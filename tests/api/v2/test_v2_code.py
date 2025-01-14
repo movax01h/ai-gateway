@@ -655,6 +655,37 @@ class TestCodeCompletions:
                     }
                 ],
             ),
+            (
+                2,
+                "foo",
+                [
+                    {
+                        "type": "file",
+                        "name": "other.py",
+                        "content": "import numpy as np",
+                    },
+                    {
+                        "type": "file",
+                        "name": "bar.py",
+                        "content": "from typing import Any",
+                    },
+                ],
+                "fireworks_ai",
+                "qwen2p5-coder-7b",
+                "https://fireworks.endpoint",
+                "api-key",
+                None,
+                True,
+                False,
+                200,
+                [
+                    {
+                        "text": "test completion",
+                        "index": 0,
+                        "finish_reason": "length",
+                    }
+                ],
+            ),
         ],
     )
     def test_non_stream_response(
@@ -712,8 +743,11 @@ class TestCodeCompletions:
             assert body["choices"] == want_choices
 
         if model_provider == "fireworks_ai":
+            content = [c["content"] for c in context]
+            prefix = "\n".join(content + ["foo"])
+
             mock_llm_text.assert_called_with(
-                "foo",
+                prefix,
                 "\n",
                 False,
                 snowplow_event_context=ANY,
