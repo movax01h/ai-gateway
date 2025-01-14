@@ -768,7 +768,7 @@ class TestCodeCompletions:
                 "\n",
                 False,
                 snowplow_event_context=ANY,
-                max_output_tokens=64,
+                max_output_tokens=48,
             )
 
     @pytest.mark.parametrize(
