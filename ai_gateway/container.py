@@ -66,6 +66,7 @@ class ContainerApplication(containers.DeclarativeContainer):
     pkg_prompts = providers.Container(
         ContainerPrompts,
         models=pkg_models_v2,
+        internal_event=internal_event,
         config=config,
     )
 

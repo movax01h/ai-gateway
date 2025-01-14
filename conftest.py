@@ -6,12 +6,13 @@ from unittest.mock import AsyncMock, Mock, PropertyMock, patch
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
-from gitlab_cloud_connector import GitLabUnitPrimitive
+from gitlab_cloud_connector import CloudConnectorUser, GitLabUnitPrimitive, UserClaims
 from langchain.chat_models.fake import FakeListChatModel
 from langchain_core.outputs import ChatGenerationChunk
 from starlette.middleware import Middleware
 from starlette_context.middleware import RawContextMiddleware
 
+from ai_gateway.api.auth_utils import StarletteUser
 from ai_gateway.api.middleware import AccessLogMiddleware, MiddlewareAuthentication
 from ai_gateway.code_suggestions.base import CodeSuggestionsChunk, CodeSuggestionsOutput
 from ai_gateway.code_suggestions.processing.base import ModelEngineOutput
@@ -24,6 +25,11 @@ from ai_gateway.config import Config
 from ai_gateway.container import ContainerApplication
 from ai_gateway.experimentation.base import ExperimentTelemetry
 from ai_gateway.models.base import ModelMetadata, TokensConsumptionMetadata
+from ai_gateway.internal_events.client import InternalEventsClient
+from ai_gateway.models.base import (
+    ModelMetadata,
+    TokensConsumptionMetadata,
+)
 from ai_gateway.models.base_text import (
     TextGenModelBase,
     TextGenModelChunk,
@@ -516,3 +522,23 @@ def prompt(
     model_metadata: ModelMetadata | None,
 ):
     yield prompt_class(model_factory, prompt_config, model_metadata)
+
+
+@pytest.fixture
+def internal_event_client():
+    yield Mock(spec=InternalEventsClient)
+
+
+@pytest.fixture
+def scopes():
+    yield []
+
+
+@pytest.fixture
+def user_is_debug():
+    yield False
+
+
+@pytest.fixture
+def user(user_is_debug: bool, scopes: list[str]):
+    yield StarletteUser(CloudConnectorUser(authenticated=True, is_debug=user_is_debug, claims=UserClaims(scopes=scopes)))

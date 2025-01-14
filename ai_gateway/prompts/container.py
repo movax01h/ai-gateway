@@ -12,6 +12,7 @@ __all__ = [
 class ContainerPrompts(containers.DeclarativeContainer):
     config = providers.Configuration(strict=True)
     models = providers.DependenciesContainer()
+    internal_event = providers.DependenciesContainer()
 
     prompt_registry = providers.Singleton(
         LocalPromptRegistry.from_local_yaml,
@@ -26,6 +27,7 @@ class ContainerPrompts(containers.DeclarativeContainer):
             ModelClassProvider.LITE_LLM: providers.Factory(models.lite_llm_chat_fn),
         },
         default_prompts=config.default_prompts,
+        internal_event_client=internal_event.client,
         custom_models_enabled=config.custom_models.enabled,
         disable_streaming=config.custom_models.disable_streaming,
     )

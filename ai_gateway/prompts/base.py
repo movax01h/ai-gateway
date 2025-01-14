@@ -11,6 +11,7 @@ from langchain_core.runnables import Runnable, RunnableBinding, RunnableConfig
 
 from ai_gateway.api.auth_utils import StarletteUser
 from ai_gateway.instrumentators.model_requests import ModelRequestInstrumentator
+from ai_gateway.internal_events.client import InternalEventsClient
 from ai_gateway.prompts.config.base import ModelConfig, PromptConfig, PromptParams
 from ai_gateway.prompts.typing import Model, ModelMetadata, TypeModelFactory
 
@@ -148,6 +149,8 @@ class Prompt(RunnableBinding[Input, Output]):
 
 
 class BasePromptRegistry(ABC):
+    internal_event_client: InternalEventsClient
+
     @abstractmethod
     def get(
         self,
@@ -163,12 +166,19 @@ class BasePromptRegistry(ABC):
         prompt_id: str,
         prompt_version: Optional[str] = None,
         model_metadata: Optional[ModelMetadata] = None,
+        internal_event_category=__name__,
     ) -> Prompt:
         prompt = self.get(prompt_id, prompt_version or "^1.0.0", model_metadata)
 
         for unit_primitive in prompt.unit_primitives:
             if not user.can(unit_primitive):
                 raise WrongUnitPrimitives
+
+        # Only record internal events once we know the user has access to all Unit Primitives
+        for unit_primitive in prompt.unit_primitives:
+            self.internal_event_client.track_event(
+                f"request_{unit_primitive}", category=internal_event_category
+            )
 
         return prompt
 

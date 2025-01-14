@@ -98,15 +98,6 @@ async def code_suggestions(
     config: Config,
     stream_handler: StreamHandler = handle_stream,
 ):
-    if not current_user.can(
-        GitLabUnitPrimitive.COMPLETE_CODE,
-        disallowed_issuers=[CloudConnectorConfig().service_name],
-    ):
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Unauthorized to access code suggestions",
-        )
-
     language_server_version = LanguageServerVersion.from_string(
         request.headers.get(X_GITLAB_LANGUAGE_SERVER_VERSION, None)
     )
@@ -127,6 +118,15 @@ async def code_suggestions(
         region=config.google_cloud_platform.location(),
     )
     if component.type == CodeEditorComponents.COMPLETION:
+        if not current_user.can(
+            GitLabUnitPrimitive.COMPLETE_CODE,
+            disallowed_issuers=[CloudConnectorConfig().service_name],
+        ):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Unauthorized to access code suggestions",
+            )
+
         return await code_completion(
             payload=component.payload,
             code_context=code_context,
@@ -239,7 +239,9 @@ async def code_generation(
     snowplow_event_context: Optional[SnowplowEventContext] = None,
 ):
     if payload.prompt_id:
-        prompt = prompt_registry.get_on_behalf(current_user, payload.prompt_id)
+        prompt = prompt_registry.get_on_behalf(
+            current_user, payload.prompt_id, internal_event_category=__name__
+        )
         engine = agent_factory(model__prompt=prompt)
 
         request_log.info(

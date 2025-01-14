@@ -9,11 +9,7 @@ from starlette.responses import StreamingResponse
 
 from ai_gateway.api.auth_utils import StarletteUser, get_current_user
 from ai_gateway.api.feature_category import feature_category
-from ai_gateway.async_dependency_resolver import (
-    get_container_application,
-    get_internal_event_client,
-)
-from ai_gateway.internal_events import InternalEventsClient
+from ai_gateway.async_dependency_resolver import get_container_application
 from ai_gateway.prompts import BasePromptRegistry, Prompt
 from ai_gateway.prompts.typing import ModelMetadata
 
@@ -48,7 +44,6 @@ async def invoke(
     prompt_id: str,
     current_user: Annotated[StarletteUser, Depends(get_current_user)],
     prompt_registry: Annotated[BasePromptRegistry, Depends(get_prompt_registry)],
-    internal_event_client: InternalEventsClient = Depends(get_internal_event_client),
 ):
     try:
         prompt = prompt_registry.get_on_behalf(
@@ -56,6 +51,7 @@ async def invoke(
             prompt_id,
             prompt_request.prompt_version,
             prompt_request.model_metadata,
+            __name__,
         )
     except ParseConstraintError:
         raise HTTPException(
@@ -71,12 +67,6 @@ async def invoke(
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail=f"Unauthorized to access '{prompt_id}'",
-        )
-
-    for unit_primitive in prompt.unit_primitives:
-        internal_event_client.track_event(
-            f"request_{unit_primitive}",
-            category=__name__,
         )
 
     # We don't use `isinstance` because we don't want to match subclasses

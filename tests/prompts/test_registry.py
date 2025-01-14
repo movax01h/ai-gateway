@@ -1,6 +1,7 @@
 from pathlib import Path
 from textwrap import dedent
 from typing import Sequence, Type, cast
+from unittest.mock import Mock
 
 import pytest
 from langchain_anthropic import ChatAnthropic
@@ -256,6 +257,7 @@ def registry(
     prompts_registered: dict[str, PromptRegistered],
     model_factories: dict[ModelClassProvider, TypeModelFactory],
     default_prompts: dict[str, str],
+    internal_event_client: Mock,
     custom_models_enabled: bool,
     disable_streaming: bool,
 ):
@@ -263,6 +265,7 @@ def registry(
         model_factories=model_factories,
         prompts_registered=prompts_registered,
         default_prompts=default_prompts,
+        internal_event_client=internal_event_client,
         custom_models_enabled=custom_models_enabled,
         disable_streaming=disable_streaming,
     )
@@ -274,6 +277,7 @@ class TestLocalPromptRegistry:
         mock_fs: FakeFilesystem,
         model_factories: dict[ModelClassProvider, TypeModelFactory],
         prompts_registered: dict[str, PromptRegistered],
+        internal_event_client: Mock,
     ):
         registry = LocalPromptRegistry.from_local_yaml(
             class_overrides={
@@ -281,6 +285,7 @@ class TestLocalPromptRegistry:
             },
             model_factories=model_factories,
             default_prompts={},
+            internal_event_client=internal_event_client,
             custom_models_enabled=False,
             disable_streaming=False,
         )
@@ -507,6 +512,7 @@ class TestLocalPromptRegistry:
     def test_get_code_generations_base(
         self,
         model_factories: dict[ModelClassProvider, TypeModelFactory],
+        internal_event_client: Mock,
         prompt_id: str,
         model_metadata: ModelMetadata | None,
         expected_name: str,
@@ -520,6 +526,7 @@ class TestLocalPromptRegistry:
             class_overrides={},
             model_factories=model_factories,
             default_prompts=default_prompt_env_config,
+            internal_event_client=internal_event_client,
         )
         prompt = registry.get(
             prompt_id, prompt_version="^1.0.0", model_metadata=model_metadata
@@ -619,6 +626,7 @@ class TestLocalPromptRegistry:
         mock_fs: FakeFilesystem,
         model_factories: dict[ModelClassProvider, TypeModelFactory],
         prompts_registered: dict[str, PromptRegistered],
+        internal_event_client: Mock,
     ):
         registry = LocalPromptRegistry.from_local_yaml(
             class_overrides={
@@ -626,6 +634,7 @@ class TestLocalPromptRegistry:
             },
             model_factories=model_factories,
             default_prompts={"chat/react": "custom"},
+            internal_event_client=internal_event_client,
             custom_models_enabled=False,
         )
 
