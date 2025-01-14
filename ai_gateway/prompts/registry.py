@@ -5,6 +5,7 @@ import structlog
 import yaml
 from poetry.core.constraints.version import Version, parse_constraint
 
+from ai_gateway.internal_events.client import InternalEventsClient
 from ai_gateway.prompts.base import BasePromptRegistry, Prompt
 from ai_gateway.prompts.config import ModelClassProvider, PromptConfig
 from ai_gateway.prompts.typing import ModelMetadata, TypeModelFactory
@@ -27,12 +28,14 @@ class LocalPromptRegistry(BasePromptRegistry):
         prompts_registered: dict[str, PromptRegistered],
         model_factories: dict[ModelClassProvider, TypeModelFactory],
         default_prompts: dict[str, str],
+        internal_event_client: InternalEventsClient,
         custom_models_enabled: bool,
         disable_streaming: bool = False,
     ):
         self.prompts_registered = prompts_registered
         self.model_factories = model_factories
         self.default_prompts = default_prompts
+        self.internal_event_client = internal_event_client
         self.custom_models_enabled = custom_models_enabled
         self.disable_streaming = disable_streaming
 
@@ -103,6 +106,7 @@ class LocalPromptRegistry(BasePromptRegistry):
         class_overrides: dict[str, Type[Prompt]],
         model_factories: dict[ModelClassProvider, TypeModelFactory],
         default_prompts: dict[str, str],
+        internal_event_client: InternalEventsClient,
         custom_models_enabled: bool = False,
         disable_streaming: bool = False,
     ) -> "LocalPromptRegistry":
@@ -145,6 +149,7 @@ class LocalPromptRegistry(BasePromptRegistry):
             prompts_registered,
             model_factories,
             default_prompts,
+            internal_event_client,
             custom_models_enabled,
             disable_streaming,
         )

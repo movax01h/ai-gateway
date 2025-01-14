@@ -117,16 +117,16 @@ async def completions(
     ),
     internal_event_client: InternalEventsClient = Depends(get_internal_event_client),
 ):
-    # pylint: disable=too-many-branches
-    if not current_user.can(GitLabUnitPrimitive.COMPLETE_CODE):
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Unauthorized to access code completions",
-        )
-
-    internal_event_client.track_event(
-        f"request_{GitLabUnitPrimitive.COMPLETE_CODE}",
-        category=__name__,
+    code_completions, kwargs = _build_code_completions(
+        request,
+        payload,
+        current_user,
+        prompt_registry,
+        completions_legacy_factory,
+        completions_anthropic_factory,
+        completions_litellm_factory,
+        completions_agent_factory,
+        internal_event_client,
     )
 
     snowplow_event_context = None
@@ -155,54 +155,6 @@ async def completions(
         current_file_name=payload.current_file.file_name,
         stream=payload.stream,
     )
-
-    kwargs = {}
-
-    if payload.model_provider == KindModelProvider.ANTHROPIC:
-        code_completions = completions_anthropic_factory(
-            model__name=payload.model_name,
-        )
-
-        # We support the prompt version 3 only with the Anthropic models
-        if payload.prompt_version == 3:
-            kwargs.update({"raw_prompt": payload.prompt})
-    elif payload.model_provider in (
-        KindModelProvider.LITELLM,
-        KindModelProvider.MISTRALAI,
-    ):
-        code_completions = _resolve_code_completions_litellm(
-            payload=payload,
-            current_user=current_user,
-            prompt_registry=prompt_registry,
-            completions_agent_factory=completions_agent_factory,
-            completions_litellm_factory=completions_litellm_factory,
-        )
-
-        if payload.context:
-            kwargs.update({"code_context": [ctx.content for ctx in payload.context]})
-    elif payload.model_provider == KindModelProvider.FIREWORKS:
-        kwargs.update({"max_output_tokens": 64, "context_max_percent": 0.3})
-
-        if payload.context:
-            kwargs.update({"code_context": [ctx.content for ctx in payload.context]})
-
-        code_completions = _resolve_code_completions_litellm(
-            payload=payload,
-            current_user=current_user,
-            prompt_registry=prompt_registry,
-            completions_agent_factory=completions_agent_factory,
-            completions_litellm_factory=completions_litellm_factory,
-        )
-    else:
-        code_completions = completions_legacy_factory()
-        if payload.choices_count > 0:
-            kwargs.update({"candidate_count": payload.choices_count})
-
-        language_server_version = LanguageServerVersion.from_string(
-            request.headers.get(X_GITLAB_LANGUAGE_SERVER_VERSION, None)
-        )
-        if language_server_version.supports_advanced_context() and payload.context:
-            kwargs.update({"code_context": [ctx.content for ctx in payload.context]})
 
     suggestions = await _execute_code_completion(
         payload=payload,
@@ -266,11 +218,6 @@ async def generations(
             detail="Unauthorized to access code generations",
         )
 
-    internal_event_client.track_event(
-        f"request_{GitLabUnitPrimitive.GENERATE_CODE}",
-        category=__name__,
-    )
-
     snowplow_event_context = None
     try:
         language = lang_from_filename(payload.current_file.file_name)
@@ -298,29 +245,17 @@ async def generations(
         api_key="*" * 10 if payload.model_api_key else None,
     )
 
-    if payload.prompt_id:
-        code_generations = _resolve_prompt_code_generations(
-            payload, current_user, prompt_registry, generations_agent_factory
-        )
-    elif payload.model_provider == KindModelProvider.ANTHROPIC:
-        if payload.prompt_version == 3:
-            code_generations = _resolve_code_generations_anthropic_chat(
-                payload,
-                generations_anthropic_chat_factory,
-            )
-        else:
-            code_generations = _resolve_code_generations_anthropic(
-                payload,
-                generations_anthropic_factory,
-            )
-    elif payload.model_provider == KindModelProvider.LITELLM:
-        code_generations = generations_litellm_factory(
-            model__name=payload.model_name,
-            model__endpoint=payload.model_endpoint,
-            model__api_key=payload.model_api_key,
-        )
-    else:
-        code_generations = generations_vertex_factory()
+    code_generations = _build_code_generations(
+        payload,
+        current_user,
+        prompt_registry,
+        generations_vertex_factory,
+        generations_anthropic_factory,
+        generations_anthropic_chat_factory,
+        generations_litellm_factory,
+        generations_agent_factory,
+        internal_event_client,
+    )
 
     if payload.prompt_version in {2, 3}:
         code_generations.with_prompt_prepared(payload.prompt)
@@ -396,10 +331,60 @@ def _resolve_prompt_code_generations(
     )
 
     prompt = prompt_registry.get_on_behalf(
-        current_user, payload.prompt_id, model_metadata=model_metadata
+        current_user,
+        payload.prompt_id,
+        model_metadata=model_metadata,
+        internal_event_category=__name__,
     )
 
     return generations_agent_factory(model__prompt=prompt)
+
+
+def _build_code_generations(
+    payload: GenerationsRequestWithVersion,
+    current_user: StarletteUser,
+    prompt_registry: BasePromptRegistry,
+    generations_vertex_factory: Factory[CodeGenerations],
+    generations_anthropic_factory: Factory[CodeGenerations],
+    generations_anthropic_chat_factory: Factory[CodeGenerations],
+    generations_litellm_factory: Factory[CodeGenerations],
+    generations_agent_factory: Factory[CodeGenerations],
+    internal_event_client: InternalEventsClient,
+) -> CodeGenerations:
+    if payload.prompt_id:
+        return _resolve_prompt_code_generations(
+            payload,
+            current_user,
+            prompt_registry,
+            generations_agent_factory,
+        )
+
+    # If we didn't use the prompt registry, we have to track the internal event manually
+    internal_event_client.track_event(
+        f"request_{GitLabUnitPrimitive.GENERATE_CODE}",
+        category=__name__,
+    )
+
+    if payload.model_provider == KindModelProvider.ANTHROPIC:
+        if payload.prompt_version == 3:
+            return _resolve_code_generations_anthropic_chat(
+                payload,
+                generations_anthropic_chat_factory,
+            )
+
+        return _resolve_code_generations_anthropic(
+            payload,
+            generations_anthropic_factory,
+        )
+
+    if payload.model_provider == KindModelProvider.LITELLM:
+        return generations_litellm_factory(
+            model__name=payload.model_name,
+            model__endpoint=payload.model_endpoint,
+            model__api_key=payload.model_api_key,
+        )
+
+    return generations_vertex_factory()
 
 
 def _resolve_code_completions_litellm(
@@ -433,6 +418,85 @@ def _resolve_code_completions_litellm(
     )
 
 
+def _build_code_completions(
+    request: Request,
+    payload: CompletionsRequestWithVersion,
+    current_user: StarletteUser,
+    prompt_registry: BasePromptRegistry,
+    completions_legacy_factory: Factory[CodeCompletionsLegacy],
+    completions_anthropic_factory: Factory[CodeCompletions],
+    completions_litellm_factory: Factory[CodeCompletions],
+    completions_agent_factory: Factory[CodeCompletions],
+    internal_event_client: InternalEventsClient,
+) -> tuple[CodeCompletions | CodeCompletionsLegacy, dict]:
+    kwargs = {}
+
+    if payload.model_provider == KindModelProvider.ANTHROPIC:
+        code_completions = completions_anthropic_factory(
+            model__name=payload.model_name,
+        )
+
+        # We support the prompt version 3 only with the Anthropic models
+        if payload.prompt_version == 3:
+            kwargs.update({"raw_prompt": payload.prompt})
+    elif payload.model_provider in (
+        KindModelProvider.LITELLM,
+        KindModelProvider.MISTRALAI,
+    ):
+        code_completions = _resolve_code_completions_litellm(
+            payload=payload,
+            current_user=current_user,
+            prompt_registry=prompt_registry,
+            completions_agent_factory=completions_agent_factory,
+            completions_litellm_factory=completions_litellm_factory,
+        )
+
+        if payload.context:
+            kwargs.update({"code_context": [ctx.content for ctx in payload.context]})
+
+        return code_completions, kwargs
+    elif payload.model_provider == KindModelProvider.FIREWORKS:
+        kwargs.update({"max_output_tokens": 64, "context_max_percent": 0.3})
+
+        if payload.context:
+            kwargs.update({"code_context": [ctx.content for ctx in payload.context]})
+
+        code_completions = _resolve_code_completions_litellm(
+            payload=payload,
+            current_user=current_user,
+            prompt_registry=prompt_registry,
+            completions_agent_factory=completions_agent_factory,
+            completions_litellm_factory=completions_litellm_factory,
+        )
+
+        return code_completions, kwargs
+    else:
+        code_completions = completions_legacy_factory()
+        if payload.choices_count > 0:
+            kwargs.update({"candidate_count": payload.choices_count})
+
+        language_server_version = LanguageServerVersion.from_string(
+            request.headers.get(X_GITLAB_LANGUAGE_SERVER_VERSION, None)
+        )
+        if language_server_version.supports_advanced_context() and payload.context:
+            kwargs.update({"code_context": [ctx.content for ctx in payload.context]})
+
+    # Providers that are handled via the prompt registry perform their own UP check and event tracking. If we reach
+    # this point is because we're using some other legacy provider, and we need to perform these steps now
+    if not current_user.can(GitLabUnitPrimitive.COMPLETE_CODE):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Unauthorized to access code completions",
+        )
+
+    internal_event_client.track_event(
+        f"request_{GitLabUnitPrimitive.COMPLETE_CODE}",
+        category=__name__,
+    )
+
+    return code_completions, kwargs
+
+
 def _resolve_agent_code_completions(
     model_metadata: ModelMetadata,
     current_user: StarletteUser,
@@ -440,7 +504,10 @@ def _resolve_agent_code_completions(
     completions_agent_factory: Factory[CodeCompletions],
 ) -> CodeCompletions:
     prompt = prompt_registry.get_on_behalf(
-        current_user, COMPLETIONS_AGENT_ID, model_metadata=model_metadata
+        current_user,
+        COMPLETIONS_AGENT_ID,
+        model_metadata=model_metadata,
+        internal_event_category=__name__,
     )
 
     return completions_agent_factory(

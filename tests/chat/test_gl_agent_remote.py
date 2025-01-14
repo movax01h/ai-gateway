@@ -15,7 +15,6 @@ from ai_gateway.chat.agents import (
     ReActAgentInputs,
 )
 from ai_gateway.chat.toolset import DuoChatToolsRegistry
-from ai_gateway.internal_events import InternalEventsClient
 from ai_gateway.models.base_chat import Role
 
 
@@ -51,12 +50,6 @@ def agent_factory(agent):
 @pytest.fixture()
 def tools_registry():
     return DuoChatToolsRegistry()
-
-
-@pytest.fixture()
-def internal_event_client():
-    internal_event_client = Mock(spec=InternalEventsClient)
-    return internal_event_client
 
 
 @pytest.mark.parametrize(
