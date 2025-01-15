@@ -11,11 +11,16 @@ from ai_gateway.code_suggestions.processing import ModelEngineCompletions
 from ai_gateway.code_suggestions.processing.post.completions import (
     PostProcessor as PostProcessorCompletions,
 )
+from ai_gateway.code_suggestions.processing.post.completions import (
+    PostProcessorOperation,
+)
 from ai_gateway.code_suggestions.processing.pre import TokenizerTokenStrategy
 from ai_gateway.experimentation import experiment_registry_provider
 from ai_gateway.models import KindAnthropicModel, KindVertexTextModel
+from ai_gateway.models.base import KindModelProvider
 from ai_gateway.models.base_chat import ChatModelBase
 from ai_gateway.models.base_text import TextGenModelBase
+from ai_gateway.models.litellm import KindLiteLlmModel
 from ai_gateway.tokenizer import init_tokenizer
 from ai_gateway.tracking.instrumentator import SnowplowInstrumentator
 
@@ -140,6 +145,24 @@ class ContainerCodeCompletions(containers.DeclarativeContainer):
         ),
     )
 
+    fireworks_qwen_factory = providers.Factory(
+        CodeCompletions,
+        model=providers.Factory(
+            litellm,
+            name=KindLiteLlmModel.QWEN_2_5,
+            provider=KindModelProvider.FIREWORKS,
+        ),
+        tokenization_strategy=providers.Factory(
+            TokenizerTokenStrategy, tokenizer=tokenizer
+        ),
+        post_processor=providers.Factory(
+            PostProcessorCompletions,
+            overrides={
+                PostProcessorOperation.FIX_END_BLOCK_ERRORS: PostProcessorOperation.FIX_END_BLOCK_ERRORS_WITH_COMPARISON,
+            },
+            exclude=config.excl_post_proc,
+        ).provider,
+    )
     agent_factory = providers.Factory(
         CodeCompletions,
         model=providers.Factory(agent_model),

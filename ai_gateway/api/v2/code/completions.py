@@ -29,6 +29,7 @@ from ai_gateway.api.v2.code.typing import (
 from ai_gateway.async_dependency_resolver import (
     get_code_suggestions_completions_agent_factory_provider,
     get_code_suggestions_completions_anthropic_provider,
+    get_code_suggestions_completions_fireworks_qwen_factory_provider,
     get_code_suggestions_completions_litellm_factory_provider,
     get_code_suggestions_completions_vertex_legacy_provider,
     get_code_suggestions_generations_agent_factory_provider,
@@ -110,6 +111,9 @@ async def completions(
     completions_litellm_factory: Factory[CodeCompletions] = Depends(
         get_code_suggestions_completions_litellm_factory_provider
     ),
+    completions_fireworks_qwen_factory: Factory[CodeCompletions] = Depends(
+        get_code_suggestions_completions_fireworks_qwen_factory_provider
+    ),
     completions_agent_factory: Factory[CodeCompletions] = Depends(
         get_code_suggestions_completions_agent_factory_provider
     ),
@@ -126,6 +130,7 @@ async def completions(
         completions_legacy_factory,
         completions_anthropic_factory,
         completions_litellm_factory,
+        completions_fireworks_qwen_factory,
         completions_agent_factory,
         internal_event_client,
     )
@@ -433,6 +438,7 @@ def _build_code_completions(
     completions_legacy_factory: Factory[CodeCompletionsLegacy],
     completions_anthropic_factory: Factory[CodeCompletions],
     completions_litellm_factory: Factory[CodeCompletions],
+    completions_fireworks_qwen_factory: Factory[CodeCompletions],
     completions_agent_factory: Factory[CodeCompletions],
     internal_event_client: InternalEventsClient,
 ) -> tuple[CodeCompletions | CodeCompletionsLegacy, dict]:
@@ -463,7 +469,7 @@ def _build_code_completions(
 
         return code_completions, kwargs
     elif payload.model_provider == KindModelProvider.FIREWORKS:
-        kwargs.update({"max_output_tokens": 64, "context_max_percent": 0.3})
+        kwargs.update({"max_output_tokens": 48, "context_max_percent": 0.3})
 
         if payload.context:
             kwargs.update({"code_context": [ctx.content for ctx in payload.context]})
@@ -473,7 +479,7 @@ def _build_code_completions(
             current_user=current_user,
             prompt_registry=prompt_registry,
             completions_agent_factory=completions_agent_factory,
-            completions_litellm_factory=completions_litellm_factory,
+            completions_litellm_factory=completions_fireworks_qwen_factory,
         )
 
         return code_completions, kwargs
