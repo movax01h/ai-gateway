@@ -1,7 +1,6 @@
 .semantic-release:
   image: node:20
   stage: release
-  when: manual
   before_script:
     - npm install -g semantic-release @semantic-release/gitlab
 
