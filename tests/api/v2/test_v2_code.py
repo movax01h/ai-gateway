@@ -16,6 +16,7 @@ from structlog.testing import capture_logs
 from ai_gateway.api.error_utils import capture_validation_errors
 from ai_gateway.api.v2 import api_router
 from ai_gateway.config import Config, ConfigModelEndpoints, ConfigModelKeys
+from ai_gateway.feature_flags.context import current_feature_flag_context
 from ai_gateway.models.base_chat import Message, Role
 from ai_gateway.tracking.container import ContainerTracking
 from ai_gateway.tracking.instrumentator import SnowplowInstrumentator
@@ -89,6 +90,7 @@ class TestCodeCompletions:
                     },
                     "experiments": [{"name": "truncate_suffix", "variant": 1}],
                     "object": "text_completion",
+                    "enabled_feature_flags": ["flag_a", "flag_b"],
                     "created": 1695182638,
                     "choices": [
                         {
@@ -116,6 +118,7 @@ class TestCodeCompletions:
                         "tokens_consumption_metadata": None,
                     },
                     "experiments": [{"name": "truncate_suffix", "variant": 1}],
+                    "enabled_feature_flags": ["flag_a", "flag_b"],
                     "object": "text_completion",
                     "created": 1695182638,
                     "choices": [],
@@ -130,6 +133,8 @@ class TestCodeCompletions:
         mock_completions_legacy: Mock,
         expected_response: dict,
     ):
+        current_feature_flag_context.set({"flag_a", "flag_b"})
+
         response = mock_client.post(
             "/completions",
             headers={
@@ -168,6 +173,9 @@ class TestCodeCompletions:
         assert body["choices"] == expected_response["choices"]
         assert body["experiments"] == expected_response["experiments"]
         assert body["model"] == expected_response["model"]
+        assert set(body["metadata"]["enabled_feature_flags"]) == set(
+            expected_response["enabled_feature_flags"]
+        )
 
         mock_track_internal_event.assert_called_once_with(
             "request_complete_code",
@@ -273,6 +281,7 @@ class TestCodeCompletions:
                             "finish_reason": "length",
                         }
                     ],
+                    "enabled_feature_flags": ["flag_b", "flag_c"],
                 },
                 False,
             ),
@@ -299,6 +308,7 @@ class TestCodeCompletions:
                             "finish_reason": "length",
                         }
                     ],
+                    "enabled_feature_flags": ["flag_b", "flag_c"],
                 },
                 False,
             ),
@@ -325,6 +335,7 @@ class TestCodeCompletions:
                             "finish_reason": "length",
                         }
                     ],
+                    "enabled_feature_flags": ["flag_b", "flag_c"],
                 },
                 True,
             ),
@@ -345,6 +356,7 @@ class TestCodeCompletions:
                     "object": "text_completion",
                     "created": 1695182638,
                     "choices": [],
+                    "enabled_feature_flags": ["flag_b", "flag_c"],
                 },
                 False,
             ),
@@ -405,6 +417,8 @@ class TestCodeCompletions:
             ]
             code_completions_kwargs.update({"raw_prompt": raw_prompt})
 
+        current_feature_flag_context.set({"flag_b", "flag_c"})
+
         response = mock_client.post(
             "/completions",
             headers={
@@ -422,6 +436,9 @@ class TestCodeCompletions:
 
         assert body["choices"] == expected_response["choices"]
         assert body["model"] == expected_response["model"]
+        assert set(body["metadata"]["enabled_feature_flags"]) == set(
+            expected_response["enabled_feature_flags"]
+        )
 
         mock_completions.assert_called_with(
             prefix=current_file["content_above_cursor"],
@@ -1057,6 +1074,7 @@ class TestCodeGenerations:
             "want_status",
             "want_prompt",
             "want_choices",
+            "enabled_feature_flags",
         ),
         [
             (
@@ -1083,6 +1101,7 @@ class TestCodeGenerations:
                         "finish_reason": "length",
                     }
                 ],
+                ["flag_a", "flag_b"],
             ),  # v1 without prompt - vertex-ai
             (
                 1,
@@ -1108,6 +1127,7 @@ class TestCodeGenerations:
                         "finish_reason": "length",
                     }
                 ],
+                ["flag_a", "flag_b"],
             ),  # v1 without prompt - anthropic
             (
                 1,
@@ -1133,6 +1153,7 @@ class TestCodeGenerations:
                         "finish_reason": "length",
                     }
                 ],
+                ["flag_a", "flag_b"],
             ),  # v1 with prompt - vertex-ai
             (
                 1,
@@ -1158,6 +1179,7 @@ class TestCodeGenerations:
                         "finish_reason": "length",
                     }
                 ],
+                ["flag_a", "flag_b"],
             ),  # v1 with prompt - anthropic
             (
                 1,
@@ -1177,6 +1199,7 @@ class TestCodeGenerations:
                 200,
                 None,
                 [],
+                ["flag_a", "flag_b"],
             ),  # v1 empty suggestions from model
             (
                 2,
@@ -1202,6 +1225,7 @@ class TestCodeGenerations:
                         "finish_reason": "length",
                     }
                 ],
+                ["flag_a", "flag_b"],
             ),  # v2 with prompt - vertex-ai
             (
                 2,
@@ -1227,6 +1251,7 @@ class TestCodeGenerations:
                         "finish_reason": "length",
                     }
                 ],
+                ["flag_a", "flag_b"],
             ),  # v2 with prompt - anthropic
             (
                 2,
@@ -1246,6 +1271,7 @@ class TestCodeGenerations:
                 422,
                 None,
                 None,
+                ["flag_a", "flag_b"],
             ),  # v2 without prompt field
             (
                 2,
@@ -1265,6 +1291,7 @@ class TestCodeGenerations:
                 200,
                 "bar",
                 [],
+                ["flag_a", "flag_b"],
             ),  # v2 empty suggestions from model
             (
                 3,
@@ -1296,6 +1323,7 @@ class TestCodeGenerations:
                         "finish_reason": "length",
                     }
                 ],
+                ["flag_a", "flag_b"],
             ),  # v3 with prompt - anthropic
             (
                 3,
@@ -1327,6 +1355,7 @@ class TestCodeGenerations:
                         "finish_reason": "length",
                     }
                 ],
+                ["flag_a", "flag_b"],
             ),
             (
                 3,
@@ -1358,6 +1387,7 @@ class TestCodeGenerations:
                         "finish_reason": "length",
                     }
                 ],
+                ["flag_a", "flag_b"],
             ),  # v3 with prompt - litellm
             (
                 2,
@@ -1386,6 +1416,7 @@ class TestCodeGenerations:
                         "finish_reason": "length",
                     }
                 ],
+                ["flag_a", "flag_b"],
             ),
         ],
     )
@@ -1416,7 +1447,10 @@ class TestCodeGenerations:
         want_status,
         want_prompt,
         want_choices,
+        enabled_feature_flags,
     ):
+        current_feature_flag_context.set({"flag_a", "flag_b"})
+
         response = mock_client.post(
             "/code/generations",
             headers={
@@ -1456,6 +1490,9 @@ class TestCodeGenerations:
         if want_status == 200:
             body = response.json()
             assert body["choices"] == want_choices
+            assert set(body["metadata"]["enabled_feature_flags"]) == set(
+                enabled_feature_flags
+            )
 
     def test_successful_stream_response(
         self,
