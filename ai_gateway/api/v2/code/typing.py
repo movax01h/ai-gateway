@@ -131,6 +131,7 @@ class SuggestionsResponse(BaseModel):
         name: str
         lang: str
         tokens_consumption_metadata: Optional[TokensConsumptionMetadata] = None
+        region: Optional[str] = None
 
     class MetadataBase(BaseModel):
         enabled_feature_flags: Optional[list[str]] = None
