@@ -222,6 +222,7 @@ async def completions(
             name=suggestions[0].model.name,
             lang=suggestions[0].lang,
             tokens_consumption_metadata=tokens_consumption_metadata,
+            region=config.google_cloud_platform.location(),
         ),
         experiments=suggestions[0].metadata.experiments,
         choices=choices,
@@ -352,6 +353,7 @@ async def generations(
             engine=suggestion.model.engine,
             name=suggestion.model.name,
             lang=suggestion.lang,
+            region=config.google_cloud_platform.location(),
         ),
         choices=_generation_suggestion_choices(suggestion.text),
     )

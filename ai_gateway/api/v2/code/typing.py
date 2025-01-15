@@ -131,6 +131,7 @@ class SuggestionsResponse(BaseModel):
         name: str
         lang: str
         tokens_consumption_metadata: Optional[TokensConsumptionMetadata] = None
+        region: Optional[str] = None
 
     id: str
     model: Model
