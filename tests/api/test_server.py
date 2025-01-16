@@ -8,6 +8,7 @@ from unittest.mock import MagicMock, patch
 import litellm
 import pytest
 from fastapi import FastAPI
+from fastapi.exceptions import RequestValidationError
 from fastapi.routing import APIRoute
 from fastapi.testclient import TestClient
 from starlette.exceptions import HTTPException as StarletteHTTPException
@@ -18,6 +19,7 @@ from ai_gateway.api.server import (
     model_api_exception_handler,
     setup_custom_exception_handlers,
     setup_gcp_service_account,
+    validation_exception_handler,
 )
 from ai_gateway.config import (
     Config,
@@ -285,6 +287,7 @@ def test_setup_custom_exception_handlers(app, monkeypatch):
     assert mock_add_exception_handler.mock_calls == [
         mock.call(StarletteHTTPException, custom_http_exception_handler),
         mock.call(ModelAPIError, model_api_exception_handler),
+        mock.call(RequestValidationError, validation_exception_handler),
     ]
 
 
@@ -356,3 +359,43 @@ def test_setup_gcp_service_account(service_account_json_key, should_create_cred_
         # pylint: enable=direct-environment-variable-reference
     else:
         assert not os.path.exists("/tmp/gcp-service-account.json")
+
+
+@patch("ai_gateway.api.server.context")
+@patch("ai_gateway.api.server.is_feature_enabled")
+def test_validation_exception_handler_without_expanded_logging_ff(
+    mock_is_feature_enabled, mock_context, app
+):
+    @app.post("/test")
+    def test_route(required_field: str):
+        return {"message": "success"}
+
+    setup_custom_exception_handlers(app)
+    mock_is_feature_enabled.return_value = False
+    client = TestClient(app)
+
+    response = client.post("/test", json={})
+    assert response.status_code == 422
+    assert response.json() == {"detail": "Validation error"}
+    assert not mock_context.__setitem__.called
+
+
+@patch("ai_gateway.api.server.context")
+@patch("ai_gateway.api.server.is_feature_enabled")
+def test_validation_exception_handler_with_expanded_logging_ff(
+    mock_is_feature_enabled, mock_context, app
+):
+    @app.post("/test")
+    def test_route(required_field: str):
+        return {"message": "success"}
+
+    setup_custom_exception_handlers(app)
+    mock_is_feature_enabled.return_value = True
+    client = TestClient(app)
+
+    response = client.post("/test", json={})
+    assert response.status_code == 422
+    assert "required_field" in str(response.json()["detail"])
+    mock_context.__setitem__.assert_called_once()
+    error_message = mock_context.__setitem__.call_args[0][1]
+    assert "required_field" in error_message
