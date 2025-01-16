@@ -6,6 +6,7 @@ import litellm
 import structlog
 from fastapi import APIRouter, FastAPI
 from fastapi.exception_handlers import http_exception_handler
+from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from gitlab_cloud_connector import (
     CompositeProvider,
@@ -13,9 +14,11 @@ from gitlab_cloud_connector import (
     LocalAuthProvider,
 )
 from prometheus_fastapi_instrumentator import Instrumentator, metrics
+from starlette import status
 from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.middleware import Middleware
 from starlette.requests import Request
+from starlette.responses import JSONResponse
 from starlette_context import context
 from starlette_context.middleware import RawContextMiddleware
 
@@ -33,6 +36,7 @@ from ai_gateway.api.v3 import api_router as http_api_router_v3
 from ai_gateway.api.v4 import api_router as http_api_router_v4
 from ai_gateway.config import Config
 from ai_gateway.container import ContainerApplication
+from ai_gateway.feature_flags import FeatureFlag, is_feature_enabled
 from ai_gateway.instrumentators.threads import monitor_threads
 from ai_gateway.models import ModelAPIError
 from ai_gateway.profiling import setup_profiling
@@ -150,9 +154,24 @@ async def model_api_exception_handler(request: Request, exc: ModelAPIError):
     return await http_exception_handler(request, wrapped_exception)
 
 
+async def validation_exception_handler(request: Request, exc: RequestValidationError):
+    if is_feature_enabled(FeatureFlag.EXPANDED_AI_LOGGING):
+        context["exception_message"] = str(exc)
+        return JSONResponse(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            content={"detail": exc.errors()},
+        )
+
+    return JSONResponse(
+        status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+        content={"detail": "Validation error"},
+    )
+
+
 def setup_custom_exception_handlers(app: FastAPI):
     app.add_exception_handler(StarletteHTTPException, custom_http_exception_handler)
     app.add_exception_handler(ModelAPIError, model_api_exception_handler)
+    app.add_exception_handler(RequestValidationError, validation_exception_handler)
 
 
 def setup_litellm(config: Config):
