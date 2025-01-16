@@ -13,8 +13,13 @@ from gitlab_cloud_connector import (
 from ai_gateway.api.auth_utils import StarletteUser, get_current_user
 from ai_gateway.api.error_utils import capture_validation_errors
 from ai_gateway.api.feature_category import feature_category
-from ai_gateway.api.middleware import X_GITLAB_LANGUAGE_SERVER_VERSION
 from ai_gateway.api.snowplow_context import get_snowplow_code_suggestion_context
+from ai_gateway.api.v2.code.model_provider_handlers import (
+    AnthropicHandler,
+    FireworksHandler,
+    LegacyHandler,
+    LiteLlmHandler,
+)
 from ai_gateway.api.v2.code.typing import (
     CompletionsRequestV1,
     CompletionsRequestV2,
@@ -49,7 +54,6 @@ from ai_gateway.code_suggestions import (
     CodeSuggestionsChunk,
 )
 from ai_gateway.code_suggestions.base import CodeSuggestionsOutput
-from ai_gateway.code_suggestions.language_server import LanguageServerVersion
 from ai_gateway.code_suggestions.processing.base import ModelEngineOutput
 from ai_gateway.code_suggestions.processing.ops import lang_from_filename
 from ai_gateway.config import Config
@@ -447,17 +451,15 @@ def _build_code_completions(
     kwargs = {}
 
     if payload.model_provider == KindModelProvider.ANTHROPIC:
+        AnthropicHandler(payload, request, kwargs).update_completion_params()
         code_completions = completions_anthropic_factory(
             model__name=payload.model_name,
         )
-
-        # We support the prompt version 3 only with the Anthropic models
-        if payload.prompt_version == 3:
-            kwargs.update({"raw_prompt": payload.prompt})
     elif payload.model_provider in (
         KindModelProvider.LITELLM,
         KindModelProvider.MISTRALAI,
     ):
+        LiteLlmHandler(payload, request, kwargs).update_completion_params()
         code_completions = _resolve_code_completions_litellm(
             payload=payload,
             current_user=current_user,
@@ -466,16 +468,9 @@ def _build_code_completions(
             completions_litellm_factory=completions_litellm_factory,
         )
 
-        if payload.context:
-            kwargs.update({"code_context": [ctx.content for ctx in payload.context]})
-
         return code_completions, kwargs
     elif payload.model_provider == KindModelProvider.FIREWORKS:
-        kwargs.update({"max_output_tokens": 48, "context_max_percent": 0.3})
-
-        if payload.context:
-            kwargs.update({"code_context": [ctx.content for ctx in payload.context]})
-
+        FireworksHandler(payload, request, kwargs).update_completion_params()
         code_completions = _resolve_code_completions_litellm(
             payload=payload,
             current_user=current_user,
@@ -487,14 +482,7 @@ def _build_code_completions(
         return code_completions, kwargs
     else:
         code_completions = completions_legacy_factory()
-        if payload.choices_count > 0:
-            kwargs.update({"candidate_count": payload.choices_count})
-
-        language_server_version = LanguageServerVersion.from_string(
-            request.headers.get(X_GITLAB_LANGUAGE_SERVER_VERSION, None)
-        )
-        if language_server_version.supports_advanced_context() and payload.context:
-            kwargs.update({"code_context": [ctx.content for ctx in payload.context]})
+        LegacyHandler(payload, request, kwargs).update_completion_params()
 
     # Providers that are handled via the prompt registry perform their own UP check and event tracking. If we reach
     # this point is because we're using some other legacy provider, and we need to perform these steps now
