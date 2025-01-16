@@ -1,0 +1,21 @@
+---
+name: Claude 3 Code Generations Agent
+model:
+  name: claude-3-5-sonnet-20241022
+  params:
+    model_class_provider: anthropic
+    temperature: 0.2
+    max_tokens: 2048
+    max_retries: 1
+unit_primitives:
+  - generate_code
+prompt_template:
+  system: |
+    {% include 'code_suggestions/generations/jinja_template/dotcom/system.jinja' %}
+  user: |
+    {{user_instruction}}
+  assistant: |
+    <new_code>
+params:
+  stop:
+    - </new_code>

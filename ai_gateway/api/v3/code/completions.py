@@ -36,6 +36,7 @@ from ai_gateway.code_suggestions import (
     LanguageServerVersion,
     ModelProvider,
 )
+from ai_gateway.code_suggestions.base import SAAS_PROMPT_MODEL_MAP
 from ai_gateway.config import Config
 from ai_gateway.container import ContainerApplication
 from ai_gateway.feature_flags.context import current_feature_flag_context
@@ -240,9 +241,19 @@ async def code_generation(
     code_context: list[CodeContextPayload] = None,
     snowplow_event_context: Optional[SnowplowEventContext] = None,
 ):
+    model_provider = payload.model_provider
     if payload.prompt_id:
+        # for backward compatibility, eventually prmpt_version should be a mandatory field
+        prompt_version = payload.prompt_version or "^1.0.0"
+        # For SaaS: prompt_version and prompt_id are mandatory fields
+        # in case prompt_id is present, model_provider is not directly passed in from request
+        model_provider = SAAS_PROMPT_MODEL_MAP[prompt_version]["model_provider"]
+
         prompt = prompt_registry.get_on_behalf(
-            current_user, payload.prompt_id, internal_event_category=__name__
+            user=current_user,
+            prompt_id=payload.prompt_id,
+            prompt_version=payload.prompt_version,
+            internal_event_category=__name__,
         )
         engine = agent_factory(model__prompt=prompt)
 
@@ -253,7 +264,8 @@ async def code_generation(
             prompt_model_name=prompt.model_name,
         )
     else:
-        if payload.model_provider == KindModelProvider.ANTHROPIC:
+        # TODO: Since we are migrating to prompt registry, we should sunset this branch
+        if model_provider == KindModelProvider.ANTHROPIC:
             engine = generations_anthropic_factory()
         else:
             engine = generations_vertex_factory()
@@ -265,7 +277,7 @@ async def code_generation(
         prefix=payload.content_above_cursor,
         file_name=payload.file_name,
         editor_lang=payload.language_identifier,
-        model_provider=payload.model_provider,
+        model_provider=model_provider,
         stream=payload.stream,
         snowplow_event_context=snowplow_event_context,
         prompt_enhancer=payload.prompt_enhancer,

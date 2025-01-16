@@ -63,14 +63,14 @@ class EditorContentPayload(BaseModel):
     model_provider: Optional[
         Literal[ModelProvider.VERTEX_AI, ModelProvider.ANTHROPIC]
     ] = None
+    model_name: Optional[str] = Field(
+        None, examples=[KindVertexTextModel.CODE_GECKO_002]
+    )
     stream: Optional[bool] = False
 
 
 class EditorContentCompletionPayload(EditorContentPayload):
     choices_count: Optional[int] = 0
-    model_name: Optional[str] = Field(
-        None, examples=[KindVertexTextModel.CODE_GECKO_002]
-    )
     prompt: Optional[str | list[Message]] = Field(
         None, examples=["Complete the function"]
     )
@@ -80,6 +80,7 @@ class EditorContentGenerationPayload(EditorContentPayload):
     prompt: Optional[Annotated[str, StringConstraints(max_length=400000)]] = None
     prompt_id: Optional[str] = None
     prompt_enhancer: Optional[dict[str, Any]] = None
+    prompt_version: Optional[str] = None
 
 
 class CodeEditorCompletion(BaseModel):

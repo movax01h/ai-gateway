@@ -586,6 +586,7 @@ class TestEditorContentGeneration:
                         "content_below_cursor": "\n",
                         "language_identifier": "python",
                         "prompt_id": "code_suggestions/generations",
+                        "prompt_version": "^1.0.0",
                         "prompt_enhancer": prompt_enhancer,
                     },
                 }
@@ -637,7 +638,7 @@ class TestEditorContentGeneration:
             prefix="# Create a fast binary search\n",
             file_name="main.py",
             editor_lang="python",
-            model_provider=None,
+            model_provider="anthropic",
             stream=False,
             snowplow_event_context=expected_snowplow_event,
             prompt_enhancer=prompt_enhancer,

@@ -478,10 +478,10 @@ class TestLocalPromptRegistry:
     @pytest.mark.parametrize(
         (
             "prompt_id",
-            "model_metadata",
             "expected_name",
             "expected_class",
             "expected_model",
+            "expected_prompt_version",
             "expected_model_class",
             "expected_kwargs",
             "default_prompt_env_config",
@@ -489,20 +489,20 @@ class TestLocalPromptRegistry:
         [
             (
                 "code_suggestions/generations",
-                None,
                 "Claude 3 Code Generations Agent",
                 Prompt,
                 "claude-3-5-sonnet@20240620",
+                "2.0.0",
                 ChatLiteLLM,
                 {"stop": ["</new_code>"], "vertex_location": "us-east5"},
-                {"code_suggestions/generations": "vertex"},
+                {"code_suggestions/generations": "base"},
             ),
             (
                 "code_suggestions/generations",
-                None,
                 "Claude 3 Code Generations Agent",
                 Prompt,
                 "claude-3-5-sonnet-20240620",
+                "1.0.0",
                 ChatAnthropic,
                 {"stop": ["</new_code>"]},
                 {},
@@ -514,8 +514,8 @@ class TestLocalPromptRegistry:
         model_factories: dict[ModelClassProvider, TypeModelFactory],
         internal_event_client: Mock,
         prompt_id: str,
-        model_metadata: ModelMetadata | None,
         expected_name: str,
+        expected_prompt_version: str,
         expected_class: Type[Prompt],
         expected_model: str,
         expected_model_class: Type[Model],
@@ -529,7 +529,8 @@ class TestLocalPromptRegistry:
             internal_event_client=internal_event_client,
         )
         prompt = registry.get(
-            prompt_id, prompt_version="^1.0.0", model_metadata=model_metadata
+            prompt_id,
+            prompt_version=expected_prompt_version,
         )
         chain = cast(RunnableSequence, prompt.bound)
         binding = cast(RunnableBinding, chain.last)

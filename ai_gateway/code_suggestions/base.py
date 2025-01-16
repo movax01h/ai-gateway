@@ -25,6 +25,7 @@ __all__ = [
     "ModelProvider",
     "PROVIDERS_MODELS_MAP",
     "USE_CASES_MODELS_MAP",
+    "SAAS_PROMPT_MODEL_MAP",
 ]
 
 
@@ -81,6 +82,29 @@ USE_CASES_MODELS_MAP = {
         KindLiteLlmModel.CLAUDE_3,
         KindLiteLlmModel.GPT,
         KindLiteLlmModel.CLAUDE_3_5,
+    },
+}
+
+SAAS_PROMPT_MODEL_MAP = {
+    "^1.0.0": {
+        "model_provider": ModelProvider.ANTHROPIC,
+        "model_version": KindAnthropicModel.CLAUDE_3_5_SONNET,
+    },
+    "1.0.0": {
+        "model_provider": ModelProvider.ANTHROPIC,
+        "model_version": KindAnthropicModel.CLAUDE_3_5_SONNET,
+    },
+    "1.0.1-dev": {
+        "model_provider": ModelProvider.ANTHROPIC,
+        "model_version": KindAnthropicModel.CLAUDE_3_5_SONNET_V2,
+    },
+    "2.0.0": {
+        "model_provider": ModelProvider.VERTEX_AI,
+        "model_version": KindAnthropicModel.CLAUDE_3_5_SONNET,
+    },
+    "2.0.1": {
+        "model_provider": ModelProvider.VERTEX_AI,
+        "model_version": KindAnthropicModel.CLAUDE_3_5_SONNET_V2,
     },
 }
 
