@@ -3,7 +3,7 @@ import pytest
 from ai_gateway.code_suggestions.processing import LanguageId
 from ai_gateway.code_suggestions.processing.post.ops import (
     fix_end_block_errors,
-    fix_end_block_errors_with_comparison,
+    fix_end_block_errors_legacy,
 )
 
 PYTHON_SAMPLE_1 = (
@@ -134,11 +134,11 @@ RUBY_SAMPLE_3 = (
     ],
 )
 @pytest.mark.asyncio
-async def test_fix_end_block_errors(
+async def test_fix_end_block_errors_legacy(
     code_sample: tuple, lang_id: LanguageId, expected_completion: str
 ):
     prefix, completion, suffix = code_sample
-    actual_completion = await fix_end_block_errors(
+    actual_completion = await fix_end_block_errors_legacy(
         prefix, completion, suffix, lang_id=lang_id
     )
 
@@ -174,11 +174,11 @@ async def test_fix_end_block_errors(
     ],
 )
 @pytest.mark.asyncio
-async def test_fix_end_block_errors_with_comparison(
+async def test_fix_end_block_errors(
     code_sample: tuple, lang_id: LanguageId, expected_completion: str
 ):
     prefix, completion, suffix = code_sample
-    actual_completion = await fix_end_block_errors_with_comparison(
+    actual_completion = await fix_end_block_errors(
         prefix, completion, suffix, lang_id=lang_id
     )
 

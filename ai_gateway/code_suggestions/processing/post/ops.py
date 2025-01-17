@@ -17,7 +17,7 @@ __all__ = [
     "clean_model_reflection",
     "trim_by_min_allowed_context",
     "fix_end_block_errors",
-    "fix_end_block_errors_with_comparison",
+    "fix_end_block_errors_legacy",
     "strip_code_block_markdown",
     "prepend_new_line",
     "strip_asterisks",
@@ -140,7 +140,7 @@ async def trim_by_min_allowed_context(
     return out
 
 
-async def fix_end_block_errors(
+async def fix_end_block_errors_legacy(
     prefix: str,
     completion: str,
     suffix: str,
@@ -177,7 +177,7 @@ async def fix_end_block_errors(
     return completion
 
 
-async def fix_end_block_errors_with_comparison(
+async def fix_end_block_errors(
     prefix: str,
     completion: str,
     suffix: str,
