@@ -8,7 +8,7 @@ from ai_gateway.code_suggestions.processing.post.base import PostProcessorBase
 from ai_gateway.code_suggestions.processing.post.ops import (
     clean_model_reflection,
     fix_end_block_errors,
-    fix_end_block_errors_with_comparison,
+    fix_end_block_errors_legacy,
     remove_comment_only_completion,
     strip_asterisks,
     trim_by_min_allowed_context,
@@ -28,7 +28,7 @@ class PostProcessorOperation(StrEnum):
     REMOVE_COMMENTS = "remove_comment_only_completion"
     TRIM_BY_MINIMUM_CONTEXT = "trim_by_min_allowed_context"
     FIX_END_BLOCK_ERRORS = "fix_end_block_errors"
-    FIX_END_BLOCK_ERRORS_WITH_COMPARISON = "fix_end_block_errors_with_comparison"
+    FIX_END_BLOCK_ERRORS_LEGACY = "fix_end_block_errors_legacy"
     CLEAN_MODEL_REFLECTION = "clean_model_reflection"
     STRIP_WHITESPACES = "strip_whitespaces"
     STRIP_ASTERISKS = "strip_asterisks"
@@ -79,8 +79,8 @@ class PostProcessor(PostProcessorBase):
                 suffix=self.suffix,
                 lang_id=self.lang_id,
             ),
-            PostProcessorOperation.FIX_END_BLOCK_ERRORS_WITH_COMPARISON: partial(
-                fix_end_block_errors_with_comparison,
+            PostProcessorOperation.FIX_END_BLOCK_ERRORS_LEGACY: partial(
+                fix_end_block_errors_legacy,
                 self.code_context,
                 suffix=self.suffix,
                 lang_id=self.lang_id,

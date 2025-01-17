@@ -124,6 +124,9 @@ class ContainerCodeCompletions(containers.DeclarativeContainer):
         ),
         post_processor=providers.Factory(
             PostProcessorCompletions,
+            overrides={
+                PostProcessorOperation.FIX_END_BLOCK_ERRORS: PostProcessorOperation.FIX_END_BLOCK_ERRORS_LEGACY,
+            },
             exclude=config.excl_post_proc,
         ).provider,
         snowplow_instrumentator=snowplow_instrumentator,
@@ -157,12 +160,10 @@ class ContainerCodeCompletions(containers.DeclarativeContainer):
         ),
         post_processor=providers.Factory(
             PostProcessorCompletions,
-            overrides={
-                PostProcessorOperation.FIX_END_BLOCK_ERRORS: PostProcessorOperation.FIX_END_BLOCK_ERRORS_WITH_COMPARISON,
-            },
             exclude=config.excl_post_proc,
         ).provider,
     )
+
     agent_factory = providers.Factory(
         CodeCompletions,
         model=providers.Factory(agent_model),
