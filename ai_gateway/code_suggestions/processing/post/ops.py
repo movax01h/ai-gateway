@@ -146,6 +146,22 @@ async def fix_end_block_errors_legacy(
     suffix: str,
     lang_id: Optional[LanguageId] = None,
 ) -> str:
+    """
+    Strips suffix from completion only if the resulting code has zero parsing errors.
+
+    This processor is more conservative in its approach. It will only strip the suffix
+    if the resulting code has absolutely no parsing errors. If the original code had
+    any parsing errors to begin with, the suffix will not be stripped.
+
+    Args:
+        prefix: The code context before the completion
+        completion: The code completion to process
+        suffix: The code context after the completion
+        lang_id: Optional language identifier for the code
+
+    Returns:
+        str: The processed completion with suffix potentially stripped if no errors exist.
+    """
     # Hypothesis 1: the suffix contains only one line.
     suffix_first_line = suffix.strip()
     if len(suffix_first_line) == 0:
@@ -183,6 +199,23 @@ async def fix_end_block_errors(
     suffix: str,
     lang_id: Optional[LanguageId] = None,
 ) -> str:
+    """
+    Strips suffix from completion if it doesn't introduce new parsing errors.
+
+    This processor takes a more lenient approach compared to fix_end_block_errors_legacy.
+    It will strip the suffix even if the original code had parsing errors, as long as
+    stripping the suffix doesn't introduce additional errors compared to the original code.
+    This makes it more effective at handling code that may have pre-existing issues.
+
+    Args:
+        prefix: The code context before the completion
+        completion: The code completion to process
+        suffix: The code context after the completion
+        lang_id: Optional language identifier for the code
+
+    Returns:
+        str: The processed completion with suffix potentially stripped if no new errors are introduced.
+    """
     stripped_suffix = suffix.strip()
     if len(stripped_suffix) == 0:
         return completion
