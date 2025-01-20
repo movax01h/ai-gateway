@@ -28,7 +28,7 @@ sequenceDiagram
 
 Participants:
 
-- Clients ... VS Code extension, Language server and GitLab-Rails (e.g. `VertexAI::Client`).
+- Clients ... VS Code extension, Language server and GitLab-Rails (for example, `VertexAI::Client`).
 - OIDC providers ... Multi-tenant SaaS GitLab (`gitlab.com`) and Customer Dot (`customers.gitlab.com`).
 - AI Gateway ... GitLab-managed service to provide AI related features (`cloud.gitlab.com/ai`).
 
@@ -41,11 +41,11 @@ Process flow:
    These JWKS are cached in AI Gateway so that it doesn't need to request to OIDC providers every time.
 1. Same
 1. Same
-1. If AI Gateway successfully decodes the JWT, the client request is authenticated and passed to the feature endpoints (e.g. `POST /v1/chat/agent`).
-   For further authorization process, see [authorization in AI Gateway](#authentication-in-ai-gateway).
+1. If AI Gateway successfully decodes the JWT, the client request is authenticated and passed to the feature endpoints
+   (for example, `POST /v1/chat/agent`). For further authorization process, see [authorization in AI Gateway](#authentication-in-ai-gateway).
 1. If AI Gateway fails to decode the JWT, AI Gateway returns an error response to the client, which could happen in the following cases:
    - The client got an JWT from an OIDC provider that is not trusted by AI Gateway.
-   - The client didn't include an JWT in the `Authorization` HTTP header e.g. `Authorization: Bearer <JWT>`.
+   - The client didn't include a JWT in the `Authorization` HTTP header.
    - The value of `X-Gitlab-Authentication-Type` HTTP header is not `oidc`.
    - The value of `X-Gitlab-Realm` HTTP header and the value of `gitlab_realm` JWT claim do not match.
    - The value of `X-Gitlab-Instance-Id` HTTP header and the value of `subject` JWT claim do not match.
@@ -53,7 +53,7 @@ Process flow:
 Notes:
 
 - Authentication happens in a middleware named `MiddlewareAuthentication`.
-  This middelware is processed for all incoming requests before passing them to feature endpoints.
+  This middleware is processed for all incoming requests before passing them to feature endpoints.
 - There is a case that a client and an OIDC provider co-exist in the same server.
   For example, an OIDC provider as multi-tenant SaaS GitLab and a client as GitLab-Rails co-exist in `gitlab.com`.
 
