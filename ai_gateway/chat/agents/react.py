@@ -20,6 +20,7 @@ from ai_gateway.chat.agents.typing import (
     TypeAgentEvent,
 )
 from ai_gateway.chat.tools.base import BaseTool
+from ai_gateway.feature_flags import FeatureFlag, is_feature_enabled
 from ai_gateway.models.base_chat import Role
 from ai_gateway.prompts import Prompt, jinja2_formatter
 from ai_gateway.prompts.typing import ModelMetadata
@@ -141,15 +142,21 @@ class ReActPromptTemplate(Runnable[ReActAgentInputs, PromptValue]):
         messages = []
 
         if "system" in self.prompt_template:
-            messages.append(
-                SystemMessage(
-                    jinja2_formatter(
-                        self.prompt_template["system"],
-                        tools=input.tools,
-                        unavailable_resources=input.unavailable_resources,
-                    )
-                )
+            content = jinja2_formatter(
+                self.prompt_template["system"],
+                tools=input.tools,
+                unavailable_resources=input.unavailable_resources,
             )
+            if is_feature_enabled(FeatureFlag.ENABLE_ANTHROPIC_PROMPT_CACHING):
+                content = [
+                    {
+                        "text": content,
+                        "type": "text",
+                        "cache_control": {"type": "ephemeral"},
+                    }
+                ]
+
+            messages.append(SystemMessage(content=content))
 
         for m in input.messages:
             if m.role is Role.USER:
