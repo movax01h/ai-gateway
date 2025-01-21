@@ -990,13 +990,13 @@ tqdm = ["tqdm"]
 
 [[package]]
 name = "gitlab-cloud-connector"
-version = "1.7.0"
+version = "2.0.0"
 description = "Cloud Connector library for Python backends"
 optional = false
 python-versions = ">=3.11,<4.0"
 files = [
-    {file = "gitlab_cloud_connector-1.7.0-py3-none-any.whl", hash = "sha256:326ac8ba663e908d2a1a1c14b24dffbafc2ef841b78eb97188c8f4cbf443f4de"},
-    {file = "gitlab_cloud_connector-1.7.0.tar.gz", hash = "sha256:f39affcb050e2360986e7f0b5e6e094d9c4ab4f69b8020c54bc63a936dea64bf"},
+    {file = "gitlab_cloud_connector-2.0.0-py3-none-any.whl", hash = "sha256:cc2e718424e0cb46c8c527b8da0b6a2fcdc1021323590ad12eac7d73afb086f0"},
+    {file = "gitlab_cloud_connector-2.0.0.tar.gz", hash = "sha256:fba4b1fc2ea05400fc385c07e82b166fe207cb2a66db89e2a5cf336ceee1a9ae"},
 ]
 
 [package.dependencies]
@@ -4557,4 +4557,4 @@ test = ["big-O", "importlib-resources", "jaraco.functools", "jaraco.itertools", 
 [metadata]
 lock-version = "2.0"
 python-versions = "~3.11.0"
-content-hash = "12b5faa172e6743dfdfcde38418e5469675e56c91bfca75a3c44f142cd544bb4"
+content-hash = "9c8b804f8515b55bff3bbf2fd4a0b190ce1db8cd51771addcece9901c9aa5273"
