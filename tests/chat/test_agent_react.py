@@ -1,4 +1,5 @@
 import pytest
+from langchain_core.messages import SystemMessage
 from starlette_context import context, request_cycle_context
 from structlog.testing import capture_logs
 
@@ -306,6 +307,41 @@ class TestReActAgent:
 
         assert actual_actions == expected_actions
         assert cap_logs[-1]["event"] == "Response streaming"
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("feature_flag_enabled", [True, False])
+    async def test_stream_message_cache_control(
+        self,
+        prompt: ReActAgent,
+        feature_flag_enabled: bool,
+    ):
+        if feature_flag_enabled:
+            current_feature_flag_context.set(["enable_anthropic_prompt_caching"])
+        else:
+            current_feature_flag_context.set([])
+
+        inputs = ReActAgentInputs(
+            messages=[
+                Message(
+                    role=Role.USER,
+                    content="What's the title of this issue?",
+                    resource_content="Please use this information about identified issue",
+                ),
+            ],
+            agent_scratchpad=[],
+            tools=[IssueReader()],
+        )
+
+        prompt_value = prompt.prompt_tpl.invoke(inputs)
+
+        for msg in prompt_value.messages:
+            if isinstance(msg, SystemMessage):
+                if feature_flag_enabled:
+                    content_dict = msg.content[0]
+                    assert content_dict["type"] == "text"
+                    assert content_dict["cache_control"] == {"type": "ephemeral"}
+                else:
+                    assert isinstance(msg.content, str)
 
     @pytest.mark.asyncio
     @pytest.mark.parametrize(
