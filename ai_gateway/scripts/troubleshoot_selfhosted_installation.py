@@ -251,7 +251,9 @@ def troubleshoot():
 
     # if model_identifier is provided, extract the provider
     # example: extract `bedrock` from `bedrock/anthropic.claude-3-5-sonnet-20240620-v1:0`
-    provider = model_identifier.split("/")[0] if model_identifier else None
+    provider = None
+    if model_identifier and "/" in model_identifier:
+        provider = model_identifier.split("/")[0]
 
     check_general_env_variables()
     check_aigw_endpoint(endpoint)
