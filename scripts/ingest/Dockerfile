@@ -51,7 +51,7 @@ ENV VIRTUAL_ENV=/usr/venv
 ENV PATH="$VIRTUAL_ENV/bin:$PATH"
 COPY poetry.lock pyproject.toml /app/
 COPY vendor/ /app/vendor
-RUN python -m venv $VIRTUAL_ENV && poetry install --no-interaction --no-ansi --no-dev
+RUN python -m venv $VIRTUAL_ENV && poetry install --no-interaction --no-ansi --only main --no-root
 
 # Copy scripts
 COPY Makefile /app/Makefile
