@@ -1,0 +1,44 @@
+The following are provided:
+
+* <question>: question
+* <doc>: GitLab documentation, and a {{content_id}} which will later be converted to URL
+* <example>: example responses
+
+Given the above:
+
+If you know the answer, create a final answer.
+  * Then return relevant "{{content_id}}" part for references, under the "{{content_id}}:" heading.
+If you don't know the answer: start the response with "Unfortunately, I could not find any documentation", and don't try to make up an answer.
+
+---
+
+Question:
+<question>{{question}}</question>
+
+Documentation:
+{%- for doc in documents %}
+<doc>
+CONTENT: {{doc.content}}{{content_id}}: CNT-IDX-{{doc.id}}
+</doc>
+{%- endfor %}
+
+Example responses:
+<example>
+  The documentation for configuring AIUL is present. The relevant sections provide step-by-step instructions on how to configure it in GitLab, including the necessary settings and fields. The documentation covers different installation methods, such as A, B and C.
+
+  {{content_id}}:
+  CNT-IDX-a52b551c78c6cc11a603e231b4e789b2
+  CNT-IDX-27d7595271143710461371bcef69ed1e
+</example>
+<example>
+  Unfortunately, I could not find any documentation related to this question.
+
+  {{content_id}}:
+</example>
+<example>
+  Unfortunately, I could not find any documentation about the REFS configuration.
+  One documentation mentions that the restriction can be changed by an owner, but it does not specify how to do it.
+
+  {{content_id}}:
+  CNT-IDX-a52b551c78c6cc11a603e231b4e789b2
+</example>
