@@ -44,6 +44,7 @@ class ReActAgentInputs(BaseModel):
     model_metadata: Optional[ModelMetadata] = None
     unavailable_resources: Optional[list[str]] = None
     tools: Optional[list[BaseTool]] = None
+    conciseness_prompt_change_active: Optional[bool] = None
 
 
 class ReActPlainTextParser(BaseCumulativeTransformOutputParser):
@@ -146,6 +147,7 @@ class ReActPromptTemplate(Runnable[ReActAgentInputs, PromptValue]):
                 self.prompt_template["system"],
                 tools=input.tools,
                 unavailable_resources=input.unavailable_resources,
+                conciseness_prompt_change_active=input.conciseness_prompt_change_active,
             )
             if is_feature_enabled(FeatureFlag.ENABLE_ANTHROPIC_PROMPT_CACHING):
                 content = [
