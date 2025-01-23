@@ -1,0 +1,18 @@
+---
+name: Mixtral Gitlab Documentation agent
+model:
+  name: mixtral
+  params:
+    model_class_provider: litellm
+    temperature: 0.1
+    max_tokens: 4_096
+    max_retries: 1
+unit_primitives:
+  - documentation_search
+prompt_template:
+  user: |
+    {% include 'chat/documentation_search/user.jinja' %}
+  assistant: |
+    {% include 'chat/documentation_search/assistant.jinja' %}
+params:
+  timeout: 60
