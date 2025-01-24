@@ -645,6 +645,7 @@ class TestLiteLlmTextGenModel:
                         "<|im_start|>",
                         "<|im_end|>",
                         "\n\n",
+                        "def goodbye_world():",
                     ],
                     "api_key": "fireworks-api-key",
                     "messages": [
@@ -696,6 +697,41 @@ class TestLiteLlmTextGenModel:
                 "def hello_world():",
                 None,
                 False,
+            ),
+            (
+                "qwen2p5-coder-7b",
+                KindModelProvider.FIREWORKS,
+                True,
+                {
+                    "model": "provider/some-cool-model#deployment_id",
+                    "stop": [
+                        "<|fim_prefix|>",
+                        "<|fim_suffix|>",
+                        "<|fim_middle|>",
+                        "<|fim_pad|>",
+                        "<|repo_name|>",
+                        "<|file_sep|>",
+                        "<|im_start|>",
+                        "<|im_end|>",
+                        "\n\n",
+                        "def goodbye_world():",
+                    ],
+                    "api_key": "fireworks-api-key",
+                    "messages": [
+                        {
+                            "content": "<|fim_prefix|>def hello_world():<|fim_suffix|>def goodbye_world():\n//another line<|fim_middle|>",
+                            "role": Role.USER,
+                        }
+                    ],
+                    "timeout": 60,
+                    "api_base": "https://fireworks.endpoint",
+                    "custom_llm_provider": "text-completion-openai",
+                    "extra_headers": {"x-session-affinity": "test"},
+                    "prompt_cache_max_len": 0,
+                },
+                "def hello_world():",
+                "def goodbye_world():\n//another line",
+                True,
             ),
         ],
     )
