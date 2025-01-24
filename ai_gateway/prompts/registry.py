@@ -76,6 +76,9 @@ class LocalPromptRegistry(BasePromptRegistry):
             )
 
         prompt_id = self._resolve_id(prompt_id, model_metadata)
+
+        log.info("Resolved prompt id", prompt_id=prompt_id)
+
         prompt_registered = self.prompts_registered[prompt_id]
         config = self._get_prompt_config(prompt_registered.versions, prompt_version)
         model_class_provider = config.model.params.model_class_provider
@@ -86,7 +89,7 @@ class LocalPromptRegistry(BasePromptRegistry):
                 f"unrecognized model class provider `{model_class_provider}`."
             )
 
-        log.debug(
+        log.info(
             "Returning prompt from the registry",
             prompt_id=prompt_id,
             prompt_name=config.name,
