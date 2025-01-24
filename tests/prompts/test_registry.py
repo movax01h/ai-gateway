@@ -641,6 +641,68 @@ class TestLocalPromptRegistry:
 
         assert registry.get("chat/react", "^1.0.0").name == "Chat react custom prompt"
 
+    def test_get_prompt_config_no_compatible_versions(
+        self,
+        prompts_registered: dict[str, PromptRegistered],
+        model_factories: dict[ModelClassProvider, TypeModelFactory],
+        internal_event_client: Mock,
+    ):
+        # Create a registry with a prompt that has versions 1.0.0 and 1.0.1
+        registry = LocalPromptRegistry(
+            prompts_registered={
+                "test/base": PromptRegistered(
+                    klass=Prompt,
+                    versions={
+                        "1.0.0": PromptConfig(
+                            name="Test prompt 1.0.0",
+                            model=ModelConfig(
+                                name="claude-2.1",
+                                params=ChatLiteLLMParams(
+                                    model_class_provider=ModelClassProvider.LITE_LLM,
+                                    top_p=0.1,
+                                    top_k=50,
+                                    max_tokens=256,
+                                    max_retries=10,
+                                    custom_llm_provider="vllm",
+                                ),
+                            ),
+                            unit_primitives=["explain_code"],
+                            prompt_template={"system": "Template1"},
+                        ),
+                        "1.0.1": PromptConfig(
+                            name="Test prompt 1.0.1",
+                            model=ModelConfig(
+                                name="claude-2.1",
+                                params=ChatLiteLLMParams(
+                                    model_class_provider=ModelClassProvider.LITE_LLM,
+                                    top_p=0.1,
+                                    top_k=50,
+                                    max_tokens=256,
+                                    max_retries=10,
+                                    custom_llm_provider="vllm",
+                                ),
+                            ),
+                            unit_primitives=["explain_code"],
+                            prompt_template={"system": "Template1"},
+                        ),
+                    },
+                ),
+            },
+            model_factories=model_factories,
+            default_prompts={},
+            internal_event_client=internal_event_client,
+            custom_models_enabled=True,
+            disable_streaming=True,
+        )
+
+        # Try to get a version 2.0.0 which doesn't exist
+        with pytest.raises(ValueError) as exc_info:
+            registry.get("test", "2.0.0")
+
+        assert (
+            str(exc_info.value) == "No prompt version found matching the query: 2.0.0"
+        )
+
     @pytest.mark.parametrize("custom_models_enabled", [False])
     def test_invalid_get(
         self, registry: LocalPromptRegistry, custom_models_enabled: bool
