@@ -1,9 +1,10 @@
 from pathlib import Path
 from textwrap import dedent
 from typing import Sequence, Type, cast
-from unittest.mock import Mock
+from unittest.mock import Mock, patch
 
 import pytest
+import yaml
 from langchain_anthropic import ChatAnthropic
 from langchain_community.chat_models import ChatLiteLLM
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
@@ -13,6 +14,7 @@ from langchain_core.runnables import RunnableBinding, RunnableSequence
 from pydantic import BaseModel, HttpUrl
 from pyfakefs.fake_filesystem import FakeFilesystem
 
+from ai_gateway.api.auth_utils import StarletteUser
 from ai_gateway.prompts import LocalPromptRegistry, Prompt, PromptRegistered
 from ai_gateway.prompts.config import (
     ChatAnthropicParams,
@@ -657,3 +659,79 @@ class TestLocalPromptRegistry:
             match="Endpoint override not allowed when custom models are disabled.",
         ):
             registry.get("chat/react", "^1.0.0", model_metadata=model_metadata)
+
+    def test_load_prompt_without_unit_primitive(
+        self,
+        mock_fs: FakeFilesystem,
+        model_factories,
+        internal_event_client: Mock,
+    ):
+        registry = LocalPromptRegistry.from_local_yaml(
+            class_overrides={},
+            model_factories=model_factories,
+            default_prompts={},
+            custom_models_enabled=True,
+            internal_event_client=internal_event_client,
+        )
+
+        yaml_content = """
+            name: TestPrompt No UP
+            model:
+                name: claude-3.5
+                params:
+                    model_class_provider: litellm
+            prompt_template:
+                system: test
+            """
+
+        with open("/tmp/test_prompt_no_up.yml", "w") as f:
+            f.write(yaml_content)
+
+        registry.prompts_registered.update(
+            {
+                "test/base": PromptRegistered(
+                    klass=Prompt,
+                    versions={"1.0.0": PromptConfig(**yaml.safe_load(yaml_content))},
+                ),  # type:ignore
+                "test/codestral": PromptRegistered(
+                    klass=Prompt,
+                    versions={"1.0.0": PromptConfig(**yaml.safe_load(yaml_content))},
+                ),  # type:ignore
+            }
+        )
+
+        prompt = registry.get("test", "1.0.0")
+        assert prompt.unit_primitives == []
+
+        prompt = registry.get(
+            "test",
+            "1.0.0",
+            ModelMetadata(
+                name="codestral",
+                endpoint=HttpUrl("http://localhost:4000/"),
+                provider="custom_openai",
+            ),
+        )
+        assert prompt.unit_primitives == []
+
+    def test_get_on_behalf_no_unit_primitive(
+        self,
+        registry: LocalPromptRegistry,
+        user: StarletteUser,
+        prompt: Prompt,
+        internal_event_client: Mock,
+    ):
+
+        test_registry = LocalPromptRegistry.from_local_yaml(
+            class_overrides={},
+            model_factories={},
+            default_prompts={},
+            internal_event_client=internal_event_client,
+        )
+        prompt.unit_primitives = []
+
+        with patch.object(test_registry, "get", return_value=prompt):
+
+            result_prompt = test_registry.get_on_behalf(user, prompt_id="test")
+
+            assert result_prompt == prompt
