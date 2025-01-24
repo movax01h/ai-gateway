@@ -29,6 +29,6 @@ class PromptConfig(BaseModel):
 
     name: str
     model: ModelConfig
-    unit_primitives: list[GitLabUnitPrimitive]
+    unit_primitives: list[GitLabUnitPrimitive] = []
     prompt_template: dict[str, str]
     params: PromptParams | None = None
