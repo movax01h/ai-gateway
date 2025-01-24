@@ -58,6 +58,11 @@ async def invoke(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail="Invalid version constraint",
         )
+    except ValueError as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(e),
+        )
     except KeyError:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,

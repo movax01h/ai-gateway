@@ -62,10 +62,21 @@ def prompt_template():
 
 
 @pytest.fixture
-def mock_registry_get(request, prompt_class: Optional[Type[Prompt]]):
+def compatible_versions():
+    yield ["1.0.0"]
+
+
+@pytest.fixture
+def mock_registry_get(
+    request,
+    prompt_class: Optional[Type[Prompt]],
+    compatible_versions: Optional[List[str]],
+):
     with patch("ai_gateway.prompts.registry.LocalPromptRegistry.get") as mock:
-        if prompt_class:
+        if prompt_class and len(compatible_versions) > 0:
             mock.return_value = request.getfixturevalue("prompt")
+        elif prompt_class and not compatible_versions:
+            mock.side_effect = ValueError("No prompt version found matching the query:")
         else:
             mock.side_effect = KeyError()
 
@@ -99,6 +110,7 @@ class TestPrompt:
             "expected_get_args",
             "expected_status",
             "expected_response",
+            "compatible_versions",
         ),
         [
             (
@@ -109,6 +121,7 @@ class TestPrompt:
                 ("test", "^1.0.0", None),
                 200,
                 "Hi John!",
+                ["1.0.0"],
             ),
             (
                 Prompt,
@@ -118,6 +131,7 @@ class TestPrompt:
                 ("test", "^2.0.0", None),
                 200,
                 "Hi John!",
+                ["2.0.0"],
             ),
             (
                 Prompt,
@@ -141,6 +155,17 @@ class TestPrompt:
                 ),
                 200,
                 "Hi John!",
+                ["1.0.0"],
+            ),
+            (
+                Prompt,
+                {"name": "John", "age": 20},
+                "^2.0.0",
+                None,
+                ("test", "^2.0.0", None),
+                400,
+                {"detail": "No prompt version found matching the query"},
+                [],
             ),
             (
                 None,
@@ -150,6 +175,7 @@ class TestPrompt:
                 ("test", "^1.0.0", None),
                 404,
                 {"detail": "Prompt 'test' not found"},
+                None,
             ),
             (
                 Prompt,
@@ -161,6 +187,7 @@ class TestPrompt:
                 {
                     "detail": "\"Input to ChatPromptTemplate is missing variables {'age'}.  Expected: ['age', 'name'] Received: ['name']"
                 },
+                ["1.0.0"],
             ),
         ],
     )
@@ -176,6 +203,7 @@ class TestPrompt:
         expected_get_args: dict,
         expected_status: int,
         expected_response: Any,
+        compatible_versions: Optional[List[str]],
     ):
         response = mock_client.post(
             "/prompts/test",
@@ -191,6 +219,7 @@ class TestPrompt:
             },
         )
 
+        mock_registry_get.compatible_versions = compatible_versions
         mock_registry_get.assert_called_with(*expected_get_args)
         assert response.status_code == expected_status
 
@@ -200,7 +229,7 @@ class TestPrompt:
         else:
             assert expected_response["detail"] in actual_response["detail"]
 
-        if prompt_class:
+        if prompt_class and len(compatible_versions) > 0:
             mock_track_internal_event.assert_called_once_with(
                 "request_explain_vulnerability",
                 category="ai_gateway.api.v1.prompts.invoke",
