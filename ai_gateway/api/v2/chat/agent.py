@@ -1,3 +1,4 @@
+from datetime import datetime
 from typing import Annotated, AsyncIterator
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
@@ -123,6 +124,7 @@ async def chat(
         conciseness_prompt_change_active=is_feature_enabled(
             FeatureFlag.CONCISENESS_PROMPT_CHANGE
         ),
+        current_date=datetime.now().strftime("%A, %B %d, %Y"),
     )
 
     gl_version = request.headers.get(X_GITLAB_VERSION_HEADER, "")

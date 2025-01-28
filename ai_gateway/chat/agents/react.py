@@ -45,6 +45,7 @@ class ReActAgentInputs(BaseModel):
     unavailable_resources: Optional[list[str]] = None
     tools: Optional[list[BaseTool]] = None
     conciseness_prompt_change_active: Optional[bool] = None
+    current_date: Optional[str] = None
 
 
 class ReActPlainTextParser(BaseCumulativeTransformOutputParser):
@@ -148,6 +149,7 @@ class ReActPromptTemplate(Runnable[ReActAgentInputs, PromptValue]):
                 tools=input.tools,
                 unavailable_resources=input.unavailable_resources,
                 conciseness_prompt_change_active=input.conciseness_prompt_change_active,
+                current_date=input.current_date,
             )
             if is_feature_enabled(FeatureFlag.ENABLE_ANTHROPIC_PROMPT_CACHING):
                 content = [
