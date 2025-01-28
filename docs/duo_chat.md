@@ -15,7 +15,7 @@ sequenceDiagram
     participant GW as Websocket
     participant GR as GitLabRails
     participant GS as GitLabSidekiq
-    participant CS as ChatStorage(Redis)
+    participant CS as ChatStorage(PostgreSQL)
     end
     box cloud.gitlab.com/ai
     participant AG as AI Gateway API
@@ -54,7 +54,7 @@ sequenceDiagram
     participant GW as Websocket
     participant GR as GitLabRails
     participant GS as GitLabSidekiq
-    participant CS as ChatStorage(Redis)
+    participant CS as ChatStorage(PostgreSQL)
     participant GD as GitLabDatabase(PostgreSQL)
     end
     box cloud.gitlab.com/ai
