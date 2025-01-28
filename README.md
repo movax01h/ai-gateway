@@ -133,6 +133,7 @@ See [Application settings doc](docs/application_settings.md)
 
 1. Clone project and change to project directory.
 1. Depending on [the version manager you are using](#prerequisites), run `mise install` or `asdf install`.
+1. [Install the `poetry-plugin-shell`](https://github.com/python-poetry/poetry-plugin-shell?tab=readme-ov-file#installation)
 1. Init shell: `poetry shell`.
 1. [Activate virtualenv](#how-to-manually-activate-the-virtualenv).
 1. Install dependencies: `poetry install`.
