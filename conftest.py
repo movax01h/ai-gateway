@@ -234,6 +234,12 @@ def mock_agent_model(mock_output: TextGenModelOutput):
     ) as mock:
         yield mock
 
+@pytest.fixture
+def mock_amazon_q_model(mock_output: TextGenModelOutput):
+    with _mock_generate(
+        "ai_gateway.models.amazon_q.AmazonQModel", mock_output
+    ) as mock:
+        yield mock
 
 @pytest.fixture
 def mock_completions_legacy_output_texts():

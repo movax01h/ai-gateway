@@ -9,6 +9,7 @@ from gitlab_cloud_connector import (
     GitLabFeatureCategory,
     GitLabUnitPrimitive,
 )
+from gitlab_cloud_connector.auth import AUTH_HEADER
 
 from ai_gateway.api.auth_utils import StarletteUser, get_current_user
 from ai_gateway.api.error_utils import capture_validation_errors
@@ -33,6 +34,7 @@ from ai_gateway.api.v2.code.typing import (
 )
 from ai_gateway.async_dependency_resolver import (
     get_code_suggestions_completions_agent_factory_provider,
+    get_code_suggestions_completions_amazon_q_factory_provider,
     get_code_suggestions_completions_anthropic_provider,
     get_code_suggestions_completions_fireworks_qwen_factory_provider,
     get_code_suggestions_completions_litellm_factory_provider,
@@ -118,6 +120,9 @@ async def completions(
     completions_fireworks_qwen_factory: Factory[CodeCompletions] = Depends(
         get_code_suggestions_completions_fireworks_qwen_factory_provider
     ),
+    completions_amazon_q_factory: Factory[CodeCompletions] = Depends(
+        get_code_suggestions_completions_amazon_q_factory_provider
+    ),
     completions_agent_factory: Factory[CodeCompletions] = Depends(
         get_code_suggestions_completions_agent_factory_provider
     ),
@@ -136,6 +141,7 @@ async def completions(
         completions_litellm_factory,
         completions_fireworks_qwen_factory,
         completions_agent_factory,
+        completions_amazon_q_factory,
         internal_event_client,
     )
 
@@ -446,9 +452,13 @@ def _build_code_completions(
     completions_litellm_factory: Factory[CodeCompletions],
     completions_fireworks_qwen_factory: Factory[CodeCompletions],
     completions_agent_factory: Factory[CodeCompletions],
+    completions_amazon_q_factory: Factory[CodeCompletions],
     internal_event_client: InternalEventsClient,
 ) -> tuple[CodeCompletions | CodeCompletionsLegacy, dict]:
     kwargs = {}
+
+    unit_primitive = GitLabUnitPrimitive.COMPLETE_CODE
+    tracking_event = f"request_{unit_primitive}"
 
     if payload.model_provider == KindModelProvider.ANTHROPIC:
         AnthropicHandler(payload, request, kwargs).update_completion_params()
@@ -480,20 +490,28 @@ def _build_code_completions(
         )
 
         return code_completions, kwargs
+    elif payload.model_provider == KindModelProvider.AMAZON_Q:
+        unit_primitive = GitLabUnitPrimitive.AMAZON_Q_INTEGRATION
+        tracking_event = f"request_{unit_primitive}_complete_code"
+        code_completions = completions_amazon_q_factory(
+            model__current_user=current_user,
+            model__auth_header=request.headers.get(AUTH_HEADER),
+            model__role_arn=payload.role_arn,
+        )
     else:
         code_completions = completions_legacy_factory()
         LegacyHandler(payload, request, kwargs).update_completion_params()
 
     # Providers that are handled via the prompt registry perform their own UP check and event tracking. If we reach
     # this point is because we're using some other legacy provider, and we need to perform these steps now
-    if not current_user.can(GitLabUnitPrimitive.COMPLETE_CODE):
+    if not current_user.can(unit_primitive):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Unauthorized to access code completions",
         )
 
     internal_event_client.track_event(
-        f"request_{GitLabUnitPrimitive.COMPLETE_CODE}",
+        tracking_event,
         category=__name__,
     )
 

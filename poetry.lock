@@ -3205,13 +3205,13 @@ files = [
 
 [[package]]
 name = "q-developer-boto3"
-version = "1.2.0"
+version = "1.4.0"
 description = "boto3 fork which includes q developer clients"
 optional = false
 python-versions = ">=3.9"
 groups = ["main"]
 files = [
-    {file = "q_developer_boto3-1.2.0-py3-none-any.whl", hash = "sha256:f41ff8aa415d99146d8c9660106c1f91bb9a78af88eb5ed98226f3310fa36f9e"},
+    {file = "q_developer_boto3-1.4.0-py3-none-any.whl", hash = "sha256:c15ad4093eaef3b41ecea20821e5107462a32103ef4dcead41a06615d17c806d"},
 ]
 
 [package.dependencies]
@@ -3219,7 +3219,7 @@ boto3 = ">=1.14.11"
 
 [package.source]
 type = "file"
-url = "vendor/q_developer_boto3-1.2.0-py3-none-any.whl"
+url = "vendor/q_developer_boto3-1.4.0-py3-none-any.whl"
 
 [[package]]
 name = "referencing"
@@ -4733,4 +4733,4 @@ test = ["big-O", "importlib-resources", "jaraco.functools", "jaraco.itertools", 
 [metadata]
 lock-version = "2.1"
 python-versions = "~3.11.0"
-content-hash = "614dfccc18a82c7731e39b5a4027afce1647d778d78b48f250d02c0772bb8b05"
+content-hash = "b6e942527f428f2f107b6ce7e806c4e862743242bbc556ab5e03474a97de33f0"

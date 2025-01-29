@@ -26,6 +26,7 @@ from ai_gateway.instrumentators import (
 )
 from ai_gateway.models import ChatModelBase, Message, ModelAPICallError, ModelAPIError
 from ai_gateway.models.agent_model import AgentModel
+from ai_gateway.models.amazon_q import AmazonQModel
 from ai_gateway.models.base import TokensConsumptionMetadata
 from ai_gateway.models.base_text import (
     TextGenModelBase,
@@ -198,6 +199,14 @@ class CodeCompletions:
                 elif isinstance(self.model, ChatModelBase):
                     res = await self.model.generate(
                         prompt.prefix, stream=stream, **kwargs
+                    )
+                elif isinstance(self.model, AmazonQModel):
+                    res = await self.model.generate(
+                        prompt.prefix,
+                        prompt.suffix,
+                        file_name,
+                        lang_id.name.lower(),
+                        **kwargs,
                     )
                 else:
                     res = await self.model.generate(

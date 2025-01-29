@@ -106,6 +106,7 @@ class ContainerCodeCompletions(containers.DeclarativeContainer):
     anthropic_claude_chat = providers.Dependency(instance_of=ChatModelBase)
     litellm = providers.Dependency(instance_of=TextGenModelBase)
     agent_model = providers.Dependency(instance_of=TextGenModelBase)
+    amazon_q_model = providers.Dependency(instance_of=TextGenModelBase)
     snowplow_instrumentator = providers.Dependency(instance_of=SnowplowInstrumentator)
 
     config = providers.Configuration(strict=True)
@@ -172,6 +173,14 @@ class ContainerCodeCompletions(containers.DeclarativeContainer):
         ),
     )
 
+    amazon_q_factory = providers.Factory(
+        CodeCompletions,
+        model=providers.Factory(amazon_q_model),
+        tokenization_strategy=providers.Factory(
+            TokenizerTokenStrategy, tokenizer=tokenizer
+        ),
+    )
+
 
 class ContainerCodeSuggestions(containers.DeclarativeContainer):
     models = providers.DependenciesContainer()
@@ -201,6 +210,7 @@ class ContainerCodeSuggestions(containers.DeclarativeContainer):
         anthropic_claude_chat=models.anthropic_claude_chat,
         litellm=models.litellm,
         agent_model=models.agent_model,
+        amazon_q_model=models.amazon_q_model,
         config=config,
         snowplow_instrumentator=snowplow.instrumentator,
     )

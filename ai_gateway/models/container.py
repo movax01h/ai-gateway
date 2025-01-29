@@ -6,6 +6,7 @@ from openai import AsyncOpenAI
 from ai_gateway.config import ConfigModelConcurrency
 from ai_gateway.models import mock
 from ai_gateway.models.agent_model import AgentModel
+from ai_gateway.models.amazon_q import AmazonQModel
 from ai_gateway.models.anthropic import AnthropicChatModel, AnthropicModel
 from ai_gateway.models.base import grpc_connect_vertex, init_anthropic_client
 from ai_gateway.models.litellm import LiteLlmChatModel, LiteLlmTextGenModel
@@ -75,6 +76,7 @@ class ContainerModels(containers.DeclarativeContainer):
     # Hence, `VertexTextBaseModel.from_model_name` and `AnthropicModel.from_model_name` are only partially applied here.
 
     config = providers.Configuration(strict=True)
+    integrations = providers.DependenciesContainer()
 
     _mock_selector = providers.Callable(
         lambda mock_model_responses: "mocked" if mock_model_responses else "original",
@@ -189,6 +191,15 @@ class ContainerModels(containers.DeclarativeContainer):
     agent_model = providers.Selector(
         _mock_selector,
         original=providers.Factory(AgentModel),
+        mocked=providers.Factory(mock.LLM),
+    )
+
+    amazon_q_model = providers.Selector(
+        _mock_selector,
+        original=providers.Factory(
+            AmazonQModel,
+            client_factory=integrations.amazon_q_client_factory,
+        ),
         mocked=providers.Factory(mock.LLM),
     )
 

@@ -313,3 +313,14 @@ class TestAmazonQClient:
             q_client.send_event(mock_event_request)
 
         mock_q_client.send_event.assert_called_once()
+
+    def test_generate_code_recommendations(
+        self, q_client, mock_q_client, mock_event_request
+    ):
+        q_client.generate_code_recommendations(
+            {"fileContext": {"context": "content"}, "maxResults": 1}
+        )
+        mock_q_client.generate_code_recommendations.assert_called_once_with(
+            fileContext={"context": "content"},
+            maxResults=1,
+        )
