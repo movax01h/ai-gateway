@@ -59,13 +59,21 @@ Notes:
 
 ### OIDC providers
 
-The endpoint `/.well-known/openid-configuration` is to get the JWKS URI. We then
-call this URI to fetch the JWKS. We cache the JWKS for 24 hours and use it to validate
-the authenticity of the suggestion requests.
+The AI gateway needs to fetch validation keys (JSON Web Key Set / JWKS) from OIDC providers to validate access tokens.
+To that end, it will dial the endpoint `/.well-known/openid-configuration` for each configured provider
+to first obtain the JWKS URI. We then call this URI to fetch the JWKS.
+We cache the JWKS for 24 hours and use it to validate the authenticity of all requests.
 
 ### Configure OIDC providers in AI Gateway
 
-To test OIDC, set the following in `.env`:
+Which OIDC providers should be used depends on who provides tokens in the first place:
+
+- When it's the Customers Portal (CDot) from which your access tokens are synced, set `AIGW_CUSTOMER_PORTAL_URL`
+- When it's your local GitLab instance that self-issues access tokens, set `AIGW_GITLAB_URL`
+
+You can also set both. Cloud Connector will try to fetch keys from all configured OIDC providers and merge their key sets.
+
+For example, to use OIDC, set the following in `.env`:
 
 ```shell
 # To test multi-tenant SaaS GitLab instance as OIDC provider
@@ -74,6 +82,18 @@ AIGW_GITLAB_URL=http://<your-gdk-address>/    # e.g. http://gdk.test:3000/
 
 # To test CustomersDot as OIDC provider
 AIGW_CUSTOMER_PORTAL_URL=http://<your-customer-dot-address> # e.g. http://127.0.0.1:5000
+```
+
+### Ensure `CLOUD_CONNECTOR_SERVICE_NAME` is set
+
+**NOTE:** This is only necessary if you don't use the Docker container.
+
+When validating tokens, we verify that the token `aud` claim (audience) matches the system name the token is sent to.
+
+For the AI gateway, make sure to set the following in `.env`:
+
+```shell
+CLOUD_CONNECTOR_SERVICE_NAME="gitlab-ai-gateway"
 ```
 
 #### Bypass JWT verification for testing
