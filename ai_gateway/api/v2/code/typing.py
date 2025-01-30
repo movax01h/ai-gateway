@@ -68,6 +68,7 @@ class SuggestionsRequest(BaseModel):
     choices_count: Optional[int] = 0
     context: Annotated[List[CodeContextPayload], Field(max_length=100)] = []
     prompt_id: Optional[str] = None
+    role_arn: Optional[str] = None
 
 
 class CompletionsRequest(SuggestionsRequest):

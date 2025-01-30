@@ -55,9 +55,15 @@ class ContainerApplication(containers.DeclarativeContainer):
         ContainerInternalEvent, config=config.internal_event
     )
 
+    integrations = providers.Container(
+        ContainerIntegrations,
+        config=config,
+    )
+
     pkg_models = providers.Container(
         ContainerModels,
         config=config,
+        integrations=integrations,
     )
     pkg_models_v2 = providers.Container(
         ContainerModelsV2,
@@ -95,8 +101,4 @@ class ContainerApplication(containers.DeclarativeContainer):
         ContainerAbuseDetection,
         config=config.abuse_detection,
         models=pkg_models,
-    )
-    integrations = providers.Container(
-        ContainerIntegrations,
-        config=config,
     )

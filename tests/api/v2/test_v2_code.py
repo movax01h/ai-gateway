@@ -33,7 +33,7 @@ def auth_user():
     return CloudConnectorUser(
         authenticated=True,
         claims=UserClaims(
-            scopes=["complete_code", "generate_code"],
+            scopes=["complete_code", "generate_code", "amazon_q_integration"],
             subject="1234",
             gitlab_realm="self-managed",
             issuer="issuer",
@@ -42,12 +42,16 @@ def auth_user():
 
 
 @pytest.fixture
-def mock_config():
+def mock_config(assets_dir):
     config = Config()
     config.custom_models.enabled = True
     config.model_keys = ConfigModelKeys(
         fireworks_api_key="mock_fireworks_key",
     )
+    config.self_signed_jwt.signing_key = open(
+        assets_dir / "keys" / "signing_key.pem"
+    ).read()
+    config.amazon_q.region = "us-west-2"
     config.model_endpoints = ConfigModelEndpoints(
         fireworks_current_region_endpoint={
             "endpoint": "https://fireworks.endpoint",
@@ -553,6 +557,7 @@ class TestCodeCompletions:
             "model_identifier",
             "want_litellm_called",
             "want_prompt_called",
+            "want_amazon_q_called",
             "want_status",
             "want_choices",
         ),
@@ -568,6 +573,7 @@ class TestCodeCompletions:
                 "api-key",
                 None,
                 True,
+                False,
                 False,
                 200,
                 [
@@ -589,6 +595,7 @@ class TestCodeCompletions:
                 "provider/codegemma_2b",
                 True,
                 False,
+                False,
                 200,
                 [
                     {
@@ -609,6 +616,7 @@ class TestCodeCompletions:
                 None,
                 False,
                 True,
+                False,
                 200,
                 [
                     {
@@ -629,6 +637,7 @@ class TestCodeCompletions:
                 None,
                 False,
                 True,
+                False,
                 200,
                 [
                     {
@@ -649,6 +658,7 @@ class TestCodeCompletions:
                 None,
                 True,
                 False,
+                False,
                 200,
                 [
                     {
@@ -668,6 +678,7 @@ class TestCodeCompletions:
                 "api-key",
                 None,
                 True,
+                False,
                 False,
                 200,
                 [
@@ -700,6 +711,28 @@ class TestCodeCompletions:
                 None,
                 True,
                 False,
+                False,
+                200,
+                [
+                    {
+                        "text": "test completion",
+                        "index": 0,
+                        "finish_reason": "length",
+                    }
+                ],
+            ),
+            (
+                2,
+                None,
+                [],
+                "amazon_q",
+                "amazon_q",
+                None,
+                None,
+                None,
+                False,
+                False,
+                True,
                 200,
                 [
                     {
@@ -716,6 +749,8 @@ class TestCodeCompletions:
         mock_client,
         mock_llm_text: Mock,
         mock_agent_model: Mock,
+        mock_amazon_q_model: Mock,
+        mock_track_internal_event: Mock,
         mock_config,
         prompt_version,
         prompt,
@@ -727,6 +762,7 @@ class TestCodeCompletions:
         model_identifier,
         want_litellm_called,
         want_prompt_called,
+        want_amazon_q_called,
         want_status,
         want_choices,
     ):
@@ -737,6 +773,7 @@ class TestCodeCompletions:
                 "X-Gitlab-Authentication-Type": "oidc",
                 "X-GitLab-Instance-Id": "1234",
                 "X-GitLab-Realm": "self-managed",
+                "X-GitLab-Global-User-Id": "1234",
             },
             json={
                 "prompt_version": prompt_version,
@@ -760,6 +797,7 @@ class TestCodeCompletions:
         assert response.status_code == want_status
         assert mock_llm_text.called == want_litellm_called
         assert mock_agent_model.called == want_prompt_called
+        assert mock_amazon_q_model.called == want_amazon_q_called
 
         if want_status == 200:
             body = response.json()
@@ -775,6 +813,12 @@ class TestCodeCompletions:
                 False,
                 snowplow_event_context=ANY,
                 max_output_tokens=48,
+            )
+
+        if model_provider == "amazon_q":
+            mock_track_internal_event.assert_called_once_with(
+                "request_amazon_q_integration_complete_code",
+                category="ai_gateway.api.v2.code.completions",
             )
 
     @pytest.mark.parametrize(
@@ -1786,3 +1830,82 @@ class TestUnauthorizedIssuer:
 
         assert response.status_code == status.HTTP_403_FORBIDDEN
         assert response.json() == {"detail": "Unauthorized to access code generations"}
+
+
+class TestAmazonQIntegration:
+    @pytest.fixture
+    def auth_user(self):
+        return CloudConnectorUser(
+            authenticated=True,
+            claims=UserClaims(
+                scopes=["amazon_q_integration"],
+                subject="1234",
+                gitlab_realm="self-managed",
+                issuer="gitlab-ai-gateway",
+            ),
+        )
+
+    @pytest.mark.parametrize(
+        ("auth_user", "model_provider", "model_name"),
+        [
+            (
+                CloudConnectorUser(
+                    authenticated=True,
+                    claims=UserClaims(
+                        scopes=["amazon_q_integration"],
+                        subject="1234",
+                        gitlab_realm="self-managed",
+                        issuer="gitlab-ai-gateway",
+                    ),
+                ),
+                "anthropic",
+                "claude-3-5-sonnet-20240620",
+            ),
+            (
+                CloudConnectorUser(
+                    authenticated=True,
+                    claims=UserClaims(
+                        scopes=["complete_code", "generate_code"],
+                        subject="1234",
+                        gitlab_realm="self-managed",
+                        issuer="gitlab-ai-gateway",
+                    ),
+                ),
+                "amazon_q",
+                "amazon_q",
+            ),
+        ],
+    )
+    def test_failed_authorization_scope(
+        self,
+        mock_client,
+        auth_user,
+        model_provider,
+        model_name,
+    ):
+        response = mock_client.post(
+            "/code/completions",
+            headers={
+                "Authorization": "Bearer 12345",
+                "X-Gitlab-Authentication-Type": "oidc",
+                "X-GitLab-Instance-Id": "1234",
+                "X-GitLab-Realm": "self-managed",
+                "X-GitLab-Global-User-Id": "1234",
+            },
+            json={
+                "prompt_version": 2,
+                "project_path": "gitlab-org/gitlab",
+                "project_id": 278964,
+                "current_file": {
+                    "file_name": "main.py",
+                    "content_above_cursor": "foo",
+                    "content_below_cursor": "\n",
+                },
+                "model_provider": model_provider,
+                "model_name": model_name,
+                "role_arn": "role-arn",
+            },
+        )
+
+        assert response.status_code == status.HTTP_403_FORBIDDEN
+        assert response.json() == {"detail": "Unauthorized to access code completions"}

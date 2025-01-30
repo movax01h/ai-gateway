@@ -10,6 +10,7 @@ from ai_gateway.code_suggestions.processing.ops import (
 )
 from ai_gateway.experimentation import ExperimentTelemetry
 from ai_gateway.models import (
+    KindAmazonQModel,
     KindAnthropicModel,
     KindLiteLlmModel,
     KindModelProvider,
@@ -46,6 +47,7 @@ PROVIDERS_MODELS_MAP = {
     KindModelProvider.LITELLM: set(KindLiteLlmModel),
     KindModelProvider.MISTRALAI: set(KindLiteLlmModel),
     KindModelProvider.FIREWORKS: set(KindLiteLlmModel),
+    KindModelProvider.AMAZON_Q: set(KindAmazonQModel),
 }
 
 USE_CASES_MODELS_MAP = {
@@ -62,6 +64,7 @@ USE_CASES_MODELS_MAP = {
         KindLiteLlmModel.CLAUDE_3,
         KindLiteLlmModel.GPT,
         KindLiteLlmModel.QWEN_2_5,
+        KindAmazonQModel.AMAZON_Q,
     },
     KindUseCase.CODE_GENERATIONS: {
         KindAnthropicModel.CLAUDE_2_0,

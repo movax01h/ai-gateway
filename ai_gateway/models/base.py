@@ -42,6 +42,7 @@ class KindModelProvider(StrEnum):
     LITELLM = "litellm"
     MISTRALAI = "codestral"
     FIREWORKS = "fireworks_ai"
+    AMAZON_Q = "amazon_q"
 
 
 class ModelAPIError(Exception):

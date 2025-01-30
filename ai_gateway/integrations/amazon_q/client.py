@@ -142,6 +142,13 @@ class AmazonQClient:
     def _create_o_auth_app_connection(self, **params):
         self.client.create_o_auth_app_connection(**params)
 
+    @raise_aws_errors
+    def generate_code_recommendations(self, payload):
+        return self.client.generate_code_recommendations(
+            fileContext=payload["fileContext"],
+            maxResults=payload["maxResults"],
+        )
+
     def _send_event(self, payload):
         self.client.send_event(
             providerId="GITLAB",
