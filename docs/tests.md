@@ -29,6 +29,16 @@ You can view the HTML report by running:
 open htmlcov/index.html
 ```
 
+### Running a single test file
+
+It's possible to run a single test file with next command:
+
+```shell
+poetry run pytest {name of test file}
+```
+
+If you run into an error `command not found: pytest` try to run `make install-test-deps` first. This command will install `pytest` and will make your shell ready to run the tests. 
+
 ## Integration test
 
 Integration tests verify that the API endpoints correctly handle requests and return appropriate responses.
