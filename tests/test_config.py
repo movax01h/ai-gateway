@@ -180,8 +180,13 @@ def test_config_google_cloud_profiler(
     [
         ({}, FFlagsCodeSuggestions()),
         (
-            {"AIGW_F__CODE_SUGGESTIONS__EXCL_POST_PROC": '["func1", "func2"]'},
-            FFlagsCodeSuggestions(excl_post_proc=["func1", "func2"]),
+            {
+                "AIGW_F__CODE_SUGGESTIONS__EXCL_POST_PROC": '["func1", "func2"]',
+                "AIGW_F__CODE_SUGGESTIONS__FIREWORKS_QWEN_SCORE_THRESHOLD": "-1.0",
+            },
+            FFlagsCodeSuggestions(
+                excl_post_proc=["func1", "func2"], fireworks_qwen_score_threshold=-1.0
+            ),
         ),
     ],
 )

@@ -597,6 +597,7 @@ class TestLiteLlmTextGenModel:
             "prefix",
             "suffix",
             "expect_async_client",
+            "expected_score",
         ),
         [
             (
@@ -615,6 +616,7 @@ class TestLiteLlmTextGenModel:
                 "def hello_world():",
                 "def goodbye_world():",
                 False,
+                10**5,
             ),
             (
                 "codestral",
@@ -628,6 +630,7 @@ class TestLiteLlmTextGenModel:
                 "def hello_world():",
                 "def goodbye_world():",
                 False,
+                10**5,
             ),
             (
                 "qwen2p5-coder-7b",
@@ -659,10 +662,12 @@ class TestLiteLlmTextGenModel:
                     "custom_llm_provider": "text-completion-openai",
                     "extra_headers": {"x-session-affinity": "test"},
                     "prompt_cache_max_len": 0,
+                    "logprobs": True,
                 },
                 "def hello_world():",
                 "def goodbye_world():",
                 True,
+                999.0,
             ),
             (
                 "qwen2p5-coder-7b",
@@ -693,10 +698,12 @@ class TestLiteLlmTextGenModel:
                     "custom_llm_provider": "text-completion-openai",
                     "extra_headers": {"x-session-affinity": "test"},
                     "prompt_cache_max_len": 0,
+                    "logprobs": True,
                 },
                 "def hello_world():",
                 None,
                 False,
+                999.0,
             ),
             (
                 "qwen2p5-coder-7b",
@@ -728,10 +735,12 @@ class TestLiteLlmTextGenModel:
                     "custom_llm_provider": "text-completion-openai",
                     "extra_headers": {"x-session-affinity": "test"},
                     "prompt_cache_max_len": 0,
+                    "logprobs": 1,
                 },
                 "def hello_world():",
                 "def goodbye_world():\n//another line",
                 True,
+                999.0,
             ),
         ],
     )
@@ -749,6 +758,7 @@ class TestLiteLlmTextGenModel:
         mock_litellm_acompletion: Mock,
         prefix,
         suffix,
+        expected_score,
     ):
         async_fireworks_client = Mock() if expect_async_client else None
 
@@ -792,6 +802,7 @@ class TestLiteLlmTextGenModel:
 
         assert isinstance(output, TextGenModelOutput)
         assert output.text == "Test response"
+        assert output.score == expected_score
         if output.metadata:
             assert output.metadata.output_tokens == 999
 

@@ -683,6 +683,6 @@ class TestCodeCompletions:
         mock_post_process = (
             completions_with_post_processing.post_processor.return_value.process
         )
-        mock_post_process.assert_called_with("Unprocessed completion output")
+        mock_post_process.assert_called_with("Unprocessed completion output", score=0)
 
         assert actual.text == "Post-processed completion output"

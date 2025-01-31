@@ -375,6 +375,9 @@ def mock_litellm_acompletion():
                     text="Test text completion response",
                 ),
             ],
+            _hidden_params={
+                "original_response": {"choices": [{"logprobs": AsyncMock(token_logprobs=[999])}]}
+                },
             usage=AsyncMock(completion_tokens=999),
         )
 
