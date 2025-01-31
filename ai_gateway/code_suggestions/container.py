@@ -162,6 +162,10 @@ class ContainerCodeCompletions(containers.DeclarativeContainer):
         post_processor=providers.Factory(
             PostProcessorCompletions,
             exclude=config.excl_post_proc,
+            extras=[
+                PostProcessorOperation.FILTER_SCORE,
+            ],
+            score_threshold=config.fireworks_qwen_score_threshold,
         ).provider,
     )
 

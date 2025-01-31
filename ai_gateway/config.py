@@ -68,6 +68,7 @@ class ConfigInstrumentator(BaseModel):
 
 class FFlagsCodeSuggestions(BaseModel):
     excl_post_proc: list[str] = []
+    fireworks_qwen_score_threshold: float = -9999.0
 
 
 class FFlags(BaseSettings):
