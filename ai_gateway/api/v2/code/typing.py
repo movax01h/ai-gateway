@@ -1,5 +1,6 @@
-from typing import Annotated, List, Literal, Optional
+from typing import Annotated, List, Literal, Optional, Union
 
+from fastapi import Body
 from pydantic import (
     BaseModel,
     ConfigDict,
@@ -119,6 +120,17 @@ class GenerationsRequestV2(GenerationsRequest):
 class GenerationsRequestV3(GenerationsRequest):
     prompt_version: Literal[3]
     prompt: list[Message]
+
+
+CompletionsRequestWithVersion = Annotated[
+    Union[CompletionsRequestV1, CompletionsRequestV2, CompletionsRequestV3],
+    Body(discriminator="prompt_version"),
+]
+
+GenerationsRequestWithVersion = Annotated[
+    Union[GenerationsRequestV1, GenerationsRequestV2, GenerationsRequestV3],
+    Body(discriminator="prompt_version"),
+]
 
 
 class SuggestionsResponse(BaseModel):
