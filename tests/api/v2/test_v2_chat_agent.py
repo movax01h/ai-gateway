@@ -162,7 +162,6 @@ class TestReActAgentStream:
                         api_key="token",
                     ),
                     unavailable_resources=["Mystery Resource 1", "Mystery Resource 2"],
-                    conciseness_prompt_change_active=False,
                 ),
                 "thought\nFinal Answer: answer\n",
                 [AgentFinalAnswer(text=c) for c in "answer"],
@@ -203,7 +202,6 @@ class TestReActAgentStream:
             "model_metadata",
             "expected_actions",
             "unavailable_resources",
-            "conciseness_prompt_change_active",
         ),
         [
             (
@@ -260,7 +258,6 @@ class TestReActAgentStream:
                     )
                 ],
                 ["Mystery Resource 1", "Mystery Resource 2"],
-                False,
             )
         ],
     )
@@ -275,7 +272,6 @@ class TestReActAgentStream:
         expected_actions: list[TypeAgentEvent],
         model_metadata: ModelMetadata,
         unavailable_resources: list[str],
-        conciseness_prompt_change_active: bool,
         mock_date,
     ):
         async def _agent_stream(*_args, **_kwargs) -> AsyncIterator[TypeAgentEvent]:
@@ -295,7 +291,6 @@ class TestReActAgentStream:
                 "options": agent_options.model_dump(mode="json"),
                 "model_metadata": model_metadata.model_dump(mode="json"),
                 "unavailable_resources": unavailable_resources,
-                conciseness_prompt_change_active: conciseness_prompt_change_active,
             },
         )
 
@@ -321,7 +316,6 @@ class TestReActAgentStream:
             agent_scratchpad=agent_scratchpad,
             model_metadata=model_metadata,
             unavailable_resources=unavailable_resources,
-            conciseness_prompt_change_active=conciseness_prompt_change_active,
             current_date=mock_date,
         )
 
