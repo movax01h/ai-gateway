@@ -31,7 +31,7 @@ spec:
     path: "/monitoring/healthz"
   scalability:
     min_instances: 1
-    max_instances: 200
+    max_instances: 100
     max_instance_request_concurrency: 40
   resources:
     startup_cpu_boost: true
