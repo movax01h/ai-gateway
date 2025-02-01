@@ -7,6 +7,7 @@ from starlette_context import context, request_cycle_context
 
 from ai_gateway.api.middleware import (
     X_GITLAB_FEATURE_ENABLED_BY_NAMESPACE_IDS_HEADER,
+    X_GITLAB_FEATURE_ENABLEMENT_TYPE_HEADER,
     X_GITLAB_GLOBAL_USER_ID_HEADER,
     X_GITLAB_HOST_NAME_HEADER,
     X_GITLAB_INSTANCE_ID_HEADER,
@@ -121,6 +122,7 @@ async def test_middleware_set_context(internal_event_middleware):
                 (X_GITLAB_GLOBAL_USER_ID_HEADER.lower().encode(), b"test-user"),
                 (X_GITLAB_DUO_SEAT_COUNT_HEADER.lower().encode(), b"100"),
                 (X_GITLAB_TEAM_MEMBER_HEADER.lower().encode(), b"true"),
+                (X_GITLAB_FEATURE_ENABLEMENT_TYPE_HEADER.lower().encode(), b"add_on"),
             ],
         }
     )
@@ -145,6 +147,7 @@ async def test_middleware_set_context(internal_event_middleware):
             global_user_id="test-user",
             duo_seat_count="100",
             is_gitlab_team_member="true",
+            feature_enablement_type="add_on",
             feature_enabled_by_namespace_ids=[],
             context_generated_at=mock_event_context.set.call_args[0][
                 0
@@ -227,6 +230,7 @@ async def test_middleware_set_context_feature_enabled_by_namespace_ids(
             instance_version=None,
             global_user_id=None,
             is_gitlab_team_member=None,
+            feature_enablement_type=None,
             feature_enabled_by_namespace_ids=expected,
             context_generated_at=mock_event_context.set.call_args[0][
                 0

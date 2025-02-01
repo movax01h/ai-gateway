@@ -44,6 +44,7 @@ def test_x_gitlab_headers_logged_when_set(mock_log_exception):
                 "X-Gitlab-Global-User-Id": "DEF",
                 "X-Gitlab-Host-Name": "awesome-org.com",
                 "X-Gitlab-Feature-Enabled-By-Namespace-Ids": "1,2",
+                "X-Gitlab-Feature-Enablement-Type": "add_on",
                 "X-Gitlab-Realm": "saas",
             },
             data={"foo": "bar"},
@@ -55,6 +56,7 @@ def test_x_gitlab_headers_logged_when_set(mock_log_exception):
     assert cap_logs[0]["gitlab_global_user_id"] == "DEF"
     assert cap_logs[0]["gitlab_host_name"] == "awesome-org.com"
     assert cap_logs[0]["gitlab_feature_enabled_by_namespace_ids"] == "1,2"
+    assert cap_logs[0]["gitlab_feature_enablement_type"] == "add_on"
     assert cap_logs[0]["gitlab_realm"] == "saas"
 
 
@@ -69,6 +71,7 @@ def test_x_gitlab_headers_not_logged_when_not_set(mock_log_exception):
     assert cap_logs[0]["gitlab_global_user_id"] is None
     assert cap_logs[0]["gitlab_host_name"] is None
     assert cap_logs[0]["gitlab_feature_enabled_by_namespace_ids"] is None
+    assert cap_logs[0]["gitlab_feature_enablement_type"] is None
     assert cap_logs[0]["gitlab_realm"] is None
 
 

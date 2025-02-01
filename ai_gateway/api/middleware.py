@@ -58,6 +58,7 @@ X_GITLAB_SAAS_DUO_PRO_NAMESPACE_IDS_HEADER = "X-Gitlab-Saas-Duo-Pro-Namespace-Id
 X_GITLAB_FEATURE_ENABLED_BY_NAMESPACE_IDS_HEADER = (
     "X-Gitlab-Feature-Enabled-By-Namespace-Ids"
 )
+X_GITLAB_FEATURE_ENABLEMENT_TYPE_HEADER = "X-Gitlab-Feature-Enablement-Type"
 X_GITLAB_MODEL_GATEWAY_REQUEST_SENT_AT = "X-Gitlab-Rails-Send-Start"
 X_GITLAB_LANGUAGE_SERVER_VERSION = "X-Gitlab-Language-Server-Version"
 X_GITLAB_ENABLED_FEATURE_FLAGS = "x-gitlab-enabled-feature-flags"
@@ -185,6 +186,9 @@ class AccessLogMiddleware:
                 ),
                 "gitlab_feature_enabled_by_namespace_ids": request.headers.get(
                     X_GITLAB_FEATURE_ENABLED_BY_NAMESPACE_IDS_HEADER
+                ),
+                "gitlab_feature_enablement_type": request.headers.get(
+                    X_GITLAB_FEATURE_ENABLEMENT_TYPE_HEADER
                 ),
                 "gitlab_realm": request.headers.get(X_GITLAB_REALM_HEADER),
                 "gitlab_duo_seat_count": request.headers.get(
@@ -362,6 +366,9 @@ class InternalEventMiddleware:
             global_user_id=request.headers.get(X_GITLAB_GLOBAL_USER_ID_HEADER),
             is_gitlab_team_member=request.headers.get(X_GITLAB_TEAM_MEMBER_HEADER),
             feature_enabled_by_namespace_ids=feature_enabled_by_namespace_ids,
+            feature_enablement_type=request.headers.get(
+                X_GITLAB_FEATURE_ENABLEMENT_TYPE_HEADER
+            ),
             context_generated_at=datetime.now().isoformat(),
             correlation_id=correlation_id.get(),
         )
