@@ -7,6 +7,9 @@ import os
 import boto3
 import requests
 
+# Constants
+SUPPORTED_MODEL_FAMILIES = ["mistral", "mixtral", "gpt", "claude_3"]
+
 
 def check_aigw_endpoint(endpoint="localhost:5052"):
     print("Testing if AI Gateway is running...")
@@ -34,6 +37,9 @@ def check_aigw_endpoint(endpoint="localhost:5052"):
 
 def check_provider_accessible(provider):
     # pylint: disable=direct-environment-variable-reference
+    if not provider == "bedrock":
+        return
+
     provider_name = provider.capitalize()
     print(f"Testing if provider {provider_name} is accessible ...")
 
@@ -61,9 +67,6 @@ def check_provider_accessible(provider):
                 >>   Verify if you can reach the internet from the server.
                 """
             raise RuntimeError(error_message)
-
-    else:
-        raise ValueError(f"Provider {provider_name} is not a supported provider.")
 
     print(f">> Provider {provider_name} is accessible ✔\n")
 
@@ -117,17 +120,16 @@ def check_gitlab_connectivity():
 
 def check_provider_specific_env_variables(provider):
     # pylint: disable=direct-environment-variable-reference
+    if not provider == "bedrock":
+        return
     provider_name = provider.capitalize()
     missing_vars = []
 
-    if provider == "bedrock":
-        required_vars = [
-            "AWS_ACCESS_KEY_ID",
-            "AWS_SECRET_ACCESS_KEY",
-            "AWS_REGION_NAME",
-        ]
-    else:
-        raise ValueError(f"Provider {provider_name} is not a supported provider.")
+    required_vars = [
+        "AWS_ACCESS_KEY_ID",
+        "AWS_SECRET_ACCESS_KEY",
+        "AWS_REGION_NAME",
+    ]
 
     print(f"Testing specific environment variables for provider {provider_name} ...")
 
@@ -144,9 +146,9 @@ def check_provider_specific_env_variables(provider):
 
 
 def check_suggestions_model_access(
-    endpoint, model_name, model_endpoint, model_key, model_identifier
+    endpoint, model_family, model_endpoint, api_key, model_identifier
 ):
-    print(f"Testing if model {model_name} is accessible for Code Generation ...")
+    print(f"Testing if the {model_family} model is accessible for Code Generation ...")
 
     url = f"http://{endpoint}/v2/code/generations"
 
@@ -162,9 +164,9 @@ def check_suggestions_model_access(
         },
         "model_provider": "litellm",
         "model_endpoint": model_endpoint,
-        "model_api_key": model_key,
+        "model_api_key": api_key,
         "model_identifier": model_identifier,
-        "model_name": model_name,
+        "model_name": model_family,
         "telemetry": [],
         "stream": False,
         "choices_count": 0,
@@ -176,11 +178,11 @@ def check_suggestions_model_access(
     }
 
     error_message = f"""
-                >> Failed to access {model_name} model."
+                >> Failed to access the {model_family} model."
                 >> Potential causes are:
                 >> - The model is not running. Verify if your model is running
                 >> - Model, model endpoint or the api key are invalid. Double check the parameters passed:
-                >>    - model: {model_name}, model endpoint: {model_endpoint}, model key: {model_key}
+                >>    - model_family: {model_family}, model endpoint: {model_endpoint}, api key: {api_key}, model_identifier: {model_identifier}
                 >> - The model is not reachable by AI Gateway. This can happen if the network is not configured correctly.
                 >>    - Attempt to make a request to your model api directly from the AI Gateway container
                 """
@@ -188,7 +190,7 @@ def check_suggestions_model_access(
     try:
         response = requests.post(url, headers=headers, json=payload, timeout=30)
         if response.status_code == 200:
-            print(f">> Successfully accessed {model_name} model ✔\n")
+            print(f">> Successfully accessed the {model_family} model ✔\n")
             return
 
         error_message = f"""
@@ -209,27 +211,38 @@ def check_suggestions_model_access(
 
 
 def troubleshoot():
-    # Parse the endpoint, model_name, model_endpoint, model_key, model_identifier with argparse
+    # Parse the endpoint, model_family, model_endpoint, api_key, model_identifier with argparse
 
-    parser = argparse.ArgumentParser(description="Test AI Gateway and model access")
-    parser.add_argument(
-        "--endpoint", default="localhost:5052", help="AI Gateway endpoint"
+    parser = argparse.ArgumentParser(
+        description="Test AI Gateway and model access",
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
     parser.add_argument(
-        "--model-name", required=False, help="Name of the model to test"
+        "--endpoint",
+        default="localhost:5052",
+        help="AI Gateway endpoint.",
+    )
+    parser.add_argument(
+        "--model-family",
+        required=False,
+        choices=SUPPORTED_MODEL_FAMILIES,
+        help="Family of the model to test.",
     )
     parser.add_argument(
         "--model-endpoint",
         required=False,
         default="http://localhost:4000",
-        help="Endpoint of the model. Example: http://localhost:4000. "
+        help="Endpoint of the model."
         "When using a model from an online provider like Bedrock, "
-        "this can be left empty.",
+        "this can be left empty. When using a model hosted via vLLM, the /v1 suffix is required.",
     )
     parser.add_argument(
-        "--model-identifier", required=False, help="Identifier of the model"
+        "--model-identifier",
+        required=False,
+        help="Identifier of the model."
+        "Example: custom_openai/Mixtral-8x7B-Instruct-v0.1, bedrock/anthropic.claude-3-5-sonnet-20240620-v1:0",
     )
-    parser.add_argument("--model-key", required=False, help="API key for the model")
+    parser.add_argument("--api-key", help="API key for the model.")
 
     args = parser.parse_args()
 
@@ -244,10 +257,10 @@ def troubleshoot():
         args.model_endpoint = "http://localhost:4000"
 
     endpoint = args.endpoint
-    model_name = args.model_name
+    model_family = args.model_family
     model_endpoint = args.model_endpoint
     model_identifier = args.model_identifier
-    model_key = args.model_key
+    api_key = args.api_key
 
     # if model_identifier is provided, extract the provider
     # example: extract `bedrock` from `bedrock/anthropic.claude-3-5-sonnet-20240620-v1:0`
@@ -259,11 +272,11 @@ def troubleshoot():
     check_aigw_endpoint(endpoint)
     check_gitlab_connectivity()
 
-    if model_name:
+    if model_family:
         if provider:
             check_provider_specific_env_variables(provider)
             check_provider_accessible(provider)
 
         check_suggestions_model_access(
-            endpoint, model_name, model_endpoint, model_key, model_identifier
+            endpoint, model_family, model_endpoint, api_key, model_identifier
         )
