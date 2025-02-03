@@ -21,7 +21,6 @@ from ai_gateway.chat.agents import (
     TypeAgentEvent,
 )
 from ai_gateway.chat.executor import GLAgentRemoteExecutor
-from ai_gateway.feature_flags import FeatureFlag, is_feature_enabled
 from ai_gateway.internal_events import InternalEventsClient
 
 __all__ = [
@@ -121,9 +120,6 @@ async def chat(
         agent_scratchpad=scratchpad,
         model_metadata=agent_request.model_metadata,
         unavailable_resources=agent_request.unavailable_resources,
-        conciseness_prompt_change_active=is_feature_enabled(
-            FeatureFlag.CONCISENESS_PROMPT_CHANGE
-        ),
         current_date=datetime.now().strftime("%A, %B %d, %Y"),
     )
 

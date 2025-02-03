@@ -44,7 +44,6 @@ class ReActAgentInputs(BaseModel):
     model_metadata: Optional[ModelMetadata] = None
     unavailable_resources: Optional[list[str]] = None
     tools: Optional[list[BaseTool]] = None
-    conciseness_prompt_change_active: Optional[bool] = None
     current_date: Optional[str] = None
 
 
@@ -148,7 +147,6 @@ class ReActPromptTemplate(Runnable[ReActAgentInputs, PromptValue]):
                 self.prompt_template["system"],
                 tools=input.tools,
                 unavailable_resources=input.unavailable_resources,
-                conciseness_prompt_change_active=input.conciseness_prompt_change_active,
                 current_date=input.current_date,
             )
             if (
