@@ -44,7 +44,7 @@ def single_validation(
     key: KindModelProvider,
 ):
     def _decorator(
-        func: Callable[[Any], Awaitable[bool]]
+        func: Callable[[Any], Awaitable[bool]],
     ) -> Callable[[Any, Any], Awaitable[bool]]:
 
         @functools.wraps(func)

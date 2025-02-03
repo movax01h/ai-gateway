@@ -193,7 +193,7 @@ class ReActAgent(Prompt[ReActAgentInputs, TypeAgentEvent]):
 
     @staticmethod
     def _build_chain(
-        chain: Runnable[ReActAgentInputs, TypeAgentEvent]
+        chain: Runnable[ReActAgentInputs, TypeAgentEvent],
     ) -> Runnable[ReActAgentInputs, TypeAgentEvent]:
         return chain | ReActPlainTextParser()
 
