@@ -22,15 +22,13 @@ class TestDuoChatToolRegistry:
     @pytest.mark.parametrize(
         "expected_tools",
         [
-            (
-                {
-                    BuildReader,
-                    EpicReader,
-                    IssueReader,
-                    MergeRequestReader,
-                    GitlabDocumentation,
-                }
-            )
+            {
+                BuildReader,
+                EpicReader,
+                IssueReader,
+                MergeRequestReader,
+                GitlabDocumentation,
+            }
         ],
     )
     def test_get_all_success(self, expected_tools: set[Type[BaseTool]]):
@@ -101,13 +99,11 @@ class TestDuoChatToolRegistry:
     @pytest.mark.parametrize(
         "unit_primitives",
         [
-            (
-                [
-                    GitLabUnitPrimitive.COMPLETE_CODE,
-                    GitLabUnitPrimitive.GENERATE_CODE,
-                    GitLabUnitPrimitive.EXPLAIN_CODE,
-                ]
-            )
+            [
+                GitLabUnitPrimitive.COMPLETE_CODE,
+                GitLabUnitPrimitive.GENERATE_CODE,
+                GitLabUnitPrimitive.EXPLAIN_CODE,
+            ]
         ],
     )
     def test_get_on_behalf_empty(

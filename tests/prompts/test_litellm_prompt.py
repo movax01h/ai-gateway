@@ -38,7 +38,7 @@ def mock_sleep():  # So we don't have to wait
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize(("response_text"), [('{"error": "something went wrong"}')])
+@pytest.mark.parametrize(("response_text"), ['{"error": "something went wrong"}'])
 async def test_ainvoke(
     mock_sleep: Mock,
     mock_http: Mock,
@@ -59,9 +59,7 @@ async def test_ainvoke(
 @pytest.mark.parametrize(
     ("response_text"),
     [
-        (
-            'data:{"type":"error","error":{"details":null,"type":"api_error","message":"something went wrong"}}'
-        )
+        'data:{"type":"error","error":{"details":null,"type":"api_error","message":"something went wrong"}}'
     ],
 )
 async def test_astream(
