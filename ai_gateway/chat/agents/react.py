@@ -151,7 +151,10 @@ class ReActPromptTemplate(Runnable[ReActAgentInputs, PromptValue]):
                 conciseness_prompt_change_active=input.conciseness_prompt_change_active,
                 current_date=input.current_date,
             )
-            if is_feature_enabled(FeatureFlag.ENABLE_ANTHROPIC_PROMPT_CACHING):
+            if (
+                is_feature_enabled(FeatureFlag.ENABLE_ANTHROPIC_PROMPT_CACHING)
+                and input.model_metadata is None
+            ):
                 content = [
                     {
                         "text": content,
