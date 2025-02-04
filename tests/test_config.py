@@ -10,6 +10,7 @@ from ai_gateway.config import (
     ConfigCustomModels,
     ConfigDefaultPrompts,
     ConfigFastApi,
+    ConfigFeatureFlags,
     ConfigGoogleCloudPlatform,
     ConfigGoogleCloudProfiler,
     ConfigInstrumentator,
@@ -19,7 +20,6 @@ from ai_gateway.config import (
     ConfigSnowplow,
     ConfigVertexSearch,
     ConfigVertexTextModel,
-    FFlagsCodeSuggestions,
 )
 
 # pylint: disable=direct-environment-variable-reference
@@ -178,23 +178,23 @@ def test_config_google_cloud_profiler(
 @pytest.mark.parametrize(
     ("values", "expected"),
     [
-        ({}, FFlagsCodeSuggestions()),
+        ({}, ConfigFeatureFlags()),
         (
             {
-                "AIGW_F__CODE_SUGGESTIONS__EXCL_POST_PROC": '["func1", "func2"]',
-                "AIGW_F__CODE_SUGGESTIONS__FIREWORKS_QWEN_SCORE_THRESHOLD": "-1.0",
+                "AIGW_FEATURE_FLAGS__EXCL_POST_PROC": '["func1", "func2"]',
+                "AIGW_FEATURE_FLAGS__FIREWORKS_QWEN_SCORE_THRESHOLD": "-1.0",
             },
-            FFlagsCodeSuggestions(
+            ConfigFeatureFlags(
                 excl_post_proc=["func1", "func2"], fireworks_qwen_score_threshold=-1.0
             ),
         ),
     ],
 )
-def test_config_f_flags_code_suggestions(values: dict, expected: FFlagsCodeSuggestions):
+def test_config_f_flags_code_suggestions(values: dict, expected: ConfigFeatureFlags):
     with mock.patch.dict(os.environ, values, clear=True):
         config = Config(_env_file=None)  # type: ignore[call-arg]
 
-        assert config.f.code_suggestions == expected
+        assert config.feature_flags == expected
 
 
 @pytest.mark.parametrize(

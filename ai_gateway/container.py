@@ -79,7 +79,7 @@ class ContainerApplication(containers.DeclarativeContainer):
     code_suggestions = providers.Container(
         ContainerCodeSuggestions,
         models=pkg_models,
-        config=config.f.code_suggestions,
+        config=config.feature_flags,
         snowplow=snowplow,
     )
     x_ray = providers.Container(
