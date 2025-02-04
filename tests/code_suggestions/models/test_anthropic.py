@@ -415,7 +415,6 @@ class TestAnthropicChatModel:
     @pytest.mark.parametrize(
         "model_name_version",
         [
-            "claude-3-opus-20240229",
             "claude-3-sonnet-20240229",
             "claude-3-haiku-20240307",
         ],

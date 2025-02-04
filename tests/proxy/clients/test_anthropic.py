@@ -16,7 +16,7 @@ async def test_valid_proxy_request(
     proxy_client = AnthropicProxyClient(async_client_factory(), concurrency_limit)
 
     request_params = {
-        "model": "claude-3-opus-20240229",
+        "model": "claude-3-5-haiku-20241022",
         "max_tokens": 1024,
         "messages": [{"role": "user", "content": "Hi, how are you?"}],
         "stream": True,

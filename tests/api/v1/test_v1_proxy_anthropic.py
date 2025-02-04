@@ -39,7 +39,7 @@ class TestProxyAnthropic:
                     "X-Gitlab-Unit-Primitive": GitLabUnitPrimitive.EXPLAIN_VULNERABILITY,
                 },
                 json={
-                    "model": "claude-3-opus-20240229",
+                    "model": "claude-3-5-haiku-20241022",
                     "max_tokens": 1024,
                     "messages": [{"role": "user", "content": "Hi, how are you?"}],
                     "stream": "true",
@@ -73,7 +73,7 @@ class TestUnauthorizedScopes:
                     "X-Gitlab-Unit-Primitive": GitLabUnitPrimitive.EXPLAIN_VULNERABILITY,
                 },
                 json={
-                    "model": "claude-3-opus-20240229",
+                    "model": "claude-3-5-haiku-20241022",
                     "max_tokens": 1024,
                     "messages": [{"role": "user", "content": "Hi, how are you?"}],
                     "stream": "true",

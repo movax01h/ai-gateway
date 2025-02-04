@@ -69,7 +69,6 @@ class KindAnthropicModel(StrEnum):
     # More info - https://docs.anthropic.com/claude/reference/selecting-a-model
     CLAUDE_2_0 = "claude-2.0"
     CLAUDE_2_1 = "claude-2.1"
-    CLAUDE_3_OPUS = "claude-3-opus-20240229"
     CLAUDE_3_SONNET = "claude-3-sonnet-20240229"
     CLAUDE_3_5_SONNET = "claude-3-5-sonnet-20240620"
     CLAUDE_3_HAIKU = "claude-3-haiku-20240307"
