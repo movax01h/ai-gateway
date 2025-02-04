@@ -11,8 +11,6 @@ __all__ = [
     "ConfigFastApi",
     "ConfigAuth",
     "ConfigGoogleCloudProfiler",
-    "FFlags",
-    "FFlagsCodeSuggestions",
     "ConfigSnowplow",
     "ConfigInstrumentator",
     "ConfigVertexTextModel",
@@ -64,17 +62,6 @@ class ConfigGoogleCloudProfiler(BaseModel):
 class ConfigInstrumentator(BaseModel):
     thread_monitoring_enabled: bool = False
     thread_monitoring_interval: int = 60
-
-
-class FFlagsCodeSuggestions(BaseModel):
-    excl_post_proc: list[str] = []
-    fireworks_qwen_score_threshold: float = -9999.0
-
-
-class FFlags(BaseSettings):
-    code_suggestions: Annotated[
-        FFlagsCodeSuggestions, Field(default_factory=FFlagsCodeSuggestions)
-    ] = FFlagsCodeSuggestions()
 
 
 class ConfigInternalEvent(BaseModel):
@@ -170,6 +157,8 @@ class ConfigAmazonQ(BaseModel):
 
 class ConfigFeatureFlags(BaseModel):
     disallowed_flags: dict[str, Set[str]] = {}
+    excl_post_proc: list[str] = []
+    fireworks_qwen_score_threshold: float = -9999.0
 
 
 class ConfigModelConcurrency(RootModel):
@@ -216,7 +205,6 @@ class Config(BaseSettings):
     instrumentator: Annotated[
         ConfigInstrumentator, Field(default_factory=ConfigInstrumentator)
     ] = ConfigInstrumentator()
-    f: Annotated[FFlags, Field(default_factory=FFlags)] = FFlags()
     snowplow: Annotated[ConfigSnowplow, Field(default_factory=ConfigSnowplow)] = (
         ConfigSnowplow()
     )
