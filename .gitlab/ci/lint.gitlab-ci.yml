@@ -1,6 +1,6 @@
 lint:
   extends: .poetry
-  stage: lint
+  stage: test
   script:
     - make lint-code
     - poetry lock --no-cache
@@ -14,7 +14,7 @@ lint:
       echo "${MAGENTA}Run ${BOLD}make format${RESET}${MAGENTA} to fix formatting issues.${RESET}"
 
 lint:doc:
-  stage: lint
+  stage: test
   image: registry.gitlab.com/gitlab-org/gitlab-docs/lint-markdown:alpine-3.20-vale-3.9.3-markdownlint2-0.17.1-lychee-0.18.0
   rules:
     - changes:
@@ -24,7 +24,7 @@ lint:doc:
     - make lint-doc
 
 lint:commit:
-  stage: lint
+  stage: test
   image: registry.hub.docker.com/library/node:alpine
   needs: []
   variables:
