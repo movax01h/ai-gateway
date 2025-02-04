@@ -3,6 +3,7 @@ from typing import Literal, Optional, TypeVar
 
 from pydantic import BaseModel
 
+from ai_gateway.chat.context.current_page import CurrentPageContext
 from ai_gateway.models.base_chat import Role
 
 __all__ = [
@@ -14,7 +15,6 @@ __all__ = [
     "TypeAgentEvent",
     "AgentStep",
     "TypeAgentInputs",
-    "Context",
     "CurrentFile",
     "AdditionalContext",
     "Message",
@@ -63,11 +63,6 @@ class AgentStep(BaseModel):
     observation: str
 
 
-class Context(BaseModel, frozen=True):  # type: ignore[call-arg]
-    type: Literal["issue", "epic", "merge_request", "commit", "build"]
-    content: str
-
-
 class CurrentFile(BaseModel):
     file_path: str
     data: str
@@ -87,7 +82,7 @@ class AdditionalContext(BaseModel):
 class Message(BaseModel):
     role: Role
     content: str
-    context: Optional[Context] = None
+    context: Optional[CurrentPageContext] = None
     current_file: Optional[CurrentFile] = None
     additional_context: Optional[list[AdditionalContext]] = None
     resource_content: Optional[str] = None
