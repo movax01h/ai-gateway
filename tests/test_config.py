@@ -181,11 +181,12 @@ def test_config_google_cloud_profiler(
         ({}, ConfigFeatureFlags()),
         (
             {
-                "AIGW_FEATURE_FLAGS__EXCL_POST_PROC": '["func1", "func2"]',
+                "AIGW_FEATURE_FLAGS__EXCL_POST_PROCESS": '["func1", "func2"]',
                 "AIGW_FEATURE_FLAGS__FIREWORKS_QWEN_SCORE_THRESHOLD": "-1.0",
             },
             ConfigFeatureFlags(
-                excl_post_proc=["func1", "func2"], fireworks_qwen_score_threshold=-1.0
+                excl_post_process=["func1", "func2"],
+                fireworks_qwen_score_threshold=-1.0,
             ),
         ),
     ],

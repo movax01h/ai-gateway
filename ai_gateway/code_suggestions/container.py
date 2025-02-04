@@ -128,7 +128,7 @@ class ContainerCodeCompletions(containers.DeclarativeContainer):
             overrides={
                 PostProcessorOperation.FIX_END_BLOCK_ERRORS: PostProcessorOperation.FIX_END_BLOCK_ERRORS_LEGACY,
             },
-            exclude=config.excl_post_proc,
+            exclude=config.excl_post_process,
         ).provider,
         snowplow_instrumentator=snowplow_instrumentator,
     )
@@ -161,7 +161,7 @@ class ContainerCodeCompletions(containers.DeclarativeContainer):
         ),
         post_processor=providers.Factory(
             PostProcessorCompletions,
-            exclude=config.excl_post_proc,
+            exclude=config.excl_post_process,
             extras=[
                 PostProcessorOperation.FILTER_SCORE,
             ],
