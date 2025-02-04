@@ -1386,7 +1386,7 @@ class TestCodeGenerations:
                     {"role": "user", "content": "bar"},
                 ],
                 "anthropic",
-                "claude-3-opus-20240229",
+                "claude-3-5-haiku-20241022",
                 None,
                 None,
                 "foo",

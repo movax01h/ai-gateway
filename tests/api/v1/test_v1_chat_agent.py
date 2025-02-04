@@ -74,16 +74,6 @@ class TestAgentSuccessfulRequest:
             (
                 "chat_content",
                 "anthropic",
-                "claude-3-opus-20240229",
-                {
-                    "temperature": 0.3,
-                    "stop_sequences": ["\n\nHuman", "Observation:"],
-                    "max_tokens_to_sample": 2048,
-                },
-            ),
-            (
-                "chat_content",
-                "anthropic",
                 "claude-3-sonnet-20240229",
                 {
                     "temperature": 0.3,
