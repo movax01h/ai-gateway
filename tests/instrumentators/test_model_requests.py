@@ -1,6 +1,7 @@
 from unittest import mock
 
 import pytest
+from structlog.testing import capture_logs
 
 from ai_gateway.instrumentators.model_requests import ModelRequestInstrumentator
 
@@ -27,7 +28,12 @@ class TestWatchContainer:
         container.start()
         mock_gauges.reset_mock()  # So we only have the calls from `stop` bellow
 
-        container.finish()
+        with capture_logs() as cap_logs:
+            container.finish()
+
+        assert len(cap_logs) == 1
+        assert cap_logs[0]["event"] == "Request to LLM complete"
+        assert cap_logs[0]["duration"] == 1
 
         assert mock_gauges.mock_calls == [
             mock.call(model_engine="anthropic", model_name="claude"),
