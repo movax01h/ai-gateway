@@ -1,9 +1,9 @@
 from time import time
-from typing import Annotated, AsyncIterator, Optional, Tuple, Union
+from typing import Annotated, AsyncIterator, Optional, Tuple
 
 import anthropic
 from dependency_injector.providers import Factory
-from fastapi import APIRouter, Body, Depends, HTTPException, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from gitlab_cloud_connector import (
     CloudConnectorConfig,
     GitLabFeatureCategory,
@@ -22,12 +22,8 @@ from ai_gateway.api.v2.code.model_provider_handlers import (
     LiteLlmHandler,
 )
 from ai_gateway.api.v2.code.typing import (
-    CompletionsRequestV1,
-    CompletionsRequestV2,
-    CompletionsRequestV3,
-    GenerationsRequestV1,
-    GenerationsRequestV2,
-    GenerationsRequestV3,
+    CompletionsRequestWithVersion,
+    GenerationsRequestWithVersion,
     StreamSuggestionsResponse,
     SuggestionsRequest,
     SuggestionsResponse,
@@ -79,16 +75,6 @@ __all__ = [
 request_log = get_request_logger("codesuggestions")
 
 router = APIRouter()
-
-CompletionsRequestWithVersion = Annotated[
-    Union[CompletionsRequestV1, CompletionsRequestV2, CompletionsRequestV3],
-    Body(discriminator="prompt_version"),
-]
-
-GenerationsRequestWithVersion = Annotated[
-    Union[GenerationsRequestV1, GenerationsRequestV2, GenerationsRequestV3],
-    Body(discriminator="prompt_version"),
-]
 
 COMPLETIONS_AGENT_ID = "code_suggestions/completions"
 GENERATIONS_AGENT_ID = "code_suggestions/generations"

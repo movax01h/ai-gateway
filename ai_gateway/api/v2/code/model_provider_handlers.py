@@ -1,9 +1,17 @@
+from fastapi import Request
+
 from ai_gateway.api.middleware import X_GITLAB_LANGUAGE_SERVER_VERSION
+from ai_gateway.api.v2.code.typing import CompletionsRequestWithVersion
 from ai_gateway.code_suggestions.language_server import LanguageServerVersion
 
 
 class BaseModelProviderHandler:
-    def __init__(self, payload, request, completion_params):
+    def __init__(
+        self,
+        payload: CompletionsRequestWithVersion,
+        request: Request,
+        completion_params: dict,
+    ):
         self.payload = payload
         self.request = request
         self.completion_params = completion_params
