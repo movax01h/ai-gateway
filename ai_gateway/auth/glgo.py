@@ -3,6 +3,7 @@ import hashlib
 import json
 import uuid
 from datetime import datetime, timedelta, timezone
+from typing import Optional
 
 import requests
 from gitlab_cloud_connector import CompositeProvider
@@ -24,7 +25,7 @@ class GlgoAuthority:
         self.kid = self._build_kid(signing_key)
         self.token_endpoint = f"{glgo_base_url}/cc/token"
 
-    def token(self, user_id: str, cloud_connector_token: str):
+    def token(self, user_id: str, cloud_connector_token: Optional[str]):
         token = self._build_token(user_id, cloud_connector_token)
 
         headers = {
@@ -44,7 +45,7 @@ class GlgoAuthority:
 
         return response.json().get("token")
 
-    def _build_token(self, user_id: str, cloud_connector_token: str):
+    def _build_token(self, user_id: str, cloud_connector_token: Optional[str]):
         now = datetime.now(timezone.utc)
         payload = {
             "iss": self.ISSUER,

@@ -21,11 +21,9 @@ class AmazonQModel(TextGenModelBase):
         self,
         current_user: StarletteUser,
         role_arn: str,
-        auth_header: str,
         client_factory: AmazonQClientFactory,
     ):
         self._current_user = current_user
-        self._auth_header = auth_header
         self._role_arn = role_arn
         self._client_factory = client_factory
         self._metadata = ModelMetadata(
@@ -47,7 +45,6 @@ class AmazonQModel(TextGenModelBase):
     ) -> TextGenModelOutput:
         q_client = self._client_factory.get_client(
             current_user=self._current_user,
-            auth_header=self._auth_header,
             role_arn=self._role_arn,
         )
 

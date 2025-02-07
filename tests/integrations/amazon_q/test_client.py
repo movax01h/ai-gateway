@@ -40,6 +40,7 @@ class TestAmazonQClientFactory:
     def mock_user(self):
         user = MagicMock(spec=StarletteUser)
         user.global_user_id = "test-user-id"
+        user.cloud_connector_token = "mock-cloud-connector-token"
         user.claims = MagicMock(subject="test-session")
         return user
 
@@ -47,9 +48,7 @@ class TestAmazonQClientFactory:
         self, amazon_q_client_factory, mock_user, mock_glgo_authority
     ):
         mock_glgo_authority.token.return_value = "mock-token"
-        token = amazon_q_client_factory._get_glgo_token(
-            mock_user, "Bearer mock-cloud-connector-token"
-        )
+        token = amazon_q_client_factory._get_glgo_token(mock_user)
 
         mock_glgo_authority.token.assert_called_once_with(
             user_id="test-user-id", cloud_connector_token="mock-cloud-connector-token"
@@ -62,9 +61,7 @@ class TestAmazonQClientFactory:
         mock_user.global_user_id = None
 
         with pytest.raises(HTTPException) as exc:
-            amazon_q_client_factory._get_glgo_token(
-                mock_user, "Bearer mock-cloud-connector-token"
-            )
+            amazon_q_client_factory._get_glgo_token(mock_user)
         assert exc.value.status_code == 400
         assert exc.value.detail == "User Id is missing"
 
@@ -74,9 +71,7 @@ class TestAmazonQClientFactory:
         mock_glgo_authority.token.side_effect = KeyError()
 
         with pytest.raises(HTTPException) as exc:
-            amazon_q_client_factory._get_glgo_token(
-                mock_user, "Bearer mock-cloud-connector-token"
-            )
+            amazon_q_client_factory._get_glgo_token(mock_user)
         assert exc.value.status_code == 500
         assert exc.value.detail == "Cannot obtain OIDC token"
 
@@ -158,7 +153,6 @@ class TestAmazonQClientFactory:
 
             client = amazon_q_client_factory.get_client(
                 current_user=mock_user,
-                auth_header="Bearer mock-cloud-connector-token",
                 role_arn="mock-role-arn",
             )
 

@@ -2,7 +2,6 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from gitlab_cloud_connector import GitLabFeatureCategory, GitLabUnitPrimitive
-from gitlab_cloud_connector.auth import AUTH_HEADER
 
 from ai_gateway.api.auth_utils import StarletteUser, get_current_user
 from ai_gateway.api.feature_category import feature_category
@@ -47,7 +46,6 @@ async def events(
     try:
         q_client = amazon_q_client_factory.get_client(
             current_user=current_user,
-            auth_header=request.headers.get(AUTH_HEADER),
             role_arn=event_request.role_arn,
         )
 

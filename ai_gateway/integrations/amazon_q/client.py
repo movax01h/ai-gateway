@@ -33,8 +33,8 @@ class AmazonQClientFactory:
         self.endpoint_url = endpoint_url
         self.region = region
 
-    def get_client(self, current_user: StarletteUser, auth_header: str, role_arn: str):
-        token = self._get_glgo_token(current_user, auth_header)
+    def get_client(self, current_user: StarletteUser, role_arn: str):
+        token = self._get_glgo_token(current_user)
         credentials = self._get_aws_credentials(current_user, token, role_arn)
 
         return AmazonQClient(
@@ -46,7 +46,6 @@ class AmazonQClientFactory:
     def _get_glgo_token(
         self,
         current_user: StarletteUser,
-        auth_header: str,
     ):
         user_id = current_user.global_user_id
         if not user_id:
@@ -55,10 +54,9 @@ class AmazonQClientFactory:
             )
 
         try:
-            _, _, cloud_connector_token = auth_header.partition(" ")
             token = self.glgo_authority.token(
                 user_id=user_id,
-                cloud_connector_token=cloud_connector_token,
+                cloud_connector_token=current_user.cloud_connector_token,
             )
             request_log.info("Obtained Glgo token", source=__name__, user_id=user_id)
             return token
