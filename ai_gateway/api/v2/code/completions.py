@@ -9,7 +9,6 @@ from gitlab_cloud_connector import (
     GitLabFeatureCategory,
     GitLabUnitPrimitive,
 )
-from gitlab_cloud_connector.auth import AUTH_HEADER
 
 from ai_gateway.api.auth_utils import StarletteUser, get_current_user
 from ai_gateway.api.error_utils import capture_validation_errors
@@ -481,7 +480,6 @@ def _build_code_completions(
         tracking_event = f"request_{unit_primitive}_complete_code"
         code_completions = completions_amazon_q_factory(
             model__current_user=current_user,
-            model__auth_header=request.headers.get(AUTH_HEADER),
             model__role_arn=payload.role_arn,
         )
     else:

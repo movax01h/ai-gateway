@@ -29,13 +29,18 @@ def homepage(
             detail="Unauthorized to access homepage",
         )
 
+    content = {
+        "authenticated": request.user.is_authenticated,
+        "is_debug": request.user.is_debug,
+        "scopes": request.auth.scopes,
+    }
+
+    if request.user.cloud_connector_token:
+        content["token"] = request.user.cloud_connector_token
+
     return JSONResponse(
         status_code=200,
-        content={
-            "authenticated": request.user.is_authenticated,
-            "is_debug": request.user.is_debug,
-            "scopes": request.auth.scopes,
-        },
+        content=content,
     )
 
 
@@ -149,6 +154,7 @@ invalid_authentication_token_type_error = {
                 "authenticated": True,
                 "is_debug": False,
                 "scopes": ["feature1", "feature3"],
+                "token": "12345",
             },
             ["auth_duration_s", "token_issuer"],
         ),
@@ -174,6 +180,7 @@ invalid_authentication_token_type_error = {
                 "authenticated": True,
                 "is_debug": False,
                 "scopes": ["feature2", "feature3"],
+                "token": "12345",
             },
             ["auth_duration_s", "token_issuer"],
         ),
@@ -199,6 +206,7 @@ invalid_authentication_token_type_error = {
                 "authenticated": True,
                 "is_debug": False,
                 "scopes": ["feature1", "feature2", "feature3"],
+                "token": "12345",
             },
             ["auth_duration_s", "token_issuer"],
         ),
@@ -386,6 +394,7 @@ invalid_authentication_token_type_error = {
                 "authenticated": True,
                 "is_debug": False,
                 "scopes": ["feature1", "feature3"],
+                "token": "12345",
             },
             ["auth_duration_s", "token_issuer"],
         ),
@@ -440,6 +449,7 @@ invalid_authentication_token_type_error = {
                 "authenticated": True,
                 "is_debug": False,
                 "scopes": ["feature1", "feature3"],
+                "token": "12345",
             },
             ["auth_duration_s", "token_issuer"],
         ),
@@ -470,6 +480,7 @@ invalid_authentication_token_type_error = {
                 "authenticated": True,
                 "is_debug": False,
                 "scopes": ["feature1", "feature3"],
+                "token": "12345",
             },
             ["auth_duration_s", "token_issuer"],
         ),
@@ -561,6 +572,7 @@ invalid_authentication_token_type_error = {
                 "authenticated": True,
                 "is_debug": False,
                 "scopes": ["feature1", "feature3"],
+                "token": "12345",
             },
             [
                 "auth_duration_s",
@@ -621,6 +633,7 @@ def test_failed_authorization_logging(
                 "authenticated": True,
                 "is_debug": False,
                 "scopes": ["feature1", "feature3"],
+                "token": "12345",
             },
             "Header is missing: 'X-Gitlab-Duo-Seat-Count'",
             [
@@ -655,6 +668,7 @@ def test_failed_authorization_logging(
                 "authenticated": True,
                 "is_debug": False,
                 "scopes": ["feature1", "feature3"],
+                "token": "12345",
             },
             "Header mismatch 'X-Gitlab-Duo-Seat-Count'",
             [

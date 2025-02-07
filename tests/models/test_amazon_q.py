@@ -13,11 +13,10 @@ def test_amazon_q_model_init():
     mock_user = MagicMock(spec=StarletteUser)
     mock_factory = MagicMock(spec=AmazonQClientFactory)
 
-    model = AmazonQModel(mock_user, "test-role", "test-header", mock_factory)
+    model = AmazonQModel(mock_user, "test-role", mock_factory)
 
     assert model._current_user == mock_user
     assert model._role_arn == "test-role"
-    assert model._auth_header == "test-header"
     assert model.metadata.name == KindAmazonQModel.AMAZON_Q
     assert model.metadata.engine == KindAmazonQModel.AMAZON_Q
 
@@ -29,7 +28,7 @@ async def test_amazon_q_model_generate():
     mock_client = MagicMock()
     mock_factory.get_client.return_value = mock_client
 
-    model = AmazonQModel(mock_user, "test-role", "test-header", mock_factory)
+    model = AmazonQModel(mock_user, "test-role", mock_factory)
 
     mock_client.generate_code_recommendations.return_value = {
         "CodeRecommendations": [{"content": "Generated Code"}]
