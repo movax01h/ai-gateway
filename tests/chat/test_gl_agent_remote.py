@@ -18,14 +18,14 @@ from ai_gateway.chat.toolset import DuoChatToolsRegistry
 from ai_gateway.models.base_chat import Role
 
 
-@pytest.fixture()
+@pytest.fixture
 def agent_events():
     return [
         AgentToolAction(thought="thought", tool="issue_reader", tool_input="tool_input")
     ]
 
 
-@pytest.fixture()
+@pytest.fixture
 def agent(agent_events):
     async def _stream_agent(*_args, **_kwargs):
         for action in agent_events:
@@ -38,7 +38,7 @@ def agent(agent_events):
     return agent
 
 
-@pytest.fixture()
+@pytest.fixture
 def agent_factory(agent):
     agent_factory = Mock(
         spec=TypeAgentFactory, side_effect=lambda *_args, **_kwargs: agent
@@ -47,7 +47,7 @@ def agent_factory(agent):
     return agent_factory
 
 
-@pytest.fixture()
+@pytest.fixture
 def tools_registry():
     return DuoChatToolsRegistry()
 

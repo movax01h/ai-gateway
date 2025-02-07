@@ -51,7 +51,7 @@ def auth_user():
     )
 
 
-@pytest.fixture()
+@pytest.fixture
 def mocked_stream():
     with patch("ai_gateway.chat.executor.GLAgentRemoteExecutor.stream") as mock:
         yield mock
@@ -63,7 +63,7 @@ def mock_model(model: Model):
         yield mock
 
 
-@pytest.fixture()
+@pytest.fixture
 def mocked_tools():
     with patch(
         "ai_gateway.chat.executor.GLAgentRemoteExecutor.tools",
