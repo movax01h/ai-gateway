@@ -326,7 +326,10 @@ class TestReActAgent:
                 )
 
         assert actual_actions == expected_actions
-        assert cap_logs[-1]["event"] == "Response streaming"
+        response_streaming_events = list(
+            filter(lambda entry: entry["event"] == "Response streaming", cap_logs)
+        )
+        assert len(response_streaming_events) > 0
 
     @pytest.mark.asyncio
     @pytest.mark.parametrize(

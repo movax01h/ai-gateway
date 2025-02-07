@@ -2,6 +2,7 @@ import time
 from contextlib import contextmanager
 from typing import Optional
 
+import structlog
 from prometheus_client import Counter, Gauge, Histogram
 
 from ai_gateway.api.feature_category import current_feature_category
@@ -38,6 +39,8 @@ INFERENCE_DURATION_S = Histogram(
     INFERENCE_DETAILS,
     buckets=(0.5, 1, 2.5, 5, 10, 30, 60),
 )
+
+logger = structlog.get_logger()
 
 
 class ModelRequestInstrumentator:
@@ -76,6 +79,8 @@ class ModelRequestInstrumentator:
             INFERENCE_IN_FLIGHT_GAUGE.labels(**self.labels).dec()
 
             duration = time.perf_counter() - self.start_time
+            logger.info("Request to LLM complete", source=__name__, duration=duration)
+
             detail_labels = self._detail_labels()
 
             INFERENCE_COUNTER.labels(**detail_labels).inc()
