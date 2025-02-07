@@ -1,7 +1,6 @@
 import time
 from typing import Annotated
 
-from dependency_injector import providers
 from dependency_injector.providers import Factory
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from gitlab_cloud_connector import GitLabFeatureCategory, GitLabUnitPrimitive
@@ -16,9 +15,11 @@ from ai_gateway.api.v1.search.typing import (
     SearchResult,
 )
 from ai_gateway.async_dependency_resolver import (
+    get_config,
     get_internal_event_client,
     get_search_factory_provider,
 )
+from ai_gateway.config import Config
 from ai_gateway.internal_events import InternalEventsClient
 from ai_gateway.searches import Searcher
 
@@ -97,6 +98,7 @@ async def docs(
     request: Request,
     current_user: Annotated[StarletteUser, Depends(get_current_user)],
     search_request: SearchRequest,
+    config: Config = Depends(get_config),
     search_factory: Factory[Searcher] = Depends(get_search_factory_provider),
     internal_event_client: InternalEventsClient = Depends(get_internal_event_client),
 ):
@@ -122,7 +124,6 @@ async def docs(
     searcher = search_factory()
 
     response = await searcher.search_with_retry(**search_params)
-    config = providers.Configuration(strict=True)
     custom_models_enabled = config.custom_models.enabled
 
     if custom_models_enabled:
