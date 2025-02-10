@@ -32,6 +32,10 @@ class AmazonQModel(TextGenModelBase):
         )
 
     @property
+    def input_token_limit(self) -> int:
+        return 20480
+
+    @property
     def metadata(self) -> ModelMetadata:
         return self._metadata
 
@@ -62,11 +66,11 @@ class AmazonQModel(TextGenModelBase):
 
         response = q_client.generate_code_recommendations(request_payload)
 
-        recommendations = response.get("CodeRecommendations") or []
-        recommendation = recommendations[0] or {}
+        recommendations = response.get("CodeRecommendations", [])
+        recommendation = recommendations[0] if recommendations else {}
 
         return TextGenModelOutput(
-            text=recommendation["content"],
+            text=recommendation.get("content", ""),
             # Give a high value, the model doesn't return scores.
             score=10**5,
             safety_attributes=SafetyAttributes(),

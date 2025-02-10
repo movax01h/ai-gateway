@@ -22,6 +22,7 @@ from ai_gateway.code_suggestions import (
     ModelProvider,
 )
 from ai_gateway.models import KindVertexTextModel, Message
+from ai_gateway.models.base import KindModelProvider
 
 __all__ = [
     "CodeEditorComponents",
@@ -61,12 +62,15 @@ class EditorContentPayload(BaseModel):
         Field(None, examples=["python"])
     )
     model_provider: Optional[
-        Literal[ModelProvider.VERTEX_AI, ModelProvider.ANTHROPIC]
+        Literal[
+            ModelProvider.VERTEX_AI, ModelProvider.ANTHROPIC, KindModelProvider.AMAZON_Q
+        ]
     ] = None
     model_name: Optional[str] = Field(
         None, examples=[KindVertexTextModel.CODE_GECKO_002]
     )
     stream: Optional[bool] = False
+    role_arn: Optional[str] = None
 
 
 class EditorContentCompletionPayload(EditorContentPayload):

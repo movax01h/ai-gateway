@@ -131,6 +131,7 @@ async def code_suggestions(
 
         return await code_completion(
             payload=component.payload,
+            current_user=current_user,
             code_context=code_context,
             stream_handler=stream_handler,
             snowplow_event_context=snowplow_code_suggestion_context,
@@ -149,12 +150,16 @@ async def code_suggestions(
 @inject
 async def code_completion(
     payload: EditorContentCompletionPayload,
+    current_user: StarletteUser,
     stream_handler: StreamHandler,
     completions_legacy_factory: Factory[CodeCompletionsLegacy] = Provide[
         ContainerApplication.code_suggestions.completions.vertex_legacy.provider
     ],
     completions_anthropic_factory: Factory[CodeCompletions] = Provide[
         ContainerApplication.code_suggestions.completions.anthropic.provider
+    ],
+    completions_amazon_q_factory: Factory[CodeCompletions] = Provide[
+        ContainerApplication.code_suggestions.completions.amazon_q_factory.provider
     ],
     code_context: list[CodeContextPayload] = None,
     snowplow_event_context: Optional[SnowplowEventContext] = None,
@@ -165,6 +170,20 @@ async def code_completion(
         # TODO: As we migrate to v3 we can rewrite this to use prompt registry
         engine = completions_anthropic_factory(model__name=payload.model_name)
         kwargs.update({"raw_prompt": payload.prompt})
+    elif payload.model_provider == KindModelProvider.AMAZON_Q:
+        if not current_user.can(
+            GitLabUnitPrimitive.AMAZON_Q_INTEGRATION,
+            disallowed_issuers=[CloudConnectorConfig().service_name],
+        ):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Unauthorized to access code suggestions",
+            )
+
+        engine = completions_amazon_q_factory(
+            model__current_user=current_user,
+            model__role_arn=payload.role_arn,
+        )
     else:
         engine = completions_legacy_factory()
 
@@ -181,7 +200,6 @@ async def code_completion(
         snowplow_event_context=snowplow_event_context,
         **kwargs,
     )
-
     if not isinstance(suggestions, list):
         suggestions = [suggestions]
 
@@ -238,11 +256,28 @@ async def code_generation(
     agent_factory: Factory[CodeGenerations] = Provide[
         ContainerApplication.code_suggestions.generations.agent_factory.provider
     ],
+    generations_amazon_q_factory: Factory[CodeGenerations] = Provide[
+        ContainerApplication.code_suggestions.generations.amazon_q_factory.provider
+    ],
     code_context: list[CodeContextPayload] = None,
     snowplow_event_context: Optional[SnowplowEventContext] = None,
 ):
     model_provider = payload.model_provider
-    if payload.prompt_id:
+    if model_provider == KindModelProvider.AMAZON_Q:
+        if not current_user.can(
+            GitLabUnitPrimitive.AMAZON_Q_INTEGRATION,
+            disallowed_issuers=[CloudConnectorConfig().service_name],
+        ):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Unauthorized to access code suggestions",
+            )
+
+        engine = generations_amazon_q_factory(
+            model__current_user=current_user,
+            model__role_arn=payload.role_arn,
+        )
+    elif payload.prompt_id:
         # for backward compatibility, eventually prmpt_version should be a mandatory field
         prompt_version = payload.prompt_version or "^1.0.0"
         # For SaaS: prompt_version and prompt_id are mandatory fields
@@ -281,8 +316,8 @@ async def code_generation(
         stream=payload.stream,
         snowplow_event_context=snowplow_event_context,
         prompt_enhancer=payload.prompt_enhancer,
+        suffix=payload.content_below_cursor,
     )
-
     if isinstance(suggestion, AsyncIterator):
         return await stream_handler(suggestion, engine)
 
