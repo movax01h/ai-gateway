@@ -348,13 +348,8 @@ class LiteLlmTextGenModel(TextGenModelBase):
         score = 10**5  # default high value if model doesn't provide score
 
         # For fireworks/qwen, use logprob of first token as score
-        # using original_response - see https://github.com/BerriAI/litellm/issues/7974
-        if self.provider == KindModelProvider.FIREWORKS and suggestion.get(
-            "_hidden_params"
-        ):
-            score = suggestion._hidden_params["original_response"]["choices"][0][
-                "logprobs"
-            ].token_logprobs[0]
+        if self.provider == KindModelProvider.FIREWORKS:
+            score = suggestion.choices[0].logprobs.token_logprobs[0]
 
         return TextGenModelOutput(
             text=self._extract_suggestion_text(suggestion),
