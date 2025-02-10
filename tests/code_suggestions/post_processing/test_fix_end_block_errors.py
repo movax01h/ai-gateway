@@ -106,6 +106,61 @@ RUBY_SAMPLE_3 = (
 )
 
 
+PYTHON_IF_STATEMENT_SAMPLE = (
+    # prefix
+    "if (",
+    # completion
+    "x > 0 && y < 10):",
+    # suffix
+    "):\n    print('Hello')",
+)
+
+PYTHON_FUNCTION_SAMPLE = (
+    # prefix
+    "def my_function(",
+    # completion
+    "x: int, y: str):",
+    # suffix
+    "):\n    print('Hello')",
+)
+
+GO_IF_STATEMENT_SAMPLE = (
+    # prefix
+    "if (",
+    # completion
+    "x > 0 && y < 10) {",
+    # suffix
+    ") {\n    fmt.Println('Hello')\n}",
+)
+
+GO_FUNCTION_SAMPLE = (
+    # prefix
+    "func myFunction(",
+    # completion
+    "x int, y string) {",
+    # suffix
+    ") {\n    fmt.Println('Hello')\n}",
+)
+
+RUBY_IF_STATEMENT_SAMPLE = (
+    # prefix
+    "if (",
+    # completion
+    "x > 0 && y < 10)",
+    # suffix
+    ")\n  puts 'Hello'\nend",
+)
+
+RUBY_METHOD_SAMPLE = (
+    # prefix
+    "def my_method(",
+    # completion
+    "x, y)",
+    # suffix
+    ")\n  puts 'Hello'\nend",
+)
+
+
 @pytest.mark.parametrize(
     ("code_sample", "lang_id", "expected_completion"),
     [
@@ -159,8 +214,8 @@ async def test_fix_end_block_errors_legacy(
         (PYTHON_SAMPLE_4, LanguageId.PYTHON, "v: int"),
         # completion has extra end block; the current approach can fix the error
         (GOLANG_SAMPLE_1, LanguageId.GO, ""),
-        # the completion contains 2 extra end blocks; the current approach is not able to fix the error
-        (GOLANG_SAMPLE_2, LanguageId.GO, "}}"),
+        # the completion contains 2 extra end blocks; the current approach can fix the error
+        (GOLANG_SAMPLE_2, LanguageId.GO, ""),
         # completion has extra end block; the current approach can fix the error
         (GOLANG_SAMPLE_3, LanguageId.GO, '\tfmt.Println("hello")'),
         # completion is correct
@@ -171,6 +226,12 @@ async def test_fix_end_block_errors_legacy(
         (RUBY_SAMPLE_2, LanguageId.RUBY, "puts 'hello'"),
         # completion is correct; no post-processing done
         (RUBY_SAMPLE_3, LanguageId.RUBY, "puts 'hello'"),
+        (PYTHON_IF_STATEMENT_SAMPLE, LanguageId.PYTHON, "x > 0 && y < 10"),
+        (PYTHON_FUNCTION_SAMPLE, LanguageId.PYTHON, "x: int, y: str"),
+        (GO_IF_STATEMENT_SAMPLE, LanguageId.GO, "x > 0 && y < 10"),
+        (GO_FUNCTION_SAMPLE, LanguageId.GO, "x int, y string"),
+        (RUBY_IF_STATEMENT_SAMPLE, LanguageId.RUBY, "x > 0 && y < 10"),
+        (RUBY_METHOD_SAMPLE, LanguageId.RUBY, "x, y"),
     ],
 )
 @pytest.mark.asyncio
