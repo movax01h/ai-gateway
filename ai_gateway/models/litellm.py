@@ -407,7 +407,7 @@ class LiteLlmTextGenModel(TextGenModelBase):
             "top_p": top_p,
             "stream": stream,
             "timeout": self.specifications.get("timeout", 30.0),
-            "stop": self._get_stop_tokens(suffix),
+            "stop": self._get_stop_tokens(),
         }
 
         completion_args = completion_args | self.model_metadata_to_params()
@@ -454,30 +454,8 @@ class LiteLlmTextGenModel(TextGenModelBase):
             ),
         )
 
-    def _use_suffix_as_stop_token(self) -> bool:
-        return self.provider == KindModelProvider.FIREWORKS
-
-    def _get_stop_tokens(self, suffix) -> list[str]:
-        if self._use_suffix_as_stop_token():
-            suffix_stop_token = self._get_suffix_stop_token(suffix)
-            if suffix_stop_token:
-                return self.stop_tokens + [suffix_stop_token]
-
+    def _get_stop_tokens(self):
         return self.stop_tokens
-
-    def _get_suffix_stop_token(self, suffix) -> str:
-        if not suffix or not suffix.strip():
-            return ""
-
-        suffix_lines = suffix.split("\n")
-        if len(suffix_lines) > 1:
-            # For multi-line suffixes, we return the first line
-            # that is not empty or all white spaces
-            for line in suffix_lines:
-                if line.strip():
-                    return line
-
-        return suffix.strip()
 
     @classmethod
     def from_model_name(

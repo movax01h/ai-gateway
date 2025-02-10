@@ -208,6 +208,9 @@ async def fix_end_block_errors(
     stripping the suffix doesn't introduce additional errors compared to the original code.
     This makes it more effective at handling code that may have pre-existing issues.
 
+    This processor will search through the completion for the suffix, if found it will stop
+    at each instance of the suffix to check if the completion before here reduces the amount of errors.
+
     Args:
         prefix: The code context before the completion
         completion: The code completion to process
@@ -217,7 +220,7 @@ async def fix_end_block_errors(
     Returns:
         str: The processed completion with suffix potentially stripped if no new errors are introduced.
     """
-    stripped_suffix = suffix.strip()
+    stripped_suffix = suffix.rstrip()
     if len(stripped_suffix) == 0:
         return completion
 
@@ -225,36 +228,61 @@ async def fix_end_block_errors(
     suffix_first_line = stripped_suffix
 
     # Hypothesis 2: the suffix contains more than one line; this overrides Hypothesis 1
-    idx_suffix_new_line = suffix_first_line.find("\n")
+    idx_suffix_new_line = suffix_first_line.strip().find("\n")
     if idx_suffix_new_line != -1:
         # Hypothesis confirmed: keep only the first line within the variable.
         suffix_first_line = suffix_first_line[:idx_suffix_new_line]
 
-    completion_lookup = completion.rstrip()
-    if not completion_lookup.endswith(suffix_first_line):
+    completion_lookup = completion
+
+    # See if suffix exists in completion
+    if completion_lookup.find(suffix_first_line) == -1:
         # Return the original copy of the completion.
         return completion
 
     try:
-        # Remove the suffix from the completion.
-        completion_lookup = completion_lookup[: -len(suffix_first_line)].rstrip()
-
         # Check for errors in the original code
         code_sample_before_suggestion = f"{prefix}{suffix}"
         parser_before_suggestion = await CodeParser.from_language_id(
             code_sample_before_suggestion, lang_id
         )
-        errors_before_suggestion = len(parser_before_suggestion.errors())
-
-        # Check if there are any new errors when inserting the code suggestion
-        code_sample_after_suggestion = f"{prefix}{completion_lookup}{suffix}"
-        parser_after_suggestion = await CodeParser.from_language_id(
-            code_sample_after_suggestion, lang_id
+        before_errors = list(
+            filter(
+                lambda e: find_cursor_position(code_sample_before_suggestion, e.start)
+                < len(code_sample_before_suggestion),
+                parser_before_suggestion.errors(),
+            )
         )
-        errors_after_suggestion = len(parser_after_suggestion.errors())
+        errors_before_suggestion = len(before_errors)
 
-        if errors_after_suggestion <= errors_before_suggestion:
-            completion = completion_lookup
+        # Start at last suffix existing in completion, trim everything after
+        # and see if it improves errors
+        least_error_count = 9999
+        while (last_suffix_pos := completion_lookup.rfind(suffix_first_line)) != -1:
+            completion_lookup = completion_lookup[:last_suffix_pos].rstrip()
+
+            # Check if there are any new errors when inserting the code suggestion
+            code_sample_after_suggestion = f"{prefix}{completion_lookup}{suffix}"
+            parser_after_suggestion = await CodeParser.from_language_id(
+                code_sample_after_suggestion, lang_id
+            )
+            after_errors = list(
+                filter(
+                    lambda e: find_cursor_position(
+                        code_sample_after_suggestion, e.start
+                    )
+                    < len(prefix),
+                    parser_after_suggestion.errors(),
+                )
+            )
+            errors_after_suggestion = len(after_errors)
+
+            if (
+                errors_after_suggestion <= errors_before_suggestion
+                and errors_after_suggestion <= least_error_count
+            ):
+                least_error_count = errors_after_suggestion
+                completion = completion_lookup
     except ValueError as e:
         log.warning(f"Failed to parse code: {e}")
 
