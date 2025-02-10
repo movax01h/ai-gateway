@@ -34,7 +34,7 @@ class ContainerCodeGenerations(containers.DeclarativeContainer):
     vertex_code_bison = providers.Dependency(instance_of=TextGenModelBase)
     anthropic_claude = providers.Dependency(instance_of=TextGenModelBase)
     anthropic_claude_chat = providers.Dependency(instance_of=ChatModelBase)
-
+    amazon_q_model = providers.Dependency(instance_of=TextGenModelBase)
     litellm_chat = providers.Dependency(instance_of=ChatModelBase)
     agent_model = providers.Dependency(instance_of=TextGenModelBase)
 
@@ -77,6 +77,15 @@ class ContainerCodeGenerations(containers.DeclarativeContainer):
     litellm_factory = providers.Factory(
         CodeGenerations,
         model=providers.Factory(litellm_chat),
+        tokenization_strategy=providers.Factory(
+            TokenizerTokenStrategy, tokenizer=tokenizer
+        ),
+        snowplow_instrumentator=snowplow_instrumentator,
+    )
+
+    amazon_q_factory = providers.Factory(
+        CodeGenerations,
+        model=providers.Factory(amazon_q_model),
         tokenization_strategy=providers.Factory(
             TokenizerTokenStrategy, tokenizer=tokenizer
         ),
@@ -203,6 +212,7 @@ class ContainerCodeSuggestions(containers.DeclarativeContainer):
         anthropic_claude_chat=models.anthropic_claude_chat,
         litellm_chat=models.litellm_chat,
         agent_model=models.agent_model,
+        amazon_q_model=models.amazon_q_model,
         snowplow_instrumentator=snowplow.instrumentator,
     )
 

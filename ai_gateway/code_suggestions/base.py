@@ -84,6 +84,7 @@ USE_CASES_MODELS_MAP = {
         KindLiteLlmModel.CLAUDE_3,
         KindLiteLlmModel.GPT,
         KindLiteLlmModel.CLAUDE_3_5,
+        KindAmazonQModel.AMAZON_Q,
     },
 }
 

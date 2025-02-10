@@ -26,10 +26,6 @@ from ai_gateway.container import ContainerApplication
 from ai_gateway.experimentation.base import ExperimentTelemetry
 from ai_gateway.models.base import ModelMetadata, TokensConsumptionMetadata
 from ai_gateway.internal_events.client import InternalEventsClient
-from ai_gateway.models.base import (
-    ModelMetadata,
-    TokensConsumptionMetadata,
-)
 from ai_gateway.models.base_text import (
     TextGenModelBase,
     TextGenModelChunk,
@@ -234,12 +230,12 @@ def mock_agent_model(mock_output: TextGenModelOutput):
     ) as mock:
         yield mock
 
+
 @pytest.fixture
 def mock_amazon_q_model(mock_output: TextGenModelOutput):
-    with _mock_generate(
-        "ai_gateway.models.amazon_q.AmazonQModel", mock_output
-    ) as mock:
+    with _mock_generate("ai_gateway.models.amazon_q.AmazonQModel", mock_output) as mock:
         yield mock
+
 
 @pytest.fixture
 def mock_completions_legacy_output_texts():
@@ -550,4 +546,8 @@ def user_is_debug():
 
 @pytest.fixture
 def user(user_is_debug: bool, scopes: list[str]):
-    yield StarletteUser(CloudConnectorUser(authenticated=True, is_debug=user_is_debug, claims=UserClaims(scopes=scopes)))
+    yield StarletteUser(
+        CloudConnectorUser(
+            authenticated=True, is_debug=user_is_debug, claims=UserClaims(scopes=scopes)
+        )
+    )
