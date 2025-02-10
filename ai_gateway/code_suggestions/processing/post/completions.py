@@ -16,12 +16,14 @@ from ai_gateway.code_suggestions.processing.post.ops import (
     trim_by_min_allowed_context,
 )
 from ai_gateway.code_suggestions.processing.typing import LanguageId
+from ai_gateway.structured_logging import get_request_logger
 
 __all__ = [
     "PostProcessorOperation",
     "PostProcessor",
 ]
 
+request_log = get_request_logger("suggestion_post_processing")
 
 AliasOpsRecord = NewType("AliasOpsRecord", tuple[str, Callable[[str], str]])
 
@@ -130,9 +132,16 @@ class PostProcessor(PostProcessorBase):
             func = partial(func, score=score)
 
         if self._is_async(func):
-            return await func(completion)
+            processed_completion = await func(completion)
+        else:
+            processed_completion = func(completion)
 
-        return func(completion)
+        if processed_completion != completion:
+            request_log.info(
+                f"Post processor {actual_processor_key} modified completion with result {processed_completion}"
+            )
+
+        return processed_completion
 
     def _is_async(self, func):
         return iscoroutinefunction(func)

@@ -121,6 +121,13 @@ class TextGenModelInstrumentator:
         def register_model_score(self, model_score: float):
             self.__dict__.update({"model_output_score": model_score})
 
+        def register_model_post_processed_output_length(self, output: str):
+            self.__dict__.update(
+                {
+                    "model_post_processed_output_length": len(output),
+                }
+            )
+
         def register_lang(self, lang_id, editor_lang: Optional[str]):
             lang = lang_id.name.lower() if lang_id else ""
 

@@ -263,6 +263,8 @@ class CodeCompletions:
             response.text, prompt, lang_id, response.score
         )
 
+        watch_container.register_model_post_processed_output_length(response_text)
+
         return CodeSuggestionsOutput(
             text=response_text,
             score=response.score,
