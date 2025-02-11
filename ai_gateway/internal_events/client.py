@@ -15,7 +15,7 @@ __all__ = ["InternalEventsClient"]
 class InternalEventsClient:
     """Client to handle internal events using SnowplowClient."""
 
-    STANDARD_CONTEXT_SCHEMA = "iglu:com.gitlab/gitlab_standard/jsonschema/1-1-1"
+    STANDARD_CONTEXT_SCHEMA = "iglu:com.gitlab/gitlab_standard/jsonschema/1-1-3"
 
     def __init__(
         self,

@@ -35,6 +35,7 @@ class EventContext(BaseModel):
     namespace_id: Optional[int] = None
     plan: Optional[str] = None
     correlation_id: Optional[str] = None
+    feature_enablement_type: Optional[str] = None
 
 
 @dataclass
