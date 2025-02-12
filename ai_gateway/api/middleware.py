@@ -63,6 +63,10 @@ X_GITLAB_FEATURE_ENABLEMENT_TYPE_HEADER = "X-Gitlab-Feature-Enablement-Type"
 X_GITLAB_MODEL_GATEWAY_REQUEST_SENT_AT = "X-Gitlab-Rails-Send-Start"
 X_GITLAB_LANGUAGE_SERVER_VERSION = "X-Gitlab-Language-Server-Version"
 X_GITLAB_ENABLED_FEATURE_FLAGS = "x-gitlab-enabled-feature-flags"
+X_GITLAB_CLIENT_TYPE = "X-Gitlab-Client-Type"
+X_GITLAB_CLIENT_VERSION = "X-Gitlab-Client-Version"
+X_GITLAB_CLIENT_NAME = "X-Gitlab-Client-Name"
+X_GITLAB_INTERFACE = "X-Gitlab-Interface"
 
 
 class _PathResolver:
@@ -368,6 +372,10 @@ class InternalEventMiddleware:
             instance_version=request.headers.get(X_GITLAB_VERSION_HEADER),
             global_user_id=request.headers.get(X_GITLAB_GLOBAL_USER_ID_HEADER),
             is_gitlab_team_member=request.headers.get(X_GITLAB_TEAM_MEMBER_HEADER),
+            client_type=request.headers.get(X_GITLAB_CLIENT_TYPE),
+            client_name=request.headers.get(X_GITLAB_CLIENT_NAME),
+            client_version=request.headers.get(X_GITLAB_CLIENT_VERSION),
+            interface=request.headers.get(X_GITLAB_INTERFACE),
             feature_enabled_by_namespace_ids=feature_enabled_by_namespace_ids,
             feature_enablement_type=request.headers.get(
                 X_GITLAB_FEATURE_ENABLEMENT_TYPE_HEADER

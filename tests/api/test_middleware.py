@@ -6,11 +6,15 @@ from starlette.requests import Request
 from starlette_context import context, request_cycle_context
 
 from ai_gateway.api.middleware import (
+    X_GITLAB_CLIENT_NAME,
+    X_GITLAB_CLIENT_TYPE,
+    X_GITLAB_CLIENT_VERSION,
     X_GITLAB_FEATURE_ENABLED_BY_NAMESPACE_IDS_HEADER,
     X_GITLAB_FEATURE_ENABLEMENT_TYPE_HEADER,
     X_GITLAB_GLOBAL_USER_ID_HEADER,
     X_GITLAB_HOST_NAME_HEADER,
     X_GITLAB_INSTANCE_ID_HEADER,
+    X_GITLAB_INTERFACE,
     X_GITLAB_REALM_HEADER,
     X_GITLAB_SAAS_DUO_PRO_NAMESPACE_IDS_HEADER,
     X_GITLAB_TEAM_MEMBER_HEADER,
@@ -123,6 +127,10 @@ async def test_middleware_set_context(internal_event_middleware):
                 (X_GITLAB_DUO_SEAT_COUNT_HEADER.lower().encode(), b"100"),
                 (X_GITLAB_TEAM_MEMBER_HEADER.lower().encode(), b"true"),
                 (X_GITLAB_FEATURE_ENABLEMENT_TYPE_HEADER.lower().encode(), b"add_on"),
+                (X_GITLAB_CLIENT_NAME.lower().encode(), b"vscode"),
+                (X_GITLAB_CLIENT_TYPE.lower().encode(), b"ide"),
+                (X_GITLAB_CLIENT_VERSION.lower().encode(), b"1.97.0"),
+                (X_GITLAB_INTERFACE.lower().encode(), b"duo_chat"),
             ],
         }
     )
@@ -148,6 +156,10 @@ async def test_middleware_set_context(internal_event_middleware):
             duo_seat_count="100",
             is_gitlab_team_member="true",
             feature_enablement_type="add_on",
+            client_name="vscode",
+            client_version="1.97.0",
+            client_type="ide",
+            interface="duo_chat",
             feature_enabled_by_namespace_ids=[],
             context_generated_at=mock_event_context.set.call_args[0][
                 0
