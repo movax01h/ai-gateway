@@ -7,7 +7,7 @@ from poetry.core.constraints.version import Version, parse_constraint
 
 from ai_gateway.internal_events.client import InternalEventsClient
 from ai_gateway.prompts.base import BasePromptRegistry, Prompt
-from ai_gateway.prompts.config import ModelClassProvider, PromptConfig
+from ai_gateway.prompts.config import BaseModelConfig, ModelClassProvider, PromptConfig
 from ai_gateway.prompts.typing import ModelMetadata, TypeModelFactory
 
 __all__ = ["LocalPromptRegistry", "PromptRegistered"]
@@ -127,17 +127,26 @@ class LocalPromptRegistry(BasePromptRegistry):
         used if no matching override is provided in `class_overrides`.
         """
 
-        prompts_definitions_dir = Path(__file__).parent / "definitions"
+        base_path = Path(__file__).parent
+        prompts_definitions_dir = base_path / "definitions"
+        model_configs_dir = (
+            base_path / "model_configs"
+        )  # New directory for model configs
         prompts_registered = {}
+
+        # Parse model config YAML files
+        model_configs = {
+            file.stem: cls._parse_base_model(file)
+            for file in model_configs_dir.glob("*.yml")
+        }
 
         # Iterate over each folder
         for path in prompts_definitions_dir.glob("**"):
-            versions = {}
-
             # Iterate over each version file
-            for version in path.glob("*.yml"):
-                with open(version, "r") as fp:
-                    versions[version.stem] = PromptConfig(**yaml.safe_load(fp))
+            versions = {
+                version.stem: cls._process_version_file(version, model_configs)
+                for version in path.glob("*.yml")
+            }
 
             # If there were no yml files in this folder, skip it
             if not versions:
@@ -165,3 +174,66 @@ class LocalPromptRegistry(BasePromptRegistry):
             custom_models_enabled,
             disable_streaming,
         )
+
+    @classmethod
+    def _parse_base_model(cls, file_name: Path) -> BaseModelConfig:
+        """Parses a YAML file and converts its content to a BaseModelConfig object.
+
+        This method reads the specified YAML file, extracts the configuration
+        parameters, and constructs a BaseModelConfig object. It handles the
+        conversion of YAML data types to appropriate Python types.
+
+        Args:
+            file (Path): A Path object pointing to the YAML file to be parsed.
+
+        Returns:
+            BaseModelConfig: An instance of BaseModelConfig containing the
+            parsed configuration data.
+        """
+
+        with open(file_name, "r") as fp:
+            return BaseModelConfig(**yaml.safe_load(fp))
+
+    @classmethod
+    def _process_version_file(
+        cls, version_file: Path, model_configs: dict[str, BaseModelConfig]
+    ) -> PromptConfig:
+        """Processes a single version YAML file and returns a PromptConfig.
+
+        Args:
+            version_file: Path to the version YAML file
+            model_configs: Dictionary of model configurations
+
+        Returns:
+            PromptConfig: Processed prompt configuration
+        """
+
+        with open(version_file, "r") as fp:
+            prompt_config_params = yaml.safe_load(fp)
+
+            if "config_file" in prompt_config_params["model"]:
+                model_config = prompt_config_params["model"]["config_file"]
+                config_for_general_model = model_configs.get(model_config)
+                if config_for_general_model:
+                    prompt_config_params = cls._patch_model_configuration(
+                        config_for_general_model, prompt_config_params
+                    )
+
+            return PromptConfig(**prompt_config_params)
+
+    @classmethod
+    def _patch_model_configuration(
+        cls, config_for_general_model: BaseModelConfig, prompt_config_params: dict
+    ) -> dict:
+        params = {
+            **config_for_general_model.params.model_dump(),
+            **prompt_config_params["model"].get("params", {}),
+        }
+
+        return {
+            **prompt_config_params,
+            "model": {
+                "name": config_for_general_model.name,
+                "params": params,
+            },
+        }
