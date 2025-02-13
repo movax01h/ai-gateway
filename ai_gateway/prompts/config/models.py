@@ -25,6 +25,7 @@ class BaseModelParams(BaseModel):
     top_k: int | None = None
     max_tokens: int | None = None
     max_retries: int | None = 1
+    model_class_provider: str | None = None
 
 
 class ChatLiteLLMParams(BaseModelParams):
