@@ -91,15 +91,11 @@ USE_CASES_MODELS_MAP = {
 SAAS_PROMPT_MODEL_MAP = {
     "^1.0.0": {
         "model_provider": ModelProvider.ANTHROPIC,
-        "model_version": KindAnthropicModel.CLAUDE_3_5_SONNET,
+        "model_version": KindAnthropicModel.CLAUDE_3_5_SONNET_V2,
     },
     "1.0.0": {
         "model_provider": ModelProvider.ANTHROPIC,
         "model_version": KindAnthropicModel.CLAUDE_3_5_SONNET,
-    },
-    "1.0.1-dev": {
-        "model_provider": ModelProvider.ANTHROPIC,
-        "model_version": KindAnthropicModel.CLAUDE_3_5_SONNET_V2,
     },
     "2.0.0": {
         "model_provider": ModelProvider.VERTEX_AI,
