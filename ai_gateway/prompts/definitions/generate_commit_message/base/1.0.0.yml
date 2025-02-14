@@ -1,12 +1,7 @@
 ---
 name: Claude 3 Generate Commit Message
 model:
-  name: claude-3-5-sonnet-20241022
-  params:
-    model_class_provider: anthropic
-    temperature: 0.0
-    max_tokens: 4096
-    max_retries: 1
+  config_file: conversation_performant
 unit_primitives:
   - generate_commit_message
 prompt_template:
