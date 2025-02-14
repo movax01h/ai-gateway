@@ -13,7 +13,11 @@ from ai_gateway.api.v1 import api_router
 from ai_gateway.config import Config
 from ai_gateway.prompts import Prompt
 from ai_gateway.prompts.config.base import PromptConfig
-from ai_gateway.prompts.typing import ModelMetadata, TypeModelFactory
+from ai_gateway.prompts.typing import (
+    AmazonQModelMetadata,
+    ModelMetadata,
+    TypeModelMetadata,
+)
 
 
 class FakeModel(SimpleChatModel):
@@ -160,6 +164,28 @@ class TestPrompt:
             (
                 Prompt,
                 {"name": "John", "age": 20},
+                None,
+                AmazonQModelMetadata(
+                    name="amazon_q",
+                    provider="amazon_q",
+                    role_arn="role-arn",
+                ),
+                (
+                    "test",
+                    "^1.0.0",
+                    AmazonQModelMetadata(
+                        name="amazon_q",
+                        provider="amazon_q",
+                        role_arn="role-arn",
+                    ),
+                ),
+                200,
+                "Hi John!",
+                ["1.0.0"],
+            ),
+            (
+                Prompt,
+                {"name": "John", "age": 20},
                 "^2.0.0",
                 None,
                 ("test", "^2.0.0", None),
@@ -199,7 +225,7 @@ class TestPrompt:
         mock_track_internal_event,
         inputs: dict[str, str],
         prompt_version: Optional[str],
-        model_metadata: Optional[ModelMetadata],
+        model_metadata: Optional[TypeModelMetadata],
         expected_get_args: dict,
         expected_status: int,
         expected_response: Any,
