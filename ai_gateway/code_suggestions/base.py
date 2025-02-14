@@ -67,7 +67,6 @@ USE_CASES_MODELS_MAP = {
         KindAmazonQModel.AMAZON_Q,
     },
     KindUseCase.CODE_GENERATIONS: {
-        KindAnthropicModel.CLAUDE_2_0,
         KindAnthropicModel.CLAUDE_2_1,
         KindVertexTextModel.CODE_BISON_002,
         KindAnthropicModel.CLAUDE_3_SONNET,

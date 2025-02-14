@@ -43,7 +43,7 @@ from ai_gateway.safety_attributes import SafetyAttributes
 class TestAnthropicModel:
     @pytest.mark.parametrize(
         "model_name_version",
-        ["claude-2.1", "claude-2.0"],
+        ["claude-2.1"],
     )
     def test_anthropic_model_from_name(self, model_name_version: str):
         model = AnthropicModel.from_model_name(model_name_version, Mock())
@@ -283,7 +283,7 @@ class TestAnthropicModel:
     @pytest.mark.asyncio
     async def test_anthropic_model_generate_instrumented(self):
         model = AnthropicModel(
-            model_name=KindAnthropicModel.CLAUDE_2_0.value,
+            model_name=KindAnthropicModel.CLAUDE_2_1.value,
             client=Mock(spec=AsyncAnthropic),
         )
         model.client.completions.create = AsyncMock()
@@ -302,14 +302,14 @@ class TestAnthropicModel:
                 Completion(
                     id="compl_01CtvorJWMstkmATFkR7qVYM",
                     completion="hello",
-                    model=KindAnthropicModel.CLAUDE_2_0.value,
+                    model=KindAnthropicModel.CLAUDE_2_1.value,
                     stop_reason="stop_sequence",
                     type="completion",
                 ),
                 Completion(
                     id="compl_02CtvorJWMstkmATFkR7qVYM",
                     completion="world",
-                    model=KindAnthropicModel.CLAUDE_2_0.value,
+                    model=KindAnthropicModel.CLAUDE_2_1.value,
                     stop_reason="stop_sequence",
                     type="completion",
                 ),
@@ -321,7 +321,7 @@ class TestAnthropicModel:
                 yield item
 
         model = AnthropicModel(
-            model_name=KindAnthropicModel.CLAUDE_2_0.value,
+            model_name=KindAnthropicModel.CLAUDE_2_1.value,
             client=Mock(spec=AsyncAnthropic),
         )
         model.client.completions.create = AsyncMock(side_effect=mock_stream)

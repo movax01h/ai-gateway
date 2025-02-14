@@ -31,11 +31,11 @@ def test_container(mock_container: containers.DeclarativeContainer):
     chat = cast(providers.Container, mock_container.chat)
 
     assert isinstance(
-        chat.anthropic_claude_factory("llm", name=KindAnthropicModel.CLAUDE_2_0),
+        chat.anthropic_claude_factory("llm", name=KindAnthropicModel.CLAUDE_2_1),
         AnthropicModel,
     )
     assert isinstance(
-        chat.anthropic_claude_factory("chat", name=KindAnthropicModel.CLAUDE_2_0),
+        chat.anthropic_claude_factory("chat", name=KindAnthropicModel.CLAUDE_2_1),
         AnthropicChatModel,
     )
     assert isinstance(

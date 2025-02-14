@@ -44,7 +44,7 @@ class PromptPayload(BaseModel):
         Literal[KindModelProvider.ANTHROPIC, KindModelProvider.LITELLM]
     ] = None
     model: Optional[KindAnthropicModel | KindLiteLlmModel] = (
-        KindAnthropicModel.CLAUDE_2_0
+        KindAnthropicModel.CLAUDE_2_1
     )
     params: Optional[AnthropicParams] = None
     model_endpoint: Optional[str] = None

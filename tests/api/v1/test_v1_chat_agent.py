@@ -60,7 +60,6 @@ class TestAgentSuccessfulRequest:
     @pytest.mark.parametrize(
         ("content_fixture", "provider", "model", "params"),
         [
-            ("text_content", "anthropic", "claude-2.0", None),
             (
                 "text_content",
                 "anthropic",
@@ -206,7 +205,7 @@ class TestAgentSuccessfulStream:
                         "payload": {
                             "content": content,
                             "provider": "anthropic",
-                            "model": KindAnthropicModel.CLAUDE_2_0.value,
+                            "model": KindAnthropicModel.CLAUDE_2_1.value,
                         },
                     },
                 ],
@@ -256,7 +255,7 @@ class TestAgentUnsupportedProvider:
                         "payload": {
                             "content": text_content,
                             "provider": "UNSUPPORTED_PROVIDER",
-                            "model": "claude-2.0",
+                            "model": "claude-2.1",
                         },
                     },
                 ]
@@ -333,7 +332,7 @@ class TestAnthropicInvalidScope:
                         "payload": {
                             "content": text_content,
                             "provider": "anthropic",
-                            "model": "claude-2.0",
+                            "model": "claude-2.1",
                         },
                     }
                 ]
@@ -364,7 +363,7 @@ class TestAgentInvalidRequestMissingFields:
                         "metadata": {"source": "gitlab-rails-sm"},
                         "payload": {
                             "provider": "anthropic",
-                            "model": "claude-2.0",
+                            "model": "claude-2.1",
                         },
                     },
                 ]
@@ -384,7 +383,7 @@ class TestAgentInvalidRequestMissingFields:
                     "type": "missing",
                     "loc": ["body", "prompt_components", 0, "payload", "content"],
                     "msg": "Field required",
-                    "input": {"provider": "anthropic", "model": "claude-2.0"},
+                    "input": {"provider": "anthropic", "model": "claude-2.1"},
                 },
             ]
         }
@@ -415,7 +414,7 @@ class TestAgentInvalidRequestManyPromptComponents:
                         "payload": {
                             "content": text_content,
                             "provider": "anthropic",
-                            "model": "claude-2.0",
+                            "model": "claude-2.1",
                         },
                     },
                     {
@@ -427,7 +426,7 @@ class TestAgentInvalidRequestManyPromptComponents:
                         "payload": {
                             "content": "SECOND PROMPT COMPONENT (NOT EXPECTED)",
                             "provider": "anthropic",
-                            "model": "claude-2.0",
+                            "model": "claude-2.1",
                         },
                     },
                 ]
@@ -451,7 +450,7 @@ class TestAgentInvalidRequestManyPromptComponents:
                             "payload": {
                                 "content": text_content,
                                 "provider": "anthropic",
-                                "model": "claude-2.0",
+                                "model": "claude-2.1",
                             },
                         },
                         {
@@ -460,7 +459,7 @@ class TestAgentInvalidRequestManyPromptComponents:
                             "payload": {
                                 "content": "SECOND PROMPT COMPONENT (NOT EXPECTED)",
                                 "provider": "anthropic",
-                                "model": "claude-2.0",
+                                "model": "claude-2.1",
                             },
                         },
                     ],
@@ -525,7 +524,7 @@ class TestAgentUnsuccessfulAnthropicRequest:
                             "payload": {
                                 "content": request.getfixturevalue(content_fixture),
                                 "provider": "anthropic",
-                                "model": "claude-2.0",
+                                "model": "claude-2.1",
                             },
                         }
                     ]
