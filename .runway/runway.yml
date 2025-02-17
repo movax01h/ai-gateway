@@ -28,6 +28,7 @@ spec:
     failure_threshold: 24
   liveness_probe:
     path: "/monitoring/healthz"
+    timeout_seconds: 5
   scalability:
     min_instances: 4
     max_instances: 200
