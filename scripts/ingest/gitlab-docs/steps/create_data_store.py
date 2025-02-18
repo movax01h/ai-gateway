@@ -3,7 +3,7 @@ import sys
 
 from google.api_core.exceptions import AlreadyExists
 from google.cloud import discoveryengine_v1 as discoveryengine
-from google.cloud.discoveryengine_v1.types import IndustryVertical
+from google.cloud.discoveryengine_v1.types import IndustryVertical, SolutionType
 
 # pylint: disable=direct-environment-variable-reference
 if os.environ.get("INGEST_DRY_RUN") == "true":
@@ -20,9 +20,20 @@ bigquery_table = os.environ["BIGQUERY_TABLE_NAME"]
 def create_data_store():
     client = discoveryengine.DataStoreServiceClient()
 
+    # https://cloud.google.com/generative-ai-app-builder/docs/provide-schema
+    with open("scripts/ingest/gitlab-docs/steps/schema.json", "r") as f:
+        json_schema = f.read()
+
+    schema = discoveryengine.Schema(
+        name=f"projects/{project_id}/locations/global/collections/default_collection/dataStores/{data_store_id}/schemas/default_schema",
+        json_schema=json_schema,
+    )
+
     data_store = discoveryengine.DataStore(
         display_name=data_store_id,
         industry_vertical=IndustryVertical.GENERIC,
+        solution_types=[SolutionType.SOLUTION_TYPE_SEARCH],
+        starting_schema=schema,
     )
 
     request = discoveryengine.CreateDataStoreRequest(
