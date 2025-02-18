@@ -122,6 +122,7 @@ class TestGLAgentRemoteExecutor:
                     "epic_reader",
                     "issue_reader",
                     "merge_request_reader",
+                    "commit_reader",
                 }
             else:
                 assert context.get("duo_chat.agent_available_tools") == ["issue_reader"]
