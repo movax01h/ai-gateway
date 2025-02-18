@@ -157,7 +157,7 @@ class ConfigAmazonQ(BaseModel):
 
 class ConfigFeatureFlags(BaseModel):
     disallowed_flags: dict[str, Set[str]] = {}
-    excl_post_proc: list[str] = []
+    excl_post_process: list[str] = []
     fireworks_qwen_score_threshold: float = -9999.0
 
 
