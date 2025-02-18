@@ -86,7 +86,7 @@ cache:
 
 .poetry:
   before_script:
-    - pip install poetry==2.0.1
+    - pip install poetry==2.1.1
     - poetry config virtualenvs.in-project true
     - poetry config cache-dir ${POETRY_CACHE_DIR}
     - poetry self add poetry-plugin-export
