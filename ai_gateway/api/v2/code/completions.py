@@ -306,7 +306,7 @@ def _resolve_code_generations_anthropic(
     generations_anthropic_factory: Factory[CodeGenerations],
 ) -> CodeGenerations:
     model_name = (
-        payload.model_name if payload.model_name else KindAnthropicModel.CLAUDE_2_0
+        payload.model_name if payload.model_name else KindAnthropicModel.CLAUDE_2_1
     )
 
     return generations_anthropic_factory(

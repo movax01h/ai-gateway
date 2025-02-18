@@ -101,10 +101,10 @@ class ContainerCodeGenerations(containers.DeclarativeContainer):
         snowplow_instrumentator=snowplow_instrumentator,
     )
 
-    # Default use case with claude.2.0
+    # Default use case with claude.2.1
     anthropic_default = providers.Factory(
         anthropic_factory,
-        model__name=KindAnthropicModel.CLAUDE_2_0,
+        model__name=KindAnthropicModel.CLAUDE_2_1,
     )
 
 
