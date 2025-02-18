@@ -48,6 +48,18 @@ def create_conflict_exception_error():
     )
 
 
+def delete_conflict_exception_error():
+    error_response = {
+        "Error": {
+            "Code": "ConflictException",
+            "Message": "This application conflicted with an existing one.",
+        }
+    }
+    return botocore.exceptions.ClientError(
+        error_response, "delete_o_auth_app_connection"
+    )
+
+
 @pytest.fixture(scope="class")
 def fast_api_router():
     return api_router
@@ -68,6 +80,22 @@ def perform_request(mock_client):
             "client_secret": "some.secret",
             "instance_url": "https://example.com",
             "redirect_url": "https://example.com",
+            "role_arn": "arn:aws:iam::123456789012:role/q-dev-role",
+        },
+    )
+
+
+def perform_delete_request(mock_client):
+    return mock_client.post(
+        "/amazon_q/oauth/application/delete",
+        headers={
+            "Authorization": "Bearer 12345",
+            "X-Gitlab-Authentication-Type": "oidc",
+            "X-GitLab-Instance-Id": "47474",
+            "X-GitLab-Realm": "self-managed",
+            "X-Gitlab-Global-User-Id": "1",
+        },
+        json={
             "role_arn": "arn:aws:iam::123456789012:role/q-dev-role",
         },
     )
@@ -157,6 +185,12 @@ class TestUnauthorizedScopes:
         assert response.status_code == status.HTTP_403_FORBIDDEN
         assert response.json() == {"detail": "Unauthorized to perform action"}
 
+    def test_failed_delete_authorization_scope(self, mock_client):
+        response = perform_delete_request(mock_client)
+
+        assert response.status_code == status.HTTP_403_FORBIDDEN
+        assert response.json() == {"detail": "Unauthorized to perform action"}
+
 
 class TestApplication:
     @pytest.fixture
@@ -203,6 +237,42 @@ class TestApplication:
         assert response.status_code == expected_status
         assert response.json() == {"detail": expected_msg}
 
+    @pytest.mark.parametrize(
+        (
+            "boto_error",
+            "expected_status",
+            "expected_msg",
+        ),
+        [
+            (
+                create_access_denied_error(),
+                status.HTTP_403_FORBIDDEN,
+                "An error occurred (AccessDeniedException) when calling the operation_name operation: The user does not have access",
+            ),
+            (
+                create_param_validation_error(),
+                status.HTTP_400_BAD_REQUEST,
+                "Parameter validation failed:\nInvalid length for parameter RoleArn, value: 4, valid min length: 20",
+            ),
+        ],
+    )
+    def test_failed_delete_aws_creds(
+        self,
+        mock_client,
+        mock_boto3,
+        mock_sts_client,
+        mock_glgo,
+        boto_error,
+        expected_status,
+        expected_msg,
+    ):
+        mock_sts_client.assume_role_with_web_identity.side_effect = boto_error
+
+        response = perform_delete_request(mock_client)
+
+        assert response.status_code == expected_status
+        assert response.json() == {"detail": expected_msg}
+
     def test_successful_oauth_application(
         self,
         mock_client,
@@ -231,6 +301,30 @@ class TestApplication:
             instanceUrl="https://example.com",
             redirectUrl="https://example.com",
         )
+
+    def test_successful_delete_oauth_application(
+        self,
+        mock_client,
+        mock_boto3,
+        mock_q_boto3,
+        mock_sts_client,
+        mock_glgo,
+        credentials,
+    ):
+        mock_delete_o_auth_app_connection = MagicMock(return_value=None)
+        mock_q_client_response = MagicMock()
+        mock_q_client_response.delete_o_auth_app_connection = (
+            mock_delete_o_auth_app_connection
+        )
+
+        mock_q_boto3.client.return_value = mock_q_client_response
+
+        response = perform_delete_request(mock_client)
+
+        assert response.status_code == status.HTTP_204_NO_CONTENT
+        mock_q_boto3.client.assert_called_once_with("q", **credentials)
+
+        mock_delete_o_auth_app_connection.assert_called_once_with()
 
     def test_successful_oauth_application_with_conflict(
         self,
@@ -270,3 +364,29 @@ class TestApplication:
 
         mock_create_o_auth_app_connection.assert_called_once_with(**params)
         mock_update_o_auth_app_connection.assert_called_once_with(**params)
+
+    def test_successful_delete_oauth_application_with_conflict(
+        self,
+        mock_client,
+        mock_boto3,
+        mock_q_boto3,
+        mock_sts_client,
+        mock_glgo,
+        credentials,
+    ):
+        mock_delete_o_auth_app_connection = MagicMock(
+            side_effect=[delete_conflict_exception_error(), None]
+        )
+
+        mock_q_client_response = MagicMock()
+        mock_q_client_response.delete_o_auth_app_connection = (
+            mock_delete_o_auth_app_connection
+        )
+
+        mock_q_boto3.client.return_value = mock_q_client_response
+
+        response = perform_delete_request(mock_client)
+
+        assert response.status_code == status.HTTP_204_NO_CONTENT
+        mock_q_boto3.client.assert_called_once_with("q", **credentials)
+        mock_delete_o_auth_app_connection.assert_called_once_with()

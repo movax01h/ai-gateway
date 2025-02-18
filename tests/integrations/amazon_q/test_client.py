@@ -318,3 +318,36 @@ class TestAmazonQClient:
             fileContext={"context": "content"},
             maxResults=1,
         )
+
+    def test_delete_o_auth_app_connection_success(self, q_client, mock_q_client):
+        q_client.delete_o_auth_app_connection()
+        mock_q_client.delete_o_auth_app_connection.assert_called_once_with()
+
+    def test_delete_o_auth_app_connection_on_conflict(
+        self, q_client, mock_q_client, mock_application_request, params
+    ):
+        error_response = {
+            "Error": {"Code": "ConflictException", "Message": "A conflict occurred"}
+        }
+        mock_q_client.delete_o_auth_app_connection.side_effect = ClientError(
+            error_response, "delete_o_auth_app_connection"
+        )
+
+        q_client.delete_o_auth_app_connection()
+
+        mock_q_client.delete_o_auth_app_connection.assert_called_once_with()
+
+    def test_delete_o_auth_app_connection_raises_non_conflict_aws_errors(
+        self, q_client, mock_q_client, mock_application_request
+    ):
+        error_response = {
+            "Error": {"Code": "ValidationException", "Message": "invalid message"}
+        }
+        mock_q_client.delete_o_auth_app_connection.side_effect = ClientError(
+            error_response, "delete_o_auth_app_connection"
+        )
+
+        with pytest.raises(AWSException):
+            q_client.delete_o_auth_app_connection()
+
+        mock_q_client.delete_o_auth_app_connection.assert_called_once()
