@@ -1,4 +1,3 @@
-from time import time
 from typing import Annotated, AsyncIterator
 
 from fastapi import APIRouter, Depends, Request
@@ -8,12 +7,7 @@ from sse_starlette.sse import EventSourceResponse
 from ai_gateway.api.auth_utils import StarletteUser, get_current_user
 from ai_gateway.api.feature_category import feature_category
 from ai_gateway.api.v3.code.completions import code_suggestions as v3_code_suggestions
-from ai_gateway.api.v3.code.typing import (
-    CompletionRequest,
-    ModelMetadata,
-    ResponseMetadataBase,
-    StreamModelEngine,
-)
+from ai_gateway.api.v3.code.typing import CompletionRequest, ResponseMetadataBase
 from ai_gateway.api.v4.code.typing import (
     StreamDelta,
     StreamEvent,
@@ -23,7 +17,6 @@ from ai_gateway.api.v4.code.typing import (
 from ai_gateway.async_dependency_resolver import get_config, get_container_application
 from ai_gateway.code_suggestions import CodeSuggestionsChunk
 from ai_gateway.config import Config
-from ai_gateway.feature_flags.context import current_feature_flag_context
 from ai_gateway.prompts import BasePromptRegistry
 
 __all__ = [
@@ -39,23 +32,14 @@ async def get_prompt_registry():
 
 async def handle_stream_sse(
     stream: AsyncIterator[CodeSuggestionsChunk],
-    engine: StreamModelEngine,
+    metadata: ResponseMetadataBase,
 ) -> EventSourceResponse:
     async def _stream_response_generator():
         def _start_message():
             # To minimize redundancy, we're only sending metadata in the first SSE message.
             return StreamSSEMessage(
                 event=StreamEvent.START,
-                data={
-                    "metadata": ResponseMetadataBase(
-                        timestamp=int(time()),
-                        model=ModelMetadata(
-                            engine=engine.model.metadata.engine,
-                            name=engine.model.metadata.name,
-                        ),
-                        enabled_feature_flags=current_feature_flag_context.get(),
-                    ).model_dump(exclude_none=True)
-                },
+                data={"metadata": metadata.model_dump(exclude_none=True)},
             ).dump_with_json_data()
 
         def _content_message(chunk):

@@ -157,6 +157,6 @@ class StreamHandler(Protocol):
     async def __call__(
         self,
         stream: AsyncIterator[CodeSuggestionsChunk],
-        engine: StreamModelEngine,
+        metadata: ResponseMetadataBase,
     ) -> Union[StreamSuggestionsResponse, EventSourceResponse]:
         pass
