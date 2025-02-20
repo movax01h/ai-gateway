@@ -1,0 +1,13 @@
+---
+name: Amazon Q Merge Request Reader agent
+model:
+  name: amazon_q
+  params:
+    model_class_provider: amazon_q
+unit_primitives:
+  - amazon_q_integration
+prompt_template:
+  system: |
+    {% include 'chat/merge_request_reader/system.jinja' %}
+  user: |
+    {% include 'chat/merge_request_reader/user.jinja' %}

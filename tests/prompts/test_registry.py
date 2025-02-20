@@ -17,6 +17,7 @@ from pyfakefs.fake_filesystem import FakeFilesystem
 from ai_gateway.api.auth_utils import StarletteUser
 from ai_gateway.prompts import LocalPromptRegistry, Prompt, PromptRegistered
 from ai_gateway.prompts.config import (
+    ChatAmazonQParams,
     ChatAnthropicParams,
     ChatLiteLLMParams,
     ModelClassProvider,
@@ -94,6 +95,27 @@ model:
       header2: "Header2 value"
 unit_primitives:
   - duo_chat
+prompt_template:
+  system: Template1
+  user: Template2
+params:
+  timeout: 60
+  stop:
+    - Foo
+    - Bar
+""",
+    )
+    fs.create_file(
+        prompts_definitions_dir / "chat" / "react" / "amazon_q" / "1.0.0.yml",
+        contents="""
+---
+name: Amazon Q React prompt
+model:
+  name: amazon_q
+  params:
+    model_class_provider: amazon_q
+unit_primitives:
+  - amazon_q_integration
 prompt_template:
   system: Template1
   user: Template2
@@ -222,6 +244,26 @@ def prompts_registered():
                     unit_primitives=["duo_chat"],
                     prompt_template={"system": "Template1", "user": "Template2"},
                     params={"timeout": 60, "stop": ["Foo", "Bar"]},
+                ),
+            },
+        ),
+        "chat/react/amazon_q": PromptRegistered(
+            klass=MockPromptClass,
+            versions={
+                "1.0.0": PromptConfig(
+                    name="Amazon Q React prompt",
+                    model=ModelConfig(
+                        name="amazon_q",
+                        params=ChatAmazonQParams(
+                            model_class_provider=ModelClassProvider.AMAZON_Q,
+                        ),
+                    ),
+                    unit_primitives=["amazon_q_integration"],
+                    prompt_template={"system": "Template1", "user": "Template2"},
+                    params={
+                        "timeout": 60,
+                        "stop": ["Foo", "Bar"],
+                    },
                 ),
             },
         ),

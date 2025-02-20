@@ -9,12 +9,14 @@ __all__ = [
     "BaseModelParams",
     "ChatLiteLLMParams",
     "ChatAnthropicParams",
+    "ChatAmazonQParams",
 ]
 
 
 class ModelClassProvider(StrEnum):
     LITE_LLM = "litellm"
     ANTHROPIC = "anthropic"
+    AMAZON_Q = "amazon_q"
 
 
 class BaseModelParams(BaseModel):
@@ -40,6 +42,12 @@ class ChatAnthropicParams(BaseModelParams):
     default_headers: Mapping[str, str] | None = None
 
 
+class ChatAmazonQParams(BaseModelParams):
+    model_class_provider: Literal[ModelClassProvider.AMAZON_Q]
+    default_headers: Mapping[str, str] | None = None
+
+
 TypeModelParams = Annotated[
-    ChatLiteLLMParams | ChatAnthropicParams, Field(discriminator="model_class_provider")
+    ChatLiteLLMParams | ChatAnthropicParams | ChatAmazonQParams,
+    Field(discriminator="model_class_provider"),
 ]
