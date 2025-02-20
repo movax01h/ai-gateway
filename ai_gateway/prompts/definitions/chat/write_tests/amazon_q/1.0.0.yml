@@ -1,0 +1,13 @@
+---
+name: Amazon Q Write Tests agent
+model:
+  name: amazon_q
+  params:
+    model_class_provider: amazon_q
+unit_primitives:
+  - amazon_q_integration
+prompt_template:
+  system: |
+    {% include 'chat/write_tests/system.jinja' %}
+  user: |
+    {% include 'chat/write_tests/user.jinja' %}

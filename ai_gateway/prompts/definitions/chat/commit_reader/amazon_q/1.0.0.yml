@@ -1,0 +1,13 @@
+---
+name: Amazon Q Commit Reader agent
+model:
+  name: amazon_q
+  params:
+    model_class_provider: amazon_q
+unit_primitives:
+  - amazon_q_integration
+prompt_template:
+  system: |
+    {% include 'chat/commit_reader/system.jinja' %}
+  user: |
+    {% include 'chat/commit_reader/user.jinja' %}
