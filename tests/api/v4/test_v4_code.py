@@ -219,6 +219,7 @@ def _assert_stream_sse_responses(
     assert start_message["event"] == StreamEvent.START
     assert start_message["data"]["metadata"]["model"] == expected_model_metadata
     assert start_message["data"]["metadata"]["timestamp"] > 0
+    assert start_message["data"]["metadata"]["region"] == "us-central1"
     assert (
         set(start_message["data"]["metadata"]["enabled_feature_flags"])
         == expected_feature_flags

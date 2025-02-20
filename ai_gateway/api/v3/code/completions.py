@@ -204,7 +204,7 @@ async def code_completion(
         suggestions = [suggestions]
 
     if isinstance(suggestions[0], AsyncIterator):
-        stream_metadata = _get_stream_metadata(engine)
+        stream_metadata = _get_stream_metadata(engine, snowplow_event_context)
         return await stream_handler(suggestions[0], stream_metadata)
 
     return CompletionResponse(
@@ -320,7 +320,7 @@ async def code_generation(
         suffix=payload.content_below_cursor,
     )
     if isinstance(suggestion, AsyncIterator):
-        stream_metadata = _get_stream_metadata(engine)
+        stream_metadata = _get_stream_metadata(engine, snowplow_event_context)
         return await stream_handler(suggestion, stream_metadata)
 
     choices = (
@@ -341,7 +341,10 @@ async def code_generation(
     )
 
 
-def _get_stream_metadata(engine: StreamModelEngine) -> ResponseMetadataBase:
+def _get_stream_metadata(
+    engine: StreamModelEngine,
+    snowplow_event_context: SnowplowEventContext,
+) -> ResponseMetadataBase:
     return ResponseMetadataBase(
         timestamp=int(time()),
         model=ModelMetadata(
@@ -349,4 +352,5 @@ def _get_stream_metadata(engine: StreamModelEngine) -> ResponseMetadataBase:
             name=engine.model.metadata.name,
         ),
         enabled_feature_flags=current_feature_flag_context.get(),
+        region=snowplow_event_context.region,
     )
