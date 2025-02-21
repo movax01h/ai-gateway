@@ -3,14 +3,18 @@ from unittest.mock import MagicMock
 
 import pytest
 
+from ai_gateway.prompts.typing import ModelMetadata
 from ai_gateway.structured_logging import sanitize_logs
 
 
 @pytest.fixture
 def inputs_with_model_metadata():
     inputs = MagicMock(
-        model_metadata=MagicMock(
-            api_key="secret-key-456", endpoint="https://example.com"
+        model_metadata=ModelMetadata(
+            name="mistral",
+            provider="openai",
+            api_key="secret-key-456",
+            endpoint="https://example.com",
         ),
         other_fied="other_value",
     )
@@ -37,7 +41,7 @@ class TestSanitizeLogs:
         result = sanitize_logs(None, None, event_dict)
 
         assert result["inputs"].model_metadata.api_key == "**********"
-        assert result["inputs"].model_metadata.endpoint == "https://example.com"
+        assert str(result["inputs"].model_metadata.endpoint) == "https://example.com/"
         assert result["inputs"].other_fied == "other_value"
 
     def test_sanitize_inputs_without_model_metadata(self):

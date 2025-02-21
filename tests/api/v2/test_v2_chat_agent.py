@@ -26,7 +26,7 @@ from ai_gateway.chat.agents.typing import AgentFinalAnswer, TypeAgentEvent
 from ai_gateway.chat.context.current_page import Context, MergeRequestContext
 from ai_gateway.config import Config
 from ai_gateway.models.base_chat import Role
-from ai_gateway.prompts.typing import Model, ModelMetadata
+from ai_gateway.prompts.typing import AmazonQModelMetadata, Model, ModelMetadata
 
 
 @pytest.fixture(scope="class")
@@ -116,6 +116,23 @@ class TestReActAgentStream:
                         name="vertex",
                         provider="claude-3-5-haiku-20241022",
                         endpoint="http://localhost:4000",
+                    ),
+                ),
+                "thought\nFinal Answer: answer\n",
+                [AgentFinalAnswer(text=c) for c in "answer"],
+            ),
+            (
+                AgentRequest(
+                    messages=[
+                        Message(
+                            role=Role.USER,
+                            content="How can I write hello world in python?",
+                        ),
+                    ],
+                    model_metadata=AmazonQModelMetadata(
+                        name="amazon_q",
+                        provider="amazon_q",
+                        role_arn="role-arn",
                     ),
                 ),
                 "thought\nFinal Answer: answer\n",

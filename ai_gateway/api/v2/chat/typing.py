@@ -3,7 +3,7 @@ from typing import Literal, Optional
 from pydantic import BaseModel, Field
 
 from ai_gateway.chat.agents import Message
-from ai_gateway.prompts.typing import ModelMetadata
+from ai_gateway.prompts.typing import TypeModelMetadata
 
 __all__ = [
     "ReActAgentScratchpad",
@@ -30,7 +30,7 @@ class AgentRequestOptions(BaseModel):
 class AgentRequest(BaseModel):
     messages: list[Message]
     options: Optional[AgentRequestOptions] = None
-    model_metadata: Optional[ModelMetadata] = None
+    model_metadata: Optional[TypeModelMetadata] = None
     unavailable_resources: Optional[list[str]] = [
         "Merge Requests, Pipelines, Vulnerabilities"
     ]

@@ -10,6 +10,7 @@ from structlog.types import EventDict, Processor
 
 from ai_gateway.config import ConfigLogging
 from ai_gateway.feature_flags import FeatureFlag, is_feature_enabled
+from ai_gateway.prompts.typing import ModelMetadata
 
 access_logger = structlog.stdlib.get_logger("api.access")
 ENABLE_REQUEST_LOGGING = False
@@ -171,7 +172,12 @@ def sanitize_logs(_, __, event_dict: EventDict) -> EventDict:
 
         if sanitized_inputs.model_metadata:
             model_metadata = copy.copy(sanitized_inputs.model_metadata)
-            model_metadata.api_key = sanitized_value if model_metadata.api_key else None
+
+            if isinstance(model_metadata, ModelMetadata):
+                model_metadata.api_key = (
+                    sanitized_value if model_metadata.api_key else None
+                )
+
             sanitized_inputs.model_metadata = model_metadata
 
         event_dict["inputs"] = sanitized_inputs

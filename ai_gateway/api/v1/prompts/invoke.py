@@ -11,7 +11,7 @@ from ai_gateway.api.auth_utils import StarletteUser, get_current_user
 from ai_gateway.api.feature_category import feature_category
 from ai_gateway.async_dependency_resolver import get_container_application
 from ai_gateway.prompts import BasePromptRegistry, Prompt
-from ai_gateway.prompts.typing import ModelMetadata
+from ai_gateway.prompts.typing import TypeModelMetadata
 
 
 class PromptInputs(RootModel):
@@ -22,7 +22,7 @@ class PromptRequest(BaseModel):
     inputs: PromptInputs
     prompt_version: Optional[str] = None
     stream: Optional[bool] = False
-    model_metadata: Optional[ModelMetadata] = None
+    model_metadata: Optional[TypeModelMetadata] = None
 
 
 router = APIRouter()

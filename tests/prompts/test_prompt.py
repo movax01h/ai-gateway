@@ -12,7 +12,7 @@ from litellm.exceptions import Timeout
 from pydantic import HttpUrl
 
 from ai_gateway.models.v2.anthropic_claude import ChatAnthropic
-from ai_gateway.prompts.base import Prompt, model_metadata_to_params
+from ai_gateway.prompts.base import Prompt
 from ai_gateway.prompts.config.base import PromptParams
 from ai_gateway.prompts.typing import Model, ModelMetadata
 
@@ -129,7 +129,7 @@ class TestModelMetadataToParams:
             identifier=None,
         )
 
-        params = model_metadata_to_params(model_metadata)
+        params = model_metadata.to_params()
 
         assert params == {
             "api_base": "https://api.example.com",
@@ -147,7 +147,7 @@ class TestModelMetadataToParams:
             identifier="model_identifier",
         )
 
-        params = model_metadata_to_params(model_metadata)
+        params = model_metadata.to_params()
 
         assert params == {
             "api_base": "https://api.example.com",
@@ -165,7 +165,7 @@ class TestModelMetadataToParams:
             identifier="custom_provider/model/identifier",
         )
 
-        params = model_metadata_to_params(model_metadata)
+        params = model_metadata.to_params()
 
         assert params == {
             "api_base": "https://api.example.com",
@@ -183,7 +183,7 @@ class TestModelMetadataToParams:
             identifier="bedrock/model/identifier",
         )
 
-        params = model_metadata_to_params(model_metadata)
+        params = model_metadata.to_params()
 
         assert params == {
             "model": "model/identifier",

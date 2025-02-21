@@ -14,7 +14,7 @@ from ai_gateway.chat.agents import (
 from ai_gateway.chat.base import BaseToolsRegistry
 from ai_gateway.chat.tools import BaseTool
 from ai_gateway.internal_events import InternalEventsClient
-from ai_gateway.prompts.typing import ModelMetadata
+from ai_gateway.prompts.typing import TypeModelMetadata
 
 __all__ = [
     "TypeAgentFactory",
@@ -32,7 +32,7 @@ class TypeAgentFactory(Protocol[TypeAgentEvent]):
     def __call__(
         self,
         *,
-        model_metadata: ModelMetadata,
+        model_metadata: TypeModelMetadata,
     ) -> Runnable[TypeAgentInputs, TypeAgentEvent]: ...
 
 
