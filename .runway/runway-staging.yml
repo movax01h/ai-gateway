@@ -16,6 +16,8 @@ spec:
     - europe-west3
     - asia-northeast1
     - europe-west9
+  deployment:
+    strategy: "expedited"
   request_timeout: 60
   observability:
     scrape_targets:
