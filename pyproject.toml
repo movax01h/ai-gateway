@@ -55,6 +55,17 @@ name = "gitlab_cloud_connector"
 url = "https://gitlab.com/api/v4/projects/58733651/packages/pypi/simple"
 priority = "supplemental"
 
+[[tool.poetry.source]]
+name = "prompt_library"
+url = "https://gitlab.com/api/v4/projects/46678122/packages/pypi/simple"
+priority = "supplemental"
+
+[tool.poetry.group.eval]
+optional = true
+
+[tool.poetry.group.eval.dependencies]
+eli5 = { version = "^0.1.2", source = "prompt_library" }
+
 [tool.poetry.group.test]
 optional = true
 
@@ -92,6 +103,7 @@ asyncio_default_fixture_loop_scope = "function"
 [tool.poetry.scripts]
 ai_gateway = "ai_gateway.main:run_app"
 ai-gateway = "ai_gateway.main:run_app"
+eval = "eval.main:main"
 index_docs = "ai_gateway.scripts.index_docs_as_sqlite:build_indexed_docs"
 troubleshoot = "ai_gateway.scripts.troubleshoot_selfhosted_installation:troubleshoot"
 compute-tps = "ai_gateway.scripts.tps_test:compute_tps"

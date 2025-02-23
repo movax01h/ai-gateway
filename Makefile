@@ -1,11 +1,13 @@
 ROOT_DIR := $(shell pwd)
 AI_GATEWAY_DIR := ${ROOT_DIR}/ai_gateway
+EVAL_DIR := ${ROOT_DIR}/eval
 LINTS_DIR := ${ROOT_DIR}/lints
 SCRIPTS_DIR := ${ROOT_DIR}/scripts
 TESTS_DIR := ${ROOT_DIR}/tests
 INTEGRATION_TESTS_DIR := ${ROOT_DIR}/integration_tests
 
 LINT_WORKING_DIR ?= ${AI_GATEWAY_DIR} \
+	${EVAL_DIR} \
 	${LINTS_DIR} \
 	${SCRIPTS_DIR} \
 	${TESTS_DIR} \
