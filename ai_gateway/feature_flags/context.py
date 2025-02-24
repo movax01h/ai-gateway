@@ -10,6 +10,7 @@ class FeatureFlag(StrEnum):
     # Definition: https://gitlab.com/gitlab-org/gitlab/-/blob/master/config/feature_flags/ops/expanded_ai_logging.yml
     EXPANDED_AI_LOGGING = "expanded_ai_logging"
     ENABLE_ANTHROPIC_PROMPT_CACHING = "enable_anthropic_prompt_caching"
+    DISABLE_CODE_GECKO_DEFAULT = "disable_code_gecko_default"
 
 
 def is_feature_enabled(feature_name: FeatureFlag | str) -> bool:

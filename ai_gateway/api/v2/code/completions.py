@@ -33,6 +33,7 @@ from ai_gateway.async_dependency_resolver import (
     get_code_suggestions_completions_anthropic_provider,
     get_code_suggestions_completions_fireworks_qwen_factory_provider,
     get_code_suggestions_completions_litellm_factory_provider,
+    get_code_suggestions_completions_litellm_vertex_codestral_factory_provider,
     get_code_suggestions_completions_vertex_legacy_provider,
     get_code_suggestions_generations_agent_factory_provider,
     get_code_suggestions_generations_anthropic_chat_factory_provider,
@@ -54,11 +55,16 @@ from ai_gateway.code_suggestions.base import CodeSuggestionsOutput
 from ai_gateway.code_suggestions.processing.base import ModelEngineOutput
 from ai_gateway.code_suggestions.processing.ops import lang_from_filename
 from ai_gateway.config import Config
-from ai_gateway.feature_flags.context import current_feature_flag_context
+from ai_gateway.feature_flags.context import (
+    FeatureFlag,
+    current_feature_flag_context,
+    is_feature_enabled,
+)
 from ai_gateway.instrumentators.base import TelemetryInstrumentator
 from ai_gateway.internal_events import InternalEventsClient
 from ai_gateway.models import KindAnthropicModel, KindModelProvider
 from ai_gateway.models.base import TokensConsumptionMetadata
+from ai_gateway.models.vertex_text import KindVertexTextModel
 from ai_gateway.prompts import BasePromptRegistry
 from ai_gateway.prompts.typing import ModelMetadata
 from ai_gateway.structured_logging import get_request_logger
@@ -108,6 +114,9 @@ async def completions(
     completions_amazon_q_factory: Factory[CodeCompletions] = Depends(
         get_code_suggestions_completions_amazon_q_factory_provider
     ),
+    completions_litellm_vertex_codestral_factory: Factory[CodeCompletions] = Depends(
+        get_code_suggestions_completions_litellm_vertex_codestral_factory_provider
+    ),
     completions_agent_factory: Factory[CodeCompletions] = Depends(
         get_code_suggestions_completions_agent_factory_provider
     ),
@@ -127,6 +136,7 @@ async def completions(
         completions_fireworks_qwen_factory,
         completions_agent_factory,
         completions_amazon_q_factory,
+        completions_litellm_vertex_codestral_factory,
         internal_event_client,
     )
 
@@ -438,6 +448,7 @@ def _build_code_completions(
     completions_fireworks_qwen_factory: Factory[CodeCompletions],
     completions_agent_factory: Factory[CodeCompletions],
     completions_amazon_q_factory: Factory[CodeCompletions],
+    completions_litellm_vertex_codestral_factory: Factory[CodeCompletions],
     internal_event_client: InternalEventsClient,
 ) -> tuple[CodeCompletions | CodeCompletionsLegacy, dict]:
     kwargs = {}
@@ -464,7 +475,10 @@ def _build_code_completions(
         )
 
         return code_completions, kwargs
-    elif payload.model_provider == KindModelProvider.FIREWORKS:
+    elif payload.model_provider == KindModelProvider.FIREWORKS or (
+        not _allow_vertex_codestral()
+        and is_feature_enabled(FeatureFlag.DISABLE_CODE_GECKO_DEFAULT)
+    ):
         FireworksHandler(payload, request, kwargs).update_completion_params()
         code_completions = _resolve_code_completions_litellm(
             payload=payload,
@@ -482,6 +496,35 @@ def _build_code_completions(
             model__current_user=current_user,
             model__role_arn=payload.role_arn,
         )
+    elif (
+        (
+            (
+                payload.model_provider == KindModelProvider.VERTEX_AI
+                and payload.model_name == KindVertexTextModel.CODESTRAL_2501
+            )
+            or is_feature_enabled(FeatureFlag.DISABLE_CODE_GECKO_DEFAULT)
+        )
+        # Codestral is currently not supported in asia-* locations
+        and _allow_vertex_codestral()
+    ):
+        code_completions = _resolve_code_completions_vertex_codestral(
+            payload=payload,
+            completions_litellm_vertex_codestral_factory=completions_litellm_vertex_codestral_factory,
+        )
+
+        # We need to pass this here since litellm.LiteLlmTextGenModel
+        # sets the default temperature and max_output_tokens in the `generate` function signature
+        # To override those values, the kwargs passed to `generate` is updated here
+        # For further details, see:
+        #     https://gitlab.com/gitlab-org/modelops/applied-ml/code-suggestions/ai-assist/-/merge_requests/1172#note_2060587592
+        #
+        # The temperature value is taken from Mistral's docs: https://docs.mistral.ai/api/#operation/createFIMCompletion
+        # context_max_percent is set to 0.3 to limit the amount of context right now because latency increases with larger context
+        kwargs.update(
+            {"temperature": 0.7, "max_output_tokens": 64, "context_max_percent": 0.3}
+        )
+        if payload.context:
+            kwargs.update({"code_context": [ctx.content for ctx in payload.context]})
     else:
         code_completions = completions_legacy_factory()
         LegacyHandler(payload, request, kwargs).update_completion_params()
@@ -500,6 +543,19 @@ def _build_code_completions(
     )
 
     return code_completions, kwargs
+
+
+def _resolve_code_completions_vertex_codestral(
+    payload: SuggestionsRequest,
+    completions_litellm_vertex_codestral_factory: Factory[CodeCompletions],
+) -> CodeCompletions:
+    if payload.prompt_version == 2 and payload.prompt is not None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="You cannot specify a prompt with the given provider and model combination",
+        )
+
+    return completions_litellm_vertex_codestral_factory()
 
 
 def _resolve_agent_code_completions(
@@ -558,6 +614,14 @@ def _completion_suggestion_choices(
 
 def _generation_suggestion_choices(text: str) -> list:
     return [SuggestionsResponse.Choice(text=text)] if text else []
+
+
+def _allow_vertex_codestral():
+    return not _get_gcp_location().startswith("asia-")
+
+
+def _get_gcp_location():
+    return Config().google_cloud_platform.location
 
 
 async def _handle_stream(

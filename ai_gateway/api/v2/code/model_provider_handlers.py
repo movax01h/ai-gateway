@@ -3,6 +3,7 @@ from fastapi import Request
 from ai_gateway.api.middleware import X_GITLAB_LANGUAGE_SERVER_VERSION
 from ai_gateway.api.v2.code.typing import CompletionsRequestWithVersion
 from ai_gateway.code_suggestions.language_server import LanguageServerVersion
+from ai_gateway.models.base import KindModelProvider
 
 
 class BaseModelProviderHandler:
@@ -46,6 +47,12 @@ class FireworksHandler(BaseModelProviderHandler):
 
         if self.payload.context:
             self._update_code_context()
+
+        if not self.payload.model_provider:
+            self.payload.model_provider = KindModelProvider.FIREWORKS
+
+        if not self.payload.model_name:
+            self.payload.model_name = "qwen2p5-coder-7b"
 
 
 class LegacyHandler(BaseModelProviderHandler):

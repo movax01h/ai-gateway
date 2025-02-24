@@ -5,6 +5,7 @@ from litellm import CustomStreamWrapper, ModelResponse, acompletion
 from litellm.exceptions import APIConnectionError, InternalServerError
 from openai import AsyncOpenAI
 
+from ai_gateway.config import Config
 from ai_gateway.models.base import (
     KindModelProvider,
     ModelAPIError,
@@ -17,6 +18,7 @@ from ai_gateway.models.base_text import (
     TextGenModelChunk,
     TextGenModelOutput,
 )
+from ai_gateway.models.vertex_text import KindVertexTextModel
 from ai_gateway.safety_attributes import SafetyAttributes
 from ai_gateway.tracking import SnowplowEventContext
 
@@ -99,6 +101,9 @@ MODEL_STOP_TOKENS = {
         "<|fim_middle|>",
         "<|file_separator|>",
     ],
+    # Ref: https://docs.litellm.ai/docs/providers/vertex#mistral-api
+    # This model is served by Vertex AI but accessed through LiteLLM abstraction
+    KindVertexTextModel.CODESTRAL_2501: ["\n\n", "\n+++++"],
     KindLiteLlmModel.QWEN_2_5: [
         "<|fim_prefix|>",
         "<|fim_suffix|>",
@@ -113,6 +118,10 @@ MODEL_STOP_TOKENS = {
 }
 
 MODEL_SPECIFICATIONS = {
+    KindVertexTextModel.CODESTRAL_2501: {
+        "timeout": 60,
+        "completion_type": ModelCompletionType.TEXT,
+    },
     KindLiteLlmModel.QWEN_2_5: {
         "timeout": 60,
         "completion_type": ModelCompletionType.FIM,
@@ -245,7 +254,7 @@ class LiteLlmChatModel(ChatModelBase):
         provider_endpoints: Optional[dict] = None,
         async_fireworks_client: Optional[AsyncOpenAI] = None,
     ):
-        if not custom_models_enabled and provider == KindModelProvider.LITELLM:
+        if not custom_models_enabled:
             if endpoint is not None or api_key is not None:
                 raise ValueError("specifying custom models endpoint is disabled")
 
@@ -402,10 +411,14 @@ class LiteLlmTextGenModel(TextGenModelBase):
             "top_p": top_p,
             "stream": stream,
             "timeout": self.specifications.get("timeout", 30.0),
-            "stop": self._get_stop_tokens(),
+            "stop": self._get_stop_tokens(suffix),
         }
 
-        completion_args = completion_args | self.model_metadata_to_params()
+        if self._is_vertex():
+            completion_args["vertex_ai_location"] = self._get_vertex_model_location()
+            completion_args["model"] = self.metadata.name
+        else:
+            completion_args = completion_args | self.model_metadata_to_params()
 
         if self._completion_type() == ModelCompletionType.TEXT:
             completion_args["suffix"] = suffix
@@ -449,8 +462,17 @@ class LiteLlmTextGenModel(TextGenModelBase):
             ),
         )
 
-    def _get_stop_tokens(self):
+    def _get_stop_tokens(self, suffix):
         return self.stop_tokens
+
+    def _is_vertex(self):
+        return self.provider == KindModelProvider.VERTEX_AI
+
+    def _get_vertex_model_location(self):
+        if Config().vertex_text_model.location.startswith("europe-"):
+            return "europe-west4"
+
+        return "us-central1"
 
     @classmethod
     def from_model_name(
@@ -466,8 +488,8 @@ class LiteLlmTextGenModel(TextGenModelBase):
         provider_endpoints: Optional[dict] = None,
         async_fireworks_client: Optional[AsyncOpenAI] = None,
     ):
-        if endpoint is not None or api_key is not None:
-            if not custom_models_enabled and provider == KindModelProvider.LITELLM:
+        if not custom_models_enabled:
+            if endpoint is not None or api_key is not None:
                 raise ValueError("specifying custom models endpoint is disabled")
 
         if provider == KindModelProvider.MISTRALAI:
@@ -483,7 +505,10 @@ class LiteLlmTextGenModel(TextGenModelBase):
             identifier = f"text-completion-openai/{identifier}"
 
         try:
-            kind_model = KindLiteLlmModel(name)
+            if provider == KindModelProvider.VERTEX_AI:
+                kind_model = KindVertexTextModel(name)
+            else:
+                kind_model = KindLiteLlmModel(name)
         except ValueError:
             raise ValueError(f"no model found by the name '{name}'")
 
