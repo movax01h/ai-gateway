@@ -178,6 +178,23 @@ class ContainerCodeCompletions(containers.DeclarativeContainer):
         ).provider,
     )
 
+    litellm_vertex_codestral_factory = providers.Factory(
+        CodeCompletions,
+        model=providers.Factory(
+            litellm,
+            name=KindVertexTextModel.CODESTRAL_2501,
+            provider=KindModelProvider.VERTEX_AI,
+        ),
+        tokenization_strategy=providers.Factory(
+            TokenizerTokenStrategy, tokenizer=tokenizer
+        ),
+        post_processor=providers.Factory(
+            PostProcessorCompletions,
+            extras=[PostProcessorOperation.STRIP_ASTERISKS],
+            exclude=config.excl_post_process,
+        ).provider,
+    )
+
     agent_factory = providers.Factory(
         CodeCompletions,
         model=providers.Factory(agent_model),

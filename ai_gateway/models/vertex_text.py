@@ -113,7 +113,7 @@ class KindVertexTextModel(StrEnum):
     TEXTEMBEDDING_GECKO_003 = "textembedding-gecko@003"
 
     # Mistral AI
-    CODESTRAL_2405 = "codestral@2405"
+    CODESTRAL_2501 = "codestral-2501"
 
     # This method handles the provider prefix transformation for
     # Vertex AI models
