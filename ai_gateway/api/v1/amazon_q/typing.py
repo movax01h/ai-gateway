@@ -4,6 +4,7 @@ from pydantic import BaseModel, Field, StringConstraints
 
 __all__ = [
     "ApplicationRequest",
+    "ApplicationDeleteRequest",
     "EventRequest",
 ]
 
@@ -13,6 +14,10 @@ class ApplicationRequest(BaseModel):
     client_secret: Annotated[str, StringConstraints(max_length=1000)]
     instance_url: Annotated[str, StringConstraints(max_length=500)]
     redirect_url: Annotated[str, StringConstraints(max_length=500)]
+    role_arn: Annotated[str, StringConstraints(max_length=2048)]
+
+
+class ApplicationDeleteRequest(BaseModel):
     role_arn: Annotated[str, StringConstraints(max_length=2048)]
 
 

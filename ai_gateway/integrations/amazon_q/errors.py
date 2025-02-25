@@ -42,6 +42,9 @@ class AWSException(Exception):
     def is_conflict(self):
         return self.error_code == "ConflictException"
 
+    def is_not_found(self):
+        return self.error_code == "ResourceNotFoundException"
+
     def to_http_exception(self):
         if self.error_code == "ResourceNotFoundException":
             return HTTPException(status_code=404, detail=self.exception_str)
