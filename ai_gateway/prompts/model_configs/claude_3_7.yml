@@ -1,0 +1,6 @@
+name: claude-3-7-sonnet-20250219
+params:
+  temperature: 0.0
+  max_tokens: 4_096
+  max_retries: 1
+  model_class_provider: anthropic
