@@ -1,7 +1,8 @@
 import json
-from typing import Literal, Optional, TypeVar
+from typing import Literal, Optional, Self, TypeVar
 
-from pydantic import BaseModel
+import fastapi
+from pydantic import BaseModel, model_validator
 
 from ai_gateway.chat.context.current_page import CurrentPageContext
 from ai_gateway.models.base_chat import Role
@@ -59,7 +60,7 @@ TypeAgentInputs = TypeVar("TypeAgentInputs")
 
 
 class AgentStep(BaseModel):
-    action: AgentToolAction
+    action: Optional[AgentToolAction] = None
     observation: str
 
 
@@ -85,4 +86,13 @@ class Message(BaseModel):
     context: Optional[CurrentPageContext] = None
     current_file: Optional[CurrentFile] = None
     additional_context: Optional[list[AdditionalContext]] = None
-    resource_content: Optional[str] = None
+    agent_scratchpad: Optional[list[AgentStep]] = None
+
+    @model_validator(mode="after")
+    def validate_agent_scratchpad_role(self) -> Self:
+        if self.agent_scratchpad is not None and self.role != Role.ASSISTANT:
+            raise fastapi.HTTPException(
+                status_code=400,
+                detail="agent_scratchpad can only be present when role is ASSISTANT",
+            )
+        return self

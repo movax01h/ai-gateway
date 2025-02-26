@@ -127,13 +127,11 @@ class TestReActAgentStream:
                         Message(
                             role=Role.USER,
                             content="chat history",
-                            resource_content="Please use this information about identified issue",
                         ),
                         Message(role=Role.ASSISTANT, content="chat history"),
                         Message(
                             role=Role.USER,
                             content="What's the title of this issue?",
-                            resource_content="Please use this information about identified issue",
                             context=Context(type="issue", content="issue content"),
                             current_file=CurrentFile(
                                 file_path="main.py",
@@ -230,13 +228,11 @@ class TestReActAgentStream:
                     Message(
                         role=Role.USER,
                         content="chat history",
-                        resource_content="Please use this information about identified issue",
                     ),
                     Message(role=Role.ASSISTANT, content="chat history"),
                     Message(
                         role=Role.USER,
                         content="What's the title of this issue?",
-                        resource_content="Please use this information about identified issue",
                         context=Context(type="issue", content="issue content"),
                         current_file=CurrentFile(
                             file_path="main.py",
