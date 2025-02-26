@@ -1,3 +1,4 @@
+import fastapi
 import pytest
 from langchain_core.messages import SystemMessage
 from pydantic import AnyUrl
@@ -123,7 +124,6 @@ class TestReActAgent:
                         Message(
                             role=Role.USER,
                             content="What's the title of this issue?",
-                            resource_content="Please use this information about identified issue",
                         ),
                     ],
                     agent_scratchpad=[],
@@ -144,7 +144,6 @@ class TestReActAgent:
                         Message(
                             role=Role.USER,
                             content="Summarize this Merge request",
-                            resource_content="Please use this information about identified issue",
                         ),
                     ],
                     agent_scratchpad=[],
@@ -163,7 +162,20 @@ class TestReActAgent:
                 ReActAgentInputs(
                     messages=[
                         Message(role=Role.USER, content="How can I log output?"),
-                        Message(role=Role.ASSISTANT, content="Use print function"),
+                        Message(
+                            role=Role.ASSISTANT,
+                            content="Use print function",
+                            agent_scratchpad=[
+                                AgentStep(
+                                    action=AgentToolAction(
+                                        thought="thought",
+                                        tool="tool",
+                                        tool_input="tool_input",
+                                    ),
+                                    observation="observation",
+                                )
+                            ],
+                        ),
                         Message(
                             role=Role.USER,
                             content="Can you explain the print function?",
@@ -182,9 +194,21 @@ class TestReActAgent:
                         Message(
                             role=Role.USER,
                             content="what's the description of this issue",
-                            resource_content="Please use this information about identified issue",
                         ),
-                        Message(role=Role.ASSISTANT, content="PoC ReAct"),
+                        Message(
+                            role=Role.ASSISTANT,
+                            content="PoC ReAct",
+                            agent_scratchpad=[
+                                AgentStep(
+                                    action=AgentToolAction(
+                                        thought="thought",
+                                        tool="tool",
+                                        tool_input="tool_input",
+                                    ),
+                                    observation="observation",
+                                )
+                            ],
+                        ),
                         Message(role=Role.USER, content="What's your name?"),
                     ],
                     agent_scratchpad=[
@@ -213,7 +237,6 @@ class TestReActAgent:
                         Message(
                             role=Role.USER,
                             content="Explain this issue",
-                            resource_content="Please use this information about identified issue",
                             context=Context(
                                 type="issue", content="this issue is about Duo Chat"
                             ),
@@ -233,7 +256,6 @@ class TestReActAgent:
                         Message(
                             role=Role.USER,
                             content="Explain this issue",
-                            resource_content="Please use this information about identified issue",
                             context=IssueContext(type="issue", title="Duo Chat issue"),
                         ),
                     ],
@@ -345,7 +367,6 @@ class TestReActAgent:
                         Message(
                             role=Role.USER,
                             content="What's the title of this issue?",
-                            resource_content="Please use this information about identified issue",
                         ),
                     ],
                     agent_scratchpad=[],
@@ -359,7 +380,6 @@ class TestReActAgent:
                         Message(
                             role=Role.USER,
                             content="What's the title of this issue?",
-                            resource_content="Please use this information about identified issue",
                         ),
                     ],
                     agent_scratchpad=[],
@@ -373,7 +393,6 @@ class TestReActAgent:
                         Message(
                             role=Role.USER,
                             content="What's the title of this issue?",
-                            resource_content="Please use this information about identified issue",
                         ),
                     ],
                     agent_scratchpad=[],
@@ -394,7 +413,6 @@ class TestReActAgent:
                         Message(
                             role=Role.USER,
                             content="What's the title of this issue?",
-                            resource_content="Please use this information about identified issue",
                         ),
                     ],
                     agent_scratchpad=[],
@@ -415,7 +433,6 @@ class TestReActAgent:
                         Message(
                             role=Role.USER,
                             content="What's the title of this issue?",
-                            resource_content="Please use this information about identified issue",
                         ),
                     ],
                     agent_scratchpad=[],
@@ -506,3 +523,18 @@ class TestReActAgent:
 
         assert actual_events == expected_events
         assert str(exc_info.value) == error_message
+
+    @pytest.mark.asyncio
+    async def test_message_agent_scratchpad_validation(self):
+        with pytest.raises(fastapi.HTTPException) as exc_info:
+            Message(
+                role=Role.USER,
+                content="test",
+                agent_scratchpad=[AgentStep(action=None, observation="test")],
+            )
+
+        assert exc_info.value.status_code == 400
+        assert (
+            exc_info.value.detail
+            == "agent_scratchpad can only be present when role is ASSISTANT"
+        )

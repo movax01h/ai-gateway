@@ -1,0 +1,9 @@
+{# Stuffing the assistant message as a chat history with the raw context retrieved at that time #}
+{%- if agent_scratchpad %}
+{%- for pad in agent_scratchpad -%}
+Observation: {{ pad.observation }}
+{% endfor -%}
+Final Answer: {{ final_answer }}
+{%- else -%}
+{{ final_answer }}
+{%- endif %}
