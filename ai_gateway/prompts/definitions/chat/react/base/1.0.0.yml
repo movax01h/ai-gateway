@@ -1,12 +1,9 @@
 ---
 name: Default configuration for the Duo Chat ReAct Agent
 model:
-  name: claude-3-5-sonnet-20240620
+  config_file: conversation_claude_3_sonnet_v1
   params:
-    model_class_provider: anthropic
-    temperature: 0.1
     max_tokens: 8_192
-    max_retries: 1
 unit_primitives:
   - duo_chat
 prompt_template:

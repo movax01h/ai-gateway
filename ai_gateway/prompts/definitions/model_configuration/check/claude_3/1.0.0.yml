@@ -1,12 +1,11 @@
 ---
 name: Claude 3
 model:
-  name: claude-3-5-sonnet-20240620
+  config_file: conversation_claude_3_sonnet_v1
   params:
     model_class_provider: litellm
     temperature: 0.0
     max_tokens: 12
-    max_retries: 1
 unit_primitives:
   - complete_code
 prompt_template:

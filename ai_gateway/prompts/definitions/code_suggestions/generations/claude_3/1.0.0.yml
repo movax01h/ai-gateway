@@ -1,12 +1,11 @@
 ---
 name: Claude 3 Code Generations Agent
 model:
-  name: claude-3-5-sonnet-20240620
+  config_file: conversation_claude_3_sonnet_v1
   params:
     model_class_provider: litellm
     temperature: 0.2
     max_tokens: 2048
-    max_retries: 1
 unit_primitives:
   - generate_code
 prompt_template:
