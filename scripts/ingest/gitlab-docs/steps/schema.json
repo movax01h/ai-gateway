@@ -1,0 +1,40 @@
+{
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "dynamic": "true",
+    "properties": {
+        "content": {
+            "type": "string",
+            "keyPropertyMapping": "description",
+            "retrievable": true
+        },
+        "metadata": {
+            "type": "object",
+            "properties": {
+                "title": {
+                    "type": "string",
+                    "keyPropertyMapping": "title",
+                    "retrievable": true
+                },
+                "source_url": {
+                    "type": "string",
+                    "keyPropertyMapping": "uri",
+                    "retrievable": true
+                },
+                "source_type": {
+                    "type": "string",
+                    "keyPropertyMapping": "category",
+                    "retrievable": true
+                },
+                "source": {
+                    "type": "string",
+                    "retrievable": true
+                },
+                "md5sum": {
+                    "type": "string",
+                    "retrievable": true
+                }
+            }
+        }
+    }
+}
