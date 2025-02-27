@@ -83,6 +83,26 @@ prompt_template:
 """,
     )
     fs.create_file(
+        prompts_definitions_dir / "test" / "base" / "1.0.2-dev.yml",
+        contents="""
+---
+name: Test prompt 1.0.2-dev
+model:
+  config_file: conversation_quick
+  params:
+    model_class_provider: litellm
+    top_p: 0.1
+    top_k: 50
+    max_tokens: 256
+    max_retries: 10
+    custom_llm_provider: vllm
+unit_primitives:
+  - explain_code
+prompt_template:
+  system: Template1
+""",
+    )
+    fs.create_file(
         prompts_definitions_dir / "chat" / "react" / "base" / "1.0.0.yml",
         contents="""
 ---
@@ -213,6 +233,23 @@ def prompts_registered():
                 ),
                 "1.0.1": PromptConfig(
                     name="Test prompt 1.0.1",
+                    model=ModelConfig(
+                        name="claude-2.1",
+                        params=ChatLiteLLMParams(
+                            model_class_provider=ModelClassProvider.LITE_LLM,
+                            top_p=0.1,
+                            top_k=50,
+                            max_tokens=256,
+                            max_retries=10,
+                            custom_llm_provider="vllm",
+                            temperature=0.9,
+                        ),
+                    ),
+                    unit_primitives=["explain_code"],
+                    prompt_template={"system": "Template1"},
+                ),
+                "1.0.2-dev": PromptConfig(
+                    name="Test prompt 1.0.2-dev",
                     model=ModelConfig(
                         name="claude-2.1",
                         params=ChatLiteLLMParams(
@@ -381,6 +418,25 @@ class TestLocalPromptRegistry:
                 None,
                 True,
                 "Test prompt 1.0.1",
+                Prompt,
+                [("system", "Template1")],
+                "claude-2.1",
+                {},
+                {
+                    "top_p": 0.1,
+                    "top_k": 50,
+                    "max_tokens": 256,
+                    "max_retries": 10,
+                    "custom_llm_provider": "vllm",
+                },
+                ChatLiteLLM,
+            ),
+            (
+                "test",
+                "1.0.2-dev",
+                None,
+                True,
+                "Test prompt 1.0.2-dev",
                 Prompt,
                 [("system", "Template1")],
                 "claude-2.1",
