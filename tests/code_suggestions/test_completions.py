@@ -310,7 +310,7 @@ class TestCodeCompletions:
                 text="Unprocessed completion output",
                 score=0,
                 safety_attributes=SafetyAttributes(),
-                metadata=Mock(output_tokens=10),
+                metadata=Mock(output_tokens=10, spec_set=["output_tokens"]),
             )
         )
 
@@ -423,7 +423,7 @@ class TestCodeCompletions:
                 text=expected_output,
                 score=0,
                 safety_attributes=SafetyAttributes(),
-                metadata=Mock(output_tokens=10),
+                metadata=Mock(output_tokens=10, max_output_tokens_used=True),
             )
         )
 
@@ -468,6 +468,9 @@ class TestCodeCompletions:
         )
         assert actual.metadata.tokens_consumption_metadata.input_tokens == 4
         assert actual.metadata.tokens_consumption_metadata.output_tokens == 10
+        assert (
+            actual.metadata.tokens_consumption_metadata.max_output_tokens_used is True
+        )
         assert actual.metadata.tokens_consumption_metadata.context_tokens_sent == 4
         assert actual.metadata.tokens_consumption_metadata.context_tokens_used == 3
 
@@ -568,7 +571,7 @@ class TestCodeCompletions:
                 text=expected_output,
                 score=0,
                 safety_attributes=SafetyAttributes(),
-                metadata=Mock(output_tokens=10),
+                metadata=Mock(output_tokens=10, spec_set=["output_tokens"]),
             )
         )
 
@@ -599,6 +602,9 @@ class TestCodeCompletions:
         )
         assert actual.metadata.tokens_consumption_metadata.input_tokens == 4
         assert actual.metadata.tokens_consumption_metadata.output_tokens == 10
+        assert (
+            actual.metadata.tokens_consumption_metadata.max_output_tokens_used is False
+        )
         assert actual.metadata.tokens_consumption_metadata.context_tokens_sent == 4
         assert actual.metadata.tokens_consumption_metadata.context_tokens_used == 3
 
@@ -684,7 +690,11 @@ class TestCodeCompletions:
         mock_post_process = (
             completions_with_post_processing.post_processor.return_value.process
         )
-        mock_post_process.assert_called_with("Unprocessed completion output", score=0)
+        mock_post_process.assert_called_with(
+            "Unprocessed completion output",
+            score=0,
+            max_output_tokens_used=False,
+        )
 
         assert actual.text == "Post-processed completion output"
 
@@ -742,7 +752,7 @@ class TestCodeCompletions:
                     text=expected_output,
                     score=0,
                     safety_attributes=SafetyAttributes(),
-                    metadata=Mock(output_tokens=10),
+                    metadata=Mock(output_tokens=10, spec_set=["output_tokens"]),
                 )
             )
 

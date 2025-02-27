@@ -105,14 +105,12 @@ class PostProcessor(PostProcessorBase):
         }
 
     async def process(self, completion: str, **kwargs: Any) -> str:
-        score = kwargs.get("score")
-
         for processor in self._ordered_post_processors():
             if str(processor) in self.exclude:
                 continue
 
             completion = await self._apply_post_processor(
-                processor, completion, score=score
+                processor, completion, **kwargs
             )
 
             if completion == "":
@@ -123,12 +121,13 @@ class PostProcessor(PostProcessorBase):
     def _ordered_post_processors(self):
         return ORDERED_POST_PROCESSORS + self.extras
 
-    async def _apply_post_processor(self, processor_key, completion, score=None):
+    async def _apply_post_processor(self, processor_key, completion, **kwargs: Any):
         # Override post-processor if present in `overrides`, else use the given processor
         actual_processor_key = self.overrides.get(processor_key, processor_key)
         func = self.ops[actual_processor_key]
 
         if actual_processor_key == PostProcessorOperation.FILTER_SCORE:
+            score = kwargs.get("score")
             func = partial(func, score=score)
 
         if self._is_async(func):

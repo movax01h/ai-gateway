@@ -116,6 +116,7 @@ class TestCodeCompletions:
                         "tokens_consumption_metadata": {
                             "input_tokens": 1,
                             "output_tokens": 2,
+                            "max_output_tokens_used": False,
                             "context_tokens_sent": None,
                             "context_tokens_used": None,
                         },
@@ -1215,7 +1216,7 @@ class TestCodeCompletions:
         )
 
         mock_post_processor.assert_called_with(
-            "Test text completion response", score=10**5
+            "Test text completion response", score=10**5, max_output_tokens_used=False
         )
 
         result = response.json()
@@ -1352,7 +1353,7 @@ class TestCodeCompletions:
         )
 
         mock_post_processor.assert_called_with(
-            "Test text completion response", score=10**5
+            "Test text completion response", score=10**5, max_output_tokens_used=False
         )
 
         result = response.json()
@@ -1413,7 +1414,9 @@ class TestCodeCompletions:
             client=ANY,
         )
 
-        mock_post_processor.assert_called_with("Test response", score=999)
+        mock_post_processor.assert_called_with(
+            "Test response", score=999, max_output_tokens_used=False
+        )
 
         result = response.json()
         assert result["model"]["engine"] == "fireworks_ai"

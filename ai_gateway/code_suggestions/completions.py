@@ -263,8 +263,16 @@ class CodeCompletions:
         watch_container.register_model_score(response.score)
         watch_container.register_safety_attributes(response.safety_attributes)
 
+        tokens_consumption_metadata = self._get_tokens_consumption_metadata(
+            prompt, response
+        )
+
         response_text = await self._get_response_text(
-            response.text, prompt, lang_id, response.score
+            response_text=response.text,
+            prompt=prompt,
+            lang_id=lang_id,
+            score=response.score,
+            max_output_tokens_used=tokens_consumption_metadata.max_output_tokens_used,
         )
 
         watch_container.register_model_post_processed_output_length(response_text)
@@ -276,19 +284,26 @@ class CodeCompletions:
             lang_id=lang_id,
             metadata=CodeSuggestionsOutput.Metadata(
                 experiments=[],
-                tokens_consumption_metadata=self._get_tokens_consumption_metadata(
-                    prompt, response
-                ),
+                tokens_consumption_metadata=tokens_consumption_metadata,
             ),
         )
 
     async def _get_response_text(
-        self, response_text: str, prompt: Prompt, lang_id: LanguageId, score: float
+        self,
+        response_text: str,
+        prompt: Prompt,
+        lang_id: LanguageId,
+        score: float,
+        max_output_tokens_used: bool,
     ):
         if self.post_processor:
             return await self.post_processor(
                 prompt.prefix, suffix=prompt.suffix, lang_id=lang_id
-            ).process(response_text, score=score)
+            ).process(
+                response_text,
+                score=score,
+                max_output_tokens_used=max_output_tokens_used,
+            )
 
         return response_text
 
@@ -299,12 +314,19 @@ class CodeCompletions:
             component.length_tokens for component in prompt.metadata.components.values()
         )
 
+        max_output_tokens_used = False
+
         if response:
             output_tokens = (
                 response.metadata.output_tokens
                 if response.metadata and hasattr(response.metadata, "output_tokens")
                 else 0
             )
+
+            if response.metadata and hasattr(
+                response.metadata, "max_output_tokens_used"
+            ):
+                max_output_tokens_used = response.metadata.max_output_tokens_used
         else:
             output_tokens = 0
 
@@ -320,6 +342,7 @@ class CodeCompletions:
         return TokensConsumptionMetadata(
             input_tokens=input_tokens,
             output_tokens=output_tokens,
+            max_output_tokens_used=max_output_tokens_used,
             context_tokens_sent=context_tokens_sent,
             context_tokens_used=context_tokens_used,
         )
