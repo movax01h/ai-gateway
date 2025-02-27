@@ -1,5 +1,5 @@
 ---
-name: Claude 3 ReAct Chat agent
+name: Default configuration for the Duo Chat ReAct Agent
 model:
   name: claude-3-5-sonnet-20240620
   params:
