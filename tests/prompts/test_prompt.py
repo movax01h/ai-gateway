@@ -38,8 +38,18 @@ class TestPrompt:
                 "claude-3-7-sonnet-20250219",
             ),
             (
+                "Default configuration for the Duo Chat documentation question answering",
+                {"duo_chat_docs_qa_claude_3_7"},
+                "claude-3-7-sonnet-20250219",
+            ),
+            (
                 "Default configuration for the Duo Chat ReAct Agent",
                 set(),
+                "test_model",
+            ),
+            (
+                "Default configuration for the Duo Chat documentation question answering",
+                {},
                 "test_model",
             ),
         ],

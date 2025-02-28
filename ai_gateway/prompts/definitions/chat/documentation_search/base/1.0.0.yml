@@ -1,5 +1,5 @@
 ---
-name: Claude 3 Gitlab Documentation agent
+name: Default configuration for the Duo Chat documentation question answering
 model:
   config_file: conversation_claude_3_sonnet_v1
 unit_primitives:
