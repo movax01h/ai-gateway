@@ -2,7 +2,11 @@ from datetime import datetime
 from typing import Annotated, AsyncIterator
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
-from gitlab_cloud_connector import GitLabFeatureCategory, GitLabUnitPrimitive
+from gitlab_cloud_connector import (
+    GitLabFeatureCategory,
+    GitLabUnitPrimitive,
+    WrongUnitPrimitives,
+)
 from starlette.responses import StreamingResponse
 
 from ai_gateway.api.auth_utils import StarletteUser, get_current_user
@@ -12,16 +16,18 @@ from ai_gateway.api.v2.chat.typing import AgentRequest
 from ai_gateway.async_dependency_resolver import (
     get_container_application,
     get_internal_event_client,
+    get_prompt_registry,
 )
 from ai_gateway.chat.agents import (
-    AdditionalContext,
     AgentStep,
     AgentToolAction,
+    ReActAgent,
     ReActAgentInputs,
     TypeAgentEvent,
 )
 from ai_gateway.chat.executor import GLAgentRemoteExecutor
 from ai_gateway.internal_events import InternalEventsClient
+from ai_gateway.prompts import BasePromptRegistry
 
 __all__ = [
     "router",
@@ -34,53 +40,54 @@ request_log = get_request_logger("chat")
 router = APIRouter()
 
 
-async def get_gl_agent_remote_executor():
-    yield get_container_application().chat.gl_agent_remote_executor()
+async def get_gl_agent_remote_executor_factory():
+    yield get_container_application().chat.gl_agent_remote_executor_factory
 
 
 def authorize_additional_context(
     current_user: StarletteUser,
-    additional_context: AdditionalContext,
-    internal_event_client: InternalEventsClient,
-):
-    unit_primitive = GitLabUnitPrimitive[
-        f"include_{additional_context.category}_context".upper()
-    ]
-    if current_user.can(unit_primitive):
-        internal_event_client.track_event(
-            f"request_{unit_primitive}",
-            category=__name__,
-        )
-    else:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail=f"Unauthorized to access {unit_primitive}",
-        )
-
-
-def authorize_agent_request(
-    current_user: StarletteUser,
     agent_request: AgentRequest,
     internal_event_client: InternalEventsClient,
 ):
-    if current_user.can(GitLabUnitPrimitive.DUO_CHAT):
-        internal_event_client.track_event(
-            f"request_{GitLabUnitPrimitive.DUO_CHAT}",
-            category=__name__,
+    if agent_request.messages:
+        for message in agent_request.messages:
+            if message.additional_context:
+                for additional_context in message.additional_context:
+                    unit_primitive = GitLabUnitPrimitive[
+                        f"include_{additional_context.category}_context".upper()
+                    ]
+                    if current_user.can(unit_primitive):
+                        internal_event_client.track_event(
+                            f"request_{unit_primitive}",
+                            category=__name__,
+                        )
+                    else:
+                        raise HTTPException(
+                            status_code=status.HTTP_403_FORBIDDEN,
+                            detail=f"Unauthorized to access {unit_primitive}",
+                        )
+
+
+def get_agent(
+    current_user: StarletteUser,
+    agent_request: AgentRequest,
+    prompt_registry: BasePromptRegistry,
+) -> ReActAgent:
+    try:
+        prompt = prompt_registry.get_on_behalf(
+            current_user,
+            "chat/react",
+            None,
+            agent_request.model_metadata,
+            __name__,
         )
-    else:
+    except WrongUnitPrimitives:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Unauthorized to access duo chat",
         )
 
-    if agent_request.messages:
-        for message in agent_request.messages:
-            if message.additional_context:
-                for ctx in message.additional_context:
-                    authorize_additional_context(
-                        current_user, ctx, internal_event_client
-                    )
+    return prompt
 
 
 @router.post("/agent")
@@ -89,12 +96,15 @@ async def chat(
     request: Request,
     agent_request: AgentRequest,
     current_user: Annotated[StarletteUser, Depends(get_current_user)],
-    gl_agent_remote_executor: GLAgentRemoteExecutor[
+    prompt_registry: Annotated[BasePromptRegistry, Depends(get_prompt_registry)],
+    gl_agent_remote_executor_factory: GLAgentRemoteExecutor[
         ReActAgentInputs, TypeAgentEvent
-    ] = Depends(get_gl_agent_remote_executor),
+    ] = Depends(get_gl_agent_remote_executor_factory),
     internal_event_client: InternalEventsClient = Depends(get_internal_event_client),
 ):
-    authorize_agent_request(current_user, agent_request, internal_event_client)
+    agent = get_agent(current_user, agent_request, prompt_registry)
+
+    authorize_additional_context(current_user, agent_request, internal_event_client)
 
     async def _stream_handler(stream_events: AsyncIterator[TypeAgentEvent]):
         async for event in stream_events:
@@ -118,12 +128,12 @@ async def chat(
     inputs = ReActAgentInputs(
         messages=agent_request.messages,
         agent_scratchpad=scratchpad,
-        model_metadata=agent_request.model_metadata,
         unavailable_resources=agent_request.unavailable_resources,
         current_date=datetime.now().strftime("%A, %B %d, %Y"),
     )
 
     gl_version = request.headers.get(X_GITLAB_VERSION_HEADER, "")
+    gl_agent_remote_executor = gl_agent_remote_executor_factory(agent=agent)
     gl_agent_remote_executor.on_behalf(current_user, gl_version)
 
     request_log.info("Request to V2 Chat Agent", source=__name__, inputs=inputs)

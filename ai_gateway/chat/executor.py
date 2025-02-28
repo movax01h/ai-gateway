@@ -1,7 +1,6 @@
-from typing import AsyncIterator, Generic, Protocol
+from typing import AsyncIterator, Generic
 
 import starlette_context
-from langchain_core.runnables import Runnable
 
 from ai_gateway.api.auth_utils import StarletteUser
 from ai_gateway.chat.agents import (
@@ -14,10 +13,8 @@ from ai_gateway.chat.agents import (
 from ai_gateway.chat.base import BaseToolsRegistry
 from ai_gateway.chat.tools import BaseTool
 from ai_gateway.internal_events import InternalEventsClient
-from ai_gateway.prompts.typing import TypeModelMetadata
 
 __all__ = [
-    "TypeAgentFactory",
     "GLAgentRemoteExecutor",
 ]
 
@@ -28,23 +25,15 @@ _REACT_AGENT_AVAILABLE_TOOL_NAMES_CONTEXT_KEY = "duo_chat.agent_available_tools"
 log = get_request_logger("gl_agent_remote_executor")
 
 
-class TypeAgentFactory(Protocol[TypeAgentEvent]):
-    def __call__(
-        self,
-        *,
-        model_metadata: TypeModelMetadata,
-    ) -> Runnable[TypeAgentInputs, TypeAgentEvent]: ...
-
-
 class GLAgentRemoteExecutor(Generic[TypeAgentInputs, TypeAgentEvent]):
     def __init__(
         self,
         *,
-        agent_factory: TypeAgentFactory,
+        agent: ReActAgent,
         tools_registry: BaseToolsRegistry,
         internal_event_client: InternalEventsClient,
     ):
-        self.agent_factory = agent_factory
+        self.agent = agent
         self.tools_registry = tools_registry
         self.internal_event_client = internal_event_client
         self._tools: list[BaseTool] | None = None
@@ -69,7 +58,6 @@ class GLAgentRemoteExecutor(Generic[TypeAgentInputs, TypeAgentEvent]):
 
     async def stream(self, *, inputs: TypeAgentInputs) -> AsyncIterator[TypeAgentEvent]:
         inputs.tools = self.tools
-        agent: ReActAgent = self.agent_factory(model_metadata=inputs.model_metadata)
 
         tools_by_name = self.tools_by_name
 
@@ -79,7 +67,7 @@ class GLAgentRemoteExecutor(Generic[TypeAgentInputs, TypeAgentEvent]):
 
         log.info("Processed inputs", source=__name__, inputs=inputs)
 
-        async for event in agent.astream(inputs):
+        async for event in self.agent.astream(inputs):
             if isinstance(event, AgentToolAction):
                 if event.tool in tools_by_name:
                     tool = tools_by_name[event.tool]

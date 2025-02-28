@@ -9,7 +9,7 @@ from starlette.responses import StreamingResponse
 
 from ai_gateway.api.auth_utils import StarletteUser, get_current_user
 from ai_gateway.api.feature_category import feature_category
-from ai_gateway.async_dependency_resolver import get_container_application
+from ai_gateway.async_dependency_resolver import get_prompt_registry
 from ai_gateway.prompts import BasePromptRegistry, Prompt
 from ai_gateway.prompts.typing import TypeModelMetadata
 
@@ -26,10 +26,6 @@ class PromptRequest(BaseModel):
 
 
 router = APIRouter()
-
-
-async def get_prompt_registry():
-    yield get_container_application().pkg_prompts.prompt_registry()
 
 
 @router.post(

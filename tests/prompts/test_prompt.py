@@ -64,8 +64,8 @@ class TestPrompt:
             model=expected_model_name, disable_streaming=ANY, max_retries=ANY
         )
 
-    def test_build_prompt_template(self, prompt_template):
-        prompt_template = Prompt._build_prompt_template(prompt_template)
+    def test_build_prompt_template(self, prompt_template, model_config):
+        prompt_template = Prompt._build_prompt_template(prompt_template, model_config)
 
         assert prompt_template == ChatPromptTemplate.from_messages(
             [("system", "Hi, I'm {{name}}"), ("user", "{{content}}")],
