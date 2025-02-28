@@ -6,7 +6,7 @@ import pytest
 from snowplow_tracker import Snowplow
 
 from ai_gateway.code_suggestions import CodeGenerations, ModelProvider
-from ai_gateway.code_suggestions.processing import LanguageId, TokenStrategyBase
+from ai_gateway.code_suggestions.processing import TokenStrategyBase
 from ai_gateway.code_suggestions.processing.post.generations import (
     PostProcessor,
     PostProcessorAnthropic,
@@ -18,6 +18,7 @@ from ai_gateway.code_suggestions.processing.typing import (
     Prompt,
 )
 from ai_gateway.instrumentators import TextGenModelInstrumentator
+from ai_gateway.models.amazon_q import AmazonQModel
 from ai_gateway.models.base_text import (
     TextGenModelBase,
     TextGenModelChunk,
@@ -74,6 +75,34 @@ class TestCodeGeneration:
 
         yield use_case
 
+    @pytest.fixture(scope="class")
+    def use_case_q(self):
+        model = Mock(spec=AmazonQModel)
+        type(model).input_token_limit = PropertyMock(return_value=2_048)
+        tokenization_strategy_mock = Mock(spec=TokenStrategyBase)
+        tokenization_strategy_mock.estimate_length = Mock(return_value=[1, 2])
+        prompt_builder_mock = Mock(spec=PromptBuilderBase)
+        prompt = Prompt(
+            prefix="prompt",
+            metadata=MetadataPromptBuilder(
+                components={
+                    "prompt": MetadataCodeContent(
+                        length=len("prompt"),
+                        length_tokens=1,
+                    ),
+                }
+            ),
+        )
+        prompt_builder_mock.build = Mock(return_value=prompt)
+
+        use_case = CodeGenerations(
+            model, tokenization_strategy_mock, Mock(spec=SnowplowInstrumentator)
+        )
+        use_case.instrumentator = InstrumentorMock(spec=TextGenModelInstrumentator)
+        use_case.prompt_builder = prompt_builder_mock
+
+        yield use_case
+
     @pytest.mark.parametrize(
         ("model_provider", "expected_post_processor"),
         [
@@ -93,7 +122,7 @@ class TestCodeGeneration:
             _ = await use_case.execute(
                 "prefix",
                 "test.py",
-                editor_lang=LanguageId.PYTHON,
+                editor_lang="Python",
                 raw_prompt="test prompt",
                 model_provider=model_provider,
             )
@@ -135,7 +164,7 @@ class TestCodeGeneration:
         actual = await use_case.execute(
             prefix="any",
             file_name="bar.py",
-            editor_lang=LanguageId.PYTHON,
+            editor_lang="Python",
             model_provider=ModelProvider.ANTHROPIC,
             stream=True,
         )
@@ -207,7 +236,7 @@ class TestCodeGeneration:
             actual = await use_case.execute(
                 prefix="any",
                 file_name="bar.py",
-                editor_lang=LanguageId.PYTHON,
+                editor_lang="Python",
                 model_provider=ModelProvider.ANTHROPIC,
                 stream=stream,
                 snowplow_event_context=snowplow_event_context,
@@ -222,3 +251,108 @@ class TestCodeGeneration:
             snowplow_mock.watch.assert_has_calls(
                 [call(expected_event_1), call(expected_event_2)]
             )
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        (
+            "prefix",
+            "suffix",
+            "file_name",
+            "editor_lang",
+            "expected_suffix",
+            "expected_lang",
+            "expected_output",
+            "additional_kwargs",
+        ),
+        [
+            # Basic case with editor_lang and suffix
+            (
+                "def test():",
+                "# test function",
+                "test.py",
+                "python",
+                "# test function",
+                "python",
+                "\ngenerated code",
+                {},
+            ),
+            # Empty suffix case
+            (
+                "def test():",
+                "",
+                "test.py",
+                "python",
+                "",
+                "python",
+                "\ngenerated code",
+                {},
+            ),
+            # None suffix case
+            (
+                "def test():",
+                None,
+                "test.py",
+                "python",
+                "",
+                "python",
+                "\ngenerated code",
+                {},
+            ),
+            # Language resolution from filename
+            (
+                "function test() {",
+                "// test function",
+                "script.js",
+                None,
+                "// test function",
+                "javascript",
+                "\ngenerated code",
+                {},
+            ),
+            # With additional kwargs
+            (
+                "def test",
+                "():",
+                "test.py",
+                "python",
+                "():",
+                "python",
+                "\ngenerated code",
+                {"temperature": 0.7, "max_tokens": 100},
+            ),
+        ],
+    )
+    async def test_amazon_q_model_generation(
+        self,
+        use_case_q: CodeGenerations,
+        prefix: str,
+        suffix: str | None,
+        file_name: str,
+        editor_lang: str | None,
+        expected_suffix: str,
+        expected_lang: str,
+        expected_output: str,
+        additional_kwargs: dict,
+    ):
+        """Test generation with AmazonQModel with various input combinations."""
+        use_case_q.model.generate = AsyncMock(
+            return_value=TextGenModelOutput(
+                text=expected_output, score=0, safety_attributes=SafetyAttributes()
+            )
+        )
+
+        result = await use_case_q.execute(
+            prefix=prefix,
+            suffix=suffix,
+            file_name=file_name,
+            editor_lang=editor_lang,
+            **additional_kwargs,
+        )
+
+        assert result is not None
+        assert result.text == expected_output
+
+        # Verify model.generate was called with correct parameters
+        use_case_q.model.generate.assert_called_once_with(
+            prefix, expected_suffix, file_name, expected_lang, **additional_kwargs
+        )
