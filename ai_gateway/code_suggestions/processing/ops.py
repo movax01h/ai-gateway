@@ -102,6 +102,10 @@ _EDITOR_LANG_TO_LANG_ID = {
     name: language.lang_id for language in _ALL_LANGS for name in language.editor_names
 }
 
+_EXTENSION_TO_LANG_NAME = {
+    ext: language.grammar_name for language in _ALL_LANGS for ext in language.extensions
+}
+
 # A new line with a non-indented letter or comment (/*, #, //)
 _END_OF_CODE_BLOCK_REGEX = re.compile(r"\n([a-zA-Z]|(\/\*)|(#)|(\/\/))")
 
@@ -166,6 +170,11 @@ def trim_by_sep(s: str, sep: str = "```") -> str:
 def lang_from_filename(file_name: Union[str, Path]) -> Optional[LanguageId]:
     ext = Path(file_name).suffix.replace(".", "")
     return _EXTENSION_TO_LANG_ID.get(ext, None)
+
+
+def lang_name_from_filename(file_name: Union[str, Path]) -> Optional[str]:
+    ext = Path(file_name).suffix.replace(".", "")
+    return _EXTENSION_TO_LANG_NAME.get(ext, None)
 
 
 def lang_from_editor_lang(editor_lang: str) -> Optional[LanguageId]:

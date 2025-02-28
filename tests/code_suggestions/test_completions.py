@@ -27,6 +27,7 @@ from ai_gateway.models import (
     ModelMetadata,
     PalmCodeGeckoModel,
 )
+from ai_gateway.models.amazon_q import AmazonQModel
 from ai_gateway.models.base import TokensConsumptionMetadata
 from ai_gateway.models.base_text import (
     TextGenModelBase,
@@ -686,3 +687,101 @@ class TestCodeCompletions:
         mock_post_process.assert_called_with("Unprocessed completion output", score=0)
 
         assert actual.text == "Post-processed completion output"
+
+    @pytest.mark.parametrize(
+        (
+            "prefix",
+            "suffix",
+            "file_name",
+            "editor_lang",
+            "expected_output",
+            "expected_language_id",
+            "expected_language",
+        ),
+        [
+            # Test with editor_lang provided
+            (
+                "def hello",
+                ":",
+                "test.py",
+                "python",
+                "world()",
+                LanguageId.PYTHON,
+                "python",
+            ),
+            # Test with language resolved from filename
+            (
+                "function test",
+                "{",
+                "script.js",
+                None,
+                "return true;",
+                LanguageId.JS,
+                "javascript",
+            ),
+            # Test with no language identifiable
+            ("some code", "", "noextension", None, None, None, None),
+        ],
+    )
+    async def test_execute_amazon_q_model(
+        self,
+        prefix: str,
+        suffix: str,
+        file_name: str,
+        editor_lang: str,
+        expected_output: str,
+        expected_language_id: LanguageId,
+        expected_language: str,
+    ):
+        # Mock AmazonQModel
+        model = Mock(spec=AmazonQModel)
+        model.input_token_limit = 16
+        if expected_output:
+            model.generate = AsyncMock(
+                return_value=TextGenModelOutput(
+                    text=expected_output,
+                    score=0,
+                    safety_attributes=SafetyAttributes(),
+                    metadata=Mock(output_tokens=10),
+                )
+            )
+
+        # Create use case with AmazonQModel
+        use_case = CodeCompletions(model, Mock(spec=TokenStrategyBase))
+        use_case.instrumentator = InstrumentorMock(spec=TextGenModelInstrumentator)
+
+        # Mock prompt builder
+        use_case.prompt_builder = Mock(spec=PromptBuilderPrefixBased)
+        use_case.prompt_builder.build.return_value = Prompt(
+            prefix=prefix,
+            suffix=suffix,
+            metadata=MetadataPromptBuilder(
+                components={
+                    "prefix": MetadataCodeContent(length=10, length_tokens=2),
+                    "suffix": MetadataCodeContent(length=10, length_tokens=2),
+                }
+            ),
+        )
+
+        # Execute the code completion
+        actual = await use_case.execute(
+            prefix=prefix,
+            suffix=suffix,
+            file_name=file_name,
+            editor_lang=editor_lang,
+        )
+
+        # Verify results
+        if expected_output:
+            assert actual.text == expected_output
+            assert actual.lang_id == expected_language_id
+
+            # Verify model.generate was called with correct parameters
+            model.generate.assert_called_once_with(
+                prefix,
+                suffix,
+                file_name,
+                expected_language.lower() if expected_language else None,
+            )
+        else:
+            assert actual.text == ""

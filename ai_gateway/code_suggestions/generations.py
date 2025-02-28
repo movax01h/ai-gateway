@@ -7,6 +7,7 @@ from ai_gateway.code_suggestions.base import (
     ModelProvider,
     increment_lang_counter,
     resolve_lang_id,
+    resolve_lang_name,
 )
 from ai_gateway.code_suggestions.processing import LanguageId, Prompt, TokenStrategyBase
 from ai_gateway.code_suggestions.processing.post.generations import (
@@ -133,13 +134,17 @@ class CodeGenerations:
                         prompt.prefix, stream=stream, **kwargs
                     )
                 elif isinstance(self.model, AmazonQModel):
-                    res = await self.model.generate(
-                        prefix,
-                        suffix if suffix else "",
-                        file_name,
-                        lang_id.name.lower(),
-                        **kwargs,
-                    )
+                    if lang := (editor_lang or resolve_lang_name(file_name)):
+                        res = await self.model.generate(
+                            prefix,
+                            suffix if suffix else "",
+                            file_name,
+                            lang.lower(),
+                            **kwargs,
+                        )
+                    else:
+                        res = None
+
                 else:
                     res = await self.model.generate(
                         prompt.prefix, "", stream=stream, **kwargs

@@ -9,6 +9,7 @@ from ai_gateway.code_suggestions.base import (
     LanguageId,
     increment_lang_counter,
     resolve_lang_id,
+    resolve_lang_name,
 )
 from ai_gateway.code_suggestions.processing import (
     ModelEngineCompletions,
@@ -201,13 +202,16 @@ class CodeCompletions:
                         prompt.prefix, stream=stream, **kwargs
                     )
                 elif isinstance(self.model, AmazonQModel):
-                    res = await self.model.generate(
-                        prompt.prefix,
-                        prompt.suffix,
-                        file_name,
-                        lang_id.name.lower(),
-                        **kwargs,
-                    )
+                    if lang := (editor_lang or resolve_lang_name(file_name)):
+                        res = await self.model.generate(
+                            prompt.prefix,
+                            prompt.suffix,
+                            file_name,
+                            lang.lower(),
+                            **kwargs,
+                        )
+                    else:
+                        res = None
                 else:
                     res = await self.model.generate(
                         prompt.prefix, prompt.suffix, stream, **kwargs

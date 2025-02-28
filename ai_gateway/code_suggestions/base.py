@@ -7,6 +7,7 @@ from ai_gateway.code_suggestions.processing.base import LANGUAGE_COUNTER
 from ai_gateway.code_suggestions.processing.ops import (
     lang_from_editor_lang,
     lang_from_filename,
+    lang_name_from_filename,
 )
 from ai_gateway.experimentation import ExperimentTelemetry
 from ai_gateway.models import (
@@ -141,6 +142,12 @@ def resolve_lang_id(
         lang_id = lang_from_editor_lang(editor_lang)
 
     return lang_id
+
+
+def resolve_lang_name(file_name: str) -> Optional[str]:
+    lang_name = lang_name_from_filename(file_name)
+
+    return lang_name
 
 
 # TODO: https://gitlab.com/gitlab-org/modelops/applied-ml/code-suggestions/ai-assist/-/issues/292
