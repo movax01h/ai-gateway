@@ -6,7 +6,7 @@ from langchain_core.runnables import Runnable
 from starlette_context import context, request_cycle_context
 
 from ai_gateway.api.auth_utils import StarletteUser
-from ai_gateway.chat import GLAgentRemoteExecutor, TypeAgentFactory
+from ai_gateway.chat import GLAgentRemoteExecutor
 from ai_gateway.chat.agents import (
     AgentError,
     AgentFinalAnswer,
@@ -36,15 +36,6 @@ def agent(agent_events):
     agent.astream = Mock(side_effect=_stream_agent)
 
     return agent
-
-
-@pytest.fixture
-def agent_factory(agent):
-    agent_factory = Mock(
-        spec=TypeAgentFactory, side_effect=lambda *_args, **_kwargs: agent
-    )
-
-    return agent_factory
 
 
 @pytest.fixture
@@ -96,7 +87,6 @@ class TestGLAgentRemoteExecutor:
     async def test_stream(
         self,
         agent: Mock,
-        agent_factory: Mock,
         agent_events,
         tools_registry: DuoChatToolsRegistry,
         internal_event_client: Mock,
@@ -104,7 +94,7 @@ class TestGLAgentRemoteExecutor:
         user: StarletteUser,
     ):
         executor = GLAgentRemoteExecutor(
-            agent_factory=agent_factory,
+            agent=agent,
             tools_registry=tools_registry,
             internal_event_client=internal_event_client,
         )
@@ -127,7 +117,6 @@ class TestGLAgentRemoteExecutor:
             else:
                 assert context.get("duo_chat.agent_available_tools") == ["issue_reader"]
 
-        agent_factory.assert_called_once_with(model_metadata=inputs.model_metadata)
         agent.astream.assert_called_once_with(inputs)
         assert actual_actions == agent_events
 
@@ -266,7 +255,6 @@ class TestGLAgentRemoteExecutorToolAction:
     async def test_stream_tool_action(
         self,
         agent: Mock,
-        agent_factory: Mock,
         tools_registry: DuoChatToolsRegistry,
         internal_event_client: Mock,
         inputs: ReActAgentInputs,
@@ -276,7 +264,7 @@ class TestGLAgentRemoteExecutorToolAction:
         expected_internal_events,
     ):
         executor = GLAgentRemoteExecutor(
-            agent_factory=agent_factory,
+            agent=agent,
             tools_registry=tools_registry,
             internal_event_client=internal_event_client,
         )
@@ -335,14 +323,13 @@ class TestGLAgentRemoteExecutorToolValidation:
     async def test_stream_tool_validation(
         self,
         agent: Mock,
-        agent_factory: Mock,
         tools_registry: DuoChatToolsRegistry,
         internal_event_client: Mock,
         user: StarletteUser,
         expected_event,
     ):
         executor = GLAgentRemoteExecutor(
-            agent_factory=agent_factory,
+            agent=agent,
             tools_registry=tools_registry,
             internal_event_client=internal_event_client,
         )

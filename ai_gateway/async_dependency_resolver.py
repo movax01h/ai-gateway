@@ -154,3 +154,7 @@ async def get_amazon_q_client_factory(
     ],
 ):
     return amazon_q_client_factory
+
+
+async def get_prompt_registry():
+    yield get_container_application().pkg_prompts.prompt_registry()

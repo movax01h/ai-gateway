@@ -47,7 +47,7 @@ def mock_date(mocker):
 def auth_user():
     return CloudConnectorUser(
         authenticated=True,
-        claims=UserClaims(scopes=["duo_chat"]),
+        claims=UserClaims(scopes=["duo_chat", "amazon_q_integration"]),
     )
 
 
@@ -440,6 +440,52 @@ class TestReActAgentStream:
                 200,
                 "",
                 [call("request_duo_chat", category="ai_gateway.api.v2.chat.agent")],
+            ),
+            (
+                CloudConnectorUser(
+                    authenticated=True,
+                    claims=UserClaims(scopes=["amazon_q_integration"]),
+                ),
+                AgentRequest(
+                    messages=[
+                        Message(
+                            role=Role.USER,
+                            content="Hi",
+                            additional_context=None,
+                        )
+                    ]
+                ),
+                403,
+                '{"detail":"Unauthorized to access duo chat"}',
+                [],
+            ),
+            (
+                CloudConnectorUser(
+                    authenticated=True,
+                    claims=UserClaims(scopes=["amazon_q_integration"]),
+                ),
+                AgentRequest(
+                    messages=[
+                        Message(
+                            role=Role.USER,
+                            content="Hi",
+                            additional_context=None,
+                        )
+                    ],
+                    model_metadata=AmazonQModelMetadata(
+                        name="amazon_q",
+                        provider="amazon_q",
+                        role_arn="role-arn",
+                    ),
+                ),
+                200,
+                "",
+                [
+                    call(
+                        "request_amazon_q_integration",
+                        category="ai_gateway.api.v2.chat.agent",
+                    )
+                ],
             ),
             (
                 CloudConnectorUser(

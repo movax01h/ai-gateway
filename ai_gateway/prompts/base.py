@@ -63,7 +63,7 @@ class Prompt(RunnableBinding[Input, Output]):
         model = self._build_model(
             model_factory, config.model, disable_streaming, model_override
         )
-        prompt = self._build_prompt_template(config.prompt_template)
+        prompt = self._build_prompt_template(config.prompt_template, config.model)
         chain = self._build_chain(
             cast(Runnable[Input, Output], prompt | model.bind(**model_kwargs))
         )
@@ -147,7 +147,7 @@ class Prompt(RunnableBinding[Input, Output]):
 
     @classmethod
     def _build_prompt_template(
-        cls, prompt_template: dict[str, str]
+        cls, prompt_template: dict[str, str], model_config: ModelConfig
     ) -> Runnable[Input, PromptValue]:
         messages = []
 

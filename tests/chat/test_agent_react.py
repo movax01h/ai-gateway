@@ -1,7 +1,6 @@
 import fastapi
 import pytest
 from langchain_core.messages import SystemMessage
-from pydantic import AnyUrl
 from starlette_context import context, request_cycle_context
 from structlog.testing import capture_logs
 
@@ -24,7 +23,11 @@ from ai_gateway.chat.context.current_page import Context, IssueContext
 from ai_gateway.chat.tools.gitlab import IssueReader, MergeRequestReader
 from ai_gateway.feature_flags.context import current_feature_flag_context
 from ai_gateway.models.base_chat import Role
-from ai_gateway.prompts.typing import ModelMetadata
+from ai_gateway.prompts.config.models import (
+    ChatAnthropicParams,
+    ChatLiteLLMParams,
+    TypeModelParams,
+)
 
 
 @pytest.fixture
@@ -358,6 +361,8 @@ class TestReActAgent:
         (
             "feature_flag_enabled",
             "inputs",
+            "model_params",
+            "should_add_anthropic_cache",
         ),
         [
             (
@@ -372,6 +377,8 @@ class TestReActAgent:
                     agent_scratchpad=[],
                     tools=[IssueReader()],
                 ),
+                ChatAnthropicParams(model_class_provider="anthropic"),
+                True,
             ),
             (
                 False,
@@ -385,6 +392,8 @@ class TestReActAgent:
                     agent_scratchpad=[],
                     tools=[IssueReader()],
                 ),
+                ChatAnthropicParams(model_class_provider="anthropic"),
+                False,
             ),
             (
                 False,
@@ -397,14 +406,9 @@ class TestReActAgent:
                     ],
                     agent_scratchpad=[],
                     tools=[IssueReader()],
-                    model_metadata=ModelMetadata(
-                        name="model_family",
-                        provider="provider",
-                        endpoint=AnyUrl("https://api.example.com"),
-                        api_key="abcde",
-                        identifier="custom_provider/model/identifier",
-                    ),
                 ),
+                ChatLiteLLMParams(model_class_provider="litellm"),
+                False,
             ),
             (
                 True,
@@ -417,14 +421,9 @@ class TestReActAgent:
                     ],
                     agent_scratchpad=[],
                     tools=[IssueReader()],
-                    model_metadata=ModelMetadata(
-                        name="mistral",
-                        provider="litellm",
-                        endpoint=AnyUrl("https://api.example.com"),
-                        api_key="abcde",
-                        identifier="litellm/mistral/identifier",
-                    ),
                 ),
+                ChatLiteLLMParams(model_class_provider="litellm"),
+                False,
             ),
             (
                 True,
@@ -437,19 +436,19 @@ class TestReActAgent:
                     ],
                     agent_scratchpad=[],
                     tools=[IssueReader()],
-                    model_metadata=ModelMetadata(
-                        name="claude-3-5-sonnet-20240620",
-                        provider="anthropic",
-                        endpoint=AnyUrl("https://api.anthropic.com/v1/messages"),
-                        api_key=None,
-                        identifier="litellm/mistral/identifier",
-                    ),
                 ),
+                ChatLiteLLMParams(model_class_provider="litellm"),
+                False,
             ),
         ],
     )
     async def test_message_cache_control(
-        self, prompt: ReActAgent, feature_flag_enabled: bool, inputs: ReActAgentInputs
+        self,
+        prompt: ReActAgent,
+        feature_flag_enabled: bool,
+        inputs: ReActAgentInputs,
+        model_params: TypeModelParams,
+        should_add_anthropic_cache: bool,
     ):
         if feature_flag_enabled:
             current_feature_flag_context.set(["enable_anthropic_prompt_caching"])
@@ -460,7 +459,7 @@ class TestReActAgent:
 
         for msg in prompt_value.messages:
             if isinstance(msg, SystemMessage):
-                if feature_flag_enabled and inputs.model_metadata is None:
+                if should_add_anthropic_cache:
                     content_dict = msg.content[0]
                     assert content_dict["type"] == "text"
                     assert content_dict["cache_control"] == {"type": "ephemeral"}
