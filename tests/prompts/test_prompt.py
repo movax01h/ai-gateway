@@ -17,6 +17,7 @@ from ai_gateway.models.v2.anthropic_claude import ChatAnthropic
 from ai_gateway.prompts.base import Prompt
 from ai_gateway.prompts.config.base import PromptConfig, PromptParams
 from ai_gateway.prompts.typing import Model, ModelMetadata
+from conftest import FakeModel
 
 
 class TestPrompt:
@@ -30,7 +31,7 @@ class TestPrompt:
     @pytest.mark.parametrize(
         ("prompt_config_name", "enabled_feature_flags", "expected_model_name"),
         [
-            ("test_prompt", {}, "test_model"),
+            ("test_prompt", set(), "test_model"),
             (
                 "Default configuration for the Duo Chat ReAct Agent",
                 {"duo_chat_react_agent_claude_3_7"},
@@ -38,7 +39,7 @@ class TestPrompt:
             ),
             (
                 "Default configuration for the Duo Chat ReAct Agent",
-                {},
+                set(),
                 "test_model",
             ),
         ],
@@ -46,16 +47,18 @@ class TestPrompt:
     def test_model_override(
         self,
         prompt_config: PromptConfig,
-        model,
-        prompt_config_name,
-        enabled_feature_flags,
-        expected_model_name,
+        model: FakeModel,
+        prompt_config_name: str,
+        enabled_feature_flags: set[str],
+        expected_model_name: str,
     ):
         prompt_config.name = prompt_config_name
         current_feature_flag_context.set(enabled_feature_flags)
 
         mock_model_factory = MagicMock(return_value=model)
         Prompt(mock_model_factory, prompt_config)
+
+        current_feature_flag_context.set(set())
 
         mock_model_factory.assert_called_once_with(
             model=expected_model_name, disable_streaming=ANY, max_retries=ANY
