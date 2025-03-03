@@ -9,7 +9,7 @@ unit_primitives:
   - generate_code
 prompt_template:
   system: |
-    {% include 'code_suggestions/generations/jinja_template/dotcom/system.jinja' %}
+    {% include 'code_suggestions/generations/jinja_template/dotcom/system/1.0.0.jinja' %}
   user: |
     {{user_instruction}}
   assistant: |

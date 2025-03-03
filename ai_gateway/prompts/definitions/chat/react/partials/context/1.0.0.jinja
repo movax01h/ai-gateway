@@ -5,7 +5,7 @@
     <content>{{context.content}}</content>
 </context>
     {%- else  %}
-        {%- set context_path = "chat/react/partials/context/" + context.type + ".jinja" %}
+        {%- set context_path = "chat/react/partials/context/" + context.type + "/1.0.0.jinja" %}
         {%- include context_path %}
     {%- endif  %}
 {%- endif %}

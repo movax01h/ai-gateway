@@ -11,11 +11,11 @@ unit_primitives:
   - duo_chat
 prompt_template:
   system: |
-    {% include 'chat/react/system_mistral.jinja' %}
+    {% include 'chat/react/system_mistral/1.0.0.jinja' %}
   user: |
-    {% include 'chat/react/user_mistral.jinja' %}
+    {% include 'chat/react/user_mistral/1.0.0.jinja' %}
   assistant: |
-    {% include 'chat/react/assistant_mistral.jinja' %}
+    {% include 'chat/react/assistant_mistral/1.0.0.jinja' %}
 params:
   timeout: 30
   stop:

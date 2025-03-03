@@ -11,8 +11,8 @@ unit_primitives:
   - troubleshoot_job
 prompt_template:
   system: |
-    {% include 'chat/troubleshoot_job/system.jinja' %}
+    {% include 'chat/troubleshoot_job/system/1.0.0.jinja' %}
   user: |
-    {% include 'chat/troubleshoot_job/user.jinja' %}
+    {% include 'chat/troubleshoot_job/user/1.0.0.jinja' %}
 params:
   timeout: 60

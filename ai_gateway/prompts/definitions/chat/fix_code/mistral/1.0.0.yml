@@ -11,8 +11,8 @@ unit_primitives:
   - fix_code
 prompt_template:
   system: |
-    {% include 'chat/fix_code/system.jinja' %}
+    {% include 'chat/fix_code/system/1.0.0.jinja' %}
   user: |
-    {% include 'chat/fix_code/user_mistral.jinja' %}
+    {% include 'chat/fix_code/user_mistral/1.0.0.jinja' %}
 params:
   timeout: 60

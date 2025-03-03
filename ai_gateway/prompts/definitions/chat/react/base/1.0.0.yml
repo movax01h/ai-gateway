@@ -8,11 +8,11 @@ unit_primitives:
   - duo_chat
 prompt_template:
   system: |
-    {% include 'chat/react/system.jinja' %}
+    {% include 'chat/react/system/1.0.0.jinja' %}
   user: |
-    {% include 'chat/react/user.jinja' %}
+    {% include 'chat/react/user/1.0.0.jinja' %}
   assistant: |
-    {% include 'chat/react/assistant.jinja' %}
+    {% include 'chat/react/assistant/1.0.0.jinja' %}
 params:
   timeout: 30
   stop:

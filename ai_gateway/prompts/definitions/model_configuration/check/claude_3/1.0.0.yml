@@ -10,8 +10,8 @@ unit_primitives:
   - complete_code
 prompt_template:
   system: |
-    {% include 'model_configuration/check/system.jinja' %}
+    {% include 'model_configuration/check/system/1.0.0.jinja' %}
   user: |
-    {% include 'model_configuration/check/system.jinja' %}
+    {% include 'model_configuration/check/system/1.0.0.jinja' %}
 params:
   timeout: 60

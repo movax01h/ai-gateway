@@ -48,9 +48,9 @@ def inputs():
 @pytest.fixture
 def prompt_template():
     yield {
-        "system": "{% include 'chat/react/system.jinja' %}",
-        "user": "{% include 'chat/react/user.jinja' %}",
-        "assistant": "{% include 'chat/react/assistant.jinja' %}",
+        "system": "{% include 'chat/react/system/1.0.0.jinja' %}",
+        "user": "{% include 'chat/react/user/1.0.0.jinja' %}",
+        "assistant": "{% include 'chat/react/assistant/1.0.0.jinja' %}",
     }
 
 
