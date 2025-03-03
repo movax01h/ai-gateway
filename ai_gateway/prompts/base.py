@@ -56,6 +56,10 @@ class Prompt(RunnableBinding[Input, Output]):
         if (
             config.name == "Default configuration for the Duo Chat ReAct Agent"
             and is_feature_enabled(FeatureFlag.DUO_CHAT_REACT_AGENT_CLAUDE_3_7)
+        ) or (
+            config.name
+            == "Default configuration for the Duo Chat documentation question answering"
+            and is_feature_enabled(FeatureFlag.DUO_CHAT_DOCS_QA_CLAUDE_3_7)
         ):
             model_override = "claude-3-7-sonnet-20250219"
 
