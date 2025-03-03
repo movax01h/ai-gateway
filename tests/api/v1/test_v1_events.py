@@ -96,6 +96,7 @@ def perform_request(mock_client, payload):
             "role_arn": "arn:aws:iam::123456789012:role/q-dev-role",
             "code": "code-123",
             "payload": payload,
+            "event_id": "Quick Action",
         },
     )
 
