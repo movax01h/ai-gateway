@@ -1,0 +1,23 @@
+---
+name: LLaMA3 Code Completions
+model:
+  name: llama3
+  params:
+    model_class_provider: litellm
+    temperature: 0.0
+    max_tokens: 128
+    max_retries: 1
+unit_primitives:
+  - complete_code
+prompt_template:
+  system: |
+    {% include 'code_suggestions/completions/system.jinja' %}
+  user: |
+    Here is a code completion CONTEXT: 
+    {{prefix}} 
+    |CODE| 
+    {{suffix}}
+    
+    You must write the code for the placeholder |CODE| so that it fits the CONTEXT. You must output only the code, no other text or your thought process is allowed.
+params:
+  timeout: 60
