@@ -138,15 +138,16 @@ class AmazonQClient:
 
     @raise_aws_errors
     def send_event(self, event_request):
+        event_id = event_request.event_id
         payload = event_request.payload.model_dump_json(exclude_none=True)
 
         try:
-            self._send_event(payload)
+            self._send_event(event_id, payload)
         except ClientError as ex:
             if ex.__class__.__name__ == "AccessDeniedException":
-                return self._retry_send_event(ex, event_request.code, payload)
+                return self._retry_send_event(ex, event_request.code, payload, event_id)
 
-            raise
+            raise ex
 
     @raise_aws_errors
     def _create_o_auth_app_connection(self, **params):
@@ -163,15 +164,20 @@ class AmazonQClient:
             maxResults=payload["maxResults"],
         )
 
-    def _send_event(self, payload):
+    def _send_event(self, event_id: str, payload: dict):
         self.client.send_event(
             providerId="GITLAB",
-            eventId="Quick Action",
+            eventId=event_id,
             eventVersion="1.0",
             event=payload,
         )
 
-    def _retry_send_event(self, error, code, payload):
+    def _retry_send_event(self, error, code, payload, event_id):
+        self._is_retry(error, code)
+
+        return self._send_event(event_id, payload)
+
+    def _is_retry(self, error, code):
         match str(error.response.get("reason")):
             case AccessDeniedExceptionReason.GITLAB_EXPIRED_IDENTITY:
                 self.client.create_auth_grant(code=code)
@@ -182,5 +188,3 @@ class AmazonQClient:
                     status_code=status.HTTP_403_FORBIDDEN,
                     detail=str(error),
                 )
-
-        return self._send_event(payload)

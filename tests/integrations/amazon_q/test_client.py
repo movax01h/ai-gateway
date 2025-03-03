@@ -1,15 +1,32 @@
-from typing import Any, Optional
-from unittest.mock import MagicMock, patch
+from typing import Any, Dict, Optional
+from unittest.mock import MagicMock, Mock, patch
 
 import pytest
 from botocore.exceptions import ClientError
-from fastapi import HTTPException, status
+from fastapi import HTTPException
 from pydantic import BaseModel
 
 from ai_gateway.api.auth_utils import StarletteUser
+from ai_gateway.api.v1.amazon_q.typing import (
+    EventHookPayload,
+    EventIssuePayload,
+    EventMergeRequestPayload,
+    EventRequest,
+)
 from ai_gateway.auth.glgo import GlgoAuthority
 from ai_gateway.integrations.amazon_q.client import AmazonQClient, AmazonQClientFactory
 from ai_gateway.integrations.amazon_q.errors import AWSException
+
+
+# Create a custom ClientError subclass with the name "AccessDeniedException"
+class AccessDeniedException(ClientError):
+    def __init__(self):
+        super().__init__(
+            error_response={
+                "Error": {"Code": "AccessDeniedException", "Message": "Access denied"}
+            },
+            operation_name="SendEvent",
+        )
 
 
 class TestAmazonQClientFactory:
@@ -288,25 +305,72 @@ class TestAmazonQClient:
         mock_q_client.create_o_auth_app_connection.assert_called_once()
         assert not mock_q_client.update_o_auth_app_connection.called
 
-    def test_send_event_success(self, q_client, mock_q_client, mock_event_request):
-        q_client.send_event(mock_event_request)
-        mock_q_client.send_event.assert_called_once_with(
-            providerId="GITLAB",
-            eventId="Quick Action",
-            eventVersion="1.0",
-            event='{"first_field":"test field","second_field":1}',
-        )
+    @pytest.mark.parametrize(
+        "event_id,payload,client_error,expected_exception",
+        [
+            # Happy path - successful event sending
+            ("Quick Action", '{"test": "data"}', None, None),
+            # Test AccessDeniedException with retry
+            (
+                "Quick Action",
+                '{"test": "data"}',
+                AccessDeniedException(),
+                None,
+            ),
+            # Test other ClientError
+            (
+                "Quick Action",
+                '{"test": "data"}',
+                ClientError(
+                    error_response={
+                        "Error": {"Code": "OtherError", "Message": "Error"}
+                    },
+                    operation_name="SendEvent",
+                ),
+                AWSException,
+            ),
+        ],
+    )
+    def test_send_event(
+        self, q_client, event_id, payload, client_error, expected_exception
+    ):
+        """Tests event sending with various scenarios."""
+        # Setup mock request
+        mock_request = Mock()
+        mock_request.payload.model_dump_json.return_value = payload
+        mock_request.event_id = event_id
+        mock_request.code = "test_code"
 
-    def test_send_event_failed(self, q_client, mock_q_client, mock_event_request):
-        error_response = {
-            "Error": {"Code": "ValidationException", "Message": "invalid message"}
-        }
-        mock_q_client.send_event.side_effect = ClientError(error_response, "send_event")
+        q_client._retry_send_event = Mock(return_value={"Success": True})
 
-        with pytest.raises(AWSException):
-            q_client.send_event(mock_event_request)
+        if client_error:
+            # Configure mock to raise exception on first call
+            q_client._send_event = Mock(side_effect=[client_error, {"Success": True}])
+        else:
+            # Configure mock to return successfully
+            q_client._send_event = Mock(return_value={"Success": True})
 
-        mock_q_client.send_event.assert_called_once()
+        if expected_exception:
+            with pytest.raises(expected_exception):
+                q_client.send_event(mock_request)
+        else:
+            # Should not raise any exception
+            q_client.send_event(mock_request)
+
+            if (
+                client_error
+                and isinstance(client_error, ClientError)
+                and client_error.response["Error"]["Code"] == "AccessDeniedException"
+            ):
+                # Verify _send_event was called first and raised the exception
+                q_client._send_event.assert_called_with(event_id, payload)
+                # Verify retry was called with correct parameters
+                q_client._retry_send_event.assert_called_once_with(
+                    client_error, mock_request.code, payload, event_id
+                )
+            else:
+                # Verify normal _send_event was called
+                q_client._send_event.assert_called_once_with(event_id, payload)
 
     def test_generate_code_recommendations(
         self, q_client, mock_q_client, mock_event_request
