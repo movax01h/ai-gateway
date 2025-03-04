@@ -259,7 +259,6 @@ class TestCodeGeneration:
             "suffix",
             "file_name",
             "editor_lang",
-            "expected_suffix",
             "expected_lang",
             "expected_output",
             "additional_kwargs",
@@ -271,7 +270,6 @@ class TestCodeGeneration:
                 "# test function",
                 "test.py",
                 "python",
-                "# test function",
                 "python",
                 "\ngenerated code",
                 {},
@@ -282,7 +280,6 @@ class TestCodeGeneration:
                 "",
                 "test.py",
                 "python",
-                "",
                 "python",
                 "\ngenerated code",
                 {},
@@ -293,7 +290,6 @@ class TestCodeGeneration:
                 None,
                 "test.py",
                 "python",
-                "",
                 "python",
                 "\ngenerated code",
                 {},
@@ -304,7 +300,6 @@ class TestCodeGeneration:
                 "// test function",
                 "script.js",
                 None,
-                "// test function",
                 "javascript",
                 "\ngenerated code",
                 {},
@@ -315,7 +310,6 @@ class TestCodeGeneration:
                 "():",
                 "test.py",
                 "python",
-                "():",
                 "python",
                 "\ngenerated code",
                 {"temperature": 0.7, "max_tokens": 100},
@@ -329,7 +323,6 @@ class TestCodeGeneration:
         suffix: str | None,
         file_name: str,
         editor_lang: str | None,
-        expected_suffix: str,
         expected_lang: str,
         expected_output: str,
         additional_kwargs: dict,
@@ -354,5 +347,5 @@ class TestCodeGeneration:
 
         # Verify model.generate was called with correct parameters
         use_case_q.model.generate.assert_called_once_with(
-            prefix, expected_suffix, file_name, expected_lang, **additional_kwargs
+            prefix, suffix, file_name, expected_lang, **additional_kwargs
         )

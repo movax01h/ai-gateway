@@ -1,4 +1,5 @@
 from enum import StrEnum
+from typing import Optional
 
 from ai_gateway.api.auth_utils import StarletteUser
 from ai_gateway.integrations.amazon_q.client import AmazonQClientFactory
@@ -42,7 +43,7 @@ class AmazonQModel(TextGenModelBase):
     async def generate(  # type: ignore[override]
         self,
         prefix: str,
-        suffix: str,
+        suffix: Optional[str],
         filename: str,
         language: str,
         **kwargs,
@@ -55,7 +56,7 @@ class AmazonQModel(TextGenModelBase):
         request_payload = {
             "fileContext": {
                 "leftFileContent": prefix,
-                "rightFileContent": suffix,
+                "rightFileContent": suffix or "",
                 "filename": filename,
                 "programmingLanguage": {
                     "languageName": language,
