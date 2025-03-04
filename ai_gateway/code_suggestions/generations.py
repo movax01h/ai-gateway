@@ -137,7 +137,7 @@ class CodeGenerations:
                     if lang := (editor_lang or resolve_lang_name(file_name)):
                         res = await self.model.generate(
                             prefix,
-                            suffix if suffix else "",
+                            suffix,
                             file_name,
                             lang.lower(),
                             **kwargs,

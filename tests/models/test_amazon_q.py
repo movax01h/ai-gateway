@@ -22,7 +22,14 @@ def test_amazon_q_model_init():
 
 
 @pytest.mark.asyncio
-async def test_amazon_q_model_generate():
+@pytest.mark.parametrize(
+    ("suffix", "expected_suffix"),
+    [
+        ("suffix", "suffix"),
+        (None, ""),
+    ],
+)
+async def test_amazon_q_model_generate(suffix, expected_suffix):
     mock_user = MagicMock(spec=StarletteUser)
     mock_factory = MagicMock(spec=AmazonQClientFactory)
     mock_client = MagicMock()
@@ -34,7 +41,7 @@ async def test_amazon_q_model_generate():
         "CodeRecommendations": [{"content": "Generated Code"}]
     }
 
-    output = await model.generate("prefix", "suffix", "file.py", "Python")
+    output = await model.generate("prefix", suffix, "file.py", "Python")
 
     assert isinstance(output, TextGenModelOutput)
     assert output.text == "Generated Code"
@@ -44,7 +51,7 @@ async def test_amazon_q_model_generate():
         {
             "fileContext": {
                 "leftFileContent": "prefix",
-                "rightFileContent": "suffix",
+                "rightFileContent": expected_suffix,
                 "filename": "file.py",
                 "programmingLanguage": {"languageName": "Python"},
             },
