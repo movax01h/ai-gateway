@@ -53,8 +53,17 @@ class LocalPromptRegistry(BasePromptRegistry):
     def _get_prompt_config(
         self, versions: dict[str, PromptConfig], prompt_version: str
     ) -> PromptConfig:
+        # Parse constraint according to poetry rules. See
+        # https://python-poetry.org/docs/dependency-specification/#version-constraints
         constraint = parse_constraint(prompt_version)
         all_versions = [Version.parse(version) for version in versions.keys()]
+
+        # If the query is not "simple" (in other words, it's not referencing specific versions but is a constraint or
+        # set of constraints, for example a range) we only want to consider stable versions. This allows us to not
+        # auto-serve dev/rc versions to clients using queries like `^1.0.0`
+        if not constraint.is_simple():
+            all_versions = [version for version in all_versions if version.is_stable()]
+
         compatible_versions = list(filter(constraint.allows, all_versions))
         if not compatible_versions:
             log.info(
