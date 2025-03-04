@@ -15,6 +15,7 @@ from pydantic import BaseModel, HttpUrl
 from pyfakefs.fake_filesystem import FakeFilesystem
 
 from ai_gateway.api.auth_utils import StarletteUser
+from ai_gateway.integrations.amazon_q.chat import ChatAmazonQ
 from ai_gateway.prompts import LocalPromptRegistry, Prompt, PromptRegistered
 from ai_gateway.prompts.config import (
     ChatAmazonQParams,
@@ -24,7 +25,12 @@ from ai_gateway.prompts.config import (
     ModelConfig,
     PromptConfig,
 )
-from ai_gateway.prompts.typing import Model, ModelMetadata, TypeModelFactory
+from ai_gateway.prompts.typing import (
+    AmazonQModelMetadata,
+    Model,
+    ModelMetadata,
+    TypeModelFactory,
+)
 
 
 class MockPromptClass(Prompt):
@@ -175,6 +181,9 @@ def model_factories():
     yield {
         ModelClassProvider.ANTHROPIC: lambda model, **kwargs: ChatAnthropic(model=model, **kwargs),  # type: ignore[call-arg]
         ModelClassProvider.LITE_LLM: lambda model, **kwargs: ChatLiteLLM(
+            model=model, **kwargs
+        ),
+        ModelClassProvider.AMAZON_Q: lambda model, **kwargs: ChatAmazonQ(
             model=model, **kwargs
         ),
     }
@@ -363,6 +372,7 @@ class TestLocalPromptRegistry:
             "expected_model",
             "expected_kwargs",
             "expected_model_params",
+            "expected_model_class",
         ),
         [
             (
@@ -382,6 +392,7 @@ class TestLocalPromptRegistry:
                     "max_retries": 10,
                     "custom_llm_provider": "vllm",
                 },
+                ChatLiteLLM,
             ),
             (
                 "test",
@@ -400,6 +411,7 @@ class TestLocalPromptRegistry:
                     "max_retries": 10,
                     "custom_llm_provider": "vllm",
                 },
+                ChatLiteLLM,
             ),
             (
                 "chat/react",
@@ -422,6 +434,24 @@ class TestLocalPromptRegistry:
                         "header2": "Header2 value",
                     },
                 },
+                ChatAnthropic,
+            ),
+            (
+                "chat/react",
+                "^1.0.0",
+                AmazonQModelMetadata(
+                    name="amazon_q",
+                    provider="amazon_q",
+                    role_arn="role-arn",
+                ),
+                False,
+                "Amazon Q React prompt",
+                Prompt,
+                [("system", "Template1"), ("user", "Template2")],
+                "amazon_q",
+                {"role_arn": "role-arn", "stop": ["Foo", "Bar"], "timeout": 60},
+                {},
+                ChatAmazonQ,
             ),
             (
                 "chat/react",
@@ -454,6 +484,7 @@ class TestLocalPromptRegistry:
                     "max_tokens": 256,
                     "max_retries": 6,
                 },
+                ChatLiteLLM,
             ),
             (
                 "chat/react",
@@ -486,6 +517,7 @@ class TestLocalPromptRegistry:
                     "max_tokens": 256,
                     "max_retries": 6,
                 },
+                ChatLiteLLM,
             ),
         ],
     )
@@ -502,6 +534,7 @@ class TestLocalPromptRegistry:
         expected_model: str,
         expected_kwargs: dict,
         expected_model_params: dict,
+        expected_model_class: Type[Model],
     ):
 
         prompt = registry.get(
@@ -533,6 +566,7 @@ class TestLocalPromptRegistry:
             if key in expected_model_params
         }
         assert actual_model_params == expected_model_params
+        assert isinstance(prompt.model, expected_model_class)
 
     @pytest.mark.parametrize(
         (

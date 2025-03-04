@@ -2,6 +2,7 @@ from dependency_injector import containers, providers
 from langchain_community.chat_models import ChatLiteLLM
 from litellm.llms.custom_httpx.http_handler import AsyncHTTPHandler
 
+from ai_gateway.integrations.amazon_q.chat import ChatAmazonQ
 from ai_gateway.models import mock
 from ai_gateway.models.base import init_anthropic_client, log_request
 from ai_gateway.models.v2.anthropic_claude import ChatAnthropic
@@ -49,3 +50,4 @@ class ContainerModels(containers.DeclarativeContainer):
     )
 
     lite_llm_chat_fn = providers.Factory(_litellm_factory)
+    amazon_q_chat_fn = providers.Factory(ChatAmazonQ)
