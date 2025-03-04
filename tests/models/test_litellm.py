@@ -638,6 +638,8 @@ class TestLiteLlmTextGenModel:
             "suffix",
             "expect_async_client",
             "expected_score",
+            "max_output_tokens",
+            "expect_max_output_tokens_used",
         ),
         [
             (
@@ -657,6 +659,8 @@ class TestLiteLlmTextGenModel:
                 "def goodbye_world():",
                 False,
                 10**5,
+                999,
+                True,
             ),
             (
                 "codestral",
@@ -671,6 +675,8 @@ class TestLiteLlmTextGenModel:
                 "def goodbye_world():",
                 False,
                 10**5,
+                999,
+                True,
             ),
             (
                 "qwen2p5-coder-7b",
@@ -707,6 +713,8 @@ class TestLiteLlmTextGenModel:
                 "def goodbye_world():",
                 True,
                 999.0,
+                1000,
+                False,
             ),
             (
                 "qwen2p5-coder-7b",
@@ -743,6 +751,8 @@ class TestLiteLlmTextGenModel:
                 None,
                 False,
                 999.0,
+                1000,
+                False,
             ),
         ],
     )
@@ -761,6 +771,8 @@ class TestLiteLlmTextGenModel:
         prefix,
         suffix,
         expected_score,
+        max_output_tokens,
+        expect_max_output_tokens_used,
     ):
         async_fireworks_client = Mock() if expect_async_client else None
 
@@ -781,10 +793,11 @@ class TestLiteLlmTextGenModel:
             snowplow_event_context=MagicMock(
                 spec=SnowplowEventContext, gitlab_global_user_id="test"
             ),
+            max_output_tokens=max_output_tokens,
         )
 
         expected_completion_args = {
-            "max_tokens": 16,
+            "max_tokens": max_output_tokens,
             "temperature": 0.95,
             "top_p": 0.95,
             "stream": False,
@@ -807,6 +820,9 @@ class TestLiteLlmTextGenModel:
         assert output.score == expected_score
         if output.metadata:
             assert output.metadata.output_tokens == 999
+            assert (
+                output.metadata.max_output_tokens_used == expect_max_output_tokens_used
+            )
 
     @pytest.mark.asyncio
     async def test_override_stream(self, endpoint, api_key):

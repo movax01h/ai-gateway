@@ -365,7 +365,7 @@ class LiteLlmTextGenModel(TextGenModelBase):
             text=self._extract_suggestion_text(suggestion),
             score=score,
             safety_attributes=SafetyAttributes(),
-            metadata=self._extract_suggestion_metadata(suggestion),
+            metadata=self._extract_suggestion_metadata(suggestion, max_output_tokens),
         )
 
     async def _handle_stream(
@@ -454,13 +454,16 @@ class LiteLlmTextGenModel(TextGenModelBase):
 
         return suggestion.choices[0].message.content
 
-    def _extract_suggestion_metadata(self, suggestion):
+    def _extract_suggestion_metadata(self, suggestion, max_output_tokens):
+        output_tokens = (
+            suggestion.usage.completion_tokens if hasattr(suggestion, "usage") else 0
+        )
+
+        max_output_tokens_used = output_tokens == max_output_tokens
+
         return TokensConsumptionMetadata(
-            output_tokens=(
-                suggestion.usage.completion_tokens
-                if hasattr(suggestion, "usage")
-                else 0
-            ),
+            output_tokens=output_tokens,
+            max_output_tokens_used=max_output_tokens_used,
         )
 
     def _get_stop_tokens(self, suffix):

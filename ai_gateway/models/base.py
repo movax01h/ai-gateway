@@ -78,6 +78,7 @@ class ModelAPICallError(ModelAPIError):
 class TokensConsumptionMetadata(BaseModel):
     input_tokens: Optional[int] = None
     output_tokens: Optional[int] = None
+    max_output_tokens_used: bool = False
     # number of tokens sent to AI Gateway
     context_tokens_sent: Optional[int] = None
     # number of tokens from context used in the prompt
