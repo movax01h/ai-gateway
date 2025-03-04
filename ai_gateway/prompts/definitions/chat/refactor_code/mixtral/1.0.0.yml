@@ -11,8 +11,8 @@ unit_primitives:
   - refactor_code
 prompt_template:
   system: |
-    {% include 'chat/refactor_code/system.jinja' %}
+    {% include 'chat/refactor_code/system/1.0.0.jinja' %}
   user: |
-    {% include 'chat/refactor_code/user_mistral.jinja' %}
+    {% include 'chat/refactor_code/user_mistral/1.0.0.jinja' %}
 params:
   timeout: 60

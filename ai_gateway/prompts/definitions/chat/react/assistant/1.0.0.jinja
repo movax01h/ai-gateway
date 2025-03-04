@@ -1,0 +1,5 @@
+{%- if final_answer -%}
+{% include 'chat/react/partials/assistant_with_final_answer/1.0.0.jinja' %}
+{%- else -%}
+{% include 'chat/react/partials/assistant/1.0.0.jinja' %}
+{%- endif -%}

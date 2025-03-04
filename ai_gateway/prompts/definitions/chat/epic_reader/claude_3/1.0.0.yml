@@ -10,10 +10,10 @@ unit_primitives:
   - ask_epic
 prompt_template:
   system: |
-    {% include 'chat/epic_reader/system.jinja' %}
+    {% include 'chat/epic_reader/system/1.0.0.jinja' %}
   user: |
-    {% include 'chat/epic_reader/user.jinja' %}
+    {% include 'chat/epic_reader/user/1.0.0.jinja' %}
   assistant: |
-    {% include 'chat/epic_reader/assistant.jinja' %}
+    {% include 'chat/epic_reader/assistant/1.0.0.jinja' %}
 params:
   timeout: 60

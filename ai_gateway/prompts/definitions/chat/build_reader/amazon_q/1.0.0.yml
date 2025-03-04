@@ -8,6 +8,6 @@ unit_primitives:
   - amazon_q_integration
 prompt_template:
   system: |
-    {% include 'chat/build_reader/system.jinja' %}
+    {% include 'chat/build_reader/system/1.0.0.jinja' %}
   user: |
-    {% include 'chat/build_reader/user.jinja' %}
+    {% include 'chat/build_reader/user/1.0.0.jinja' %}

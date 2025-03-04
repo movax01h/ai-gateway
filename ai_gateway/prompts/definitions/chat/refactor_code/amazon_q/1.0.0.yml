@@ -8,6 +8,6 @@ unit_primitives:
   - amazon_q_integration
 prompt_template:
   system: |
-    {% include 'chat/refactor_code/system.jinja' %}
+    {% include 'chat/refactor_code/system/1.0.0.jinja' %}
   user: |
-    {% include 'chat/refactor_code/user.jinja' %}
+    {% include 'chat/refactor_code/user/1.0.0.jinja' %}

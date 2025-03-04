@@ -11,13 +11,13 @@ unit_primitives:
   - complete_code
 prompt_template:
   system: |
-    {% include 'code_suggestions/completions/system.jinja' %}
+    {% include 'code_suggestions/completions/system/1.0.0.jinja' %}
   user: |
-    Here is a code completion CONTEXT: 
-    {{prefix}} 
-    |CODE| 
+    Here is a code completion CONTEXT:
+    {{prefix}}
+    |CODE|
     {{suffix}}
-    
+
     You must write the code for the placeholder |CODE| so that it fits the CONTEXT. You must output only the code, no other text or your thought process is allowed.
 params:
   timeout: 60

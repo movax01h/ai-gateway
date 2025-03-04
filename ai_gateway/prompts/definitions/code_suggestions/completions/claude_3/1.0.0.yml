@@ -11,8 +11,8 @@ unit_primitives:
   - complete_code
 prompt_template:
   system: |
-    {% include 'code_suggestions/completions/system.jinja' %}
+    {% include 'code_suggestions/completions/system/1.0.0.jinja' %}
   user: |
-    {% include 'code_suggestions/completions/claude_3_user.jinja' %}
+    {% include 'code_suggestions/completions/claude_3_user/1.0.0.jinja' %}
 params:
   timeout: 60

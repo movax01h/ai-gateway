@@ -241,7 +241,7 @@ Temporary Items
 *.py[cod]
 *$py.class
 *.so
-build/
+/build/
 develop-eggs/
 dist/
 downloads/
