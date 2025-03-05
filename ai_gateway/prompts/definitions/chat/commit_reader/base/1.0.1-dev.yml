@@ -1,7 +1,7 @@
 ---
 name: Commit identifier parser for Duo Chat
 model:
-  config_file: conversation_performant
+  config_file: claude_3_7
   params:
     max_tokens: 2_048
 unit_primitives:

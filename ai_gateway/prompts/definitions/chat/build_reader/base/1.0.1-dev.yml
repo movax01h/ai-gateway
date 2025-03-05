@@ -1,7 +1,7 @@
 ---
 name: CI/CD job identifier parser for Duo Chat
 model:
-  name: claude-3-5-sonnet-20241022
+  config_file: claude_3_7
   params:
     model_class_provider: anthropic
     temperature: 0.0
