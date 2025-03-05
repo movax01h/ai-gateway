@@ -41,10 +41,13 @@ def auth_user():
 
 
 @pytest.fixture
-def config_values(assets_dir):
+def config_values(assets_dir, gcp_location):
     return {
         "custom_models": {
             "enabled": True,
+        },
+        "google_cloud_platform": {
+            "location": gcp_location,
         },
         "model_keys": {
             "fireworks_api_key": "mock_fireworks_key",
@@ -57,7 +60,7 @@ def config_values(assets_dir):
         },
         "model_endpoints": {
             "fireworks_regional_endpoints": {
-                "us-central1": {
+                gcp_location: {
                     "endpoint": "https://fireworks.endpoint",
                     "identifier": "qwen2p5-coder-7b",
                 },
@@ -72,23 +75,8 @@ def unit_primitives():
 
 
 @pytest.fixture
-def mock_gcp_location():
-    with patch("ai_gateway.api.v2.code.completions.Config") as mock:
-        mock.return_value = Mock(
-            google_cloud_platform=Mock(location="us-mock-location")
-        )
-
-        yield mock
-
-
-@pytest.fixture
-def mock_gcp_location_in_asia():
-    with patch("ai_gateway.api.v2.code.completions.Config") as mock:
-        mock.return_value = Mock(
-            google_cloud_platform=Mock(location="asia-mock-location")
-        )
-
-        yield mock
+def gcp_location():
+    return "us-central1"
 
 
 @pytest.fixture
@@ -1187,7 +1175,6 @@ class TestCodeCompletions:
         self,
         mock_client: Mock,
         mock_litellm_acompletion: Mock,
-        mock_gcp_location: Mock,
         mock_post_processor: Mock,
     ):
         params = {
@@ -1254,12 +1241,12 @@ class TestCodeCompletions:
             == "You cannot specify a prompt with the given provider and model combination"
         )
 
+    @pytest.mark.parametrize("gcp_location", ["asia-mock-location"])
     def test_attempt_vertex_codestral_in_asia(
         self,
         mock_client: Mock,
         mock_litellm_acompletion: Mock,
         mock_completions_legacy: Mock,
-        mock_gcp_location_in_asia: Mock,
     ):
         params = {
             "prompt_version": 1,
@@ -1323,7 +1310,6 @@ class TestCodeCompletions:
         self,
         mock_client: Mock,
         mock_litellm_acompletion: Mock,
-        mock_gcp_location: Mock,
         mock_post_processor: Mock,
     ):
         params = {
@@ -1365,12 +1351,12 @@ class TestCodeCompletions:
         assert result["model"]["name"] == "vertex_ai/codestral-2501"
         assert result["choices"][0]["text"] == "Post-processed completion response"
 
+    @pytest.mark.parametrize("gcp_location", ["asia-mock-location"])
     def test_disable_code_gecko_default_in_asia(
         self,
         mock_client: Mock,
         mock_litellm_acompletion: Mock,
         mock_post_processor: Mock,
-        mock_gcp_location_in_asia: Mock,
     ):
         params = {
             "prompt_version": 1,

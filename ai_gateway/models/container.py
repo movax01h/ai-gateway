@@ -171,6 +171,7 @@ class ContainerModels(containers.DeclarativeContainer):
             provider_keys=config.model_keys,
             provider_endpoints=config.model_endpoints,
             async_fireworks_client=async_fireworks_client,
+            vertex_model_location=config.vertex_text_model.location,
         ),
         mocked=providers.Factory(mock.ChatModel),
     )
