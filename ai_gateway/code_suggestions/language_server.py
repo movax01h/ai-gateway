@@ -7,7 +7,7 @@ __all__ = ["LanguageServerVersion"]
 
 log = structlog.stdlib.get_logger("codesuggestions")
 
-ADVANCED_CONTEXT_LANGUAGE_SERVER_VERSION = Version("6.3.0")
+ADVANCED_CONTEXT_LANGUAGE_SERVER_VERSION = Version("7.17.1")
 
 
 class LanguageServerVersion:

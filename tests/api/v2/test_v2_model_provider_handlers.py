@@ -150,7 +150,7 @@ class TestLegacyHandler:
                         content="from typing import Any",
                     ),
                 ],
-                {"X-Gitlab-Language-Server-Version": "6.3.0"},
+                {"X-Gitlab-Language-Server-Version": "7.17.1"},
                 {
                     "code_context": [
                         "from typing import List",
@@ -161,7 +161,7 @@ class TestLegacyHandler:
             (
                 0,
                 [],
-                {"X-Gitlab-Language-Server-Version": "6.3.0"},
+                {"X-Gitlab-Language-Server-Version": "7.17.1"},
                 {},
             ),
             (

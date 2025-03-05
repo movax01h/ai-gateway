@@ -13,9 +13,10 @@ class TestLanguageServer:
             ("invalid version", Version("0.0.0"), False),
             ("0.0.0", Version("0.0.0"), False),
             ("4.15.0", Version("4.15.0"), False),
-            ("6.21.0", Version("6.21.0"), True),
-            ("7.0.0", Version("7.0.0"), True),
-            ("7.0.0-beta.1", Version("7.0.0-beta.1"), True),
+            ("6.21.0", Version("6.21.0"), False),
+            ("7.17.1", Version("7.17.1"), True),
+            ("7.18.0", Version("7.18.0"), True),
+            ("8.0.0-beta.1", Version("8.0.0-beta.1"), True),
             ("999.99.9", Version("999.99.9"), True),
         ],
     )
