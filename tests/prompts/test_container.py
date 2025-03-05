@@ -7,15 +7,14 @@ from dependency_injector import containers, providers
 from pydantic import AnyUrl
 
 from ai_gateway.chat.agents.react import ReActAgent
-from ai_gateway.config import Config
 from ai_gateway.prompts import Prompt
 from ai_gateway.prompts.registry import LocalPromptRegistry
 from ai_gateway.prompts.typing import ModelMetadata
 
 
 @pytest.fixture
-def mock_config():
-    yield Config(custom_models={"enabled": True, "disable_streaming": True})
+def config_values():
+    yield {"custom_models": {"enabled": True, "disable_streaming": True}}
 
 
 def test_container(mock_container: containers.DeclarativeContainer):

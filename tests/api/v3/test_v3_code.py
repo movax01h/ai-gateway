@@ -6,7 +6,6 @@ from fastapi.testclient import TestClient
 from gitlab_cloud_connector import CloudConnectorUser, UserClaims
 
 from ai_gateway.api.v3 import api_router
-from ai_gateway.config import Config, ConfigModelEndpoints, ConfigModelKeys
 from ai_gateway.feature_flags.context import current_feature_flag_context
 from ai_gateway.models.base import KindModelProvider
 from ai_gateway.tracking import SnowplowEventContext
@@ -44,24 +43,29 @@ def auth_user():
 
 
 @pytest.fixture
-def mock_config(assets_dir):
-    config = Config()
-    config.custom_models.enabled = True
-    config.model_keys = ConfigModelKeys(
-        fireworks_api_key="mock_fireworks_key",
-    )
-    config.self_signed_jwt.signing_key = open(
-        assets_dir / "keys" / "signing_key.pem"
-    ).read()
-    config.amazon_q.region = "us-west-2"
-    config.model_endpoints = ConfigModelEndpoints(
-        fireworks_current_region_endpoint={
-            "endpoint": "https://fireworks.endpoint",
-            "identifier": "qwen2p5-coder-7b",
-        }
-    )
-
-    yield config
+def config_values(assets_dir):
+    return {
+        "custom_models": {
+            "enabled": True,
+        },
+        "model_keys": {
+            "fireworks_api_key": "mock_fireworks_key",
+        },
+        "self_signed_jwt": {
+            "signing_key": open(assets_dir / "keys" / "signing_key.pem").read(),
+        },
+        "amazon_q": {
+            "region": "us-west-2",
+        },
+        "model_endpoints": {
+            "fireworks_regional_endpoints": {
+                "us-central1": {
+                    "endpoint": "https://fireworks.endpoint",
+                    "identifier": "qwen2p5-coder-7b",
+                },
+            },
+        },
+    }
 
 
 class TestEditorContentCompletion:

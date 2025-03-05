@@ -3,17 +3,13 @@ from typing import Type, cast
 import pytest
 from dependency_injector import containers, providers
 
-from ai_gateway.config import Config
 from ai_gateway.searches.search import Searcher, VertexAISearch
 from ai_gateway.searches.sqlite_search import SqliteSearch
 
 
 @pytest.fixture
-def mock_config(custom_models_enabled: bool):
-    config = Config()
-    config.custom_models.enabled = custom_models_enabled
-
-    yield config
+def config_values(custom_models_enabled: bool):
+    return {"custom_models": {"enabled": custom_models_enabled}}
 
 
 @pytest.mark.parametrize(

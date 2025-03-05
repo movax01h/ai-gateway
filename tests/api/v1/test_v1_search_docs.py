@@ -13,8 +13,6 @@ from ai_gateway.api.v1.search.typing import (
     SearchResponseMetadata,
     SearchResult,
 )
-from ai_gateway.config import Config
-from ai_gateway.internal_events import InternalEventAdditionalProperties
 
 
 @pytest.fixture(scope="class")
@@ -52,14 +50,6 @@ def search_results():
             },
         }
     ]
-
-
-@pytest.fixture
-def mock_config():
-    config = Config()
-    config.custom_models.enabled = False
-
-    yield config
 
 
 @pytest.mark.asyncio
