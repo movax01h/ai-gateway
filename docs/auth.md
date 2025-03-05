@@ -83,7 +83,7 @@ AIGW_CUSTOMER_PORTAL_URL=http://<your-customer-dot-address> # e.g. http://127.0.
 
 ### Ensure `CLOUD_CONNECTOR_SERVICE_NAME` is set
 
-**NOTE:** This is only necessary if you don't use the Docker container.
+**NOTE:** Only necessary if you don't use the Docker container.
 
 When validating tokens, we verify that the token `aud` claim (audience) matches the system name the token is sent to.
 
