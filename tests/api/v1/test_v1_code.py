@@ -7,7 +7,6 @@ from gitlab_cloud_connector import CloudConnectorUser, CompositeProvider, UserCl
 from jose import jwt
 
 from ai_gateway.api.v1 import api_router
-from ai_gateway.config import Config, ConfigAuth, ConfigSelfSignedJwt
 
 # JSON Web Key can be generated via https://mkjwk.org/
 # Private key: X.509 PEM format
@@ -76,12 +75,12 @@ def auth_user(request):
 
 
 @pytest.fixture
-def mock_config():
-    yield Config(
-        _env_file=None,
-        auth=ConfigAuth(),
-        self_signed_jwt=ConfigSelfSignedJwt(signing_key=TEST_PRIVATE_KEY),
-    )
+def config_values():
+    yield {
+        "self_signed_jwt": {
+            "signing_key": TEST_PRIVATE_KEY,
+        }
+    }
 
 
 # Third argument ("auth_user") is to parametrize the presence of "duo_seat_count" claim.
@@ -278,12 +277,12 @@ class TestUnauthorizedIssuer:
 
 class TestUserAccessTokenJwtGenerationFailed:
     @pytest.fixture
-    def mock_config(self):
-        yield Config(
-            _env_file=None,
-            auth=ConfigAuth(),
-            self_signed_jwt=ConfigSelfSignedJwt(signing_key="BROKEN_KEY"),
-        )
+    def config_values(self):
+        yield {
+            "self_signed_jwt": {
+                "signing_key": "BROKEN_KEY",
+            }
+        }
 
     def test_user_access_token_jwt_generation_failed(self, mock_client: TestClient):
         response = mock_client.post(

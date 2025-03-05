@@ -3,7 +3,6 @@ from fastapi.testclient import TestClient
 from gitlab_cloud_connector import CloudConnectorUser, UserClaims
 
 from ai_gateway.api.v2 import api_router
-from ai_gateway.config import Config
 
 
 @pytest.fixture(scope="class")
@@ -24,8 +23,8 @@ def auth_user():
 
 
 @pytest.fixture
-def mock_config():
-    yield Config(mock_model_responses=True)
+def config_values():
+    yield {"mock_model_responses": True}
 
 
 class TestMockedModels:

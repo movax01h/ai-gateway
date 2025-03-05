@@ -10,9 +10,7 @@ from langchain_core.messages import BaseMessage
 from pydantic import AnyUrl
 
 from ai_gateway.api.v1 import api_router
-from ai_gateway.config import Config
 from ai_gateway.prompts import Prompt
-from ai_gateway.prompts.config.base import PromptConfig
 from ai_gateway.prompts.typing import (
     AmazonQModelMetadata,
     ModelMetadata,
@@ -42,14 +40,6 @@ class FakeModel(SimpleChatModel):
         assert self.expected_message == messages[0].content
 
         return self.response
-
-
-@pytest.fixture
-def mock_config():
-    config = Config()
-    config.custom_models.enabled = False
-
-    yield config
 
 
 @pytest.fixture

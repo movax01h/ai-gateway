@@ -159,15 +159,16 @@ def auth_user(self):
 
 
 @pytest.fixture
-def mock_config(assets_dir, credentials):
-    config = Config()
-    config.amazon_q.endpoint_url = credentials["endpoint_url"]
-    config.amazon_q.region = credentials["region_name"]
-    config.self_signed_jwt.signing_key = open(
-        assets_dir / "keys" / "signing_key.pem"
-    ).read()
-
-    yield config
+def config_values(assets_dir, credentials):
+    return {
+        "amazon_q": {
+            "endpoint_url": credentials["endpoint_url"],
+            "region": credentials["region_name"],
+        },
+        "self_signed_jwt": {
+            "signing_key": open(assets_dir / "keys" / "signing_key.pem").read()
+        },
+    }
 
 
 class TestUnauthorizedScopes:

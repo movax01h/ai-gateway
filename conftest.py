@@ -115,8 +115,13 @@ def mock_connect_vertex_search():
 
 
 @pytest.fixture
-def mock_config():
-    yield Config()
+def config_values():
+    return {}
+
+
+@pytest.fixture
+def mock_config(config_values: dict[str, Any]):
+    yield Config(_env_file=None, _env_prefix='AIGW_TEST', **config_values)
 
 
 @pytest.fixture

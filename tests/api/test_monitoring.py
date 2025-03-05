@@ -8,23 +8,25 @@ from fastapi.testclient import TestClient
 
 from ai_gateway.api import create_fast_api_server
 from ai_gateway.api.monitoring import validated
-from ai_gateway.config import Config, ConfigAuth, ConfigModelEndpoints, ConfigModelKeys
+from ai_gateway.config import Config
 from ai_gateway.models import ModelAPIError
 
 
 @pytest.fixture
-def mock_config():
-    cfg = Config(_env_file=None, auth=ConfigAuth())
+def config_values():
     # test using a valid looking fireworks config so we can stub out the actual
     # call rather than the `from_model_name` classmethod
-    cfg.model_keys = ConfigModelKeys(fireworks_api_key="fw_api_key")
-    cfg.model_endpoints = ConfigModelEndpoints(
-        fireworks_current_region_endpoint={
-            "endpoint": "https://fireworks.endpoint.com/v1",
-            "identifier": "accounts/fireworks/models/qwen2p5-coder-7b#accounts/deployment/deadbeef",
-        }
-    )
-    yield cfg
+    yield {
+        "model_keys": {"fireworks_api_key": "fw_api_key"},
+        "model_endpoints": {
+            "fireworks_regional_endpoints": {
+                "us-central1": {
+                    "endpoint": "https://fireworks.endpoint.com/v1",
+                    "identifier": "accounts/fireworks/models/qwen2p5-coder-7b#accounts/deployment/deadbeef",
+                },
+            }
+        },
+    }
 
 
 @pytest.fixture

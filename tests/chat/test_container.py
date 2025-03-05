@@ -5,7 +5,6 @@ import pytest
 from dependency_injector import containers, providers
 from langchain_core.runnables import Runnable
 
-from ai_gateway import Config
 from ai_gateway.chat.executor import GLAgentRemoteExecutor
 from ai_gateway.chat.tools import BaseTool
 from ai_gateway.chat.tools.gitlab import (
@@ -21,11 +20,8 @@ from ai_gateway.models.litellm import KindLiteLlmModel, LiteLlmChatModel
 
 
 @pytest.fixture
-def mock_config(custom_models_enabled: bool):
-    config = Config()
-    config.custom_models.enabled = custom_models_enabled
-
-    yield config
+def config_values(custom_models_enabled: bool):
+    return {"custom_models": {"enabled": custom_models_enabled}}
 
 
 @pytest.fixture
