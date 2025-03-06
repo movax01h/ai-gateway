@@ -1,0 +1,18 @@
+---
+name: Codestral Fix Code agent
+model:
+  name: codestral
+  params:
+    model_class_provider: litellm
+    temperature: 0.3
+    max_tokens: 2_048
+    max_retries: 1
+unit_primitives:
+  - fix_code
+prompt_template:
+  system: |
+    {% include 'chat/fix_code/system/1.0.0.jinja' %}
+  user: |
+    {% include 'chat/fix_code/user_mistral/1.0.0.jinja' %}
+params:
+  timeout: 60
