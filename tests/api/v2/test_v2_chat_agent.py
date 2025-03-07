@@ -34,15 +34,6 @@ def fast_api_router():
     return api_router
 
 
-@pytest.fixture(autouse=True)
-def mock_date(mocker):
-    mock_datetime = mocker.patch(
-        "ai_gateway.api.v2.chat.agent.datetime", wraps=datetime
-    )
-    mock_datetime.now.return_value = datetime(2024, 12, 25)
-    return "Wednesday, December 25, 2024"
-
-
 @pytest.fixture
 def auth_user():
     return CloudConnectorUser(
@@ -303,7 +294,6 @@ class TestReActAgentStream:
         expected_actions: list[TypeAgentEvent],
         model_metadata: ModelMetadata,
         unavailable_resources: list[str],
-        mock_date,
     ):
         async def _agent_stream(*_args, **_kwargs) -> AsyncIterator[TypeAgentEvent]:
             for action in actions:
@@ -311,19 +301,25 @@ class TestReActAgentStream:
 
         mocked_stream.side_effect = _agent_stream
 
-        response = mock_client.post(
-            "/chat/agent",
-            headers={
-                "Authorization": "Bearer 12345",
-                "X-Gitlab-Authentication-Type": "oidc",
-            },
-            json={
-                "messages": [m.model_dump(mode="json") for m in messages],
-                "options": agent_options.model_dump(mode="json"),
-                "model_metadata": model_metadata.model_dump(mode="json"),
-                "unavailable_resources": unavailable_resources,
-            },
-        )
+        mock_now = datetime(2024, 12, 25)
+        expected_date_string = "Wednesday, December 25, 2024"
+
+        with patch("ai_gateway.api.v2.chat.agent.datetime") as mock_datetime:
+            mock_datetime.now.return_value = mock_now
+
+            response = mock_client.post(
+                "/chat/agent",
+                headers={
+                    "Authorization": "Bearer 12345",
+                    "X-Gitlab-Authentication-Type": "oidc",
+                },
+                json={
+                    "messages": [m.model_dump(mode="json") for m in messages],
+                    "options": agent_options.model_dump(mode="json"),
+                    "model_metadata": model_metadata.model_dump(mode="json"),
+                    "unavailable_resources": unavailable_resources,
+                },
+            )
 
         actual_actions = [
             chunk_to_model(chunk, AgentToolAction)
@@ -347,7 +343,7 @@ class TestReActAgentStream:
             agent_scratchpad=agent_scratchpad,
             model_metadata=model_metadata,
             unavailable_resources=unavailable_resources,
-            current_date=mock_date,
+            current_date=expected_date_string,
         )
 
         assert response.status_code == 200
