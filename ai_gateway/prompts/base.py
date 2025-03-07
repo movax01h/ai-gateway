@@ -184,6 +184,9 @@ class BasePromptRegistry(ABC):
         model_metadata: Optional[TypeModelMetadata] = None,
         internal_event_category=__name__,
     ) -> Prompt:
+        if model_metadata:
+            model_metadata.add_user(user)
+
         prompt = self.get(prompt_id, prompt_version or "^1.0.0", model_metadata)
 
         for unit_primitive in prompt.unit_primitives:
