@@ -1,3 +1,5 @@
+from typing import Annotated
+
 import structlog
 from fastapi import APIRouter, BackgroundTasks, Depends, Request
 from gitlab_cloud_connector import FEATURE_CATEGORIES_FOR_PROXY_ENDPOINTS
@@ -29,9 +31,13 @@ router = APIRouter()
 async def vertex_ai(
     request: Request,
     background_tasks: BackgroundTasks,
-    abuse_detector: AbuseDetector = Depends(get_abuse_detector),
-    vertex_ai_proxy_client: VertexAIProxyClient = Depends(get_vertex_ai_proxy_client),
-    internal_event_client: InternalEventsClient = Depends(get_internal_event_client),
+    abuse_detector: Annotated[AbuseDetector, Depends(get_abuse_detector)],
+    vertex_ai_proxy_client: Annotated[
+        VertexAIProxyClient, Depends(get_vertex_ai_proxy_client)
+    ],
+    internal_event_client: Annotated[
+        InternalEventsClient, Depends(get_internal_event_client)
+    ],
 ):
     unit_primitive = request.headers[X_GITLAB_UNIT_PRIMITIVE]
     internal_event_client.track_event(

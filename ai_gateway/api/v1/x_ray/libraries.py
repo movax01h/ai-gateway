@@ -39,8 +39,10 @@ async def libraries(
     request: Request,
     payload: XRayRequest,
     current_user: Annotated[StarletteUser, Depends(get_current_user)],
-    model: AnthropicModel = Depends(get_x_ray_anthropic_claude),
-    internal_event_client: InternalEventsClient = Depends(get_internal_event_client),
+    model: Annotated[AnthropicModel, Depends(get_x_ray_anthropic_claude)],
+    internal_event_client: Annotated[
+        InternalEventsClient, Depends(get_internal_event_client)
+    ],
 ):
     if not current_user.can(
         GitLabUnitPrimitive.GENERATE_CODE,

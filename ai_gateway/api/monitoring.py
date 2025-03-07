@@ -1,5 +1,5 @@
 import functools
-from typing import Any, Awaitable, Callable
+from typing import Annotated, Any, Awaitable, Callable
 
 from dependency_injector.providers import Factory
 from fastapi import APIRouter, Depends
@@ -64,9 +64,10 @@ def single_validation(
 
 @single_validation(KindModelProvider.VERTEX_AI)
 async def validate_vertex_available(
-    completions_legacy_vertex_factory: Factory[CodeCompletionsLegacy] = Depends(
-        get_code_suggestions_completions_vertex_legacy_provider
-    ),
+    completions_legacy_vertex_factory: Annotated[
+        Factory[CodeCompletionsLegacy],
+        Depends(get_code_suggestions_completions_vertex_legacy_provider),
+    ],
 ) -> bool:
     code_completions = completions_legacy_vertex_factory()
     await code_completions.execute(
@@ -80,9 +81,10 @@ async def validate_vertex_available(
 
 @single_validation(KindModelProvider.ANTHROPIC)
 async def validate_anthropic_available(
-    generations_anthropic_chat_factory: Factory[CodeGenerations] = Depends(
-        get_code_suggestions_generations_anthropic_chat_factory_provider
-    ),
+    generations_anthropic_chat_factory: Annotated[
+        Factory[CodeGenerations],
+        Depends(get_code_suggestions_generations_anthropic_chat_factory_provider),
+    ],
 ) -> bool:
     prompt = Prompt(
         prefix=[
@@ -119,9 +121,10 @@ async def validate_anthropic_available(
 
 @single_validation(KindModelProvider.FIREWORKS)
 async def validate_fireworks_available(
-    completions_litellm_factory: Factory[CodeCompletions] = Depends(
-        get_code_suggestions_completions_litellm_factory_provider
-    ),
+    completions_litellm_factory: Annotated[
+        Factory[CodeCompletions],
+        Depends(get_code_suggestions_completions_litellm_factory_provider),
+    ],
 ) -> bool:
     code_completions = completions_litellm_factory(
         model__name=KindLiteLlmModel.QWEN_2_5,

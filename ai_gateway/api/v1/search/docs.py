@@ -98,9 +98,11 @@ async def docs(
     request: Request,
     current_user: Annotated[StarletteUser, Depends(get_current_user)],
     search_request: SearchRequest,
-    config: Config = Depends(get_config),
-    search_factory: Factory[Searcher] = Depends(get_search_factory_provider),
-    internal_event_client: InternalEventsClient = Depends(get_internal_event_client),
+    config: Annotated[Config, Depends(get_config)],
+    search_factory: Annotated[Factory[Searcher], Depends(get_search_factory_provider)],
+    internal_event_client: Annotated[
+        InternalEventsClient, Depends(get_internal_event_client)
+    ],
 ):
     if not current_user.can(GitLabUnitPrimitive.DOCUMENTATION_SEARCH):
         raise HTTPException(

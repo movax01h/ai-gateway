@@ -33,7 +33,10 @@ router = APIRouter()
 async def user_access_token(
     request: Request,
     current_user: Annotated[StarletteUser, Depends(get_current_user)],
-    token_authority: TokenAuthority = Depends(get_token_authority),
+    token_authority: Annotated[TokenAuthority, Depends(get_token_authority)],
+    internal_event_client: Annotated[
+        InternalEventsClient, Depends(get_internal_event_client)
+    ],
     x_gitlab_global_user_id: Annotated[
         str, Header()
     ] = None,  # This is the value of X_GITLAB_GLOBAL_USER_ID_HEADER
@@ -43,7 +46,6 @@ async def user_access_token(
     x_gitlab_instance_id: Annotated[
         str, Header()
     ] = None,  # This is the value of X_GITLAB_INSTANCE_ID_HEADER
-    internal_event_client: InternalEventsClient = Depends(get_internal_event_client),
 ):
     if not current_user.can(
         GitLabUnitPrimitive.COMPLETE_CODE,
