@@ -289,6 +289,79 @@ async def fix_end_block_errors(
     return completion
 
 
+async def fix_truncation(
+    prefix: str,
+    completion: str,
+    suffix: str,
+    max_output_tokens_used: bool,
+    raw_completion: str,
+    lang_id: Optional[LanguageId] = None,
+) -> str:
+    """
+    Trims back a truncated completion to a more sensible stopping point if it does not
+    introduce new parsing errors.
+
+    This process trims back to the last space of the last line. If the last line does
+    not contain any non-leading and non-trailing spaces, it trims off the entire last
+    line unless doing so would remove all the code content.
+
+    Args:
+        prefix: The code context before the completion
+        completion: The code completion to process
+        suffix: The code context after the completion
+        max_output_tokens_used: True if the completion consists of the
+                                max number of output tokens permitted.
+        raw_completion: The completion before any post processing
+        lang_id: Optional language identifier for the code
+
+    Returns:
+        str: The processed completion
+    """
+
+    # We assume the completion is likely truncated if it:
+    # 1. uses exactly max output tokens,
+    # 2. is unmodified by previous post processors, and
+    # 3. does not end with space or newline characters.
+    def _is_likely_truncated() -> bool:
+        return (
+            max_output_tokens_used
+            and completion == raw_completion
+            and completion == completion.rstrip()
+        )
+
+    if not _is_likely_truncated():
+        return completion
+
+    last_line = completion.splitlines()[-1:][0]
+    last_space_index = last_line.rfind(" ")
+    string_to_remove = (
+        last_line[last_space_index:] if last_space_index != -1 else last_line
+    )
+
+    trimmed_completion = completion.removesuffix(string_to_remove).rstrip()
+
+    # Return the unmodified completion if trimming it would remove all code
+    # content (e.g. when the completion is only one line without spaces).
+    if not trimmed_completion.strip():
+        return completion
+
+    code_before_trim = f"{prefix}{completion}{suffix}"
+    code_after_trim = f"{prefix}{trimmed_completion}{suffix}"
+
+    try:
+        parser_before_trim = await CodeParser.from_language_id(
+            code_before_trim, lang_id
+        )
+        parser_after_trim = await CodeParser.from_language_id(code_after_trim, lang_id)
+
+        if len(parser_after_trim.errors()) <= len(parser_before_trim.errors()):
+            return trimmed_completion
+    except ValueError as e:
+        log.warning(f"Failed to parse code: {e}")
+
+    return completion
+
+
 def strip_code_block_markdown(text: str) -> str:
     text = _RE_MARKDOWN_CODE_BLOCK_BEGIN.sub("", text, count=0)
     text = text.rstrip("`")

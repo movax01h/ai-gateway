@@ -91,6 +91,16 @@ def mock_filter_score():
         yield mock
 
 
+@pytest.fixture
+def mock_fix_truncation():
+    with patch(
+        "ai_gateway.code_suggestions.processing.post.completions.fix_truncation"
+    ) as mock:
+        mock.return_value = "processed completion"
+
+        yield mock
+
+
 class TestPostProcessorCompletions:
     @pytest.mark.asyncio
     async def test_process(
@@ -102,6 +112,7 @@ class TestPostProcessorCompletions:
         mock_clean_model_reflection: Mock,
         mock_strip_whitespaces: Mock,
         mock_filter_score: Mock,
+        mock_fix_truncation: Mock,
     ):
         code_context = "test code context"
         lang_id = LanguageId.RUBY
@@ -120,6 +131,7 @@ class TestPostProcessorCompletions:
         mock_clean_model_reflection.assert_called_once()
         mock_strip_whitespaces.assert_called_once()
         mock_filter_score.assert_not_called()
+        mock_fix_truncation.assert_not_called()
 
     @pytest.mark.asyncio
     async def test_process_with_custom_operations(
@@ -132,6 +144,7 @@ class TestPostProcessorCompletions:
         mock_strip_whitespaces: Mock,
         mock_strip_asterisks: Mock,
         mock_filter_score: Mock,
+        mock_fix_truncation: Mock,
     ):
         code_context = "test code context"
         lang_id = LanguageId.RUBY
@@ -148,6 +161,7 @@ class TestPostProcessorCompletions:
             extras=[
                 PostProcessorOperation.STRIP_ASTERISKS,
                 PostProcessorOperation.FILTER_SCORE,
+                PostProcessorOperation.FIX_TRUNCATION,
             ],
         )
         await post_processor.process(completion)
@@ -162,6 +176,7 @@ class TestPostProcessorCompletions:
         mock_strip_whitespaces.assert_called_once()
         mock_strip_asterisks.assert_called_once()
         mock_filter_score.assert_called_once()
+        mock_fix_truncation.assert_called_once()
 
     @pytest.mark.asyncio
     async def test_process_with_exclusions(
@@ -173,6 +188,7 @@ class TestPostProcessorCompletions:
         mock_clean_model_reflection: Mock,
         mock_strip_whitespaces: Mock,
         mock_filter_score: Mock,
+        mock_fix_truncation: Mock,
     ):
         code_context = "test code context"
         lang_id = LanguageId.RUBY
@@ -193,3 +209,4 @@ class TestPostProcessorCompletions:
         mock_clean_model_reflection.assert_called_once()
         mock_strip_whitespaces.assert_not_called()
         mock_filter_score.assert_not_called()
+        mock_fix_truncation.assert_not_called()

@@ -11,6 +11,7 @@ from ai_gateway.code_suggestions.processing.post.ops import (
     filter_score,
     fix_end_block_errors,
     fix_end_block_errors_legacy,
+    fix_truncation,
     remove_comment_only_completion,
     strip_asterisks,
     trim_by_min_allowed_context,
@@ -37,6 +38,7 @@ class PostProcessorOperation(StrEnum):
     STRIP_WHITESPACES = "strip_whitespaces"
     STRIP_ASTERISKS = "strip_asterisks"
     FILTER_SCORE = "filter_score"
+    FIX_TRUNCATION = "fix_truncation"
 
 
 # This is the ordered list of prost-processing functions
@@ -97,6 +99,12 @@ class PostProcessor(PostProcessorBase):
                 suffix=self.suffix,
                 lang_id=self.lang_id,
             ),
+            PostProcessorOperation.FIX_TRUNCATION: partial(
+                fix_truncation,
+                self.code_context,
+                suffix=self.suffix,
+                lang_id=self.lang_id,
+            ),
             PostProcessorOperation.CLEAN_MODEL_REFLECTION: partial(
                 clean_model_reflection, self.code_context
             ),
@@ -105,12 +113,14 @@ class PostProcessor(PostProcessorBase):
         }
 
     async def process(self, completion: str, **kwargs: Any) -> str:
+        raw_completion = completion
+
         for processor in self._ordered_post_processors():
             if str(processor) in self.exclude:
                 continue
 
             completion = await self._apply_post_processor(
-                processor, completion, **kwargs
+                processor, completion, raw_completion=raw_completion, **kwargs
             )
 
             if completion == "":
@@ -129,6 +139,15 @@ class PostProcessor(PostProcessorBase):
         if actual_processor_key == PostProcessorOperation.FILTER_SCORE:
             score = kwargs.get("score")
             func = partial(func, score=score)
+
+        if actual_processor_key == PostProcessorOperation.FIX_TRUNCATION:
+            max_output_tokens_used = kwargs.get("max_output_tokens_used", False)
+            raw_completion = kwargs.get("raw_completion")
+            func = partial(
+                func,
+                max_output_tokens_used=max_output_tokens_used,
+                raw_completion=raw_completion,
+            )
 
         if self._is_async(func):
             processed_completion = await func(completion)

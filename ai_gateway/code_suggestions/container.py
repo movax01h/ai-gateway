@@ -173,6 +173,7 @@ class ContainerCodeCompletions(containers.DeclarativeContainer):
             exclude=config.excl_post_process,
             extras=[
                 PostProcessorOperation.FILTER_SCORE,
+                PostProcessorOperation.FIX_TRUNCATION,
             ],
             score_threshold=config.fireworks_qwen_score_threshold,
         ).provider,
