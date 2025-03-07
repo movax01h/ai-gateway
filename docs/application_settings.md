@@ -93,7 +93,7 @@ Instead, you should do:
    @router.post("/awesome_feature")
    async def awesome_feature(
       request: Request,
-      awesome_client: AwesomeClient = Depends(Provide[ContainerAwesomeFeature.awesome_client]),
+      awesome_client: Annotated[AwesomeClient, Depends(Provide[ContainerAwesomeFeature.awesome_client])],
    ):
       return awesome_client.predict('Hi, how are you?')
    ```

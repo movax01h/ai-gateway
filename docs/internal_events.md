@@ -17,7 +17,7 @@ from ai_gateway.async_dependency_resolver get_internal_event_client
 @router.post("/awesome_feature")
 async def awesome_feature(
     request: Request,
-    internal_event_client: InternalEventsClient = Depends(get_internal_event_client),
+    internal_event_client: Annotated[InternalEventsClient, Depends(get_internal_event_client)],
 ):
     # Send "request_awesome_feature" event to Snowplow.
     internal_event_client.track_event("request_awesome_feature")

@@ -97,10 +97,13 @@ async def chat(
     agent_request: AgentRequest,
     current_user: Annotated[StarletteUser, Depends(get_current_user)],
     prompt_registry: Annotated[BasePromptRegistry, Depends(get_prompt_registry)],
-    gl_agent_remote_executor_factory: GLAgentRemoteExecutor[
-        ReActAgentInputs, TypeAgentEvent
-    ] = Depends(get_gl_agent_remote_executor_factory),
-    internal_event_client: InternalEventsClient = Depends(get_internal_event_client),
+    gl_agent_remote_executor_factory: Annotated[
+        GLAgentRemoteExecutor[ReActAgentInputs, TypeAgentEvent],
+        Depends(get_gl_agent_remote_executor_factory),
+    ],
+    internal_event_client: Annotated[
+        InternalEventsClient, Depends(get_internal_event_client)
+    ],
 ):
     agent = get_agent(current_user, agent_request, prompt_registry)
 

@@ -30,10 +30,12 @@ async def oauth_create_application(
     request: Request,
     application_request: ApplicationRequest,
     current_user: Annotated[StarletteUser, Depends(get_current_user)],
-    internal_event_client: InternalEventsClient = Depends(get_internal_event_client),
-    amazon_q_client_factory: AmazonQClientFactory = Depends(
-        get_amazon_q_client_factory
-    ),
+    internal_event_client: Annotated[
+        InternalEventsClient, Depends(get_internal_event_client)
+    ],
+    amazon_q_client_factory: Annotated[
+        AmazonQClientFactory, Depends(get_amazon_q_client_factory)
+    ],
 ):
     if not current_user.can(GitLabUnitPrimitive.AMAZON_Q_INTEGRATION):
         raise HTTPException(
@@ -65,10 +67,12 @@ async def oauth_delete_application(
     request: Request,
     application_request: ApplicationDeleteRequest,
     current_user: Annotated[StarletteUser, Depends(get_current_user)],
-    internal_event_client: InternalEventsClient = Depends(get_internal_event_client),
-    amazon_q_client_factory: AmazonQClientFactory = Depends(
-        get_amazon_q_client_factory
-    ),
+    internal_event_client: Annotated[
+        InternalEventsClient, Depends(get_internal_event_client)
+    ],
+    amazon_q_client_factory: Annotated[
+        AmazonQClientFactory, Depends(get_amazon_q_client_factory)
+    ],
 ):
     if not current_user.can(GitLabUnitPrimitive.AMAZON_Q_INTEGRATION):
         raise HTTPException(

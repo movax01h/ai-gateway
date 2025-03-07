@@ -70,11 +70,13 @@ async def chat(
     chat_request: ChatRequest,
     chat_invokable: str,
     current_user: Annotated[StarletteUser, Depends(get_current_user)],
-    anthropic_claude_factory: FactoryAggregate = Depends(
-        get_chat_anthropic_claude_factory_provider
-    ),
-    litellm_factory: Factory = Depends(get_chat_litellm_factory_provider),
-    internal_event_client: InternalEventsClient = Depends(get_internal_event_client),
+    anthropic_claude_factory: Annotated[
+        FactoryAggregate, Depends(get_chat_anthropic_claude_factory_provider)
+    ],
+    litellm_factory: Annotated[Factory, Depends(get_chat_litellm_factory_provider)],
+    internal_event_client: Annotated[
+        InternalEventsClient, Depends(get_internal_event_client)
+    ],
 ):
     prompt_component = chat_request.prompt_components[0]
     payload = prompt_component.payload

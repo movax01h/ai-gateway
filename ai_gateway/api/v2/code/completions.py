@@ -99,31 +99,44 @@ async def completions(
     current_user: Annotated[StarletteUser, Depends(get_current_user)],
     prompt_registry: Annotated[BasePromptRegistry, Depends(get_prompt_registry)],
     config: Annotated[Config, Depends(get_config)],
-    completions_legacy_factory: Factory[CodeCompletionsLegacy] = Depends(
-        get_code_suggestions_completions_vertex_legacy_provider
-    ),
-    completions_anthropic_factory: Factory[CodeCompletions] = Depends(
-        get_code_suggestions_completions_anthropic_provider
-    ),
-    completions_litellm_factory: Factory[CodeCompletions] = Depends(
-        get_code_suggestions_completions_litellm_factory_provider
-    ),
-    completions_fireworks_qwen_factory: Factory[CodeCompletions] = Depends(
-        get_code_suggestions_completions_fireworks_qwen_factory_provider
-    ),
-    completions_amazon_q_factory: Factory[CodeCompletions] = Depends(
-        get_code_suggestions_completions_amazon_q_factory_provider
-    ),
-    completions_litellm_vertex_codestral_factory: Factory[CodeCompletions] = Depends(
-        get_code_suggestions_completions_litellm_vertex_codestral_factory_provider
-    ),
-    completions_agent_factory: Factory[CodeCompletions] = Depends(
-        get_code_suggestions_completions_agent_factory_provider
-    ),
-    snowplow_instrumentator: SnowplowInstrumentator = Depends(
-        get_snowplow_instrumentator
-    ),
-    internal_event_client: InternalEventsClient = Depends(get_internal_event_client),
+    completions_legacy_factory: Annotated[
+        Factory[CodeCompletionsLegacy],
+        Depends(get_code_suggestions_completions_vertex_legacy_provider),
+    ],
+    completions_anthropic_factory: Annotated[
+        Factory[CodeCompletions],
+        Depends(get_code_suggestions_completions_anthropic_provider),
+    ],
+    completions_litellm_factory: Annotated[
+        Factory[CodeCompletions],
+        Depends(get_code_suggestions_completions_litellm_factory_provider),
+    ],
+    completions_fireworks_qwen_factory: Annotated[
+        Factory[CodeCompletions],
+        Depends(get_code_suggestions_completions_fireworks_qwen_factory_provider),
+    ],
+    completions_amazon_q_factory: Annotated[
+        Factory[CodeCompletions],
+        Depends(get_code_suggestions_completions_amazon_q_factory_provider),
+    ],
+    completions_litellm_vertex_codestral_factory: Annotated[
+        Factory[CodeCompletions],
+        Depends(
+            get_code_suggestions_completions_litellm_vertex_codestral_factory_provider
+        ),
+    ],
+    completions_agent_factory: Annotated[
+        Factory[CodeCompletions],
+        Depends(get_code_suggestions_completions_agent_factory_provider),
+    ],
+    snowplow_instrumentator: Annotated[
+        SnowplowInstrumentator,
+        Depends(get_snowplow_instrumentator),
+    ],
+    internal_event_client: Annotated[
+        InternalEventsClient,
+        Depends(get_internal_event_client),
+    ],
 ):
     code_completions, kwargs = _build_code_completions(
         request,
@@ -204,25 +217,32 @@ async def generations(
     current_user: Annotated[StarletteUser, Depends(get_current_user)],
     prompt_registry: Annotated[BasePromptRegistry, Depends(get_prompt_registry)],
     config: Annotated[Config, Depends(get_config)],
-    generations_vertex_factory: Factory[CodeGenerations] = Depends(
-        get_code_suggestions_generations_vertex_provider
-    ),
-    generations_anthropic_factory: Factory[CodeGenerations] = Depends(
-        get_code_suggestions_generations_anthropic_factory_provider
-    ),
-    generations_anthropic_chat_factory: Factory[CodeGenerations] = Depends(
-        get_code_suggestions_generations_anthropic_chat_factory_provider
-    ),
-    generations_litellm_factory: Factory[CodeGenerations] = Depends(
-        get_code_suggestions_generations_litellm_factory_provider
-    ),
-    generations_agent_factory: Factory[CodeGenerations] = Depends(
-        get_code_suggestions_generations_agent_factory_provider
-    ),
-    snowplow_instrumentator: SnowplowInstrumentator = Depends(
-        get_snowplow_instrumentator
-    ),
-    internal_event_client: InternalEventsClient = Depends(get_internal_event_client),
+    generations_vertex_factory: Annotated[
+        Factory[CodeGenerations],
+        Depends(get_code_suggestions_generations_vertex_provider),
+    ],
+    generations_anthropic_factory: Annotated[
+        Factory[CodeGenerations],
+        Depends(get_code_suggestions_generations_anthropic_factory_provider),
+    ],
+    generations_anthropic_chat_factory: Annotated[
+        Factory[CodeGenerations],
+        Depends(get_code_suggestions_generations_anthropic_chat_factory_provider),
+    ],
+    generations_litellm_factory: Annotated[
+        Factory[CodeGenerations],
+        Depends(get_code_suggestions_generations_litellm_factory_provider),
+    ],
+    generations_agent_factory: Annotated[
+        Factory[CodeGenerations],
+        Depends(get_code_suggestions_generations_agent_factory_provider),
+    ],
+    snowplow_instrumentator: Annotated[
+        SnowplowInstrumentator, Depends(get_snowplow_instrumentator)
+    ],
+    internal_event_client: Annotated[
+        InternalEventsClient, Depends(get_internal_event_client)
+    ],
 ):
     if not current_user.can(
         GitLabUnitPrimitive.GENERATE_CODE,
