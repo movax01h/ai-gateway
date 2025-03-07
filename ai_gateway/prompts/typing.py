@@ -1,8 +1,11 @@
+from abc import abstractmethod
 from typing import Annotated, Any, Dict, Literal, Optional, Protocol, TypeAlias
 
 from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.runnables import RunnableBinding
 from pydantic import AnyUrl, BaseModel, StringConstraints, UrlConstraints
+
+from ai_gateway.api.auth_utils import StarletteUser
 
 # NOTE: Do not change this to `BaseChatModel | RunnableBinding`. You'd think that's just equivalent, right? WRONG. If
 # you do that, you'll get `object has no attribute 'get'` when you use a `RummableBinding`. Why? I have no idea.
@@ -11,16 +14,29 @@ from pydantic import AnyUrl, BaseModel, StringConstraints, UrlConstraints
 Model: TypeAlias = RunnableBinding | BaseChatModel
 
 
-class AmazonQModelMetadata(BaseModel):
+class BaseModelMetadata(BaseModel):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self._user = None
+
+    @abstractmethod
+    def to_params(self) -> Dict[str, Any]:
+        pass
+
+    def add_user(self, user: StarletteUser):
+        self._user = user
+
+
+class AmazonQModelMetadata(BaseModelMetadata):
     provider: Literal["amazon_q"]
     name: Literal["amazon_q"]
     role_arn: Annotated[str, StringConstraints(max_length=255)]
 
     def to_params(self) -> Dict[str, Any]:
-        return {"role_arn": self.role_arn}
+        return {"role_arn": self.role_arn, "user": self._user}
 
 
-class ModelMetadata(BaseModel):
+class ModelMetadata(BaseModelMetadata):
     name: Annotated[str, StringConstraints(max_length=255)]
     provider: Annotated[str, StringConstraints(max_length=255)]
     endpoint: Annotated[AnyUrl, UrlConstraints(max_length=255)]

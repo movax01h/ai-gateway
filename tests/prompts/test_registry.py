@@ -505,7 +505,12 @@ class TestLocalPromptRegistry:
                 Prompt,
                 [("system", "Template1"), ("user", "Template2")],
                 "amazon_q",
-                {"role_arn": "role-arn", "stop": ["Foo", "Bar"], "timeout": 60},
+                {
+                    "role_arn": "role-arn",
+                    "stop": ["Foo", "Bar"],
+                    "timeout": 60.0,
+                    "user": None,
+                },
                 {},
                 ChatAmazonQ,
             ),
