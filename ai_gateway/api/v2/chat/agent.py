@@ -134,7 +134,9 @@ async def chat(
 
     gl_version = request.headers.get(X_GITLAB_VERSION_HEADER, "")
     gl_agent_remote_executor = gl_agent_remote_executor_factory(agent=agent)
-    gl_agent_remote_executor.on_behalf(current_user, gl_version)
+    gl_agent_remote_executor.on_behalf(
+        current_user, gl_version, agent_request.model_metadata
+    )
 
     request_log.info("Request to V2 Chat Agent", source=__name__, inputs=inputs)
 

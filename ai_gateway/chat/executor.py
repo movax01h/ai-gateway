@@ -1,6 +1,7 @@
-from typing import AsyncIterator, Generic
+from typing import AsyncIterator, Generic, Optional
 
 import starlette_context
+from gitlab_cloud_connector import GitLabUnitPrimitive
 
 from ai_gateway.api.auth_utils import StarletteUser
 from ai_gateway.chat.agents import (
@@ -13,6 +14,8 @@ from ai_gateway.chat.agents import (
 from ai_gateway.chat.base import BaseToolsRegistry
 from ai_gateway.chat.tools import BaseTool
 from ai_gateway.internal_events import InternalEventsClient
+from ai_gateway.prompts.config.models import ModelClassProvider
+from ai_gateway.prompts.typing import TypeModelMetadata
 
 __all__ = [
     "GLAgentRemoteExecutor",
@@ -49,12 +52,30 @@ class GLAgentRemoteExecutor(Generic[TypeAgentInputs, TypeAgentEvent]):
     def tools_by_name(self) -> dict:
         return {tool.name: tool for tool in self.tools}
 
-    def on_behalf(self, user: StarletteUser, gl_version: str):
+    def on_behalf(
+        self,
+        user: StarletteUser,
+        gl_version: str,
+        model_metadata: Optional[TypeModelMetadata] = None,
+    ):
         # Access the user tools as soon as possible to raise an exception
         # (in case of invalid unit primitives) before starting the data stream.
         # Reason: https://github.com/tiangolo/fastapi/discussions/10138
         if not user.is_debug:
-            self._tools = self.tools_registry.get_on_behalf(user, gl_version)
+            # TODO: Remove it when proper access control for unit primitives with different providers is implemented
+            # https://gitlab.com/gitlab-org/cloud-connector/gitlab-cloud-connector/-/issues/60
+            if (
+                model_metadata
+                and model_metadata.provider == ModelClassProvider.AMAZON_Q
+                and user.can(GitLabUnitPrimitive.AMAZON_Q_INTEGRATION)
+            ):
+                self._tools = [
+                    tool
+                    for tool in self.tools_registry.get_all()
+                    if tool.is_compatible(gl_version)
+                ]
+            else:
+                self._tools = self.tools_registry.get_on_behalf(user, gl_version)
 
     async def stream(self, *, inputs: TypeAgentInputs) -> AsyncIterator[TypeAgentEvent]:
         inputs.tools = self.tools
