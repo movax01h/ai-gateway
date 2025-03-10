@@ -1,8 +1,10 @@
+from typing import Optional
 from unittest.mock import AsyncMock, Mock, call
 
 import pytest
 from gitlab_cloud_connector import CloudConnectorUser, UserClaims
 from langchain_core.runnables import Runnable
+from pydantic import AnyUrl
 from starlette_context import context, request_cycle_context
 
 from ai_gateway.api.auth_utils import StarletteUser
@@ -16,6 +18,11 @@ from ai_gateway.chat.agents import (
 )
 from ai_gateway.chat.toolset import DuoChatToolsRegistry
 from ai_gateway.models.base_chat import Role
+from ai_gateway.prompts.typing import (
+    AmazonQModelMetadata,
+    ModelMetadata,
+    TypeModelMetadata,
+)
 
 
 @pytest.fixture
@@ -128,6 +135,7 @@ class TestGLAgentRemoteExecutorToolAction:
             "user",
             "gl_version",
             "inputs",
+            "model_metadata",
             "agent_events",
             "expected_available_tools",
             "expected_internal_events",
@@ -142,6 +150,7 @@ class TestGLAgentRemoteExecutorToolAction:
                 ),
                 "17.2.0",
                 ReActAgentInputs(messages=[Message(role=Role.USER, content="Hi")]),
+                None,
                 [AgentToolAction(thought="", tool="issue_reader", tool_input="")],
                 ["issue_reader"],
                 [call("request_ask_issue", category="ai_gateway.chat.executor")],
@@ -155,6 +164,7 @@ class TestGLAgentRemoteExecutorToolAction:
                 ),
                 "17.2.0",
                 ReActAgentInputs(messages=[Message(role=Role.USER, content="Hi")]),
+                None,
                 [AgentToolAction(thought="", tool="epic_reader", tool_input="")],
                 ["epic_reader"],
                 [call("request_ask_epic", category="ai_gateway.chat.executor")],
@@ -168,6 +178,7 @@ class TestGLAgentRemoteExecutorToolAction:
                 ),
                 "17.2.0",
                 ReActAgentInputs(messages=[Message(role=Role.USER, content="Hi")]),
+                None,
                 [
                     AgentToolAction(
                         thought="", tool="gitlab_documentation", tool_input=""
@@ -190,6 +201,7 @@ class TestGLAgentRemoteExecutorToolAction:
                 ),
                 "17.2.0",
                 ReActAgentInputs(messages=[Message(role=Role.USER, content="Hi")]),
+                None,
                 [
                     AgentToolAction(
                         thought="", tool="GitlabDocumentationTool", tool_input=""
@@ -207,6 +219,7 @@ class TestGLAgentRemoteExecutorToolAction:
                 ),
                 "17.2.0",
                 ReActAgentInputs(messages=[Message(role=Role.USER, content="Hi")]),
+                None,
                 [AgentToolAction(thought="", tool="", tool_input="")],
                 ["gitlab_documentation"],
                 [],
@@ -220,6 +233,7 @@ class TestGLAgentRemoteExecutorToolAction:
                 ),
                 "17.2.0",
                 ReActAgentInputs(messages=[Message(role=Role.USER, content="Hi")]),
+                None,
                 [AgentToolAction(thought="", tool="issue_reader", tool_input="")],
                 ["gitlab_documentation"],
                 [],
@@ -233,6 +247,7 @@ class TestGLAgentRemoteExecutorToolAction:
                 ),
                 "17.2.0",
                 ReActAgentInputs(messages=[Message(role=Role.USER, content="Hi")]),
+                None,
                 [AgentFinalAnswer(text="I'm good")],
                 ["gitlab_documentation"],
                 [],
@@ -246,8 +261,59 @@ class TestGLAgentRemoteExecutorToolAction:
                 ),
                 "17.2.0",
                 ReActAgentInputs(messages=[Message(role=Role.USER, content="Hi")]),
+                None,
                 [],
                 [],
+                [],
+            ),
+            (
+                StarletteUser(
+                    CloudConnectorUser(
+                        authenticated=True,
+                        claims=UserClaims(scopes=[]),
+                    )
+                ),
+                "17.2.0",
+                ReActAgentInputs(messages=[Message(role=Role.USER, content="Hi")]),
+                AmazonQModelMetadata(
+                    role_arn="role-arn", provider="amazon_q", name="amazon_q"
+                ),
+                [],
+                [],
+                [],
+            ),
+            (
+                StarletteUser(
+                    CloudConnectorUser(
+                        authenticated=True,
+                        claims=UserClaims(scopes=["amazon_q_integration"]),
+                    )
+                ),
+                "17.2.0",
+                ReActAgentInputs(messages=[Message(role=Role.USER, content="Hi")]),
+                ModelMetadata(
+                    provider="litellm",
+                    name="mistral",
+                    endpoint=AnyUrl("http://localhost:4000"),
+                ),
+                [],
+                [],
+                [],
+            ),
+            (
+                StarletteUser(
+                    CloudConnectorUser(
+                        authenticated=True,
+                        claims=UserClaims(scopes=["amazon_q_integration"]),
+                    )
+                ),
+                "17.2.0",
+                ReActAgentInputs(messages=[Message(role=Role.USER, content="Hi")]),
+                AmazonQModelMetadata(
+                    role_arn="role-arn", provider="amazon_q", name="amazon_q"
+                ),
+                [],
+                ["epic_reader", "issue_reader", "gitlab_documentation"],
                 [],
             ),
         ],
@@ -259,6 +325,7 @@ class TestGLAgentRemoteExecutorToolAction:
         internal_event_client: Mock,
         inputs: ReActAgentInputs,
         user: StarletteUser,
+        model_metadata: Optional[TypeModelMetadata],
         gl_version: str,
         expected_available_tools,
         expected_internal_events,
@@ -269,7 +336,7 @@ class TestGLAgentRemoteExecutorToolAction:
             internal_event_client=internal_event_client,
         )
 
-        executor.on_behalf(user, gl_version)
+        executor.on_behalf(user, gl_version, model_metadata)
 
         with request_cycle_context({}):
             async for _ in executor.stream(inputs=inputs):
