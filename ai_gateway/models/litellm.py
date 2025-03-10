@@ -5,7 +5,6 @@ from litellm import CustomStreamWrapper, ModelResponse, acompletion
 from litellm.exceptions import APIConnectionError, InternalServerError
 from openai import AsyncOpenAI
 
-from ai_gateway.config import Config
 from ai_gateway.models.base import (
     KindModelProvider,
     ModelAPIError,
@@ -298,6 +297,7 @@ class LiteLlmTextGenModel(TextGenModelBase):
     def __init__(
         self,
         model_name: KindLiteLlmModel = KindLiteLlmModel.CODEGEMMA,
+        vertex_model_location: str = "",
         provider: Optional[KindModelProvider] = KindModelProvider.LITELLM,
         metadata: Optional[ModelMetadata] = None,
         disable_streaming: bool = False,
@@ -307,6 +307,7 @@ class LiteLlmTextGenModel(TextGenModelBase):
         self.model_name = model_name
         self._metadata = _init_litellm_model_metadata(metadata, model_name, provider)
         self.disable_streaming = disable_streaming
+        self.vertex_model_location = vertex_model_location
 
         self.stop_tokens = MODEL_STOP_TOKENS.get(model_name, [])
         self.async_fireworks_client = async_fireworks_client
@@ -473,7 +474,7 @@ class LiteLlmTextGenModel(TextGenModelBase):
         return self.provider == KindModelProvider.VERTEX_AI
 
     def _get_vertex_model_location(self):
-        if Config().vertex_text_model.location.startswith("europe-"):
+        if self.vertex_model_location.startswith("europe-"):
             return "europe-west4"
 
         return "us-central1"
@@ -484,6 +485,7 @@ class LiteLlmTextGenModel(TextGenModelBase):
         name: Union[str, KindLiteLlmModel],
         custom_models_enabled: bool = False,
         disable_streaming: bool = False,
+        vertex_model_location: str = "",
         endpoint: Optional[str] = None,
         api_key: Optional[str] = None,
         identifier: Optional[str] = None,
@@ -530,6 +532,7 @@ class LiteLlmTextGenModel(TextGenModelBase):
             metadata=metadata,
             disable_streaming=disable_streaming,
             async_fireworks_client=async_fireworks_client,
+            vertex_model_location=vertex_model_location,
         )
 
 

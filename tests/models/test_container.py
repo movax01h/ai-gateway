@@ -10,6 +10,7 @@ from ai_gateway.models.container import (
     _init_vertex_ai_proxy_client,
     _init_vertex_grpc_client,
 )
+from ai_gateway.models.litellm import LiteLlmTextGenModel
 from ai_gateway.proxy.clients.anthropic import AnthropicProxyClient
 from ai_gateway.proxy.clients.vertex_ai import VertexAIProxyClient
 
@@ -149,3 +150,4 @@ async def test_container(mock_container: containers.DeclarativeContainer):
 
     assert isinstance(models.anthropic_proxy_client(), AnthropicProxyClient)
     assert isinstance(models.vertex_ai_proxy_client(), VertexAIProxyClient)
+    assert isinstance(models.litellm(name="gpt"), LiteLlmTextGenModel)

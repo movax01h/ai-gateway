@@ -18,24 +18,6 @@ from ai_gateway.models.vertex_text import KindVertexTextModel
 from ai_gateway.tracking import SnowplowEventContext
 
 
-@pytest.fixture
-def mock_vertex_ai_location():
-    with patch("ai_gateway.models.litellm.Config") as mock:
-        mock.return_value = Mock(vertex_text_model=Mock(location="mock-location"))
-
-        yield mock
-
-
-@pytest.fixture
-def mock_vertex_ai_location_in_europe():
-    with patch("ai_gateway.models.litellm.Config") as mock:
-        mock.return_value = Mock(
-            vertex_text_model=Mock(location="europe-mock-location")
-        )
-
-        yield mock
-
-
 class TestKindLiteLlmModel:
     def test_chat_model(self):
         assert KindLiteLlmModel.MISTRAL.chat_model() == "custom_openai/mistral"
@@ -973,12 +955,12 @@ class TestLiteLlmTextGenModel:
     @pytest.mark.asyncio
     async def test_generate_vertex_codestral(
         self,
-        mock_vertex_ai_location: Mock,
         mock_litellm_acompletion: Mock,
     ):
         lite_llm_vertex_codestral_model = LiteLlmTextGenModel.from_model_name(
             name=KindVertexTextModel.CODESTRAL_2501,
             provider=KindModelProvider.VERTEX_AI,
+            vertex_model_location="us-mock-location",
         )
 
         output = await lite_llm_vertex_codestral_model.generate(
@@ -1008,12 +990,12 @@ class TestLiteLlmTextGenModel:
     @pytest.mark.asyncio
     async def test_generate_vertex_codestral_in_europe(
         self,
-        mock_vertex_ai_location_in_europe: Mock,
         mock_litellm_acompletion: Mock,
     ):
         lite_llm_vertex_codestral_model = LiteLlmTextGenModel.from_model_name(
             name=KindVertexTextModel.CODESTRAL_2501,
             provider=KindModelProvider.VERTEX_AI,
+            vertex_model_location="europe-mock-location",
         )
 
         await lite_llm_vertex_codestral_model.generate(

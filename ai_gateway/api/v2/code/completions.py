@@ -138,6 +138,7 @@ async def completions(
         Depends(get_internal_event_client),
     ],
 ):
+    region = config.google_cloud_platform.location()
     code_completions, kwargs = _build_code_completions(
         request,
         payload,
@@ -151,6 +152,7 @@ async def completions(
         completions_amazon_q_factory,
         completions_litellm_vertex_codestral_factory,
         internal_event_client,
+        region=region,
     )
 
     snowplow_event_context = None
@@ -163,7 +165,7 @@ async def completions(
             suffix=payload.current_file.content_below_cursor,
             language=language_name,
             global_user_id=current_user.global_user_id,
-            region=config.google_cloud_platform.location(),
+            region=region,
         )
         snowplow_instrumentator.watch(SnowplowEvent(context=snowplow_event_context))
     except Exception as e:
@@ -198,7 +200,7 @@ async def completions(
             name=suggestions[0].model.name,
             lang=suggestions[0].lang,
             tokens_consumption_metadata=tokens_consumption_metadata,
-            region=config.google_cloud_platform.location(),
+            region=region,
         ),
         experiments=suggestions[0].metadata.experiments,
         metadata=SuggestionsResponse.MetadataBase(
@@ -470,6 +472,7 @@ def _build_code_completions(
     completions_amazon_q_factory: Factory[CodeCompletions],
     completions_litellm_vertex_codestral_factory: Factory[CodeCompletions],
     internal_event_client: InternalEventsClient,
+    region: str,
 ) -> tuple[CodeCompletions | CodeCompletionsLegacy, dict]:
     kwargs = {}
 
@@ -496,7 +499,7 @@ def _build_code_completions(
 
         return code_completions, kwargs
     elif payload.model_provider == KindModelProvider.FIREWORKS or (
-        not _allow_vertex_codestral()
+        not _allow_vertex_codestral(region)
         and is_feature_enabled(FeatureFlag.DISABLE_CODE_GECKO_DEFAULT)
     ):
         FireworksHandler(payload, request, kwargs).update_completion_params()
@@ -525,7 +528,7 @@ def _build_code_completions(
             or is_feature_enabled(FeatureFlag.DISABLE_CODE_GECKO_DEFAULT)
         )
         # Codestral is currently not supported in asia-* locations
-        and _allow_vertex_codestral()
+        and _allow_vertex_codestral(region)
     ):
         code_completions = _resolve_code_completions_vertex_codestral(
             payload=payload,
@@ -636,12 +639,8 @@ def _generation_suggestion_choices(text: str) -> list:
     return [SuggestionsResponse.Choice(text=text)] if text else []
 
 
-def _allow_vertex_codestral():
-    return not _get_gcp_location().startswith("asia-")
-
-
-def _get_gcp_location():
-    return Config().google_cloud_platform.location
+def _allow_vertex_codestral(region: str):
+    return not region.startswith("asia-")
 
 
 async def _handle_stream(
