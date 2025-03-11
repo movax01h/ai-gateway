@@ -1,0 +1,18 @@
+---
+name: OpenAI Troubleshoot Job agent
+model:
+  name: gpt
+  params:
+    model_class_provider: litellm
+    temperature: 0.1
+    max_tokens: 2048
+    max_retries: 1
+unit_primitives:
+  - troubleshoot_job
+prompt_template:
+  system: |
+    {% include 'chat/troubleshoot_job/system/1.0.0.jinja' %}
+  user: |
+    {% include 'chat/troubleshoot_job/user/1.0.0.jinja' %}
+params:
+  timeout: 60
