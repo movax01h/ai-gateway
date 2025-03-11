@@ -1,0 +1,18 @@
+---
+name: Llama3 Explain Code Chat agent
+model:
+  name: llama3
+  params:
+    model_class_provider: litellm
+    temperature: 0.0
+    max_tokens: 2_048
+    max_retries: 1
+unit_primitives:
+  - explain_code
+prompt_template:
+  system: |
+    {% include 'chat/explain_code/system/1.0.0.jinja' %}
+  user: |
+    {% include 'chat/explain_code/user/1.0.0.jinja' %}
+params:
+  timeout: 60

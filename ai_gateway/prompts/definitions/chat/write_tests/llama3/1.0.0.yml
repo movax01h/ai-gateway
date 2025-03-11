@@ -1,0 +1,18 @@
+---
+name: Llama3 Write Tests agent
+model:
+  name: llama3
+  params:
+    model_class_provider: litellm
+    temperature: 0.3
+    max_tokens: 2_048
+    max_retries: 1
+unit_primitives:
+  - write_tests
+prompt_template:
+  system: |
+    {% include 'chat/write_tests/system/1.0.0.jinja' %}
+  user: |
+    {% include 'chat/write_tests/user/1.0.0.jinja' %}
+params:
+  timeout: 60
