@@ -1,14 +1,16 @@
 import functools
 from typing import Annotated, Any, Awaitable, Callable
 
-from dependency_injector.providers import Factory
-from fastapi import APIRouter, Depends
+from dependency_injector.providers import Configuration, Factory
+from fastapi import APIRouter, Depends, Request
 from fastapi_health import health
+from gitlab_cloud_connector import cloud_connector_ready
 
 from ai_gateway.async_dependency_resolver import (
     get_code_suggestions_completions_litellm_factory_provider,
     get_code_suggestions_completions_vertex_legacy_provider,
     get_code_suggestions_generations_anthropic_chat_factory_provider,
+    get_config,
 )
 from ai_gateway.code_suggestions import (
     CodeCompletions,
@@ -17,6 +19,7 @@ from ai_gateway.code_suggestions import (
 )
 from ai_gateway.code_suggestions.processing import MetadataPromptBuilder, Prompt
 from ai_gateway.code_suggestions.processing.typing import MetadataCodeContent
+from ai_gateway.config import Config
 from ai_gateway.models import (
     KindAnthropicModel,
     KindLiteLlmModel,
@@ -139,6 +142,26 @@ async def validate_fireworks_available(
     return True
 
 
+async def validate_cloud_connector_ready(
+    config: Annotated[Configuration[Config], Depends(get_config)],
+    request: Request = None,
+) -> bool:
+    """
+    Always pass for Self-Hosted-Models. This is temporary.
+    With the current CC <-> AI GW interface, we can't easily skip CDot sync just for SHM only.
+    At the same time, we can't require SHM to always connect to CustomersDot -
+    as CustomersDot connection/sync is not needed for AI GW to work in SHM context.
+    So we shouldn't fail the probe for customer setups that can't or don't want to reach CustomersDot.
+    As soon as https://gitlab.com/gitlab-org/gitlab/-/issues/517088 is complete, we should stop passing CustomersDot
+    as a provider for SHM setups. With that, we can drop the check for SHM in this file.
+    """
+    if config.custom_models.enabled():
+        return True
+
+    provider = request.app.state.cloud_connector_auth_provider
+    return cloud_connector_ready(provider)
+
+
 router.add_api_route("/healthz", health([]))
 router.add_api_route(
     "/ready",
@@ -147,6 +170,7 @@ router.add_api_route(
             validate_vertex_available,
             validate_anthropic_available,
             validate_fireworks_available,
+            validate_cloud_connector_ready,
         ]
     ),
 )

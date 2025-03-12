@@ -189,6 +189,16 @@ async def test_lifespan(config, app, unused_port, monkeypatch, vertex_project):
         assert litellm.vertex_project == vertex_project
 
 
+def test_cloud_connector_auth_provider_in_app_state():
+    config = Config(_env_file=None, auth=ConfigAuth(bypass_external=True))
+
+    with patch("gitlab_cloud_connector.cloud_connector_ready", return_value=True):
+        app = create_fast_api_server(config)
+
+    assert hasattr(app.state, "cloud_connector_auth_provider")
+    assert app.state.cloud_connector_auth_provider is not None
+
+
 def test_middleware_authentication(fastapi_server_app: FastAPI, auth_enabled: bool):
     client = TestClient(fastapi_server_app)
 

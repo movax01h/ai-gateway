@@ -69,6 +69,25 @@ async def lifespan(app: FastAPI):
 
 
 def create_fast_api_server(config: Config):
+    auth_provider = CompositeProvider(
+        [
+            LocalAuthProvider(
+                structlog,
+                signing_key=config.self_signed_jwt.signing_key,
+                validation_key=config.self_signed_jwt.validation_key,
+            ),
+            GitLabOidcProvider(
+                structlog,
+                oidc_providers={
+                    "Gitlab": config.gitlab_url,
+                    "CustomersDot": config.customer_portal_url,
+                },
+            ),
+        ],
+        structlog,
+        bypass_auth_jwt_signature=config.auth.bypass_jwt_signature,
+    )
+
     fastapi_app = FastAPI(
         title="GitLab AI Gateway",
         description="GitLab AI Gateway API to execute AI actions",
@@ -95,24 +114,7 @@ def create_fast_api_server(config: Config):
                 environment=config.environment,
             ),
             MiddlewareAuthentication(
-                CompositeProvider(
-                    [
-                        LocalAuthProvider(
-                            structlog,
-                            signing_key=config.self_signed_jwt.signing_key,
-                            validation_key=config.self_signed_jwt.validation_key,
-                        ),
-                        GitLabOidcProvider(
-                            structlog,
-                            oidc_providers={
-                                "Gitlab": config.gitlab_url,
-                                "CustomersDot": config.customer_portal_url,
-                            },
-                        ),
-                    ],
-                    structlog,
-                    bypass_auth_jwt_signature=config.auth.bypass_jwt_signature,
-                ),
+                auth_provider,
                 bypass_auth=config.auth.bypass_external,
                 bypass_auth_with_header=config.auth.bypass_external_with_header,
                 skip_endpoints=_SKIP_ENDPOINTS,
@@ -131,6 +133,9 @@ def create_fast_api_server(config: Config):
         extra={"config": config},
     )
 
+    fastapi_app.state.cloud_connector_auth_provider = (
+        auth_provider  # For readiness check
+    )
     setup_custom_exception_handlers(fastapi_app)
     setup_router(fastapi_app)
     setup_app_logging(fastapi_app)

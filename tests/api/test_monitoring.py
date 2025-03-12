@@ -1,5 +1,5 @@
 from typing import Iterator
-from unittest.mock import Mock, call
+from unittest.mock import Mock, call, patch
 
 import pytest
 from dependency_injector import containers
@@ -160,3 +160,50 @@ def test_ready_fireworks_failure(
     response = client.get("/monitoring/ready")
 
     assert response.status_code == 503
+
+
+def test_ready_cloud_connector_failure_from_library(
+    client: TestClient,
+    mock_generations: Mock,
+    mock_completions_legacy: Mock,
+    mock_llm_text: Mock,
+    mock_config: Config,
+):
+    with patch("ai_gateway.api.monitoring.cloud_connector_ready", return_value=False):
+        response = client.get("/monitoring/ready")
+
+    assert response.status_code == 503
+
+
+class TestCustomModelEnabled:
+    # This overrides conftest.py `config_values` which is referenced by `mock_config`
+    @pytest.fixture
+    def config_values(self):
+        yield {
+            "custom_models": {"enabled": "true"},
+            "model_keys": {"fireworks_api_key": "fw_api_key"},
+            "model_endpoints": {
+                "fireworks_regional_endpoints": {
+                    "us-central1": {
+                        "endpoint": "https://fireworks.endpoint.com/v1",
+                        "identifier": "accounts/fireworks/models/qwen2p5-coder-7b#accounts/deployment/deadbeef",
+                    },
+                }
+            },
+        }
+
+    def test_ready_custom_models_enabled_skips_cloud_connector(
+        self,
+        client: TestClient,
+        mock_generations: Mock,
+        mock_completions_legacy: Mock,
+        mock_llm_text: Mock,
+        mock_config: Config,
+    ):
+        # Even if cloud_connector_ready would return False, the endpoint should still work
+        with patch(
+            "ai_gateway.api.monitoring.cloud_connector_ready", return_value=False
+        ):
+            response = client.get("/monitoring/ready")
+
+        assert response.status_code == 200
