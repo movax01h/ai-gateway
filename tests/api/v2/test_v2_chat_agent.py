@@ -402,6 +402,35 @@ class TestReActAgentStream:
             ),
             (
                 CloudConnectorUser(
+                    authenticated=True,
+                    claims=UserClaims(scopes=["duo_chat", "include_terminal_context"]),
+                ),
+                AgentRequest(
+                    messages=[
+                        Message(
+                            role=Role.USER,
+                            content="Explain this terminal content",
+                            additional_context=[
+                                AdditionalContext(
+                                    category="terminal",
+                                    content="zsh: command not found: fakecommand",
+                                )
+                            ],
+                        ),
+                    ],
+                    options=AgentRequestOptions(
+                        agent_scratchpad=ReActAgentScratchpad(
+                            agent_type="react",
+                            steps=[],
+                        ),
+                    ),
+                ),
+                200,
+                "",
+                [call("request_duo_chat", category="ai_gateway.api.v2.chat.agent")],
+            ),
+            (
+                CloudConnectorUser(
                     authenticated=True, claims=UserClaims(scopes=["duo_chat"])
                 ),
                 AgentRequest(
