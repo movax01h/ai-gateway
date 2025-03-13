@@ -4553,18 +4553,18 @@ full = ["httpx (>=0.27.0,<0.29.0)", "itsdangerous", "jinja2", "python-multipart 
 
 [[package]]
 name = "starlette-context"
-version = "0.3.6"
+version = "0.4.0"
 description = "Middleware for Starlette that allows you to store and access the context data of a request. Can be used with logging so logs automatically use request headers such as x-request-id or x-correlation-id."
 optional = false
-python-versions = ">=3.8,<4.0"
+python-versions = "<4.0,>=3.9"
 groups = ["main"]
 files = [
-    {file = "starlette_context-0.3.6-py3-none-any.whl", hash = "sha256:b14ce373fbb6895a2182a7104b9f63ba20c8db83444005fb9a844dd77ad9895c"},
-    {file = "starlette_context-0.3.6.tar.gz", hash = "sha256:d361a36ba2d4acca3ab680f917b25e281533d725374752d47607a859041958cb"},
+    {file = "starlette_context-0.4.0-py3-none-any.whl", hash = "sha256:dbcc11006587f901edd3d0a989a69a628fccf9d00c1ca3c28fab23ab88bd0093"},
+    {file = "starlette_context-0.4.0.tar.gz", hash = "sha256:3242417c9354c067a4ac5009aff762dc0b322074216f664825d5d127108553be"},
 ]
 
 [package.dependencies]
-starlette = "*"
+starlette = ">=0.27.0"
 
 [[package]]
 name = "structlog"
@@ -5584,4 +5584,4 @@ cffi = ["cffi (>=1.11)"]
 [metadata]
 lock-version = "2.1"
 python-versions = "~3.11.0"
-content-hash = "3c2774e4d5418d2d352e237e2b0c1be1f32507f96bad1746ba4eeab18a6458fe"
+content-hash = "0f5cce3ad52076e55591b2bdcf4f2c5baa9771fa8bddba9b86273ede6c9b7a54"
