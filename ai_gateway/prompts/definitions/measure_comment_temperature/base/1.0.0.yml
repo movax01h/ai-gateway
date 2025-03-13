@@ -62,3 +62,9 @@ prompt_template:
       TemperatureRatingResponse = {"rating": int, "issues": list[str]}
 
     Return: TemperatureRatingResponse
+
+    When returning JSON, please format your response as a valid JSON string with minimal proper escaping.
+    - Use only a single backslash to escape quotes inside JSON strings: \"
+    - For nested quotes (quotes within quotes), still use only a single backslash
+    - Example of correct format: {"comment": "He said \"I'm happy\" yesterday"}
+    - Do NOT use multiple backslashes like \\\" or \\\\"
