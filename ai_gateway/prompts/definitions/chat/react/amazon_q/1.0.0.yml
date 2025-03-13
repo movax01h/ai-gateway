@@ -11,3 +11,5 @@ prompt_template:
     {% include 'chat/react/system/1.0.0.jinja' %}
   user: |
     {% include 'chat/react/user/1.0.0.jinja' %}
+  assistant: |
+    {% include 'chat/react/assistant/1.0.0.jinja' %}

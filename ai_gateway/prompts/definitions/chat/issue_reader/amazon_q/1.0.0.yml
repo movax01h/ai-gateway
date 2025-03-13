@@ -11,3 +11,5 @@ prompt_template:
     {% include 'chat/issue_reader/system/1.0.0.jinja' %}
   user: |
     {% include 'chat/issue_reader/user/1.0.0.jinja' %}
+  assistant: |
+    {% include 'chat/issue_reader/assistant/1.0.0.jinja' %}
