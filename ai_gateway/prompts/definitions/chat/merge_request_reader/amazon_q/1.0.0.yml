@@ -11,3 +11,5 @@ prompt_template:
     {% include 'chat/merge_request_reader/system/1.0.0.jinja' %}
   user: |
     {% include 'chat/merge_request_reader/user/1.0.0.jinja' %}
+  assistant: |
+    {% include 'chat/merge_request_reader/assistant/1.0.0.jinja' %}

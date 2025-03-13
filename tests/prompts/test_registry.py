@@ -16,6 +16,7 @@ from pyfakefs.fake_filesystem import FakeFilesystem
 
 from ai_gateway.api.auth_utils import StarletteUser
 from ai_gateway.integrations.amazon_q.chat import ChatAmazonQ
+from ai_gateway.integrations.amazon_q.client import AmazonQClientFactory
 from ai_gateway.prompts import LocalPromptRegistry, Prompt, PromptRegistered
 from ai_gateway.prompts.config import (
     ChatAmazonQParams,
@@ -204,7 +205,9 @@ def model_factories():
             model=model, **kwargs
         ),
         ModelClassProvider.AMAZON_Q: lambda model, **kwargs: ChatAmazonQ(
-            model=model, **kwargs
+            model=model,
+            amazon_q_client_factory=Mock(spec=AmazonQClientFactory),
+            **kwargs
         ),
     }
 

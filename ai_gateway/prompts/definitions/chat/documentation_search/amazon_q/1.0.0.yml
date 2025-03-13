@@ -9,3 +9,5 @@ unit_primitives:
 prompt_template:
   user: |
     {% include 'chat/documentation_search/user/1.0.0.jinja' %}
+  assistant: |
+    {% include 'chat/documentation_search/assistant/1.0.0.jinja' %}

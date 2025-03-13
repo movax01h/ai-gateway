@@ -29,6 +29,7 @@ class ContainerModels(containers.DeclarativeContainer):
     # Hence, `ChatAnthropic` etc. are only partially applied here.
 
     config = providers.Configuration(strict=True)
+    integrations = providers.DependenciesContainer()
 
     _mock_selector = providers.Callable(
         lambda mock_model_responses: "mocked" if mock_model_responses else "original",
@@ -50,4 +51,7 @@ class ContainerModels(containers.DeclarativeContainer):
     )
 
     lite_llm_chat_fn = providers.Factory(_litellm_factory)
-    amazon_q_chat_fn = providers.Factory(ChatAmazonQ)
+    amazon_q_chat_fn = providers.Factory(
+        ChatAmazonQ,
+        amazon_q_client_factory=integrations.amazon_q_client_factory,
+    )

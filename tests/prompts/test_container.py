@@ -13,8 +13,16 @@ from ai_gateway.prompts.typing import ModelMetadata
 
 
 @pytest.fixture
-def config_values():
-    yield {"custom_models": {"enabled": True, "disable_streaming": True}}
+def config_values(assets_dir):
+    return {
+        "custom_models": {"enabled": True, "disable_streaming": True},
+        "self_signed_jwt": {
+            "signing_key": open(assets_dir / "keys" / "signing_key.pem").read()
+        },
+        "amazon_q": {
+            "region": "us-west-2",
+        },
+    }
 
 
 def test_container(mock_container: containers.DeclarativeContainer):

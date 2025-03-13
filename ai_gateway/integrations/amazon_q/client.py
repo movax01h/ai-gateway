@@ -150,6 +150,12 @@ class AmazonQClient:
             raise ex
 
     @raise_aws_errors
+    def send_message(self, message):
+        return self.client.send_message(
+            message=message, conversationId="conversationId"
+        )
+
+    @raise_aws_errors
     def _create_o_auth_app_connection(self, **params):
         self.client.create_o_auth_app_connection(**params)
 
