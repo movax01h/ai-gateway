@@ -23,9 +23,13 @@ class SearchPayload(BaseModel):
 
 
 class SearchRequest(BaseModel):
-    type: Annotated[str, StringConstraints(max_length=100)]
-    metadata: SearchMetadata
-    payload: SearchPayload
+    type: Annotated[str, StringConstraints(max_length=100)] = Field(examples=["search"])
+    metadata: SearchMetadata = Field(
+        examples=[{"source": "gitlab-docs", "version": "17.0"}]
+    )
+    payload: SearchPayload = Field(
+        examples=[{"query": "How to create a project", "page_size": 4}]
+    )
 
 
 class SearchResponseMetadata(BaseModel):
