@@ -1,7 +1,7 @@
 from unittest import mock
 
 import pytest
-from langchain_core.messages import ChatMessage
+from langchain_core.messages import AIMessage, ChatMessage, HumanMessage
 from langchain_core.outputs import ChatGenerationChunk
 
 from ai_gateway.integrations.amazon_q.chat import ChatAmazonQ
@@ -19,21 +19,21 @@ class TestChatAmazonQ:
         return ChatAmazonQ(amazon_q_client_factory=mock_q_client_factory)
 
     @pytest.fixture
-    def message(self):
-        return "What is the weather like in some city?"
-
-    @pytest.fixture
-    def sample_messages(self, message):
-        return [ChatMessage(content=message, role="user")]
+    def sample_messages(self):
+        return [
+            ChatMessage(content="system message", role="user"),
+            HumanMessage(content="user message", role="user"),
+            AIMessage(content="assistant message", role="user"),
+            ChatMessage(content="latest assistant message", role="user"),
+            ChatMessage(content="latest user message", role="user"),
+        ]
 
     def test_generate_response(self, chat_amazon_q, sample_messages):
         result = chat_amazon_q.invoke(sample_messages)
 
         assert result.content == "Amazon Q"
 
-    def test_stream(
-        self, chat_amazon_q, mock_q_client_factory, sample_messages, message
-    ):
+    def test_stream(self, chat_amazon_q, mock_q_client_factory, sample_messages):
         mock_user = mock.MagicMock()
         role_arn = "role-arn"
 
@@ -58,7 +58,15 @@ class TestChatAmazonQ:
         mock_q_client_factory.get_client.assert_called_once_with(
             current_user=mock_user, role_arn=role_arn
         )
-        mock_q_client.send_message.assert_called_once_with(message=message)
+        mock_q_client.send_message.assert_called_once_with(
+            message={
+                "content": "system message latest assistant message latest user message"
+            },
+            history=[
+                {"userInputMessage": {"content": "user message"}},
+                {"assistantResponseMessage": {"content": "assistant message"}},
+            ],
+        )
 
     def test_identifying_params(self, chat_amazon_q):
         params = chat_amazon_q._identifying_params

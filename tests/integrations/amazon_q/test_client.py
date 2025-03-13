@@ -194,6 +194,17 @@ class TestAmazonQClientFactory:
 
 class TestAmazonQClient:
     @pytest.fixture
+    def send_message_params(self):
+        return {
+            "message": {"content": "test message"},
+            "history": [
+                {"userInputMessage": {"content": "response"}},
+                {"assistantResponseMessage": {"content": "response"}},
+            ],
+            "conversationId": "conversation_id",
+        }
+
+    @pytest.fixture
     def mock_credentials(self):
         return {
             "AccessKeyId": "test-access-key",
@@ -416,21 +427,20 @@ class TestAmazonQClient:
 
         mock_q_client.delete_o_auth_app_connection.assert_called_once()
 
-    def test_send_message_success(self, q_client, mock_q_client):
-        message = "test message"
-
+    def test_send_message_success(self, q_client, mock_q_client, send_message_params):
         mock_q_client.send_message.return_value = {"Success": True}
 
-        response = q_client.send_message(message)
-
-        mock_q_client.send_message.assert_called_once_with(
-            message=message, conversationId="conversationId"
+        response = q_client.send_message(
+            send_message_params["message"], send_message_params["history"]
         )
+
+        mock_q_client.send_message.assert_called_once_with(**send_message_params)
 
         assert response == {"Success": True}
 
-    def test_send_message_client_error(self, q_client, mock_q_client):
-        message = "test message"
+    def test_send_message_client_error(
+        self, q_client, mock_q_client, send_message_params
+    ):
         error_response = {
             "Error": {"Code": "InternalServerError", "Message": "Internal error"}
         }
@@ -440,20 +450,20 @@ class TestAmazonQClient:
         )
 
         with pytest.raises(AWSException):
-            q_client.send_message(message)
+            q_client.send_message(
+                send_message_params["message"], send_message_params["history"]
+            )
 
-        mock_q_client.send_message.assert_called_once_with(
-            message=message, conversationId="conversationId"
-        )
+        mock_q_client.send_message.assert_called_once_with(**send_message_params)
 
-    def test_send_message_access_denied(self, q_client, mock_q_client):
-        message = "test message"
-
+    def test_send_message_access_denied(
+        self, q_client, mock_q_client, send_message_params
+    ):
         mock_q_client.send_message.side_effect = AccessDeniedException()
 
         with pytest.raises(AWSException):
-            q_client.send_message(message)
+            q_client.send_message(
+                send_message_params["message"], send_message_params["history"]
+            )
 
-        mock_q_client.send_message.assert_called_once_with(
-            message=message, conversationId="conversationId"
-        )
+        mock_q_client.send_message.assert_called_once_with(**send_message_params)

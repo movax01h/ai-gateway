@@ -1,3 +1,5 @@
+from typing import List
+
 import boto3
 from botocore.exceptions import ClientError
 from fastapi import HTTPException, status
@@ -150,9 +152,11 @@ class AmazonQClient:
             raise ex
 
     @raise_aws_errors
-    def send_message(self, message):
+    def send_message(self, message: str, history: List[dict[str, str]]):
         return self.client.send_message(
-            message=message, conversationId="conversationId"
+            message=message,
+            conversationId="conversation_id",
+            history=history,
         )
 
     @raise_aws_errors
