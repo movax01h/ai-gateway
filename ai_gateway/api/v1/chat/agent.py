@@ -61,7 +61,12 @@ path_unit_primitive_map = {ci.name: ci.unit_primitive for ci in CHAT_INVOKABLES}
 
 
 @router.post(
-    "/{chat_invokable}", response_model=ChatResponse, status_code=status.HTTP_200_OK
+    "/{chat_invokable}",
+    response_model=ChatResponse,
+    deprecated=True,
+    summary="Deprecated endpoint",
+    description="This endpoint is deprecated and will be removed https://gitlab.com/gitlab-org/modelops/applied-ml/code-suggestions/ai-assist/-/issues/825",
+    status_code=status.HTTP_200_OK,
 )
 @authorize_with_unit_primitive("chat_invokable", chat_invokables=CHAT_INVOKABLES)
 @track_metadata("chat_invokable", mapping=path_unit_primitive_map)
