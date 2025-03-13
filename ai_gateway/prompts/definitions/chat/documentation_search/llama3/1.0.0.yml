@@ -1,0 +1,18 @@
+---
+name: Llama3 Gitlab Documentation agent
+model:
+  name: llama3
+  params:
+    model_class_provider: litellm
+    temperature: 0.0
+    max_tokens: 2_048
+    max_retries: 1
+unit_primitives:
+  - documentation_search
+prompt_template:
+  user: |
+    {% include 'chat/documentation_search/user/1.0.0.jinja' %}
+  assistant: |
+    {% include 'chat/documentation_search/assistant/1.0.0.jinja' %}
+params:
+  timeout: 60
