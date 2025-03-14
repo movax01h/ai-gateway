@@ -31,6 +31,7 @@ _COMMENT_IDENTIFIERS = ["/*", "//", "#"]
 _SPECIAL_CHARS = "()[];.,$%&^*@#!{}/"
 _RE_MARKDOWN_CODE_BLOCK_BEGIN = re.compile(r"^`{3}\S*\n", flags=re.MULTILINE)
 _RE_LEADING_ASTERISKS = r"^\s*\*{5,}"
+_IRRELEVANT_KEYWORDS = ["<|cursor|>"]
 
 
 async def clean_model_reflection(context: str, completion: str, **kwargs: Any) -> str:
@@ -429,6 +430,13 @@ def strip_asterisks(completion: str) -> str:
     # else, return the original completion
     # if there is no match for a string of asterisks, no need to clean the completion
     return completion
+
+
+# This function removes irrelevant keywords from completions
+# https://gitlab.com/gitlab-org/gitlab/-/issues/517027
+def clean_irrelevant_keywords(completions: str) -> str:
+    pattern = "|".join(map(re.escape, _IRRELEVANT_KEYWORDS))
+    return re.sub(pattern, "", completions)
 
 
 # Very simple filtering based on score
