@@ -133,7 +133,7 @@ class TestEditorContentGenerationStream:
                 "^1.0.0",
                 {
                     "engine": "agent",
-                    "name": "Claude 3.7 Sonnet Code Generations Agent",
+                    "name": "Claude 3 Code Generations Agent",
                 },
                 {"flag_a", "flag_b"},
             ),
