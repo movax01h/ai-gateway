@@ -2,6 +2,7 @@ import json
 from typing import Literal, Optional, Self, TypeVar
 
 import fastapi
+from fastapi import status
 from pydantic import BaseModel, model_validator
 
 from ai_gateway.chat.context.current_page import CurrentPageContext
@@ -98,7 +99,7 @@ class Message(BaseModel):
     def validate_agent_scratchpad_role(self) -> Self:
         if self.agent_scratchpad is not None and self.role != Role.ASSISTANT:
             raise fastapi.HTTPException(
-                status_code=400,
+                status_code=status.HTTP_400_BAD_REQUEST,
                 detail="agent_scratchpad can only be present when role is ASSISTANT",
             )
         return self

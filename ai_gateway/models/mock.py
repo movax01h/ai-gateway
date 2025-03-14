@@ -6,6 +6,7 @@ from unittest.mock import AsyncMock
 import fastapi
 import httpx
 from anthropic.types import Message
+from fastapi import status
 from langchain_core.callbacks import CallbackManagerForLLMRun
 from langchain_core.language_models.chat_models import SimpleChatModel
 from langchain_core.messages import BaseMessage
@@ -50,7 +51,7 @@ class AsyncStream(AsyncIterator[_T]):
 class AsyncClient(AsyncMock):
     async def send(self, *args, **kwargs):
         return httpx.Response(
-            status_code=200,
+            status_code=status.HTTP_200_OK,
             headers={
                 "Content-Type": "application/json",
                 "date": "2024",
@@ -64,7 +65,7 @@ class ProxyClient(AsyncMock):
     async def proxy(self, *args, **kwargs):
         return fastapi.Response(
             content=json.dumps({"response": "mocked"}).encode("utf-8"),
-            status_code=200,
+            status_code=status.HTTP_200_OK,
             headers={"Content-Type": "application/json"},
         )
 

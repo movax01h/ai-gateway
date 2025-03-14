@@ -2,6 +2,7 @@ import os
 import typing
 
 import fastapi
+from fastapi import status
 
 from ai_gateway.models.anthropic import KindAnthropicModel
 from ai_gateway.models.base import KindModelProvider
@@ -42,7 +43,8 @@ class AnthropicProxyClient(BaseProxyClient):
             return json_body["model"]
         except KeyError:
             raise fastapi.HTTPException(
-                status_code=400, detail="Failed to extract model name"
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Failed to extract model name",
             )
 
     def _extract_stream_flag(self, upstream_path: str, json_body: typing.Any) -> bool:
@@ -52,4 +54,6 @@ class AnthropicProxyClient(BaseProxyClient):
         try:
             headers_to_upstream["x-api-key"] = os.environ["ANTHROPIC_API_KEY"]
         except KeyError:
-            raise fastapi.HTTPException(status_code=400, detail="API key not found")
+            raise fastapi.HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST, detail="API key not found"
+            )

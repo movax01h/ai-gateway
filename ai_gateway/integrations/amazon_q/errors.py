@@ -3,7 +3,7 @@ from functools import wraps
 from typing import Optional
 
 import botocore
-from fastapi import HTTPException
+from fastapi import HTTPException, status
 
 from ai_gateway.tracking import log_exception
 
@@ -47,20 +47,29 @@ class AWSException(Exception):
 
     def to_http_exception(self):
         if self.error_code == "ResourceNotFoundException":
-            return HTTPException(status_code=404, detail=self.exception_str)
+            return HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND, detail=self.exception_str
+            )
         if self.error_code == "AccessDeniedException":
-            return HTTPException(status_code=403, detail=self.exception_str)
+            return HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN, detail=self.exception_str
+            )
         if self.error_code == "ValidationException":
-            return HTTPException(status_code=400, detail=self.exception_str)
+            return HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST, detail=self.exception_str
+            )
 
         # For any other AWS errors, return a 500 Internal Server Error
-        return HTTPException(status_code=500, detail=f"AWS Error: {self.exception_str}")
+        return HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"AWS Error: {self.exception_str}",
+        )
 
     @classmethod
     def from_exception(cls, e: botocore.exceptions.ClientError):
         error_code = e.response["Error"]["Code"]
         error_message = e.response["Error"]["Message"]
-        response_code = 500
+        response_code = status.HTTP_500_INTERNAL_SERVER_ERROR
         response_metadata = e.response.get("ResponseMetadata")
 
         if response_metadata:
@@ -83,7 +92,7 @@ def raise_aws_errors(func):
             return func(*args, **kwargs)
         except botocore.exceptions.ParamValidationError as e:
             log_exception(e)
-            raise HTTPException(status_code=400, detail=str(e))
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
         except botocore.exceptions.ClientError as e:
             aws_error = AWSException.from_exception(e)
 

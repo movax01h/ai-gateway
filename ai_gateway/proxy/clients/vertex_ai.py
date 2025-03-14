@@ -2,6 +2,7 @@ import re
 import typing
 
 import fastapi
+from fastapi import status
 
 from ai_gateway.auth.gcp import access_token
 from ai_gateway.models.base import KindModelProvider
@@ -64,6 +65,8 @@ class VertexAIProxyClient(BaseProxyClient):
             action = match.group(2)
             sse_flag = match.group(3) or ""
         except (IndexError, AssertionError):
-            raise fastapi.HTTPException(status_code=404, detail="Not found")
+            raise fastapi.HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND, detail="Not found"
+            )
 
         return model, action, sse_flag
