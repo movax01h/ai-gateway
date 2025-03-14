@@ -7,6 +7,7 @@ from ai_gateway.code_suggestions.processing.ops import strip_whitespaces
 from ai_gateway.code_suggestions.processing.post.base import PostProcessorBase
 from ai_gateway.code_suggestions.processing.post.ops import (
     SCORE_THRESHOLD_DISABLED,
+    clean_irrelevant_keywords,
     clean_model_reflection,
     filter_score,
     fix_end_block_errors,
@@ -39,12 +40,14 @@ class PostProcessorOperation(StrEnum):
     STRIP_ASTERISKS = "strip_asterisks"
     FILTER_SCORE = "filter_score"
     FIX_TRUNCATION = "fix_truncation"
+    CLEAN_IRRELEVANT_KEYWORDS = "clean_irrelevant_keywords"
 
 
 # This is the ordered list of prost-processing functions
 # Please do not change the order unless you have determined that it is acceptable
 ORDERED_POST_PROCESSORS = [
     PostProcessorOperation.REMOVE_COMMENTS,
+    PostProcessorOperation.CLEAN_IRRELEVANT_KEYWORDS,
     PostProcessorOperation.TRIM_BY_MINIMUM_CONTEXT,
     PostProcessorOperation.FIX_END_BLOCK_ERRORS,
     PostProcessorOperation.CLEAN_MODEL_REFLECTION,
@@ -76,7 +79,7 @@ class PostProcessor(PostProcessorBase):
         )
 
     @property
-    def ops(self) -> list[AliasOpsRecord]:
+    def ops(self) -> dict[PostProcessorOperation, Callable[..., str]]:
         return {
             PostProcessorOperation.FILTER_SCORE: partial(
                 filter_score, threshold=self.score_threshold
@@ -110,6 +113,7 @@ class PostProcessor(PostProcessorBase):
             ),
             PostProcessorOperation.STRIP_WHITESPACES: strip_whitespaces,
             PostProcessorOperation.STRIP_ASTERISKS: strip_asterisks,
+            PostProcessorOperation.CLEAN_IRRELEVANT_KEYWORDS: clean_irrelevant_keywords,
         }
 
     async def process(self, completion: str, **kwargs: Any) -> str:
