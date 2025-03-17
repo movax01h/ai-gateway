@@ -8,13 +8,6 @@ unit_primitives:
   - summarize_new_merge_request
 prompt_template:
   system: |
-    You are a code assistant, developed to help summarize code in non-technical terms.
+    {% include 'summarize_new_merge_request/system/1.0.0.jinja' %}
   user: |
-    ```
-    {{extracted_diff}}
-    ```
-    The code above, enclosed by three ticks, is the code diff of a merge request.
-    Write a summary of the changes in couple sentences, the way an expert engineer would summarize the
-    changes using simple - generally non-technical - terms.
-    You MUST ensure that it is no longer than 1800 characters. A character is considered anything, not only
-    letters.
+    {% include 'summarize_new_merge_request/user/1.0.0.jinja' %}
