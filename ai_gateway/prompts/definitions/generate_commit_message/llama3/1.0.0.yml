@@ -1,7 +1,12 @@
 ---
-name: Claude 3.7 Generate Commit Message
+name: Llama3 Generate Commit Message
 model:
-  config_file: claude_3_7
+  name: llama3
+  params:
+    model_class_provider: litellm
+    temperature: 0.0
+    max_tokens: 2_048
+    max_retries: 1
 unit_primitives:
   - generate_commit_message
 prompt_template:
@@ -9,3 +14,5 @@ prompt_template:
     {% include 'generate_commit_message/system/1.0.0.jinja' %}
   user: |
     {% include 'generate_commit_message/user/1.0.0.jinja' %}
+params:
+  timeout: 60
