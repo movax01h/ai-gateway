@@ -40,7 +40,7 @@ class ModelMetadata(BaseModelMetadata):
     name: Annotated[str, StringConstraints(max_length=255)]
     provider: Annotated[str, StringConstraints(max_length=255)]
     endpoint: Annotated[AnyUrl, UrlConstraints(max_length=255)]
-    api_key: Optional[Annotated[str, StringConstraints(max_length=1000)]] = None
+    api_key: Optional[Annotated[str, StringConstraints(max_length=2000)]] = None
     identifier: Optional[Annotated[str, StringConstraints(max_length=1000)]] = None
 
     def to_params(self) -> Dict[str, Any]:
