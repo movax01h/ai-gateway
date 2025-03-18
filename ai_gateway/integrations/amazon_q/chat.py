@@ -2,7 +2,13 @@ from typing import Any, Dict, Iterator, List, Optional
 
 from langchain_core.callbacks.manager import CallbackManagerForLLMRun
 from langchain_core.language_models.chat_models import BaseChatModel
-from langchain_core.messages import AIMessage, AIMessageChunk, BaseMessage, HumanMessage
+from langchain_core.messages import (
+    AIMessage,
+    AIMessageChunk,
+    BaseMessage,
+    HumanMessage,
+    SystemMessage,
+)
 from langchain_core.outputs import ChatGeneration, ChatGenerationChunk, ChatResult
 
 from ai_gateway.api.auth_utils import StarletteUser
@@ -98,9 +104,19 @@ class ChatAmazonQ(BaseChatModel):
                 - history (list): A list of dictionaries representing user and assistant message history,
                   with either {"userInputMessage": { "content" ... }} or {"assistantResponseMessage": {"content" ... }} formats.
         """
-        system_message = messages.pop(0)
-        assistant_message = messages.pop()
-        user_message = messages.pop()
+        input_messages = []
+        # Extract the system message to always send it as an input
+        if messages and isinstance(messages[0], SystemMessage):
+            input_messages.append(messages.pop(0))
+        # Support prompt definitions with assistant messages (like react prompts)
+        if len(messages) > 1 and isinstance(messages[-1], AIMessage):
+            assistant_message = messages.pop()
+            user_message = messages.pop()
+            input_messages.append(user_message)
+            input_messages.append(assistant_message)
+        # Support prompt definitions with system + user messages (like explain code prompts)
+        if messages and isinstance(messages[-1], HumanMessage):
+            input_messages.append(messages.pop())
 
         history = []
         for msg in messages:
@@ -112,7 +128,9 @@ class ChatAmazonQ(BaseChatModel):
                 )
 
         message = {
-            "content": f"{system_message.content} {user_message.content} {assistant_message.content}"
+            "content": " ".join(
+                msg.content for msg in input_messages if isinstance(msg.content, str)
+            )
         }
 
         return message, history
