@@ -1,9 +1,11 @@
 ---
-name: Claude 3.7 Summarize Review
+name: Amazon Q Summarize Review
 model:
-  config_file: claude_3_7
+  name: amazon_q
+  params:
+    model_class_provider: amazon_q
 unit_primitives:
-  - summarize_review
+  - amazon_q_integration
 prompt_template:
   system: |
     {% include 'summarize_review/system/1.0.0.jinja' %}
