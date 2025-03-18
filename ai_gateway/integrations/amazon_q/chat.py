@@ -24,12 +24,16 @@ class ChatAmazonQ(BaseChatModel):
 
     def _generate(
         self,
-        messages: List[BaseMessage],
-        stop: Optional[List[str]] = None,
-        run_manager: Optional[CallbackManagerForLLMRun] = None,
+        *args: Any,
         **kwargs: Any,
     ) -> ChatResult:
-        generations = [ChatGeneration(message=AIMessage(content="Amazon Q"))]
+        content = "".join(
+            chunk.message.content
+            for chunk in self._stream(*args, **kwargs)
+            if isinstance(chunk.message.content, str)
+        )
+
+        generations = [ChatGeneration(message=AIMessage(content=content))]
 
         return ChatResult(generations=generations)
 
