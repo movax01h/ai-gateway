@@ -1,0 +1,13 @@
+---
+name: Amazon Q Generate Commit Message
+model:
+  name: amazon_q
+  params:
+    model_class_provider: amazon_q
+unit_primitives:
+  - amazon_q_integration
+prompt_template:
+  system: |
+    {% include 'generate_commit_message/system/1.0.0.jinja' %}
+  user: |
+    {% include 'generate_commit_message/user/1.0.0.jinja' %}
