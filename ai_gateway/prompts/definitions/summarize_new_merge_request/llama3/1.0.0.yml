@@ -1,10 +1,12 @@
 ---
-name: Claude 3.5 Summarize New Merge Request
+name: Llama3 Summarize New Merge Request
 model:
-  config_file: conversation_claude_3_sonnet_v1
+  name: llama3
   params:
+    model_class_provider: litellm
+    temperature: 0.1
     max_tokens: 2_000
-    temperature: 0
+    max_retries: 1
 unit_primitives:
   - summarize_new_merge_request
 prompt_template:
@@ -12,3 +14,5 @@ prompt_template:
     {% include 'summarize_new_merge_request/system/1.0.0.jinja' %}
   user: |
     {% include 'summarize_new_merge_request/user/1.0.0.jinja' %}
+params:
+  timeout: 60
