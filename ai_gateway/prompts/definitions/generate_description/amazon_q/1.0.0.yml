@@ -1,9 +1,11 @@
 ---
-name: Claude 3 Generate Description
+name: Amazon Q Generate Description
 model:
-  config_file: conversation_performant
+  name: amazon_q
+  params:
+    model_class_provider: amazon_q
 unit_primitives:
-  - generate_issue_description
+  - amazon_q_integration
 prompt_template:
   system: |
     {% include 'generate_description/system/1.0.0.jinja' %}

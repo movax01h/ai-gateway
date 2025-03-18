@@ -8,30 +8,6 @@ unit_primitives:
   - generate_issue_description
 prompt_template:
   system: |
-    You are a helpful assistant
-
-    {% if template %}
-    Your job is to rewrite a text to follow the given template.
-    {% else %}
-    Your job is to write an issue description based off a text.
-
-    Try to format the issue description appropriately.
-    {% endif %}
+    {% include 'generate_description/system/1.0.0.jinja' %}
   user: |
-    Here's the text:
-
-    <text>
-    {{content}}
-    </text>
-
-    {% if template %}
-    Here's the template:
-
-    <template>
-    {{template}}
-    </template>
-
-    Only respond with the rewritten text.
-    {% else %}
-    Only respond with your issue description.
-    {% endif %}
+    {% include 'generate_description/user/1.0.0.jinja' %}
