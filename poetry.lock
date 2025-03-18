@@ -1141,14 +1141,14 @@ files = [
 
 [[package]]
 name = "gitlab-cloud-connector"
-version = "2.6.0"
+version = "2.7.0"
 description = "Cloud Connector library for Python backends"
 optional = false
 python-versions = ">=3.11,<4.0"
 groups = ["main"]
 files = [
-    {file = "gitlab_cloud_connector-2.6.0-py3-none-any.whl", hash = "sha256:b7b3fc15be2c9689709a9c5dcca1d91ee72f491444bdcf41e160821676c9e1cd"},
-    {file = "gitlab_cloud_connector-2.6.0.tar.gz", hash = "sha256:30407879bf7661623c6ff20a03c522ad9aa614c2acd952d4604901e22ac77053"},
+    {file = "gitlab_cloud_connector-2.7.0-py3-none-any.whl", hash = "sha256:a6f3740111a7a7e28a2ba59c4a06e60c44334846cd57d91f20a15959891db44d"},
+    {file = "gitlab_cloud_connector-2.7.0.tar.gz", hash = "sha256:2b82143f8af62f3582af6170dcb013e4d36f0fac5db3b906b4a24de4a5cefee9"},
 ]
 
 [package.dependencies]
