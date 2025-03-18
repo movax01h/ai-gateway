@@ -8,18 +8,17 @@ from ai_gateway.integrations.amazon_q.chat import ChatAmazonQ
 from ai_gateway.integrations.amazon_q.client import AmazonQClientFactory
 
 
-@pytest.fixture
-def mock_q_client_factory():
-    return mock.MagicMock(AmazonQClientFactory)
-
-
 class TestChatAmazonQ:
+    @pytest.fixture
+    def mock_q_client_factory(self):
+        return mock.MagicMock(AmazonQClientFactory)
+
     @pytest.fixture
     def chat_amazon_q(self, mock_q_client_factory):
         return ChatAmazonQ(amazon_q_client_factory=mock_q_client_factory)
 
     @pytest.fixture
-    def sample_messages(self):
+    def messages(self):
         return [
             SystemMessage(content="system message", role="user"),
             HumanMessage(content="user message", role="user"),
@@ -43,13 +42,38 @@ class TestChatAmazonQ:
 
         return q_client
 
-    def test_generate_response(self, chat_amazon_q, sample_messages):
-        result = chat_amazon_q.invoke(sample_messages)
+    @pytest.fixture
+    def mock_user(self):
+        return mock.MagicMock()
 
-        assert result.content == "Amazon Q"
+    def test_generate_response(
+        self,
+        chat_amazon_q,
+        messages,
+        mock_user,
+        mock_q_client,
+        mock_q_client_factory,
+    ):
+        role_arn = "role-arn"
+        result = chat_amazon_q.invoke(messages, user=mock_user, role_arn=role_arn)
 
-    def test_stream(self, chat_amazon_q, mock_q_client, mock_q_client_factory):
-        mock_user = mock.MagicMock()
+        assert result.content == "Streamed response"
+        mock_q_client_factory.get_client.assert_called_once_with(
+            current_user=mock_user, role_arn=role_arn
+        )
+        mock_q_client.send_message.assert_called_once_with(
+            message={
+                "content": "system message latest user message latest assistant message"
+            },
+            history=[
+                {"userInputMessage": {"content": "user message"}},
+                {"assistantResponseMessage": {"content": "assistant message"}},
+            ],
+        )
+
+    def test_stream(
+        self, chat_amazon_q, mock_user, mock_q_client, mock_q_client_factory
+    ):
         role_arn = "role-arn"
 
         messages = [
@@ -71,14 +95,16 @@ class TestChatAmazonQ:
         )
 
     def test_stream_history(
-        self, chat_amazon_q, mock_q_client, mock_q_client_factory, sample_messages
+        self,
+        chat_amazon_q,
+        messages,
+        mock_user,
+        mock_q_client,
+        mock_q_client_factory,
     ):
-        mock_user = mock.MagicMock()
         role_arn = "role-arn"
 
-        stream = chat_amazon_q._stream(
-            sample_messages, user=mock_user, role_arn=role_arn
-        )
+        stream = chat_amazon_q._stream(messages, user=mock_user, role_arn=role_arn)
 
         chunk = next(stream)
         assert isinstance(chunk, ChatGenerationChunk)
