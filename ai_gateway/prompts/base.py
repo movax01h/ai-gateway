@@ -10,7 +10,6 @@ from langchain_core.prompts.string import DEFAULT_FORMATTER_MAPPING
 from langchain_core.runnables import Runnable, RunnableBinding, RunnableConfig
 
 from ai_gateway.api.auth_utils import StarletteUser
-from ai_gateway.feature_flags.context import FeatureFlag, is_feature_enabled
 from ai_gateway.instrumentators.model_requests import ModelRequestInstrumentator
 from ai_gateway.internal_events.client import InternalEventsClient
 from ai_gateway.prompts.config.base import ModelConfig, PromptConfig, PromptParams
@@ -52,16 +51,6 @@ class Prompt(RunnableBinding[Input, Output]):
         disable_streaming: bool = False,
     ):
         model_override = None
-
-        if (
-            config.name == "Default configuration for the Duo Chat ReAct Agent"
-            and is_feature_enabled(FeatureFlag.DUO_CHAT_REACT_AGENT_CLAUDE_3_7)
-        ) or (
-            config.name
-            == "Default configuration for the Duo Chat documentation question answering"
-            and is_feature_enabled(FeatureFlag.DUO_CHAT_DOCS_QA_CLAUDE_3_7)
-        ):
-            model_override = "claude-3-7-sonnet-20250219"
 
         model_kwargs = self._build_model_kwargs(config.params, model_metadata)
         model = self._build_model(
