@@ -6,6 +6,7 @@ from typing import Optional, Tuple
 
 import structlog
 from asgi_correlation_id.context import correlation_id
+from fastapi import status
 from fastapi.encoders import jsonable_encoder
 from gitlab_cloud_connector import (
     X_GITLAB_DUO_SEAT_COUNT_HEADER,
@@ -119,7 +120,7 @@ class AccessLogMiddleware:
         except (ValueError, TypeError):
             wait_duration = -1
 
-        status_code = 500
+        status_code = status.HTTP_500_INTERNAL_SERVER_ERROR
         content_type = "unknown"
 
         async def send_wrapper(message):
@@ -298,7 +299,7 @@ class MiddlewareAuthentication(Middleware):
         content = jsonable_encoder({"error": str(e)})
         starlette_context["auth_error_details"] = str(e)
         starlette_context["http_exception_details"] = str(e)
-        return JSONResponse(status_code=401, content=content)
+        return JSONResponse(status_code=status.HTTP_401_UNAUTHORIZED, content=content)
 
     def __init__(
         self,

@@ -88,6 +88,9 @@ async def user_access_token(
             scopes=[GitLabUnitPrimitive.COMPLETE_CODE],
         )
     except Exception:
-        raise HTTPException(status_code=500, detail="Failed to generate JWT")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to generate JWT",
+        )
 
     return Token(token=token, expires_at=expires_at)

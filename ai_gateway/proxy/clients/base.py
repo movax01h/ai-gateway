@@ -5,6 +5,7 @@ from abc import ABC, abstractmethod
 
 import fastapi
 import httpx
+from fastapi import status
 from starlette.background import BackgroundTask
 
 from ai_gateway.config import ConfigModelConcurrency
@@ -24,7 +25,9 @@ class BaseProxyClient(ABC):
         model_name = self._extract_model_name(upstream_path, json_body)
 
         if model_name not in self._allowed_upstream_models():
-            raise fastapi.HTTPException(status_code=400, detail="Unsupported model")
+            raise fastapi.HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST, detail="Unsupported model"
+            )
 
         stream = self._extract_stream_flag(upstream_path, json_body)
         headers_to_upstream = self._create_headers_to_upstream(request.headers)
@@ -49,7 +52,9 @@ class BaseProxyClient(ABC):
                     request_to_upstream, stream=stream
                 )
         except Exception:
-            raise fastapi.HTTPException(status_code=502, detail="Bad Gateway")
+            raise fastapi.HTTPException(
+                status_code=status.HTTP_502_BAD_GATEWAY, detail="Bad Gateway"
+            )
 
         headers_to_downstream = self._create_headers_to_downstream(
             response_from_upstream.headers
@@ -113,7 +118,9 @@ class BaseProxyClient(ABC):
         path = re.sub(f"^(.*?)/{self._upstream_service()}/", "/", request_path)
 
         if path not in self._allowed_upstream_paths():
-            raise fastapi.HTTPException(status_code=404, detail="Not found")
+            raise fastapi.HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND, detail="Not found"
+            )
 
         return path
 
@@ -123,7 +130,9 @@ class BaseProxyClient(ABC):
         try:
             json_body = json.loads(body)
         except json.JSONDecodeError:
-            raise fastapi.HTTPException(status_code=400, detail="Invalid JSON")
+            raise fastapi.HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid JSON"
+            )
 
         return json_body
 

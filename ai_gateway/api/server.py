@@ -153,7 +153,7 @@ async def custom_http_exception_handler(request: Request, exc: StarletteHTTPExce
 
 async def model_api_exception_handler(request: Request, exc: ModelAPIError):
     wrapped_exception = StarletteHTTPException(
-        status_code=503,
+        status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
         detail="Inference failed",
     )
     return await http_exception_handler(request, wrapped_exception)
