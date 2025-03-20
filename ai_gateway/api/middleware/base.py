@@ -35,7 +35,6 @@ from uvicorn.protocols.utils import get_path_with_query_string
 
 from ai_gateway.api.auth_utils import StarletteUser
 from ai_gateway.api.timing import timing
-from ai_gateway.feature_flags import current_feature_flag_context
 from ai_gateway.internal_events import (
     EventContext,
     current_event_context,
@@ -43,31 +42,26 @@ from ai_gateway.internal_events import (
 )
 from ai_gateway.tracking.errors import log_exception
 
-__all__ = [
-    "MiddlewareAuthentication",
-]
+from .headers import (
+    X_GITLAB_CLIENT_NAME,
+    X_GITLAB_CLIENT_TYPE,
+    X_GITLAB_CLIENT_VERSION,
+    X_GITLAB_FEATURE_ENABLED_BY_NAMESPACE_IDS_HEADER,
+    X_GITLAB_FEATURE_ENABLEMENT_TYPE_HEADER,
+    X_GITLAB_GLOBAL_USER_ID_HEADER,
+    X_GITLAB_HOST_NAME_HEADER,
+    X_GITLAB_INSTANCE_ID_HEADER,
+    X_GITLAB_INTERFACE,
+    X_GITLAB_LANGUAGE_SERVER_VERSION,
+    X_GITLAB_MODEL_GATEWAY_REQUEST_SENT_AT,
+    X_GITLAB_REALM_HEADER,
+    X_GITLAB_SAAS_DUO_PRO_NAMESPACE_IDS_HEADER,
+    X_GITLAB_TEAM_MEMBER_HEADER,
+    X_GITLAB_VERSION_HEADER,
+)
 
 log = logging.getLogger("codesuggestions")
 access_logger = structlog.stdlib.get_logger("api.access")
-
-X_GITLAB_REALM_HEADER = "X-Gitlab-Realm"
-X_GITLAB_INSTANCE_ID_HEADER = "X-Gitlab-Instance-Id"
-X_GITLAB_GLOBAL_USER_ID_HEADER = "X-Gitlab-Global-User-Id"
-X_GITLAB_TEAM_MEMBER_HEADER = "X-Gitlab-Is-Team-Member"
-X_GITLAB_HOST_NAME_HEADER = "X-Gitlab-Host-Name"
-X_GITLAB_VERSION_HEADER = "X-Gitlab-Version"
-X_GITLAB_SAAS_DUO_PRO_NAMESPACE_IDS_HEADER = "X-Gitlab-Saas-Duo-Pro-Namespace-Ids"
-X_GITLAB_FEATURE_ENABLED_BY_NAMESPACE_IDS_HEADER = (
-    "X-Gitlab-Feature-Enabled-By-Namespace-Ids"
-)
-X_GITLAB_FEATURE_ENABLEMENT_TYPE_HEADER = "X-Gitlab-Feature-Enablement-Type"
-X_GITLAB_MODEL_GATEWAY_REQUEST_SENT_AT = "X-Gitlab-Rails-Send-Start"
-X_GITLAB_LANGUAGE_SERVER_VERSION = "X-Gitlab-Language-Server-Version"
-X_GITLAB_ENABLED_FEATURE_FLAGS = "x-gitlab-enabled-feature-flags"
-X_GITLAB_CLIENT_TYPE = "X-Gitlab-Client-Type"
-X_GITLAB_CLIENT_VERSION = "X-Gitlab-Client-Version"
-X_GITLAB_CLIENT_NAME = "X-Gitlab-Client-Name"
-X_GITLAB_INTERFACE = "X-Gitlab-Interface"
 
 
 class _PathResolver:
@@ -421,38 +415,3 @@ class DistributedTraceMiddleware:
                 await self.app(scope, receive, send)
         else:
             await self.app(scope, receive, send)
-
-
-class FeatureFlagMiddleware:
-    """Middleware for feature flags."""
-
-    def __init__(self, app, disallowed_flags: dict = None):
-        self.app = app
-        self.disallowed_flags = disallowed_flags
-
-    async def __call__(self, scope, receive, send):
-        if scope["type"] != "http":
-            await self.app(scope, receive, send)
-            return
-
-        request = Request(scope)
-
-        if X_GITLAB_ENABLED_FEATURE_FLAGS not in request.headers:
-            await self.app(scope, receive, send)
-            return
-
-        enabled_feature_flags = request.headers.get(
-            X_GITLAB_ENABLED_FEATURE_FLAGS, ""
-        ).split(",")
-        enabled_feature_flags = set(enabled_feature_flags)
-
-        if self.disallowed_flags:
-            # Remove feature flags that are not supported in the specific realm.
-            gitlab_realm = request.headers.get(X_GITLAB_REALM_HEADER, "")
-            disallowed_flags = self.disallowed_flags.get(gitlab_realm, set())
-            enabled_feature_flags = enabled_feature_flags.difference(disallowed_flags)
-
-        current_feature_flag_context.set(enabled_feature_flags)
-        starlette_context["enabled_feature_flags"] = ",".join(enabled_feature_flags)
-
-        await self.app(scope, receive, send)

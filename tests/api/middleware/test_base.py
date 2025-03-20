@@ -20,15 +20,9 @@ from ai_gateway.api.middleware import (
     X_GITLAB_TEAM_MEMBER_HEADER,
     X_GITLAB_VERSION_HEADER,
     DistributedTraceMiddleware,
-    FeatureFlagMiddleware,
     InternalEventMiddleware,
 )
 from ai_gateway.internal_events import EventContext
-
-
-@pytest.fixture
-def mock_app():
-    return AsyncMock()
 
 
 @pytest.fixture
@@ -45,16 +39,6 @@ def distributed_trace_middleware(mock_app):
     )
 
 
-@pytest.fixture
-def feature_flag_middleware(mock_app, disallowed_flags):
-    return FeatureFlagMiddleware(mock_app, disallowed_flags)
-
-
-@pytest.fixture
-def disallowed_flags():
-    return {}
-
-
 @pytest.mark.asyncio
 async def test_middleware_non_http_request(internal_event_middleware):
     scope = {"type": "websocket"}
@@ -62,7 +46,7 @@ async def test_middleware_non_http_request(internal_event_middleware):
     send = AsyncMock()
 
     with request_cycle_context({}), patch(
-        "ai_gateway.api.middleware.current_event_context"
+        "ai_gateway.api.middleware.base.current_event_context"
     ) as mock_event_context:
         await internal_event_middleware(scope, receive, send)
         mock_event_context.set.assert_not_called()
@@ -81,7 +65,7 @@ async def test_middleware_disabled(mock_app):
     send = AsyncMock()
 
     with request_cycle_context({}), patch(
-        "ai_gateway.api.middleware.current_event_context"
+        "ai_gateway.api.middleware.base.current_event_context"
     ) as mock_event_context:
         await internal_event_middleware(scope, receive, send)
         mock_event_context.set.assert_not_called()
@@ -103,7 +87,7 @@ async def test_middleware_skip_path(internal_event_middleware):
     send = AsyncMock()
 
     with request_cycle_context({}), patch(
-        "ai_gateway.api.middleware.current_event_context"
+        "ai_gateway.api.middleware.base.current_event_context"
     ) as mock_event_context:
         await internal_event_middleware(scope, receive, send)
         mock_event_context.set.assert_not_called()
@@ -139,9 +123,9 @@ async def test_middleware_set_context(internal_event_middleware):
     send = AsyncMock()
 
     with request_cycle_context({}), patch(
-        "ai_gateway.api.middleware.current_event_context"
+        "ai_gateway.api.middleware.base.current_event_context"
     ) as mock_event_context, patch(
-        "ai_gateway.api.middleware.tracked_internal_events"
+        "ai_gateway.api.middleware.base.tracked_internal_events"
     ) as mock_tracked_internal_events:
         await internal_event_middleware(scope, receive, send)
 
@@ -229,7 +213,7 @@ async def test_middleware_set_context_feature_enabled_by_namespace_ids(
     send = AsyncMock()
 
     with request_cycle_context({}), patch(
-        "ai_gateway.api.middleware.current_event_context"
+        "ai_gateway.api.middleware.base.current_event_context"
     ) as mock_event_context:
         await internal_event_middleware(scope, receive, send)
 
@@ -269,7 +253,7 @@ async def test_middleware_missing_headers(internal_event_middleware):
     send = AsyncMock()
 
     with request_cycle_context({}), patch(
-        "ai_gateway.api.middleware.current_event_context"
+        "ai_gateway.api.middleware.base.current_event_context"
     ) as mock_event_context:
         await internal_event_middleware(scope, receive, send)
 
@@ -308,56 +292,11 @@ async def test_middleware_distributed_trace(distributed_trace_middleware):
     receive = AsyncMock()
     send = AsyncMock()
 
-    with patch("ai_gateway.api.middleware.tracing_context") as mock_tracing_context:
+    with patch(
+        "ai_gateway.api.middleware.base.tracing_context"
+    ) as mock_tracing_context:
         await distributed_trace_middleware(scope, receive, send)
 
         mock_tracing_context.assert_called_once_with(parent=current_run_id)
 
     distributed_trace_middleware.app.assert_called_once_with(scope, receive, send)
-
-
-@pytest.mark.asyncio
-@pytest.mark.parametrize(
-    "headers,disallowed_flags,expected_flags",
-    [
-        (
-            [
-                (b"x-gitlab-enabled-feature-flags", b"feature_a,feature_b,feature_c"),
-            ],
-            {},
-            {"feature_a", "feature_b", "feature_c"},
-        ),
-        (
-            [
-                (b"x-gitlab-enabled-feature-flags", b"feature_a,feature_b,feature_c"),
-                (b"x-gitlab-realm", b"self-managed"),
-            ],
-            {"self-managed": {"feature_a"}},
-            {"feature_b", "feature_c"},
-        ),
-    ],
-)
-async def test_middleware_feature_flag(
-    feature_flag_middleware, headers, disallowed_flags, expected_flags
-):
-    request = Request(
-        {
-            "type": "http",
-            "path": "/api/endpoint",
-            "headers": headers,
-        }
-    )
-    scope = request.scope
-    receive = AsyncMock()
-    send = AsyncMock()
-
-    with patch(
-        "ai_gateway.api.middleware.current_feature_flag_context"
-    ) as mock_feature_flag_context, request_cycle_context({}):
-        await feature_flag_middleware(scope, receive, send)
-
-        mock_feature_flag_context.set.assert_called_once_with(expected_flags)
-
-        assert set(context["enabled_feature_flags"].split(",")) == expected_flags
-
-    feature_flag_middleware.app.assert_called_once_with(scope, receive, send)
