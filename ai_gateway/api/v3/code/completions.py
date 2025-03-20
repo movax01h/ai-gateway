@@ -1,5 +1,5 @@
 from time import time
-from typing import Annotated, AsyncIterator
+from typing import Annotated, AsyncIterator, Optional
 
 from dependency_injector.providers import Factory
 from dependency_injector.wiring import Provide, inject
@@ -162,7 +162,7 @@ async def code_completion(
     completions_amazon_q_factory: Factory[CodeCompletions] = Provide[
         ContainerApplication.code_suggestions.completions.amazon_q_factory.provider
     ],
-    code_context: list[CodeContextPayload] = None,
+    code_context: Optional[list[CodeContextPayload]] = None,
 ):
     kwargs = {}
 
@@ -261,7 +261,7 @@ async def code_generation(
     generations_amazon_q_factory: Factory[CodeGenerations] = Provide[
         ContainerApplication.code_suggestions.generations.amazon_q_factory.provider
     ],
-    code_context: list[CodeContextPayload] = None,
+    code_context: Optional[list[CodeContextPayload]] = None,
 ):
     model_provider = payload.model_provider
     if model_provider == KindModelProvider.AMAZON_Q:
