@@ -1,4 +1,4 @@
-from typing import Annotated
+from typing import Annotated, Optional
 
 import structlog
 from fastapi import APIRouter, Depends, Header, HTTPException, Request, status
@@ -38,13 +38,13 @@ async def user_access_token(
         InternalEventsClient, Depends(get_internal_event_client)
     ],
     x_gitlab_global_user_id: Annotated[
-        str, Header()
+        Optional[str], Header()
     ] = None,  # This is the value of X_GITLAB_GLOBAL_USER_ID_HEADER
     x_gitlab_realm: Annotated[
-        str, Header()
+        Optional[str], Header()
     ] = None,  # This is the value of X_GITLAB_REALM_HEADER
     x_gitlab_instance_id: Annotated[
-        str, Header()
+        Optional[str], Header()
     ] = None,  # This is the value of X_GITLAB_INSTANCE_ID_HEADER
 ):
     if not current_user.can(

@@ -121,7 +121,7 @@ def config_values():
 
 @pytest.fixture
 def mock_config(config_values: dict[str, Any]):
-    yield Config(_env_file=None, _env_prefix='AIGW_TEST', **config_values)
+    yield Config(_env_file=None, _env_prefix="AIGW_TEST", **config_values)
 
 
 @pytest.fixture
@@ -380,7 +380,7 @@ def mock_litellm_acompletion():
                 AsyncMock(
                     message=AsyncMock(content="Test response"),
                     text="Test text completion response",
-                    logprobs= AsyncMock(token_logprobs=[999]),
+                    logprobs=AsyncMock(token_logprobs=[999]),
                 ),
             ],
             usage=AsyncMock(completion_tokens=999),
