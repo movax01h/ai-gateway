@@ -17,6 +17,7 @@ stages:
   - ingest
   - runway_staging
   - runway_production
+  - deploy_pages
 
 variables:
   PIP_CACHE_DIR: "$CI_PROJECT_DIR/.cache/pip"
@@ -115,3 +116,14 @@ tag-self-hosted:
       git push origin "self-hosted-${GITLAB_VERSION}"
   rules:
     - if: $GITLAB_VERSION
+
+pages:
+  stage: deploy_pages
+  script:
+    - mkdir -p public
+    - python scripts/prompt_directory_json_builder.py
+  artifacts:
+    paths:
+      - public
+  rules:
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
