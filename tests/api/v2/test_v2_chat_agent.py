@@ -44,8 +44,40 @@ def auth_user():
 
 
 @pytest.fixture
-def mocked_stream():
-    with patch("ai_gateway.chat.executor.GLAgentRemoteExecutor.stream") as mock:
+def mock_create_event_stream():
+    async def _dummy_create_event_stream(*args, **kwargs):
+        react_inputs = ReActAgentInputs(
+            messages=(
+                kwargs.get("agent_request").messages
+                if kwargs.get("agent_request")
+                else []
+            ),
+            agent_scratchpad=kwargs.get("agent_scratchpad", []),
+            unavailable_resources=(
+                kwargs.get("agent_request").unavailable_resources
+                if kwargs.get("agent_request")
+                else []
+            ),
+            current_date=kwargs.get(
+                "current_date", datetime.now().strftime("%A, %B %d, %Y")
+            ),
+        )
+
+        async def _dummy_stream_events():
+            if hasattr(mock_create_event_stream_mock, "stream_return_values"):
+                for event in mock_create_event_stream_mock.stream_return_values:
+                    yield event
+            else:
+                yield AgentFinalAnswer(text="mocked_answer")
+
+        return react_inputs, _dummy_stream_events()
+
+    with patch(
+        "ai_gateway.api.v2.chat.agent.create_event_stream",
+        side_effect=_dummy_create_event_stream,
+    ) as mock:
+        mock_create_event_stream_mock = mock
+
         yield mock
 
 
@@ -241,9 +273,24 @@ class TestReActAgentStream:
         mock_client: TestClient,
         mock_model: Mock,
         mocked_tools: Mock,
+        mock_create_event_stream: Mock,
         agent_request: AgentRequest,
         expected_events: list[TypeAgentEvent],
     ):
+
+        async def _stream_gen():
+            for event in expected_events:
+                yield event
+
+        side_effect = mock_create_event_stream.side_effect
+
+        async def dynamic_side_effect(*args, **kwargs):
+            inputs_part, _ = await side_effect(*args, **kwargs)
+
+            return inputs_part, _stream_gen()
+
+        mock_create_event_stream.side_effect = dynamic_side_effect
+
         response = mock_client.post(
             "/chat/agent",
             headers={
@@ -260,6 +307,7 @@ class TestReActAgentStream:
 
         assert response.status_code == 200
         assert actual_events == expected_events
+        mock_create_event_stream.assert_called_once
 
     @pytest.mark.asyncio
     @pytest.mark.parametrize(
@@ -330,7 +378,7 @@ class TestReActAgentStream:
     async def test_legacy_success(
         self,
         mock_client: TestClient,
-        mocked_stream: Mock,
+        mock_create_event_stream: Mock,
         mock_track_internal_event,
         messages: list[Message],
         actions: list[TypeAgentEvent],
@@ -342,7 +390,14 @@ class TestReActAgentStream:
             for action in actions:
                 yield action
 
-        mocked_stream.side_effect = _agent_stream
+        side_effect = mock_create_event_stream.side_effect
+
+        async def dynamic_side_effect(*args, **kwargs):
+            inputs_part, _ = await side_effect(*args, **kwargs)
+
+            return inputs_part, _agent_stream()
+
+        mock_create_event_stream.side_effect = dynamic_side_effect
 
         mock_now = datetime(2024, 12, 25)
         expected_date_string = "Wednesday, December 25, 2024"
@@ -386,7 +441,8 @@ class TestReActAgentStream:
 
         assert response.status_code == 200
         assert actual_actions == expected_actions
-        mocked_stream.assert_called_once_with(inputs=agent_inputs)
+
+        mock_create_event_stream.assert_called_once
 
         mock_track_internal_event.assert_called_once_with(
             "request_duo_chat",

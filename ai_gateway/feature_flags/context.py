@@ -11,6 +11,7 @@ class FeatureFlag(StrEnum):
     EXPANDED_AI_LOGGING = "expanded_ai_logging"
     ENABLE_ANTHROPIC_PROMPT_CACHING = "enable_anthropic_prompt_caching"
     DISABLE_CODE_GECKO_DEFAULT = "disable_code_gecko_default"
+    CHAT_V1_REDIRECT = "redirect_v1_chat_request"
 
 
 def is_feature_enabled(feature_name: FeatureFlag | str) -> bool:
