@@ -42,6 +42,7 @@ from ai_gateway.container import ContainerApplication
 from ai_gateway.feature_flags.context import current_feature_flag_context
 from ai_gateway.models import KindModelProvider
 from ai_gateway.prompts import BasePromptRegistry
+from ai_gateway.prompts.typing import TypeModelMetadata
 from ai_gateway.structured_logging import get_request_logger
 from ai_gateway.tracking import SnowplowEventContext
 
@@ -144,6 +145,7 @@ async def code_suggestions(
             prompt_registry=prompt_registry,
             stream_handler=stream_handler,
             snowplow_event_context=snowplow_code_suggestion_context,
+            model_metadata=payload.model_metadata,
         )
 
 
@@ -262,6 +264,7 @@ async def code_generation(
         ContainerApplication.code_suggestions.generations.amazon_q_factory.provider
     ],
     code_context: Optional[list[CodeContextPayload]] = None,
+    model_metadata: TypeModelMetadata = None,
 ):
     model_provider = payload.model_provider
     if model_provider == KindModelProvider.AMAZON_Q:
@@ -289,6 +292,7 @@ async def code_generation(
             user=current_user,
             prompt_id=payload.prompt_id,
             prompt_version=payload.prompt_version,
+            model_metadata=model_metadata,
             internal_event_category=__name__,
         )
         engine = agent_factory(model__prompt=prompt)

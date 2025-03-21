@@ -1,4 +1,6 @@
-from unittest.mock import Mock
+from dataclasses import dataclass
+from typing import Optional
+from unittest.mock import Mock, patch
 
 import pytest
 from dependency_injector import containers
@@ -18,6 +20,8 @@ __all__ = [
     "TestIncomingRequest",
     "TestUnauthorizedIssuer",
 ]
+
+from ai_gateway.prompts.typing import ModelMetadata
 
 
 @pytest.fixture
@@ -672,6 +676,92 @@ class TestEditorContentGeneration:
             prompt_enhancer=prompt_enhancer,
             suffix="\n",
         )
+
+    class TestModelMetadataSelection:
+        @dataclass
+        class Case:
+            model_metadata: Optional[dict]
+            expected_arguments: tuple[str, str, Optional[ModelMetadata]]
+
+        CASE_WITH_MODEL_PARAMS = Case(
+            model_metadata={
+                "api_key": "token",
+                "endpoint": "http://localhost:4000",
+                "identifier": "provider/some-model",
+                "name": "mistral",
+                "provider": "litellm",
+            },
+            expected_arguments=(
+                "code_suggestions/generations",
+                "2.0.1",
+                ModelMetadata(
+                    name="mistral",
+                    provider="litellm",
+                    endpoint="http://localhost:4000",
+                    api_key="token",
+                    identifier="provider/some-model",
+                ),
+            ),
+        )
+
+        CASE_WITHOUT_MODEL_PARAMS = Case(
+            model_metadata=None,
+            expected_arguments=("code_suggestions/generations", "2.0.1", None),
+        )
+
+        @pytest.mark.parametrize(
+            "test_case", [CASE_WITH_MODEL_PARAMS, CASE_WITHOUT_MODEL_PARAMS]
+        )
+        def test_model_metadata_selection(
+            self,
+            mock_client: TestClient,
+            mock_generations: Mock,
+            route: str,
+            test_case: Case,
+        ):
+            prompt_enhancer = {
+                "examples_array": [],
+                "trimmed_prefix": "# Create a fast binary search\n",
+                "trimmed_suffix": "",
+                "related_files": [],
+                "related_snippets": [],
+                "libraries": [],
+                "user_instruction": "Generate the best possible code based on instructions.",
+            }
+
+            data = {
+                "prompt_components": [
+                    {
+                        "type": "code_editor_generation",
+                        "payload": {
+                            "file_name": "main.py",
+                            "content_above_cursor": "# Create a fast binary search\n",
+                            "content_below_cursor": "\n",
+                            "language_identifier": "python",
+                            "prompt_id": "code_suggestions/generations",
+                            "prompt_version": "2.0.1",
+                            "prompt_enhancer": prompt_enhancer,
+                        },
+                    }
+                ],
+                "model_metadata": test_case.model_metadata,
+            }
+
+            with patch("ai_gateway.prompts.registry.LocalPromptRegistry.get") as mock:
+                response = mock_client.post(
+                    route,
+                    headers={
+                        "Authorization": "Bearer 12345",
+                        "X-Gitlab-Authentication-Type": "oidc",
+                        "X-GitLab-Instance-Id": "1234",
+                        "X-GitLab-Realm": "self-managed",
+                        "X-Gitlab-Global-User-Id": "test-user-id",
+                    },
+                    json=data,
+                )
+
+                assert response.status_code == 200
+                mock.assert_called_with(*test_case.expected_arguments)
 
     @pytest.mark.parametrize(
         ("prompt", "want_called"),
