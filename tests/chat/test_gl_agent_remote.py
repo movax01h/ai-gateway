@@ -100,7 +100,7 @@ class TestGLAgentRemoteExecutor:
         inputs: ReActAgentInputs,
         user: StarletteUser,
     ):
-        executor = GLAgentRemoteExecutor(
+        executor: GLAgentRemoteExecutor = GLAgentRemoteExecutor(
             agent=agent,
             tools_registry=tools_registry,
             internal_event_client=internal_event_client,
@@ -112,8 +112,12 @@ class TestGLAgentRemoteExecutor:
         with request_cycle_context({}):
             actual_actions = [action async for action in executor.stream(inputs=inputs)]
 
+            assert (
+                context.get("duo_chat.agent_available_tools") is not None
+            ), "Expected 'duo_chat.agent_available_tools' to be set in context and not None"
+
             if user.is_debug:
-                assert set(context.get("duo_chat.agent_available_tools")) == {
+                assert set(context.get("duo_chat.agent_available_tools", [])) == {
                     "build_reader",
                     "gitlab_documentation",
                     "epic_reader",
@@ -330,7 +334,7 @@ class TestGLAgentRemoteExecutorToolAction:
         expected_available_tools,
         expected_internal_events,
     ):
-        executor = GLAgentRemoteExecutor(
+        executor: GLAgentRemoteExecutor = GLAgentRemoteExecutor(
             agent=agent,
             tools_registry=tools_registry,
             internal_event_client=internal_event_client,
@@ -395,7 +399,7 @@ class TestGLAgentRemoteExecutorToolValidation:
         user: StarletteUser,
         expected_event,
     ):
-        executor = GLAgentRemoteExecutor(
+        executor: GLAgentRemoteExecutor = GLAgentRemoteExecutor(
             agent=agent,
             tools_registry=tools_registry,
             internal_event_client=internal_event_client,

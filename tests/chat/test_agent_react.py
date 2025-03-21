@@ -26,6 +26,7 @@ from ai_gateway.models.base_chat import Role
 from ai_gateway.prompts.config.models import (
     ChatAnthropicParams,
     ChatLiteLLMParams,
+    ModelClassProvider,
     TypeModelParams,
 )
 
@@ -52,25 +53,6 @@ def prompt_template():
         "user": "{% include 'chat/react/user/1.0.0.jinja' %}",
         "assistant": "{% include 'chat/react/assistant/1.0.0.jinja' %}",
     }
-
-
-@pytest.fixture
-def tool_action(model_response: str):
-    yield AgentToolAction(
-        thought="I'm thinking...",
-        tool="ci_issue_reader",
-        tool_input="random input",
-        log=model_response,
-    )
-
-
-@pytest.fixture
-def final_answer(model_response: str):
-    yield AgentFinalAnswer(
-        thought="I'm thinking...",
-        text="Paris",
-        log=model_response,
-    )
 
 
 @pytest.fixture(autouse=True)
@@ -377,7 +359,7 @@ class TestReActAgent:
                     agent_scratchpad=[],
                     tools=[IssueReader()],
                 ),
-                ChatAnthropicParams(model_class_provider="anthropic"),
+                ChatAnthropicParams(model_class_provider=ModelClassProvider.ANTHROPIC),
                 True,
             ),
             (
@@ -392,7 +374,7 @@ class TestReActAgent:
                     agent_scratchpad=[],
                     tools=[IssueReader()],
                 ),
-                ChatAnthropicParams(model_class_provider="anthropic"),
+                ChatAnthropicParams(model_class_provider=ModelClassProvider.ANTHROPIC),
                 False,
             ),
             (
@@ -407,22 +389,7 @@ class TestReActAgent:
                     agent_scratchpad=[],
                     tools=[IssueReader()],
                 ),
-                ChatLiteLLMParams(model_class_provider="litellm"),
-                False,
-            ),
-            (
-                True,
-                ReActAgentInputs(
-                    messages=[
-                        Message(
-                            role=Role.USER,
-                            content="What's the title of this issue?",
-                        ),
-                    ],
-                    agent_scratchpad=[],
-                    tools=[IssueReader()],
-                ),
-                ChatLiteLLMParams(model_class_provider="litellm"),
+                ChatLiteLLMParams(model_class_provider=ModelClassProvider.LITE_LLM),
                 False,
             ),
             (
@@ -437,7 +404,22 @@ class TestReActAgent:
                     agent_scratchpad=[],
                     tools=[IssueReader()],
                 ),
-                ChatLiteLLMParams(model_class_provider="litellm"),
+                ChatLiteLLMParams(model_class_provider=ModelClassProvider.LITE_LLM),
+                False,
+            ),
+            (
+                True,
+                ReActAgentInputs(
+                    messages=[
+                        Message(
+                            role=Role.USER,
+                            content="What's the title of this issue?",
+                        ),
+                    ],
+                    agent_scratchpad=[],
+                    tools=[IssueReader()],
+                ),
+                ChatLiteLLMParams(model_class_provider=ModelClassProvider.LITE_LLM),
                 False,
             ),
         ],
@@ -451,18 +433,23 @@ class TestReActAgent:
         should_add_anthropic_cache: bool,
     ):
         if feature_flag_enabled:
-            current_feature_flag_context.set(["enable_anthropic_prompt_caching"])
+            current_feature_flag_context.set({"enable_anthropic_prompt_caching"})
         else:
-            current_feature_flag_context.set([])
+            current_feature_flag_context.set(set[str]())
 
         prompt_value = prompt.prompt_tpl.invoke(inputs)
 
-        for msg in prompt_value.messages:
+        for msg in prompt_value.to_messages():
             if isinstance(msg, SystemMessage):
                 if should_add_anthropic_cache:
-                    content_dict = msg.content[0]
-                    assert content_dict["type"] == "text"
-                    assert content_dict["cache_control"] == {"type": "ephemeral"}
+                    if isinstance(msg.content[0], dict):
+                        content_dict = msg.content[0]
+                        assert content_dict["type"] == "text"
+                        assert content_dict["cache_control"] == {"type": "ephemeral"}
+                    else:
+                        raise TypeError(
+                            f"Expected msg.content[0] to be a dict, but got {type(msg.content[0])}"
+                        )
                 else:
                     assert isinstance(msg.content, str)
 
