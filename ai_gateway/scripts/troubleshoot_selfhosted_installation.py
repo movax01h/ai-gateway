@@ -146,7 +146,7 @@ def check_provider_specific_env_variables(provider):
 
 
 def check_suggestions_model_access(
-    endpoint, model_family, model_endpoint, api_key, model_identifier
+    endpoint, model_family, model_endpoint, api_key, model_identifier, provider
 ):
     print(f"Testing if the {model_family} model is accessible for Code Generation ...")
 
@@ -177,12 +177,21 @@ def check_suggestions_model_access(
         "prompt": "",
     }
 
+    model_endpoint_message = (
+        model_endpoint
+        if provider != "bedrock"
+        else "Set to None as Bedrock models don't require a model endpoint to be set"
+    )
+
     error_message = f"""
                 >> Failed to access the {model_family} model."
                 >> Potential causes are:
                 >> - The model is not running. Verify if your model is running
                 >> - Model, model endpoint or the api key are invalid. Double check the parameters passed:
-                >>    - model_family: {model_family}, model endpoint: {model_endpoint}, api key: {api_key}, model_identifier: {model_identifier}
+                >>    - model_family: {model_family}
+                >>    - model_endpoint: {model_endpoint_message}
+                >>    - api_key: {api_key}
+                >>    - model_identifier: {model_identifier}
                 >> - The model is not reachable by AI Gateway. This can happen if the network is not configured correctly.
                 >>    - Attempt to make a request to your model api directly from the AI Gateway container
                 """
@@ -278,5 +287,5 @@ def troubleshoot():
             check_provider_accessible(provider)
 
         check_suggestions_model_access(
-            endpoint, model_family, model_endpoint, api_key, model_identifier
+            endpoint, model_family, model_endpoint, api_key, model_identifier, provider
         )
