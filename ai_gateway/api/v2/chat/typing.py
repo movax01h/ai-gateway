@@ -32,7 +32,7 @@ class AgentRequest(BaseModel):
         examples=[[{"role": "user", "content": "what is gitlab"}]]
     )
     options: Optional[AgentRequestOptions] = None
-    model_metadata: Optional[TypeModelMetadata] = Field(None, examples=[None])
+    model_metadata: Optional[TypeModelMetadata] = Field(default=None, examples=[None])
     unavailable_resources: Optional[list[str]] = [
         "Merge Requests, Pipelines, Vulnerabilities"
     ]

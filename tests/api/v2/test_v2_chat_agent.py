@@ -1,10 +1,11 @@
 import json
 from datetime import datetime
-from typing import AsyncIterator
+from typing import AsyncIterator, Type
 from unittest.mock import Mock, PropertyMock, call, patch
 
 import pytest
 from gitlab_cloud_connector import CloudConnectorUser, UserClaims
+from pydantic import AnyUrl
 from starlette.testclient import TestClient
 
 from ai_gateway.api.v2 import api_router
@@ -69,7 +70,7 @@ def config_values():
     yield {"custom_models": {"enabled": True}}
 
 
-def chunk_to_model(chunk: str, klass: AgentBaseEvent) -> str:
+def chunk_to_model(chunk: str, klass: Type[AgentBaseEvent]) -> AgentBaseEvent:
     res = json.loads(chunk)
     data = res.pop("data")
     return klass.model_validate({**res, **data})
@@ -103,7 +104,7 @@ class TestReActAgentStream:
                     model_metadata=ModelMetadata(
                         name="vertex",
                         provider="claude-3-5-haiku-20241022",
-                        endpoint="http://localhost:4000",
+                        endpoint=AnyUrl("http://localhost:4000"),
                     ),
                 ),
                 "thought\nFinal Answer: answer\n",
@@ -161,7 +162,7 @@ class TestReActAgentStream:
                     model_metadata=ModelMetadata(
                         name="mistral",
                         provider="litellm",
-                        endpoint="http://localhost:4000",
+                        endpoint=AnyUrl("http://localhost:4000"),
                         api_key="token",
                     ),
                     unavailable_resources=["Mystery Resource 1", "Mystery Resource 2"],
@@ -269,7 +270,7 @@ class TestReActAgentStream:
                 ModelMetadata(
                     name="mistral",
                     provider="litellm",
-                    endpoint="http://localhost:4000",
+                    endpoint=AnyUrl("http://localhost:4000"),
                     api_key="token",
                 ),
                 [
@@ -341,7 +342,6 @@ class TestReActAgentStream:
         agent_inputs = ReActAgentInputs(
             messages=messages,
             agent_scratchpad=agent_scratchpad,
-            model_metadata=model_metadata,
             unavailable_resources=unavailable_resources,
             current_date=expected_date_string,
         )

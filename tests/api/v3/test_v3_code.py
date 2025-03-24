@@ -6,6 +6,7 @@ import pytest
 from dependency_injector import containers
 from fastapi.testclient import TestClient
 from gitlab_cloud_connector import CloudConnectorUser, UserClaims
+from pydantic import AnyUrl
 
 from ai_gateway.api.v3 import api_router
 from ai_gateway.feature_flags.context import current_feature_flag_context
@@ -270,7 +271,7 @@ class TestEditorContentCompletion:
         mock_code_gecko: Mock,
         model_provider: str,
         expected_code: int,
-        expected_response: str,
+        expected_response: dict,
         expected_model: dict,
         route: str,
     ):
@@ -697,7 +698,7 @@ class TestEditorContentGeneration:
                 ModelMetadata(
                     name="mistral",
                     provider="litellm",
-                    endpoint="http://localhost:4000",
+                    endpoint=AnyUrl("http://localhost:4000"),
                     api_key="token",
                     identifier="provider/some-model",
                 ),
@@ -905,7 +906,7 @@ class TestEditorContentGeneration:
         mock_code_bison: Mock,
         model_provider: str,
         expected_code: int,
-        expected_response: str,
+        expected_response: dict,
         expected_model: dict,
         route: str,
     ):

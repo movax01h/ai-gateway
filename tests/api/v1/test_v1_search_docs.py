@@ -59,7 +59,6 @@ async def test_success(
     request_body: dict,
     search_results: dict,
 ):
-
     time_now = time()
     with patch(
         "ai_gateway.searches.search.VertexAISearch.search_with_retry",
@@ -131,9 +130,9 @@ async def test_missing_param(
 
 
 @pytest.mark.asyncio
-async def test_missing_authenication(
+async def test_missing_authentication(
     mock_client: TestClient,
-    request_body: request_body,
+    request_body: dict,
 ):
     response = mock_client.post(
         "/search/gitlab-docs",
