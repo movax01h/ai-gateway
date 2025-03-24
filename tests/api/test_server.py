@@ -1,7 +1,7 @@
 import asyncio
 import os
 import socket
-from typing import Iterator, cast
+from typing import cast
 from unittest import mock
 from unittest.mock import MagicMock, patch
 
@@ -61,12 +61,12 @@ def unused_port():
 
 @pytest.fixture
 def vertex_project():
-    yield "vertex-project"
+    return "vertex-project"
 
 
 @pytest.fixture
 def config(vertex_project: str):
-    yield Config(
+    return Config(
         google_cloud_platform=ConfigGoogleCloudPlatform(project=vertex_project)
     )
 
@@ -84,12 +84,12 @@ def auth_enabled():
 
 
 @pytest.fixture(scope="session")
-def fastapi_server_app(auth_enabled) -> Iterator[FastAPI]:
+def fastapi_server_app(auth_enabled) -> FastAPI:
     config = Config(_env_file=None, auth=ConfigAuth(bypass_external=not auth_enabled))
     fast_api_container = ContainerApplication()
     fast_api_container.config.from_dict(config.model_dump())
     setup_logging(config.logging)
-    yield create_fast_api_server(config)
+    return create_fast_api_server(config)
 
 
 @pytest.mark.parametrize(

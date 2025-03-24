@@ -67,7 +67,7 @@ def mocked_tools():
 
 @pytest.fixture
 def config_values():
-    yield {"custom_models": {"enabled": True}}
+    return {"custom_models": {"enabled": True}}
 
 
 def chunk_to_model(chunk: str, klass: Type[AgentBaseEvent]) -> AgentBaseEvent:

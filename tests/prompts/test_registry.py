@@ -194,12 +194,11 @@ params:
   model_class_provider: test
 """,
     )
-    yield fs
 
 
 @pytest.fixture
 def model_factories():
-    yield {
+    return {
         ModelClassProvider.ANTHROPIC: lambda model, **kwargs: ChatAnthropic(model=model, **kwargs),  # type: ignore[call-arg]
         ModelClassProvider.LITE_LLM: lambda model, **kwargs: ChatLiteLLM(
             model=model, **kwargs
@@ -214,7 +213,7 @@ def model_factories():
 
 @pytest.fixture
 def prompts_registered():
-    yield {
+    return {
         "test/base": PromptRegistered(
             klass=Prompt,
             versions={
@@ -347,17 +346,17 @@ def prompts_registered():
 
 @pytest.fixture
 def default_prompts():
-    yield {}
+    return {}
 
 
 @pytest.fixture
 def custom_models_enabled():
-    yield True
+    return True
 
 
 @pytest.fixture
 def disable_streaming():
-    yield True
+    return True
 
 
 @pytest.fixture
@@ -369,7 +368,7 @@ def registry(
     custom_models_enabled: bool,
     disable_streaming: bool,
 ):
-    yield LocalPromptRegistry(
+    return LocalPromptRegistry(
         model_factories=model_factories,
         prompts_registered=prompts_registered,
         default_prompts=default_prompts,
@@ -600,7 +599,6 @@ class TestLocalPromptRegistry:
         expected_model_params: dict,
         expected_model_class: Type[Model],
     ):
-
         prompt = registry.get(
             prompt_id,
             prompt_version=prompt_version,
@@ -938,7 +936,6 @@ class TestLocalPromptRegistry:
         prompt: Prompt,
         internal_event_client: Mock,
     ):
-
         test_registry = LocalPromptRegistry.from_local_yaml(
             class_overrides={},
             model_factories={},
@@ -948,7 +945,6 @@ class TestLocalPromptRegistry:
         prompt.unit_primitives = []
 
         with patch.object(test_registry, "get", return_value=prompt):
-
             result_prompt = test_registry.get_on_behalf(user, prompt_id="test")
 
             assert result_prompt == prompt

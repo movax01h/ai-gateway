@@ -10,7 +10,7 @@ from ai_gateway.prompts import Prompt
 
 @pytest.fixture
 def model():
-    yield ChatLiteLLM(
+    return ChatLiteLLM(
         model="claude-3-sonnet@20240229", custom_llm_provider="vertex_ai", max_retries=3  # type: ignore[call-arg]
     )
 
@@ -28,7 +28,7 @@ def mock_http(mock_http_handler: Mock):
 def mock_http_handler(response_text: str):
     handler = AsyncMock()
     handler.post.return_value = httpx.Response(status_code=200, text=response_text)
-    yield handler
+    return handler
 
 
 @pytest.fixture

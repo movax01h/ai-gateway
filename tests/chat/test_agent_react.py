@@ -33,12 +33,12 @@ from ai_gateway.prompts.config.models import (
 
 @pytest.fixture
 def prompt_class():
-    yield ReActAgent
+    return ReActAgent
 
 
 @pytest.fixture
 def inputs():
-    yield ReActAgentInputs(
+    return ReActAgentInputs(
         messages=[
             Message(role=Role.USER, content="Hi, how are you?"),
             Message(role=Role.ASSISTANT, content="I'm good!"),
@@ -48,7 +48,7 @@ def inputs():
 
 @pytest.fixture
 def prompt_template():
-    yield {
+    return {
         "system": "{% include 'chat/react/system/1.0.0.jinja' %}",
         "user": "{% include 'chat/react/user/1.0.0.jinja' %}",
         "assistant": "{% include 'chat/react/assistant/1.0.0.jinja' %}",

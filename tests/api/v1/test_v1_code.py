@@ -76,7 +76,7 @@ def auth_user(request):
 
 @pytest.fixture
 def config_values():
-    yield {
+    return {
         "self_signed_jwt": {
             "signing_key": TEST_PRIVATE_KEY,
         }
