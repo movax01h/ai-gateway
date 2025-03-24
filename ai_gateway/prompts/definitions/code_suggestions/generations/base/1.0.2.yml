@@ -1,0 +1,19 @@
+---
+name: Claude 3.7 Sonnet Code Generations Agent
+model:
+  config_file: claude_3_7
+  params:
+    temperature: 0.2
+    max_tokens: 2048
+unit_primitives:
+  - generate_code
+prompt_template:
+  system: |
+    {% include 'code_suggestions/generations/jinja_template/dotcom/system/1.0.0.jinja' %}
+  user: |
+    {{user_instruction}}
+  assistant: |
+    <new_code>
+params:
+  stop:
+    - </new_code>

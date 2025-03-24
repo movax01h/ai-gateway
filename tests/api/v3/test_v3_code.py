@@ -537,7 +537,7 @@ class TestEditorContentGeneration:
             # non-empty suggestions from model
             (
                 "def search",
-                "Claude 3 Code Generations Agent",
+                "Claude 3.7 Sonnet Code Generations Agent",
                 "agent",
                 {
                     "choices": [
@@ -550,7 +550,7 @@ class TestEditorContentGeneration:
                     "metadata": {
                         "model": {
                             "engine": "agent",
-                            "name": "Claude 3 Code Generations Agent",
+                            "name": "Claude 3.7 Sonnet Code Generations Agent",
                             "lang": "python",
                         },
                         "enabled_feature_flags": ["flag_a", "flag_b"],
@@ -560,14 +560,14 @@ class TestEditorContentGeneration:
             # empty suggestions from model
             (
                 "",
-                "Claude 3 Code Generations Agent",
+                "Claude 3.7 Sonnet Code Generations Agent",
                 "agent",
                 {
                     "choices": [],
                     "metadata": {
                         "model": {
                             "engine": "agent",
-                            "name": "Claude 3 Code Generations Agent",
+                            "name": "Claude 3.7 Sonnet Code Generations Agent",
                             "lang": "python",
                         },
                         "enabled_feature_flags": ["flag_a", "flag_b"],
