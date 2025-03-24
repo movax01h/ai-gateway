@@ -1,7 +1,7 @@
 # pylint: disable=too-many-lines
 
 import time
-from typing import Dict, List, Union
+from typing import Any, Dict, List, Union
 from unittest.mock import ANY, Mock, patch
 
 import pytest
@@ -420,7 +420,7 @@ class TestCodeCompletions:
             ],
         }
 
-        code_completions_kwargs = (
+        code_completions_kwargs: dict[str, Any] = (
             {"code_context": ["test context"]} if expect_context else {}
         )
         if prompt_version == 2:
@@ -442,11 +442,12 @@ class TestCodeCompletions:
                 },
             ]
             data.update({"prompt": raw_prompt})
-            raw_prompt = [
-                Message(role=prompt["role"], content=prompt["content"])
+
+            raw_prompt_args = [
+                Message(role=Role(prompt["role"]), content=prompt["content"])
                 for prompt in raw_prompt
             ]
-            code_completions_kwargs.update({"raw_prompt": raw_prompt})
+            code_completions_kwargs.update({"raw_prompt": raw_prompt_args})
 
         current_feature_flag_context.set({"flag_b", "flag_c"})
 
@@ -1326,7 +1327,7 @@ class TestCodeCompletions:
 
         response = self._send_code_completions_request(mock_client, params)
 
-        current_feature_flag_context.set([])
+        current_feature_flag_context.set(set[str]())
 
         mock_litellm_acompletion.assert_called_with(
             model="vertex_ai/codestral-2501",
@@ -1370,7 +1371,7 @@ class TestCodeCompletions:
         }
         current_feature_flag_context.set({FeatureFlag.DISABLE_CODE_GECKO_DEFAULT})
         response = self._send_code_completions_request(mock_client, params)
-        current_feature_flag_context.set([])
+        current_feature_flag_context.set(set[str]())
 
         mock_litellm_acompletion.assert_called_with(
             messages=[

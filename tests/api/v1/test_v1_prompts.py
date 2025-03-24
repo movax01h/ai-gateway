@@ -68,10 +68,14 @@ def mock_registry_get(
     compatible_versions: Optional[List[str]],
 ):
     with patch("ai_gateway.prompts.registry.LocalPromptRegistry.get") as mock:
-        if prompt_class and len(compatible_versions) > 0:
-            mock.return_value = request.getfixturevalue("prompt")
-        elif prompt_class and not compatible_versions:
+        if prompt_class and not compatible_versions:
             mock.side_effect = ValueError("No prompt version found matching the query:")
+        elif (
+            prompt_class
+            and compatible_versions is not None
+            and len(compatible_versions) > 0
+        ):
+            mock.return_value = request.getfixturevalue("prompt")
         else:
             mock.side_effect = KeyError()
 
@@ -246,7 +250,11 @@ class TestPrompt:
         else:
             assert expected_response["detail"] in actual_response["detail"]
 
-        if prompt_class and len(compatible_versions) > 0:
+        if (
+            prompt_class
+            and compatible_versions is not None
+            and len(compatible_versions) > 0
+        ):
             mock_track_internal_event.assert_called_once_with(
                 "request_explain_vulnerability",
                 category="ai_gateway.api.v1.prompts.invoke",
