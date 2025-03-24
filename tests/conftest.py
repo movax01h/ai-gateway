@@ -121,7 +121,7 @@ def config_values():
 
 @pytest.fixture
 def mock_config(config_values: dict[str, Any]):
-    yield Config(_env_file=None, _env_prefix="AIGW_TEST", **config_values)
+    return Config(_env_file=None, _env_prefix="AIGW_TEST", **config_values)
 
 
 @pytest.fixture
@@ -131,12 +131,12 @@ def mock_container(
     container_application = ContainerApplication()
     container_application.config.from_dict(mock_config.model_dump())
 
-    yield container_application
+    return container_application
 
 
 @pytest.fixture
 def mock_output_text():
-    yield "test completion"
+    return "test completion"
 
 
 @pytest.fixture
@@ -244,7 +244,7 @@ def mock_amazon_q_model(mock_output: TextGenModelOutput):
 
 @pytest.fixture
 def mock_completions_legacy_output_texts():
-    yield ["def search"]
+    return ["def search"]
 
 
 @pytest.fixture
@@ -272,22 +272,22 @@ def mock_completions_legacy_output(mock_completions_legacy_output_texts: str):
             )
         )
 
-    yield output
+    return output
 
 
 @pytest.fixture
 def mock_suggestions_output_text():
-    yield "def search"
+    return "def search"
 
 
 @pytest.fixture
 def mock_suggestions_model():
-    yield "claude-3-haiku-20240307"
+    return "claude-3-haiku-20240307"
 
 
 @pytest.fixture
 def mock_suggestions_engine():
-    yield "anthropic"
+    return "anthropic"
 
 
 @pytest.fixture
@@ -408,22 +408,22 @@ def mock_litellm_acompletion_streamed():
 
 @pytest.fixture
 def model_response():
-    yield "Hello there!"
+    return "Hello there!"
 
 
 @pytest.fixture
 def model_engine():
-    yield "fake-engine"
+    return "fake-engine"
 
 
 @pytest.fixture
 def model_name():
-    yield "fake-model"
+    return "fake-model"
 
 
 @pytest.fixture
 def model_error():
-    yield None
+    return None
 
 
 class FakeModel(FakeListChatModel):
@@ -458,7 +458,7 @@ def model(
     # our default Assistant prompt template already contains "Thought: "
     text = model_response.removeprefix("Thought: ") if model_response else ""
 
-    yield FakeModel(
+    return FakeModel(
         model_engine=model_engine,
         model_name=model_name,
         responses=[text],
@@ -468,32 +468,32 @@ def model(
 
 @pytest.fixture
 def model_factory(model: Model):
-    yield lambda *args, **kwargs: model
+    return lambda *args, **kwargs: model
 
 
 @pytest.fixture
 def model_params():
-    yield ChatLiteLLMParams(model_class_provider="litellm")
+    return ChatLiteLLMParams(model_class_provider="litellm")
 
 
 @pytest.fixture
 def model_config(model_params: TypeModelParams):
-    yield ModelConfig(name="test_model", params=model_params)
+    return ModelConfig(name="test_model", params=model_params)
 
 
 @pytest.fixture
 def prompt_template():
-    yield {"system": "Hi, I'm {{name}}", "user": "{{content}}"}
+    return {"system": "Hi, I'm {{name}}", "user": "{{content}}"}
 
 
 @pytest.fixture
 def unit_primitives():
-    yield ["complete_code", "generate_code"]
+    return ["complete_code", "generate_code"]
 
 
 @pytest.fixture
 def prompt_params():
-    yield PromptParams()
+    return PromptParams()
 
 
 @pytest.fixture
@@ -503,7 +503,7 @@ def prompt_config(
     prompt_template: dict[str, str],
     prompt_params: PromptParams,
 ):
-    yield PromptConfig(
+    return PromptConfig(
         name="test_prompt",
         model=model_config,
         unit_primitives=unit_primitives,
@@ -514,12 +514,12 @@ def prompt_config(
 
 @pytest.fixture
 def model_metadata():
-    yield None
+    return None
 
 
 @pytest.fixture
 def prompt_class():
-    yield Prompt
+    return Prompt
 
 
 @pytest.fixture
@@ -534,22 +534,22 @@ def prompt(
 
 @pytest.fixture
 def internal_event_client():
-    yield Mock(spec=InternalEventsClient)
+    return Mock(spec=InternalEventsClient)
 
 
 @pytest.fixture
 def scopes():
-    yield []
+    return []
 
 
 @pytest.fixture
 def user_is_debug():
-    yield False
+    return False
 
 
 @pytest.fixture
 def user(user_is_debug: bool, scopes: list[str]):
-    yield StarletteUser(
+    return StarletteUser(
         CloudConnectorUser(
             authenticated=True, is_debug=user_is_debug, claims=UserClaims(scopes=scopes)
         )

@@ -45,7 +45,7 @@ class FakeModel(SimpleChatModel):
 
 @pytest.fixture
 def model_factory():
-    yield lambda model, **kwargs: FakeModel(
+    return lambda model, **kwargs: FakeModel(
         expected_message="Hi, I'm John and I'm 20 years old",
         response="Hi John!",
     )
@@ -53,12 +53,12 @@ def model_factory():
 
 @pytest.fixture
 def prompt_template():
-    yield {"system": "Hi, I'm {{name}} and I'm {{age}} years old"}
+    return {"system": "Hi, I'm {{name}} and I'm {{age}} years old"}
 
 
 @pytest.fixture
 def compatible_versions():
-    yield ["1.0.0"]
+    return ["1.0.0"]
 
 
 @pytest.fixture
@@ -89,7 +89,7 @@ def fast_api_router():
 
 @pytest.fixture
 def unit_primitives():
-    yield ["explain_vulnerability"]
+    return ["explain_vulnerability"]
 
 
 @pytest.fixture

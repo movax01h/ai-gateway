@@ -84,7 +84,7 @@ class TestPrompt:
 class TestPromptTimeout:
     @pytest.fixture
     def prompt_params(self):
-        yield PromptParams(timeout=0.1)
+        return PromptParams(timeout=0.1)
 
     @pytest.mark.asyncio
     @pytest.mark.parametrize(

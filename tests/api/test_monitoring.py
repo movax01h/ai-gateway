@@ -1,4 +1,3 @@
-from typing import Iterator
 from unittest.mock import Mock, call, patch
 
 import pytest
@@ -16,7 +15,7 @@ from ai_gateway.models import ModelAPIError
 def config_values():
     # test using a valid looking fireworks config so we can stub out the actual
     # call rather than the `from_model_name` classmethod
-    yield {
+    return {
         "model_keys": {"fireworks_api_key": "fw_api_key"},
         "model_endpoints": {
             "fireworks_regional_endpoints": {
@@ -30,8 +29,8 @@ def config_values():
 
 
 @pytest.fixture
-def fastapi_server_app(mock_config: Config) -> Iterator[FastAPI]:
-    yield create_fast_api_server(mock_config)
+def fastapi_server_app(mock_config: Config) -> FastAPI:
+    return create_fast_api_server(mock_config)
 
 
 @pytest.fixture

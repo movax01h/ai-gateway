@@ -23,7 +23,7 @@ def registry(internal_event_client: Mock, prompt: Prompt):
         def get(self, *args, **kwargs):
             return prompt
 
-    yield Registry()
+    return Registry()
 
 
 class TestBaseRegistry:
