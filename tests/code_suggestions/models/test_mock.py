@@ -76,8 +76,8 @@ class TestChatModel:
         response = await model.generate(messages, stream=False, **kwargs)
         assert isinstance(response, TextGenModelOutput)
 
-        messages = [message.model_dump(mode="json") for message in messages]
-        expected_substrings = [json.dumps(s) for s in (messages, kwargs)]
+        raw_messages = [message.model_dump(mode="json") for message in messages]
+        expected_substrings = [json.dumps(s) for s in (raw_messages, kwargs)]
 
         assert response.score == 0
         assert response.safety_attributes == SafetyAttributes()
@@ -93,8 +93,8 @@ class TestChatModel:
 
         actual_text = "".join([chunk.text async for chunk in response])
 
-        messages = [message.model_dump(mode="json") for message in messages]
-        expected_substrings = [json.dumps(s) for s in (messages, kwargs)]
+        raw_messages = [message.model_dump(mode="json") for message in messages]
+        expected_substrings = [json.dumps(s) for s in (raw_messages, kwargs)]
 
         assert actual_text.startswith("echo:")
         assert all(substring in actual_text for substring in expected_substrings)
