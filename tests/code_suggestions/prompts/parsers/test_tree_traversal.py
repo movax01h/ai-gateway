@@ -92,7 +92,7 @@ class StubLimitedDepthVisitor(BaseVisitor):
 
 class StubLimitedNodeTraversalVisitor(BaseVisitor):
     def __init__(self, symbol: str):
-        self.visited_nodes: List[type] = []
+        self.visited_nodes: list[Node] = []
         self.symbol = symbol
         self._stop_node_traversal = False
 
