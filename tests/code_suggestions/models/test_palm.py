@@ -4,7 +4,7 @@ from unittest.mock import AsyncMock, Mock, patch
 import pytest
 from google.api_core.exceptions import InvalidArgument, RetryError
 from google.cloud.aiplatform.gapic import PredictionServiceAsyncClient, PredictResponse
-from google.protobuf import json_format
+from google.protobuf import json_format, struct_pb2
 
 from ai_gateway.models.base_text import TextGenModelOutput
 from ai_gateway.models.vertex_text import (
@@ -221,10 +221,11 @@ def test_palm_model_from_name(
 ):
     model = model.from_model_name(model_name, Mock(), "project", "location")
 
-    assert isinstance(model.metadata.name, str)
+    # mypy [attr-defined] exclusion due to a known issue https://github.com/python/mypy/issues/8085
+    assert isinstance(model.metadata.name, str)  # type: ignore[attr-defined]
 
-    assert model.metadata.name == expected_metadata_name
-    assert model.metadata.engine == "vertex-ai"
+    assert model.metadata.name == expected_metadata_name  # type: ignore[attr-defined]
+    assert model.metadata.engine == "vertex-ai"  # type: ignore[attr-defined]
 
 
 @pytest.mark.asyncio
@@ -355,10 +356,14 @@ async def test_palm_model_safety_attributes(
 ):
     client = Mock()
     predict_response = PredictResponse()
-    predict_response.predictions.append(prediction)
+    prediction_value = json_format.ParseDict(prediction, struct_pb2.Value())
+    predict_response.predictions.append(prediction_value)
+
     client.predict = AsyncMock(return_value=predict_response)
     palm_model = model(client, "test", "some location")
 
     model_output = await palm_model.generate("# bomberman", "")
 
+    assert isinstance(model_output, list)
+    assert isinstance(model_output[0], TextGenModelOutput)
     assert model_output[0].safety_attributes == expected_safety_attributes

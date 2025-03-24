@@ -5,14 +5,13 @@ from unittest.mock import AsyncMock
 
 import fastapi
 import httpx
-from anthropic.types import Message
 from fastapi import status
 from langchain_core.callbacks import CallbackManagerForLLMRun
 from langchain_core.language_models.chat_models import SimpleChatModel
 from langchain_core.messages import BaseMessage
 
 from ai_gateway.models.base import ModelMetadata
-from ai_gateway.models.base_chat import ChatModelBase
+from ai_gateway.models.base_chat import ChatModelBase, Message
 from ai_gateway.models.base_text import (
     TextGenModelBase,
     TextGenModelChunk,
