@@ -17,12 +17,12 @@ from ai_gateway.chat.agents import (
     ReActAgentInputs,
 )
 from ai_gateway.chat.toolset import DuoChatToolsRegistry
-from ai_gateway.models.base_chat import Role
-from ai_gateway.prompts.typing import (
+from ai_gateway.model_metadata import (
     AmazonQModelMetadata,
     ModelMetadata,
     TypeModelMetadata,
 )
+from ai_gateway.models.base_chat import Role
 
 
 @pytest.fixture

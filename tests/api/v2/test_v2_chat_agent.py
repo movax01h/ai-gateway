@@ -25,9 +25,9 @@ from ai_gateway.chat.agents import (
 )
 from ai_gateway.chat.agents.typing import AgentFinalAnswer, TypeAgentEvent
 from ai_gateway.chat.context.current_page import Context, MergeRequestContext
-from ai_gateway.config import Config
+from ai_gateway.model_metadata import AmazonQModelMetadata, ModelMetadata
 from ai_gateway.models.base_chat import Role
-from ai_gateway.prompts.typing import AmazonQModelMetadata, Model, ModelMetadata
+from ai_gateway.prompts.typing import Model
 
 
 @pytest.fixture(scope="class")

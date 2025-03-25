@@ -11,10 +11,11 @@ from langchain_core.runnables import Runnable
 from litellm.exceptions import Timeout
 from pydantic import HttpUrl
 
+from ai_gateway.model_metadata import ModelMetadata
 from ai_gateway.models.v2.anthropic_claude import ChatAnthropic
 from ai_gateway.prompts.base import Prompt
 from ai_gateway.prompts.config.base import PromptParams
-from ai_gateway.prompts.typing import Model, ModelMetadata
+from ai_gateway.prompts.typing import Model
 
 
 class TestPrompt:

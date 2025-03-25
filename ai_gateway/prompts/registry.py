@@ -6,9 +6,10 @@ import yaml
 from poetry.core.constraints.version import Version, parse_constraint
 
 from ai_gateway.internal_events.client import InternalEventsClient
+from ai_gateway.model_metadata import ModelMetadata, TypeModelMetadata
 from ai_gateway.prompts.base import BasePromptRegistry, Prompt
 from ai_gateway.prompts.config import BaseModelConfig, ModelClassProvider, PromptConfig
-from ai_gateway.prompts.typing import ModelMetadata, TypeModelFactory, TypeModelMetadata
+from ai_gateway.prompts.typing import TypeModelFactory
 
 __all__ = ["LocalPromptRegistry", "PromptRegistered"]
 

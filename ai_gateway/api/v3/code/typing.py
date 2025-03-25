@@ -21,9 +21,9 @@ from ai_gateway.code_suggestions import (
     CodeSuggestionsChunk,
     ModelProvider,
 )
+from ai_gateway.model_metadata import TypeModelMetadata
 from ai_gateway.models import KindVertexTextModel, Message
 from ai_gateway.models.base import KindModelProvider
-from ai_gateway.prompts.typing import TypeModelMetadata
 
 __all__ = [
     "CodeEditorComponents",

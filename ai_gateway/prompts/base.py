@@ -12,8 +12,9 @@ from langchain_core.runnables import Runnable, RunnableBinding, RunnableConfig
 from ai_gateway.api.auth_utils import StarletteUser
 from ai_gateway.instrumentators.model_requests import ModelRequestInstrumentator
 from ai_gateway.internal_events.client import InternalEventsClient
+from ai_gateway.model_metadata import TypeModelMetadata
 from ai_gateway.prompts.config.base import ModelConfig, PromptConfig, PromptParams
-from ai_gateway.prompts.typing import Model, TypeModelFactory, TypeModelMetadata
+from ai_gateway.prompts.typing import Model, TypeModelFactory
 
 __all__ = [
     "Prompt",

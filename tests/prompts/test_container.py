@@ -7,9 +7,9 @@ from dependency_injector import containers, providers
 from pydantic import AnyUrl
 
 from ai_gateway.chat.agents.react import ReActAgent
+from ai_gateway.model_metadata import ModelMetadata
 from ai_gateway.prompts import Prompt
 from ai_gateway.prompts.registry import LocalPromptRegistry
-from ai_gateway.prompts.typing import ModelMetadata
 
 
 @pytest.fixture
