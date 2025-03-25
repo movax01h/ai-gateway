@@ -62,11 +62,11 @@ from ai_gateway.feature_flags.context import (
 )
 from ai_gateway.instrumentators.base import TelemetryInstrumentator
 from ai_gateway.internal_events import InternalEventsClient
+from ai_gateway.model_metadata import ModelMetadata
 from ai_gateway.models import KindAnthropicModel, KindModelProvider
 from ai_gateway.models.base import TokensConsumptionMetadata
 from ai_gateway.models.vertex_text import KindVertexTextModel
 from ai_gateway.prompts import BasePromptRegistry
-from ai_gateway.prompts.typing import ModelMetadata
 from ai_gateway.structured_logging import get_request_logger
 from ai_gateway.tracking import SnowplowEvent, SnowplowEventContext
 from ai_gateway.tracking.errors import log_exception

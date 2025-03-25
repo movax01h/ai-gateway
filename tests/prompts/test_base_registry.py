@@ -6,12 +6,12 @@ from gitlab_cloud_connector import GitLabUnitPrimitive, WrongUnitPrimitives
 from pydantic import AnyUrl
 
 from ai_gateway.api.auth_utils import StarletteUser
-from ai_gateway.prompts import BasePromptRegistry, Prompt
-from ai_gateway.prompts.typing import (
+from ai_gateway.model_metadata import (
     AmazonQModelMetadata,
     ModelMetadata,
     TypeModelMetadata,
 )
+from ai_gateway.prompts import BasePromptRegistry, Prompt
 
 
 @pytest.fixture

@@ -3,7 +3,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from ai_gateway.prompts.typing import ModelMetadata
+from ai_gateway.model_metadata import ModelMetadata
 from ai_gateway.structured_logging import sanitize_logs
 
 

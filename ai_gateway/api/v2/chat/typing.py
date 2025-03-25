@@ -3,7 +3,7 @@ from typing import Literal, Optional
 from pydantic import BaseModel, Field
 
 from ai_gateway.chat.agents import Message
-from ai_gateway.prompts.typing import TypeModelMetadata
+from ai_gateway.model_metadata import TypeModelMetadata
 
 __all__ = [
     "ReActAgentScratchpad",

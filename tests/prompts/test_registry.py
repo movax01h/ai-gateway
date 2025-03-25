@@ -17,6 +17,7 @@ from pyfakefs.fake_filesystem import FakeFilesystem
 from ai_gateway.api.auth_utils import StarletteUser
 from ai_gateway.integrations.amazon_q.chat import ChatAmazonQ
 from ai_gateway.integrations.amazon_q.client import AmazonQClientFactory
+from ai_gateway.model_metadata import AmazonQModelMetadata, ModelMetadata
 from ai_gateway.prompts import LocalPromptRegistry, Prompt, PromptRegistered
 from ai_gateway.prompts.config import (
     ChatAmazonQParams,
@@ -26,12 +27,7 @@ from ai_gateway.prompts.config import (
     ModelConfig,
     PromptConfig,
 )
-from ai_gateway.prompts.typing import (
-    AmazonQModelMetadata,
-    Model,
-    ModelMetadata,
-    TypeModelFactory,
-)
+from ai_gateway.prompts.typing import Model, TypeModelFactory
 
 
 class MockPromptClass(Prompt):

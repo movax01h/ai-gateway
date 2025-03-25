@@ -25,6 +25,7 @@ from ai_gateway.config import Config
 from ai_gateway.container import ContainerApplication
 from ai_gateway.experimentation.base import ExperimentTelemetry
 from ai_gateway.internal_events.client import InternalEventsClient
+from ai_gateway.model_metadata import TypeModelMetadata
 from ai_gateway.models.base import ModelMetadata, TokensConsumptionMetadata
 from ai_gateway.models.base_text import (
     TextGenModelBase,
@@ -34,7 +35,7 @@ from ai_gateway.models.base_text import (
 from ai_gateway.prompts import Prompt
 from ai_gateway.prompts.config.base import ModelConfig, PromptConfig, PromptParams
 from ai_gateway.prompts.config.models import ChatLiteLLMParams, TypeModelParams
-from ai_gateway.prompts.typing import Model, TypeModelFactory, TypeModelMetadata
+from ai_gateway.prompts.typing import Model, TypeModelFactory
 from ai_gateway.safety_attributes import SafetyAttributes
 
 pytest_plugins = ("pytest_asyncio",)

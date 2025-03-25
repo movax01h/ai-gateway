@@ -10,7 +10,7 @@ from structlog.types import EventDict, Processor
 
 from ai_gateway.config import ConfigLogging
 from ai_gateway.feature_flags import FeatureFlag, is_feature_enabled
-from ai_gateway.prompts.typing import ModelMetadata
+from ai_gateway.model_metadata import ModelMetadata
 
 access_logger = structlog.stdlib.get_logger("api.access")
 ENABLE_REQUEST_LOGGING = False

@@ -14,8 +14,8 @@ from ai_gateway.chat.agents import (
 from ai_gateway.chat.base import BaseToolsRegistry
 from ai_gateway.chat.tools import BaseTool
 from ai_gateway.internal_events import InternalEventsClient
+from ai_gateway.model_metadata import TypeModelMetadata
 from ai_gateway.prompts.config.models import ModelClassProvider
-from ai_gateway.prompts.typing import TypeModelMetadata
 
 __all__ = [
     "GLAgentRemoteExecutor",

@@ -9,14 +9,13 @@ from langchain_core.language_models.chat_models import SimpleChatModel
 from langchain_core.messages import BaseMessage
 from pydantic import AnyUrl
 
-from ai_gateway.api.auth_utils import StarletteUser
 from ai_gateway.api.v1 import api_router
-from ai_gateway.prompts import Prompt
-from ai_gateway.prompts.typing import (
+from ai_gateway.model_metadata import (
     AmazonQModelMetadata,
     ModelMetadata,
     TypeModelMetadata,
 )
+from ai_gateway.prompts import Prompt
 
 
 class FakeModel(SimpleChatModel):
