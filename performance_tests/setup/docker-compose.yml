@@ -1,0 +1,27 @@
+version: '3'
+services:
+  ai-gateway-influx:
+    image: registry.gitlab.com/gitlab-org/modelops/applied-ml/code-suggestions/ai-assist/model-gateway:$COMPONENT_MR_CI_COMMIT_SHA
+    pull_policy: if_not_present
+    container_name: ai-gateway-influx
+    hostname: ai-gateway-influx
+    ports:
+      - "5052:5000"
+      - "8082:8082"
+    environment:
+      - AIGW_AUTH__BYPASS_EXTERNAL=true
+      - AIGW_AUTH__BYPASS_EXTERNAL_WITH_HEADER=false
+      - AIGW_AUTH__BYPASS_JWT_SIGNATURE=1
+      - AIGW_LOGGING__LEVEL=debug
+      - AIGW_MOCK_MODEL_RESPONSES=true
+    deploy:
+      resources:
+        limits:
+          cpus: '1'
+          memory: 4G
+    networks:
+      - gitlab-network
+
+networks:
+  gitlab-network:
+    driver: bridge
