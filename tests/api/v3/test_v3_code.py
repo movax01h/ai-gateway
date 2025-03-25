@@ -22,7 +22,11 @@ __all__ = [
     "TestUnauthorizedIssuer",
 ]
 
-from ai_gateway.model_metadata import ModelMetadata
+from ai_gateway.model_metadata import (
+    AmazonQModelMetadata,
+    ModelMetadata,
+    TypeModelMetadata,
+)
 
 
 @pytest.fixture
@@ -1179,6 +1183,8 @@ class TestAmazonQIntegrationV3:
             "mock_suggestions_output_text",
             "mock_suggestions_model",
             "mock_suggestions_engine",
+            "role_arn",
+            "model_metadata",
             "expected_response",
         ),
         [
@@ -1187,6 +1193,8 @@ class TestAmazonQIntegrationV3:
                 "def search",
                 "amazon_q",
                 "amazon_q",
+                "test:role",
+                None,
                 {
                     "choices": [
                         {
@@ -1210,6 +1218,60 @@ class TestAmazonQIntegrationV3:
                 "",
                 "amazon_q",
                 "amazon_q",
+                "test:role",
+                None,
+                {
+                    "choices": [],
+                    "metadata": {
+                        "model": {
+                            "engine": "amazon_q",
+                            "name": "amazon_q",
+                            "lang": "python",
+                        },
+                        "enabled_feature_flags": ["flag_a", "flag_b"],
+                    },
+                },
+            ),
+            # non-empty suggestions from model
+            (
+                "def search",
+                "amazon_q",
+                "amazon_q",
+                "",
+                AmazonQModelMetadata(
+                    provider="amazon_q",
+                    name="amazon_q",
+                    role_arn="test:role",
+                ),
+                {
+                    "choices": [
+                        {
+                            "text": "def search",
+                            "index": 0,
+                            "finish_reason": "length",
+                        }
+                    ],
+                    "metadata": {
+                        "model": {
+                            "engine": "amazon_q",
+                            "name": "amazon_q",
+                            "lang": "python",
+                        },
+                        "enabled_feature_flags": ["flag_a", "flag_b"],
+                    },
+                },
+            ),
+            # empty suggestions from model
+            (
+                "",
+                "amazon_q",
+                "amazon_q",
+                "",
+                AmazonQModelMetadata(
+                    provider="amazon_q",
+                    name="amazon_q",
+                    role_arn="test:role",
+                ),
                 {
                     "choices": [],
                     "metadata": {
@@ -1229,6 +1291,8 @@ class TestAmazonQIntegrationV3:
         mock_client: TestClient,
         mock_generations: Mock,
         mock_suggestions_output_text: str,
+        role_arn: str,
+        model_metadata: Optional[TypeModelMetadata],
         expected_response: dict,
         route: str,
     ):
@@ -1240,7 +1304,7 @@ class TestAmazonQIntegrationV3:
             "model_provider": "amazon_q",
             "prompt_id": "code_suggestions/generations",
             "prompt_version": "^1.0.0",
-            "role_arn": "test:role",
+            "role_arn": role_arn,
         }
 
         prompt_component = {
@@ -1248,7 +1312,10 @@ class TestAmazonQIntegrationV3:
             "payload": payload,
         }
 
-        data = {"prompt_components": [prompt_component]}
+        data = {
+            "prompt_components": [prompt_component],
+            "model_metadata": model_metadata and model_metadata.model_dump(mode="json"),
+        }
 
         current_feature_flag_context.set({"flag_a", "flag_b"})
 
@@ -1269,11 +1336,8 @@ class TestAmazonQIntegrationV3:
         body = response.json()
 
         assert body["choices"] == expected_response["choices"]
-
         assert body["metadata"]["model"] == expected_response["metadata"]["model"]
-
         assert body["metadata"]["timestamp"] > 0
-
         assert set(body["metadata"]["enabled_feature_flags"]) == set(
             expected_response["metadata"]["enabled_feature_flags"]
         )
@@ -1307,6 +1371,8 @@ class TestAmazonQIntegrationV3:
             "mock_suggestions_output_text",
             "mock_suggestions_model",
             "mock_suggestions_engine",
+            "role_arn",
+            "model_metadata",
             "expected_response",
         ),
         [
@@ -1315,6 +1381,8 @@ class TestAmazonQIntegrationV3:
                 "def search",
                 "amazon_q",
                 "amazon_q",
+                "test:role",
+                None,
                 {
                     "choices": [
                         {
@@ -1338,6 +1406,8 @@ class TestAmazonQIntegrationV3:
                 "",
                 "amazon_q",
                 "amazon_q",
+                "test:role",
+                None,
                 {
                     "choices": [],
                     "metadata": {
@@ -1357,6 +1427,8 @@ class TestAmazonQIntegrationV3:
         mock_client: TestClient,
         mock_completions: Mock,
         mock_suggestions_output_text: str,
+        role_arn: str,
+        model_metadata: Optional[TypeModelMetadata],
         expected_response: dict,
         route: str,
     ):
@@ -1367,7 +1439,7 @@ class TestAmazonQIntegrationV3:
             "language_identifier": "python",
             "choices_count": 3,
             "model_provider": "amazon_q",
-            "role_arn": "test:role",
+            "role_arn": role_arn,
         }
 
         prompt_component = {
@@ -1375,7 +1447,10 @@ class TestAmazonQIntegrationV3:
             "payload": payload,
         }
 
-        data = {"prompt_components": [prompt_component]}
+        data = {
+            "prompt_components": [prompt_component],
+            "model_metadata": model_metadata and model_metadata.model_dump(mode="json"),
+        }
 
         current_feature_flag_context.set({"flag_a", "flag_b"})
 
@@ -1396,11 +1471,8 @@ class TestAmazonQIntegrationV3:
         body = response.json()
 
         assert body["choices"] == expected_response["choices"]
-
         assert body["metadata"]["model"] == expected_response["metadata"]["model"]
-
         assert body["metadata"]["timestamp"] > 0
-
         assert set(body["metadata"]["enabled_feature_flags"]) == set(
             expected_response["metadata"]["enabled_feature_flags"]
         )

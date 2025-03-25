@@ -136,6 +136,7 @@ async def code_suggestions(
             code_context=code_context,
             stream_handler=stream_handler,
             snowplow_event_context=snowplow_code_suggestion_context,
+            model_metadata=payload.model_metadata,
         )
     if component.type == CodeEditorComponents.GENERATION:
         return await code_generation(
@@ -165,6 +166,7 @@ async def code_completion(
         ContainerApplication.code_suggestions.completions.amazon_q_factory.provider
     ],
     code_context: Optional[list[CodeContextPayload]] = None,
+    model_metadata: TypeModelMetadata = None,
 ):
     kwargs = {}
 
@@ -172,7 +174,9 @@ async def code_completion(
         # TODO: As we migrate to v3 we can rewrite this to use prompt registry
         engine = completions_anthropic_factory(model__name=payload.model_name)
         kwargs.update({"raw_prompt": payload.prompt})
-    elif payload.model_provider == KindModelProvider.AMAZON_Q:
+    elif payload.model_provider == KindModelProvider.AMAZON_Q or (
+        model_metadata and model_metadata.provider == KindModelProvider.AMAZON_Q
+    ):
         if not current_user.can(
             GitLabUnitPrimitive.AMAZON_Q_INTEGRATION,
             disallowed_issuers=[CloudConnectorConfig().service_name],
@@ -184,7 +188,7 @@ async def code_completion(
 
         engine = completions_amazon_q_factory(
             model__current_user=current_user,
-            model__role_arn=payload.role_arn,
+            model__role_arn=payload.role_arn or model_metadata.role_arn,
         )
     else:
         engine = completions_legacy_factory()
@@ -266,7 +270,9 @@ async def code_generation(
     code_context: Optional[list[CodeContextPayload]] = None,
     model_metadata: TypeModelMetadata = None,
 ):
-    model_provider = payload.model_provider
+    model_provider = payload.model_provider or (
+        model_metadata and model_metadata.provider
+    )
     if model_provider == KindModelProvider.AMAZON_Q:
         if not current_user.can(
             GitLabUnitPrimitive.AMAZON_Q_INTEGRATION,
@@ -279,7 +285,7 @@ async def code_generation(
 
         engine = generations_amazon_q_factory(
             model__current_user=current_user,
-            model__role_arn=payload.role_arn,
+            model__role_arn=payload.role_arn or model_metadata.role_arn,
         )
     elif payload.prompt_id:
         # for backward compatibility, eventually prmpt_version should be a mandatory field
