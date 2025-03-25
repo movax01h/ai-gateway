@@ -15,8 +15,17 @@ LINT_WORKING_DIR ?= ${AI_GATEWAY_DIR} \
 
 MYPY_LINT_TODO_DIR ?= --exclude "ai_gateway/api/*" \
 	--exclude "ai_gateway/chat/*" \
-	--exclude "ai_gateway/code_suggestions/*" \
 	--exclude "ai_gateway/models/*" \
+	--exclude "ai_gateway/code_suggestions/base.py" \
+	--exclude "ai_gateway/code_suggestions/completions.py" \
+	--exclude "ai_gateway/code_suggestions/container.py" \
+	--exclude "ai_gateway/code_suggestions/experimental.py" \
+	--exclude "ai_gateway/code_suggestions/generations.py" \
+	--exclude "ai_gateway/code_suggestions/processing/base.py" \
+	--exclude "ai_gateway/code_suggestions/processing/completions.py" \
+	--exclude "ai_gateway/code_suggestions/processing/ops.py" \
+	--exclude "ai_gateway/code_suggestions/processing/post/completions.py" \
+	--exclude "ai_gateway/code_suggestions/processing/pre/base.py" \
 	--exclude "tests/code_suggestions/test_completions.py" \
 	--exclude "tests/code_suggestions/test_container.py" \
 	--exclude "tests/code_suggestions/test_engine.py" \
