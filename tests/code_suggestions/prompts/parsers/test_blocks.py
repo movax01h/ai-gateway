@@ -153,8 +153,14 @@ async def test_min_allowed_block_visitor(
     tree_dfs(parser.tree, visitor)
 
     context_node = visitor.block
-    assert context_node.type == expected_context_type
-    assert context_node.start_point <= target_point <= context_node.end_point
+
+    if context_node:
+        assert context_node.type == expected_context_type
+        assert context_node.start_point <= target_point <= context_node.end_point
+    else:
+        raise TypeError(
+            f"Expected context_node to be a Node, but got {type(context_node)}"
+        )
 
 
 @pytest.mark.parametrize(

@@ -490,7 +490,7 @@ fun main() {
 async def test_symbol_counter(
     lang_id: LanguageId,
     source_code: str,
-    target_symbols_counts: dict[str],
+    target_symbols_counts: dict[str, int],
 ):
     parser = await CodeParser.from_language_id(source_code, lang_id)
     output = parser.count_symbols()
