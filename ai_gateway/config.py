@@ -130,10 +130,13 @@ class ConfigModelEndpoints(BaseModel):
             selected_region, {}
         )
 
+    # legacy, unused
     fireworks_completion_endpoint: Optional[str] = None
     fireworks_completion_identifier: Optional[str] = None
-    fireworks_regional_endpoints: Optional[dict[str, dict[str, str]]] = {}
-    fireworks_current_region_endpoint: Optional[dict[str, str]] = {}
+    # current per-region configruation
+    fireworks_regional_endpoints: Optional[dict[str, dict[str, dict[str, str]]]] = {}
+    # dynamic based on GCP location
+    fireworks_current_region_endpoint: Optional[dict[str, dict[str, str]]] = {}
 
 
 class ConfigGoogleCloudPlatform(BaseModel):
@@ -158,7 +161,7 @@ class ConfigAmazonQ(BaseModel):
 class ConfigFeatureFlags(BaseModel):
     disallowed_flags: dict[str, Set[str]] = {}
     excl_post_process: list[str] = []
-    fireworks_qwen_score_threshold: float = -9999.0
+    fireworks_score_threshold: dict[str, float] = {}
 
 
 class ConfigModelConcurrency(RootModel):

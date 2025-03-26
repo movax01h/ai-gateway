@@ -65,8 +65,10 @@ def config_values(assets_dir):
         "model_endpoints": {
             "fireworks_regional_endpoints": {
                 "us-central1": {
-                    "endpoint": "https://fireworks.endpoint",
-                    "identifier": "qwen2p5-coder-7b",
+                    "qwen2p5-coder-7b": {
+                        "endpoint": "https://fireworks.endpoint",
+                        "identifier": "qwen2p5-coder-7b",
+                    },
                 },
             },
         },

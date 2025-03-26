@@ -303,6 +303,7 @@ class CodeCompletions:
                 response_text,
                 score=score,
                 max_output_tokens_used=max_output_tokens_used,
+                model_name=self.model.metadata.name,
             )
 
         return response_text

@@ -25,8 +25,6 @@ __all__ = [
 
 log = structlog.stdlib.get_logger("codesuggestions")
 
-SCORE_THRESHOLD_DISABLED = -9999.0
-
 _COMMENT_IDENTIFIERS = ["/*", "//", "#"]
 _SPECIAL_CHARS = "()[];.,$%&^*@#!{}/"
 _RE_MARKDOWN_CODE_BLOCK_BEGIN = re.compile(r"^`{3}\S*\n", flags=re.MULTILINE)
@@ -440,9 +438,11 @@ def clean_irrelevant_keywords(completions: str) -> str:
 
 
 # Very simple filtering based on score
-def filter_score(completion: str, score: float, threshold: float) -> str:
+def filter_score(
+    completion: str, score: float, threshold: Optional[float] = None
+) -> str:
     if (
-        threshold != SCORE_THRESHOLD_DISABLED
+        isinstance(threshold, (int, float))
         and isinstance(score, (int, float))
         and score < threshold
     ):

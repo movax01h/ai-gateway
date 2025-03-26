@@ -20,8 +20,10 @@ def config_values():
         "model_endpoints": {
             "fireworks_regional_endpoints": {
                 "us-central1": {
-                    "endpoint": "https://fireworks.endpoint.com/v1",
-                    "identifier": "accounts/fireworks/models/qwen2p5-coder-7b#accounts/deployment/deadbeef",
+                    "qwen2p5-coder-7b": {
+                        "endpoint": "https://fireworks.endpoint.com/v1",
+                        "identifier": "accounts/fireworks/models/qwen2p5-coder-7b#accounts/deployment/deadbeef",
+                    },
                 },
             }
         },
@@ -184,8 +186,10 @@ class TestCustomModelEnabled:
             "model_endpoints": {
                 "fireworks_regional_endpoints": {
                     "us-central1": {
-                        "endpoint": "https://fireworks.endpoint.com/v1",
-                        "identifier": "accounts/fireworks/models/qwen2p5-coder-7b#accounts/deployment/deadbeef",
+                        "qwen2p5-coder-7b": {
+                            "endpoint": "https://fireworks.endpoint.com/v1",
+                            "identifier": "accounts/fireworks/models/qwen2p5-coder-7b#accounts/deployment/deadbeef",
+                        },
                     },
                 }
             },
