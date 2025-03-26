@@ -109,7 +109,7 @@ def test_ready_vertex_failure(
             editor_lang="python",
         )
     ]
-    # Don't try antrhopic if vertex is not available, no need to spend
+    # Don't try anthropic if vertex is not available, no need to spend
     # the money if the service is not going to be ready
     assert not mock_generations.mock_calls
     assert response.status_code == 503

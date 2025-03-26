@@ -29,6 +29,7 @@ from ai_gateway.config import (
 )
 from ai_gateway.container import ContainerApplication
 from ai_gateway.models import ModelAPIError
+from ai_gateway.models.base import ModelAPICallError
 from ai_gateway.structured_logging import setup_logging
 
 _ROUTES_V1 = [
@@ -337,6 +338,24 @@ def test_model_exception_handler(app):
 
     assert response.status_code == 503
     assert response.json() == {"detail": "Inference failed"}
+
+
+def test_model_exception_handler_with_429_error(app):
+    @app.get("/test")
+    def test_route():
+        class TestTooManyRequestsError(ModelAPICallError):
+            code = 429
+
+        error = TestTooManyRequestsError("Too many requests")
+        raise error
+
+    setup_custom_exception_handlers(app)
+
+    client = TestClient(app)
+    response = client.get("/test")
+
+    assert response.status_code == 429
+    assert response.json() == {"detail": "Too many requests. Please try again later."}
 
 
 @pytest.mark.parametrize(
