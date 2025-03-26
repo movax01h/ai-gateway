@@ -58,8 +58,9 @@ def test_ready(
     mock_completions_legacy: Mock,
     mock_llm_text: Mock,
 ):
-    response = client.get("/monitoring/ready")
-    response = client.get("/monitoring/ready")
+    with patch("ai_gateway.api.monitoring.cloud_connector_ready", return_value=True):
+        response = client.get("/monitoring/ready")
+        response = client.get("/monitoring/ready")
 
     assert response.status_code == 200
     # assert we only called each model once
