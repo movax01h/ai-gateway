@@ -56,8 +56,8 @@ async def get_code_suggestions_completions_litellm_factory_provider():
     yield get_container_application().code_suggestions.completions.litellm_factory
 
 
-async def get_code_suggestions_completions_fireworks_qwen_factory_provider():
-    yield get_container_application().code_suggestions.completions.fireworks_qwen_factory
+async def get_code_suggestions_completions_fireworks_factory_provider():
+    yield get_container_application().code_suggestions.completions.fireworks_factory
 
 
 async def get_code_suggestions_completions_amazon_q_factory_provider():

@@ -182,11 +182,11 @@ def test_config_google_cloud_profiler(
         (
             {
                 "AIGW_FEATURE_FLAGS__EXCL_POST_PROCESS": '["func1", "func2"]',
-                "AIGW_FEATURE_FLAGS__FIREWORKS_QWEN_SCORE_THRESHOLD": "-1.0",
+                "AIGW_FEATURE_FLAGS__FIREWORKS_SCORE_THRESHOLD": '{"model": "-1.0"}',
             },
             ConfigFeatureFlags(
                 excl_post_process=["func1", "func2"],
-                fireworks_qwen_score_threshold=-1.0,
+                fireworks_score_threshold={"model": -1.0},
             ),
         ),
     ],
@@ -388,24 +388,28 @@ def test_config_vertex_text_model(values: dict, expected: ConfigVertexTextModel)
         ({}, ConfigModelEndpoints()),
         (
             {
-                "AIGW_MODEL_ENDPOINTS__FIREWORKS_REGIONAL_ENDPOINTS": '{"location": {"endpoint": "endpoint"}}',
+                "AIGW_MODEL_ENDPOINTS__FIREWORKS_REGIONAL_ENDPOINTS": '{"location": {"model": {"endpoint": "endpoint"}}}',
                 "AIGW_GOOGLE_CLOUD_PLATFORM__LOCATION": "location",
                 "RUNWAY_REGION": "test-case1",  # ignored
             },
             ConfigModelEndpoints(
-                fireworks_regional_endpoints={"location": {"endpoint": "endpoint"}},
-                fireworks_current_region_endpoint={"endpoint": "endpoint"},
+                fireworks_regional_endpoints={
+                    "location": {"model": {"endpoint": "endpoint"}}
+                },
+                fireworks_current_region_endpoint={"model": {"endpoint": "endpoint"}},
             ),
         ),
         (
             {
-                "AIGW_MODEL_ENDPOINTS__FIREWORKS_REGIONAL_ENDPOINTS": '{"us": {"endpoint": "endpoint"}}',
+                "AIGW_MODEL_ENDPOINTS__FIREWORKS_REGIONAL_ENDPOINTS": '{"us": {"model": {"endpoint": "endpoint"}}}',
                 "AIGW_GOOGLE_CLOUD_PLATFORM__LOCATION": "unknown",
                 "RUNWAY_REGION": "test-case1",  # ignored
             },
             ConfigModelEndpoints(
-                fireworks_regional_endpoints={"us": {"endpoint": "endpoint"}},
-                fireworks_current_region_endpoint={"endpoint": "endpoint"},
+                fireworks_regional_endpoints={
+                    "us": {"model": {"endpoint": "endpoint"}}
+                },
+                fireworks_current_region_endpoint={"model": {"endpoint": "endpoint"}},
             ),
         ),
     ],

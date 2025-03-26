@@ -176,8 +176,9 @@ class TestPostProcessorCompletions:
                 PostProcessorOperation.FILTER_SCORE,
                 PostProcessorOperation.FIX_TRUNCATION,
             ],
+            score_threshold={"test-model": -1.0},
         )
-        await post_processor.process(completion)
+        await post_processor.process(completion, model_name="test/test-model")
 
         mock_remove_comment_only_completion.assert_called_once()
         mock_trim_by_min_allowed_context.assert_called_once()
@@ -189,7 +190,9 @@ class TestPostProcessorCompletions:
         mock_clean_model_reflection.assert_called_once()
         mock_strip_whitespaces.assert_called_once()
         mock_strip_asterisks.assert_called_once()
-        mock_filter_score.assert_called_once()
+        mock_filter_score.assert_called_once_with(
+            "processed completion", score=None, threshold=-1.0
+        )
         mock_fix_truncation.assert_called_once()
 
     @pytest.mark.asyncio

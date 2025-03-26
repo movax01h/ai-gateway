@@ -4,6 +4,7 @@ from ai_gateway.api.middleware import X_GITLAB_LANGUAGE_SERVER_VERSION
 from ai_gateway.api.v2.code.typing import CompletionsRequestWithVersion
 from ai_gateway.code_suggestions.language_server import LanguageServerVersion
 from ai_gateway.models.base import KindModelProvider
+from ai_gateway.models.litellm import KindLiteLlmModel
 
 
 class BaseModelProviderHandler:
@@ -41,6 +42,8 @@ class LiteLlmHandler(BaseModelProviderHandler):
 
 class FireworksHandler(BaseModelProviderHandler):
     def update_completion_params(self):
+        default_model = KindLiteLlmModel.QWEN_2_5
+
         self.completion_params.update(
             {"max_output_tokens": 48, "context_max_percent": 0.3}
         )
@@ -51,8 +54,11 @@ class FireworksHandler(BaseModelProviderHandler):
         if not self.payload.model_provider:
             self.payload.model_provider = KindModelProvider.FIREWORKS
 
-        if not self.payload.model_name:
-            self.payload.model_name = "qwen2p5-coder-7b"
+        if not self.payload.model_name or self.payload.model_name not in [
+            KindLiteLlmModel.QWEN_2_5,
+            KindLiteLlmModel.CODESTRAL_2501,
+        ]:
+            self.payload.model_name = default_model
 
 
 class LegacyHandler(BaseModelProviderHandler):

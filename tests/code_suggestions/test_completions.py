@@ -303,7 +303,10 @@ class TestCodeCompletions:
 
     @pytest.fixture(scope="class")
     def completions_with_post_processing(self):
-        model = Mock(spec=TextGenModelBase)
+        model = Mock(
+            spec=TextGenModelBase,
+            metadata=Mock(name="text-completion-openai/test-model"),
+        )
         type(model).input_token_limit = PropertyMock(return_value=2_048)
         model.generate = AsyncMock(
             return_value=TextGenModelOutput(
@@ -694,6 +697,7 @@ class TestCodeCompletions:
             "Unprocessed completion output",
             score=0,
             max_output_tokens_used=False,
+            model_name=completions_with_post_processing.model.metadata.name,
         )
 
         assert actual.text == "Post-processed completion output"

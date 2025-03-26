@@ -31,7 +31,7 @@ from ai_gateway.async_dependency_resolver import (
     get_code_suggestions_completions_agent_factory_provider,
     get_code_suggestions_completions_amazon_q_factory_provider,
     get_code_suggestions_completions_anthropic_provider,
-    get_code_suggestions_completions_fireworks_qwen_factory_provider,
+    get_code_suggestions_completions_fireworks_factory_provider,
     get_code_suggestions_completions_litellm_factory_provider,
     get_code_suggestions_completions_litellm_vertex_codestral_factory_provider,
     get_code_suggestions_completions_vertex_legacy_provider,
@@ -111,9 +111,9 @@ async def completions(
         Factory[CodeCompletions],
         Depends(get_code_suggestions_completions_litellm_factory_provider),
     ],
-    completions_fireworks_qwen_factory: Annotated[
+    completions_fireworks_factory: Annotated[
         Factory[CodeCompletions],
-        Depends(get_code_suggestions_completions_fireworks_qwen_factory_provider),
+        Depends(get_code_suggestions_completions_fireworks_factory_provider),
     ],
     completions_amazon_q_factory: Annotated[
         Factory[CodeCompletions],
@@ -147,7 +147,7 @@ async def completions(
         completions_legacy_factory,
         completions_anthropic_factory,
         completions_litellm_factory,
-        completions_fireworks_qwen_factory,
+        completions_fireworks_factory,
         completions_agent_factory,
         completions_amazon_q_factory,
         completions_litellm_vertex_codestral_factory,
@@ -467,7 +467,7 @@ def _build_code_completions(
     completions_legacy_factory: Factory[CodeCompletionsLegacy],
     completions_anthropic_factory: Factory[CodeCompletions],
     completions_litellm_factory: Factory[CodeCompletions],
-    completions_fireworks_qwen_factory: Factory[CodeCompletions],
+    completions_fireworks_factory: Factory[CodeCompletions],
     completions_agent_factory: Factory[CodeCompletions],
     completions_amazon_q_factory: Factory[CodeCompletions],
     completions_litellm_vertex_codestral_factory: Factory[CodeCompletions],
@@ -508,7 +508,7 @@ def _build_code_completions(
             current_user=current_user,
             prompt_registry=prompt_registry,
             completions_agent_factory=completions_agent_factory,
-            completions_litellm_factory=completions_fireworks_qwen_factory,
+            completions_litellm_factory=completions_fireworks_factory,
         )
 
         return code_completions, kwargs

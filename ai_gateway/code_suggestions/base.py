@@ -58,6 +58,7 @@ USE_CASES_MODELS_MAP = {
         KindAnthropicModel.CLAUDE_2_1,
         KindVertexTextModel.CODE_GECKO_002,
         KindVertexTextModel.CODESTRAL_2501,
+        KindLiteLlmModel.CODESTRAL_2501,
         KindLiteLlmModel.CODEGEMMA,
         KindLiteLlmModel.CODELLAMA,
         KindLiteLlmModel.CODESTRAL,

@@ -6,7 +6,6 @@ from typing import Any, Callable, NewType, Optional
 from ai_gateway.code_suggestions.processing.ops import strip_whitespaces
 from ai_gateway.code_suggestions.processing.post.base import PostProcessorBase
 from ai_gateway.code_suggestions.processing.post.ops import (
-    SCORE_THRESHOLD_DISABLED,
     clean_irrelevant_keywords,
     clean_model_reflection,
     filter_score,
@@ -66,7 +65,7 @@ class PostProcessor(PostProcessorBase):
         ] = None,
         exclude: Optional[list] = None,
         extras: Optional[list] = None,
-        score_threshold: Optional[float] = None,
+        score_threshold: Optional[dict[str, float]] = None,
     ):
         self.code_context = code_context
         self.lang_id = lang_id
@@ -74,16 +73,12 @@ class PostProcessor(PostProcessorBase):
         self.overrides = overrides if overrides else {}
         self.exclude = set(exclude) if exclude else []
         self.extras = extras if extras else []
-        self.score_threshold = (
-            score_threshold if score_threshold else SCORE_THRESHOLD_DISABLED
-        )
+        self.score_threshold = score_threshold or {}
 
     @property
     def ops(self) -> dict[PostProcessorOperation, Callable[..., str]]:
         return {
-            PostProcessorOperation.FILTER_SCORE: partial(
-                filter_score, threshold=self.score_threshold
-            ),
+            PostProcessorOperation.FILTER_SCORE: partial(filter_score),
             PostProcessorOperation.REMOVE_COMMENTS: partial(
                 remove_comment_only_completion, lang_id=self.lang_id
             ),
@@ -141,8 +136,10 @@ class PostProcessor(PostProcessorBase):
         func = self.ops[actual_processor_key]
 
         if actual_processor_key == PostProcessorOperation.FILTER_SCORE:
+            model_name = kwargs.get("model_name", "").partition("/")[-1]
+            threshold = self.score_threshold.get(model_name)
             score = kwargs.get("score")
-            func = partial(func, score=score)
+            func = partial(func, score=score, threshold=threshold)
 
         if actual_processor_key == PostProcessorOperation.FIX_TRUNCATION:
             max_output_tokens_used = kwargs.get("max_output_tokens_used", False)

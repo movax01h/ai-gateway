@@ -20,7 +20,6 @@ from ai_gateway.models import KindAnthropicModel, KindVertexTextModel
 from ai_gateway.models.base import KindModelProvider
 from ai_gateway.models.base_chat import ChatModelBase
 from ai_gateway.models.base_text import TextGenModelBase
-from ai_gateway.models.litellm import KindLiteLlmModel
 from ai_gateway.tokenizer import init_tokenizer
 from ai_gateway.tracking.instrumentator import SnowplowInstrumentator
 
@@ -158,11 +157,10 @@ class ContainerCodeCompletions(containers.DeclarativeContainer):
         ),
     )
 
-    fireworks_qwen_factory = providers.Factory(
+    fireworks_factory = providers.Factory(
         CodeCompletions,
         model=providers.Factory(
             litellm,
-            name=KindLiteLlmModel.QWEN_2_5,
             provider=KindModelProvider.FIREWORKS,
         ),
         tokenization_strategy=providers.Factory(
@@ -175,7 +173,7 @@ class ContainerCodeCompletions(containers.DeclarativeContainer):
                 PostProcessorOperation.FILTER_SCORE,
                 PostProcessorOperation.FIX_TRUNCATION,
             ],
-            score_threshold=config.fireworks_qwen_score_threshold,
+            score_threshold=config.fireworks_score_threshold,
         ).provider,
     )
 

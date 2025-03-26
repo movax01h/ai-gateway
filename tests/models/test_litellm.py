@@ -156,11 +156,34 @@ class TestLiteLlmChatModel:
                 {"fireworks_api_key": "stubbed-api-key"},
                 {
                     "fireworks_current_region_endpoint": {
-                        "endpoint": "https://fireworks.endpoint",
-                        "identifier": "provider/some-cool-model#deployment_id",
+                        "qwen2p5-coder-7b": {
+                            "endpoint": "https://fireworks.endpoint",
+                            "identifier": "provider/some-cool-model#deployment_id",
+                        }
                     }
                 },
                 "fireworks_ai/qwen2p5-coder-7b",
+                "stubbed-api-key",
+                "fireworks_ai",
+                "https://fireworks.endpoint",
+                "fireworks_ai/provider/some-cool-model#deployment_id",
+            ),
+            (
+                "codestral-2501",
+                "",
+                None,
+                KindModelProvider.FIREWORKS,
+                True,
+                {"fireworks_api_key": "stubbed-api-key"},
+                {
+                    "fireworks_current_region_endpoint": {
+                        "codestral-2501": {
+                            "endpoint": "https://fireworks.endpoint",
+                            "identifier": "provider/some-cool-model#deployment_id",
+                        }
+                    }
+                },
+                "fireworks_ai/codestral-2501",
                 "stubbed-api-key",
                 "fireworks_ai",
                 "https://fireworks.endpoint",
@@ -394,8 +417,14 @@ class TestLiteLlmTextGenModel:
     def provider_endpoints(self):
         return {
             "fireworks_current_region_endpoint": {
-                "endpoint": "https://fireworks.endpoint",
-                "identifier": "provider/some-cool-model#deployment_id",
+                "qwen2p5-coder-7b": {
+                    "endpoint": "https://fireworks.endpoint",
+                    "identifier": "provider/some-cool-model#deployment_id",
+                },
+                "codestral-2501": {
+                    "endpoint": "https://fireworks.codestral.endpoint",
+                    "identifier": "provider/some-codestral-model#deployment_id",
+                },
             }
         }
 
@@ -501,11 +530,34 @@ class TestLiteLlmTextGenModel:
                 {"fireworks_api_key": "stubbed-api-key"},
                 {
                     "fireworks_current_region_endpoint": {
-                        "endpoint": "https://fireworks.endpoint",
-                        "identifier": "provider/some-cool-model#deployment_id",
+                        "qwen2p5-coder-7b": {
+                            "endpoint": "https://fireworks.endpoint",
+                            "identifier": "provider/some-cool-model#deployment_id",
+                        }
                     }
                 },
                 "text-completion-fireworks_ai/qwen2p5-coder-7b",
+                "stubbed-api-key",
+                "fireworks_ai",
+                "https://fireworks.endpoint",
+                "text-completion-openai/provider/some-cool-model#deployment_id",
+            ),
+            (
+                "codestral-2501",
+                "",
+                None,
+                KindModelProvider.FIREWORKS,
+                True,
+                {"fireworks_api_key": "stubbed-api-key"},
+                {
+                    "fireworks_current_region_endpoint": {
+                        "codestral-2501": {
+                            "endpoint": "https://fireworks.endpoint",
+                            "identifier": "provider/some-cool-model#deployment_id",
+                        }
+                    }
+                },
+                "text-completion-fireworks_ai/codestral-2501",
                 "stubbed-api-key",
                 "fireworks_ai",
                 "https://fireworks.endpoint",
@@ -590,6 +642,22 @@ class TestLiteLlmTextGenModel:
                     provider_keys={"fireworks_api_key": "stubbed-api-key"},
                     provider_endpoints={
                         "fireworks_current_region_endpoint": {"invalid": "config"}
+                    },
+                )
+            assert (
+                str(exc.value)
+                == f"Fireworks model configuration is missing for model {model_name}."
+            )
+
+            with pytest.raises(ValueError) as exc:
+                LiteLlmTextGenModel.from_model_name(
+                    provider=provider,
+                    name=model_name,
+                    provider_keys={"fireworks_api_key": "stubbed-api-key"},
+                    provider_endpoints={
+                        "fireworks_current_region_endpoint": {
+                            model_name: {"invalid": "config"}
+                        }
                     },
                 )
             assert (
@@ -724,6 +792,34 @@ class TestLiteLlmTextGenModel:
                     ],
                     "timeout": 60,
                     "api_base": "https://fireworks.endpoint",
+                    "custom_llm_provider": "text-completion-openai",
+                    "extra_headers": {"x-session-affinity": "test"},
+                    "prompt_cache_max_len": 0,
+                    "logprobs": 1,
+                },
+                "def hello_world():",
+                None,
+                False,
+                999.0,
+                1000,
+                False,
+            ),
+            (
+                "codestral-2501",
+                KindModelProvider.FIREWORKS,
+                True,
+                {
+                    "model": "provider/some-codestral-model#deployment_id",
+                    "stop": ["\n\n", "\n+++++", "[PREFIX]", "</s>[SUFFIX]", "[MIDDLE]"],
+                    "api_key": "fireworks-api-key",
+                    "messages": [
+                        {
+                            "content": "</s>[SUFFIX][PREFIX]def hello_world():[MIDDLE]",
+                            "role": Role.USER,
+                        }
+                    ],
+                    "timeout": 60,
+                    "api_base": "https://fireworks.codestral.endpoint",
                     "custom_llm_provider": "text-completion-openai",
                     "extra_headers": {"x-session-affinity": "test"},
                     "prompt_cache_max_len": 0,
@@ -981,7 +1077,7 @@ class TestLiteLlmTextGenModel:
             top_p=0.95,
             stream=False,
             timeout=60.0,
-            stop=["\n\n", "\n+++++"],
+            stop=["\n\n", "\n+++++", "[PREFIX]", "</s>[SUFFIX]", "[MIDDLE]"],
         )
 
         assert isinstance(output, TextGenModelOutput)
