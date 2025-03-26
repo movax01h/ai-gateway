@@ -7,8 +7,7 @@ import os
 import boto3
 import requests
 
-# Constants
-SUPPORTED_MODEL_FAMILIES = ["mistral", "mixtral", "gpt", "claude_3"]
+SUPPORTED_MODEL_FAMILIES = ["mistral", "mixtral", "gpt", "claude_3", "llama3"]
 
 
 def check_aigw_endpoint(endpoint="localhost:5052"):
