@@ -39,6 +39,7 @@ from ai_gateway.container import ContainerApplication
 from ai_gateway.feature_flags import FeatureFlag, is_feature_enabled
 from ai_gateway.instrumentators.threads import monitor_threads
 from ai_gateway.models import ModelAPIError
+from ai_gateway.models.base import ModelAPICallError
 from ai_gateway.profiling import setup_profiling
 from ai_gateway.structured_logging import setup_app_logging
 
@@ -152,10 +153,17 @@ async def custom_http_exception_handler(request: Request, exc: StarletteHTTPExce
 
 
 async def model_api_exception_handler(request: Request, exc: ModelAPIError):
-    wrapped_exception = StarletteHTTPException(
-        status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-        detail="Inference failed",
-    )
+    if isinstance(exc, ModelAPICallError) and exc.code == 429:
+        wrapped_exception = StarletteHTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail="Too many requests. Please try again later.",
+        )
+    else:
+        # Default to 503 for all other error types
+        wrapped_exception = StarletteHTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Inference failed",
+        )
     return await http_exception_handler(request, wrapped_exception)
 
 
