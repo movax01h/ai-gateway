@@ -122,7 +122,7 @@ SAAS_PROMPT_MODEL_MAP = {
 
 
 class CodeSuggestionsOutput(NamedTuple):
-    class Metadata(NamedTuple):
+    class Metadata(NamedTuple):  # type: ignore[misc]
         experiments: list[ExperimentTelemetry]
         tokens_consumption_metadata: Optional[TokensConsumptionMetadata] = None
 
@@ -130,7 +130,7 @@ class CodeSuggestionsOutput(NamedTuple):
     score: float
     model: ModelMetadata
     lang_id: Optional[LanguageId] = None
-    metadata: Optional[Metadata] = None
+    metadata: Optional["CodeSuggestionsOutput.Metadata"] = None  # type: ignore[name-defined]
 
     @property
     def lang(self) -> str:
@@ -158,13 +158,12 @@ def resolve_lang_name(file_name: str) -> Optional[str]:
     return lang_name
 
 
-# TODO: https://gitlab.com/gitlab-org/modelops/applied-ml/code-suggestions/ai-assist/-/issues/292
 def increment_lang_counter(
     filename: str,
     lang_id: Optional[LanguageId] = None,
     editor_lang_id: Optional[str] = None,
 ):
-    labels = {"lang": None, "editor_lang": None}
+    labels: dict[str, Optional[str]] = {"lang": None, "editor_lang": None}
 
     if lang_id:
         labels["lang"] = lang_id.name.lower()
