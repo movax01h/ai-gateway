@@ -122,7 +122,8 @@ class AmazonQClient:
                     "OAuth Application Exists. Updating OAuth Application Connection."
                 )
 
-                self.client.update_o_auth_app_connection(**params)
+                self._delete_o_auth_app_connection()
+                self._create_o_auth_app_connection(**params)
             else:
                 raise ex
 
