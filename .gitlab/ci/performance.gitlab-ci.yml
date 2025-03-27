@@ -16,6 +16,8 @@ dotenv-vars:
   rules:
     - if: $CI_PIPELINE_SOURCE == "merge_request_event"
       when: always
+    - if: $CI_COMMIT_BRANCH == "main"
+      when: always
     - when: never
 
 tests:performance:
@@ -35,8 +37,13 @@ tests:performance:
     JOB_WITH_ARTIFACTS_ID: $JOB_WITH_ARTIFACTS_ID
     PROJECT_ID: $CI_PROJECT_ID
     COMPONENT_MR_CI_COMMIT_SHA: $CI_COMMIT_SHORT_SHA
-    PARENT_PIPELINE_MR_IID: $CI_MERGE_REQUEST_IID
   rules:
     - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+      variables:
+        PARENT_PIPELINE_MR_IID: $CI_MERGE_REQUEST_IID
+      when: always
+    - if: $CI_COMMIT_BRANCH == "main"
+      variables:
+        PARENT_PIPELINE_MR_IID: "main"
       when: always
     - when: never
