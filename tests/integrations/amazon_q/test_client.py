@@ -1,5 +1,5 @@
-from typing import Any, Dict, Optional
-from unittest.mock import MagicMock, Mock, patch
+from typing import Any, Optional
+from unittest.mock import MagicMock, Mock, call, patch
 
 import pytest
 from botocore.exceptions import ClientError
@@ -7,12 +7,6 @@ from fastapi import HTTPException
 from pydantic import BaseModel
 
 from ai_gateway.api.auth_utils import StarletteUser
-from ai_gateway.api.v1.amazon_q.typing import (
-    EventHookPayload,
-    EventIssuePayload,
-    EventMergeRequestPayload,
-    EventRequest,
-)
 from ai_gateway.auth.glgo import GlgoAuthority
 from ai_gateway.integrations.amazon_q.client import AmazonQClient, AmazonQClientFactory
 from ai_gateway.integrations.amazon_q.errors import AWSException
@@ -283,7 +277,7 @@ class TestAmazonQClient:
         q_client.create_or_update_auth_application(mock_application_request)
         mock_q_client.create_o_auth_app_connection.assert_called_once_with(**params)
 
-        assert not mock_q_client.update_o_auth_app_connection.called
+        assert not mock_q_client.delete_o_auth_app_connection.called
 
     def test_update_auth_application_on_conflict(
         self, q_client, mock_q_client, mock_application_request, params
@@ -291,14 +285,17 @@ class TestAmazonQClient:
         error_response = {
             "Error": {"Code": "ConflictException", "Message": "A conflict occurred"}
         }
-        mock_q_client.create_o_auth_app_connection.side_effect = ClientError(
-            error_response, "create_o_auth_app_connection"
-        )
+        mock_q_client.create_o_auth_app_connection.side_effect = [
+            ClientError(error_response, "create_o_auth_app_connection"),
+            None,
+        ]
 
         q_client.create_or_update_auth_application(mock_application_request)
 
-        mock_q_client.create_o_auth_app_connection.assert_called_once_with(**params)
-        mock_q_client.update_o_auth_app_connection.assert_called_once_with(**params)
+        mock_q_client.create_o_auth_app_connection.assert_has_calls(
+            [call(**params), call(**params)]
+        )
+        mock_q_client.delete_o_auth_app_connection.assert_called_once()
 
     def test_raises_non_conflict_aws_errors(
         self, q_client, mock_q_client, mock_application_request
@@ -314,7 +311,7 @@ class TestAmazonQClient:
             q_client.create_or_update_auth_application(mock_application_request)
 
         mock_q_client.create_o_auth_app_connection.assert_called_once()
-        assert not mock_q_client.update_o_auth_app_connection.called
+        assert not mock_q_client.delete_o_auth_app_connection.called
 
     @pytest.mark.parametrize(
         "event_id,payload,client_error,expected_exception",
