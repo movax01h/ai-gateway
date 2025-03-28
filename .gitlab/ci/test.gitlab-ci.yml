@@ -39,3 +39,12 @@ tests:integration:
     CI_DEBUG_SERVICES: true
   script:
     - make test-integration
+
+tests:evaluation:
+  extends: .poetry
+  stage: test
+  needs:
+    - install
+  script:
+    - make eval
+  when: manual
