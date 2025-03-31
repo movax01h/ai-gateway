@@ -25,7 +25,7 @@ from ai_gateway.config import Config
 from ai_gateway.container import ContainerApplication
 from ai_gateway.experimentation.base import ExperimentTelemetry
 from ai_gateway.internal_events.client import InternalEventsClient
-from ai_gateway.model_metadata import TypeModelMetadata
+from ai_gateway.model_metadata import TypeModelMetadata, current_model_metadata_context
 from ai_gateway.models.base import ModelMetadata, TokensConsumptionMetadata
 from ai_gateway.models.base_text import (
     TextGenModelBase,
@@ -83,6 +83,12 @@ def test_client(fast_api_router, stub_auth_provider, request):
 
 
 @pytest.fixture
+def model_metadata_context():
+    current_model_metadata_context.set(None)
+    yield current_model_metadata_context
+
+
+@pytest.fixture
 def mock_track_internal_event():
     with patch("ai_gateway.internal_events.InternalEventsClient.track_event") as mock:
         yield mock
@@ -95,7 +101,9 @@ def mock_detect_abuse():
 
 
 @pytest.fixture
-def mock_client(test_client, stub_auth_provider, auth_user, mock_container):
+def mock_client(
+    test_client, stub_auth_provider, auth_user, mock_container, model_metadata_context
+):
     """Setup all the needed mocks to perform requests in the test environment"""
     with patch.object(stub_auth_provider, "authenticate", return_value=auth_user):
         yield test_client

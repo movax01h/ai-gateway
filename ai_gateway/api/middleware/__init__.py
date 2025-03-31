@@ -22,6 +22,7 @@ from .headers import (
     X_GITLAB_TEAM_MEMBER_HEADER,
     X_GITLAB_VERSION_HEADER,
 )
+from .model_config import ModelConfigMiddleware
 
 __all__ = [
     "AccessLogMiddleware",
@@ -29,6 +30,7 @@ __all__ = [
     "MiddlewareAuthentication",
     "InternalEventMiddleware",
     "DistributedTraceMiddleware",
+    "ModelConfigMiddleware",
     "X_GITLAB_REALM_HEADER",
     "X_GITLAB_INSTANCE_ID_HEADER",
     "X_GITLAB_GLOBAL_USER_ID_HEADER",

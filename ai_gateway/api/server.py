@@ -28,6 +28,7 @@ from ai_gateway.api.middleware import (
     FeatureFlagMiddleware,
     InternalEventMiddleware,
     MiddlewareAuthentication,
+    ModelConfigMiddleware,
 )
 from ai_gateway.api.monitoring import router as http_monitoring_router
 from ai_gateway.api.v1 import api_router as http_api_router_v1
@@ -129,6 +130,10 @@ def create_fast_api_server(config: Config):
                 skip_endpoints=_SKIP_ENDPOINTS,
                 enabled=config.internal_event.enabled,
                 environment=config.environment,
+            ),
+            Middleware(
+                ModelConfigMiddleware,
+                custom_models_enabled=config.custom_models.enabled,
             ),
         ],
         extra={"config": config},

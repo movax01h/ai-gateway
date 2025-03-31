@@ -10,6 +10,7 @@ from ai_gateway.model_metadata import (
     AmazonQModelMetadata,
     ModelMetadata,
     TypeModelMetadata,
+    current_model_metadata_context,
 )
 from ai_gateway.prompts import BasePromptRegistry, Prompt
 
@@ -156,3 +157,30 @@ class TestBaseRegistry:
         )
 
         internal_event_client.track_event.assert_has_calls(expected_internal_events)
+
+    @pytest.mark.parametrize(
+        ("model_metadata", "unit_primitives", "scopes"),
+        [
+            (
+                ModelMetadata(
+                    name="mistral",
+                    provider="litellm",
+                    endpoint=AnyUrl("http://localhost:4000"),
+                    api_key="token",
+                ),
+                [GitLabUnitPrimitive.COMPLETE_CODE],
+                ["complete_code"],
+            )
+        ],
+    )
+    def test_get_on_behalf_with_context_model_metadata(
+        self,
+        registry: BasePromptRegistry,
+        user: StarletteUser,
+        prompt: Prompt,
+        unit_primitives: list[GitLabUnitPrimitive],
+        model_metadata: TypeModelMetadata,
+    ):
+        current_model_metadata_context.set(model_metadata)
+
+        assert registry.get_on_behalf(user, "test", None) == prompt

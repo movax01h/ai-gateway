@@ -63,7 +63,15 @@ class ModelMetadata(BaseModelMetadata):
         return params
 
 
-TypeModelMetadata = ModelMetadata | AmazonQModelMetadata
+TypeModelMetadata = AmazonQModelMetadata | ModelMetadata
+
+
+def create_model_metadata(data: Dict[str, Any]) -> TypeModelMetadata:
+    if data["provider"] == "amazon_q":
+        return AmazonQModelMetadata(**data)
+
+    return ModelMetadata(**data)
+
 
 current_model_metadata_context: ContextVar[Optional[TypeModelMetadata]] = ContextVar(
     "current_model_metadata_context", default=None
