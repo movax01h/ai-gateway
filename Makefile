@@ -80,6 +80,11 @@ lint: lint-code lint-doc
 .PHONY: lint-code
 lint-code: flake8 check-black check-isort check-pylint check-mypy
 
+.PHONY: lint-commit
+lint-commit:
+	@npm install
+	@npx commitlint --from=$$(git rev-parse main) --help-url
+
 .PHONY: flake8
 flake8: install-lint-deps
 	@echo "Running flake8..."

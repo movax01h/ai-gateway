@@ -31,11 +31,10 @@ lint:commit:
     GIT_DEPTH: 0
   before_script:
     - apk add --no-cache git
-    - npm install --save-dev @commitlint/config-conventional @commitlint/cli
-    - |
-      echo "module.exports = { extends: ['@commitlint/config-conventional'] };" > commitlint.config.js
+    - npm install
   script:
     - npx commitlint --from="$CI_MERGE_REQUEST_DIFF_BASE_SHA" --help-url
-      'https://www.conventionalcommits.org/en'
+    - echo "Verifying Merge request title formatting"
+    - echo "$CI_MERGE_REQUEST_TITLE" | npx commitlint
   rules:
     - if: "$CI_MERGE_REQUEST_DIFF_BASE_SHA"

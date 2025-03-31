@@ -9,3 +9,6 @@ pre-commit:
     lint-doc:
       glob: "*.md"
       run: make lint-doc
+pre-push:
+    lint-commit:
+      run: make lint-commit
