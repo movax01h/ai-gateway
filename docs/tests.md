@@ -1,6 +1,13 @@
 # Tests
 
 This project uses [Pytest](https://docs.pytest.org/en/stable/) for testing.
+Additionally, we use several Pytest plugins to enhance our testing capabilities:
+
+- `pytest-asyncio`: For testing asynchronous code.
+- `pytest-cov`: For code coverage reporting.
+- `pytest-randomly`: For randomizing test order to detect inter-dependencies.
+- `pytest-watcher`: For running tests in watch mode.
+- `pytest-xdist`: For running tests in parallel.
 
 ## Unit test
 
@@ -31,7 +38,8 @@ open htmlcov/index.html
 
 ### Running a single test file
 
-It's possible to run a single test file with next command:
+Tests run in parallel by default for speed. If you need to debug a specific test, it's recommended to run it
+individually. To run a single test file, use the following command:
 
 ```shell
 poetry run pytest {name of test file}
