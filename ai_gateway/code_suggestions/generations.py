@@ -140,6 +140,7 @@ class CodeGenerations:
                             suffix,
                             file_name,
                             lang.lower(),
+                            stream,
                             **kwargs,
                         )
                     else:

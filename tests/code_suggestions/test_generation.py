@@ -259,6 +259,7 @@ class TestCodeGeneration:
             "suffix",
             "file_name",
             "editor_lang",
+            "stream",
             "expected_lang",
             "expected_output",
             "additional_kwargs",
@@ -270,6 +271,7 @@ class TestCodeGeneration:
                 "# test function",
                 "test.py",
                 "python",
+                False,
                 "python",
                 "\ngenerated code",
                 {},
@@ -280,6 +282,7 @@ class TestCodeGeneration:
                 "",
                 "test.py",
                 "python",
+                False,
                 "python",
                 "\ngenerated code",
                 {},
@@ -290,6 +293,7 @@ class TestCodeGeneration:
                 None,
                 "test.py",
                 "python",
+                False,
                 "python",
                 "\ngenerated code",
                 {},
@@ -300,6 +304,7 @@ class TestCodeGeneration:
                 "// test function",
                 "script.js",
                 None,
+                False,
                 "javascript",
                 "\ngenerated code",
                 {},
@@ -310,6 +315,18 @@ class TestCodeGeneration:
                 "():",
                 "test.py",
                 "python",
+                False,
+                "python",
+                "\ngenerated code",
+                {"temperature": 0.7, "max_tokens": 100},
+            ),
+            # With streaming
+            (
+                "def test",
+                "():",
+                "test.py",
+                "python",
+                True,
                 "python",
                 "\ngenerated code",
                 {"temperature": 0.7, "max_tokens": 100},
@@ -322,6 +339,7 @@ class TestCodeGeneration:
         prefix: str,
         suffix: str | None,
         file_name: str,
+        stream: bool,
         editor_lang: str | None,
         expected_lang: str,
         expected_output: str,
@@ -339,6 +357,7 @@ class TestCodeGeneration:
             suffix=suffix,
             file_name=file_name,
             editor_lang=editor_lang,
+            stream=stream,
             **additional_kwargs,
         )
 
@@ -347,5 +366,5 @@ class TestCodeGeneration:
 
         # Verify model.generate was called with correct parameters
         use_case_q.model.generate.assert_called_once_with(
-            prefix, suffix, file_name, expected_lang, **additional_kwargs
+            prefix, suffix, file_name, expected_lang, stream, **additional_kwargs
         )

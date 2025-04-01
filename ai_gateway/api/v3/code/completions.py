@@ -329,6 +329,7 @@ async def code_generation(
         prompt_enhancer=payload.prompt_enhancer,
         suffix=payload.content_below_cursor,
     )
+
     if isinstance(suggestion, AsyncIterator):
         stream_metadata = _get_stream_metadata(engine, snowplow_event_context)
         return await stream_handler(suggestion, stream_metadata)
