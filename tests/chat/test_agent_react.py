@@ -524,3 +524,46 @@ class TestReActAgent:
             exc_info.value.detail
             == "agent_scratchpad can only be present when role is ASSISTANT"
         )
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        ("inputs", "model_response", "expected_actions"),
+        [
+            (
+                ReActAgentInputs(
+                    messages=[
+                        Message(role=Role.USER, content="What's the weather like?"),
+                        Message(role=Role.ASSISTANT, content=None),
+                    ],
+                    agent_scratchpad=[],
+                    tools=[],
+                ),
+                "Thought: I'm thinking...\nFinal Answer: A",
+                [
+                    AgentFinalAnswer(
+                        text="A",
+                    ),
+                ],
+            ),
+        ],
+    )
+    async def test_stream_with_empty_assistant_content(
+        self,
+        inputs: ReActAgentInputs,
+        model_response: str,
+        expected_actions: list[AgentFinalAnswer],
+        prompt: ReActAgent,
+    ):
+        with capture_logs() as cap_logs, request_cycle_context({}):
+            actual_actions = [action async for action in prompt.astream(inputs)]
+
+        prompt_value = prompt.prompt_tpl.invoke(inputs)
+
+        assert actual_actions == expected_actions
+        response_streaming_events = list(
+            filter(lambda entry: entry["event"] == "Response streaming", cap_logs)
+        )
+        assert len(response_streaming_events) > 0
+
+        messages = prompt_value.to_messages()
+        assert len(messages) == 3  # System, User and one added AI message

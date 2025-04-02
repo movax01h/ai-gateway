@@ -90,7 +90,7 @@ class AdditionalContext(BaseModel):
 
 class Message(BaseModel):
     role: Role
-    content: str
+    content: Optional[str] = None
     context: Optional[CurrentPageContext] = None
     current_file: Optional[CurrentFile] = None
     additional_context: Optional[list[AdditionalContext]] = None
