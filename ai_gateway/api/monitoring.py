@@ -19,12 +19,12 @@ from ai_gateway.code_suggestions import (
 )
 from ai_gateway.code_suggestions.processing import MetadataPromptBuilder, Prompt
 from ai_gateway.code_suggestions.processing.typing import MetadataCodeContent
-from ai_gateway.config import Config
 from ai_gateway.models import (
     KindAnthropicModel,
     KindLiteLlmModel,
     KindModelProvider,
     Message,
+    Role,
 )
 
 __all__ = [
@@ -91,8 +91,8 @@ async def validate_anthropic_available(
 ) -> bool:
     prompt = Prompt(
         prefix=[
-            Message(content="Complete this code: def hello_world()", role="user"),
-            Message(content="<new_code>", role="assistant"),
+            Message(content="Complete this code: def hello_world()", role=Role.USER),
+            Message(content="<new_code>", role=Role.ASSISTANT),
         ],
         metadata=MetadataPromptBuilder(
             components={
@@ -143,8 +143,8 @@ async def validate_fireworks_available(
 
 
 async def validate_cloud_connector_ready(
-    config: Annotated[Configuration[Config], Depends(get_config)],
-    request: Request = None,
+    config: Annotated[Configuration, Depends(get_config)],
+    request: Request,
 ) -> bool:
     """
     Always pass for Self-Hosted-Models. This is temporary.

@@ -1,3 +1,5 @@
+from typing import Optional
+
 from starlette.middleware.base import Request
 from starlette_context import context as starlette_context
 
@@ -9,7 +11,7 @@ from .headers import X_GITLAB_ENABLED_FEATURE_FLAGS, X_GITLAB_REALM_HEADER
 class FeatureFlagMiddleware:
     """Middleware for feature flags."""
 
-    def __init__(self, app, disallowed_flags: dict = None):
+    def __init__(self, app, disallowed_flags: Optional[dict] = None):
         self.app = app
         self.disallowed_flags = disallowed_flags
 
