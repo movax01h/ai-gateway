@@ -9,15 +9,17 @@ __all__ = [
 ]
 
 
+class CodeCompletionsInternalModel(NamedTuple):
+    # TODO: replace with enum values
+    engine: str
+    name: str
+    lang: str
+
+
 class CodeCompletionsInternal(NamedTuple):
-    class Model(NamedTuple):
-        # TODO: replace with enum values
-        engine: str
-        name: str
-        lang: str
 
     text: str
-    model: Model
+    model: CodeCompletionsInternalModel
     finish_reason: str = "length"
 
 
@@ -39,7 +41,7 @@ class CodeCompletionsInternalUseCase:
 
         return CodeCompletionsInternal(
             text=completion.text,
-            model=CodeCompletionsInternal.Model(
+            model=CodeCompletionsInternalModel(
                 # TODO: return props from the target engine instead of using glob var
                 engine=context.get("model_engine", ""),
                 name=context.get("model_name", ""),

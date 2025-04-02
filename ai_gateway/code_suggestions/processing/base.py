@@ -92,15 +92,12 @@ class ModelEngineBase(ABC):
         lang_id: Optional[LanguageId] = None,
         editor_lang_id: Optional[str] = None,
     ):
-        labels = {"lang": None, "editor_lang": None}
 
-        if lang_id:
-            labels["lang"] = lang_id.name.lower()
-
-        if editor_lang_id:
-            labels["editor_lang"] = editor_lang_id
-
-        labels["extension"] = Path(filename).suffix[1:]
+        labels = {
+            "lang": lang_id.name.lower() if lang_id else None,
+            "editor_lang": editor_lang_id,
+            "extension": Path(filename).suffix[1:],
+        }
 
         LANGUAGE_COUNTER.labels(**labels).inc()
 
@@ -110,7 +107,7 @@ class ModelEngineBase(ABC):
         prefix: str,
         suffix: str,
         file_name: str,
-        lang_id: LanguageId,
+        lang_id: Optional[LanguageId] = None,
         editor_lang: Optional[str] = None,
         **kwargs: Any
     ) -> ModelEngineOutput:
