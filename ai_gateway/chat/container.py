@@ -32,8 +32,10 @@ class ContainerChat(containers.DeclarativeContainer):
         self_hosted_documentation_enabled=config.custom_models.enabled,
     )
 
-    gl_agent_remote_executor_factory = providers.Factory(
-        GLAgentRemoteExecutor,
-        tools_registry=_tools_registry,
-        internal_event_client=internal_event.client,
+    gl_agent_remote_executor_factory: providers.Factory[GLAgentRemoteExecutor] = (
+        providers.Factory(
+            GLAgentRemoteExecutor,
+            tools_registry=_tools_registry,
+            internal_event_client=internal_event.client,
+        )
     )

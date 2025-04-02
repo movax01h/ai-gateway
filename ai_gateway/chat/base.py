@@ -45,9 +45,7 @@ class UnitPrimitiveToolset(BaseModel):
 
 class BaseToolsRegistry(ABC):
     @abstractmethod
-    def get_on_behalf(
-        self, user: StarletteUser, gl_version: str, raise_exception: bool = True
-    ) -> list[BaseTool]:
+    def get_on_behalf(self, user: StarletteUser, gl_version: str) -> list[BaseTool]:
         pass
 
     @abstractmethod

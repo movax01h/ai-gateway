@@ -14,7 +14,6 @@ LINT_WORKING_DIR ?= ${AI_GATEWAY_DIR} \
 	${INTEGRATION_TESTS_DIR}
 
 MYPY_LINT_TODO_DIR ?= --exclude "ai_gateway/api/*" \
-	--exclude "ai_gateway/chat/*" \
 	--exclude "ai_gateway/models/*" \
 	--exclude "ai_gateway/code_suggestions/completions.py" \
 	--exclude "ai_gateway/code_suggestions/container.py" \

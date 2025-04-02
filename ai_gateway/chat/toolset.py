@@ -23,7 +23,7 @@ class DuoChatToolsRegistry(BaseToolsRegistry):
     def tools(self) -> list[BaseTool]:
         # We can also read the list of tools and associated unit primitives from the file
         # similar to what we implemented for the Prompt Registry
-        tools = [
+        tools: list[BaseTool] = [
             BuildReader(),
             EpicReader(),
             IssueReader(),

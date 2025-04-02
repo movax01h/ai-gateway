@@ -3,7 +3,7 @@ from typing import Any, Optional
 
 from gitlab_cloud_connector import GitLabUnitPrimitive
 from packaging.version import InvalidVersion, Version
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 
 __all__ = [
     "BaseTool",
@@ -11,13 +11,15 @@ __all__ = [
 ]
 
 
-class BaseTool(ABC, BaseModel, frozen=True):
+class BaseTool(ABC, BaseModel):
     name: str
     description: str
     unit_primitive: GitLabUnitPrimitive
     min_required_gl_version: Optional[str] = None
     resource: Optional[str] = None
     example: Optional[str] = None
+
+    model_config = ConfigDict(frozen=True)
 
     def is_compatible(self, gl_version: str) -> bool:
         if not self.min_required_gl_version:
