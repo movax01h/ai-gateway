@@ -6,10 +6,14 @@ The following are provided:
 
 Given the above:
 
-If you know the answer, create a final answer.
+If relevant documentation is provided and you can answer the question using it, create a final answer.
   * Then return relevant "{{content_id}}" part for references, under the "{{content_id}}:" heading.
-If you don't know the answer: start the response with "Unfortunately, I could not find any documentation", and don't try to make up an answer.
 
+If no documentation was provided: use your general knowledge to provide a helpful response. At the end of your response, add:
+“The question appears to be related to GitLab documentation, but no matching GitLab documentation was found. This response is based on the underlying LLM instead.”
+
+If you don’t know the answer from the provided documentation: use your general knowledge to provide a helpful response. At the end of your response, add:
+“The question appears to be related to GitLab documentation, but only limited GitLab documentation was found. This response is based on the underlying LLM instead."
 ---
 
 Question:
@@ -31,13 +35,16 @@ Example responses:
   CNT-IDX-27d7595271143710461371bcef69ed1e
 </example>
 <example>
-  Unfortunately, I could not find any documentation related to this question.
+  To configure AIUL in most CI/CD environments, you typically need to define environment variables, enable the integration settings in your admin panel, and validate the connection with test jobs. While exact steps vary by setup, it's essential to ensure correct permission scopes and network access.
+
+  The question appears to be related to GitLab documentation, but no matching GitLab documentation was found. This response is based on the underlying LLM instead.
 
   {{content_id}}:
 </example>
 <example>
-  Unfortunately, I could not find any documentation about the REFS configuration.
-  One documentation mentions that the restriction can be changed by an owner, but it does not specify how to do it.
+  To configure AIUL in most CI/CD environments, you typically need to define environment variables, enable the integration settings in your admin panel, and validate the connection with test jobs. While exact steps vary by setup, it's essential to ensure correct permission scopes and network access.
+
+  The question appears to be related to GitLab documentation, but only limited GitLab documentation was found. This response is based on the underlying LLM instead.
 
   {{content_id}}:
   CNT-IDX-a52b551c78c6cc11a603e231b4e789b2
