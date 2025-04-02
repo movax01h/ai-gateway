@@ -10,6 +10,7 @@ ENV AIGW_FASTAPI__API_PORT=5052
 ENV AIGW_FASTAPI__OPENAPI_URL="/openapi.json"
 ENV AIGW_FASTAPI__DOCS_URL="/docs"
 ENV TRANSFORMERS_NO_ADVISORY_WARNINGS=1
+ENV HF_HUB_OFFLINE=true
 
 RUN poetry run index_docs -o "./tmp/docs.db" -v ${TAG##self-hosted-}
 
