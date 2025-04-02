@@ -1,5 +1,5 @@
 from abc import ABC, abstractmethod
-from typing import Any
+from typing import Any, Optional
 
 from ai_gateway.code_suggestions.processing.typing import (
     MetadataCodeContent,
@@ -22,8 +22,8 @@ class PromptBuilderBase(ABC):
 
         self.always_len = 0
 
-        self.tpl: PromptTemplateBase = None
-        self.tpl_args = {}
+        self.tpl: Optional[PromptTemplateBase] = None
+        self.tpl_args: dict = {}
 
     def add_template(self, tpl: PromptTemplateBase, **kwargs: Any) -> int:
         self.tpl = tpl
