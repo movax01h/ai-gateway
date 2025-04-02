@@ -1,6 +1,6 @@
 from typing import Literal, Union
 
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 
 __all__ = [
     "Context",
@@ -13,7 +13,7 @@ __all__ = [
 ]
 
 
-class Context(BaseModel, frozen=True):
+class Context(BaseModel):
     """
     Represents current page context and gets its prompt content from GitLab application.
     This class is deprecated but is needed to process requests from
@@ -23,6 +23,8 @@ class Context(BaseModel, frozen=True):
 
     type: Literal["issue", "epic", "merge_request", "commit", "build"]
     content: str
+
+    model_config = ConfigDict(frozen=True)
 
 
 class CiBuildContext(BaseModel):

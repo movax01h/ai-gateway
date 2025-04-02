@@ -1,9 +1,9 @@
 import re
-from typing import Any, AsyncIterator, Optional
+from typing import Any, AsyncIterator, Optional, Union, cast
 
 import starlette_context
 from langchain_core.exceptions import OutputParserException
-from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
+from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage
 from langchain_core.output_parsers import BaseCumulativeTransformOutputParser
 from langchain_core.outputs import Generation
 from langchain_core.prompt_values import ChatPromptValue, PromptValue
@@ -12,6 +12,7 @@ from pydantic import BaseModel
 
 from ai_gateway.chat.agents.typing import (
     AgentError,
+    AgentEventType,
     AgentFinalAnswer,
     AgentStep,
     AgentToolAction,
@@ -56,10 +57,8 @@ class ReActPlainTextParser(BaseCumulativeTransformOutputParser):
 
     def _parse_final_answer(self, message: str) -> Optional[AgentFinalAnswer]:
         if match_answer := self.re_final_answer.search(message):
-            match_thought = self.re_thought.search(message)
 
             return AgentFinalAnswer(
-                thought=match_thought.group(1) if match_thought else "",
                 text=match_answer.group(1),
             )
 
@@ -97,10 +96,11 @@ class ReActPlainTextParser(BaseCumulativeTransformOutputParser):
 
         return name.replace("\\_", "_")
 
-    def _parse(self, text: str) -> TypeAgentEvent:
+    def _parse(self, text: str) -> AgentEventType:
         wrapped_text = f"<message>Thought: {text}</message>"
 
-        event: Optional[TypeAgentEvent] = None
+        event: AgentEventType  # Explicit declaration avoids mypy confusion
+
         if final_answer := self._parse_final_answer(wrapped_text):
             event = final_answer
         elif agent_action := self._parse_agent_action(wrapped_text):
@@ -112,7 +112,7 @@ class ReActPlainTextParser(BaseCumulativeTransformOutputParser):
 
     def parse_result(
         self, result: list[Generation], *, partial: bool = False
-    ) -> Optional[TypeAgentEvent]:
+    ) -> Optional[AgentEventType]:
         event = None
         text = result[0].text.strip()
 
@@ -125,7 +125,7 @@ class ReActPlainTextParser(BaseCumulativeTransformOutputParser):
 
         return event
 
-    def parse(self, text: str) -> Optional[TypeAgentEvent]:
+    def parse(self, text: str) -> Optional[AgentEventType]:
         return self.parse_result([Generation(text=text)])
 
 
@@ -140,7 +140,7 @@ class ReActPromptTemplate(Runnable[ReActAgentInputs, PromptValue]):
         config: Optional[RunnableConfig] = None,
         **kwargs: Any,
     ) -> PromptValue:
-        messages = []
+        messages: list[BaseMessage] = []
 
         if "system" in self.prompt_template:
             content = jinja2_formatter(
@@ -154,15 +154,16 @@ class ReActPromptTemplate(Runnable[ReActAgentInputs, PromptValue]):
                 and self.model_config.params.model_class_provider
                 == ModelClassProvider.ANTHROPIC
             ):
-                content = [
+                content_block: list[Union[str, dict]] = [
                     {
                         "text": content,
                         "type": "text",
                         "cache_control": {"type": "ephemeral"},
                     }
                 ]
-
-            messages.append(SystemMessage(content=content))
+                messages.append(SystemMessage(content=content_block))
+            else:
+                messages.append(SystemMessage(content=content))
 
         for m in input.messages:
             if m.role is Role.USER:
@@ -237,9 +238,10 @@ class ReActAgent(Prompt[ReActAgentInputs, TypeAgentEvent]):
                 elif isinstance(event, AgentFinalAnswer):
                     agent_final_answer_found = True
                     if len(event.text) > 0:
-                        yield AgentFinalAnswer(
+                        response = AgentFinalAnswer(
                             text=event.text[len_final_answer:],
                         )
+                        yield cast(TypeAgentEvent, response)
 
                         len_final_answer = len(event.text)
 
@@ -248,14 +250,18 @@ class ReActAgent(Prompt[ReActAgentInputs, TypeAgentEvent]):
             error_message = str(e)
             retryable = any(err in error_message for err in self.RETRYABLE_ERRORS)
 
-            yield AgentError(message=error_message, retryable=retryable)
+            yield cast(
+                TypeAgentEvent, AgentError(message=error_message, retryable=retryable)
+            )
             raise
 
         if agent_final_answer_found:
             pass  # no-op
         elif agent_tool_action_found:
-            event = events[-1]
-            starlette_context.context[_REACT_AGENT_TOOL_ACTION_CONTEXT_KEY] = event.tool
-            yield event
+            agent_tool_action: AgentToolAction = events[-1]  # type: ignore[assignment]
+            starlette_context.context[_REACT_AGENT_TOOL_ACTION_CONTEXT_KEY] = (
+                agent_tool_action.tool
+            )
+            yield cast(TypeAgentEvent, agent_tool_action)
         elif isinstance(events[-1], AgentUnknownAction):
-            yield events[-1]
+            yield cast(TypeAgentEvent, events[-1])
