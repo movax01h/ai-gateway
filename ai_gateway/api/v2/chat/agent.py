@@ -21,6 +21,7 @@ from ai_gateway.async_dependency_resolver import (
 from ai_gateway.chat.agents import (
     AgentStep,
     AgentToolAction,
+    Message,
     ReActAgent,
     ReActAgentInputs,
     TypeAgentEvent,
@@ -33,6 +34,7 @@ __all__ = [
     "router",
 ]
 
+from ai_gateway.models import Role
 from ai_gateway.structured_logging import get_request_logger
 
 request_log = get_request_logger("chat")
@@ -90,6 +92,41 @@ def get_agent(
     return prompt
 
 
+def _build_scratchpad_from_request(
+    agent_request: AgentRequest, last_message: Message
+) -> list[AgentStep]:
+    if agent_request.options:
+        return [
+            AgentStep(
+                action=AgentToolAction(
+                    thought=step.thought.replace("\\_", "_"),
+                    tool=step.tool.replace("\\_", "_"),
+                    tool_input=step.tool_input,
+                ),
+                observation=step.observation,
+            )
+            for step in agent_request.options.agent_scratchpad.steps
+        ]
+
+    # Empty content in the assistant's last message indicates an active in-progress query,
+    # it is used to extract agent_scratchpad and pass it to the model.
+    if last_message.role == Role.ASSISTANT and last_message.content is None:
+        return [
+            AgentStep(
+                action=AgentToolAction(
+                    type=step.action.type,
+                    thought=step.action.thought.replace("\\_", "_"),
+                    tool=step.action.tool.replace("\\_", "_"),
+                    tool_input=step.action.tool_input,
+                ),
+                observation=step.observation,
+            )
+            for step in last_message.agent_scratchpad or []
+        ]
+
+    return []
+
+
 @router.post("/agent")
 @feature_category(GitLabFeatureCategory.DUO_CHAT)
 async def chat(
@@ -113,20 +150,9 @@ async def chat(
         async for event in stream_events:
             yield f"{event.dump_as_response()}\n"
 
-    if agent_request.options:
-        scratchpad = [
-            AgentStep(
-                action=AgentToolAction(
-                    thought=step.thought.replace("\\_", "_"),
-                    tool=step.tool.replace("\\_", "_"),
-                    tool_input=step.tool_input,
-                ),
-                observation=step.observation,
-            )
-            for step in agent_request.options.agent_scratchpad.steps
-        ]
-    else:
-        scratchpad = []
+    last_message = agent_request.messages[-1]
+
+    scratchpad = _build_scratchpad_from_request(agent_request, last_message)
 
     inputs = ReActAgentInputs(
         messages=agent_request.messages,
