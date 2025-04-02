@@ -1,0 +1,18 @@
+---
+name: Llama3 Summarize Review
+model:
+  name: llama3
+  params:
+    model_class_provider: litellm
+    temperature: 0.1
+    max_tokens: 2_000
+    max_retries: 1
+unit_primitives:
+  - summarize_review
+prompt_template:
+  system: |
+    {% include 'summarize_review/system/1.0.0.jinja' %}
+  user: |
+    {% include 'summarize_review/user/1.0.0.jinja' %}
+params:
+  timeout: 60
