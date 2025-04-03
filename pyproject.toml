@@ -117,6 +117,7 @@ jobs = 0
 load-plugins = [
   "lints.unsafe_dependency_resolution",
   "lints.direct_environment_variable_reference",
+  "lints.file_naming_for_tests",
 ]
 
 [tool.pylint.messages_control]
