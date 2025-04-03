@@ -1,9 +1,12 @@
 ---
-name: Claude 3.5 Glab Ask Git Command
+name: GPT Glab Ask Git Command
 model:
-  name: claude-3-haiku-20240307
+  name: gpt
   params:
-    model_class_provider: anthropic
+    model_class_provider: litellm
+    temperature: 0.1
+    max_tokens: 2_048
+    max_retries: 1
 unit_primitives:
   - glab_ask_git_command
 prompt_template:
@@ -11,3 +14,5 @@ prompt_template:
     {% include 'glab_ask_git_command/system/1.0.0.jinja' %}
   user: |
     {% include 'glab_ask_git_command/user/1.0.0.jinja' %}
+params:
+  timeout: 60
