@@ -191,7 +191,6 @@ def _side_effect_with_connection_exception(
     safety_attributes: SafetyAttributes,
 ):
     def _fn(prompt: str, suffix: str):
-        VertexAPIConnectionError.code = -1
         raise VertexAPIConnectionError("connection exception")
 
     return _fn

@@ -196,7 +196,6 @@ class ModelEngineCompletions(ModelEngineBase):
         stream: bool = False,
         **kwargs: Any,
     ) -> ModelEngineOutput:
-
         prompt = await self._build_prompt(
             prefix, file_name, suffix, lang_id, kwargs.get("code_context")
         )
@@ -298,7 +297,8 @@ class ModelEngineCompletions(ModelEngineBase):
                         )
                     return outputs
             except (VertexAPIConnectionError, VertexAPIStatusError) as ex:
-                watch_container.register_model_exception(str(ex), ex.code)
+                code = getattr(ex, "code", None)
+                watch_container.register_model_exception(str(ex), code)
                 raise
 
         return empty_output
