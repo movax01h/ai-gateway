@@ -8,26 +8,22 @@ from langchain_core.output_parsers import BaseCumulativeTransformOutputParser
 from langchain_core.outputs import Generation
 from langchain_core.prompt_values import ChatPromptValue, PromptValue
 from langchain_core.runnables import Runnable, RunnableConfig
-from pydantic import BaseModel
 
 from ai_gateway.chat.agents.typing import (
     AgentError,
     AgentEventType,
     AgentFinalAnswer,
-    AgentStep,
     AgentToolAction,
     AgentUnknownAction,
-    Message,
+    ReActAgentInputs,
     TypeAgentEvent,
 )
-from ai_gateway.chat.tools.base import BaseTool
 from ai_gateway.feature_flags import FeatureFlag, is_feature_enabled
 from ai_gateway.models.base_chat import Role
 from ai_gateway.prompts import Prompt, jinja2_formatter
 from ai_gateway.prompts.config import ModelClassProvider, ModelConfig
 
 __all__ = [
-    "ReActAgentInputs",
     "ReActPlainTextParser",
     "ReActAgent",
 ]
@@ -37,14 +33,6 @@ from ai_gateway.structured_logging import get_request_logger
 _REACT_AGENT_TOOL_ACTION_CONTEXT_KEY = "duo_chat.agent_tool_action"
 
 request_log = get_request_logger("react")
-
-
-class ReActAgentInputs(BaseModel):
-    messages: list[Message]
-    agent_scratchpad: Optional[list[AgentStep]] = None
-    unavailable_resources: Optional[list[str]] = None
-    tools: Optional[list[BaseTool]] = None
-    current_date: Optional[str] = None
 
 
 class ReActPlainTextParser(BaseCumulativeTransformOutputParser):
@@ -224,7 +212,7 @@ class ReActAgent(Prompt[ReActAgentInputs, TypeAgentEvent]):
         config: Optional[RunnableConfig] = None,
         **kwargs: Optional[Any],
     ) -> AsyncIterator[TypeAgentEvent]:
-        events = []
+        events: list[TypeAgentEvent] = []
         astream = super().astream(input, config, **kwargs)
         len_final_answer = 0
         agent_final_answer_found = False
@@ -260,10 +248,10 @@ class ReActAgent(Prompt[ReActAgentInputs, TypeAgentEvent]):
         if agent_final_answer_found:
             pass  # no-op
         elif agent_tool_action_found:
-            agent_tool_action: AgentToolAction = events[-1]  # type: ignore[assignment]
+            agent_tool_action = cast(AgentToolAction, events[-1])
             starlette_context.context[_REACT_AGENT_TOOL_ACTION_CONTEXT_KEY] = (
                 agent_tool_action.tool
             )
-            yield cast(TypeAgentEvent, agent_tool_action)
+            yield cast(TypeAgentEvent, events[-1])
         elif isinstance(events[-1], AgentUnknownAction):
             yield cast(TypeAgentEvent, events[-1])
