@@ -79,7 +79,7 @@ class GLAgentRemoteExecutor(Generic[TypeAgentInputs, TypeAgentEvent]):
                 self._tools = self.tools_registry.get_on_behalf(user, gl_version)
 
     async def stream(self, *, inputs: TypeAgentInputs) -> AsyncIterator[TypeAgentEvent]:
-        inputs.tools = self.tools  # type: ignore[attr-defined]
+        inputs.tools = self.tools
 
         tools_by_name = self.tools_by_name
 
