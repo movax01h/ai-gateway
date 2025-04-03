@@ -83,7 +83,9 @@ class TextGenModelInstrumentator:
         def __init__(self, **kwargs: Any):
             self.__dict__.update(**kwargs)
 
-        def register_model_exception(self, message: str, status_code: int):
+        def register_model_exception(
+            self, message: str, status_code: Optional[int] = None
+        ):
             self.__dict__.update(
                 {
                     "model_exception_message": message,
