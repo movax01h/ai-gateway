@@ -5,7 +5,7 @@ import pytest
 from ai_gateway.api.auth_utils import StarletteUser
 from ai_gateway.integrations.amazon_q.client import AmazonQClientFactory
 from ai_gateway.models.amazon_q import AmazonQModel, KindAmazonQModel
-from ai_gateway.models.base_text import TextGenModelOutput
+from ai_gateway.models.base_text import TextGenModelChunk, TextGenModelOutput
 from ai_gateway.safety_attributes import SafetyAttributes
 
 
@@ -41,7 +41,7 @@ async def test_amazon_q_model_generate(suffix, expected_suffix):
         "CodeRecommendations": [{"content": "Generated Code"}]
     }
 
-    output = await model.generate("prefix", suffix, "file.py", "Python")
+    output = await model.generate("prefix", suffix, "file.py", "Python", False)
 
     assert isinstance(output, TextGenModelOutput)
     assert output.text == "Generated Code"
@@ -52,6 +52,39 @@ async def test_amazon_q_model_generate(suffix, expected_suffix):
             "fileContext": {
                 "leftFileContent": "prefix",
                 "rightFileContent": expected_suffix,
+                "filename": "file.py",
+                "programmingLanguage": {"languageName": "Python"},
+            },
+            "maxResults": 1,
+        }
+    )
+
+
+@pytest.mark.asyncio
+async def test_amazon_q_model_generate_streaming():
+    mock_user = MagicMock(spec=StarletteUser)
+    mock_factory = MagicMock(spec=AmazonQClientFactory)
+    mock_client = MagicMock()
+    mock_factory.get_client.return_value = mock_client
+
+    model = AmazonQModel(mock_user, "test-role", mock_factory)
+
+    mock_client.generate_code_recommendations.return_value = {
+        "CodeRecommendations": [{"content": "Generated Code"}]
+    }
+
+    response = await model.generate("prefix", "suffix", "file.py", "Python", True)
+    content = []
+    async for chunk in response:
+        assert isinstance(chunk, TextGenModelChunk)
+        content.append(chunk.text)
+
+    assert content == ["Generated Code"]
+    mock_client.generate_code_recommendations.assert_called_once_with(
+        {
+            "fileContext": {
+                "leftFileContent": "prefix",
+                "rightFileContent": "suffix",
                 "filename": "file.py",
                 "programmingLanguage": {"languageName": "Python"},
             },

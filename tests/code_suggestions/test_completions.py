@@ -708,6 +708,7 @@ class TestCodeCompletions:
             "suffix",
             "file_name",
             "editor_lang",
+            "stream",
             "expected_output",
             "expected_language_id",
             "expected_language",
@@ -719,6 +720,18 @@ class TestCodeCompletions:
                 ":",
                 "test.py",
                 "python",
+                False,
+                "world()",
+                LanguageId.PYTHON,
+                "python",
+            ),
+            # Test with streaming
+            (
+                "def hello",
+                ":",
+                "test.py",
+                "python",
+                True,
                 "world()",
                 LanguageId.PYTHON,
                 "python",
@@ -729,12 +742,13 @@ class TestCodeCompletions:
                 "{",
                 "script.js",
                 None,
+                False,
                 "return true;",
                 LanguageId.JS,
                 "javascript",
             ),
             # Test with no language identifiable
-            ("some code", "", "noextension", None, None, None, None),
+            ("some code", "", "noextension", False, None, None, None, None),
         ],
     )
     async def test_execute_amazon_q_model(
@@ -743,6 +757,7 @@ class TestCodeCompletions:
         suffix: str,
         file_name: str,
         editor_lang: str,
+        stream: bool,
         expected_output: str,
         expected_language_id: LanguageId,
         expected_language: str,
@@ -783,6 +798,7 @@ class TestCodeCompletions:
             suffix=suffix,
             file_name=file_name,
             editor_lang=editor_lang,
+            stream=stream,
         )
 
         # Verify results
@@ -796,6 +812,7 @@ class TestCodeCompletions:
                 suffix,
                 file_name,
                 expected_language.lower() if expected_language else None,
+                stream,
             )
         else:
             assert actual.text == ""

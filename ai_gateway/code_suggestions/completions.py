@@ -208,6 +208,7 @@ class CodeCompletions:
                             prompt.suffix,
                             file_name,
                             lang.lower(),
+                            stream,
                             **kwargs,
                         )
                     else:
