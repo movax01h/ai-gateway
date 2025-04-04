@@ -65,6 +65,10 @@ def config_values(assets_dir, gcp_location):
                         "endpoint": "https://fireworks.endpoint",
                         "identifier": "qwen2p5-coder-7b",
                     },
+                    "codestral-2501": {
+                        "endpoint": "https://fireworks.endpoint",
+                        "identifier": "codestral-2501",
+                    },
                 },
             },
         },
@@ -94,188 +98,6 @@ class TestCodeCompletions:
         """Ensure Snowplow cache is reset between tests."""
         yield
         Snowplow.reset()
-
-    @pytest.mark.parametrize(
-        ("mock_completions_legacy_output_texts", "expected_response"),
-        [
-            # non-empty suggestions from model
-            (
-                ["def search", "println"],
-                {
-                    "id": "id",
-                    "model": {
-                        "engine": "vertex-ai",
-                        "name": "code-gecko",
-                        "lang": "python",
-                        "tokens_consumption_metadata": {
-                            "input_tokens": 1,
-                            "output_tokens": 2,
-                            "max_output_tokens_used": False,
-                            "context_tokens_sent": None,
-                            "context_tokens_used": None,
-                        },
-                        "region": "us-central1",
-                    },
-                    "experiments": [{"name": "truncate_suffix", "variant": 1}],
-                    "object": "text_completion",
-                    "enabled_feature_flags": ["flag_a", "flag_b"],
-                    "created": 1695182638,
-                    "choices": [
-                        {
-                            "text": "def search",
-                            "index": 0,
-                            "finish_reason": "length",
-                        },
-                        {
-                            "text": "println",
-                            "index": 0,
-                            "finish_reason": "length",
-                        },
-                    ],
-                },
-            ),
-            # empty suggestions from model
-            (
-                [""],
-                {
-                    "id": "id",
-                    "model": {
-                        "engine": "vertex-ai",
-                        "name": "code-gecko",
-                        "lang": "python",
-                        "tokens_consumption_metadata": None,
-                        "region": "us-central1",
-                    },
-                    "experiments": [{"name": "truncate_suffix", "variant": 1}],
-                    "enabled_feature_flags": ["flag_a", "flag_b"],
-                    "object": "text_completion",
-                    "created": 1695182638,
-                    "choices": [],
-                },
-            ),
-        ],
-    )
-    def test_legacy_successful_response(
-        self,
-        mock_client: TestClient,
-        mock_track_internal_event,
-        mock_completions_legacy: Mock,
-        expected_response: dict,
-    ):
-        current_feature_flag_context.set({"flag_a", "flag_b"})
-
-        response = mock_client.post(
-            "/completions",
-            headers={
-                "Authorization": "Bearer 12345",
-                "X-Gitlab-Authentication-Type": "oidc",
-                "X-GitLab-Instance-Id": "1234",
-                "X-GitLab-Realm": "self-managed",
-            },
-            json={
-                "prompt_version": 1,
-                "project_path": "gitlab-org/gitlab",
-                "project_id": 278964,
-                "current_file": {
-                    "file_name": "main.py",
-                    "content_above_cursor": "# Create a fast binary search\n",
-                    "content_below_cursor": "\n",
-                },
-                "context": [
-                    {"content": "test context", "name": "test", "type": "function"}
-                ],
-            },
-        )
-
-        assert response.status_code == 200
-        mock_completions_legacy.assert_called_once_with(
-            prefix="# Create a fast binary search\n",
-            suffix="\n",
-            file_name="main.py",
-            editor_lang=None,
-            stream=False,
-            snowplow_event_context=ANY,
-        )
-
-        body = response.json()
-
-        assert body["choices"] == expected_response["choices"]
-        assert body["experiments"] == expected_response["experiments"]
-        assert body["model"] == expected_response["model"]
-        assert set(body["metadata"]["enabled_feature_flags"]) == set(
-            expected_response["enabled_feature_flags"]
-        )
-
-        mock_track_internal_event.assert_called_once_with(
-            "request_complete_code",
-            category="ai_gateway.api.v2.code.completions",
-        )
-
-    @pytest.mark.parametrize(
-        ("headers", "expected_args"),
-        [
-            # Omitted Language Server Version:
-            (
-                {},
-                {},
-            ),
-            # Supported Language Server Version:
-            (
-                {"X-Gitlab-Language-Server-Version": "7.17.1"},
-                {"code_context": ["import numpy as np"]},
-            ),
-            # Unsupported Language Server Version:
-            (
-                {"X-Gitlab-Language-Server-Version": "4.15.0"},
-                {},
-            ),
-        ],
-    )
-    def test_completions_legacy_advanced_context_support(
-        self,
-        mock_client: TestClient,
-        mock_completions_legacy: Mock,
-        headers: dict,
-        expected_args: dict,
-    ):
-        current_file = {
-            "file_name": "main.py",
-            "content_above_cursor": "# Create a fast binary search\n",
-            "content_below_cursor": "\n",
-        }
-        response = mock_client.post(
-            "/completions",
-            headers={
-                "Authorization": "Bearer 12345",
-                "X-Gitlab-Authentication-Type": "oidc",
-                "X-GitLab-Instance-Id": "1234",
-                "X-GitLab-Realm": "self-managed",
-                **headers,
-            },
-            json={
-                "prompt_version": 1,
-                "project_path": "gitlab-org/gitlab",
-                "project_id": 278964,
-                "current_file": current_file,
-                "context": [
-                    {
-                        "type": "file",
-                        "name": "other.py",
-                        "content": "import numpy as np",
-                    }
-                ],
-            },
-        )
-        assert response.status_code == 200
-        mock_completions_legacy.assert_called_with(
-            prefix=current_file["content_above_cursor"],
-            suffix=current_file["content_below_cursor"],
-            file_name=current_file["file_name"],
-            editor_lang=current_file.get("language_identifier", None),
-            stream=False,
-            snowplow_event_context=ANY,
-            **expected_args,
-        )
 
     @pytest.mark.parametrize(
         (
@@ -1043,7 +865,7 @@ class TestCodeCompletions:
         self,
         mock_client: TestClient,
         mock_container: containers.Container,
-        mock_completions_legacy: Mock,
+        mock_completions: Mock,
         auth_user: CloudConnectorUser,
         telemetry: List[Dict[str, Union[str, int, None]]],
         current_file: Dict[str, str],
@@ -1174,11 +996,16 @@ class TestCodeCompletions:
 
         assert response.status_code == expected_status_code
 
+    @pytest.mark.parametrize(
+        "model_details",
+        [{"model_provider": "vertex-ai", "model_name": "codestral-2501"}, {}],
+    )
     def test_vertex_codestral(
         self,
         mock_client: Mock,
         mock_litellm_acompletion: Mock,
         mock_post_processor: Mock,
+        model_details: Dict[str, str],
     ):
         params = {
             "prompt_version": 2,
@@ -1189,9 +1016,9 @@ class TestCodeCompletions:
                 "content_above_cursor": "foo",
                 "content_below_cursor": "\n",
             },
-            "model_provider": "vertex-ai",
-            "model_name": "codestral-2501",
         }
+
+        params.update(model_details)
 
         response = self._send_code_completions_request(mock_client, params)
 
@@ -1247,12 +1074,30 @@ class TestCodeCompletions:
             == "You cannot specify a prompt with the given provider and model combination"
         )
 
-    @pytest.mark.parametrize("gcp_location", ["asia-mock-location"])
-    def test_attempt_vertex_codestral_in_asia(
+    @pytest.mark.parametrize(
+        ("gcp_location", "model_details", "expected_model", "expected_content"),
+        [
+            (
+                "asia-mock-location",
+                {"model_provider": "vertex-ai", "model_name": "codestral-2501"},
+                "codestral-2501",
+                "</s>[SUFFIX]\n[PREFIX]foo[MIDDLE]",
+            ),
+            (
+                "asia-mock-location",
+                {},
+                "qwen2p5-coder-7b",
+                "<|fim_prefix|>foo<|fim_suffix|>\n<|fim_middle|>",
+            ),
+        ],
+    )
+    def test_code_completion_in_asia(
         self,
         mock_client: Mock,
         mock_litellm_acompletion: Mock,
-        mock_completions_legacy: Mock,
+        model_details: Dict[str, str],
+        expected_model: str,
+        expected_content: str,
     ):
         params = {
             "prompt_version": 1,
@@ -1263,21 +1108,27 @@ class TestCodeCompletions:
                 "content_above_cursor": "foo",
                 "content_below_cursor": "\n",
             },
-            "model_provider": "vertex-ai",
-            "model_name": "codestral-2501",
         }
+
+        params.update(model_details)
 
         self._send_code_completions_request(mock_client, params)
 
-        assert not mock_litellm_acompletion.called
-
-        mock_completions_legacy.assert_called_once_with(
-            prefix="foo",
-            suffix="\n",
-            file_name="main.py",
-            editor_lang=None,
+        mock_litellm_acompletion.assert_called_once_with(
+            messages=[{"content": expected_content, "role": "user"}],
+            max_tokens=48,
+            temperature=0.95,
+            top_p=0.95,
+            timeout=60,
+            stop=ANY,
+            api_base="https://fireworks.endpoint",
+            api_key="mock_fireworks_key",
+            model=expected_model,
+            custom_llm_provider="text-completion-openai",
+            client=None,
+            prompt_cache_max_len=0,
+            logprobs=1,
             stream=False,
-            snowplow_event_context=ANY,
         )
 
     @pytest.mark.asyncio
@@ -1328,11 +1179,7 @@ class TestCodeCompletions:
                 "content_below_cursor": "\n",
             },
         }
-        current_feature_flag_context.set({FeatureFlag.DISABLE_CODE_GECKO_DEFAULT})
-
         response = self._send_code_completions_request(mock_client, params)
-
-        current_feature_flag_context.set(set[str]())
 
         mock_litellm_acompletion.assert_called_with(
             model="vertex_ai/codestral-2501",
@@ -1377,9 +1224,7 @@ class TestCodeCompletions:
                 "content_below_cursor": "\n",
             },
         }
-        current_feature_flag_context.set({FeatureFlag.DISABLE_CODE_GECKO_DEFAULT})
         response = self._send_code_completions_request(mock_client, params)
-        current_feature_flag_context.set(set[str]())
 
         mock_litellm_acompletion.assert_called_with(
             messages=[
