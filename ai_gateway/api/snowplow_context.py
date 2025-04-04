@@ -16,8 +16,8 @@ from ai_gateway.tracking import SnowplowEventContext
 def get_snowplow_code_suggestion_context(
     req: Request,
     region: str,
-    prefix: Optional[str] = "",
-    suffix: Optional[str] = "",
+    prefix: str,
+    suffix: str,
     language: Optional[str] = "",
     global_user_id: Optional[str] = "",
     suggestion_source: Optional[str] = "network",
