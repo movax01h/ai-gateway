@@ -276,7 +276,13 @@ class MiddlewareAuthentication(Middleware):
             if cloud_connector_error:
                 raise AuthenticationError(cloud_connector_error.error_message)
 
-            _, _, cloud_connector_token = conn.headers.get(AUTH_HEADER).partition(" ")
+            auth_header = conn.headers.get(AUTH_HEADER)
+
+            # The auth header is already validated as part of the above `cloud_connector_auth` call. It is
+            # guaranteed that the value is present. This assert is a safeguard against changes in the
+            # external`cloud_connector_auth` call and appeases type checker.
+            assert auth_header
+            _, _, cloud_connector_token = auth_header.partition(" ")
             return AuthCredentials(cloud_connector_user.claims.scopes), StarletteUser(
                 cloud_connector_user,
                 cloud_connector_token,
