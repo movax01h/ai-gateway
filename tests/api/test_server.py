@@ -358,6 +358,33 @@ def test_model_exception_handler_with_429_error(app):
     assert response.json() == {"detail": "Too many requests. Please try again later."}
 
 
+def test_model_exception_handler_propagates_retry_after_header(app):
+    @app.get("/test")
+    def test_route():
+        mock_response = MagicMock()
+        mock_response.status_code = 429
+        mock_response.headers = {"retry-after": "30"}
+
+        original_error = MagicMock()
+        original_error.response = mock_response
+
+        class TestTooManyRequestsError(ModelAPICallError):
+            code = 429
+
+        too_many_requests_error = TestTooManyRequestsError(
+            "Too many requests", errors=(original_error,)
+        )
+        raise too_many_requests_error
+
+    setup_custom_exception_handlers(app)
+
+    client = TestClient(app)
+    response = client.get("/test")
+
+    assert "Retry-After" in response.headers
+    assert response.headers["Retry-After"] == "30"
+
+
 @pytest.mark.parametrize(
     ("service_account_json_key", "should_create_cred_file"),
     [
