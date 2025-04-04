@@ -51,7 +51,8 @@ class FireworksHandler(BaseModelProviderHandler):
         if self.payload.context:
             self._update_code_context()
 
-        self.payload.model_provider = KindModelProvider.FIREWORKS
+        if not self.payload.model_provider:
+            self.payload.model_provider = KindModelProvider.FIREWORKS
 
         if not self.payload.model_name or self.payload.model_name not in [
             KindLiteLlmModel.QWEN_2_5,

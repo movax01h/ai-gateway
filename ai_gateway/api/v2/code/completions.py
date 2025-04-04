@@ -17,6 +17,7 @@ from ai_gateway.api.snowplow_context import get_snowplow_code_suggestion_context
 from ai_gateway.api.v2.code.model_provider_handlers import (
     AnthropicHandler,
     FireworksHandler,
+    LegacyHandler,
     LiteLlmHandler,
 )
 from ai_gateway.api.v2.code.typing import (
@@ -54,12 +55,17 @@ from ai_gateway.code_suggestions.base import CodeSuggestionsOutput
 from ai_gateway.code_suggestions.processing.base import ModelEngineOutput
 from ai_gateway.code_suggestions.processing.ops import lang_from_filename
 from ai_gateway.config import Config
-from ai_gateway.feature_flags.context import current_feature_flag_context
+from ai_gateway.feature_flags.context import (
+    FeatureFlag,
+    current_feature_flag_context,
+    is_feature_enabled,
+)
 from ai_gateway.instrumentators.base import TelemetryInstrumentator
 from ai_gateway.internal_events import InternalEventsClient
 from ai_gateway.model_metadata import ModelMetadata
 from ai_gateway.models import KindAnthropicModel, KindModelProvider
 from ai_gateway.models.base import TokensConsumptionMetadata
+from ai_gateway.models.vertex_text import KindVertexTextModel
 from ai_gateway.prompts import BasePromptRegistry
 from ai_gateway.structured_logging import get_request_logger
 from ai_gateway.tracking import SnowplowEvent, SnowplowEventContext
@@ -492,16 +498,9 @@ def _build_code_completions(
         )
 
         return code_completions, kwargs
-    elif payload.model_provider == KindModelProvider.AMAZON_Q:
-        unit_primitive = GitLabUnitPrimitive.AMAZON_Q_INTEGRATION
-        tracking_event = f"request_{unit_primitive}_complete_code"
-        code_completions = completions_amazon_q_factory(
-            model__current_user=current_user,
-            model__role_arn=payload.role_arn,
-        )
-    elif (
-        payload.model_provider == KindModelProvider.FIREWORKS
-        or not _allow_vertex_codestral(region)
+    elif payload.model_provider == KindModelProvider.FIREWORKS or (
+        not _allow_vertex_codestral(region)
+        and is_feature_enabled(FeatureFlag.DISABLE_CODE_GECKO_DEFAULT)
     ):
         FireworksHandler(payload, request, kwargs).update_completion_params()
         code_completions = _resolve_code_completions_litellm(
@@ -513,7 +512,24 @@ def _build_code_completions(
         )
 
         return code_completions, kwargs
-    else:
+    elif payload.model_provider == KindModelProvider.AMAZON_Q:
+        unit_primitive = GitLabUnitPrimitive.AMAZON_Q_INTEGRATION
+        tracking_event = f"request_{unit_primitive}_complete_code"
+        code_completions = completions_amazon_q_factory(
+            model__current_user=current_user,
+            model__role_arn=payload.role_arn,
+        )
+    elif (
+        (
+            (
+                payload.model_provider == KindModelProvider.VERTEX_AI
+                and payload.model_name == KindVertexTextModel.CODESTRAL_2501
+            )
+            or is_feature_enabled(FeatureFlag.DISABLE_CODE_GECKO_DEFAULT)
+        )
+        # Codestral is currently not supported in asia-* locations
+        and _allow_vertex_codestral(region)
+    ):
         code_completions = _resolve_code_completions_vertex_codestral(
             payload=payload,
             completions_litellm_vertex_codestral_factory=completions_litellm_vertex_codestral_factory,
@@ -532,6 +548,9 @@ def _build_code_completions(
         )
         if payload.context:
             kwargs.update({"code_context": [ctx.content for ctx in payload.context]})
+    else:
+        code_completions = completions_legacy_factory()
+        LegacyHandler(payload, request, kwargs).update_completion_params()
 
     # Providers that are handled via the prompt registry perform their own UP check and event tracking. If we reach
     # this point is because we're using some other legacy provider, and we need to perform these steps now
