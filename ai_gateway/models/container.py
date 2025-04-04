@@ -173,7 +173,7 @@ class ContainerModels(containers.DeclarativeContainer):
             async_fireworks_client=async_fireworks_client,
             vertex_model_location=config.vertex_text_model.location,
         ),
-        mocked=providers.Factory(mock.ChatModel),
+        mocked=providers.Factory(mock.LLM),
     )
 
     litellm_chat = providers.Selector(
