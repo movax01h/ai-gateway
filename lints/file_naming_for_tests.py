@@ -19,11 +19,7 @@ EXCLUDED_FILES = {
     "/tests/code_suggestions/models/test_palm.py",
     "/tests/code_suggestions/models/test_mock.py",
     "/tests/code_suggestions/models/test_base.py",
-    "/tests/chat/test_gl_agent_remote.py",
-    "/tests/chat/test_agent_react.py",
     "/tests/prompts/test_litellm_prompt.py",
-    "/tests/prompts/test_prompt.py",
-    "/tests/prompts/test_base_registry.py",
 }
 
 
