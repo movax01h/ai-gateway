@@ -12,13 +12,7 @@ EXCLUDED_FILES = {
     "/tests/code_suggestions/test_engine.py",
     "/tests/code_suggestions/test_processing.py",
     "/tests/code_suggestions/test_logging.py",
-    "/tests/code_suggestions/test_prompts.py",
     "/tests/code_suggestions/test_authentication.py",
-    "/tests/code_suggestions/test_generation.py",
-    "/tests/code_suggestions/models/test_anthropic.py",
-    "/tests/code_suggestions/models/test_palm.py",
-    "/tests/code_suggestions/models/test_mock.py",
-    "/tests/code_suggestions/models/test_base.py",
     "/tests/prompts/test_litellm_prompt.py",
 }
 
