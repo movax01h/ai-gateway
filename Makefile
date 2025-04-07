@@ -20,7 +20,6 @@ MYPY_LINT_TODO_DIR ?= --exclude "ai_gateway/models/*" \
 	--exclude "ai_gateway/api/v1/x_ray/libraries.py" \
 	--exclude "ai_gateway/api/v1/prompts/invoke.py" \
 	--exclude "ai_gateway/api/v1/chat/agent.py" \
-	--exclude "ai_gateway/api/server.py" \
 	--exclude "ai_gateway/code_suggestions/completions.py" \
 	--exclude "ai_gateway/code_suggestions/container.py" \
 	--exclude "ai_gateway/code_suggestions/generations.py" \
