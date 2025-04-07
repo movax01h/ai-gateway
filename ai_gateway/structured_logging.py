@@ -8,12 +8,16 @@ from asgi_correlation_id import CorrelationIdMiddleware
 from fastapi import FastAPI
 from structlog.types import EventDict, Processor
 
+from ai_gateway.api.middleware.self_hosted_logging import (
+    enabled_instance_verbose_ai_logs,
+)
 from ai_gateway.config import ConfigLogging
 from ai_gateway.feature_flags import FeatureFlag, is_feature_enabled
 from ai_gateway.model_metadata import ModelMetadata
 
 access_logger = structlog.stdlib.get_logger("api.access")
 ENABLE_REQUEST_LOGGING = False
+CUSTOM_MODELS_ENABLED = False
 
 
 # https://github.com/hynek/structlog/issues/35#issuecomment-591321744
@@ -51,11 +55,13 @@ def setup_app_logging(app: FastAPI):
     app.add_middleware(CorrelationIdMiddleware, validator=None)
 
 
-def setup_logging(logging_config: ConfigLogging):
+def setup_logging(logging_config: ConfigLogging, custom_models_enabled: bool):
     global ENABLE_REQUEST_LOGGING  # pylint: disable=global-statement
+    global CUSTOM_MODELS_ENABLED  # pylint: disable=global-statement
 
     timestamper = structlog.processors.TimeStamper(fmt="iso")
     ENABLE_REQUEST_LOGGING = logging_config.enable_request_logging
+    CUSTOM_MODELS_ENABLED = custom_models_enabled
 
     shared_processors: list[Processor] = [
         structlog.contextvars.merge_contextvars,
@@ -156,7 +162,14 @@ def setup_logging(logging_config: ConfigLogging):
 
 
 def prevent_logging_if_disabled(_, __, event_dict: EventDict) -> EventDict:
-    if ENABLE_REQUEST_LOGGING or is_feature_enabled(FeatureFlag.EXPANDED_AI_LOGGING):
+    if (
+        ENABLE_REQUEST_LOGGING
+        or (CUSTOM_MODELS_ENABLED and enabled_instance_verbose_ai_logs())
+        or (
+            not CUSTOM_MODELS_ENABLED
+            and is_feature_enabled(FeatureFlag.EXPANDED_AI_LOGGING)
+        )
+    ):
         return event_dict
 
     raise structlog.DropEvent

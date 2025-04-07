@@ -39,7 +39,7 @@ def start_metrics_server(config: Config):
 def run_app():
     config = get_config()
 
-    setup_logging(config.logging)
+    setup_logging(config.logging, config.custom_models.enabled)
     start_metrics_server(config)
 
     # For now, trust all IPs for proxy headers until https://github.com/encode/uvicorn/pull/1611 is available.
