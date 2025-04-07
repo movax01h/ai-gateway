@@ -34,6 +34,8 @@ def test_get_snowplow_code_suggestion_context_realm_header(
 ):
     mock_request.headers = headers
 
-    context = get_snowplow_code_suggestion_context(req=mock_request, region="us-east-1")
+    context = get_snowplow_code_suggestion_context(
+        req=mock_request, prefix="", suffix="", region="us-east-1"
+    )
 
     assert context.gitlab_realm == expected_realm

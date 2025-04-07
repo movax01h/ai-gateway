@@ -14,7 +14,6 @@ LINT_WORKING_DIR ?= ${AI_GATEWAY_DIR} \
 	${INTEGRATION_TESTS_DIR}
 
 MYPY_LINT_TODO_DIR ?= --exclude "ai_gateway/models/*" \
-	--exclude "ai_gateway/api/snowplow_context.py" \
 	--exclude "ai_gateway/api/v3/code/completions.py" \
 	--exclude "ai_gateway/api/v2/code/completions.py" \
 	--exclude "ai_gateway/api/v2/chat/agent.py" \
