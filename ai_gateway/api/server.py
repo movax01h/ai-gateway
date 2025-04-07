@@ -20,7 +20,7 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.middleware import Middleware
 from starlette.responses import JSONResponse
 from starlette_context import context
-from starlette_context.middleware import RawContextMiddleware
+from starlette_context.middleware import ContextMiddleware, RawContextMiddleware
 
 from ai_gateway.api.middleware import (
     AccessLogMiddleware,
@@ -29,6 +29,9 @@ from ai_gateway.api.middleware import (
     InternalEventMiddleware,
     MiddlewareAuthentication,
     ModelConfigMiddleware,
+)
+from ai_gateway.api.middleware.self_hosted_logging import (
+    EnabledInstanceVerboseAiLogsHeaderPlugin,
 )
 from ai_gateway.api.monitoring import router as http_monitoring_router
 from ai_gateway.api.server_utils import extract_retry_after_header
@@ -137,6 +140,10 @@ def create_fast_api_server(config: Config):
             Middleware(
                 ModelConfigMiddleware,
                 custom_models_enabled=config.custom_models.enabled,
+            ),
+            Middleware(
+                ContextMiddleware,
+                plugins=(EnabledInstanceVerboseAiLogsHeaderPlugin(),),
             ),
         ],
         extra={"config": config},
