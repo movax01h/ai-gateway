@@ -1,8 +1,9 @@
-from unittest.mock import AsyncMock, Mock, patch
+from unittest.mock import AsyncMock, MagicMock, Mock, patch
 
 import httpx
 import litellm
 import pytest
+from google.auth.credentials import Credentials
 from langchain_community.chat_models import ChatLiteLLM
 
 from ai_gateway.prompts import Prompt
@@ -47,7 +48,11 @@ async def test_ainvoke(
     response_text: str,
 ):
     with pytest.raises(litellm.APIConnectionError, match="something went wrong"), patch(
-        "google.auth.default", return_value=(Mock(), "mock_project_id")
+        "google.auth.default",
+        return_value=(
+            MagicMock(spec=Credentials, token="mock_token"),
+            "mock_project_id",
+        ),
     ):
         await prompt.ainvoke({"name": "Duo", "content": "What's up?"})
 
@@ -72,8 +77,15 @@ async def test_astream(
     litellm.module_level_aclient = mock_http_handler
 
     with pytest.raises(
-        litellm.exceptions.InternalServerError, match="something went wrong"
-    ), patch("google.auth.default", return_value=(Mock(), "mock_project_id")):
+        litellm.InternalServerError, match="something went wrong"
+    ), patch(
+        "google.auth.default",
+        return_value=(
+            MagicMock(spec=Credentials, token="mock_token"),
+            "mock_project_id",
+        ),
+    ):
         await anext(prompt.astream({"name": "Duo", "content": "What's up?"}))
 
+    mock_http.assert_not_called()
     assert mock_http_handler.post.call_count == 1
