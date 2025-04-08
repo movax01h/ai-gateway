@@ -3766,7 +3766,7 @@ optional = false
 python-versions = ">=3.9"
 groups = ["main"]
 files = [
-    {file = "q_developer_boto3-1.11.0-py3-none-any.whl", hash = "sha256:d7275496269e638125328cc9f6f71be7d1722ec20a28badedef0073ee44a83ae"},
+    {file = "q_developer_boto3-1.12.0-py3-none-any.whl", hash = "sha256:fd9890a71e80483b9a32b7e8bd5af2ec24934ad58caff7a9093ec67aa34ea986"},
 ]
 
 [package.dependencies]
@@ -3774,7 +3774,7 @@ boto3 = ">=1.14.11"
 
 [package.source]
 type = "file"
-url = "vendor/q_developer_boto3-1.11.0-py3-none-any.whl"
+url = "vendor/q_developer_boto3-1.12.0-py3-none-any.whl"
 
 [[package]]
 name = "rapidfuzz"
@@ -5627,4 +5627,4 @@ cffi = ["cffi (>=1.11)"]
 [metadata]
 lock-version = "2.1"
 python-versions = "~3.11.0"
-content-hash = "7352e324496533e92fd5254491761677605c3a74e6b139c2303cfb9a1318fc0d"
+content-hash = "ca3618a15876e7a830dc3c30dca57eebd6289d755438e94fc3abee37e9072fb0"

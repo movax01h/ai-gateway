@@ -161,19 +161,32 @@ class AmazonQClient:
         )
 
     @raise_aws_errors
+    def generate_code_recommendations(self, payload):
+        return self.client.generate_code_recommendations(
+            fileContext=payload["fileContext"],
+            maxResults=payload["maxResults"],
+        )
+
+    @raise_aws_errors
+    def verify_oauth_connection(self, health_request):
+        try:
+            return self._verify_oauth_connection()
+        except ClientError as ex:
+            if ex.response["Error"]["Code"] == "AccessDeniedException":
+                return self._retry_verify_oauth_connection(ex, health_request.code)
+
+            raise ex
+
+    def _verify_oauth_connection(self):
+        return self.client.verify_o_auth_app_connection()
+
+    @raise_aws_errors
     def _create_o_auth_app_connection(self, **params):
         self.client.create_o_auth_app_connection(**params)
 
     @raise_aws_errors
     def _delete_o_auth_app_connection(self):
         self.client.delete_o_auth_app_connection()
-
-    @raise_aws_errors
-    def generate_code_recommendations(self, payload):
-        return self.client.generate_code_recommendations(
-            fileContext=payload["fileContext"],
-            maxResults=payload["maxResults"],
-        )
 
     def _send_event(self, event_id: str, payload: dict):
         self.client.send_event(
@@ -187,6 +200,11 @@ class AmazonQClient:
         self._is_retry(error, code)
 
         return self._send_event(event_id, payload)
+
+    def _retry_verify_oauth_connection(self, error, code):
+        self._is_retry(error, code)
+
+        return self._verify_oauth_connection()
 
     def _is_retry(self, error, code):
         match str(error.response.get("reason")):

@@ -464,3 +464,86 @@ class TestAmazonQClient:
             )
 
         mock_q_client.send_message.assert_called_once_with(**send_message_params)
+
+    @pytest.mark.parametrize(
+        "client_error,expected_result,expected_exception",
+        [
+            # Happy path - successful verification
+            (
+                None,
+                {
+                    "response": {
+                        "GITLAB_INSTANCE_REACHABILITY": {"status": "PASSED"},
+                        "GITLAB_CREDENTIAL_VALIDITY": {"status": "PASSED"},
+                    }
+                },
+                None,
+            ),
+            # Test AccessDeniedException with retry
+            (
+                ClientError(
+                    {
+                        "Error": {
+                            "Code": "AccessDeniedException",
+                            "Message": "Access Denied",
+                        }
+                    },
+                    "verify_o_auth_app_connection",
+                ),
+                {"Status": "Retried"},
+                None,
+            ),
+            # Test other ClientError
+            (
+                ClientError(
+                    {
+                        "Error": {
+                            "Code": "InternalServerError",
+                            "Message": "Internal Server Error",
+                        }
+                    },
+                    "verify_o_auth_app_connection",
+                ),
+                None,
+                AWSException,
+            ),
+        ],
+    )
+    def test_verify_oauth_connection(
+        self, q_client, mock_q_client, client_error, expected_result, expected_exception
+    ):
+        """Tests OAuth connection verification with various scenarios."""
+        # Setup mock request
+        mock_health_request = Mock()
+        mock_health_request.code = "test_code"
+
+        # Setup retry mock
+        q_client._retry_verify_oauth_connection = Mock(
+            return_value={"Status": "Retried"}
+        )
+
+        if client_error:
+            # Configure mock to raise exception
+            q_client._verify_oauth_connection = Mock(side_effect=client_error)
+        else:
+            # Configure mock to return successfully
+            q_client._verify_oauth_connection = Mock(return_value=expected_result)
+
+        if expected_exception:
+            with pytest.raises(expected_exception):
+                q_client.verify_oauth_connection(mock_health_request)
+        else:
+            result = q_client.verify_oauth_connection(mock_health_request)
+
+            if (
+                client_error
+                and client_error.response["Error"]["Code"] == "AccessDeniedException"
+            ):
+                # Verify retry was called with correct parameters
+                q_client._retry_verify_oauth_connection.assert_called_once_with(
+                    client_error, mock_health_request.code
+                )
+                assert result == {"Status": "Retried"}
+            else:
+                # Verify normal verification was successful
+                assert result == expected_result
