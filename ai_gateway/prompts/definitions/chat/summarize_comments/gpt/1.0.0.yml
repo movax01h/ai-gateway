@@ -1,0 +1,18 @@
+---
+name: GPT Summarize Comments agent
+model:
+  name: gpt
+  params:
+    model_class_provider: litellm
+    temperature: 0.1
+    max_tokens: 2_048
+    max_retries: 1
+unit_primitives:
+  - summarize_comments
+prompt_template:
+  system: |
+    {% include 'chat/summarize_comments/system/1.0.0.jinja' %}
+  user: |
+    {% include 'chat/summarize_comments/user/1.0.0.jinja' %}
+params:
+  timeout: 60
