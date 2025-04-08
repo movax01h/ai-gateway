@@ -1,5 +1,6 @@
 # Import your model classes
 import pytest
+from pydantic import HttpUrl
 
 from ai_gateway.model_metadata import (
     AmazonQModelMetadata,
@@ -59,3 +60,76 @@ def test_create_model_metadata_invalid_data():
     # Act & Assert
     with pytest.raises(ValueError):
         create_model_metadata(invalid_data)
+
+
+class TestModelMetadataToParams:
+    def test_without_identifier(self):
+        model_metadata = ModelMetadata(
+            name="model_family",
+            provider="provider",
+            endpoint=HttpUrl("https://api.example.com"),
+            api_key="abcde",
+            identifier=None,
+        )
+
+        params = model_metadata.to_params()
+
+        assert params == {
+            "api_base": "https://api.example.com",
+            "api_key": "abcde",
+            "model": "model_family",
+            "custom_llm_provider": "provider",
+        }
+
+    def test_with_identifier_no_provider(self):
+        model_metadata = ModelMetadata(
+            name="model_family",
+            provider="provider",
+            endpoint=HttpUrl("https://api.example.com"),
+            api_key="abcde",
+            identifier="model_identifier",
+        )
+
+        params = model_metadata.to_params()
+
+        assert params == {
+            "api_base": "https://api.example.com",
+            "api_key": "abcde",
+            "model": "model_identifier",
+            "custom_llm_provider": "custom_openai",
+        }
+
+    def test_with_identifier_with_provider(self):
+        model_metadata = ModelMetadata(
+            name="model_family",
+            provider="provider",
+            endpoint=HttpUrl("https://api.example.com"),
+            api_key="abcde",
+            identifier="custom_provider/model/identifier",
+        )
+
+        params = model_metadata.to_params()
+
+        assert params == {
+            "api_base": "https://api.example.com",
+            "api_key": "abcde",
+            "model": "model/identifier",
+            "custom_llm_provider": "custom_provider",
+        }
+
+    def test_with_identifier_with_bedrock_provider(self):
+        model_metadata = ModelMetadata(
+            name="model_family",
+            provider="provider",
+            endpoint=HttpUrl("https://api.example.com"),
+            api_key="abcde",
+            identifier="bedrock/model/identifier",
+        )
+
+        params = model_metadata.to_params()
+
+        assert params == {
+            "model": "model/identifier",
+            "api_key": "abcde",
+            "custom_llm_provider": "bedrock",
+        }
