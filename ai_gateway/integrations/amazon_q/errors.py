@@ -58,6 +58,10 @@ class AWSException(Exception):
             return HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST, detail=self.exception_str
             )
+        if str(self.error_code) in ("ThrottlingException", "429"):
+            return HTTPException(
+                status_code=status.HTTP_429_TOO_MANY_REQUESTS, detail=self.exception_str
+            )
 
         # For any other AWS errors, return a 500 Internal Server Error
         return HTTPException(

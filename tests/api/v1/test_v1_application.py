@@ -3,12 +3,10 @@ from unittest.mock import MagicMock, call, patch
 
 import botocore
 import pytest
-from botocore.exceptions import ClientError
-from fastapi import HTTPException, status
+from fastapi import status
 from gitlab_cloud_connector import CloudConnectorUser, GitLabUnitPrimitive, UserClaims
 
 from ai_gateway.api.v1 import api_router
-from ai_gateway.config import Config
 
 
 def create_access_denied_error():
@@ -20,6 +18,23 @@ def create_access_denied_error():
         "ResponseMetadata": {
             "HTTPHeaders": {
                 "HTTPStatusCode": 400,
+                "RequestId": "cef34aa6-ce28-4b6f-a159-a89fad215348",
+                "RetryAttempts": 0,
+            },
+        },
+    }
+    return botocore.exceptions.ClientError(error_response, "operation_name")
+
+
+def create_throttle_error():
+    error_response = {
+        "Error": {
+            "Code": "ThrottlingException",
+            "Message": "Too many requests",
+        },
+        "ResponseMetadata": {
+            "HTTPHeaders": {
+                "HTTPStatusCode": 429,
                 "RequestId": "cef34aa6-ce28-4b6f-a159-a89fad215348",
                 "RetryAttempts": 0,
             },
@@ -394,3 +409,92 @@ class TestApplication:
         assert response.status_code == status.HTTP_204_NO_CONTENT
         mock_q_boto3.client.assert_called_once_with("q", **credentials)
         mock_delete_o_auth_app_connection.assert_called_once_with()
+
+    def test_validate_auth_app_successful(
+        self,
+        mock_client,
+        mock_boto3,
+        mock_q_boto3,
+        mock_sts_client,
+        mock_glgo,
+        credentials,
+    ):
+        verify_app_response = {"test1": "PASSED", "test2": "PASSED"}
+        mock_verify_o_auth_app_connection = MagicMock(
+            return_value={"response": verify_app_response}
+        )
+        mock_q_client_response = MagicMock()
+        mock_q_client_response.verify_o_auth_app_connection = (
+            mock_verify_o_auth_app_connection
+        )
+
+        mock_q_boto3.client.return_value = mock_q_client_response
+
+        response = mock_client.post(
+            "/amazon_q/oauth/application/verify",
+            headers={
+                "Authorization": "Bearer 12345",
+                "X-Gitlab-Authentication-Type": "oidc",
+                "X-GitLab-Instance-Id": "47474",
+                "X-GitLab-Realm": "self-managed",
+                "X-Gitlab-Global-User-Id": "1",
+            },
+            json={
+                "role_arn": "arn:aws:iam::123456789012:role/q-dev-role",
+                "code": "some.code",
+            },
+        )
+
+        assert response.status_code == status.HTTP_200_OK
+        assert response.json() == verify_app_response
+        mock_q_boto3.client.assert_called_once_with("q", **credentials)
+
+        mock_verify_o_auth_app_connection.assert_called_once_with()
+
+    @pytest.mark.parametrize(
+        ("error_response", "expected_code"),
+        [
+            (
+                create_throttle_error(),
+                status.HTTP_429_TOO_MANY_REQUESTS,
+            ),
+        ],
+    )
+    def test_validate_auth_app_aws_exception(
+        self,
+        mock_client,
+        mock_boto3,
+        mock_q_boto3,
+        mock_sts_client,
+        mock_glgo,
+        credentials,
+        error_response,
+        expected_code,
+    ):
+        mock_verify_o_auth_app_connection = MagicMock(side_effect=error_response)
+        mock_q_client_response = MagicMock()
+        mock_q_client_response.verify_o_auth_app_connection = (
+            mock_verify_o_auth_app_connection
+        )
+
+        mock_q_boto3.client.return_value = mock_q_client_response
+
+        response = mock_client.post(
+            "/amazon_q/oauth/application/verify",
+            headers={
+                "Authorization": "Bearer 12345",
+                "X-Gitlab-Authentication-Type": "oidc",
+                "X-GitLab-Instance-Id": "47474",
+                "X-GitLab-Realm": "self-managed",
+                "X-Gitlab-Global-User-Id": "1",
+            },
+            json={
+                "role_arn": "arn:aws:iam::123456789012:role/q-dev-role",
+                "code": "some.code",
+            },
+        )
+
+        assert response.status_code == expected_code
+        mock_q_boto3.client.assert_called_once_with("q", **credentials)
+
+        mock_verify_o_auth_app_connection.assert_called_once_with()
