@@ -1,6 +1,6 @@
-# Create a starlette-context plugin that fetches the header 'my-header'
+from typing import Union
 
-from starlette.requests import Request
+from starlette.requests import HTTPConnection, Request
 from starlette_context import context
 from starlette_context.plugins import Plugin
 
@@ -10,7 +10,7 @@ HEADER_KEY = "x-gitlab-enabled-instance-verbose-ai-logs"
 class EnabledInstanceVerboseAiLogsHeaderPlugin(Plugin):
     key = "enabled-instance-verbose-ai-logs"
 
-    async def process_request(self, request: Request) -> bool:
+    async def process_request(self, request: Union[Request, HTTPConnection]) -> bool:
         """
         Extract the 'my-header' value from the request headers.
 

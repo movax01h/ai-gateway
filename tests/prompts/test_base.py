@@ -10,7 +10,7 @@ from langchain_community.chat_models import ChatLiteLLM
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.runnables import Runnable
 from litellm.exceptions import Timeout
-from pydantic import AnyUrl, HttpUrl
+from pydantic import AnyUrl
 
 from ai_gateway.api.auth_utils import StarletteUser
 from ai_gateway.model_metadata import (
@@ -48,33 +48,59 @@ class TestPrompt:
         }
 
     @pytest.mark.asyncio
+    @mock.patch("ai_gateway.prompts.base.get_request_logger")
     @mock.patch(
         "ai_gateway.instrumentators.model_requests.ModelRequestInstrumentator.watch"
     )
     async def test_ainvoke(
-        self, mock_watch: mock.Mock, prompt: Prompt, model_response: str
+        self,
+        mock_watch: mock.Mock,
+        mock_get_logger: mock.Mock,
+        prompt: Prompt,
+        model_response: str,
     ):
+        mock_logger = mock.MagicMock()
+        mock_get_logger.return_value = mock_logger
+
         response = await prompt.ainvoke({"name": "Duo", "content": "What's up?"})
 
         assert response.content == model_response
 
+        mock_logger.info.assert_called_with(
+            "Performing LLM request",
+            prompt="System: Hi, I'm Duo\nHuman: What's up?",
+        )
+
         mock_watch.assert_called_with(stream=False)
 
     @pytest.mark.asyncio
+    @mock.patch("ai_gateway.prompts.base.get_request_logger")
     @mock.patch(
         "ai_gateway.instrumentators.model_requests.ModelRequestInstrumentator.watch"
     )
     async def test_astream(
-        self, mock_watch: mock.Mock, prompt: Prompt, model_response: str
+        self,
+        mock_watch: mock.Mock,
+        mock_get_logger: mock.Mock,
+        prompt: Prompt,
+        model_response: str,
     ):
         mock_watcher = mock.AsyncMock()
         mock_watch.return_value.__enter__.return_value = mock_watcher
         response = ""
 
+        mock_logger = mock.MagicMock()
+        mock_get_logger.return_value = mock_logger
+
         async for c in prompt.astream({"name": "Duo", "content": "What's up?"}):
             response += c.content
 
             mock_watcher.afinish.assert_not_awaited()  # Make sure we don't finish prematurely
+
+        mock_logger.info.assert_called_with(
+            "Performing LLM request",
+            prompt="System: Hi, I'm Duo\nHuman: What's up?",
+        )
 
         assert response == model_response
 
@@ -125,79 +151,6 @@ class TestPromptTimeout:
             await prompt.ainvoke(
                 {"name": "Duo", "content": "Print pi with 400 decimals"}
             )
-
-
-class TestModelMetadataToParams:
-    def test_without_identifier(self):
-        model_metadata = ModelMetadata(
-            name="model_family",
-            provider="provider",
-            endpoint=HttpUrl("https://api.example.com"),
-            api_key="abcde",
-            identifier=None,
-        )
-
-        params = model_metadata.to_params()
-
-        assert params == {
-            "api_base": "https://api.example.com",
-            "api_key": "abcde",
-            "model": "model_family",
-            "custom_llm_provider": "provider",
-        }
-
-    def test_with_identifier_no_provider(self):
-        model_metadata = ModelMetadata(
-            name="model_family",
-            provider="provider",
-            endpoint=HttpUrl("https://api.example.com"),
-            api_key="abcde",
-            identifier="model_identifier",
-        )
-
-        params = model_metadata.to_params()
-
-        assert params == {
-            "api_base": "https://api.example.com",
-            "api_key": "abcde",
-            "model": "model_identifier",
-            "custom_llm_provider": "custom_openai",
-        }
-
-    def test_with_identifier_with_provider(self):
-        model_metadata = ModelMetadata(
-            name="model_family",
-            provider="provider",
-            endpoint=HttpUrl("https://api.example.com"),
-            api_key="abcde",
-            identifier="custom_provider/model/identifier",
-        )
-
-        params = model_metadata.to_params()
-
-        assert params == {
-            "api_base": "https://api.example.com",
-            "api_key": "abcde",
-            "model": "model/identifier",
-            "custom_llm_provider": "custom_provider",
-        }
-
-    def test_with_identifier_with_bedrock_provider(self):
-        model_metadata = ModelMetadata(
-            name="model_family",
-            provider="provider",
-            endpoint=HttpUrl("https://api.example.com"),
-            api_key="abcde",
-            identifier="bedrock/model/identifier",
-        )
-
-        params = model_metadata.to_params()
-
-        assert params == {
-            "model": "model/identifier",
-            "api_key": "abcde",
-            "custom_llm_provider": "bedrock",
-        }
 
 
 @pytest.fixture

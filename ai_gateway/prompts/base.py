@@ -4,6 +4,7 @@ from typing import Any, AsyncIterator, Mapping, Optional, Tuple, TypeVar, cast
 from gitlab_cloud_connector import GitLabUnitPrimitive, WrongUnitPrimitives
 from jinja2 import PackageLoader
 from jinja2.sandbox import SandboxedEnvironment
+from langchain_core.callbacks import BaseCallbackHandler
 from langchain_core.prompt_values import PromptValue
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.prompts.string import DEFAULT_FORMATTER_MAPPING
@@ -15,6 +16,7 @@ from ai_gateway.internal_events.client import InternalEventsClient
 from ai_gateway.model_metadata import TypeModelMetadata, current_model_metadata_context
 from ai_gateway.prompts.config.base import ModelConfig, PromptConfig, PromptParams
 from ai_gateway.prompts.typing import Model, TypeModelFactory
+from ai_gateway.structured_logging import get_request_logger
 
 __all__ = [
     "Prompt",
@@ -38,6 +40,19 @@ def jinja2_formatter(template: str, /, **kwargs: Any) -> str:
 DEFAULT_FORMATTER_MAPPING["jinja2"] = jinja2_formatter
 
 
+class PromptLoggingHandler(BaseCallbackHandler):
+    """
+    Logs the full prompt that is sent to the LLM.
+    """
+
+    def on_llm_start(
+        self, serialized: dict[str, Any], prompts: list[str], **kwargs: Any
+    ) -> Any:
+        get_request_logger("prompt").info(
+            "Performing LLM request", prompt="\n".join(prompts)
+        )
+
+
 class Prompt(RunnableBinding[Input, Output]):
     name: str
     model: Model
@@ -59,7 +74,10 @@ class Prompt(RunnableBinding[Input, Output]):
         )
         prompt = self._build_prompt_template(config.prompt_template, config.model)
         chain = self._build_chain(
-            cast(Runnable[Input, Output], prompt | model.bind(**model_kwargs))
+            cast(
+                Runnable[Input, Output],
+                prompt | model.bind(**model_kwargs),
+            )
         )
 
         super().__init__(
@@ -114,7 +132,11 @@ class Prompt(RunnableBinding[Input, Output]):
         **kwargs: Optional[Any],
     ) -> Output:
         with self.instrumentator.watch(stream=False):
-            return await super().ainvoke(input, config, **kwargs)
+            return await super().ainvoke(
+                input,
+                self._add_logger_to_config(config),
+                **kwargs,
+            )
 
     async def astream(
         self,
@@ -123,7 +145,11 @@ class Prompt(RunnableBinding[Input, Output]):
         **kwargs: Optional[Any],
     ) -> AsyncIterator[Output]:
         with self.instrumentator.watch(stream=True) as watcher:
-            async for item in super().astream(input, config, **kwargs):
+            async for item in super().astream(
+                input,
+                self._add_logger_to_config(config),
+                **kwargs,
+            ):
                 yield item
 
             await watcher.afinish()
@@ -132,6 +158,17 @@ class Prompt(RunnableBinding[Input, Output]):
     @staticmethod
     def _build_chain(chain: Runnable[Input, Output]) -> Runnable[Input, Output]:
         return chain
+
+    @staticmethod
+    def _add_logger_to_config(config):
+        callback = PromptLoggingHandler()
+
+        if not config:
+            return {"callbacks": [callback]}
+
+        config["callbacks"] = [*config.get("callbacks", []), callback]
+
+        return config
 
     # Assume that the prompt template keys map to roles. Subclasses can
     # override this method to implement more complex logic.
