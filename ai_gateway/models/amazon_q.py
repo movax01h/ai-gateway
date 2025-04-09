@@ -1,8 +1,11 @@
 from enum import StrEnum
 from typing import AsyncIterator, Optional
 
+import structlog
+
 from ai_gateway.api.auth_utils import StarletteUser
 from ai_gateway.integrations.amazon_q.client import AmazonQClientFactory
+from ai_gateway.integrations.amazon_q.errors import AWSException
 from ai_gateway.models.base import ModelMetadata
 from ai_gateway.models.base_text import (
     TextGenModelBase,
@@ -15,6 +18,8 @@ __all__ = [
     "AmazonQModel",
     "KindAmazonQModel",
 ]
+
+log = structlog.stdlib.get_logger("amazon_q")
 
 
 class KindAmazonQModel(StrEnum):
@@ -53,10 +58,6 @@ class AmazonQModel(TextGenModelBase):
         stream: bool,
         **kwargs,
     ) -> TextGenModelOutput:
-        q_client = self._client_factory.get_client(
-            current_user=self._current_user,
-            role_arn=self._role_arn,
-        )
 
         request_payload = {
             "fileContext": {
@@ -69,8 +70,14 @@ class AmazonQModel(TextGenModelBase):
             },
             "maxResults": 1,
         }
-
-        response = q_client.generate_code_recommendations(request_payload)
+        try:
+            q_client = self._client_factory.get_client(
+                current_user=self._current_user,
+                role_arn=self._role_arn,
+            )
+            response = q_client.generate_code_recommendations(request_payload)
+        except AWSException as e:
+            raise e.to_http_exception()
 
         recommendations = response.get("CodeRecommendations", [])
         recommendation = recommendations[0] if recommendations else {}

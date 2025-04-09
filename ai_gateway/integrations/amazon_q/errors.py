@@ -46,15 +46,19 @@ class AWSException(Exception):
         return self.error_code == "ResourceNotFoundException"
 
     def to_http_exception(self):
-        if self.error_code == "ResourceNotFoundException":
+        if str(self.error_code) in (
+            "ResourceNotFoundException",
+            "UnknownOperationException",
+            "404",
+        ):
             return HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND, detail=self.exception_str
             )
-        if self.error_code == "AccessDeniedException":
+        if str(self.error_code) in ("AccessDeniedException", "403"):
             return HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN, detail=self.exception_str
             )
-        if self.error_code == "ValidationException":
+        if str(self.error_code) in ("ValidationException", "400"):
             return HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST, detail=self.exception_str
             )
