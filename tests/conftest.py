@@ -8,7 +8,9 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from gitlab_cloud_connector import CloudConnectorUser, GitLabUnitPrimitive, UserClaims
 from langchain.chat_models.fake import FakeListChatModel
-from langchain_core.outputs import ChatGenerationChunk
+from langchain_core.messages import BaseMessage
+from langchain_core.messages.ai import AIMessage, UsageMetadata
+from langchain_core.outputs import ChatGenerationChunk, ChatResult
 from starlette.middleware import Middleware
 from starlette_context.middleware import RawContextMiddleware
 
@@ -435,10 +437,16 @@ def model_error():
     return None
 
 
+@pytest.fixture
+def usage_metadata():
+    return None
+
+
 class FakeModel(FakeListChatModel):
     model_engine: str
     model_name: str
     model_error: Optional[Exception] = None
+    usage_metadata: Optional[UsageMetadata] = None
 
     @property
     def _llm_type(self) -> str:
@@ -448,21 +456,45 @@ class FakeModel(FakeListChatModel):
     def _identifying_params(self) -> dict[str, Any]:
         return {**super()._identifying_params, **{"model": self.model_name}}
 
+    def _generate(self, *args, **kwargs) -> ChatResult:
+        result = super()._generate(*args, **kwargs)
+
+        self._set_usage_metadata(result.generations[0].message)
+
+        return result
+
     async def _astream(
         self,
         *args,
         **kwargs,
     ) -> AsyncIterator[ChatGenerationChunk]:
+        usage_metadata_sent = False
         async for c in super()._astream(*args, **kwargs):
+            # Send usage metadata only once
+            if not usage_metadata_sent:
+                self._set_usage_metadata(c.message)
+                usage_metadata_sent = True
+
             yield c
 
         if self.model_error:
             raise self.model_error  # pylint: disable=raising-bad-type
 
+    def _set_usage_metadata(self, message: BaseMessage):
+        if not self.usage_metadata or not isinstance(message, AIMessage):
+            return
+
+        message.usage_metadata = self.usage_metadata
+        message.response_metadata = {"model_name": self.model_name}
+
 
 @pytest.fixture
 def model(
-    model_response: str, model_engine: str, model_name: str, model_error: Exception
+    model_response: str,
+    model_engine: str,
+    model_name: str,
+    model_error: Exception,
+    usage_metadata: Optional[UsageMetadata],
 ):
     # our default Assistant prompt template already contains "Thought: "
     text = model_response.removeprefix("Thought: ") if model_response else ""
@@ -472,6 +504,7 @@ def model(
         model_name=model_name,
         responses=[text],
         model_error=model_error,
+        usage_metadata=usage_metadata,
     )
 
 

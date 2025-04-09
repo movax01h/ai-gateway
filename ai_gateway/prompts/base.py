@@ -4,7 +4,8 @@ from typing import Any, AsyncIterator, Mapping, Optional, Tuple, TypeVar, cast
 from gitlab_cloud_connector import GitLabUnitPrimitive, WrongUnitPrimitives
 from jinja2 import PackageLoader
 from jinja2.sandbox import SandboxedEnvironment
-from langchain_core.callbacks import BaseCallbackHandler
+from langchain_core.callbacks import BaseCallbackHandler, get_usage_metadata_callback
+from langchain_core.messages.ai import UsageMetadata
 from langchain_core.prompt_values import PromptValue
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.prompts.string import DEFAULT_FORMATTER_MAPPING
@@ -55,9 +56,12 @@ class PromptLoggingHandler(BaseCallbackHandler):
 
 class Prompt(RunnableBinding[Input, Output]):
     name: str
+    model_engine: str
+    model_provider: str
     model: Model
     unit_primitives: list[GitLabUnitPrimitive]
     prompt_tpl: Runnable[Input, PromptValue]
+    internal_event_client: Optional[InternalEventsClient] = None
 
     def __init__(
         self,
@@ -67,7 +71,7 @@ class Prompt(RunnableBinding[Input, Output]):
         disable_streaming: bool = False,
     ):
         model_override = None
-
+        model_provider = config.model.params.model_class_provider
         model_kwargs = self._build_model_kwargs(config.params, model_metadata)
         model = self._build_model(
             model_factory, config.model, disable_streaming, model_override
@@ -82,6 +86,8 @@ class Prompt(RunnableBinding[Input, Output]):
 
         super().__init__(
             name=config.name,
+            model_engine=config.model.params.custom_llm_provider or model_provider,
+            model_provider=model_provider,
             model=model,
             unit_primitives=config.unit_primitives,
             bound=chain,
@@ -131,12 +137,18 @@ class Prompt(RunnableBinding[Input, Output]):
         config: Optional[RunnableConfig] = None,
         **kwargs: Optional[Any],
     ) -> Output:
-        with self.instrumentator.watch(stream=False):
-            return await super().ainvoke(
+        with self.instrumentator.watch(
+            stream=False
+        ), get_usage_metadata_callback() as cb:
+            result = await super().ainvoke(
                 input,
                 self._add_logger_to_config(config),
                 **kwargs,
             )
+
+            self.handle_usage_metadata(cb.usage_metadata)
+
+            return result
 
     async def astream(
         self,
@@ -144,7 +156,12 @@ class Prompt(RunnableBinding[Input, Output]):
         config: Optional[RunnableConfig] = None,
         **kwargs: Optional[Any],
     ) -> AsyncIterator[Output]:
-        with self.instrumentator.watch(stream=True) as watcher:
+        # pylint: disable=contextmanager-generator-missing-cleanup
+        # To properly address this pylint issue, the upstream function would need to be altered to ensure proper cleanup.
+        # See https://pylint.readthedocs.io/en/latest/user_guide/messages/warning/contextmanager-generator-missing-cleanup.html
+        with self.instrumentator.watch(
+            stream=True
+        ) as watcher, get_usage_metadata_callback() as cb:
             async for item in super().astream(
                 input,
                 self._add_logger_to_config(config),
@@ -152,7 +169,27 @@ class Prompt(RunnableBinding[Input, Output]):
             ):
                 yield item
 
+            self.handle_usage_metadata(cb.usage_metadata)
+
             await watcher.afinish()
+        # pylint: enable=contextmanager-generator-missing-cleanup
+
+    def handle_usage_metadata(self, usage_metadata: dict[str, UsageMetadata]) -> None:
+        if self.internal_event_client is None:
+            return
+
+        for model, usage in usage_metadata.items():
+            for unit_primitive in self.unit_primitives:
+                self.internal_event_client.track_event(
+                    f"token_usage_{unit_primitive}",
+                    category=__name__,
+                    input_tokens=usage["input_tokens"],
+                    output_tokens=usage["output_tokens"],
+                    total_tokens=usage["total_tokens"],
+                    model_engine=self.model_engine,
+                    model_name=model,
+                    model_provider=self.model_provider,
+                )
 
     # Subclasses can override this method to add steps at either side of the chain
     @staticmethod
@@ -218,6 +255,7 @@ class BasePromptRegistry(ABC):
             model_metadata.add_user(user)
 
         prompt = self.get(prompt_id, prompt_version or "^1.0.0", model_metadata)
+        prompt.internal_event_client = self.internal_event_client
 
         for unit_primitive in prompt.unit_primitives:
             if not user.can(unit_primitive):

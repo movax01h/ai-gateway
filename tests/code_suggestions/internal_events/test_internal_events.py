@@ -12,6 +12,35 @@ from ai_gateway.internal_events.context import (
     tracked_internal_events,
 )
 
+BASE_CONTEXT_SCHEMA = {
+    "client_name": None,
+    "client_type": None,
+    "client_version": None,
+    "context_generated_at": None,
+    "correlation_id": None,
+    "environment": "development",
+    "extra": None,
+    "feature_enabled_by_namespace_ids": None,
+    "feature_enablement_type": None,
+    "global_user_id": None,
+    "host_name": None,
+    "input_tokens": None,
+    "instance_id": None,
+    "instance_version": None,
+    "interface": None,
+    "is_gitlab_team_member": None,
+    "model_engine": None,
+    "model_name": None,
+    "model_provider": None,
+    "namespace_id": None,
+    "output_tokens": None,
+    "plan": None,
+    "project_id": None,
+    "realm": None,
+    "source": "ai-gateway-python",
+    "total_tokens": None,
+}
+
 
 class TestInternalEventsClient:
     @pytest.fixture(scope="class", autouse=True)
@@ -49,19 +78,19 @@ class TestInternalEventsClient:
         assert len(tracker_args["emitters"]) == 1
 
     @pytest.mark.parametrize(
-        "event_name, additional_properties, category, expected_extra",
+        "event_name, additional_properties, category, kwargs",
         [
             (
                 "test_event_1",
-                InternalEventAdditionalProperties(extra={"key1": "value1"}),
-                "category_1",
-                {"key1": "value1"},
+                None,
+                None,
+                {},
             ),
             (
                 "test_event_2",
                 InternalEventAdditionalProperties(extra={"key2": "value2"}),
                 "category_2",
-                {"key2": "value2"},
+                {"model_name": "my_model"},
             ),
         ],
     )
@@ -70,7 +99,7 @@ class TestInternalEventsClient:
         event_name,
         additional_properties,
         category,
-        expected_extra,
+        kwargs,
     ):
         with mock.patch("snowplow_tracker.Tracker.track") as mock_track, mock.patch(
             "snowplow_tracker.events.StructuredEvent.__init__"
@@ -94,19 +123,33 @@ class TestInternalEventsClient:
                 event_name=event_name,
                 additional_properties=additional_properties,
                 category=category,
+                **kwargs,
             )
 
             mock_track.assert_called_once()
             mock_structured_event_init.assert_called_once()
             event_init_args = mock_structured_event_init.call_args[1]
 
-            assert event_init_args["category"] == category
+            assert event_init_args["category"] == category or "default_category"
             assert event_init_args["action"] == event_name
-            assert event_init_args["label"] == additional_properties.label
-            assert event_init_args["value"] == additional_properties.value
-            assert event_init_args["property_"] == additional_properties.property
+            if additional_properties:
+                assert event_init_args["label"] == additional_properties.label
+                assert event_init_args["value"] == additional_properties.value
+                assert event_init_args["property_"] == additional_properties.property
+            else:
+                assert event_init_args["label"] is None
+                assert event_init_args["value"] is None
+                assert event_init_args["property_"] is None
 
             context = event_init_args["context"][0]
             assert isinstance(context, SelfDescribingJson)
-            assert context.to_json()["schema"] == client.STANDARD_CONTEXT_SCHEMA
+            assert context.schema == client.STANDARD_CONTEXT_SCHEMA
+
+            expected_context_data = {
+                **BASE_CONTEXT_SCHEMA,
+                "extra": additional_properties.extra if additional_properties else {},
+                **kwargs,
+            }
+
+            assert context.data == expected_context_data
             assert tracked_internal_events.get() == {event_name}

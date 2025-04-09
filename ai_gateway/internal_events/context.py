@@ -2,7 +2,7 @@ from contextvars import ContextVar
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Set
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 __all__ = [
     "EventContext",
@@ -19,6 +19,9 @@ class EventContext(BaseModel):
     See https://gitlab.com/gitlab-org/iglu/-/tree/master/public/schemas/com.gitlab/gitlab_standard?ref_type=heads
     about the spec of the GitLab standard context.
     """
+
+    # Opt out protected namespace "model_" (https://github.com/pydantic/pydantic/issues/6322).
+    model_config = ConfigDict(protected_namespaces=())
 
     environment: Optional[str] = "development"
     source: Optional[str] = "ai-gateway-python"
@@ -40,6 +43,12 @@ class EventContext(BaseModel):
     client_version: Optional[str] = None
     client_type: Optional[str] = None
     interface: Optional[str] = None
+    input_tokens: Optional[int] = None
+    output_tokens: Optional[int] = None
+    total_tokens: Optional[int] = None
+    model_engine: Optional[str] = None
+    model_name: Optional[str] = None
+    model_provider: Optional[str] = None
 
 
 @dataclass
