@@ -111,6 +111,7 @@ class KindVertexTextModel(StrEnum):
     CODECHAT_BISON = "codechat-bison"
     TEXTEMBEDDING_GECKO = "textembedding-gecko"
     TEXTEMBEDDING_GECKO_003 = "textembedding-gecko@003"
+    TEXTEMBEDDING_005 = "text-embedding-005"
 
     # Mistral AI
     CODESTRAL_2501 = "codestral-2501"
