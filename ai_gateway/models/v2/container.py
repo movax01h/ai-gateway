@@ -14,14 +14,18 @@ __all__ = [
 
 
 def _litellm_factory(*args, **kwargs) -> Model:
-    model = ChatLiteLLM(*args, **kwargs)
+    # Always include usage metrics when streaming. See https://docs.litellm.ai/docs/completion/usage#streaming-usage
+    # Respect other possible values that may have been passed.
+    kwargs["model_kwargs"] = kwargs.get("model_kwargs", {})
+    kwargs["model_kwargs"]["stream_options"] = kwargs["model_kwargs"].get(
+        "stream_options", {}
+    )
+    kwargs["model_kwargs"]["stream_options"]["include_usage"] = True
 
     if kwargs.get("custom_llm_provider", "") == "vertex_ai":
-        client = AsyncHTTPHandler(event_hooks={"request": [log_request]})
+        kwargs["client"] = AsyncHTTPHandler(event_hooks={"request": [log_request]})
 
-        return model.bind(client=client)
-
-    return model
+    return ChatLiteLLM(*args, **kwargs)
 
 
 class ContainerModels(containers.DeclarativeContainer):

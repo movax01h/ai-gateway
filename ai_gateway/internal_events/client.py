@@ -15,7 +15,7 @@ __all__ = ["InternalEventsClient"]
 class InternalEventsClient:
     """Client to handle internal events using SnowplowClient."""
 
-    STANDARD_CONTEXT_SCHEMA = "iglu:com.gitlab/gitlab_standard/jsonschema/1-1-3"
+    STANDARD_CONTEXT_SCHEMA = "iglu:com.gitlab/gitlab_standard/jsonschema/1-1-4"
 
     def __init__(
         self,
@@ -46,6 +46,7 @@ class InternalEventsClient:
         event_name: str,
         additional_properties: Optional[InternalEventAdditionalProperties] = None,
         category: Optional[str] = "default_category",
+        **kwargs,
     ) -> None:
         """Send internal event to Snowplow.
 
@@ -63,7 +64,7 @@ class InternalEventsClient:
             additional_properties = InternalEventAdditionalProperties()
 
         context: EventContext = current_event_context.get()
-        new_context = context.model_dump()
+        new_context = {**context.model_dump(), **kwargs}
         new_context["extra"] = additional_properties.extra
 
         structured_event = StructuredEvent(
