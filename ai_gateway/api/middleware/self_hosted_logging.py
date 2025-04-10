@@ -24,4 +24,4 @@ class EnabledInstanceVerboseAiLogsHeaderPlugin(Plugin):
 
 
 def enabled_instance_verbose_ai_logs():
-    return context["enabled-instance-verbose-ai-logs"]
+    return context.get("enabled-instance-verbose-ai-logs", False)
