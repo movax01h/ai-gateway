@@ -1,0 +1,18 @@
+---
+description: Tracks Duo Workflow pauses
+internal_events: true
+action: pause_duo_workflow
+product_group: duo_workflow
+additional_properties:
+  label:
+    description: Hardcoded string workflow_pause_event
+  property:
+    description: pause_request_by_user_duo_workflow or pause_request_by_agent_duo_workflow
+  value:
+    description: Workflow Id that can be used to connect this event to others that happen when the workflow is completed.
+milestone: '17.10'
+introduced_by_url: https://gitlab.com/gitlab-org/duo-workflow/duo-workflow-service/-/merge_requests/279
+distributions:
+  - ee
+tiers:
+  - ultimate

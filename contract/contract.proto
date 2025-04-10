@@ -1,0 +1,84 @@
+syntax = "proto3";
+
+option go_package = "gitlab.com/gitlab-org/duo-workflow/duo-workflow-service/clients/gopb";
+option ruby_package = "DuoWorkflowService";
+
+service DuoWorkflow {
+    rpc ExecuteWorkflow(stream ClientEvent) returns (stream Action);
+    rpc GenerateToken(GenerateTokenRequest) returns (GenerateTokenResponse);
+}
+
+message ClientEvent {
+    oneof response {
+        StartWorkflowRequest startRequest = 1;
+        ActionResponse actionResponse = 2;
+    }
+}
+
+message StartWorkflowRequest {
+    string clientVersion = 1;
+    string workflowID = 2;
+    string workflowDefinition = 3;
+    string goal = 4;
+    string workflowMetadata = 5;
+    repeated string clientCapabilities = 6;
+}
+
+message ActionResponse {
+    string requestID = 1;
+    string response = 2;
+}
+
+message Action {
+    string requestID = 1;
+    oneof action {
+        RunCommandAction runCommand = 2;
+        RunHTTPRequest runHTTPRequest = 3;
+        ReadFile runReadFile = 4;
+        WriteFile runWriteFile = 5;
+        RunGitCommand runGitCommand = 6;
+        EditFile runEditFile = 7;
+    };
+}
+
+message RunCommandAction {
+    reserved 1, 2;
+    reserved "command", "withGitCredentials";
+    string program = 3;
+    repeated string arguments = 4;
+    repeated string flags = 5;
+}
+
+message ReadFile {
+    string filepath = 1;
+}
+
+message WriteFile {
+    string filepath = 1;
+    string contents = 2;
+}
+
+message EditFile {
+    string filepath = 1;
+    string oldString = 2;
+    string newString = 3;
+}
+
+message RunHTTPRequest {
+    string method = 1;
+    string path = 2;
+    optional string body = 3;
+}
+
+message RunGitCommand {
+    string command = 1;
+    optional string arguments = 2;
+    string repository_url = 3;
+}
+
+message GenerateTokenRequest {}
+
+message GenerateTokenResponse {
+    string token = 1;
+    int64 expiresAt = 2;
+}

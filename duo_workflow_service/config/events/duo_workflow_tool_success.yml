@@ -1,0 +1,18 @@
+---
+description: Tracks successful Duo Workflow tool calls
+internal_events: true
+action: duo_workflow_tool_success
+product_group: duo_workflow
+additional_properties:
+  label:
+    description: Hardcoded string workflow_tool_call
+  property:
+    description: Workflow tool name
+  value:
+    description: Workflow Id that can be used to connect this event to others that happen when the workflow is completed.
+milestone: '17.7'
+introduced_by_url: https://gitlab.com/gitlab-org/duo-workflow/duo-workflow-service/-/merge_requests/175
+distributions:
+  - ee
+tiers:
+  - ultimate
