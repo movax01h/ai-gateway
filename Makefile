@@ -20,7 +20,6 @@ MYPY_LINT_TODO_DIR ?= --exclude "ai_gateway/models/agent_model.py" \
 	--exclude "ai_gateway/models/litellm.py" \
 	--exclude "ai_gateway/models/mock.py" \
 	--exclude "ai_gateway/models/v2/anthropic_claude.py" \
-	--exclude "ai_gateway/models/v2/container.py" \
 	--exclude "ai_gateway/models/vertex_text.py" \
 	--exclude "ai_gateway/api/v3/code/completions.py" \
 	--exclude "ai_gateway/api/v2/code/completions.py" \
