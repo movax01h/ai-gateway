@@ -1,6 +1,7 @@
 from datetime import datetime
 from typing import Annotated, AsyncIterator
 
+from dependency_injector import providers
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from gitlab_cloud_connector import (
     GitLabFeatureCategory,
@@ -22,13 +23,12 @@ from ai_gateway.chat.agents import (
     AgentStep,
     AgentToolAction,
     Message,
-    ReActAgent,
     ReActAgentInputs,
     TypeAgentEvent,
 )
 from ai_gateway.chat.executor import GLAgentRemoteExecutor
 from ai_gateway.internal_events import InternalEventsClient
-from ai_gateway.prompts import BasePromptRegistry
+from ai_gateway.prompts import BasePromptRegistry, Prompt
 
 __all__ = [
     "router",
@@ -74,7 +74,7 @@ def get_agent(
     current_user: StarletteUser,
     agent_request: AgentRequest,
     prompt_registry: BasePromptRegistry,
-) -> ReActAgent:
+) -> Prompt:
     try:
         prompt = prompt_registry.get_on_behalf(
             current_user,
@@ -121,7 +121,8 @@ def _build_scratchpad_from_request(
                 ),
                 observation=step.observation,
             )
-            for step in last_message.agent_scratchpad or []
+            for step in (last_message.agent_scratchpad or [])
+            if step.action
         ]
 
     return []
@@ -135,7 +136,7 @@ async def chat(
     current_user: Annotated[StarletteUser, Depends(get_current_user)],
     prompt_registry: Annotated[BasePromptRegistry, Depends(get_prompt_registry)],
     gl_agent_remote_executor_factory: Annotated[
-        GLAgentRemoteExecutor[ReActAgentInputs, TypeAgentEvent],
+        providers.Factory[GLAgentRemoteExecutor[ReActAgentInputs, TypeAgentEvent]],
         Depends(get_gl_agent_remote_executor_factory),
     ],
     internal_event_client: Annotated[
