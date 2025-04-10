@@ -20,7 +20,7 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.middleware import Middleware
 from starlette.responses import JSONResponse
 from starlette_context import context
-from starlette_context.middleware import ContextMiddleware, RawContextMiddleware
+from starlette_context.middleware import RawContextMiddleware
 
 from ai_gateway.api.middleware import (
     AccessLogMiddleware,
@@ -105,7 +105,10 @@ def create_fast_api_server(config: Config):
         swagger_ui_parameters={"defaultModelsExpandDepth": -1},
         lifespan=lifespan,
         middleware=[
-            Middleware(RawContextMiddleware),
+            Middleware(
+                RawContextMiddleware,
+                plugins=(EnabledInstanceVerboseAiLogsHeaderPlugin(),),
+            ),
             Middleware(
                 CORSMiddleware,
                 allow_origins=["*"],
@@ -140,10 +143,6 @@ def create_fast_api_server(config: Config):
             Middleware(
                 ModelConfigMiddleware,
                 custom_models_enabled=config.custom_models.enabled,
-            ),
-            Middleware(
-                ContextMiddleware,
-                plugins=(EnabledInstanceVerboseAiLogsHeaderPlugin(),),
             ),
         ],
         extra={"config": config},
