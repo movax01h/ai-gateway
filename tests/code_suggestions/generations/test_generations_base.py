@@ -1,5 +1,5 @@
 from contextlib import contextmanager
-from typing import Any, AsyncIterator
+from typing import Any, AsyncIterator, List
 from unittest.mock import AsyncMock, MagicMock, Mock, PropertyMock, call, patch
 
 import pytest
@@ -113,21 +113,25 @@ class TestCodeGeneration:
     async def test_execute_with_prompt_version(
         self, use_case: CodeGenerations, model_provider, expected_post_processor
     ):
-        use_case.model.generate = AsyncMock(
-            return_value=TextGenModelOutput(
+        with patch.object(
+            use_case.model, "generate", new_callable=AsyncMock
+        ) as mock_generate:
+            mock_generate.return_value = TextGenModelOutput(
                 text="output", score=0, safety_attributes=SafetyAttributes()
             )
-        )
-        with patch.object(expected_post_processor, "process") as mock:
-            _ = await use_case.execute(
-                "prefix",
-                "test.py",
-                editor_lang="Python",
-                raw_prompt="test prompt",
-                model_provider=model_provider,
-            )
 
-            mock.assert_called()
+            with patch.object(
+                expected_post_processor, "process"
+            ) as mock_post_processor:
+                _ = await use_case.execute(
+                    "prefix",
+                    "test.py",
+                    editor_lang="Python",
+                    raw_prompt="test prompt",
+                    model_provider=model_provider,
+                )
+                mock_generate.assert_called()
+                mock_post_processor.assert_called()
 
     @pytest.mark.parametrize(
         (
@@ -159,27 +163,33 @@ class TestCodeGeneration:
             for chunk in model_chunks:
                 yield chunk
 
-        use_case.model.generate = AsyncMock(side_effect=_stream_generator)
+        with patch.object(
+            use_case.model, "generate", new_callable=AsyncMock
+        ) as mock_generate:
+            mock_generate.side_effect = _stream_generator
 
-        actual = await use_case.execute(
-            prefix="any",
-            file_name="bar.py",
-            editor_lang="Python",
-            model_provider=ModelProvider.ANTHROPIC,
-            stream=True,
-        )
+            actual = await use_case.execute(
+                prefix="any",
+                file_name="bar.py",
+                editor_lang="Python",
+                model_provider=ModelProvider.ANTHROPIC,
+                stream=True,
+            )
 
-        chunks = []
-        async for content in actual:
-            chunks += content
+            chunks: List[str] = []
+            if isinstance(actual, AsyncIterator):
+                async for content in actual:
+                    chunks.append(content.text)
+            else:
+                chunks.append(actual.text)
 
-        assert chunks == expected_chunks
+            assert chunks == expected_chunks
 
-        use_case.model.generate.assert_called_with(
-            use_case.prompt_builder.build().prefix,
-            "",
-            stream=True,
-        )
+            mock_generate.assert_called_with(
+                use_case.prompt_builder.build().prefix,
+                "",
+                stream=True,
+            )
 
     @pytest.mark.parametrize(
         ("stream", "response_token_length"),
@@ -225,26 +235,40 @@ class TestCodeGeneration:
             mock.estimate_length = Mock(return_value=[4, 5])
 
             if stream:
-                use_case.model.generate = AsyncMock(side_effect=_stream_generator)
+                with patch.object(
+                    use_case.model, "generate", new_callable=AsyncMock
+                ) as mock_generate:
+                    mock_generate.side_effect = _stream_generator
+
+                    actual = await use_case.execute(
+                        prefix="any",
+                        file_name="bar.py",
+                        editor_lang="Python",
+                        model_provider=ModelProvider.ANTHROPIC,
+                        stream=stream,
+                        snowplow_event_context=snowplow_event_context,
+                    )
+
+                    if isinstance(actual, AsyncIterator):
+                        async for _ in actual:
+                            pass
+
             else:
-                use_case.model.generate = AsyncMock(
-                    return_value=TextGenModelOutput(
+                with patch.object(
+                    use_case.model, "generate", new_callable=AsyncMock
+                ) as mock_generate:
+                    mock_generate.return_value = TextGenModelOutput(
                         text="output", score=0, safety_attributes=SafetyAttributes()
                     )
-                )
 
-            actual = await use_case.execute(
-                prefix="any",
-                file_name="bar.py",
-                editor_lang="Python",
-                model_provider=ModelProvider.ANTHROPIC,
-                stream=stream,
-                snowplow_event_context=snowplow_event_context,
-            )
-
-            if stream:
-                async for _ in actual:
-                    pass
+                    actual = await use_case.execute(
+                        prefix="any",
+                        file_name="bar.py",
+                        editor_lang="Python",
+                        model_provider=ModelProvider.ANTHROPIC,
+                        stream=stream,
+                        snowplow_event_context=snowplow_event_context,
+                    )
 
             mock.estimate_length.assert_called()
 
@@ -346,25 +370,43 @@ class TestCodeGeneration:
         additional_kwargs: dict,
     ):
         """Test generation with AmazonQModel with various input combinations."""
-        use_case_q.model.generate = AsyncMock(
-            return_value=TextGenModelOutput(
-                text=expected_output, score=0, safety_attributes=SafetyAttributes()
+
+        async def _stream_generator(
+            prefix: str,
+            suffix: str,
+            file_name: str,
+            editor_lang: str,
+            stream: bool,
+            **kwargs: Any,
+        ) -> AsyncIterator[TextGenModelChunk]:
+            yield TextGenModelChunk(text=expected_output)
+
+        with patch.object(
+            use_case_q.model, "generate", new_callable=AsyncMock
+        ) as mock_generate:
+            if stream:
+                mock_generate.side_effect = _stream_generator
+            else:
+                mock_generate.return_value = TextGenModelOutput(
+                    text=expected_output, score=0, safety_attributes=SafetyAttributes()
+                )
+
+            result = await use_case_q.execute(
+                prefix=prefix,
+                suffix=suffix,
+                file_name=file_name,
+                editor_lang=editor_lang,
+                stream=stream,
+                **additional_kwargs,
             )
-        )
 
-        result = await use_case_q.execute(
-            prefix=prefix,
-            suffix=suffix,
-            file_name=file_name,
-            editor_lang=editor_lang,
-            stream=stream,
-            **additional_kwargs,
-        )
+            assert result is not None
+            if isinstance(result, AsyncIterator):
+                async for res in result:
+                    assert res.text == expected_output
+            else:
+                assert result.text == expected_output
 
-        assert result is not None
-        assert result.text == expected_output
-
-        # Verify model.generate was called with correct parameters
-        use_case_q.model.generate.assert_called_once_with(
-            prefix, suffix, file_name, expected_lang, stream, **additional_kwargs
-        )
+            mock_generate.assert_called_once_with(
+                prefix, suffix, file_name, expected_lang, stream, **additional_kwargs
+            )
