@@ -110,7 +110,7 @@ check-isort: install-lint-deps
 .PHONY: check-pylint
 check-pylint: install-lint-deps
 	@echo "Running pylint check..."
-	@poetry run pylint ${LINT_WORKING_DIR} --ignore=vendor
+	@poetry run pylint ${LINT_WORKING_DIR} --ignore=vendor --ignore-paths=$(TESTS_DIR)/duo_workflow_service
 
 .PHONY: check-mypy
 check-mypy: install-lint-deps

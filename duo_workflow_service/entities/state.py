@@ -272,7 +272,9 @@ class SearchAndReplaceWorkflowState(TypedDict):
     #        AIMessage(…)
     #     ]
     # }
-    conversation_history: Dict[str, List[BaseMessage]]
+    conversation_history: Annotated[
+        Dict[str, List[BaseMessage]], _conversation_history_reducer
+    ]
     ui_chat_log: Annotated[List[UiChatLog], _ui_chat_log_reducer]
     config: Optional[SearchAndReplaceConfig]
     directory: str
