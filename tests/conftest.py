@@ -25,7 +25,6 @@ from ai_gateway.code_suggestions.processing.typing import (
 )
 from ai_gateway.config import Config
 from ai_gateway.container import ContainerApplication
-from ai_gateway.experimentation.base import ExperimentTelemetry
 from ai_gateway.internal_events.client import InternalEventsClient
 from ai_gateway.model_metadata import TypeModelMetadata, current_model_metadata_context
 from ai_gateway.models.base import ModelMetadata, TokensConsumptionMetadata
@@ -273,9 +272,6 @@ def mock_completions_legacy_output(mock_completions_legacy_output_texts: str):
                         "prefix": MetadataCodeContent(length=10, length_tokens=2),
                         "suffix": MetadataCodeContent(length=10, length_tokens=2),
                     },
-                    experiments=[
-                        ExperimentTelemetry(name="truncate_suffix", variant=1)
-                    ],
                 ),
                 tokens_consumption_metadata=TokensConsumptionMetadata(
                     input_tokens=1, output_tokens=2
@@ -314,7 +310,7 @@ def mock_suggestions_output(
             name=mock_suggestions_model, engine=mock_suggestions_engine
         ),
         lang_id=LanguageId.PYTHON,
-        metadata=CodeSuggestionsOutput.Metadata(experiments=[]),  # type: ignore[attr-defined]
+        metadata=CodeSuggestionsOutput.Metadata(),  # type: ignore[attr-defined]
     )
 
 

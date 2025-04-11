@@ -16,7 +16,6 @@ from ai_gateway.code_suggestions.processing.typing import (
     Prompt,
     TokenStrategyBase,
 )
-from ai_gateway.experimentation import ExperimentTelemetry
 from ai_gateway.instrumentators import TextGenModelInstrumentator
 from ai_gateway.models import ModelMetadata, PalmCodeGenBaseModel
 from ai_gateway.models.base import TokensConsumptionMetadata
@@ -36,10 +35,6 @@ LANGUAGE_COUNTER = Counter(
 
 CODE_SYMBOL_COUNTER = Counter(
     "code_suggestions_prompt_symbols", "Prompt symbols count", ["lang", "symbol"]
-)
-
-EXPERIMENT_COUNTER = Counter(
-    "code_suggestions_experiments", "Ongoing experiments", ["name", "variant"]
 )
 
 MINIMUM_CONFIDENCE_SCORE = -10
@@ -125,10 +120,6 @@ class ModelEngineBase(ABC):
         symbol_map: dict,
     ) -> None:
         watch_container.register_prompt_symbols(symbol_map)
-
-    def increment_experiment_counter(self, experiments: list[ExperimentTelemetry]):
-        for exp in experiments:
-            EXPERIMENT_COUNTER.labels(name=exp.name, variant=exp.variant).inc()
 
 
 class PromptBuilderBase(ABC):

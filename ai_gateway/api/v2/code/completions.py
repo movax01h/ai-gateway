@@ -196,7 +196,6 @@ async def completions(
             tokens_consumption_metadata=tokens_consumption_metadata,
             region=region,
         ),
-        experiments=suggestions[0].metadata.experiments,
         metadata=SuggestionsResponse.MetadataBase(
             enabled_feature_flags=current_feature_flag_context.get(),
         ),

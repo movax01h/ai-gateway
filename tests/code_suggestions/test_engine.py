@@ -13,7 +13,6 @@ from ai_gateway.code_suggestions.processing import (
     ops,
 )
 from ai_gateway.code_suggestions.processing.pre import TokenizerTokenStrategy
-from ai_gateway.experimentation import ExperimentRegistry
 from ai_gateway.models import (
     ModelAPIError,
     ModelMetadata,
@@ -596,7 +595,6 @@ async def test_model_engine_palm(
     engine = ModelEngineCompletions(
         model=text_gen_base_model,
         tokenization_strategy=tokenization_strategy,
-        experiment_registry=ExperimentRegistry(),
     )
     engine.instrumentator = MockInstrumentor()
 
@@ -796,7 +794,6 @@ async def test_prompt_building_model_engine_palm(
     engine = ModelEngineCompletions(
         model=text_gen_base_model,
         tokenization_strategy=tokenization_strategy,
-        experiment_registry=ExperimentRegistry(),
     )
     prompt = await engine._build_prompt(
         prefix=prefix,

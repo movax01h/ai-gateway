@@ -16,16 +16,10 @@ from ai_gateway.code_suggestions.processing.typing import (
     MetadataExtraInfo,
     MetadataPromptBuilder,
     Prompt,
-    TokenStrategyBase,
 )
 from ai_gateway.code_suggestions.prompts.parsers import CodeParser
-from ai_gateway.experimentation import ExperimentRegistry, ExperimentTelemetry
 from ai_gateway.instrumentators import TextGenModelInstrumentator
-from ai_gateway.models import (
-    PalmCodeGenBaseModel,
-    VertexAPIConnectionError,
-    VertexAPIStatusError,
-)
+from ai_gateway.models import VertexAPIConnectionError, VertexAPIStatusError
 from ai_gateway.models.base import TokensConsumptionMetadata
 
 log = structlog.stdlib.get_logger("codesuggestions")
@@ -101,15 +95,10 @@ class _PromptBuilder(PromptBuilderBase):
         suffix: CodeContent,
         file_name: str,
         lang_id: Optional[LanguageId] = None,
-        experiments: Optional[list[ExperimentTelemetry]] = None,
     ):
-        if experiments is None:
-            experiments = []
-
         super().__init__(prefix, suffix, lang_id)
 
         self.file_name = file_name
-        self._metadata["experiments"] = experiments
 
     def add_extra_info(
         self, extra_info: _CodeInfo, max_total_length_tokens: int, extra_info_name: str
@@ -166,7 +155,6 @@ class _PromptBuilder(PromptBuilderBase):
                 },
                 imports=self._metadata.get("imports", None),
                 function_signatures=self._metadata.get("function_signatures", None),
-                experiments=self._metadata["experiments"],
                 code_context=self._metadata.get("code_context", None),
             ),
         )
@@ -176,15 +164,6 @@ class ModelEngineCompletions(ModelEngineBase):
     MAX_TOKENS_IMPORTS_PERCENT = 0.12  # about 245 tokens for code-gecko
     MAX_TOKENS_SUFFIX_PERCENT = 0.07  # about 126 tokens for code-gecko, if "imports" takes up all the available space
     MAX_TOKENS_CONTEXT_PERCENT = 0.5  # about 1024 tokens for code-gecko
-
-    def __init__(
-        self,
-        model: PalmCodeGenBaseModel,
-        tokenization_strategy: TokenStrategyBase,
-        experiment_registry: ExperimentRegistry,
-    ):
-        super().__init__(model, tokenization_strategy)
-        self.experiment_registry = experiment_registry
 
     async def _generate(
         self,
@@ -219,9 +198,6 @@ class ModelEngineCompletions(ModelEngineBase):
             try:
                 # count symbols of the final prompt
                 await self._count_symbols(prompt.prefix, lang_id, watch_container)
-
-                # log experiments included in this request
-                self._count_experiments(prompt.metadata.experiments, watch_container)
 
                 watch_container.register_lang(lang_id, editor_lang)
 
@@ -328,20 +304,9 @@ class ModelEngineCompletions(ModelEngineBase):
             - prompt_len_func_signatures
         )
 
-        experiments = []
-        if exp := self.experiment_registry.get_experiment("exp_truncate_suffix"):
-            experiment_output = exp.run(
-                logger=log, prefix=prefix, suffix=suffix, lang_id=lang_id
-            )
-            experiments.append(experiment_output.telemetry)
-            truncated_suffix = experiment_output.output
-            body = self._get_body(prefix, truncated_suffix, prompt_len_body)
-        else:
-            body = self._get_body(prefix, suffix, prompt_len_body)
+        body = self._get_body(prefix, suffix, prompt_len_body)
 
-        prompt_builder = _PromptBuilder(
-            body.prefix, body.suffix, file_name, lang_id, experiments
-        )
+        prompt_builder = _PromptBuilder(body.prefix, body.suffix, file_name, lang_id)
         # NOTE that the last thing we add here will appear first in the prefix
         prompt_builder.add_extra_info(
             func_signatures,
@@ -461,11 +426,3 @@ class ModelEngineCompletions(ModelEngineBase):
             self.log_symbol_map(watch_container, symbol_map)
         except ValueError as e:
             log.warning(f"Failed to parse code: {e}")
-
-    def _count_experiments(
-        self,
-        experiments: list[ExperimentTelemetry],
-        watch_container: TextGenModelInstrumentator.WatchContainer,
-    ) -> None:
-        watch_container.register_experiments(experiments)
-        self.increment_experiment_counter(experiments)

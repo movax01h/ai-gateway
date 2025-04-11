@@ -16,7 +16,6 @@ from ai_gateway.code_suggestions import (
     USE_CASES_MODELS_MAP,
     KindUseCase,
 )
-from ai_gateway.experimentation import ExperimentTelemetry
 from ai_gateway.instrumentators.base import Telemetry
 from ai_gateway.models import KindModelProvider, Message
 from ai_gateway.models.base import TokensConsumptionMetadata
@@ -151,7 +150,8 @@ class SuggestionsResponse(BaseModel):
 
     id: str
     model: Model
-    experiments: list[ExperimentTelemetry] = []
+    # We no longer support experimentation. This is only for backward compatability.
+    experiments: list[str] = []
     object: str = "text_completion"
     created: int
     choices: list[Choice]

@@ -239,7 +239,6 @@ class CodeCompletions:
             model=self.model.metadata,
             lang_id=lang_id,
             metadata=CodeSuggestionsOutput.Metadata(
-                experiments=[],
                 tokens_consumption_metadata=self._get_tokens_consumption_metadata(
                     prompt
                 ),
@@ -284,7 +283,6 @@ class CodeCompletions:
             model=self.model.metadata,
             lang_id=lang_id,
             metadata=CodeSuggestionsOutput.Metadata(
-                experiments=[],
                 tokens_consumption_metadata=tokens_consumption_metadata,
             ),
         )
