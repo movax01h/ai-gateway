@@ -29,12 +29,12 @@ __all__ = [
 
 class ContainerCodeGenerations(containers.DeclarativeContainer):
     tokenizer = providers.Dependency(instance_of=PreTrainedTokenizerFast)
-    vertex_code_bison = providers.Dependency(instance_of=TextGenModelBase)
-    anthropic_claude = providers.Dependency(instance_of=TextGenModelBase)
-    anthropic_claude_chat = providers.Dependency(instance_of=ChatModelBase)
-    amazon_q_model = providers.Dependency(instance_of=TextGenModelBase)
-    litellm_chat = providers.Dependency(instance_of=ChatModelBase)
-    agent_model = providers.Dependency(instance_of=TextGenModelBase)
+    vertex_code_bison = providers.Dependency(instance_of=TextGenModelBase)  # type: ignore[type-abstract]
+    anthropic_claude = providers.Dependency(instance_of=TextGenModelBase)  # type: ignore[type-abstract]
+    anthropic_claude_chat = providers.Dependency(instance_of=ChatModelBase)  # type: ignore[type-abstract]
+    amazon_q_model = providers.Dependency(instance_of=TextGenModelBase)  # type: ignore[type-abstract]
+    litellm_chat = providers.Dependency(instance_of=ChatModelBase)  # type: ignore[type-abstract]
+    agent_model = providers.Dependency(instance_of=TextGenModelBase)  # type: ignore[type-abstract]
 
     snowplow_instrumentator = providers.Dependency(instance_of=SnowplowInstrumentator)
 
@@ -108,12 +108,12 @@ class ContainerCodeGenerations(containers.DeclarativeContainer):
 
 class ContainerCodeCompletions(containers.DeclarativeContainer):
     tokenizer = providers.Dependency(instance_of=PreTrainedTokenizerFast)
-    vertex_code_gecko = providers.Dependency(instance_of=TextGenModelBase)
-    anthropic_claude = providers.Dependency(instance_of=TextGenModelBase)
-    anthropic_claude_chat = providers.Dependency(instance_of=ChatModelBase)
-    litellm = providers.Dependency(instance_of=TextGenModelBase)
-    agent_model = providers.Dependency(instance_of=TextGenModelBase)
-    amazon_q_model = providers.Dependency(instance_of=TextGenModelBase)
+    vertex_code_gecko = providers.Dependency(instance_of=TextGenModelBase)  # type: ignore[type-abstract]
+    anthropic_claude = providers.Dependency(instance_of=TextGenModelBase)  # type: ignore[type-abstract]
+    anthropic_claude_chat = providers.Dependency(instance_of=ChatModelBase)  # type: ignore[type-abstract]
+    litellm = providers.Dependency(instance_of=TextGenModelBase)  # type: ignore[type-abstract]
+    agent_model = providers.Dependency(instance_of=TextGenModelBase)  # type: ignore[type-abstract]
+    amazon_q_model = providers.Dependency(instance_of=TextGenModelBase)  # type: ignore[type-abstract]
     snowplow_instrumentator = providers.Dependency(instance_of=SnowplowInstrumentator)
 
     config = providers.Configuration(strict=True)
