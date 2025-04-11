@@ -9,7 +9,6 @@ from ai_gateway.code_suggestions.processing.ops import (
     lang_from_filename,
     lang_name_from_filename,
 )
-from ai_gateway.experimentation import ExperimentTelemetry
 from ai_gateway.models import (
     KindAmazonQModel,
     KindAnthropicModel,
@@ -123,7 +122,6 @@ SAAS_PROMPT_MODEL_MAP = {
 
 class CodeSuggestionsOutput(NamedTuple):
     class Metadata(NamedTuple):  # type: ignore[misc]
-        experiments: list[ExperimentTelemetry]
         tokens_consumption_metadata: Optional[TokensConsumptionMetadata] = None
 
     text: str

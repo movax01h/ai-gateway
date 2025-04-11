@@ -8,12 +8,10 @@ from prometheus_client import Counter, Histogram
 from pydantic import BaseModel, ConfigDict, StringConstraints
 from starlette_context import context
 
-from ai_gateway.experimentation import ExperimentTelemetry
 from ai_gateway.safety_attributes import SafetyAttributes
 
-EXPERIMENT_LABELS = ["exp_names", "exp_variants"]
 METRIC_LABELS = ["model_engine", "model_name"]
-TELEMETRY_LABELS = METRIC_LABELS + ["lang"] + EXPERIMENT_LABELS
+TELEMETRY_LABELS = METRIC_LABELS + ["lang"]
 PROMPT_LABELS = METRIC_LABELS + ["component"]
 
 INFERENCE_COUNTER = Counter(
@@ -110,16 +108,6 @@ class TextGenModelInstrumentator:
                 }
             )
 
-        def register_experiments(self, experiments: list[ExperimentTelemetry]):
-            included_experiments = []
-            for exp in experiments:
-                entry = {
-                    "name": exp.name,
-                    "variant": exp.variant,
-                }
-                included_experiments.append(entry)
-            self.__dict__.update({"experiments": included_experiments})
-
         def register_model_score(self, model_score: float):
             self.__dict__.update({"model_output_score": model_score})
 
@@ -211,21 +199,9 @@ class Telemetry(BaseModel):
     model_engine: Optional[Annotated[str, StringConstraints(max_length=50)]] = None
     model_name: Optional[Annotated[str, StringConstraints(max_length=50)]] = None
     lang: Optional[Annotated[str, StringConstraints(max_length=50)]] = None
-    experiments: Optional[list[ExperimentTelemetry]] = None
     requests: int
     accepts: int
     errors: int
-
-
-def _format_experiment_telemetry(
-    experiments: Optional[list[ExperimentTelemetry]],
-) -> dict:
-    if not experiments:
-        return {"exp_names": None, "exp_variants": None}
-    return {
-        "exp_names": ",".join(exp.name for exp in experiments),
-        "exp_variants": ",".join(str(exp.variant) for exp in experiments),
-    }
 
 
 class TelemetryInstrumentator:
@@ -244,10 +220,6 @@ class TelemetryInstrumentator:
                 }
 
                 telemetry_logger.info("telemetry", **(stats.dict() | labels))
-
-                # add stringified exp data after the telemetry_logger call,
-                # since this data belongs to the Prometheus counters only
-                labels.update(_format_experiment_telemetry(stats.experiments))
 
                 ACCEPTS_COUNTER.labels(**labels).inc(stats.accepts)
                 REQUESTS_COUNTER.labels(**labels).inc(stats.requests)

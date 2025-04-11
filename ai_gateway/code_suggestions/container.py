@@ -15,7 +15,6 @@ from ai_gateway.code_suggestions.processing.post.completions import (
     PostProcessorOperation,
 )
 from ai_gateway.code_suggestions.processing.pre import TokenizerTokenStrategy
-from ai_gateway.experimentation import experiment_registry_provider
 from ai_gateway.models import KindAnthropicModel, KindVertexTextModel
 from ai_gateway.models.base import KindModelProvider
 from ai_gateway.models.base_chat import ChatModelBase
@@ -129,7 +128,6 @@ class ContainerCodeCompletions(containers.DeclarativeContainer):
             tokenization_strategy=providers.Factory(
                 TokenizerTokenStrategy, tokenizer=tokenizer
             ),
-            experiment_registry=experiment_registry_provider(),
         ),
         post_processor=providers.Factory(
             PostProcessorCompletions,
