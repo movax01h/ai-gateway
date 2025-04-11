@@ -1,5 +1,5 @@
 from http.client import responses
-from typing import Annotated, Any, Optional
+from typing import Annotated, Any, AsyncIterator, Optional, Protocol
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from gitlab_cloud_connector import GitLabFeatureCategory, WrongUnitPrimitives
@@ -23,6 +23,10 @@ class PromptRequest(BaseModel):
     prompt_version: Optional[str] = None
     stream: Optional[bool] = False
     model_metadata: Optional[TypeModelMetadata] = None
+
+
+class PromptChunk(Protocol):
+    content: str
 
 
 router = APIRouter()
@@ -79,7 +83,9 @@ async def invoke(
 
     try:
         if prompt_request.stream:
-            response = prompt.astream(prompt_request.inputs.root)
+            response: AsyncIterator[PromptChunk] = prompt.astream(
+                prompt_request.inputs.root
+            )
 
             async def _handle_stream():
                 async for chunk in response:
@@ -87,8 +93,8 @@ async def invoke(
 
             return StreamingResponse(_handle_stream(), media_type="text/event-stream")
 
-        response = await prompt.ainvoke(prompt_request.inputs.root)
-        return response.content
+        response_chunk: PromptChunk = await prompt.ainvoke(prompt_request.inputs.root)
+        return response_chunk.content
     except KeyError as e:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
