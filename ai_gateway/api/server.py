@@ -177,7 +177,7 @@ async def model_api_exception_handler(request: Request, exc: ModelAPIError) -> R
 
         # When a 429 error is returned from some API, like Anthropic
         # the response includes a retry-after header
-        # which we propogate to the client
+        # which we propagate to the client
         # https://docs.anthropic.com/en/api/rate-limits#response-headers
         retry_after = extract_retry_after_header(exc)
 
