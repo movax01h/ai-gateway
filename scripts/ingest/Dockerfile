@@ -15,9 +15,9 @@ RUN apt-get update && apt-get install -y \
     autoconf patch rustc libyaml-dev libreadline6-dev libgmp-dev libgdbm6 libgdbm-dev libdb-dev uuid-dev
 
 # Set the locale UTF8
-ENV LANG C.UTF-8
-ENV LANGUAGE C
-ENV LC_ALL C.UTF-8
+ENV LANG=C.UTF-8
+ENV LANGUAGE=C
+ENV LC_ALL=C.UTF-8
 
 WORKDIR /app
 
