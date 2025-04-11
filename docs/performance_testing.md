@@ -6,7 +6,7 @@ of using [`perf_analyzer`](https://github.com/triton-inference-server/client/blo
 
 ## Single prompt
 
-Log in to the Triton server and save the following to [`test.json`](assets/test.json) to be used as input data:
+Sign in to the Triton server and save the following to [`test.json`](assets/test.json) to use as input data:
 
 ```json
 {
@@ -36,7 +36,7 @@ Run `perf_analyzer`:
 perf_analyzer -m ensemble --percentile=95 --concurrency-range 1:4 --input-data test.json
 ```
 
-The output will end with a summary similar to:
+The output ends with a summary, like:
 
 ```plaintext
 Inferences/Second vs. Client p95 Batch Latency
@@ -209,8 +209,8 @@ Concurrency: 4, throughput: 2.44411 infer/sec, latency 1627208 usec
 
 ## Increasing concurrency
 
-[Concurrent model execution](https://github.com/triton-inference-server/tutorials/tree/main/Conceptual_Guide/Part_2-improving_resource_utilization#concurrent-model-execution)
-can be evaluated by [increasing concurrency levels](https://github.com/triton-inference-server/client/blob/main/src/c%2B%2B/perf_analyzer/docs/cli.md#--concurrency-rangestartendstep). For example:
+Evaluate [concurrent model execution](https://github.com/triton-inference-server/tutorials/tree/main/Conceptual_Guide/Part_2-improving_resource_utilization#concurrent-model-execution)
+by [increasing concurrency levels](https://github.com/triton-inference-server/client/blob/main/src/c%2B%2B/perf_analyzer/docs/cli.md#--concurrency-rangestartendstep). For example:
 
 ```shell
 $ perf_analyzer -m ensemble --percentile=95 --concurrency-range 1:91:10 --input-data test.json
@@ -230,21 +230,23 @@ Concurrency: 81, throughput: 2.44405 infer/sec, latency 28932473 usec
 Concurrency: 91, throughput: 2.44408 infer/sec, latency 33024001 usec
 ```
 
-## tests:performance job
+## `tests:performance` job
 
-The `test:performance` job runs in MR pipelines and it runs all the tests under [performance_test/k6-test](../performance_tests/k6-test/) directory against angainst a Docker instance of AI Gateway. The Docker Compose file for the instance that the tests will be run against is under [performance_test/setup](../performance_tests/setup/docker-compose.yml). The tests uses [Grafana K6](https://grafana.com/docs/k6/latest/) to write the test.
+The `test:performance` job runs in MR pipelines. It runs all the tests under the [`performance_test/k6-test`](../performance_tests/k6-test/) directory against a Docker instance of AI Gateway. The Docker Compose file for the instance that the tests run against is under [`performance_test/setup`](../performance_tests/setup/docker-compose.yml). The tests use [Grafana K6](https://grafana.com/docs/k6/latest/) to write the test.
 
-The test uses [Component Performance Testing](https://gitlab.com/gitlab-org/quality/component-performance-testing-aigw-poc) tool which is maintained by [Performance Enablement Group](https://handbook.gitlab.com/handbook/engineering/infrastructure-platforms/developer-experience/performance-enablement/). For any questions or feedback reach out to [#g_performance_enablement](https://gitlab.enterprise.slack.com/archives/C081476PPAM) channel.
+The test uses the [Component Performance Testing](https://gitlab.com/gitlab-org/quality/component-performance-testing-aigw-poc) tool, which is maintained by [Performance Enablement Group](https://handbook.gitlab.com/handbook/engineering/infrastructure-platforms/developer-experience/performance-enablement/). For any questions or feedback, reach out to the [`#g_performance_enablement`](https://gitlab.enterprise.slack.com/archives/C081476PPAM) Slack channel.
 
-These tests are aimed to run against a mocked instance of AI Gateway to ensure there is no degredation in the TTFB values on account of the changes submitted in the MR.
+These tests are aimed to run against a mocked instance of AI Gateway. They ensure the changes submitted in the merge request cause no degradation in the TTFB values.
 
-The `test:performance` job triggers a multi-project pipeline in [Component Performance Testing](https://gitlab.com/gitlab-org/quality/component-performance-testing-aigw-poc) project which spins up the AI Gateway instance as per the Docker Compose file and runs the k6-test against it.
+The `test:performance` job triggers a multi-project pipeline in [Component Performance Testing](https://gitlab.com/gitlab-org/quality/component-performance-testing-aigw-poc) project. This project spins up the AI Gateway instance as per the Docker Compose file, and runs the k6-test against it.
 
 ### Adding a new test
 
-To add a new test, create a new `.js` file under [performance_test/k6-test](../performance_tests/k6-test/) and copy paste the following boilerplate to it before begining to write the test.
+To add a new test:
 
-Update the comment sections with the respective values/code.
+1. Create a new `.js` file under [`performance_test/k6-test`](../performance_tests/k6-test/).
+1. Copy and paste the following boilerplate to it before beginning to write the test.
+1. Update the comment sections with the respective values and code.
 
 ```javascript
 // Import necessary modules
@@ -265,9 +267,9 @@ export default function () {
 
 }
 
-/* 
+/*
 / LET THE BELOW METHOD BE AS IT IS
-/ USED TO GENERATE CUSTOM REPORTS 
+/ USED TO GENERATE CUSTOM REPORTS
 / WHICH WILL BE POSTED TO MR AS A COMMENT
 */
 
@@ -301,3 +303,36 @@ export function handleSummary(data) {
   return summaryOutput;
 }
 ```
+
+## Troubleshooting `tests:performance` job failures
+
+The `tests:performance` job is designed to run only in merge request pipelines, and the main branch pipeline of the canonical [`ai-assist`](https://gitlab.com/gitlab-org/modelops/applied-ml/code-suggestions/ai-assist) project.
+
+### Common permission issues
+
+If the `tests:performance` job fails due to permission issues, it might be caused by one of the following scenarios:
+
+#### Bot-created MRs
+
+If a bot created the merge request, verify whether the bot is managed by GitLab:
+
+ 1. If you're unsure, ask in the `#it-help` channel whether the bot is managed by GitLab
+ 1. If confirmed, post a message in the `#performance-enablement` channel requesting someone to add the bot to the [Component Performance Testing](https://gitlab.com/gitlab-org/quality/component-performance-testing-aigw-poc) project
+
+#### Community contributions from forked repositories
+
+Merge request [!2299](https://gitlab.com/gitlab-org/modelops/applied-ml/code-suggestions/ai-assist/-/merge_requests/2299) implements a rule that prevents the `tests:performance` job from running in merge requests from forked repositories. This should no longer be an issue.
+
+#### Other access-related issues
+
+The `tests:performance` job is intended to run only on merge requests and in the `main` branch. If you observe it running in other scenarios:
+
+ 1. Create a merge request to update the rules in the [CI configuration file](../.gitlab/ci/performance.gitlab-ci.yml).
+ 1. Ensure your changes receive the required reviews.
+ 1. Merge the approved changes into the main branch.
+
+### Code-related failures
+
+If the `tests:performance` job fails due to code-related issues rather than permissions, post a message in the [`#g_performance_enablement`](https://gitlab.enterprise.slack.com/archives/C081476PPAM) Slack channel for help.
+
+The `tests:performance` job should run only in merge request pipelines, and main branch pipeline of the canonical [`ai-assist`](https://gitlab.com/gitlab-org/modelops/applied-ml/code-suggestions/ai-assist) project.
