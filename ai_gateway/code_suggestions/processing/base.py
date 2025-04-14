@@ -1,6 +1,6 @@
 from abc import ABC, abstractmethod
 from pathlib import Path
-from typing import Any, NamedTuple, Optional
+from typing import Any, Dict, NamedTuple, Optional, Union
 
 from prometheus_client import Counter
 
@@ -12,6 +12,7 @@ from ai_gateway.code_suggestions.processing.typing import (
     CodeContent,
     LanguageId,
     MetadataCodeContent,
+    MetadataExtraInfo,
     MetadataPromptBuilder,
     Prompt,
     TokenStrategyBase,
@@ -70,7 +71,7 @@ class ModelEngineBase(ABC):
         file_name: str,
         editor_lang_id: Optional[str] = None,
         **kwargs: Any
-    ) -> ModelEngineOutput:
+    ) -> list[ModelEngineOutput]:
         lang_id = lang_from_filename(file_name)
         self.increment_lang_counter(file_name, lang_id, editor_lang_id)
 
@@ -105,14 +106,16 @@ class ModelEngineBase(ABC):
         lang_id: Optional[LanguageId] = None,
         editor_lang: Optional[str] = None,
         **kwargs: Any
-    ) -> ModelEngineOutput:
+    ) -> list[ModelEngineOutput]:
         pass
 
-    def increment_code_symbol_counter(self, lang_id: LanguageId, symbol_map: dict):
+    def increment_code_symbol_counter(
+        self, symbol_map: dict, lang_id: Optional[LanguageId] = None
+    ):
         for symbol, count in symbol_map.items():
-            CODE_SYMBOL_COUNTER.labels(lang=lang_id.name.lower(), symbol=symbol).inc(
-                count
-            )
+            CODE_SYMBOL_COUNTER.labels(
+                lang=lang_id.name.lower() if lang_id else "", symbol=symbol
+            ).inc(count)
 
     def log_symbol_map(
         self,
@@ -132,7 +135,7 @@ class PromptBuilderBase(ABC):
         self.lang_id = lang_id
         self._prefix = prefix.text
 
-        self._metadata = {
+        self._metadata: Dict[str, Union[MetadataCodeContent, MetadataExtraInfo]] = {
             "prefix": MetadataCodeContent(
                 length=len(prefix.text),
                 length_tokens=prefix.length_tokens,

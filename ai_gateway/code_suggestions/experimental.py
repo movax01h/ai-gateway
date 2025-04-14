@@ -29,22 +29,25 @@ class CodeCompletionsInternalUseCase:
 
     async def __call__(
         self, prefix: str, suffix: str, file_name: Optional[str] = None, **kwargs: Any
-    ) -> CodeCompletionsInternal:
+    ) -> list[CodeCompletionsInternal]:
         file_name = file_name if file_name else ""
 
-        completion = await self.engine.generate(
+        completions = await self.engine.generate(
             prefix,
             suffix,
             file_name,
             **kwargs,
         )
 
-        return CodeCompletionsInternal(
-            text=completion.text,
-            model=CodeCompletionsInternalModel(
-                # TODO: return props from the target engine instead of using glob var
-                engine=context.get("model_engine", ""),
-                name=context.get("model_name", ""),
-                lang=completion.lang,
-            ),
-        )
+        return [
+            CodeCompletionsInternal(
+                text=c.text,
+                model=CodeCompletionsInternalModel(
+                    # TODO: return props from the target engine instead of using glob var
+                    engine=context.get("model_engine", ""),
+                    name=context.get("model_name", ""),
+                    lang=c.lang,
+                ),
+            )
+            for c in completions
+        ]
