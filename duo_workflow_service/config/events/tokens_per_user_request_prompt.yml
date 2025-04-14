@@ -1,0 +1,26 @@
+---
+description: Tracks token usage per LLM call in Duo Workflow
+internal_events: true
+action: tokens_per_user_request_prompt
+product_group: duo_workflow
+additional_properties:
+  label:
+    description: Duo Workflow Agent Name
+  property:
+    description: Hardcoded string workflow_id
+  value:
+    description: Workflow Id that can be used to connect this event to others that happen when the workflow is completed.
+  input_tokens:
+    description: Tokens count that are input into the model, such as a prompt or conversation history
+  output_tokens:
+    description: Tokens count that the model generates in response to the input, such as the model's response
+  total_tokens:
+    description: Sum of input and output tokens per LLM call.
+  estimated_input_tokens:
+    description: Number of input tokens estimated by the approximate token counter.
+milestone: '17.6'
+introduced_by_url: https://gitlab.com/gitlab-org/duo-workflow/duo-workflow-service/-/merge_requests/153
+distributions:
+  - ee
+tiers:
+  - ultimate

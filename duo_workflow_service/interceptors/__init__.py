@@ -1,0 +1,4 @@
+X_GITLAB_REALM_HEADER = "x-gitlab-realm"
+X_GITLAB_INSTANCE_ID_HEADER = "x-gitlab-instance-id"
+X_GITLAB_GLOBAL_USER_ID_HEADER = "x-gitlab-global-user-id"
+X_GITLAB_HOST_NAME = "x-gitlab-host-name"

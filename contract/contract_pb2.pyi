@@ -1,0 +1,122 @@
+from google.protobuf.internal import containers as _containers
+from google.protobuf import descriptor as _descriptor
+from google.protobuf import message as _message
+from typing import ClassVar as _ClassVar, Iterable as _Iterable, Mapping as _Mapping, Optional as _Optional, Union as _Union
+
+DESCRIPTOR: _descriptor.FileDescriptor
+
+class ClientEvent(_message.Message):
+    __slots__ = ("startRequest", "actionResponse")
+    STARTREQUEST_FIELD_NUMBER: _ClassVar[int]
+    ACTIONRESPONSE_FIELD_NUMBER: _ClassVar[int]
+    startRequest: StartWorkflowRequest
+    actionResponse: ActionResponse
+    def __init__(self, startRequest: _Optional[_Union[StartWorkflowRequest, _Mapping]] = ..., actionResponse: _Optional[_Union[ActionResponse, _Mapping]] = ...) -> None: ...
+
+class StartWorkflowRequest(_message.Message):
+    __slots__ = ("clientVersion", "workflowID", "workflowDefinition", "goal", "workflowMetadata", "clientCapabilities")
+    CLIENTVERSION_FIELD_NUMBER: _ClassVar[int]
+    WORKFLOWID_FIELD_NUMBER: _ClassVar[int]
+    WORKFLOWDEFINITION_FIELD_NUMBER: _ClassVar[int]
+    GOAL_FIELD_NUMBER: _ClassVar[int]
+    WORKFLOWMETADATA_FIELD_NUMBER: _ClassVar[int]
+    CLIENTCAPABILITIES_FIELD_NUMBER: _ClassVar[int]
+    clientVersion: str
+    workflowID: str
+    workflowDefinition: str
+    goal: str
+    workflowMetadata: str
+    clientCapabilities: _containers.RepeatedScalarFieldContainer[str]
+    def __init__(self, clientVersion: _Optional[str] = ..., workflowID: _Optional[str] = ..., workflowDefinition: _Optional[str] = ..., goal: _Optional[str] = ..., workflowMetadata: _Optional[str] = ..., clientCapabilities: _Optional[_Iterable[str]] = ...) -> None: ...
+
+class ActionResponse(_message.Message):
+    __slots__ = ("requestID", "response")
+    REQUESTID_FIELD_NUMBER: _ClassVar[int]
+    RESPONSE_FIELD_NUMBER: _ClassVar[int]
+    requestID: str
+    response: str
+    def __init__(self, requestID: _Optional[str] = ..., response: _Optional[str] = ...) -> None: ...
+
+class Action(_message.Message):
+    __slots__ = ("requestID", "runCommand", "runHTTPRequest", "runReadFile", "runWriteFile", "runGitCommand", "runEditFile")
+    REQUESTID_FIELD_NUMBER: _ClassVar[int]
+    RUNCOMMAND_FIELD_NUMBER: _ClassVar[int]
+    RUNHTTPREQUEST_FIELD_NUMBER: _ClassVar[int]
+    RUNREADFILE_FIELD_NUMBER: _ClassVar[int]
+    RUNWRITEFILE_FIELD_NUMBER: _ClassVar[int]
+    RUNGITCOMMAND_FIELD_NUMBER: _ClassVar[int]
+    RUNEDITFILE_FIELD_NUMBER: _ClassVar[int]
+    requestID: str
+    runCommand: RunCommandAction
+    runHTTPRequest: RunHTTPRequest
+    runReadFile: ReadFile
+    runWriteFile: WriteFile
+    runGitCommand: RunGitCommand
+    runEditFile: EditFile
+    def __init__(self, requestID: _Optional[str] = ..., runCommand: _Optional[_Union[RunCommandAction, _Mapping]] = ..., runHTTPRequest: _Optional[_Union[RunHTTPRequest, _Mapping]] = ..., runReadFile: _Optional[_Union[ReadFile, _Mapping]] = ..., runWriteFile: _Optional[_Union[WriteFile, _Mapping]] = ..., runGitCommand: _Optional[_Union[RunGitCommand, _Mapping]] = ..., runEditFile: _Optional[_Union[EditFile, _Mapping]] = ...) -> None: ...
+
+class RunCommandAction(_message.Message):
+    __slots__ = ("program", "arguments", "flags")
+    PROGRAM_FIELD_NUMBER: _ClassVar[int]
+    ARGUMENTS_FIELD_NUMBER: _ClassVar[int]
+    FLAGS_FIELD_NUMBER: _ClassVar[int]
+    program: str
+    arguments: _containers.RepeatedScalarFieldContainer[str]
+    flags: _containers.RepeatedScalarFieldContainer[str]
+    def __init__(self, program: _Optional[str] = ..., arguments: _Optional[_Iterable[str]] = ..., flags: _Optional[_Iterable[str]] = ...) -> None: ...
+
+class ReadFile(_message.Message):
+    __slots__ = ("filepath",)
+    FILEPATH_FIELD_NUMBER: _ClassVar[int]
+    filepath: str
+    def __init__(self, filepath: _Optional[str] = ...) -> None: ...
+
+class WriteFile(_message.Message):
+    __slots__ = ("filepath", "contents")
+    FILEPATH_FIELD_NUMBER: _ClassVar[int]
+    CONTENTS_FIELD_NUMBER: _ClassVar[int]
+    filepath: str
+    contents: str
+    def __init__(self, filepath: _Optional[str] = ..., contents: _Optional[str] = ...) -> None: ...
+
+class EditFile(_message.Message):
+    __slots__ = ("filepath", "oldString", "newString")
+    FILEPATH_FIELD_NUMBER: _ClassVar[int]
+    OLDSTRING_FIELD_NUMBER: _ClassVar[int]
+    NEWSTRING_FIELD_NUMBER: _ClassVar[int]
+    filepath: str
+    oldString: str
+    newString: str
+    def __init__(self, filepath: _Optional[str] = ..., oldString: _Optional[str] = ..., newString: _Optional[str] = ...) -> None: ...
+
+class RunHTTPRequest(_message.Message):
+    __slots__ = ("method", "path", "body")
+    METHOD_FIELD_NUMBER: _ClassVar[int]
+    PATH_FIELD_NUMBER: _ClassVar[int]
+    BODY_FIELD_NUMBER: _ClassVar[int]
+    method: str
+    path: str
+    body: str
+    def __init__(self, method: _Optional[str] = ..., path: _Optional[str] = ..., body: _Optional[str] = ...) -> None: ...
+
+class RunGitCommand(_message.Message):
+    __slots__ = ("command", "arguments", "repository_url")
+    COMMAND_FIELD_NUMBER: _ClassVar[int]
+    ARGUMENTS_FIELD_NUMBER: _ClassVar[int]
+    REPOSITORY_URL_FIELD_NUMBER: _ClassVar[int]
+    command: str
+    arguments: str
+    repository_url: str
+    def __init__(self, command: _Optional[str] = ..., arguments: _Optional[str] = ..., repository_url: _Optional[str] = ...) -> None: ...
+
+class GenerateTokenRequest(_message.Message):
+    __slots__ = ()
+    def __init__(self) -> None: ...
+
+class GenerateTokenResponse(_message.Message):
+    __slots__ = ("token", "expiresAt")
+    TOKEN_FIELD_NUMBER: _ClassVar[int]
+    EXPIRESAT_FIELD_NUMBER: _ClassVar[int]
+    token: str
+    expiresAt: int
+    def __init__(self, token: _Optional[str] = ..., expiresAt: _Optional[int] = ...) -> None: ...
