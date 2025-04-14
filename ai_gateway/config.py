@@ -133,7 +133,7 @@ class ConfigModelEndpoints(BaseModel):
     # legacy, unused
     fireworks_completion_endpoint: Optional[str] = None
     fireworks_completion_identifier: Optional[str] = None
-    # current per-region configruation
+    # current per-region configuration
     fireworks_regional_endpoints: Optional[dict[str, dict[str, dict[str, str]]]] = {}
     # dynamic based on GCP location
     fireworks_current_region_endpoint: Optional[dict[str, dict[str, str]]] = {}

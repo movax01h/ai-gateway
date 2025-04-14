@@ -39,7 +39,7 @@ POST /v4/code/suggestions
 Format details:
 
 - A streaming response consists of one or more SSE messages.
-- An indvidual, **complete SSE message** consists of the keys `event` and `data` (outputted in this order), and is delimited by double newlines.
+- An individual, **complete SSE message** consists of the keys `event` and `data` (outputted in this order), and is delimited by double newlines.
 - The streaming response always begins with event `stream_start` and ends with `stream_end`.
 - The value of `data` is either `null` or a JSON string.
 - Metadata is only provided in the starting message.
@@ -324,7 +324,7 @@ This will compile and execute the program, printing "Hello World" to the console
 
 - `200: OK` if the service returns some completions.
 - `401: Unauthorized` if the service fails to authenticate using the access token.
-- `422: Unprocessable Entity` if the required attributes are missing or the number of `prompt_component` objects is not adequet.
+- `422: Unprocessable Entity` if the required attributes are missing or the number of `prompt_component` objects is not adequate.
 
 ### V2
 
