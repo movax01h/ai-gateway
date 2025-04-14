@@ -26,7 +26,7 @@ class TestWatchContainer:
         time_counter.side_effect = [1, 2]
 
         container.start()
-        mock_gauges.reset_mock()  # So we only have the calls from `stop` bellow
+        mock_gauges.reset_mock()  # So we only have the calls from `stop` below
 
         with capture_logs() as cap_logs:
             container.finish()
