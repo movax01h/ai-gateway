@@ -44,6 +44,7 @@ tests:performance:
     PARENT_PIPELINE_COMMIT_BRANCH: $CI_COMMIT_BRANCH
     PARENT_PIPELINE_SOURCE: $CI_PIPELINE_SOURCE
     COMPONENT_MR_CI_COMMIT_SHA: $CI_COMMIT_SHORT_SHA
+    COMPONENT_SERVICE_NAME: "ai-gateway-influx"
   rules:
     - if: $CI_PROJECT_NAMESPACE =~ /^gitlab-org\/security.*/
       when: never
