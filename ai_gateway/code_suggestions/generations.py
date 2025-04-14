@@ -147,8 +147,14 @@ class CodeGenerations:
                         res = None
 
                 else:
+                    prefix_str = (
+                        prompt.prefix
+                        if isinstance(prompt.prefix, str)
+                        else "".join(prompt.prefix)
+                    )
+
                     res = await self.model.generate(
-                        prompt.prefix, "", stream=stream, **kwargs
+                        prefix_str, "", stream=stream, **kwargs
                     )
 
                 if isinstance(res, list):
@@ -210,8 +216,10 @@ class CodeGenerations:
         snowplow_event_context: Optional[SnowplowEventContext] = None,
     ) -> CodeSuggestionsOutput:
         watch_container.register_model_output_length(response.text)
-        watch_container.register_model_score(response.score)
-        watch_container.register_safety_attributes(response.safety_attributes)
+        if response.score is not None:
+            watch_container.register_model_score(response.score)
+        if response.safety_attributes is not None:
+            watch_container.register_safety_attributes(response.safety_attributes)
 
         processor = (
             PostProcessorAnthropic
