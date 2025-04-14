@@ -3,6 +3,7 @@ import logging
 import sys
 from pathlib import Path
 
+import litellm
 import structlog
 from asgi_correlation_id import CorrelationIdMiddleware
 from fastapi import FastAPI
@@ -62,6 +63,9 @@ def setup_logging(logging_config: ConfigLogging, custom_models_enabled: bool):
     timestamper = structlog.processors.TimeStamper(fmt="iso")
     ENABLE_REQUEST_LOGGING = logging_config.enable_request_logging
     CUSTOM_MODELS_ENABLED = custom_models_enabled
+
+    if logging_config.enable_litellm_logging:
+        litellm._turn_on_debug()
 
     shared_processors: list[Processor] = [
         structlog.contextvars.merge_contextvars,
