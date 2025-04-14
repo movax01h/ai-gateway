@@ -64,7 +64,7 @@ TypeAgentEvent = TypeVar("TypeAgentEvent", bound=AgentEventType)
 
 class AgentStep(BaseModel):
     action: Optional[AgentToolAction] = None
-    observation: str
+    observation: str = ""
 
 
 class CurrentFile(BaseModel):
