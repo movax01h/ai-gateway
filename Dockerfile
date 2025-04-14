@@ -10,8 +10,7 @@ ENV PYTHONUNBUFFERED=1 \
   POETRY_VIRTUALENVS_PATH=/home/aigateway/app/venv \
   POETRY_CONFIG_DIR=/home/aigateway/app/.config/pypoetry \
   POETRY_DATA_DIR=/home/aigateway/app/.local/share/pypoetry \
-  POETRY_CACHE_DIR=/home/aigateway/app/.cache/pypoetry \
-  CLOUD_CONNECTOR_SERVICE_NAME=${CLOUD_CONNECTOR_SERVICE_NAME}
+  POETRY_CACHE_DIR=/home/aigateway/app/.cache/pypoetry
 
 WORKDIR /home/aigateway/app
 
@@ -43,6 +42,8 @@ FROM base-image AS final
 
 WORKDIR /home/aigateway/app
 
+RUN apt-get update && apt-get install -y parallel
+
 RUN useradd aigateway
 RUN chown -R aigateway:aigateway /home/aigateway/
 USER aigateway
@@ -50,6 +51,8 @@ USER aigateway
 COPY --chown=aigateway:aigateway --from=install-image /home/aigateway/app/venv/ /home/aigateway/app/venv/
 
 COPY --chown=aigateway:aigateway ai_gateway/ ai_gateway/
+COPY --chown=aigateway:aigateway duo_workflow_service/ duo_workflow_service/
+COPY --chown=aigateway:aigateway contract/ contract/
 COPY --chown=aigateway:aigateway vendor/ /home/aigateway/app/vendor/
 
 # Environment variable TRANSFORMERS_CACHE controls where files are downloaded
