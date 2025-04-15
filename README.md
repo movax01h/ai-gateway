@@ -267,7 +267,7 @@ We are supporting the following clients:
 
 ## Deployment
 
-### For production environments
+### For production AI Gateway environments
 
 AI Gateway is continuously deployed to [Runway](https://about.gitlab.com/handbook/engineering/infrastructure/platforms/tools/runway/).
 
@@ -280,6 +280,18 @@ When an MR gets merged, CI will build a new Docker image, and trigger a Runway d
 The service overview dashboard is available at [https://dashboards.gitlab.net/d/ai-gateway-main/ai-gateway-overview](https://dashboards.gitlab.net/d/ai-gateway-main/ai-gateway-overview).
 
 Note that while the runway pods are running in the `gitlab-runway-production` GCP project, all Vertex API calls target the `gitlab-ai-framework-prod` (and `-stage`, `-dev`) GCP project for isolation purposes. This project is managed [through terraform](https://ops.gitlab.net/gitlab-com/gl-infra/config-mgmt/-/tree/main/environments/ai-framework-prod?ref_type=heads). Monitoring for those calls is provided through [stackdriver-exporter](https://gitlab.com/gitlab-com/gl-infra/k8s-workloads/gitlab-helmfiles/-/tree/master/releases/stackdriver-exporter/ai-framework?ref_type=heads).
+
+### For production Duo Workflow Service environments
+
+Duo Workflow Service is continuously deployed to [Runway](https://about.gitlab.com/handbook/engineering/infrastructure/platforms/tools/runway/).
+
+This deployment is currently available at `https://duo-workflow-svc.runway.gitlab.net`.
+
+When an MR gets merged, CI will build a new Docker image, and trigger a Runway downstream pipeline that will deploy this image to staging, and then production. Downstream pipelines run against the [deployment project](https://gitlab.com/gitlab-com/gl-infra/platform/runway/deployments/duo-workflow-svc).
+
+The service overview dashboard is available at [here](https://dashboards.gitlab.net/d/runway-service/runway3a-runway-service-metrics?var-PROMETHEUS_DS=mimir-runway&var-environment=gprd&var-type=duo-workflow-svc).
+
+Currently, the service doesn't have a dependency on `gitlab-runway-production` GCP project. In the future, it could use Vertex AI resources through it.
 
 ### For staging-ref
 
