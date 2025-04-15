@@ -174,16 +174,6 @@ ln -s /Users/yourusername/.local/share/mise/installs/python/3.10.14/lib/libpytho
 
 Next, try installing `poetry` again.
 
-### glcoud setup fails during asdf install
-
-If `gcloud` setup fails with `ModuleNotFoundError: No module named 'imp'`, during `asdf install` run:
-
-```shell
-export CLOUDSDK_PYTHON=$(which python3.11)
-```
-
-Then, try again. For more details, refer to [this StackOverflow post](https://stackoverflow.com/questions/77316716/gcloud-modulenotfounderror-no-module-named-imp).
-
 ### Mocking AI model responses
 
 If you do not require real models to run and evaluate the input data, you can mock the model responses
