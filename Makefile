@@ -31,7 +31,6 @@ MYPY_LINT_TODO_DIR ?= --exclude "ai_gateway/models/agent_model.py" \
 	--exclude "ai_gateway/code_suggestions/processing/post/completions.py" \
 	--exclude "tests/code_suggestions/test_completions.py" \
 	--exclude "tests/code_suggestions/test_container.py" \
-	--exclude "tests/code_suggestions/test_engine.py" \
 	--exclude "tests/code_suggestions/generations/test_generations_base.py"
 
 COMPOSE_FILES := -f docker-compose.dev.yaml

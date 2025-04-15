@@ -50,7 +50,8 @@ def _side_effect_few_shot_tpl(
     lang_id = ops.lang_from_filename(filename)
 
     def _fn(prompt: str, _suffix: str):
-        assert lang_id.name.lower() in prompt
+        if lang_id is not None:
+            assert lang_id.name.lower() in prompt
         assert content in prompt
 
         return TextGenModelOutput(
@@ -106,7 +107,8 @@ def _side_effect_lang_prepended(
     lang_id = ops.lang_from_filename(filename)
 
     def _fn(prompt: str, _suffix: str):
-        assert prompt.startswith(f"<{lang_id.name.lower()}>")
+        if lang_id is not None:
+            assert prompt.startswith(f"<{lang_id.name.lower()}>")
         assert prompt.endswith(content)
 
         return TextGenModelOutput(
