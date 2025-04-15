@@ -68,6 +68,9 @@ async def libraries(
     # Handle direct completion
     if hasattr(completion, "text"):
         response = completion.text
+    elif isinstance(completion, list):
+        # Non-streamed multiple outputs
+        response = "".join([c.text for c in completion])
     else:
         # Handle streaming completion
         chunks = []

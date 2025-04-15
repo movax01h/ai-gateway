@@ -11,7 +11,8 @@ from anthropic import (
     AsyncStream,
 )
 from anthropic._types import NOT_GIVEN
-from anthropic.types import ContentBlockDeltaEvent
+from anthropic.types import Completion, ContentBlockDeltaEvent
+from anthropic.types import Message as AnthropicMessage
 
 from ai_gateway.models.base import (
     KindModelProvider,
@@ -143,11 +144,27 @@ class AnthropicModel(TextGenModelBase):
     async def generate(
         self,
         prefix: str,
-        _suffix: Optional[str] = "",
+        suffix: Optional[str] = "",
         stream: bool = False,
+        temperature: Optional[float] = None,
+        max_output_tokens: Optional[int] = None,
+        top_p: Optional[float] = None,
+        top_k: Optional[float] = None,
         **kwargs: Any,
-    ) -> Union[TextGenModelOutput, AsyncIterator[TextGenModelChunk]]:
-        opts = _obtain_opts(self.model_opts, **kwargs)
+    ) -> Union[
+        TextGenModelOutput, list[TextGenModelOutput], AsyncIterator[TextGenModelChunk]
+    ]:
+        default_values = {
+            **{
+                "temperature": temperature,
+                "top_k": top_k,
+                "top_p": top_p,
+                "max_output_tokens": max_output_tokens,
+            },
+            **kwargs,
+        }
+        opts = _obtain_opts(self.model_opts, **default_values)
+
         log.debug("codegen anthropic call:", **opts)
 
         with self.instrumentator.watch(stream=stream) as watcher:
@@ -168,20 +185,24 @@ class AnthropicModel(TextGenModelBase):
             if stream:
                 return self._handle_stream(suggestion, watcher.finish)
 
+        completion_text = getattr(suggestion, "completion", "")
         return TextGenModelOutput(
-            text=suggestion.completion,
+            text=completion_text,
             # Give a high value, the model doesn't return scores.
             score=10**5,
             safety_attributes=SafetyAttributes(),
         )
 
     async def _handle_stream(
-        self, response: AsyncStream, after_callback: Callable
+        self, response, after_callback: Callable
     ) -> AsyncIterator[TextGenModelChunk]:
         try:
             async for event in response:
-                chunk_content = TextGenModelChunk(text=event.completion)
-                yield chunk_content
+                if isinstance(event, AsyncStream):
+                    async for comp in event:
+                        yield TextGenModelChunk(text=comp.completion)
+                elif isinstance(event, Completion):
+                    yield TextGenModelChunk(text=event.completion)
         finally:
             after_callback()
 
@@ -262,9 +283,23 @@ class AnthropicChatModel(ChatModelBase):
         self,
         messages: list[Message],
         stream: bool = False,
+        temperature: Optional[float] = None,
+        max_output_tokens: Optional[int] = None,
+        top_p: Optional[float] = None,
+        top_k: Optional[int] = None,
         **kwargs: Any,
     ) -> Union[TextGenModelOutput, AsyncIterator[TextGenModelChunk]]:
-        opts = _obtain_opts(self.model_opts, **kwargs)
+
+        default_values = {
+            **{
+                "temperature": temperature,
+                "top_k": top_k,
+                "top_p": top_p,
+                "max_output_tokens": max_output_tokens,
+            },
+            **kwargs,
+        }
+        opts = _obtain_opts(self.model_opts, **default_values)
         log.debug("codegen anthropic call:", **opts)
 
         model_messages = _build_model_messages(messages)
@@ -291,25 +326,35 @@ class AnthropicChatModel(ChatModelBase):
                     watcher.register_error,
                 )
 
+        text = (
+            getattr(suggestion.content[0], "text", "")
+            if hasattr(suggestion, "content") and suggestion.content
+            else ""
+        )
         return TextGenModelOutput(
-            text=suggestion.content[0].text,
+            text=text,
             # Give a high value, the model doesn't return scores.
             score=10**5,
             safety_attributes=SafetyAttributes(),
         )
 
     async def _handle_stream(
-        self, response: AsyncStream, after_callback: Callable, error_callback: Callable
+        self,
+        response,
+        after_callback: Callable,
+        error_callback: Callable,
     ) -> AsyncIterator[TextGenModelChunk]:
         try:
             async for event in response:
-                if isinstance(event, ContentBlockDeltaEvent):
-                    if not event.delta:
-                        yield TextGenModelChunk(text="")
-
-                    yield TextGenModelChunk(text=event.delta.text)
+                if isinstance(event, AnthropicMessage):
+                    text = (
+                        getattr(event.content[0], "text", "") if event.content else ""
+                    )
+                elif isinstance(event, ContentBlockDeltaEvent):
+                    text = getattr(event.delta, "text", "") if event.delta else ""
                 else:
                     continue
+                yield TextGenModelChunk(text=text)
         except Exception:
             error_callback()
             raise
