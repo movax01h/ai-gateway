@@ -57,6 +57,11 @@ class Prompt(NamedTuple):
     metadata: MetadataPromptBuilder
     suffix: Optional[str] = None
 
+    def get_normalized_prefix(self) -> str:
+        if isinstance(self.prefix, list):
+            return "".join(map(str, self.prefix))
+        return self.prefix
+
 
 class TokenStrategyBase(ABC):
     @abstractmethod
