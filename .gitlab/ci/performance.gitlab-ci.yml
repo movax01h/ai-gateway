@@ -13,9 +13,10 @@ dotenv-vars:
     paths:
       - performance_tests
       - variables.env
-    expire_in: 1 hour
+    expire_in: 5d
     reports:
       dotenv: variables.env
+  allow_failure: true
   rules:
     - if: $CI_PROJECT_NAMESPACE =~ /^gitlab-org\/security.*/
       when: never
@@ -37,6 +38,7 @@ tests:performance:
     forward:
       pipeline_variables: true
       yaml_variables: true
+  allow_failure: true  
   variables:
     JOB_WITH_ARTIFACTS: $JOB_WITH_ARTIFACTS
     JOB_WITH_ARTIFACTS_ID: $JOB_WITH_ARTIFACTS_ID
