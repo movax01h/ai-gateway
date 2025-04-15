@@ -57,7 +57,9 @@ class AmazonQModel(TextGenModelBase):
         language: str,
         stream: bool,
         **kwargs,
-    ) -> TextGenModelOutput:
+    ) -> (
+        TextGenModelOutput | list[TextGenModelOutput] | AsyncIterator[TextGenModelChunk]
+    ):
 
         request_payload = {
             "fileContext": {
