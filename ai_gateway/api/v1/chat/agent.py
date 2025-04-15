@@ -1,5 +1,5 @@
 from time import time
-from typing import Annotated, AsyncIterator, Union
+from typing import Annotated, AsyncIterator, Optional, Union
 
 from dependency_injector.providers import Factory, FactoryAggregate
 from fastapi import APIRouter, Depends, HTTPException, Request, status
@@ -116,7 +116,7 @@ async def chat(
             response=completion.text,
             metadata=ChatResponseMetadata(
                 provider=payload.provider,
-                model=payload.model.value,
+                model=payload.model.value if payload.model else None,
                 timestamp=int(time()),
             ),
         )
@@ -143,7 +143,7 @@ async def chat(
 async def _generate_completion(
     anthropic_claude_factory: FactoryAggregate,
     prompt: PromptPayload,
-    stream: bool = False,
+    stream: Optional[bool] = False,
 ) -> Union[TextGenModelOutput, AsyncIterator[TextGenModelChunk]]:
     opts = prompt.params.dict() if prompt.params else {}
 

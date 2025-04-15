@@ -68,8 +68,8 @@ class ChatRequest(BaseModel):
 
 
 class ChatResponseMetadata(BaseModel):
-    provider: str
-    model: str
+    provider: Optional[str]
+    model: Optional[str]
     timestamp: int
 
 
