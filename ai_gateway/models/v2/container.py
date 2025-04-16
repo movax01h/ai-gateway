@@ -14,13 +14,15 @@ __all__ = [
 
 
 def _litellm_factory(*args, **kwargs) -> Model:
-    # Always include usage metrics when streaming. See https://docs.litellm.ai/docs/completion/usage#streaming-usage
-    # Respect other possible values that may have been passed.
-    kwargs["model_kwargs"] = kwargs.get("model_kwargs", {})
-    kwargs["model_kwargs"]["stream_options"] = kwargs["model_kwargs"].get(
-        "stream_options", {}
-    )
-    kwargs["model_kwargs"]["stream_options"]["include_usage"] = True
+
+    if not kwargs.get("disable_streaming", False):
+        # Always include usage metrics when streaming. See https://docs.litellm.ai/docs/completion/usage#streaming-usage
+        # Respect other possible values that may have been passed.
+        kwargs["model_kwargs"] = kwargs.get("model_kwargs", {})
+        kwargs["model_kwargs"]["stream_options"] = kwargs["model_kwargs"].get(
+            "stream_options", {}
+        )
+        kwargs["model_kwargs"]["stream_options"]["include_usage"] = True
 
     if kwargs.get("custom_llm_provider", "") == "vertex_ai":
         kwargs["client"] = AsyncHTTPHandler(event_hooks={"request": [log_request]})
