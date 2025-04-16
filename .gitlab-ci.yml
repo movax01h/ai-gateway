@@ -38,8 +38,6 @@ variables:
   SAST_EXCLUDED_PATHS: "tests, tmp, api"
   CS_IMAGE: $TARGET_IMAGE
 
-  CLOUD_CONNECTOR_SERVICE_NAME: "gitlab-ai-gateway"
-
 include:
   - local: .gitlab/ci/build.gitlab-ci.yml
   - local: .gitlab/ci/lint.gitlab-ci.yml

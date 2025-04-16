@@ -191,6 +191,7 @@ class Config(BaseSettings):
     gitlab_api_url: str = "https://gitlab.com/api/v4/"
     customer_portal_url: str = "https://customers.gitlab.com"
     glgo_base_url: str = "http://auth.token.gitlab.com"
+    cloud_connector_service_name: str = "gitlab-ai-gateway"
     mock_model_responses: bool = False
 
     logging: Annotated[ConfigLogging, Field(default_factory=ConfigLogging)] = (
@@ -256,6 +257,10 @@ class Config(BaseSettings):
             parent=self.google_cloud_platform,
             children=[self.vertex_text_model, self.vertex_search],
         )
+
+        # pylint: disable=direct-environment-variable-reference
+        os.environ["CLOUD_CONNECTOR_SERVICE_NAME"] = self.cloud_connector_service_name
+        # pylint: enable=direct-environment-variable-reference
 
         self.model_endpoints.update_fireworks_current_region_endpoint(
             self.google_cloud_platform.location

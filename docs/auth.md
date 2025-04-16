@@ -87,11 +87,16 @@ AIGW_CUSTOMER_PORTAL_URL=http://<your-customer-dot-address> # e.g. http://127.0.
 
 When validating tokens, we verify that the token `aud` claim (audience) matches the system name the token is sent to.
 
-For the AI gateway, make sure to set the following in `.env`:
+Make sure to set the following in `.env`:
 
 ```shell
-CLOUD_CONNECTOR_SERVICE_NAME="gitlab-ai-gateway"
+# For AI Gateway
+AIGW_CLOUD_CONNECTOR_SERVICE_NAME="gitlab-ai-gateway"
+# For Duo Workflow Service
+DUO_WORKFLOW_CLOUD_CONNECTOR_SERVICE_NAME="gitlab-duo-workflow-service"
 ```
+
+These environemnt variables are converted to `CLOUD_CONNECTOR_SERVICE_NAME` environment variable in the runtime.
 
 #### Bypass JWT verification for testing
 
@@ -220,6 +225,6 @@ This decorator also validates that the request is not modified at client side.
 If a client attempts to use a unit primitive for a different purpose,
 the request is flagged as an abused request, which reported to
 the `abuse_request_probabilities` Prometheus metric and `abuse_detection` log.
-For such requests, GitLab may conduct further investigation and 
+For such requests, GitLab may conduct further investigation and
 block the requests in Cloud Connector LB or AI Gateway middleware.
 See [this issue](https://gitlab.com/gitlab-com/legal-and-compliance/-/issues/2176) (Internal Only) for more information.
