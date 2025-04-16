@@ -13,8 +13,7 @@ LINT_WORKING_DIR ?= ${AI_GATEWAY_DIR} \
 	${TESTS_DIR} \
 	${INTEGRATION_TESTS_DIR}
 
-MYPY_LINT_TODO_DIR ?= --exclude "ai_gateway/models/agent_model.py" \
-	--exclude "ai_gateway/models/anthropic.py" \
+MYPY_LINT_TODO_DIR ?= --exclude "ai_gateway/models/anthropic.py" \
 	--exclude "ai_gateway/models/base.py" \
 	--exclude "ai_gateway/models/litellm.py" \
 	--exclude "ai_gateway/models/mock.py" \
