@@ -38,6 +38,12 @@ from ai_gateway.prompts.config.base import ModelConfig, PromptConfig, PromptPara
 from ai_gateway.prompts.config.models import ChatLiteLLMParams, TypeModelParams
 from ai_gateway.prompts.typing import Model, TypeModelFactory
 from ai_gateway.safety_attributes import SafetyAttributes
+from duo_workflow_service.entities.state import (
+    MessageTypeEnum,
+    Plan,
+    WorkflowState,
+    WorkflowStatusEnum,
+)
 
 pytest_plugins = ("pytest_asyncio",)
 
@@ -591,4 +597,25 @@ def user(user_is_debug: bool, scopes: list[str]):
         CloudConnectorUser(
             authenticated=True, is_debug=user_is_debug, claims=UserClaims(scopes=scopes)
         )
+    )
+
+
+@pytest.fixture(scope="function")
+def workflow_state():
+    return WorkflowState(
+        plan=Plan(steps=[]),
+        status=WorkflowStatusEnum.NOT_STARTED,
+        conversation_history={},
+        handover=[],
+        last_human_input=None,
+        ui_chat_log=[
+            {
+                "message_type": MessageTypeEnum.AGENT,
+                "content": "This is a test message",
+                "timestamp": "2025-01-08T12:00:00Z",
+                "status": None,
+                "correlation_id": None,
+                "tool_info": None,
+            }
+        ],
     )
