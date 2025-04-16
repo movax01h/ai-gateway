@@ -21,6 +21,7 @@ Answer the question as accurate as you can.
 You have access only to the following tools:
 <tools_list>
 {%- if tools %}
+{% set tools = tools | rejectattr('name', 'equalto', 'gitlab_documentation') | list %}
 {%- for tool in tools %}
     <tool>
         <name>{{ tool.name }}</name>
@@ -53,6 +54,7 @@ Question: the input question you must answer
 Thought: you should always think about what to do
 Action: the action to take, should be one tool from this list: [
 {%- if tools %}
+{% set tools = tools | rejectattr('name', 'equalto', 'gitlab_documentation') | list %}
 {%- for tool in tools -%}
     {{ tool.name }}
     {%- if not loop.last %}, {% endif %}
