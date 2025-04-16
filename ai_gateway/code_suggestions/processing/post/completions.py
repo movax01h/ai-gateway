@@ -1,7 +1,8 @@
+import inspect
 from enum import StrEnum
 from functools import partial
 from inspect import iscoroutinefunction
-from typing import Any, Callable, NewType, Optional
+from typing import Any, Awaitable, Callable, NewType, Optional, Union
 
 from ai_gateway.code_suggestions.processing.ops import strip_whitespaces
 from ai_gateway.code_suggestions.processing.post.base import PostProcessorBase
@@ -76,7 +77,11 @@ class PostProcessor(PostProcessorBase):
         self.score_threshold = score_threshold or {}
 
     @property
-    def ops(self) -> dict[PostProcessorOperation, Callable[..., str]]:
+    def ops(
+        self,
+    ) -> dict[
+        PostProcessorOperation, Union[Callable[..., str], Callable[..., Awaitable[str]]]
+    ]:
         return {
             PostProcessorOperation.FILTER_SCORE: partial(filter_score),
             PostProcessorOperation.REMOVE_COMMENTS: partial(
@@ -150,10 +155,11 @@ class PostProcessor(PostProcessorBase):
                 raw_completion=raw_completion,
             )
 
-        if self._is_async(func):
-            processed_completion = await func(completion)
+        result = func(completion)
+        if inspect.isawaitable(result):
+            processed_completion = await result
         else:
-            processed_completion = func(completion)
+            processed_completion = result
 
         if processed_completion != completion:
             request_log.info(
