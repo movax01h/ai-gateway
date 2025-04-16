@@ -7,6 +7,7 @@ import httpx
 import structlog
 from anthropic import AsyncAnthropic
 from anthropic._base_client import _DefaultAsyncHttpxClient
+from google.api_core.client_options import ClientOptions
 from google.cloud.aiplatform.gapic import PredictionServiceAsyncClient
 from pydantic import BaseModel
 
@@ -88,9 +89,9 @@ class TokensConsumptionMetadata(BaseModel):
 class ModelMetadata(NamedTuple):
     name: str
     engine: str
-    endpoint: str = None
-    api_key: str = None
-    identifier: str = None
+    endpoint: Optional[str] = None
+    api_key: Optional[str] = None
+    identifier: Optional[str] = None
 
 
 class ModelBase(ABC):
@@ -139,8 +140,9 @@ class ModelBase(ABC):
         return params
 
 
-def grpc_connect_vertex(client_options: dict) -> PredictionServiceAsyncClient:
-    log.info("Initializing Vertex AI client", **client_options)
+def grpc_connect_vertex(client_options_dict: dict) -> PredictionServiceAsyncClient:
+    log.info("Initializing Vertex AI client", **client_options_dict)
+    client_options = ClientOptions(client_options_dict)
     return PredictionServiceAsyncClient(client_options=client_options)
 
 
