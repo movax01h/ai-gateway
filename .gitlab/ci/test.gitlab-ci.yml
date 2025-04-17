@@ -48,3 +48,54 @@ tests:evaluation:
   script:
     - make eval
   when: manual
+
+.proto-variables:
+  variables:
+    DEBIAN_VERSION: "bookworm"
+    RUBY_VERSION: "3.3"
+    GO_VERSION: "1.22"
+    PYTHON_VERSION: "3.12.10"
+    POETRY_VERSION: "2.0.1"
+
+check-proto-go:
+  extends: [.proto-variables]
+  image: golang:${GO_VERSION}-${DEBIAN_VERSION}
+  stage: test
+  script:
+    - apt update
+    - apt install unzip # Needed by Makefile to download and install protoc
+    - make gen-proto-go
+    - '(git diff --exit-code || (echo "ERROR: There are changes after running make gen-proto-go. Run it locally and commit the changes." && exit 1))'
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+      changes:
+        - contract/**/*.proto
+        - clients/gopb/**/*.go
+
+check-proto-python:
+  extends: [.proto-variables]
+  image: python:${PYTHON_VERSION}-${DEBIAN_VERSION}
+  stage: test
+  script:
+    - pip install poetry==${POETRY_VERSION}
+    - make gen-proto-python
+    - '(git diff --exit-code || (echo "ERROR: There are changes after running make gen-proto-python. Run it locally and commit the changes." && exit 1))'
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+      changes:
+        - contract/**/*.proto
+        - contract/**/*.py
+        - contract/**/*.pyi
+
+check-proto-ruby:
+  extends: [.proto-variables]
+  image: ruby:${RUBY_VERSION}-${DEBIAN_VERSION}
+  stage: test
+  script:
+    - make gen-proto-ruby
+    - '(git diff --exit-code || (echo "ERROR: There are changes after running make gen-proto-ruby. Run it locally and commit the changes." && exit 1))'
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+      changes:
+        - contract/**/*.proto
+        - clients/ruby/**/*.rb

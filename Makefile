@@ -41,6 +41,70 @@ COMPOSE := docker compose $(COMPOSE_FILES)
 endif
 TEST_PATH_ARG ?=
 
+# grpc
+
+PROTOC_VERSION := 27.3
+PROTOC_GEN_GO_VERSION := v1.35.1
+PROTOC_GEN_GO_GRPC_VERSION := v1.5.1
+
+UNAME_S := $(shell uname -s)
+ifeq ($(UNAME_S),Linux)
+    OS := linux
+else ifeq ($(UNAME_S),Darwin)
+    OS := osx
+else
+    $(error Unsupported operating system: $(UNAME_S))
+endif
+
+UNAME_M := $(shell uname -m)
+ifeq ($(UNAME_M),x86_64)
+    ARCH := x86_64
+else ifeq ($(UNAME_M),arm64) # macOS aarch64
+    ARCH := aarch_64
+else ifeq ($(UNAME_M),aarch64) # linux aarch64
+    ARCH := aarch_64
+else
+    $(error Unsupported architecture: $(UNAME_M))
+endif
+
+.PHONY: gen-proto
+gen-proto: gen-proto-python gen-proto-go gen-proto-ruby
+
+.PHONY: gen-proto-python
+gen-proto-python: install-test-deps
+	poetry run python -m grpc_tools.protoc \
+		-I ./ \
+		--python_out=./ \
+		--pyi_out=./ \
+		--grpc_python_out=./ \
+		./contract/contract.proto
+
+.PHONY: gen-proto-ruby
+gen-proto-ruby:
+	(cd clients/ruby; bundle install)
+	grpc_tools_ruby_protoc -I contract --ruby_out=clients/ruby/lib/proto --grpc_out=clients/ruby/lib/proto contract/contract.proto
+	sed -i.bak "s/require 'contract_pb'/require_relative 'contract_pb'/" clients/ruby/lib/proto/contract_services_pb.rb
+	rm clients/ruby/lib/proto/contract_services_pb.rb.bak
+
+.PHONY: gen-proto-go
+gen-proto-go: gen-proto-go-install bin/protoc
+	bin/protoc --go_out=clients/gopb --go_opt=paths=source_relative \
+		--go-grpc_out=clients/gopb --go-grpc_opt=paths=source_relative \
+		./contract/contract.proto
+
+.PHONY: gen-proto-go-install
+gen-proto-go-install:
+	go install google.golang.org/protobuf/cmd/protoc-gen-go@$(PROTOC_GEN_GO_VERSION)
+	go install google.golang.org/grpc/cmd/protoc-gen-go-grpc@$(PROTOC_GEN_GO_GRPC_VERSION)
+
+tmp/protoc-${PROTOC_VERSION}/bin/protoc:
+	mkdir -p tmp bin
+	wget https://github.com/protocolbuffers/protobuf/releases/download/v$(PROTOC_VERSION)/protoc-$(PROTOC_VERSION)-$(OS)-$(ARCH).zip -O tmp/protoc-$(PROTOC_VERSION)-$(OS)-$(ARCH).zip
+	unzip tmp/protoc-${PROTOC_VERSION}-$(OS)-$(ARCH).zip "bin/protoc" -d tmp/protoc-${PROTOC_VERSION}
+
+bin/protoc: tmp/protoc-${PROTOC_VERSION}/bin/protoc
+	cp tmp/protoc-${PROTOC_VERSION}/bin/protoc bin/protoc
+
 .PHONY: develop-local
 develop-local:
 	$(COMPOSE) up --build --remove-orphans
