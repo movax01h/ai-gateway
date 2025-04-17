@@ -49,6 +49,33 @@ from ai_gateway.models.v2.container import _litellm_factory
             },
             False,
         ),
+        (
+            {
+                "model": "mistral",
+                "disable_streaming": False,
+            },
+            {
+                "model": "mistral",
+                "disable_streaming": False,
+                "model_kwargs": {
+                    "stream_options": {
+                        "include_usage": True,
+                    },
+                },
+            },
+            False,
+        ),
+        (
+            {
+                "model": "mistral",
+                "disable_streaming": True,
+            },
+            {
+                "model": "mistral",
+                "disable_streaming": True,
+            },
+            False,
+        ),
     ],
 )
 def test_litellm_factory(
