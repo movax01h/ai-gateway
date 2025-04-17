@@ -1,0 +1,32 @@
+# https://gitlab-com.gitlab.io/gl-infra/platform/runway/runwayctl/manifest.schema.html
+apiVersion: runway/v1
+kind: RunwayService
+metadata:
+  name: duo-workflow-service
+  department: eng-dev
+  department_group: eng-dev-create-shared-infra
+  product_category: duo_workflow
+  owner_email_handle: dgriffith
+spec:
+  regions:
+  - us-east1
+  request_timeout: 3600
+  load_balancing:
+    external_load_balancer:
+      backend_protocol: "HTTP2"
+  observability:
+    scrape_targets:
+      - "localhost:8082"
+# TODO: Renable once CF issue is being resolved
+# https://gitlab.com/gitlab-org/gitlab/-/issues/509586
+  # network_policies:
+  #   cloudflare: true
+  scalability:
+    min_instances: 4
+    max_instances: 8
+    max_instance_request_concurrency: 200
+  resources:
+    startup_cpu_boost: true
+    limits:
+      cpu: 2000m
+      memory: 8G
