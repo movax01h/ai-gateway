@@ -1,0 +1,36 @@
+Your task is to rate the given comment on a temperature score where:
+- 1 (low temperature) is good and adheres to the guidelines
+- 2 (high temperature) is problematic and violates the guidelines
+
+If you rate a comment as high temperature (2), you must provide a bullet-point list explaining the specific problems with the comment.
+Limit the list to maximum three items.
+
+Here is the comment you need to rate:
+
+<comment>
+{{content}}
+</comment>
+
+Please analyze this comment carefully, considering the company guidelines and the multi-cultural context of the workplace.
+Be mindful of potential negative perceptions that could arise from different cultural perspectives.
+
+If you determine that the comment has a high temperature (2), provide your reasoning in an issues list, explaining each problem you've identified.
+
+After your analysis, do not wrap your response in markdown.
+For response, use this JSON schema:
+
+    TemperatureRatingResponse = {"rating": int, "issues": list[str]}
+
+Return: TemperatureRatingResponse
+
+When returning JSON, please format your response as a valid JSON string WITHOUT markdown code blocks. Your response should contain ONLY the raw JSON object, like this:
+
+{"rating": 1, "issues": []}
+
+Guidelines for proper JSON formatting:
+- Use only a single backslash to escape quotes inside JSON strings: \"
+- For nested quotes (quotes within quotes), still use only a single backslash
+- Example of correct format: {"comment": "He said \"I'm happy\" yesterday"}
+- Do NOT use multiple backslashes like \\\" or \\\\
+- Do NOT wrap your response in ```json ... ``` or any other formatting
+- Your entire response should be nothing but the valid JSON object
