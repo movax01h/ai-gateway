@@ -14,7 +14,10 @@ To maintain AI Gateway project, the following domain knowledge is preferred:
 - [Python](https://www.python.org) as the primary programming language.
 - [Poetry](https://python-poetry.org) as the package and virtual environment manager.
 - [FastAPI](https://fastapi.tiangolo.com/) as the modern web framework.
-- [Architectural blueprint](https://docs.gitlab.com/ee/architecture/blueprints/ai_gateway/) to understand how the AI Gateway is integrated with the other components.
+- [LangGraph](https://langchain-ai.github.io/langgraph/) as the service that executes the workflows.
+- [gRPC](https://grpc.io/docs/what-is-grpc/introduction/) as the primary method to send messages between the Executor and the Service
+- [Architectural blueprint for AI Gateway](https://docs.gitlab.com/ee/architecture/blueprints/ai_gateway/) to understand how the AI Gateway is integrated with the other components.
+- [Architectural blueprint for Duo Workflow Service](https://handbook.gitlab.com/handbook/engineering/architecture/design-documents/duo_workflow/) to understand how Duo Workflow is designed and how the service integrates with the overall design.
 
 In addition, it would be better to familiarize yourself with the following observability services:
 
