@@ -1075,6 +1075,38 @@ class TestCodeCompletions:
         )
 
     @pytest.mark.parametrize(
+        "allow_llm_cache",
+        ["true", "false"],
+    )
+    def test_fireworks_codestral_with_prompt(
+        self, allow_llm_cache: str, mock_litellm_acompletion: Mock, mock_client: Mock
+    ):
+        params = {
+            "project_path": "gitlab-org/gitlab-shell",
+            "project_id": 278964,
+            "current_file": {
+                "file_name": "main.py",
+                "content_above_cursor": "foo",
+                "content_below_cursor": "\n",
+            },
+            "model_provider": "fireworks_ai",
+            "model_name": "codestral-2501",
+            "stream": False,
+            "choices_count": 1,
+            "prompt_version": 1,
+            "prompt_cache_max_len": 0,
+        }
+
+        self._send_code_completions_request(mock_client, params, allow_llm_cache)
+
+        kwargs = mock_litellm_acompletion.call_args.kwargs
+
+        if allow_llm_cache == "false":
+            assert "prompt_cache_max_len" in kwargs
+        else:
+            assert "prompt_cache_max_len" not in kwargs
+
+    @pytest.mark.parametrize(
         ("gcp_location", "model_details", "expected_model", "expected_content"),
         [
             (
@@ -1272,12 +1304,15 @@ class TestCodeCompletions:
         )
         assert result["choices"][0]["text"] == "Post-processed completion response"
 
-    def _send_code_completions_request(self, mock_client, params):
+    def _send_code_completions_request(
+        self, mock_client, params, enable_prompt_cache="false"
+    ):
         headers = {
             "Authorization": "Bearer 12345",
             "X-Gitlab-Authentication-Type": "oidc",
             "X-GitLab-Instance-Id": "1234",
             "X-GitLab-Realm": "self-managed",
+            "X-Gitlab-Model-Prompt-Cache-Enabled": enable_prompt_cache,
         }
 
         return mock_client.post(
