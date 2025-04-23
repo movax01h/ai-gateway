@@ -308,6 +308,7 @@ class LiteLlmTextGenModel(TextGenModelBase):
 
     def __init__(
         self,
+        using_cache: bool,
         model_name: KindLiteLlmModel = KindLiteLlmModel.CODEGEMMA,
         vertex_model_location: str = "",
         provider: Optional[KindModelProvider] = KindModelProvider.LITELLM,
@@ -323,6 +324,7 @@ class LiteLlmTextGenModel(TextGenModelBase):
 
         self.stop_tokens = MODEL_STOP_TOKENS.get(model_name, [])
         self.async_fireworks_client = async_fireworks_client
+        self.using_cache = using_cache
 
     @property
     def metadata(self) -> ModelMetadata:
@@ -444,7 +446,8 @@ class LiteLlmTextGenModel(TextGenModelBase):
         if self.provider == KindModelProvider.FIREWORKS:
             completion_args["client"] = self.async_fireworks_client
             # disable prompt caching
-            completion_args["prompt_cache_max_len"] = 0
+            if not self.using_cache:
+                completion_args["prompt_cache_max_len"] = 0
             completion_args["logprobs"] = 1
 
         return await acompletion(**completion_args)
@@ -499,6 +502,7 @@ class LiteLlmTextGenModel(TextGenModelBase):
         provider_keys: Optional[dict] = None,
         provider_endpoints: Optional[dict] = None,
         async_fireworks_client: Optional[AsyncOpenAI] = None,
+        using_cache: bool = True,
     ):
         if not custom_models_enabled:
             if endpoint is not None or api_key is not None:
@@ -539,6 +543,7 @@ class LiteLlmTextGenModel(TextGenModelBase):
             disable_streaming=disable_streaming,
             async_fireworks_client=async_fireworks_client,
             vertex_model_location=vertex_model_location,
+            using_cache=using_cache,
         )
 
 

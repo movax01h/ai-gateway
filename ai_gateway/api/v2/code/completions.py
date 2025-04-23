@@ -13,6 +13,7 @@ from gitlab_cloud_connector import (
 from ai_gateway.api.auth_utils import StarletteUser, get_current_user
 from ai_gateway.api.error_utils import capture_validation_errors
 from ai_gateway.api.feature_category import feature_category
+from ai_gateway.api.middleware.headers import X_GITLAB_MODEL_PROMPT_CACHE_ENABLED
 from ai_gateway.api.snowplow_context import get_snowplow_code_suggestion_context
 from ai_gateway.api.v2.code.model_provider_handlers import (
     AnthropicHandler,
@@ -425,6 +426,7 @@ def _resolve_code_completions_litellm(
     payload: SuggestionsRequest,
     current_user: StarletteUser,
     prompt_registry: BasePromptRegistry,
+    use_llm_prompt_caching: bool,
     completions_agent_factory: Factory[CodeCompletions],
     completions_litellm_factory: Factory[CodeCompletions],
 ) -> CodeCompletions:
@@ -449,6 +451,7 @@ def _resolve_code_completions_litellm(
         model__endpoint=payload.model_endpoint,
         model__api_key=payload.model_api_key,
         model__provider=payload.model_provider,
+        model__using_cache=use_llm_prompt_caching,
     )
 
 
@@ -467,6 +470,10 @@ def _build_code_completions(
     internal_event_client: InternalEventsClient,
     region: str,
 ) -> tuple[CodeCompletions | CodeCompletionsLegacy, dict]:
+    # Default to use cache
+    use_llm_prompt_caching = (
+        request.headers.get(X_GITLAB_MODEL_PROMPT_CACHE_ENABLED, "true") == "true"
+    )
     kwargs = {}
 
     unit_primitive = GitLabUnitPrimitive.COMPLETE_CODE
@@ -486,6 +493,7 @@ def _build_code_completions(
             payload=payload,
             current_user=current_user,
             prompt_registry=prompt_registry,
+            use_llm_prompt_caching=use_llm_prompt_caching,
             completions_agent_factory=completions_agent_factory,
             completions_litellm_factory=completions_litellm_factory,
         )
@@ -507,6 +515,7 @@ def _build_code_completions(
             payload=payload,
             current_user=current_user,
             prompt_registry=prompt_registry,
+            use_llm_prompt_caching=use_llm_prompt_caching,
             completions_agent_factory=completions_agent_factory,
             completions_litellm_factory=completions_fireworks_factory,
         )
