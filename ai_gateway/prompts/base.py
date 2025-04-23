@@ -139,14 +139,14 @@ class Prompt(RunnableBinding[Input, Output]):
     ) -> Output:
         with self.instrumentator.watch(
             stream=False
-        ), get_usage_metadata_callback() as cb:
+        ) as watcher, get_usage_metadata_callback() as cb:
             result = await super().ainvoke(
                 input,
                 self._add_logger_to_config(config),
                 **kwargs,
             )
 
-            self.handle_usage_metadata(cb.usage_metadata)
+            self.handle_usage_metadata(watcher, cb.usage_metadata)
 
             return result
 
@@ -169,16 +169,22 @@ class Prompt(RunnableBinding[Input, Output]):
             ):
                 yield item
 
-            self.handle_usage_metadata(cb.usage_metadata)
+            self.handle_usage_metadata(watcher, cb.usage_metadata)
 
             await watcher.afinish()
         # pylint: enable=contextmanager-generator-missing-cleanup
 
-    def handle_usage_metadata(self, usage_metadata: dict[str, UsageMetadata]) -> None:
+    def handle_usage_metadata(
+        self,
+        watcher: ModelRequestInstrumentator.WatchContainer,
+        usage_metadata: dict[str, UsageMetadata],
+    ) -> None:
         if self.internal_event_client is None:
             return
 
         for model, usage in usage_metadata.items():
+            watcher.register_token_usage(model, usage)
+
             for unit_primitive in self.unit_primitives:
                 self.internal_event_client.track_event(
                     f"token_usage_{unit_primitive}",

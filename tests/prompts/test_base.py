@@ -26,6 +26,21 @@ from ai_gateway.prompts.config.base import PromptParams
 from ai_gateway.prompts.typing import Model
 
 
+@pytest.fixture
+def mock_watcher():
+    return mock.AsyncMock()
+
+
+@pytest.fixture
+def mock_watch(mock_watcher: Mock):
+    with mock.patch(
+        "ai_gateway.instrumentators.model_requests.ModelRequestInstrumentator.watch"
+    ) as mock_watch:
+        mock_watch.return_value.__enter__.return_value = mock_watcher
+
+        yield mock_watch
+
+
 class TestPrompt:
     @pytest.mark.parametrize(
         ("model_params", "expected_model_engine"),
@@ -66,13 +81,10 @@ class TestPrompt:
 
     @pytest.mark.asyncio
     @mock.patch("ai_gateway.prompts.base.get_request_logger")
-    @mock.patch(
-        "ai_gateway.instrumentators.model_requests.ModelRequestInstrumentator.watch"
-    )
     async def test_ainvoke(
         self,
-        mock_watch: mock.Mock,
         mock_get_logger: mock.Mock,
+        mock_watch: mock.Mock,
         prompt: Prompt,
         model_response: str,
     ):
@@ -92,18 +104,14 @@ class TestPrompt:
 
     @pytest.mark.asyncio
     @mock.patch("ai_gateway.prompts.base.get_request_logger")
-    @mock.patch(
-        "ai_gateway.instrumentators.model_requests.ModelRequestInstrumentator.watch"
-    )
     async def test_astream(
         self,
-        mock_watch: mock.Mock,
         mock_get_logger: mock.Mock,
+        mock_watch: mock.Mock,
+        mock_watcher: mock.Mock,
         prompt: Prompt,
         model_response: str,
     ):
-        mock_watcher = mock.AsyncMock()
-        mock_watch.return_value.__enter__.return_value = mock_watcher
         response = ""
 
         mock_logger = mock.MagicMock()
@@ -132,6 +140,8 @@ class TestPrompt:
     )
     async def test_ainvoke_handle_usage_metadata(
         self,
+        mock_watch: mock.Mock,
+        mock_watcher: mock.Mock,
         internal_event_client: mock.Mock,
         prompt: Prompt,
         usage_metadata: UsageMetadata,
@@ -139,7 +149,9 @@ class TestPrompt:
         prompt.internal_event_client = internal_event_client
         await prompt.ainvoke({"name": "Duo", "content": "What's up?"})
 
-        _assert_usage_metadata_handling(internal_event_client, prompt, usage_metadata)
+        _assert_usage_metadata_handling(
+            mock_watcher, internal_event_client, prompt, usage_metadata
+        )
 
     @pytest.mark.asyncio
     @pytest.mark.parametrize(
@@ -148,6 +160,8 @@ class TestPrompt:
     )
     async def test_astream_handle_usage_metadata(
         self,
+        mock_watch: mock.Mock,
+        mock_watcher: mock.Mock,
         internal_event_client: mock.Mock,
         prompt: Prompt,
         usage_metadata: UsageMetadata,
@@ -158,12 +172,20 @@ class TestPrompt:
         async for _ in prompt.astream({"name": "Duo", "content": "What's up?"}):
             pass
 
-        _assert_usage_metadata_handling(internal_event_client, prompt, usage_metadata)
+        _assert_usage_metadata_handling(
+            mock_watcher, internal_event_client, prompt, usage_metadata
+        )
 
 
 def _assert_usage_metadata_handling(
-    internal_event_client: mock.Mock, prompt: Prompt, usage_metadata: UsageMetadata
+    mock_watcher: mock.Mock,
+    internal_event_client: mock.Mock,
+    prompt: Prompt,
+    usage_metadata: UsageMetadata,
 ):
+    mock_watcher.register_token_usage.assert_called_once_with(
+        prompt.model_name, usage_metadata
+    )
     for unit_primitive in prompt.unit_primitives:
         internal_event_client.track_event.assert_any_call(
             f"token_usage_{unit_primitive}",
