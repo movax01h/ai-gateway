@@ -15,4 +15,3 @@ AIGW_CUSTOM_MODELS__ENABLED: "true"
 AIGW_CLOUD_CONNECTOR_SERVICE_NAME: "gitlab-ai-gateway"
 AIGW_MODEL_ENDPOINTS__FIREWORKS_REGIONAL_ENDPOINTS: '{ "us": {"qwen2p5-coder-7b": { "endpoint": "https://gitlab-ac589058.us-virginia-1.direct.fireworks.ai/v1", "identifier": "accounts/fireworks/models/qwen2p5-coder-7b#accounts/gitlab/deployments/ac589058"}, "codestral-2501": {"endpoint": "https://gitlab-fd046d6c.us-arizona-1.direct.fireworks.ai/v1","identifier": "accounts/gitlab/models/codestral-2501"}}}'
 AIGW_FEATURE_FLAGS__FIREWORKS_SCORE_THRESHOLD: '{"qwen2p5-coder-7b": -1.5}'
-DISABLE_DUO_WORKFLOW_SERVICE: "true"
