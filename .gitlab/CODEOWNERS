@@ -4,5 +4,8 @@
 # https://gitlab.com/groups/gitlab-org/maintainers/ai-gateway/-/group_members?with_inherited_permissions=exclude
 * @gitlab-org/maintainers/ai-gateway
 
+^[Duo Workflow Service] @AndrasHerczeg @DylanGriffith @halilcoban @jfypk @Joey_Khabie @mikolaj_wawrzyniak @shekharpatnaik @ssuman3
+duo_workflow_service/
+
 ^[Infrastructure]
 * @gitlab-org/production-engineering @gitlab-org/scalability
