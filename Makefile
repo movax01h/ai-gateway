@@ -14,7 +14,6 @@ LINT_WORKING_DIR ?= ${AI_GATEWAY_DIR} \
 	${INTEGRATION_TESTS_DIR}
 
 MYPY_LINT_TODO_DIR ?= --exclude "ai_gateway/models/anthropic.py" \
-	--exclude "ai_gateway/models/base.py" \
 	--exclude "ai_gateway/models/litellm.py" \
 	--exclude "ai_gateway/models/mock.py" \
 	--exclude "ai_gateway/models/v2/anthropic_claude.py" \
