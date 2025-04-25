@@ -31,6 +31,7 @@ from duo_workflow_service.tools.request_user_clarification import (
     RequestUserClarificationTool,
 )
 
+from ...internal_events.event_enum import CategoryEnum
 from .prompts import (
     ASSIGNMENT_PROMPT,
     CLARITY_JUDGE_RESPONSE_TEMPLATE,
@@ -54,20 +55,22 @@ class Routes(StrEnum):
 
 
 class GoalDisambiguationComponent:
-    # pylint: disable=too-many-positional-arguments
+    #: pylint: disable=too-many-positional-arguments
     def __init__(
         self,
         goal: str,
         model: BaseChatModel,
         workflow_id: str,
         tools_registry: ToolsRegistry,
-        http_client: GitlabHttpClient,  # type: ignore
+        http_client: GitlabHttpClient,
+        workflow_type: CategoryEnum,
     ):
         self._goal = goal
         self._model = model
         self._workflow_id = workflow_id
         self._http_client = http_client
         self._tools_registry = tools_registry
+        self._workflow_type = workflow_type
 
     # pylint: enable=too-many-positional-arguments
 
@@ -95,6 +98,7 @@ class GoalDisambiguationComponent:
             ),
             http_client=self._http_client,
             workflow_id=self._workflow_id,
+            workflow_type=self._workflow_type,
         )
         task_clarity_handover = HandoverAgent(
             new_status=WorkflowStatusEnum.PLANNING,

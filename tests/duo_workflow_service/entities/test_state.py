@@ -577,6 +577,39 @@ def test_ui_chat_log_reducer_with_empty_lists():
             ],
             [None, None, None, None],
         ),
+        # Test case: Tool message with empty content
+        (
+            [
+                SystemMessage(content="system message"),
+                HumanMessage(content="human message"),
+                AIMessage(content="ai message"),
+                ToolMessage(content="", tool_call_id="tool-call-1"),
+            ],
+            [SystemMessage, HumanMessage, AIMessage],
+            [
+                "system message",
+                "human message",
+                "ai message",
+            ],
+            [None, None, None],
+        ),
+        # Test case: Tool message with string "None" content
+        (
+            [
+                SystemMessage(content="system message"),
+                HumanMessage(content="human message"),
+                AIMessage(content="ai message"),
+                ToolMessage(content="None", tool_call_id="tool-call-1"),
+            ],
+            [SystemMessage, HumanMessage, AIMessage, HumanMessage],
+            [
+                "system message",
+                "human message",
+                "ai message",
+                "None",
+            ],
+            [None, None, None, None],
+        ),
     ],
 )
 def test_restore_message_consistency(
@@ -671,6 +704,19 @@ def test_restore_message_consistency_tool_message_before_tool_call():
                 SystemMessage(content="system message"),
                 HumanMessage(content="human message"),
                 HumanMessage(content="orphaned tool response"),  # Converted
+            ],
+        ),
+        # Test case: Orphaned tool message with empty content is dropped
+        (
+            [
+                SystemMessage(content="system message"),
+                HumanMessage(content="human message"),
+                ToolMessage(content="", tool_call_id="tool-call-1"),
+            ],
+            [
+                SystemMessage(content="system message"),
+                HumanMessage(content="human message"),
+                # No message for empty content
             ],
         ),
     ],

@@ -18,7 +18,11 @@ from duo_workflow_service.entities.state import (
     WorkflowStatusEnum,
 )
 from duo_workflow_service.internal_events import InternalEventAdditionalProperties
-from duo_workflow_service.internal_events.event_enum import EventEnum, EventLabelEnum
+from duo_workflow_service.internal_events.event_enum import (
+    CategoryEnum,
+    EventEnum,
+    EventLabelEnum,
+)
 from duo_workflow_service.tools import PipelineMergeRequestNotFoundError
 from duo_workflow_service.tools.planner import (
     AddNewTaskInput,
@@ -110,10 +114,12 @@ async def test_run(
 
     mock_internal_event_tracker.instance = MagicMock(return_value=None)
     mock_internal_event_tracker.track_event = MagicMock(return_value=None)
+    workflow_type = CategoryEnum.WORKFLOW_SOFTWARE_DEVELOPMENT
     tools_executor = ToolsExecutor(
         tools_agent_name="planner",
         agent_tools=list(test_case.tools.keys()),
         workflow_id="123",
+        workflow_type=workflow_type,
     )
     workflow_state["conversation_history"]["planner"] = [
         AIMessage(content="test", tool_calls=test_case.tool_calls),
@@ -154,7 +160,7 @@ async def test_run(
                             property=mock_tool().name,
                             value="123",
                         ),
-                        category="ToolsExecutor",
+                        category=workflow_type.value,
                     ),
                 ]
             )
@@ -287,7 +293,10 @@ async def test_run_with_state_manipulating_tools(
     mock_datetime.timezone = timezone
 
     tools_executor = ToolsExecutor(
-        tools_agent_name="planner", agent_tools=[], workflow_id="123"
+        tools_agent_name="planner",
+        agent_tools=[],
+        workflow_id="123",
+        workflow_type=CategoryEnum.WORKFLOW_SOFTWARE_DEVELOPMENT,
     )
     workflow_state["conversation_history"]["planner"] = [
         AIMessage(content="test", tool_calls=test_case["tool_calls"]),
@@ -377,9 +386,13 @@ async def test_run_error_handling(
 
     mock_internal_event_tracker.instance = MagicMock(return_value=None)
     mock_internal_event_tracker.track_event = MagicMock(return_value=None)
+    workflow_type = CategoryEnum.WORKFLOW_SOFTWARE_DEVELOPMENT
     tool = mock_tool(side_effect=tool_side_effect, args_schema=tool_args_schema)
     tools_executor = ToolsExecutor(
-        tools_agent_name="planner", agent_tools=[tool], workflow_id="123"
+        tools_agent_name="planner",
+        agent_tools=[tool],
+        workflow_id="123",
+        workflow_type=workflow_type,
     )
     workflow_state["conversation_history"]["planner"] = [
         AIMessage(content="test", tool_calls=[tool_call]),
@@ -398,7 +411,7 @@ async def test_run_error_handling(
                     value="123",
                     error=str(tool_side_effect),
                 ),
-                category="ToolsExecutor",
+                category=workflow_type.value,
             ),
         ]
     )
@@ -444,7 +457,10 @@ async def test_run_error_handling(
 )
 def test_get_tool_display_message_action_handlers(tool_name, args, expected_message):
     tools_executor = ToolsExecutor(
-        tools_agent_name="test_agent", agent_tools=[], workflow_id="123"
+        tools_agent_name="test_agent",
+        agent_tools=[],
+        workflow_id="123",
+        workflow_type=CategoryEnum.WORKFLOW_SOFTWARE_DEVELOPMENT,
     )
 
     message = tools_executor.get_tool_display_message(tool_name, args)
@@ -474,7 +490,10 @@ class MockGetIssue(BaseTool):
 def test_get_tool_display_message_tool_lookup():
     mock_tool = MockGetIssue()
     tools_executor = ToolsExecutor(
-        tools_agent_name="test_agent", agent_tools=[mock_tool], workflow_id="123"
+        tools_agent_name="test_agent",
+        agent_tools=[mock_tool],
+        workflow_id="123",
+        workflow_type=CategoryEnum.WORKFLOW_SOFTWARE_DEVELOPMENT,
     )
 
     valid_args = {"project_id": 123, "issue_id": 456}
@@ -484,7 +503,10 @@ def test_get_tool_display_message_tool_lookup():
 
 def test_get_tool_display_message_unknown_tool():
     tools_executor = ToolsExecutor(
-        tools_agent_name="test_agent", agent_tools=[], workflow_id="123"
+        tools_agent_name="test_agent",
+        agent_tools=[],
+        workflow_id="123",
+        workflow_type=CategoryEnum.WORKFLOW_SOFTWARE_DEVELOPMENT,
     )
 
     message = tools_executor.get_tool_display_message(

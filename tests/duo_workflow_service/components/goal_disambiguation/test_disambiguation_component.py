@@ -32,6 +32,7 @@ from duo_workflow_service.entities import (
     WorkflowStatusEnum,
 )
 from duo_workflow_service.gitlab.http_client import GitlabHttpClient
+from duo_workflow_service.internal_events.event_enum import CategoryEnum
 from duo_workflow_service.tools.request_user_clarification import (
     RequestUserClarificationTool,
 )
@@ -121,6 +122,7 @@ class TestGoalDisambiguationComponent:
                 model=chat_mock,
                 tools_registry=tools_registry_mock,
                 http_client=mock_http_client,
+                workflow_type=CategoryEnum.WORKFLOW_SOFTWARE_DEVELOPMENT,
             )
             entry_point = component.attach(
                 graph=graph,
@@ -189,6 +191,7 @@ class TestGoalDisambiguationComponent:
                 model=chat_mock,
                 tools_registry=tools_registry_mock,
                 http_client=mock_http_client,
+                workflow_type=CategoryEnum.WORKFLOW_SOFTWARE_DEVELOPMENT,
             )
             entry_point = component.attach(
                 graph=graph,
@@ -244,6 +247,7 @@ class TestGoalDisambiguationComponent:
                 model=chat_mock,
                 tools_registry=tools_registry_mock,
                 http_client=mock_http_client,
+                workflow_type=CategoryEnum.WORKFLOW_SOFTWARE_DEVELOPMENT,
             )
             entry_point = component.attach(
                 graph=graph,
@@ -311,6 +315,7 @@ class TestGoalDisambiguationComponent:
                 model=chat_mock,
                 tools_registry=tools_registry_mock,
                 http_client=mock_http_client,
+                workflow_type=CategoryEnum.WORKFLOW_SOFTWARE_DEVELOPMENT,
             )
             entry_point = component.attach(
                 graph=graph,
@@ -382,6 +387,7 @@ class TestGoalDisambiguationComponent:
                 model=chat_mock,
                 tools_registry=tools_registry_mock,
                 http_client=mock_http_client,
+                workflow_type=CategoryEnum.WORKFLOW_SOFTWARE_DEVELOPMENT,
             )
             entry_point = component.attach(
                 graph=graph,
@@ -481,6 +487,7 @@ class TestGoalDisambiguationComponent:
                 model=chat_mock,
                 tools_registry=tools_registry_mock,
                 http_client=mock_http_client,
+                workflow_type=CategoryEnum.WORKFLOW_SOFTWARE_DEVELOPMENT,
             )
             entry_point = component.attach(
                 graph=graph,
@@ -555,6 +562,7 @@ class TestGoalDisambiguationComponent:
                 model=chat_mock,
                 tools_registry=tools_registry_mock,
                 http_client=mock_http_client,
+                workflow_type=CategoryEnum.WORKFLOW_SOFTWARE_DEVELOPMENT,
             )
             entry_point = component.attach(
                 graph=graph,
@@ -606,6 +614,7 @@ class TestGoalDisambiguationComponent:
                 model=chat_mock,
                 tools_registry=tools_registry_mock,
                 http_client=mock_http_client,
+                workflow_type=CategoryEnum.WORKFLOW_SOFTWARE_DEVELOPMENT,
             )
             entry_point = component.attach(
                 graph=graph,
@@ -652,6 +661,7 @@ class TestGoalDisambiguationComponent:
                 model=chat_mock,
                 tools_registry=tools_registry_mock,
                 http_client=mock_http_client,
+                workflow_type=CategoryEnum.WORKFLOW_SOFTWARE_DEVELOPMENT,
             )
             entry_point = component.attach(
                 graph=graph,

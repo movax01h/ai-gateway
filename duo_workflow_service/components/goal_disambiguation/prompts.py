@@ -52,24 +52,28 @@ CLARITY ASSESSMENT REPORT
 Overall Clarity Score: [Average of all criteria scores]
 
 Strengths:
-1. [List specific elements that are well-defined]
-2. [...]
+1. [Specific element that is well-defined]
+2. [Another well-defined element]
+[Add more as needed, using a numbered list]
 
 Areas Needing Clarification:
-1. [List specific ambiguities or missing information]
-2. [...]
+1. [Specific ambiguity or missing information]
+2. [Another area needing clarification]
+[Add more as needed, using a numbered list]
 
 Context Considerations:
-- [Note any relevant information from conversation history]
-- [Highlight any potential conflicts with previous requirements]
+1. [Relevant information from conversation history]
+2. [Potential conflicts with previous requirements]
+[Add more as needed, using a numbered list]
 
 Recommendations:
-1. [Specific suggestions for improving task clarity]
-2. [...]
+1. [Specific suggestion for improving task clarity]
+2. [Another suggestion for improvement]
+[Add more as needed, using a numbered list]
 
 Final Verdict:
 [CLEAR/NEEDS CLARIFICATION/UNCLEAR]
-Brief explanation of the verdict (2-3 sentences)
+[Brief explanation of the verdict in 2-3 sentences]
 
 ### Example Usage
 

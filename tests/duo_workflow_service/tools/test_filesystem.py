@@ -8,6 +8,7 @@ from duo_workflow_service.tools import ReadFile, WriteFile
 from duo_workflow_service.tools.filesystem import (
     EditFile,
     EditFileInput,
+    FilesScopeEnum,
     FindFiles,
     FindFilesInput,
     Grep,
@@ -109,24 +110,60 @@ class TestFindFiles:
         assert result == "file1.py\nfile2.py"
         mock_git_arun.assert_called_once_with(
             repository_url="",
-            args="--exclude-standard --cached --others '*.py'",
+            args="--exclude-standard --cached --others *.py",
+            command="ls-files",
+        )
+
+    @pytest.mark.asyncio
+    @patch("duo_workflow_service.tools.filesystem.GitCommand", autospec=True)
+    async def test_find_files_empty_result(self, mock_git_command):
+        mock_git_arun = AsyncMock(return_value="")
+        mock_git_command.return_value._arun = mock_git_arun
+
+        tool = FindFiles()
+        name_pattern = "*.nonexistent"
+        result = await tool._arun(".", name_pattern)
+
+        assert "No matches found for pattern '*.nonexistent'" in result
+        mock_git_arun.assert_called_once_with(
+            repository_url="",
+            args="--exclude-standard --cached --others *.nonexistent",
+            command="ls-files",
+        )
+
+    @pytest.mark.asyncio
+    @patch("duo_workflow_service.tools.filesystem.GitCommand", autospec=True)
+    async def test_find_files_whitespace_result(self, mock_git_command):
+        mock_git_arun = AsyncMock(return_value="  \n \t ")
+        mock_git_command.return_value._arun = mock_git_arun
+
+        tool = FindFiles()
+        name_pattern = "*.nonexistent"
+        result = await tool._arun(".", name_pattern)
+
+        assert "No matches found for pattern '*.nonexistent'" in result
+        mock_git_arun.assert_called_once_with(
+            repository_url="",
+            args="--exclude-standard --cached --others *.nonexistent",
             command="ls-files",
         )
 
     @pytest.mark.asyncio
     @pytest.mark.parametrize(
-        ("flags", "expected_args"),
+        ("files_scope", "expected_args"),
         [
-            (["--cached"], "--exclude-standard --cached"),
-            (["--others"], "--exclude-standard --others"),
-            (["--modified"], "--exclude-standard --modified --cached --others"),
+            (FilesScopeEnum.ALL, "--exclude-standard --cached --others"),
+            (FilesScopeEnum.TRACKED, "--exclude-standard --cached"),
+            (FilesScopeEnum.UNTRACKED, "--exclude-standard --others"),
+            (FilesScopeEnum.MODIFIED, "--exclude-standard --modified"),
+            (FilesScopeEnum.DELETED, "--exclude-standard --deleted"),
         ],
     )
     @patch("duo_workflow_service.tools.filesystem.GitCommand")
-    async def test_find_files_arun_method_with_flag(
+    async def test_find_files_arun_method_with_params(
         self,
         mock_git_command,
-        flags: list[str],
+        files_scope: FilesScopeEnum,
         expected_args: str,
     ):
         mock_git_arun = AsyncMock(return_value="file1.py\nfile2.py")
@@ -134,12 +171,12 @@ class TestFindFiles:
 
         tool = FindFiles()
         name_pattern = "*.py"
-        result = await tool._arun(".", name_pattern, flags)
+        result = await tool._arun(".", name_pattern, files_scope=files_scope)
 
         assert result == "file1.py\nfile2.py"
         mock_git_arun.assert_called_once_with(
             repository_url="",
-            args=f"{expected_args} '*.py'",
+            args=f"{expected_args} *.py",
             command="ls-files",
         )
 
@@ -153,21 +190,6 @@ class TestFindFiles:
 
 class TestLsFiles:
     @pytest.mark.asyncio
-    @patch.dict(os.environ, {"FEATURE_GIT_LS_TREE_INSTEAD_OF_LS": "false"})
-    @patch("duo_workflow_service.tools.filesystem.RunCommand", autospec=True)
-    async def test_run_command_success(self, mock_run_command):
-        mock_arun = AsyncMock(return_value=".file1 file2 directory")
-        mock_run_command.return_value._arun = mock_arun
-
-        ls_command = LsFiles()
-
-        response = await ls_command._arun(directory="app")
-
-        assert response == ".file1 file2 directory"
-        mock_arun.assert_called_once_with("ls", arguments=["app"], flags=["-a"])
-
-    @pytest.mark.asyncio
-    @patch.dict(os.environ, {"FEATURE_GIT_LS_TREE_INSTEAD_OF_LS": "true"})
     @patch("duo_workflow_service.tools.filesystem.GitCommand", autospec=True)
     async def test_run_git_command_success(self, mock_git_command):
         mock_arun = AsyncMock(return_value=".file1 file2 directory")
@@ -200,9 +222,9 @@ class TestGrep:
     valid_test_cases = [
         # Basic recursive search
         pytest.param(
-            {"pattern": "test", "search_directory": None, "flags": ["-r"]},
+            {"pattern": "test", "search_directory": None, "recursive": True},
             "test.py:10:test line",
-            "-r 'test'",
+            "-r test",
             id="basic_recursive_grep",
         ),
         # Test with directory
@@ -212,7 +234,7 @@ class TestGrep:
                 "search_directory": "src",
             },
             "src/test.py:10:test line",
-            "'test' -- src",
+            "test -- src",
             id="with_directory",
         ),
         # Test with files_without_match
@@ -220,32 +242,32 @@ class TestGrep:
             {
                 "pattern": "test",
                 "search_directory": None,
-                "flags": ["--files-without-match"],
+                "files_without_match": True,
             },
             "file3.py",
-            "--files-without-match 'test'",
+            "--files-without-match test",
             id="files_without_match",
         ),
         # Test with files_with_matches
         pytest.param(
-            {"pattern": "test", "flags": ["--files-with-matches"]},
+            {"pattern": "test", "files_with_matches": True},
             "file1.py\nfile2.py",
-            "--files-with-matches 'test'",
+            "--files-with-matches test",
             id="files_with_matches",
         ),
-        # Test with ignore_case
+        # Test with case_insensitive
         pytest.param(
-            {"pattern": "test", "flags": ["--ignore-case"]},
+            {"pattern": "test", "case_insensitive": True},
             "test.py:10:TEST line",
-            "--ignore-case 'test'",
+            "-i test",
             id="ignore_case",
         ),
-        # Test with complex pattern
+        # Test with fixed_strings
         pytest.param(
-            {"pattern": "<!-- tags:", "flags": ["-F"]},
+            {"pattern": "<!-- tags:", "fixed_strings": True},
             "file1.py\nfile2.py",
-            "-F '<!-- tags:'",
-            id="multiple_flags",
+            "-F <!-- tags:",
+            id="fixed_strings",
         ),
     ]
 
@@ -383,11 +405,50 @@ def test_write_file_format_display_message():
 def test_find_files_format_display_message():
     tool = FindFiles(description="Find files description")
 
-    input_data = FindFilesInput(directory=".", name_pattern="*.py", flags=["--others"])
-
+    # Test with default parameters
+    input_data = FindFilesInput(directory=".", name_pattern="*.py")
     message = tool.format_display_message(input_data)
+    expected_message = "Search files in '.' with pattern '*.py' (All files)"
+    assert message == expected_message
 
-    expected_message = "Search files in '.' with pattern '*.py'"
+    # Test with tracked_only
+    input_data = FindFilesInput(
+        directory=".",
+        name_pattern="*.py",
+        files_scope=FilesScopeEnum.TRACKED,
+    )
+    message = tool.format_display_message(input_data)
+    expected_message = "Search files in '.' with pattern '*.py' (tracked only)"
+    assert message == expected_message
+
+    # Test with untracked_only
+    input_data = FindFilesInput(
+        directory=".",
+        name_pattern="*.py",
+        files_scope=FilesScopeEnum.UNTRACKED,
+    )
+    message = tool.format_display_message(input_data)
+    expected_message = "Search files in '.' with pattern '*.py' (untracked only)"
+    assert message == expected_message
+
+    # Test with modified
+    input_data = FindFilesInput(
+        directory=".",
+        name_pattern="*.py",
+        files_scope=FilesScopeEnum.MODIFIED,
+    )
+    message = tool.format_display_message(input_data)
+    expected_message = "Search files in '.' with pattern '*.py' (modified only)"
+    assert message == expected_message
+
+    # Test with deleted
+    input_data = FindFilesInput(
+        directory=".",
+        name_pattern="*.py",
+        files_scope=FilesScopeEnum.DELETED,
+    )
+    message = tool.format_display_message(input_data)
+    expected_message = "Search files in '.' with pattern '*.py' (deleted only)"
     assert message == expected_message
 
 
@@ -405,10 +466,33 @@ def test_ls_files_format_display_message():
 def test_grep_format_display_message():
     tool = Grep(description="Grep description")
 
-    input_data = GrepInput(pattern="TODO", search_directory="./src", flags=["-r"])
-
+    # Basic test with directory
+    input_data = GrepInput(pattern="TODO", search_directory="./src")
     message = tool.format_display_message(input_data)
+    expected_message = "Search for 'TODO' in files in './src'"
+    assert message == expected_message
 
+    # Test with options
+    input_data = GrepInput(
+        pattern="TODO", search_directory="./src", recursive=True, case_insensitive=True
+    )
+    message = tool.format_display_message(input_data)
+    expected_message = "Search for 'TODO' in files in './src'"
+    assert message == expected_message
+
+    # Test with all options
+    input_data = GrepInput(
+        pattern="TODO",
+        search_directory="./src",
+        recursive=True,
+        case_insensitive=True,
+        include_untracked=True,
+        files_with_matches=True,
+        files_without_match=True,
+        no_recursive=True,
+        fixed_strings=True,
+    )
+    message = tool.format_display_message(input_data)
     expected_message = "Search for 'TODO' in files in './src'"
     assert message == expected_message
 
@@ -416,10 +500,17 @@ def test_grep_format_display_message():
 def test_grep_format_display_message_no_directory():
     tool = Grep(description="Grep description")
 
-    input_data = GrepInput(pattern="TODO", search_directory=None, flags=["-r"])
-
+    # Basic test with no directory
+    input_data = GrepInput(pattern="TODO", search_directory=None)
     message = tool.format_display_message(input_data)
+    expected_message = "Search for 'TODO' in directory"
+    assert message == expected_message
 
+    # Test with options and no directory
+    input_data = GrepInput(
+        pattern="TODO", search_directory=None, recursive=True, case_insensitive=True
+    )
+    message = tool.format_display_message(input_data)
     expected_message = "Search for 'TODO' in directory"
     assert message == expected_message
 

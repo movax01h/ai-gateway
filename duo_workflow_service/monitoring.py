@@ -3,7 +3,11 @@ import os
 import structlog
 from prometheus_client import start_http_server
 
+from duo_workflow_service.tracking.duo_workflow_metrics import DuoWorkflowMetrics
+
 log = structlog.stdlib.get_logger("monitoring")
+
+duo_workflow_metrics = DuoWorkflowMetrics()
 
 
 def setup_monitoring():
@@ -18,3 +22,5 @@ def setup_monitoring():
         )
     else:
         log.debug("Metrics are disabled...")
+
+    return duo_workflow_metrics

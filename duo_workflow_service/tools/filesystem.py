@@ -1,5 +1,5 @@
-import os
-from typing import List, Optional, Type
+from enum import IntEnum
+from typing import Optional, Type
 
 from pydantic import BaseModel, Field
 
@@ -38,7 +38,7 @@ class ReadFile(DuoBaseTool):
 class WriteFileInput(BaseModel):
     file_path: str = Field(description="the file_path to write the file to")
     contents: str = Field(
-        "", description="the contents to write in the file. *This is required*"
+        description="the contents to write in the file. *This is required*"
     )
 
 
@@ -63,17 +63,28 @@ class WriteFile(DuoBaseTool):
         return "Create file"
 
 
+class FilesScopeEnum(IntEnum):
+    ALL = 0
+    TRACKED = 1
+    UNTRACKED = 2
+    MODIFIED = 3
+    DELETED = 4
+
+
 class FindFilesInput(BaseModel):
     directory: str = Field(description="Always pass .")
     name_pattern: str = Field(
         description="The wildcard pattern to search for, e.g. '**/*.py' for all Python files."
     )
-    flags: Optional[list[str]] = Field(
-        None,
-        description=(
-            "The options to pass to the git ls-files command, e.g. ['--others'] to search for only untracked files."
-            "All valid options for git ls-files can be used."
-        ),
+    files_scope: Optional[FilesScopeEnum] = Field(
+        default=FilesScopeEnum.ALL.value,
+        description="""
+        - 0: (Default): Finds all files matching the pattern. (equivalent to using --cached --others flags together)",
+        - 1: Finds only tracked files. (equivalent to using --cached flag only)
+        - 2: Finds only untracked files. (equivalent to using --others flag only)
+        - 3: Finds only modified files . (equivalent to using --modified flag only)
+        - 4: Finds only deleted files (equivalent to using --deleted flag only)
+        """,
     )
 
 
@@ -88,38 +99,74 @@ class FindFiles(DuoBaseTool):
     Examples:
     - Find all Python files (both tracked and untracked) recursively: find_files(name_pattern="**/*.py")
     - Find a specific file with path (whether tracked or not): find_files(name_pattern="path/to/file.txt")
-    - Find only tracked Python files in current directory: find_files(name_pattern="*.py", flags=["--cached"])
+    - Find only tracked Python files in current directory: find_files(name_pattern="*.py", files_scope=1)
+    - Find only untracked Python files: find_files(name_pattern="*.py", files_scope=2)
+    - Find only modified Python files: find_files(name_pattern="*.py", files_scope=3)
+    - Find only deleted Python files: find_files(name_pattern="*.py", files_scope=4)
     """
     args_schema: Type[BaseModel] = FindFilesInput  # type: ignore
 
     async def _arun(
-        self, directory: str, name_pattern: str, flags: Optional[list[str]] = None
+        self,
+        directory: str,
+        name_pattern: str,
+        files_scope: FilesScopeEnum = FilesScopeEnum.ALL,
     ) -> str:
         run_git_command = GitCommand(metadata=self.metadata)
 
         # Always exclude files ignored by git
         ls_files_args = ["--exclude-standard"]
 
-        user_flags = flags or []
-        ls_files_args.extend(user_flags)
+        # Process tracking flags
+        match files_scope:
+            case FilesScopeEnum.ALL.value:
+                ls_files_args.extend(["--cached", "--others"])
 
-        tracking_flags = ["--cached", "--others"]
-        if not any(flag in user_flags for flag in tracking_flags):
-            # By default, include both tracked and untracked files unless
-            # a specific one is specified.
-            ls_files_args.extend(tracking_flags)
+            case FilesScopeEnum.TRACKED.value:
+                ls_files_args.append("--cached")
+
+            case FilesScopeEnum.UNTRACKED.value:
+                ls_files_args.append("--others")
+
+            case FilesScopeEnum.MODIFIED.value:
+                ls_files_args.append("--modified")
+
+            case FilesScopeEnum.DELETED.value:
+                ls_files_args.append("--deleted")
 
         if name_pattern:
-            ls_files_args.append(ensure_pattern_is_quoted(name_pattern))
+            ls_files_args.append(name_pattern)
 
-        return await run_git_command._arun(
+        result = await run_git_command._arun(
             repository_url="",
             command="ls-files",
             args=" ".join(ls_files_args),
         )
 
+        if not result or result.isspace():
+            return _format_no_matches_message(name_pattern, directory)
+
+        return result
+
     def format_display_message(self, args: FindFilesInput) -> str:
-        return f"Search files in '{args.directory}' with pattern '{args.name_pattern}'"
+        mode = ""
+        match args.files_scope:
+            case FilesScopeEnum.ALL:
+                mode = " (All files)"
+
+            case FilesScopeEnum.TRACKED:
+                mode = " (tracked only)"
+
+            case FilesScopeEnum.UNTRACKED:
+                mode = " (untracked only)"
+
+            case FilesScopeEnum.MODIFIED:
+                mode = " (modified only)"
+
+            case FilesScopeEnum.DELETED:
+                mode = " (deleted only)"
+
+        return f"Search files in '{args.directory}' with pattern '{args.name_pattern}'{mode}"
 
 
 class LsFilesInput(BaseModel):
@@ -130,45 +177,24 @@ class LsFilesInput(BaseModel):
 
 class LsFiles(DuoBaseTool):
     name: str = "ls_files"
-    description: str = "Run ls -a on a specific directory."
-    args_schema: Type[BaseModel] = LsFilesInput  # type: ignore
-
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-
-        if (
-            os.environ.get("FEATURE_GIT_LS_TREE_INSTEAD_OF_LS", "False").lower()
-            == "true"
-        ):
-            self.description = """Lists the contents of a given directory by running the git ls-tree --name-only HEAD:dir command.
+    description: str = """Lists the contents of a given directory by running the git ls-tree --name-only HEAD:dir command.
           The command lists only git tracked files (cached in Git’s index)."""
+    args_schema: Type[BaseModel] = LsFilesInput  # type: ignore
 
     async def _arun(
         self,
         directory: str,
     ) -> str:
-        if (
-            os.environ.get("FEATURE_GIT_LS_TREE_INSTEAD_OF_LS", "False").lower()
-            == "true"
-        ):
-            run_git_command = GitCommand(metadata=self.metadata)
+        run_git_command = GitCommand(metadata=self.metadata)
 
-            if not directory.endswith("/"):
-                directory += "/"
+        if not directory.endswith("/"):
+            directory += "/"
 
-            return await run_git_command._arun(
-                repository_url="",
-                command="ls-tree",
-                args=f"--name-only HEAD:{directory}",
-            )
-
-        run_command = RunCommand(
-            name="run_command",
-            description="Run a shell command",
-            metadata=self.metadata,
+        return await run_git_command._arun(
+            repository_url="",
+            command="ls-tree",
+            args=f"--name-only HEAD:{directory}",
         )
-
-        return await run_command._arun("ls", arguments=[directory], flags=["-a"])
 
     def format_display_message(self, args: LsFilesInput) -> str:
         return f"List files in '{args.directory}'"
@@ -176,15 +202,38 @@ class LsFiles(DuoBaseTool):
 
 class GrepInput(BaseModel):
     search_directory: Optional[str] = Field(
-        None,
+        default=None,
         description="The relative path of directory in which to search. Leave blank to search in the current directory.",
     )
-    flags: Optional[List[str]] = Field(
-        None,
-        description="Options to apply to the grep command. Standard git grep options are supported."
-        "Possible values are (but not limited to) ['-r', '-i', '--untracked'].",
-    )
     pattern: str = Field(description="The PATTERN to search for")
+    recursive: bool = Field(
+        default=False,
+        description="Search recursively through directories (equivalent to -r flag)",
+    )
+    case_insensitive: bool = Field(
+        default=False,
+        description="Ignore case distinctions (equivalent to -i or --ignore-case flag)",
+    )
+    include_untracked: bool = Field(
+        default=False,
+        description="Also search in untracked files (equivalent to --untracked flag)",
+    )
+    files_with_matches: bool = Field(
+        default=False,
+        description="Show only filenames that contain matches (equivalent to --files-with-matches flag)",
+    )
+    files_without_match: bool = Field(
+        default=False,
+        description="Show only filenames that don't contain matches (equivalent to --files-without-match flag)",
+    )
+    no_recursive: bool = Field(
+        default=False,
+        description="Don't search recursively (equivalent to --no-recursive flag)",
+    )
+    fixed_strings: bool = Field(
+        default=False,
+        description="Interpret patterns as fixed strings, not regular expressions (equivalent to -F flag)",
+    )
 
 
 class Grep(DuoBaseTool):
@@ -192,38 +241,70 @@ class Grep(DuoBaseTool):
     description: str = """Search for text patterns in git-tracked files in a directory using the git grep command.
     This tool uses git grep (NOT regular grep) to search through files tracked by git.
 
-    IMPORTANT: By default, git grep only searches tracked files. To include untracked files, use the --untracked argument:
-    - Default (tracked only): git_grep(pattern="TODO")
-    - Include untracked: git_grep(pattern="TODO", flags=["--untracked"])
+    IMPORTANT: By default, git grep only searches tracked files. To include untracked files, use include_untracked=True.
 
     Examples:
-    - Search for "TODO" in all files: git_grep(pattern="TODO")
-    - Case-insensitive search: git_grep(pattern="error", flags=["-i"])
-    - Recursive search in subdirectories: git_grep(pattern="test", flags=["-r"])
-    - Non-recursive (current dir only): git_grep(pattern="test", flags=["--no-recursive"])
-    - Recursive search in specific dir: git_grep(pattern="bug", flags=["-r"], directory="src/")
-    - Search only files in current dir: git_grep(pattern="fix", directory=".", flags=["--no-recursive"])
-    - Complex pattern: git_grep(pattern='"<!-- tags:"', flags=["-F"]
+    - Search for "TODO" in all files: grep_files(pattern="TODO")
+    - Case-insensitive search: grep_files(pattern="error", case_insensitive=True)
+    - Recursive search in subdirectories: grep_files(pattern="test", recursive=True)
+    - Non-recursive (current dir only): grep_files(pattern="test", no_recursive=True)
+    - Recursive search in specific dir: grep_files(pattern="bug", recursive=True, search_directory="src/")
+    - Search only files in current dir: grep_files(pattern="fix", search_directory=".", no_recursive=True)
+    - Find files with matches: grep_files(pattern="TODO", files_with_matches=True)
+    - Find files without matches: grep_files(pattern="TODO", files_without_match=True)
+    - Fixed string pattern (not regex): grep_files(pattern="<!-- tags:", fixed_strings=True)
+    - Include untracked files: grep_files(pattern="TODO", include_untracked=True)
     """
     args_schema: Type[BaseModel] = GrepInput  # type: ignore
 
-    # pylint: disable=too-many-positional-arguments
+    # pylint: disable=R0913,R0917
     async def _arun(
         self,
         pattern: str,
         search_directory: Optional[str] = None,
-        flags: Optional[List[str]] = None,
+        recursive: bool = False,
+        case_insensitive: bool = False,
+        include_untracked: bool = False,
+        files_with_matches: bool = False,
+        files_without_match: bool = False,
+        no_recursive: bool = False,
+        fixed_strings: bool = False,
     ) -> str:
+        """
+        Execute the grep command with the specified parameters.
+
+        This method has many parameters to support various grep options.
+        """
         if search_directory and ".." in search_directory:
             return "Searching above the current directory is not allowed"
 
         run_git_command = GitCommand(metadata=self.metadata)
 
         grep_args = []
-        if flags:
-            grep_args.extend(flags)
 
-        grep_args.append(ensure_pattern_is_quoted(pattern))
+        # Add all the boolean flags to the command
+        if recursive:
+            grep_args.append("-r")
+
+        if case_insensitive:
+            grep_args.append("-i")
+
+        if include_untracked:
+            grep_args.append("--untracked")
+
+        if files_with_matches:
+            grep_args.append("--files-with-matches")
+
+        if files_without_match:
+            grep_args.append("--files-without-match")
+
+        if no_recursive:
+            grep_args.append("--no-recursive")
+
+        if fixed_strings:
+            grep_args.append("-F")
+
+        grep_args.append(pattern)
 
         if search_directory:
             grep_args.append("--")
@@ -239,8 +320,6 @@ class Grep(DuoBaseTool):
             return _format_no_matches_message(pattern, search_directory)
 
         return result
-
-    # pylint: enable=too-many-positional-arguments
 
     def format_display_message(self, args: GrepInput) -> str:
         if args.search_directory is None:
@@ -384,15 +463,6 @@ class EditFile(DuoBaseTool):
         return "Edit file"
 
 
-def ensure_pattern_is_quoted(pattern: str) -> str:
-    if pattern.startswith("'") and pattern.endswith("'"):
-        return pattern
-
-    return f"'{pattern}'"
-
-
 def _format_no_matches_message(pattern, search_directory=None):
     search_scope = f" in '{search_directory}'" if search_directory else ""
-    return (
-        f"No matches found for pattern '{pattern}'{search_scope} in the searched files."
-    )
+    return f"No matches found for pattern '{pattern}'{search_scope}."

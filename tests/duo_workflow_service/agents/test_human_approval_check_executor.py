@@ -76,11 +76,31 @@ class TestHumanApprovalCheckExecutor:
             ),
         ]
 
-    @patch.dict(os.environ, {"USE_MEMSAVER": "true"})
+    @patch.dict(os.environ, {"WORKFLOW_INTERRUPT": "true"})
     @pytest.mark.asyncio
-    async def test_run_with_diabled_interrupts(self, workflow_state):
+    @patch("duo_workflow_service.agents.human_approval_check_executor.interrupt")
+    async def test_run_with_empty_message(self, mock_interrupt, workflow_state):
+        event = {"event_type": WorkflowEventType.MESSAGE, "message": ""}
+        mock_interrupt.return_value = event
         executor = HumanApprovalCheckExecutor("agent", "1234")
+        workflow_state["conversation_history"] = {
+            "agent": [
+                AIMessage(
+                    content="Previous message",
+                    tool_calls=[{"id": "tool_123", "name": "test", "args": {}}],
+                )
+            ]
+        }
 
         result = await executor.run(workflow_state)
 
-        assert result["status"] == WorkflowStatusEnum.PLANNING
+        assert result["last_human_input"] == event
+        assert len(result["ui_chat_log"]) == 1
+        assert result["ui_chat_log"][0]["message_type"] == MessageTypeEnum.AGENT
+        assert (
+            result["ui_chat_log"][0]["content"]
+            == "No message received, continuing workflow"
+        )
+        assert (
+            "conversation_history" not in result
+        )  # Ensure no conversation history updates for empty message

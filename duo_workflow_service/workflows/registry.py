@@ -1,16 +1,23 @@
 import inspect
 from pathlib import Path
-from typing import Optional, Type
+from typing import Optional
 
-from duo_workflow_service.workflows import search_and_replace, software_development
+from duo_workflow_service.workflows import (
+    chat,
+    convert_to_gitlab_ci,
+    search_and_replace,
+    software_development,
+)
 
-from .abstract_workflow import AbstractWorkflow
+from .abstract_workflow import TypeWorkflow
 
 current_directory = Path(__file__).parent
 
-_WORKFLOWS: list[Type[AbstractWorkflow]] = [
+_WORKFLOWS: list[TypeWorkflow] = [
     software_development.Workflow,
     search_and_replace.Workflow,
+    convert_to_gitlab_ci.Workflow,
+    chat.Workflow,
 ]
 
 # Eg: {
@@ -24,9 +31,7 @@ _WORKFLOWS_LOOKUP = {
 }
 
 
-class Registry:
-    @staticmethod
-    def resolve(workflow_definition: Optional[str]) -> Type[AbstractWorkflow]:
-        if workflow_definition:
-            return _WORKFLOWS_LOOKUP[workflow_definition]
-        return software_development.Workflow  # for backwards compatibility
+def resolve_workflow_class(workflow_definition: Optional[str]) -> TypeWorkflow:
+    if workflow_definition:
+        return _WORKFLOWS_LOOKUP[workflow_definition]
+    return software_development.Workflow  # for backwards compatibility

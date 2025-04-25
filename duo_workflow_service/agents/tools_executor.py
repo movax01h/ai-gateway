@@ -23,8 +23,13 @@ from duo_workflow_service.internal_events import (
     DuoWorkflowInternalEvent,
     InternalEventAdditionalProperties,
 )
-from duo_workflow_service.internal_events.event_enum import EventEnum, EventLabelEnum
-from duo_workflow_service.tools import PipelineException
+from duo_workflow_service.internal_events.event_enum import (
+    CategoryEnum,
+    EventEnum,
+    EventLabelEnum,
+)
+from duo_workflow_service.monitoring import duo_workflow_metrics
+from duo_workflow_service.tools import PipelineException, format_tool_display_message
 from duo_workflow_service.tools.planner import format_task_number
 
 _HIDDEN_TOOLS = ["get_plan"]
@@ -89,11 +94,13 @@ class ToolsExecutor:
         tools_agent_name: str,
         agent_tools: list[BaseTool],
         workflow_id: str,
+        workflow_type: CategoryEnum,
     ) -> None:
         self._tools_agent_name = tools_agent_name
         self._tool_lookup = dict(list(map(lambda x: (x.name, x), agent_tools)))
         self._workflow_id = workflow_id
         self._logger = structlog.stdlib.get_logger("workflow")
+        self._workflow_type = workflow_type
 
     async def run(self, state: DuoWorkflowStateType):
         last_message = state["conversation_history"][self._tools_agent_name][-1]
@@ -124,10 +131,12 @@ class ToolsExecutor:
                 tool = self._tool_lookup[tool_name]
 
                 try:
-                    tool_response = await tool.arun(tool_args)
+                    with duo_workflow_metrics.time_tool_call(tool_name=tool_name):
+                        tool_response = await tool.arun(tool_args)
 
                     self._track_internal_event(
-                        EventEnum.WORKFLOW_TOOL_SUCCESS, tool_name
+                        event_name=EventEnum.WORKFLOW_TOOL_SUCCESS,
+                        tool_name=tool_name,
                     )
 
                     ui_chat_log = self._create_ui_chat_log(
@@ -151,9 +160,9 @@ class ToolsExecutor:
 
                     tool_response = f"Tool {tool_name} execution failed due to wrong arguments. You must adhere to the tool args schema! {schema}"
                     self._track_internal_event(
-                        EventEnum.WORKFLOW_TOOL_FAILURE,
-                        tool_name,
-                        {"error": str(error)},
+                        event_name=EventEnum.WORKFLOW_TOOL_FAILURE,
+                        tool_name=tool_name,
+                        extra={"error": str(error)},
                     )
 
                     ui_chat_log = self._create_ui_chat_log(
@@ -168,9 +177,9 @@ class ToolsExecutor:
                 except ValidationError as error:
                     tool_response = f"Tool {tool_name} raised validation error {error}"
                     self._track_internal_event(
-                        EventEnum.WORKFLOW_TOOL_FAILURE,
-                        tool_name,
-                        {"error": str(error)},
+                        event_name=EventEnum.WORKFLOW_TOOL_FAILURE,
+                        tool_name=tool_name,
+                        extra={"error": str(error)},
                     )
 
                     ui_chat_log = self._create_ui_chat_log(
@@ -190,9 +199,9 @@ class ToolsExecutor:
                         )
                     )
                     self._track_internal_event(
-                        EventEnum.WORKFLOW_TOOL_FAILURE,
-                        tool_name,
-                        {"error": str(error)},
+                        event_name=EventEnum.WORKFLOW_TOOL_FAILURE,
+                        tool_name=tool_name,
+                        extra={"error": str(error)},
                     )
 
                     ui_chat_log = self._create_ui_chat_log(
@@ -225,7 +234,12 @@ class ToolsExecutor:
             "ui_chat_log": ui_chat_logs,
         }
 
-    def _track_internal_event(self, event_name: EventEnum, tool_name, extra=None):
+    def _track_internal_event(
+        self,
+        event_name: EventEnum,
+        tool_name,
+        extra=None,
+    ):
         if extra is None:
             extra = {}
         additional_properties = InternalEventAdditionalProperties(
@@ -237,7 +251,7 @@ class ToolsExecutor:
         DuoWorkflowInternalEvent.track_event(
             event_name=event_name.value,
             additional_properties=additional_properties,
-            category=self.__class__.__name__,
+            category=self._workflow_type.value,
         )
 
     async def _handle_plan_modification(
@@ -299,14 +313,6 @@ class ToolsExecutor:
 
         elif tool_name in self._tool_lookup:
             tool = self._tool_lookup[tool_name]
-            if hasattr(tool, "format_display_message"):
-                if hasattr(tool, "args_schema") and tool.args_schema:
-                    try:
-                        pydantic_args = tool.args_schema(**args)
-                        message = tool.format_display_message(pydantic_args)
-                    except Exception:
-                        message = tool.format_display_message(args)
-                else:
-                    message = tool.format_display_message(args)
+            message = format_tool_display_message(tool, args) or message
 
         return message

@@ -27,7 +27,7 @@ class RequestUserClarificationTool(BaseModel):
         description="Clarity Final Verdict from the judge's assessment [CLEAR/NEEDS CLARIFICATION/UNCLEAR]"
     )
     response: Optional[str] = Field(
-        None, description="Optional message to a user to answer their questions"
+        default=None, description="Optional message to a user to answer their questions"
     )
 
     tool_title: ClassVar[str] = TOOL_TITLE

@@ -30,16 +30,15 @@ from duo_workflow_service.gitlab.http_client import GitlabHttpClient
 from duo_workflow_service.gitlab.url_parser import GitLabUrlParser
 from duo_workflow_service.internal_events import (
     DuoWorkflowInternalEvent,
-    EventContext,
     InternalEventAdditionalProperties,
-    current_event_context,
 )
-from duo_workflow_service.internal_events.event_enum import EventEnum
+from duo_workflow_service.internal_events.event_enum import CategoryEnum, EventEnum
+from duo_workflow_service.monitoring import duo_workflow_metrics
 from duo_workflow_service.tracking import log_exception
 
 # Constants
 QUEUE_MAX_SIZE = 1
-MAX_TOKENS_TO_SAMPLE = 4096
+MAX_TOKENS_TO_SAMPLE = 8192
 RECURSION_LIMIT = 300
 DEBUG = os.getenv("DEBUG")
 MAX_MESSAGES_TO_DISPLAY = 5
@@ -59,8 +58,14 @@ class AbstractWorkflow(ABC):
     _http_client: GitlabHttpClient
     _workflow_metadata: dict[str, Any]
     is_done: bool = False
+    _workflow_type: CategoryEnum
 
-    def __init__(self, workflow_id: str, workflow_metadata: Dict[str, Any]):
+    def __init__(
+        self,
+        workflow_id: str,
+        workflow_metadata: Dict[str, Any],
+        workflow_type: CategoryEnum,
+    ):
         self._outbox = asyncio.Queue(maxsize=QUEUE_MAX_SIZE)
         self._inbox = asyncio.Queue(maxsize=QUEUE_MAX_SIZE)
         self._workflow_id = workflow_id
@@ -69,20 +74,22 @@ class AbstractWorkflow(ABC):
         self._http_client = GitlabHttpClient(
             {"outbox": self._outbox, "inbox": self._inbox}
         )
+        self._workflow_type = workflow_type
 
     async def run(self, goal: str) -> None:
-        extended_logging = self._workflow_metadata.get("extended_logging", False)
-        tracing_metadata = {
-            "git_url": self._workflow_metadata.get("git_url", ""),
-            "git_sha": self._workflow_metadata.get("git_sha", ""),
-        }
+        with duo_workflow_metrics.time_workflow(workflow_type=self.__class__.__name__):
+            extended_logging = self._workflow_metadata.get("extended_logging", False)
+            tracing_metadata = {
+                "git_url": self._workflow_metadata.get("git_url", ""),
+                "git_sha": self._workflow_metadata.get("git_sha", ""),
+            }
 
-        with tracing_context(enabled=extended_logging):
-            # pylint: disable=unexpected-keyword-arg
-            await self._compile_and_run_graph(
-                goal=goal,
-                langsmith_extra={"metadata": tracing_metadata},
-            )
+            with tracing_context(enabled=extended_logging):
+                # pylint: disable=unexpected-keyword-arg
+                await self._compile_and_run_graph(
+                    goal=goal,
+                    langsmith_extra={"metadata": tracing_metadata},
+                )
 
     @abstractmethod
     async def _handle_workflow_failure(
@@ -124,11 +131,6 @@ class AbstractWorkflow(ABC):
                 workflow_id=self._workflow_id,
             )
 
-            if self._project:
-                context: EventContext = current_event_context.get()
-                context.project_id = self._project.get("id")
-                context.namespace_id = self._project.get("namespace", {}).get("id")
-
             if "web_url" not in self._project:
                 raise RuntimeError(
                     f"Failed to get web_url from project for workflow {self._workflow_id}"
@@ -152,7 +154,7 @@ class AbstractWorkflow(ABC):
             )
 
             async with GitLabWorkflow(
-                self._http_client, self._workflow_id
+                self._http_client, self._workflow_id, self._workflow_type
             ) as checkpointer:
                 status_event = getattr(checkpointer, "initial_status_event", None)
                 if not status_event:
@@ -202,23 +204,8 @@ class AbstractWorkflow(ABC):
         try:
             self.is_done = True
 
-            def drain_queue(queue, queue_name: str):
-                while queue.qsize() > 0:
-                    msg = queue.get_nowait()
-                    queue.task_done()
-                    content = str(msg)
-
-                    if len(content) > MAX_MESSAGE_LENGTH:
-                        content = f"{content[:MAX_MESSAGE_LENGTH]}..."
-
-                    self.log.info(
-                        f"Drained {queue_name} message during cleanup",
-                        workflow_id=workflow_id,
-                        content=content,
-                    )
-
-            drain_queue(self._outbox, "outbox")
-            drain_queue(self._inbox, "inbox")
+            self._drain_queue(workflow_id, self._outbox, "outbox")
+            self._drain_queue(workflow_id, self._inbox, "inbox")
 
             self.log.info("Workflow cleanup completed.")
         except BaseException as cleanup_err:
@@ -229,15 +216,50 @@ class AbstractWorkflow(ABC):
                     "context": "Workflow cleanup failed",
                 },
             )
+            raise
+
+    def _drain_queue(self, workflow_id, queue, queue_name: str):
+        try:
+            while True:
+                try:
+                    msg = queue.get_nowait()
+                except asyncio.QueueEmpty:
+                    # Queue is empty, exit loop
+                    break
+
+                queue.task_done()
+                content = str(msg)
+
+                if len(content) > MAX_MESSAGE_LENGTH:
+                    content = f"{content[:MAX_MESSAGE_LENGTH]}..."
+
+                self.log.info(
+                    f"Drained {queue_name} message during cleanup",
+                    workflow_id=workflow_id,
+                    content=content,
+                )
+        except Exception as e:
+            log_exception(
+                e,
+                extra={
+                    "workflow_id": workflow_id,
+                    "context": f"Error draining {queue_name} queue",
+                },
+            )
+            raise
 
     def _track_internal_event(
         self,
         event_name: EventEnum,
         additional_properties: InternalEventAdditionalProperties,
+        category: CategoryEnum,
     ):
         self.log.info("Tracking Internal event %s", event_name.value)
         DuoWorkflowInternalEvent.track_event(
             event_name=event_name.value,
             additional_properties=additional_properties,
-            category=self.__class__.__name__,
+            category=category.value if category else self.__class__.__name__,
         )
+
+
+TypeWorkflow = type[AbstractWorkflow]

@@ -27,7 +27,12 @@ from duo_workflow_service.internal_events import (
     DuoWorkflowInternalEvent,
     InternalEventAdditionalProperties,
 )
-from duo_workflow_service.internal_events.event_enum import EventEnum, EventPropertyEnum
+from duo_workflow_service.internal_events.event_enum import (
+    CategoryEnum,
+    EventEnum,
+    EventPropertyEnum,
+)
+from duo_workflow_service.monitoring import duo_workflow_metrics
 from duo_workflow_service.structured_logging import _workflow_id
 from duo_workflow_service.token_counter.approximate_token_counter import (
     ApproximateTokenCounter,
@@ -53,6 +58,7 @@ class Agent:
         tools: list[Union[BaseTool, Type[BaseModel]]],
         workflow_id: str,
         http_client: GitlabHttpClient,
+        workflow_type: CategoryEnum,
     ):
         self._model = model.bind_tools(tools)  # type: ignore
         self._goal = goal
@@ -61,33 +67,37 @@ class Agent:
         self._error_handler = ModelErrorHandler()
         self._workflow_id = workflow_id
         self._http_client = http_client
+        self._workflow_type = workflow_type
 
     async def run(self, state: DuoWorkflowStateType) -> dict:
-        updates: dict[str, Any] = {
-            "handover": [],
-        }
-        model_completion: list[MessageLikeRepresentation]
-
-        event: Union[WorkflowEvent, None] = await get_event(
-            self._http_client, self._workflow_id, False
-        )
-
-        if event and event["event_type"] == WorkflowEventType.STOP:
-            return {"status": WorkflowStatusEnum.CANCELLED}
-
-        if self.name in state["conversation_history"]:
-            model_completion = await self._model_completion(
-                state["conversation_history"][self.name]
-            )
-            updates["conversation_history"] = {self.name: model_completion}
-        else:
-            messages = self._conversation_preamble(state)
-            model_completion = await self._model_completion(messages)
-            updates["conversation_history"] = {
-                self.name: [*messages, *model_completion]
+        with duo_workflow_metrics.time_compute(
+            operation_type=f"{self.name}_processing"
+        ):
+            updates: dict[str, Any] = {
+                "handover": [],
             }
+            model_completion: list[MessageLikeRepresentation]
 
-        return {**updates, **self._respond_to_human(state, model_completion)}
+            event: Union[WorkflowEvent, None] = await get_event(
+                self._http_client, self._workflow_id, False
+            )
+
+            if event and event["event_type"] == WorkflowEventType.STOP:
+                return {"status": WorkflowStatusEnum.CANCELLED}
+
+            if self.name in state["conversation_history"]:
+                model_completion = await self._model_completion(
+                    state["conversation_history"][self.name]
+                )
+                updates["conversation_history"] = {self.name: model_completion}
+            else:
+                messages = self._conversation_preamble(state)
+                model_completion = await self._model_completion(messages)
+                updates["conversation_history"] = {
+                    self.name: [*messages, *model_completion]
+                }
+
+            return {**updates, **self._respond_to_human(state, model_completion)}
 
     def _respond_to_human(self, state, model_completion) -> dict[str, Any]:
         if not isinstance(model_completion[0], AIMessage):
@@ -115,7 +125,12 @@ class Agent:
                     self.name
                 ).count_tokens(messages)
 
-                response = await self._model.ainvoke(messages)
+                model_name = getattr(self._model, "model_name", "unknown")
+                with duo_workflow_metrics.time_llm_request(
+                    model=model_name, request_type=f"{self.name}_completion"
+                ):
+                    response = await self._model.ainvoke(messages)
+
                 self._track_tokens_data(response, approximate_token_count)
                 return [response]
             except APIStatusError as e:
@@ -144,7 +159,7 @@ class Agent:
         DuoWorkflowInternalEvent.track_event(
             event_name=EventEnum.TOKEN_PER_USER_PROMPT.value,
             additional_properties=additional_properties,
-            category=self.__class__.__name__,
+            category=self._workflow_type.value,
         )
 
     def _parse_model_content(self, content: str | List) -> str | None:

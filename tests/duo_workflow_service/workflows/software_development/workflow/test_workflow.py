@@ -17,6 +17,7 @@ from duo_workflow_service.components.tools_registry import (
 )
 from duo_workflow_service.entities import Plan, WorkflowStatusEnum
 from duo_workflow_service.gitlab.http_client import GitlabHttpClient
+from duo_workflow_service.internal_events.event_enum import CategoryEnum
 from duo_workflow_service.workflows.software_development import Workflow
 from duo_workflow_service.workflows.software_development.workflow import (
     CONTEXT_BUILDER_TOOLS,
@@ -24,6 +25,29 @@ from duo_workflow_service.workflows.software_development.workflow import (
     PLANNER_TOOLS,
     Workflow,
 )
+
+
+class MockComponent:
+    _mock_node_run: MagicMock
+    _approved_agent_name: str
+
+    def __init__(self, mock_node_run, approved_agent_name: str):
+        self._approved_agent_name = approved_agent_name
+        self._mock_node_run = mock_node_run
+
+    def attach(
+        self,
+        graph,
+        exit_node: str,
+        back_node: str,
+        next_node: str,
+    ):
+        node_name = f"{self._approved_agent_name}_mock_component_entry_node"
+
+        graph.add_node(node_name, self._mock_node_run)
+        graph.add_edge(node_name, exit_node)
+
+        return node_name
 
 
 @pytest.fixture
@@ -46,7 +70,11 @@ def checkpoint_tuple():
 
 @pytest.mark.asyncio
 async def test_workflow_initialization():
-    workflow = Workflow("123", {})
+    workflow = Workflow(
+        "123",
+        {},
+        workflow_type=CategoryEnum.WORKFLOW_SOFTWARE_DEVELOPMENT,
+    )
     assert isinstance(workflow._outbox, asyncio.Queue)
     assert isinstance(workflow._inbox, asyncio.Queue)
 
@@ -136,12 +164,12 @@ async def test_workflow_run(
     mock_plan_supervisor_agent,
     mock_handover_agent,
     mock_agent,
-    mock_tools_registry,
+    mock_tools_registry_cls,
     checkpoint_tuple,
 ):
-    mock_tools_registry.configure = AsyncMock(
-        return_value=MagicMock(spec=ToolsRegistry)
-    )
+    mock_tools_registry = MagicMock(spec=ToolsRegistry)
+    mock_tools_registry_cls.configure = AsyncMock(return_value=mock_tools_registry)
+    mock_tools_registry.approval_required.return_value = False
     mock_fetch_project_data_with_workflow_id.return_value = {
         "id": 1,
         "name": "test-project",
@@ -214,7 +242,11 @@ async def test_workflow_run(
 
     mock_goal_disambiguator_component.return_value.attach.return_value = "planning"
 
-    workflow = Workflow("123", {})
+    workflow = Workflow(
+        "123",
+        {},
+        workflow_type=CategoryEnum.WORKFLOW_SOFTWARE_DEVELOPMENT,
+    )
     await workflow.run("test_goal")
 
     assert mock_goal_disambiguator_component.return_value.attach.call_count == 1
@@ -264,14 +296,14 @@ async def test_workflow_run_with_memory_saver(
     mock_plan_supervisor_agent,
     mock_handover_agent,
     mock_agent,
-    mock_tools_registry,
+    mock_tools_registry_cls,
     checkpoint_tuple,
 ):
 
     mock_goal_disambiguator_component.return_value.attach.return_value = "planning"
-    mock_tools_registry.configure = AsyncMock(
-        return_value=MagicMock(spec=ToolsRegistry)
-    )
+    mock_tools_registry = MagicMock(spec=ToolsRegistry)
+    mock_tools_registry_cls.configure = AsyncMock(return_value=mock_tools_registry)
+    mock_tools_registry.approval_required.return_value = False
     mock_fetch_project_data_with_workflow_id.return_value = {
         "id": 1,
         "name": "test-project",
@@ -339,7 +371,11 @@ async def test_workflow_run_with_memory_saver(
         "conversation_history": {},
     }
 
-    workflow = Workflow("123", {})
+    workflow = Workflow(
+        "123",
+        {},
+        workflow_type=CategoryEnum.WORKFLOW_SOFTWARE_DEVELOPMENT,
+    )
     await workflow.run("test_goal")
 
     assert mock_agent.call_count == 3
@@ -427,7 +463,11 @@ async def test_workflow_run_when_exception(
         def __anext__(self):
             raise asyncio.CancelledError()
 
-    workflow = Workflow("123", {})
+    workflow = Workflow(
+        "123",
+        {},
+        workflow_type=CategoryEnum.WORKFLOW_SOFTWARE_DEVELOPMENT,
+    )
     with patch(
         "duo_workflow_service.workflows.software_development.workflow.StateGraph"
     ) as graph:
@@ -471,13 +511,13 @@ async def test_workflow_run_with_error_state(
     mock_plan_supervisor_agent,
     mock_handover_agent,
     mock_agent,
-    mock_tools_registry,
+    mock_tools_registry_cls,
     checkpoint_tuple,
 ):
     mock_goal_disambiguator_component.return_value.attach.return_value = "planning"
-    mock_tools_registry.configure = AsyncMock(
-        return_value=MagicMock(spec=ToolsRegistry)
-    )
+    mock_tools_registry = MagicMock(spec=ToolsRegistry)
+    mock_tools_registry_cls.configure = AsyncMock(return_value=mock_tools_registry)
+    mock_tools_registry.approval_required.return_value = False
 
     mock_fetch_project_data_with_workflow_id.return_value = {
         "id": 1,
@@ -520,7 +560,11 @@ async def test_workflow_run_with_error_state(
         "conversation_history": {},
     }
 
-    workflow = Workflow("123", {})
+    workflow = Workflow(
+        "123",
+        {},
+        workflow_type=CategoryEnum.WORKFLOW_SOFTWARE_DEVELOPMENT,
+    )
 
     await workflow.run("test_goal")
 
@@ -600,7 +644,11 @@ async def test_workflow_run_with_tools_registry(
         def __anext__(self):
             raise asyncio.CancelledError()
 
-    workflow = Workflow("123", {})
+    workflow = Workflow(
+        "123",
+        {},
+        workflow_type=CategoryEnum.WORKFLOW_SOFTWARE_DEVELOPMENT,
+    )
     with patch(
         "duo_workflow_service.workflows.software_development.workflow.StateGraph"
     ) as graph_cls:
@@ -641,23 +689,23 @@ async def test_workflow_run_with_tools_registry(
 
 
 @pytest.fixture
-def tools_registry():
+def tools_registry(tool_metadata):
     """Create a tools registry with all privileges enabled."""
-    outbox = MagicMock()
-    inbox = MagicMock()
     return ToolsRegistry(
-        outbox=outbox,
-        inbox=inbox,
-        gl_http_client=AsyncMock(spec=GitlabHttpClient),
-        tools_configuration=list(_AGENT_PRIVILEGES.keys()),
-        gitlab_host="gitlab.example.com",
+        enabled_tools=list(_AGENT_PRIVILEGES.keys()),
+        preapproved_tools=list(_AGENT_PRIVILEGES.keys()),
+        tool_metadata=tool_metadata,
     )
 
 
 @pytest.fixture
 def software_development_workflow():
     """Create a software development workflow instance."""
-    workflow = Workflow("test", {})
+    workflow = Workflow(
+        "test",
+        {},
+        workflow_type=CategoryEnum.WORKFLOW_SOFTWARE_DEVELOPMENT,
+    )
     workflow._project = {"id": 1, "name": "test", "http_url_to_repo": "http://test"}  # type: ignore
     workflow._http_client = MagicMock()
     return workflow
@@ -755,7 +803,11 @@ async def test_workflow_run_with_setup_error(
     )
     mock_git_lab_workflow_instance.get_next_version = MagicMock(return_value=1)
 
-    workflow = Workflow("123", {})
+    workflow = Workflow(
+        "123",
+        {},
+        workflow_type=CategoryEnum.WORKFLOW_SOFTWARE_DEVELOPMENT,
+    )
     await workflow.run("test_goal")
 
     assert workflow.is_done
@@ -795,7 +847,11 @@ async def test_workflow_run_with_missing_web_url(
     )
     mock_git_lab_workflow_instance.get_next_version = MagicMock(return_value=1)
 
-    workflow = Workflow("123", {})
+    workflow = Workflow(
+        "123",
+        {},
+        workflow_type=CategoryEnum.WORKFLOW_SOFTWARE_DEVELOPMENT,
+    )
 
     await workflow.run("test_goal")
     assert workflow.is_done
@@ -842,7 +898,11 @@ async def test_workflow_run_with_invalid_web_url(
     )
     mock_git_lab_workflow_instance.get_next_version = MagicMock(return_value=1)
 
-    workflow = Workflow("123", {})
+    workflow = Workflow(
+        "123",
+        {},
+        workflow_type=CategoryEnum.WORKFLOW_SOFTWARE_DEVELOPMENT,
+    )
 
     await workflow.run("test_goal")
     assert workflow.is_done
@@ -921,7 +981,11 @@ async def test_workflow_run_with_retry(
                 raise asyncio.CancelledError()
             return {"build_context": {}}
 
-    workflow = Workflow("123", {})
+    workflow = Workflow(
+        "123",
+        {},
+        workflow_type=CategoryEnum.WORKFLOW_SOFTWARE_DEVELOPMENT,
+    )
     async_iterator = AsyncIterator()
 
     with patch(
@@ -972,15 +1036,147 @@ async def test_workflow_run_with_retry(
         assert workflow.is_done
 
 
+@pytest.mark.asyncio
+@patch("duo_workflow_service.workflows.abstract_workflow.ToolsRegistry", autospec=True)
+@patch("duo_workflow_service.workflows.software_development.workflow.Agent")
+@patch("duo_workflow_service.workflows.software_development.workflow.HandoverAgent")
+@patch(
+    "duo_workflow_service.workflows.software_development.workflow.PlanSupervisorAgent"
+)
+@patch("duo_workflow_service.workflows.software_development.workflow.ToolsExecutor")
+@patch(
+    "duo_workflow_service.workflows.abstract_workflow.fetch_project_data_with_workflow_id"
+)
+@patch("duo_workflow_service.workflows.software_development.workflow.new_chat_client")
+@patch("duo_workflow_service.workflows.abstract_workflow.GitLabWorkflow", autospec=True)
+@patch(
+    "duo_workflow_service.workflows.software_development.workflow.ToolsApprovalComponent",
+    autospec=True,
+)
+@patch.dict(os.environ, {"DW_INTERNAL_EVENT__ENABLED": "true"})
+async def test_workflow_run_with_tool_approvals(
+    mock_tools_approval_component,
+    mock_gitlab_workflow,
+    mock_chat_client,
+    mock_fetch_project_data_with_workflow_id,
+    mock_tools_executor,
+    mock_plan_supervisor_agent,
+    mock_handover_agent,
+    mock_agent,
+    mock_tools_registry_cls,
+    checkpoint_tuple,
+):
+    mock_tools_registry = MagicMock(spec=ToolsRegistry)
+    mock_tools_registry_cls.configure = AsyncMock(return_value=mock_tools_registry)
+    mock_fetch_project_data_with_workflow_id.return_value = {
+        "id": 1,
+        "name": "test-project",
+        "description": "This is a test project",
+        "http_url_to_repo": "https://example.com/project",
+        "web_url": "https://example.com/project",
+    }
+
+    mock_git_lab_workflow_instance = mock_gitlab_workflow.return_value
+    mock_git_lab_workflow_instance.__aenter__.return_value = (
+        mock_git_lab_workflow_instance
+    )
+    mock_git_lab_workflow_instance.__aexit__.return_value = None
+    mock_git_lab_workflow_instance._offline_mode = False
+    mock_git_lab_workflow_instance.aget_tuple = AsyncMock(return_value=None)
+    mock_git_lab_workflow_instance.alist = AsyncMock(return_value=[])
+    mock_git_lab_workflow_instance.aput = AsyncMock(
+        return_value={
+            "configurable": {"thread_id": "123", "checkpoint_id": "checkpoint1"}
+        }
+    )
+    mock_git_lab_workflow_instance.get_next_version = MagicMock(return_value=1)
+
+    mock_handover_agent.return_value.run.side_effect = [
+        {
+            "plan": Plan(steps=[]),
+            "status": WorkflowStatusEnum.COMPLETED,
+            "conversation_history": {},
+        },
+        {
+            "plan": Plan(steps=[]),
+            "status": WorkflowStatusEnum.COMPLETED,
+            "conversation_history": {},
+        },
+    ]
+
+    mock_tools_registry.approval_required.return_value = [True, False, False]
+
+    mock_agent.return_value.run.side_effect = [
+        {
+            "plan": Plan(steps=[]),
+            "status": WorkflowStatusEnum.PLANNING,
+            "conversation_history": {
+                "context_builder": [
+                    SystemMessage(content="system message"),
+                    HumanMessage(content="human message"),
+                    AIMessage(
+                        content="Tool calls are present, route to planner tools execution",
+                        tool_calls=[
+                            {
+                                "id": "1",
+                                "name": "update_plan",
+                                "args": {"summary": "done"},
+                            }
+                        ],
+                    ),
+                ],
+            },
+        },
+    ]
+
+    mock_plan_supervisor_agent.return_value.run.return_value = {
+        "plan": Plan(steps=[]),
+        "status": WorkflowStatusEnum.EXECUTION,
+        "conversation_history": {},
+    }
+
+    mock_tools_aprroval_execution = MagicMock()
+    mock_tools_aprroval_execution.return_value = {"status": WorkflowStatusEnum.PLANNING}
+    mock_tools_approval_component.side_effect = [
+        MockComponent(
+            mock_node_run=mock_tools_aprroval_execution,
+            approved_agent_name="context_builder",
+        ),
+        MockComponent(
+            mock_node_run=mock_tools_aprroval_execution, approved_agent_name="executor"
+        ),
+    ]
+
+    workflow = Workflow(
+        "123",
+        {},
+        workflow_type=CategoryEnum.WORKFLOW_SOFTWARE_DEVELOPMENT,
+    )
+    await workflow.run("test_goal")
+
+    assert mock_agent.call_count == 3
+    assert mock_tools_aprroval_execution.call_count == 1
+
+    assert workflow.is_done
+
+
 def test_get_from_outbox():
-    workflow = Workflow("123", {})
+    workflow = Workflow(
+        "123",
+        {},
+        workflow_type=CategoryEnum.WORKFLOW_SOFTWARE_DEVELOPMENT,
+    )
     workflow._outbox.put_nowait("test_item")
     item = workflow.get_from_outbox()
     assert item == "test_item"
 
 
 def test_add_to_inbox():
-    workflow = Workflow("123", {})
+    workflow = Workflow(
+        "123",
+        {},
+        workflow_type=CategoryEnum.WORKFLOW_SOFTWARE_DEVELOPMENT,
+    )
     event = contract_pb2.ClientEvent()
     workflow.add_to_inbox(event)
     assert workflow._inbox.qsize() == 1
@@ -989,7 +1185,11 @@ def test_add_to_inbox():
 
 @pytest.mark.asyncio
 async def test_workflow_cleanup():
-    workflow = Workflow("123", {})
+    workflow = Workflow(
+        "123",
+        {},
+        workflow_type=CategoryEnum.WORKFLOW_SOFTWARE_DEVELOPMENT,
+    )
 
     assert workflow._outbox.empty()
     assert workflow._inbox.empty()
