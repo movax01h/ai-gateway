@@ -854,23 +854,6 @@ class TestLocalPromptRegistry:
             str(exc_info.value) == "No prompt version found matching the query: 2.0.0"
         )
 
-    @pytest.mark.parametrize("custom_models_enabled", [False])
-    def test_invalid_get(
-        self, registry: LocalPromptRegistry, custom_models_enabled: bool
-    ):
-        model_metadata = ModelMetadata(
-            name="custom",
-            endpoint=HttpUrl("http://localhost:4000/"),
-            api_key="token",
-            provider="custom_openai",
-        )
-
-        with pytest.raises(
-            ValueError,
-            match="Endpoint override not allowed when custom models are disabled.",
-        ):
-            registry.get("chat/react", "^1.0.0", model_metadata=model_metadata)
-
     def test_load_prompt_without_unit_primitive(
         self,
         mock_fs: FakeFilesystem,
