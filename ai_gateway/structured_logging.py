@@ -165,15 +165,19 @@ def setup_logging(logging_config: ConfigLogging, custom_models_enabled: bool):
     sys.excepthook = handle_exception
 
 
-def prevent_logging_if_disabled(_, __, event_dict: EventDict) -> EventDict:
-    if (
+def can_log_request_data():
+    return (
         ENABLE_REQUEST_LOGGING
         or (CUSTOM_MODELS_ENABLED and enabled_instance_verbose_ai_logs())
         or (
             not CUSTOM_MODELS_ENABLED
             and is_feature_enabled(FeatureFlag.EXPANDED_AI_LOGGING)
         )
-    ):
+    )
+
+
+def prevent_logging_if_disabled(_, __, event_dict: EventDict) -> EventDict:
+    if can_log_request_data():
         return event_dict
 
     raise structlog.DropEvent

@@ -422,16 +422,16 @@ def test_setup_gcp_service_account(service_account_json_key, should_create_cred_
 
 
 @patch("ai_gateway.api.server.context")
-@patch("ai_gateway.api.server.is_feature_enabled")
-def test_validation_exception_handler_without_expanded_logging_ff(
-    mock_is_feature_enabled, mock_context, app
+@patch("ai_gateway.api.server.can_log_request_data")
+def test_validation_exception_handler_without_log_request_data(
+    mock_can_log_request_data, mock_context, app
 ):
     @app.post("/test")
     def test_route(required_field: str):
         return {"message": "success"}
 
     setup_custom_exception_handlers(app)
-    mock_is_feature_enabled.return_value = False
+    mock_can_log_request_data.return_value = False
     client = TestClient(app)
 
     response = client.post("/test", json={})
@@ -441,16 +441,16 @@ def test_validation_exception_handler_without_expanded_logging_ff(
 
 
 @patch("ai_gateway.api.server.context")
-@patch("ai_gateway.api.server.is_feature_enabled")
-def test_validation_exception_handler_with_expanded_logging_ff(
-    mock_is_feature_enabled, mock_context, app
+@patch("ai_gateway.api.server.can_log_request_data")
+def test_validation_exception_handler_with_log_request_data(
+    mock_can_log_request_data, mock_context, app
 ):
     @app.post("/test")
     def test_route(required_field: str):
         return {"message": "success"}
 
     setup_custom_exception_handlers(app)
-    mock_is_feature_enabled.return_value = True
+    mock_can_log_request_data.return_value = True
     client = TestClient(app)
 
     response = client.post("/test", json={})
