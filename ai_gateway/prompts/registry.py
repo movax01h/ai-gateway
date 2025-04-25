@@ -6,7 +6,7 @@ import yaml
 from poetry.core.constraints.version import Version, parse_constraint
 
 from ai_gateway.internal_events.client import InternalEventsClient
-from ai_gateway.model_metadata import ModelMetadata, TypeModelMetadata
+from ai_gateway.model_metadata import TypeModelMetadata
 from ai_gateway.prompts.base import BasePromptRegistry, Prompt
 from ai_gateway.prompts.config import BaseModelConfig, ModelClassProvider, PromptConfig
 from ai_gateway.prompts.typing import TypeModelFactory
@@ -85,15 +85,6 @@ class LocalPromptRegistry(BasePromptRegistry):
         prompt_version: str,
         model_metadata: Optional[TypeModelMetadata] = None,
     ) -> Prompt:
-        if (
-            isinstance(model_metadata, ModelMetadata)
-            and model_metadata.endpoint
-            and not self.custom_models_enabled
-        ):
-            raise ValueError(
-                "Endpoint override not allowed when custom models are disabled."
-            )
-
         prompt_id = self._resolve_id(prompt_id, model_metadata)
 
         log.info("Resolved prompt id", prompt_id=prompt_id)
