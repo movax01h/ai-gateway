@@ -12,9 +12,8 @@ from google.cloud.aiplatform.gapic import PredictionServiceAsyncClient
 from pydantic import BaseModel
 
 from ai_gateway.config import Config
-from ai_gateway.feature_flags import FeatureFlag, is_feature_enabled
 from ai_gateway.instrumentators.model_requests import ModelRequestInstrumentator
-from ai_gateway.structured_logging import get_request_logger
+from ai_gateway.structured_logging import can_log_request_data, get_request_logger
 
 # TODO: The instrumentator needs the config here to know what limit needs to be
 # reported for a model. This would be nicer if we dependency inject the instrumentator
@@ -147,18 +146,21 @@ def grpc_connect_vertex(client_options_dict: dict) -> PredictionServiceAsyncClie
 
 
 async def log_request(request: httpx.Request):
-    if is_feature_enabled(FeatureFlag.EXPANDED_AI_LOGGING):
-        try:
-            request_content_json = json.loads(request.content.decode("utf8"))
-        except Exception:
-            request_content_json = {}
-
+    if can_log_request_data():
         request_log.info(
             "Request to LLM",
             source=__name__,
             request_method=request.method,
             request_url=request.url,
-            request_content_json=request_content_json,
+            request_content_json=json.loads(request.content.decode("utf8")),
+        )
+    else:
+        log.info(
+            "Request to LLM",
+            source=__name__,
+            request_method=request.method,
+            request_url=request.url,
+            request_content_json={},
         )
 
 

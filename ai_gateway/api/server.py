@@ -41,12 +41,11 @@ from ai_gateway.api.v3 import api_router as http_api_router_v3
 from ai_gateway.api.v4 import api_router as http_api_router_v4
 from ai_gateway.config import Config
 from ai_gateway.container import ContainerApplication
-from ai_gateway.feature_flags import FeatureFlag, is_feature_enabled
 from ai_gateway.instrumentators.threads import monitor_threads
 from ai_gateway.models import ModelAPIError
 from ai_gateway.models.base import ModelAPICallError
 from ai_gateway.profiling import setup_profiling
-from ai_gateway.structured_logging import setup_app_logging
+from ai_gateway.structured_logging import can_log_request_data, setup_app_logging
 
 __all__ = [
     "create_fast_api_server",
@@ -199,7 +198,7 @@ async def model_api_exception_handler(request: Request, exc: ModelAPIError) -> R
 async def validation_exception_handler(
     request: Request, exc: RequestValidationError
 ) -> JSONResponse:
-    if is_feature_enabled(FeatureFlag.EXPANDED_AI_LOGGING):
+    if can_log_request_data():
         context["exception_message"] = str(exc)
         return JSONResponse(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
