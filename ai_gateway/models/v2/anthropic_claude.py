@@ -31,10 +31,10 @@ class ChatAnthropic(_LChatAnthropic):
 
     @model_validator(mode="after")
     def post_init(self) -> Self:
-        client_options = {}
-
-        client_options["api_key"] = self.anthropic_api_key.get_secret_value()
-        client_options["base_url"] = self.anthropic_api_url
+        client_options: dict[str, Any] = {
+            "api_key": self.anthropic_api_key.get_secret_value(),
+            "base_url": self.anthropic_api_url,
+        }
 
         client_options.update(
             {
@@ -55,7 +55,7 @@ class ChatAnthropic(_LChatAnthropic):
 
         # hack: we don't use sync methods in the AIGW,
         # so to avoid unnecessary initialization, set None for the sync client
-        self._client = None
+        self._client = None  # type: ignore[assignment]
         # pylint: enable=attribute-defined-outside-init
 
         return self
