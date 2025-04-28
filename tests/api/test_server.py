@@ -213,6 +213,7 @@ def test_middleware_authentication(fastapi_server_app: FastAPI, auth_enabled: bo
     assert response.status_code == 200
 
 
+@pytest.mark.xdist_group("capture_logs")
 def test_middleware_log_request(fastapi_server_app: FastAPI, caplog):
     client = TestClient(fastapi_server_app)
 

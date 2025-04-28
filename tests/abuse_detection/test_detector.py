@@ -55,7 +55,9 @@ async def test_eval(mock_request, abuse_detector):
 
 
 @pytest.mark.asyncio
+@pytest.mark.xdist_group("capture_logs")
 async def test_eval_failure(mock_request):
+
     body = '{"messages": [{"role": "user", "content": "How can I create an issue in GitLab?"}]}'
     expected_usecase = "Asking a question about how to use GitLab."
 
@@ -81,6 +83,7 @@ async def test_detect(mock_request, abuse_detector):
 
 
 @pytest.mark.asyncio
+@pytest.mark.xdist_group("capture_logs")
 async def test_report(mock_request, abuse_detector):
     score = 0.2
 

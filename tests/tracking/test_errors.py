@@ -1,5 +1,6 @@
 from unittest.mock import MagicMock, patch
 
+import pytest
 from anthropic import APIStatusError
 from structlog.testing import capture_logs
 
@@ -9,6 +10,7 @@ from ai_gateway.tracking.errors import log_exception
 
 @patch("ai_gateway.tracking.errors.correlation_id")
 @patch("ai_gateway.tracking.errors.traceback.format_exc")
+@pytest.mark.xdist_group("capture_logs")
 def test_log_exception(mock_traceback, mock_correlation_id):
     mock_traceback.return_value = "dummy backtrace"
     mock_correlation_id.get.return_value = "123"
@@ -25,6 +27,7 @@ def test_log_exception(mock_traceback, mock_correlation_id):
 
 @patch("ai_gateway.tracking.errors.correlation_id")
 @patch("ai_gateway.tracking.errors.traceback.format_exc")
+@pytest.mark.xdist_group("capture_logs")
 def test_log_exception_with_code(mock_traceback, mock_correlation_id):
     mock_traceback.return_value = "dummy backtrace with status code"
     mock_correlation_id.get.return_value = "123"
