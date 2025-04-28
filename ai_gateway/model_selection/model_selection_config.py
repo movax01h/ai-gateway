@@ -19,6 +19,7 @@ class LLMDefinition(BaseModel):
 
 
 class UnitPrimitiveConfig(BaseModel):
+    feature_setting: str
     unit_primitives: list[GitLabUnitPrimitive]
     default_model: str
     selectable_models: list[str] = []

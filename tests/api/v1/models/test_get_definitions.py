@@ -42,6 +42,7 @@ def mock_model_config():
         }
         mock_configs.get_unit_primitive_config.return_value = [
             UnitPrimitiveConfig(
+                feature_setting="config1",
                 unit_primitives=[
                     GitLabUnitPrimitive.ASK_ISSUE,
                     GitLabUnitPrimitive.ASK_EPIC,
@@ -51,6 +52,7 @@ def mock_model_config():
                 beta_models=[],
             ),
             UnitPrimitiveConfig(
+                feature_setting="config2",
                 unit_primitives=[
                     GitLabUnitPrimitive.DUO_CHAT,
                 ],
@@ -72,12 +74,14 @@ def test_get_models_returns_correct_data(mock_model_config, client):
     assert data["models"][0] == {"name": "Model 1", "identifier": "model1"}
     assert data["models"][1] == {"name": "Model 2", "identifier": "model2"}
     assert data["unit_primitives"][0] == {
+        "feature_setting": "config1",
         "unit_primitives": ["ask_issue", "ask_epic"],
         "default_model": "model1",
         "selectable_models": ["model1", "model2"],
         "beta_models": [],
     }
     assert data["unit_primitives"][1] == {
+        "feature_setting": "config2",
         "unit_primitives": ["duo_chat"],
         "default_model": "model2",
         "selectable_models": ["model2"],

@@ -45,7 +45,8 @@ def mock_fs(fs: FakeFilesystem):
         contents=dedent(
             """
             configurable_unit_primitives:
-              - unit_primitives:
+              - feature_setting: "test_config"
+                unit_primitives:
                   - "ask_commit"
                   - "ask_epic"
                 default_model: "model_1"
@@ -84,6 +85,7 @@ def test_get_unit_primitive_config(mock_fs):
 
     assert configs == [
         UnitPrimitiveConfig(
+            feature_setting="test_config",
             unit_primitives=[
                 GitLabUnitPrimitive.ASK_COMMIT,
                 GitLabUnitPrimitive.ASK_EPIC,
