@@ -232,19 +232,19 @@ Concurrency: 91, throughput: 2.44408 infer/sec, latency 33024001 usec
 
 ## `tests:performance` job
 
-The `test:performance` job runs in MR pipelines. It runs all the tests under the [`performance_test/k6-test`](../performance_tests/k6-test/) directory against a Docker instance of AI Gateway. The Docker Compose file for the instance that the tests run against is under [`performance_test/setup`](../performance_tests/setup/docker-compose.yml). The tests use [Grafana K6](https://grafana.com/docs/k6/latest/) to write the test.
+The `test:performance` job runs in MR pipelines. It runs all the tests under the [`performance_test/k6_test`](../performance_tests/k6_test/) directory against a Docker instance of AI Gateway. The Docker Compose file for the instance that the tests run against is under [`performance_test/setup`](../performance_tests/setup/docker-compose.yml). The tests use [Grafana K6](https://grafana.com/docs/k6/latest/) to write the test.
 
 The test uses the [Component Performance Testing](https://gitlab.com/gitlab-org/quality/component-performance-testing-aigw-poc) tool, which is maintained by [Performance Enablement Group](https://handbook.gitlab.com/handbook/engineering/infrastructure-platforms/developer-experience/performance-enablement/). For any questions or feedback, reach out to the [`#g_performance_enablement`](https://gitlab.enterprise.slack.com/archives/C081476PPAM) Slack channel.
 
 These tests are aimed to run against a mocked instance of AI Gateway. They ensure the changes submitted in the merge request cause no degradation in the TTFB values.
 
-The `test:performance` job triggers a multi-project pipeline in [Component Performance Testing](https://gitlab.com/gitlab-org/quality/component-performance-testing-aigw-poc) project. This project spins up the AI Gateway instance as per the Docker Compose file, and runs the k6-test against it.
+The `test:performance` job triggers a multi-project pipeline in [Component Performance Testing](https://gitlab.com/gitlab-org/quality/component-performance-testing-aigw-poc) project. This project spins up the AI Gateway instance as per the Docker Compose file, and runs the k6_test against it.
 
 ### Adding a new test
 
 To add a new test:
 
-1. Create a new `.js` file under [`performance_test/k6-test`](../performance_tests/k6-test/).
+1. Create a new `.js` file under [`performance_test/k6_test`](../performance_tests/k6_test/).
 1. Copy and paste the following boilerplate to it before beginning to write the test.
 1. Update the comment sections with the respective values and code.
 
