@@ -38,7 +38,7 @@ tests:performance:
     forward:
       pipeline_variables: true
       yaml_variables: true
-  allow_failure: true  
+  allow_failure: true
   variables:
     JOB_WITH_ARTIFACTS: $JOB_WITH_ARTIFACTS
     JOB_WITH_ARTIFACTS_ID: $JOB_WITH_ARTIFACTS_ID
