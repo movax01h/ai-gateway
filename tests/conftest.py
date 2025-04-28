@@ -4,6 +4,7 @@ from typing import Any, AsyncIterator, Optional, Type
 from unittest.mock import AsyncMock, Mock, PropertyMock, patch
 
 import pytest
+import structlog
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from gitlab_cloud_connector import CloudConnectorUser, GitLabUnitPrimitive, UserClaims
@@ -619,3 +620,8 @@ def workflow_state():
             }
         ],
     )
+
+
+@pytest.fixture(autouse=True)
+def disable_cached_logger():
+    structlog.configure(cache_logger_on_first_use=False)
