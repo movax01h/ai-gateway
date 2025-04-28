@@ -307,6 +307,7 @@ class TestCodeCompletions:
         )
 
     @pytest.mark.parametrize("prompt_version", [1])
+    @pytest.mark.xdist_group("capture_logs")
     def test_request_latency(
         self,
         prompt_version: int,

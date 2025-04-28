@@ -582,6 +582,7 @@ invalid_authentication_token_type_error = {
         ),
     ],
 )
+@pytest.mark.xdist_group("capture_logs")
 def test_failed_authorization_logging(
     mock_client, headers, data, expected_status_code, expected_response, log_keys
 ):
@@ -679,6 +680,7 @@ def test_failed_authorization_logging(
         ),
     ],
 )
+@pytest.mark.xdist_group("capture_logs")
 def test_failed_duo_seat_count_validation_logging(
     # We have a separate spec for this, since this is a unique case, where validation fails,
     # we log an error, but we still want the request to pass. Extracted from `test_failed_authorization_logging`

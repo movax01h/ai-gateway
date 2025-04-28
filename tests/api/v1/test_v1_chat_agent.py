@@ -482,6 +482,7 @@ class TestAgentUnsuccessfulAnthropicRequest:
             ("chat_content", AnthropicAPIConnectionError),
         ],
     )
+    @pytest.mark.xdist_group("capture_logs")
     async def test_fail_receiving_anthropic_response(
         self,
         request,

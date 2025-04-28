@@ -36,6 +36,14 @@ You can view the HTML report by running:
 open htmlcov/index.html
 ```
 
+-**Important**: To prevent issues with thread safety due to `capture_logs` not being [thread-safe](https://github.com/hynek/structlog/blob/d8f4e6ea099a327469e5cd3b015209cb13062335/src/structlog/testing.py#L72),please place the following decorator before the test definition.
+
+```python
+@pytest.mark.xdist_group("capture_logs")
+```
+
+The code snippet above will wrap all tests within the same group that `pytest-xdist` runs in a single worker.
+
 ### Running a single test file
 
 Tests run in parallel by default for speed. If you need to debug a specific test, it's recommended to run it

@@ -316,6 +316,7 @@ class TestReActAgent:
             ),
         ],
     )
+    @pytest.mark.xdist_group("capture_logs")
     async def test_stream(
         self,
         inputs: ReActAgentInputs,
@@ -547,6 +548,7 @@ class TestReActAgent:
             ),
         ],
     )
+    @pytest.mark.xdist_group("capture_logs")
     async def test_stream_with_empty_assistant_content(
         self,
         inputs: ReActAgentInputs,
