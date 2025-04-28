@@ -8,8 +8,9 @@ from ai_gateway.model_metadata import (
 
 
 class ModelConfigMiddleware:
-    def __init__(self, app):
+    def __init__(self, app, custom_models_enabled=False):
         self.app = app
+        self.custom_models_enabled = custom_models_enabled
 
     async def __call__(
         self,
@@ -17,7 +18,7 @@ class ModelConfigMiddleware:
         receive: Callable,
         send: Callable,
     ) -> None:
-        if scope["type"] != "http":
+        if scope["type"] != "http" or not self.custom_models_enabled:
             await self.app(scope, receive, send)
             return
 
