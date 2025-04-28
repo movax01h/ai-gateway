@@ -7,7 +7,6 @@ import httpx
 import structlog
 from anthropic import AsyncAnthropic
 from anthropic._base_client import _DefaultAsyncHttpxClient
-from google.api_core.client_options import ClientOptions
 from google.cloud.aiplatform.gapic import PredictionServiceAsyncClient
 from pydantic import BaseModel
 
@@ -139,10 +138,12 @@ class ModelBase(ABC):
         return params
 
 
-def grpc_connect_vertex(client_options_dict: dict) -> PredictionServiceAsyncClient:
-    log.info("Initializing Vertex AI client", **client_options_dict)
-    client_options = ClientOptions(client_options_dict)
-    return PredictionServiceAsyncClient(client_options=client_options)
+def grpc_connect_vertex(client_options: dict) -> PredictionServiceAsyncClient:
+    log.info("Initializing Vertex AI client", **client_options)
+
+    # Ignore the typecheck for this line until the type is changed to Union upstream:
+    # https://github.com/googleapis/python-aiplatform/pull/5272
+    return PredictionServiceAsyncClient(client_options=client_options)  # type: ignore
 
 
 async def log_request(request: httpx.Request):
