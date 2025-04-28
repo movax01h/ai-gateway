@@ -10,6 +10,7 @@ from starlette.responses import StreamingResponse
 from ai_gateway.api.auth_utils import StarletteUser, get_current_user
 from ai_gateway.api.feature_category import feature_category
 from ai_gateway.async_dependency_resolver import get_prompt_registry
+from ai_gateway.model_metadata import TypeModelMetadata
 from ai_gateway.prompts import BasePromptRegistry, Prompt
 
 
@@ -21,6 +22,7 @@ class PromptRequest(BaseModel):
     inputs: PromptInputs
     prompt_version: Optional[str] = None
     stream: Optional[bool] = False
+    model_metadata: Optional[TypeModelMetadata] = None
 
 
 class PromptChunk(Protocol):
@@ -48,7 +50,8 @@ async def invoke(
             current_user,
             prompt_id,
             prompt_request.prompt_version,
-            internal_event_category=__name__,
+            prompt_request.model_metadata,
+            __name__,
         )
     except ParseConstraintError:
         raise HTTPException(

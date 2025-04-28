@@ -16,7 +16,6 @@ class LLMDefinition(BaseModel):
     provider: str
     provider_identifier: str
     params: dict[str, Any] = {}
-    family: Optional[str] = None
 
 
 class UnitPrimitiveConfig(BaseModel):
@@ -67,8 +66,3 @@ class ModelSelectionConfig:
         """Refresh the configuration by reloading from source files."""
         self._llm_definitions = None
         self._unit_primitive_configs = None
-
-    def get_gitlab_model(self, gitlab_model_id: str) -> LLMDefinition:
-        if gitlab_model := self.get_llm_definitions().get(gitlab_model_id, None):
-            return gitlab_model
-        raise ValueError(f"Invalid model identifier: {gitlab_model_id}")

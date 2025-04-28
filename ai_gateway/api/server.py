@@ -139,7 +139,10 @@ def create_fast_api_server(config: Config):
                 enabled=config.internal_event.enabled,
                 environment=config.environment,
             ),
-            Middleware(ModelConfigMiddleware),
+            Middleware(
+                ModelConfigMiddleware,
+                custom_models_enabled=config.custom_models.enabled,
+            ),
         ],
         extra={"config": config},
     )

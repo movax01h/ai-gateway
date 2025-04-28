@@ -1,6 +1,4 @@
 # Import your model classes
-from unittest.mock import patch
-
 import pytest
 from pydantic import HttpUrl
 
@@ -9,7 +7,6 @@ from ai_gateway.model_metadata import (
     ModelMetadata,
     create_model_metadata,
 )
-from ai_gateway.model_selection import LLMDefinition, ModelSelectionConfig
 
 
 def test_create_amazon_q_model_metadata():
@@ -52,46 +49,6 @@ def test_create_regular_model_metadata():
     assert result.identifier == "openai/gpt-4"
 
 
-class TestCreateGitlabModelMetadata:
-    @pytest.fixture
-    def get_llm_definitions(self):
-        mock_info = {
-            "gitlab_model1": LLMDefinition(
-                gitlab_identifier="gitlab_model1",
-                name="gitlab_model",
-                provider="custom_openai",
-                provider_identifier="mixtral_8x7b",
-                family="mixtral",
-            )
-        }
-
-        with patch.object(
-            ModelSelectionConfig, "get_llm_definitions", return_value=mock_info
-        ) as mock_method:
-            yield mock_method
-
-    def test_create_gitlab_model_metadata(self, get_llm_definitions):
-        data = {
-            "provider": "gitlab",
-            "identifier": "gitlab_model1",
-        }
-
-        result = create_model_metadata(data)
-
-        assert result.provider == "custom_openai"
-        assert result.identifier == "mixtral_8x7b"
-        assert result.name == "mixtral"
-
-    def test_create_gitlab_model_metadata_non_existing(self, get_llm_definitions):
-        data = {
-            "provider": "gitlab",
-            "identifier": "non_existing_gitlab_model",
-        }
-
-        with pytest.raises(ValueError):
-            create_model_metadata(data)
-
-
 def test_create_model_metadata_invalid_data():
     # Arrange
     invalid_data = {
@@ -100,6 +57,7 @@ def test_create_model_metadata_invalid_data():
         # missing required role_arn
     }
 
+    # Act & Assert
     with pytest.raises(ValueError):
         create_model_metadata(invalid_data)
 

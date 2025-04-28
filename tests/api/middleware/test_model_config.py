@@ -14,8 +14,14 @@ def model_metadata_context():
 
 
 @pytest.fixture
-def middleware_test_client(model_metadata_context):
-    app = FastAPI(middleware=[Middleware(ModelConfigMiddleware)])
+def middleware_test_client(custom_models_enabled, model_metadata_context):
+    app = FastAPI(
+        middleware=[
+            Middleware(
+                ModelConfigMiddleware, custom_models_enabled=custom_models_enabled
+            )
+        ]
+    )
 
     @app.post("/test")
     async def do_something(
@@ -25,6 +31,11 @@ def middleware_test_client(model_metadata_context):
         return model_metadata_context.get()
 
     return TestClient(app)
+
+
+@pytest.fixture
+def custom_models_enabled():
+    return True
 
 
 @pytest.mark.asyncio
@@ -71,5 +82,25 @@ async def test_model_params_is_none_when_metadata_is_not_in_body(
     middleware_test_client,
 ):
     response = middleware_test_client.post("/test", json={"foo": "bar"})
+
+    assert response.json() is None
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("custom_models_enabled", [False])
+async def test_model_params_when_custom_models_disabled(
+    middleware_test_client, custom_models_enabled
+):
+    model_params = {
+        "name": "test_model",
+        "provider": "custom_openai",
+        "endpoint": "http://test_model.com/",
+        "api_key": "test_api_key",
+        "identifier": "test_model_identifier",
+    }
+
+    response = middleware_test_client.post(
+        "/test", json={"model_metadata": model_params}
+    )
 
     assert response.json() is None

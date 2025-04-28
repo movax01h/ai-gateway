@@ -4,4 +4,4 @@ from .model_selection_config import (
     UnitPrimitiveConfig,
 )
 
-__all__ = ["UnitPrimitiveConfig", "LLMDefinition", "ModelSelectionConfig"]
+__all__ = ["ModelSelectionConfig", "UnitPrimitiveConfig", "LLMDefinition"]
