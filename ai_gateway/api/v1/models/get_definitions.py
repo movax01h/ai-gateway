@@ -14,6 +14,7 @@ class _GetModelResponseModel(BaseModel):
 
 
 class _GetModelResponseUnitPrimitive(BaseModel):
+    feature_setting: str
     default_model: str
     selectable_models: list[str]
     beta_models: list[str]
@@ -39,12 +40,7 @@ async def get_models():
             for defi in selection_config.get_llm_definitions().values()
         ],
         unit_primitives=[
-            _GetModelResponseUnitPrimitive(
-                unit_primitives=primitive.unit_primitives,
-                default_model=primitive.default_model,
-                selectable_models=primitive.selectable_models,
-                beta_models=primitive.beta_models,
-            )
+            _GetModelResponseUnitPrimitive(**primitive.model_dump())
             for primitive in selection_config.get_unit_primitive_config()
         ],
     )

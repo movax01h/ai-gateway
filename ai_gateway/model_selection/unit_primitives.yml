@@ -1,14 +1,22 @@
 configurable_unit_primitives:
-  - unit_primitives:
+  - feature_setting: "duo_chat"
+    unit_primitives:
       - "ask_build"
       - "ask_commit"
     default_model: "claude_sonnet_3_7_20250219"
     selectable_models:
       - "claude-3-7-sonnet-20250219"
       - "claude_3_5_sonnet_20240620"
-  - unit_primitives:
-      - "complete_code"
+  - feature_setting: "code_generations"
+    unit_primitives:
       - "generate_code"
+    default_model: "claude_sonnet_3_7_20250219"
+    selectable_models:
+      - "claude-3-7-sonnet-20250219"
+      - "claude_3_5_sonnet_20240620"
+  - feature_setting: "code_completions"
+    unit_primitives:
+      - "complete_code"
     default_model: "claude_sonnet_3_7_20250219"
     selectable_models:
       - "claude-3-7-sonnet-20250219"
