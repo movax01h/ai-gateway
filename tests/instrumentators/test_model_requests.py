@@ -7,6 +7,37 @@ from ai_gateway.instrumentators.model_requests import ModelRequestInstrumentator
 
 
 class TestWatchContainer:
+    @mock.patch("prometheus_client.Counter.labels")
+    def test_register_token_usage(self, mock_counters):
+        container = ModelRequestInstrumentator.WatchContainer(
+            labels={"model_engine": "anthropic", "model_name": "claude"},
+            streaming=False,
+            concurrency_limit=None,
+        )
+
+        container.register_token_usage(
+            "claude", {"input_tokens": 10, "output_tokens": 15}
+        )
+
+        assert mock_counters.mock_calls == [
+            mock.call(
+                model_engine="anthropic",
+                model_name="claude",
+                error="no",
+                streaming="no",
+                feature_category="unknown",
+            ),
+            mock.call().inc(10),
+            mock.call(
+                model_engine="anthropic",
+                model_name="claude",
+                error="no",
+                streaming="no",
+                feature_category="unknown",
+            ),
+            mock.call().inc(15),
+        ]
+
     @mock.patch("prometheus_client.Gauge.labels")
     @mock.patch("prometheus_client.Counter.labels")
     @mock.patch("prometheus_client.Histogram.labels")
