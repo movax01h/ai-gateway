@@ -56,10 +56,13 @@ def setup_app_logging(app: FastAPI):
     app.add_middleware(CorrelationIdMiddleware, validator=None)
 
 
-def setup_logging(logging_config: ConfigLogging, custom_models_enabled: bool):
+def setup_logging(
+    logging_config: ConfigLogging,
+    custom_models_enabled: bool,
+    cache_logger_on_first_use: bool = True,
+):
     global ENABLE_REQUEST_LOGGING  # pylint: disable=global-statement
     global CUSTOM_MODELS_ENABLED  # pylint: disable=global-statement
-
     timestamper = structlog.processors.TimeStamper(fmt="iso")
     ENABLE_REQUEST_LOGGING = logging_config.enable_request_logging
     CUSTOM_MODELS_ENABLED = custom_models_enabled
@@ -94,7 +97,7 @@ def setup_logging(logging_config: ConfigLogging, custom_models_enabled: bool):
             structlog.stdlib.ProcessorFormatter.wrap_for_formatter,
         ],
         logger_factory=structlog.stdlib.LoggerFactory(),
-        cache_logger_on_first_use=True,
+        cache_logger_on_first_use=cache_logger_on_first_use,
     )
 
     log_renderer: structlog.types.Processor
