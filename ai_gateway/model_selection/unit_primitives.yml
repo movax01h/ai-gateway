@@ -1,3 +1,4 @@
+# see docs/model_selection for documentation
 configurable_unit_primitives:
   - feature_setting: "duo_chat"
     unit_primitives:
