@@ -176,6 +176,24 @@ class TestModelMetadataToParams:
             "custom_llm_provider": "bedrock",
         }
 
+    def test_without_api_key_uses_dummy_key(self):
+        model_metadata = ModelMetadata(
+            name="model_family",
+            provider="provider",
+            endpoint=HttpUrl("https://api.example.com"),
+            api_key=None,
+            identifier=None,
+        )
+
+        params = model_metadata.to_params()
+
+        assert params == {
+            "api_base": "https://api.example.com",
+            "api_key": "dummy_key",
+            "model": "model_family",
+            "custom_llm_provider": "provider",
+        }
+
 
 def test_create_model_metadata_with_none_data():
     result = create_model_metadata(None)

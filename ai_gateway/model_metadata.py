@@ -44,6 +44,10 @@ class ModelMetadata(BaseModelMetadata):
             params["api_base"] = str(self.endpoint).removesuffix("/")
         if self.api_key:
             params["api_key"] = str(self.api_key)
+        else:
+            # Set a default dummy key to avoid LiteLLM errors
+            # See https://gitlab.com/gitlab-org/gitlab/-/issues/520512
+            params["api_key"] = "dummy_key"
 
         params["model"] = self.name
         params["custom_llm_provider"] = self.provider
