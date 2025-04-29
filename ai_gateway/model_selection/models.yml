@@ -1,3 +1,4 @@
+# see docs/model_selection for documentation
 models:
   - name: "Claude Sonnet 3.7 - Anthropic"
     gitlab_identifier: "claude_sonnet_3_7_20250219"
