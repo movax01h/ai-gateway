@@ -36,8 +36,10 @@ async def get_models():
 
     response = _GetModelResponse(
         models=[
-            _GetModelResponseModel(name=defi.name, identifier=defi.gitlab_identifier)
-            for defi in selection_config.get_llm_definitions().values()
+            _GetModelResponseModel(
+                name=definition.name, identifier=definition.gitlab_identifier
+            )
+            for definition in selection_config.get_llm_definitions().values()
         ],
         unit_primitives=[
             _GetModelResponseUnitPrimitive(**primitive.model_dump())
