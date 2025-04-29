@@ -89,7 +89,9 @@ def fastapi_server_app(auth_enabled) -> FastAPI:
     config = Config(_env_file=None, auth=ConfigAuth(bypass_external=not auth_enabled))
     fast_api_container = ContainerApplication()
     fast_api_container.config.from_dict(config.model_dump())
-    setup_logging(config.logging, False)
+    setup_logging(
+        config.logging, custom_models_enabled=False, cache_logger_on_first_use=False
+    )
     return create_fast_api_server(config)
 
 
@@ -238,7 +240,7 @@ def test_middleware_internal_event(fastapi_server_app: FastAPI, test_path, expec
     client = TestClient(server)
 
     with patch(
-        "ai_gateway.api.middleware.base.current_event_context"
+        "ai_gateway.api.middleware.internal_event.current_event_context"
     ) as mock_event_context:
         client.post(test_path)
         if expected:
