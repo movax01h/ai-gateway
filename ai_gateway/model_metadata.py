@@ -5,6 +5,7 @@ from typing import Annotated, Any, Dict, Literal, Optional
 from pydantic import AnyUrl, BaseModel, StringConstraints, UrlConstraints
 
 from ai_gateway.api.auth_utils import StarletteUser
+from ai_gateway.model_selection import ModelSelectionConfig
 
 
 class BaseModelMetadata(BaseModel):
@@ -32,7 +33,7 @@ class AmazonQModelMetadata(BaseModelMetadata):
 class ModelMetadata(BaseModelMetadata):
     name: Annotated[str, StringConstraints(max_length=255)]
     provider: Annotated[str, StringConstraints(max_length=255)]
-    endpoint: Annotated[AnyUrl, UrlConstraints(max_length=255)]
+    endpoint: Optional[Annotated[AnyUrl, UrlConstraints(max_length=255)]] = None
     api_key: Optional[Annotated[str, StringConstraints(max_length=2000)]] = None
     identifier: Optional[Annotated[str, StringConstraints(max_length=1000)]] = None
 
@@ -66,9 +67,31 @@ class ModelMetadata(BaseModelMetadata):
 TypeModelMetadata = AmazonQModelMetadata | ModelMetadata
 
 
-def create_model_metadata(data: Dict[str, Any]) -> TypeModelMetadata:
-    if data["provider"] == "amazon_q":
-        return AmazonQModelMetadata(**data)
+def parameters_for_gitlab_provider(identifier) -> dict[str, Any]:
+    """
+    Retrieve model parameters for a given GitLab identifier.
+
+    This function also allows setting custom provider details based on the identifier, like fetching endpoints based on
+    AIGW location.
+    """
+    gitlab_model = ModelSelectionConfig().get_gitlab_model(identifier)
+
+    return {
+        "provider": gitlab_model.provider,
+        "identifier": gitlab_model.provider_identifier,
+        "name": gitlab_model.family or "base",
+    }
+
+
+def create_model_metadata(data: Dict[str, Any]) -> Optional[TypeModelMetadata]:
+    if not data or "provider" not in data:
+        return None
+
+    match data["provider"]:
+        case "amazon_q":
+            return AmazonQModelMetadata(**data)
+        case "gitlab":
+            return ModelMetadata(**parameters_for_gitlab_provider(data["identifier"]))
 
     return ModelMetadata(**data)
 
