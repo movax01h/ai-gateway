@@ -256,8 +256,22 @@ export const RPS_THRESHOLD= /* RPS THRESHOLD VALUE EXPECTED */;
 export const TEST_NAME=/* 'NAME OF THE TEST IN QUOTES' */
 
 export const options = {
-  vus: /* NUMBER OF VIRTUAL USERS/THREADS */ ,
-  duration: '60s', // Test duration
+  scenarios: {
+    warmup: {
+      executor: 'constant-vus',
+      vus: 1, // Number of virtual users/threads
+      duration: '10s', // Time for warmup 
+      gracefulStop: '0s',
+      tags: { scenario: 'warmup' }, // Tag these requests to filter them out
+    },
+    load_test: {
+      executor: 'constant-vus',
+      vus: 2,
+      duration: '50s',  // Time of the actual test
+      startTime: '10s', // Start after warmup completes
+      tags: { scenario: 'load_test' },
+    },
+  }
 };
 
 export default function () {
