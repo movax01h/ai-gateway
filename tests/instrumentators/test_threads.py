@@ -24,7 +24,6 @@ def mock_run_once():
 @pytest.mark.asyncio
 @mock.patch("prometheus_client.Gauge.labels")
 @mock.patch("ai_gateway.instrumentators.threads.asyncio.sleep")
-@pytest.mark.xdist_group("capture_logs")
 async def test_monitor_threads(mock_sleep, mock_gauges):
     mock_loop = Mock()
     mock_loop.is_running = mock_run_once

@@ -12,6 +12,7 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.routing import APIRoute
 from fastapi.testclient import TestClient
 from starlette.exceptions import HTTPException as StarletteHTTPException
+from structlog.testing import capture_logs
 
 from ai_gateway.api import create_fast_api_server, server
 from ai_gateway.api.server import (
@@ -33,7 +34,7 @@ from ai_gateway.models.base import ModelAPICallError
 from ai_gateway.structured_logging import setup_logging
 
 _ROUTES_V1 = [
-    ("/v1/chat/{chat_invokable}", ["POST"]),
+    ("/v1/chat/{chat_invokable}", ["POST"]),  # legacy path
     ("/v1/x-ray/libraries", ["POST"]),
 ]
 
@@ -41,6 +42,7 @@ _ROUTES_V2 = [
     ("/v2/code/completions", ["POST"]),
     ("/v2/completions", ["POST"]),  # legacy path
     ("/v2/code/generations", ["POST"]),
+    ("/v2/chat/agent", ["POST"]),
 ]
 
 _ROUTES_V3 = [
@@ -205,7 +207,7 @@ def test_cloud_connector_auth_provider_in_app_state():
 def test_middleware_authentication(fastapi_server_app: FastAPI, auth_enabled: bool):
     client = TestClient(fastapi_server_app)
 
-    response = client.post("/v1/chat/agent")
+    response = client.post("/v2/chat/agent")
     if auth_enabled:
         assert response.status_code == 401
     else:
@@ -215,20 +217,17 @@ def test_middleware_authentication(fastapi_server_app: FastAPI, auth_enabled: bo
     assert response.status_code == 200
 
 
-@pytest.mark.xdist_group("capture_logs")
 def test_middleware_log_request(fastapi_server_app: FastAPI, caplog):
     client = TestClient(fastapi_server_app)
 
-    with caplog.at_level("INFO"):
-        client.post("/v1/chat/agent")
-        log_messages = [record.message for record in caplog.records]
-        assert any("correlation_id" in msg for msg in log_messages)
-
-    caplog.clear()
+    with capture_logs() as cap_logs:
+        client.post("/v2/chat/agent")
+        correlation_ids = [log.get("correlation_id") for log in cap_logs]
+        assert len(correlation_ids) > 0
 
 
 @pytest.mark.parametrize(
-    "test_path,expected", [("/v1/chat/agent", True), ("/monitoring/healthz", False)]
+    "test_path,expected", [("/v2/chat/agent", True), ("/monitoring/healthz", False)]
 )
 def test_middleware_internal_event(fastapi_server_app: FastAPI, test_path, expected):
     config = Config(
@@ -250,7 +249,7 @@ def test_middleware_internal_event(fastapi_server_app: FastAPI, test_path, expec
 
 
 @pytest.mark.parametrize(
-    "test_path,expected", [("/v1/chat/agent", True), ("/monitoring/healthz", False)]
+    "test_path,expected", [("/v2/chat/agent", True), ("/monitoring/healthz", False)]
 )
 def test_middleware_distributed_trace(fastapi_server_app: FastAPI, test_path, expected):
     config = Config(
@@ -288,7 +287,7 @@ def test_middleware_feature_flag(fastapi_server_app: FastAPI):
         "ai_gateway.api.middleware.feature_flag.current_feature_flag_context"
     ) as mock_feature_flag_context:
         client.post(
-            "/v1/chat/agent",
+            "/v2/chat/agent",
             headers={"x-gitlab-enabled-feature-flags": "feature_a,feature_b"},
         )
         mock_feature_flag_context.set.assert_called_once_with(
