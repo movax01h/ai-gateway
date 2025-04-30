@@ -42,7 +42,6 @@ class TestWatchContainer:
     @mock.patch("prometheus_client.Counter.labels")
     @mock.patch("prometheus_client.Histogram.labels")
     @mock.patch("time.perf_counter")
-    @pytest.mark.xdist_group("capture_logs")
     def test_finish(
         self,
         time_counter,

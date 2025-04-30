@@ -35,7 +35,6 @@ client = TestClient(app)
 
 
 @mock.patch("ai_gateway.api.middleware.base.log_exception")
-@pytest.mark.xdist_group("capture_logs")
 def test_x_gitlab_headers_logged_when_set(mock_log_exception):
     with capture_logs() as cap_logs, pytest.raises(RuntimeError):
         client.post(
@@ -62,7 +61,6 @@ def test_x_gitlab_headers_logged_when_set(mock_log_exception):
 
 
 @mock.patch("ai_gateway.api.middleware.base.log_exception")
-@pytest.mark.xdist_group("capture_logs")
 def test_x_gitlab_headers_not_logged_when_not_set(mock_log_exception):
     with capture_logs() as cap_logs, pytest.raises(RuntimeError):
         client.post("/", headers={}, data={"foo": "bar"})
@@ -78,7 +76,6 @@ def test_x_gitlab_headers_not_logged_when_not_set(mock_log_exception):
 
 
 @mock.patch("ai_gateway.api.middleware.base.log_exception")
-@pytest.mark.xdist_group("capture_logs")
 def test_exeption_capture(mock_log_exception):
     with capture_logs() as cap_logs, pytest.raises(RuntimeError):
         response = client.post("/", headers={}, data={"foo": "bar"})
@@ -92,7 +89,6 @@ def test_exeption_capture(mock_log_exception):
 
 
 @mock.patch("ai_gateway.api.middleware.base.log_exception")
-@pytest.mark.xdist_group("capture_logs")
 def test_exeption_group_capture(mock_log_exception):
     with capture_logs() as cap_logs, pytest.raises(ValueError):
         response = client.post("/exception_group", headers={}, data={"foo": "bar"})
