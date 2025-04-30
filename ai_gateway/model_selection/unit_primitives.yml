@@ -7,18 +7,46 @@ configurable_unit_primitives:
     default_model: "claude_sonnet_3_7_20250219"
     selectable_models:
       - "claude-3-7-sonnet-20250219"
-      - "claude_3_5_sonnet_20240620"
+      - "claude-3-5-sonnet-20240620"
   - feature_setting: "code_generations"
     unit_primitives:
       - "generate_code"
     default_model: "claude_sonnet_3_7_20250219"
     selectable_models:
       - "claude-3-7-sonnet-20250219"
-      - "claude_3_5_sonnet_20240620"
+      - "claude-3-5-sonnet-20240620"
   - feature_setting: "code_completions"
     unit_primitives:
       - "complete_code"
     default_model: "claude_sonnet_3_7_20250219"
     selectable_models:
       - "claude-3-7-sonnet-20250219"
-      - "claude_3_5_sonnet_20240620"
+      - "claude-3-5-sonnet-20240620"
+  - feature_setting: "duo_chat_fix_code"
+    unit_primitives:
+      - "fix_code"
+    default_model: "claude_sonnet_3_7_20250219"
+    selectable_models:
+      - "claude-3-7-sonnet-20250219"
+      - "claude-3-5-sonnet-20240620"
+  - feature_setting: "duo_chat_refactor_code"
+    unit_primitives:
+      - "refactor_code"
+    default_model: "claude_sonnet_3_7_20250219"
+    selectable_models:
+      - "claude-3-7-sonnet-20250219"
+      - "claude-3-5-sonnet-20240620"
+  - feature_setting: "duo_chat_write_tests"
+    unit_primitives:
+      - "write_tests"
+    default_model: "claude_sonnet_3_7_20250219"
+    selectable_models:
+      - "claude-3-7-sonnet-20250219"
+      - "claude-3-5-sonnet-20240620"
+  - feature_setting: "duo_chat_explain_code"
+    unit_primitives:
+      - "explain_code"
+    default_model: "claude_sonnet_3_7_20250219"
+    selectable_models:
+      - "claude-3-7-sonnet-20250219"
+      - "claude-3-5-sonnet-20240620"
