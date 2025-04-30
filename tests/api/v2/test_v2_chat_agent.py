@@ -464,6 +464,56 @@ class TestReActAgentStream:
             ),
             (
                 CloudConnectorUser(
+                    authenticated=True,
+                    claims=UserClaims(
+                        scopes=["duo_chat", "include_repository_context"]
+                    ),
+                ),
+                AgentRequest(
+                    messages=[
+                        Message(
+                            role=Role.USER,
+                            content="Some prompt",
+                            additional_context=[
+                                AdditionalContext(
+                                    category="repository",
+                                    content="some repository context",
+                                )
+                            ],
+                        ),
+                        Message(role=Role.ASSISTANT, content=None, agent_scratchpad=[]),
+                    ]
+                ),
+                200,
+                "",
+                [call("request_duo_chat", category="ai_gateway.api.v2.chat.agent")],
+            ),
+            (
+                CloudConnectorUser(
+                    authenticated=True,
+                    claims=UserClaims(scopes=["duo_chat", "include_directory_context"]),
+                ),
+                AgentRequest(
+                    messages=[
+                        Message(
+                            role=Role.USER,
+                            content="Some prompt",
+                            additional_context=[
+                                AdditionalContext(
+                                    category="directory",
+                                    content="some directory context",
+                                )
+                            ],
+                        ),
+                        Message(role=Role.ASSISTANT, content=None, agent_scratchpad=[]),
+                    ]
+                ),
+                200,
+                "",
+                [call("request_duo_chat", category="ai_gateway.api.v2.chat.agent")],
+            ),
+            (
+                CloudConnectorUser(
                     authenticated=True, claims=UserClaims(scopes=["duo_chat"])
                 ),
                 AgentRequest(
