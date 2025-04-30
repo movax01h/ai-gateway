@@ -18,6 +18,11 @@ To maintain AI Gateway project, the following domain knowledge is preferred:
 - [gRPC](https://grpc.io/docs/what-is-grpc/introduction/) as the primary method to send messages between the Executor and the Service
 - [Architectural blueprint for AI Gateway](https://docs.gitlab.com/ee/architecture/blueprints/ai_gateway/) to understand how the AI Gateway is integrated with the other components.
 - [Architectural blueprint for Duo Workflow Service](https://handbook.gitlab.com/handbook/engineering/architecture/design-documents/duo_workflow/) to understand how Duo Workflow is designed and how the service integrates with the overall design.
+- [Prompts Migration Versioning](https://handbook.gitlab.com/handbook/engineering/architecture/design-documents/prompts_migration/#versioning)
+- [AI Model Selection](https://handbook.gitlab.com/handbook/engineering/architecture/design-documents/ai_model_selection/)
+- [Consolidating Evaluation Tooling](https://handbook.gitlab.com/handbook/engineering/architecture/design-documents/ai_evaluation_consolidation/)
+- [AI Context Abstraction Layer](https://handbook.gitlab.com/handbook/engineering/architecture/design-documents/ai_context_abstraction_layer/)
+- [Self-Hosted Model Deployment](https://handbook.gitlab.com/handbook/engineering/architecture/design-documents/custom_models/)
 
 In addition, it would be better to familiarize yourself with the following observability services:
 
@@ -33,10 +38,10 @@ While there is no strict guideline how to become a maintainer, we generally reco
 - Review more than or equal to 5 MRs as a trainee maintainer.
 - Familiarize yourself with the [preferred domain knowledge](#preferred-domain-knowledge).
 
-When it's ready:
+When you are ready:
 
 - Create a merge request and indicate your role as an `ai-gateway: maintainer` in your [team member entry](https://gitlab.com/gitlab-com/www-gitlab-com/blob/master/doc/team_database.md).
 - Assign MR to your manager and AI Gateway maintainers for merge.
-- After the MR is merged, ask an Owner of [`@gitlab-org/maintainers/ai-gateway`](https://gitlab.com/groups/gitlab-org/maintainers/ai-gateway/-/group_members?with_inherited_permissions=exclude) group to add you. It will make you one of the [Code Owners](https://gitlab.com/gitlab-org/modelops/applied-ml/code-suggestions/ai-assist/-/blob/main/.gitlab/CODEOWNERS?ref_type=heads) whose approval is required for an MR to be merged.
-- Add your username to the `members` of the `ai-gateway` entry in the [`inventory.json`](https://gitlab.com/gitlab-com/gl-infra/platform/runway/provisioner/-/blob/main/inventory.json?ref_type=heads). It will make you one of the maintainers in [the deployment project](https://gitlab.com/gitlab-com/gl-infra/platform/runway/deployments/ai-gateway), which allows you to deploy via Runway.
-- Add your username to the list of `additionalReviewers` in the [`renovate.json`](https://gitlab.com/gitlab-org/modelops/applied-ml/code-suggestions/ai-assist/-/blob/main/renovate.json). It will include you as a reviewer for dependency update merge requests.
+- After the MR is merged, ask an Owner of [`@gitlab-org/maintainers/ai-gateway`](https://gitlab.com/groups/gitlab-org/maintainers/ai-gateway/-/group_members?with_inherited_permissions=exclude) group to add you. This will make you one of the [Code Owners](https://gitlab.com/gitlab-org/modelops/applied-ml/code-suggestions/ai-assist/-/blob/main/.gitlab/CODEOWNERS?ref_type=heads) whose approval is required for an MR to be merged.
+- Add your username to the `members` of the `ai-gateway` entry in the [`inventory.json`](https://gitlab.com/gitlab-com/gl-infra/platform/runway/provisioner/-/blob/main/inventory.json?ref_type=heads). This will make you one of the maintainers in [the deployment project](https://gitlab.com/gitlab-com/gl-infra/platform/runway/deployments/ai-gateway), which allows you to deploy via Runway.
+- Add your username to the list of `additionalReviewers` in the [`renovate.json`](https://gitlab.com/gitlab-org/modelops/applied-ml/code-suggestions/ai-assist/-/blob/main/renovate.json). This will include you as a reviewer for dependency update merge requests.
