@@ -83,6 +83,8 @@ class AdditionalContext(BaseModel):
         "dependency",
         "local_git",
         "terminal",
+        "repository",
+        "directory",
     ]
     id: Optional[str] = None
     content: Optional[str] = None
