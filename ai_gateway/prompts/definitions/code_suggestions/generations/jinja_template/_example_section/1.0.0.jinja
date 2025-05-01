@@ -1,0 +1,16 @@
+{%- if examples_array %}
+Here are a few examples of successfully generated code:
+<examples>
+
+{%- for use_case in examples_array %}
+<example>
+H: <existing_code>
+{{ use_case.example }}
+</existing_code>
+
+A: {{ use_case.response }}</new_code>
+</example>
+{% endfor %}
+
+</examples>
+{%- endif %}
