@@ -1,0 +1,6 @@
+{%- if libraries %}
+The list of available libraries is provided below in <libs></libs> tags. Ignore libraries that are not publicly registered.
+<libs>
+{{("\n").join(libraries)}}
+</libs>
+{%- endif %}
