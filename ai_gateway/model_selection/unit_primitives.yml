@@ -18,8 +18,9 @@ configurable_unit_primitives:
   - feature_setting: "code_completions"
     unit_primitives:
       - "complete_code"
-    default_model: "claude_sonnet_3_7_20250219"
+    default_model: "codestral_2501_fireworks"
     selectable_models:
+      - "codestral_2501_vertex"
       - "claude-3-7-sonnet-20250219"
       - "claude-3-5-sonnet-20240620"
   - feature_setting: "duo_chat_fix_code"
