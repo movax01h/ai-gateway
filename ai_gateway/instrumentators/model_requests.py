@@ -7,6 +7,7 @@ from langchain_core.messages.ai import UsageMetadata
 from prometheus_client import Counter, Gauge, Histogram
 
 from ai_gateway.api.feature_category import current_feature_category
+from ai_gateway.config import ModelLimits
 from ai_gateway.tracking.errors import log_exception
 
 METRIC_LABELS = ["model_engine", "model_name"]
@@ -21,6 +22,16 @@ INFERENCE_IN_FLIGHT_GAUGE = Gauge(
 MAX_CONCURRENT_MODEL_INFERENCES = Gauge(
     "model_inferences_max_concurrent",
     "The maximum number of inferences we can run concurrently on a model",
+    METRIC_LABELS,
+)
+MAX_MODEL_INPUT_TOKENS = Gauge(
+    "model_max_input_tokens",
+    "The per-minute limit on input tokens for a model",
+    METRIC_LABELS,
+)
+MAX_MODEL_OUTPUT_TOKENS = Gauge(
+    "model_max_output_tokens",
+    "The per-minute limit on output tokens for a model",
     METRIC_LABELS,
 )
 
@@ -61,11 +72,11 @@ class ModelRequestInstrumentator:
         def __init__(
             self,
             labels: dict[str, str],
-            concurrency_limit: Optional[int],
+            limits: Optional[ModelLimits],
             streaming: bool,
         ):
             self.labels = labels
-            self.concurrency_limit = concurrency_limit
+            self.limits = limits
             self.error = False
             self.streaming = streaming
             self.start_time = None
@@ -76,10 +87,20 @@ class ModelRequestInstrumentator:
             """
             self.start_time = time.perf_counter()
 
-            if self.concurrency_limit is not None:
-                MAX_CONCURRENT_MODEL_INFERENCES.labels(**self.labels).set(
-                    self.concurrency_limit
-                )
+            if self.limits is not None:
+                if self.limits["concurrency"] is not None:
+                    MAX_CONCURRENT_MODEL_INFERENCES.labels(**self.labels).set(
+                        self.limits["concurrency"]
+                    )
+                if self.limits["input_tokens"] is not None:
+                    MAX_MODEL_INPUT_TOKENS.labels(**self.labels).set(
+                        self.limits["input_tokens"]
+                    )
+                if self.limits["output_tokens"] is not None:
+                    MAX_MODEL_OUTPUT_TOKENS.labels(**self.labels).set(
+                        self.limits["output_tokens"]
+                    )
+
             INFERENCE_IN_FLIGHT_GAUGE.labels(**self.labels).inc()
 
         def register_error(self):
@@ -124,16 +145,16 @@ class ModelRequestInstrumentator:
         self,
         model_engine: str,
         model_name: str,
-        concurrency_limit: Optional[int],
+        limits: Optional[ModelLimits],
     ):
         self.labels = {"model_engine": model_engine, "model_name": model_name}
-        self.concurrency_limit = concurrency_limit
+        self.limits = limits
 
     @contextmanager
     def watch(self, stream=False):
         watcher = ModelRequestInstrumentator.WatchContainer(
             labels=self.labels,
-            concurrency_limit=self.concurrency_limit,
+            limits=self.limits,
             streaming=stream,
         )
         watcher.start()

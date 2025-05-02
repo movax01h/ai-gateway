@@ -7,6 +7,7 @@ from dependency_injector import containers, providers
 from pydantic import AnyUrl
 
 from ai_gateway.chat.agents.react import ReActAgent
+from ai_gateway.config import ConfigModelLimits
 from ai_gateway.model_metadata import ModelMetadata
 from ai_gateway.prompts import Prompt
 from ai_gateway.prompts.registry import LocalPromptRegistry
@@ -22,12 +23,33 @@ def config_values(assets_dir):
         "amazon_q": {
             "region": "us-west-2",
         },
+        "model_engine_limits": {
+            "anthropic-chat": {
+                "claude-3-7-sonnet-20250219": {
+                    "input_tokens": 5,
+                    "output_tokens": 10,
+                    "concurrency": 15,
+                }
+            }
+        },
     }
 
 
 def test_container(mock_container: containers.DeclarativeContainer):
     prompts = cast(providers.Container, mock_container.pkg_prompts)
     registry = cast(LocalPromptRegistry, prompts.prompt_registry())
+
+    assert registry.model_limits == ConfigModelLimits(
+        {
+            "anthropic-chat": {
+                "claude-3-7-sonnet-20250219": {
+                    "input_tokens": 5,
+                    "output_tokens": 10,
+                    "concurrency": 15,
+                }
+            }
+        }
+    )
 
     prompts_dir = Path(
         sys.modules[LocalPromptRegistry.__module__].__file__ or ""

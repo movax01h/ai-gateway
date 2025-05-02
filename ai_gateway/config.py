@@ -1,5 +1,5 @@
 import os
-from typing import Annotated, Optional, Set
+from typing import Annotated, Optional, Set, TypedDict
 
 from dotenv import find_dotenv
 from pydantic import BaseModel, Field, RootModel
@@ -14,7 +14,7 @@ __all__ = [
     "ConfigSnowplow",
     "ConfigInstrumentator",
     "ConfigVertexTextModel",
-    "ConfigModelConcurrency",
+    "ConfigModelLimits",
     "ConfigCustomModels",
     "ConfigModelKeys",
     "ConfigModelEndpoints",
@@ -165,10 +165,16 @@ class ConfigFeatureFlags(BaseModel):
     fireworks_score_threshold: dict[str, float] = {}
 
 
-class ConfigModelConcurrency(RootModel):
-    root: dict[str, dict[str, int]] = {}
+class ModelLimits(TypedDict):
+    concurrency: int | None
+    input_tokens: int | None
+    output_tokens: int | None
 
-    def for_model(self, engine: str, name: str) -> Optional[int]:
+
+class ConfigModelLimits(RootModel):
+    root: dict[str, dict[str, ModelLimits]] = {}
+
+    def for_model(self, engine: str, name: str) -> Optional[ModelLimits]:
         return self.root.get(engine, {}).get(name, None)
 
 
@@ -237,9 +243,9 @@ class Config(BaseSettings):
     vertex_search: Annotated[
         ConfigVertexSearch, Field(default_factory=ConfigVertexSearch)
     ] = ConfigVertexSearch()
-    model_engine_concurrency_limits: Annotated[
-        ConfigModelConcurrency, Field(default_factory=ConfigModelConcurrency)
-    ] = ConfigModelConcurrency()
+    model_engine_limits: Annotated[
+        ConfigModelLimits, Field(default_factory=ConfigModelLimits)
+    ] = ConfigModelLimits()
     default_prompts: Annotated[
         ConfigDefaultPrompts, Field(default_factory=ConfigDefaultPrompts)
     ] = ConfigDefaultPrompts()

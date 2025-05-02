@@ -24,7 +24,7 @@ from ai_gateway.code_suggestions.processing.typing import (
     MetadataCodeContent,
     MetadataPromptBuilder,
 )
-from ai_gateway.config import Config
+from ai_gateway.config import Config, ConfigModelLimits
 from ai_gateway.container import ContainerApplication
 from ai_gateway.internal_events.client import InternalEventsClient
 from ai_gateway.model_metadata import TypeModelMetadata, current_model_metadata_context
@@ -580,6 +580,11 @@ def prompt(
 @pytest.fixture
 def internal_event_client():
     return Mock(spec=InternalEventsClient)
+
+
+@pytest.fixture
+def model_limits():
+    return ConfigModelLimits()
 
 
 @pytest.fixture

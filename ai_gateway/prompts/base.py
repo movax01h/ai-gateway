@@ -12,6 +12,7 @@ from langchain_core.prompts.string import DEFAULT_FORMATTER_MAPPING
 from langchain_core.runnables import Runnable, RunnableBinding, RunnableConfig
 
 from ai_gateway.api.auth_utils import StarletteUser
+from ai_gateway.config import ConfigModelLimits, ModelLimits
 from ai_gateway.instrumentators.model_requests import ModelRequestInstrumentator
 from ai_gateway.internal_events.client import InternalEventsClient
 from ai_gateway.model_metadata import TypeModelMetadata, current_model_metadata_context
@@ -62,6 +63,7 @@ class Prompt(RunnableBinding[Input, Output]):
     unit_primitives: list[GitLabUnitPrimitive]
     prompt_tpl: Runnable[Input, PromptValue]
     internal_event_client: Optional[InternalEventsClient] = None
+    limits: Optional[ModelLimits] = None
 
     def __init__(
         self,
@@ -128,7 +130,12 @@ class Prompt(RunnableBinding[Input, Output]):
         return ModelRequestInstrumentator(
             model_engine=self.model._llm_type,
             model_name=self.model_name,
-            concurrency_limit=None,  # TODO: Plug concurrency limit into agents
+            limits=self.limits,
+        )
+
+    def set_limits(self, model_limits: ConfigModelLimits):
+        self.limits = model_limits.for_model(
+            engine=self.model._llm_type, name=self.model_name
         )
 
     async def ainvoke(
@@ -236,6 +243,7 @@ class Prompt(RunnableBinding[Input, Output]):
 
 class BasePromptRegistry(ABC):
     internal_event_client: InternalEventsClient
+    model_limits: ConfigModelLimits
 
     @abstractmethod
     def get(
@@ -262,6 +270,7 @@ class BasePromptRegistry(ABC):
 
         prompt = self.get(prompt_id, prompt_version or "^1.0.0", model_metadata)
         prompt.internal_event_client = self.internal_event_client
+        prompt.set_limits(self.model_limits)
 
         for unit_primitive in prompt.unit_primitives:
             if not user.can(unit_primitive):

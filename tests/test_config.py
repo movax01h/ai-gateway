@@ -15,8 +15,8 @@ from ai_gateway.config import (
     ConfigGoogleCloudProfiler,
     ConfigInstrumentator,
     ConfigLogging,
-    ConfigModelConcurrency,
     ConfigModelEndpoints,
+    ConfigModelLimits,
     ConfigSnowplow,
     ConfigVertexSearch,
     ConfigVertexTextModel,
@@ -471,18 +471,30 @@ def test_amazon_q():
 @pytest.mark.parametrize(
     ("values", "expected"),
     [
-        ({}, ConfigModelConcurrency()),
+        ({}, ConfigModelLimits()),
         (
-            {"AIGW_MODEL_ENGINE_CONCURRENCY_LIMITS": '{"engine": {"model": 10}}'},
-            ConfigModelConcurrency({"engine": {"model": 10}}),
+            {
+                "AIGW_MODEL_ENGINE_LIMITS": '{"engine": {"model": {"input_tokens": 10, "output_tokens": 20, "concurrency": 30}}}'
+            },
+            ConfigModelLimits(
+                {
+                    "engine": {
+                        "model": {
+                            "input_tokens": 10,
+                            "output_tokens": 20,
+                            "concurrency": 30,
+                        }
+                    }
+                }
+            ),
         ),
     ],
 )
-def test_config_model_concurrency(values: dict, expected: ConfigModelConcurrency):
+def test_config_model_limits(values: dict, expected: ConfigModelLimits):
     with mock.patch.dict(os.environ, values, clear=True):
         config = Config(_env_file=None)  # type: ignore[call-arg]
 
-        assert config.model_engine_concurrency_limits == expected
+        assert config.model_engine_limits == expected
 
 
 @pytest.mark.parametrize(

@@ -14,6 +14,7 @@ from litellm.exceptions import Timeout
 from pydantic import AnyUrl
 
 from ai_gateway.api.auth_utils import StarletteUser
+from ai_gateway.config import ConfigModelLimits
 from ai_gateway.model_metadata import (
     AmazonQModelMetadata,
     ModelMetadata,
@@ -244,10 +245,13 @@ class TestPromptTimeout:
 
 
 @pytest.fixture
-def registry(internal_event_client: Mock, prompt: Prompt):
+def registry(
+    internal_event_client: Mock, model_limits: ConfigModelLimits, prompt: Prompt
+):
     class Registry(BasePromptRegistry):
         def __init__(self):
             self.internal_event_client = internal_event_client
+            self.model_limits = model_limits
 
         def get(self, *args, **kwargs):
             return prompt

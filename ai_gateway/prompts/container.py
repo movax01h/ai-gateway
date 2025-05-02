@@ -1,6 +1,7 @@
 from dependency_injector import containers, providers
 
 from ai_gateway.chat import agents as chat
+from ai_gateway.config import ConfigModelLimits
 from ai_gateway.prompts.config import ModelClassProvider
 from ai_gateway.prompts.registry import LocalPromptRegistry
 
@@ -29,6 +30,7 @@ class ContainerPrompts(containers.DeclarativeContainer):
         },
         default_prompts=config.default_prompts,
         internal_event_client=internal_event.client,
+        model_limits=providers.Factory(ConfigModelLimits, config.model_engine_limits),
         custom_models_enabled=config.custom_models.enabled,
         disable_streaming=config.custom_models.disable_streaming,
     )

@@ -8,16 +8,14 @@ import httpx
 from fastapi import status
 from starlette.background import BackgroundTask
 
-from ai_gateway.config import ConfigModelConcurrency
+from ai_gateway.config import ConfigModelLimits
 from ai_gateway.instrumentators.model_requests import ModelRequestInstrumentator
 
 
 class BaseProxyClient(ABC):
-    def __init__(
-        self, client: httpx.AsyncClient, concurrency_limit: ConfigModelConcurrency
-    ):
+    def __init__(self, client: httpx.AsyncClient, limits: ConfigModelLimits):
         self.client = client
-        self.concurrency_limit = concurrency_limit
+        self.limits = limits
 
     async def proxy(self, request: fastapi.Request) -> fastapi.Response:
         upstream_path = self._extract_upstream_path(request.url.__str__())
@@ -44,7 +42,7 @@ class BaseProxyClient(ABC):
             with ModelRequestInstrumentator(
                 model_engine=self._upstream_service(),
                 model_name=model_name,
-                concurrency_limit=self.concurrency_limit.for_model(
+                limits=self.limits.for_model(
                     engine=self._upstream_service(), name=model_name
                 ),
             ).watch(stream=stream) as watcher:

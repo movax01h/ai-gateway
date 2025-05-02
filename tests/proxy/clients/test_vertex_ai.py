@@ -7,18 +7,16 @@ from starlette.datastructures import URL
 
 from ai_gateway.proxy.clients.vertex_ai import VertexAIProxyClient
 
-from .fixtures import async_client_factory, concurrency_limit, request_factory
+from .fixtures import async_client_factory, limits, request_factory
 
 
 @pytest.mark.asyncio
-async def test_valid_proxy_request(
-    async_client_factory, concurrency_limit, request_factory
-):
+async def test_valid_proxy_request(async_client_factory, limits, request_factory):
     proxy_client = VertexAIProxyClient(
         project="",
         location="",
         client=async_client_factory(),
-        concurrency_limit=concurrency_limit,
+        limits=limits,
     )
 
     request_params = {
@@ -91,7 +89,7 @@ async def test_valid_proxy_request(
 )
 async def test_request_url(
     async_client_factory,
-    concurrency_limit,
+    limits,
     request_factory,
     request_url,
     expected_upstream_path,
@@ -102,7 +100,7 @@ async def test_request_url(
         project="my-project",
         location="my-location",
         client=async_client,
-        concurrency_limit=concurrency_limit,
+        limits=limits,
     )
 
     if expected_error:
