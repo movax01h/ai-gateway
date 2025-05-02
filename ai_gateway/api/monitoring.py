@@ -6,15 +6,13 @@ from fastapi import APIRouter, Depends, Request
 from fastapi_health import health
 from gitlab_cloud_connector import cloud_connector_ready
 
-from ai_gateway.async_dependency_resolver import (
+from ai_gateway.async_dependency_resolver import (  # get_code_suggestions_completions_vertex_legacy_provider,
     get_code_suggestions_completions_litellm_factory_provider,
-    get_code_suggestions_completions_vertex_legacy_provider,
     get_code_suggestions_generations_anthropic_chat_factory_provider,
     get_config,
 )
-from ai_gateway.code_suggestions import (
+from ai_gateway.code_suggestions import (  # CodeCompletionsLegacy,
     CodeCompletions,
-    CodeCompletionsLegacy,
     CodeGenerations,
 )
 from ai_gateway.code_suggestions.processing import MetadataPromptBuilder, Prompt
@@ -65,21 +63,22 @@ def single_validation(
     return _decorator
 
 
-@single_validation(KindModelProvider.VERTEX_AI)
-async def validate_vertex_available(
-    completions_legacy_vertex_factory: Annotated[
-        Factory[CodeCompletionsLegacy],
-        Depends(get_code_suggestions_completions_vertex_legacy_provider),
-    ],
-) -> bool:
-    code_completions = completions_legacy_vertex_factory()
-    await code_completions.execute(
-        prefix="def hello_world():",
-        suffix="",
-        file_name="monitoring.py",
-        editor_lang="python",
-    )
-    return True
+# TODO: replace this with the correct vertex model
+# @single_validation(KindModelProvider.VERTEX_AI)
+# async def validate_vertex_available(
+#     completions_legacy_vertex_factory: Annotated[
+#         Factory[CodeCompletionsLegacy],
+#         Depends(get_code_suggestions_completions_vertex_legacy_provider),
+#     ],
+# ) -> bool:
+#     code_completions = completions_legacy_vertex_factory()
+#     await code_completions.execute(
+#         prefix="def hello_world():",
+#         suffix="",
+#         file_name="monitoring.py",
+#         editor_lang="python",
+#     )
+#     return True
 
 
 @single_validation(KindModelProvider.ANTHROPIC)
@@ -167,7 +166,7 @@ router.add_api_route(
     "/ready",
     health(
         [
-            validate_vertex_available,
+            # validate_vertex_available,
             validate_anthropic_available,
             validate_fireworks_available,
             validate_cloud_connector_ready,
