@@ -231,4 +231,4 @@ install-eval-deps:
 .PHONY: eval
 eval: install-eval-deps
 	@echo "Running evaluation..."
-	@poetry run eval $(PROMPT_ID) $(PROMPT_VERSION) $(DATASET)
+	@poetry run eval --prompt-id $(PROMPT_ID) --prompt-version $(PROMPT_VERSION) --dataset $(DATASET) $(EVALUATORS)
