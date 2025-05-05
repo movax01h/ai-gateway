@@ -208,11 +208,11 @@ async def test_streaming(
     [
         (
             {},
-            [("content-length", "22")],
+            [("content-length", "21")],
         ),
         (
             {"Vendor-Trace-ID": "123"},
-            [("content-length", "22")],
+            [("content-length", "21")],
         ),
         (
             {"content-length": "200"},

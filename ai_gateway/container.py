@@ -12,12 +12,11 @@ from ai_gateway.models.v2.container import ContainerModels as ContainerModelsV2
 from ai_gateway.prompts.container import ContainerPrompts
 from ai_gateway.searches.container import ContainerSearches
 from ai_gateway.tracking.container import ContainerTracking
+from ai_gateway.x_ray.container import ContainerXRay
 
 __all__ = [
     "ContainerApplication",
 ]
-
-from ai_gateway.x_ray.container import ContainerXRay
 
 
 class ContainerApplication(containers.DeclarativeContainer):

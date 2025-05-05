@@ -101,8 +101,8 @@ for more information on choosing a dataset).
 - Add a `LANGCHAIN_API_KEY` to your `.env` (see
 [the eli5 prerequisites doc](https://gitlab.com/gitlab-org/modelops/ai-model-validation-and-research/ai-evaluation/prompt-library/-/tree/main/doc/eli5#prerequisites)
 on instructions on how to gain access to LangSmith)
-- Run `poetry run eval [prompt-id] [prompt-version] [dataset-name]` (for example:
-`poetry run eval generate_description 1.0.0 dataset.generate_description.1`)
+- Run `make eval` with the appropriate variables. For example:
+`make eval PROMPT_ID=generate_description PROMPT_VERSION=1.0.0 DATASET=dataset.generate_description.1 EVALUATORS="correctness"`
 
 ### Running prompt evaluations on CI
 
@@ -112,6 +112,7 @@ prompt changes before merging them. You'll need to supply the following CI varia
 - `PROMPT_ID`
 - `PROMPT_VERSION`
 - `DATASET`
+- `EVALUATORS` (list of space-separated evaluator names, optional)
 
 In the job output, look for the message "View the evaluation results for experiment" to get a link to the resulting
 LangSmith run.
