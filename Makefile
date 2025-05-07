@@ -20,7 +20,6 @@ MYPY_LINT_TODO_DIR ?= --exclude "ai_gateway/models/anthropic.py" \
 	--exclude "ai_gateway/api/v3/code/completions.py" \
 	--exclude "ai_gateway/api/v2/code/completions.py" \
 	--exclude "ai_gateway/code_suggestions/completions.py" \
-	--exclude "ai_gateway/code_suggestions/container.py" \
 	--exclude "ai_gateway/code_suggestions/generations.py" \
 	--exclude "ai_gateway/code_suggestions/processing/ops.py" \
 	--exclude "tests/code_suggestions/test_completions.py" \
