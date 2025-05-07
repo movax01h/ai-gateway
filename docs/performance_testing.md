@@ -254,24 +254,38 @@ import { textSummary } from 'https://jslib.k6.io/k6-summary/0.0.1/index.js';
 export const TTFB_THRESHOLD= /* TTFB THRESHOLD VALUE EXPECTED */
 export const RPS_THRESHOLD= /* RPS THRESHOLD VALUE EXPECTED */;
 export const TEST_NAME=/* 'NAME OF THE TEST IN QUOTES' */
+export const LOAD_TEST_VUS = 2; /* THE NUMBER OF THREADS OF ACTUAL TEST */
+export const LOAD_TEST_DURATION = '50s'; /* THE DURATION FOR THE ACTUAL TEST RUN */
+export const WARMUP_TEST_VUS = 1; /* THE NUMBER OF THREADS FOR WARMING UP THE SYSTEM */
+export const WARMUP_TEST_DURATION = '10s'; /* THE DURATION FOR THE WARMUP RUN */
+export const LOAD_TEST_START_TIME = '10s'; /* THE TIME TO WAIT AFTER WHICH THE LOAD TEST STARTS
+                                              USUALLY THIS WOULD BE EQUAL TO WARMUP_TEST_DURATION */
 
 export const options = {
-  scenarios: {
+scenarios:  {
     warmup: {
       executor: 'constant-vus',
-      vus: 1, // Number of virtual users/threads
-      duration: '10s', // Time for warmup 
+      vus: WARMUP_TEST_VUS,
+      duration: WARMUP_TEST_DURATION,
       gracefulStop: '0s',
-      tags: { scenario: 'warmup' }, // Tag these requests to filter them out
+      tags: { scenario: 'warmup' },
     },
     load_test: {
       executor: 'constant-vus',
-      vus: 2,
-      duration: '50s',  // Time of the actual test
-      startTime: '10s', // Start after warmup completes
+      vus: LOAD_TEST_VUS,
+      duration: LOAD_TEST_DURATION,
+      startTime: LOAD_TEST_START_TIME,
       tags: { scenario: 'load_test' },
     },
-  }
+  },
+  thresholds: {
+    'http_req_waiting{scenario:load_test}': [
+      { threshold: `p(90)<${TTFB_THRESHOLD}`, abortOnFail: false }
+    ],
+    'http_reqs{scenario:load_test}': [
+      { threshold: `rate>=${RPS_THRESHOLD}`, abortOnFail: false }
+    ]
+  },
 };
 
 export default function () {
@@ -281,41 +295,6 @@ export default function () {
 
 }
 
-/*
-/ LET THE BELOW METHOD BE AS IT IS
-/ USED TO GENERATE CUSTOM REPORTS
-/ WHICH WILL BE POSTED TO MR AS A COMMENT
-*/
-
-export function handleSummary(data) {
-  const SUMMARY_OUTPUT_PATH = `results/${TEST_NAME}.json`;
-  console.log(data.metrics.http_reqs)
-
-  // Create an object for the return value
-  const summaryOutput = {
-    'stdout': textSummary(data, { indent: ' ', enableColors: true }) +
-              `\nConstants:\n` +
-              `TTFB_THRESHOLD: ${TTFB_THRESHOLD}\n` +
-              `RPS_THRESHOLD: ${RPS_THRESHOLD}\n` +
-              `VUs: ${options.vus}\n` +
-              `Duration: ${options.duration}\n`+
-              `TTFB p90: ${data.metrics.http_req_waiting.values["p(90)"]}ms\n`+
-              `TTFB Avg: ${data.metrics.http_req_waiting.values["avg"]}ms\n`+
-              `http_requests: ${data.metrics.http_reqs.values["rate"]}\n,`
-  };
-
-  summaryOutput[SUMMARY_OUTPUT_PATH] = JSON.stringify({
-    metrics: data.metrics,
-    constants: {
-      ttfb_threshold: TTFB_THRESHOLD,
-      rps_threshold: RPS_THRESHOLD,
-      vus: options.vus,
-      duration: options.duration
-    }
-  }, null, 2);
-
-  return summaryOutput;
-}
 ```
 
 ## Troubleshooting `tests:performance` job failures
