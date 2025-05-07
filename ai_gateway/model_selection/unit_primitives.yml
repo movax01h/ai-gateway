@@ -72,3 +72,11 @@ configurable_unit_primitives:
     selectable_models:
       - "claude-3-7-sonnet-20250219"
       - "claude-3-5-sonnet-20240620"
+
+  - feature_setting: "resolve_vulnerability"
+    unit_primitives:
+      - "resolve_vulnerability"
+    default_model: "claude_3_5_sonnet_20240620"
+    selectable_models:
+      - "claude-3-7-sonnet-20250219"
+      - "claude-3-5-sonnet-20240620"
