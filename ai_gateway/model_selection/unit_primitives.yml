@@ -6,77 +6,90 @@ configurable_unit_primitives:
       - "ask_commit"
     default_model: "claude_sonnet_3_7_20250219"
     selectable_models:
-      - "claude-3-7-sonnet-20250219"
-      - "claude-3-5-sonnet-20240620"
+      - "claude_sonnet_3_7_20250219"
+      - "claude_3_5_sonnet_20240620"
   - feature_setting: "code_generations"
     unit_primitives:
       - "generate_code"
     default_model: "claude_sonnet_3_7_20250219"
     selectable_models:
-      - "claude-3-7-sonnet-20250219"
-      - "claude-3-5-sonnet-20240620"
+      - "claude_sonnet_3_7_20250219"
+      - "claude_3_5_sonnet_20240620"
   - feature_setting: "code_completions"
     unit_primitives:
       - "complete_code"
     default_model: "codestral_2501_fireworks"
     selectable_models:
       - "codestral_2501_vertex"
-      - "claude-3-7-sonnet-20250219"
-      - "claude-3-5-sonnet-20240620"
+      - "claude_sonnet_3_7_20250219"
+      - "claude_3_5_sonnet_20240620"
   - feature_setting: "duo_chat_fix_code"
     unit_primitives:
       - "fix_code"
     default_model: "claude_sonnet_3_7_20250219"
     selectable_models:
-      - "claude-3-7-sonnet-20250219"
-      - "claude-3-5-sonnet-20240620"
+      - "claude_sonnet_3_7_20250219"
+      - "claude_3_5_sonnet_20240620"
   - feature_setting: "duo_chat_refactor_code"
     unit_primitives:
       - "refactor_code"
     default_model: "claude_sonnet_3_7_20250219"
     selectable_models:
-      - "claude-3-7-sonnet-20250219"
-      - "claude-3-5-sonnet-20240620"
+      - "claude_sonnet_3_7_20250219"
+      - "claude_3_5_sonnet_20240620"
   - feature_setting: "duo_chat_write_tests"
     unit_primitives:
       - "write_tests"
     default_model: "claude_sonnet_3_7_20250219"
     selectable_models:
-      - "claude-3-7-sonnet-20250219"
-      - "claude-3-5-sonnet-20240620"
+      - "claude_sonnet_3_7_20250219"
+      - "claude_3_5_sonnet_20240620"
   - feature_setting: "duo_chat_explain_code"
     unit_primitives:
       - "explain_code"
     default_model: "claude_sonnet_3_7_20250219"
     selectable_models:
-      - "claude-3-7-sonnet-20250219"
-      - "claude-3-5-sonnet-20240620"
+      - "claude_sonnet_3_7_20250219"
+      - "claude_3_5_sonnet_20240620"
   - feature_setting: "generate_commit_message"
     unit_primitives:
       - "generate_commit_message"
     default_model: "claude_sonnet_3_7_20250219"
     selectable_models:
-      - "claude-3-7-sonnet-20250219"
-      - "claude-3-5-sonnet-20240620"
+      - "claude_sonnet_3_7_20250219"
+      - "claude_3_5_sonnet_20240620"
   - feature_setting: "summarize_new_merge_request"
     unit_primitives:
       - "summarize_new_merge_request"
     default_model: "claude_sonnet_3_7_20250219"
     selectable_models:
-      - "claude-3-7-sonnet-20250219"
-      - "claude-3-5-sonnet-20240620"
+      - "claude_sonnet_3_7_20250219"
+      - "claude_3_5_sonnet_20240620"
   - feature_setting: "summarize_review"
     unit_primitives:
       - "summarize_review"
     default_model: "claude_sonnet_3_7_20250219"
     selectable_models:
-      - "claude-3-7-sonnet-20250219"
-      - "claude-3-5-sonnet-20240620"
-
+      - "claude_sonnet_3_7_20250219"
+      - "claude_3_5_sonnet_20240620"
   - feature_setting: "resolve_vulnerability"
     unit_primitives:
       - "resolve_vulnerability"
     default_model: "claude_3_5_sonnet_20240620"
     selectable_models:
-      - "claude-3-7-sonnet-20250219"
-      - "claude-3-5-sonnet-20240620"
+      - "claude_sonnet_3_7_20250219"
+      - "claude_3_5_sonnet_20240620"
+  - feature_setting: "duo_chat_explain_vulnerability"
+    unit_primitives:
+      - "explain_vulnerability"
+    default_model: "claude_3_5_sonnet_20240620"
+    selectable_models:
+      - "claude_3_5_sonnet_20240620"
+  - feature_setting: "code_suggestions"
+    unit_primitives:
+      - "generate_code"
+      - "complete_code"
+    default_model: "claude_sonnet_3_7_20250219"
+    selectable_models:
+      - "claude_sonnet_3_7_20250219"
+      - "claude_3_5_sonnet_20240620"
