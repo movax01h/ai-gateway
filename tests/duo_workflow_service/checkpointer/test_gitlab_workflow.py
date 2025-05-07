@@ -21,6 +21,7 @@ from duo_workflow_service.entities.state import WorkflowStatusEnum
 from duo_workflow_service.gitlab.http_client import checkpoint_decoder
 from duo_workflow_service.internal_events import InternalEventAdditionalProperties
 from duo_workflow_service.internal_events.event_enum import (
+    CategoryEnum,
     EventEnum,
     EventLabelEnum,
     EventPropertyEnum,
@@ -77,8 +78,21 @@ def workflow_id():
 
 
 @pytest.fixture
-def gitlab_workflow(http_client, workflow_id):
-    return GitLabWorkflow(http_client, workflow_id)
+def workflow_type():
+    return CategoryEnum.WORKFLOW_SOFTWARE_DEVELOPMENT
+
+
+@pytest.fixture
+def gitlab_workflow(
+    http_client,
+    workflow_id,
+    workflow_type,
+):
+    return GitLabWorkflow(
+        http_client,
+        workflow_id,
+        workflow_type,
+    )
 
 
 @pytest.fixture
@@ -112,7 +126,11 @@ def checkpoint_metadata():
 @pytest.mark.asyncio
 @patch("duo_workflow_service.checkpointer.gitlab_workflow.DuoWorkflowInternalEvent")
 async def test_workflow_event_tracking_for_cancelled_workflow(
-    mock_internal_event_tracker, gitlab_workflow, http_client, workflow_id
+    mock_internal_event_tracker,
+    gitlab_workflow,
+    http_client,
+    workflow_id,
+    workflow_type,
 ):
     async def mock_aget(path, **kwargs):
         if (
@@ -145,7 +163,7 @@ async def test_workflow_event_tracking_for_cancelled_workflow(
                     property=EventPropertyEnum.WORKFLOW_ID.value,
                     value="1234",
                 ),
-                category="GitLabWorkflow",
+                category=workflow_type.value,
             ),
             call(
                 event_name=EventEnum.WORKFLOW_FINISH_SUCCESS.value,
@@ -154,7 +172,7 @@ async def test_workflow_event_tracking_for_cancelled_workflow(
                     property=EventPropertyEnum.CANCELLED_BY_USER.value,
                     value="1234",
                 ),
-                category="GitLabWorkflow",
+                category=workflow_type.value,
             ),
         ]
     )
@@ -163,7 +181,11 @@ async def test_workflow_event_tracking_for_cancelled_workflow(
 @pytest.mark.asyncio
 @patch("duo_workflow_service.checkpointer.gitlab_workflow.DuoWorkflowInternalEvent")
 async def test_workflow_context_manager_success(
-    mock_internal_event_tracker, gitlab_workflow, http_client, workflow_id
+    mock_internal_event_tracker,
+    gitlab_workflow,
+    http_client,
+    workflow_id,
+    workflow_type,
 ):
     async def mock_aget(path, **kwargs):
         if (
@@ -197,7 +219,7 @@ async def test_workflow_context_manager_success(
                     property=EventPropertyEnum.WORKFLOW_ID.value,
                     value="1234",
                 ),
-                category="GitLabWorkflow",
+                category=workflow_type,
             ),
             call(
                 event_name=EventEnum.WORKFLOW_FINISH_SUCCESS.value,
@@ -206,7 +228,7 @@ async def test_workflow_context_manager_success(
                     property=EventPropertyEnum.WORKFLOW_COMPLETED.value,
                     value="1234",
                 ),
-                category="GitLabWorkflow",
+                category=workflow_type,
             ),
         ]
     )
@@ -221,6 +243,7 @@ async def test_workflow_context_manager_startup_error(
     gitlab_workflow,
     http_client,
     workflow_id,
+    workflow_type,
 ):
     http_client.aget.side_effect = ValueError("Startup error simulated")
 
@@ -243,7 +266,7 @@ async def test_workflow_context_manager_startup_error(
             property="ValueError('Startup error simulated')",
             value=workflow_id,
         ),
-        category="GitLabWorkflow",
+        category=workflow_type,
     )
 
     # The log_exception for status update shouldn't be called since status update succeeded
@@ -259,6 +282,7 @@ async def test_workflow_context_manager_startup_error_with_status_update_failure
     gitlab_workflow,
     http_client,
     workflow_id,
+    workflow_type,
 ):
     http_client.aget.side_effect = ValueError("Startup error simulated")
 
@@ -284,7 +308,7 @@ async def test_workflow_context_manager_startup_error_with_status_update_failure
             property="ValueError('Startup error simulated')",
             value=workflow_id,
         ),
-        category="GitLabWorkflow",
+        category=workflow_type,
     )
 
     mock_log_exception.assert_called_once_with(
@@ -299,18 +323,74 @@ async def test_workflow_context_manager_startup_error_with_status_update_failure
 @pytest.mark.asyncio
 @patch("duo_workflow_service.checkpointer.gitlab_workflow.DuoWorkflowInternalEvent")
 async def test_workflow_context_manager_resume_interrupted(
-    mock_internal_event_tracker, gitlab_workflow, http_client, workflow_id
+    mock_internal_event_tracker,
+    gitlab_workflow,
+    http_client,
+    workflow_id,
+    workflow_type,
 ):
     gitlab_workflow._status_handler = AsyncMock()
-    gitlab_workflow._status_handler.get_workflow_status.return_value = (
-        WorkflowStatusEnum.INPUT_REQUIRED
-    )
+    gitlab_workflow._status_handler.get_workflow_status.side_effect = [
+        WorkflowStatusEnum.INPUT_REQUIRED,
+        WorkflowStatusEnum.PLANNING,
+    ]
 
     async with gitlab_workflow as workflow:
         assert isinstance(workflow, GitLabWorkflow)
 
     gitlab_workflow._status_handler.update_workflow_status.assert_called_once_with(
-        workflow_id, WorkflowStatusEventEnum.RESUME.value
+        workflow_id, WorkflowStatusEventEnum.RESUME
+    )
+
+    mock_internal_event_tracker.track_event.assert_has_calls(
+        [
+            call(
+                event_name=EventEnum.WORKFLOW_RESUME.value,
+                additional_properties=InternalEventAdditionalProperties(
+                    label=EventLabelEnum.WORKFLOW_RESUME_LABEL.value,
+                    property=EventPropertyEnum.WORKFLOW_RESUME_BY_PLAN_AFTER_INPUT.value,
+                    value=workflow_id,
+                ),
+                category=workflow_type,
+            ),
+        ]
+    )
+
+
+@pytest.mark.asyncio
+@patch("duo_workflow_service.checkpointer.gitlab_workflow.DuoWorkflowInternalEvent")
+async def test_workflow_context_manager_resume_interrupted_approval(
+    mock_internal_event_tracker,
+    gitlab_workflow,
+    http_client,
+    workflow_id,
+    workflow_type,
+):
+    gitlab_workflow._status_handler = AsyncMock()
+    gitlab_workflow._status_handler.get_workflow_status.side_effect = [
+        WorkflowStatusEnum.PLAN_APPROVAL_REQUIRED,
+        WorkflowStatusEnum.EXECUTION,
+    ]
+
+    async with gitlab_workflow as workflow:
+        assert isinstance(workflow, GitLabWorkflow)
+
+    gitlab_workflow._status_handler.update_workflow_status.assert_called_once_with(
+        workflow_id, WorkflowStatusEventEnum.RESUME
+    )
+
+    mock_internal_event_tracker.track_event.assert_has_calls(
+        [
+            call(
+                event_name=EventEnum.WORKFLOW_RESUME.value,
+                additional_properties=InternalEventAdditionalProperties(
+                    label=EventLabelEnum.WORKFLOW_RESUME_LABEL.value,
+                    property=EventPropertyEnum.WORKFLOW_RESUME_BY_PLAN_AFTER_APPROVAL.value,
+                    value=workflow_id,
+                ),
+                category=workflow_type,
+            ),
+        ]
     )
 
 
@@ -321,6 +401,7 @@ async def test_workflow_context_manager_retry_success(
     gitlab_workflow,
     http_client_for_retry,
     workflow_id,
+    workflow_type,
 ):
     async with gitlab_workflow as workflow:
         assert isinstance(workflow, GitLabWorkflow)
@@ -341,7 +422,7 @@ async def test_workflow_context_manager_retry_success(
                     property=EventPropertyEnum.WORKFLOW_RESUME_BY_USER.value,
                     value=workflow_id,
                 ),
-                category="GitLabWorkflow",
+                category=workflow_type,
             ),
             call(
                 event_name=EventEnum.WORKFLOW_FINISH_SUCCESS.value,
@@ -350,7 +431,7 @@ async def test_workflow_context_manager_retry_success(
                     property=EventPropertyEnum.WORKFLOW_COMPLETED.value,
                     value=workflow_id,
                 ),
-                category="GitLabWorkflow",
+                category=workflow_type,
             ),
         ]
     )
@@ -359,7 +440,11 @@ async def test_workflow_context_manager_retry_success(
 @pytest.mark.asyncio
 @patch("duo_workflow_service.checkpointer.gitlab_workflow.DuoWorkflowInternalEvent")
 async def test_workflow_context_manager_error(
-    mock_internal_event_tracker, gitlab_workflow, http_client, workflow_id
+    mock_internal_event_tracker,
+    gitlab_workflow,
+    http_client,
+    workflow_id,
+    workflow_type,
 ):
     http_client.aget.return_value = []
 
@@ -384,7 +469,7 @@ async def test_workflow_context_manager_error(
                     property=EventPropertyEnum.WORKFLOW_ID.value,
                     value="1234",
                 ),
-                category="GitLabWorkflow",
+                category=workflow_type,
             ),
             call(
                 event_name=EventEnum.WORKFLOW_FINISH_FAILURE.value,
@@ -393,7 +478,7 @@ async def test_workflow_context_manager_error(
                     property="ValueError('Test error')",
                     value="1234",
                 ),
-                category="GitLabWorkflow",
+                category=workflow_type,
             ),
         ]
     )
@@ -540,9 +625,13 @@ async def test_aput(
 
 
 def test_aput_with_no_status_update(
-    checkpoint_data, checkpoint_metadata, http_client, workflow_id
+    checkpoint_data,
+    checkpoint_metadata,
+    http_client,
+    workflow_id,
+    workflow_type,
 ):
-    workflow = GitLabWorkflow(http_client, workflow_id)
+    workflow = GitLabWorkflow(http_client, workflow_id, workflow_type=workflow_type)
     checkpoint = checkpoint_data[0]["checkpoint"]
 
     # no status update in checkpoint
@@ -558,9 +647,17 @@ def test_aput_with_no_status_update(
 
 
 def test_aput_with_no_status_update_and_human_input(
-    checkpoint_data, checkpoint_metadata, http_client, workflow_id
+    checkpoint_data,
+    checkpoint_metadata,
+    http_client,
+    workflow_id,
+    workflow_type,
 ):
-    workflow = GitLabWorkflow(http_client, workflow_id)
+    workflow = GitLabWorkflow(
+        client=http_client,
+        workflow_id=workflow_id,
+        workflow_type=workflow_type,
+    )
     checkpoint = checkpoint_data[0]["checkpoint"]
 
     # no status update in checkpoint
@@ -641,9 +738,25 @@ async def test_resume_status_event(
 
 
 @pytest.mark.asyncio
+@patch("duo_workflow_service.checkpointer.gitlab_workflow.DuoWorkflowInternalEvent")
+async def test_track_workflow_completion_early_return(
+    mock_internal_event_tracker, gitlab_workflow
+):
+    # Test with a status that doesn't match any of the specific cases
+    await gitlab_workflow._track_workflow_completion("some_other_status")
+
+    # Verify no event was tracked
+    mock_internal_event_tracker.track_event.assert_not_called()
+
+
+@pytest.mark.asyncio
 @patch.dict("os.environ", {"USE_MEMSAVER": "true"}, clear=True)
-async def test_offline_mode(http_client, workflow_id):
-    gitlab_workflow = GitLabWorkflow(client=http_client, workflow_id=workflow_id)
+async def test_offline_mode(http_client, workflow_id, workflow_type):
+    gitlab_workflow = GitLabWorkflow(
+        client=http_client,
+        workflow_id=workflow_id,
+        workflow_type=workflow_type,
+    )
 
     async with gitlab_workflow as workflow:
         assert isinstance(workflow, MemorySaver)

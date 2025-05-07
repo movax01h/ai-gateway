@@ -295,23 +295,40 @@ async def test_create_issue_with_url_error(
     )
 
 
-def test_create_issue_format_display_message():
+@pytest.mark.parametrize(
+    "input_data,expected_message",
+    [
+        (
+            CreateIssueInput(
+                project_id=123,
+                title="New Bug Report",
+                description="This is a test issue",
+                labels=None,
+                assignee_ids=None,
+                confidential=None,
+                due_date=None,
+                issue_type=None,
+            ),
+            "Create issue 'New Bug Report' in project 123",
+        ),
+        (
+            CreateIssueInput(
+                url="https://gitlab.com/namespace/project",
+                title="New Bug Report",
+                description="This is a test issue",
+                labels=None,
+                assignee_ids=None,
+                confidential=None,
+                due_date=None,
+                issue_type=None,
+            ),
+            "Create issue 'New Bug Report' in https://gitlab.com/namespace/project",
+        ),
+    ],
+)
+def test_create_issue_format_display_message(input_data, expected_message):
     tool = CreateIssue(description="Create issue description")
-
-    input_data = CreateIssueInput(
-        project_id=123,
-        title="New Bug Report",
-        description="This is a test issue",
-        labels=None,
-        assignee_ids=None,
-        confidential=None,
-        due_date=None,
-        issue_type=None,
-    )
-
     message = tool.format_display_message(input_data)
-
-    expected_message = "Create issue 'New Bug Report' in project 123"
     assert message == expected_message
 
 
@@ -458,31 +475,56 @@ async def test_list_issues_with_url_error(
     )
 
 
-def test_list_issues_format_display_message():
+@pytest.mark.parametrize(
+    "input_data,expected_message",
+    [
+        (
+            ListIssuesInput(
+                project_id=123,
+                assignee_id=None,
+                assignee_username=None,
+                author_id=None,
+                author_username=None,
+                confidential=None,
+                created_after=None,
+                created_before=None,
+                due_date=None,
+                health_status=None,
+                issue_type=None,
+                labels=None,
+                scope=None,
+                search=None,
+                sort=None,
+                state=None,
+            ),
+            "List issues in project 123",
+        ),
+        (
+            ListIssuesInput(
+                url="https://gitlab.com/namespace/project",
+                assignee_id=None,
+                assignee_username=None,
+                author_id=None,
+                author_username=None,
+                confidential=None,
+                created_after=None,
+                created_before=None,
+                due_date=None,
+                health_status=None,
+                issue_type=None,
+                labels=None,
+                scope=None,
+                search=None,
+                sort=None,
+                state=None,
+            ),
+            "List issues in https://gitlab.com/namespace/project",
+        ),
+    ],
+)
+def test_list_issues_format_display_message(input_data, expected_message):
     tool = ListIssues(description="List issues description")
-
-    input_data = ListIssuesInput(
-        project_id=123,
-        assignee_id=None,
-        assignee_username=None,
-        author_id=None,
-        author_username=None,
-        confidential=None,
-        created_after=None,
-        created_before=None,
-        due_date=None,
-        health_status=None,
-        issue_type=None,
-        labels=None,
-        scope=None,
-        search=None,
-        sort=None,
-        state=None,
-    )
-
     message = tool.format_display_message(input_data)
-
-    expected_message = "List issues in project 123"
     assert message == expected_message
 
 
@@ -508,17 +550,6 @@ async def test_get_issue(issue_tool_setup):
     gitlab_client_mock.aget.assert_called_once_with(
         path="/api/v4/projects/1/issues/123", parse_json=False
     )
-
-
-def test_get_issue_format_display_message():
-    tool = GetIssue(description="Get issue description")
-
-    input_data = IssueResourceInput(project_id=123, issue_iid=456)
-
-    message = tool.format_display_message(input_data)
-
-    expected_message = "Read issue #456 in project 123"
-    assert message == expected_message
 
 
 @pytest.mark.asyncio
@@ -857,25 +888,62 @@ async def test_update_issue(gitlab_client_mock, metadata):
     )
 
 
-def test_update_issue_format_display_message():
-    tool = UpdateIssue(description="Update issue description")
-
-    input_data = UpdateIssueInput(
-        project_id=123,
-        issue_iid=456,
-        title=None,
-        description=None,
-        labels=None,
-        assignee_ids=None,
-        confidential=None,
-        due_date=None,
-        state_event=None,
-        discussion_locked=None,
-    )
-
+@pytest.mark.parametrize(
+    "input_data,expected_message",
+    [
+        (
+            IssueResourceInput(project_id=123, issue_iid=456),
+            "Read issue #456 in project 123",
+        ),
+        (
+            IssueResourceInput(url="https://gitlab.com/namespace/project/-/issues/42"),
+            "Read issue https://gitlab.com/namespace/project/-/issues/42",
+        ),
+    ],
+)
+def test_get_issue_format_display_message(input_data, expected_message):
+    tool = GetIssue(description="Get issue description")
     message = tool.format_display_message(input_data)
+    assert message == expected_message
 
-    expected_message = "Update issue #456 in project 123"
+
+@pytest.mark.parametrize(
+    "input_data,expected_message",
+    [
+        (
+            UpdateIssueInput(
+                project_id=123,
+                issue_iid=456,
+                title=None,
+                description=None,
+                labels=None,
+                assignee_ids=None,
+                confidential=None,
+                due_date=None,
+                state_event=None,
+                discussion_locked=None,
+            ),
+            "Update issue #456 in project 123",
+        ),
+        (
+            UpdateIssueInput(
+                url="https://gitlab.com/namespace/project/-/issues/42",
+                title=None,
+                description=None,
+                labels=None,
+                assignee_ids=None,
+                confidential=None,
+                due_date=None,
+                state_event=None,
+                discussion_locked=None,
+            ),
+            "Update issue https://gitlab.com/namespace/project/-/issues/42",
+        ),
+    ],
+)
+def test_update_issue_format_display_message(input_data, expected_message):
+    tool = UpdateIssue(description="Update issue description")
+    message = tool.format_display_message(input_data)
     assert message == expected_message
 
 
@@ -910,16 +978,27 @@ async def test_create_issue_note(issue_tool_setup, note_data):
     )
 
 
-def test_create_issue_note_format_display_message():
+@pytest.mark.parametrize(
+    "input_data,expected_message",
+    [
+        (
+            CreateIssueNoteInput(
+                project_id=123, issue_iid=456, body="This is a comment"
+            ),
+            "Add comment to issue #456 in project 123",
+        ),
+        (
+            CreateIssueNoteInput(
+                url="https://gitlab.com/namespace/project/-/issues/42",
+                body="This is a comment",
+            ),
+            "Add comment to issue https://gitlab.com/namespace/project/-/issues/42",
+        ),
+    ],
+)
+def test_create_issue_note_format_display_message(input_data, expected_message):
     tool = CreateIssueNote(description="Create issue note description")
-
-    input_data = CreateIssueNoteInput(
-        project_id=123, issue_iid=456, body="This is a comment"
-    )
-
     message = tool.format_display_message(input_data)
-
-    expected_message = "Add comment to issue #456 in project 123"
     assert message == expected_message
 
 
@@ -961,16 +1040,28 @@ async def test_list_issue_notes(
     )
 
 
-def test_list_issue_notes_format_display_message():
+@pytest.mark.parametrize(
+    "input_data,expected_message",
+    [
+        (
+            ListIssueNotesInput(
+                project_id=123, issue_iid=456, sort=None, order_by=None
+            ),
+            "Read comments on issue #456 in project 123",
+        ),
+        (
+            ListIssueNotesInput(
+                url="https://gitlab.com/namespace/project/-/issues/42",
+                sort="asc",
+                order_by="created_at",
+            ),
+            "Read comments on issue https://gitlab.com/namespace/project/-/issues/42",
+        ),
+    ],
+)
+def test_list_issue_notes_format_display_message(input_data, expected_message):
     tool = ListIssueNotes(description="List issue notes description")
-
-    input_data = ListIssueNotesInput(
-        project_id=123, issue_iid=456, sort=None, order_by=None
-    )
-
     message = tool.format_display_message(input_data)
-
-    expected_message = "Read comments on issue #456 in project 123"
     assert message == expected_message
 
 
@@ -1000,14 +1091,24 @@ async def test_get_issue_note(issue_tool_setup, note_data):
     )
 
 
-def test_get_issue_note_format_display_message():
+@pytest.mark.parametrize(
+    "input_data,expected_message",
+    [
+        (
+            GetIssueNoteInput(project_id=123, issue_iid=456, note_id=789),
+            "Read comment #789 on issue #456 in project 123",
+        ),
+        (
+            GetIssueNoteInput(
+                url="https://gitlab.com/namespace/project/-/issues/42", note_id=789
+            ),
+            "Read comment #789 on issue https://gitlab.com/namespace/project/-/issues/42",
+        ),
+    ],
+)
+def test_get_issue_note_format_display_message(input_data, expected_message):
     tool = GetIssueNote(description="Get issue note description")
-
-    input_data = GetIssueNoteInput(project_id=123, issue_iid=456, note_id=789)
-
     message = tool.format_display_message(input_data)
-
-    expected_message = "Read comment #789 on issue #456 in project 123"
     assert message == expected_message
 
 

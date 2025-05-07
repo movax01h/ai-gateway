@@ -135,8 +135,7 @@ class TestPlanTerminatorAgent:
             chat_message = result["ui_chat_log"][0]
             assert chat_message["message_type"] == MessageTypeEnum.WORKFLOW_END
             assert chat_message["content"] == (
-                "The workflow has encountered an error and failed or has been cancelled. "
-                "The remaining steps in the plan have been cancelled."
+                "Your request was valid but Workflow failed to complete it. Please try again."
             )
             assert chat_message["timestamp"] == "2025-01-01T12:00:00+00:00"
 

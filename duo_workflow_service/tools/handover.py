@@ -12,7 +12,11 @@ TOOL_TITLE = "handover_tool"
 
 
 class HandoverTool(BaseModel):
-    description: str = """A final response to the user"""
+    """
+    A final response to the user.
+    DO NOT call this tool without providing a summary.
+    """
+
     summary: str = Field(
         description="The summary of the work done based on the past conversation between human, agent and tools executions"
     )

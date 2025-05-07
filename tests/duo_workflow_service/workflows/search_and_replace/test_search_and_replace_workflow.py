@@ -16,6 +16,7 @@ from duo_workflow_service.entities import (
 )
 from duo_workflow_service.entities.state import MAX_CONTEXT_TOKENS, ReplacementRule
 from duo_workflow_service.gitlab.http_client import GitlabHttpClient
+from duo_workflow_service.internal_events.event_enum import CategoryEnum
 from duo_workflow_service.workflows.search_and_replace.prompts import (
     SEARCH_AND_REPLACE_FILE_USER_MESSAGE,
 )
@@ -36,15 +37,11 @@ from duo_workflow_service.workflows.search_and_replace.workflow import (
 
 
 @pytest.fixture
-def tools_registry_with_all_privileges():
-    outbox = MagicMock()
-    inbox = MagicMock()
+def tools_registry_with_all_privileges(tool_metadata):
     return ToolsRegistry(
-        outbox=outbox,
-        inbox=inbox,
-        gl_http_client=AsyncMock(spec=GitlabHttpClient),
-        tools_configuration=list(_AGENT_PRIVILEGES.keys()),
-        gitlab_host="gitlab.example.com",
+        tool_metadata=tool_metadata,
+        enabled_tools=list(_AGENT_PRIVILEGES.keys()),
+        preapproved_tools=list(_AGENT_PRIVILEGES.keys()),
     )
 
 
@@ -359,7 +356,11 @@ async def test_workflow_compilation(
     mock_agent, mock_new_chat_client, mock_tools_registry, mock_checkpointer
 ):
     """Test workflow compilation process."""
-    workflow = Workflow(workflow_id="test_id", workflow_metadata={})
+    workflow = Workflow(
+        workflow_id="test_id",
+        workflow_metadata={},
+        workflow_type=CategoryEnum.WORKFLOW_SEARCH_AND_REPLACE,
+    )
 
     # Compile the workflow graph
     compiled_graph = workflow._compile(
@@ -377,6 +378,7 @@ async def test_workflow_compilation(
         model=mock_new_chat_client.return_value,
         workflow_id="test_id",
         http_client=workflow._http_client,
+        workflow_type=CategoryEnum.WORKFLOW_SEARCH_AND_REPLACE.value,
     )
     mock_tools_registry.get.assert_called()  # Should call get() for tools
     mock_tools_registry.get_batch.assert_called_once()  # Should get batch of tools for agent
@@ -386,7 +388,11 @@ async def test_workflow_compilation(
 @pytest.mark.asyncio
 async def test_workflow_initialization():
     """Test workflow initialization and state setup."""
-    workflow = Workflow(workflow_id="test_id", workflow_metadata={})
+    workflow = Workflow(
+        workflow_id="test_id",
+        workflow_metadata={},
+        workflow_type=CategoryEnum.WORKFLOW_SEARCH_AND_REPLACE,
+    )
     initial_state = workflow.get_workflow_state("/test/path")
 
     assert initial_state["directory"] == "/test/path"
@@ -403,7 +409,11 @@ async def test_accessibility_tools(
     tools_registry_with_all_privileges, mock_checkpointer
 ):
     """Test that all tools used by the accessibility agent are available in the tools registry."""
-    workflow = Workflow(workflow_id="test_id", workflow_metadata={})
+    workflow = Workflow(
+        workflow_id="test_id",
+        workflow_metadata={},
+        workflow_type=CategoryEnum.WORKFLOW_SEARCH_AND_REPLACE,
+    )
 
     captured_tool_names = []
 
@@ -435,7 +445,11 @@ async def test_non_accessibility_tools(
     tools_registry_with_all_privileges, mock_checkpointer
 ):
     """Test that all other tools used in the search and replace workflow are available in the tools registry."""
-    workflow = Workflow(workflow_id="test_id", workflow_metadata={})
+    workflow = Workflow(
+        workflow_id="test_id",
+        workflow_metadata={},
+        workflow_type=CategoryEnum.WORKFLOW_SEARCH_AND_REPLACE,
+    )
 
     captured_tool_names = []
 

@@ -9,7 +9,6 @@ class Project(TypedDict):
     name: str
     http_url_to_repo: str
     web_url: str
-    namespace: dict
 
 
 async def fetch_project_data_with_workflow_id(

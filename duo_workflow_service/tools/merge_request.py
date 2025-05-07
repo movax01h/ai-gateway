@@ -5,12 +5,35 @@ from typing import Any, Optional, Type
 from pydantic import BaseModel, Field
 
 from duo_workflow_service.tools.duo_base_tool import DuoBaseTool
+from duo_workflow_service.tools.gitlab_resource_input import ProjectResourceInput
 
 DESCRIPTION_CHARACTER_LIMIT = 1_048_576
 
+PROJECT_IDENTIFICATION_DESCRIPTION = """To identify the project you must provide either:
+- project_id parameter, or
+- A GitLab URL like:
+  - https://gitlab.com/namespace/project
+  - https://gitlab.com/namespace/project/-/merge_requests
+  - https://gitlab.com/group/subgroup/project
+  - https://gitlab.com/group/subgroup/project/-/merge_requests
+"""
 
-class CreateMergeRequestInput(BaseModel):
-    project_id: int = Field(description="Id of the project")
+MERGE_REQUEST_IDENTIFICATION_DESCRIPTION = """To identify a merge request you must provide either:
+- project_id and merge_request_iid, or
+- A GitLab URL like:
+  - https://gitlab.com/namespace/project/-/merge_requests/42
+  - https://gitlab.com/group/subgroup/project/-/merge_requests/42
+"""
+
+
+class MergeRequestResourceInput(ProjectResourceInput):
+    merge_request_iid: Optional[int] = Field(
+        default=None,
+        description="The internal ID of the project merge request. Required if URL is not provided.",
+    )
+
+
+class CreateMergeRequestInput(ProjectResourceInput):
     source_branch: str = Field(description="The source branch name")
     target_branch: str = Field(description="The target branch name")
     title: str = Field(description="Title of the merge request")
@@ -36,18 +59,33 @@ class CreateMergeRequestInput(BaseModel):
 
 class CreateMergeRequest(DuoBaseTool):
     name: str = "create_merge_request"
-    description: str = """Create a new merge request in the specified project"""
+    description: str = f"""Create a new merge request in the specified project.
+
+    {PROJECT_IDENTIFICATION_DESCRIPTION}
+
+    For example:
+    - Given project_id 13, source_branch "feature", target_branch "main", and title "New feature", the tool call would be:
+        create_merge_request(project_id=13, source_branch="feature", target_branch="main", title="New feature")
+    - Given the URL https://gitlab.com/namespace/project, source_branch "feature", target_branch "main", and title "New feature", the tool call would be:
+        create_merge_request(url="https://gitlab.com/namespace/project", source_branch="feature", target_branch="main", title="New feature")
+    """
     args_schema: Type[BaseModel] = CreateMergeRequestInput
 
     async def _arun(
         self,
-        project_id: int,
         source_branch: str,
         target_branch: str,
         title: str,
         **kwargs: Any,
     ) -> str:
-        data: dict[str, Any] = {
+        url = kwargs.pop("url", None)
+        project_id = kwargs.pop("project_id", None)
+
+        project_id, errors = self._validate_project_url(url, project_id)
+
+        if errors:
+            return json.dumps({"error": "; ".join(errors)})
+        data = {
             "source_branch": source_branch,
             "target_branch": target_branch,
             "title": title,
@@ -62,64 +100,108 @@ class CreateMergeRequest(DuoBaseTool):
         ]
         data.update({k: kwargs[k] for k in optional_params if k in kwargs})
 
-        response = await self.gitlab_client.apost(
-            path=f"/api/v4/projects/{project_id}/merge_requests",
-            body=json.dumps(data),
-        )
-
-        return json.dumps({"status": "success", "data": data, "response": response})
+        try:
+            response = await self.gitlab_client.apost(
+                path=f"/api/v4/projects/{project_id}/merge_requests",
+                body=json.dumps(data),
+            )
+            return json.dumps({"status": "success", "data": data, "response": response})
+        except Exception as e:
+            return json.dumps({"error": str(e)})
 
     def format_display_message(self, args: CreateMergeRequestInput) -> str:
+        if args.url:
+            return f"Create merge request from '{args.source_branch}' to '{args.target_branch}' in {args.url}"
         return f"Create merge request from '{args.source_branch}' to '{args.target_branch}' in project {args.project_id}"
-
-
-class GetMergeRequestInput(BaseModel):
-    project_id: int = Field(description="Id of the project")
-    merge_request_iid: int = Field(description="Id of the merge request")
 
 
 class GetMergeRequest(DuoBaseTool):
     name: str = "get_merge_request"
-    description: str = """Fetch details about the merge request"""
-    args_schema: Type[BaseModel] = GetMergeRequestInput  # type: ignore
+    description: str = f"""Fetch details about the merge request.
 
-    async def _arun(self, project_id: int, merge_request_iid: int) -> str:
-        return await self.gitlab_client.aget(
-            path=f"/api/v4/projects/{project_id}/merge_requests/{merge_request_iid}",
-            parse_json=False,
+    {MERGE_REQUEST_IDENTIFICATION_DESCRIPTION}
+
+    For example:
+    - Given project_id 13 and merge_request_iid 9, the tool call would be:
+        get_merge_request(project_id=13, merge_request_iid=9)
+    - Given the URL https://gitlab.com/namespace/project/-/merge_requests/103, the tool call would be:
+        get_merge_request(url="https://gitlab.com/namespace/project/-/merge_requests/103")
+    """
+    args_schema: Type[BaseModel] = MergeRequestResourceInput  # type: ignore
+
+    async def _arun(self, **kwargs: Any) -> str:
+        url = kwargs.get("url")
+        project_id = kwargs.get("project_id")
+        merge_request_iid = kwargs.get("merge_request_iid")
+
+        validation_result = self._validate_merge_request_url(
+            url, project_id, merge_request_iid
         )
 
-    def format_display_message(self, args: GetMergeRequestInput) -> str:
+        if validation_result.errors:
+            return json.dumps({"error": "; ".join(validation_result.errors)})
+
+        try:
+            response = await self.gitlab_client.aget(
+                path=f"/api/v4/projects/{validation_result.project_id}/merge_requests/{validation_result.merge_request_iid}",
+                parse_json=False,
+            )
+            return json.dumps({"merge_request": response})
+        except Exception as e:
+            return json.dumps({"error": str(e)})
+
+    def format_display_message(self, args: MergeRequestResourceInput) -> str:
+        if args.url:
+            return f"Read merge request {args.url}"
         return (
             f"Read merge request !{args.merge_request_iid} in project {args.project_id}"
         )
 
 
-class ListMergeRequestDiffsInput(BaseModel):
-    project_id: int = Field(description="Id of the project")
-    merge_request_iid: int = Field(description="Id of the merge request")
-
-
 class ListMergeRequestDiffs(DuoBaseTool):
     name: str = "list_merge_request_diffs"
-    description: str = """Fetch the diffs of the files changed in a merge request"""
-    args_schema: Type[BaseModel] = ListMergeRequestDiffsInput  # type: ignore
+    description: str = f"""Fetch the diffs of the files changed in a merge request.
 
-    async def _arun(self, project_id: int, merge_request_iid: int) -> str:
-        return await self.gitlab_client.aget(
-            path=f"/api/v4/projects/{project_id}/merge_requests/{merge_request_iid}/diffs",
-            parse_json=False,
+    {MERGE_REQUEST_IDENTIFICATION_DESCRIPTION}
+
+    For example:
+    - Given project_id 13 and merge_request_iid 9, the tool call would be:
+        list_merge_request_diffs(project_id=13, merge_request_iid=9)
+    - Given the URL https://gitlab.com/namespace/project/-/merge_requests/103, the tool call would be:
+        list_merge_request_diffs(url="https://gitlab.com/namespace/project/-/merge_requests/103")
+    """
+    args_schema: Type[BaseModel] = MergeRequestResourceInput  # type: ignore
+
+    async def _arun(self, **kwargs: Any) -> str:
+        url = kwargs.get("url")
+        project_id = kwargs.get("project_id")
+        merge_request_iid = kwargs.get("merge_request_iid")
+
+        validation_result = self._validate_merge_request_url(
+            url, project_id, merge_request_iid
         )
 
-    def format_display_message(self, args: ListMergeRequestDiffsInput) -> str:
+        if validation_result.errors:
+            return json.dumps({"error": "; ".join(validation_result.errors)})
+
+        try:
+            response = await self.gitlab_client.aget(
+                path=f"/api/v4/projects/{validation_result.project_id}/merge_requests/{validation_result.merge_request_iid}/diffs",
+                parse_json=False,
+            )
+            return json.dumps({"diffs": response})
+        except Exception as e:
+            return json.dumps({"error": str(e)})
+
+    def format_display_message(self, args: MergeRequestResourceInput) -> str:
+        if args.url:
+            return f"View changes in merge request {args.url}"
         return f"View changes in merge request !{args.merge_request_iid} in project {args.project_id}"
 
 
 # The merge_request_diff_head_sha parameter is required for the /merge quick action.
 # We exclude it here as an added precautionary layer to prevent Duo Workflow from merging code without human approval.
-class CreateMergeRequestNoteInput(BaseModel):
-    project_id: int = Field(description="Id of the project")
-    merge_request_iid: int = Field(description="Id of the merge request")
+class CreateMergeRequestNoteInput(MergeRequestResourceInput):
     body: str = Field(
         description="The content of a note. Limited to 1,000,000 characters."
     )
@@ -127,16 +209,37 @@ class CreateMergeRequestNoteInput(BaseModel):
 
 class CreateMergeRequestNote(DuoBaseTool):
     name: str = "create_merge_request_note"
-    description: str = """Create a note (comment) on a merge request. You are NOT allowed to ever use a GitLab quick action in a merge request note.
+    description: str = f"""Create a note (comment) on a merge request. You are NOT allowed to ever use a GitLab quick action in a merge request note.
                     Quick actions are text-based shortcuts for common GitLab actions. They are commands that are on their own line and
-                    start with a backslash. Examples include /merge, /approve, /close, etc."""
+                    start with a backslash. Examples include /merge, /approve, /close, etc.
+
+    {MERGE_REQUEST_IDENTIFICATION_DESCRIPTION}
+
+    For example:
+    - Given project_id 13, merge_request_iid 9, and body "This is a comment", the tool call would be:
+        create_merge_request_note(project_id=13, merge_request_iid=9, body="This is a comment")
+    - Given the URL https://gitlab.com/namespace/project/-/merge_requests/103 and body "This is a comment", the tool call would be:
+        create_merge_request_note(url="https://gitlab.com/namespace/project/-/merge_requests/103", body="This is a comment")
+
+    The body parameter is always required.
+    """
     args_schema: Type[BaseModel] = CreateMergeRequestNoteInput  # type: ignore
 
     def _contains_quick_action(self, body: str) -> bool:
         quick_action_pattern = r"(?m)^/[a-zA-Z]+"
         return bool(re.search(quick_action_pattern, body))
 
-    async def _arun(self, project_id: int, merge_request_iid: int, body: str) -> str:
+    async def _arun(self, body: str, **kwargs: Any) -> str:
+        url = kwargs.pop("url", None)
+        project_id = kwargs.pop("project_id", None)
+        merge_request_iid = kwargs.pop("merge_request_iid", None)
+
+        validation_result = self._validate_merge_request_url(
+            url, project_id, merge_request_iid
+        )
+
+        if validation_result.errors:
+            return json.dumps({"error": "; ".join(validation_result.errors)})
         if self._contains_quick_action(body):
             return json.dumps(
                 {
@@ -146,46 +249,67 @@ class CreateMergeRequestNote(DuoBaseTool):
                 }
             )
 
-        response = await self.gitlab_client.apost(
-            path=f"/api/v4/projects/{project_id}/merge_requests/{merge_request_iid}/notes",
-            body=json.dumps(
-                {
-                    "body": body,
-                },
-            ),
-        )
-        return json.dumps({"status": "success", "body": body, "response": response})
+        try:
+            response = await self.gitlab_client.apost(
+                path=f"/api/v4/projects/{validation_result.project_id}/merge_requests/{validation_result.merge_request_iid}/notes",
+                body=json.dumps(
+                    {
+                        "body": body,
+                    },
+                ),
+            )
+            return json.dumps({"status": "success", "body": body, "response": response})
+        except Exception as e:
+            return json.dumps({"error": str(e)})
 
     def format_display_message(self, args: CreateMergeRequestNoteInput) -> str:
+        if args.url:
+            return f"Add comment to merge request {args.url}"
         return f"Add comment to merge request !{args.merge_request_iid} in project {args.project_id}"
-
-
-class ListAllMergeRequestNotesInput(BaseModel):
-    project_id: int = Field(description="Id of the project")
-    merge_request_iid: int = Field(description="Id of the merge request")
 
 
 class ListAllMergeRequestNotes(DuoBaseTool):
     name: str = "list_all_merge_request_notes"
-    description: str = """List all notes (comments) on a merge request.
+    description: str = f"""List all notes (comments) on a merge request.
 
-    DO NOT use this tool to get issue notes/comments (use list_issue_notes).
+    {MERGE_REQUEST_IDENTIFICATION_DESCRIPTION}
+
+    For example:
+    - Given project_id 13 and merge_request_iid 9, the tool call would be:
+        list_all_merge_request_notes(project_id=13, merge_request_iid=9)
+    - Given the URL https://gitlab.com/namespace/project/-/merge_requests/103, the tool call would be:
+        list_all_merge_request_notes(url="https://gitlab.com/namespace/project/-/merge_requests/103")
     """
-    args_schema: Type[BaseModel] = ListAllMergeRequestNotesInput  # type: ignore
+    args_schema: Type[BaseModel] = MergeRequestResourceInput  # type: ignore
 
-    async def _arun(self, project_id: int, merge_request_iid: int) -> str:
-        return await self.gitlab_client.aget(
-            path=f"/api/v4/projects/{project_id}/merge_requests/{merge_request_iid}/notes",
-            parse_json=False,
+    async def _arun(self, **kwargs: Any) -> str:
+        url = kwargs.get("url")
+        project_id = kwargs.get("project_id")
+        merge_request_iid = kwargs.get("merge_request_iid")
+
+        validation_result = self._validate_merge_request_url(
+            url, project_id, merge_request_iid
         )
 
-    def format_display_message(self, args: ListAllMergeRequestNotesInput) -> str:
+        if validation_result.errors:
+            return json.dumps({"error": "; ".join(validation_result.errors)})
+
+        try:
+            response = await self.gitlab_client.aget(
+                path=f"/api/v4/projects/{validation_result.project_id}/merge_requests/{validation_result.merge_request_iid}/notes",
+                parse_json=False,
+            )
+            return json.dumps({"notes": response})
+        except Exception as e:
+            return json.dumps({"error": str(e)})
+
+    def format_display_message(self, args: MergeRequestResourceInput) -> str:
+        if args.url:
+            return f"Read comments on merge request {args.url}"
         return f"Read comments on merge request !{args.merge_request_iid} in project {args.project_id}"
 
 
-class UpdateMergeRequestInput(BaseModel):
-    project_id: int = Field(description="Id of the project")
-    merge_request_iid: int = Field(description="Id of the merge request")
+class UpdateMergeRequestInput(MergeRequestResourceInput):
     allow_collaboration: Optional[bool] = Field(
         default=None,
         description="Allow commits from members who can merge to the target branch.",
@@ -233,18 +357,42 @@ class UpdateMergeRequestInput(BaseModel):
 class UpdateMergeRequest(DuoBaseTool):
     name: str = "update_merge_request"
     description: str = f"""Updates an existing merge request. You can change the target branch, title, or even close the MR.
-    Max character limit of {DESCRIPTION_CHARACTER_LIMIT} characters."""
+    Max character limit of {DESCRIPTION_CHARACTER_LIMIT} characters.
+
+    {MERGE_REQUEST_IDENTIFICATION_DESCRIPTION}
+
+    For example:
+    - Given project_id 13, merge_request_iid 9, and title "Updated title", the tool call would be:
+        update_merge_request(project_id=13, merge_request_iid=9, title="Updated title")
+    - Given the URL https://gitlab.com/namespace/project/-/merge_requests/103 and title "Updated title", the tool call would be:
+        update_merge_request(url="https://gitlab.com/namespace/project/-/merge_requests/103", title="Updated title")
+    """
     args_schema: Type[BaseModel] = UpdateMergeRequestInput
 
-    async def _arun(
-        self, project_id: int, merge_request_iid: int, **kwargs: Any
-    ) -> str:
-        data = {k: v for k, v in kwargs.items() if v is not None}
+    async def _arun(self, **kwargs: Any) -> str:
+        url = kwargs.pop("url", None)
+        project_id = kwargs.pop("project_id", None)
+        merge_request_iid = kwargs.pop("merge_request_iid", None)
 
-        return await self.gitlab_client.aput(
-            path=f"/api/v4/projects/{project_id}/merge_requests/{merge_request_iid}",
-            body=json.dumps(data),
+        validation_result = self._validate_merge_request_url(
+            url, project_id, merge_request_iid
         )
 
+        if validation_result.errors:
+            return json.dumps({"error": "; ".join(validation_result.errors)})
+
+        data = {k: v for k, v in kwargs.items() if v is not None}
+
+        try:
+            response = await self.gitlab_client.aput(
+                path=f"/api/v4/projects/{validation_result.project_id}/merge_requests/{validation_result.merge_request_iid}",
+                body=json.dumps(data),
+            )
+            return json.dumps({"updated_merge_request": response})
+        except Exception as e:
+            return json.dumps({"error": str(e)})
+
     def format_display_message(self, args: UpdateMergeRequestInput) -> str:
+        if args.url:
+            return f"Update merge request {args.url}"
         return f"Update merge request !{args.merge_request_iid} in project {args.project_id}"

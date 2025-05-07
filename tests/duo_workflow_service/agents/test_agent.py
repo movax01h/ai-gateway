@@ -19,7 +19,11 @@ from duo_workflow_service.entities.state import (
 )
 from duo_workflow_service.gitlab.http_client import GitlabHttpClient
 from duo_workflow_service.internal_events import InternalEventAdditionalProperties
-from duo_workflow_service.internal_events.event_enum import EventEnum, EventPropertyEnum
+from duo_workflow_service.internal_events.event_enum import (
+    CategoryEnum,
+    EventEnum,
+    EventPropertyEnum,
+)
 
 
 @pytest.fixture
@@ -73,6 +77,7 @@ class TestAgent:
             tools=[],
             workflow_id="test-workflow-123",
             http_client=http_client_mock,
+            workflow_type=CategoryEnum.WORKFLOW_SOFTWARE_DEVELOPMENT,
         )
 
     def test_init(self, chat_mock, planner_agent, http_client_mock):
@@ -135,6 +140,7 @@ class TestAgent:
         planner_agent,
         workflow_state,
     ):
+        workflow_type = CategoryEnum.WORKFLOW_SOFTWARE_DEVELOPMENT
         mock_internal_event_tracker.instance = MagicMock(return_value=None)
         mock_internal_event_tracker.track_event = MagicMock(return_value=None)
 
@@ -193,7 +199,7 @@ class TestAgent:
                         total_tokens=2,
                         estimated_input_tokens=22,
                     ),
-                    category="Agent",
+                    category=workflow_type,
                 )
             ]
         )

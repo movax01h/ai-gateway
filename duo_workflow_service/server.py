@@ -1,7 +1,7 @@
 import asyncio
 import json
 import os
-from typing import AsyncIterable, AsyncIterator, Type
+from typing import AsyncIterable, AsyncIterator
 
 import grpc
 import structlog
@@ -24,6 +24,9 @@ from duo_workflow_service.interceptors.authentication_interceptor import (
 from duo_workflow_service.interceptors.correlation_id_interceptor import (
     CorrelationIdInterceptor,
 )
+from duo_workflow_service.interceptors.feature_flag_interceptor import (
+    FeatureFlagInterceptor,
+)
 from duo_workflow_service.interceptors.internal_events_interceptor import (
     InternalEventsInterceptor,
 )
@@ -31,20 +34,40 @@ from duo_workflow_service.interceptors.monitoring_interceptor import (
     MonitoringInterceptor,
 )
 from duo_workflow_service.internal_events.client import DuoWorkflowInternalEvent
+from duo_workflow_service.internal_events.event_enum import CategoryEnum
 from duo_workflow_service.llm_factory import validate_llm_access
 from duo_workflow_service.monitoring import setup_monitoring
 from duo_workflow_service.profiling import setup_profiling
 from duo_workflow_service.structured_logging import set_workflow_id, setup_logging
 from duo_workflow_service.tracking.errors import log_exception
 from duo_workflow_service.tracking.sentry_error_tracking import setup_error_tracking
-from duo_workflow_service.workflows.abstract_workflow import AbstractWorkflow
-from duo_workflow_service.workflows.registry import Registry
+from duo_workflow_service.workflows.abstract_workflow import (
+    AbstractWorkflow,
+    TypeWorkflow,
+)
+from duo_workflow_service.workflows.registry import resolve_workflow_class
 
 log = structlog.stdlib.get_logger("server")
 
 
+def string_to_category_enum(category_string: str) -> CategoryEnum:
+    try:
+        return CategoryEnum(category_string)
+    except ValueError:
+        # Handle case when string doesn't match any enum value
+        # We will return default workflow type
+        # Since it isn't a blocker for workflow run
+        log.warning(f"Unknown category string: {category_string}")
+        return CategoryEnum.WORKFLOW_SOFTWARE_DEVELOPMENT
+
+
 class DuoWorkflowService(contract_pb2_grpc.DuoWorkflowServicer):
     OUTBOX_CHECK_INTERVAL = 0.5
+
+    # Set to 2 seconds to provide a reasonable balance between:
+    # - Giving tasks enough time to properly clean up resources
+    # - Not delaying the server response for too long when handling errors
+    TASK_CANCELLATION_TIMEOUT = 2.0
 
     # pylint: disable=invalid-overridden-method
     async def ExecuteWorkflow(
@@ -67,16 +90,18 @@ class DuoWorkflowService(contract_pb2_grpc.DuoWorkflowServicer):
         set_workflow_id(workflow_id)
         log.info("Starting workflow %s", start_workflow_request)
         goal = start_workflow_request.startRequest.goal
-        workflow_definition = start_workflow_request.startRequest.workflowDefinition
         workflow_metadata = {}
+        workflow_definition = start_workflow_request.startRequest.workflowDefinition
         if start_workflow_request.startRequest.workflowMetadata:
             workflow_metadata = json.loads(
                 start_workflow_request.startRequest.workflowMetadata
             )
-        workflow_class: Type[AbstractWorkflow] = Registry.resolve(workflow_definition)
+        workflow_type = string_to_category_enum(workflow_definition)
+        workflow_class: TypeWorkflow = resolve_workflow_class(workflow_definition)
         workflow: AbstractWorkflow = workflow_class(
             workflow_id=workflow_id,
             workflow_metadata=workflow_metadata,
+            workflow_type=workflow_type,
         )
 
         async def send_events():
@@ -110,6 +135,7 @@ class DuoWorkflowService(contract_pb2_grpc.DuoWorkflowServicer):
                     log.debug("Queue is empty, waiting", err=err)
                     await asyncio.sleep(self.OUTBOX_CHECK_INTERVAL)
 
+        workflow_task = None
         try:
             workflow_task = asyncio.create_task(workflow.run(goal))
             async for action in send_events():
@@ -118,9 +144,21 @@ class DuoWorkflowService(contract_pb2_grpc.DuoWorkflowServicer):
             await workflow_task
         except BaseException as err:
             log_exception(err, extra={"workflow_id": workflow_id})
-            workflow_task.cancel(
-                f"Terminated workflow {workflow_id} execution due to an {type(err).__name__}: {err}"
-            )
+            if workflow_task and not workflow_task.done():
+                workflow_task.cancel(
+                    f"Terminated workflow {workflow_id} execution due to an {type(err).__name__}: {err}"
+                )
+                # https://docs.python.org/3/library/asyncio-task.html#asyncio.Task.cancel
+                # The asyncio documentation states that cancel() only "arranges for a CancelledError
+                # to be thrown into the wrapped coroutine on the next cycle through the event loop."
+                # By awaiting the task after cancellation, the code now allows the event loop to
+                # complete that cycle and properly handle the cancellation before proceeding
+                try:
+                    await asyncio.wait_for(
+                        workflow_task, timeout=self.TASK_CANCELLATION_TIMEOUT
+                    )
+                except (asyncio.TimeoutError, asyncio.CancelledError):
+                    pass
 
             await context.abort(grpc.StatusCode.INTERNAL, "Something went wrong")
         finally:
@@ -184,6 +222,7 @@ async def serve(port: int) -> None:
         interceptors=[
             CorrelationIdInterceptor(),
             AuthenticationInterceptor(),
+            FeatureFlagInterceptor(),
             InternalEventsInterceptor(),
             MonitoringInterceptor(),
         ],
@@ -207,6 +246,7 @@ async def serve(port: int) -> None:
 def configure_cache() -> None:
     if os.environ.get("LLM_CACHE") == "true":
         set_llm_cache(SQLiteCache(database_path=".llm_cache.db"))
+
 
 def setup_cloud_connector():
     cloud_connector_service_name = os.environ.get("DUO_WORKFLOW_CLOUD_CONNECTOR_SERVICE_NAME", "gitlab-duo-workflow-service")

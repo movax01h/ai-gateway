@@ -43,10 +43,7 @@ class PlanTerminatorAgent:
                 step_copy["status"] = TaskStatus.CANCELLED
             updated_steps.append(step_copy)
 
-        message = (
-            "The workflow has encountered an error and failed or has been cancelled. The remaining steps in the "
-            "plan have been cancelled."
-        )
+        message = "Your request was valid but Workflow failed to complete it. Please try again."
 
         self.log.info(f"PlanTerminator: {message}")
 

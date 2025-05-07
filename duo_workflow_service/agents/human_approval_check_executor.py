@@ -1,4 +1,3 @@
-import os
 from datetime import datetime, timezone
 from typing import Any, Dict, List
 
@@ -27,10 +26,6 @@ class HumanApprovalCheckExecutor:
         self._workflow_id = workflow_id
 
     async def run(self, state: WorkflowState):
-        # when using memory saver, human in the loop is not supported
-        if not os.environ.get("WORKFLOW_INTERRUPT", False) or os.getenv("USE_MEMSAVER"):
-            return {"status": state["status"]}
-
         ui_chat_logs: List[UiChatLog] = []
         event: WorkflowEvent = interrupt("Workflow interrupted")
 
@@ -56,27 +51,39 @@ class HumanApprovalCheckExecutor:
                 event["correlation_id"] if event.get("correlation_id") else None
             )
 
-            ui_chat_logs.append(
-                UiChatLog(
-                    correlation_id=correlation_id,
-                    message_type=MessageTypeEnum.USER,
-                    content=f"Received message: {message}",
-                    timestamp=datetime.now(timezone.utc).isoformat(),
-                    status=ToolStatus.SUCCESS,
-                    tool_info=None,
+            if not message:
+                ui_chat_logs.append(
+                    UiChatLog(
+                        correlation_id=correlation_id,
+                        message_type=MessageTypeEnum.AGENT,
+                        content="No message received, continuing workflow",
+                        timestamp=datetime.now(timezone.utc).isoformat(),
+                        status=ToolStatus.SUCCESS,
+                        tool_info=None,
+                    )
                 )
-            )
-
-            # Check if last message was a tool call
-            last_message = state["conversation_history"][self._agent_name][-1]
-            messages: List[BaseMessage] = [
-                ToolMessage(
-                    content="Tool cancelled temporarily as user has a question",
-                    tool_call_id=tool_call.get("id"),
+            else:
+                ui_chat_logs.append(
+                    UiChatLog(
+                        correlation_id=correlation_id,
+                        message_type=MessageTypeEnum.USER,
+                        content=f"Received message: {message}",
+                        timestamp=datetime.now(timezone.utc).isoformat(),
+                        status=ToolStatus.SUCCESS,
+                        tool_info=None,
+                    )
                 )
-                for tool_call in getattr(last_message, "tool_calls", [])
-            ]
 
-            messages.append(HumanMessage(content=message))
-            updates["conversation_history"] = {self._agent_name: messages}
+                # Check if last message was a tool call
+                last_message = state["conversation_history"][self._agent_name][-1]
+                messages: List[BaseMessage] = [
+                    ToolMessage(
+                        content="Tool cancelled temporarily as user has a question",
+                        tool_call_id=tool_call.get("id"),
+                    )
+                    for tool_call in getattr(last_message, "tool_calls", [])
+                ]
+
+                messages.append(HumanMessage(content=message))
+                updates["conversation_history"] = {self._agent_name: messages}
         return updates

@@ -39,7 +39,7 @@ AGENT_NAME = "replacement_agent"
 CONFIG_PATH = ".duo_workflow/search_and_replace_config.yml"
 DEBUG = os.getenv("DEBUG")
 MAX_MESSAGE_LENGTH = 200
-MAX_TOKENS_TO_SAMPLE = 4096
+MAX_TOKENS_TO_SAMPLE = 8192
 RECURSION_LIMIT = 50000
 
 
@@ -53,7 +53,7 @@ def _scan_directory_tree_input_parser(state: SearchAndReplaceWorkflowState):
     input_args = []
     # It appears thaT git ls-files does not support globs without
     # altering bash config, therefore additional tool call is needed to
-    # combine search for both subdirectories as well as scan root directory
+    # combine search for both subdirectories and scan root directory
     for file_type in state["config"].file_types:
         # search in scan root directory
         input_args.append(
@@ -443,6 +443,7 @@ class Workflow(AbstractWorkflow):
             tools=tools_registry.get_batch(accessibility_tools),
             http_client=self._http_client,
             workflow_id=self._workflow_id,
+            workflow_type=self._workflow_type,
         )
         graph.add_node("request_patch", agent.run)
         graph.add_edge("request_patch", "log_agent_response")
@@ -461,6 +462,7 @@ class Workflow(AbstractWorkflow):
             tools_agent_name=AGENT_NAME,
             agent_tools=tools_registry.get_handlers(accessibility_tools),
             workflow_id=self._workflow_id,
+            workflow_type=self._workflow_type,
         ).run
 
         graph.add_node("apply_patch", apply_patch)

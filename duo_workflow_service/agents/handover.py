@@ -5,10 +5,10 @@ from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, System
 
 from duo_workflow_service.agents.prompts import HANDOVER_TOOL_NAME
 from duo_workflow_service.entities.state import (
+    DuoWorkflowStateType,
     MessageTypeEnum,
     ToolStatus,
     UiChatLog,
-    WorkflowState,
     WorkflowStatusEnum,
 )
 
@@ -33,7 +33,7 @@ class HandoverAgent:
         self._new_status = new_status
         self._include_conversation_history = include_conversation_history
 
-    async def run(self, state: WorkflowState):
+    async def run(self, state: DuoWorkflowStateType):
         handover_messages: List[BaseMessage] = []
         ui_chat_logs: List[UiChatLog] = []
 
@@ -93,16 +93,18 @@ class HandoverAgent:
         # make sure that there are no pending tool calls
         if len(handover_calls) > 0 and handover_calls[-1]["args"].get("summary"):
             summary = handover_calls[-1]["args"]["summary"]
-            ui_chat_logs.append(
-                UiChatLog(
-                    message_type=MessageTypeEnum.AGENT,
-                    content=summary,
-                    timestamp=datetime.now(timezone.utc).isoformat(),
-                    status=ToolStatus.SUCCESS,
-                    correlation_id=None,
-                    tool_info=None,
+
+            if summary:
+                ui_chat_logs.append(
+                    UiChatLog(
+                        message_type=MessageTypeEnum.AGENT,
+                        content=summary,
+                        timestamp=datetime.now(timezone.utc).isoformat(),
+                        status=ToolStatus.SUCCESS,
+                        correlation_id=None,
+                        tool_info=None,
+                    )
                 )
-            )
-            return HumanMessage(content=summary)
+                return HumanMessage(content=summary)
 
         return AIMessage(id=last_message.id, content=last_message.content)

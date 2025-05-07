@@ -20,8 +20,6 @@ from langgraph.graph import (  # pylint: disable=no-langgraph-langchain-imports
 from duo_workflow_service.agents import (
     Agent,
     HandoverAgent,
-    HumanApprovalCheckExecutor,
-    HumanApprovalEntryExecutor,
     PlanSupervisorAgent,
     PlanTerminatorAgent,
     ToolsExecutor,
@@ -31,18 +29,27 @@ from duo_workflow_service.agents.prompts import (
     EXECUTOR_SYSTEM_MESSAGE,
     HANDOVER_TOOL_NAME,
     PLANNER_GOAL,
+    PLANNER_INSTRUCTIONS,
     PLANNER_PROMPT,
+    PLANNER_TASK_BATCH_INSTRUCTIONS,
     SET_TASK_STATUS_TOOL_NAME,
 )
-from duo_workflow_service.components import GoalDisambiguationComponent, ToolsRegistry
+from duo_workflow_service.components import (
+    GoalDisambiguationComponent,
+    PlanApprovalComponent,
+    ToolsApprovalComponent,
+    ToolsRegistry,
+)
 from duo_workflow_service.entities import (
     MessageTypeEnum,
     Plan,
     ToolStatus,
     UiChatLog,
-    WorkflowEventType,
     WorkflowState,
     WorkflowStatusEnum,
+)
+from duo_workflow_service.interceptors.feature_flag_interceptor import (
+    current_feature_flag_context,
 )
 from duo_workflow_service.llm_factory import new_chat_client
 from duo_workflow_service.tracking.errors import log_exception
@@ -50,7 +57,7 @@ from duo_workflow_service.workflows.abstract_workflow import AbstractWorkflow
 
 # Constants
 QUEUE_MAX_SIZE = 1
-MAX_TOKENS_TO_SAMPLE = 4096
+MAX_TOKENS_TO_SAMPLE = 8192
 RECURSION_LIMIT = 300
 DEBUG = os.getenv("DEBUG")
 MAX_MESSAGES_TO_DISPLAY = 5
@@ -70,7 +77,6 @@ EXECUTOR_TOOLS = [
     "get_merge_request",
     "get_pipeline_errors",
     "get_project",
-    "run_read_only_git_command",
     "run_git_command",
     "list_all_merge_request_notes",
     "list_merge_request_diffs",
@@ -94,9 +100,11 @@ EXECUTOR_TOOLS = [
     "list_epics",
     "create_epic",
     "update_epic",
+    "get_repository_file",
 ]
 
 CONTEXT_BUILDER_TOOLS = [
+    "get_previous_workflow_context",
     "list_issues",
     "get_issue",
     "list_issue_notes",
@@ -115,13 +123,14 @@ CONTEXT_BUILDER_TOOLS = [
     "ls_files",
     "find_files",
     "grep_files",
-    "run_command",
     "handover_tool",
     "get_epic",
     "list_epics",
+    "get_repository_file",
 ]
 
 PLANNER_TOOLS = [
+    "get_previous_workflow_context",
     "get_plan",
     "add_new_task",
     "remove_task",
@@ -133,6 +142,7 @@ PLANNER_TOOLS = [
 class Routes(StrEnum):
     END = "end"
     CALL_TOOL = "call_tool"
+    TOOLS_APPROVAL = "tools_approval"
     SUPERVISOR = PlanSupervisorAgent.__name__
     HANDOVER = HandoverAgent.__name__
     BUILD_CONTEXT = "build_context"
@@ -143,6 +153,7 @@ class Routes(StrEnum):
 
 def _router(
     routed_agent_name: str,
+    tool_registry: ToolsRegistry,
     state: WorkflowState,
 ) -> Routes:
     if state["status"] in [WorkflowStatusEnum.CANCELLED, WorkflowStatusEnum.ERROR]:
@@ -152,27 +163,14 @@ def _router(
     if isinstance(last_message, AIMessage) and len(last_message.tool_calls) > 0:
         if last_message.tool_calls[0]["name"] == HANDOVER_TOOL_NAME:
             return Routes.HANDOVER
+        if any(
+            tool_registry.approval_required(call["name"])
+            for call in last_message.tool_calls
+        ):
+            return Routes.TOOLS_APPROVAL
         return Routes.CALL_TOOL
 
     return Routes.SUPERVISOR
-
-
-def _approval_router(
-    state: WorkflowState,
-) -> Routes:
-    if not os.environ.get("WORKFLOW_INTERRUPT", False) or os.getenv("USE_MEMSAVER"):
-        return Routes.HANDOVER
-
-    if state["status"] in [WorkflowStatusEnum.CANCELLED, WorkflowStatusEnum.ERROR]:
-        return Routes.STOP
-
-    event = state.get("last_human_input", None)
-    if event:
-        if event["event_type"] == WorkflowEventType.RESUME:
-            return Routes.HANDOVER
-        elif event["event_type"] == WorkflowEventType.STOP:
-            return Routes.STOP
-    return Routes.CHAT
 
 
 def _should_continue(
@@ -208,6 +206,7 @@ class Workflow(AbstractWorkflow):
             tools=tools_registry.get_batch(EXECUTOR_TOOLS),
             workflow_id=self._workflow_id,
             http_client=self._http_client,
+            workflow_type=self._workflow_type,
         )
 
         return {
@@ -223,6 +222,7 @@ class Workflow(AbstractWorkflow):
                 tools_agent_name="executor",
                 agent_tools=tools_registry.get_handlers(EXECUTOR_TOOLS),
                 workflow_id=self._workflow_id,
+                workflow_type=self._workflow_type,
             ),
         }
 
@@ -251,6 +251,7 @@ class Workflow(AbstractWorkflow):
                 project_id=self._project["id"],
                 project_name=self._project["name"],
                 project_url=self._project["http_url_to_repo"],
+                planner_instructions=self.planner_instructions(tools_registry),
             ),
             model=base_model_planner,
             name="planner",
@@ -258,6 +259,7 @@ class Workflow(AbstractWorkflow):
             http_client=self._http_client,
             system_prompt=PLANNER_PROMPT,
             tools=tools_registry.get_batch(PLANNER_TOOLS),
+            workflow_type=self._workflow_type,
         )
 
         return {
@@ -268,18 +270,7 @@ class Workflow(AbstractWorkflow):
                 tools_agent_name="planner",
                 agent_tools=[],
                 workflow_id=self._workflow_id,
-            ),
-        }
-
-    def _setup_approval_for_stage(self, stage_name):
-        return {
-            "planning_approval_entry": HumanApprovalEntryExecutor(
-                stage_name,
-                self._workflow_id,
-            ),
-            "planning_approval_check": HumanApprovalCheckExecutor(
-                stage_name,
-                self._workflow_id,
+                workflow_type=self._workflow_type,
             ),
         }
 
@@ -288,7 +279,6 @@ class Workflow(AbstractWorkflow):
         graph: StateGraph,
         executor_components,
         planner_components,
-        planner_approval_components,
         tools_registry,
         goal,
     ):
@@ -298,10 +288,11 @@ class Workflow(AbstractWorkflow):
         last_node_name = self._add_context_builder_nodes(graph, goal, tools_registry)
         disambiguation_component = GoalDisambiguationComponent(
             goal=goal,
-            model=new_chat_client(),
+            model=new_chat_client(max_tokens=MAX_TOKENS_TO_SAMPLE),
             http_client=self._http_client,
             workflow_id=self._workflow_id,
             tools_registry=tools_registry,
+            workflow_type=self._workflow_type,
         )
         disambiguation_entry_node = disambiguation_component.attach(
             graph=graph,
@@ -315,36 +306,29 @@ class Workflow(AbstractWorkflow):
         graph.add_node("planning", planner_components["agent"].run)
         graph.add_node("update_plan", planner_components["tools_executor"].run)
         graph.add_node("planning_supervisor", planner_components["supervisor"].run)
-        graph.add_node(
-            "planning_approval_entry",
-            planner_approval_components["planning_approval_entry"].run,
-        )
-        graph.add_node(
-            "planning_approval_check",
-            planner_approval_components["planning_approval_check"].run,
-        )
         graph.add_edge("update_plan", "planning")
         graph.add_edge("planning_supervisor", "planning")
 
+        planner_approval_component = PlanApprovalComponent(
+            workflow_id=self._workflow_id,
+            approved_agent_name=planner_components["agent"].name,
+        )
+
+        planning_approval_entry_node = planner_approval_component.attach(
+            graph=graph,
+            next_node="set_status_to_execution",
+            back_node="planning",
+            exit_node="plan_terminator",
+        )
+
         graph.add_conditional_edges(
             "planning",
-            partial(_router, "planner"),
+            partial(_router, "planner", tools_registry),
             {
                 Routes.CALL_TOOL: "update_plan",
                 Routes.SUPERVISOR: "planning_supervisor",
-                Routes.HANDOVER: "planning_approval_entry",
+                Routes.HANDOVER: planning_approval_entry_node,
                 Routes.STOP: "plan_terminator",
-            },
-        )
-        graph.add_edge("planning_approval_entry", "planning_approval_check")
-
-        graph.add_conditional_edges(
-            "planning_approval_check",
-            _approval_router,
-            {
-                Routes.HANDOVER: "set_status_to_execution",
-                Routes.STOP: "plan_terminator",
-                Routes.CHAT: "planning",
             },
         )
 
@@ -368,10 +352,25 @@ class Workflow(AbstractWorkflow):
         graph.add_edge("execution_supervisor", "execution")
         graph.add_edge("execution_tools", "execution")
         graph.add_edge("execution_handover", END)
+
+        execution_approval_component = ToolsApprovalComponent(
+            workflow_id=self._workflow_id,
+            approved_agent_name=executor_components["agent"].name,
+            tools_registry=tools_registry,
+        )
+
+        execution_approval_entry_node = execution_approval_component.attach(
+            graph=graph,
+            next_node="execution_tools",
+            back_node="execution",
+            exit_node="plan_terminator",
+        )
+
         graph.add_conditional_edges(
             "execution",
-            partial(_router, "executor"),
+            partial(_router, "executor", tools_registry),
             {
+                Routes.TOOLS_APPROVAL: execution_approval_entry_node,
                 Routes.CALL_TOOL: "execution_tools",
                 Routes.HANDOVER: "execution_handover",
                 Routes.SUPERVISOR: "execution_supervisor",
@@ -389,7 +388,7 @@ class Workflow(AbstractWorkflow):
         tools_registry: ToolsRegistry,
         checkpointer: BaseCheckpointSaver,
     ):
-        base_model_planner = new_chat_client()
+        base_model_planner = new_chat_client(max_tokens=MAX_TOKENS_TO_SAMPLE)
         base_model_executor = new_chat_client(max_tokens=MAX_TOKENS_TO_SAMPLE)
 
         graph = StateGraph(WorkflowState)
@@ -400,15 +399,11 @@ class Workflow(AbstractWorkflow):
         planner_components = self._setup_planner(
             goal, tools_registry, base_model_planner, executor_components["tools"]
         )
-        planner_approval_components = self._setup_approval_for_stage(
-            planner_components["agent"].name
-        )
 
         graph = self._setup_workflow_graph(
             graph,
             executor_components,
             planner_components,
-            planner_approval_components,
             tools_registry,
             goal,
         )
@@ -435,22 +430,44 @@ class Workflow(AbstractWorkflow):
         )
 
     def log_workflow_elements(self, element):
-        if "conversation_history" in element:
-            for agent, messages in element["conversation_history"].items():
-                self.log.info("agent: %s", agent)
-                messages = messages if DEBUG else messages[-MAX_MESSAGES_TO_DISPLAY:]
-                for message in messages:
-                    self.log.info(
-                        f"%s: %{'' if DEBUG else f'.{MAX_MESSAGE_LENGTH}'}s",
-                        message.__class__.__name__,
-                        message.content,
-                    )
-                self.log.info("--------------------------")
-                if "status" in element:
-                    self.log.info(element["status"])
-                if "plan" in element:
-                    self.log.info(element["plan"])
+        if "conversation_history" not in element:
+            return
+
+        for agent, messages in element["conversation_history"].items():
+            self.log.info("agent: %s", agent)
+            messages = messages if DEBUG else messages[-MAX_MESSAGES_TO_DISPLAY:]
+            for message in messages:
+                self.log.info(
+                    f"%s: %{'' if DEBUG else f'.{MAX_MESSAGE_LENGTH}'}s",
+                    message.__class__.__name__,
+                    message.content,
+                )
+            self.log.info("--------------------------")
+            if "status" in element:
+                self.log.info(element["status"])
+            if "plan" in element:
+                self.log.info(element["plan"])
             self.log.info("###############################")
+
+    def planner_instructions(self, tools_registry):
+        available_feature_flags = current_feature_flag_context.get()
+        self.log.info("Available feature flags: %s", available_feature_flags)
+        if "batch_duo_workflow_planner_tasks" in available_feature_flags:
+            self.log.info("Using batched planner")
+            return PLANNER_TASK_BATCH_INSTRUCTIONS.format(
+                add_new_task_tool_name=tools_registry.get("add_new_task").name,  # type: ignore
+                remove_task_tool_name=tools_registry.get("remove_task").name,  # type: ignore
+                update_task_description_tool_name=tools_registry.get("update_task_description").name,  # type: ignore
+                handover_tool_name=HANDOVER_TOOL_NAME,
+            )
+
+        self.log.info("Using regular planner")
+        return PLANNER_INSTRUCTIONS.format(
+            add_new_task_tool_name=tools_registry.get("add_new_task").name,  # type: ignore
+            remove_task_tool_name=tools_registry.get("remove_task").name,  # type: ignore
+            update_task_description_tool_name=tools_registry.get("update_task_description").name,  # type: ignore
+            handover_tool_name=HANDOVER_TOOL_NAME,
+        )
 
     def _setup_context_builder(
         self,
@@ -459,7 +476,7 @@ class Workflow(AbstractWorkflow):
     ):
         context_builder = Agent(
             goal=goal,
-            model=new_chat_client(),  # type: ignore
+            model=new_chat_client(max_tokens=MAX_TOKENS_TO_SAMPLE),  # type: ignore
             name="context_builder",
             system_prompt=BUILD_CONTEXT_SYSTEM_MESSAGE.format(
                 handover_tool_name=HANDOVER_TOOL_NAME,
@@ -470,6 +487,7 @@ class Workflow(AbstractWorkflow):
             tools=tools_registry.get_batch(CONTEXT_BUILDER_TOOLS),
             workflow_id=self._workflow_id,
             http_client=self._http_client,
+            workflow_type=self._workflow_type,
         )
 
         return {
@@ -485,6 +503,7 @@ class Workflow(AbstractWorkflow):
                 tools_agent_name=context_builder.name,
                 agent_tools=tools_registry.get_handlers(CONTEXT_BUILDER_TOOLS),
                 workflow_id=self._workflow_id,
+                workflow_type=self._workflow_type,
             ),
         }
 
@@ -504,11 +523,25 @@ class Workflow(AbstractWorkflow):
             "build_context_supervisor", context_builder_components["supervisor"].run
         )
 
+        context_builder_approval_component = ToolsApprovalComponent(
+            workflow_id=self._workflow_id,
+            approved_agent_name="context_builder",
+            tools_registry=tools_registry,
+        )
+
+        context_builder_approval_entry_node = context_builder_approval_component.attach(
+            graph=graph,
+            next_node="build_context_tools",
+            back_node="build_context",
+            exit_node="plan_terminator",
+        )
+
         graph.add_conditional_edges(
             "build_context",
-            partial(_router, "context_builder"),
+            partial(_router, "context_builder", tools_registry),
             {
                 Routes.CALL_TOOL: "build_context_tools",
+                Routes.TOOLS_APPROVAL: context_builder_approval_entry_node,
                 Routes.HANDOVER: "build_context_handover",
                 Routes.SUPERVISOR: "build_context_supervisor",
                 Routes.STOP: "plan_terminator",

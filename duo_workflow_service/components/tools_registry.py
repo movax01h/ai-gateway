@@ -6,6 +6,9 @@ from pydantic import BaseModel
 
 from duo_workflow_service import tools
 from duo_workflow_service.gitlab.http_client import GitlabHttpClient
+from duo_workflow_service.interceptors.feature_flag_interceptor import (
+    current_feature_flag_context,
+)
 
 ToolType = Union[BaseTool, Type[BaseModel]]
 
@@ -60,6 +63,7 @@ _READ_ONLY_GITLAB_TOOLS: list[Type[BaseTool]] = [
     tools.ListEpics,
     tools.ListIssueNotes,
     tools.GetIssueNote,
+    tools.GetRepositoryFile,
 ]
 
 _AGENT_PRIVILEGES: dict[str, list[Type[BaseTool]]] = {
@@ -89,13 +93,13 @@ _AGENT_PRIVILEGES: dict[str, list[Type[BaseTool]]] = {
     "read_only_gitlab": _READ_ONLY_GITLAB_TOOLS,
     "run_commands": [
         tools.RunCommand,
-        tools.ReadOnlyGit,
     ],
 }
 
 
 class ToolsRegistry:
-    _approved_tools: dict[str, Union[BaseTool, Type[BaseModel]]]
+    _enabled_tools: dict[str, Union[BaseTool, Type[BaseModel]]]
+    _preapproved_tool_names: set[str]
 
     @classmethod
     async def configure(
@@ -115,54 +119,75 @@ class ToolsRegistry:
                 f"Failed to fetch tools configuration for workflow {workflow_id}"
             )
 
-        return cls(
-            outbox=outbox,
-            inbox=inbox,
-            gl_http_client=gl_http_client,
-            tools_configuration=config["agent_privileges_names"],
-            gitlab_host=gitlab_host,
-        )
-
-    def __init__(
-        self,
-        outbox: asyncio.Queue,
-        inbox: asyncio.Queue,
-        gl_http_client: GitlabHttpClient,
-        tools_configuration: list[str],
-        *,
-        gitlab_host: str,
-    ):
+        agent_previlages = config.get("agent_privileges_names", [])
+        preapproved_tools = config.get("pre_approved_agent_privileges_names", [])
         tool_metadata = ToolMetadata(
             outbox=outbox,
             inbox=inbox,
             gitlab_client=gl_http_client,
             gitlab_host=gitlab_host,
         )
-        self._approved_tools = {
+
+        return cls(
+            enabled_tools=agent_previlages,
+            preapproved_tools=preapproved_tools,
+            tool_metadata=tool_metadata,
+        )
+
+    def __init__(
+        self,
+        enabled_tools: list[str],
+        preapproved_tools: list[str],
+        *,
+        tool_metadata: ToolMetadata,
+    ):
+        self._enabled_tools = {
             **{tool_cls.tool_title: tool_cls for tool_cls in NO_OP_TOOLS},  # type: ignore
             **{tool.name: tool for tool in [tool_cls() for tool_cls in _DEFAULT_TOOLS]},
         }
 
-        for privilege in tools_configuration:
+        feature_flags = current_feature_flag_context.get()
+        if "duo_workflow_previous_workflow_tool" in feature_flags:
+            self._enabled_tools["get_previous_workflow_context"] = (
+                tools.GetWorkflowContext(metadata=tool_metadata)  # type: ignore
+            )
+
+        self._preapproved_tool_names = set(self._enabled_tools.keys())
+
+        for privilege in enabled_tools:
             for tool_cls in _AGENT_PRIVILEGES[privilege]:
                 tool = tool_cls(metadata=tool_metadata)
-                self._approved_tools[tool.name] = tool
+                self._enabled_tools[tool.name] = tool
+                if privilege in preapproved_tools:
+                    self._preapproved_tool_names.add(tool.name)
 
     def get(self, tool_name: str) -> Optional[ToolType]:
-        return self._approved_tools.get(tool_name)
+        return self._enabled_tools.get(tool_name)
 
     def get_batch(self, tool_names: list[str]) -> list[ToolType]:
         return [
-            self._approved_tools[tool_name]
+            self._enabled_tools[tool_name]
             for tool_name in tool_names
-            if tool_name in self._approved_tools
+            if tool_name in self._enabled_tools
         ]
 
     def get_handlers(self, tool_names: list[str]) -> list[BaseTool]:
         tool_handlers: list[BaseTool] = []
         for tool_name in tool_names:
-            handler = self._approved_tools.get(tool_name)
+            handler = self._enabled_tools.get(tool_name)
             if isinstance(handler, BaseTool):
                 tool_handlers.append(handler)
 
         return tool_handlers
+
+    def approval_required(self, tool_name: str) -> bool:
+        """Check if a tool requires human approval before execution.
+
+        Args:
+            tool_name: The name of the tool to check
+
+        Returns:
+            False if the tool is in the preapproved list,
+            True otherwise.
+        """
+        return tool_name not in self._preapproved_tool_names

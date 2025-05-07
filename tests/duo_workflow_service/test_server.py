@@ -16,20 +16,22 @@ from gitlab_cloud_connector import (
 
 from contract import contract_pb2
 from duo_workflow_service.interceptors.authentication_interceptor import current_user
+from duo_workflow_service.internal_events.event_enum import CategoryEnum
 from duo_workflow_service.server import DuoWorkflowService, run, serve
 
 
 @pytest.mark.asyncio
 @patch("duo_workflow_service.server.AbstractWorkflow")
-@patch("duo_workflow_service.server.Registry")
+@patch("duo_workflow_service.server.resolve_workflow_class")
 async def test_execute_workflow_when_no_events_ends(
-    mock_registry_class, mock_abstract_workflow_class
+    mock_resolve_workflow,
+    mock_abstract_workflow_class,
 ):
+    mock_resolve_workflow.return_value = mock_abstract_workflow_class
     mock_workflow = mock_abstract_workflow_class.return_value
     mock_workflow.is_done = True
     mock_workflow.run = AsyncMock()
     mock_workflow.cleanup = AsyncMock()
-    mock_registry_class.resolve.return_value = mock_abstract_workflow_class
 
     async def mock_request_iterator() -> AsyncIterable[contract_pb2.ClientEvent]:
         yield contract_pb2.ClientEvent(
@@ -48,15 +50,15 @@ async def test_execute_workflow_when_no_events_ends(
 @pytest.mark.asyncio
 @patch("asyncio.sleep")
 @patch("duo_workflow_service.server.AbstractWorkflow")
-@patch("duo_workflow_service.server.Registry")
+@patch("duo_workflow_service.server.resolve_workflow_class")
 async def test_execute_workflow_when_nothing_in_outbox(
-    mock_registry_class, mock_abstract_workflow_class, mock_sleep
+    mock_resolve_workflow, mock_abstract_workflow_class, mock_sleep
 ):
     mock_workflow = mock_abstract_workflow_class.return_value
     mock_workflow.is_done = False
     mock_workflow.run = AsyncMock()
     mock_workflow.cleanup = AsyncMock()
-    mock_registry_class.resolve.return_value = mock_abstract_workflow_class
+    mock_resolve_workflow.return_value = mock_abstract_workflow_class
 
     def side_effect():
         mock_workflow.is_done = True
@@ -80,22 +82,20 @@ async def test_execute_workflow_when_nothing_in_outbox(
 
 
 @pytest.mark.asyncio
-@patch("asyncio.create_task")
 @patch("duo_workflow_service.server.AbstractWorkflow")
-@patch("duo_workflow_service.server.Registry")
+@patch("duo_workflow_service.server.resolve_workflow_class")
 async def test_workflow_is_cancelled_on_parent_task_cancellation(
-    mock_registry_class, mock_abstract_workflow_class, mock_task
+    mock_resolve_workflow, mock_abstract_workflow_class
 ):
     mock_workflow = mock_abstract_workflow_class.return_value
     mock_workflow.is_done = False
     mock_workflow.run = AsyncMock()
     mock_workflow.cleanup = AsyncMock()
-    mock_registry_class.resolve.return_value = mock_abstract_workflow_class
+    mock_resolve_workflow.return_value = mock_abstract_workflow_class
 
-    def side_effect():
-        raise asyncio.CancelledError()
-
-    mock_workflow.get_from_outbox = MagicMock(side_effect=side_effect)
+    mock_workflow.get_from_outbox = MagicMock(
+        side_effect=asyncio.CancelledError("Task cancelled")
+    )
 
     async def mock_request_iterator() -> AsyncIterable[contract_pb2.ClientEvent]:
         yield contract_pb2.ClientEvent(
@@ -105,26 +105,40 @@ async def test_workflow_is_cancelled_on_parent_task_cancellation(
     current_user.set(CloudConnectorUser(authenticated=True, is_debug=True))
     mock_context = MagicMock(spec=grpc.ServicerContext)
     mock_context.abort = AsyncMock()
-    result = DuoWorkflowService().ExecuteWorkflow(mock_request_iterator(), mock_context)
-    with pytest.raises(StopAsyncIteration):
-        await result.__anext__()
-    assert mock_task.mock_calls[-1] == call().cancel(ANY)
 
-    mock_context.abort.assert_called_once_with(
-        grpc.StatusCode.INTERNAL, "Something went wrong"
-    )
+    real_workflow_task: asyncio.Task = None  # type: ignore
+    original_create_task = asyncio.create_task
+
+    def mock_create_task(coro, **kwargs):
+        nonlocal real_workflow_task
+        real_workflow_task = original_create_task(coro, **kwargs)
+        return real_workflow_task
+
+    with patch("asyncio.create_task", side_effect=mock_create_task):
+        servicer = DuoWorkflowService()
+        result = servicer.ExecuteWorkflow(mock_request_iterator(), mock_context)
+
+        with pytest.raises(StopAsyncIteration):
+            await result.__anext__()
+
+        assert real_workflow_task is not None
+        assert real_workflow_task.cancelled()
+
+        mock_context.abort.assert_called_once_with(
+            grpc.StatusCode.INTERNAL, "Something went wrong"
+        )
 
 
 @pytest.mark.asyncio
 @patch("duo_workflow_service.server.AbstractWorkflow")
-@patch("duo_workflow_service.server.Registry")
-async def test_execute_workflow(mock_registry_class, mock_abstract_workflow_class):
+@patch("duo_workflow_service.server.resolve_workflow_class")
+async def test_execute_workflow(mock_resolve_workflow, mock_abstract_workflow_class):
     mock_workflow_instance = mock_abstract_workflow_class.return_value
     mock_workflow_instance.is_done = False
     mock_workflow_instance.run = AsyncMock()
     mock_workflow_instance.cleanup = AsyncMock()
     mock_workflow_instance.get_from_outbox.return_value = contract_pb2.Action()
-    mock_registry_class.resolve.return_value = mock_abstract_workflow_class
+    mock_resolve_workflow.return_value = mock_abstract_workflow_class
 
     async def mock_request_iterator() -> AsyncIterable[contract_pb2.ClientEvent]:
         yield contract_pb2.ClientEvent(
@@ -241,15 +255,15 @@ def test_run_without_llm_access():
 
 @pytest.mark.asyncio
 @patch("duo_workflow_service.server.AbstractWorkflow")
-@patch("duo_workflow_service.server.Registry")
+@patch("duo_workflow_service.server.resolve_workflow_class")
 async def test_execute_workflow_missing_workflow_metadata(
-    mock_registry_class, mock_abstract_workflow_class
+    mock_resolve_workflow, mock_abstract_workflow_class
 ):
     mock_workflow = mock_abstract_workflow_class.return_value
     mock_workflow.is_done = True
     mock_workflow.run = AsyncMock()
     mock_workflow.cleanup = AsyncMock()
-    mock_registry_class.resolve.return_value = mock_abstract_workflow_class
+    mock_resolve_workflow.return_value = mock_abstract_workflow_class
 
     async def mock_request_iterator() -> AsyncIterable[contract_pb2.ClientEvent]:
         yield contract_pb2.ClientEvent(
@@ -266,20 +280,21 @@ async def test_execute_workflow_missing_workflow_metadata(
     mock_abstract_workflow_class.assert_called_once_with(
         workflow_id="123",
         workflow_metadata={},
+        workflow_type=CategoryEnum.WORKFLOW_SOFTWARE_DEVELOPMENT,
     )
 
 
 @pytest.mark.asyncio
 @patch("duo_workflow_service.server.AbstractWorkflow")
-@patch("duo_workflow_service.server.Registry")
+@patch("duo_workflow_service.server.resolve_workflow_class")
 async def test_execute_workflow_valid_workflow_metadata(
-    mock_registry_class, mock_abstract_workflow_class
+    mock_resolve_workflow, mock_abstract_workflow_class
 ):
     mock_workflow = mock_abstract_workflow_class.return_value
     mock_workflow.is_done = True
     mock_workflow.run = AsyncMock()
     mock_workflow.cleanup = AsyncMock()
-    mock_registry_class.resolve.return_value = mock_abstract_workflow_class
+    mock_resolve_workflow.return_value = mock_abstract_workflow_class
 
     async def mock_request_iterator() -> AsyncIterable[contract_pb2.ClientEvent]:
         yield contract_pb2.ClientEvent(
@@ -299,4 +314,5 @@ async def test_execute_workflow_valid_workflow_metadata(
     mock_abstract_workflow_class.assert_called_once_with(
         workflow_id="123",
         workflow_metadata={"key": "value"},
+        workflow_type=CategoryEnum.WORKFLOW_SOFTWARE_DEVELOPMENT,
     )

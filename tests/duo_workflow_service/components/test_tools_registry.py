@@ -1,10 +1,15 @@
 import asyncio
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
 from duo_workflow_service import tools
-from duo_workflow_service.components.tools_registry import ToolsRegistry
+from duo_workflow_service.components.tools_registry import (
+    _DEFAULT_TOOLS,
+    NO_OP_TOOLS,
+    ToolMetadata,
+    ToolsRegistry,
+)
 from duo_workflow_service.gitlab.http_client import GitlabHttpClient
 
 
@@ -42,7 +47,6 @@ _outbox = MagicMock(spec=asyncio.Queue)
                 "set_task_status",
                 "run_command",
                 "handover_tool",
-                "run_read_only_git_command",
                 "request_user_clarification_tool",
             },
         ),
@@ -77,6 +81,7 @@ _outbox = MagicMock(spec=asyncio.Queue)
                 "list_epics",
                 "list_issue_notes",
                 "get_issue_note",
+                "get_repository_file",
             },
         ),
         (
@@ -118,6 +123,7 @@ _outbox = MagicMock(spec=asyncio.Queue)
                 "create_merge_request",
                 "list_issue_notes",
                 "get_issue_note",
+                "get_repository_file",
             },
         ),
         (
@@ -162,95 +168,86 @@ _outbox = MagicMock(spec=asyncio.Queue)
         "read_write_files_privileges",
     ],
 )
-def test_registry_initialization(gl_http_client, config, expected_tools_set):
+def test_registry_initialization(tool_metadata, config, expected_tools_set):
     registry = ToolsRegistry(
-        outbox=_outbox,
-        inbox=_inbox,
-        gl_http_client=gl_http_client,
-        tools_configuration=config,
-        gitlab_host="gitlab.example.com",
+        enabled_tools=config,
+        preapproved_tools=[],
+        tool_metadata=tool_metadata,
     )
 
-    assert set(registry._approved_tools.keys()) == expected_tools_set
+    assert set(registry._enabled_tools.keys()) == expected_tools_set
 
 
 def test_registry_initialization_initialises_tools_with_correct_attributes(
-    gl_http_client,
+    tool_metadata,
 ):
-    gitlab_host = "gitlab.example.com"
     registry = ToolsRegistry(
-        outbox=_outbox,
-        inbox=_inbox,
-        gl_http_client=gl_http_client,
-        tools_configuration=[
+        enabled_tools=[
             "run_commands",
             "use_git",
             "read_write_gitlab",
             "read_only_gitlab",
             "read_write_files",
         ],
-        gitlab_host=gitlab_host,
+        preapproved_tools=[],
+        tool_metadata=tool_metadata,
     )
-    metadata = {
-        "outbox": _outbox,
-        "inbox": _inbox,
-        "gitlab_client": gl_http_client,
-        "gitlab_host": gitlab_host,
-    }
     expected_tools = {
         "add_new_task": tools.AddNewTask(),
         "remove_task": tools.RemoveTask(),
         "update_task_description": tools.UpdateTaskDescription(),
         "get_plan": tools.GetPlan(),
         "set_task_status": tools.SetTaskStatus(),
-        "run_command": tools.RunCommand(metadata=metadata),
-        "create_issue": tools.CreateIssue(metadata=metadata),
-        "list_issues": tools.ListIssues(metadata=metadata),
-        "get_issue": tools.GetIssue(metadata=metadata),
-        "update_issue": tools.UpdateIssue(metadata=metadata),
-        "get_job_logs": tools.GetLogsFromJob(metadata=metadata),
-        "get_merge_request": tools.GetMergeRequest(metadata=metadata),
-        "list_merge_request_diffs": tools.ListMergeRequestDiffs(metadata=metadata),
-        "create_merge_request_note": tools.CreateMergeRequestNote(metadata=metadata),
+        "run_command": tools.RunCommand(metadata=tool_metadata),
+        "create_issue": tools.CreateIssue(metadata=tool_metadata),
+        "list_issues": tools.ListIssues(metadata=tool_metadata),
+        "get_issue": tools.GetIssue(metadata=tool_metadata),
+        "update_issue": tools.UpdateIssue(metadata=tool_metadata),
+        "get_job_logs": tools.GetLogsFromJob(metadata=tool_metadata),
+        "get_merge_request": tools.GetMergeRequest(metadata=tool_metadata),
+        "list_merge_request_diffs": tools.ListMergeRequestDiffs(metadata=tool_metadata),
+        "create_merge_request_note": tools.CreateMergeRequestNote(
+            metadata=tool_metadata
+        ),
         "list_all_merge_request_notes": tools.ListAllMergeRequestNotes(
-            metadata=metadata
+            metadata=tool_metadata
         ),
-        "update_merge_request": tools.UpdateMergeRequest(metadata=metadata),
+        "update_merge_request": tools.UpdateMergeRequest(metadata=tool_metadata),
         "get_pipeline_errors": tools.GetPipelineErrorsForMergeRequest(
-            metadata=metadata
+            metadata=tool_metadata
         ),
-        "get_project": tools.GetProject(metadata=metadata),
-        "gitlab_group_project_search": tools.GroupProjectSearch(metadata=metadata),
-        "gitlab_issue_search": tools.IssueSearch(metadata=metadata),
-        "gitlab_merge_request_search": tools.MergeRequestSearch(metadata=metadata),
-        "gitlab_milestone_search": tools.MilestoneSearch(metadata=metadata),
-        "gitlab__user_search": tools.UserSearch(metadata=metadata),
-        "gitlab_blob_search": tools.BlobSearch(metadata=metadata),
-        "gitlab_commit_search": tools.CommitSearch(metadata=metadata),
-        "gitlab_wiki_blob_search": tools.WikiBlobSearch(metadata=metadata),
-        "gitlab_note_search": tools.NoteSearch(metadata=metadata),
-        "read_file": tools.ReadFile(metadata=metadata),
-        "ls_files": tools.LsFiles(metadata=metadata),
-        "create_file_with_contents": tools.WriteFile(metadata=metadata),
-        "edit_file": tools.EditFile(metadata=metadata),
-        "find_files": tools.FindFiles(metadata=metadata),
-        "grep_files": tools.Grep(metadata=metadata),
-        "mkdir": tools.Mkdir(metadata=metadata),
-        "run_read_only_git_command": tools.ReadOnlyGit(metadata=metadata),
-        "run_git_command": tools.git.Command(metadata=metadata),
+        "get_project": tools.GetProject(metadata=tool_metadata),
+        "gitlab_group_project_search": tools.GroupProjectSearch(metadata=tool_metadata),
+        "gitlab_issue_search": tools.IssueSearch(metadata=tool_metadata),
+        "gitlab_merge_request_search": tools.MergeRequestSearch(metadata=tool_metadata),
+        "gitlab_milestone_search": tools.MilestoneSearch(metadata=tool_metadata),
+        "gitlab__user_search": tools.UserSearch(metadata=tool_metadata),
+        "gitlab_blob_search": tools.BlobSearch(metadata=tool_metadata),
+        "gitlab_commit_search": tools.CommitSearch(metadata=tool_metadata),
+        "gitlab_wiki_blob_search": tools.WikiBlobSearch(metadata=tool_metadata),
+        "gitlab_note_search": tools.NoteSearch(metadata=tool_metadata),
+        "read_file": tools.ReadFile(metadata=tool_metadata),
+        "ls_files": tools.LsFiles(metadata=tool_metadata),
+        "create_file_with_contents": tools.WriteFile(metadata=tool_metadata),
+        "edit_file": tools.EditFile(metadata=tool_metadata),
+        "find_files": tools.FindFiles(metadata=tool_metadata),
+        "grep_files": tools.Grep(metadata=tool_metadata),
+        "mkdir": tools.Mkdir(metadata=tool_metadata),
+        "run_git_command": tools.git.Command(metadata=tool_metadata),
         "handover_tool": tools.HandoverTool,
         "request_user_clarification_tool": tools.RequestUserClarificationTool,
-        "get_epic": tools.GetEpic(metadata=metadata),
-        "list_epics": tools.ListEpics(metadata=metadata),
-        "create_epic": tools.CreateEpic(metadata=metadata),
-        "update_epic": tools.UpdateEpic(metadata=metadata),
-        "list_issue_notes": tools.ListIssueNotes(metadata=metadata),
-        "get_issue_note": tools.GetIssueNote(metadata=metadata),
-        "create_issue_note": tools.CreateIssueNote(metadata=metadata),
-        "create_merge_request": tools.CreateMergeRequest(metadata=metadata),
+        "get_epic": tools.GetEpic(metadata=tool_metadata),
+        "list_epics": tools.ListEpics(metadata=tool_metadata),
+        "create_epic": tools.CreateEpic(metadata=tool_metadata),
+        "update_epic": tools.UpdateEpic(metadata=tool_metadata),
+        "list_issue_notes": tools.ListIssueNotes(metadata=tool_metadata),
+        "get_issue_note": tools.GetIssueNote(metadata=tool_metadata),
+        "create_issue_note": tools.CreateIssueNote(metadata=tool_metadata),
+        "create_merge_request": tools.CreateMergeRequest(metadata=tool_metadata),
+        "get_repository_file": tools.GetRepositoryFile(metadata=tool_metadata),
     }
 
-    assert registry._approved_tools == expected_tools
+    assert registry._enabled_tools == expected_tools
 
 
 @pytest.mark.asyncio
@@ -275,14 +272,13 @@ async def test_registry_configuration(gl_http_client):
     )
 
     # Verify configured tools based on privileges
-    assert set(registry._approved_tools.keys()) == {
+    assert set(registry._enabled_tools.keys()) == {
         "add_new_task",
         "remove_task",
         "update_task_description",
         "get_plan",
         "set_task_status",
         "run_command",
-        "run_read_only_git_command",
         "handover_tool",
         "request_user_clarification_tool",
     }
@@ -310,13 +306,11 @@ async def test_registry_configuration(gl_http_client):
     ],
     ids=["approved_tool", "not_approved_tool", "nonexistent_tool", "handover_tool"],
 )
-def test_get_tool(gl_http_client, tool_name, expected_tool, config):
+def test_get_tool(tool_metadata, tool_name, expected_tool, config):
     registry = ToolsRegistry(
-        outbox=_outbox,
-        inbox=_inbox,
-        gl_http_client=gl_http_client,
-        tools_configuration=config,
-        gitlab_host="gitlab.example.com",
+        enabled_tools=config,
+        preapproved_tools=[],
+        tool_metadata=tool_metadata,
     )
 
     tool = registry.get(tool_name)
@@ -335,13 +329,11 @@ def test_get_tool(gl_http_client, tool_name, expected_tool, config):
     ],
     ids=["multiple_tools", "no_tools"],
 )
-def test_get_batch_tools(gl_http_client, requested_tools, expected_tools, config):
+def test_get_batch_tools(tool_metadata, requested_tools, expected_tools, config):
     registry = ToolsRegistry(
-        outbox=_outbox,
-        inbox=_inbox,
-        gl_http_client=gl_http_client,
-        tools_configuration=config,
-        gitlab_host="gitlab.example.com",
+        enabled_tools=config,
+        preapproved_tools=[],
+        tool_metadata=tool_metadata,
     )
 
     assert [
@@ -361,18 +353,107 @@ def test_get_batch_tools(gl_http_client, requested_tools, expected_tools, config
     ],
     ids=["tools_and_noop_tools_mixed", "noop_tools_only"],
 )
-def test_get_handlers(gl_http_client, requested_tools, expected_tools, config):
+def test_get_handlers(tool_metadata, requested_tools, expected_tools, config):
     registry = ToolsRegistry(
-        outbox=_outbox,
-        inbox=_inbox,
-        gl_http_client=gl_http_client,
-        tools_configuration=config,
-        gitlab_host="gitlab.example.com",
+        enabled_tools=config,
+        preapproved_tools=[],
+        tool_metadata=tool_metadata,
     )
 
     assert [
         tool.__class__ for tool in registry.get_handlers(requested_tools)
     ] == expected_tools
+
+
+def test_preapproved_tools_initialization(tool_metadata):
+    registry = ToolsRegistry(
+        enabled_tools=["read_write_files", "read_only_gitlab"],
+        preapproved_tools=["read_write_files"],
+        tool_metadata=tool_metadata,
+    )
+
+    # Default tools should always be in preapproved_tools
+    default_tools = {
+        "add_new_task",
+        "remove_task",
+        "update_task_description",
+        "get_plan",
+        "set_task_status",
+        "handover_tool",
+        "request_user_clarification_tool",
+    }
+    # Tools from read_write_files privilege should be in preapproved_tools
+    read_write_tools = {
+        "read_file",
+        "create_file_with_contents",
+        "edit_file",
+        "ls_files",
+        "find_files",
+        "grep_files",
+        "mkdir",
+    }
+
+    assert registry._preapproved_tool_names == default_tools.union(read_write_tools)
+
+
+def test_approval_required(tool_metadata):
+    registry = ToolsRegistry(
+        enabled_tools=["read_write_files", "read_only_gitlab"],
+        preapproved_tools=[
+            "read_write_files"
+        ],  # Only read_write_files tools are preapproved
+        tool_metadata=tool_metadata,
+    )
+
+    # Tool is in preapproved list
+    assert not registry.approval_required("read_file")  # from read_write_files
+    assert not registry.approval_required("edit_file")  # from read_write_files
+
+    # Tool is not in preapproved list
+    assert registry.approval_required("list_issues")  # from read_only_gitlab
+    assert registry.approval_required("get_issue")  # from read_only_gitlab
+
+    # Tool that doesn't exist in enabled_tools but also not in preapproved list
+    assert registry.approval_required("nonexistent_tool")
+
+
+@pytest.mark.asyncio
+async def test_registry_configuration_with_preapproved_tools(gl_http_client):
+    workflow_id = "test_workflow"
+    config = {
+        "agent_privileges_names": ["read_write_files", "run_commands"],
+        "pre_approved_agent_privileges_names": ["read_write_files"],
+    }
+
+    gl_http_client.aget.return_value = config
+
+    registry = await ToolsRegistry.configure(
+        workflow_id=workflow_id,
+        gl_http_client=gl_http_client,
+        outbox=_outbox,
+        inbox=_inbox,
+        gitlab_host="gitlab.example.com",
+    )
+
+    always_enabled_tools = set([tool_cls.tool_title for tool_cls in NO_OP_TOOLS])  # type: ignore
+    always_enabled_tools.update([tool_cls().name for tool_cls in _DEFAULT_TOOLS])
+
+    read_write_tools = {
+        "read_file",
+        "create_file_with_contents",
+        "edit_file",
+        "ls_files",
+        "find_files",
+        "grep_files",
+        "mkdir",
+    }
+    expected_preapproved = always_enabled_tools.union(read_write_tools)
+
+    assert registry._preapproved_tool_names == expected_preapproved
+    assert registry.approval_required("run_command")
+    assert not registry.approval_required("handover_tool")
+    assert not registry.approval_required("add_new_task")
+    assert not registry.approval_required("edit_file")
 
 
 @pytest.mark.asyncio
@@ -392,3 +473,33 @@ async def test_registry_configuration_error(gl_http_client, config):
             inbox=_inbox,
             gitlab_host="gitlab.example.com",
         )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "feature_flag_value, should_include_context_tool",
+    [
+        ("duo_workflow_previous_workflow_tool", True),
+        ("", False),
+    ],
+)
+@patch("duo_workflow_service.components.tools_registry.current_feature_flag_context")
+async def test_feature_flag_behavior(
+    mock_feature_flags_context,
+    feature_flag_value,
+    should_include_context_tool,
+    tool_metadata,
+):
+    mock_feature_flags_context.get.return_value = feature_flag_value
+
+    registry = ToolsRegistry(
+        enabled_tools=["read_write_gitlab"],
+        preapproved_tools=[],
+        tool_metadata=tool_metadata,
+    )
+
+    tool_keys = registry._preapproved_tool_names
+    if should_include_context_tool:
+        assert "get_previous_workflow_context" in tool_keys
+    else:
+        assert "get_previous_workflow_context" not in tool_keys

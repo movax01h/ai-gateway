@@ -3,9 +3,7 @@ import astroid.nodes
 import pylint.testutils
 import pytest
 
-from duo_workflow_service.pylint_plugins.no_langgraph_langchain_imports import (
-    NoLanggraphLangchainImportsChecker,
-)
+from lints.no_langgraph_langchain_imports import NoLanggraphLangchainImportsChecker
 
 
 class TestUniqueReturnChecker(pylint.testutils.CheckerTestCase):

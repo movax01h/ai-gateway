@@ -34,43 +34,6 @@ class IssueResourceInput(ProjectResourceInput):
 
 
 class IssueBaseTool(DuoBaseTool):
-    def _validate_project_url(
-        self, url: Optional[str], project_id: Optional[Any]
-    ) -> Tuple[Optional[str], List[str]]:
-        """Validate project URL and extract project_id.
-
-        Args:
-            url: The GitLab URL to parse
-            project_id: The project ID provided by the user
-
-        Returns:
-            Tuple containing:
-                - The validated project_id (or None if validation failed)
-                - A list of error messages (empty if validation succeeded)
-        """
-        errors = []
-
-        if not url:
-            if not project_id:
-                errors.append("'project_id' must be provided when 'url' is not")
-            return project_id, errors
-
-        try:
-            # Parse URL and validate netloc against gitlab_host
-            url_project_id = GitLabUrlParser.parse_project_url(url, self.gitlab_host)
-
-            # If both URL and project_id are provided, check if they match
-            if project_id is not None and str(project_id) != url_project_id:
-                errors.append(
-                    f"Project ID mismatch: provided '{project_id}' but URL contains '{url_project_id}'"
-                )
-
-            # Use the project_id from the URL
-            return url_project_id, errors
-        except GitLabUrlParseError as e:
-            errors.append(f"Failed to parse URL: {str(e)}")
-            return project_id, errors
-
     def _validate_issue_url(
         self, url: Optional[str], project_id: Optional[Any], issue_iid: Optional[int]
     ) -> Tuple[Optional[str], Optional[int], List[str]]:
@@ -122,23 +85,28 @@ class IssueBaseTool(DuoBaseTool):
 class CreateIssueInput(ProjectResourceInput):
     title: str = Field(description="Title of the issue")
     description: Optional[str] = Field(
-        description=f"The description of an issue. Limited to {DESCRIPTION_CHARACTER_LIMIT} characters."
+        default=None,
+        description=f"The description of an issue. Limited to {DESCRIPTION_CHARACTER_LIMIT} characters.",
     )
     labels: Optional[str] = Field(
+        default=None,
         description="""Comma-separated label names to assign to the new issue.
-                                  If a label does not already exist, this creates a new project label and assigns it to the issue."""
+                                  If a label does not already exist, this creates a new project label and assigns it to the issue.""",
     )
     assignee_ids: Optional[list[int]] = Field(
-        description="The IDs of the users to assign the issue to"
+        default=None, description="The IDs of the users to assign the issue to"
     )
     confidential: Optional[bool] = Field(
-        description="Set to true to create a confidential issue. Default is false."
+        default=None,
+        description="Set to true to create a confidential issue. Default is false.",
     )
     due_date: Optional[str] = Field(
-        description="The due date. Date time string in the format YYYY-MM-DD, for example 2016-03-11."
+        default=None,
+        description="The due date. Date time string in the format YYYY-MM-DD, for example 2016-03-11.",
     )
     issue_type: Optional[str] = Field(
-        description="The type of issue. One of issue, incident, test_case or task. Default is issue."
+        default=None,
+        description="The type of issue. One of issue, incident, test_case or task. Default is issue.",
     )
 
 
@@ -177,63 +145,78 @@ class CreateIssue(IssueBaseTool):
             return json.dumps({"error": str(e)})
 
     def format_display_message(self, args: CreateIssueInput) -> str:
+        if args.url:
+            return f"Create issue '{args.title}' in {args.url}"
         return f"Create issue '{args.title}' in project {args.project_id}"
 
 
 class ListIssuesInput(ProjectResourceInput):
     assignee_id: Optional[int] = Field(
+        default=None,
         description="""Return issues assigned to the given user ID. It can't be used together with assignee_username.
-                              None returns unassigned issues. Any returns issues with an assignee."""
+                              None returns unassigned issues. Any returns issues with an assignee.""",
     )
     assignee_username: Optional[List[str]] = Field(
+        default=None,
         description="""Return issues assigned to the given username. This works like assignee_id but can't be used together with it. In GitLab CE,
-                        assignee_username can only have one value. If there's more than one, an error will be returned."""
+                        assignee_username can only have one value. If there's more than one, an error will be returned.""",
     )
     author_id: Optional[int] = Field(
+        default=None,
         description="""Return issues created by the given user id.
                                      It can't be used together with author_username.
-                                     Combine with scope=all or scope=assigned_to_me."""
+                                     Combine with scope=all or scope=assigned_to_me.""",
     )
     author_username: Optional[str] = Field(
+        default=None,
         description="""Return issues created by the given username.
                                            Similar to author_id and it can't be used together with author_id.
-                                           Combine with scope=all or scope=assigned_to_me."""
+                                           Combine with scope=all or scope=assigned_to_me.""",
     )
     confidential: Optional[bool] = Field(
-        description="Filter confidential or public issues"
+        default=None, description="Filter confidential or public issues"
     )
     created_after: Optional[str] = Field(
-        description="Return issues created on or after the given time. Expected in ISO 8601 date and time format (YYYY-MM-DDTHH:MM:SSZ)"
+        default=None,
+        description="Return issues created on or after the given time. Expected in ISO 8601 date and time format (YYYY-MM-DDTHH:MM:SSZ)",
     )
     created_before: Optional[str] = Field(
-        description="Return issues created on or before the given time. Expected in ISO 8601 date and time format (YYYY-MM-DDTHH:MM:SSZ)"
+        default=None,
+        description="Return issues created on or before the given time. Expected in ISO 8601 date and time format (YYYY-MM-DDTHH:MM:SSZ)",
     )
     due_date: Optional[str] = Field(
+        default=None,
         description="""Return issues that have no due date, are overdue, or whose due date is this week, this month, or between two weeks ago and next month.
-        Accepts: 0 (no due date), any, today, tomorrow, overdue, week, month, next_month_and_previous_two_weeks."""
+        Accepts: 0 (no due date), any, today, tomorrow, overdue, week, month, next_month_and_previous_two_weeks.""",
     )
     health_status: Optional[str] = Field(
+        default=None,
         description="""Return issues with the specified health_status. None returns issues with no
-            health status assigned, and Any returns issues with a health status assigned."""
+            health status assigned, and Any returns issues with a health status assigned.""",
     )
     issue_type: Optional[str] = Field(
-        description="Filter to a given type of issue. One of issue, incident, test_case or task."
+        default=None,
+        description="Filter to a given type of issue. One of issue, incident, test_case or task.",
     )
     labels: Optional[str] = Field(
+        default=None,
         description="""Comma-separated list of label names, issues must have all labels to be returned.
-                                  None lists all issues with no labels. Any lists all issues with at least one label. Predefined names are case-insensitive."""
+                                  None lists all issues with no labels. Any lists all issues with at least one label. Predefined names are case-insensitive.""",
     )
     scope: Optional[str] = Field(
-        description="Return issues for the given scope: created_by_me, assigned_to_me or all. Defaults to created_by_me."
+        default=None,
+        description="Return issues for the given scope: created_by_me, assigned_to_me or all. Defaults to created_by_me.",
     )
     search: Optional[str] = Field(
-        description="Search issues against their title and description"
+        default=None, description="Search issues against their title and description"
     )
     sort: Optional[str] = Field(
-        description="Return issues sorted in asc or desc order. Default is desc."
+        default=None,
+        description="Return issues sorted in asc or desc order. Default is desc.",
     )
     state: Optional[str] = Field(
-        description="Return all issues or just those that are opened or closed"
+        default=None,
+        description="Return all issues or just those that are opened or closed",
     )
 
 
@@ -273,6 +256,8 @@ class ListIssues(IssueBaseTool):
             return json.dumps({"error": str(e)})
 
     def format_display_message(self, args: ListIssuesInput) -> str:
+        if args.url:
+            return f"List issues in {args.url}"
         return f"List issues in project {args.project_id}"
 
 
@@ -312,27 +297,37 @@ class GetIssue(IssueBaseTool):
             return json.dumps({"error": str(e)})
 
     def format_display_message(self, args: IssueResourceInput) -> str:
+        if args.url:
+            return f"Read issue {args.url}"
         return f"Read issue #{args.issue_iid} in project {args.project_id}"
 
 
 class UpdateIssueInput(IssueResourceInput):
-    title: Optional[str] = Field(description="Title of the issue")
+    title: Optional[str] = Field(default=None, description="Title of the issue")
     description: Optional[str] = Field(
-        description=f"Description of the issue. Max character limit of {DESCRIPTION_CHARACTER_LIMIT} characters."
+        default=None,
+        description=f"Description of the issue. Max character limit of {DESCRIPTION_CHARACTER_LIMIT} characters.",
     )
-    labels: Optional[str] = Field(description="Comma-separated list of label names")
+    labels: Optional[str] = Field(
+        default=None, description="Comma-separated list of label names"
+    )
     assignee_ids: Optional[list[int]] = Field(
-        description="The ID of the users to assign the issue to. Set to `0` or provide an empty value to unassign all assignees."
+        default=None,
+        description="The ID of the users to assign the issue to. Set to `0` or provide an empty value to unassign all assignees.",
     )
     confidential: Optional[bool] = Field(
-        description="Set to true to make the issue confidential"
+        default=None, description="Set to true to make the issue confidential"
     )
-    due_date: Optional[str] = Field(description="Date string in the format YYYY-MM-DD")
+    due_date: Optional[str] = Field(
+        default=None, description="Date string in the format YYYY-MM-DD"
+    )
     state_event: Optional[str] = Field(
-        description="The state event of an issue. To close the issue, use 'close', and to reopen it, use 'reopen'."
+        default=None,
+        description="The state event of an issue. To close the issue, use 'close', and to reopen it, use 'reopen'.",
     )
     discussion_locked: Optional[bool] = Field(
-        description="Flag indicating if the issue’s discussion is locked. If the discussion is locked only project members can add or edit comments."
+        default=None,
+        description="Flag indicating if the issue's discussion is locked. If the discussion is locked only project members can add or edit comments.",
     )
 
 
@@ -374,6 +369,8 @@ class UpdateIssue(IssueBaseTool):
             return json.dumps({"error": str(e)})
 
     def format_display_message(self, args: UpdateIssueInput) -> str:
+        if args.url:
+            return f"Update issue {args.url}"
         return f"Update issue #{args.issue_iid} in project {args.project_id}"
 
 
@@ -425,15 +422,19 @@ class CreateIssueNote(IssueBaseTool):
             return json.dumps({"error": str(e)})
 
     def format_display_message(self, args: CreateIssueNoteInput) -> str:
+        if args.url:
+            return f"Add comment to issue {args.url}"
         return f"Add comment to issue #{args.issue_iid} in project {args.project_id}"
 
 
 class ListIssueNotesInput(IssueResourceInput):
     sort: Optional[str] = Field(
-        description="Return issue notes sorted in asc or desc order. Default is desc"
+        default=None,
+        description="Return issue notes sorted in asc or desc order. Default is desc",
     )
     order_by: Optional[str] = Field(
-        description="Return issue notes ordered by created_at or updated_at fields. Default is created_at"
+        default=None,
+        description="Return issue notes ordered by created_at or updated_at fields. Default is created_at",
     )
 
 
@@ -476,6 +477,8 @@ class ListIssueNotes(IssueBaseTool):
             return json.dumps({"error": str(e)})
 
     def format_display_message(self, args: ListIssueNotesInput) -> str:
+        if args.url:
+            return f"Read comments on issue {args.url}"
         return f"Read comments on issue #{args.issue_iid} in project {args.project_id}"
 
 
@@ -521,4 +524,6 @@ class GetIssueNote(IssueBaseTool):
             return json.dumps({"error": str(e)})
 
     def format_display_message(self, args: GetIssueNoteInput) -> str:
+        if args.url:
+            return f"Read comment #{args.note_id} on issue {args.url}"
         return f"Read comment #{args.note_id} on issue #{args.issue_iid} in project {args.project_id}"

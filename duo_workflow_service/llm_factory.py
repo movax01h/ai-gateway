@@ -6,9 +6,19 @@ from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_google_vertexai.model_garden import ChatAnthropicVertex
 from langsmith import tracing_context
 
+from duo_workflow_service.interceptors.feature_flag_interceptor import (
+    current_feature_flag_context,
+)
+
 
 class VertexConfig:
-    model = "claude-3-5-sonnet-v2@20241022"
+    @property
+    def model_name(self) -> str:
+        feature_flags = current_feature_flag_context.get()
+        if "duo_workflow_claude_3_7" in feature_flags:
+            return "claude-3-7-sonnet@20250219"
+
+        return "claude-3-5-sonnet-v2@20241022"
 
     @property
     def project_id(self) -> str:
@@ -36,9 +46,10 @@ class VertexConfig:
 
 def new_chat_client(config: VertexConfig = VertexConfig(), **kwargs) -> BaseChatModel:
     vertex_project_id = os.environ.get("DUO_WORKFLOW__VERTEX_PROJECT_ID")
+
     if vertex_project_id and len(vertex_project_id) > 1:
         return ChatAnthropicVertex(
-            model_name=config.model,
+            model_name=config.model_name,
             project=config.project_id,
             location=config.location,
             max_retries=config.max_retries,
@@ -46,8 +57,7 @@ def new_chat_client(config: VertexConfig = VertexConfig(), **kwargs) -> BaseChat
         )
 
     anthropic_api_key = os.environ.get("ANTHROPIC_API_KEY")
-    # Too bad these names are different across vertex-anthropic and regular-anthropic
-    anthropic_model_name = "claude-3-5-sonnet-20241022"
+    anthropic_model_name = get_anthropic_model_name()
     if anthropic_api_key and len(anthropic_api_key) > 1:
         return ChatAnthropic(
             model_name=anthropic_model_name, **kwargs, max_retries=config.max_retries
@@ -68,5 +78,14 @@ def validate_llm_access(config: VertexConfig = VertexConfig()):
         )
 
     content = anthropic_response.content
-    model_name = anthropic_response.response_metadata["model"]
-    log.info("Connected to model: %s: %s", model_name, content)
+    # feature flags are not yet loaded, so logging the model name here could be misleaeding if the model name depends on feature flags.
+    log.info(str(content))
+
+
+def get_anthropic_model_name() -> str:
+    feature_flags = current_feature_flag_context.get()
+
+    if "duo_workflow_claude_3_7" in feature_flags:
+        return "claude-3-7-sonnet-20250219"
+
+    return "claude-3-5-sonnet-20241022"

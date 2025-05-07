@@ -7,7 +7,7 @@ additional_properties:
   label:
     description: Hardcoded string workflow_pause_event
   property:
-    description: pause_request_by_user_duo_workflow or pause_request_by_agent_duo_workflow
+    description: pause_request_by_<actor>_<reason (optional)>
   value:
     description: Workflow Id that can be used to connect this event to others that happen when the workflow is completed.
 milestone: '17.10'

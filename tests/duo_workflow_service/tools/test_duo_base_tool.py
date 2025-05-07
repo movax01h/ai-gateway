@@ -2,9 +2,13 @@ from typing import Type
 from unittest.mock import MagicMock
 
 import pytest
+from langchain.tools import BaseTool
 from pydantic import BaseModel, Field
 
-from duo_workflow_service.tools.duo_base_tool import DuoBaseTool
+from duo_workflow_service.tools.duo_base_tool import (
+    DuoBaseTool,
+    format_tool_display_message,
+)
 
 
 class DummyTool(DuoBaseTool):
@@ -91,3 +95,42 @@ def test_gitlab_host_property_when_not_set():
 
     with pytest.raises(RuntimeError, match="gitlab_host is not set"):
         _ = tool.gitlab_host
+
+
+def test_format_tool_display_message_non_duo_base_tool_child():
+    mock_tool = MagicMock(spec=BaseTool)
+    args = {"test": "value"}
+
+    assert format_tool_display_message(mock_tool, args) == None
+
+
+def test_format_tool_display_message_for_tool_without_args_schema():
+    mock_tool = MagicMock(spec=DuoBaseTool)
+    mock_tool.format_display_message.return_value = "Tool msg"
+    args = {"test": "value"}
+
+    assert format_tool_display_message(mock_tool, args) == "Tool msg"
+    mock_tool.format_display_message.assert_called_once_with(args)
+
+
+def test_format_tool_display_message_for_tool_with_args_schema():
+    mock_tool = MagicMock(spec=DuoBaseTool)
+    mock_tool.format_display_message.return_value = "Tool msg"
+    mock_schema = MagicMock(return_value="pydantic model instance")
+    mock_tool.args_schema = mock_schema
+    args = {"test": "value"}
+
+    assert format_tool_display_message(mock_tool, args) == "Tool msg"
+    mock_schema.assert_called_once_with(**args)
+    mock_tool.format_display_message.assert_called_once_with(mock_schema.return_value)
+
+
+def test_format_tool_display_message_for_tool_with_args_schema_when_error():
+    mock_tool = MagicMock(spec=DuoBaseTool)
+    mock_tool.format_display_message.return_value = "Tool msg"
+    mock_schema = MagicMock(side_effect=Exception("Something went wrong"))
+    mock_tool.args_schema = mock_schema
+    args = {"test": "value"}
+
+    assert format_tool_display_message(mock_tool, args) == "Tool msg"
+    mock_tool.format_display_message.assert_called_once_with(args)

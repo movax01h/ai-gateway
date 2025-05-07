@@ -11,6 +11,7 @@ from duo_workflow_service.entities.state import (
     ToolInfo,
     WorkflowState,
 )
+from duo_workflow_service.monitoring import duo_workflow_metrics
 
 WorkflowStateT_contra = TypeVar(
     "WorkflowStateT_contra",
@@ -74,7 +75,9 @@ class RunToolNode(Generic[WorkflowStateT]):
         logs = []
 
         for tool_params in self._input_parser(state):
-            outputs.append(await self._tool._arun(**tool_params))
+            with duo_workflow_metrics.time_tool_call(tool_name=self._tool.name):
+                output = await self._tool._arun(**tool_params)
+            outputs.append(output)
             logs.append(
                 UiChatLog(
                     message_type=MessageTypeEnum.TOOL,

@@ -2,6 +2,14 @@ import re
 from typing import List, Tuple
 from urllib.parse import quote, unquote, urlparse
 
+PROJECT_URL_REGEX = r"^(.+?)(?:/-/.*)?$"
+ISSUE_URL_REGEX = r"^(.+?)/-/issues/(\d+)"
+GROUP_URL_REGEX = r"^(?:groups/)?(.+?)(?:/-/.*)?$"
+EPIC_URL_REGEX = r"^(?:groups/)?(.+?)/-/epics/(\d+)"
+MR_URL_REGEX = r"^(.+?)/-/merge_requests/(\d+)"
+JOB_URL_REGEX = r"^(.+?)/-/jobs/(\d+)"
+REPOSITORY_FILE_URL_REGEX = r"^(.+?)/-/blob/([^/]+)/(.+)$"
+
 
 class GitLabUrlParseError(Exception):
     """Exception raised when a GitLab URL cannot be parsed correctly."""
@@ -102,10 +110,7 @@ class GitLabUrlParser:
 
         Example URLs:
         - https://gitlab.com/namespace/project
-        - https://gitlab.com/namespace/project/-/issues
         - https://gitlab.example.com/namespace/project
-        - https://gitlab.com/group/subgroup/project
-        - https://gitlab.com/group/subgroup/project/-/issues
 
         Args:
             url: The GitLab URL to parse
@@ -121,7 +126,7 @@ class GitLabUrlParser:
 
         # Use a pattern that captures everything up to /-/ if present
         components = GitLabUrlParser._extract_path_components(
-            url, r"^(.+?)(?:/-/.*)?$", "Could not extract project path from URL"
+            url, PROJECT_URL_REGEX, "Could not extract project path from URL"
         )
 
         # URL-encode the project path for API calls
@@ -134,7 +139,6 @@ class GitLabUrlParser:
         Example URL:
         - https://gitlab.com/namespace/project/-/issues/42
         - https://gitlab.example.com/namespace/project/-/issues/42
-        - https://gitlab.com/group/subgroup/project/-/issues/42
 
         Args:
             url: The GitLab issue URL to parse
@@ -149,7 +153,7 @@ class GitLabUrlParser:
         GitLabUrlParser._validate_url_netloc(url, gitlab_host)
 
         components = GitLabUrlParser._extract_path_components(
-            url, r"^(.+?)/-/issues/(\d+)", "Could not parse issue URL"
+            url, ISSUE_URL_REGEX, "Could not parse issue URL"
         )
 
         # URL-encode the project path for API calls
@@ -157,3 +161,156 @@ class GitLabUrlParser:
         issue_iid = int(components[1])
 
         return encoded_path, issue_iid
+
+    @staticmethod
+    def parse_group_url(url: str, gitlab_host: str) -> str:
+        """Extract group path from a GitLab URL.
+
+        Example URLs:
+        - https://gitlab.com/groups/namespace/group
+        - https://gitlab.example.com/groups/namespace/group
+
+        Args:
+            url: The GitLab URL to parse
+            gitlab_host: Optional GitLab host to validate against
+
+        Returns:
+            The URL-encoded group path
+
+        Raises:
+            GitLabUrlParseError: If the URL cannot be parsed or if the netloc doesn't match gitlab_host
+        """
+        GitLabUrlParser._validate_url_netloc(url, gitlab_host)
+
+        # Use a pattern that captures an optional 'groups/' prefix and everything up to /-/ if present
+        components = GitLabUrlParser._extract_path_components(
+            url,
+            GROUP_URL_REGEX,
+            "Could not extract group path from URL",
+        )
+
+        # URL-encode the group path for API calls
+        return quote(components[0], safe="")
+
+    @staticmethod
+    def parse_epic_url(url: str, gitlab_host: str) -> Tuple[str, int]:
+        """Extract group path and epic ID from a GitLab epic URL.
+
+        Example URLs:
+        - https://gitlab.com/groups/namespace/group/-/epics/42
+        - https://gitlab.example.com/groups/namespace/group/-/epics/42
+
+        Args:
+            url: The GitLab URL to parse
+            gitlab_host: Optional GitLab host to validate against
+
+        Returns:
+            A tuple containing the URL-encoded group path and the epic ID
+
+        Raises:
+            GitLabUrlParseError: If the URL cannot be parsed or if the netloc doesn't match gitlab_host
+        """
+        GitLabUrlParser._validate_url_netloc(url, gitlab_host)
+
+        # Use a pattern that captures an optional 'groups/' prefix, the group path, and the epic ID
+        components = GitLabUrlParser._extract_path_components(
+            url, EPIC_URL_REGEX, "Could not parse epic URL"
+        )
+
+        # URL-encode the group path for API calls
+        encoded_path = quote(components[0], safe="")
+        epic_iid = int(components[1])
+
+        return encoded_path, epic_iid
+
+    @staticmethod
+    def parse_merge_request_url(url: str, gitlab_host: str) -> Tuple[str, int]:
+        """Extract project path and merge request ID from a GitLab merge request URL.
+
+        Example URLs:
+        - https://gitlab.com/namespace/project/-/merge_requests/123
+        - https://gitlab.example.com/namespace/project/-/merge_requests/123
+        - https://gitlab.com/group/subgroup/project/-/merge_requests/123
+
+        Args:
+            url: The GitLab merge request URL to parse
+            gitlab_host: Optional GitLab host to validate against
+
+        Returns:
+            A tuple containing the URL-encoded project path and the merge request ID
+
+        Raises:
+            GitLabUrlParseError: If the URL cannot be parsed or if the netloc doesn't match gitlab_host
+        """
+        GitLabUrlParser._validate_url_netloc(url, gitlab_host)
+
+        components = GitLabUrlParser._extract_path_components(
+            url, MR_URL_REGEX, "Could not parse merge request URL"
+        )
+
+        # URL-encode the project path for API calls
+        encoded_path = quote(components[0], safe="")
+        merge_request_iid = int(components[1])
+
+        return encoded_path, merge_request_iid
+
+    @staticmethod
+    def parse_job_url(url: str, gitlab_host: str) -> Tuple[str, int]:
+        """Extract project path and job ID from a GitLab job URL.
+
+        Example URLs:
+        - https://gitlab.com/namespace/project/-/jobs/42
+        - https://gitlab.example.com/namespace/project/-/jobs/42
+
+        Args:
+            url: The GitLab job URL to parse
+            gitlab_host: Optional GitLab host to validate against
+
+        Returns:
+            A tuple containing the URL-encoded project path and the job ID
+
+        Raises:
+            GitLabUrlParseError: If the URL cannot be parsed or if the netloc doesn't match gitlab_host
+        """
+        GitLabUrlParser._validate_url_netloc(url, gitlab_host)
+
+        components = GitLabUrlParser._extract_path_components(
+            url, JOB_URL_REGEX, "Could not parse job URL"
+        )
+
+        # URL-encode the project path for API calls
+        encoded_path = quote(components[0], safe="")
+        job_id = int(components[1])
+
+        return encoded_path, job_id
+
+    @staticmethod
+    def parse_repository_file_url(url: str, gitlab_host: str) -> Tuple[str, str, str]:
+        """Parse GitLab URL into project path, ref, and file path components.
+
+        Example URLs:
+        - https://gitlab.com/namespace/project/-/blob/master/README.md
+        - https://gitlab.com/group/subgroup/project/-/blob/main/src/file.py
+
+        Args:
+            url: The GitLab URL to parse
+            gitlab_host: The GitLab host to validate against
+
+        Returns:
+            A tuple containing the URL-encoded project path, the ref, and the file path
+
+        Raises:
+            GitLabUrlParseError: If the URL cannot be parsed or if the netloc doesn't match gitlab_host
+        """
+        GitLabUrlParser._validate_url_netloc(url, gitlab_host)
+
+        components = GitLabUrlParser._extract_path_components(
+            url, REPOSITORY_FILE_URL_REGEX, "Could not parse repository file URL"
+        )
+
+        # URL-encode the project path for API calls
+        project_path = quote(components[0], safe="")
+        ref = components[1]
+        file_path = components[2]
+
+        return project_path, ref, file_path
