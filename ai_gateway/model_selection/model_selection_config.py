@@ -35,7 +35,7 @@ class ModelSelectionConfig:
             cls.__instance = super(ModelSelectionConfig, cls).__new__(cls)
         return cls.__instance
 
-    def __init__(self):
+    def __init__(self) -> None:
         self._llm_definitions: Optional[dict[str, LLMDefinition]] = None
         self._unit_primitive_configs: Optional[list[UnitPrimitiveConfig]] = None
 
