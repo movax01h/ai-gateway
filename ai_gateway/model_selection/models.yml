@@ -32,6 +32,14 @@ models:
       temperature: 0.0
       max_tokens: 4_096
       max_retries: 1
+  - name: "Claude Sonnet 3 - Anthropic" # used by troubleshoot only
+    gitlab_identifier: "claude_3_sonnet_20240229"
+    provider: "anthropic"
+    provider_identifier: "claude-3-sonnet-20240229"
+    params:
+      temperature: 0.1
+      max_tokens: 2_048
+      max_retries: 1
   - name: "Codestral 25.01 - Fireworks"
     gitlab_identifier: "codestral_2501_fireworks"
     provider: "fireworks_ai"
