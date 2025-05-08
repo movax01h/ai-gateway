@@ -32,6 +32,14 @@ models:
       temperature: 0.0
       max_tokens: 4_096
       max_retries: 1
+  - name: "Claude 3.5 Haiku - Anthropic"
+    gitlab_identifier: "claude_3_5_haiku_20241022"
+    provider: "anthropic"
+    provider_identifier: "claude-3-5-haiku-20241022"
+    params:
+      temperature: 0.0
+      max_tokens: 4_096
+      max_retries: 1
   - name: "Claude Sonnet 3 - Anthropic" # used by troubleshoot only
     gitlab_identifier: "claude_3_sonnet_20240229"
     provider: "anthropic"
