@@ -57,7 +57,7 @@ Unlike unit testing, integration tests send requests to the server as a black-bo
 - Integration tests are located at `integration_tests` directory.
 - Integration tests are slower than unit tests. Adding too many test cases could result in slower CI pipelines, which could affect productivity negatively.
 - According to [the GitLab testing guide](https://docs.gitlab.com/ee/development/testing_guide/testing_levels.html#white-box-tests-at-the-system-level-formerly-known-as-system--feature-tests),
-it's ideal to just cover happy path, unhappy path and regression cases. The rest of the low-level testing should be covered in unit testing.
+  it's ideal to just cover happy path, unhappy path and regression cases. The rest of the low-level testing should be covered in unit testing.
 
 ### Run integration test locally
 
@@ -90,6 +90,6 @@ make test-integration
 ## Code guidelines
 
 - Avoid using [provider overriding](https://python-dependency-injector.ets-labs.org/providers/overriding.html),
-since it can lead to divergences between test and runtime behavior. See
-[this issue](https://gitlab.com/gitlab-org/modelops/applied-ml/code-suggestions/ai-assist/-/issues/511)
-for more details.
+  since it can lead to divergences between test and runtime behavior. See
+  [this issue](https://gitlab.com/gitlab-org/modelops/applied-ml/code-suggestions/ai-assist/-/issues/511)
+  for more details.

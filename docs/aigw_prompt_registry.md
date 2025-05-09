@@ -28,7 +28,7 @@ AI Gateway Prompts are defined as `.yml` files located in `prompts/definitions/`
 #### AI Gateway Model Configuration
 
 AI Gateway allows for storing model name and parameters together and retrieving them without re-defining them in every definition file.
-AI Gateway Model Configs are defined as `.yml` files located in `prompts/model_configs/` and specify parameters for different models. Parameters from definition files take precedence over parameters from the model config file. 
+AI Gateway Model Configs are defined as `.yml` files located in `prompts/model_configs/` and specify parameters for different models. Parameters from definition files take precedence over parameters from the model config file.
 
 Each configuration file includes:
 

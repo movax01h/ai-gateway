@@ -21,8 +21,8 @@ Some parameters that are optional in the [auto-generated interactive API documen
 
 For more information, see:
 
-- [How to configure self-hosted models](https://docs.gitlab.com/ee/administration/self_hosted_models/configure_duo_features.html#configure-the-self-hosted-model )
-- [Approved LLMs for self-hosted models](https://docs.gitlab.com/ee/administration/self_hosted_models/supported_models_and_hardware_requirements.html#approved-llms )
+- [How to configure self-hosted models](https://docs.gitlab.com/ee/administration/self_hosted_models/configure_duo_features.html#configure-the-self-hosted-model)
+- [Approved LLMs for self-hosted models](https://docs.gitlab.com/ee/administration/self_hosted_models/supported_models_and_hardware_requirements.html#approved-llms)
 
 ## Code Suggestions
 
@@ -301,7 +301,7 @@ Example response:
 
 Example streaming response:
 
-```shell
+````shell
 
 
 Here is a golang function that prints "Hello World":
@@ -318,7 +318,7 @@ func main() {
 [...]
 
 This will compile and execute the program, printing "Hello World" to the console.
-```
+````
 
 #### Responses
 
@@ -923,7 +923,7 @@ POST /v1/x-ray/libraries
 | `prompt_components.payload.model`    | string | yes      | The AI model for which the prompt is designed for.                                                                                              | `claude-2.0`                          |
 | `prompt_components.metadata`         | hash   | no       | The metadata of the prompt component. Only string - string key value pairs are accepted (max_len: **10**).                                      |                                       |
 
-```shell
+````shell
 curl --request POST \
   --url "http://localhost:5052/v1/x-ray/libraries" \
   --header 'Authorization: Bearer <access_token>' \

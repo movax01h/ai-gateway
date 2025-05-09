@@ -52,7 +52,7 @@ AI-gateway itself. See the `ModelRequestInstrumentator` in
 `ai_gateway/instrumentators/model_requests.py` for these metrics.
 
 | Metric name                       | Labels                       | Explanation                                                                |
-|-----------------------------------|------------------------------|----------------------------------------------------------------------------|
+| --------------------------------- | ---------------------------- | -------------------------------------------------------------------------- |
 | `model_inferences_in_flight`      | `model_engine`, `model_name` | Incremented at the start of a request to an engine, decremented at the end |
 | `model_inferences_max_concurrent` | `model_engine`, `model_name` | Set when a model is first used                                             |
 
