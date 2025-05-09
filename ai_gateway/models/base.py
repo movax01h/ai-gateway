@@ -42,6 +42,7 @@ class KindModelProvider(StrEnum):
     MISTRALAI = "codestral"
     FIREWORKS = "fireworks_ai"
     AMAZON_Q = "amazon_q"
+    GITLAB = "gitlab"
 
 
 class ModelAPIError(Exception):
