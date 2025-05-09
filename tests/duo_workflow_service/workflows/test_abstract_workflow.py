@@ -68,7 +68,7 @@ async def test_get_from_outbox(workflow):
     await workflow._outbox.put("test_item")
 
     # Get the item
-    item = workflow.get_from_outbox()
+    item = await workflow.get_from_outbox()
 
     assert item == "test_item"
     assert workflow._outbox.empty()

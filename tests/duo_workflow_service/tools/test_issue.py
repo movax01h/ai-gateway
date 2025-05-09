@@ -482,7 +482,7 @@ async def test_list_issues_with_url_error(
             ListIssuesInput(
                 project_id=123,
                 assignee_id=None,
-                assignee_username=None,
+                assignee_usernames=None,
                 author_id=None,
                 author_username=None,
                 confidential=None,
@@ -503,7 +503,7 @@ async def test_list_issues_with_url_error(
             ListIssuesInput(
                 url="https://gitlab.com/namespace/project",
                 assignee_id=None,
-                assignee_username=None,
+                assignee_usernames=None,
                 author_id=None,
                 author_username=None,
                 confidential=None,

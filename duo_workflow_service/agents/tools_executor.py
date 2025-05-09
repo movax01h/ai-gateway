@@ -4,8 +4,8 @@ from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
 import structlog
-from langchain.tools import BaseTool
-from langchain_core.messages import ToolMessage
+from langchain_core.messages import AIMessage, BaseMessage, ToolMessage
+from langchain_core.output_parsers.string import StrOutputParser
 from pydantic import ValidationError
 
 from duo_workflow_service.entities import WorkflowStatusEnum
@@ -19,6 +19,9 @@ from duo_workflow_service.entities.state import (
     ToolStatus,
     UiChatLog,
 )
+from duo_workflow_service.interceptors.feature_flag_interceptor import (
+    current_feature_flag_context,
+)
 from duo_workflow_service.internal_events import (
     DuoWorkflowInternalEvent,
     InternalEventAdditionalProperties,
@@ -29,7 +32,11 @@ from duo_workflow_service.internal_events.event_enum import (
     EventLabelEnum,
 )
 from duo_workflow_service.monitoring import duo_workflow_metrics
-from duo_workflow_service.tools import PipelineException, format_tool_display_message
+from duo_workflow_service.tools import (
+    PipelineException,
+    Toolset,
+    format_tool_display_message,
+)
 from duo_workflow_service.tools.planner import format_task_number
 
 _HIDDEN_TOOLS = ["get_plan"]
@@ -77,27 +84,43 @@ def _set_task_status(args: dict, plan: Plan) -> tuple[Plan, str]:
     return plan, f"Task not found: {args['task_id']}"
 
 
+def _create_plan(args: dict, plan: Plan) -> tuple[Plan, str]:
+    tasks = args.get("tasks", "")
+    steps: List[Task] = []
+    for i, task_description in enumerate(tasks):
+        steps.append(
+            Task(
+                id=f"task-{i}",
+                description=task_description,
+                status=TaskStatus.NOT_STARTED,
+            )
+        )
+
+    return Plan(steps=steps), "Plan created"
+
+
 _ACTION_HANDLERS = {
     "add_new_task": _add_new_task,
     "remove_task": _remove_task,
     "update_task_description": _update_task_description,
     "set_task_status": _set_task_status,
+    "create_plan": _create_plan,
 }
 
 
 class ToolsExecutor:
     _tools_agent_name: str
-    _tool_lookup: Dict[str, BaseTool]
+    _toolset: Toolset
 
     def __init__(
         self,
         tools_agent_name: str,
-        agent_tools: list[BaseTool],
+        toolset: Toolset,
         workflow_id: str,
         workflow_type: CategoryEnum,
     ) -> None:
         self._tools_agent_name = tools_agent_name
-        self._tool_lookup = dict(list(map(lambda x: (x.name, x), agent_tools)))
+        self._toolset = toolset
         self._workflow_id = workflow_id
         self._logger = structlog.stdlib.get_logger("workflow")
         self._workflow_type = workflow_type
@@ -107,6 +130,8 @@ class ToolsExecutor:
         tool_calls = getattr(last_message, "tool_calls", [])
         tools_responses = []
         ui_chat_logs: List[UiChatLog] = []
+
+        self._create_ai_message_ui_chat_log(last_message, ui_chat_logs)
 
         for tool_call in tool_calls:
             tool_name = tool_call["name"]
@@ -118,101 +143,23 @@ class ToolsExecutor:
                     tool_name, tool_args, state["plan"]
                 )
                 state["plan"] = new_plan
-
-                ui_chat_log = self._create_ui_chat_log(
-                    tool_name=tool_name,
-                    tool_args=tool_args,
+                self._add_tool_ui_chat_log(
+                    tool_info={"name": tool_name, "args": tool_args},
                     status=ToolStatus.SUCCESS,
+                    ui_chat_logs=ui_chat_logs,
                 )
-                if ui_chat_log:
-                    ui_chat_logs.append(ui_chat_log)
 
-            if tool_name in self._tool_lookup:
-                tool = self._tool_lookup[tool_name]
+            if tool_name in self._toolset:
+                result = await self._execute_tool(tool_name, tool_args)
 
-                try:
-                    with duo_workflow_metrics.time_tool_call(tool_name=tool_name):
-                        tool_response = await tool.arun(tool_args)
-
-                    self._track_internal_event(
-                        event_name=EventEnum.WORKFLOW_TOOL_SUCCESS,
-                        tool_name=tool_name,
-                    )
-
-                    ui_chat_log = self._create_ui_chat_log(
-                        tool_name=tool_name,
-                        tool_args=tool_args,
-                        status=ToolStatus.SUCCESS,
-                    )
-                    if ui_chat_log and tool_name not in _ACTION_HANDLERS:
-                        ui_chat_logs.append(ui_chat_log)
-
-                except TypeError as error:
-                    # log the error itself to check if the TypeError is indeed
-                    # a schema error.
-                    self._logger.error(f"Tools executor raised TypeError {error}")
-
-                    schema = (
-                        f"The schema is: {tool.args_schema.model_json_schema()}"
-                        if tool.args_schema
-                        else "The tool does not accept any argument"
-                    )
-
-                    tool_response = f"Tool {tool_name} execution failed due to wrong arguments. You must adhere to the tool args schema! {schema}"
-                    self._track_internal_event(
-                        event_name=EventEnum.WORKFLOW_TOOL_FAILURE,
-                        tool_name=tool_name,
-                        extra={"error": str(error)},
-                    )
-
-                    ui_chat_log = self._create_ui_chat_log(
-                        tool_name=tool_name,
-                        tool_args=tool_args,
-                        status=ToolStatus.FAILURE,
-                        error_message="Invalid arguments",
-                    )
-                    if ui_chat_log:
-                        ui_chat_logs.append(ui_chat_log)
-
-                except ValidationError as error:
-                    tool_response = f"Tool {tool_name} raised validation error {error}"
-                    self._track_internal_event(
-                        event_name=EventEnum.WORKFLOW_TOOL_FAILURE,
-                        tool_name=tool_name,
-                        extra={"error": str(error)},
-                    )
-
-                    ui_chat_log = self._create_ui_chat_log(
-                        tool_name=tool_name,
-                        tool_args=tool_args,
-                        status=ToolStatus.FAILURE,
-                        error_message="Validation error",
-                    )
-                    if ui_chat_log:
-                        ui_chat_logs.append(ui_chat_log)
-
-                except PipelineException as error:
-                    tool_response = f"Pipeline exception due to {error}"
+                if result.get("status") == WorkflowStatusEnum.ERROR:
                     tools_responses.append(
                         ToolMessage(
-                            content=str(tool_response), tool_call_id=tool_call.get("id")
+                            content=result["response"],
+                            tool_call_id=tool_call.get("id"),
                         )
                     )
-                    self._track_internal_event(
-                        event_name=EventEnum.WORKFLOW_TOOL_FAILURE,
-                        tool_name=tool_name,
-                        extra={"error": str(error)},
-                    )
-
-                    ui_chat_log = self._create_ui_chat_log(
-                        tool_name=tool_name,
-                        tool_args=tool_args,
-                        status=ToolStatus.FAILURE,
-                        error_message=f"Pipeline error: {error}",
-                    )
-                    if ui_chat_log:
-                        ui_chat_logs.append(ui_chat_log)
-
+                    ui_chat_logs.extend(result.get("chat_logs", []))
                     return {
                         "conversation_history": {
                             self._tools_agent_name: tools_responses
@@ -220,6 +167,11 @@ class ToolsExecutor:
                         "status": WorkflowStatusEnum.ERROR,
                         "ui_chat_log": ui_chat_logs,
                     }
+
+                tool_response = result["response"]
+
+                if tool_name not in _ACTION_HANDLERS:
+                    ui_chat_logs.extend(result.get("chat_logs", []))
 
             if tool_name == "get_plan":
                 tool_response = json.dumps(state["plan"]["steps"])
@@ -232,6 +184,174 @@ class ToolsExecutor:
             "conversation_history": {self._tools_agent_name: tools_responses},
             "plan": state["plan"],
             "ui_chat_log": ui_chat_logs,
+        }
+
+    def _create_ai_message_ui_chat_log(
+        self, message: BaseMessage, ui_chat_logs: List[UiChatLog]
+    ):
+        tool_calls = getattr(message, "tool_calls", [])
+        if tool_calls and all(
+            tool_call["name"] in _HIDDEN_TOOLS for tool_call in tool_calls
+        ):
+            return
+
+        ai_message_content = self._extract_ai_message_text(message)
+        feature_flags = current_feature_flag_context.get()
+
+        if "duo_workflow_better_tool_messages" in feature_flags and ai_message_content:
+            ui_chat_logs.append(
+                UiChatLog(
+                    message_type=MessageTypeEnum.AGENT,
+                    content=ai_message_content,
+                    timestamp=datetime.now(timezone.utc).isoformat(),
+                    status=ToolStatus.SUCCESS,
+                    correlation_id=None,
+                    tool_info=None,
+                )
+            )
+
+    def _add_tool_ui_chat_log(
+        self,
+        tool_info: Dict[str, Any],
+        status: ToolStatus,
+        ui_chat_logs: List[UiChatLog],
+        error_message: Optional[str] = None,
+    ):
+        chat_log = self._create_tool_ui_chat_log(
+            tool_name=tool_info["name"],
+            tool_args=tool_info["args"],
+            status=status,
+            error_message=error_message,
+        )
+        if chat_log:
+            ui_chat_logs.append(chat_log)
+
+    async def _execute_tool(
+        self, tool_name: str, tool_args: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        tool = self._toolset[tool_name]
+        chat_logs: List[UiChatLog] = []
+
+        try:
+            with duo_workflow_metrics.time_tool_call(tool_name=tool_name):
+                tool_response = await tool.arun(tool_args)
+
+            self._track_internal_event(
+                event_name=EventEnum.WORKFLOW_TOOL_SUCCESS,
+                tool_name=tool_name,
+            )
+
+            self._add_tool_ui_chat_log(
+                tool_info={"name": tool_name, "args": tool_args},
+                status=ToolStatus.SUCCESS,
+                ui_chat_logs=chat_logs,
+            )
+
+            return {
+                "response": tool_response,
+                "chat_logs": chat_logs,
+            }
+
+        except TypeError as error:
+            tool_context = {"tool": tool, "name": tool_name, "args": tool_args}
+            return self._handle_type_error(tool_context, error, chat_logs)
+
+        except ValidationError as error:
+            return self._handle_validation_error(tool_name, tool_args, error, chat_logs)
+
+        except PipelineException as error:
+            return self._handle_pipeline_error(tool_name, tool_args, error, chat_logs)
+
+    def _handle_type_error(
+        self,
+        tool_context: Dict[str, Any],
+        error: TypeError,
+        chat_logs: List[UiChatLog],
+    ) -> Dict[str, Any]:
+        # log the error itself to check if the TypeError is indeed
+        # a schema error.
+        self._logger.error(f"Tools executor raised TypeError {error}")
+
+        tool = tool_context["tool"]
+        tool_name = tool_context["name"]
+        tool_args = tool_context["args"]
+
+        schema = (
+            f"The schema is: {tool.args_schema.model_json_schema()}"
+            if tool.args_schema
+            else "The tool does not accept any argument"
+        )
+
+        tool_response = f"Tool {tool_name} execution failed due to wrong arguments. You must adhere to the tool args schema! {schema}"
+        self._track_internal_event(
+            event_name=EventEnum.WORKFLOW_TOOL_FAILURE,
+            tool_name=tool_name,
+            extra={"error": str(error)},
+        )
+
+        self._add_tool_ui_chat_log(
+            tool_info={"name": tool_name, "args": tool_args},
+            status=ToolStatus.FAILURE,
+            ui_chat_logs=chat_logs,
+            error_message="Invalid arguments",
+        )
+
+        return {
+            "response": tool_response,
+            "chat_logs": chat_logs,
+        }
+
+    def _handle_validation_error(
+        self,
+        tool_name: str,
+        tool_args: Dict[str, Any],
+        error: ValidationError,
+        chat_logs: List[UiChatLog],
+    ) -> Dict[str, Any]:
+        tool_response = f"Tool {tool_name} raised validation error {error}"
+        self._track_internal_event(
+            event_name=EventEnum.WORKFLOW_TOOL_FAILURE,
+            tool_name=tool_name,
+            extra={"error": str(error)},
+        )
+
+        self._add_tool_ui_chat_log(
+            tool_info={"name": tool_name, "args": tool_args},
+            status=ToolStatus.FAILURE,
+            ui_chat_logs=chat_logs,
+            error_message="Validation error",
+        )
+
+        return {
+            "response": tool_response,
+            "chat_logs": chat_logs,
+        }
+
+    def _handle_pipeline_error(
+        self,
+        tool_name: str,
+        tool_args: Dict[str, Any],
+        error: PipelineException,
+        chat_logs: List[UiChatLog],
+    ) -> Dict[str, Any]:
+        tool_response = f"Pipeline exception due to {error}"
+        self._track_internal_event(
+            event_name=EventEnum.WORKFLOW_TOOL_FAILURE,
+            tool_name=tool_name,
+            extra={"error": str(error)},
+        )
+
+        self._add_tool_ui_chat_log(
+            tool_info={"name": tool_name, "args": tool_args},
+            status=ToolStatus.FAILURE,
+            ui_chat_logs=chat_logs,
+            error_message=f"Pipeline error: {error}",
+        )
+
+        return {
+            "response": tool_response,
+            "chat_logs": chat_logs,
+            "status": WorkflowStatusEnum.ERROR,
         }
 
     def _track_internal_event(
@@ -263,7 +383,7 @@ class ToolsExecutor:
             return new_plan, response
         return plan, "Error handling plan modification"
 
-    def _create_ui_chat_log(
+    def _create_tool_ui_chat_log(
         self,
         tool_name: str,
         tool_args: Dict[str, Any],
@@ -308,11 +428,18 @@ class ToolsExecutor:
                 "remove_task": f"Remove task {task_num}",
                 "update_task_description": f"Update description for task {task_num}",
                 "set_task_status": f"Set task {task_num} to '{args.get('status', '')}'",
+                "create_plan": f"Create plan with {len(args.get('tasks', []))} tasks",
             }
             message = action_messages.get(tool_name, "")
 
-        elif tool_name in self._tool_lookup:
-            tool = self._tool_lookup[tool_name]
+        elif tool_name in self._toolset:
+            tool = self._toolset[tool_name]
             message = format_tool_display_message(tool, args) or message
 
         return message
+
+    def _extract_ai_message_text(self, last_message: BaseMessage):
+        if isinstance(last_message, AIMessage):
+            return StrOutputParser().invoke(last_message)
+
+        return None

@@ -1,13 +1,12 @@
-import json
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from typing import Dict, List, Type
+from typing import Any, Dict, List, Type
 from unittest.mock import MagicMock, call, patch
 
 import pytest
 from langchain.tools import BaseTool
-from langchain_core.messages import AIMessage, ToolMessage
+from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 from pydantic import BaseModel, Field, ValidationError
 
 from duo_workflow_service.agents import ToolsExecutor
@@ -23,9 +22,10 @@ from duo_workflow_service.internal_events.event_enum import (
     EventEnum,
     EventLabelEnum,
 )
-from duo_workflow_service.tools import PipelineMergeRequestNotFoundError
+from duo_workflow_service.tools import PipelineMergeRequestNotFoundError, Toolset
 from duo_workflow_service.tools.planner import (
     AddNewTaskInput,
+    CreatePlanInput,
     RemoveTaskInput,
     SetTaskStatusInput,
     UpdateTaskDescriptionInput,
@@ -48,6 +48,14 @@ class ToolTestCase:
     tool_calls: List[Dict]
     tools: Dict[MagicMock, bool]
     tools_response: List[ToolMessage]
+    ai_content: Any = field(
+        default_factory=lambda: [
+            {
+                "type": "text",
+                "text": "I'll search for issues related to this repository",
+            }
+        ]
+    )
 
 
 @pytest.mark.asyncio
@@ -115,14 +123,34 @@ async def test_run(
     mock_internal_event_tracker.instance = MagicMock(return_value=None)
     mock_internal_event_tracker.track_event = MagicMock(return_value=None)
     workflow_type = CategoryEnum.WORKFLOW_SOFTWARE_DEVELOPMENT
+
+    # Create mock toolset
+    mock_toolset = MagicMock(spec=Toolset)
+
+    # Configure the mock toolset to behave like a dictionary
+    def mock_contains(key):
+        for tool in test_case.tools.keys():
+            if tool.name == key:
+                return True
+        return False
+
+    def mock_getitem(key):
+        for tool in test_case.tools.keys():
+            if tool.name == key:
+                return tool
+        raise KeyError(f"Tool '{key}' does not exist in executable tools")
+
+    mock_toolset.__contains__ = MagicMock(side_effect=mock_contains)
+    mock_toolset.__getitem__ = MagicMock(side_effect=mock_getitem)
+
     tools_executor = ToolsExecutor(
         tools_agent_name="planner",
-        agent_tools=list(test_case.tools.keys()),
+        toolset=mock_toolset,
         workflow_id="123",
         workflow_type=workflow_type,
     )
     workflow_state["conversation_history"]["planner"] = [
-        AIMessage(content="test", tool_calls=test_case.tool_calls),
+        AIMessage(content=test_case.ai_content, tool_calls=test_case.tool_calls),
     ]
 
     result = await tools_executor.run(workflow_state)
@@ -170,8 +198,231 @@ async def test_run(
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
+    "feature_flag_value, last_message, expected_message_types",
+    [
+        (
+            "duo_workflow_better_tool_messages",
+            lambda tool: AIMessage(
+                content=[{"type": "text", "text": "I'm going to search for something"}],
+                tool_calls=[
+                    {
+                        "id": "1",
+                        "name": tool.name,
+                        "args": {"tasks": [{"description": "step1"}]},
+                    }
+                ],
+            ),
+            [MessageTypeEnum.AGENT, MessageTypeEnum.TOOL],
+        ),
+        (
+            "",
+            lambda tool: AIMessage(
+                content=[{"type": "text", "text": "I'm going to search for something"}],
+                tool_calls=[
+                    {
+                        "id": "1",
+                        "name": tool.name,
+                        "args": {"tasks": [{"description": "step1"}]},
+                    }
+                ],
+            ),
+            [MessageTypeEnum.TOOL],
+        ),
+        (
+            "duo_workflow_better_tool_messages",
+            lambda tool: AIMessage(
+                content=[
+                    {"type": "text", "text": "I'm just thinking without using tools"}
+                ],
+                tool_calls=[],
+            ),
+            [MessageTypeEnum.AGENT],
+        ),
+        (
+            "",
+            lambda tool: AIMessage(
+                content=[
+                    {"type": "text", "text": "I'm just thinking without using tools"}
+                ],
+                tool_calls=[],
+            ),
+            [],
+        ),
+        (
+            "duo_workflow_better_tool_messages",
+            lambda tool: AIMessage(
+                content=[{"type": "text", "text": "I'm going to use multiple tools"}],
+                tool_calls=[
+                    {
+                        "id": "1",
+                        "name": tool.name,
+                        "args": {"tasks": [{"description": "step1"}]},
+                    },
+                    {
+                        "id": "2",
+                        "name": tool.name,
+                        "args": {"tasks": [{"description": "step2"}]},
+                    },
+                ],
+            ),
+            [MessageTypeEnum.AGENT, MessageTypeEnum.TOOL, MessageTypeEnum.TOOL],
+        ),
+        (
+            "",
+            lambda tool: AIMessage(
+                content=[{"type": "text", "text": "I'm going to use multiple tools"}],
+                tool_calls=[
+                    {
+                        "id": "1",
+                        "name": tool.name,
+                        "args": {"tasks": [{"description": "step1"}]},
+                    },
+                    {
+                        "id": "2",
+                        "name": tool.name,
+                        "args": {"tasks": [{"description": "step2"}]},
+                    },
+                ],
+            ),
+            [MessageTypeEnum.TOOL, MessageTypeEnum.TOOL],
+        ),
+        (
+            "duo_workflow_better_tool_messages",
+            lambda tool: HumanMessage(content="This is a human message"),
+            [],
+        ),
+        (
+            "",
+            lambda tool: HumanMessage(content="This is a human message"),
+            [],
+        ),
+        (
+            "duo_workflow_better_tool_messages",
+            lambda tool: AIMessage(
+                content=[{"type": "text", "text": "I'm going to check the plan"}],
+                tool_calls=[
+                    {
+                        "id": "1",
+                        "name": "get_plan",
+                        "args": {},
+                    }
+                ],
+            ),
+            [],
+        ),
+        (
+            "duo_workflow_better_tool_messages",
+            lambda tool: AIMessage(
+                content=[
+                    {"type": "text", "text": "I'll check the plan and add a task"}
+                ],
+                tool_calls=[
+                    {
+                        "id": "1",
+                        "name": "get_plan",
+                        "args": {},
+                    },
+                    {
+                        "id": "2",
+                        "name": tool.name,
+                        "args": {"tasks": [{"description": "step1"}]},
+                    },
+                ],
+            ),
+            [MessageTypeEnum.AGENT, MessageTypeEnum.TOOL],
+        ),
+    ],
+    ids=[
+        "single_tool_call_ff_on",
+        "single_tool_call_ff_off",
+        "no_tool_call_ff_on",
+        "no_tool_call_ff_off",
+        "multiple_tool_call_ff_on",
+        "multiple_tool_call_ff_off",
+        "last_message_not_AIMessage_ff_on",
+        "last_message_not_AIMessage_ff_off",
+        "all_hidden_tools_ff_on",
+        "mixed_hidden_visible_tools_ff_on",
+    ],
+)
+@patch("duo_workflow_service.agents.tools_executor.current_feature_flag_context")
+async def test_adding_ai_context_to_ui_chat_logs(
+    mock_feature_flags_context,
+    workflow_state,
+    feature_flag_value,
+    last_message,
+    expected_message_types,
+):
+    def get_feature_flags():
+        return feature_flag_value
+
+    mock_feature_flags_context.get.side_effect = get_feature_flags
+
+    tool = mock_tool()
+
+    mock_toolset = MagicMock(spec=Toolset)
+    mock_toolset.__contains__ = MagicMock(return_value=True)
+    mock_toolset.__getitem__ = MagicMock(return_value=tool)
+
+    tools_executor = ToolsExecutor(
+        tools_agent_name="planner",
+        toolset=mock_toolset,
+        workflow_id="123",
+        workflow_type=CategoryEnum.WORKFLOW_SOFTWARE_DEVELOPMENT,
+    )
+
+    workflow_state["conversation_history"]["planner"] = [last_message(tool)]
+    workflow_state["plan"] = {"steps": []}
+
+    result = await tools_executor.run(workflow_state)
+
+    assert "ui_chat_log" in result
+    assert len(result["ui_chat_log"]) == len(expected_message_types)
+
+    for i, expected_type in enumerate(expected_message_types):
+        if i < len(result["ui_chat_log"]):
+            assert result["ui_chat_log"][i]["message_type"] == expected_type
+
+    if expected_message_types and expected_message_types[0] == MessageTypeEnum.AGENT:
+        message = last_message(tool)
+        if isinstance(message, AIMessage) and message.content:
+            if (
+                isinstance(message.content, list)
+                and len(message.content) > 0
+                and isinstance(message.content[0], dict)
+                and "text" in message.content[0]
+            ):
+                expected_content = message.content[0]["text"]
+            else:
+                expected_content = message.content
+            assert result["ui_chat_log"][0]["content"] == expected_content
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
     "test_case",
     [
+        {
+            "plan": {"steps": []},
+            "tool_calls": [
+                {
+                    "id": "1",
+                    "name": "create_plan",
+                    "args": CreatePlanInput(
+                        tasks=["Task 1", "Task 2", "Task 3"]
+                    ).model_dump(),
+                }
+            ],
+            "tools_response": [ToolMessage(content="Plan created", tool_call_id="1")],
+            "expected_plan": {
+                "steps": [
+                    {"id": "task-0", "description": "Task 1", "status": "Not Started"},
+                    {"id": "task-1", "description": "Task 2", "status": "Not Started"},
+                    {"id": "task-2", "description": "Task 3", "status": "Not Started"},
+                ]
+            },
+            "expected_log_content": "Create plan with 3 tasks",
+        },
         {
             "plan": {"steps": []},
             "tool_calls": [
@@ -292,14 +543,19 @@ async def test_run_with_state_manipulating_tools(
     mock_datetime.now.return_value = mock_now
     mock_datetime.timezone = timezone
 
+    mock_toolset = MagicMock(spec=Toolset)
+
     tools_executor = ToolsExecutor(
         tools_agent_name="planner",
-        agent_tools=[],
+        toolset=mock_toolset,
         workflow_id="123",
         workflow_type=CategoryEnum.WORKFLOW_SOFTWARE_DEVELOPMENT,
     )
     workflow_state["conversation_history"]["planner"] = [
-        AIMessage(content="test", tool_calls=test_case["tool_calls"]),
+        AIMessage(
+            content=[{"type": "text", "text": "test"}],
+            tool_calls=test_case["tool_calls"],
+        ),
     ]
     workflow_state["plan"] = test_case["plan"]
 
@@ -388,14 +644,20 @@ async def test_run_error_handling(
     mock_internal_event_tracker.track_event = MagicMock(return_value=None)
     workflow_type = CategoryEnum.WORKFLOW_SOFTWARE_DEVELOPMENT
     tool = mock_tool(side_effect=tool_side_effect, args_schema=tool_args_schema)
+
+    mock_toolset = MagicMock(spec=Toolset)
+
+    mock_toolset.__contains__ = MagicMock(return_value=True)
+    mock_toolset.__getitem__ = MagicMock(return_value=tool)
+
     tools_executor = ToolsExecutor(
         tools_agent_name="planner",
-        agent_tools=[tool],
+        toolset=mock_toolset,
         workflow_id="123",
         workflow_type=workflow_type,
     )
     workflow_state["conversation_history"]["planner"] = [
-        AIMessage(content="test", tool_calls=[tool_call]),
+        AIMessage(content=[{"type": "text", "text": "test"}], tool_calls=[tool_call]),
     ]
 
     result = await tools_executor.run(workflow_state)
@@ -452,13 +714,18 @@ async def test_run_error_handling(
             {"task_id": "task-3", "status": "Completed"},
             "Set task 4 to 'Completed'",
         ),
+        (
+            "create_plan",
+            {"tasks": ["Task 1", "Task 2", "Task 3"]},
+            "Create plan with 3 tasks",
+        ),
         ("get_plan", {}, None),  # Hidden tool
     ],
 )
 def test_get_tool_display_message_action_handlers(tool_name, args, expected_message):
     tools_executor = ToolsExecutor(
         tools_agent_name="test_agent",
-        agent_tools=[],
+        toolset=MagicMock(spec=Toolset),
         workflow_id="123",
         workflow_type=CategoryEnum.WORKFLOW_SOFTWARE_DEVELOPMENT,
     )
@@ -489,9 +756,15 @@ class MockGetIssue(BaseTool):
 
 def test_get_tool_display_message_tool_lookup():
     mock_tool = MockGetIssue()
+
+    mock_toolset = MagicMock(spec=Toolset)
+
+    mock_toolset.__contains__ = MagicMock(return_value=True)
+    mock_toolset.__getitem__ = MagicMock(return_value=mock_tool)
+
     tools_executor = ToolsExecutor(
         tools_agent_name="test_agent",
-        agent_tools=[mock_tool],
+        toolset=mock_toolset,
         workflow_id="123",
         workflow_type=CategoryEnum.WORKFLOW_SOFTWARE_DEVELOPMENT,
     )
@@ -502,9 +775,13 @@ def test_get_tool_display_message_tool_lookup():
 
 
 def test_get_tool_display_message_unknown_tool():
+    mock_toolset = MagicMock(spec=Toolset)
+
+    mock_toolset.__contains__ = MagicMock(return_value=False)
+
     tools_executor = ToolsExecutor(
         tools_agent_name="test_agent",
-        agent_tools=[],
+        toolset=mock_toolset,
         workflow_id="123",
         workflow_type=CategoryEnum.WORKFLOW_SOFTWARE_DEVELOPMENT,
     )

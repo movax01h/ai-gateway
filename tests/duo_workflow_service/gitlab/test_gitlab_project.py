@@ -23,12 +23,12 @@ async def test_fetch_project_data_with_workflow_id_success():
         },
     ]
 
-    workflow_id = "abc-123"
+    workflow_id = "111"
     project = await fetch_project_data_with_workflow_id(gitlab_client, workflow_id)
 
     # Verify the first call: fetch workflow details
     gitlab_client.aget.assert_any_call(
-        path="/api/v4/ai/duo_workflows/workflows/abc-123", parse_json=True
+        path=f"/api/v4/ai/duo_workflows/workflows/{workflow_id}", parse_json=True
     )
     # Verify the second call: fetch project details
     gitlab_client.aget.assert_any_call(path="/api/v4/projects/123", parse_json=True)

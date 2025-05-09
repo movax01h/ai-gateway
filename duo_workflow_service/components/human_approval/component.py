@@ -16,6 +16,7 @@ from duo_workflow_service.entities.state import (
     WorkflowState,
     WorkflowStatusEnum,
 )
+from lib import Result, result
 
 log = structlog.get_logger("human_approval_component")
 
@@ -23,6 +24,7 @@ log = structlog.get_logger("human_approval_component")
 class Routes(StrEnum):
     CONTINUE = "continue"
     BACK = "back"
+    SKIP = "skip"
     STOP = "stop"
 
 
@@ -39,9 +41,13 @@ class HumanApprovalComponent(ABC):
         self._approved_agent_name = approved_agent_name
 
     @abstractmethod
-    def _approval_message(self, state: WorkflowState) -> str:
-        """Returns the message content to display in the approval request UI.
-        This message should explain what needs approval and how to proceed."""
+    def _build_approval_request(
+        self, state: WorkflowState
+    ) -> Result[str, RuntimeError]:
+        """Prepares a request for approval,
+        it returns a Result object indicating success or failure
+        of the request preparation.
+        """
 
     def attach(
         self,
@@ -61,9 +67,14 @@ class HumanApprovalComponent(ABC):
             f"{self._node_prefix}_entry_{self._approved_agent_name}",
             self._request_approval,
         )
-        graph.add_edge(
+
+        graph.add_conditional_edges(
             f"{self._node_prefix}_entry_{self._approved_agent_name}",
-            f"{self._node_prefix}_check_{self._approved_agent_name}",
+            self._approval_request_router,
+            {
+                Routes.CONTINUE: f"{self._node_prefix}_check_{self._approved_agent_name}",
+                Routes.SKIP: next_node,
+            },
         )
 
         graph.add_node(
@@ -105,12 +116,24 @@ class HumanApprovalComponent(ABC):
 
         return Routes.BACK
 
-    def _request_approval(self, state):
+    def _approval_request_router(
+        self, state: WorkflowState
+    ) -> Literal[Routes.SKIP, Routes.CONTINUE]:
+        if state["status"] == self._approval_req_workflow_state:
+            return Routes.CONTINUE
+        return Routes.SKIP
+
+    def _request_approval(self, state: WorkflowState):
+        approval_request = self._build_approval_request(state)
+
+        if not result.ok(approval_request):
+            return {"status": state["status"]}
+
         ui_chat_logs = [
             UiChatLog(
                 correlation_id=None,
                 message_type=MessageTypeEnum.REQUEST,
-                content=self._approval_message(state),
+                content=approval_request.value,
                 timestamp=datetime.now(timezone.utc).isoformat(),
                 status=ToolStatus.SUCCESS,
                 tool_info=None,

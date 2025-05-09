@@ -1,4 +1,4 @@
-from typing import Type
+from typing import List, Type
 
 from langchain.tools import BaseTool
 from pydantic import BaseModel, Field
@@ -109,3 +109,26 @@ class SetTaskStatus(BaseTool):
     def format_display_message(self, args: SetTaskStatusInput) -> str:
         task_num = format_task_number(args.task_id)
         return f"Set task {task_num} to '{args.status}'"
+
+
+class CreatePlanInput(BaseModel):
+    tasks: List[str] = Field(
+        description="A complete list of tasks that create a new plan"
+    )
+
+
+class CreatePlan(BaseTool):
+    name: str = "create_plan"
+    description: str = """Create a list of tasks for the plan.
+    The tasks you provide here will set the tasks in the current plan.
+    Please provide all the tasks that you want to show to the user.
+    """
+
+    args_schema: Type[BaseModel] = CreatePlanInput
+
+    def _run(self, tasks: List[str]) -> str:
+        return "Plan created successfully"
+
+    def format_display_message(self, args: CreatePlanInput) -> str:
+        tasks_display = ", ".join(args.tasks[:3])
+        return f"Create a plan: {tasks_display}..."

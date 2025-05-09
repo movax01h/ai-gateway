@@ -2,12 +2,14 @@ import asyncio
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from langchain.tools import BaseTool
 
 from duo_workflow_service import tools
 from duo_workflow_service.components.tools_registry import (
     _DEFAULT_TOOLS,
     NO_OP_TOOLS,
     ToolMetadata,
+    Toolset,
     ToolsRegistry,
 )
 from duo_workflow_service.gitlab.http_client import GitlabHttpClient
@@ -28,6 +30,7 @@ _outbox = MagicMock(spec=asyncio.Queue)
         (
             {},
             {
+                "create_plan",
                 "add_new_task",
                 "remove_task",
                 "update_task_description",
@@ -40,6 +43,7 @@ _outbox = MagicMock(spec=asyncio.Queue)
         (
             ["run_commands"],
             {
+                "create_plan",
                 "add_new_task",
                 "remove_task",
                 "update_task_description",
@@ -53,6 +57,7 @@ _outbox = MagicMock(spec=asyncio.Queue)
         (
             ["read_only_gitlab"],
             {
+                "create_plan",
                 "add_new_task",
                 "remove_task",
                 "update_task_description",
@@ -87,6 +92,7 @@ _outbox = MagicMock(spec=asyncio.Queue)
         (
             ["read_write_gitlab"],
             {
+                "create_plan",
                 "add_new_task",
                 "remove_task",
                 "update_task_description",
@@ -129,6 +135,7 @@ _outbox = MagicMock(spec=asyncio.Queue)
         (
             ["use_git"],
             {
+                "create_plan",
                 "add_new_task",
                 "remove_task",
                 "update_task_description",
@@ -142,6 +149,7 @@ _outbox = MagicMock(spec=asyncio.Queue)
         (
             ["read_write_files"],
             {
+                "create_plan",
                 "add_new_task",
                 "remove_task",
                 "update_task_description",
@@ -193,6 +201,7 @@ def test_registry_initialization_initialises_tools_with_correct_attributes(
         tool_metadata=tool_metadata,
     )
     expected_tools = {
+        "create_plan": tools.CreatePlan(),
         "add_new_task": tools.AddNewTask(),
         "remove_task": tools.RemoveTask(),
         "update_task_description": tools.UpdateTaskDescription(),
@@ -252,27 +261,22 @@ def test_registry_initialization_initialises_tools_with_correct_attributes(
 
 @pytest.mark.asyncio
 async def test_registry_configuration(gl_http_client):
-    workflow_id = "test_workflow"
-    config = {
+    workflow_config = {
+        "id": "test_workflow",
         "agent_privileges_names": ["run_commands"],
     }
 
-    gl_http_client.aget.return_value = config
-
     registry = await ToolsRegistry.configure(
-        workflow_id=workflow_id,
+        workflow_config=workflow_config,
         gl_http_client=gl_http_client,
         outbox=_outbox,
         inbox=_inbox,
         gitlab_host="gitlab.example.com",
     )
 
-    gl_http_client.aget.assert_called_once_with(
-        f"/api/v4/ai/duo_workflows/workflows/{workflow_id}"
-    )
-
     # Verify configured tools based on privileges
     assert set(registry._enabled_tools.keys()) == {
+        "create_plan",
         "add_new_task",
         "remove_task",
         "update_task_description",
@@ -374,6 +378,7 @@ def test_preapproved_tools_initialization(tool_metadata):
 
     # Default tools should always be in preapproved_tools
     default_tools = {
+        "create_plan",
         "add_new_task",
         "remove_task",
         "update_task_description",
@@ -419,16 +424,14 @@ def test_approval_required(tool_metadata):
 
 @pytest.mark.asyncio
 async def test_registry_configuration_with_preapproved_tools(gl_http_client):
-    workflow_id = "test_workflow"
-    config = {
+    workflow_config = {
+        "id": "test_workflow",
         "agent_privileges_names": ["read_write_files", "run_commands"],
         "pre_approved_agent_privileges_names": ["read_write_files"],
     }
 
-    gl_http_client.aget.return_value = config
-
     registry = await ToolsRegistry.configure(
-        workflow_id=workflow_id,
+        workflow_config=workflow_config,
         gl_http_client=gl_http_client,
         outbox=_outbox,
         inbox=_inbox,
@@ -458,16 +461,14 @@ async def test_registry_configuration_with_preapproved_tools(gl_http_client):
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
-    "config",
+    "workflow_config",
     [(None), ({"id": 123})],
-    ids=["no_response", "no_agent_privileges_names_in_a_response"],
+    ids=["no_workflow", "no_agent_privileges_in_workflow"],
 )
-async def test_registry_configuration_error(gl_http_client, config):
-    gl_http_client.aget.return_value = config
-
-    with pytest.raises(RuntimeError, match="Failed to fetch tools configuration"):
+async def test_registry_configuration_error(gl_http_client, workflow_config):
+    with pytest.raises(RuntimeError, match="Failed to find tools configuration"):
         await ToolsRegistry.configure(
-            workflow_id="test_workflow",
+            workflow_config=workflow_config,
             gl_http_client=gl_http_client,
             outbox=_outbox,
             inbox=_inbox,
@@ -503,3 +504,55 @@ async def test_feature_flag_behavior(
         assert "get_previous_workflow_context" in tool_keys
     else:
         assert "get_previous_workflow_context" not in tool_keys
+
+
+@pytest.mark.parametrize(
+    "tool_names,expected_preapproved",
+    [
+        (
+            ["read_file", "create_file_with_contents"],
+            set(["read_file", "create_file_with_contents"]),
+        ),
+        (
+            ["run_git_command"],
+            set(),
+        ),
+        (
+            ["read_file", "run_git_command"],
+            {"read_file"},
+        ),
+        (
+            ["nonexistent_tool"],  # Nonexistent tool should be filtered out
+            set(),
+        ),
+    ],
+    ids=[
+        "with all tools being preapproved tools",
+        "with all tools not being preapproved tools",
+        "with mixed tools",
+        "with nonexistent tool",
+    ],
+)
+def test_toolset_method(tool_metadata, tool_names, expected_preapproved):
+    registry = ToolsRegistry(
+        enabled_tools=["read_write_files", "use_git"],
+        preapproved_tools=["read_write_files"],
+        tool_metadata=tool_metadata,
+    )
+
+    with patch("duo_workflow_service.components.tools_registry.Toolset") as MockToolset:
+        mock_toolset = MagicMock(spec=Toolset)
+        MockToolset.return_value = mock_toolset
+
+        toolset = registry.toolset(tool_names)
+
+        expected_all_tools = {
+            tool_name: registry.get(tool_name)
+            for tool_name in tool_names
+            if registry.get(tool_name)
+        }
+
+        MockToolset.assert_called_once_with(
+            pre_approved=expected_preapproved, all_tools=expected_all_tools
+        )
+        assert toolset == mock_toolset

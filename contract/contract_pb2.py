@@ -24,7 +24,7 @@ _sym_db = _symbol_database.Default()
 
 
 
-DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n\x17\x63ontract/contract.proto\"s\n\x0b\x43lientEvent\x12-\n\x0cstartRequest\x18\x01 \x01(\x0b\x32\x15.StartWorkflowRequestH\x00\x12)\n\x0e\x61\x63tionResponse\x18\x02 \x01(\x0b\x32\x0f.ActionResponseH\x00\x42\n\n\x08response\"\xa1\x01\n\x14StartWorkflowRequest\x12\x15\n\rclientVersion\x18\x01 \x01(\t\x12\x12\n\nworkflowID\x18\x02 \x01(\t\x12\x1a\n\x12workflowDefinition\x18\x03 \x01(\t\x12\x0c\n\x04goal\x18\x04 \x01(\t\x12\x18\n\x10workflowMetadata\x18\x05 \x01(\t\x12\x1a\n\x12\x63lientCapabilities\x18\x06 \x03(\t\"5\n\x0e\x41\x63tionResponse\x12\x11\n\trequestID\x18\x01 \x01(\t\x12\x10\n\x08response\x18\x02 \x01(\t\"\x8a\x02\n\x06\x41\x63tion\x12\x11\n\trequestID\x18\x01 \x01(\t\x12\'\n\nrunCommand\x18\x02 \x01(\x0b\x32\x11.RunCommandActionH\x00\x12)\n\x0erunHTTPRequest\x18\x03 \x01(\x0b\x32\x0f.RunHTTPRequestH\x00\x12 \n\x0brunReadFile\x18\x04 \x01(\x0b\x32\t.ReadFileH\x00\x12\"\n\x0crunWriteFile\x18\x05 \x01(\x0b\x32\n.WriteFileH\x00\x12\'\n\rrunGitCommand\x18\x06 \x01(\x0b\x32\x0e.RunGitCommandH\x00\x12 \n\x0brunEditFile\x18\x07 \x01(\x0b\x32\t.EditFileH\x00\x42\x08\n\x06\x61\x63tion\"n\n\x10RunCommandAction\x12\x0f\n\x07program\x18\x03 \x01(\t\x12\x11\n\targuments\x18\x04 \x03(\t\x12\r\n\x05\x66lags\x18\x05 \x03(\tJ\x04\x08\x01\x10\x02J\x04\x08\x02\x10\x03R\x07\x63ommandR\x12withGitCredentials\"\x1c\n\x08ReadFile\x12\x10\n\x08\x66ilepath\x18\x01 \x01(\t\"/\n\tWriteFile\x12\x10\n\x08\x66ilepath\x18\x01 \x01(\t\x12\x10\n\x08\x63ontents\x18\x02 \x01(\t\"B\n\x08\x45\x64itFile\x12\x10\n\x08\x66ilepath\x18\x01 \x01(\t\x12\x11\n\toldString\x18\x02 \x01(\t\x12\x11\n\tnewString\x18\x03 \x01(\t\"J\n\x0eRunHTTPRequest\x12\x0e\n\x06method\x18\x01 \x01(\t\x12\x0c\n\x04path\x18\x02 \x01(\t\x12\x11\n\x04\x62ody\x18\x03 \x01(\tH\x00\x88\x01\x01\x42\x07\n\x05_body\"^\n\rRunGitCommand\x12\x0f\n\x07\x63ommand\x18\x01 \x01(\t\x12\x16\n\targuments\x18\x02 \x01(\tH\x00\x88\x01\x01\x12\x16\n\x0erepository_url\x18\x03 \x01(\tB\x0c\n\n_arguments\"\x16\n\x14GenerateTokenRequest\"9\n\x15GenerateTokenResponse\x12\r\n\x05token\x18\x01 \x01(\t\x12\x11\n\texpiresAt\x18\x02 \x01(\x03\x32{\n\x0b\x44uoWorkflow\x12,\n\x0f\x45xecuteWorkflow\x12\x0c.ClientEvent\x1a\x07.Action(\x01\x30\x01\x12>\n\rGenerateToken\x12\x15.GenerateTokenRequest\x1a\x16.GenerateTokenResponseB[ZDgitlab.com/gitlab-org/duo-workflow/duo-workflow-service/clients/gopb\xea\x02\x12\x44uoWorkflowServiceb\x06proto3')
+DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n\x17\x63ontract/contract.proto\"s\n\x0b\x43lientEvent\x12-\n\x0cstartRequest\x18\x01 \x01(\x0b\x32\x15.StartWorkflowRequestH\x00\x12)\n\x0e\x61\x63tionResponse\x18\x02 \x01(\x0b\x32\x0f.ActionResponseH\x00\x42\n\n\x08response\"\xc3\x01\n\x14StartWorkflowRequest\x12\x15\n\rclientVersion\x18\x01 \x01(\t\x12\x12\n\nworkflowID\x18\x02 \x01(\t\x12\x1a\n\x12workflowDefinition\x18\x03 \x01(\t\x12\x0c\n\x04goal\x18\x04 \x01(\t\x12\x18\n\x10workflowMetadata\x18\x05 \x01(\t\x12\x1a\n\x12\x63lientCapabilities\x18\x06 \x03(\t\x12 \n\x07\x63ontext\x18\x07 \x03(\x0b\x32\x0f.ContextElement\"5\n\x0e\x41\x63tionResponse\x12\x11\n\trequestID\x18\x01 \x01(\t\x12\x10\n\x08response\x18\x02 \x01(\t\"\xb3\x02\n\x06\x41\x63tion\x12\x11\n\trequestID\x18\x01 \x01(\t\x12\'\n\nrunCommand\x18\x02 \x01(\x0b\x32\x11.RunCommandActionH\x00\x12)\n\x0erunHTTPRequest\x18\x03 \x01(\x0b\x32\x0f.RunHTTPRequestH\x00\x12 \n\x0brunReadFile\x18\x04 \x01(\x0b\x32\t.ReadFileH\x00\x12\"\n\x0crunWriteFile\x18\x05 \x01(\x0b\x32\n.WriteFileH\x00\x12\'\n\rrunGitCommand\x18\x06 \x01(\x0b\x32\x0e.RunGitCommandH\x00\x12 \n\x0brunEditFile\x18\x07 \x01(\x0b\x32\t.EditFileH\x00\x12\'\n\rnewCheckpoint\x18\x08 \x01(\x0b\x32\x0e.NewCheckpointH\x00\x42\x08\n\x06\x61\x63tion\"n\n\x10RunCommandAction\x12\x0f\n\x07program\x18\x03 \x01(\t\x12\x11\n\targuments\x18\x04 \x03(\t\x12\r\n\x05\x66lags\x18\x05 \x03(\tJ\x04\x08\x01\x10\x02J\x04\x08\x02\x10\x03R\x07\x63ommandR\x12withGitCredentials\"\x1c\n\x08ReadFile\x12\x10\n\x08\x66ilepath\x18\x01 \x01(\t\"/\n\tWriteFile\x12\x10\n\x08\x66ilepath\x18\x01 \x01(\t\x12\x10\n\x08\x63ontents\x18\x02 \x01(\t\"B\n\x08\x45\x64itFile\x12\x10\n\x08\x66ilepath\x18\x01 \x01(\t\x12\x11\n\toldString\x18\x02 \x01(\t\x12\x11\n\tnewString\x18\x03 \x01(\t\"J\n\x0eRunHTTPRequest\x12\x0e\n\x06method\x18\x01 \x01(\t\x12\x0c\n\x04path\x18\x02 \x01(\t\x12\x11\n\x04\x62ody\x18\x03 \x01(\tH\x00\x88\x01\x01\x42\x07\n\x05_body\"^\n\rRunGitCommand\x12\x0f\n\x07\x63ommand\x18\x01 \x01(\t\x12\x16\n\targuments\x18\x02 \x01(\tH\x00\x88\x01\x01\x12\x16\n\x0erepository_url\x18\x03 \x01(\tB\x0c\n\n_arguments\"\x16\n\x14GenerateTokenRequest\"9\n\x15GenerateTokenResponse\x12\r\n\x05token\x18\x01 \x01(\t\x12\x11\n\texpiresAt\x18\x02 \x01(\x03\"S\n\x0e\x43ontextElement\x12!\n\x04type\x18\x01 \x01(\x0e\x32\x13.ContextElementType\x12\x0c\n\x04name\x18\x02 \x01(\t\x12\x10\n\x08\x63ontents\x18\x03 \x01(\t\"Q\n\rNewCheckpoint\x12\x0e\n\x06status\x18\x01 \x01(\t\x12\x12\n\ncheckpoint\x18\x02 \x01(\t\x12\x0c\n\x04goal\x18\x03 \x01(\t\x12\x0e\n\x06\x65rrors\x18\x04 \x03(\t*{\n\x12\x43ontextElementType\x12\x13\n\x0fUSER_PREFERENCE\x10\x00\x12\x11\n\rSELECTED_TEXT\x10\x01\x12\x08\n\x04\x46ILE\x10\x02\x12\t\n\x05ISSUE\x10\x03\x12\x11\n\rMERGE_REQUEST\x10\x04\x12\x15\n\x11PREVIOUS_WORKFLOW\x10\x05\x32{\n\x0b\x44uoWorkflow\x12,\n\x0f\x45xecuteWorkflow\x12\x0c.ClientEvent\x1a\x07.Action(\x01\x30\x01\x12>\n\rGenerateToken\x12\x15.GenerateTokenRequest\x1a\x16.GenerateTokenResponseB[ZDgitlab.com/gitlab-org/duo-workflow/duo-workflow-service/clients/gopb\xea\x02\x12\x44uoWorkflowServiceb\x06proto3')
 
 _globals = globals()
 _builder.BuildMessageAndEnumDescriptors(DESCRIPTOR, _globals)
@@ -32,30 +32,36 @@ _builder.BuildTopDescriptorsAndMessages(DESCRIPTOR, 'contract.contract_pb2', _gl
 if not _descriptor._USE_C_DESCRIPTORS:
   _globals['DESCRIPTOR']._loaded_options = None
   _globals['DESCRIPTOR']._serialized_options = b'ZDgitlab.com/gitlab-org/duo-workflow/duo-workflow-service/clients/gopb\352\002\022DuoWorkflowService'
+  _globals['_CONTEXTELEMENTTYPE']._serialized_start=1389
+  _globals['_CONTEXTELEMENTTYPE']._serialized_end=1512
   _globals['_CLIENTEVENT']._serialized_start=27
   _globals['_CLIENTEVENT']._serialized_end=142
   _globals['_STARTWORKFLOWREQUEST']._serialized_start=145
-  _globals['_STARTWORKFLOWREQUEST']._serialized_end=306
-  _globals['_ACTIONRESPONSE']._serialized_start=308
-  _globals['_ACTIONRESPONSE']._serialized_end=361
-  _globals['_ACTION']._serialized_start=364
-  _globals['_ACTION']._serialized_end=630
-  _globals['_RUNCOMMANDACTION']._serialized_start=632
-  _globals['_RUNCOMMANDACTION']._serialized_end=742
-  _globals['_READFILE']._serialized_start=744
-  _globals['_READFILE']._serialized_end=772
-  _globals['_WRITEFILE']._serialized_start=774
-  _globals['_WRITEFILE']._serialized_end=821
-  _globals['_EDITFILE']._serialized_start=823
-  _globals['_EDITFILE']._serialized_end=889
-  _globals['_RUNHTTPREQUEST']._serialized_start=891
-  _globals['_RUNHTTPREQUEST']._serialized_end=965
-  _globals['_RUNGITCOMMAND']._serialized_start=967
-  _globals['_RUNGITCOMMAND']._serialized_end=1061
-  _globals['_GENERATETOKENREQUEST']._serialized_start=1063
-  _globals['_GENERATETOKENREQUEST']._serialized_end=1085
-  _globals['_GENERATETOKENRESPONSE']._serialized_start=1087
-  _globals['_GENERATETOKENRESPONSE']._serialized_end=1144
-  _globals['_DUOWORKFLOW']._serialized_start=1146
-  _globals['_DUOWORKFLOW']._serialized_end=1269
+  _globals['_STARTWORKFLOWREQUEST']._serialized_end=340
+  _globals['_ACTIONRESPONSE']._serialized_start=342
+  _globals['_ACTIONRESPONSE']._serialized_end=395
+  _globals['_ACTION']._serialized_start=398
+  _globals['_ACTION']._serialized_end=705
+  _globals['_RUNCOMMANDACTION']._serialized_start=707
+  _globals['_RUNCOMMANDACTION']._serialized_end=817
+  _globals['_READFILE']._serialized_start=819
+  _globals['_READFILE']._serialized_end=847
+  _globals['_WRITEFILE']._serialized_start=849
+  _globals['_WRITEFILE']._serialized_end=896
+  _globals['_EDITFILE']._serialized_start=898
+  _globals['_EDITFILE']._serialized_end=964
+  _globals['_RUNHTTPREQUEST']._serialized_start=966
+  _globals['_RUNHTTPREQUEST']._serialized_end=1040
+  _globals['_RUNGITCOMMAND']._serialized_start=1042
+  _globals['_RUNGITCOMMAND']._serialized_end=1136
+  _globals['_GENERATETOKENREQUEST']._serialized_start=1138
+  _globals['_GENERATETOKENREQUEST']._serialized_end=1160
+  _globals['_GENERATETOKENRESPONSE']._serialized_start=1162
+  _globals['_GENERATETOKENRESPONSE']._serialized_end=1219
+  _globals['_CONTEXTELEMENT']._serialized_start=1221
+  _globals['_CONTEXTELEMENT']._serialized_end=1304
+  _globals['_NEWCHECKPOINT']._serialized_start=1306
+  _globals['_NEWCHECKPOINT']._serialized_end=1387
+  _globals['_DUOWORKFLOW']._serialized_start=1514
+  _globals['_DUOWORKFLOW']._serialized_end=1637
 # @@protoc_insertion_point(module_scope)

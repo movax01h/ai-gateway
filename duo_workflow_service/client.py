@@ -48,14 +48,11 @@ def test_generate_token():
         or "<paste-your-local-gdk-instance-id-here>"
     )
 
-    duo_seat_count = "111"
-
     metadata = [
         ("authorization", f"Bearer {token}"),
         ("x-gitlab-authentication-type", "oidc"),
         ("x-gitlab-realm", "saas"),
         ("x-gitlab-instance-id", gitlab_instance_id),
-        ("x-gitlab-duo-seat-count", duo_seat_count),
         # ("x-gitlab-global-user-id", global_user_id), <-- we don't need user id while we test with realm == "saas"
     ]
 
@@ -83,11 +80,8 @@ def test_execute_workflow():
         os.environ.get("DUO_WORKFLOW_CLIENT_GDK_GL_INSTANCE_ID")
         or "<paste-your-local-gdk-instance-id-here>"
     )
-    duo_seat_count = "111"
     gitlab_realm = "self-managed"
-    current_user = CloudConnectorUser(
-        authenticated=True, claims=UserClaims(duo_seat_count=duo_seat_count)
-    )
+    current_user = CloudConnectorUser(authenticated=True, claims=UserClaims())
     token, _ = ta.encode(
         global_user_id_and_subject,
         gitlab_realm,
@@ -102,7 +96,6 @@ def test_execute_workflow():
         ("x-gitlab-authentication-type", "oidc"),
         ("x-gitlab-realm", "self-managed"),
         ("x-gitlab-global-user-id", global_user_id_and_subject),
-        ("x-gitlab-duo-seat-count", duo_seat_count),
     ]
 
     responses = stub.ExecuteWorkflow(generate_client_events(), metadata=metadata)

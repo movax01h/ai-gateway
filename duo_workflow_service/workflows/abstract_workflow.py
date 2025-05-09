@@ -26,6 +26,7 @@ from duo_workflow_service.gitlab.gitlab_project import (
     Project,
     fetch_project_data_with_workflow_id,
 )
+from duo_workflow_service.gitlab.gitlab_workflow_params import fetch_workflow_config
 from duo_workflow_service.gitlab.http_client import GitlabHttpClient
 from duo_workflow_service.gitlab.url_parser import GitLabUrlParser
 from duo_workflow_service.internal_events import (
@@ -46,6 +47,8 @@ MAX_MESSAGE_LENGTH = 200
 
 
 class AbstractWorkflow(ABC):
+    OUTBOX_CHECK_INTERVAL = 0.5
+
     """
     Abstract base class for workflow implementations.
     Provides a structure for creating workflow classes with common functionality.
@@ -55,6 +58,7 @@ class AbstractWorkflow(ABC):
     _inbox: asyncio.Queue
     _workflow_id: str
     _project: Project
+    _workflow_config: dict[str, Any]
     _http_client: GitlabHttpClient
     _workflow_metadata: dict[str, Any]
     is_done: bool = False
@@ -106,8 +110,8 @@ class AbstractWorkflow(ABC):
     ) -> Any:
         pass
 
-    def get_from_outbox(self):
-        item = self._outbox.get_nowait()
+    async def get_from_outbox(self):
+        item = await asyncio.wait_for(self._outbox.get(), self.OUTBOX_CHECK_INTERVAL)
         self._outbox.task_done()
         return item
 
@@ -145,10 +149,14 @@ class AbstractWorkflow(ABC):
                     f"Failed to extract gitlab host from web_url for workflow {self._workflow_id}"
                 )
 
+            self._workflow_config = await fetch_workflow_config(
+                self._http_client, self._workflow_id
+            )
+
             tools_registry = await ToolsRegistry.configure(
                 outbox=self._outbox,
                 inbox=self._inbox,
-                workflow_id=self._workflow_id,
+                workflow_config=self._workflow_config,
                 gl_http_client=self._http_client,
                 gitlab_host=gitlab_host,
             )

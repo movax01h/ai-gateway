@@ -3,6 +3,8 @@ import pytest
 from duo_workflow_service.tools.planner import (
     AddNewTask,
     AddNewTaskInput,
+    CreatePlan,
+    CreatePlanInput,
     GetPlan,
     RemoveTask,
     RemoveTaskInput,
@@ -25,6 +27,12 @@ from duo_workflow_service.tools.planner import (
             {"task_id": "1", "new_description": "Updated task"},
             "Task with ID 1 updated with description: Updated task",
         ),
+        (
+            CreatePlan,
+            CreatePlanInput,
+            {"tasks": ["Task 1", "Task 2", "Task 3"]},
+            "Plan created successfully",
+        ),
     ],
 )
 def test_tool_run(tool_class, input_class, input_data, expected_result):
@@ -33,6 +41,8 @@ def test_tool_run(tool_class, input_class, input_data, expected_result):
         input_instance = input_class(**input_data)
         if isinstance(tool, AddNewTask):
             result = tool._run(description=input_instance.description)
+        elif isinstance(tool, CreatePlan):
+            result = tool._run(tasks=input_instance.tasks)
         else:
             result = tool._run(**input_instance.model_dump())
     else:
@@ -106,6 +116,22 @@ def test_set_task_status_format_display_message():
 
     expected_message = "Set task 2 to 'In Progress'"
     assert message == expected_message
+
+
+def test_create_plan():
+    create_plan = CreatePlan(description="Create a plan")
+    tasks = ["Task 1", "Task 2", "Task 3"]
+    result = create_plan._run(tasks=tasks)
+    assert result == "Plan created successfully"
+
+
+def test_create_plan_format_display_message():
+    create_plan = CreatePlan(description="Create a plan")
+    tasks = ["Task 1", "Task 2", "Task 3"]
+    input_data = CreatePlanInput(tasks=tasks)
+
+    message = create_plan.format_display_message(input_data)
+    assert message == "Create a plan: Task 1, Task 2, Task 3..."
 
 
 @pytest.mark.parametrize(

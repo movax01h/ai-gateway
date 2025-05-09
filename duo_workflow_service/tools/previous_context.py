@@ -8,8 +8,8 @@ from duo_workflow_service.tools.duo_base_tool import DuoBaseTool
 
 
 class GetWorkflowContextInput(BaseModel):
-    workflow_id: str = Field(
-        description="The ID of the workflow to get the last checkpoint for"
+    previous_workflow_id: int = Field(
+        description="The ID of a previously-run workflow to get context for"
     )
 
 
@@ -18,34 +18,48 @@ class GetWorkflowContext(DuoBaseTool):
     description: str = """Get context from a previously run workflow.
 
     This tool retrieves context from a previously run specified workflow.
+    Only use it when prompted by the user to reference a previously executed workflow.
+    Do not provide context for any other workflow unless explicitly asked.
 
     Args:
-        workflow_id: The ID of the workflow to get the last checkpoint for
+        previous_workflow_id: The ID of a previously-run workflow to get context for
 
     Returns:
         A JSON string containing context data from a previous workflow or an error message if the context could not be retrieved.
     """
     args_schema: Type[BaseModel] = GetWorkflowContextInput  # type: ignore
 
-    async def _arun(self, workflow_id: str, **kwargs: Any) -> str:
+    async def _arun(self, previous_workflow_id: int, **kwargs: Any) -> str:
         try:
             response = await self.gitlab_client.aget(
-                path=f"/api/v4/ai/duo_workflows/workflows/{workflow_id}/checkpoints?per_page=1",
+                path=f"/api/v4/ai/duo_workflows/workflows/{previous_workflow_id}/checkpoints?per_page=1",
                 parse_json=True,
             )
 
+            if (
+                isinstance(response, dict)
+                and "status" in response
+                and response["status"] != 200
+            ):
+                return json.dumps({"error": "API Error"})
+
             if not response or len(response) == 0:
-                return json.dumps({"error": "No checkpoints found for this workflow"})
+                return json.dumps(
+                    {"error": "Unable to find checkpoint for this workflow"}
+                )
 
             return json.dumps({"context": self._format_checkpoint_context(response[0])})
         except Exception as e:
             return json.dumps({"error": str(e)})
 
     def format_display_message(self, args: GetWorkflowContextInput) -> Optional[str]:
-        return f"Get context for workflow {args.workflow_id}"
+        return f"Get context for workflow {args.previous_workflow_id}"
 
     def _format_checkpoint_context(self, checkpoint: dict) -> str:
-        workflow_id = checkpoint.get("workflow_id", "Unknown workflow ID")
+        workflow_id = checkpoint.get("metadata", {}).get("thread_id", None)
+
+        if not workflow_id:
+            raise ValueError("Invalid checkpoint format. Valid workflow ID is required")
 
         if not checkpoint.get("checkpoint") or not checkpoint.get("checkpoint", {}).get(
             "channel_values"

@@ -24,6 +24,7 @@ from duo_workflow_service.internal_events.event_enum import (
     EventEnum,
     EventPropertyEnum,
 )
+from duo_workflow_service.tools import Toolset
 
 
 @pytest.fixture
@@ -68,26 +69,33 @@ class TestAgent:
         return MagicMock(spec=GitlabHttpClient)
 
     @pytest.fixture
-    def planner_agent(self, chat_mock, http_client_mock):
+    def mock_toolset(self):
+        mock = MagicMock(spec=Toolset)
+        mock.bindable = []
+        return mock
+
+    @pytest.fixture
+    def planner_agent(self, chat_mock, http_client_mock, mock_toolset):
         return Agent(
             goal="Make the world a better place",
             model=chat_mock,
             name="test agent",
             system_prompt="You are AGI entity capable of anything",
-            tools=[],
+            toolset=mock_toolset,
             workflow_id="test-workflow-123",
             http_client=http_client_mock,
             workflow_type=CategoryEnum.WORKFLOW_SOFTWARE_DEVELOPMENT,
         )
 
-    def test_init(self, chat_mock, planner_agent, http_client_mock):
+    def test_init(self, chat_mock, planner_agent, http_client_mock, mock_toolset):
         assert planner_agent._goal == "Make the world a better place"
         assert planner_agent._model == chat_mock
         assert planner_agent.name == "test agent"
         assert planner_agent._system_prompt == "You are AGI entity capable of anything"
         assert planner_agent._workflow_id == "test-workflow-123"
         assert planner_agent._http_client == http_client_mock
-        chat_mock.bind_tools.assert_called_once_with([])
+        assert planner_agent._toolset == mock_toolset
+        chat_mock.bind_tools.assert_called_once_with(mock_toolset.bindable)
 
     @pytest.mark.asyncio
     async def test_run_with_empty_conversation(

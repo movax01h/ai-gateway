@@ -18,6 +18,7 @@ from duo_workflow_service.components.tools_registry import (
 from duo_workflow_service.entities import Plan, WorkflowStatusEnum
 from duo_workflow_service.gitlab.http_client import GitlabHttpClient
 from duo_workflow_service.internal_events.event_enum import CategoryEnum
+from duo_workflow_service.tools.toolset import Toolset
 from duo_workflow_service.workflows.software_development import Workflow
 from duo_workflow_service.workflows.software_development.workflow import (
     CONTEXT_BUILDER_TOOLS,
@@ -148,6 +149,7 @@ def _agent_responses(status: WorkflowStatusEnum, agent_name: str):
 @patch(
     "duo_workflow_service.workflows.abstract_workflow.fetch_project_data_with_workflow_id"
 )
+@patch("duo_workflow_service.workflows.abstract_workflow.fetch_workflow_config")
 @patch("duo_workflow_service.workflows.software_development.workflow.new_chat_client")
 @patch("duo_workflow_service.workflows.abstract_workflow.GitLabWorkflow", autospec=True)
 @patch(
@@ -159,6 +161,7 @@ async def test_workflow_run(
     mock_goal_disambiguator_component,
     mock_gitlab_workflow,
     mock_chat_client,
+    mock_fetch_workflow_config,
     mock_fetch_project_data_with_workflow_id,
     mock_tools_executor,
     mock_plan_supervisor_agent,
@@ -280,6 +283,7 @@ async def test_workflow_run(
 @patch(
     "duo_workflow_service.workflows.abstract_workflow.fetch_project_data_with_workflow_id"
 )
+@patch("duo_workflow_service.workflows.abstract_workflow.fetch_workflow_config")
 @patch("duo_workflow_service.workflows.software_development.workflow.new_chat_client")
 @patch("duo_workflow_service.workflows.abstract_workflow.GitLabWorkflow", autospec=True)
 @patch(
@@ -291,6 +295,7 @@ async def test_workflow_run_with_memory_saver(
     mock_goal_disambiguator_component,
     mock_gitlab_workflow,
     mock_chat_client,
+    mock_fetch_workflow_config,
     mock_fetch_project_data_with_workflow_id,
     mock_tools_executor,
     mock_plan_supervisor_agent,
@@ -408,6 +413,7 @@ async def test_workflow_run_with_memory_saver(
 @patch(
     "duo_workflow_service.workflows.abstract_workflow.fetch_project_data_with_workflow_id"
 )
+@patch("duo_workflow_service.workflows.abstract_workflow.fetch_workflow_config")
 @patch("duo_workflow_service.workflows.software_development.workflow.new_chat_client")
 @patch(
     "duo_workflow_service.workflows.software_development.workflow.GoalDisambiguationComponent",
@@ -417,6 +423,7 @@ async def test_workflow_run_with_memory_saver(
 async def test_workflow_run_when_exception(
     mock_goal_disambiguator_component,
     chat_client,
+    mock_fetch_workflow_config,
     mock_fetch_project_data_with_workflow_id,
     mock_gitlab_workflow,
     mock_tools_executor,
@@ -492,6 +499,7 @@ async def test_workflow_run_when_exception(
 @patch(
     "duo_workflow_service.workflows.abstract_workflow.fetch_project_data_with_workflow_id"
 )
+@patch("duo_workflow_service.workflows.abstract_workflow.fetch_workflow_config")
 @patch(
     "duo_workflow_service.workflows.software_development.workflow.new_chat_client",
     autospec=True,
@@ -506,6 +514,7 @@ async def test_workflow_run_with_error_state(
     mock_goal_disambiguator_component,
     mock_gitlab_workflow,
     mock_chat_client,
+    mock_fetch_workflow_config,
     mock_fetch_project_data_with_workflow_id,
     mock_tools_executor,
     mock_plan_supervisor_agent,
@@ -588,6 +597,7 @@ async def test_workflow_run_with_error_state(
 @patch(
     "duo_workflow_service.workflows.abstract_workflow.fetch_project_data_with_workflow_id"
 )
+@patch("duo_workflow_service.workflows.abstract_workflow.fetch_workflow_config")
 @patch("duo_workflow_service.workflows.software_development.workflow.new_chat_client")
 @patch("duo_workflow_service.workflows.abstract_workflow.GitLabWorkflow", autospec=True)
 @patch(
@@ -598,6 +608,7 @@ async def test_workflow_run_with_tools_registry(
     mock_goal_disambiguator_component,
     mock_gitlab_workflow,
     chat_client,
+    mock_fetch_workflow_config,
     mock_fetch_project_data_with_workflow_id,
     mock_tools_executor,
     mock_plan_supervisor_agent,
@@ -658,19 +669,11 @@ async def test_workflow_run_with_tools_registry(
         instance.compile.return_value = compiled_graph
         await workflow.run("test_goal")
 
-    mock_tools_registry.get_batch.assert_has_calls(
+    mock_tools_registry.toolset.assert_has_calls(
         [
             call(EXECUTOR_TOOLS),
             call(CONTEXT_BUILDER_TOOLS),
             call(PLANNER_TOOLS),
-        ],
-        any_order=True,
-    )
-    mock_tools_registry.get_handlers.assert_has_calls(
-        [
-            call(EXECUTOR_TOOLS),
-            call(EXECUTOR_TOOLS),
-            call(CONTEXT_BUILDER_TOOLS),
         ],
         any_order=True,
     )
@@ -683,9 +686,8 @@ async def test_workflow_run_with_tools_registry(
         ],
         any_order=True,
     )
-
-    # Verify get_plan is called once in executor setup and once in planner setup
-    assert mock_tools_registry.get.call_args_list.count(call("get_plan")) == 2
+    # Verify get_plan is called once in executor setup and twice in planner setup
+    assert mock_tools_registry.get.call_args_list.count(call("get_plan")) == 3
 
 
 @pytest.fixture
@@ -735,17 +737,17 @@ def test_executor_tools(tools_registry, software_development_workflow):
     agent_components = software_development_workflow._setup_executor(
         "test goal", tools_registry, MagicMock()
     )
-    assert agent_components["tools"] == EXECUTOR_TOOLS
-    assert_tools_in_tools_registry(tools_registry, agent_components["tools"])
+    assert agent_components["toolset"] == tools_registry.toolset(EXECUTOR_TOOLS)
+    assert_tools_in_tools_registry(tools_registry, agent_components["toolset"])
 
 
 @patch("duo_workflow_service.workflows.software_development.workflow.new_chat_client")
 def test_planner_tools(tools_registry, software_development_workflow):
     agent_components = software_development_workflow._setup_planner(
-        "test goal", tools_registry, MagicMock(), []
+        "test goal", tools_registry, MagicMock(), MagicMock(spec=Toolset)
     )
-    assert agent_components["tools"] == PLANNER_TOOLS
-    assert_tools_in_tools_registry(tools_registry, agent_components["tools"])
+    assert agent_components["toolset"] == tools_registry.toolset(PLANNER_TOOLS)
+    assert_tools_in_tools_registry(tools_registry, agent_components["toolset"])
 
 
 @patch("duo_workflow_service.workflows.software_development.workflow.new_chat_client")
@@ -754,8 +756,8 @@ def test_context_builder_tools(tools_registry, software_development_workflow):
     agent_components = software_development_workflow._setup_context_builder(
         "test goal", tools_registry
     )
-    assert agent_components["tools"] == CONTEXT_BUILDER_TOOLS
-    assert_tools_in_tools_registry(tools_registry, agent_components["tools"])
+    assert agent_components["toolset"] == tools_registry.toolset(CONTEXT_BUILDER_TOOLS)
+    assert_tools_in_tools_registry(tools_registry, agent_components["toolset"])
 
 
 @pytest.mark.asyncio
@@ -764,6 +766,7 @@ def test_context_builder_tools(tools_registry, software_development_workflow):
 @patch(
     "duo_workflow_service.workflows.abstract_workflow.fetch_project_data_with_workflow_id"
 )
+@patch("duo_workflow_service.workflows.abstract_workflow.fetch_workflow_config")
 @patch(
     "duo_workflow_service.workflows.software_development.workflow.GoalDisambiguationComponent",
     autospec=True,
@@ -771,6 +774,7 @@ def test_context_builder_tools(tools_registry, software_development_workflow):
 @patch.dict(os.environ, {"DW_INTERNAL_EVENT__ENABLED": "true"})
 async def test_workflow_run_with_setup_error(
     mock_goal_disambiguator_component,
+    mock_fetch_workflow_config,
     mock_fetch_project_data_with_workflow_id,
     mock_gitlab_workflow,
     mock_tools_registry,
@@ -920,6 +924,7 @@ async def test_workflow_run_with_invalid_web_url(
 @patch(
     "duo_workflow_service.workflows.abstract_workflow.fetch_project_data_with_workflow_id"
 )
+@patch("duo_workflow_service.workflows.abstract_workflow.fetch_workflow_config")
 @patch("duo_workflow_service.workflows.software_development.workflow.new_chat_client")
 @patch(
     "duo_workflow_service.workflows.software_development.workflow.GoalDisambiguationComponent",
@@ -929,6 +934,7 @@ async def test_workflow_run_with_invalid_web_url(
 async def test_workflow_run_with_retry(
     mock_goal_disambiguator_component,
     chat_client,
+    mock_fetch_workflow_config,
     mock_fetch_project_data_with_workflow_id,
     mock_gitlab_workflow,
     mock_tools_executor,
@@ -1047,6 +1053,7 @@ async def test_workflow_run_with_retry(
 @patch(
     "duo_workflow_service.workflows.abstract_workflow.fetch_project_data_with_workflow_id"
 )
+@patch("duo_workflow_service.workflows.abstract_workflow.fetch_workflow_config")
 @patch("duo_workflow_service.workflows.software_development.workflow.new_chat_client")
 @patch("duo_workflow_service.workflows.abstract_workflow.GitLabWorkflow", autospec=True)
 @patch(
@@ -1058,6 +1065,7 @@ async def test_workflow_run_with_tool_approvals(
     mock_tools_approval_component,
     mock_gitlab_workflow,
     mock_chat_client,
+    mock_fetch_workflow_config,
     mock_fetch_project_data_with_workflow_id,
     mock_tools_executor,
     mock_plan_supervisor_agent,
@@ -1074,6 +1082,10 @@ async def test_workflow_run_with_tool_approvals(
         "description": "This is a test project",
         "http_url_to_repo": "https://example.com/project",
         "web_url": "https://example.com/project",
+    }
+    mock_fetch_workflow_config.return_value = {
+        "id": 1,
+        "project_id": 1,
     }
 
     mock_git_lab_workflow_instance = mock_gitlab_workflow.return_value
@@ -1160,14 +1172,15 @@ async def test_workflow_run_with_tool_approvals(
     assert workflow.is_done
 
 
-def test_get_from_outbox():
+@pytest.mark.asyncio
+async def test_get_from_outbox():
     workflow = Workflow(
         "123",
         {},
         workflow_type=CategoryEnum.WORKFLOW_SOFTWARE_DEVELOPMENT,
     )
     workflow._outbox.put_nowait("test_item")
-    item = workflow.get_from_outbox()
+    item = await workflow.get_from_outbox()
     assert item == "test_item"
 
 

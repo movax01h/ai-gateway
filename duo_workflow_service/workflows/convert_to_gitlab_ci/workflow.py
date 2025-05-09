@@ -155,12 +155,14 @@ class Workflow(AbstractWorkflow):
 
         # translator node
         translation_tools = ["create_file_with_contents", "read_file"]
+        agents_toolset = tools_registry.toolset(translation_tools)
+
         agent = Agent(
             goal="N/A",
             system_prompt="N/A",
             name=AGENT_NAME,
             model=new_chat_client(max_tokens=MAX_TOKENS_TO_SAMPLE),
-            tools=tools_registry.get_batch(translation_tools),
+            toolset=agents_toolset,
             http_client=self._http_client,
             workflow_id=self._workflow_id,
             workflow_type=CategoryEnum.WORKFLOW_CONVERT_TO_GITLAB_CI,
@@ -169,7 +171,7 @@ class Workflow(AbstractWorkflow):
 
         tools_executor = ToolsExecutor(
             tools_agent_name=AGENT_NAME,
-            agent_tools=tools_registry.get_handlers(translation_tools),
+            toolset=agents_toolset,
             workflow_id=self._workflow_id,
             workflow_type=CategoryEnum.WORKFLOW_CONVERT_TO_GITLAB_CI,
         )

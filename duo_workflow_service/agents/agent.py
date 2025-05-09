@@ -1,8 +1,7 @@
 from datetime import datetime, timezone
-from typing import Any, List, Type, Union
+from typing import Any, List, Union
 
 from anthropic import APIStatusError
-from langchain.tools import BaseTool
 from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.messages import (
     AIMessage,
@@ -11,7 +10,7 @@ from langchain_core.messages import (
     MessageLikeRepresentation,
     SystemMessage,
 )
-from pydantic import BaseModel
+from langchain_core.runnables import Runnable
 
 from duo_workflow_service.entities.event import WorkflowEvent, WorkflowEventType
 from duo_workflow_service.entities.state import (
@@ -37,16 +36,18 @@ from duo_workflow_service.structured_logging import _workflow_id
 from duo_workflow_service.token_counter.approximate_token_counter import (
     ApproximateTokenCounter,
 )
+from duo_workflow_service.tools import Toolset
 
 
 class Agent:
     name: str
 
-    _model: BaseChatModel
+    _model: Runnable
     _goal: str
     _system_prompt: str
     _workflow_id: str
     _http_client: GitlabHttpClient
+    _toolset: Toolset
 
     def __init__(
         self,
@@ -55,12 +56,12 @@ class Agent:
         model: BaseChatModel,
         name: str,
         system_prompt: str,
-        tools: list[Union[BaseTool, Type[BaseModel]]],
+        toolset: Toolset,
         workflow_id: str,
         http_client: GitlabHttpClient,
         workflow_type: CategoryEnum,
     ):
-        self._model = model.bind_tools(tools)  # type: ignore
+        self._model = model.bind_tools(toolset.bindable)
         self._goal = goal
         self._system_prompt = system_prompt
         self.name = name
@@ -68,6 +69,7 @@ class Agent:
         self._workflow_id = workflow_id
         self._http_client = http_client
         self._workflow_type = workflow_type
+        self._toolset = toolset
 
     async def run(self, state: DuoWorkflowStateType) -> dict:
         with duo_workflow_metrics.time_compute(

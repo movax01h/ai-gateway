@@ -16,6 +16,7 @@ from duo_workflow_service.entities.state import (
     WorkflowState,
     WorkflowStatusEnum,
 )
+from lib import Result, result
 
 
 class HumanApprovalComponentTestProxy(HumanApprovalComponent):
@@ -26,8 +27,13 @@ class HumanApprovalComponentTestProxy(HumanApprovalComponent):
     )
     _node_prefix: str = "test_approval"
 
-    def _approval_message(self, _state) -> str:
-        return "Test approval message"
+    def _build_approval_request(self, _state) -> Result[str, RuntimeError]:
+        return result.Ok("Test approval message")
+
+
+class HumanApprovalComponentSkipInterruptionTestProxy(HumanApprovalComponentTestProxy):
+    def _build_approval_request(self, state):
+        return result.Error(RuntimeError("Error building approval request"))
 
 
 def set_up_graph(
@@ -263,6 +269,38 @@ class TestHumanApprovalComponent:
 
             assert mock_entry_node.call_count == 2
             assert mock_check_executor.run.call_count == 2
+            mock_continuation_node.assert_called_once()
+            mock_termination_node.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_attach_with_skip_interruption(
+        self,
+        graph_config,
+        graph_input: WorkflowState,
+        mock_check_executor,
+        node_return_value,
+    ):
+
+        with patch(
+            "duo_workflow_service.components.human_approval.component.HumanApprovalCheckExecutor",
+            return_value=mock_check_executor,
+        ), patch.dict(os.environ, {"WORKFLOW_INTERRUPT": "True"}):
+            component = HumanApprovalComponentSkipInterruptionTestProxy(
+                workflow_id=graph_config["configurable"]["thread_id"],
+                approved_agent_name="test-agent",
+            )
+
+            graph, mock_entry_node, mock_continuation_node, mock_termination_node = (
+                set_up_graph(node_return_value, component)
+            )
+            # Run the graph
+            response = await graph.ainvoke(input=graph_input, config=graph_config)
+
+            assert "ui_chat_log" in response
+            assert len(response["ui_chat_log"]) == 0
+
+            mock_entry_node.assert_called_once()
+            mock_check_executor.run.assert_not_called()
             mock_continuation_node.assert_called_once()
             mock_termination_node.assert_not_called()
 
