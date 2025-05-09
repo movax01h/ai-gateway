@@ -309,8 +309,8 @@ If the `tests:performance` job fails due to permission issues, it might be cause
 
 If a bot created the merge request, verify whether the bot is managed by GitLab:
 
- 1. If you're unsure, ask in the `#it-help` channel whether the bot is managed by GitLab
- 1. If confirmed, post a message in the `#performance-enablement` channel requesting someone to add the bot to the [Component Performance Testing](https://gitlab.com/gitlab-org/quality/component-performance-testing-aigw-poc) project
+1. If you're unsure, ask in the `#it-help` channel whether the bot is managed by GitLab.
+1. If confirmed, post a message in the `#performance-enablement` channel requesting someone to add the bot to the [Component Performance Testing](https://gitlab.com/gitlab-org/quality/component-performance-testing-aigw-poc) project.
 
 #### Community contributions from forked repositories
 
@@ -320,9 +320,9 @@ Merge request [!2299](https://gitlab.com/gitlab-org/modelops/applied-ml/code-sug
 
 The `tests:performance` job is intended to run only on merge requests and in the `main` branch. If you observe it running in other scenarios:
 
- 1. Create a merge request to update the rules in the [CI configuration file](../.gitlab/ci/performance.gitlab-ci.yml).
- 1. Ensure your changes receive the required reviews.
- 1. Merge the approved changes into the main branch.
+1. Create a merge request to update the rules in the [CI configuration file](../.gitlab/ci/performance.gitlab-ci.yml).
+1. Ensure your changes receive the required reviews.
+1. Merge the approved changes into the main branch.
 
 ### Code-related failures
 
