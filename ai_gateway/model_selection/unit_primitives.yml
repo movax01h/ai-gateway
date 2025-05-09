@@ -96,9 +96,11 @@ configurable_unit_primitives:
   - feature_setting: "glab_ask_git_command"
     unit_primitives:
       - "glab_ask_git_command"
-    default_model: "claude_3_haiku_20240307"
+    default_model: "claude_3_5_haiku_20241022"
     selectable_models:
       - "claude_3_haiku_20240307"
+      - "claude_3_5_haiku_20241022"
+      - "claude_3_5_sonnet_20240620"
   - feature_setting: "duo_chat_troubleshoot_job"
     unit_primitives:
       - "troubleshoot_job"
