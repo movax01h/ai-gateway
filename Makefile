@@ -132,6 +132,11 @@ install-lint-deps:
 	@echo "Installing lint dependencies..."
 	@poetry install --only lint
 
+.PHONY: codespell
+codespell: install-lint-deps
+	@echo "Running codespell fix..."
+	@poetry run codespell -w
+
 .PHONY: black
 black: install-lint-deps
 	@echo "Running black format..."
@@ -143,13 +148,13 @@ isort: install-lint-deps
 	@poetry run isort ${LINT_WORKING_DIR}
 
 .PHONY: format
-format: black isort
+format: codespell black isort
 
 .PHONY: lint
 lint: lint-code lint-doc
 
 .PHONY: lint-code
-lint-code: flake8 check-black check-isort check-pylint check-mypy
+lint-code: flake8 check-black check-isort check-pylint check-mypy check-codespell
 
 .PHONY: lint-commit
 lint-commit:
@@ -185,6 +190,11 @@ else
 	@echo "Running mypy check..."
 	@poetry run mypy ${LINT_WORKING_DIR} ${MYPY_LINT_TODO_DIR} --exclude "scripts/vendor/*"
 endif
+
+.PHONY: check-codespell
+check-codespell: install-lint-deps
+	@echo "Running codespell check..."
+	@poetry run codespell
 
 .PHONY: install-test-deps
 install-test-deps:

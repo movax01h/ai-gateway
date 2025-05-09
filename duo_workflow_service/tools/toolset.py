@@ -21,7 +21,7 @@ class Toolset(collections.abc.Mapping):
 
         Args:
             pre_approved: A list of tool names that are pre-approved for use.
-            all_tools: A lists of all enabeled tools.
+            all_tools: A lists of all enabled tools.
         """
         self._all_tools = all_tools
         self._pre_approved = pre_approved

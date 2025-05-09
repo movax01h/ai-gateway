@@ -83,7 +83,7 @@ class TestGoalDisambiguationComponent:
                     "name": "request_user_clarification_tool",
                     "args": {
                         "recommendations": ["List issue links for bugs to fix"],
-                        "message": "I need to undestand which bug do you need to fix",
+                        "message": "I need to understand which bug do you need to fix",
                         "clarity_score": 2.1,
                         "clarity_verdict": "UNCLEAR",
                     },
@@ -219,7 +219,7 @@ class TestGoalDisambiguationComponent:
             mock_agent_class.return_value = mock_agent
             mock_agent.run.return_value = {
                 "conversation_history": {
-                    "clarity_judge": [AIMessage(content="All clear please procceed")]
+                    "clarity_judge": [AIMessage(content="All clear please proceed")]
                 },
             }
 
@@ -276,7 +276,7 @@ class TestGoalDisambiguationComponent:
             mock_agent_class.return_value = mock_agent
             mock_agent.run.return_value = {
                 "conversation_history": {
-                    "clarity_judge": [AIMessage(content="All clear please procceed")]
+                    "clarity_judge": [AIMessage(content="All clear please proceed")]
                 },
             }
 
@@ -310,7 +310,7 @@ class TestGoalDisambiguationComponent:
                 == response["conversation_history"][_AGENT_NAME][-1]
             )
             assert response["handover"][-1] == AIMessage(
-                content="All clear please procceed"
+                content="All clear please proceed"
             )
 
     @pytest.mark.asyncio
@@ -415,9 +415,7 @@ class TestGoalDisambiguationComponent:
                 },
                 {
                     "conversation_history": {
-                        "clarity_judge": [
-                            AIMessage(content="All clear please procceed")
-                        ]
+                        "clarity_judge": [AIMessage(content="All clear please proceed")]
                     },
                 },
             ]
@@ -450,7 +448,7 @@ class TestGoalDisambiguationComponent:
             assert len(response["ui_chat_log"]) == 2
             assert (
                 response["ui_chat_log"][0]["content"]
-                == "I need to undestand which bug do you need to fix\n\nI'm ready to help with your project but I need a few key details:\n\n1. List issue links for bugs to fix"
+                == "I need to understand which bug do you need to fix\n\nI'm ready to help with your project but I need a few key details:\n\n1. List issue links for bugs to fix"
             )
             assert response["ui_chat_log"][0]["message_type"] == MessageTypeEnum.REQUEST
             assert (
@@ -475,7 +473,7 @@ class TestGoalDisambiguationComponent:
                         "Answer all question within my feedback, and finally reevaluate clarity."
                     )
                 ),
-                AIMessage(content="All clear please procceed"),
+                AIMessage(content="All clear please proceed"),
             ]
             assert response["handover"][3:7] == except_handover
 
@@ -516,9 +514,7 @@ class TestGoalDisambiguationComponent:
                 },
                 {
                     "conversation_history": {
-                        "clarity_judge": [
-                            AIMessage(content="All clear please procceed")
-                        ]
+                        "clarity_judge": [AIMessage(content="All clear please proceed")]
                     },
                 },
             ]
@@ -551,7 +547,7 @@ class TestGoalDisambiguationComponent:
             assert len(response["ui_chat_log"]) == 2
             assert (
                 response["ui_chat_log"][0]["content"]
-                == "I need to undestand which bug do you need to fix\n\nI'm ready to help with your project but I need a few key details:\n\n1. List issue links for bugs to fix"
+                == "I need to understand which bug do you need to fix\n\nI'm ready to help with your project but I need a few key details:\n\n1. List issue links for bugs to fix"
             )
 
     @pytest.mark.asyncio
@@ -592,9 +588,7 @@ class TestGoalDisambiguationComponent:
                 },
                 {
                     "conversation_history": {
-                        "clarity_judge": [
-                            AIMessage(content="All clear please procceed")
-                        ]
+                        "clarity_judge": [AIMessage(content="All clear please proceed")]
                     },
                 },
             ]

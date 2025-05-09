@@ -96,7 +96,7 @@ AIGW_CLOUD_CONNECTOR_SERVICE_NAME="gitlab-ai-gateway"
 DUO_WORKFLOW_CLOUD_CONNECTOR_SERVICE_NAME="gitlab-duo-workflow-service"
 ```
 
-These environemnt variables are converted to `CLOUD_CONNECTOR_SERVICE_NAME` environment variable in the runtime.
+These environment variables are converted to `CLOUD_CONNECTOR_SERVICE_NAME` environment variable in the runtime.
 
 #### Bypass JWT verification for testing
 

@@ -170,6 +170,7 @@ async def test_gitlab_http_client_checkpoint_decoding(
     client,
     monkeypatch_execute_action,
 ):
+    # codespell:ignore-begin
     json_checkpoint = """
       {
         "id": 1,
@@ -268,6 +269,7 @@ async def test_gitlab_http_client_checkpoint_decoding(
         },
         "metadata": {},
     }
+    # codespell:ignore-end
     monkeypatch_execute_action.return_value = json_checkpoint
 
     result = await client.aget(

@@ -150,7 +150,7 @@ class SuggestionsResponse(BaseModel):
 
     id: str
     model: Model
-    # We no longer support experimentation. This is only for backward compatability.
+    # We no longer support experimentation. This is only for backward compatibility.
     experiments: list[str] = []
     object: str = "text_completion"
     created: int
