@@ -1,9 +1,25 @@
 from google.protobuf.internal import containers as _containers
+from google.protobuf.internal import enum_type_wrapper as _enum_type_wrapper
 from google.protobuf import descriptor as _descriptor
 from google.protobuf import message as _message
 from typing import ClassVar as _ClassVar, Iterable as _Iterable, Mapping as _Mapping, Optional as _Optional, Union as _Union
 
 DESCRIPTOR: _descriptor.FileDescriptor
+
+class ContextElementType(int, metaclass=_enum_type_wrapper.EnumTypeWrapper):
+    __slots__ = ()
+    USER_PREFERENCE: _ClassVar[ContextElementType]
+    SELECTED_TEXT: _ClassVar[ContextElementType]
+    FILE: _ClassVar[ContextElementType]
+    ISSUE: _ClassVar[ContextElementType]
+    MERGE_REQUEST: _ClassVar[ContextElementType]
+    PREVIOUS_WORKFLOW: _ClassVar[ContextElementType]
+USER_PREFERENCE: ContextElementType
+SELECTED_TEXT: ContextElementType
+FILE: ContextElementType
+ISSUE: ContextElementType
+MERGE_REQUEST: ContextElementType
+PREVIOUS_WORKFLOW: ContextElementType
 
 class ClientEvent(_message.Message):
     __slots__ = ("startRequest", "actionResponse")
@@ -14,20 +30,22 @@ class ClientEvent(_message.Message):
     def __init__(self, startRequest: _Optional[_Union[StartWorkflowRequest, _Mapping]] = ..., actionResponse: _Optional[_Union[ActionResponse, _Mapping]] = ...) -> None: ...
 
 class StartWorkflowRequest(_message.Message):
-    __slots__ = ("clientVersion", "workflowID", "workflowDefinition", "goal", "workflowMetadata", "clientCapabilities")
+    __slots__ = ("clientVersion", "workflowID", "workflowDefinition", "goal", "workflowMetadata", "clientCapabilities", "context")
     CLIENTVERSION_FIELD_NUMBER: _ClassVar[int]
     WORKFLOWID_FIELD_NUMBER: _ClassVar[int]
     WORKFLOWDEFINITION_FIELD_NUMBER: _ClassVar[int]
     GOAL_FIELD_NUMBER: _ClassVar[int]
     WORKFLOWMETADATA_FIELD_NUMBER: _ClassVar[int]
     CLIENTCAPABILITIES_FIELD_NUMBER: _ClassVar[int]
+    CONTEXT_FIELD_NUMBER: _ClassVar[int]
     clientVersion: str
     workflowID: str
     workflowDefinition: str
     goal: str
     workflowMetadata: str
     clientCapabilities: _containers.RepeatedScalarFieldContainer[str]
-    def __init__(self, clientVersion: _Optional[str] = ..., workflowID: _Optional[str] = ..., workflowDefinition: _Optional[str] = ..., goal: _Optional[str] = ..., workflowMetadata: _Optional[str] = ..., clientCapabilities: _Optional[_Iterable[str]] = ...) -> None: ...
+    context: _containers.RepeatedCompositeFieldContainer[ContextElement]
+    def __init__(self, clientVersion: _Optional[str] = ..., workflowID: _Optional[str] = ..., workflowDefinition: _Optional[str] = ..., goal: _Optional[str] = ..., workflowMetadata: _Optional[str] = ..., clientCapabilities: _Optional[_Iterable[str]] = ..., context: _Optional[_Iterable[_Union[ContextElement, _Mapping]]] = ...) -> None: ...
 
 class ActionResponse(_message.Message):
     __slots__ = ("requestID", "response")
@@ -38,7 +56,7 @@ class ActionResponse(_message.Message):
     def __init__(self, requestID: _Optional[str] = ..., response: _Optional[str] = ...) -> None: ...
 
 class Action(_message.Message):
-    __slots__ = ("requestID", "runCommand", "runHTTPRequest", "runReadFile", "runWriteFile", "runGitCommand", "runEditFile")
+    __slots__ = ("requestID", "runCommand", "runHTTPRequest", "runReadFile", "runWriteFile", "runGitCommand", "runEditFile", "newCheckpoint")
     REQUESTID_FIELD_NUMBER: _ClassVar[int]
     RUNCOMMAND_FIELD_NUMBER: _ClassVar[int]
     RUNHTTPREQUEST_FIELD_NUMBER: _ClassVar[int]
@@ -46,6 +64,7 @@ class Action(_message.Message):
     RUNWRITEFILE_FIELD_NUMBER: _ClassVar[int]
     RUNGITCOMMAND_FIELD_NUMBER: _ClassVar[int]
     RUNEDITFILE_FIELD_NUMBER: _ClassVar[int]
+    NEWCHECKPOINT_FIELD_NUMBER: _ClassVar[int]
     requestID: str
     runCommand: RunCommandAction
     runHTTPRequest: RunHTTPRequest
@@ -53,7 +72,8 @@ class Action(_message.Message):
     runWriteFile: WriteFile
     runGitCommand: RunGitCommand
     runEditFile: EditFile
-    def __init__(self, requestID: _Optional[str] = ..., runCommand: _Optional[_Union[RunCommandAction, _Mapping]] = ..., runHTTPRequest: _Optional[_Union[RunHTTPRequest, _Mapping]] = ..., runReadFile: _Optional[_Union[ReadFile, _Mapping]] = ..., runWriteFile: _Optional[_Union[WriteFile, _Mapping]] = ..., runGitCommand: _Optional[_Union[RunGitCommand, _Mapping]] = ..., runEditFile: _Optional[_Union[EditFile, _Mapping]] = ...) -> None: ...
+    newCheckpoint: NewCheckpoint
+    def __init__(self, requestID: _Optional[str] = ..., runCommand: _Optional[_Union[RunCommandAction, _Mapping]] = ..., runHTTPRequest: _Optional[_Union[RunHTTPRequest, _Mapping]] = ..., runReadFile: _Optional[_Union[ReadFile, _Mapping]] = ..., runWriteFile: _Optional[_Union[WriteFile, _Mapping]] = ..., runGitCommand: _Optional[_Union[RunGitCommand, _Mapping]] = ..., runEditFile: _Optional[_Union[EditFile, _Mapping]] = ..., newCheckpoint: _Optional[_Union[NewCheckpoint, _Mapping]] = ...) -> None: ...
 
 class RunCommandAction(_message.Message):
     __slots__ = ("program", "arguments", "flags")
@@ -120,3 +140,25 @@ class GenerateTokenResponse(_message.Message):
     token: str
     expiresAt: int
     def __init__(self, token: _Optional[str] = ..., expiresAt: _Optional[int] = ...) -> None: ...
+
+class ContextElement(_message.Message):
+    __slots__ = ("type", "name", "contents")
+    TYPE_FIELD_NUMBER: _ClassVar[int]
+    NAME_FIELD_NUMBER: _ClassVar[int]
+    CONTENTS_FIELD_NUMBER: _ClassVar[int]
+    type: ContextElementType
+    name: str
+    contents: str
+    def __init__(self, type: _Optional[_Union[ContextElementType, str]] = ..., name: _Optional[str] = ..., contents: _Optional[str] = ...) -> None: ...
+
+class NewCheckpoint(_message.Message):
+    __slots__ = ("status", "checkpoint", "goal", "errors")
+    STATUS_FIELD_NUMBER: _ClassVar[int]
+    CHECKPOINT_FIELD_NUMBER: _ClassVar[int]
+    GOAL_FIELD_NUMBER: _ClassVar[int]
+    ERRORS_FIELD_NUMBER: _ClassVar[int]
+    status: str
+    checkpoint: str
+    goal: str
+    errors: _containers.RepeatedScalarFieldContainer[str]
+    def __init__(self, status: _Optional[str] = ..., checkpoint: _Optional[str] = ..., goal: _Optional[str] = ..., errors: _Optional[_Iterable[str]] = ...) -> None: ...

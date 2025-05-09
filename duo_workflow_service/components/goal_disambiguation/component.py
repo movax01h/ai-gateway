@@ -61,6 +61,7 @@ class GoalDisambiguationComponent:
         goal: str,
         model: BaseChatModel,
         workflow_id: str,
+        allow_agent_to_request_user: bool,
         tools_registry: ToolsRegistry,
         http_client: GitlabHttpClient,
         workflow_type: CategoryEnum,
@@ -70,6 +71,9 @@ class GoalDisambiguationComponent:
         self._workflow_id = workflow_id
         self._http_client = http_client
         self._tools_registry = tools_registry
+        self._allow_agent_to_request_user = self._allowed_to_clarify(
+            allow_agent_to_request_user
+        )
         self._workflow_type = workflow_type
 
     # pylint: enable=too-many-positional-arguments
@@ -81,11 +85,7 @@ class GoalDisambiguationComponent:
         component_execution_state: WorkflowStatusEnum,
         graph_termination_node: str = END,
     ) -> Annotated[str, "Entry node name"]:
-        if os.environ.get("FEATURE_GOAL_DISAMBIGUATION", "False").lower() not in (
-            "true",
-            "1",
-            "t",
-        ) or os.getenv("USE_MEMSAVER"):
+        if not self._allow_agent_to_request_user:
             return component_exit_node
 
         task_clarity_judge = Agent(
@@ -93,7 +93,7 @@ class GoalDisambiguationComponent:
             system_prompt="N/A",
             name=_AGENT_NAME,
             model=self._model,
-            tools=self._tools_registry.get_batch(
+            toolset=self._tools_registry.toolset(
                 [RequestUserClarificationTool.tool_title]
             ),
             http_client=self._http_client,
@@ -145,6 +145,15 @@ class GoalDisambiguationComponent:
         graph.add_edge("task_clarity_handover", component_exit_node)
 
         return "task_clarity_build_prompt"
+
+    def _allowed_to_clarify(self, allow_agent_to_request_user: bool) -> bool:
+        return (
+            os.environ.get("FEATURE_GOAL_DISAMBIGUATION", "False").lower()
+            in ("true", "1", "t")
+            and os.environ.get("USE_MEMSAVER", "False").lower()
+            not in ("true", "1", "t")
+            and allow_agent_to_request_user
+        )
 
     async def _build_prompt(
         self, state: WorkflowState

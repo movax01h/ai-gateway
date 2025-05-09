@@ -105,7 +105,7 @@ class TestFindFiles:
 
         tool = FindFiles()
         name_pattern = "*.py"
-        result = await tool._arun(".", name_pattern)
+        result = await tool._arun(name_pattern)
 
         assert result == "file1.py\nfile2.py"
         mock_git_arun.assert_called_once_with(
@@ -122,7 +122,7 @@ class TestFindFiles:
 
         tool = FindFiles()
         name_pattern = "*.nonexistent"
-        result = await tool._arun(".", name_pattern)
+        result = await tool._arun(name_pattern)
 
         assert "No matches found for pattern '*.nonexistent'" in result
         mock_git_arun.assert_called_once_with(
@@ -139,7 +139,7 @@ class TestFindFiles:
 
         tool = FindFiles()
         name_pattern = "*.nonexistent"
-        result = await tool._arun(".", name_pattern)
+        result = await tool._arun(name_pattern)
 
         assert "No matches found for pattern '*.nonexistent'" in result
         mock_git_arun.assert_called_once_with(
@@ -171,8 +171,7 @@ class TestFindFiles:
 
         tool = FindFiles()
         name_pattern = "*.py"
-        result = await tool._arun(".", name_pattern, files_scope=files_scope)
-
+        result = await tool._arun(name_pattern, files_scope=files_scope)
         assert result == "file1.py\nfile2.py"
         mock_git_arun.assert_called_once_with(
             repository_url="",
@@ -406,49 +405,46 @@ def test_find_files_format_display_message():
     tool = FindFiles(description="Find files description")
 
     # Test with default parameters
-    input_data = FindFilesInput(directory=".", name_pattern="*.py")
+    input_data = FindFilesInput(name_pattern="*.py")
+
     message = tool.format_display_message(input_data)
-    expected_message = "Search files in '.' with pattern '*.py' (All files)"
+    expected_message = "Search files with pattern '*.py' (All files)"
     assert message == expected_message
 
     # Test with tracked_only
     input_data = FindFilesInput(
-        directory=".",
         name_pattern="*.py",
         files_scope=FilesScopeEnum.TRACKED,
     )
     message = tool.format_display_message(input_data)
-    expected_message = "Search files in '.' with pattern '*.py' (tracked only)"
+    expected_message = "Search files with pattern '*.py' (tracked only)"
     assert message == expected_message
 
     # Test with untracked_only
     input_data = FindFilesInput(
-        directory=".",
         name_pattern="*.py",
         files_scope=FilesScopeEnum.UNTRACKED,
     )
     message = tool.format_display_message(input_data)
-    expected_message = "Search files in '.' with pattern '*.py' (untracked only)"
+    expected_message = "Search files with pattern '*.py' (untracked only)"
     assert message == expected_message
 
     # Test with modified
     input_data = FindFilesInput(
-        directory=".",
         name_pattern="*.py",
         files_scope=FilesScopeEnum.MODIFIED,
     )
     message = tool.format_display_message(input_data)
-    expected_message = "Search files in '.' with pattern '*.py' (modified only)"
+    expected_message = "Search files with pattern '*.py' (modified only)"
     assert message == expected_message
 
     # Test with deleted
     input_data = FindFilesInput(
-        directory=".",
         name_pattern="*.py",
         files_scope=FilesScopeEnum.DELETED,
     )
     message = tool.format_display_message(input_data)
-    expected_message = "Search files in '.' with pattern '*.py' (deleted only)"
+    expected_message = "Search files with pattern '*.py' (deleted only)"
     assert message == expected_message
 
 

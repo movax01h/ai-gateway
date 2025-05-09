@@ -72,9 +72,11 @@ class FilesScopeEnum(IntEnum):
 
 
 class FindFilesInput(BaseModel):
-    directory: str = Field(description="Always pass .")
     name_pattern: str = Field(
-        description="The wildcard pattern to search for, e.g. '**/*.py' for all Python files."
+        description=(
+            "The pattern to search for files. IMPORTANT: This pattern is delimited by spaces before being passed to git."
+            "For complex patterns,you must handle proper escaping"
+        )
     )
     files_scope: Optional[FilesScopeEnum] = Field(
         default=FilesScopeEnum.ALL.value,
@@ -90,27 +92,18 @@ class FindFilesInput(BaseModel):
 
 class FindFiles(DuoBaseTool):
     name: str = "find_files"
-    description: str = """Find files matching a specific pattern in the repository.
+    description: str = """Find files matching a specific pattern in the repository
 
-    IMPORTANT: By default, this tool uses git ls-files to find both tracked and untracked files
-    This tools always passes `--exclude-standard` flag to git ls-files, thus does not have access
-    to files ignored by git.
-
-    Examples:
-    - Find all Python files (both tracked and untracked) recursively: find_files(name_pattern="**/*.py")
-    - Find a specific file with path (whether tracked or not): find_files(name_pattern="path/to/file.txt")
-    - Find only tracked Python files in current directory: find_files(name_pattern="*.py", files_scope=1)
-    - Find only untracked Python files: find_files(name_pattern="*.py", files_scope=2)
-    - Find only modified Python files: find_files(name_pattern="*.py", files_scope=3)
-    - Find only deleted Python files: find_files(name_pattern="*.py", files_scope=4)
+    IMPORTANT: This tool uses git ls-files to recursively find files.
+        - The `name_pattern` is delimited by spaces before being passed to git (similar to shell word splitting)
+        - Patterns with spaces need proper escaping or quoting
+        - The tool always passes `--exclude-standard` flag, so files ignored by git won't be found
+        - By default, both tracked and untracked files are included unless you specify otherwise via `files_scope`
     """
     args_schema: Type[BaseModel] = FindFilesInput  # type: ignore
 
     async def _arun(
-        self,
-        directory: str,
-        name_pattern: str,
-        files_scope: FilesScopeEnum = FilesScopeEnum.ALL,
+        self, name_pattern: str, files_scope: FilesScopeEnum = FilesScopeEnum.ALL
     ) -> str:
         run_git_command = GitCommand(metadata=self.metadata)
 
@@ -144,7 +137,7 @@ class FindFiles(DuoBaseTool):
         )
 
         if not result or result.isspace():
-            return _format_no_matches_message(name_pattern, directory)
+            return _format_no_matches_message(name_pattern)
 
         return result
 
@@ -166,7 +159,7 @@ class FindFiles(DuoBaseTool):
             case FilesScopeEnum.DELETED:
                 mode = " (deleted only)"
 
-        return f"Search files in '{args.directory}' with pattern '{args.name_pattern}'{mode}"
+        return f"Search files with pattern '{args.name_pattern}'{mode}"
 
 
 class LsFilesInput(BaseModel):

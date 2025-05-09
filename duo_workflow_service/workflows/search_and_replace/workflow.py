@@ -435,12 +435,14 @@ class Workflow(AbstractWorkflow):
         accessibility_tools = [
             "edit_file",
         ]
+        agents_toolset = tools_registry.toolset(accessibility_tools)
+
         agent = Agent(
             goal="N/A",  # "Not used, Agent always gets prepared messages from previous steps",
             system_prompt="N/A",
             name=AGENT_NAME,
             model=new_chat_client(max_tokens=MAX_TOKENS_TO_SAMPLE),
-            tools=tools_registry.get_batch(accessibility_tools),
+            toolset=agents_toolset,
             http_client=self._http_client,
             workflow_id=self._workflow_id,
             workflow_type=self._workflow_type,
@@ -460,7 +462,7 @@ class Workflow(AbstractWorkflow):
         )
         apply_patch = ToolsExecutor(
             tools_agent_name=AGENT_NAME,
-            agent_tools=tools_registry.get_handlers(accessibility_tools),
+            toolset=agents_toolset,
             workflow_id=self._workflow_id,
             workflow_type=self._workflow_type,
         ).run

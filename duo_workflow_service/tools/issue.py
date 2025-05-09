@@ -153,10 +153,10 @@ class CreateIssue(IssueBaseTool):
 class ListIssuesInput(ProjectResourceInput):
     assignee_id: Optional[int] = Field(
         default=None,
-        description="""Return issues assigned to the given user ID. It can't be used together with assignee_username.
+        description="""Return issues assigned to the given user ID. It can't be used together with assignee_usernames.
                               None returns unassigned issues. Any returns issues with an assignee.""",
     )
-    assignee_username: Optional[List[str]] = Field(
+    assignee_usernames: Optional[List[str]] = Field(
         default=None,
         description="""Return issues assigned to the given username. This works like assignee_id but can't be used together with it. In GitLab CE,
                         assignee_username can only have one value. If there's more than one, an error will be returned.""",

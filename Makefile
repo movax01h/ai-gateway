@@ -62,7 +62,7 @@ else
 endif
 
 .PHONY: gen-proto
-gen-proto: gen-proto-python gen-proto-go gen-proto-ruby
+gen-proto: gen-proto-python gen-proto-go gen-proto-ruby gen-proto-node
 
 .PHONY: gen-proto-python
 gen-proto-python: install-test-deps
@@ -91,8 +91,20 @@ gen-proto-go-install:
 	go install google.golang.org/protobuf/cmd/protoc-gen-go@$(PROTOC_GEN_GO_VERSION)
 	go install google.golang.org/grpc/cmd/protoc-gen-go-grpc@$(PROTOC_GEN_GO_GRPC_VERSION)
 
+.PHONY: gen-proto-node
+gen-proto-node: bin/protoc
+	(cd clients/node; npm install)
+	(cd clients/node; npm run before_generate)
+	bin/protoc --plugin=protoc-gen-ts_proto=./clients/node/node_modules/.bin/protoc-gen-ts_proto \
+		--proto_path=./contract \
+		--ts_proto_out=clients/node/src/grpc \
+		--ts_proto_opt=env=node,useAbortSignal=true,esModuleInterop=true,outputServices=grpc-js \
+		./contract/contract.proto
+		@echo "Building Node client after generating proto files..."
+		@(cd clients/node; npx tsc)
+		@(cd clients/node; npm run after_generate)
+
 tmp/protoc-${PROTOC_VERSION}/bin/protoc:
-	mkdir -p tmp bin
 	wget https://github.com/protocolbuffers/protobuf/releases/download/v$(PROTOC_VERSION)/protoc-$(PROTOC_VERSION)-$(OS)-$(ARCH).zip -O tmp/protoc-$(PROTOC_VERSION)-$(OS)-$(ARCH).zip
 	unzip tmp/protoc-${PROTOC_VERSION}-$(OS)-$(ARCH).zip "bin/protoc" -d tmp/protoc-${PROTOC_VERSION}
 
@@ -162,7 +174,7 @@ check-isort: install-lint-deps
 .PHONY: check-pylint
 check-pylint: install-lint-deps
 	@echo "Running pylint check..."
-	@poetry run pylint ${LINT_WORKING_DIR} --ignore=vendor --ignore-paths=$(TESTS_DIR)/duo_workflow_service
+	@poetry run pylint ${LINT_WORKING_DIR} --ignore=vendor --ignore-paths=$(TESTS_DIR)/duo_workflow_service,$(TESTS_DIR)/lib
 
 .PHONY: check-mypy
 check-mypy: install-lint-deps

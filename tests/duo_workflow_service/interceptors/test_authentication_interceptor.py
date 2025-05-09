@@ -24,7 +24,6 @@ def handler_call_details():
         ("x-gitlab-realm", "test-realm"),
         ("x-gitlab-instance-id", "test-instance-id"),
         ("x-gitlab-global-user-id", "test-global-user-id"),
-        ("x-gitlab-duo-seat-count", "111"),
     )
     return mock_details
 

@@ -13,7 +13,13 @@ from duo_workflow_service.entities import (
 )
 from duo_workflow_service.entities.state import ChatWorkflowState
 from duo_workflow_service.internal_events.event_enum import CategoryEnum
-from duo_workflow_service.workflows.chat.workflow import AGENT_NAME, Routes, Workflow
+from duo_workflow_service.workflows.chat.workflow import (
+    AGENT_NAME,
+    CHAT_MUTATION_TOOLS,
+    CHAT_READ_ONLY_TOOLS,
+    Routes,
+    Workflow,
+)
 
 
 @pytest.fixture
@@ -211,7 +217,11 @@ def test_append_goal_with_existing_goal(workflow_with_project):
 @patch(
     "duo_workflow_service.workflows.abstract_workflow.fetch_project_data_with_workflow_id"
 )
+@patch(
+    "duo_workflow_service.workflows.abstract_workflow.fetch_workflow_config",
+)
 async def test_workflow_run(
+    mock_fetch_workflow_config,
     mock_fetch_project_data,
     mock_gitlab_workflow,
     mock_tools_registry,
@@ -255,3 +265,41 @@ async def test_workflow_run(
         await workflow.run("Test chat goal")
 
         assert workflow.is_done
+
+
+@pytest.mark.parametrize(
+    "feature_flag_value, expected_tools",
+    [
+        ("duo_workflow_chat_mutation_tools", CHAT_MUTATION_TOOLS),
+        ("", CHAT_READ_ONLY_TOOLS),
+    ],
+)
+@patch("duo_workflow_service.workflows.chat.workflow.current_feature_flag_context")
+@patch("duo_workflow_service.components.tools_registry.ToolsRegistry.toolset")
+def test_tools_registry_interaction(
+    mock_toolset, mock_feature_flag_context, feature_flag_value, expected_tools
+):
+    mock_feature_flag_context.get.return_value = (
+        [feature_flag_value] if feature_flag_value else []
+    )
+
+    mock_toolset.return_value = [Mock(name=f"mock_{tool}") for tool in expected_tools]
+
+    workflow = Workflow(
+        workflow_id="test-id",
+        workflow_metadata={},
+        workflow_type=CategoryEnum.WORKFLOW_CHAT,
+    )
+    tools_registry = MagicMock(spec=ToolsRegistry)
+    checkpointer = MagicMock()
+
+    with patch("duo_workflow_service.workflows.chat.workflow.new_chat_client"):
+        workflow._compile("Test goal", tools_registry, checkpointer)
+
+    assert tools_registry.toolset.called
+
+    args, _ = tools_registry.toolset.call_args
+    tools_passed_to_get_batch = args[0]
+
+    for tool in expected_tools:
+        assert tool in tools_passed_to_get_batch

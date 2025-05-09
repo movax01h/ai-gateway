@@ -25,6 +25,7 @@ from duo_workflow_service.agents import (
     ToolsExecutor,
 )
 from duo_workflow_service.agents.prompts import (
+    BATCH_PLANNER_GOAL,
     BUILD_CONTEXT_SYSTEM_MESSAGE,
     EXECUTOR_SYSTEM_MESSAGE,
     HANDOVER_TOOL_NAME,
@@ -191,6 +192,7 @@ class Workflow(AbstractWorkflow):
     def _setup_executor(
         self, goal: str, tools_registry: ToolsRegistry, base_model_executor
     ):
+        executors_toolset = tools_registry.toolset(EXECUTOR_TOOLS)
         executor = Agent(
             goal=goal,
             model=base_model_executor,
@@ -203,7 +205,7 @@ class Workflow(AbstractWorkflow):
                 project_name=self._project["name"],
                 project_url=self._project["http_url_to_repo"],
             ),
-            tools=tools_registry.get_batch(EXECUTOR_TOOLS),
+            toolset=executors_toolset,
             workflow_id=self._workflow_id,
             http_client=self._http_client,
             workflow_type=self._workflow_type,
@@ -211,7 +213,7 @@ class Workflow(AbstractWorkflow):
 
         return {
             "agent": executor,
-            "tools": EXECUTOR_TOOLS,
+            "toolset": executors_toolset,
             "supervisor": PlanSupervisorAgent(supervised_agent_name=executor.name),
             "handover": HandoverAgent(
                 new_status=WorkflowStatusEnum.COMPLETED,
@@ -220,7 +222,7 @@ class Workflow(AbstractWorkflow):
             ),
             "tools_executor": ToolsExecutor(
                 tools_agent_name="executor",
-                agent_tools=tools_registry.get_handlers(EXECUTOR_TOOLS),
+                toolset=executors_toolset,
                 workflow_id=self._workflow_id,
                 workflow_type=self._workflow_type,
             ),
@@ -231,44 +233,77 @@ class Workflow(AbstractWorkflow):
         goal: str,
         tools_registry: ToolsRegistry,
         base_model_planner,
-        executor_tools,
+        executor_toolset,
     ):
-        planner = Agent(
-            goal=PLANNER_GOAL.format(
-                executor_agent_prompt=EXECUTOR_SYSTEM_MESSAGE,
-                handover_tool_name=HANDOVER_TOOL_NAME,
-                executor_agent_tools="\n".join(
-                    [
-                        f"{t.name}: {t.description}"
-                        for t in tools_registry.get_handlers(executor_tools)
-                    ]
+        available_feature_flags = current_feature_flag_context.get()
+        if "batch_duo_workflow_planner_tasks" in available_feature_flags:
+            planner_tools = PLANNER_TOOLS + ["create_plan"]
+            planner_toolset = tools_registry.toolset(planner_tools)
+            planner = Agent(
+                goal=BATCH_PLANNER_GOAL.format(
+                    executor_agent_prompt=EXECUTOR_SYSTEM_MESSAGE,
+                    handover_tool_name=HANDOVER_TOOL_NAME,
+                    executor_agent_tools="\n".join(
+                        [
+                            f"{tool_name}: {tool.description}"
+                            for tool_name, tool in executor_toolset.items()
+                        ]
+                    ),
+                    goal=goal,
+                    create_plan_tool_name=tools_registry.get("create_plan").name,  # type: ignore
+                    get_plan_tool_name=tools_registry.get("get_plan").name,  # type: ignore
+                    add_new_task_tool_name=tools_registry.get("add_new_task").name,  # type: ignore
+                    remove_task_tool_name=tools_registry.get("remove_task").name,  # type: ignore
+                    update_task_description_tool_name=tools_registry.get("update_task_description").name,  # type: ignore
+                    planner_instructions=self.planner_instructions(tools_registry),
                 ),
-                goal=goal,
-                get_plan_tool_name=tools_registry.get("get_plan").name,  # type: ignore
-                add_new_task_tool_name=tools_registry.get("add_new_task").name,  # type: ignore
-                remove_task_tool_name=tools_registry.get("remove_task").name,  # type: ignore
-                update_task_description_tool_name=tools_registry.get("update_task_description").name,  # type: ignore
-                project_id=self._project["id"],
-                project_name=self._project["name"],
-                project_url=self._project["http_url_to_repo"],
-                planner_instructions=self.planner_instructions(tools_registry),
-            ),
-            model=base_model_planner,
-            name="planner",
-            workflow_id=self._workflow_id,
-            http_client=self._http_client,
-            system_prompt=PLANNER_PROMPT,
-            tools=tools_registry.get_batch(PLANNER_TOOLS),
-            workflow_type=self._workflow_type,
-        )
+                model=base_model_planner,
+                name="planner",
+                workflow_id=self._workflow_id,
+                http_client=self._http_client,
+                system_prompt=PLANNER_PROMPT,
+                toolset=planner_toolset,
+                workflow_type=self._workflow_type,
+            )
+        else:
+            planner_tools = PLANNER_TOOLS
+            planner_toolset = tools_registry.toolset(PLANNER_TOOLS)
+            planner = Agent(
+                goal=PLANNER_GOAL.format(
+                    executor_agent_prompt=EXECUTOR_SYSTEM_MESSAGE,
+                    handover_tool_name=HANDOVER_TOOL_NAME,
+                    executor_agent_tools="\n".join(
+                        [
+                            f"{tool_name}: {tool.description}"
+                            for tool_name, tool in executor_toolset.items()
+                        ]
+                    ),
+                    goal=goal,
+                    get_plan_tool_name=tools_registry.get("get_plan").name,  # type: ignore
+                    add_new_task_tool_name=tools_registry.get("add_new_task").name,  # type: ignore
+                    remove_task_tool_name=tools_registry.get("remove_task").name,  # type: ignore
+                    update_task_description_tool_name=tools_registry.get("update_task_description").name,  # type: ignore
+                    project_id=self._project["id"],
+                    project_name=self._project["name"],
+                    project_url=self._project["http_url_to_repo"],
+                    planner_instructions=self.planner_instructions(tools_registry),
+                ),
+                model=base_model_planner,
+                name="planner",
+                workflow_id=self._workflow_id,
+                http_client=self._http_client,
+                system_prompt=PLANNER_PROMPT,
+                toolset=planner_toolset,
+                workflow_type=self._workflow_type,
+            )
 
         return {
             "agent": planner,
-            "tools": PLANNER_TOOLS,
+            "toolset": planner_toolset,
             "supervisor": PlanSupervisorAgent(supervised_agent_name="planner"),
             "tools_executor": ToolsExecutor(
                 tools_agent_name="planner",
-                agent_tools=[],
+                toolset=planner_toolset,
                 workflow_id=self._workflow_id,
                 workflow_type=self._workflow_type,
             ),
@@ -292,6 +327,9 @@ class Workflow(AbstractWorkflow):
             http_client=self._http_client,
             workflow_id=self._workflow_id,
             tools_registry=tools_registry,
+            allow_agent_to_request_user=self._workflow_config.get(
+                "allow_agent_to_request_user", False
+            ),
             workflow_type=self._workflow_type,
         )
         disambiguation_entry_node = disambiguation_component.attach(
@@ -356,7 +394,7 @@ class Workflow(AbstractWorkflow):
         execution_approval_component = ToolsApprovalComponent(
             workflow_id=self._workflow_id,
             approved_agent_name=executor_components["agent"].name,
-            tools_registry=tools_registry,
+            toolset=executor_components["toolset"],
         )
 
         execution_approval_entry_node = execution_approval_component.attach(
@@ -397,7 +435,7 @@ class Workflow(AbstractWorkflow):
             goal, tools_registry, base_model_executor
         )
         planner_components = self._setup_planner(
-            goal, tools_registry, base_model_planner, executor_components["tools"]
+            goal, tools_registry, base_model_planner, executor_components["toolset"]
         )
 
         graph = self._setup_workflow_graph(
@@ -451,22 +489,29 @@ class Workflow(AbstractWorkflow):
 
     def planner_instructions(self, tools_registry):
         available_feature_flags = current_feature_flag_context.get()
-        self.log.info("Available feature flags: %s", available_feature_flags)
         if "batch_duo_workflow_planner_tasks" in available_feature_flags:
             self.log.info("Using batched planner")
             return PLANNER_TASK_BATCH_INSTRUCTIONS.format(
+                create_plan_tool_name=tools_registry.get("create_plan").name,  # type: ignore
                 add_new_task_tool_name=tools_registry.get("add_new_task").name,  # type: ignore
                 remove_task_tool_name=tools_registry.get("remove_task").name,  # type: ignore
                 update_task_description_tool_name=tools_registry.get("update_task_description").name,  # type: ignore
+                get_plan_tool_name=tools_registry.get("get_plan").name,  # type: ignore
                 handover_tool_name=HANDOVER_TOOL_NAME,
+                project_id=self._project["id"],
+                project_name=self._project["name"],
+                project_url=self._project["http_url_to_repo"],
             )
 
-        self.log.info("Using regular planner")
         return PLANNER_INSTRUCTIONS.format(
             add_new_task_tool_name=tools_registry.get("add_new_task").name,  # type: ignore
             remove_task_tool_name=tools_registry.get("remove_task").name,  # type: ignore
             update_task_description_tool_name=tools_registry.get("update_task_description").name,  # type: ignore
+            get_plan_tool_name=tools_registry.get("get_plan").name,  # type: ignore
             handover_tool_name=HANDOVER_TOOL_NAME,
+            project_id=self._project["id"],
+            project_name=self._project["name"],
+            project_url=self._project["http_url_to_repo"],
         )
 
     def _setup_context_builder(
@@ -474,6 +519,7 @@ class Workflow(AbstractWorkflow):
         goal: str,
         tools_registry: ToolsRegistry,
     ):
+        context_builder_toolset = tools_registry.toolset(CONTEXT_BUILDER_TOOLS)
         context_builder = Agent(
             goal=goal,
             model=new_chat_client(max_tokens=MAX_TOKENS_TO_SAMPLE),  # type: ignore
@@ -484,7 +530,7 @@ class Workflow(AbstractWorkflow):
                 project_name=self._project["name"],
                 project_url=self._project["http_url_to_repo"],
             ),
-            tools=tools_registry.get_batch(CONTEXT_BUILDER_TOOLS),
+            toolset=context_builder_toolset,
             workflow_id=self._workflow_id,
             http_client=self._http_client,
             workflow_type=self._workflow_type,
@@ -492,7 +538,7 @@ class Workflow(AbstractWorkflow):
 
         return {
             "agent": context_builder,
-            "tools": CONTEXT_BUILDER_TOOLS,
+            "toolset": context_builder_toolset,
             "handover": HandoverAgent(
                 new_status=WorkflowStatusEnum.PLANNING,
                 handover_from=context_builder.name,
@@ -501,7 +547,7 @@ class Workflow(AbstractWorkflow):
             "supervisor": PlanSupervisorAgent(supervised_agent_name="context_builder"),
             "tools_executor": ToolsExecutor(
                 tools_agent_name=context_builder.name,
-                agent_tools=tools_registry.get_handlers(CONTEXT_BUILDER_TOOLS),
+                toolset=context_builder_toolset,
                 workflow_id=self._workflow_id,
                 workflow_type=self._workflow_type,
             ),
@@ -526,7 +572,7 @@ class Workflow(AbstractWorkflow):
         context_builder_approval_component = ToolsApprovalComponent(
             workflow_id=self._workflow_id,
             approved_agent_name="context_builder",
-            tools_registry=tools_registry,
+            toolset=context_builder_components["toolset"],
         )
 
         context_builder_approval_entry_node = context_builder_approval_component.attach(

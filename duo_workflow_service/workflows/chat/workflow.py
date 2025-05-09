@@ -22,6 +22,9 @@ from duo_workflow_service.entities.state import (
     WorkflowStatusEnum,
 )
 from duo_workflow_service.gitlab.events import get_event
+from duo_workflow_service.interceptors.feature_flag_interceptor import (
+    current_feature_flag_context,
+)
 from duo_workflow_service.llm_factory import new_chat_client
 from duo_workflow_service.tracking.errors import log_exception
 from duo_workflow_service.workflows.abstract_workflow import AbstractWorkflow
@@ -39,6 +42,44 @@ class Routes(StrEnum):
     SHOW_AGENT_MESSAGE = "show_agent_message"
     TOOL_USE = "tool_use"
     STOP = "stop"
+
+
+CHAT_READ_ONLY_TOOLS = [
+    "list_issues",
+    "get_issue",
+    "list_issue_notes",
+    "get_issue_note",
+    "get_job_logs",
+    "get_merge_request",
+    "get_pipeline_errors",
+    "get_project",
+    "run_read_only_git_command",
+    "list_all_merge_request_notes",
+    "list_merge_request_diffs",
+    "gitlab_issue_search",
+    "gitlab_merge_request_search",
+    "read_file",
+    "ls_files",
+    "find_files",
+    "grep_files",
+    "get_epic",
+    "list_epics",
+    "scan_directory_tree",
+]
+
+
+CHAT_MUTATION_TOOLS = [
+    "create_issue",
+    "update_issue",
+    "create_issue_note",
+    "create_merge_request_note",
+    "create_merge_request",
+    "create_file_with_contents",
+    "edit_file",
+    "mkdir",
+    "create_epic",
+    "update_epic",
+]
 
 
 class Workflow(AbstractWorkflow):
@@ -159,38 +200,15 @@ class Workflow(AbstractWorkflow):
 
         self._goal = goal
         graph = StateGraph(ChatWorkflowState)
-        tools = [
-            "list_issues",
-            "get_issue",
-            "list_issue_notes",
-            "get_issue_note",
-            "get_job_logs",
-            "get_merge_request",
-            "get_pipeline_errors",
-            "get_project",
-            "run_read_only_git_command",
-            "run_git_command",
-            "list_all_merge_request_notes",
-            "list_merge_request_diffs",
-            "gitlab_issue_search",
-            "gitlab_merge_request_search",
-            "read_file",
-            "ls_files",
-            "edit_file",
-            "find_files",
-            "grep_files",
-            "mkdir",
-            "get_epic",
-            "list_epics",
-            "scan_directory_tree",
-        ]
+        tools = self._get_tools()
+        agents_toolset = tools_registry.toolset(tools)
 
         agent = Agent(
             goal="",
             system_prompt="",
             name=AGENT_NAME,
             model=new_chat_client(max_tokens=MAX_TOKENS_TO_SAMPLE),
-            tools=tools_registry.get_batch(tools),
+            toolset=agents_toolset,
             workflow_id=self._workflow_id,
             http_client=self._http_client,
             workflow_type=self._workflow_type,
@@ -198,7 +216,7 @@ class Workflow(AbstractWorkflow):
 
         tools_runner = ToolsExecutor(
             tools_agent_name=AGENT_NAME,
-            agent_tools=tools_registry.get_handlers(tools),
+            toolset=agents_toolset,
             workflow_id=self._workflow_id,
             workflow_type=self._workflow_type,
         ).run
@@ -243,6 +261,14 @@ class Workflow(AbstractWorkflow):
                     log["message_type"],
                     log["content"],
                 )
+
+    def _get_tools(self):
+        available_tools = CHAT_READ_ONLY_TOOLS
+        feature_flags = current_feature_flag_context.get()
+        if "duo_workflow_chat_mutation_tools" in feature_flags:
+            available_tools = CHAT_READ_ONLY_TOOLS + CHAT_MUTATION_TOOLS
+
+        return available_tools
 
     async def _handle_workflow_failure(
         self, error: BaseException, compiled_graph: Any, graph_config: Any

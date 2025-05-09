@@ -119,6 +119,44 @@ class TestGoalDisambiguationComponent:
             component = GoalDisambiguationComponent(
                 goal="fix that bug",
                 workflow_id=graph_config["configurable"]["thread_id"],
+                allow_agent_to_request_user=True,
+                model=chat_mock,
+                tools_registry=tools_registry_mock,
+                http_client=mock_http_client,
+                workflow_type=CategoryEnum.WORKFLOW_SOFTWARE_DEVELOPMENT,
+            )
+            entry_point = component.attach(
+                graph=graph,
+                component_exit_node="test_node",
+                component_execution_state=WorkflowStatusEnum.PLANNING,
+                graph_termination_node=END,
+            )
+
+            assert (
+                entry_point == "test_node"
+            ), "Then disambiguation component should be skipped"
+
+    @pytest.mark.asyncio
+    @patch.dict(os.environ, {"FEATURE_GOAL_DISAMBIGUATION": "True"})
+    async def test_attach_without_allow_agent_to_request_user(
+        self,
+        chat_mock: BaseChatModel,
+        tools_registry_mock: ToolsRegistry,
+        mock_http_client: GitlabHttpClient,
+        graph_config: RunnableConfig,
+    ):
+        graph = StateGraph(WorkflowState)
+
+        with patch(
+            "duo_workflow_service.components.goal_disambiguation.component.Agent"
+        ) as mock_agent_class:
+            mock_agent = MagicMock(spec=Agent)
+            mock_agent_class.return_value = mock_agent
+
+            component = GoalDisambiguationComponent(
+                goal="fix that bug",
+                workflow_id=graph_config["configurable"]["thread_id"],
+                allow_agent_to_request_user=False,
                 model=chat_mock,
                 tools_registry=tools_registry_mock,
                 http_client=mock_http_client,
@@ -188,6 +226,7 @@ class TestGoalDisambiguationComponent:
             component = GoalDisambiguationComponent(
                 goal=goal,
                 workflow_id=graph_config["configurable"]["thread_id"],  # etype:ignore
+                allow_agent_to_request_user=True,
                 model=chat_mock,
                 tools_registry=tools_registry_mock,
                 http_client=mock_http_client,
@@ -244,6 +283,7 @@ class TestGoalDisambiguationComponent:
             component = GoalDisambiguationComponent(
                 goal="Fix all the bugs",
                 workflow_id=graph_config["configurable"]["thread_id"],
+                allow_agent_to_request_user=True,
                 model=chat_mock,
                 tools_registry=tools_registry_mock,
                 http_client=mock_http_client,
@@ -312,6 +352,7 @@ class TestGoalDisambiguationComponent:
             component = GoalDisambiguationComponent(
                 goal="Fix bug in pipeline configuration",
                 workflow_id=graph_config["configurable"]["thread_id"],
+                allow_agent_to_request_user=True,
                 model=chat_mock,
                 tools_registry=tools_registry_mock,
                 http_client=mock_http_client,
@@ -384,6 +425,7 @@ class TestGoalDisambiguationComponent:
             component = GoalDisambiguationComponent(
                 goal="Fix all the bugs",
                 workflow_id=graph_config["configurable"]["thread_id"],
+                allow_agent_to_request_user=True,
                 model=chat_mock,
                 tools_registry=tools_registry_mock,
                 http_client=mock_http_client,
@@ -484,6 +526,7 @@ class TestGoalDisambiguationComponent:
             component = GoalDisambiguationComponent(
                 goal="Fix all the bugs",
                 workflow_id=graph_config["configurable"]["thread_id"],
+                allow_agent_to_request_user=True,
                 model=chat_mock,
                 tools_registry=tools_registry_mock,
                 http_client=mock_http_client,
@@ -559,6 +602,7 @@ class TestGoalDisambiguationComponent:
             component = GoalDisambiguationComponent(
                 goal="Fix all the bugs",
                 workflow_id=graph_config["configurable"]["thread_id"],
+                allow_agent_to_request_user=True,
                 model=chat_mock,
                 tools_registry=tools_registry_mock,
                 http_client=mock_http_client,
@@ -611,6 +655,7 @@ class TestGoalDisambiguationComponent:
             component = GoalDisambiguationComponent(
                 goal="Fix bug in pipeline configuration",
                 workflow_id=graph_config["configurable"]["thread_id"],
+                allow_agent_to_request_user=True,
                 model=chat_mock,
                 tools_registry=tools_registry_mock,
                 http_client=mock_http_client,
@@ -658,6 +703,7 @@ class TestGoalDisambiguationComponent:
             component = GoalDisambiguationComponent(
                 goal="Fix bug in pipeline configuration",
                 workflow_id=graph_config["configurable"]["thread_id"],
+                allow_agent_to_request_user=True,
                 model=chat_mock,
                 tools_registry=tools_registry_mock,
                 http_client=mock_http_client,

@@ -215,12 +215,11 @@ async def test_workflow_compilation(
         goal="N/A",
         system_prompt="N/A",
         name="ci_pipelines_manager_agent",
-        tools=mock_tools_registry.get_batch.return_value,
+        toolset=mock_tools_registry.toolset.return_value,
         model=mock_new_chat_client.return_value,
         workflow_id="test_id",
         http_client=workflow._http_client,
         workflow_type=CategoryEnum.WORKFLOW_CONVERT_TO_GITLAB_CI.value,
     )
     mock_tools_registry.get.assert_called()  # Should call get() for tools
-    mock_tools_registry.get_batch.assert_called_once()  # Should get batch of tools for agent
-    mock_tools_registry.get_handlers.assert_called_once()  # Should get handlers for executor
+    mock_tools_registry.toolset.assert_called()

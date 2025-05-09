@@ -22,6 +22,7 @@ from duo_workflow_service.entities.state import (
     WorkflowStatusEnum,
 )
 from duo_workflow_service.tools.duo_base_tool import DuoBaseTool
+from duo_workflow_service.tools.toolset import Toolset, UnknownToolError
 
 
 def set_up_graph(
@@ -79,19 +80,19 @@ class TestToolsApprovalComponent:
         return mock
 
     @pytest.fixture
-    def mock_tools_registry(self, mock_tool):
-        mock = MagicMock(ToolsRegistry)
-        mock.get_batch.return_value = [mock_tool]
-        mock.get.return_value = mock_tool
-        mock.approval_required.return_value = False
+    def mock_toolset(self, mock_tool):
+        mock = MagicMock(spec=Toolset)
+        mock.bindable = []
+        mock.__getitem__.return_value = mock_tool
+        mock.approved.return_value = True
         return mock
 
     @pytest.fixture
-    def component(self, graph_config, mock_tools_registry):
+    def component(self, graph_config, mock_toolset):
         return ToolsApprovalComponent(
             workflow_id=graph_config["configurable"]["thread_id"],
             approved_agent_name="test-agent",
-            tools_registry=mock_tools_registry,
+            toolset=mock_toolset,
         )
 
     @pytest.mark.asyncio
@@ -101,7 +102,7 @@ class TestToolsApprovalComponent:
         graph_config,
         graph_input: WorkflowState,
         mock_tool,
-        mock_tools_registry,
+        mock_toolset,
         mock_check_executor,
     ):
 
@@ -124,7 +125,7 @@ class TestToolsApprovalComponent:
                 "name": "pre_approved_tool",
                 "args": {"arg3": "value3"},
             }
-            mock_tools_registry.approval_required.side_effect = [True, True, False]
+            mock_toolset.approved.side_effect = [False, False, True]
 
             node_resp = node_return_value(
                 messages=[
@@ -163,7 +164,7 @@ class TestToolsApprovalComponent:
             assert chat_log["status"] == ToolStatus.SUCCESS
             assert chat_log["tool_info"] is None
 
-            mock_tools_registry.get.assert_has_calls([call("tool1"), call("tool2")])
+            mock_toolset.__getitem__.assert_has_calls([call("tool1"), call("tool2")])
             assert len(mock_format_tool_msg.mock_calls) == 2
             mock_format_tool_msg.assert_has_calls(
                 [
@@ -182,7 +183,7 @@ class TestToolsApprovalComponent:
         component: ToolsApprovalComponent,
         graph_config,
         graph_input: WorkflowState,
-        mock_tools_registry,
+        mock_toolset,
         mock_check_executor,
     ):
         with patch(
@@ -211,15 +212,10 @@ class TestToolsApprovalComponent:
             response = await graph.ainvoke(input=graph_input, config=graph_config)
 
             assert "ui_chat_log" in response
-            assert len(response["ui_chat_log"]) == 1
-            chat_log = response["ui_chat_log"][0]
-            assert (
-                "Found no tool call requests to approve. If this situation persists, please file a bug report"
-                == chat_log["content"]
-            )
+            assert len(response["ui_chat_log"]) == 0
 
-            mock_tools_registry.get.assert_not_called()
-            mock_check_executor.run.assert_called_once()
+            mock_toolset.__getitem__.assert_not_called()
+            mock_check_executor.run.assert_not_called()
             mock_entry_node.assert_called_once()
             mock_continuation_node.assert_called_once()
             mock_termination_node.assert_not_called()
@@ -230,7 +226,6 @@ class TestToolsApprovalComponent:
         component: ToolsApprovalComponent,
         graph_config,
         graph_input: WorkflowState,
-        mock_tools_registry,
         mock_check_executor,
     ):
         with patch(
@@ -272,3 +267,154 @@ class TestToolsApprovalComponent:
                 mock_entry_node.assert_called_once()
                 mock_continuation_node.assert_not_called()
                 mock_termination_node.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_tools_approval_with_only_non_existent_tool(
+        self,
+        component: ToolsApprovalComponent,
+        graph_config,
+        graph_input: WorkflowState,
+        mock_toolset,
+        mock_check_executor,
+    ):
+        with patch(
+            "duo_workflow_service.components.human_approval.component.HumanApprovalCheckExecutor",
+            return_value=mock_check_executor,
+        ), patch.dict(os.environ, {"WORKFLOW_INTERRUPT": "True"}):
+            # Configure the toolset to raise UnknownToolError for the non-existent tool
+            non_existent_tool_call = {
+                "id": "1",
+                "name": "non_existent_tool",
+                "args": {"arg1": "value1"},
+            }
+            mock_toolset.approved.side_effect = UnknownToolError(
+                f"Tool '{non_existent_tool_call['name']}' does not exist"
+            )
+
+            node_resp = node_return_value(
+                messages=[
+                    AIMessage(
+                        content="Testing non-existent tool",
+                        tool_calls=[non_existent_tool_call],
+                    )
+                ]
+            )
+
+            graph, mock_entry_node, mock_continuation_node, mock_termination_node = (
+                set_up_graph(node_resp, component)
+            )
+
+            response = await graph.ainvoke(input=graph_input, config=graph_config)
+
+            assert "ui_chat_log" in response
+            assert len(response["ui_chat_log"]) == 0
+
+            mock_toolset.approved.assert_called_once_with(
+                non_existent_tool_call["name"]
+            )
+
+            mock_check_executor.run.assert_not_called()
+            mock_entry_node.assert_called_once()
+            mock_continuation_node.assert_called_once()
+            mock_termination_node.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_tools_approval_with_mixed_tools_including_non_existent(
+        self,
+        component: ToolsApprovalComponent,
+        graph_config,
+        graph_input: WorkflowState,
+        mock_tool,
+        mock_toolset,
+        mock_check_executor,
+    ):
+        with patch(
+            "duo_workflow_service.components.human_approval.component.HumanApprovalCheckExecutor",
+            return_value=mock_check_executor,
+        ), patch(
+            "duo_workflow_service.components.human_approval.tools_approval.format_tool_display_message",
+            return_value="Using mock tool1: {'arg1': 'value1'}",
+        ) as mock_format_tool_msg, patch.dict(
+            os.environ, {"WORKFLOW_INTERRUPT": "True"}
+        ):
+            # Configure a mix of valid and non-existent tools
+            valid_tool_call = {
+                "id": "1",
+                "name": "valid_tool",
+                "args": {"arg1": "value1"},
+            }
+            pre_approved_tool_call = {
+                "id": "2",
+                "name": "pre_approved_tool",
+                "args": {"arg2": "value2"},
+            }
+            non_existent_tool_call = {
+                "id": "3",
+                "name": "non_existent_tool",
+                "args": {"arg3": "value3"},
+            }
+
+            # Set up the side effects:
+            # 1. First call (valid_tool) - returns False (not pre-approved, needs approval)
+            # 2. Second call (pre_approved_tool) - returns True (pre-approved, needs no approval)
+            # 3. Third call (non_existent_tool) - raises UnknownToolError
+            mock_toolset.approved.side_effect = [
+                False,
+                True,
+                UnknownToolError(
+                    f"Tool '{non_existent_tool_call['name']}' does not exist"
+                ),
+            ]
+
+            node_resp = node_return_value(
+                messages=[
+                    AIMessage(
+                        content="Testing mixed tools",
+                        tool_calls=[
+                            valid_tool_call,
+                            pre_approved_tool_call,
+                            non_existent_tool_call,
+                        ],
+                    )
+                ]
+            )
+
+            graph, mock_entry_node, mock_continuation_node, mock_termination_node = (
+                set_up_graph(node_resp, component)
+            )
+
+            mock_check_executor.run.return_value = {
+                "last_human_input": {
+                    "event_type": WorkflowEventType.RESUME,
+                }
+            }
+
+            response = await graph.ainvoke(input=graph_input, config=graph_config)
+
+            assert "ui_chat_log" in response
+            assert len(response["ui_chat_log"]) == 1
+            chat_log = response["ui_chat_log"][0]
+            assert chat_log["correlation_id"] is None
+            assert "Using mock tool1: {'arg1': 'value1'}" in chat_log["content"]
+            assert "In order to complete the current task" in chat_log["content"]
+
+            # Verify that all three approved calls were made
+            assert mock_toolset.approved.call_count == 3
+            mock_toolset.approved.assert_has_calls(
+                [
+                    call(valid_tool_call["name"]),
+                    call(pre_approved_tool_call["name"]),
+                    call(non_existent_tool_call["name"]),
+                ]
+            )
+
+            # Verify format_tool_display_message was called
+            mock_format_tool_msg.assert_called_once_with(
+                mock_tool, valid_tool_call["args"]
+            )
+
+            # Verify the execution continued normally
+            mock_check_executor.run.assert_called_once()
+            mock_entry_node.assert_called_once()
+            mock_continuation_node.assert_called_once()
+            mock_termination_node.assert_not_called()

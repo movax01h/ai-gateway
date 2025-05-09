@@ -4,6 +4,7 @@ from duo_workflow_service.components.human_approval.component import (
     HumanApprovalComponent,
 )
 from duo_workflow_service.entities.state import WorkflowState, WorkflowStatusEnum
+from lib import result
 
 
 class PlanApprovalComponent(HumanApprovalComponent):
@@ -14,8 +15,10 @@ class PlanApprovalComponent(HumanApprovalComponent):
     )
     _node_prefix: Literal["plan_approval"] = "plan_approval"
 
-    def _approval_message(self, state: WorkflowState) -> str:
-        return (
+    def _build_approval_request(
+        self, state: WorkflowState
+    ) -> result.Result[str, RuntimeError]:
+        return result.Ok(
             "On the left, review the proposed plan. Then ask questions or request changes. "
             "To execute the plan, select Approve plan."
         )

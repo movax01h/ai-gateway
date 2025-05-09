@@ -1,5 +1,5 @@
 import asyncio
-from typing import Optional, Type, TypedDict, Union
+from typing import Any, Optional, Type, TypedDict, Union
 
 from langchain.tools import BaseTool
 from pydantic import BaseModel
@@ -9,8 +9,7 @@ from duo_workflow_service.gitlab.http_client import GitlabHttpClient
 from duo_workflow_service.interceptors.feature_flag_interceptor import (
     current_feature_flag_context,
 )
-
-ToolType = Union[BaseTool, Type[BaseModel]]
+from duo_workflow_service.tools import Toolset, ToolType
 
 
 class ToolMetadata(TypedDict):
@@ -24,6 +23,7 @@ class ToolMetadata(TypedDict):
 # a workflow to progress, and they do not pose any security risk, therefore they
 # are being exempted from dynamic configuration.
 _DEFAULT_TOOLS: list[Type[BaseTool]] = [
+    tools.CreatePlan,
     tools.AddNewTask,
     tools.RemoveTask,
     tools.UpdateTaskDescription,
@@ -104,23 +104,25 @@ class ToolsRegistry:
     @classmethod
     async def configure(
         cls,
-        workflow_id: str,
+        workflow_config: dict[str, Any],
         gl_http_client: GitlabHttpClient,
         outbox: asyncio.Queue,
         inbox: asyncio.Queue,
         *,
         gitlab_host: str,
     ):
-        config = await gl_http_client.aget(
-            f"/api/v4/ai/duo_workflows/workflows/{workflow_id}"
-        )
-        if not config or "agent_privileges_names" not in config:
+        if not workflow_config:
+            raise RuntimeError("Failed to find tools configuration for workflow")
+
+        if "agent_privileges_names" not in workflow_config:
             raise RuntimeError(
-                f"Failed to fetch tools configuration for workflow {workflow_id}"
+                f"Failed to find tools configuration for workflow {workflow_config.get('id', 'None')}"
             )
 
-        agent_previlages = config.get("agent_privileges_names", [])
-        preapproved_tools = config.get("pre_approved_agent_privileges_names", [])
+        agent_privileges = workflow_config.get("agent_privileges_names", [])
+        preapproved_tools = workflow_config.get(
+            "pre_approved_agent_privileges_names", []
+        )
         tool_metadata = ToolMetadata(
             outbox=outbox,
             inbox=inbox,
@@ -129,7 +131,7 @@ class ToolsRegistry:
         )
 
         return cls(
-            enabled_tools=agent_previlages,
+            enabled_tools=agent_privileges,
             preapproved_tools=preapproved_tools,
             tool_metadata=tool_metadata,
         )
@@ -191,3 +193,26 @@ class ToolsRegistry:
             True otherwise.
         """
         return tool_name not in self._preapproved_tool_names
+
+    def toolset(self, tool_names: list[str]) -> Toolset:
+        """Create a Toolset instance representing complete collection of tools available to an agent.
+
+        Args:
+            tool_names: A list of tool names to include in the Toolset.
+
+        Returns:
+            A new Toolset instance containing the requested tools.
+        """
+        all_tools = {
+            tool_name: self._enabled_tools[tool_name]
+            for tool_name in tool_names
+            if tool_name in self._enabled_tools
+        }
+
+        pre_approved = {
+            tool_name
+            for tool_name in tool_names
+            if tool_name in self._preapproved_tool_names
+        }
+
+        return Toolset(pre_approved=pre_approved, all_tools=all_tools)

@@ -22,6 +22,7 @@ message StartWorkflowRequest {
     string goal = 4;
     string workflowMetadata = 5;
     repeated string clientCapabilities = 6;
+    repeated ContextElement context = 7;
 }
 
 message ActionResponse {
@@ -38,6 +39,7 @@ message Action {
         WriteFile runWriteFile = 5;
         RunGitCommand runGitCommand = 6;
         EditFile runEditFile = 7;
+        NewCheckpoint newCheckpoint = 8;
     };
 }
 
@@ -81,4 +83,26 @@ message GenerateTokenRequest {}
 message GenerateTokenResponse {
     string token = 1;
     int64 expiresAt = 2;
+}
+
+enum ContextElementType {
+    USER_PREFERENCE = 0;
+    SELECTED_TEXT = 1;
+    FILE = 2;
+    ISSUE = 3;
+    MERGE_REQUEST = 4;
+    PREVIOUS_WORKFLOW = 5;
+}
+
+message ContextElement {
+    ContextElementType type = 1;
+    string name = 2;
+    string contents = 3;
+}
+
+message NewCheckpoint {
+    string status = 1;
+    string checkpoint = 2;
+    string goal = 3;
+    repeated string errors = 4;
 }

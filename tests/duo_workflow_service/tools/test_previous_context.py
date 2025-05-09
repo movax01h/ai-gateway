@@ -24,7 +24,7 @@ def get_last_checkpoint_tool(gitlab_client):
 
 class TestGetWorkflowContext:
     def test_format_display_message(self, get_last_checkpoint_tool):
-        args = GetWorkflowContextInput(workflow_id="123")
+        args = GetWorkflowContextInput(previous_workflow_id=123)
         result = get_last_checkpoint_tool.format_display_message(args)
 
         assert result == "Get context for workflow 123"
@@ -32,7 +32,6 @@ class TestGetWorkflowContext:
     @pytest.mark.asyncio
     async def test_arun_success(self, get_last_checkpoint_tool, gitlab_client):
         mock_checkpoint = {
-            "workflow_id": "123",
             "checkpoint": {
                 "channel_values": {
                     "plan": {
@@ -48,10 +47,17 @@ class TestGetWorkflowContext:
                     ],
                 }
             },
+            "metadata": {
+                "step": 4,
+                "source": "loop",
+                "writes": {},
+                "parents": {},
+                "thread_id": "123",
+            },
         }
         gitlab_client.aget.return_value = [mock_checkpoint]
 
-        result = await get_last_checkpoint_tool._arun(workflow_id="123")
+        result = await get_last_checkpoint_tool._arun(previous_workflow_id=123)
 
         gitlab_client.aget.assert_called_once_with(
             path="/api/v4/ai/duo_workflows/workflows/123/checkpoints?per_page=1",
@@ -76,18 +82,21 @@ class TestGetWorkflowContext:
     async def test_arun_empty_response(self, get_last_checkpoint_tool, gitlab_client):
         gitlab_client.aget.return_value = []
 
-        result = await get_last_checkpoint_tool._arun(workflow_id="123")
+        result = await get_last_checkpoint_tool._arun(previous_workflow_id=123)
 
         # Verify the error message
         parsed_result = json.loads(result)
         assert "error" in parsed_result
-        assert parsed_result["error"] == "No checkpoints found for this workflow"
+        assert parsed_result["error"] == "Unable to find checkpoint for this workflow"
 
     @pytest.mark.asyncio
     async def test_arun_api_error(self, get_last_checkpoint_tool, gitlab_client):
-        gitlab_client.aget.side_effect = Exception("API Error")
+        gitlab_client.aget.return_value = {
+            "message": "unexpected status code: 404",
+            "status": 404,
+        }
 
-        result = await get_last_checkpoint_tool._arun(workflow_id="123")
+        result = await get_last_checkpoint_tool._arun(previous_workflow_id=123)
 
         # Verify the error message
         parsed_result = json.loads(result)
@@ -98,7 +107,16 @@ class TestGetWorkflowContext:
     async def test_format_checkpoint_context_no_checkpoint_data(
         self, get_last_checkpoint_tool
     ):
-        checkpoint = {"workflow_id": "123"}
+        checkpoint = {
+            "checkpoint": {},
+            "metadata": {
+                "step": 4,
+                "source": "loop",
+                "writes": {},
+                "parents": {},
+                "thread_id": "123",
+            },
+        }
 
         context_str = get_last_checkpoint_tool._format_checkpoint_context(checkpoint)
 
@@ -114,7 +132,16 @@ class TestGetWorkflowContext:
     async def test_format_checkpoint_context_invalid_data(
         self, get_last_checkpoint_tool
     ):
-        invalid_checkpoint = {"workflow_id": "123", "checkpoint": {"invalid": "data"}}
+        invalid_checkpoint = {
+            "checkpoint": {"invalid": "data"},
+            "metadata": {
+                "step": 4,
+                "source": "loop",
+                "writes": {},
+                "parents": {},
+                "thread_id": "123",
+            },
+        }
 
         context_str = get_last_checkpoint_tool._format_checkpoint_context(
             invalid_checkpoint
@@ -133,9 +160,15 @@ class TestGetWorkflowContext:
     ):
         # Create a checkpoint that will cause an exception during parsing
         bad_checkpoint = {
-            "workflow_id": "123",
             "checkpoint": {
                 "channel_values": {"handover": "not-a-list", "status": "Completed"}
+            },
+            "metadata": {
+                "step": 4,
+                "source": "loop",
+                "writes": {},
+                "parents": {},
+                "thread_id": "123",
             },
         }
 
@@ -150,7 +183,6 @@ class TestGetWorkflowContext:
         self, get_last_checkpoint_tool
     ):
         checkpoint = {
-            "workflow_id": "123",
             "checkpoint": {
                 "channel_values": {
                     "plan": {"steps": []},
@@ -161,6 +193,13 @@ class TestGetWorkflowContext:
                     ],
                     "status": "Failed",
                 }
+            },
+            "metadata": {
+                "step": 4,
+                "source": "loop",
+                "writes": {},
+                "parents": {},
+                "thread_id": "123",
             },
         }
 
