@@ -2,7 +2,7 @@
 
 import time
 from typing import Any, Dict, List, Union
-from unittest.mock import ANY, Mock, patch
+from unittest.mock import ANY, AsyncMock, Mock, patch
 
 import pytest
 from dependency_injector import containers
@@ -16,6 +16,7 @@ from structlog.testing import capture_logs
 from ai_gateway.api.error_utils import capture_validation_errors
 from ai_gateway.api.v2 import api_router
 from ai_gateway.feature_flags.context import current_feature_flag_context
+from ai_gateway.model_selection import LLMDefinition
 from ai_gateway.models.base_chat import Message, Role
 from ai_gateway.tracking.container import ContainerTracking
 from ai_gateway.tracking.instrumentator import SnowplowInstrumentator
@@ -1320,6 +1321,96 @@ class TestCodeCompletions:
             headers=headers,
             json=params,
         )
+
+    def test_gitlab_model_provider(self, mock_client):
+        """Test that v2/completions works with 'gitlab' as the model_provider"""
+
+        test_model = LLMDefinition(
+            name="Test Model",
+            gitlab_identifier="test-model-id",
+            provider="custom_openai",
+            provider_identifier="test-provider-id",
+            family="test-family",
+            params={"temperature": 0.0, "max_tokens": 4096},
+        )
+
+        mock_suggestion = Mock()
+        mock_suggestion.text = "test completion"
+        mock_suggestion.score = 1.0
+
+        mock_model = Mock()
+        mock_model.engine = "test-engine"
+        mock_model.name = "test-model"
+        mock_suggestion.model = mock_model
+
+        mock_suggestion.lang = "python"
+        mock_suggestion.metadata = None
+
+        with patch(
+            "ai_gateway.model_selection.ModelSelectionConfig.get_gitlab_model"
+        ) as mock_get_gitlab_model, patch(
+            "ai_gateway.api.v2.code.completions._execute_code_completion"
+        ) as mock_execute, patch(
+            "ai_gateway.api.v2.code.completions._build_code_completions"
+        ) as mock_build:
+
+            mock_get_gitlab_model.return_value = test_model
+            mock_execute.return_value = [mock_suggestion]
+
+            mock_completions = Mock()
+            mock_build.return_value = (mock_completions, {})
+
+            # Test
+            response = mock_client.post(
+                "/code/completions",
+                headers={
+                    "Authorization": "Bearer 12345",
+                    "X-Gitlab-Authentication-Type": "oidc",
+                    "X-GitLab-Instance-Id": "1234",
+                    "X-GitLab-Realm": "self-managed",
+                },
+                json={
+                    "prompt_version": 2,
+                    "current_file": {
+                        "file_name": "main.py",
+                        "content_above_cursor": "def test():",
+                        "content_below_cursor": "\n",
+                        "language_identifier": "python",
+                    },
+                    "model_provider": "gitlab",
+                    "model_identifier": "test-model-id",
+                },
+            )
+
+            assert response.status_code == 200
+            assert mock_build.called
+            build_args, build_kwargs = mock_build.call_args
+            assert build_args[1].model_provider == "gitlab"
+            assert build_args[1].model_identifier == "test-model-id"
+
+        # Test error case when model_identifier is missing
+        response = mock_client.post(
+            "/code/completions",
+            headers={
+                "Authorization": "Bearer 12345",
+                "X-Gitlab-Authentication-Type": "oidc",
+                "X-GitLab-Instance-Id": "1234",
+                "X-GitLab-Realm": "self-managed",
+            },
+            json={
+                "prompt_version": 2,
+                "current_file": {
+                    "file_name": "main.py",
+                    "content_above_cursor": "def test():",
+                    "content_below_cursor": "\n",
+                },
+                "model_provider": "gitlab",
+                # model_identifier deliberately left out
+            },
+        )
+
+        assert response.status_code == 400
+        assert "model_identifier is required" in response.json()["detail"]
 
 
 class TestCodeGenerations:
