@@ -1,3 +1,4 @@
+from itertools import chain
 from pathlib import Path
 from typing import Any, Optional
 
@@ -64,6 +65,30 @@ class ModelSelectionConfig:
 
         return self._unit_primitive_configs
 
+    def validate(self) -> None:
+        unit_primitive_configs = self.get_unit_primitive_config()
+        models = self.get_llm_definitions()
+        gitlab_models_ids = models.keys()
+
+        errors: set[str] = set()
+        for unit_primitive_config in unit_primitive_configs:
+            ids = chain(
+                [unit_primitive_config.default_model],
+                unit_primitive_config.selectable_models,
+                unit_primitive_config.beta_models,
+            )
+
+            errors.update(
+                gitlab_model_id
+                for gitlab_model_id in ids
+                if gitlab_model_id not in gitlab_models_ids
+            )
+
+        if errors:
+            raise ValueError(
+                f"The following gitlab models ids are used but are not defined in models.yml: {", ".join(errors)}"
+            )
+
     def refresh(self):
         """Refresh the configuration by reloading from source files."""
         self._llm_definitions = None
@@ -73,3 +98,7 @@ class ModelSelectionConfig:
         if gitlab_model := self.get_llm_definitions().get(gitlab_model_id, None):
             return gitlab_model
         raise ValueError(f"Invalid model identifier: {gitlab_model_id}")
+
+
+def validate_model_selection_config():
+    ModelSelectionConfig().validate()

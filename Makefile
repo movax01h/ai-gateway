@@ -142,6 +142,10 @@ isort: install-lint-deps
 	@echo "Running isort format..."
 	@poetry run isort ${LINT_WORKING_DIR}
 
+.PHONY: check-model-selection
+check-model-selection:
+	@poetry run validate-model-selection-config
+
 .PHONY: format
 format: black isort
 

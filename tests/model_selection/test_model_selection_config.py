@@ -48,11 +48,11 @@ def mock_fs(fs: FakeFilesystem):
                 unit_primitives:
                   - "ask_commit"
                   - "ask_epic"
-                default_model: "model_1"
+                default_model: "gitlab-model-1"
                 selectable_models:
-                  - "model_1"
+                  - "gitlab-model-1"
                 beta_models:
-                  - "model_2"
+                  - "gitlab-model-2"
             """
         ),
     )
@@ -90,9 +90,9 @@ def test_get_unit_primitive_config(selection_config):
                 GitLabUnitPrimitive.ASK_COMMIT,
                 GitLabUnitPrimitive.ASK_EPIC,
             ],
-            default_model="model_1",
-            selectable_models=["model_1"],
-            beta_models=["model_2"],
+            default_model="gitlab-model-1",
+            selectable_models=["gitlab-model-1"],
+            beta_models=["gitlab-model-2"],
         )
     ]
 
@@ -117,3 +117,54 @@ def test_get_gitlab_model(selection_config):
 def test_get_gitlab_model_missing_key(selection_config):
     with pytest.raises(ValueError):
         selection_config.get_gitlab_model("non-existing-model")
+
+
+def test_validate_without_error(mock_fs):
+    assert ModelSelectionConfig().validate() is None
+
+
+def test_validate_with_error(fs: FakeFilesystem):
+    model_selection_dir = (
+        Path(__file__).parent.parent.parent / "ai_gateway" / "model_selection"
+    )
+
+    fs.create_file(
+        model_selection_dir / "unit_primitives.yml",
+        contents=dedent(
+            """
+            configurable_unit_primitives:
+              - feature_setting: "test_config"
+                unit_primitives:
+                  - "ask_commit"
+                default_model: "non_existent_model"
+                selectable_models:
+                  - "model_1"
+                  - "another_non_existent_model"
+                beta_models:
+                  - "third_non_existent_model"
+            """
+        ),
+    )
+
+    # Create a models.yml file with valid models
+    fs.create_file(
+        model_selection_dir / "models.yml",
+        contents=dedent(
+            """
+            models:
+              - model_identifier: model1
+                name: Model One
+                gitlab_identifier: model_1
+                provider: provider1
+                provider_identifier: provider-model-1
+            """
+        ),
+    )
+
+    with pytest.raises(ValueError) as excinfo:
+        ModelSelectionConfig().validate()
+
+    error_message = str(excinfo.value)
+    assert "non_existent_model" in error_message
+    assert "another_non_existent_model" in error_message
+    assert "third_non_existent_model" in error_message
