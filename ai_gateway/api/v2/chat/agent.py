@@ -1,5 +1,5 @@
 from datetime import datetime
-from typing import Annotated, AsyncIterator
+from typing import Annotated, AsyncIterator, Tuple
 
 from dependency_injector import providers
 from fastapi import APIRouter, Depends, HTTPException, Request, status
@@ -32,6 +32,7 @@ from ai_gateway.prompts import BasePromptRegistry, Prompt
 
 __all__ = [
     "router",
+    "create_event_stream",
 ]
 
 from ai_gateway.models import Role
@@ -128,6 +129,32 @@ def _build_scratchpad_from_request(
     return []
 
 
+async def create_event_stream(
+    current_user: StarletteUser,
+    agent_request: AgentRequest,
+    agent: Prompt,
+    gl_agent_remote_executor_factory: providers.Factory[
+        GLAgentRemoteExecutor[ReActAgentInputs, TypeAgentEvent]
+    ],
+    gl_version: str,
+    agent_scratchpad: list[AgentStep],
+) -> Tuple[ReActAgentInputs, AsyncIterator[TypeAgentEvent]]:
+
+    gl_agent_remote_executor = gl_agent_remote_executor_factory(agent=agent)
+    gl_agent_remote_executor.on_behalf(
+        current_user, gl_version, agent_request.model_metadata
+    )
+    inputs = ReActAgentInputs(
+        messages=agent_request.messages,
+        agent_scratchpad=agent_scratchpad,
+        unavailable_resources=agent_request.unavailable_resources,
+        current_date=datetime.now().strftime("%A, %B, %d, %Y"),
+    )
+
+    stream_events = gl_agent_remote_executor.stream(inputs=inputs)
+    return inputs, stream_events
+
+
 @router.post("/agent")
 @feature_category(GitLabFeatureCategory.DUO_CHAT)
 async def chat(
@@ -155,22 +182,22 @@ async def chat(
 
     scratchpad = _build_scratchpad_from_request(agent_request, last_message)
 
-    inputs = ReActAgentInputs(
-        messages=agent_request.messages,
-        agent_scratchpad=scratchpad,
-        unavailable_resources=agent_request.unavailable_resources,
-        current_date=datetime.now().strftime("%A, %B %d, %Y"),
+    gl_version = request.headers.get(X_GITLAB_VERSION_HEADER, "")
+
+    stream_result: Tuple[ReActAgentInputs, AsyncIterator[TypeAgentEvent]] = (
+        await create_event_stream(
+            current_user=current_user,
+            agent_request=agent_request,
+            agent=agent,
+            gl_agent_remote_executor_factory=gl_agent_remote_executor_factory,
+            gl_version=gl_version,
+            agent_scratchpad=scratchpad,
+        )
     )
 
-    gl_version = request.headers.get(X_GITLAB_VERSION_HEADER, "")
-    gl_agent_remote_executor = gl_agent_remote_executor_factory(agent=agent)
-    gl_agent_remote_executor.on_behalf(
-        current_user, gl_version, agent_request.model_metadata
-    )
+    inputs, stream_events = stream_result
 
     request_log.info("Request to V2 Chat Agent", source=__name__, inputs=inputs)
-
-    stream_events = gl_agent_remote_executor.stream(inputs=inputs)
 
     # When StreamingResponse is returned, clients get 200 even if there was an error during the process.
     # This is because the status code is returned before the actual process starts,

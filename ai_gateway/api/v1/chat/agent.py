@@ -1,12 +1,15 @@
 from time import time
-from typing import Annotated, AsyncIterator, Optional, Union
+from typing import Annotated, AsyncIterator, Optional, Tuple, Union
 
+from dependency_injector import providers
 from dependency_injector.providers import Factory, FactoryAggregate
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from gitlab_cloud_connector import GitLabUnitPrimitive
+from starlette.responses import StreamingResponse
 
 from ai_gateway.api.auth_utils import StarletteUser, get_current_user
 from ai_gateway.api.feature_category import track_metadata
+from ai_gateway.api.middleware import X_GITLAB_VERSION_HEADER
 from ai_gateway.api.v1.chat.auth import ChatInvokable, authorize_with_unit_primitive
 from ai_gateway.api.v1.chat.typing import (
     ChatRequest,
@@ -15,11 +18,22 @@ from ai_gateway.api.v1.chat.typing import (
     PromptPayload,
     StreamChatResponse,
 )
+from ai_gateway.api.v2.chat.agent import (
+    create_event_stream,
+    get_agent,
+    get_gl_agent_remote_executor_factory,
+)
+from ai_gateway.api.v2.chat.typing import AgentRequest
 from ai_gateway.async_dependency_resolver import (
     get_chat_anthropic_claude_factory_provider,
     get_chat_litellm_factory_provider,
     get_internal_event_client,
+    get_prompt_registry,
 )
+from ai_gateway.chat.agents import ReActAgentInputs, TypeAgentEvent
+from ai_gateway.chat.agents.typing import Message
+from ai_gateway.chat.executor import GLAgentRemoteExecutor
+from ai_gateway.feature_flags import FeatureFlag, is_feature_enabled
 from ai_gateway.internal_events import InternalEventsClient
 from ai_gateway.models import (
     AnthropicAPIConnectionError,
@@ -27,7 +41,9 @@ from ai_gateway.models import (
     AnthropicAPITimeoutError,
     KindModelProvider,
 )
+from ai_gateway.models.base_chat import Role
 from ai_gateway.models.base_text import TextGenModelChunk, TextGenModelOutput
+from ai_gateway.prompts import BasePromptRegistry
 from ai_gateway.tracking import log_exception
 
 __all__ = [
@@ -60,6 +76,33 @@ CHAT_INVOKABLES = [
 path_unit_primitive_map = {ci.name: ci.unit_primitive for ci in CHAT_INVOKABLES}
 
 
+def convert_v1_to_v2_inputs(chat_request: ChatRequest) -> AgentRequest:
+    """
+    Adapts a v1 ChatRequest into a v2 AgentRequest.
+    If the payload content is a string, wrap it in a Message.
+    """
+    prompt_component = chat_request.prompt_components[0]
+    payload = prompt_component.payload
+
+    if isinstance(payload.content, str):
+        messages = [Message(role=Role.USER, content=payload.content)]
+    else:
+        messages = [
+            (
+                Message(**message)
+                if isinstance(message, dict)
+                else Message(**message.model_dump())
+            )
+            for message in payload.content
+        ]
+
+    return AgentRequest(
+        messages=messages,
+        options=None,
+        model_metadata=None,
+    )
+
+
 @router.post(
     "/{chat_invokable}",
     response_model=ChatResponse,
@@ -82,7 +125,60 @@ async def chat(
     internal_event_client: Annotated[
         InternalEventsClient, Depends(get_internal_event_client)
     ],
+    prompt_registry: Annotated[BasePromptRegistry, Depends(get_prompt_registry)],
+    gl_agent_remote_executor_factory: Annotated[
+        providers.Factory[GLAgentRemoteExecutor[ReActAgentInputs, TypeAgentEvent]],
+        Depends(get_gl_agent_remote_executor_factory),
+    ],
 ):
+    if is_feature_enabled(FeatureFlag.CHAT_V1_REDIRECT):
+
+        agent_request = convert_v1_to_v2_inputs(chat_request)
+        payload = chat_request.prompt_components[0].payload
+
+        agent = get_agent(current_user, agent_request, prompt_registry)
+
+        gl_version = request.headers.get(X_GITLAB_VERSION_HEADER, "")
+
+        stream_result: Tuple[ReActAgentInputs, AsyncIterator[TypeAgentEvent]] = (
+            await create_event_stream(
+                current_user=current_user,
+                agent_request=agent_request,
+                agent=agent,
+                gl_agent_remote_executor_factory=gl_agent_remote_executor_factory,
+                gl_version=gl_version,
+                agent_scratchpad=[],
+            )
+        )
+
+        _, stream_events = stream_result
+
+        if chat_request.stream:
+
+            async def stream_handler():
+                async for event in stream_events:
+                    # Transform each event
+                    yield (
+                        event.text
+                        if hasattr(event, "text")
+                        else event.dump_as_response()
+                    )
+
+            return StreamingResponse(stream_handler(), media_type="text/event-stream")
+
+        final_text = ""
+        async for event in stream_events:
+            if hasattr(event, "text"):
+                final_text += event.text
+        return ChatResponse(
+            response=final_text,
+            metadata=ChatResponseMetadata(
+                provider=payload.provider,
+                model=None,
+                timestamp=int(time()),
+            ),
+        )
+
     prompt_component = chat_request.prompt_components[0]
     payload = prompt_component.payload
 
@@ -92,7 +188,10 @@ async def chat(
     )
 
     try:
-        if payload.provider in (KindModelProvider.LITELLM, KindModelProvider.MISTRALAI):
+        if payload.provider in (
+            KindModelProvider.LITELLM,
+            KindModelProvider.MISTRALAI,
+        ):
             model = litellm_factory(
                 name=payload.model,
                 endpoint=payload.model_endpoint,
