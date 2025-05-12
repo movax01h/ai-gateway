@@ -52,6 +52,7 @@ COPY --chown=aigateway:aigateway --from=install-image /home/aigateway/app/venv/ 
 
 COPY --chown=aigateway:aigateway ai_gateway/ ai_gateway/
 COPY --chown=aigateway:aigateway duo_workflow_service/ duo_workflow_service/
+COPY --chown=aigateway:aigateway lib/ lib/
 COPY --chown=aigateway:aigateway contract/ contract/
 COPY --chown=aigateway:aigateway vendor/ /home/aigateway/app/vendor/
 
