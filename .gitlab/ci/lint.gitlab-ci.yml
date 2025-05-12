@@ -13,6 +13,15 @@ lint:
       RESET=$(printf '\e[0m')
       echo "${MAGENTA}Run ${BOLD}make format${RESET}${MAGENTA} to fix formatting issues.${RESET}"
 
+lint:model_config_files:
+  stage: test
+  extends: .poetry
+  rules:
+    - changes:
+        - "ai_gateway/model_selection/*.{yml}"
+  script:
+    - make check-model-selection
+
 lint:doc:
   stage: test
   image: ${DOCS_LINT_IMAGE}
