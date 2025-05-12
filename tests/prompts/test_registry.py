@@ -45,7 +45,7 @@ def mock_fs(fs: FakeFilesystem):
 ---
 name: Test prompt 1.0.0
 model:
-  name: claude-2.1
+  name: claude-3-5-sonnet-20241022
   params:
     model_class_provider: litellm
     top_p: 0.1
@@ -183,7 +183,7 @@ params:
         model_configs_dir / "conversation_quick.yml",
         contents="""
 ---
-name: claude-2.1
+name: claude-3-5-sonnet-20241022
 params:
   temperature: 0.9
   max_tokens: 200
@@ -216,7 +216,7 @@ def prompts_registered():
                 "1.0.0": PromptConfig(
                     name="Test prompt 1.0.0",
                     model=ModelConfig(
-                        name="claude-2.1",
+                        name="claude-3-5-sonnet-20241022",
                         params=ChatLiteLLMParams(
                             model_class_provider=ModelClassProvider.LITE_LLM,
                             top_p=0.1,
@@ -232,7 +232,7 @@ def prompts_registered():
                 "1.0.1": PromptConfig(
                     name="Test prompt 1.0.1",
                     model=ModelConfig(
-                        name="claude-2.1",
+                        name="claude-3-5-sonnet-20241022",
                         params=ChatLiteLLMParams(
                             model_class_provider=ModelClassProvider.LITE_LLM,
                             top_p=0.1,
@@ -249,7 +249,7 @@ def prompts_registered():
                 "1.0.2-dev": PromptConfig(
                     name="Test prompt 1.0.2-dev",
                     model=ModelConfig(
-                        name="claude-2.1",
+                        name="claude-3-5-sonnet-20241022",
                         params=ChatLiteLLMParams(
                             model_class_provider=ModelClassProvider.LITE_LLM,
                             top_p=0.1,
@@ -418,7 +418,7 @@ class TestLocalPromptRegistry:
                 "Test prompt 1.0.1",
                 Prompt,
                 [("system", "Template1")],
-                "claude-2.1",
+                "claude-3-5-sonnet-20241022",
                 {},
                 {
                     "top_p": 0.1,
@@ -437,7 +437,7 @@ class TestLocalPromptRegistry:
                 "Test prompt 1.0.2-dev",
                 Prompt,
                 [("system", "Template1")],
-                "claude-2.1",
+                "claude-3-5-sonnet-20241022",
                 {},
                 {
                     "top_p": 0.1,
@@ -456,7 +456,7 @@ class TestLocalPromptRegistry:
                 "Test prompt 1.0.0",
                 Prompt,
                 [("system", "Template1")],
-                "claude-2.1",
+                "claude-3-5-sonnet-20241022",
                 {},
                 {
                     "top_p": 0.1,
@@ -807,7 +807,7 @@ class TestLocalPromptRegistry:
                         "1.0.0": PromptConfig(
                             name="Test prompt 1.0.0",
                             model=ModelConfig(
-                                name="claude-2.1",
+                                name="claude-3-5-sonnet-20241022",
                                 params=ChatLiteLLMParams(
                                     model_class_provider=ModelClassProvider.LITE_LLM,
                                     top_p=0.1,
@@ -823,7 +823,7 @@ class TestLocalPromptRegistry:
                         "1.0.1": PromptConfig(
                             name="Test prompt 1.0.1",
                             model=ModelConfig(
-                                name="claude-2.1",
+                                name="claude-3-5-sonnet-20241022",
                                 params=ChatLiteLLMParams(
                                     model_class_provider=ModelClassProvider.LITE_LLM,
                                     top_p=0.1,

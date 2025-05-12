@@ -63,7 +63,7 @@ class TestAgentSuccessfulRequest:
             (
                 "text_content",
                 "anthropic",
-                "claude-2.1",
+                "claude-3-5-sonnet-20241022",
                 {
                     "temperature": 0.3,
                     "stop_sequences": ["\n\nHuman", "Observation:"],
@@ -205,7 +205,7 @@ class TestAgentSuccessfulStream:
                         "payload": {
                             "content": content,
                             "provider": "anthropic",
-                            "model": KindAnthropicModel.CLAUDE_2_1.value,
+                            "model": KindAnthropicModel.CLAUDE_3_5_SONNET_V2.value,
                         },
                     },
                 ],
@@ -255,7 +255,7 @@ class TestAgentUnsupportedProvider:
                         "payload": {
                             "content": text_content,
                             "provider": "UNSUPPORTED_PROVIDER",
-                            "model": "claude-2.1",
+                            "model": "claude-3-5-sonnet-20241022",
                         },
                     },
                 ]
@@ -332,7 +332,7 @@ class TestAnthropicInvalidScope:
                         "payload": {
                             "content": text_content,
                             "provider": "anthropic",
-                            "model": "claude-2.1",
+                            "model": "claude-3-5-sonnet-20241022",
                         },
                     }
                 ]
@@ -363,7 +363,7 @@ class TestAgentInvalidRequestMissingFields:
                         "metadata": {"source": "gitlab-rails-sm"},
                         "payload": {
                             "provider": "anthropic",
-                            "model": "claude-2.1",
+                            "model": "claude-3-5-sonnet-20241022",
                         },
                     },
                 ]
@@ -383,7 +383,10 @@ class TestAgentInvalidRequestMissingFields:
                     "type": "missing",
                     "loc": ["body", "prompt_components", 0, "payload", "content"],
                     "msg": "Field required",
-                    "input": {"provider": "anthropic", "model": "claude-2.1"},
+                    "input": {
+                        "provider": "anthropic",
+                        "model": "claude-3-5-sonnet-20241022",
+                    },
                 },
             ]
         }
@@ -414,7 +417,7 @@ class TestAgentInvalidRequestManyPromptComponents:
                         "payload": {
                             "content": text_content,
                             "provider": "anthropic",
-                            "model": "claude-2.1",
+                            "model": "claude-3-5-sonnet-20241022",
                         },
                     },
                     {
@@ -426,7 +429,7 @@ class TestAgentInvalidRequestManyPromptComponents:
                         "payload": {
                             "content": "SECOND PROMPT COMPONENT (NOT EXPECTED)",
                             "provider": "anthropic",
-                            "model": "claude-2.1",
+                            "model": "claude-3-5-sonnet-20241022",
                         },
                     },
                 ]
@@ -450,7 +453,7 @@ class TestAgentInvalidRequestManyPromptComponents:
                             "payload": {
                                 "content": text_content,
                                 "provider": "anthropic",
-                                "model": "claude-2.1",
+                                "model": "claude-3-5-sonnet-20241022",
                             },
                         },
                         {
@@ -459,7 +462,7 @@ class TestAgentInvalidRequestManyPromptComponents:
                             "payload": {
                                 "content": "SECOND PROMPT COMPONENT (NOT EXPECTED)",
                                 "provider": "anthropic",
-                                "model": "claude-2.1",
+                                "model": "claude-3-5-sonnet-20241022",
                             },
                         },
                     ],
@@ -524,7 +527,7 @@ class TestAgentUnsuccessfulAnthropicRequest:
                             "payload": {
                                 "content": request.getfixturevalue(content_fixture),
                                 "provider": "anthropic",
-                                "model": "claude-2.1",
+                                "model": "claude-3-5-sonnet-20241022",
                             },
                         }
                     ]

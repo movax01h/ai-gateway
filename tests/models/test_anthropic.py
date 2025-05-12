@@ -43,7 +43,7 @@ from ai_gateway.safety_attributes import SafetyAttributes
 class TestAnthropicModel:
     @pytest.mark.parametrize(
         "model_name_version",
-        ["claude-2.1"],
+        ["claude-3-5-sonnet-20241022"],
     )
     def test_anthropic_model_from_name(self, model_name_version: str):
         model = AnthropicModel.from_model_name(model_name_version, Mock())
@@ -55,19 +55,19 @@ class TestAnthropicModel:
         ("model_name_version", "opts", "opts_client", "opts_model"),
         [
             (
-                "claude-2.1",
+                "claude-3-5-sonnet-20241022",
                 {},
                 AnthropicModel.OPTS_CLIENT,
                 AnthropicModel.OPTS_MODEL,
             ),
             (
-                "claude-2.1",
+                "claude-3-5-sonnet-20241022",
                 {"version": "2020-10-10"},
                 AnthropicModel.OPTS_CLIENT,
                 AnthropicModel.OPTS_MODEL,
             ),
             (
-                "claude-2.1",
+                "claude-3-5-sonnet-20241022",
                 {
                     "timeout": 6,
                     "max_tokens_to_sample": 5,
@@ -123,10 +123,18 @@ class TestAnthropicModel:
     @pytest.mark.parametrize(
         ("model_name_version", "exception", "expected_exception"),
         [
-            ("claude-2.1", BadRequestError, AnthropicAPIStatusError),
-            ("claude-2.1", UnprocessableEntityError, AnthropicAPIStatusError),
-            ("claude-2.1", APIConnectionError, AnthropicAPIConnectionError),
-            ("claude-2.1", APITimeoutError, AnthropicAPITimeoutError),
+            ("claude-3-5-sonnet-20241022", BadRequestError, AnthropicAPIStatusError),
+            (
+                "claude-3-5-sonnet-20241022",
+                UnprocessableEntityError,
+                AnthropicAPIStatusError,
+            ),
+            (
+                "claude-3-5-sonnet-20241022",
+                APIConnectionError,
+                AnthropicAPIConnectionError,
+            ),
+            ("claude-3-5-sonnet-20241022", APITimeoutError, AnthropicAPITimeoutError),
         ],
     )
     async def test_anthropic_model_error(
@@ -162,7 +170,7 @@ class TestAnthropicModel:
         ),
         [
             (
-                "claude-2.1",
+                "claude-3-5-sonnet-20241022",
                 "random_prompt",
                 "random_text",
                 {},
@@ -175,7 +183,7 @@ class TestAnthropicModel:
                 ),
             ),
             (
-                "claude-2.1",
+                "claude-3-5-sonnet-20241022",
                 "random_prompt",
                 "random_text",
                 {"top_k": 10},
@@ -188,7 +196,7 @@ class TestAnthropicModel:
                 ),
             ),
             (
-                "claude-2.1",
+                "claude-3-5-sonnet-20241022",
                 "random_prompt",
                 "random_text",
                 {"temperature": 1},
@@ -204,7 +212,7 @@ class TestAnthropicModel:
                 ),
             ),
             (
-                "claude-2.1",
+                "claude-3-5-sonnet-20241022",
                 "random_prompt",
                 "random_text",
                 {"temperature": 1},
@@ -220,7 +228,7 @@ class TestAnthropicModel:
                 ),
             ),
             (
-                "claude-2.1",
+                "claude-3-5-sonnet-20241022",
                 "random_prompt",
                 "random_text",
                 {},
@@ -283,7 +291,7 @@ class TestAnthropicModel:
     @pytest.mark.asyncio
     async def test_anthropic_model_generate_instrumented(self):
         model = AnthropicModel(
-            model_name=KindAnthropicModel.CLAUDE_2_1.value,
+            model_name=KindAnthropicModel.CLAUDE_3_5_SONNET_V2.value,
             client=Mock(spec=AsyncAnthropic),
         )
         model.client.completions.create = AsyncMock()
@@ -302,14 +310,14 @@ class TestAnthropicModel:
                 Completion(
                     id="compl_01CtvorJWMstkmATFkR7qVYM",
                     completion="hello",
-                    model=KindAnthropicModel.CLAUDE_2_1.value,
+                    model=KindAnthropicModel.CLAUDE_3_5_SONNET_V2.value,
                     stop_reason="stop_sequence",
                     type="completion",
                 ),
                 Completion(
                     id="compl_02CtvorJWMstkmATFkR7qVYM",
                     completion="world",
-                    model=KindAnthropicModel.CLAUDE_2_1.value,
+                    model=KindAnthropicModel.CLAUDE_3_5_SONNET_V2.value,
                     stop_reason="stop_sequence",
                     type="completion",
                 ),
@@ -321,7 +329,7 @@ class TestAnthropicModel:
                 yield item
 
         model = AnthropicModel(
-            model_name=KindAnthropicModel.CLAUDE_2_1.value,
+            model_name=KindAnthropicModel.CLAUDE_3_5_SONNET_V2.value,
             client=Mock(spec=AsyncAnthropic),
         )
         model.client.completions.create = AsyncMock(side_effect=mock_stream)
@@ -353,21 +361,21 @@ class TestAnthropicModel:
         ),
         [
             (
-                "claude-2.1",
+                "claude-3-5-sonnet-20241022",
                 "random_prompt",
                 [
                     Completion(
                         id="compl_01CtvorJWMstkmATFkR7qVYM",
                         completion="def hello_",
                         stop_reason="stop_sequence",
-                        model="claude-2.1",
+                        model="claude-3-5-sonnet-20241022",
                         type="completion",
                     ),
                     Completion(
                         id="compl_02CtvorJWMstkmATFkR7qVYM",
                         completion="world():",
                         stop_reason="stop_sequence",
-                        model="claude-2.1",
+                        model="claude-3-5-sonnet-20241022",
                         type="completion",
                     ),
                 ],

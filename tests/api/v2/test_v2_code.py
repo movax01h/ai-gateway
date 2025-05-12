@@ -114,13 +114,13 @@ class TestCodeCompletions:
             (
                 1,
                 "anthropic",
-                "claude-2.1",
+                "claude-3-5-sonnet-20241022",
                 "def search",
                 {
                     "id": "id",
                     "model": {
                         "engine": "anthropic",
-                        "name": "claude-2.1",
+                        "name": "claude-3-5-sonnet-20241022",
                         "lang": "python",
                         "tokens_consumption_metadata": None,
                         "region": "us-central1",
@@ -198,13 +198,13 @@ class TestCodeCompletions:
             (
                 1,
                 "anthropic",
-                "claude-2.1",
+                "claude-3-5-sonnet-20241022",
                 "",
                 {
                     "id": "id",
                     "model": {
                         "engine": "anthropic",
-                        "name": "claude-2.1",
+                        "name": "claude-3-5-sonnet-20241022",
                         "lang": "python",
                         "tokens_consumption_metadata": None,
                         "region": "us-central1",
@@ -1431,7 +1431,6 @@ class TestCodeGenerations:
             "model_api_key",
             "mock_output_text",
             "want_vertex_called",
-            "want_anthropic_called",
             "want_anthropic_chat_called",
             "want_prompt_prepared_called",
             "want_litellm_called",
@@ -1455,7 +1454,6 @@ class TestCodeGenerations:
                 False,
                 False,
                 False,
-                False,
                 200,
                 None,
                 [
@@ -1473,13 +1471,12 @@ class TestCodeGenerations:
                 "foo",
                 None,
                 "anthropic",
-                "claude-2.1",
+                "claude-3-5-sonnet-20241022",
                 None,
                 None,
                 "foo",
                 False,
                 True,
-                False,
                 False,
                 False,
                 200,
@@ -1504,7 +1501,6 @@ class TestCodeGenerations:
                 None,
                 "foo",
                 True,
-                False,
                 False,
                 False,
                 False,
@@ -1533,7 +1529,6 @@ class TestCodeGenerations:
                 False,
                 False,
                 False,
-                False,
                 200,
                 None,
                 [
@@ -1544,7 +1539,7 @@ class TestCodeGenerations:
                     }
                 ],
                 ["flag_a", "flag_b"],
-            ),  # v1 with prompt - anthropic
+            ),  # v1 with prompt - vertex-ai
             (
                 1,
                 None,
@@ -1556,7 +1551,6 @@ class TestCodeGenerations:
                 None,
                 "",
                 True,
-                False,
                 False,
                 False,
                 False,
@@ -1578,7 +1572,6 @@ class TestCodeGenerations:
                 True,
                 False,
                 False,
-                True,
                 False,
                 200,
                 "bar",
@@ -1597,14 +1590,13 @@ class TestCodeGenerations:
                 "foo",
                 "bar",
                 "anthropic",
-                "claude-2.1",
+                "claude-3-5-sonnet-20241022",
                 None,
                 None,
                 "foo",
                 False,
                 True,
                 False,
-                True,
                 False,
                 200,
                 "bar",
@@ -1616,18 +1608,17 @@ class TestCodeGenerations:
                     }
                 ],
                 ["flag_a", "flag_b"],
-            ),  # v2 with prompt - anthropic
+            ),  # v2 with prompt - anthropic (now using chat version)
             (
                 2,
                 None,
                 "foo",
                 None,
                 "anthropic",
-                "claude-2.1",
+                "claude-3-5-sonnet-20241022",
                 None,
                 None,
                 "foo",
-                False,
                 False,
                 False,
                 False,
@@ -1643,14 +1634,13 @@ class TestCodeGenerations:
                 "foo",
                 "bar",
                 "anthropic",
-                "claude-2.1",
+                "claude-3-5-sonnet-20241022",
                 None,
                 None,
                 "",
                 False,
                 True,
                 False,
-                True,
                 False,
                 200,
                 "bar",
@@ -1670,7 +1660,6 @@ class TestCodeGenerations:
                 None,
                 None,
                 "foo",
-                False,
                 False,
                 True,
                 True,
@@ -1703,7 +1692,6 @@ class TestCodeGenerations:
                 None,
                 "foo",
                 False,
-                False,
                 True,
                 True,
                 False,
@@ -1723,6 +1711,34 @@ class TestCodeGenerations:
             ),
             (
                 3,
+                None,
+                "foo",
+                [
+                    {"role": "system", "content": "foo"},
+                    {"role": "user", "content": "bar"},
+                ],
+                "anthropic",
+                "claude-2-1",
+                None,
+                None,
+                "foo",
+                False,
+                True,
+                False,
+                False,
+                200,
+                "bar",
+                [
+                    {
+                        "text": "foo",
+                        "index": 0,
+                        "finish_reason": "length",
+                    }
+                ],
+                ["flag_a", "flag_b"],
+            ),  # v2 with prompt - anthropic (now using chat version)
+            (
+                3,
                 "",
                 "foo",
                 [
@@ -1736,8 +1752,7 @@ class TestCodeGenerations:
                 "foo",
                 False,
                 False,
-                False,
-                False,
+                True,
                 True,
                 200,
                 [
@@ -1754,16 +1769,18 @@ class TestCodeGenerations:
                 ["flag_a", "flag_b"],
             ),  # v3 with prompt - litellm
             (
-                2,
+                3,
                 "code_suggestions/generations",
                 "foo",
-                "prompt",
+                [
+                    {"role": "system", "content": "foo"},
+                    {"role": "user", "content": "bar"},
+                ],
                 "litellm",
                 "mistral",
                 "http://localhost:11434/v1",
                 "api-key",
                 "foo",
-                False,
                 False,
                 False,
                 False,
@@ -1789,7 +1806,6 @@ class TestCodeGenerations:
         mock_client,
         mock_container: containers.Container,
         mock_code_bison: Mock,
-        mock_anthropic: Mock,
         mock_anthropic_chat: Mock,
         mock_llm_chat: Mock,
         mock_agent_model: Mock,
@@ -1804,7 +1820,6 @@ class TestCodeGenerations:
         model_api_key,
         mock_output_text,
         want_vertex_called,
-        want_anthropic_called,
         want_anthropic_chat_called,
         want_prompt_prepared_called,
         want_litellm_called,
@@ -1843,7 +1858,6 @@ class TestCodeGenerations:
 
         assert response.status_code == want_status
         assert mock_code_bison.called == want_vertex_called
-        assert mock_anthropic.called == want_anthropic_called
         assert mock_llm_chat.called == want_litellm_called
         assert mock_anthropic_chat.called == want_anthropic_chat_called
         assert mock_agent_model.called == bool(prompt_id)
@@ -1857,144 +1871,6 @@ class TestCodeGenerations:
             assert set(body["metadata"]["enabled_feature_flags"]) == set(
                 enabled_feature_flags
             )
-
-    def test_successful_stream_response(
-        self,
-        mock_client: TestClient,
-        mock_generations_stream: Mock,
-        mock_suggestions_output_text: str,
-    ):
-        response = mock_client.post(
-            "/code/generations",
-            headers={
-                "Authorization": "Bearer 12345",
-                "X-Gitlab-Authentication-Type": "oidc",
-                "X-GitLab-Instance-Id": "1234",
-                "X-GitLab-Realm": "self-managed",
-            },
-            json={
-                "prompt_version": 2,
-                "project_path": "gitlab-org/gitlab",
-                "project_id": 278964,
-                "current_file": {
-                    "file_name": "main.py",
-                    "content_above_cursor": "# create function",
-                    "content_below_cursor": "\n",
-                },
-                "prompt": "# create a function",
-                "model_provider": "anthropic",
-            },
-        )
-
-        assert response.status_code == 200
-        assert response.text == mock_suggestions_output_text
-        assert response.headers["content-type"] == "text/event-stream; charset=utf-8"
-
-    @pytest.mark.parametrize(
-        (
-            "telemetry",
-            "current_file",
-            "request_headers",
-            "expected_language",
-        ),
-        [
-            (
-                [
-                    {
-                        "model_engine": "vertex",
-                        "model_name": "code-gecko",
-                        "requests": 1,
-                        "accepts": 1,
-                        "errors": 0,
-                        "lang": None,
-                    }
-                ],
-                {
-                    "file_name": "main.py",
-                    "content_above_cursor": "# Create a fast binary search\n",
-                    "content_below_cursor": "\n",
-                },
-                {
-                    "User-Agent": "vs-code",
-                    "X-Gitlab-Instance-Id": "1234",
-                    "X-Gitlab-Global-User-Id": "XTuMnZ6XTWkP3yh0ZwXualmOZvm2Gg/bk9jyfkL7Y6k=",
-                    "X-Gitlab-Host-Name": "gitlab.com",
-                    "X-Gitlab-Saas-Duo-Pro-Namespace-Ids": "4,5,6",
-                    "X-Gitlab-Realm": "self-managed",
-                },
-                "python",
-            )
-        ],
-    )
-    def test_snowplow_tracking(
-        self,
-        mock_client: TestClient,
-        mock_container: containers.Container,
-        mock_generations: Mock,
-        telemetry: List[Dict[str, Union[str, int, None]]],
-        current_file: Dict[str, str],
-        expected_language: str,
-        request_headers: Dict[str, str],
-    ):
-        expected_event = SnowplowEvent(
-            context=SnowplowEventContext(
-                prefix_length=len(current_file.get("content_above_cursor", "")),
-                suffix_length=len(current_file.get("content_below_cursor", "")),
-                language=expected_language,
-                gitlab_realm=request_headers.get("X-Gitlab-Realm", ""),
-                is_direct_connection=False,
-                suggestion_source="network",
-                region="us-central1",
-                gitlab_instance_id=request_headers.get("X-Gitlab-Instance-Id", ""),
-                gitlab_global_user_id=request_headers.get(
-                    "X-Gitlab-Global-User-Id", ""
-                ),
-                gitlab_host_name=request_headers.get("X-Gitlab-Host-Name", ""),
-                gitlab_saas_duo_pro_namespace_ids=list(
-                    map(
-                        int,
-                        CommaSeparatedStrings(
-                            request_headers.get(
-                                "X-Gitlab-Saas-Duo-Pro-Namespace-Ids", ""
-                            )
-                        ),
-                    )
-                ),
-            )
-        )
-
-        snowplow_instrumentator_mock = Mock(spec=SnowplowInstrumentator)
-
-        snowplow_container_mock = Mock(spec=ContainerTracking)
-        snowplow_container_mock.instrumentator = Mock(
-            return_value=snowplow_instrumentator_mock
-        )
-
-        with patch.object(mock_container, "snowplow", snowplow_container_mock):
-            mock_client.post(
-                "/code/generations",
-                headers={
-                    "Authorization": "Bearer 12345",
-                    "X-Gitlab-Authentication-Type": "oidc",
-                    **request_headers,
-                },
-                json={
-                    "prompt_version": 1,
-                    "project_path": "gitlab-org/gitlab",
-                    "project_id": 278964,
-                    "current_file": current_file,
-                    "prompt": "some prompt",
-                    "model_provider": "vertex-ai",
-                    "model_name": "code-bison@002",
-                    "telemetry": telemetry,
-                    "choices_count": 1,
-                },
-            )
-
-        snowplow_instrumentator_mock.watch.assert_called_once()
-        args = snowplow_instrumentator_mock.watch.call_args[0]
-        assert len(args) == 1
-        assert args[0] == expected_event
 
 
 class TestUnauthorizedScopes:

@@ -11,5 +11,5 @@ class ContainerXRay(containers.DeclarativeContainer):
     models = providers.DependenciesContainer()
 
     anthropic_claude = providers.Factory(
-        models.anthropic_claude, name=KindAnthropicModel.CLAUDE_2_1
+        models.anthropic_claude, name=KindAnthropicModel.CLAUDE_3_5_SONNET_V2
     )

@@ -123,7 +123,7 @@ class TestEditorContentGenerationStream:
                 None,
                 {
                     "engine": "anthropic",
-                    "name": "claude-2.1",
+                    "name": "claude-3-5-sonnet-20241022",
                 },
                 {"flag_a", "flag_b"},
             ),

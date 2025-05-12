@@ -104,7 +104,7 @@ class AnthropicModel(TextGenModelBase):
         self,
         client: AsyncAnthropic,
         version: str = DEFAULT_VERSION,
-        model_name: str = KindAnthropicModel.CLAUDE_2_1.value,
+        model_name: str = KindAnthropicModel.CLAUDE_3_5_SONNET_V2.value,
         **kwargs: Any,
     ):
         client_opts = self._obtain_client_opts(version, **kwargs)

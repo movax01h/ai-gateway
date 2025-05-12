@@ -5,7 +5,7 @@ number of inferences we can run concurrently on a single model, or the
 entire engine.
 
 At the time of writing, only Anthropic limits the concurrent
-inferences. We have a larger allowed concurrency for `claude-2.1` than
+inferences. We have a larger allowed concurrency for `claude-3-5-sonnet-20241022` than
 we do for `claude-2.0`, and the enforced limit across all models is
 equal to that of `claude-2.0`. The metrics [for Anthropic](#anthropic-metrics)
 are emitted from the application and need to be kept up-to-date if when we
@@ -31,7 +31,7 @@ The components regarding limits enforced by model engines are:
 - [`concurrent_inferences_per_engine`](https://dashboards.gitlab.net/d/alerts-max_inferences_per_engine/bd1e5cca-760c-55b0-98fa-4501e273af2a?var-environment=gprd&var-type=ai-gateway&var-stage=main&var-component=max_concurrent_inferences_per_engine&orgId=1):
   Per engine concurrent requests across all models, enforced by
   Anthropic. The limit is the highest number of requests allowed to a
-  model. In our case `claude-2.1`.
+  model. In our case `claude-3-5-sonnet-20241022`.
 - [`gcp_quota_limit_vertex_ai`](https://dashboards.gitlab.net/d/alerts-sat_gcp_quota_limit_vertex_ai/d6ff3868-f03d-5dda-bd7c-e0fd406c5cc6?var-environment=gprd&var-type=ai-gateway&var-stage=main&var-component=gcp_quota_limit_vertex_ai&orgId=1):
   Per model rate limit for vertex models.
 
@@ -70,7 +70,7 @@ variable needs to be set in JSON with this format:
 For example for Anthropic (these are not our actual limits):
 
 ```json
-{ "anthropic": { "claude-2.0": 5, "claude-2.1": 15 } }
+{ "anthropic": { "claude-2.0": 5, "claude-3-5-sonnet-20241022": 15 } }
 ```
 
 Because we don't want to share the limits we got from providers, this
