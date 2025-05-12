@@ -16,7 +16,7 @@
     "stanhu",
     "tle_gitlab"
   ],
-  "ignoreDeps": ["errata-ai/vale", "DavidAnson/markdownlint-cli2", "node", "ruby"],
+  "ignoreDeps": ["errata-ai/vale", "DavidAnson/markdownlint-cli2", "markdownlint-cli2", "node", "ruby"],
   "packageRules": [
     {
       "matchPackageNames": ["isort"],
