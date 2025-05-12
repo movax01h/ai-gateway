@@ -4,7 +4,7 @@ A TypeScript/JavaScript client for the GitLab Duo Workflow Service.
 
 ## Installation
 
-```bash
+```shell
 npm install @gitlab-org/duo-workflow-service
 ```
 
@@ -42,7 +42,7 @@ stream.on("end", () => console.info("Stream ended"));
 
 The client is generated from the Duo Workflow Service build.
 
-```bash
+```shell
 make gen-proto-node
 ```
 
@@ -54,7 +54,7 @@ Then when your change hits CI for `main`, a `publish-node-client` job will run. 
 
 #### Versioning
 
-There is a simple script that automatically increments the package.json version when running `make gen-proto-node`, if the generated file changes.
+There is a simple script that automatically increments the `package.json` version when running `make gen-proto-node`, if the generated file changes.
 
 The script does not use proper SemVer, it will always increment the `patch` version each time there is any change. Feel free to manually update the `minor` or `major` if your change is significant / breaking.
 

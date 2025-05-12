@@ -2,7 +2,7 @@
 
 This Ruby Gem is meant to initialize a client to the Duo Workflow Service.
 
-This Gem is generated via GRPC from the repository https://gitlab.com/gitlab-org/modelops/applied-ml/code-suggestions/ai-assist.
+This Gem is generated via GRPC from the repository <https://gitlab.com/gitlab-org/modelops/applied-ml/code-suggestions/ai-assist>.
 
 The gem's single source of truth is the version in the Duo Workflow Service repository, because that is where the `.proto` files that the gem is based on live.
 
@@ -12,7 +12,7 @@ To test the gem locally:
 
 1. Run the Duo Workflow Service server.
 
-   ```bash
+   ```shell
    poetry run python -m duo_workflow_service.server
    ```
 
@@ -25,7 +25,7 @@ To test the gem locally:
 
 ## How to update the gem
 
-The gem must be built manually and then copied over to [gitlab](https://gitlab.com/gitlab-org/gitlab), which is where it is used.
+The gem must be built manually and then copied over to [GitLab](https://gitlab.com/gitlab-org/gitlab), which is where it is used.
 
 We may [automate this process](https://gitlab.com/gitlab-org/duo-workflow/duo-workflow-service/-/issues/34) later.
 
@@ -35,18 +35,18 @@ How to do this:
 
 1. Ensure the proto files are up to date.
 
-   ```bash
+   ```shell
    make gen-proto-ruby
    ```
 
 1. Update the Gem version in `clients/ruby/lib/gitlab/duo_workflow_service/version.rb` to bump the version according to [semantic versioning](https://semver.org/) rules.
 1. Commit these changes and open a Merge Request.
 
-### Update the gem in the Gitlab repository
+### Update the gem in the GitLab repository
 
 1. Copy over the update gem source files.
 
-   ```bash
+   ```shell
    cd $GITLAB_DIR
    rm -rf vendor/gems/gitlab-duo-workflow-service-client
    cp -R $DUO_WORKFLOW_SERVICE_DIR/clients/ruby/* vendor/gems/gitlab-duo-workflow-service-client
