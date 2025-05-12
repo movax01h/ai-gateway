@@ -309,6 +309,7 @@ dmypy.json
 .pytype/
 cython_debug/
 .test-reports/
+.llm_cache.db
 
 # Chart dependencies
 infrastructure/ai-assist/charts
