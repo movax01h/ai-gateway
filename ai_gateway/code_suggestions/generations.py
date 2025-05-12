@@ -122,6 +122,7 @@ class CodeGenerations:
                     params = {
                         "prefix": prefix,
                         "instruction": prompt.prefix,
+                        "user_instruction": prompt.prefix,
                         "language": editor_lang,
                         "file_name": file_name,
                     }

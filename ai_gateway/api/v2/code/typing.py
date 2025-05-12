@@ -18,6 +18,7 @@ from ai_gateway.code_suggestions import (
 )
 from ai_gateway.instrumentators.base import Telemetry
 from ai_gateway.models import KindModelProvider, Message
+from ai_gateway.models.anthropic import KindAnthropicModel
 from ai_gateway.models.base import TokensConsumptionMetadata
 
 __all__ = [
@@ -167,6 +168,9 @@ def _validate_model_name(
     use_case: KindUseCase,
     provider: Optional[KindModelProvider] = None,
 ) -> str:
+    # Default model for Anthropic provider
+    default_model = KindAnthropicModel.CLAUDE_3_5_SONNET_V2
+
     # ignore model name validation when provider is invalid
     if not provider:
         return model_name
@@ -180,6 +184,13 @@ def _validate_model_name(
     valid_model_names = use_case_models & provider_models
 
     if model_name not in valid_model_names:
+        if model_name.startswith("claude-") and provider == KindModelProvider.ANTHROPIC:
+            version_str = model_name[len("claude-") :].split("-")[0]
+            major_version = int(version_str.split(".")[0])
+
+            if major_version < 3:
+                return default_model
+
         raise ValueError(
             f"model {model_name} is not supported by use case {use_case} and provider {provider}"
         )

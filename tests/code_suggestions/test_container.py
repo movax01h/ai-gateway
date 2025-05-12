@@ -40,4 +40,9 @@ def test_container(mock_container: containers.DeclarativeContainer):
         generations.litellm_factory(model__name=KindLiteLlmModel.MISTRAL),
         CodeGenerations,
     )
-    assert isinstance(generations.anthropic_default(), CodeGenerations)
+    assert isinstance(
+        generations.anthropic_default(
+            model__name=KindAnthropicModel.CLAUDE_3_5_SONNET_V2
+        ),
+        CodeGenerations,
+    )

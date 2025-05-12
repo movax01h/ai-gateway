@@ -73,7 +73,6 @@ class TestMockedModels:
                 "X-GitLab-Realm": "self-managed",
             },
             json={
-                "prompt_version": 2,
                 "project_path": "gitlab-org/gitlab",
                 "project_id": 278964,
                 "current_file": {
@@ -81,8 +80,12 @@ class TestMockedModels:
                     "content_above_cursor": "wonder",
                     "content_below_cursor": "\n",
                 },
-                "prompt": "write a wonderful function",
+                "prompt_version": 3,
+                "prompt": [
+                    {"role": "user", "content": "Generate a hello world function in Go"}
+                ],
                 "model_provider": "anthropic",
+                "model_name": "claude-3-5-sonnet-20241022",
             },
         )
 

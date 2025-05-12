@@ -33,7 +33,9 @@ class TestChatAnthropic:
     )
     def test_async_model_options(self, model_options: dict, expected_options: dict):
         model = ChatAnthropic(
-            async_client=AsyncAnthropic(), model="claude-2.1", **model_options
+            async_client=AsyncAnthropic(),
+            model="claude-3-5-sonnet-20241022",
+            **model_options
         )  # type: ignore[call-arg]
 
         assert isinstance(model._async_client, AsyncAnthropic)
@@ -50,7 +52,7 @@ class TestChatAnthropic:
 
     def test_unsupported_sync_methods(self):
         model = ChatAnthropic(
-            async_client=AsyncAnthropic(), model="claude-2.1"
+            async_client=AsyncAnthropic(), model="claude-3-5-sonnet-20241022"
         )  # type: ignore[call-arg]
 
         with pytest.raises(NotImplementedError):
@@ -59,7 +61,7 @@ class TestChatAnthropic:
     def test_overwrite_anthropic_credentials(self):
         model = ChatAnthropic(
             async_client=AsyncAnthropic(),
-            model="claude-2.1",
+            model="claude-3-5-sonnet-20241022",
             anthropic_api_key="test_api_key",
             anthropic_api_url="http://anthropic.test",
         )  # type: ignore[call-arg]
