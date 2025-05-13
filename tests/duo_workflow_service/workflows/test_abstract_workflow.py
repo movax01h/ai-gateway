@@ -200,3 +200,19 @@ async def test_compile_and_run_graph_with_exception(
 
     # Check exception was handled
     assert workflow.is_done is True
+
+
+@pytest.mark.asyncio
+@patch.object(TestWorkflow, "_compile_and_run_graph")
+async def test_run_passes_correct_metadata_to_langsmith_extra(
+    mock_compile_and_run_graph, workflow
+):
+    await workflow.run("Test goal")
+
+    call_args = mock_compile_and_run_graph.call_args
+    args, kwargs = call_args
+
+    metadata = kwargs["langsmith_extra"]["metadata"]
+    assert metadata["git_url"] == "https://example.com"
+    assert metadata["git_sha"] == "abc123"
+    assert metadata["workflow_type"] == CategoryEnum.WORKFLOW_SOFTWARE_DEVELOPMENT.value

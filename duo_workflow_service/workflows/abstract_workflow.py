@@ -86,6 +86,7 @@ class AbstractWorkflow(ABC):
             tracing_metadata = {
                 "git_url": self._workflow_metadata.get("git_url", ""),
                 "git_sha": self._workflow_metadata.get("git_sha", ""),
+                "workflow_type": self._workflow_type.value
             }
 
             with tracing_context(enabled=extended_logging):
