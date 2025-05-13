@@ -64,7 +64,7 @@ class ToolsApprovalComponent(HumanApprovalComponent):
                 unknown_tools = True
                 continue
             except KeyError:
-                # tool call refered to NO-OP tool like HandOver tool which does not
+                # tool call referred to NO-OP tool like HandOver tool which does not
                 # require approvals
                 continue
 

@@ -53,6 +53,7 @@ Format details:
 
 Example response:
 
+<!-- codespell:ignore-begin -->
 ```shell
 event: stream_start
 data: {"metadata": {"model": {"engine": "agent", "name": "Claude 3 Code Generations Agent"}, "timestamp": 1732121183, "enabled_feature_flags": ["flag_a", "flag_b"], "region": "us-central1"}}
@@ -73,6 +74,7 @@ event: stream_end
 data: null
 
 ```
+<!-- codespell:ignore-end -->
 
 ### V3
 

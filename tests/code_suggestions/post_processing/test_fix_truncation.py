@@ -3,6 +3,7 @@ import pytest
 from ai_gateway.code_suggestions.processing import LanguageId
 from ai_gateway.code_suggestions.processing.post.ops import fix_truncation
 
+# codespell:ignore-begin
 RUBY_SAMPLE_1 = (
     # prefix
     "Event.new(\n",
@@ -11,6 +12,7 @@ RUBY_SAMPLE_1 = (
     # suffix
     "\n)",
 )
+# codespell:ignore-end
 
 RUBY_SAMPLE_1__TRIMMED_COMPLETION = "    name: params[:name],\n    config: { repeat:"
 

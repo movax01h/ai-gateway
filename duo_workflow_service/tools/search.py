@@ -28,6 +28,7 @@ class GitLabSearchBase(DuoBaseTool, ABC):
 
     @classmethod
     def _get_description(cls, unique_description: str) -> str:
+        # codespell:ignore-begin
         return f"""
         {unique_description}
 
@@ -57,6 +58,7 @@ class GitLabSearchBase(DuoBaseTool, ABC):
 
         Note: If a user is not a member of a private project or a private group, this tool is going to result in a 404 status code.
         """
+        # codespell:ignore-end
 
     @abstractmethod
     async def _arun(self, *args: Any, **kwargs: Any) -> str:
