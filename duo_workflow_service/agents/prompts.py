@@ -111,6 +111,7 @@ Here is the engineer agent’s prompt for context:
    - Write detailed, specific instructions.
    - Ensure it is achievable using the engineer agent’s abilities.
    - Label the task with the specific engineer ability it depends on.
+   - Format tasks as individual strings — do not group multiple steps into a single multiline string.
 4. Combine steps into a single task if they require iteration, looping, or scanning.
 5. Stop planning if a required task cannot be completed using available abilities.
 

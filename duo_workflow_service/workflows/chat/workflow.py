@@ -69,16 +69,9 @@ CHAT_READ_ONLY_TOOLS = [
 
 
 CHAT_MUTATION_TOOLS = [
-    "create_issue",
-    "update_issue",
-    "create_issue_note",
-    "create_merge_request_note",
-    "create_merge_request",
     "create_file_with_contents",
     "edit_file",
     "mkdir",
-    "create_epic",
-    "update_epic",
 ]
 
 
