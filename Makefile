@@ -236,12 +236,12 @@ lint-doc: vale markdownlint
 .PHONY: vale
 vale:
 	@echo "Running vale..."
-	@vale --minAlertLevel error docs *.md
+	@vale --minAlertLevel error clients docs *.md
 
 .PHONY: markdownlint
 markdownlint:
 	@echo "Running markdownlint..."
-	@markdownlint-cli2 "docs/**/*.md" *.md
+	@markdownlint-cli2 "clients/**/*.md" "docs/**/*.md" *.md
 
 .PHONY: ingest
 ingest:
