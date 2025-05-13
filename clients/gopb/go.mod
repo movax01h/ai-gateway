@@ -1,6 +1,6 @@
 module gitlab.com/gitlab-org/duo-workflow/duo-workflow-service/clients/gopb
 
-go 1.24.3
+go 1.22.0
 
 require (
 	google.golang.org/grpc v1.67.1

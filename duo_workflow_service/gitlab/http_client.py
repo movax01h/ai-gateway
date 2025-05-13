@@ -76,16 +76,16 @@ class GitlabHttpClient:
             ),
         )
 
-        if parse_json:
-            try:
-                return json.loads(response, object_hook=object_hook)
-
-            except json.JSONDecodeError as e:
-                logger.error(f"JSON decode error for {method} {path}: {str(e)}. ")
-                logger.error(
-                    f"Response content type: {type(response)}, content: {str(response)}"
-                )
-
-                return {}
-        else:
+        if not parse_json:
             return response
+
+        try:
+            return json.loads(response, object_hook=object_hook)
+
+        except json.JSONDecodeError as e:
+            logger.error(f"JSON decode error for {method} {path}: {str(e)}. ")
+            logger.error(
+                f"Raw response type: {type(response)}, content: {repr(response)}"
+            )
+
+            return {}

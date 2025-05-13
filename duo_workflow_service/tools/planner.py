@@ -113,7 +113,11 @@ class SetTaskStatus(BaseTool):
 
 class CreatePlanInput(BaseModel):
     tasks: List[str] = Field(
-        description="A complete list of tasks that create a new plan"
+        description=(
+            "A list of tasks, where each task is a separate string element in the array. "
+            "Do NOT provide a single multi-line string. "
+            "Example: ['Check repo structure', 'Run tests', 'Fix warnings']"
+        ),
     )
 
 
@@ -122,6 +126,7 @@ class CreatePlan(BaseTool):
     description: str = """Create a list of tasks for the plan.
     The tasks you provide here will set the tasks in the current plan.
     Please provide all the tasks that you want to show to the user.
+    Tasks should be formatted in an array where each task is a string.
     """
 
     args_schema: Type[BaseModel] = CreatePlanInput
