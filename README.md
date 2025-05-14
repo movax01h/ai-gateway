@@ -236,6 +236,11 @@ go to `/admin/groups` select `Edit` on the group you are using, set `Plan` to `U
 
 See [authentication and authorization doc](docs/auth.md).
 
+## Internal Events
+
+See [internal events doc](docs/internal_events.md) for more information on how
+to add internal events and test internal event collection with Snowplow locally.
+
 ## Component overview
 
 In above diagram, the main components are shown.

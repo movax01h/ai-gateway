@@ -49,7 +49,7 @@ internal_event_client.track_event(
 )
 ```
 
-There are various arguments you can set aside from the event name.
+Various arguments can be set aside from the event name.
 See [this section](https://docs.gitlab.com/ee/development/internal_analytics/internal_event_instrumentation/quick_start.html#trigger-events) for more information.
 
 ## Test locally
@@ -65,14 +65,17 @@ See [this section](https://docs.gitlab.com/ee/development/internal_analytics/int
    ```
 
 1. Run snowplow micro with `gdk start snowplow-micro`.
-1. Run AI Gateway with `poetry run ai_gateway`.
+1. Run AI Gateway with `poetry run ai_gateway` or `gdk start gitlab-ai-gateway`.
 
-Visit [the UI dashboard](http://127.0.0.1:9091) to see the events received by snowplow micro.
+Visit [the UI dashboard](http://localhost:9091/micro/ui) to see the events received by snowplow micro.
 
 ## Configuration
 
-There are various configuration options for the Internal Event Tracking.
+Various configuration options are available for the Internal Event Tracking.
 See `AIGW_INTERNAL_EVENT` prefixed variables in the [application settings](application_settings.md#how-to-update-application-settings).
+
+When testing locally, make sure that `AIGW_INTERNAL_EVENT__BATCH_SIZE` is `1`.
+Otherwise, no events are visible in the UI until the batch size has been reached.
 
 ## Internal Event Middleware
 
