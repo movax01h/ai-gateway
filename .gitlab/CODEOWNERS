@@ -6,6 +6,9 @@
 
 ^[Duo Workflow Service] @AndrasHerczeg @DylanGriffith @halilcoban @jfypk @Joey_Khabie @mikolaj_wawrzyniak @shekharpatnaik @ssuman3
 duo_workflow_service/
+clients/
+contract/
+lib/
 
 ^[Infrastructure]
 * @gitlab-org/production-engineering @gitlab-org/scalability
