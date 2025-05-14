@@ -1,7 +1,6 @@
 from datetime import datetime
 
 from asgi_correlation_id.context import correlation_id
-from gitlab_cloud_connector import X_GITLAB_DUO_SEAT_COUNT_HEADER
 from starlette.datastructures import CommaSeparatedStrings
 from starlette.middleware.base import Request
 from starlette_context import context as starlette_context
@@ -84,7 +83,6 @@ class InternalEventMiddleware:
             client_name=request.headers.get(X_GITLAB_CLIENT_NAME),
             client_version=request.headers.get(X_GITLAB_CLIENT_VERSION),
             interface=request.headers.get(X_GITLAB_INTERFACE),
-            duo_seat_count=request.headers.get(X_GITLAB_DUO_SEAT_COUNT_HEADER),
             feature_enabled_by_namespace_ids=feature_enabled_by_namespace_ids,
             feature_enablement_type=request.headers.get(
                 X_GITLAB_FEATURE_ENABLEMENT_TYPE_HEADER

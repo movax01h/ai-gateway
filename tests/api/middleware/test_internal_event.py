@@ -1,7 +1,6 @@
 from unittest.mock import AsyncMock, patch
 
 import pytest
-from gitlab_cloud_connector import X_GITLAB_DUO_SEAT_COUNT_HEADER
 from starlette.requests import Request
 from starlette_context import context, request_cycle_context
 
@@ -100,7 +99,6 @@ async def test_middleware_set_context(internal_event_middleware):
                 (X_GITLAB_HOST_NAME_HEADER.lower().encode(), b"test-host"),
                 (X_GITLAB_VERSION_HEADER.lower().encode(), b"test-version"),
                 (X_GITLAB_GLOBAL_USER_ID_HEADER.lower().encode(), b"test-user"),
-                (X_GITLAB_DUO_SEAT_COUNT_HEADER.lower().encode(), b"100"),
                 (X_GITLAB_TEAM_MEMBER_HEADER.lower().encode(), b"true"),
                 (X_GITLAB_FEATURE_ENABLEMENT_TYPE_HEADER.lower().encode(), b"add_on"),
                 (X_GITLAB_CLIENT_NAME.lower().encode(), b"vscode"),
@@ -129,7 +127,6 @@ async def test_middleware_set_context(internal_event_middleware):
             host_name="test-host",
             instance_version="test-version",
             global_user_id="test-user",
-            duo_seat_count="100",
             is_gitlab_team_member="true",
             feature_enablement_type="add_on",
             client_name="vscode",
@@ -257,7 +254,6 @@ async def test_middleware_missing_headers(internal_event_middleware):
             host_name=None,
             instance_version=None,
             global_user_id=None,
-            duo_seat_count=None,
             feature_enabled_by_namespace_ids=[],
             context_generated_at=mock_event_context.set.call_args[0][
                 0

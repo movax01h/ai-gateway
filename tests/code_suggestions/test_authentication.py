@@ -76,7 +76,6 @@ expected_log_keys = [
     "gitlab_feature_enabled_by_namespace_ids",
     "gitlab_feature_enablement_type",
     "gitlab_language_server_version",
-    "gitlab_duo_seat_count",
     "duration_request",
 ]
 
@@ -454,44 +453,12 @@ invalid_authentication_token_type_error = {
             },
             ["auth_duration_s", "token_issuer"],
         ),
-        # 'duo_seat_count' claim is non-empty, 'X-Gitlab-Duo-Seat-Count' is present and matches the claim
-        (
-            {
-                "Authorization": "Bearer 12345",
-                "X-Gitlab-Authentication-Type": "oidc",
-                "X-Gitlab-Global-User-Id": "1234",
-                "X-Gitlab-Instance-Id": "1234",
-                "X-GitLab-Realm": "self-managed",
-                "X-Gitlab-Duo-Seat-Count": "333",
-            },
-            None,
-            200,
-            CloudConnectorUser(
-                authenticated=True,
-                claims=UserClaims(
-                    scopes=["feature1", "feature3"],
-                    subject="1234",
-                    issuer="gitlab-ai-gateway",
-                    gitlab_realm="self-managed",
-                    duo_seat_count="333",
-                    gitlab_instance_id="1234",
-                ),
-            ),
-            {
-                "authenticated": True,
-                "is_debug": False,
-                "scopes": ["feature1", "feature3"],
-                "token": "12345",
-            },
-            ["auth_duration_s", "token_issuer"],
-        ),
         # 'gitlab_instance_id' claim is non-empty, 'X-Gitlab-Instance-Id' is missing
         (
             {
                 "Authorization": "Bearer 12345",
                 "X-Gitlab-Authentication-Type": "oidc",
                 "X-Gitlab-Global-User-Id": "1234",
-                "X-Gitlab-Duo-Seat-Count": "333",
                 "X-GitLab-Realm": "self-managed",
             },
             None,
@@ -503,7 +470,6 @@ invalid_authentication_token_type_error = {
                     subject="1234",
                     issuer="gitlab-ai-gateway",
                     gitlab_realm="self-managed",
-                    duo_seat_count="333",
                     gitlab_instance_id="1234",
                 ),
             ),
@@ -523,7 +489,6 @@ invalid_authentication_token_type_error = {
                 "X-Gitlab-Global-User-Id": "1234",
                 "X-Gitlab-Instance-Id": "mismatch",
                 "X-GitLab-Realm": "self-managed",
-                "X-Gitlab-Duo-Seat-Count": "333",
             },
             None,
             401,
@@ -534,7 +499,6 @@ invalid_authentication_token_type_error = {
                     subject="1234",
                     issuer="gitlab-ai-gateway",
                     gitlab_realm="self-managed",
-                    duo_seat_count="333",
                     gitlab_instance_id="1234",
                 ),
             ),
@@ -554,7 +518,6 @@ invalid_authentication_token_type_error = {
                 "X-Gitlab-Global-User-Id": "1234",
                 "X-Gitlab-Instance-Id": "1234",
                 "X-GitLab-Realm": "self-managed",
-                "X-Gitlab-Duo-Seat-Count": "333",
             },
             None,
             200,
@@ -565,7 +528,6 @@ invalid_authentication_token_type_error = {
                     subject="1234",
                     issuer="gitlab-ai-gateway",
                     gitlab_realm="self-managed",
-                    duo_seat_count="333",
                     gitlab_instance_id="1234",
                 ),
             ),
@@ -595,113 +557,6 @@ def test_failed_authorization_logging(
         assert cap_logs[0]["status_code"] == expected_status_code
         assert cap_logs[0]["method"] == "POST"
         assert set(cap_logs[0].keys()) == set(expected_log_keys + log_keys)
-
-
-@pytest.mark.parametrize(
-    (
-        "headers",
-        "data",
-        "expected_status_code",
-        "auth_user",
-        "expected_response",
-        "expected_error_message",
-        "log_keys",
-    ),
-    [
-        # 'duo_seat_count' claim is non-empty, 'X-Gitlab-Duo-Seat-Count' is missing
-        (
-            {
-                "Authorization": "Bearer 12345",
-                "X-Gitlab-Authentication-Type": "oidc",
-                "X-Gitlab-Global-User-Id": "1234",
-                "X-Gitlab-Instance-Id": "1234",
-                "X-GitLab-Realm": "self-managed",
-            },
-            None,
-            200,
-            CloudConnectorUser(
-                authenticated=True,
-                claims=UserClaims(
-                    scopes=["feature1", "feature3"],
-                    subject="1234",
-                    issuer="gitlab-ai-gateway",
-                    gitlab_realm="self-managed",
-                    duo_seat_count="333",
-                    gitlab_instance_id="1234",
-                ),
-            ),
-            {
-                "authenticated": True,
-                "is_debug": False,
-                "scopes": ["feature1", "feature3"],
-                "token": "12345",
-            },
-            "Header is missing: 'X-Gitlab-Duo-Seat-Count'",
-            [
-                "auth_duration_s",
-                "token_issuer",
-            ],
-        ),
-        # 'duo_seat_count' claim is non-empty, 'X-Gitlab-Duo-Seat-Count' is present but does not match the claim
-        (
-            {
-                "Authorization": "Bearer 12345",
-                "X-Gitlab-Authentication-Type": "oidc",
-                "X-Gitlab-Global-User-Id": "1234",
-                "X-Gitlab-Instance-Id": "1234",
-                "X-GitLab-Realm": "self-managed",
-                "X-Gitlab-Duo-Seat-Count": "777",
-            },
-            None,
-            200,
-            CloudConnectorUser(
-                authenticated=True,
-                claims=UserClaims(
-                    scopes=["feature1", "feature3"],
-                    subject="1234",
-                    issuer="gitlab-ai-gateway",
-                    gitlab_realm="self-managed",
-                    duo_seat_count="333",
-                    gitlab_instance_id="1234",
-                ),
-            ),
-            {
-                "authenticated": True,
-                "is_debug": False,
-                "scopes": ["feature1", "feature3"],
-                "token": "12345",
-            },
-            "Header mismatch 'X-Gitlab-Duo-Seat-Count'",
-            [
-                "auth_duration_s",
-                "token_issuer",
-            ],
-        ),
-    ],
-)
-def test_failed_duo_seat_count_validation_logging(
-    # We have a separate spec for this, since this is a unique case, where validation fails,
-    # we log an error, but we still want the request to pass. Extracted from `test_failed_authorization_logging`
-    # See: https://gitlab.com/gitlab-org/modelops/applied-ml/code-suggestions/ai-assist/-/issues/672
-    mock_client,
-    headers,
-    data,
-    expected_status_code,
-    expected_error_message,
-    expected_response,
-    log_keys,
-):
-    with capture_logs() as cap_logs:
-        response = mock_client.post("/", headers=headers, data=data)
-
-        assert response.status_code == expected_status_code
-        assert response.json() == expected_response
-
-        assert len(cap_logs) == 2  # Regular logging and exception logging
-        assert cap_logs[0]["event"] == expected_error_message
-        assert cap_logs[1]["status_code"] == expected_status_code
-        assert cap_logs[1]["method"] == "POST"
-        assert set(cap_logs[1].keys()) == set(expected_log_keys + log_keys)
 
 
 def test_bypass_auth(fast_api_router, stub_auth_provider):
