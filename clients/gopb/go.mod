@@ -1,4 +1,4 @@
-module gitlab.com/gitlab-org/duo-workflow/duo-workflow-service/clients/gopb
+module gitlab.com/gitlab-org/modelops/applied-ml/code-suggestions/ai-assist/clients/gopb
 
 go 1.22.0
 

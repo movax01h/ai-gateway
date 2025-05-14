@@ -27,7 +27,7 @@ To test the gem locally:
 
 The gem must be built manually and then copied over to [GitLab](https://gitlab.com/gitlab-org/gitlab), which is where it is used.
 
-We may [automate this process](https://gitlab.com/gitlab-org/duo-workflow/duo-workflow-service/-/issues/34) later.
+We may [automate this process](https://gitlab.com/gitlab-org/modelops/applied-ml/code-suggestions/ai-assist/-/issues/1090) later.
 
 How to do this:
 
