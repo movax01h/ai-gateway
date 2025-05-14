@@ -141,7 +141,19 @@ def test_are_tools_called_with_tool_use():
     assert workflow._are_tools_called(state) == Routes.TOOL_USE
 
 
-def test_show_agent_message_with_message():
+@pytest.mark.parametrize(
+    "message_content, expected_content",
+    [
+        ("Hello, I'm the agent", "Hello, I'm the agent"),
+        (
+            [
+                {"type": "text", "text": "Hello, I'm the agent"},
+            ],
+            "Hello, I'm the agent",
+        ),
+    ],
+)
+def test_show_agent_message_with_message(message_content, expected_content):
     workflow = Workflow(
         workflow_id="test-id",
         workflow_metadata={},
@@ -149,9 +161,7 @@ def test_show_agent_message_with_message():
     )
 
     state: ChatWorkflowState = {
-        "conversation_history": {
-            AGENT_NAME: [AIMessage(content="Hello, I'm the agent")]
-        },
+        "conversation_history": {AGENT_NAME: [AIMessage(content=message_content)]},
         "plan": {"steps": []},
         "status": WorkflowStatusEnum.EXECUTION,
         "ui_chat_log": [],
@@ -162,7 +172,7 @@ def test_show_agent_message_with_message():
     assert "ui_chat_log" in result
     assert len(result["ui_chat_log"]) == 1
     assert result["ui_chat_log"][0]["message_type"] == MessageTypeEnum.AGENT
-    assert result["ui_chat_log"][0]["content"] == "Hello, I'm the agent"
+    assert result["ui_chat_log"][0]["content"] == expected_content
     assert result["ui_chat_log"][0]["status"] == ToolStatus.SUCCESS
 
 

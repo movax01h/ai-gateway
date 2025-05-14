@@ -140,22 +140,39 @@ async def test_execute_workflow(mock_resolve_workflow, mock_abstract_workflow_cl
     mock_workflow_instance.is_done = False
     mock_workflow_instance.run = AsyncMock()
     mock_workflow_instance.cleanup = AsyncMock()
+
+    checkpoint_action = contract_pb2.Action(newCheckpoint=contract_pb2.NewCheckpoint())
+
+    mock_workflow_instance.get_from_streaming_outbox = MagicMock(
+        side_effect=[checkpoint_action, checkpoint_action, None]
+    )
     mock_workflow_instance.get_from_outbox = AsyncMock(
-        return_value=contract_pb2.Action()
+        side_effect=[contract_pb2.Action(), contract_pb2.Action()]
     )
     mock_resolve_workflow.return_value = mock_abstract_workflow_class
 
+    def mock_add_to_inbox(event):
+        mock_workflow_instance.is_done = True
+
+    mock_workflow_instance.add_to_inbox = MagicMock(side_effect=[mock_add_to_inbox])
+
     async def mock_request_iterator() -> AsyncIterable[contract_pb2.ClientEvent]:
-        yield contract_pb2.ClientEvent(
-            startRequest=contract_pb2.StartWorkflowRequest(goal="test")
-        )
+        while True:
+            yield contract_pb2.ClientEvent(
+                startRequest=contract_pb2.StartWorkflowRequest(goal="test")
+            )
 
     current_user.set(CloudConnectorUser(authenticated=True, is_debug=True))
     mock_context = MagicMock(spec=grpc.ServicerContext)
     servicer = GrpcServer()
     result = servicer.ExecuteWorkflow(mock_request_iterator(), mock_context)
     assert isinstance(result, AsyncIterable)
-    assert isinstance(await anext(result), contract_pb2.Action)
+    assert (await anext(result)).WhichOneof("action") == "newCheckpoint"
+    assert (await anext(result)).WhichOneof("action") != "newCheckpoint"
+    assert (await anext(result)).WhichOneof("action") == "newCheckpoint"
+    assert (await anext(result)).WhichOneof("action") != "newCheckpoint"
+
+    assert mock_workflow_instance.add_to_inbox.call_count == 1
 
 
 @pytest.mark.asyncio

@@ -4,6 +4,7 @@ from enum import StrEnum
 from typing import Any, Dict, List
 
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage
+from langchain_core.output_parsers.string import StrOutputParser
 from langgraph.checkpoint.memory import BaseCheckpointSaver
 from langgraph.graph import END, StateGraph
 from langgraph.types import Command, Send
@@ -105,7 +106,7 @@ class Workflow(AbstractWorkflow):
             "ui_chat_log": [
                 UiChatLog(
                     message_type=MessageTypeEnum.AGENT,
-                    content=str(last_message.content),
+                    content=StrOutputParser().invoke(last_message) or "",
                     timestamp=datetime.now(timezone.utc).isoformat(),
                     status=ToolStatus.SUCCESS,
                     correlation_id=None,

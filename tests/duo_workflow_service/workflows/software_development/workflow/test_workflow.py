@@ -156,8 +156,10 @@ def _agent_responses(status: WorkflowStatusEnum, agent_name: str):
     "duo_workflow_service.workflows.software_development.workflow.GoalDisambiguationComponent",
     autospec=True,
 )
+@patch("duo_workflow_service.workflows.abstract_workflow.UserInterface", autospec=True)
 @patch.dict(os.environ, {"DW_INTERNAL_EVENT__ENABLED": "true"})
 async def test_workflow_run(
+    mock_checkpoint_notifier,
     mock_goal_disambiguator_component,
     mock_gitlab_workflow,
     mock_chat_client,
@@ -170,6 +172,7 @@ async def test_workflow_run(
     mock_tools_registry_cls,
     checkpoint_tuple,
 ):
+    mock_checkpoint_notifier_instance = mock_checkpoint_notifier.return_value
     mock_tools_registry = MagicMock(spec=ToolsRegistry)
     mock_tools_registry_cls.configure = AsyncMock(return_value=mock_tools_registry)
     mock_tools_registry.approval_required.return_value = False
@@ -269,10 +272,13 @@ async def test_workflow_run(
     assert mock_git_lab_workflow_instance.aput.call_count >= 1
     assert mock_git_lab_workflow_instance.aget_tuple.call_count >= 1
 
+    assert mock_checkpoint_notifier_instance.send_event.call_count >= 2
+
     assert workflow.is_done
 
 
 @pytest.mark.asyncio
+@patch("duo_workflow_service.workflows.abstract_workflow.UserInterface", autospec=True)
 @patch("duo_workflow_service.workflows.abstract_workflow.ToolsRegistry", autospec=True)
 @patch("duo_workflow_service.workflows.software_development.workflow.Agent")
 @patch("duo_workflow_service.workflows.software_development.workflow.HandoverAgent")
@@ -489,6 +495,7 @@ async def test_workflow_run_when_exception(
 
 
 @pytest.mark.asyncio
+@patch("duo_workflow_service.workflows.abstract_workflow.UserInterface", autospec=True)
 @patch("duo_workflow_service.workflows.abstract_workflow.ToolsRegistry", autospec=True)
 @patch("duo_workflow_service.workflows.software_development.workflow.Agent")
 @patch("duo_workflow_service.workflows.software_development.workflow.HandoverAgent")
@@ -1043,6 +1050,7 @@ async def test_workflow_run_with_retry(
 
 
 @pytest.mark.asyncio
+@patch("duo_workflow_service.workflows.abstract_workflow.UserInterface", autospec=True)
 @patch("duo_workflow_service.workflows.abstract_workflow.ToolsRegistry", autospec=True)
 @patch("duo_workflow_service.workflows.software_development.workflow.Agent")
 @patch("duo_workflow_service.workflows.software_development.workflow.HandoverAgent")

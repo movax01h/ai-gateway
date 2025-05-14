@@ -75,6 +75,16 @@ async def test_get_from_outbox(workflow):
 
 
 @pytest.mark.asyncio
+async def test_get_from_streaming_outbox(workflow):
+    await workflow._streaming_outbox.put("test_item")
+
+    item = workflow.get_from_streaming_outbox()
+
+    assert item == "test_item"
+    assert workflow._streaming_outbox.empty()
+
+
+@pytest.mark.asyncio
 async def test_add_to_inbox(workflow):
     # Create a mock event
     mock_event = MagicMock()
