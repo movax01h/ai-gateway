@@ -19,6 +19,7 @@ from duo_workflow_service.checkpointer.gitlab_workflow import (
     GitLabWorkflow,
     WorkflowStatusEventEnum,
 )
+from duo_workflow_service.checkpointer.notifier import UserInterface
 from duo_workflow_service.components import ToolsRegistry
 from duo_workflow_service.entities import DuoWorkflowStateType
 from duo_workflow_service.gitlab.events import get_event
@@ -56,6 +57,7 @@ class AbstractWorkflow(ABC):
 
     _outbox: asyncio.Queue
     _inbox: asyncio.Queue
+    _streaming_outbox: asyncio.Queue
     _workflow_id: str
     _project: Project
     _workflow_config: dict[str, Any]
@@ -72,6 +74,7 @@ class AbstractWorkflow(ABC):
     ):
         self._outbox = asyncio.Queue(maxsize=QUEUE_MAX_SIZE)
         self._inbox = asyncio.Queue(maxsize=QUEUE_MAX_SIZE)
+        self._streaming_outbox = asyncio.Queue(maxsize=QUEUE_MAX_SIZE)
         self._workflow_id = workflow_id
         self._workflow_metadata = workflow_metadata
         self.log = structlog.stdlib.get_logger("workflow").bind(workflow_id=workflow_id)
@@ -109,6 +112,14 @@ class AbstractWorkflow(ABC):
         checkpointer: BaseCheckpointSaver,
     ) -> Any:
         pass
+
+    def get_from_streaming_outbox(self):
+        try:
+            item = self._streaming_outbox.get_nowait()
+            self._streaming_outbox.task_done()
+            return item
+        except asyncio.QueueEmpty:
+            return None
 
     async def get_from_outbox(self):
         item = await asyncio.wait_for(self._outbox.get(), self.OUTBOX_CHECK_INTERVAL)
@@ -160,6 +171,9 @@ class AbstractWorkflow(ABC):
                 gl_http_client=self._http_client,
                 gitlab_host=gitlab_host,
             )
+            checkpoint_notifier = UserInterface(
+                outbox=self._streaming_outbox, goal=goal
+            )
 
             async with GitLabWorkflow(
                 self._http_client, self._workflow_id, self._workflow_type
@@ -174,14 +188,18 @@ class AbstractWorkflow(ABC):
                 compiled_graph = self._compile(goal, tools_registry, checkpointer)
                 graph_input = await self.get_graph_input(goal, status_event)
 
-                async for steps in compiled_graph.astream(
+                async for type, state in compiled_graph.astream(
                     input=graph_input,
                     config=graph_config,
+                    stream_mode=["values", "messages", "updates"],
                 ):
-                    for step in steps:
-                        self.log.info(f"step: {step}")
-                        element = steps[step]
-                        self.log_workflow_elements(element)
+                    if type == "updates":
+                        for step in state:
+                            self.log.info(f"step: {step}")
+                            element = state[step]
+                            self.log_workflow_elements(element)
+                    else:
+                        await checkpoint_notifier.send_event(type, state)
 
         except BaseException as e:
             await self._handle_workflow_failure(e, compiled_graph, graph_config)
@@ -213,6 +231,7 @@ class AbstractWorkflow(ABC):
             self.is_done = True
 
             self._drain_queue(workflow_id, self._outbox, "outbox")
+            self._drain_queue(workflow_id, self._streaming_outbox, "streaming outbox")
             self._drain_queue(workflow_id, self._inbox, "inbox")
 
             self.log.info("Workflow cleanup completed.")
