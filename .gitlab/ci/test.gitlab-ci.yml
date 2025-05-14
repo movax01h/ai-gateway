@@ -49,6 +49,34 @@ tests:evaluation:
     - make eval
   when: manual
 
+.test-base: &test-base
+  stage: test
+  trigger:
+    project: gitlab-org/duo-workflow/testing/duo-workflow-tests
+
+.test-variables: &test-variables
+  LS_DATASET: "duo_workflow.swe-bench-verified-test.1"
+  LANGCHAIN_PROJECT: "duo-workflow-ci-job"
+  DW_SERVICE_REF: $CI_COMMIT_REF
+  DW_CONCURRENCY: 3
+  SWEBENCH_START: "true"
+
+sanity-tests:
+  # Runs SWE Bench tests on a small set of problems that are consistently resolved by Duo Workflow.
+  <<: *test-base
+  when: always
+  allow_failure: true # TODO: to be removed once swe-bench pipelines are stable enough
+  variables:
+    <<: *test-variables
+    LS_DATASET_SPLIT: "solved_consistently_sm"
+
+regression-tests:
+  <<: *test-base
+  when: manual
+  variables:
+    <<: *test-variables
+    LS_DATASET_SPLIT: "validation_stratified_b06f4db4_p30"
+
 .proto-variables:
   variables:
     DEBIAN_VERSION: "bookworm"
@@ -99,3 +127,18 @@ check-proto-ruby:
       changes:
         - contract/**/*.proto
         - clients/ruby/**/*.rb
+
+check-proto-node:
+  extends: [.proto-variables]
+  image: node:18-${DEBIAN_VERSION}
+  stage: test
+  script:
+    - make gen-proto-node
+    - '(git diff --exit-code || (echo "ERROR: There are changes after running make gen-proto-node. Run it locally and commit the changes." && exit 1))'
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+      changes:
+        - contract/**/*.proto
+        - clients/node/src/**/*.ts
+        - clients/node/package.json
+        - clients/node/package-lock.json

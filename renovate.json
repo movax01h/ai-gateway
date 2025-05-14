@@ -16,7 +16,8 @@
     "stanhu",
     "tle_gitlab"
   ],
-  "ignoreDeps": ["errata-ai/vale", "DavidAnson/markdownlint-cli2", "markdownlint-cli2", "node", "ruby"],
+  "ignoreDeps": ["errata-ai/vale", "DavidAnson/markdownlint-cli2", "markdownlint-cli2", "node", "ruby", "golang"],
+  "ignorePaths": ["clients/gopb/go.mod"],
   "packageRules": [
     {
       "matchPackageNames": ["isort"],

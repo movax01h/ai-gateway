@@ -81,3 +81,36 @@ release-docker-hub-image:self-managed-nightly:
     - echo $REGISTRY
   rules:
     - if: $CI_COMMIT_BRANCH && $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+
+publish-node-client:
+  stage: release
+  image: node:20-alpine
+  allow_failure: true
+  script:
+    - cd clients/node
+    - |
+      # Configure npm to use GitLab's registry with CI token for auth
+      npm config set @gitlab-org:registry https://gitlab.com/api/v4/projects/${CI_PROJECT_ID}/packages/npm/
+      npm config set //gitlab.com/api/v4/projects/${CI_PROJECT_ID}/packages/npm/:_authToken ${CI_JOB_TOKEN}
+    - |
+      # Check if version is already published
+      PACKAGE_NAME=$(node -e "console.log(require('./package.json').name)")
+      PACKAGE_VERSION=$(node -e "console.log(require('./package.json').version)")
+      echo "Checking if ${PACKAGE_NAME}@${PACKAGE_VERSION} is already published..."
+
+      if npm view "${PACKAGE_NAME}@${PACKAGE_VERSION}" version > /dev/null 2>&1; then
+        echo "Version ${PACKAGE_VERSION} is already published. Skipping."
+        exit 0
+      else
+        echo "Version ${PACKAGE_VERSION} is not published. Publishing..."
+      fi
+    - |
+      # Registry configured, npm config is now:
+      npm config list
+    - npm ci
+    - npx tsc
+    - npm publish
+  rules:
+    - if: $CI_COMMIT_BRANCH == "main"
+      changes:
+        - clients/node/**/*
