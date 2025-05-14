@@ -7,7 +7,6 @@ from typing import Optional
 import structlog
 from asgi_correlation_id.context import correlation_id
 from fastapi import status
-from gitlab_cloud_connector import X_GITLAB_DUO_SEAT_COUNT_HEADER
 from langsmith.run_helpers import tracing_context
 from starlette.datastructures import CommaSeparatedStrings, MutableHeaders
 from starlette.middleware.base import Request
@@ -170,9 +169,6 @@ class AccessLogMiddleware:
                     X_GITLAB_FEATURE_ENABLEMENT_TYPE_HEADER
                 ),
                 "gitlab_realm": request.headers.get(X_GITLAB_REALM_HEADER),
-                "gitlab_duo_seat_count": request.headers.get(
-                    X_GITLAB_DUO_SEAT_COUNT_HEADER
-                ),
             }
             fields.update(starlette_context.data)
 
