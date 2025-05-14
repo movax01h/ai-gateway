@@ -1,6 +1,6 @@
 syntax = "proto3";
 
-option go_package = "gitlab.com/gitlab-org/duo-workflow/duo-workflow-service/clients/gopb";
+option go_package = "gitlab.com/gitlab-org/modelops/applied-ml/code-suggestions/ai-assist/clients/gopb";
 option ruby_package = "DuoWorkflowService";
 
 service DuoWorkflow {
