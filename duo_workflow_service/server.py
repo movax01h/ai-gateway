@@ -37,9 +37,13 @@ async def start_servers():
 
     await asyncio.gather(*tasks)
 
+def setup_cloud_connector():
+    cloud_connector_service_name = os.environ.get("DUO_WORKFLOW_CLOUD_CONNECTOR_SERVICE_NAME", "gitlab-duo-workflow-service")
+    os.environ["CLOUD_CONNECTOR_SERVICE_NAME"] = cloud_connector_service_name
 
 def run():
     load_dotenv()
+    setup_cloud_connector()
     setup_profiling()
     setup_error_tracking()
     setup_monitoring()
