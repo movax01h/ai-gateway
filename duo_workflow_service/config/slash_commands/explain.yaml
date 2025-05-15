@@ -1,0 +1,22 @@
+---
+# Configuration for the /explain slash command
+name: explain
+description: "Explains the selected code in detail"
+
+system_prompt: |
+  This is a sample system prompt for now.
+  This will be updated with the real explain system prompt.
+
+goal: |
+  Please explain the code between the <ContextElementType> tags:
+
+  Provide a detailed explanation of:
+  1. What the code does
+  2. How it works
+  3. Any important patterns or concepts it demonstrates
+  4. Potential areas for improvement or optimization
+
+# Optional parameters
+parameters:
+  max_tokens: 1024
+  temperature: 0.7
