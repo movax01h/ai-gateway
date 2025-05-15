@@ -2,4 +2,4 @@
 
 require_relative "duo_workflow_service/version"
 
-require "proto/contract_pb"
+require "proto/contract_services_pb"

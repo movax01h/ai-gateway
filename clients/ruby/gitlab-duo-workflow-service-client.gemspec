@@ -20,6 +20,6 @@ Gem::Specification.new do |spec|
   spec.add_development_dependency "gitlab-styles", "~> 10.1.0"
   spec.add_development_dependency "rspec", "~> 3.0"
   spec.add_development_dependency "rspec-parameterized", "~> 1.0.2"
-  spec.add_development_dependency "rubocop", "~> 1.50"
+  spec.add_development_dependency "rubocop", "~> 1.21"
   spec.add_development_dependency 'grpc-tools'
 end

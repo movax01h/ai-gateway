@@ -18,9 +18,12 @@ To test the gem locally:
 
 1. Invoke the client in a Rails console.
 
+   ```shell
+   gdk rails console
+   ```
+
    ```ruby
-   cd $GITLAB_DIR
-   Ai::DuoWorkflowService::Client.new(duo_workflow_service_url: "localhost:50052").generate_token
+   Ai::DuoWorkflow::DuoWorkflowService::Client.new(duo_workflow_service_url: "localhost:50052", current_user: User.first, secure: false).generate_token
    ```
 
 ## How to update the gem
@@ -47,9 +50,9 @@ How to do this:
 1. Copy over the update gem source files.
 
    ```shell
-   cd $GITLAB_DIR
-   rm -rf vendor/gems/gitlab-duo-workflow-service-client
-   cp -R $DUO_WORKFLOW_SERVICE_DIR/clients/ruby/* vendor/gems/gitlab-duo-workflow-service-client
+   cd <gdk-root>
+   rm -rf gitlab/vendor/gems/gitlab-duo-workflow-service-client/*
+   cp -R gitlab-ai-gateway/clients/ruby/. gitlab/vendor/gems/gitlab-duo-workflow-service-client
    ```
 
 1. Update the `Gemfile` so that `gitlab-duo-workflow-service-client` points to the version of the gem in the latest updates.
