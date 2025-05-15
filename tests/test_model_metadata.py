@@ -1,7 +1,9 @@
 # Import your model classes
+from unittest import mock
 from unittest.mock import patch
 
 import pytest
+from gitlab_cloud_connector import GitLabUnitPrimitive
 from pydantic import HttpUrl
 
 from ai_gateway.model_metadata import (
@@ -9,7 +11,11 @@ from ai_gateway.model_metadata import (
     ModelMetadata,
     create_model_metadata,
 )
-from ai_gateway.model_selection import LLMDefinition, ModelSelectionConfig
+from ai_gateway.model_selection import (
+    LLMDefinition,
+    ModelSelectionConfig,
+    UnitPrimitiveConfig,
+)
 
 
 def test_create_amazon_q_model_metadata():
@@ -55,7 +61,7 @@ def test_create_regular_model_metadata():
 class TestCreateGitlabModelMetadata:
     @pytest.fixture
     def get_llm_definitions(self):
-        mock_info = {
+        mock_models = {
             "gitlab_model1": LLMDefinition(
                 gitlab_identifier="gitlab_model1",
                 name="gitlab_model",
@@ -65,12 +71,22 @@ class TestCreateGitlabModelMetadata:
             )
         }
 
-        with patch.object(
-            ModelSelectionConfig, "get_llm_definitions", return_value=mock_info
+        mock_definitions = {
+            "duo_chat": UnitPrimitiveConfig(
+                feature_setting="duo_chat",
+                unit_primitives=[GitLabUnitPrimitive.DUO_CHAT],
+                default_model="gitlab_model1",
+            )
+        }
+
+        with patch.multiple(
+            ModelSelectionConfig,
+            get_llm_definitions=mock.Mock(return_value=mock_models),
+            get_unit_primitive_config_map=mock.Mock(return_value=mock_definitions),
         ) as mock_method:
             yield mock_method
 
-    def test_create_gitlab_model_metadata(self, get_llm_definitions):
+    def test_create_gitlab_model_metadata_with_identifier(self, get_llm_definitions):
         data = {
             "provider": "gitlab",
             "identifier": "gitlab_model1",
@@ -81,6 +97,31 @@ class TestCreateGitlabModelMetadata:
         assert result.provider == "custom_openai"
         assert result.identifier == "mixtral_8x7b"
         assert result.name == "mixtral"
+
+    def test_create_gitlab_model_metadata_with_feature_setting(
+        self, get_llm_definitions
+    ):
+        data = {
+            "provider": "gitlab",
+            "feature_setting": "duo_chat",
+        }
+
+        result = create_model_metadata(data)
+
+        assert result.provider == "custom_openai"
+        assert result.identifier == "mixtral_8x7b"
+        assert result.name == "mixtral"
+
+    def test_required_parameters(self, get_llm_definitions):
+        data = {
+            "provider": "gitlab",
+        }
+
+        with pytest.raises(
+            ValueError,
+            match=r"Argument error: either identifier or feature_setting must be present.",
+        ):
+            create_model_metadata(data)
 
     def test_create_gitlab_model_metadata_non_existing(self, get_llm_definitions):
         data = {

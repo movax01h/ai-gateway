@@ -83,7 +83,7 @@ def test_load_llm_definitions(selection_config):
 
 
 def test_get_unit_primitive_config(selection_config):
-    assert selection_config.get_unit_primitive_config() == [
+    assert list(selection_config.get_unit_primitive_config()) == [
         UnitPrimitiveConfig(
             feature_setting="test_config",
             unit_primitives=[
@@ -95,6 +95,21 @@ def test_get_unit_primitive_config(selection_config):
             beta_models=["gitlab-model-2"],
         )
     ]
+
+
+def test_get_unit_primitive_config_map(selection_config):
+    assert selection_config.get_unit_primitive_config_map() == {
+        "test_config": UnitPrimitiveConfig(
+            feature_setting="test_config",
+            unit_primitives=[
+                GitLabUnitPrimitive.ASK_COMMIT,
+                GitLabUnitPrimitive.ASK_EPIC,
+            ],
+            default_model="gitlab-model-1",
+            selectable_models=["gitlab-model-1"],
+            beta_models=["gitlab-model-2"],
+        )
+    }
 
 
 def test_is_singleton(mock_fs):
@@ -117,6 +132,23 @@ def test_get_gitlab_model(selection_config):
 def test_get_gitlab_model_missing_key(selection_config):
     with pytest.raises(ValueError):
         selection_config.get_gitlab_model("non-existing-model")
+
+
+def test_get_gitlab_model_for_feature(selection_config):
+    assert selection_config.get_gitlab_model_for_feature(
+        "test_config"
+    ) == LLMDefinition(
+        name="Model One",
+        gitlab_identifier="gitlab-model-1",
+        provider="provider1",
+        provider_identifier="provider-model-1",
+        params={"param1": "value1"},
+    )
+
+
+def test_get_gitlab_model_for_feature_no_feature(selection_config):
+    with pytest.raises(ValueError, match="Invalid feature setting: random-feature"):
+        selection_config.get_gitlab_model_for_feature("random-feature")
 
 
 def test_validate_without_error(mock_fs):

@@ -1,6 +1,6 @@
 from itertools import chain
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any, Iterable, Optional
 
 import yaml
 from gitlab_cloud_connector import GitLabUnitPrimitive
@@ -38,7 +38,7 @@ class ModelSelectionConfig:
 
     def __init__(self) -> None:
         self._llm_definitions: Optional[dict[str, LLMDefinition]] = None
-        self._unit_primitive_configs: Optional[list[UnitPrimitiveConfig]] = None
+        self._unit_primitive_configs: Optional[dict[str, UnitPrimitiveConfig]] = None
 
     def get_llm_definitions(self) -> dict[str, LLMDefinition]:
         if not self._llm_definitions:
@@ -53,17 +53,20 @@ class ModelSelectionConfig:
 
         return self._llm_definitions
 
-    def get_unit_primitive_config(self) -> list[UnitPrimitiveConfig]:
+    def get_unit_primitive_config_map(self) -> dict[str, UnitPrimitiveConfig]:
         if not self._unit_primitive_configs:
             with open(UNIT_PRIMITIVE_CONFIG_PATH, "r") as f:
                 config_data = yaml.safe_load(f)
 
-            self._unit_primitive_configs = [
-                UnitPrimitiveConfig(**data)
+            self._unit_primitive_configs = {
+                data["feature_setting"]: UnitPrimitiveConfig(**data)
                 for data in config_data["configurable_unit_primitives"]
-            ]
+            }
 
         return self._unit_primitive_configs
+
+    def get_unit_primitive_config(self) -> Iterable[UnitPrimitiveConfig]:
+        return self.get_unit_primitive_config_map().values()
 
     def validate(self) -> None:
         unit_primitive_configs = self.get_unit_primitive_config()
@@ -98,6 +101,13 @@ class ModelSelectionConfig:
         if gitlab_model := self.get_llm_definitions().get(gitlab_model_id, None):
             return gitlab_model
         raise ValueError(f"Invalid model identifier: {gitlab_model_id}")
+
+    def get_gitlab_model_for_feature(self, feature_setting_name: str) -> LLMDefinition:
+        if feature_setting := self.get_unit_primitive_config_map().get(
+            feature_setting_name, None
+        ):
+            return self.get_gitlab_model(feature_setting.default_model)
+        raise ValueError(f"Invalid feature setting: {feature_setting_name}")
 
 
 def validate_model_selection_config():
