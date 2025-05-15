@@ -1,4 +1,4 @@
-from typing import Any, Callable, NamedTuple, Optional
+from typing import Any, AsyncIterator, Callable, NamedTuple, Optional
 
 import structlog
 
@@ -225,6 +225,11 @@ class ModelEngineCompletions(ModelEngineBase):
                     prompt.suffix if prompt.suffix else "",
                     **kwargs,
                 ):
+                    # TODO: Handle streamed output separately or ignore for now
+                    if isinstance(responses, AsyncIterator):
+                        log.warning("Streaming responses not yet handled in _generate")
+                        return empty_output
+
                     if not isinstance(responses, list):
                         responses = [responses]
 

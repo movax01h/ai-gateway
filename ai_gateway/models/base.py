@@ -69,7 +69,7 @@ class ModelAPIError(Exception):
 
 
 class ModelAPICallError(ModelAPIError):
-    code: int
+    code: Optional[int] = None
 
     def __init__(self, message: str, errors: tuple = (), details: tuple = ()):
         super().__init__(f"{self.code} {message}", errors=errors, details=details)
