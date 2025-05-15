@@ -1,11 +1,11 @@
 from dependency_injector import containers, providers
-from langchain_community.chat_models import ChatLiteLLM
 from litellm.llms.custom_httpx.http_handler import AsyncHTTPHandler
 
 from ai_gateway.integrations.amazon_q.chat import ChatAmazonQ
 from ai_gateway.models import mock
 from ai_gateway.models.base import init_anthropic_client, log_request
 from ai_gateway.models.v2.anthropic_claude import ChatAnthropic
+from ai_gateway.models.v2.chat_litellm import ChatLiteLLM
 from ai_gateway.prompts.typing import Model
 
 __all__ = [
@@ -14,15 +14,6 @@ __all__ = [
 
 
 def _litellm_factory(*args, **kwargs) -> Model:
-
-    if not kwargs.get("disable_streaming", False):
-        # Always include usage metrics when streaming. See https://docs.litellm.ai/docs/completion/usage#streaming-usage
-        # Respect other possible values that may have been passed.
-        kwargs["model_kwargs"] = kwargs.get("model_kwargs", {})
-        kwargs["model_kwargs"]["stream_options"] = kwargs["model_kwargs"].get(
-            "stream_options", {}
-        )
-        kwargs["model_kwargs"]["stream_options"]["include_usage"] = True
 
     if kwargs.get("custom_llm_provider", "") == "vertex_ai":
         kwargs["client"] = AsyncHTTPHandler(event_hooks={"request": [log_request]})

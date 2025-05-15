@@ -17,35 +17,15 @@ from ai_gateway.models.v2.container import _litellm_factory
             {
                 "model": "claude-3-sonnet@20240229",
                 "custom_llm_provider": "vertex_ai",
-                "model_kwargs": {"stream_options": {"include_usage": True}},
             },
             True,
         ),
         (
-            {"model": "mistral"},
             {
                 "model": "mistral",
-                "model_kwargs": {"stream_options": {"include_usage": True}},
-            },
-            False,
-        ),
-        (
-            {
-                "model": "mistral",
-                "model_kwargs": {
-                    "another_model_kwarg": "my_value",
-                    "stream_options": {"another_stream_option": 1},
-                },
             },
             {
                 "model": "mistral",
-                "model_kwargs": {
-                    "another_model_kwarg": "my_value",
-                    "stream_options": {
-                        "another_stream_option": 1,
-                        "include_usage": True,
-                    },
-                },
             },
             False,
         ),
@@ -57,11 +37,6 @@ from ai_gateway.models.v2.container import _litellm_factory
             {
                 "model": "mistral",
                 "disable_streaming": False,
-                "model_kwargs": {
-                    "stream_options": {
-                        "include_usage": True,
-                    },
-                },
             },
             False,
         ),
