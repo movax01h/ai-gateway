@@ -2575,20 +2575,20 @@ types-requests = ">=2.31.0.2,<3.0.0.0"
 
 [[package]]
 name = "langgraph"
-version = "0.2.76"
+version = "0.2.52"
 description = "Building stateful, multi-actor applications with LLMs"
 optional = false
 python-versions = "<4.0,>=3.9.0"
 groups = ["main"]
 files = [
-    {file = "langgraph-0.2.76-py3-none-any.whl", hash = "sha256:076b8b5d2fc5a9761c46a7618430cfa5c978a8012257c43cbc127b27e0fd7872"},
-    {file = "langgraph-0.2.76.tar.gz", hash = "sha256:688f8dcd9b6797ba78384599e0de944773000c75156ad1e186490e99e89fa5c0"},
+    {file = "langgraph-0.2.52-py3-none-any.whl", hash = "sha256:4cec56629b833a4f61678d5395719f7a096b16438bf521c48744e9d0579f3559"},
+    {file = "langgraph-0.2.52.tar.gz", hash = "sha256:d28b58787b44b880fcdd9479a61a35cc9c273d007eb756ee468fb2f5f72c7738"},
 ]
 
 [package.dependencies]
-langchain-core = ">=0.2.43,<0.3.0 || >0.3.0,<0.3.1 || >0.3.1,<0.3.2 || >0.3.2,<0.3.3 || >0.3.3,<0.3.4 || >0.3.4,<0.3.5 || >0.3.5,<0.3.6 || >0.3.6,<0.3.7 || >0.3.7,<0.3.8 || >0.3.8,<0.3.9 || >0.3.9,<0.3.10 || >0.3.10,<0.3.11 || >0.3.11,<0.3.12 || >0.3.12,<0.3.13 || >0.3.13,<0.3.14 || >0.3.14,<0.3.15 || >0.3.15,<0.3.16 || >0.3.16,<0.3.17 || >0.3.17,<0.3.18 || >0.3.18,<0.3.19 || >0.3.19,<0.3.20 || >0.3.20,<0.3.21 || >0.3.21,<0.3.22 || >0.3.22,<0.4.0"
-langgraph-checkpoint = ">=2.0.10,<3.0.0"
-langgraph-sdk = ">=0.1.42,<0.2.0"
+langchain-core = ">=0.2.43,<0.3.0 || >0.3.0,<0.3.1 || >0.3.1,<0.3.2 || >0.3.2,<0.3.3 || >0.3.3,<0.3.4 || >0.3.4,<0.3.5 || >0.3.5,<0.3.6 || >0.3.6,<0.3.7 || >0.3.7,<0.3.8 || >0.3.8,<0.3.9 || >0.3.9,<0.3.10 || >0.3.10,<0.3.11 || >0.3.11,<0.3.12 || >0.3.12,<0.3.13 || >0.3.13,<0.3.14 || >0.3.14,<0.4.0"
+langgraph-checkpoint = ">=2.0.4,<3.0.0"
+langgraph-sdk = ">=0.1.32,<0.2.0"
 
 [[package]]
 name = "langgraph-checkpoint"
@@ -6164,4 +6164,4 @@ cffi = ["cffi (>=1.11)"]
 [metadata]
 lock-version = "2.1"
 python-versions = "~3.12.0"
-content-hash = "0ae1c4894a67deb4a9b9b6f5ac36174db84449f74fef772a04c8c2c8ee5440a4"
+content-hash = "4154e41156e2b8ff14350a8e47c49a054b5f5e3b93ac4269e98b932c9ef457a3"
