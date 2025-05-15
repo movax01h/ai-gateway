@@ -68,6 +68,12 @@ class ToolStatus(StrEnum):
     FAILURE = "failure"
 
 
+class SlashCommandStatus(StrEnum):
+    PENDING = "pending"
+    SUCCESS = "success"
+    FAILURE = "failure"
+
+
 class ToolInfo(TypedDict):
     name: str
     args: dict[str, Any]
@@ -77,7 +83,7 @@ class UiChatLog(TypedDict):
     message_type: MessageTypeEnum
     content: str
     timestamp: str
-    status: Optional[ToolStatus]
+    status: Optional[Union[ToolStatus, SlashCommandStatus]]
     correlation_id: Optional[str]
     tool_info: Optional[ToolInfo]
 
