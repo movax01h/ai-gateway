@@ -82,8 +82,9 @@ configurable_unit_primitives:
   - feature_setting: "duo_chat_explain_vulnerability"
     unit_primitives:
       - "explain_vulnerability"
-    default_model: "claude_3_haiku_20240307"
+    default_model: "claude_sonnet_3_7_20250219"
     selectable_models:
+      - "claude_sonnet_3_7_20250219"
       - "claude_3_5_sonnet_20240620"
       - "claude_3_haiku_20240307"
   - feature_setting: "code_suggestions"
