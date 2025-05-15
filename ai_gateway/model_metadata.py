@@ -71,14 +71,23 @@ class ModelMetadata(BaseModelMetadata):
 TypeModelMetadata = AmazonQModelMetadata | ModelMetadata
 
 
-def parameters_for_gitlab_provider(identifier) -> dict[str, Any]:
+def parameters_for_gitlab_provider(parameters) -> dict[str, Any]:
     """
     Retrieve model parameters for a given GitLab identifier.
 
     This function also allows setting custom provider details based on the identifier, like fetching endpoints based on
     AIGW location.
     """
-    gitlab_model = ModelSelectionConfig().get_gitlab_model(identifier)
+
+    configs = ModelSelectionConfig()
+    if identifier := parameters.get("identifier"):
+        gitlab_model = configs.get_gitlab_model(identifier)
+    elif feature_setting := parameters.get("feature_setting"):
+        gitlab_model = configs.get_gitlab_model_for_feature(feature_setting)
+    else:
+        raise ValueError(
+            "Argument error: either identifier or feature_setting must be present."
+        )
 
     return {
         "provider": gitlab_model.provider,
@@ -95,7 +104,7 @@ def create_model_metadata(data: Dict[str, Any]) -> Optional[TypeModelMetadata]:
         case "amazon_q":
             return AmazonQModelMetadata(**data)
         case "gitlab":
-            return ModelMetadata(**parameters_for_gitlab_provider(data["identifier"]))
+            return ModelMetadata(**parameters_for_gitlab_provider(data))
 
     return ModelMetadata(**data)
 
