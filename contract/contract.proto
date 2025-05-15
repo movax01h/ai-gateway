@@ -28,6 +28,22 @@ message StartWorkflowRequest {
 message ActionResponse {
     string requestID = 1;
     string response = 2;
+    oneof response_type {
+      PlainTextResponse plainTextResponse = 3;
+      HttpResponse httpResponse = 4;
+    }
+}
+
+message PlainTextResponse {
+    string response = 1;
+    string error = 2;
+}
+
+message HttpResponse {
+    map<string, string> headers = 1;
+    int32 statusCode = 2;
+    string body = 3;
+    string error = 4;
 }
 
 message Action {

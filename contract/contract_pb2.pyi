@@ -48,12 +48,43 @@ class StartWorkflowRequest(_message.Message):
     def __init__(self, clientVersion: _Optional[str] = ..., workflowID: _Optional[str] = ..., workflowDefinition: _Optional[str] = ..., goal: _Optional[str] = ..., workflowMetadata: _Optional[str] = ..., clientCapabilities: _Optional[_Iterable[str]] = ..., context: _Optional[_Iterable[_Union[ContextElement, _Mapping]]] = ...) -> None: ...
 
 class ActionResponse(_message.Message):
-    __slots__ = ("requestID", "response")
+    __slots__ = ("requestID", "response", "plainTextResponse", "httpResponse")
     REQUESTID_FIELD_NUMBER: _ClassVar[int]
     RESPONSE_FIELD_NUMBER: _ClassVar[int]
+    PLAINTEXTRESPONSE_FIELD_NUMBER: _ClassVar[int]
+    HTTPRESPONSE_FIELD_NUMBER: _ClassVar[int]
     requestID: str
     response: str
-    def __init__(self, requestID: _Optional[str] = ..., response: _Optional[str] = ...) -> None: ...
+    plainTextResponse: PlainTextResponse
+    httpResponse: HttpResponse
+    def __init__(self, requestID: _Optional[str] = ..., response: _Optional[str] = ..., plainTextResponse: _Optional[_Union[PlainTextResponse, _Mapping]] = ..., httpResponse: _Optional[_Union[HttpResponse, _Mapping]] = ...) -> None: ...
+
+class PlainTextResponse(_message.Message):
+    __slots__ = ("response", "error")
+    RESPONSE_FIELD_NUMBER: _ClassVar[int]
+    ERROR_FIELD_NUMBER: _ClassVar[int]
+    response: str
+    error: str
+    def __init__(self, response: _Optional[str] = ..., error: _Optional[str] = ...) -> None: ...
+
+class HttpResponse(_message.Message):
+    __slots__ = ("headers", "statusCode", "body", "error")
+    class HeadersEntry(_message.Message):
+        __slots__ = ("key", "value")
+        KEY_FIELD_NUMBER: _ClassVar[int]
+        VALUE_FIELD_NUMBER: _ClassVar[int]
+        key: str
+        value: str
+        def __init__(self, key: _Optional[str] = ..., value: _Optional[str] = ...) -> None: ...
+    HEADERS_FIELD_NUMBER: _ClassVar[int]
+    STATUSCODE_FIELD_NUMBER: _ClassVar[int]
+    BODY_FIELD_NUMBER: _ClassVar[int]
+    ERROR_FIELD_NUMBER: _ClassVar[int]
+    headers: _containers.ScalarMap[str, str]
+    statusCode: int
+    body: str
+    error: str
+    def __init__(self, headers: _Optional[_Mapping[str, str]] = ..., statusCode: _Optional[int] = ..., body: _Optional[str] = ..., error: _Optional[str] = ...) -> None: ...
 
 class Action(_message.Message):
     __slots__ = ("requestID", "runCommand", "runHTTPRequest", "runReadFile", "runWriteFile", "runGitCommand", "runEditFile", "newCheckpoint")

@@ -98,6 +98,25 @@ export interface StartWorkflowRequest {
 export interface ActionResponse {
   requestID: string;
   response: string;
+  plainTextResponse?: PlainTextResponse | undefined;
+  httpResponse?: HttpResponse | undefined;
+}
+
+export interface PlainTextResponse {
+  response: string;
+  error: string;
+}
+
+export interface HttpResponse {
+  headers: { [key: string]: string };
+  statusCode: number;
+  body: string;
+  error: string;
+}
+
+export interface HttpResponse_HeadersEntry {
+  key: string;
+  value: string;
 }
 
 export interface Action {
@@ -414,7 +433,7 @@ export const StartWorkflowRequest: MessageFns<StartWorkflowRequest> = {
 };
 
 function createBaseActionResponse(): ActionResponse {
-  return { requestID: "", response: "" };
+  return { requestID: "", response: "", plainTextResponse: undefined, httpResponse: undefined };
 }
 
 export const ActionResponse: MessageFns<ActionResponse> = {
@@ -424,6 +443,12 @@ export const ActionResponse: MessageFns<ActionResponse> = {
     }
     if (message.response !== "") {
       writer.uint32(18).string(message.response);
+    }
+    if (message.plainTextResponse !== undefined) {
+      PlainTextResponse.encode(message.plainTextResponse, writer.uint32(26).fork()).join();
+    }
+    if (message.httpResponse !== undefined) {
+      HttpResponse.encode(message.httpResponse, writer.uint32(34).fork()).join();
     }
     return writer;
   },
@@ -451,6 +476,22 @@ export const ActionResponse: MessageFns<ActionResponse> = {
           message.response = reader.string();
           continue;
         }
+        case 3: {
+          if (tag !== 26) {
+            break;
+          }
+
+          message.plainTextResponse = PlainTextResponse.decode(reader, reader.uint32());
+          continue;
+        }
+        case 4: {
+          if (tag !== 34) {
+            break;
+          }
+
+          message.httpResponse = HttpResponse.decode(reader, reader.uint32());
+          continue;
+        }
       }
       if ((tag & 7) === 4 || tag === 0) {
         break;
@@ -464,6 +505,10 @@ export const ActionResponse: MessageFns<ActionResponse> = {
     return {
       requestID: isSet(object.requestID) ? globalThis.String(object.requestID) : "",
       response: isSet(object.response) ? globalThis.String(object.response) : "",
+      plainTextResponse: isSet(object.plainTextResponse)
+        ? PlainTextResponse.fromJSON(object.plainTextResponse)
+        : undefined,
+      httpResponse: isSet(object.httpResponse) ? HttpResponse.fromJSON(object.httpResponse) : undefined,
     };
   },
 
@@ -475,6 +520,12 @@ export const ActionResponse: MessageFns<ActionResponse> = {
     if (message.response !== "") {
       obj.response = message.response;
     }
+    if (message.plainTextResponse !== undefined) {
+      obj.plainTextResponse = PlainTextResponse.toJSON(message.plainTextResponse);
+    }
+    if (message.httpResponse !== undefined) {
+      obj.httpResponse = HttpResponse.toJSON(message.httpResponse);
+    }
     return obj;
   },
 
@@ -485,6 +536,291 @@ export const ActionResponse: MessageFns<ActionResponse> = {
     const message = createBaseActionResponse();
     message.requestID = object.requestID ?? "";
     message.response = object.response ?? "";
+    message.plainTextResponse = (object.plainTextResponse !== undefined && object.plainTextResponse !== null)
+      ? PlainTextResponse.fromPartial(object.plainTextResponse)
+      : undefined;
+    message.httpResponse = (object.httpResponse !== undefined && object.httpResponse !== null)
+      ? HttpResponse.fromPartial(object.httpResponse)
+      : undefined;
+    return message;
+  },
+};
+
+function createBasePlainTextResponse(): PlainTextResponse {
+  return { response: "", error: "" };
+}
+
+export const PlainTextResponse: MessageFns<PlainTextResponse> = {
+  encode(message: PlainTextResponse, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
+    if (message.response !== "") {
+      writer.uint32(10).string(message.response);
+    }
+    if (message.error !== "") {
+      writer.uint32(18).string(message.error);
+    }
+    return writer;
+  },
+
+  decode(input: BinaryReader | Uint8Array, length?: number): PlainTextResponse {
+    const reader = input instanceof BinaryReader ? input : new BinaryReader(input);
+    let end = length === undefined ? reader.len : reader.pos + length;
+    const message = createBasePlainTextResponse();
+    while (reader.pos < end) {
+      const tag = reader.uint32();
+      switch (tag >>> 3) {
+        case 1: {
+          if (tag !== 10) {
+            break;
+          }
+
+          message.response = reader.string();
+          continue;
+        }
+        case 2: {
+          if (tag !== 18) {
+            break;
+          }
+
+          message.error = reader.string();
+          continue;
+        }
+      }
+      if ((tag & 7) === 4 || tag === 0) {
+        break;
+      }
+      reader.skip(tag & 7);
+    }
+    return message;
+  },
+
+  fromJSON(object: any): PlainTextResponse {
+    return {
+      response: isSet(object.response) ? globalThis.String(object.response) : "",
+      error: isSet(object.error) ? globalThis.String(object.error) : "",
+    };
+  },
+
+  toJSON(message: PlainTextResponse): unknown {
+    const obj: any = {};
+    if (message.response !== "") {
+      obj.response = message.response;
+    }
+    if (message.error !== "") {
+      obj.error = message.error;
+    }
+    return obj;
+  },
+
+  create<I extends Exact<DeepPartial<PlainTextResponse>, I>>(base?: I): PlainTextResponse {
+    return PlainTextResponse.fromPartial(base ?? ({} as any));
+  },
+  fromPartial<I extends Exact<DeepPartial<PlainTextResponse>, I>>(object: I): PlainTextResponse {
+    const message = createBasePlainTextResponse();
+    message.response = object.response ?? "";
+    message.error = object.error ?? "";
+    return message;
+  },
+};
+
+function createBaseHttpResponse(): HttpResponse {
+  return { headers: {}, statusCode: 0, body: "", error: "" };
+}
+
+export const HttpResponse: MessageFns<HttpResponse> = {
+  encode(message: HttpResponse, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
+    Object.entries(message.headers).forEach(([key, value]) => {
+      HttpResponse_HeadersEntry.encode({ key: key as any, value }, writer.uint32(10).fork()).join();
+    });
+    if (message.statusCode !== 0) {
+      writer.uint32(16).int32(message.statusCode);
+    }
+    if (message.body !== "") {
+      writer.uint32(26).string(message.body);
+    }
+    if (message.error !== "") {
+      writer.uint32(34).string(message.error);
+    }
+    return writer;
+  },
+
+  decode(input: BinaryReader | Uint8Array, length?: number): HttpResponse {
+    const reader = input instanceof BinaryReader ? input : new BinaryReader(input);
+    let end = length === undefined ? reader.len : reader.pos + length;
+    const message = createBaseHttpResponse();
+    while (reader.pos < end) {
+      const tag = reader.uint32();
+      switch (tag >>> 3) {
+        case 1: {
+          if (tag !== 10) {
+            break;
+          }
+
+          const entry1 = HttpResponse_HeadersEntry.decode(reader, reader.uint32());
+          if (entry1.value !== undefined) {
+            message.headers[entry1.key] = entry1.value;
+          }
+          continue;
+        }
+        case 2: {
+          if (tag !== 16) {
+            break;
+          }
+
+          message.statusCode = reader.int32();
+          continue;
+        }
+        case 3: {
+          if (tag !== 26) {
+            break;
+          }
+
+          message.body = reader.string();
+          continue;
+        }
+        case 4: {
+          if (tag !== 34) {
+            break;
+          }
+
+          message.error = reader.string();
+          continue;
+        }
+      }
+      if ((tag & 7) === 4 || tag === 0) {
+        break;
+      }
+      reader.skip(tag & 7);
+    }
+    return message;
+  },
+
+  fromJSON(object: any): HttpResponse {
+    return {
+      headers: isObject(object.headers)
+        ? Object.entries(object.headers).reduce<{ [key: string]: string }>((acc, [key, value]) => {
+          acc[key] = String(value);
+          return acc;
+        }, {})
+        : {},
+      statusCode: isSet(object.statusCode) ? globalThis.Number(object.statusCode) : 0,
+      body: isSet(object.body) ? globalThis.String(object.body) : "",
+      error: isSet(object.error) ? globalThis.String(object.error) : "",
+    };
+  },
+
+  toJSON(message: HttpResponse): unknown {
+    const obj: any = {};
+    if (message.headers) {
+      const entries = Object.entries(message.headers);
+      if (entries.length > 0) {
+        obj.headers = {};
+        entries.forEach(([k, v]) => {
+          obj.headers[k] = v;
+        });
+      }
+    }
+    if (message.statusCode !== 0) {
+      obj.statusCode = Math.round(message.statusCode);
+    }
+    if (message.body !== "") {
+      obj.body = message.body;
+    }
+    if (message.error !== "") {
+      obj.error = message.error;
+    }
+    return obj;
+  },
+
+  create<I extends Exact<DeepPartial<HttpResponse>, I>>(base?: I): HttpResponse {
+    return HttpResponse.fromPartial(base ?? ({} as any));
+  },
+  fromPartial<I extends Exact<DeepPartial<HttpResponse>, I>>(object: I): HttpResponse {
+    const message = createBaseHttpResponse();
+    message.headers = Object.entries(object.headers ?? {}).reduce<{ [key: string]: string }>((acc, [key, value]) => {
+      if (value !== undefined) {
+        acc[key] = globalThis.String(value);
+      }
+      return acc;
+    }, {});
+    message.statusCode = object.statusCode ?? 0;
+    message.body = object.body ?? "";
+    message.error = object.error ?? "";
+    return message;
+  },
+};
+
+function createBaseHttpResponse_HeadersEntry(): HttpResponse_HeadersEntry {
+  return { key: "", value: "" };
+}
+
+export const HttpResponse_HeadersEntry: MessageFns<HttpResponse_HeadersEntry> = {
+  encode(message: HttpResponse_HeadersEntry, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
+    if (message.key !== "") {
+      writer.uint32(10).string(message.key);
+    }
+    if (message.value !== "") {
+      writer.uint32(18).string(message.value);
+    }
+    return writer;
+  },
+
+  decode(input: BinaryReader | Uint8Array, length?: number): HttpResponse_HeadersEntry {
+    const reader = input instanceof BinaryReader ? input : new BinaryReader(input);
+    let end = length === undefined ? reader.len : reader.pos + length;
+    const message = createBaseHttpResponse_HeadersEntry();
+    while (reader.pos < end) {
+      const tag = reader.uint32();
+      switch (tag >>> 3) {
+        case 1: {
+          if (tag !== 10) {
+            break;
+          }
+
+          message.key = reader.string();
+          continue;
+        }
+        case 2: {
+          if (tag !== 18) {
+            break;
+          }
+
+          message.value = reader.string();
+          continue;
+        }
+      }
+      if ((tag & 7) === 4 || tag === 0) {
+        break;
+      }
+      reader.skip(tag & 7);
+    }
+    return message;
+  },
+
+  fromJSON(object: any): HttpResponse_HeadersEntry {
+    return {
+      key: isSet(object.key) ? globalThis.String(object.key) : "",
+      value: isSet(object.value) ? globalThis.String(object.value) : "",
+    };
+  },
+
+  toJSON(message: HttpResponse_HeadersEntry): unknown {
+    const obj: any = {};
+    if (message.key !== "") {
+      obj.key = message.key;
+    }
+    if (message.value !== "") {
+      obj.value = message.value;
+    }
+    return obj;
+  },
+
+  create<I extends Exact<DeepPartial<HttpResponse_HeadersEntry>, I>>(base?: I): HttpResponse_HeadersEntry {
+    return HttpResponse_HeadersEntry.fromPartial(base ?? ({} as any));
+  },
+  fromPartial<I extends Exact<DeepPartial<HttpResponse_HeadersEntry>, I>>(object: I): HttpResponse_HeadersEntry {
+    const message = createBaseHttpResponse_HeadersEntry();
+    message.key = object.key ?? "";
+    message.value = object.value ?? "";
     return message;
   },
 };
@@ -1582,6 +1918,10 @@ function longToNumber(int64: { toString(): string }): number {
     throw new globalThis.Error("Value is smaller than Number.MIN_SAFE_INTEGER");
   }
   return num;
+}
+
+function isObject(value: any): boolean {
+  return typeof value === "object" && value !== null;
 }
 
 function isSet(value: any): boolean {
