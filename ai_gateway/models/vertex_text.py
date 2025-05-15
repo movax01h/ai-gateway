@@ -1,6 +1,6 @@
 from abc import ABC, abstractmethod
 from enum import StrEnum
-from typing import Any, Optional, Sequence, Union
+from typing import Any, AsyncIterator, Optional, Sequence, Union
 
 import structlog
 from google.api_core.exceptions import GoogleAPICallError, GoogleAPIError
@@ -14,7 +14,11 @@ from ai_gateway.models.base import (
     ModelMetadata,
     TokensConsumptionMetadata,
 )
-from ai_gateway.models.base_text import TextGenModelBase, TextGenModelOutput
+from ai_gateway.models.base_text import (
+    TextGenModelBase,
+    TextGenModelChunk,
+    TextGenModelOutput,
+)
 from ai_gateway.safety_attributes import SafetyAttributes
 from ai_gateway.tracking import SnowplowEventContext
 
@@ -157,7 +161,9 @@ class PalmCodeGenBaseModel(TextGenModelBase):
         candidate_count: int = 1,
         stop_sequences: Optional[Sequence[str]] = None,
         code_context: Optional[Sequence[str]] = None,
-    ) -> Optional[TextGenModelOutput | list[TextGenModelOutput]]:
+    ) -> (
+        TextGenModelOutput | list[TextGenModelOutput] | AsyncIterator[TextGenModelChunk]
+    ):
         if not input.is_valid():
             return TextGenModelOutput(
                 text="", score=0, safety_attributes=SafetyAttributes()
@@ -241,7 +247,7 @@ class PalmCodeGenBaseModel(TextGenModelBase):
     @abstractmethod
     async def generate(
         self,
-        prompt: str,
+        prefix: str,
         suffix: str,
         stream: bool = False,
         temperature: float = 0.2,
@@ -251,7 +257,9 @@ class PalmCodeGenBaseModel(TextGenModelBase):
         candidate_count: int = 1,
         stop_sequences: Optional[Sequence[str]] = None,
         snowplow_event_context: Optional[SnowplowEventContext] = None,
-    ) -> Optional[TextGenModelOutput | list[TextGenModelOutput]]:
+    ) -> (
+        TextGenModelOutput | list[TextGenModelOutput] | AsyncIterator[TextGenModelChunk]
+    ):
         pass
 
 
@@ -273,7 +281,7 @@ class PalmTextBisonModel(PalmCodeGenBaseModel):
 
     async def generate(
         self,
-        prompt: str,
+        prefix: str,
         suffix: str,
         stream: bool = False,
         temperature: float = 0.2,
@@ -283,8 +291,10 @@ class PalmTextBisonModel(PalmCodeGenBaseModel):
         candidate_count: int = 1,
         stop_sequences: Optional[Sequence[str]] = None,
         snowplow_event_context: Optional[SnowplowEventContext] = None,
-    ) -> Optional[TextGenModelOutput | list[TextGenModelOutput]]:
-        model_input = TextBisonModelInput(prompt)
+    ) -> (
+        TextGenModelOutput | list[TextGenModelOutput] | AsyncIterator[TextGenModelChunk]
+    ):
+        model_input = TextBisonModelInput(prefix)
         res = await self._generate(
             model_input,
             temperature,
@@ -329,7 +339,7 @@ class PalmCodeBisonModel(PalmCodeGenBaseModel):
 
     async def generate(
         self,
-        prompt: str,
+        prefix: str,
         suffix: str,
         stream: bool = False,
         temperature: float = 0.2,
@@ -339,8 +349,10 @@ class PalmCodeBisonModel(PalmCodeGenBaseModel):
         candidate_count: int = 1,
         stop_sequences: Optional[Sequence[str]] = None,
         snowplow_event_context: Optional[SnowplowEventContext] = None,
-    ) -> Optional[TextGenModelOutput | list[TextGenModelOutput]]:
-        model_input = CodeBisonModelInput(prompt)
+    ) -> (
+        TextGenModelOutput | list[TextGenModelOutput] | AsyncIterator[TextGenModelChunk]
+    ):
+        model_input = CodeBisonModelInput(prefix)
         res = await self._generate(
             model_input,
             temperature,
@@ -388,7 +400,7 @@ class PalmCodeGeckoModel(PalmCodeGenBaseModel):
 
     async def generate(
         self,
-        prompt: str,
+        prefix: str,
         suffix: str,
         stream: bool = False,
         temperature: float = 0.2,
@@ -397,10 +409,12 @@ class PalmCodeGeckoModel(PalmCodeGenBaseModel):
         top_k: int = 40,
         candidate_count: int = 1,
         stop_sequences: Optional[Sequence[str]] = None,
-        code_context: Optional[list[str]] = None,
         snowplow_event_context: Optional[SnowplowEventContext] = None,
-    ) -> Optional[TextGenModelOutput | list[TextGenModelOutput]]:
-        model_input = CodeGeckoModelInput(prompt, suffix)
+        code_context: Optional[list[str]] = None,
+    ) -> (
+        TextGenModelOutput | list[TextGenModelOutput] | AsyncIterator[TextGenModelChunk]
+    ):
+        model_input = CodeGeckoModelInput(prefix, suffix)
 
         if not stop_sequences:
             stop_sequences = PalmCodeGeckoModel.DEFAULT_STOP_SEQUENCES
