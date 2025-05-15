@@ -41,14 +41,26 @@ for them.
 MARKDOWN
 
 OPTIONAL_REVIEW_TEMPLATE = '%{role} review is optional for %{category}'
-NOT_AVAILABLE_TEMPLATE = 'No %{role} available'
+
+def group_not_available_template(slack_channel, gitlab_group)
+  <<~TEMPLATE.strip
+    No engineer is available for automated assignment, please reach out to the `#{slack_channel}` Slack channel or mention `#{gitlab_group}` for assistance.
+  TEMPLATE
+end
+
+NOT_AVAILABLE_TEMPLATES = {
+  default: 'No %{role} available',
+  analytics_instrumentation: group_not_available_template('#g_analyze_analytics_instrumentation', '@gitlab-org/analytics-section/analytics-instrumentation/engineers')
+}.freeze
+
 CATEGORY_LABELS = {
   ai_gateway: '~"devops::ai-powered"',
   duo_workflow_service: '~"group::duo workflow"',
+  analytics_instrumentation: '~"group::analytics instrumentation"',
 }.freeze
 
 def note_for_spin_role(spin, role, category)
-  template = NOT_AVAILABLE_TEMPLATE
+  template = NOT_AVAILABLE_TEMPLATES[category] || NOT_AVAILABLE_TEMPLATES[:default]
 
   note =
     if spin.optional_role == role
