@@ -149,6 +149,7 @@ isort: install-lint-deps
 
 .PHONY: check-model-selection
 check-model-selection:
+	@poetry install
 	@poetry run validate-model-selection-config
 
 .PHONY: format
