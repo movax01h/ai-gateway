@@ -1,5 +1,3 @@
-import pytest
-
 from ai_gateway.feature_flags.context import (
     current_feature_flag_context,
     is_feature_enabled,
@@ -36,11 +34,3 @@ def test_current_feature_flag_context_set_and_get():
     test_flags = {"flag1", "flag2"}
     current_feature_flag_context.set(test_flags)
     assert current_feature_flag_context.get() == test_flags
-
-
-@pytest.fixture(autouse=True)
-def reset_context():
-    # This fixture will reset the context before and after each test
-    current_feature_flag_context.set([])
-    yield
-    current_feature_flag_context.set([])
