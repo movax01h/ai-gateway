@@ -75,6 +75,8 @@ CHAT_MUTATION_TOOLS = [
 
 
 class Workflow(AbstractWorkflow):
+    _stream: bool = True
+
     def _are_tools_called(self, state: ChatWorkflowState) -> Routes:
         if state["status"] in [WorkflowStatusEnum.CANCELLED, WorkflowStatusEnum.ERROR]:
             return Routes.STOP

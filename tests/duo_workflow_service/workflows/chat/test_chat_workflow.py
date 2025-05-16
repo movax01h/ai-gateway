@@ -223,6 +223,7 @@ def test_are_tools_called_with_tool_use():
 
 
 @pytest.mark.asyncio
+@patch("duo_workflow_service.workflows.chat.workflow.new_chat_client")
 @patch("duo_workflow_service.workflows.abstract_workflow.ToolsRegistry")
 @patch("duo_workflow_service.workflows.abstract_workflow.GitLabWorkflow", autospec=True)
 @patch(
@@ -231,12 +232,16 @@ def test_are_tools_called_with_tool_use():
 @patch(
     "duo_workflow_service.workflows.abstract_workflow.fetch_workflow_config",
 )
+@patch("duo_workflow_service.workflows.abstract_workflow.UserInterface", autospec=True)
 async def test_workflow_run(
+    mock_user_interface,
     mock_fetch_workflow_config,
     mock_fetch_project_data,
     mock_gitlab_workflow,
     mock_tools_registry,
+    mock_chat_client,
 ):
+    mock_user_interface_instance = mock_user_interface.return_value
     mock_tools_registry.configure = AsyncMock(
         return_value=MagicMock(spec=ToolsRegistry)
     )
@@ -260,11 +265,27 @@ async def test_workflow_run(
         }
     )
 
+    state = {"status": "Not Started", "ui_chat_log": []}
+
+    class AsyncIterator:
+        def __init__(self):
+            self.call_count = 0
+
+        def __aiter__(self):
+            return self
+
+        async def __anext__(self):
+            self.call_count += 1
+            if self.call_count > 1:
+                raise StopAsyncIteration
+            else:
+                return ("values", state)
+
     with patch(
         "duo_workflow_service.workflows.chat.workflow.StateGraph"
     ) as mock_graph_cls:
         compiled_graph = MagicMock()
-        compiled_graph.astream = AsyncMock(return_value=AsyncMock())
+        compiled_graph.astream.return_value = AsyncIterator()
         mock_graph = mock_graph_cls.return_value
         mock_graph.compile.return_value = compiled_graph
 
@@ -277,6 +298,11 @@ async def test_workflow_run(
         await workflow.run("Test chat goal")
 
         assert workflow.is_done
+
+        mock_user_interface_instance.send_event.assert_called_with(
+            type="values", state=state, stream=True
+        )
+        assert mock_user_interface_instance.send_event.call_count == 1
 
 
 @pytest.mark.parametrize(

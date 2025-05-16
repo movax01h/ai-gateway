@@ -144,17 +144,20 @@ async def test_execute_workflow(mock_resolve_workflow, mock_abstract_workflow_cl
     checkpoint_action = contract_pb2.Action(newCheckpoint=contract_pb2.NewCheckpoint())
 
     mock_workflow_instance.get_from_streaming_outbox = MagicMock(
-        side_effect=[checkpoint_action, checkpoint_action, None]
+        side_effect=[
+            checkpoint_action,
+            checkpoint_action,
+            checkpoint_action,
+            checkpoint_action,
+        ]
+    )
+    mock_workflow_instance.outbox_empty = MagicMock(
+        side_effect=[False, False, True, True]
     )
     mock_workflow_instance.get_from_outbox = AsyncMock(
         side_effect=[contract_pb2.Action(), contract_pb2.Action()]
     )
     mock_resolve_workflow.return_value = mock_abstract_workflow_class
-
-    def mock_add_to_inbox(event):
-        mock_workflow_instance.is_done = True
-
-    mock_workflow_instance.add_to_inbox = MagicMock(side_effect=[mock_add_to_inbox])
 
     async def mock_request_iterator() -> AsyncIterable[contract_pb2.ClientEvent]:
         while True:
@@ -171,8 +174,10 @@ async def test_execute_workflow(mock_resolve_workflow, mock_abstract_workflow_cl
     assert (await anext(result)).WhichOneof("action") != "newCheckpoint"
     assert (await anext(result)).WhichOneof("action") == "newCheckpoint"
     assert (await anext(result)).WhichOneof("action") != "newCheckpoint"
+    assert (await anext(result)).WhichOneof("action") == "newCheckpoint"
+    assert (await anext(result)).WhichOneof("action") == "newCheckpoint"
 
-    assert mock_workflow_instance.add_to_inbox.call_count == 1
+    assert mock_workflow_instance.add_to_inbox.call_count == 2
 
 
 @pytest.mark.asyncio

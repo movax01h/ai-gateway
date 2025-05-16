@@ -104,6 +104,9 @@ class GrpcServer(contract_pb2_grpc.DuoWorkflowServicer):
                             aiter(request_iterator)
                         )
 
+                        if workflow.outbox_empty():
+                            continue
+
                     action = await workflow.get_from_outbox()
 
                     if isinstance(action, contract_pb2.Action):
@@ -118,7 +121,6 @@ class GrpcServer(contract_pb2_grpc.DuoWorkflowServicer):
                     event: contract_pb2.ClientEvent = await anext(
                         aiter(request_iterator)
                     )
-
 
                     workflow.add_to_inbox(event)
                     if (

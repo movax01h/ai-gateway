@@ -65,6 +65,7 @@ class AbstractWorkflow(ABC):
     _workflow_metadata: dict[str, Any]
     is_done: bool = False
     _workflow_type: CategoryEnum
+    _stream: bool = False
 
     def __init__(
         self,
@@ -121,6 +122,9 @@ class AbstractWorkflow(ABC):
             return item
         except asyncio.QueueEmpty:
             return None
+
+    def outbox_empty(self):
+        return self._outbox.empty()
 
     async def get_from_outbox(self):
         item = await asyncio.wait_for(self._outbox.get(), self.OUTBOX_CHECK_INTERVAL)
@@ -200,7 +204,9 @@ class AbstractWorkflow(ABC):
                             element = state[step]
                             self.log_workflow_elements(element)
                     else:
-                        await checkpoint_notifier.send_event(type, state)
+                        await checkpoint_notifier.send_event(
+                            type=type, state=state, stream=self._stream
+                        )
 
         except BaseException as e:
             await self._handle_workflow_failure(e, compiled_graph, graph_config)
