@@ -113,24 +113,43 @@ def test_format_tool_display_message_for_tool_without_args_schema():
     mock_tool.format_display_message.assert_called_once_with(args)
 
 
-def test_format_tool_display_message_for_tool_with_args_schema():
+class DummyArgsModel(BaseModel):
+    """Minimal Pydantic model that mirrors the 'args' dict in the tests."""
+
+    test: str
+
+
+class ErrorArgsModel(BaseModel):
+    """Model that raises on instantiation so we can hit the except-branch."""
+
+    test: str
+
+    def __init__(self, **data):
+        raise Exception("Something went wrong")
+
+
+def test_format_tool_display_message_for_tool_with_pydantic_args_schema():
     mock_tool = MagicMock(spec=DuoBaseTool)
+    mock_tool.args_schema = DummyArgsModel
     mock_tool.format_display_message.return_value = "Tool msg"
-    mock_schema = MagicMock(return_value="pydantic model instance")
-    mock_tool.args_schema = mock_schema
     args = {"test": "value"}
 
-    assert format_tool_display_message(mock_tool, args) == "Tool msg"
-    mock_schema.assert_called_once_with(**args)
-    mock_tool.format_display_message.assert_called_once_with(mock_schema.return_value)
+    result = format_tool_display_message(mock_tool, args)
+
+    assert result == "Tool msg"
+    mock_tool.format_display_message.assert_called_once()
+    passed_instance = mock_tool.format_display_message.call_args.args[0]
+    assert isinstance(passed_instance, DummyArgsModel)
+    assert passed_instance.test == "value"
 
 
 def test_format_tool_display_message_for_tool_with_args_schema_when_error():
     mock_tool = MagicMock(spec=DuoBaseTool)
+    mock_tool.args_schema = ErrorArgsModel
     mock_tool.format_display_message.return_value = "Tool msg"
-    mock_schema = MagicMock(side_effect=Exception("Something went wrong"))
-    mock_tool.args_schema = mock_schema
     args = {"test": "value"}
 
-    assert format_tool_display_message(mock_tool, args) == "Tool msg"
+    result = format_tool_display_message(mock_tool, args)
+
+    assert result == "Tool msg"
     mock_tool.format_display_message.assert_called_once_with(args)

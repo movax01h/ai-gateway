@@ -48,6 +48,7 @@ class Agent:
     _workflow_id: str
     _http_client: GitlabHttpClient
     _toolset: Toolset
+    _check_events: bool
 
     def __init__(
         self,
@@ -60,6 +61,7 @@ class Agent:
         workflow_id: str,
         http_client: GitlabHttpClient,
         workflow_type: CategoryEnum,
+        check_events: bool = True,
     ):
         self._model = model.bind_tools(toolset.bindable)
         self._goal = goal
@@ -70,6 +72,7 @@ class Agent:
         self._http_client = http_client
         self._workflow_type = workflow_type
         self._toolset = toolset
+        self._check_events = check_events
 
     async def run(self, state: DuoWorkflowStateType) -> dict:
         with duo_workflow_metrics.time_compute(
@@ -80,12 +83,13 @@ class Agent:
             }
             model_completion: list[MessageLikeRepresentation]
 
-            event: Union[WorkflowEvent, None] = await get_event(
-                self._http_client, self._workflow_id, False
-            )
+            if self._check_events:
+                event: Union[WorkflowEvent, None] = await get_event(
+                    self._http_client, self._workflow_id, False
+                )
 
-            if event and event["event_type"] == WorkflowEventType.STOP:
-                return {"status": WorkflowStatusEnum.CANCELLED}
+                if event and event["event_type"] == WorkflowEventType.STOP:
+                    return {"status": WorkflowStatusEnum.CANCELLED}
 
             if self.name in state["conversation_history"]:
                 model_completion = await self._model_completion(

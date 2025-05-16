@@ -1,6 +1,7 @@
 from typing import Any, List, NamedTuple, Optional
 
 from langchain.tools import BaseTool
+from pydantic import BaseModel
 
 from duo_workflow_service.gitlab.http_client import GitlabHttpClient
 from duo_workflow_service.gitlab.url_parser import GitLabUrlParseError, GitLabUrlParser
@@ -21,14 +22,18 @@ def format_tool_display_message(tool: BaseTool, args: Any) -> Optional[str]:
     if not hasattr(tool, "format_display_message"):
         return None
 
-    if not hasattr(tool, "args_schema") or tool.args_schema is None:
-        return tool.format_display_message(args)
-
     try:
-        pydantic_args = tool.args_schema(**args)
-        return tool.format_display_message(pydantic_args)
+        schema = getattr(tool, "args_schema", None)
+
+        if isinstance(schema, type) and issubclass(schema, BaseModel):
+            # type: ignore[arg-type]
+            parsed = schema(**args)
+            return tool.format_display_message(parsed)
+
     except Exception:
         return tool.format_display_message(args)
+
+    return tool.format_display_message(args)
 
 
 class DuoBaseTool(BaseTool):
