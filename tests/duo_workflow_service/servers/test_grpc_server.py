@@ -287,6 +287,7 @@ async def test_execute_workflow_missing_workflow_metadata(
         workflow_id="123",
         workflow_metadata={},
         workflow_type=CategoryEnum.WORKFLOW_SOFTWARE_DEVELOPMENT,
+        context_elements=[],
     )
 
 
@@ -321,6 +322,7 @@ async def test_execute_workflow_valid_workflow_metadata(
         workflow_id="123",
         workflow_metadata={"key": "value"},
         workflow_type=CategoryEnum.WORKFLOW_SOFTWARE_DEVELOPMENT,
+        context_elements=[],
     )
 
 

@@ -66,18 +66,21 @@ class AbstractWorkflow(ABC):
     is_done: bool = False
     _workflow_type: CategoryEnum
     _stream: bool = False
+    _context_elements: list
 
     def __init__(
         self,
         workflow_id: str,
         workflow_metadata: Dict[str, Any],
         workflow_type: CategoryEnum,
+        context_elements: list = None,
     ):
         self._outbox = asyncio.Queue(maxsize=QUEUE_MAX_SIZE)
         self._inbox = asyncio.Queue(maxsize=QUEUE_MAX_SIZE)
         self._streaming_outbox = asyncio.Queue(maxsize=QUEUE_MAX_SIZE)
         self._workflow_id = workflow_id
         self._workflow_metadata = workflow_metadata
+        self._context_elements = context_elements or []
         self.log = structlog.stdlib.get_logger("workflow").bind(workflow_id=workflow_id)
         self._http_client = GitlabHttpClient(
             {"outbox": self._outbox, "inbox": self._inbox}

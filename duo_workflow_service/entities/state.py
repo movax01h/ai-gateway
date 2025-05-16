@@ -12,6 +12,7 @@ from langchain_core.messages import (
 )
 from pydantic import BaseModel
 
+from contract.contract_pb2 import ContextElement
 from duo_workflow_service.entities.event import WorkflowEvent
 from duo_workflow_service.token_counter.approximate_token_counter import (
     ApproximateTokenCounter,
@@ -295,6 +296,7 @@ class ChatWorkflowState(TypedDict):
     ]
     ui_chat_log: Annotated[List[UiChatLog], _ui_chat_log_reducer]
     last_human_input: Union[WorkflowEvent, None]
+    context_elements: List[ContextElement]
 
 
 DuoWorkflowStateType = Union[

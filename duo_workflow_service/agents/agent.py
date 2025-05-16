@@ -1,5 +1,6 @@
 from datetime import datetime, timezone
 from typing import Any, List, Union
+from xml.etree import ElementTree
 
 from anthropic import APIStatusError
 from langchain_core.language_models.chat_models import BaseChatModel
@@ -12,6 +13,7 @@ from langchain_core.messages import (
 )
 from langchain_core.runnables import Runnable
 
+from contract.contract_pb2 import ContextElement, ContextElementType
 from duo_workflow_service.entities.event import WorkflowEvent, WorkflowEventType
 from duo_workflow_service.entities.state import (
     DuoWorkflowStateType,
@@ -213,4 +215,23 @@ class Agent:
             HumanMessage(content=f"Your goal is: {self._goal}")
         )
 
+        if state.get("context_elements"):
+            conversation_preamble.append(
+                self._format_context_elements(state.get("context_elements"))
+            )
+
         return conversation_preamble
+
+    def _format_context_elements(self, context_elements: List[ContextElement]) -> BaseMessage:
+        xml_elements = []
+
+        for element in context_elements:
+            # Create an Element object
+            xml_element = ElementTree.Element(ContextElementType.Name(element.type))
+            # Set its text content (automatically escapes special characters)
+            xml_element.text = element.contents
+            # Convert to string representation
+            xml_str = ElementTree.tostring(xml_element, encoding='unicode')
+            xml_elements.append(xml_str)
+
+        return HumanMessage(content="\n".join(xml_elements))

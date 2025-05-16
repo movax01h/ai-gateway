@@ -1,11 +1,13 @@
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, call, patch
+from xml.etree import ElementTree
 
 import pytest
 from anthropic import APIStatusError
 from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 
+from contract.contract_pb2 import ContextElement, ContextElementType
 from duo_workflow_service.agents import Agent
 from duo_workflow_service.agents.prompts import HANDOVER_TOOL_NAME
 from duo_workflow_service.entities import WorkflowEventType
@@ -515,3 +517,79 @@ class TestAgent:
             result["conversation_history"]["test agent"][-1].content
             == "Working with events checked"
         )
+
+    @pytest.mark.asyncio
+    async def test_run_with_context_elements(
+        self, chat_mock, planner_agent, workflow_state
+    ):
+        workflow_state["context_elements"] = [
+            ContextElement(
+                type=ContextElementType.SELECTED_TEXT,
+                contents="Text with <tags> & 'quotes'",
+            ),
+            ContextElement(
+                type=ContextElementType.ISSUE,
+                contents="Issue has <script>alert('XSS');</script> & other & special © chars",
+            ),
+        ]
+
+        chat_mock.ainvoke.return_value = AIMessage(
+            content="Response with special chars"
+        )
+
+        result = await planner_agent.run(workflow_state)
+
+        # Verify that ainvoke was called with correctly formatted context elements
+        args, _ = chat_mock.ainvoke.call_args
+        messages = args[0]
+
+        # Find the message containing context elements
+        context_message = None
+        for message in messages:
+            if (
+                isinstance(message, HumanMessage)
+                and "<SELECTED_TEXT>" in message.content
+            ):
+                context_message = message
+                break
+
+        # Verify the content has escaped special characters
+        assert "&lt;" in context_message.content  # < is escaped
+        assert "&gt;" in context_message.content  # > is escaped
+        assert "&amp;" in context_message.content  # & is escaped
+        assert "alert" in context_message.content  # content is preserved
+
+        # Verify the XML can be parsed (valid XML despite special chars)
+        xml_elements = context_message.content.split("\n")
+        parsed_elements = list(map(ElementTree.fromstring, xml_elements))
+
+        assert parsed_elements[0].tag == "SELECTED_TEXT"
+        assert parsed_elements[0].text == "Text with <tags> & 'quotes'"
+        assert parsed_elements[1].tag == "ISSUE"
+        assert (
+            parsed_elements[1].text
+            == "Issue has <script>alert('XSS');</script> & other & special © chars"
+        )
+
+    @pytest.mark.asyncio
+    async def test_run_with_empty_context_elements(
+        self, chat_mock, planner_agent, workflow_state
+    ):
+        workflow_state["context_elements"] = []
+
+        chat_mock.ainvoke.return_value = AIMessage(content="Response without context")
+
+        result = await planner_agent.run(workflow_state)
+
+        chat_mock.ainvoke.assert_called_once()
+
+        # Get the messages passed to ainvoke
+        args, _ = chat_mock.ainvoke.call_args
+        messages = args[0]
+
+        assert len(messages), 2
+        assert isinstance(messages[0], SystemMessage)
+
+        # Verify no xml content in the last message
+        assert isinstance(messages[-1], HumanMessage)
+        assert messages[-1].content == "Your goal is: Make the world a better place"
