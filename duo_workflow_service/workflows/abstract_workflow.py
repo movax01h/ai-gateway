@@ -94,11 +94,16 @@ class AbstractWorkflow(ABC):
             }
 
             with tracing_context(enabled=extended_logging):
-                # pylint: disable=unexpected-keyword-arg
-                await self._compile_and_run_graph(
-                    goal=goal,
-                    langsmith_extra={"metadata": tracing_metadata},
-                )
+                try:
+                    # pylint: disable=unexpected-keyword-arg
+                    await self._compile_and_run_graph(
+                        goal=goal,
+                        langsmith_extra={"metadata": tracing_metadata},
+                    )
+                except TraceableException:
+                    # Intentionally suppressing the exception here after it has been
+                    # properly traced in Langsmith via the TraceableException
+                    pass
 
     @abstractmethod
     async def _handle_workflow_failure(
@@ -210,6 +215,7 @@ class AbstractWorkflow(ABC):
 
         except BaseException as e:
             await self._handle_workflow_failure(e, compiled_graph, graph_config)
+            raise TraceableException(e)
         finally:
             self.is_done = True
 
@@ -297,3 +303,12 @@ class AbstractWorkflow(ABC):
 
 
 TypeWorkflow = type[AbstractWorkflow]
+
+
+class TraceableException(Exception):
+    def __init__(self, original_exception: BaseException):
+        self.original_exception = original_exception
+        super().__init__(str(original_exception))
+
+    def __repr__(self):
+        return f"<TraceableException wrapping {repr(self.original_exception)}>"
