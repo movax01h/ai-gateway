@@ -63,6 +63,17 @@ async def test_init():
 
 
 @pytest.mark.asyncio
+async def test_outbox_empty(workflow):
+    await workflow._outbox.put("test_item")
+    assert not workflow.outbox_empty()
+
+    item = await workflow.get_from_outbox()
+
+    assert item == "test_item"
+    assert workflow.outbox_empty()
+
+
+@pytest.mark.asyncio
 async def test_get_from_outbox(workflow):
     # Put an item in the outbox
     await workflow._outbox.put("test_item")

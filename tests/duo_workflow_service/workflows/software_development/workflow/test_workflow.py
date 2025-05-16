@@ -1,7 +1,7 @@
 import asyncio
 import os
 from collections import namedtuple
-from unittest.mock import AsyncMock, MagicMock, call, patch
+from unittest.mock import ANY, AsyncMock, MagicMock, call, patch
 from uuid import uuid4
 
 import pytest
@@ -172,7 +172,7 @@ async def test_workflow_run(
     mock_tools_registry_cls,
     checkpoint_tuple,
 ):
-    mock_checkpoint_notifier_instance = mock_checkpoint_notifier.return_value
+    mock_user_interface_instance = mock_checkpoint_notifier.return_value
     mock_tools_registry = MagicMock(spec=ToolsRegistry)
     mock_tools_registry_cls.configure = AsyncMock(return_value=mock_tools_registry)
     mock_tools_registry.approval_required.return_value = False
@@ -272,7 +272,10 @@ async def test_workflow_run(
     assert mock_git_lab_workflow_instance.aput.call_count >= 1
     assert mock_git_lab_workflow_instance.aget_tuple.call_count >= 1
 
-    assert mock_checkpoint_notifier_instance.send_event.call_count >= 2
+    mock_user_interface_instance.send_event.assert_called_with(
+        type=ANY, state=ANY, stream=False
+    )
+    assert mock_user_interface_instance.send_event.call_count >= 2
 
     assert workflow.is_done
 
