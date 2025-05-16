@@ -87,14 +87,27 @@ def convert_v1_to_v2_inputs(chat_request: ChatRequest) -> AgentRequest:
     if isinstance(payload.content, str):
         messages = [Message(role=Role.USER, content=payload.content)]
     else:
-        messages = [
-            (
-                Message(**message)
-                if isinstance(message, dict)
-                else Message(**message.model_dump())
-            )
-            for message in payload.content
-        ]
+        system_message_buffer = []
+        messages = []
+
+        for message_data in payload.content:
+            message_data = message_data.model_dump()
+            role = message_data["role"]
+            content = message_data["content"]
+
+            if role == "system":
+                system_message_buffer.append(content)
+            elif role == "user" and system_message_buffer:
+                full_user_content = ""
+                full_user_content += "\\n".join(system_message_buffer) + "\\n\\n"
+                system_message_buffer = []
+                full_user_content += content
+
+                message = Message(role=Role.USER, content=full_user_content)
+                messages.append(message)
+            else:
+                message = Message(message_data)
+                messages.append(message)
 
     return AgentRequest(
         messages=messages,
