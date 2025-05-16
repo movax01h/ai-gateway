@@ -1,0 +1,4 @@
+# Collapse all generated protobuf files by default
+*.pb.go gitlab-generated
+*_pb2.py gitlab-generated
+*_pb.rb gitlab-generated
