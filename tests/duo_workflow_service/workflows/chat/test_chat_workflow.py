@@ -3,6 +3,7 @@ from unittest.mock import ANY, AsyncMock, MagicMock, Mock, patch
 import pytest
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 
+from contract.contract_pb2 import ContextElement
 from duo_workflow_service.agents.prompts import CHAT_SYSTEM_PROMPT
 from duo_workflow_service.components.tools_registry import ToolsRegistry
 from duo_workflow_service.entities import (
@@ -29,6 +30,7 @@ def mock_state():
         "conversation_history": {},
         "ui_chat_log": [],
         "last_human_input": None,
+        "context_elements": [],
     }
 
 
@@ -78,6 +80,7 @@ async def test_workflow_initialization(workflow_with_project):
     assert initial_state["ui_chat_log"][0]["message_type"] == MessageTypeEnum.TOOL
     assert "Starting chat: Test chat goal" in initial_state["ui_chat_log"][0]["content"]
     assert initial_state["ui_chat_log"][0]["status"] == ToolStatus.SUCCESS
+    assert initial_state["context_elements"] == []
 
 
 @pytest.mark.asyncio
@@ -103,6 +106,7 @@ async def test_execute_agent(workflow_with_project):
         conversation_history={AGENT_NAME: []},
         ui_chat_log=[],
         last_human_input=None,
+        context_elements=[],
     )
 
     result = await workflow_with_project._execute_agent(state)
@@ -146,6 +150,7 @@ async def test_execute_agent_with_tools(workflow_with_project):
         conversation_history={AGENT_NAME: []},
         ui_chat_log=[],
         last_human_input=None,
+        context_elements=[],
     )
 
     result = await workflow_with_project._execute_agent(state)
@@ -184,6 +189,7 @@ def test_are_tools_called_with_various_content(message_content, expected_result)
         "status": WorkflowStatusEnum.EXECUTION,
         "ui_chat_log": [],
         "last_human_input": None,
+        "context_elements": [],
     }
     assert workflow._are_tools_called(state) == expected_result
 
@@ -218,6 +224,7 @@ def test_are_tools_called_with_tool_use():
         "status": WorkflowStatusEnum.EXECUTION,
         "ui_chat_log": [],
         "last_human_input": None,
+        "context_elements": [],
     }
     assert workflow._are_tools_called(state) == Routes.TOOL_USE
 

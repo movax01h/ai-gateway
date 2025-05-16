@@ -39,7 +39,8 @@ def workflow():
         "git_sha": "abc123",
     }
     workflow_type = CategoryEnum.WORKFLOW_SOFTWARE_DEVELOPMENT
-    return MockWorkflow(workflow_id, metadata, workflow_type)
+    context_elements = []
+    return MockWorkflow(workflow_id, metadata, workflow_type, context_elements)
 
 
 @pytest.fixture
@@ -58,14 +59,17 @@ async def test_init():
     # Test initialization
     workflow_id = "test-workflow-id"
     metadata = {"key": "value"}
+    context_elements = [{"type": 1, "name": "test", "contents": "test content"}]
     workflow = MockWorkflow(
         workflow_id,
         metadata,
         CategoryEnum.WORKFLOW_SOFTWARE_DEVELOPMENT,
+        context_elements,
     )
 
     assert workflow._workflow_id == workflow_id
     assert workflow._workflow_metadata == metadata
+    assert workflow._context_elements == context_elements
     assert workflow.is_done is False
     assert workflow._outbox.maxsize == 1
     assert workflow._inbox.maxsize == 1

@@ -86,12 +86,18 @@ class GrpcServer(contract_pb2_grpc.DuoWorkflowServicer):
             workflow_metadata = json.loads(
                 start_workflow_request.startRequest.workflowMetadata
             )
+
+        context_elements = []
+        if start_workflow_request.startRequest.context:
+            context_elements = list(start_workflow_request.startRequest.context)
+
         workflow_type = string_to_category_enum(workflow_definition)
         workflow_class: TypeWorkflow = resolve_workflow_class(workflow_definition)
         workflow: AbstractWorkflow = workflow_class(
             workflow_id=workflow_id,
             workflow_metadata=workflow_metadata,
             workflow_type=workflow_type,
+            context_elements=context_elements,
         )
 
         async def send_events():
