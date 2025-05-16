@@ -57,6 +57,7 @@ def workflow_state():
     )
 
 
+# pylint: disable=too-many-public-methods
 class TestAgent:
     @pytest.fixture
     def chat_mock(self):
@@ -430,4 +431,87 @@ class TestAgent:
         assert (
             result["conversation_history"]["test agent"][-1].content
             == "Finally succeeded!"
+        )
+
+    # pylint: disable=too-many-positional-arguments
+    @pytest.mark.asyncio
+    @patch("duo_workflow_service.agents.agent.get_event")
+    async def test_run_with_check_events_disabled(
+        self, mock_get_event, chat_mock, http_client_mock, mock_toolset, workflow_state
+    ):
+        # Create agent with check_events=False
+        agent = Agent(
+            goal="Make the world a better place",
+            model=chat_mock,
+            name="test agent",
+            system_prompt="You are AGI entity capable of anything",
+            toolset=mock_toolset,
+            workflow_id="test-workflow-123",
+            http_client=http_client_mock,
+            workflow_type=CategoryEnum.WORKFLOW_SOFTWARE_DEVELOPMENT,
+            check_events=False,
+        )
+
+        chat_mock.ainvoke.return_value = AIMessage(
+            content="Working without checking events"
+        )
+
+        result = await agent.run(workflow_state)
+
+        # Verify get_event was not called
+        mock_get_event.assert_not_called()
+
+        # Verify the agent still processed the request
+        assert "conversation_history" in result
+        assert (
+            result["conversation_history"]["test agent"][-1].content
+            == "Working without checking events"
+        )
+
+    @pytest.mark.asyncio
+    @patch("duo_workflow_service.agents.agent.get_event")
+    async def test_run_with_check_events_enabled(
+        self,
+        mock_get_event,
+        chat_mock,
+        http_client_mock,
+        mock_toolset,
+        workflow_state,
+    ):
+        # Create agent with check_events=True (default)
+        agent = Agent(
+            goal="Make the world a better place",
+            model=chat_mock,
+            name="test agent",
+            system_prompt="You are AGI entity capable of anything",
+            toolset=mock_toolset,
+            workflow_id="test-workflow-123",
+            http_client=http_client_mock,
+            workflow_type=CategoryEnum.WORKFLOW_SOFTWARE_DEVELOPMENT,
+            check_events=True,
+        )
+
+        # Mock event response
+        mock_get_event.return_value = {
+            "id": "event-id",
+            "event_type": "message",
+            "message": "Continue working",
+        }
+
+        chat_mock.ainvoke.return_value = AIMessage(
+            content="Working with events checked"
+        )
+
+        result = await agent.run(workflow_state)
+
+        # Verify get_event was called
+        mock_get_event.assert_called_once_with(
+            http_client_mock, "test-workflow-123", False
+        )
+
+        # Verify the agent processed the request
+        assert "conversation_history" in result
+        assert (
+            result["conversation_history"]["test agent"][-1].content
+            == "Working with events checked"
         )

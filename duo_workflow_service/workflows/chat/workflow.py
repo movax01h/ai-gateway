@@ -7,10 +7,9 @@ from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, System
 from langchain_core.output_parsers.string import StrOutputParser
 from langgraph.checkpoint.memory import BaseCheckpointSaver
 from langgraph.graph import END, StateGraph
-from langgraph.types import Command, Send
+from langgraph.types import Command
 
 from duo_workflow_service.agents.agent import Agent
-from duo_workflow_service.agents.handover import HandoverAgent
 from duo_workflow_service.agents.prompts import CHAT_SYSTEM_PROMPT
 from duo_workflow_service.agents.tools_executor import ToolsExecutor
 from duo_workflow_service.checkpointer.gitlab_workflow import WorkflowStatusEventEnum
@@ -22,7 +21,6 @@ from duo_workflow_service.entities.state import (
     UiChatLog,
     WorkflowStatusEnum,
 )
-from duo_workflow_service.gitlab.events import get_event
 from duo_workflow_service.interceptors.feature_flag_interceptor import (
     current_feature_flag_context,
 )
@@ -86,24 +84,25 @@ class Workflow(AbstractWorkflow):
         if isinstance(last_message, AIMessage) and len(last_message.tool_calls) > 0:
             return Routes.TOOL_USE
 
-        return Routes.SHOW_AGENT_MESSAGE
+        return Routes.STOP
 
-    def _show_agent_message(self, state: ChatWorkflowState) -> Dict[str, Any]:
-        if state["status"] in [WorkflowStatusEnum.CANCELLED, WorkflowStatusEnum.ERROR]:
-            self.log.info(
-                "ChatWorkflow._show_agent_message: Workflow Cancelled or Errored",
-                workflow_id=self._workflow_id,
-            )
-            return {"status": state["status"]}
+    async def _execute_agent(self, state: ChatWorkflowState) -> Dict[str, Any]:
+        # First run the agent
+        agent_result = await self._agent.run(state)
 
-        history: List[BaseMessage] = state["conversation_history"][AGENT_NAME]
+        history: List[BaseMessage] = agent_result["conversation_history"][AGENT_NAME]
         if not history:
             return {"status": WorkflowStatusEnum.EXECUTION}
         last_message = history[-1]
 
-        return {
+        # Combine the agent result with the UI message
+        result = {
+            **agent_result,
             "status": WorkflowStatusEnum.INPUT_REQUIRED,
-            "ui_chat_log": [
+        }
+
+        if not isinstance(last_message, AIMessage) or len(last_message.tool_calls) == 0:
+            result["ui_chat_log"] = [
                 UiChatLog(
                     message_type=MessageTypeEnum.AGENT,
                     content=StrOutputParser().invoke(last_message) or "",
@@ -112,31 +111,9 @@ class Workflow(AbstractWorkflow):
                     correlation_id=None,
                     tool_info=None,
                 )
-            ],
-        }
+            ]
 
-    def _append_goal(self, state: ChatWorkflowState) -> Dict[str, Any]:
-        goal = self._goal
-        self.log.info(
-            "ChatWorkflow._append_goal: Adding goal to conversation history",
-            workflow_id=self._workflow_id,
-            goal=goal,
-        )
-
-        conversation_history = state.get("conversation_history", {})
-        agent_history = conversation_history.get(AGENT_NAME, [])
-        last_message = agent_history[-1] if agent_history else None
-        new_messages = []
-
-        last_message_is_goal = (
-            isinstance(last_message, HumanMessage) and last_message.content == goal
-        )
-        if not last_message_is_goal:
-            new_messages.append(HumanMessage(content=goal))
-
-        return {
-            "conversation_history": {AGENT_NAME: new_messages},
-        }
+        return result
 
     def get_workflow_state(self, goal: str) -> ChatWorkflowState:
         initial_ui_chat_log = UiChatLog(
@@ -157,7 +134,12 @@ class Workflow(AbstractWorkflow):
         return ChatWorkflowState(
             plan={"steps": []},
             status=WorkflowStatusEnum.NOT_STARTED,
-            conversation_history={AGENT_NAME: [SystemMessage(content=system_prompt)]},
+            conversation_history={
+                AGENT_NAME: [
+                    SystemMessage(content=system_prompt),
+                    HumanMessage(content=goal),
+                ]
+            },
             ui_chat_log=[initial_ui_chat_log],
             last_human_input=None,
         )
@@ -167,15 +149,14 @@ class Workflow(AbstractWorkflow):
             case WorkflowStatusEventEnum.START:
                 return self.get_workflow_state(goal)
             case WorkflowStatusEventEnum.RESUME:
-                event = await get_event(self._http_client, self._workflow_id)
                 return Command(
-                    resume=event,
-                    send=Send(
-                        "append_goal",
-                        {
-                            "status": WorkflowStatusEnum.EXECUTION,
+                    goto="agent",
+                    update={
+                        "status": WorkflowStatusEnum.EXECUTION,
+                        "conversation_history": {
+                            AGENT_NAME: [HumanMessage(content=goal)]
                         },
-                    ),
+                    },
                 )
             case _:
                 return None
@@ -197,7 +178,14 @@ class Workflow(AbstractWorkflow):
         tools = self._get_tools()
         agents_toolset = tools_registry.toolset(tools)
 
-        agent = Agent(
+        tools_runner = ToolsExecutor(
+            tools_agent_name=AGENT_NAME,
+            toolset=agents_toolset,
+            workflow_id=self._workflow_id,
+            workflow_type=self._workflow_type,
+        ).run
+
+        self._agent = Agent(
             goal="",
             system_prompt="",
             name=AGENT_NAME,
@@ -206,43 +194,23 @@ class Workflow(AbstractWorkflow):
             workflow_id=self._workflow_id,
             http_client=self._http_client,
             workflow_type=self._workflow_type,
+            check_events=False,
         )
 
-        tools_runner = ToolsExecutor(
-            tools_agent_name=AGENT_NAME,
-            toolset=agents_toolset,
-            workflow_id=self._workflow_id,
-            workflow_type=self._workflow_type,
-        ).run
-        graph.add_node("append_goal", self._append_goal)
-        graph.add_node("agent", agent.run)
+        graph.add_node("agent", self._execute_agent)
         graph.add_node("run_tools", tools_runner)
-        graph.add_node("show_agent_message", self._show_agent_message)
 
-        graph.set_entry_point("append_goal")
+        graph.set_entry_point("agent")
 
-        graph.add_edge("append_goal", "agent")
         graph.add_conditional_edges(
             "agent",
             self._are_tools_called,
             {
                 Routes.TOOL_USE: "run_tools",
-                Routes.SHOW_AGENT_MESSAGE: "show_agent_message",
-                Routes.STOP: "complete",
+                Routes.STOP: END,
             },
         )
         graph.add_edge("run_tools", "agent")
-        graph.add_edge("show_agent_message", END)
-
-        graph.add_node(
-            "complete",
-            HandoverAgent(
-                new_status=WorkflowStatusEnum.COMPLETED,
-                handover_from=AGENT_NAME,
-                include_conversation_history=False,
-            ).run,
-        )
-        graph.add_edge("complete", END)
 
         return graph.compile(checkpointer=checkpointer)
 
