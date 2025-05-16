@@ -56,6 +56,9 @@ message Action {
         RunGitCommand runGitCommand = 6;
         EditFile runEditFile = 7;
         NewCheckpoint newCheckpoint = 8;
+        ListDirectory listDirectory = 9;
+        Grep grep = 10;
+        FindFiles findFiles = 11;
     };
 }
 
@@ -121,4 +124,18 @@ message NewCheckpoint {
     string checkpoint = 2;
     string goal = 3;
     repeated string errors = 4;
+}
+
+message ListDirectory {
+    string directory = 1;
+}
+
+message Grep {
+  string search_directory = 1;
+  string pattern = 2;
+  bool case_insensitive = 3;
+}
+
+message FindFiles {
+  string name_pattern = 1;
 }

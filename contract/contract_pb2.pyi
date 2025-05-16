@@ -87,7 +87,7 @@ class HttpResponse(_message.Message):
     def __init__(self, headers: _Optional[_Mapping[str, str]] = ..., statusCode: _Optional[int] = ..., body: _Optional[str] = ..., error: _Optional[str] = ...) -> None: ...
 
 class Action(_message.Message):
-    __slots__ = ("requestID", "runCommand", "runHTTPRequest", "runReadFile", "runWriteFile", "runGitCommand", "runEditFile", "newCheckpoint")
+    __slots__ = ("requestID", "runCommand", "runHTTPRequest", "runReadFile", "runWriteFile", "runGitCommand", "runEditFile", "newCheckpoint", "listDirectory", "grep", "findFiles")
     REQUESTID_FIELD_NUMBER: _ClassVar[int]
     RUNCOMMAND_FIELD_NUMBER: _ClassVar[int]
     RUNHTTPREQUEST_FIELD_NUMBER: _ClassVar[int]
@@ -96,6 +96,9 @@ class Action(_message.Message):
     RUNGITCOMMAND_FIELD_NUMBER: _ClassVar[int]
     RUNEDITFILE_FIELD_NUMBER: _ClassVar[int]
     NEWCHECKPOINT_FIELD_NUMBER: _ClassVar[int]
+    LISTDIRECTORY_FIELD_NUMBER: _ClassVar[int]
+    GREP_FIELD_NUMBER: _ClassVar[int]
+    FINDFILES_FIELD_NUMBER: _ClassVar[int]
     requestID: str
     runCommand: RunCommandAction
     runHTTPRequest: RunHTTPRequest
@@ -104,7 +107,10 @@ class Action(_message.Message):
     runGitCommand: RunGitCommand
     runEditFile: EditFile
     newCheckpoint: NewCheckpoint
-    def __init__(self, requestID: _Optional[str] = ..., runCommand: _Optional[_Union[RunCommandAction, _Mapping]] = ..., runHTTPRequest: _Optional[_Union[RunHTTPRequest, _Mapping]] = ..., runReadFile: _Optional[_Union[ReadFile, _Mapping]] = ..., runWriteFile: _Optional[_Union[WriteFile, _Mapping]] = ..., runGitCommand: _Optional[_Union[RunGitCommand, _Mapping]] = ..., runEditFile: _Optional[_Union[EditFile, _Mapping]] = ..., newCheckpoint: _Optional[_Union[NewCheckpoint, _Mapping]] = ...) -> None: ...
+    listDirectory: ListDirectory
+    grep: Grep
+    findFiles: FindFiles
+    def __init__(self, requestID: _Optional[str] = ..., runCommand: _Optional[_Union[RunCommandAction, _Mapping]] = ..., runHTTPRequest: _Optional[_Union[RunHTTPRequest, _Mapping]] = ..., runReadFile: _Optional[_Union[ReadFile, _Mapping]] = ..., runWriteFile: _Optional[_Union[WriteFile, _Mapping]] = ..., runGitCommand: _Optional[_Union[RunGitCommand, _Mapping]] = ..., runEditFile: _Optional[_Union[EditFile, _Mapping]] = ..., newCheckpoint: _Optional[_Union[NewCheckpoint, _Mapping]] = ..., listDirectory: _Optional[_Union[ListDirectory, _Mapping]] = ..., grep: _Optional[_Union[Grep, _Mapping]] = ..., findFiles: _Optional[_Union[FindFiles, _Mapping]] = ...) -> None: ...
 
 class RunCommandAction(_message.Message):
     __slots__ = ("program", "arguments", "flags")
@@ -193,3 +199,25 @@ class NewCheckpoint(_message.Message):
     goal: str
     errors: _containers.RepeatedScalarFieldContainer[str]
     def __init__(self, status: _Optional[str] = ..., checkpoint: _Optional[str] = ..., goal: _Optional[str] = ..., errors: _Optional[_Iterable[str]] = ...) -> None: ...
+
+class ListDirectory(_message.Message):
+    __slots__ = ("directory",)
+    DIRECTORY_FIELD_NUMBER: _ClassVar[int]
+    directory: str
+    def __init__(self, directory: _Optional[str] = ...) -> None: ...
+
+class Grep(_message.Message):
+    __slots__ = ("search_directory", "pattern", "case_insensitive")
+    SEARCH_DIRECTORY_FIELD_NUMBER: _ClassVar[int]
+    PATTERN_FIELD_NUMBER: _ClassVar[int]
+    CASE_INSENSITIVE_FIELD_NUMBER: _ClassVar[int]
+    search_directory: str
+    pattern: str
+    case_insensitive: bool
+    def __init__(self, search_directory: _Optional[str] = ..., pattern: _Optional[str] = ..., case_insensitive: bool = ...) -> None: ...
+
+class FindFiles(_message.Message):
+    __slots__ = ("name_pattern",)
+    NAME_PATTERN_FIELD_NUMBER: _ClassVar[int]
+    name_pattern: str
+    def __init__(self, name_pattern: _Optional[str] = ...) -> None: ...
