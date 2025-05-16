@@ -128,6 +128,9 @@ export interface Action {
   runGitCommand?: RunGitCommand | undefined;
   runEditFile?: EditFile | undefined;
   newCheckpoint?: NewCheckpoint | undefined;
+  listDirectory?: ListDirectory | undefined;
+  grep?: Grep | undefined;
+  findFiles?: FindFiles | undefined;
 }
 
 export interface RunCommandAction {
@@ -182,6 +185,20 @@ export interface NewCheckpoint {
   checkpoint: string;
   goal: string;
   errors: string[];
+}
+
+export interface ListDirectory {
+  directory: string;
+}
+
+export interface Grep {
+  searchDirectory: string;
+  pattern: string;
+  caseInsensitive: boolean;
+}
+
+export interface FindFiles {
+  namePattern: string;
 }
 
 function createBaseClientEvent(): ClientEvent {
@@ -835,6 +852,9 @@ function createBaseAction(): Action {
     runGitCommand: undefined,
     runEditFile: undefined,
     newCheckpoint: undefined,
+    listDirectory: undefined,
+    grep: undefined,
+    findFiles: undefined,
   };
 }
 
@@ -863,6 +883,15 @@ export const Action: MessageFns<Action> = {
     }
     if (message.newCheckpoint !== undefined) {
       NewCheckpoint.encode(message.newCheckpoint, writer.uint32(66).fork()).join();
+    }
+    if (message.listDirectory !== undefined) {
+      ListDirectory.encode(message.listDirectory, writer.uint32(74).fork()).join();
+    }
+    if (message.grep !== undefined) {
+      Grep.encode(message.grep, writer.uint32(82).fork()).join();
+    }
+    if (message.findFiles !== undefined) {
+      FindFiles.encode(message.findFiles, writer.uint32(90).fork()).join();
     }
     return writer;
   },
@@ -938,6 +967,30 @@ export const Action: MessageFns<Action> = {
           message.newCheckpoint = NewCheckpoint.decode(reader, reader.uint32());
           continue;
         }
+        case 9: {
+          if (tag !== 74) {
+            break;
+          }
+
+          message.listDirectory = ListDirectory.decode(reader, reader.uint32());
+          continue;
+        }
+        case 10: {
+          if (tag !== 82) {
+            break;
+          }
+
+          message.grep = Grep.decode(reader, reader.uint32());
+          continue;
+        }
+        case 11: {
+          if (tag !== 90) {
+            break;
+          }
+
+          message.findFiles = FindFiles.decode(reader, reader.uint32());
+          continue;
+        }
       }
       if ((tag & 7) === 4 || tag === 0) {
         break;
@@ -957,6 +1010,9 @@ export const Action: MessageFns<Action> = {
       runGitCommand: isSet(object.runGitCommand) ? RunGitCommand.fromJSON(object.runGitCommand) : undefined,
       runEditFile: isSet(object.runEditFile) ? EditFile.fromJSON(object.runEditFile) : undefined,
       newCheckpoint: isSet(object.newCheckpoint) ? NewCheckpoint.fromJSON(object.newCheckpoint) : undefined,
+      listDirectory: isSet(object.listDirectory) ? ListDirectory.fromJSON(object.listDirectory) : undefined,
+      grep: isSet(object.grep) ? Grep.fromJSON(object.grep) : undefined,
+      findFiles: isSet(object.findFiles) ? FindFiles.fromJSON(object.findFiles) : undefined,
     };
   },
 
@@ -985,6 +1041,15 @@ export const Action: MessageFns<Action> = {
     }
     if (message.newCheckpoint !== undefined) {
       obj.newCheckpoint = NewCheckpoint.toJSON(message.newCheckpoint);
+    }
+    if (message.listDirectory !== undefined) {
+      obj.listDirectory = ListDirectory.toJSON(message.listDirectory);
+    }
+    if (message.grep !== undefined) {
+      obj.grep = Grep.toJSON(message.grep);
+    }
+    if (message.findFiles !== undefined) {
+      obj.findFiles = FindFiles.toJSON(message.findFiles);
     }
     return obj;
   },
@@ -1015,6 +1080,13 @@ export const Action: MessageFns<Action> = {
       : undefined;
     message.newCheckpoint = (object.newCheckpoint !== undefined && object.newCheckpoint !== null)
       ? NewCheckpoint.fromPartial(object.newCheckpoint)
+      : undefined;
+    message.listDirectory = (object.listDirectory !== undefined && object.listDirectory !== null)
+      ? ListDirectory.fromPartial(object.listDirectory)
+      : undefined;
+    message.grep = (object.grep !== undefined && object.grep !== null) ? Grep.fromPartial(object.grep) : undefined;
+    message.findFiles = (object.findFiles !== undefined && object.findFiles !== null)
+      ? FindFiles.fromPartial(object.findFiles)
       : undefined;
     return message;
   },
@@ -1839,6 +1911,214 @@ export const NewCheckpoint: MessageFns<NewCheckpoint> = {
     message.checkpoint = object.checkpoint ?? "";
     message.goal = object.goal ?? "";
     message.errors = object.errors?.map((e) => e) || [];
+    return message;
+  },
+};
+
+function createBaseListDirectory(): ListDirectory {
+  return { directory: "" };
+}
+
+export const ListDirectory: MessageFns<ListDirectory> = {
+  encode(message: ListDirectory, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
+    if (message.directory !== "") {
+      writer.uint32(10).string(message.directory);
+    }
+    return writer;
+  },
+
+  decode(input: BinaryReader | Uint8Array, length?: number): ListDirectory {
+    const reader = input instanceof BinaryReader ? input : new BinaryReader(input);
+    let end = length === undefined ? reader.len : reader.pos + length;
+    const message = createBaseListDirectory();
+    while (reader.pos < end) {
+      const tag = reader.uint32();
+      switch (tag >>> 3) {
+        case 1: {
+          if (tag !== 10) {
+            break;
+          }
+
+          message.directory = reader.string();
+          continue;
+        }
+      }
+      if ((tag & 7) === 4 || tag === 0) {
+        break;
+      }
+      reader.skip(tag & 7);
+    }
+    return message;
+  },
+
+  fromJSON(object: any): ListDirectory {
+    return { directory: isSet(object.directory) ? globalThis.String(object.directory) : "" };
+  },
+
+  toJSON(message: ListDirectory): unknown {
+    const obj: any = {};
+    if (message.directory !== "") {
+      obj.directory = message.directory;
+    }
+    return obj;
+  },
+
+  create<I extends Exact<DeepPartial<ListDirectory>, I>>(base?: I): ListDirectory {
+    return ListDirectory.fromPartial(base ?? ({} as any));
+  },
+  fromPartial<I extends Exact<DeepPartial<ListDirectory>, I>>(object: I): ListDirectory {
+    const message = createBaseListDirectory();
+    message.directory = object.directory ?? "";
+    return message;
+  },
+};
+
+function createBaseGrep(): Grep {
+  return { searchDirectory: "", pattern: "", caseInsensitive: false };
+}
+
+export const Grep: MessageFns<Grep> = {
+  encode(message: Grep, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
+    if (message.searchDirectory !== "") {
+      writer.uint32(10).string(message.searchDirectory);
+    }
+    if (message.pattern !== "") {
+      writer.uint32(18).string(message.pattern);
+    }
+    if (message.caseInsensitive !== false) {
+      writer.uint32(24).bool(message.caseInsensitive);
+    }
+    return writer;
+  },
+
+  decode(input: BinaryReader | Uint8Array, length?: number): Grep {
+    const reader = input instanceof BinaryReader ? input : new BinaryReader(input);
+    let end = length === undefined ? reader.len : reader.pos + length;
+    const message = createBaseGrep();
+    while (reader.pos < end) {
+      const tag = reader.uint32();
+      switch (tag >>> 3) {
+        case 1: {
+          if (tag !== 10) {
+            break;
+          }
+
+          message.searchDirectory = reader.string();
+          continue;
+        }
+        case 2: {
+          if (tag !== 18) {
+            break;
+          }
+
+          message.pattern = reader.string();
+          continue;
+        }
+        case 3: {
+          if (tag !== 24) {
+            break;
+          }
+
+          message.caseInsensitive = reader.bool();
+          continue;
+        }
+      }
+      if ((tag & 7) === 4 || tag === 0) {
+        break;
+      }
+      reader.skip(tag & 7);
+    }
+    return message;
+  },
+
+  fromJSON(object: any): Grep {
+    return {
+      searchDirectory: isSet(object.searchDirectory) ? globalThis.String(object.searchDirectory) : "",
+      pattern: isSet(object.pattern) ? globalThis.String(object.pattern) : "",
+      caseInsensitive: isSet(object.caseInsensitive) ? globalThis.Boolean(object.caseInsensitive) : false,
+    };
+  },
+
+  toJSON(message: Grep): unknown {
+    const obj: any = {};
+    if (message.searchDirectory !== "") {
+      obj.searchDirectory = message.searchDirectory;
+    }
+    if (message.pattern !== "") {
+      obj.pattern = message.pattern;
+    }
+    if (message.caseInsensitive !== false) {
+      obj.caseInsensitive = message.caseInsensitive;
+    }
+    return obj;
+  },
+
+  create<I extends Exact<DeepPartial<Grep>, I>>(base?: I): Grep {
+    return Grep.fromPartial(base ?? ({} as any));
+  },
+  fromPartial<I extends Exact<DeepPartial<Grep>, I>>(object: I): Grep {
+    const message = createBaseGrep();
+    message.searchDirectory = object.searchDirectory ?? "";
+    message.pattern = object.pattern ?? "";
+    message.caseInsensitive = object.caseInsensitive ?? false;
+    return message;
+  },
+};
+
+function createBaseFindFiles(): FindFiles {
+  return { namePattern: "" };
+}
+
+export const FindFiles: MessageFns<FindFiles> = {
+  encode(message: FindFiles, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
+    if (message.namePattern !== "") {
+      writer.uint32(10).string(message.namePattern);
+    }
+    return writer;
+  },
+
+  decode(input: BinaryReader | Uint8Array, length?: number): FindFiles {
+    const reader = input instanceof BinaryReader ? input : new BinaryReader(input);
+    let end = length === undefined ? reader.len : reader.pos + length;
+    const message = createBaseFindFiles();
+    while (reader.pos < end) {
+      const tag = reader.uint32();
+      switch (tag >>> 3) {
+        case 1: {
+          if (tag !== 10) {
+            break;
+          }
+
+          message.namePattern = reader.string();
+          continue;
+        }
+      }
+      if ((tag & 7) === 4 || tag === 0) {
+        break;
+      }
+      reader.skip(tag & 7);
+    }
+    return message;
+  },
+
+  fromJSON(object: any): FindFiles {
+    return { namePattern: isSet(object.namePattern) ? globalThis.String(object.namePattern) : "" };
+  },
+
+  toJSON(message: FindFiles): unknown {
+    const obj: any = {};
+    if (message.namePattern !== "") {
+      obj.namePattern = message.namePattern;
+    }
+    return obj;
+  },
+
+  create<I extends Exact<DeepPartial<FindFiles>, I>>(base?: I): FindFiles {
+    return FindFiles.fromPartial(base ?? ({} as any));
+  },
+  fromPartial<I extends Exact<DeepPartial<FindFiles>, I>>(object: I): FindFiles {
+    const message = createBaseFindFiles();
+    message.namePattern = object.namePattern ?? "";
     return message;
   },
 };
