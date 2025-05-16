@@ -2,25 +2,23 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from duo_workflow_service.gitlab.gitlab_project import Project
 from duo_workflow_service.internal_events import InternalEventAdditionalProperties
 from duo_workflow_service.internal_events.event_enum import CategoryEnum, EventEnum
-from duo_workflow_service.workflows.abstract_workflow import AbstractWorkflow
+from duo_workflow_service.workflows.abstract_workflow import (
+    AbstractWorkflow,
+    TraceableException,
+)
 
 
 # Concrete implementation for testing
-async def _mock_stream():
-    yield {"step1": {"key": "value"}}
+class MockGraph:
+    async def astream(self, input, config, stream_mode):
+        yield "updates", {"step1": {"key": "value"}}
 
 
-class TestWorkflow(AbstractWorkflow):
-    __test__ = False
-
+class MockWorkflow(AbstractWorkflow):
     def _compile(self, goal, tools_registry, checkpointer):
-        # Return a mock graph that can be streamed
-        mock_graph = AsyncMock()
-        mock_graph.astream.return_value = _mock_stream()
-        return mock_graph
+        return MockGraph()
 
     def get_workflow_state(self, goal):
         return {"goal": goal, "state": "initial"}
@@ -41,7 +39,18 @@ def workflow():
         "git_sha": "abc123",
     }
     workflow_type = CategoryEnum.WORKFLOW_SOFTWARE_DEVELOPMENT
-    return TestWorkflow(workflow_id, metadata, workflow_type)
+    return MockWorkflow(workflow_id, metadata, workflow_type)
+
+
+@pytest.fixture
+def mock_project():
+    return {
+        "id": MagicMock(),
+        "description": MagicMock(),
+        "name": MagicMock(),
+        "http_url_to_repo": MagicMock(),
+        "web_url": "https://example.com/project",
+    }
 
 
 @pytest.mark.asyncio
@@ -49,7 +58,7 @@ async def test_init():
     # Test initialization
     workflow_id = "test-workflow-id"
     metadata = {"key": "value"}
-    workflow = TestWorkflow(
+    workflow = MockWorkflow(
         workflow_id,
         metadata,
         CategoryEnum.WORKFLOW_SOFTWARE_DEVELOPMENT,
@@ -109,13 +118,19 @@ async def test_add_to_inbox(workflow):
 
 
 @pytest.mark.asyncio
+@patch("duo_workflow_service.workflows.abstract_workflow.fetch_workflow_config")
 @patch(
     "duo_workflow_service.workflows.abstract_workflow.fetch_project_data_with_workflow_id"
 )
 @patch("duo_workflow_service.workflows.abstract_workflow.GitLabWorkflow")
 @patch("duo_workflow_service.workflows.abstract_workflow.ToolsRegistry.configure")
 async def test_compile_and_run_graph(
-    mock_tools_registry, mock_gitlab_workflow, mock_fetch_project, workflow
+    mock_tools_registry,
+    mock_gitlab_workflow,
+    mock_fetch_project,
+    mock_workflow_config,
+    workflow,
+    mock_project,
 ):
     # Setup mocks
     mock_tools_registry.return_value = MagicMock()
@@ -123,7 +138,7 @@ async def test_compile_and_run_graph(
     mock_checkpointer.aget_tuple = AsyncMock(return_value=None)
     mock_checkpointer.initial_status_event = "START"
     mock_gitlab_workflow.return_value.__aenter__.return_value = mock_checkpointer
-    mock_fetch_project.return_value = MagicMock(spec=Project)
+    mock_fetch_project.return_value = mock_project
 
     # Run the method
     await workflow._compile_and_run_graph("Test goal")
@@ -205,26 +220,38 @@ def test_track_internal_event(mock_track_event, workflow):
 
 
 @pytest.mark.asyncio
+@patch("duo_workflow_service.workflows.abstract_workflow.fetch_workflow_config")
 @patch(
     "duo_workflow_service.workflows.abstract_workflow.fetch_project_data_with_workflow_id"
 )
 @patch("duo_workflow_service.workflows.abstract_workflow.GitLabWorkflow")
 @patch("duo_workflow_service.workflows.abstract_workflow.ToolsRegistry.configure")
 async def test_compile_and_run_graph_with_exception(
-    mock_tools_registry, mock_gitlab_workflow, mock_fetch_project, workflow
+    mock_tools_registry,
+    mock_gitlab_workflow,
+    mock_fetch_project,
+    mock_workflow_config,
+    workflow,
+    mock_project,
 ):
     # Setup mocks to raise an exception
     mock_tools_registry.side_effect = Exception("Test exception")
+    mock_fetch_project.return_value = mock_project
+    workflow._inbox.get = AsyncMock(
+        return_value=MagicMock(actionResponse=MagicMock(requestID="", response=""))
+    )
+    workflow._inbox.task_done = AsyncMock()
 
-    # Run the method
-    await workflow._compile_and_run_graph("Test goal")
+    with pytest.raises(TraceableException) as exc_info:
+        await workflow._compile_and_run_graph("Test goal")
 
-    # Check exception was handled
     assert workflow.is_done is True
+    assert isinstance(exc_info.value.original_exception, Exception)
+    assert str(exc_info.value.original_exception) == "Test exception"
 
 
 @pytest.mark.asyncio
-@patch.object(TestWorkflow, "_compile_and_run_graph")
+@patch.object(MockWorkflow, "_compile_and_run_graph")
 async def test_run_passes_correct_metadata_to_langsmith_extra(
     mock_compile_and_run_graph, workflow
 ):
