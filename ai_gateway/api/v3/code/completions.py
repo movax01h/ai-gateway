@@ -11,6 +11,10 @@ from gitlab_cloud_connector import (
 )
 
 from ai_gateway.api.auth_utils import StarletteUser, get_current_user
+from ai_gateway.api.context_utils import (
+    GitLabAiRequestType,
+    populate_ai_metadata_in_context,
+)
 from ai_gateway.api.feature_category import feature_category
 from ai_gateway.api.middleware import X_GITLAB_LANGUAGE_SERVER_VERSION
 from ai_gateway.api.snowplow_context import get_snowplow_code_suggestion_context
@@ -120,6 +124,7 @@ async def code_suggestions(
         global_user_id=current_user.global_user_id,
         region=config.google_cloud_platform.location(),
     )
+
     if component.type == CodeEditorComponents.COMPLETION:
         if not current_user.can(
             GitLabUnitPrimitive.COMPLETE_CODE,
@@ -206,6 +211,12 @@ async def code_completion(
         snowplow_event_context=snowplow_event_context,
         **kwargs,
     )
+
+    populate_ai_metadata_in_context(
+        model_metadata=model_metadata,
+        request_type=GitLabAiRequestType.COMPLETIONS,
+    )
+
     if not isinstance(suggestions, list):
         suggestions = [suggestions]
 
@@ -319,6 +330,11 @@ async def code_generation(
 
         if payload.prompt:
             engine.with_prompt_prepared(payload.prompt)
+
+    populate_ai_metadata_in_context(
+        model_metadata=model_metadata,
+        request_type=GitLabAiRequestType.GENERATIONS,
+    )
 
     suggestion = await engine.execute(
         prefix=payload.content_above_cursor,
