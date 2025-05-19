@@ -3,7 +3,7 @@ from dependency_injector import containers, providers
 from google.cloud.aiplatform.gapic import PredictionServiceAsyncClient
 from openai import AsyncOpenAI
 
-from ai_gateway.config import ConfigModelConcurrency
+from ai_gateway.config import ConfigModelLimits
 from ai_gateway.models import mock
 from ai_gateway.models.agent_model import AgentModel
 from ai_gateway.models.amazon_q import AmazonQModel
@@ -207,9 +207,7 @@ class ContainerModels(containers.DeclarativeContainer):
     anthropic_proxy_client = providers.Factory(
         AnthropicProxyClient,
         client=http_client_anthropic_proxy,
-        concurrency_limit=providers.Factory(
-            ConfigModelConcurrency, config.model_engine_concurrency_limits
-        ),
+        limits=providers.Factory(ConfigModelLimits, config.model_engine_limits),
     )
 
     vertex_ai_proxy_client = providers.Selector(
@@ -219,9 +217,7 @@ class ContainerModels(containers.DeclarativeContainer):
             client=http_client_vertex_ai_proxy,
             project=config.vertex_text_model.project,
             location=config.vertex_text_model.location,
-            concurrency_limit=providers.Factory(
-                ConfigModelConcurrency, config.model_engine_concurrency_limits
-            ),
+            limits=providers.Factory(ConfigModelLimits, config.model_engine_limits),
         ),
         mocked=providers.Factory(mock.ProxyClient),
     )

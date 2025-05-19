@@ -5,7 +5,7 @@ import httpx
 import pytest
 from starlette.datastructures import URL
 
-from ai_gateway.config import ConfigModelConcurrency
+from ai_gateway.config import ConfigModelLimits
 
 
 @pytest.fixture
@@ -31,10 +31,14 @@ def async_client_factory():
 
 
 @pytest.fixture
-def concurrency_limit():
-    concurrency_limit = Mock(spec=ConfigModelConcurrency)
-    concurrency_limit.for_model.return_value = 100
-    return concurrency_limit
+def limits():
+    limits = Mock(spec=ConfigModelLimits)
+    limits.for_model.return_value = {
+        "concurrency": 100,
+        "input_tokens": 50,
+        "output_tokens": 25,
+    }
+    return limits
 
 
 @pytest.fixture

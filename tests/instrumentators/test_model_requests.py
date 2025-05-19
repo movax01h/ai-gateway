@@ -12,7 +12,7 @@ class TestWatchContainer:
         container = ModelRequestInstrumentator.WatchContainer(
             labels={"model_engine": "anthropic", "model_name": "claude"},
             streaming=False,
-            concurrency_limit=None,
+            limits=None,
         )
 
         container.register_token_usage(
@@ -52,7 +52,7 @@ class TestWatchContainer:
         container = ModelRequestInstrumentator.WatchContainer(
             labels={"model_engine": "anthropic", "model_name": "claude"},
             streaming=False,
-            concurrency_limit=None,
+            limits=None,
         )
         time_counter.side_effect = [1, 2]
 
@@ -104,7 +104,7 @@ class TestModelRequestInstrumentator:
         time_counter.side_effect = [1, 2]
 
         instrumentator = ModelRequestInstrumentator(
-            model_engine="anthropic", model_name="claude", concurrency_limit=None
+            model_engine="anthropic", model_name="claude", limits=None
         )
         with instrumentator.watch():
             assert mock_gauges.mock_calls == [
@@ -145,7 +145,7 @@ class TestModelRequestInstrumentator:
         time_counter.side_effect = [1, 2]
 
         instrumentator = ModelRequestInstrumentator(
-            model_engine="anthropic", model_name="claude", concurrency_limit=None
+            model_engine="anthropic", model_name="claude", limits=None
         )
 
         with pytest.raises(ValueError):
@@ -187,14 +187,20 @@ class TestModelRequestInstrumentator:
     @mock.patch("prometheus_client.Gauge.labels")
     def test_watch_with_limit(self, mock_gauges):
         instrumentator = ModelRequestInstrumentator(
-            model_engine="anthropic", model_name="claude", concurrency_limit=5
+            model_engine="anthropic",
+            model_name="claude",
+            limits={"input_tokens": 5, "output_tokens": 10, "concurrency": 15},
         )
 
         with instrumentator.watch():
             mock_gauges.assert_has_calls(
                 [
                     mock.call(model_engine="anthropic", model_name="claude"),
+                    mock.call().set(15),
+                    mock.call(model_engine="anthropic", model_name="claude"),
                     mock.call().set(5),
+                    mock.call(model_engine="anthropic", model_name="claude"),
+                    mock.call().set(10),
                 ]
             )
 
@@ -207,7 +213,7 @@ class TestModelRequestInstrumentator:
     ):
         time_counter.side_effect = [1, 2]
         instrumentator = ModelRequestInstrumentator(
-            model_engine="anthropic", model_name="claude", concurrency_limit=None
+            model_engine="anthropic", model_name="claude", limits=None
         )
 
         with instrumentator.watch(stream=True) as watcher:

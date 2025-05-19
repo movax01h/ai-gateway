@@ -55,22 +55,24 @@ AI-gateway itself. See the `ModelRequestInstrumentator` in
 | --------------------------------- | ---------------------------- | -------------------------------------------------------------------------- |
 | `model_inferences_in_flight`      | `model_engine`, `model_name` | Incremented at the start of a request to an engine, decremented at the end |
 | `model_inferences_max_concurrent` | `model_engine`, `model_name` | Set when a model is first used                                             |
+| `model_max_input_tokens`          | `model_engine`, `model_name` | Set when a model is first used                                             |
+| `model_max_output_tokens`         | `model_engine`, `model_name` | Set when a model is first used                                             |
 
 The metric for the limits is configured through an environment variable called
-`AIGW_MODEL_ENGINE_CONCURRENCY_LIMITS`. It's currently only used for
+`AIGW_MODEL_ENGINE_LIMITS`. It's currently only used for
 `anthropic` but could be used for different model engines. The
 variable needs to be set in JSON with this format:
 
 ```json
 {
-  "<engine-name>": { "<model-name>": integer-limit }
+  "<engine-name>": { "<model-name>":  { "input_tokens": integer-limit, "output_tokens": integer-limit, "concurrency": integer-limit } }
 }
 ```
 
 For example for Anthropic (these are not our actual limits):
 
 ```json
-{ "anthropic": { "claude-2.0": 5, "claude-3-5-sonnet-20241022": 15 } }
+{ "anthropic-chat": { "claude-3-7-sonnet-20250219": { "input_tokens": 1000, "output_tokens": 500, "concurrency": 60 } } }
 ```
 
 Because we don't want to share the limits we got from providers, this
@@ -78,8 +80,8 @@ environment variable is configured in vault.
 [Similar to other secrets in Runway](https://gitlab.com/gitlab-com/gl-infra/platform/runway/docs/-/blob/master/secrets-management.md?ref_type=heads).
 So in this case the variable is available at the following locations:
 
-- Production: [`env/production/service/ai-gateway/AIGW_MODEL_ENGINE_CONCURRENCY_LIMITS`](https://vault.gitlab.net/ui/vault/secrets/runway/kv/env%252Fproduction%252Fservice%252Fai-gateway%252FAIGW_MODEL_ENGINE_CONCURRENCY_LIMITS/details)
-- Staging: [`env/staging/service/ai-gateway/AIGW_MODEL_ENGINE_CONCURRENCY_LIMITS`](https://vault.gitlab.net/ui/vault/secrets/runway/kv/env%2Fstaging%2Fservice%2Fai-gateway%2FAIGW_MODEL_ENGINE_CONCURRENCY_LIMITS/details?version=1)
+- Production: [`env/production/service/ai-gateway/AIGW_MODEL_ENGINE_LIMITS`](https://vault.gitlab.net/ui/vault/secrets/runway/kv/env%252Fproduction%252Fservice%252Fai-gateway%252FAIGW_MODEL_ENGINE_LIMITS/details)
+- Staging: [`env/staging/service/ai-gateway/AIGW_MODEL_ENGINE_LIMITS`](https://vault.gitlab.net/ui/vault/secrets/runway/kv/env%2Fstaging%2Fservice%2Fai-gateway%2FAIGW_MODEL_ENGINE_LIMITS/details?version=1)
 
 When we introduce new models, and those models have a higher limit due
 to performance improvements on Anthropic's side, or a lower limit. We

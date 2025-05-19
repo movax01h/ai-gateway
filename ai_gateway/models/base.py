@@ -104,7 +104,7 @@ class ModelBase(ABC):
         return ModelRequestInstrumentator(
             model_engine=self.metadata.engine,
             model_name=self.metadata.name,
-            concurrency_limit=config.model_engine_concurrency_limits.for_model(
+            limits=config.model_engine_limits.for_model(
                 engine=self.metadata.engine, name=self.metadata.name
             ),
         )

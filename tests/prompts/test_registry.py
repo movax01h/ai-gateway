@@ -15,6 +15,7 @@ from pydantic import BaseModel, HttpUrl
 from pyfakefs.fake_filesystem import FakeFilesystem
 
 from ai_gateway.api.auth_utils import StarletteUser
+from ai_gateway.config import ConfigModelLimits
 from ai_gateway.integrations.amazon_q.chat import ChatAmazonQ
 from ai_gateway.integrations.amazon_q.client import AmazonQClientFactory
 from ai_gateway.model_metadata import AmazonQModelMetadata, ModelMetadata
@@ -361,6 +362,7 @@ def registry(
     model_factories: dict[ModelClassProvider, TypeModelFactory],
     default_prompts: dict[str, str],
     internal_event_client: Mock,
+    model_limits: ConfigModelLimits,
     custom_models_enabled: bool,
     disable_streaming: bool,
 ):
@@ -369,6 +371,7 @@ def registry(
         prompts_registered=prompts_registered,
         default_prompts=default_prompts,
         internal_event_client=internal_event_client,
+        model_limits=model_limits,
         custom_models_enabled=custom_models_enabled,
         disable_streaming=disable_streaming,
     )
@@ -381,6 +384,7 @@ class TestLocalPromptRegistry:
         model_factories: dict[ModelClassProvider, TypeModelFactory],
         prompts_registered: dict[str, PromptRegistered],
         internal_event_client: Mock,
+        model_limits: ConfigModelLimits,
     ):
         registry = LocalPromptRegistry.from_local_yaml(
             class_overrides={
@@ -389,6 +393,7 @@ class TestLocalPromptRegistry:
             model_factories=model_factories,
             default_prompts={},
             internal_event_client=internal_event_client,
+            model_limits=model_limits,
             custom_models_enabled=False,
             disable_streaming=False,
         )
@@ -664,6 +669,7 @@ class TestLocalPromptRegistry:
         self,
         model_factories: dict[ModelClassProvider, TypeModelFactory],
         internal_event_client: Mock,
+        model_limits: ConfigModelLimits,
         prompt_id: str,
         expected_name: str,
         expected_prompt_version: str,
@@ -678,6 +684,7 @@ class TestLocalPromptRegistry:
             model_factories=model_factories,
             default_prompts=default_prompt_env_config,
             internal_event_client=internal_event_client,
+            model_limits=model_limits,
         )
         prompt = registry.get(
             prompt_id,
@@ -779,6 +786,7 @@ class TestLocalPromptRegistry:
         model_factories: dict[ModelClassProvider, TypeModelFactory],
         prompts_registered: dict[str, PromptRegistered],
         internal_event_client: Mock,
+        model_limits: ConfigModelLimits,
     ):
         registry = LocalPromptRegistry.from_local_yaml(
             class_overrides={
@@ -787,6 +795,7 @@ class TestLocalPromptRegistry:
             model_factories=model_factories,
             default_prompts={"chat/react": "custom"},
             internal_event_client=internal_event_client,
+            model_limits=model_limits,
             custom_models_enabled=False,
         )
 
@@ -797,6 +806,7 @@ class TestLocalPromptRegistry:
         prompts_registered: dict[str, PromptRegistered],
         model_factories: dict[ModelClassProvider, TypeModelFactory],
         internal_event_client: Mock,
+        model_limits: ConfigModelLimits,
     ):
         # Create a registry with a prompt that has versions 1.0.0 and 1.0.1
         registry = LocalPromptRegistry(
@@ -842,6 +852,7 @@ class TestLocalPromptRegistry:
             model_factories=model_factories,
             default_prompts={},
             internal_event_client=internal_event_client,
+            model_limits=model_limits,
             custom_models_enabled=True,
             disable_streaming=True,
         )
@@ -859,6 +870,7 @@ class TestLocalPromptRegistry:
         mock_fs: FakeFilesystem,
         model_factories,
         internal_event_client: Mock,
+        model_limits: ConfigModelLimits,
     ):
         registry = LocalPromptRegistry.from_local_yaml(
             class_overrides={},
@@ -866,6 +878,7 @@ class TestLocalPromptRegistry:
             default_prompts={},
             custom_models_enabled=True,
             internal_event_client=internal_event_client,
+            model_limits=model_limits,
         )
 
         yaml_content = """
@@ -914,12 +927,14 @@ class TestLocalPromptRegistry:
         user: StarletteUser,
         prompt: Prompt,
         internal_event_client: Mock,
+        model_limits: ConfigModelLimits,
     ):
         test_registry = LocalPromptRegistry.from_local_yaml(
             class_overrides={},
             model_factories={},
             default_prompts={},
             internal_event_client=internal_event_client,
+            model_limits=model_limits,
         )
         prompt.unit_primitives = []
 

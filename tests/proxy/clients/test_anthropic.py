@@ -5,15 +5,15 @@ import pytest
 
 from ai_gateway.proxy.clients.anthropic import AnthropicProxyClient
 
-from .fixtures import async_client_factory, concurrency_limit, request_factory
+from .fixtures import async_client_factory, limits, request_factory
 
 
 @pytest.mark.asyncio
 async def test_valid_proxy_request(
-    async_client_factory, concurrency_limit, request_factory, monkeypatch
+    async_client_factory, limits, request_factory, monkeypatch
 ):
     monkeypatch.setenv("ANTHROPIC_API_KEY", "test")
-    proxy_client = AnthropicProxyClient(async_client_factory(), concurrency_limit)
+    proxy_client = AnthropicProxyClient(async_client_factory(), limits)
 
     request_params = {
         "model": "claude-3-5-haiku-20241022",

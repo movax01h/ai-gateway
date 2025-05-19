@@ -6,7 +6,7 @@ from starlette.datastructures import URL
 
 from ai_gateway.proxy.clients.base import BaseProxyClient
 
-from .fixtures import async_client_factory, concurrency_limit, request_factory
+from .fixtures import async_client_factory, limits, request_factory
 
 
 class TestProxyClient(BaseProxyClient):
@@ -38,10 +38,8 @@ class TestProxyClient(BaseProxyClient):
 
 
 @pytest.mark.asyncio
-async def test_valid_proxy_request(
-    async_client_factory, concurrency_limit, request_factory
-):
-    proxy_client = TestProxyClient(async_client_factory(), concurrency_limit)
+async def test_valid_proxy_request(async_client_factory, limits, request_factory):
+    proxy_client = TestProxyClient(async_client_factory(), limits)
 
     response = await proxy_client.proxy(request_factory())
 
@@ -64,12 +62,12 @@ async def test_valid_proxy_request(
 )
 async def test_request_url(
     async_client_factory,
-    concurrency_limit,
+    limits,
     request_factory,
     request_url,
     expected_error,
 ):
-    proxy_client = TestProxyClient(async_client_factory(), concurrency_limit)
+    proxy_client = TestProxyClient(async_client_factory(), limits)
 
     if expected_error:
         with pytest.raises(fastapi.HTTPException, match=expected_error):
@@ -90,12 +88,12 @@ async def test_request_url(
 )
 async def test_request_body(
     async_client_factory,
-    concurrency_limit,
+    limits,
     request_factory,
     request_body,
     expected_error,
 ):
-    proxy_client = TestProxyClient(async_client_factory(), concurrency_limit)
+    proxy_client = TestProxyClient(async_client_factory(), limits)
 
     if expected_error:
         with pytest.raises(fastapi.HTTPException, match=expected_error):
@@ -117,12 +115,12 @@ async def test_request_body(
 )
 async def test_model_names(
     async_client_factory,
-    concurrency_limit,
+    limits,
     request_factory,
     request_body,
     expected_error,
 ):
-    proxy_client = TestProxyClient(async_client_factory(), concurrency_limit)
+    proxy_client = TestProxyClient(async_client_factory(), limits)
 
     if expected_error:
         with pytest.raises(fastapi.HTTPException, match=expected_error):
@@ -156,13 +154,13 @@ async def test_model_names(
 )
 async def test_upstream_headers(
     async_client_factory,
-    concurrency_limit,
+    limits,
     request_factory,
     request_headers,
     expected_headers,
 ):
     async_client = async_client_factory()
-    proxy_client = TestProxyClient(async_client, concurrency_limit)
+    proxy_client = TestProxyClient(async_client, limits)
 
     await proxy_client.proxy(request_factory(request_headers=request_headers))
 
@@ -184,13 +182,13 @@ async def test_upstream_headers(
 )
 async def test_streaming(
     async_client_factory,
-    concurrency_limit,
+    limits,
     request_factory,
     request_body,
     expected_streaming,
 ):
     async_client = async_client_factory()
-    proxy_client = TestProxyClient(async_client, concurrency_limit)
+    proxy_client = TestProxyClient(async_client, limits)
 
     response = await proxy_client.proxy(request_factory(request_body=request_body))
 
@@ -222,13 +220,13 @@ async def test_streaming(
 )
 async def test_downstream_headers(
     async_client_factory,
-    concurrency_limit,
+    limits,
     request_factory,
     response_headers,
     expected_headers,
 ):
     async_client = async_client_factory(response_headers=response_headers)
-    proxy_client = TestProxyClient(async_client, concurrency_limit)
+    proxy_client = TestProxyClient(async_client, limits)
 
     response = await proxy_client.proxy(request_factory())
 
