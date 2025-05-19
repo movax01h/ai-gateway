@@ -102,6 +102,8 @@ EXECUTOR_TOOLS = [
     "create_epic",
     "update_epic",
     "get_repository_file",
+    "list_epic_notes",
+    "get_epic_note",
 ]
 
 CONTEXT_BUILDER_TOOLS = [
@@ -128,6 +130,8 @@ CONTEXT_BUILDER_TOOLS = [
     "get_epic",
     "list_epics",
     "get_repository_file",
+    "list_epic_notes",
+    "get_epic_note",
 ]
 
 PLANNER_TOOLS = [
