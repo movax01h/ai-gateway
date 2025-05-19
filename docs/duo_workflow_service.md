@@ -11,32 +11,97 @@ necessary commands to complete tasks - all while maintaining a secure
 boundary between untrusted code execution and the core GitLab
 infrastructure.
 
-## Quick start
+## Local development with GDK
 
-- Install required tools.
+You should [set up GitLab Duo Workflow with the GitLab Development Kit (GDK)](https://gitlab.com/gitlab-org/gitlab-development-kit/-/blob/main/doc/howto/duo_workflow.md).
 
-  ```shell
-  mise install # or
-  asdf install
-  ```
+The GDK setup documentation also explains how ensure that all feature flags and
+settings enabled so that Duo Workflow works.
 
-- Install project dependencies.
+## Local developmment without GDK
 
-  ```shell
-  poetry install
-  ```
+If for some reason you cannot [set up Duo Workflow Service directly with GDK](https://gitlab.com/gitlab-org/gitlab-development-kit/-/blob/main/doc/howto/duo_workflow.md), you can manually set it up following these steps:
 
-- Configure environment.
+1. Ensure you have met all prerequisites locally (this list may not be exhaustive, GDK setup script is)
+   - [GitLab Ultimate cloud license](https://docs.gitlab.com/development/ai_features/ai_development_license)
+   - [Experiment and beta features setting](https://docs.gitlab.com/user/gitlab_duo/turn_on_off/#turn-on-beta-and-experimental-features) enabled
+   - Feature flag enabled: `Feature.enable(:duo_workflow)`
 
-  ```shell
-  cp .env.example .env
-  ```
+1. Install dependencies with [poetry](https://python-poetry.org/docs/#installing-with-pipx).
 
-- Run the service.
+   ```shell
+   poetry install
+   ```
 
-  ```shell
-  poetry run duo-workflow-service
-  ```
+1. Copy the example env file in the Service repo.
+
+   ```shell
+   cp .env.example .env
+   ```
+
+1. Install [`gcloud`](https://cloud.google.com/sdk/docs/install)
+1. Login using your GitLab Google account by running:
+
+   ```shell
+   gcloud auth login
+   ```
+
+1. Set the `ai-enablement-dev-69497ba7` as active project by running:
+
+   ```shell
+   gcloud config set project ai-enablement-dev-69497ba7
+   ```
+
+1. Create the credentials for the application.
+
+   ```shell
+   gcloud auth application-default login --disable-quota-project
+   ```
+
+1. Optional: The `ai-enablement-dev-69497ba7` Google Cloud project should by available to all engineers at GitLab. If you do not have access to this project, unset `DUO_WORKFLOW__VERTEX_PROJECT_ID` in `.env` and instead set `ANTHROPIC_API_KEY` to a valid Anthropic API key.
+
+1. Optional: You can disable auth for local development in the `.env` file. This
+   disables authentication or the gRPC connection between the Duo Workflow Service
+   and Duo Workflow Executor but a token is still required for requests to
+   your local GitLab instance.
+
+   ```shell
+   DUO_WORKFLOW_AUTH__ENABLED=false
+   ```
+
+1. Run the Duo Workflow Service server.
+
+   ```shell
+   poetry run python -m duo_workflow_service.server
+   ```
+
+1. If you can correctly connect to Claude, you should see something
+   like this in the output.
+
+   ```shell
+   {"event": "I'm Claude, an AI assistant created by Anthropic."...
+   ```
+
+## Debugging and troubleshooting
+
+See the Duo Workflow [troubleshooting handbook page](https://handbook.gitlab.com/handbook/engineering/development/data-science/ai-powered/duo-workflow/troubleshooting/).
+
+### Issues connecting to 50052 port
+
+JAMF may be listening on the `50052` port which conflicts with the GitLab Duo Workflow Service.
+
+```shell
+$ sudo lsof -i -P | grep LISTEN | grep :50052
+jamfRemot  <redacted>           root   11u  IPv4 <redacted>      0t0    TCP localhost:50052 (LISTEN)
+```
+
+To work around this,run the server on 50053 with:
+
+```shell
+PORT=50053 poetry run duo-workflow-service
+```
+
+## Common commands
 
 - Run tests.
 
@@ -76,64 +141,6 @@ LLM_CACHE=true
 When enabled all queries will be cached to a local SQLite file at
 `.llm_cache.db`. You can delete this file at any time to clear the
 cache.
-
-## Setting up local development for Duo Workflow
-
-For ease of use you can you can [set up Duo Workflow Service directly with GDK](https://gitlab.com/gitlab-org/gitlab-development-kit/-/blob/main/doc/howto/duo_workflow.md?ref_type=heads).
-
-To manually set it up do the following:
-
-1. Install dependencies with [poetry](https://python-poetry.org/docs/#installing-with-pipx).
-
-   ```shell
-   poetry install
-   ```
-
-1. Copy the example env file in the Service repo.
-
-   ```shell
-   cp .env.example .env
-   ```
-
-1. Setup [`gcloud`](https://cloud.google.com/sdk/docs/install) on your system.
-1. Login using your GitLab Google account by running:
-
-   ```shell
-   gcloud auth login
-   ```
-
-1. Set the `ai-enablement-dev-69497ba7` as active project by running:
-
-   ```shell
-   gcloud config set project ai-enablement-dev-69497ba7
-   ```
-
-1. Create the credentials for the application.
-
-   ```shell
-   gcloud auth application-default login --disable-quota-project
-   ```
-
-1. Optional: The `ai-enablement-dev-69497ba7` Google Cloud project should by available to all engineers at GitLab. If you do not have access to this project, unset `DUO_WORKFLOW__VERTEX_PROJECT_ID` in `.env` and instead set `ANTHROPIC_API_KEY` to a valid Anthropic API key.
-
-1. Optional: You can disable auth for local development in the `.env` file. This disables authentication or the gRPC connection between the Duo Workflow Service and Duo Workflow Executor but a token will still be required for requests to your local GitLab instance.
-
-   ```shell
-   DUO_WORKFLOW_AUTH__ENABLED=false
-   ```
-
-1. Run the Duo Workflow Service server.
-
-   ```shell
-   poetry run python -m duo_workflow_service.server
-   ```
-
-1. If you can correctly connect to Claude, you should see something
-   like this in the output.
-
-   ```shell
-   {"event": "Connected to model: claude-3-5-sonnet-v2-20241022: I am Claude, an AI assistant created by Anthropic."...
-   ```
 
 ## Architecture
 
@@ -233,25 +240,6 @@ be useful to store checkpoints only in memory - you can use `USE_MEMSAVER=1`
 environment variable to use `MemorySaver`.
 
 When using `MemorySaver`, human in the loop features and workflow status updates are disabled.
-
-## Debugging and troubleshooting
-
-See Duo Workflow [troubleshooting handbook page](https://handbook.gitlab.com/handbook/engineering/development/data-science/ai-powered/duo-workflow/troubleshooting/).
-
-### Issues connecting to 50052 port
-
-JAMF may be listening on the `50052` port which will conflict with GitLab Duo Workflow Service.
-
-```shell
-$ sudo lsof -i -P | grep LISTEN | grep :50052
-jamfRemot  <redacted>           root   11u  IPv4 <redacted>      0t0    TCP localhost:50052 (LISTEN)
-```
-
-To work around this,run the server on 50053 with:
-
-```shell
-PORT=50053 poetry run duo-workflow-service
-```
 
 ### Visualise graph
 
