@@ -86,6 +86,7 @@ class RunToolNode(Generic[WorkflowStateT]):
                     status=ToolStatus.SUCCESS,
                     correlation_id=None,
                     tool_info=ToolInfo(name=self._tool.name, args=tool_params),
+                    context_elements=None,
                 )
             )
 

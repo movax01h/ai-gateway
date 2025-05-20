@@ -219,6 +219,7 @@ class GoalDisambiguationComponent:
                     status=None,
                     correlation_id=None,
                     tool_info=None,
+                    context_elements=None,
                 )
             ],
             "status": WorkflowStatusEnum.INPUT_REQUIRED,
@@ -250,6 +251,7 @@ class GoalDisambiguationComponent:
                 timestamp=datetime.now(timezone.utc).isoformat(),
                 status=ToolStatus.SUCCESS,
                 tool_info=None,
+                context_elements=None,
             )
         ]
 
