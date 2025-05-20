@@ -63,6 +63,20 @@ def chat_messages():
 
 
 @pytest.fixture
+def chat_response():
+    return [
+        {
+            "role": "user",
+            "content": "You are a helpful assistant\\n\\nHi",
+            "context": None,
+            "current_file": None,
+            "additional_context": None,
+            "agent_scratchpad": None,
+        },
+    ]
+
+
+@pytest.fixture
 def request_body(request, content_fixture):
     return {
         "prompt_components": [
@@ -152,7 +166,9 @@ class TestConvertV1ToV2Inputs:
                 Message(role=Role.USER, content=expected_content).model_dump()
             ]
         else:
-            assert [m.model_dump() for m in agent_request.messages] == expected_content
+            assert [
+                m.model_dump() for m in agent_request.messages
+            ] == request.getfixturevalue("chat_response")
 
 
 class TestRedirectedV1ChatEndpoint:
