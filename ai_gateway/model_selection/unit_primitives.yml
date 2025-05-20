@@ -111,3 +111,10 @@ configurable_unit_primitives:
       - "claude_3_sonnet_20240229"
       - "claude_3_5_sonnet_20240620"
       - "claude_sonnet_3_7_20250219"
+  - feature_setting: "review_merge_request"
+    unit_primitives:
+      - "review_merge_request"
+    default_model: "claude_sonnet_3_7_20250219"
+    selectable_models:
+      - "claude_sonnet_3_7_20250219"
+      - "claude_3_5_sonnet_20240620"

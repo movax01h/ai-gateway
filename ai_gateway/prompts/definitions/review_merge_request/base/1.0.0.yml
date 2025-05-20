@@ -1,0 +1,13 @@
+---
+name: Claude 3.7 Multi File Review Merge Request
+model:
+  config_file: claude_3_7
+  params:
+    max_tokens: 8_192
+unit_primitives:
+  - review_merge_request
+prompt_template:
+  system: |
+    {% include 'review_merge_request/system/1.0.0.jinja' %}
+  user: |
+    {% include 'review_merge_request/user/1.0.0.jinja' %}
