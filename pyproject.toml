@@ -75,7 +75,8 @@ priority = "supplemental"
 optional = true
 
 [tool.poetry.group.eval.dependencies]
-eli5 = { version = "^0.2.0", source = "prompt_library" }
+eli5 = { version = "^0.3.1", source = "prompt_library" }
+typer = "^0.15.4"
 
 [tool.poetry.group.test]
 optional = true
@@ -136,6 +137,7 @@ ai_gateway = "ai_gateway.main:run_app"
 ai-gateway = "ai_gateway.main:run_app"
 validate-model-selection-config = "ai_gateway.model_selection:validate_model_selection_config"
 eval = "eval.main:main"
+generate-dataset = "eval.generate_dataset:main"
 index_docs = "ai_gateway.scripts.index_docs_as_sqlite:build_indexed_docs"
 troubleshoot = "ai_gateway.scripts.troubleshoot_selfhosted_installation:troubleshoot"
 compute-tps = "ai_gateway.scripts.tps_test:compute_tps"

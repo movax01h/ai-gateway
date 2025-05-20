@@ -28,7 +28,7 @@ As with every AI evaluation pipeline, Prompt Evaluations require an input datase
 
 #### Datasets
 
-The structure of the input dataset very much depends on the prompt variables (see prompt registry [documentation](aigw_prompt_registry.md) for additional details).
+The structure of the input dataset very much depends on the prompt variables (see prompt registry [documentation](../aigw_prompt_registry.md) for additional details).
 However, the general requirements are:
 
 - Use LangSmith `inputs` to store prompt variables. Our evaluation scripts rely on the `inputs` to build the ready-to-use prompt.
@@ -42,13 +42,14 @@ We don't have any strict requirements for the dataset `outputs` schema.
 If your prompt returns a single value, feel free to use the `output` field to store the expected value.
 If your prompt outputs a complex dictionary structure, it can also be used as a schema.
 
-> Note: we are currently working on an approach to automatically generate synthetic datasets for given prompts.
-> Please feel free to track the progress in the [issue](https://gitlab.com/gitlab-org/modelops/ai-model-validation-and-research/ai-evaluation/prompt-library/-/issues/708).
+> Note: We have completed the first version of the approach to automatically generate synthetic datasets for given prompts.
+> This approach directly generates synthetic datasets from AI Gateway prompt definitions to accelerate development and the evaluation process.
+> Please refer to [dataset_generation.md](dataset_generation.md) for additional details.
 
 #### Evaluators
 
 To accelerate the development process, CEF provides a set of pre-built evaluators that are able to operate with various data schemas and structures.
-The list of supported evaluators can be found in the `eval` main [script](../eval/main.py).
+The list of supported evaluators can be found in the `eval` main [script](../../eval/main.py).
 At this moment, only the `correctness` evaluator is attached to prompt evaluations.
 The `correctness` evaluator is schema-agnostic and relies on an LLM to assess the correctness of the actual prompt outputs by comparing them with expected outputs.
 

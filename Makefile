@@ -207,7 +207,7 @@ check-codespell: install-lint-deps
 .PHONY: install-test-deps
 install-test-deps:
 	@echo "Installing test dependencies..."
-	@poetry install --with test
+	@poetry install --with test,eval
 
 .PHONY: test
 test: install-test-deps

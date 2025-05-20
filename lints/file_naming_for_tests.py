@@ -4,7 +4,7 @@ from astroid import nodes
 from pylint.checkers import BaseChecker
 from pylint.lint import PyLinter
 
-# DO NOT ADD FILES
+# DO NOT ADD FILES FROM THE ai_gateway MODULE
 EXCLUDED_FILES = {
     "/tests/test_structured_log.py",
     "/tests/searches/test_search_container.py",
@@ -14,6 +14,7 @@ EXCLUDED_FILES = {
     "/tests/code_suggestions/test_logging.py",
     "/tests/code_suggestions/test_authentication.py",
     "/tests/prompts/test_litellm_prompt.py",
+    "/tests/eval/test_generate_dataset.py",
 }
 
 
