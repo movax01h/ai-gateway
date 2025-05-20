@@ -1,7 +1,7 @@
 PATH
   remote: .
   specs:
-    gitlab-duo-workflow-service-client (0.1)
+    gitlab-duo-workflow-service-client (0.2)
       grpc
 
 GEM
@@ -136,7 +136,7 @@ DEPENDENCIES
   grpc-tools
   rspec (~> 3.0)
   rspec-parameterized (~> 1.0.2)
-  rubocop (~> 1.50)
+  rubocop (~> 1.21)
 
 BUNDLED WITH
    2.4.4
