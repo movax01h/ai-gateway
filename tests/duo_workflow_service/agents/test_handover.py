@@ -1,3 +1,5 @@
+# pylint: disable=file-naming-for-tests
+
 from datetime import datetime, timezone
 from unittest.mock import patch
 

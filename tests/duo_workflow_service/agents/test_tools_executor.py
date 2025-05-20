@@ -1,3 +1,5 @@
+# pylint: disable=file-naming-for-tests,direct-environment-variable-reference
+
 import os
 from dataclasses import dataclass, field
 from datetime import datetime, timezone

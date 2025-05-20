@@ -1,3 +1,5 @@
+# pylint: disable=direct-environment-variable-reference
+
 import asyncio
 import json
 import os
@@ -106,7 +108,7 @@ class GrpcServer(contract_pb2_grpc.DuoWorkflowServicer):
                     streaming_action = workflow.get_from_streaming_outbox()
                     if isinstance(streaming_action, contract_pb2.Action):
                         yield streaming_action
-                        _event: contract_pb2.ClientEvent = await anext(
+                        _event: contract_pb2.ClientEvent = await anext(  # noqa: F841
                             aiter(request_iterator)
                         )
 

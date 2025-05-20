@@ -1,3 +1,5 @@
+# pylint: disable=direct-environment-variable-reference
+
 import os
 from abc import ABC, abstractmethod
 from datetime import datetime, timezone

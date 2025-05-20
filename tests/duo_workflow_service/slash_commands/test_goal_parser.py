@@ -2,6 +2,8 @@
 Tests for the slash_commands.goal_parser module.
 """
 
+# pylint: disable=file-naming-for-tests,unused-import
+
 from unittest.mock import MagicMock, patch
 
 import pytest

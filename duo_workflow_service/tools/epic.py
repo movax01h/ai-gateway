@@ -133,7 +133,6 @@ class EpicBaseTool(DuoBaseTool):
                 None if group_id is None else str(group_id), epic_iid, errors
             )
 
-
     async def _get_epic_ids_from_url(
         self,
         url: Optional[str],

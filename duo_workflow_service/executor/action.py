@@ -3,18 +3,21 @@ import time
 from typing import Any, Dict
 
 import structlog
-from contract import contract_pb2
 from prometheus_client import Histogram
 
+from contract import contract_pb2
+
 ACTION_LATENCY = Histogram(
-    name='executor_actions_duration_seconds',
-    documentation='Latency for all actions that go to the Executor.',
-    labelnames=['action_class']
+    name="executor_actions_duration_seconds",
+    documentation="Latency for all actions that go to the Executor.",
+    labelnames=["action_class"],
 )
+
 
 def record_metrics(action_class: str, duration: float):
     """Record Prometheus metrics for an action execution."""
     ACTION_LATENCY.labels(action_class=action_class).observe(duration)
+
 
 async def _execute_action(metadata: Dict[str, Any], action: contract_pb2.Action):
     outbox: asyncio.Queue = metadata["outbox"]

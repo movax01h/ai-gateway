@@ -73,7 +73,7 @@ class AbstractWorkflow(ABC):
         workflow_id: str,
         workflow_metadata: Dict[str, Any],
         workflow_type: CategoryEnum,
-        context_elements: list = None,
+        context_elements: list = None,  # type: ignore[assignment]
     ):
         self._outbox = asyncio.Queue(maxsize=QUEUE_MAX_SIZE)
         self._inbox = asyncio.Queue(maxsize=QUEUE_MAX_SIZE)
@@ -93,7 +93,7 @@ class AbstractWorkflow(ABC):
             tracing_metadata = {
                 "git_url": self._workflow_metadata.get("git_url", ""),
                 "git_sha": self._workflow_metadata.get("git_sha", ""),
-                "workflow_type": self._workflow_type.value
+                "workflow_type": self._workflow_type.value,
             }
 
             with tracing_context(enabled=extended_logging):

@@ -1,3 +1,5 @@
+# pylint: disable=direct-environment-variable-reference
+
 import logging
 import os
 from contextvars import ContextVar

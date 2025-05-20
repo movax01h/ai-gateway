@@ -1,3 +1,5 @@
+# pylint: disable=file-naming-for-tests,direct-environment-variable-reference
+
 import asyncio
 import os
 from unittest.mock import MagicMock, patch

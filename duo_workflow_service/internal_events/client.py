@@ -1,3 +1,5 @@
+# pylint: disable=direct-environment-variable-reference
+
 import os
 import threading
 from typing import Optional
