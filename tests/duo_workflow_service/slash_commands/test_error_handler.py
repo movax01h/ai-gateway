@@ -2,6 +2,8 @@
 Tests for the slash_commands.error_handler module.
 """
 
+# pylint: disable=file-naming-for-tests,unused-import
+
 from datetime import datetime, timezone
 from unittest.mock import MagicMock, patch
 

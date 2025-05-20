@@ -1,3 +1,5 @@
+# pylint: disable=file-naming-for-tests,unused-import,direct-environment-variable-reference
+
 import os
 from datetime import datetime, timezone
 from unittest.mock import AsyncMock, MagicMock, call, patch

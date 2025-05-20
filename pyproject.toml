@@ -111,6 +111,7 @@ codespell = "^2.4.1"
 skip = """
 *.db,\
 *.excalidraw,\
+*.js.map,\
 *.png,\
 *.pyc,\
 ./bin,\

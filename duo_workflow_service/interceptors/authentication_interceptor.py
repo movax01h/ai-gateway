@@ -1,3 +1,5 @@
+# pylint: disable=direct-environment-variable-reference
+
 import contextvars
 import os
 from typing import Callable

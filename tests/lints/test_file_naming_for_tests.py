@@ -1,3 +1,5 @@
+# pylint: disable=file-naming-for-tests
+
 import os
 from unittest.mock import patch
 

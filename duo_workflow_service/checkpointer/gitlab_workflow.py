@@ -143,7 +143,7 @@ class GitLabWorkflow(BaseCheckpointSaver[Any], AbstractAsyncContextManager[Any])
         config: RunnableConfig,
         writes: Sequence[Tuple[str, Any]],
         task_id: str,
-        task_path: str = "", # We are ignoring this parameter for now since we don't care for the order the pending writes are fetched in 
+        task_path: str = "",  # We are ignoring this parameter for now since we don't care for the order the pending writes are fetched in
     ) -> None:
         return
 
@@ -460,7 +460,7 @@ class GitLabWorkflow(BaseCheckpointSaver[Any], AbstractAsyncContextManager[Any])
         config: RunnableConfig,
         writes: Sequence[Tuple[str, Any]],
         task_id: str,
-        task_path: str = "", # We are ignoring this parameter for now since we don't care for the order the pending writes are fetched in
+        task_path: str = "",  # We are ignoring this parameter for now since we don't care for the order the pending writes are fetched in
     ) -> None:
         configurable = config.get("configurable", {})
         checkpoint_id = configurable.get("checkpoint_id")

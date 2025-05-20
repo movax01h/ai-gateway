@@ -1,3 +1,5 @@
+# pylint: disable=file-naming-for-tests,unused-import,unused-variable
+
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, call, patch
 from xml.etree import ElementTree

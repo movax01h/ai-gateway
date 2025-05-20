@@ -78,7 +78,7 @@ class FindFilesInput(BaseModel):
             "For complex patterns,you must handle proper escaping"
         )
     )
-    files_scope: Optional[FilesScopeEnum] = Field(
+    files_scope: Optional[FilesScopeEnum] = Field(  # type: ignore[assignment]
         default=FilesScopeEnum.ALL.value,
         description="""
         - 0: (Default): Finds all files matching the pattern. (equivalent to using --cached --others flags together)",

@@ -1,3 +1,5 @@
+# pylint: disable=direct-environment-variable-reference
+
 import os
 from contextvars import ContextVar
 from dataclasses import dataclass, field

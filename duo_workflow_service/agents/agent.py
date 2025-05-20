@@ -217,12 +217,14 @@ class Agent:
 
         if state.get("context_elements"):
             conversation_preamble.append(
-                self._format_context_elements(state.get("context_elements"))
+                self._format_context_elements(state.get("context_elements"))  # type: ignore[arg-type]
             )
 
         return conversation_preamble
 
-    def _format_context_elements(self, context_elements: List[ContextElement]) -> BaseMessage:
+    def _format_context_elements(
+        self, context_elements: List[ContextElement]
+    ) -> BaseMessage:
         xml_elements = []
 
         for element in context_elements:
@@ -231,7 +233,7 @@ class Agent:
             # Set its text content (automatically escapes special characters)
             xml_element.text = element.contents
             # Convert to string representation
-            xml_str = ElementTree.tostring(xml_element, encoding='unicode')
+            xml_str = ElementTree.tostring(xml_element, encoding="unicode")
             xml_elements.append(xml_str)
 
         return HumanMessage(content="\n".join(xml_elements))

@@ -2,6 +2,8 @@
 Tests for the slash_commands.definition module.
 """
 
+# pylint: disable=file-naming-for-tests,unused-import
+
 import os
 from pathlib import Path
 from unittest.mock import MagicMock, mock_open, patch

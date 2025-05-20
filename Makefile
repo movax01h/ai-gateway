@@ -1,5 +1,7 @@
 ROOT_DIR := $(shell pwd)
 AI_GATEWAY_DIR := ${ROOT_DIR}/ai_gateway
+DUO_WORKFLOW_SERVICE_DIR := ${ROOT_DIR}/duo_workflow_service
+LIB_DIR := ${ROOT_DIR}/lib
 EVAL_DIR := ${ROOT_DIR}/eval
 LINTS_DIR := ${ROOT_DIR}/lints
 SCRIPTS_DIR := ${ROOT_DIR}/scripts
@@ -7,6 +9,8 @@ TESTS_DIR := ${ROOT_DIR}/tests
 INTEGRATION_TESTS_DIR := ${ROOT_DIR}/integration_tests
 
 LINT_WORKING_DIR ?= ${AI_GATEWAY_DIR} \
+	${DUO_WORKFLOW_SERVICE_DIR} \
+	${LIB_DIR} \
 	${EVAL_DIR} \
 	${LINTS_DIR} \
 	${SCRIPTS_DIR} \
@@ -183,7 +187,7 @@ check-isort: install-lint-deps
 .PHONY: check-pylint
 check-pylint: install-lint-deps
 	@echo "Running pylint check..."
-	@poetry run pylint ${LINT_WORKING_DIR} --ignore=vendor --ignore-paths=$(TESTS_DIR)/duo_workflow_service,$(TESTS_DIR)/lib,$(TESTS_DIR)/lints
+	@poetry run pylint ${LINT_WORKING_DIR} --ignore=vendor
 
 .PHONY: check-mypy
 check-mypy: install-lint-deps
