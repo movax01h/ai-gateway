@@ -44,6 +44,7 @@ class Routes(StrEnum):
     CONTINUE = "continue"
     END = "end"
     AGENT = "agent"
+    COMMIT_CHANGES = "commit_changes"
 
 
 def _router(state: WorkflowState) -> str:
@@ -55,8 +56,14 @@ def _router(state: WorkflowState) -> str:
         return Routes.END
 
     tool_calls = getattr(agent_messages[-2], "tool_calls", [])
+    if len(tool_calls) == 0:
+        return Routes.END
+
     if tool_calls and tool_calls[0].get("name") == "read_file":
         return Routes.AGENT
+
+    if tool_calls[0].get("name") == "create_file_with_contents":
+        return Routes.COMMIT_CHANGES
 
     return Routes.END
 
@@ -124,6 +131,23 @@ def _load_file_contents(file_contents: list[str], state: WorkflowState):
     }
 
 
+def _git_output(command_output: list[str], state: WorkflowState):
+    logs: list[UiChatLog] = [
+        UiChatLog(
+            message_type=MessageTypeEnum.TOOL,
+            content=f"{command_output[-1]}",
+            timestamp=datetime.now(timezone.utc).isoformat(),
+            status=ToolStatus.SUCCESS,
+            correlation_id=None,
+            tool_info=None,
+        )
+    ]
+
+    return {
+        "ui_chat_log": logs,
+    }
+
+
 class Workflow(AbstractWorkflow):
     async def _handle_workflow_failure(
         self, error: BaseException, compiled_graph: Any, graph_config: Any
@@ -142,22 +166,18 @@ class Workflow(AbstractWorkflow):
         graph = StateGraph(WorkflowState)
 
         # Setup workflow graph
-        graph.set_entry_point("load_files")
-        # Load jenkins file contents
-        graph.add_node(
-            "load_files",
-            RunToolNode[WorkflowState](
-                tool=tools_registry.get("read_file"),  # type: ignore
-                input_parser=lambda _: [{"file_path": goal}],
-                output_parser=_load_file_contents,  # type: ignore
-            ).run,
+        graph = self._setup_workflow_graph(
+            graph,
+            tools_registry,
+            goal,
         )
 
-        # translator node
+        return graph.compile(checkpointer=checkpointer)
+
+    def _setup_translator_nodes(self, tools_registry: ToolsRegistry):
         translation_tools = ["create_file_with_contents", "read_file"]
         agents_toolset = tools_registry.toolset(translation_tools)
-
-        agent = Agent(
+        translator_agent = Agent(
             goal="N/A",
             system_prompt="N/A",
             name=AGENT_NAME,
@@ -167,15 +187,70 @@ class Workflow(AbstractWorkflow):
             workflow_id=self._workflow_id,
             workflow_type=CategoryEnum.WORKFLOW_CONVERT_TO_GITLAB_CI,
         )
-        graph.add_node("request_translation", agent.run)
 
-        tools_executor = ToolsExecutor(
-            tools_agent_name=AGENT_NAME,
-            toolset=agents_toolset,
-            workflow_id=self._workflow_id,
-            workflow_type=CategoryEnum.WORKFLOW_CONVERT_TO_GITLAB_CI,
+        return {
+            "agent": translator_agent,
+            "tools": translation_tools,
+            "tools_executor": ToolsExecutor(
+                tools_agent_name=AGENT_NAME,
+                toolset=agents_toolset,
+                workflow_id=self._workflow_id,
+                workflow_type=CategoryEnum.WORKFLOW_CONVERT_TO_GITLAB_CI,
+            ),
+            "start_node": "request_translation",
+        }
+
+    def _setup_workflow_graph(
+        self,
+        graph: StateGraph,
+        tools_registry,
+        ci_config_file_path,
+    ):
+        translator_components = self._setup_translator_nodes(tools_registry)
+
+        self.log.info("Starting %s workflow graph compilation", self._workflow_type)
+        graph.set_entry_point("load_files")
+        # Load jenkins file contents
+        graph.add_node(
+            "load_files",
+            RunToolNode[WorkflowState](
+                tool=tools_registry.get("read_file"),  # type: ignore
+                input_parser=lambda _: [{"file_path": ci_config_file_path}],
+                output_parser=_load_file_contents,  # type: ignore
+            ).run,
         )
-        graph.add_node("execution_tools", tools_executor.run)
+        # translator nodes
+        graph.add_node(
+            translator_components["start_node"], translator_components["agent"].run
+        )
+        graph.add_node("execution_tools", translator_components["tools_executor"].run)
+
+        # deterministic git actions
+        graph.add_node(
+            "git_actions",
+            RunToolNode[WorkflowState](
+                tool=tools_registry.get("run_git_command"),  # type: ignore
+                input_parser=lambda _: [
+                    {
+                        "repository_url": self._project["http_url_to_repo"],
+                        "command": "add",
+                        "args": "-A",
+                    },
+                    {
+                        "repository_url": self._project["http_url_to_repo"],
+                        "command": "commit",
+                        "args": "-m 'Duo Workflow: Convert to GitLab CI'",
+                    },
+                    {
+                        "repository_url": self._project["http_url_to_repo"],
+                        "command": "push",
+                        "args": "-o merge_request.create",
+                    },
+                ],
+                output_parser=_git_output,  # type: ignore
+            ).run,
+        )
+
         graph.add_node(
             "complete",
             HandoverAgent(
@@ -183,26 +258,27 @@ class Workflow(AbstractWorkflow):
             ).run,
         )
 
-        graph.add_edge("load_files", "request_translation")
+        graph.add_edge("load_files", translator_components["start_node"])
         graph.add_conditional_edges(
-            "request_translation",
+            translator_components["start_node"],
             _tools_execution_requested,
             {
-                "continue": "execution_tools",
-                "end": "complete",
+                Routes.CONTINUE: "execution_tools",
+                Routes.END: "complete",
             },
         )
         graph.add_conditional_edges(
             "execution_tools",
             _router,
             {
-                Routes.AGENT: "request_translation",
+                Routes.AGENT: translator_components["start_node"],
                 Routes.END: "complete",
+                Routes.COMMIT_CHANGES: "git_actions",
             },
         )
+        graph.add_edge("git_actions", "complete")
         graph.add_edge("complete", END)
-
-        return graph.compile(checkpointer=checkpointer)
+        return graph
 
     def get_workflow_state(self, goal: str) -> WorkflowState:
         target_file = goal
