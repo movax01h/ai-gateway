@@ -1,9 +1,9 @@
 from time import time
-from typing import Annotated, AsyncIterator, Optional, Tuple, Union
+from typing import Annotated, AsyncIterator, Tuple
 
 from dependency_injector import providers
 from dependency_injector.providers import Factory, FactoryAggregate
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, Depends, Request, status
 from gitlab_cloud_connector import GitLabUnitPrimitive
 from starlette.responses import StreamingResponse
 
@@ -15,8 +15,6 @@ from ai_gateway.api.v1.chat.typing import (
     ChatRequest,
     ChatResponse,
     ChatResponseMetadata,
-    PromptPayload,
-    StreamChatResponse,
 )
 from ai_gateway.api.v2.chat.agent import (
     create_event_stream,
@@ -33,18 +31,9 @@ from ai_gateway.async_dependency_resolver import (
 from ai_gateway.chat.agents import ReActAgentInputs, TypeAgentEvent
 from ai_gateway.chat.agents.typing import Message
 from ai_gateway.chat.executor import GLAgentRemoteExecutor
-from ai_gateway.feature_flags import FeatureFlag, is_feature_enabled
 from ai_gateway.internal_events import InternalEventsClient
-from ai_gateway.models import (
-    AnthropicAPIConnectionError,
-    AnthropicAPIStatusError,
-    AnthropicAPITimeoutError,
-    KindModelProvider,
-)
 from ai_gateway.models.base_chat import Role
-from ai_gateway.models.base_text import TextGenModelChunk, TextGenModelOutput
 from ai_gateway.prompts import BasePromptRegistry
-from ai_gateway.tracking import log_exception
 
 __all__ = [
     "router",
@@ -144,153 +133,47 @@ async def chat(
         Depends(get_gl_agent_remote_executor_factory),
     ],
 ):
-    if is_feature_enabled(FeatureFlag.CHAT_V1_REDIRECT):
 
-        agent_request = convert_v1_to_v2_inputs(chat_request)
-        payload = chat_request.prompt_components[0].payload
+    agent_request = convert_v1_to_v2_inputs(chat_request)
+    payload = chat_request.prompt_components[0].payload
 
-        agent = get_agent(current_user, agent_request, prompt_registry)
+    agent = get_agent(current_user, agent_request, prompt_registry)
 
-        gl_version = request.headers.get(X_GITLAB_VERSION_HEADER, "")
+    gl_version = request.headers.get(X_GITLAB_VERSION_HEADER, "")
 
-        stream_result: Tuple[ReActAgentInputs, AsyncIterator[TypeAgentEvent]] = (
-            await create_event_stream(
-                current_user=current_user,
-                agent_request=agent_request,
-                agent=agent,
-                gl_agent_remote_executor_factory=gl_agent_remote_executor_factory,
-                gl_version=gl_version,
-                agent_scratchpad=[],
-            )
+    stream_result: Tuple[ReActAgentInputs, AsyncIterator[TypeAgentEvent]] = (
+        await create_event_stream(
+            current_user=current_user,
+            agent_request=agent_request,
+            agent=agent,
+            gl_agent_remote_executor_factory=gl_agent_remote_executor_factory,
+            gl_version=gl_version,
+            agent_scratchpad=[],
         )
-
-        _, stream_events = stream_result
-
-        if chat_request.stream:
-
-            async def stream_handler():
-                async for event in stream_events:
-                    # Transform each event
-                    yield (
-                        event.text
-                        if hasattr(event, "text")
-                        else event.dump_as_response()
-                    )
-
-            return StreamingResponse(stream_handler(), media_type="text/event-stream")
-
-        final_text = ""
-        async for event in stream_events:
-            if hasattr(event, "text"):
-                final_text += event.text
-        return ChatResponse(
-            response=final_text,
-            metadata=ChatResponseMetadata(
-                provider=payload.provider,
-                model=None,
-                timestamp=int(time()),
-            ),
-        )
-
-    prompt_component = chat_request.prompt_components[0]
-    payload = prompt_component.payload
-
-    internal_event_client.track_event(
-        f"request_{path_unit_primitive_map[chat_invokable]}",
-        category=__name__,
     )
 
-    try:
-        if payload.provider in (
-            KindModelProvider.LITELLM,
-            KindModelProvider.MISTRALAI,
-        ):
-            model = litellm_factory(
-                name=payload.model,
-                endpoint=payload.model_endpoint,
-                api_key=payload.model_api_key,
-                provider=payload.provider,
-                identifier=payload.model_identifier,
-            )
+    _, stream_events = stream_result
 
-            completion = await model.generate(
-                messages=payload.content,
-                stream=chat_request.stream,
-            )
-        else:
-            completion = await _generate_completion(
-                anthropic_claude_factory, payload, stream=chat_request.stream
-            )
+    if chat_request.stream:
 
-        if isinstance(completion, AsyncIterator):
-            return await _handle_stream(completion)
-        return ChatResponse(
-            response=completion.text,
-            metadata=ChatResponseMetadata(
-                provider=payload.provider,
-                model=payload.model.value if payload.model else None,
-                timestamp=int(time()),
-            ),
-        )
-    except AnthropicAPIStatusError as ex:
-        log_exception(ex)
-        raise HTTPException(
-            status_code=status.HTTP_502_BAD_GATEWAY,
-            detail="Anthropic API Status Error.",
-        )
-    except AnthropicAPITimeoutError as ex:
-        log_exception(ex)
-        raise HTTPException(
-            status_code=status.HTTP_504_GATEWAY_TIMEOUT,
-            detail="Anthropic API Timeout Error.",
-        )
-    except AnthropicAPIConnectionError as ex:
-        log_exception(ex)
-        raise HTTPException(
-            status_code=status.HTTP_502_BAD_GATEWAY,
-            detail="Anthropic API Connection Error.",
-        )
+        async def stream_handler():
+            async for event in stream_events:
+                # Transform each event
+                yield (
+                    event.text if hasattr(event, "text") else event.dump_as_response()
+                )
 
+        return StreamingResponse(stream_handler(), media_type="text/event-stream")
 
-async def _generate_completion(
-    anthropic_claude_factory: FactoryAggregate,
-    prompt: PromptPayload,
-    stream: Optional[bool] = False,
-) -> Union[TextGenModelOutput, AsyncIterator[TextGenModelChunk]]:
-    opts = prompt.params.dict() if prompt.params else {}
-
-    if isinstance(prompt.content, str):
-        factory_type = (
-            "llm"  # retrieve `AnthropicModel` from the FactoryAggregate object
-        )
-        opts.update({"prefix": prompt.content, "stream": stream})
-    else:  # otherwise, `list[Message]`
-        factory_type = (
-            "chat"  # retrieve `AnthropicChatModel` from the FactoryAggregate object
-        )
-        opts.update({"messages": prompt.content, "stream": stream})
-
-        # Hack: Anthropic renamed the `max_tokens_to_sample` arg to `max_tokens` for the new Message API
-        if max_tokens := opts.pop("max_tokens_to_sample", None):
-            opts["max_tokens"] = max_tokens
-
-        # Temporary fix for mitigating https://gitlab.com/gitlab-com/gl-infra/production/-/issues/18996.
-        # v1/chat/agent endpoint uses Claude models that support up to 4096 output tokens.
-        if "max_tokens" in opts and opts["max_tokens"] > 4096:
-            opts["max_tokens"] = 4096
-
-    completion = await anthropic_claude_factory(
-        factory_type, name=prompt.model
-    ).generate(**opts)
-
-    return completion
-
-
-async def _handle_stream(
-    response: AsyncIterator[TextGenModelChunk],
-) -> StreamChatResponse:
-    async def _stream_generator():
-        async for result in response:
-            yield result.text
-
-    return StreamChatResponse(_stream_generator(), media_type="text/event-stream")
+    final_text = ""
+    async for event in stream_events:
+        if hasattr(event, "text"):
+            final_text += event.text
+    return ChatResponse(
+        response=final_text,
+        metadata=ChatResponseMetadata(
+            provider=payload.provider,
+            model=None,
+            timestamp=int(time()),
+        ),
+    )
