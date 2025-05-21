@@ -29,6 +29,7 @@ def handler_call_details():
         ("x-gitlab-feature-enabled-by-namespace-ids", "1,2,3"),
         ("x-gitlab-project-id", "1"),
         ("x-gitlab-namespace-id", "2"),
+        ("x-gitlab-is-a-gitlab-member", "true"),
     )
     return mock_details
 
@@ -44,6 +45,7 @@ def handler_call_details_with_empty_feature():
         ("x-gitlab-feature-enabled-by-namespace-ids", ""),
         ("x-gitlab-project-id", "1"),
         ("x-gitlab-namespace-id", "2"),
+        ("x-gitlab-is-a-gitlab-member", "true"),
     )
     return mock_details
 
@@ -57,6 +59,7 @@ def handler_call_details_with_empty_project_and_namespace_id():
         ("x-gitlab-global-user-id", "test-global-user-id"),
         ("x-gitlab-host-name", "test-gitlab-host"),
         ("x-gitlab-feature-enabled-by-namespace-ids", ""),
+        ("x-gitlab-is-a-gitlab-member", "false"),
     )
     return mock_details
 
@@ -74,6 +77,7 @@ async def test_interceptor_with_internal_events_disabled(
     assert event_context.feature_enabled_by_namespace_ids == [1, 2, 3]
     assert event_context.project_id == 1
     assert event_context.namespace_id == 2
+    assert event_context.is_gitlab_team_member is True
 
 
 @pytest.mark.asyncio
@@ -91,6 +95,7 @@ async def test_interceptor_with_empty_feature_enabled_attribute(
     assert event_context.feature_enabled_by_namespace_ids is None
     assert event_context.project_id == 1
     assert event_context.namespace_id == 2
+    assert event_context.is_gitlab_team_member is True
 
 
 @pytest.mark.asyncio
@@ -110,3 +115,16 @@ async def test_interceptor_with_empty_project_and_namespace_ids(
     assert event_context.feature_enabled_by_namespace_ids is None
     assert event_context.project_id is None
     assert event_context.namespace_id is None
+
+
+@pytest.mark.asyncio
+async def test_interceptor_with_gitlab_member_false(
+    interceptor,
+    mock_continuation,
+    handler_call_details_with_empty_project_and_namespace_id,
+):
+    await interceptor.intercept_service(
+        mock_continuation, handler_call_details_with_empty_project_and_namespace_id
+    )
+    event_context = current_event_context.get()
+    assert event_context.is_gitlab_team_member is False
