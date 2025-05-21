@@ -5,6 +5,7 @@ import json
 import os
 from typing import AsyncIterable, AsyncIterator
 
+import aiohttp
 import grpc
 import structlog
 from gitlab_cloud_connector import (
@@ -16,6 +17,7 @@ from gitlab_cloud_connector import (
 from grpc_reflection.v1alpha import reflection
 
 from contract import contract_pb2, contract_pb2_grpc
+from duo_workflow_service.gitlab.connection_pool import connection_pool
 from duo_workflow_service.interceptors.authentication_interceptor import (
     AuthenticationInterceptor,
     current_user,
@@ -95,11 +97,18 @@ class GrpcServer(contract_pb2_grpc.DuoWorkflowServicer):
 
         workflow_type = string_to_category_enum(workflow_definition)
         workflow_class: TypeWorkflow = resolve_workflow_class(workflow_definition)
+
+        invocation_metadata = dict(context.invocation_metadata())
+
         workflow: AbstractWorkflow = workflow_class(
             workflow_id=workflow_id,
             workflow_metadata=workflow_metadata,
             workflow_type=workflow_type,
             context_elements=context_elements,
+            invocation_metadata={
+                "base_url": invocation_metadata.get("x-gitlab-base-url", ""),
+                "gitlab_token": invocation_metadata.get("x-gitlab-oauth-token", ""),
+            },
         )
 
         async def send_events():
@@ -218,33 +227,38 @@ async def grpc_serve(port: int) -> None:
         pings to be sent even if there are no calls in flight.
     For more details, check: https://github.com/grpc/grpc/blob/master/doc/keepalive.md
     """
-    server_options = [
-        ("grpc.keepalive_time_ms", 20 * 1000),
-        ("grpc.http2.min_ping_interval_without_data_ms", 10 * 1000),
-        ("grpc.keepalive_permit_without_calls", 1),
-        ("grpc.so_reuseport", 0),
-    ]
+    connection_pool.set_options(
+        pool_size=100,  # Adjust based on your needs
+        timeout=aiohttp.ClientTimeout(total=30),
+    )
+    async with connection_pool:
+        server_options = [
+            ("grpc.keepalive_time_ms", 20 * 1000),
+            ("grpc.http2.min_ping_interval_without_data_ms", 10 * 1000),
+            ("grpc.keepalive_permit_without_calls", 1),
+            ("grpc.so_reuseport", 0),
+        ]
 
-    server = grpc.aio.server(
-        interceptors=[
-            CorrelationIdInterceptor(),
-            AuthenticationInterceptor(),
-            FeatureFlagInterceptor(),
-            InternalEventsInterceptor(),
-            MonitoringInterceptor(),
-        ],
-        options=server_options,
-    )
-    contract_pb2_grpc.add_DuoWorkflowServicer_to_server(GrpcServer(), server)
-    server.add_insecure_port(f"[::]:{port}")
-    # enable reflection for faster local development and debugging
-    # this can be removed when we are closer to production
-    service_names = (
-        contract_pb2.DESCRIPTOR.services_by_name["DuoWorkflow"].full_name,
-        reflection.SERVICE_NAME,
-    )
-    reflection.enable_server_reflection(service_names, server)
-    log.info("Starting gRPC server on port %d", port)
-    await server.start()
-    log.info("Started server")
-    await server.wait_for_termination()
+        server = grpc.aio.server(
+            interceptors=[
+                CorrelationIdInterceptor(),
+                AuthenticationInterceptor(),
+                FeatureFlagInterceptor(),
+                InternalEventsInterceptor(),
+                MonitoringInterceptor(),
+            ],
+            options=server_options,
+        )
+        contract_pb2_grpc.add_DuoWorkflowServicer_to_server(GrpcServer(), server)
+        server.add_insecure_port(f"[::]:{port}")
+        # enable reflection for faster local development and debugging
+        # this can be removed when we are closer to production
+        service_names = (
+            contract_pb2.DESCRIPTOR.services_by_name["DuoWorkflow"].full_name,
+            reflection.SERVICE_NAME,
+        )
+        reflection.enable_server_reflection(service_names, server)
+        log.info("Starting gRPC server on port %d", port)
+        await server.start()
+        log.info("Started server")
+        await server.wait_for_termination()

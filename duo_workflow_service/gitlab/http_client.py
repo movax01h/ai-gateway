@@ -1,12 +1,9 @@
 import json
 import logging
+from abc import ABC, abstractmethod
 from typing import Any, Callable, Dict, Optional, Union
-from urllib.parse import urlencode
 
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
-
-from contract import contract_pb2
-from duo_workflow_service.executor.action import _execute_action
 
 # Setup logger
 logger = logging.getLogger(__name__)
@@ -30,9 +27,8 @@ def checkpoint_decoder(json_object: dict):
         return json_object
 
 
-class GitlabHttpClient:
-    def __init__(self, metadata: Dict[str, Any]):
-        self.metadata = metadata
+class GitlabHttpClient(ABC):
+    """Abstract base class defining the interface for GitLab HTTP clients."""
 
     async def aget(
         self,
@@ -54,6 +50,44 @@ class GitlabHttpClient:
     async def apatch(self, path: str, body: str, parse_json: bool = True) -> Any:
         return await self._call(path, "PATCH", parse_json, data=body)
 
+    def _parse_response(
+        self,
+        response: Any,
+        parse_json: bool = True,
+        object_hook: Union[Callable, None] = None,
+    ) -> Union[Dict[str, Any], list, str, None]:
+        """Parse the response from the API call.
+
+        Args:
+            response: The raw response (string or other data)
+            parse_json: Whether to parse the response as JSON
+            object_hook: Optional JSON decoder hook for custom object deserialization
+
+        Returns:
+            Parsed response data (dict/list) if parsing succeeds,
+            or raw response (str) if parsing fails or is not requested,
+            or None if response is None
+        """
+        if not parse_json:
+            return response
+
+        try:
+            if isinstance(response, str):
+                if object_hook:
+                    return json.loads(response, object_hook=object_hook)
+                return json.loads(response)
+            elif isinstance(response, (dict)):
+                return response  # Already parsed JSON (dict)
+
+            return {}
+        except json.JSONDecodeError as e:
+            logger.error(f"JSON decode error: {str(e)}. ")
+            logger.error(
+                f"Raw response type: {type(response)}, content: {repr(response)}"
+            )
+            return {}
+
+    @abstractmethod
     async def _call(
         self,
         path: str,
@@ -62,30 +96,5 @@ class GitlabHttpClient:
         data: Optional[str] = None,
         params: Optional[Dict[str, Any]] = None,
         object_hook: Union[Callable, None] = None,
-    ):
-        if params:
-            query_string = urlencode(params)
-            path = f"{path}?{query_string}"
-
-        response = await _execute_action(
-            self.metadata,
-            contract_pb2.Action(
-                runHTTPRequest=contract_pb2.RunHTTPRequest(
-                    path=path, method=method, body=data
-                )
-            ),
-        )
-
-        if not parse_json:
-            return response
-
-        try:
-            return json.loads(response, object_hook=object_hook)
-
-        except json.JSONDecodeError as e:
-            logger.error(f"JSON decode error for {method} {path}: {str(e)}. ")
-            logger.error(
-                f"Raw response type: {type(response)}, content: {repr(response)}"
-            )
-
-            return {}
+    ) -> Any:
+        pass
