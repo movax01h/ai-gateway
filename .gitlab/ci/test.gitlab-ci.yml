@@ -73,6 +73,7 @@ sanity-tests:
 regression-tests:
   <<: *test-base
   when: manual
+  allow_failure: true
   variables:
     <<: *test-variables
     LS_DATASET_SPLIT: "validation_stratified_b06f4db4_p30"
