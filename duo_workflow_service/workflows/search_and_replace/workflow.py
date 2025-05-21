@@ -399,7 +399,7 @@ class Workflow(AbstractWorkflow):
         graph.add_node(
             "detect_affected_components",
             RunToolNode[SearchAndReplaceWorkflowState](
-                tool=tools_registry.get("grep_files"),  # type: ignore
+                tool=tools_registry.get("grep"),  # type: ignore
                 input_parser=_detect_affected_components_input_parser,
                 output_parser=_detect_affected_components_output_parser,
             ).run,
