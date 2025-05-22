@@ -138,147 +138,158 @@ def _agent_responses(status: WorkflowStatusEnum, agent_name: str):
     ]
 
 
-# @pytest.mark.asyncio
-# @patch("duo_workflow_service.workflows.abstract_workflow.ToolsRegistry", autospec=True)
-# @patch("duo_workflow_service.workflows.software_development.workflow.Agent")
-# @patch("duo_workflow_service.workflows.software_development.workflow.HandoverAgent")
-# @patch(
-#     "duo_workflow_service.workflows.software_development.workflow.PlanSupervisorAgent"
-# )
-# @patch("duo_workflow_service.workflows.software_development.workflow.ToolsExecutor")
-# @patch(
-#     "duo_workflow_service.workflows.abstract_workflow.fetch_project_data_with_workflow_id"
-# )
-# @patch("duo_workflow_service.workflows.abstract_workflow.fetch_workflow_config")
-# @patch("duo_workflow_service.workflows.software_development.workflow.new_chat_client")
-# @patch("duo_workflow_service.workflows.abstract_workflow.GitLabWorkflow", autospec=True)
-# @patch(
-#     "duo_workflow_service.workflows.software_development.workflow.GoalDisambiguationComponent",
-#     autospec=True,
-# )
-# @patch("duo_workflow_service.workflows.abstract_workflow.UserInterface", autospec=True)
-# @patch.dict(os.environ, {"DW_INTERNAL_EVENT__ENABLED": "true"})
-# async def test_workflow_run(
-#     mock_checkpoint_notifier,
-#     mock_goal_disambiguator_component,
-#     mock_gitlab_workflow,
-#     mock_chat_client,
-#     mock_fetch_workflow_config,
-#     mock_fetch_project_data_with_workflow_id,
-#     mock_tools_executor,
-#     mock_plan_supervisor_agent,
-#     mock_handover_agent,
-#     mock_agent,
-#     mock_tools_registry_cls,
-#     checkpoint_tuple,
-# ):
-#     mock_user_interface_instance = mock_checkpoint_notifier.return_value
-#     mock_tools_registry = MagicMock(spec=ToolsRegistry)
-#     mock_tools_registry_cls.configure = AsyncMock(return_value=mock_tools_registry)
-#     mock_tools_registry.approval_required.return_value = False
-#     mock_fetch_project_data_with_workflow_id.return_value = {
-#         "id": 1,
-#         "name": "test-project",
-#         "description": "This is a test project",
-#         "http_url_to_repo": "https://example.com/project",
-#         "web_url": "https://example.com/project",
-#     }
-#
-#     mock_git_lab_workflow_instance = mock_gitlab_workflow.return_value
-#     mock_git_lab_workflow_instance.__aenter__.return_value = (
-#         mock_git_lab_workflow_instance
-#     )
-#     mock_git_lab_workflow_instance.__aexit__.return_value = None
-#     mock_git_lab_workflow_instance._offline_mode = False
-#     mock_git_lab_workflow_instance.aget_tuple = AsyncMock(return_value=None)
-#     mock_git_lab_workflow_instance.alist = AsyncMock(return_value=[])
-#     mock_git_lab_workflow_instance.aput = AsyncMock(
-#         return_value={
-#             "configurable": {"thread_id": "123", "checkpoint_id": "checkpoint1"}
-#         }
-#     )
-#     mock_git_lab_workflow_instance.get_next_version = MagicMock(return_value=1)
-#
-#     mock_tools_executor.return_value.run.side_effect = [
-#         {
-#             "plan": Plan(steps=[]),
-#             "status": WorkflowStatusEnum.PLANNING,
-#             "conversation_history": {},
-#         },
-#         {
-#             "plan": Plan(steps=[]),
-#             "status": WorkflowStatusEnum.PLANNING,
-#             "conversation_history": {},
-#         },
-#         {
-#             "plan": Plan(steps=[]),
-#             "status": WorkflowStatusEnum.EXECUTION,
-#             "conversation_history": {},
-#         },
-#     ]
-#
-#     mock_handover_agent.return_value.run.side_effect = [
-#         {
-#             "plan": Plan(steps=[]),
-#             "status": WorkflowStatusEnum.COMPLETED,
-#             "conversation_history": {},
-#         },
-#         {
-#             "plan": Plan(steps=[]),
-#             "status": WorkflowStatusEnum.COMPLETED,
-#             "conversation_history": {},
-#         },
-#     ]
-#
-#     mock_agent.return_value.run.side_effect = [
-#         *_agent_responses(
-#             WorkflowStatusEnum.PLANNING, "context_builder"
-#         ),  # context builder responses
-#         *_agent_responses(WorkflowStatusEnum.PLANNING, "planner"),  # planner responses
-#         *_agent_responses(
-#             WorkflowStatusEnum.EXECUTION, "executor"
-#         ),  # executor responses
-#     ]
-#
-#     mock_plan_supervisor_agent.return_value.run.return_value = {
-#         "plan": Plan(steps=[]),
-#         "status": WorkflowStatusEnum.EXECUTION,
-#         "conversation_history": {},
-#     }
-#
-#     mock_goal_disambiguator_component.return_value.attach.return_value = "planning"
-#
-#     workflow = Workflow(
-#         "123",
-#         {},
-#         workflow_type=CategoryEnum.WORKFLOW_SOFTWARE_DEVELOPMENT,
-#     )
-#     await workflow.run("test_goal")
-#
-#     assert mock_goal_disambiguator_component.return_value.attach.call_count == 1
-#
-#     assert mock_agent.call_count == 3
-#     assert mock_agent.return_value.run.call_count >= 5
-#
-#     assert mock_tools_executor.call_count == 3
-#     assert mock_tools_executor.return_value.run.call_count >= 1
-#
-#     assert mock_handover_agent.call_count == 3
-#     assert mock_handover_agent.return_value.run.call_count >= 1
-#
-#     assert mock_plan_supervisor_agent.call_count == 3
-#     assert mock_plan_supervisor_agent.return_value.run.call_count >= 2
-#
-#     assert mock_git_lab_workflow_instance.aput.call_count >= 1
-#     assert mock_git_lab_workflow_instance.aget_tuple.call_count >= 1
-#
-#     mock_user_interface_instance.send_event.assert_called_with(
-#         type=ANY, state=ANY, stream=False
-#     )
-#     assert mock_user_interface_instance.send_event.call_count >= 2
-#
-#     assert workflow.is_done
-#
+@pytest.mark.asyncio
+@patch("duo_workflow_service.workflows.abstract_workflow.ToolsRegistry", autospec=True)
+@patch("duo_workflow_service.workflows.software_development.workflow.Agent")
+@patch("duo_workflow_service.workflows.software_development.workflow.HandoverAgent")
+@patch(
+    "duo_workflow_service.workflows.software_development.workflow.PlanSupervisorAgent"
+)
+@patch("duo_workflow_service.workflows.software_development.workflow.ToolsExecutor")
+@patch(
+    "duo_workflow_service.workflows.abstract_workflow.fetch_project_data_with_workflow_id"
+)
+@patch("duo_workflow_service.workflows.abstract_workflow.fetch_workflow_config")
+@patch("duo_workflow_service.workflows.software_development.workflow.new_chat_client")
+@patch("duo_workflow_service.workflows.abstract_workflow.GitLabWorkflow", autospec=True)
+@patch(
+    "duo_workflow_service.workflows.software_development.workflow.ToolsApprovalComponent",
+    autospec=True,
+)
+@patch(
+    "duo_workflow_service.workflows.software_development.workflow.PlanApprovalComponent",
+    autospec=True,
+)
+@patch(
+    "duo_workflow_service.workflows.software_development.workflow.GoalDisambiguationComponent",
+    autospec=True,
+)
+@patch("duo_workflow_service.workflows.abstract_workflow.UserInterface", autospec=True)
+@patch.dict(os.environ, {"DW_INTERNAL_EVENT__ENABLED": "true"})
+async def test_workflow_run(
+    mock_checkpoint_notifier,
+    mock_goal_disambiguator_component,
+    mock_plan_approval_component,
+    mock_tools_approval_component,
+    mock_gitlab_workflow,
+    mock_chat_client,
+    mock_fetch_workflow_config,
+    mock_fetch_project_data_with_workflow_id,
+    mock_tools_executor,
+    mock_plan_supervisor_agent,
+    mock_handover_agent,
+    mock_agent,
+    mock_tools_registry_cls,
+    checkpoint_tuple,
+):
+    mock_user_interface_instance = mock_checkpoint_notifier.return_value
+    mock_tools_registry = MagicMock(spec=ToolsRegistry)
+    mock_tools_registry_cls.configure = AsyncMock(return_value=mock_tools_registry)
+    mock_tools_registry.approval_required.return_value = False
+    mock_fetch_project_data_with_workflow_id.return_value = {
+        "id": 1,
+        "name": "test-project",
+        "description": "This is a test project",
+        "http_url_to_repo": "https://example.com/project",
+        "web_url": "https://example.com/project",
+    }
+
+    mock_git_lab_workflow_instance = mock_gitlab_workflow.return_value
+    mock_git_lab_workflow_instance.__aenter__.return_value = (
+        mock_git_lab_workflow_instance
+    )
+    mock_git_lab_workflow_instance.__aexit__.return_value = None
+    mock_git_lab_workflow_instance._offline_mode = False
+    mock_git_lab_workflow_instance.aget_tuple = AsyncMock(return_value=None)
+    mock_git_lab_workflow_instance.alist = AsyncMock(return_value=[])
+    mock_git_lab_workflow_instance.aput = AsyncMock(
+        return_value={
+            "configurable": {"thread_id": "123", "checkpoint_id": "checkpoint1"}
+        }
+    )
+    mock_git_lab_workflow_instance.get_next_version = MagicMock(return_value=1)
+
+    mock_tools_executor.return_value.run.side_effect = [
+        {
+            "plan": Plan(steps=[]),
+            "status": WorkflowStatusEnum.PLANNING,
+            "conversation_history": {},
+        },
+        {
+            "plan": Plan(steps=[]),
+            "status": WorkflowStatusEnum.PLANNING,
+            "conversation_history": {},
+        },
+        {
+            "plan": Plan(steps=[]),
+            "status": WorkflowStatusEnum.EXECUTION,
+            "conversation_history": {},
+        },
+    ]
+
+    mock_handover_agent.return_value.run.return_value = {
+        "plan": Plan(steps=[]),
+        "status": WorkflowStatusEnum.COMPLETED,
+        "conversation_history": {},
+    }
+
+    mock_agent.return_value.run.side_effect = [
+        *_agent_responses(
+            WorkflowStatusEnum.PLANNING, "context_builder"
+        ),  # context builder responses
+        *_agent_responses(WorkflowStatusEnum.PLANNING, "planner"),  # planner responses
+        *_agent_responses(
+            WorkflowStatusEnum.EXECUTION, "executor"
+        ),  # executor responses
+    ]
+
+    mock_plan_supervisor_agent.return_value.run.return_value = {
+        "plan": Plan(steps=[]),
+        "status": WorkflowStatusEnum.EXECUTION,
+        "conversation_history": {},
+    }
+
+    mock_goal_disambiguator_component.return_value.attach.return_value = "planning"
+    mock_plan_approval_component.return_value.attach.return_value = (
+        "set_status_to_execution"
+    )
+    mock_tools_approval_component.return_value.attach.side_effect = [
+        "build_context_tools",
+        "execution_tools",
+    ]
+
+    workflow = Workflow(
+        "123",
+        {},
+        workflow_type=CategoryEnum.WORKFLOW_SOFTWARE_DEVELOPMENT,
+    )
+    await workflow.run("test_goal")
+
+    assert mock_goal_disambiguator_component.return_value.attach.call_count == 1
+    assert mock_plan_approval_component.return_value.attach.call_count == 1
+    assert mock_tools_approval_component.return_value.attach.call_count == 2
+
+    assert mock_agent.call_count == 3
+    assert mock_agent.return_value.run.call_count >= 5
+
+    assert mock_tools_executor.call_count == 3
+    assert mock_tools_executor.return_value.run.call_count >= 1
+
+    assert mock_handover_agent.call_count == 3
+    assert mock_handover_agent.return_value.run.call_count == 3
+
+    assert mock_plan_supervisor_agent.call_count == 3
+    assert mock_plan_supervisor_agent.return_value.run.call_count >= 2
+
+    assert mock_git_lab_workflow_instance.aput.call_count >= 1
+    assert mock_git_lab_workflow_instance.aget_tuple.call_count >= 1
+
+    mock_user_interface_instance.send_event.assert_called_with(
+        type=ANY, state=ANY, stream=False
+    )
+    assert mock_user_interface_instance.send_event.call_count >= 2
+
+    assert workflow.is_done
 
 
 @pytest.mark.asyncio
