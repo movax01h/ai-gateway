@@ -22,6 +22,7 @@ class TestDuoWorkflowMetrics(unittest.TestCase):
             "compute_duration",
             "gitlab_response_duration",
             "network_latency",
+            "llm_response_counter",
         ]:
             mock_histogram = MagicMock()
             setattr(self.metrics, metric_name, mock_histogram)
@@ -155,6 +156,27 @@ class TestDuoWorkflowMetrics(unittest.TestCase):
             workflow_type="test_workflow"
         )
         observe_mock.assert_called_once()
+
+    def test_llm_response_counter(self):
+        observe_mock = MagicMock()
+        labels_result_mock = MagicMock()
+        labels_result_mock.inc = observe_mock
+
+        cast(MagicMock, self.metrics.llm_response_counter.labels).return_value = (
+            labels_result_mock
+        )
+
+        self.metrics.count_llm_response(
+            model="test_model",
+            request_type="test_request",
+            stop_reason="test_reason",
+        )
+
+        cast(
+            MagicMock, self.metrics.llm_response_counter.labels
+        ).assert_called_once_with(
+            model="test_model", request_type="test_request", stop_reason="other"
+        )
 
 
 if __name__ == "__main__":

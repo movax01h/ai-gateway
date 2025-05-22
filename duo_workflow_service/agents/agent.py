@@ -105,7 +105,10 @@ class Agent:
                     self.name: [*messages, *model_completion]
                 }
 
-            return {**updates, **self._respond_to_human(state, model_completion)}
+            return {
+                **updates,
+                **self._respond_to_human(state, model_completion),
+            }
 
     def _respond_to_human(self, state, model_completion) -> dict[str, Any]:
         if not isinstance(model_completion[0], AIMessage):
@@ -118,7 +121,7 @@ class Agent:
         ):
             content = self._parse_model_content(model_completion[0].content)
             return {
-                "ui_chat_log": [self._create_ui_chat_log(content)] if content else [],
+                "ui_chat_log": ([self._create_ui_chat_log(content)] if content else []),
                 "last_human_input": None,
             }
 
@@ -134,12 +137,22 @@ class Agent:
                 ).count_tokens(messages)
 
                 model_name = getattr(self._model, "model_name", "unknown")
+                request_type = f"{self.name}_completion"
                 with duo_workflow_metrics.time_llm_request(
-                    model=model_name, request_type=f"{self.name}_completion"
+                    model=model_name, request_type=request_type
                 ):
                     response = await self._model.ainvoke(messages)
 
                 self._track_tokens_data(response, approximate_token_count)
+                duo_workflow_metrics.count_llm_response(
+                    model=model_name,
+                    request_type=request_type,
+                    stop_reason=(
+                        response.response_metadata.get("stop_reason")
+                        if response.response_metadata
+                        else None
+                    ),
+                )
                 return [response]
             except APIStatusError as e:
                 error_message = str(e)
