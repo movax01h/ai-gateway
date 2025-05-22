@@ -36,6 +36,7 @@ from duo_workflow_service.interceptors.monitoring_interceptor import (
 )
 from duo_workflow_service.internal_events.event_enum import CategoryEnum
 from duo_workflow_service.structured_logging import set_workflow_id
+from duo_workflow_service.tracking import MonitoringContext, current_monitoring_context
 from duo_workflow_service.tracking.errors import log_exception
 from duo_workflow_service.workflows.abstract_workflow import (
     AbstractWorkflow,
@@ -83,6 +84,8 @@ class GrpcServer(contract_pb2_grpc.DuoWorkflowServicer):
                 grpc.StatusCode.PERMISSION_DENIED, "Unauthorized to execute workflow"
             )
 
+        monitoring_context: MonitoringContext = current_monitoring_context.get()
+
         # Fetch the start workflow call
         start_workflow_request: contract_pb2.ClientEvent = await anext(
             aiter(request_iterator)
@@ -94,6 +97,8 @@ class GrpcServer(contract_pb2_grpc.DuoWorkflowServicer):
         goal = start_workflow_request.startRequest.goal
         workflow_metadata = {}
         workflow_definition = start_workflow_request.startRequest.workflowDefinition
+        monitoring_context.workflow_id = workflow_id
+        monitoring_context.workflow_definition = workflow_definition
         if start_workflow_request.startRequest.workflowMetadata:
             workflow_metadata = json.loads(
                 start_workflow_request.startRequest.workflowMetadata

@@ -3,6 +3,7 @@ from unittest.mock import AsyncMock, MagicMock, Mock
 import grpc
 import pytest
 from prometheus_client import CollectorRegistry
+from structlog.testing import capture_logs
 
 from duo_workflow_service.interceptors.monitoring_interceptor import (
     MonitoringInterceptor,
@@ -44,6 +45,7 @@ async def test_interceptor_methods(
     continuation = AsyncMock()
     handler_call_details = Mock()
     handler_call_details.method = f"/{service_name}/{method_name}"
+    handler_call_details.invocation_metadata = {"user-agent": "test_agent"}
 
     mock_handler = Mock()
     setattr(mock_handler, handler_attr, AsyncMock(return_value="response"))
@@ -58,7 +60,9 @@ async def test_interceptor_methods(
     assert result is not None
 
     handler_func = getattr(result, handler_attr)
-    response = await handler_func(None, mock_context)
+
+    with capture_logs() as cap_logs:
+        response = await handler_func(None, mock_context)
 
     assert response == "response"
 
@@ -73,6 +77,12 @@ async def test_interceptor_methods(
     )
 
     assert total_calls == 1.0
+
+    assert len(cap_logs) == 1
+    assert cap_logs[0]["event"] == f"Finished {method_name} RPC"
+    assert cap_logs[0]["grpc_service_name"] == service_name
+    assert cap_logs[0]["grpc_method_name"] == method_name
+    assert cap_logs[0]["user_agent"] == "test_agent"
 
 
 @pytest.mark.asyncio
@@ -117,6 +127,7 @@ async def test_streaming_interceptor_methods(
     continuation = AsyncMock()
     handler_call_details = Mock()
     handler_call_details.method = f"/{service_name}/{method_name}"
+    handler_call_details.invocation_metadata = {}
 
     async def _stream_generator(_req, _ctx):
         yield "Stream"
@@ -139,8 +150,9 @@ async def test_streaming_interceptor_methods(
     handler_func = getattr(result, handler_attr)
 
     content = []
-    async for chunk in handler_func(None, mock_context):
-        content.append(chunk)
+    with capture_logs() as cap_logs:
+        async for chunk in handler_func(None, mock_context):
+            content.append(chunk)
     assert content == ["Stream", "content"]
 
     total_calls = registry.get_sample_value(
@@ -154,6 +166,11 @@ async def test_streaming_interceptor_methods(
     )
     assert total_calls == 1.0
 
+    assert len(cap_logs) == 1
+    assert cap_logs[0]["event"] == f"Finished {method_name} RPC"
+    assert cap_logs[0]["grpc_service_name"] == service_name
+    assert cap_logs[0]["grpc_method_name"] == method_name
+
 
 @pytest.mark.asyncio
 async def test_interceptor_handles_exception():
@@ -162,6 +179,7 @@ async def test_interceptor_handles_exception():
     continuation = AsyncMock()
     handler_call_details = Mock()
     handler_call_details.method = "/test.Service/ErrorMethod"
+    handler_call_details.invocation_metadata = {}
 
     mock_handler = Mock()
     mock_handler.unary_unary = AsyncMock(side_effect=Exception("Test Exception"))
@@ -172,7 +190,7 @@ async def test_interceptor_handles_exception():
     mock_context = Mock()
     mock_context.code.return_value = grpc.StatusCode.OK
 
-    with pytest.raises(Exception, match="Test Exception"):
+    with pytest.raises(Exception, match="Test Exception"), capture_logs() as cap_logs:
         result = await interceptor.intercept_service(continuation, handler_call_details)
         assert result is not None
 
@@ -189,6 +207,10 @@ async def test_interceptor_handles_exception():
     )
 
     assert total_calls == 1.0
+    assert len(cap_logs) == 1
+    assert cap_logs[0]["event"] == f"Finished ErrorMethod RPC"
+    assert cap_logs[0]["exception_message"] == "Test Exception"
+    assert cap_logs[0]["exception_class"] == "Exception"
 
 
 @pytest.mark.asyncio
@@ -198,6 +220,7 @@ async def test_interceptor_stream_handles_exception():
     continuation = AsyncMock()
     handler_call_details = Mock()
     handler_call_details.method = "/test.Service/StreamErrorMethod"
+    handler_call_details.invocation_metadata = {}
 
     mock_handler = Mock()
     mock_handler.stream_stream = MagicMock(side_effect=Exception("Test Exception"))
@@ -208,7 +231,7 @@ async def test_interceptor_stream_handles_exception():
     mock_context = Mock()
     mock_context.code.return_value = grpc.StatusCode.OK
 
-    with pytest.raises(Exception, match="Test Exception"):
+    with pytest.raises(Exception, match="Test Exception"), capture_logs() as cap_logs:
         result = await interceptor.intercept_service(continuation, handler_call_details)
         assert result is not None
 
@@ -226,3 +249,7 @@ async def test_interceptor_stream_handles_exception():
     )
 
     assert total_calls == 1.0
+    assert len(cap_logs) == 1
+    assert cap_logs[0]["event"] == f"Finished StreamErrorMethod RPC"
+    assert cap_logs[0]["exception_message"] == "Test Exception"
+    assert cap_logs[0]["exception_class"] == "Exception"
