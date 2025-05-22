@@ -35,6 +35,7 @@ __all__ = [
     "create_event_stream",
 ]
 
+from ai_gateway.model_metadata import current_model_metadata_context
 from ai_gateway.models import Role
 from ai_gateway.structured_logging import get_request_logger
 
@@ -73,7 +74,6 @@ def authorize_additional_context(
 
 def get_agent(
     current_user: StarletteUser,
-    agent_request: AgentRequest,
     prompt_registry: BasePromptRegistry,
 ) -> Prompt:
     try:
@@ -81,7 +81,7 @@ def get_agent(
             current_user,
             "chat/react",
             None,
-            agent_request.model_metadata,
+            current_model_metadata_context.get(),
             __name__,
         )
     except WrongUnitPrimitives:
@@ -141,9 +141,8 @@ async def create_event_stream(
 ) -> Tuple[ReActAgentInputs, AsyncIterator[TypeAgentEvent]]:
 
     gl_agent_remote_executor = gl_agent_remote_executor_factory(agent=agent)
-    gl_agent_remote_executor.on_behalf(
-        current_user, gl_version, agent_request.model_metadata
-    )
+    model_metadata = current_model_metadata_context.get()
+    gl_agent_remote_executor.on_behalf(current_user, gl_version, model_metadata)
     inputs = ReActAgentInputs(
         messages=agent_request.messages,
         agent_scratchpad=agent_scratchpad,
@@ -170,7 +169,7 @@ async def chat(
         InternalEventsClient, Depends(get_internal_event_client)
     ],
 ):
-    agent = get_agent(current_user, agent_request, prompt_registry)
+    agent = get_agent(current_user, prompt_registry)
 
     authorize_additional_context(current_user, agent_request, internal_event_client)
 
