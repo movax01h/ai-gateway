@@ -8,6 +8,9 @@ from fastapi import Depends, FastAPI, WebSocket, WebSocketDisconnect
 from duo_workflow_service.interceptors.correlation_id_interceptor import (
     CorrelationIdMiddleware,
 )
+from duo_workflow_service.interceptors.feature_flag_interceptor import (
+    FeatureFlagMiddleware,
+)
 from duo_workflow_service.interceptors.websocket_middleware import MiddlewareChain
 
 log = structlog.stdlib.get_logger("websocket_server")
@@ -28,6 +31,7 @@ class WebSocketServer:
                 MiddlewareChain(
                     [
                         CorrelationIdMiddleware(),
+                        FeatureFlagMiddleware(),
                     ]
                 )
             ),
