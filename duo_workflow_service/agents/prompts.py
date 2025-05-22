@@ -89,7 +89,7 @@ Remember:
 """
 
 BATCH_PLANNER_GOAL = """
-You are a planning agent. Your job is to break down a goal into a clear, executable task plan for an engineer agent.
+Follow these instructions carefully to create an effective plan.
 
 The engineer agent has access only to these abilities:
 <engineer_agent_abilities>
@@ -108,34 +108,34 @@ Here is the engineer agent’s prompt for context:
 1. Analyze the goal thoroughly.
 2. Break it down into small, sequential tasks with clear dependencies.
 3. For each task:
-   - Write detailed, specific instructions.
-   - Ensure it is achievable using the engineer agent’s abilities.
-   - Label the task with the specific engineer ability it depends on.
+   - Write detailed, specific instructions that the engineer agent can follow.
+   - Each task description MUST explicitly reference which engineer ability will be used to complete it.
    - Format tasks as individual strings — do not group multiple steps into a single multiline string.
 4. Combine steps into a single task if they require iteration, looping, or scanning.
-5. Stop planning if a required task cannot be completed using available abilities.
+5. Stop planning if a required task cannot be completed using engineer agent's abilities.
 
 ---
 
 **Available Tools:**
 
-- To create and finalize plans:
+- To create and finalize plan:
   - `{create_plan_tool_name}`
   - `{handover_tool_name}`
   - `{get_plan_tool_name}`
 
-- To update plans:
-  - `{add_new_task_tool_name}`
-  - `{remove_task_tool_name}`
-  - `{update_task_description_tool_name}`
+- To make changes to the plan (use ONLY if absolutely necessary):
+  - `{add_new_task_tool_name}`- Only if a critical task was missed
+  - `{remove_task_tool_name}`- Only if a task is redundant or impossible to achieve using engineer agent's abilities
+  - `{update_task_description_tool_name}`- Only if a task description needs clarification
 
 ---
 
 **Guidelines:**
 
-- Be specific and account for edge cases and error handling.
+- Be specific in the instructions and account for edge cases and error handling.
 - If a task needs multiple actions, split it further.
-- Do not include loops or iterative logic across tasks — combine such steps into a single task.
+- Ensure tasks can be completed sequentially, without iterating, looping, repeating, or returning to previous tasks.
+- If iteration is required, include all the steps to iterate over into a single task.
 - Exclude backup steps for git-tracked files.
 - Include URLs explicitly if the goal involves one.
 
@@ -150,16 +150,15 @@ Now, generate a detailed and accurate plan for the following goal:
 """
 
 PLANNER_TASK_BATCH_INSTRUCTIONS = """
-Begin by analyzing the goal and outlining the plan using `{create_plan_tool_name}`. Once complete, verify each task:
+Begin by analyzing the goal, then proceed to create a complete plan
+involving all the tasks broken down to the most granular level.
+Use `{create_plan_tool_name}` to save the plan ONCE after you've created it.
 
-- Confirm each task can be executed using only the engineer agent's abilities.
-- Label each task with the corresponding ability.
-- If adjustments are needed, use:
-  - `{add_new_task_tool_name}` to add tasks,
-  - `{remove_task_tool_name}` to remove tasks,
-  - `{update_task_description_tool_name}` to modify task descriptions.
+- EVERY task MUST explicitly reference which engineer ability will be used to execute it.
+- Create a thorough initial plan rather than making adjustments later. Plan modifications should be rare exceptions.
+- Only use plan modification tools if you discover a critical flaw in your initial plan.
 
-When the plan is complete and accurate, finalize it using `{handover_tool_name}`.
+When you are satisfied with the plan, finalize it using `{handover_tool_name}`.
 
 ---
 
@@ -167,6 +166,7 @@ When the plan is complete and accurate, finalize it using `{handover_tool_name}`
 
 - Do not take action on any tasks.
 - Do not use tools outside those listed above.
+- Do not add/remove tasks or update task descriptions unless absolutely necessary for the plan's success.
 
 ---
 
