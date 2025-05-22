@@ -16,7 +16,11 @@ from starlette.middleware import Middleware
 from starlette_context.middleware import RawContextMiddleware
 
 from ai_gateway.api.auth_utils import StarletteUser
-from ai_gateway.api.middleware import AccessLogMiddleware, MiddlewareAuthentication
+from ai_gateway.api.middleware import (
+    AccessLogMiddleware,
+    MiddlewareAuthentication,
+    ModelConfigMiddleware,
+)
 from ai_gateway.code_suggestions.base import CodeSuggestionsChunk, CodeSuggestionsOutput
 from ai_gateway.code_suggestions.processing.base import ModelEngineOutput
 from ai_gateway.code_suggestions.processing.typing import (
@@ -83,6 +87,7 @@ def test_client(fast_api_router, stub_auth_provider, request):
         Middleware(RawContextMiddleware),
         Middleware(AccessLogMiddleware, skip_endpoints=[]),
         MiddlewareAuthentication(stub_auth_provider, False, None),
+        Middleware(ModelConfigMiddleware),
     ]
     app = FastAPI(middleware=middlewares)
     app.include_router(fast_api_router)

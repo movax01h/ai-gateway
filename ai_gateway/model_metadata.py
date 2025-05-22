@@ -40,6 +40,11 @@ class ModelMetadata(BaseModelMetadata):
     def to_params(self) -> Dict[str, Any]:
         params: Dict[str, str] = {}
 
+        # when additional parameters are passed (eg api_key),
+        # Anthropic under litellm will crash. The only parameter supported is 'model'
+        if self.provider == "anthropic":
+            return {"model": self.identifier}
+
         if self.endpoint:
             params["api_base"] = str(self.endpoint).removesuffix("/")
         if self.api_key:

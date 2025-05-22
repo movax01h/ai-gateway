@@ -25,7 +25,11 @@ from ai_gateway.chat.agents import (
 )
 from ai_gateway.chat.agents.typing import AgentFinalAnswer, TypeAgentEvent
 from ai_gateway.chat.context.current_page import Context, MergeRequestContext
-from ai_gateway.model_metadata import AmazonQModelMetadata, ModelMetadata
+from ai_gateway.model_metadata import (
+    AmazonQModelMetadata,
+    ModelMetadata,
+    TypeModelMetadata,
+)
 from ai_gateway.models.base_chat import Role
 from ai_gateway.prompts.typing import Model
 
@@ -111,7 +115,7 @@ def chunk_to_model(chunk: str, klass: Type[AgentBaseEvent]) -> AgentBaseEvent:
 class TestReActAgentStream:
     @pytest.mark.asyncio
     @pytest.mark.parametrize(
-        ("agent_request", "model_response", "expected_events"),
+        ("agent_request", "model_metadata", "model_response", "expected_events"),
         [
             (
                 AgentRequest(
@@ -122,6 +126,7 @@ class TestReActAgentStream:
                         ),
                     ]
                 ),
+                None,
                 "thought\nFinal Answer: answer\n",
                 [AgentFinalAnswer(text=c) for c in "answer"],
             ),
@@ -133,11 +138,11 @@ class TestReActAgentStream:
                             content="How can I write hello world in python?",
                         ),
                     ],
-                    model_metadata=ModelMetadata(
-                        name="vertex",
-                        provider="claude-3-5-haiku-20241022",
-                        endpoint=AnyUrl("http://localhost:4000"),
-                    ),
+                ),
+                ModelMetadata(
+                    name="vertex",
+                    provider="claude-3-5-haiku-20241022",
+                    endpoint=AnyUrl("http://localhost:4000"),
                 ),
                 "thought\nFinal Answer: answer\n",
                 [AgentFinalAnswer(text=c) for c in "answer"],
@@ -150,11 +155,11 @@ class TestReActAgentStream:
                             content="How can I write hello world in python?",
                         ),
                     ],
-                    model_metadata=AmazonQModelMetadata(
-                        name="amazon_q",
-                        provider="amazon_q",
-                        role_arn="role-arn",
-                    ),
+                ),
+                AmazonQModelMetadata(
+                    name="amazon_q",
+                    provider="amazon_q",
+                    role_arn="role-arn",
                 ),
                 "thought\nFinal Answer: answer\n",
                 [AgentFinalAnswer(text=c) for c in "answer"],
@@ -191,13 +196,13 @@ class TestReActAgentStream:
                             ],
                         ),
                     ),
-                    model_metadata=ModelMetadata(
-                        name="mistral",
-                        provider="litellm",
-                        endpoint=AnyUrl("http://localhost:4000"),
-                        api_key="token",
-                    ),
                     unavailable_resources=["Mystery Resource 1", "Mystery Resource 2"],
+                ),
+                ModelMetadata(
+                    name="mistral",
+                    provider="litellm",
+                    endpoint=AnyUrl("http://localhost:4000"),
+                    api_key="token",
                 ),
                 "thought\nFinal Answer: answer\n",
                 [AgentFinalAnswer(text=c) for c in "answer"],
@@ -235,13 +240,13 @@ class TestReActAgentStream:
                             ],
                         ),
                     ],
-                    model_metadata=ModelMetadata(
-                        name="mistral",
-                        provider="litellm",
-                        endpoint=AnyUrl("http://localhost:4000"),
-                        api_key="token",
-                    ),
                     unavailable_resources=["Mystery Resource 1", "Mystery Resource 2"],
+                ),
+                ModelMetadata(
+                    name="mistral",
+                    provider="litellm",
+                    endpoint=AnyUrl("http://localhost:4000"),
+                    api_key="token",
                 ),
                 "thought\nFinal Answer: answer\n",
                 [AgentFinalAnswer(text=c) for c in "answer"],
@@ -263,6 +268,7 @@ class TestReActAgentStream:
                         ),
                     ],
                 ),
+                None,
                 "thought\nFinal Answer: answer\n",
                 [AgentFinalAnswer(text=c) for c in "answer"],
             ),
@@ -275,6 +281,7 @@ class TestReActAgentStream:
         mocked_tools: Mock,
         mock_create_event_stream: Mock,
         agent_request: AgentRequest,
+        model_metadata: TypeModelMetadata,
         expected_events: list[TypeAgentEvent],
     ):
 
@@ -291,13 +298,17 @@ class TestReActAgentStream:
 
         mock_create_event_stream.side_effect = dynamic_side_effect
 
+        json_params = agent_request.model_dump(mode="json")
+        if model_metadata:
+            json_params["model_metadata"] = model_metadata.model_dump(mode="json")
+
         response = mock_client.post(
             "/chat/agent",
             headers={
                 "Authorization": "Bearer 12345",
                 "X-Gitlab-Authentication-Type": "oidc",
             },
-            json=agent_request.model_dump(mode="json"),
+            json=json_params,
         )
 
         actual_events = [
@@ -451,7 +462,7 @@ class TestReActAgentStream:
 
     @pytest.mark.asyncio
     @pytest.mark.parametrize(
-        "auth_user,agent_request,expected_status_code,expected_error,expected_internal_events",
+        "auth_user,agent_request,expected_status_code,expected_error,expected_internal_events,model_metadata",
         [
             (
                 CloudConnectorUser(
@@ -461,6 +472,7 @@ class TestReActAgentStream:
                 200,
                 "",
                 [call("request_duo_chat", category="ai_gateway.api.v2.chat.agent")],
+                None,
             ),
             (
                 CloudConnectorUser(
@@ -470,6 +482,7 @@ class TestReActAgentStream:
                 403,
                 '{"detail":"Unauthorized to access duo chat"}',
                 [],
+                None,
             ),
             (
                 CloudConnectorUser(
@@ -493,6 +506,7 @@ class TestReActAgentStream:
                         category="ai_gateway.api.v2.chat.agent",
                     ),
                 ],
+                None,
             ),
             (
                 CloudConnectorUser(
@@ -517,6 +531,7 @@ class TestReActAgentStream:
                 200,
                 "",
                 [call("request_duo_chat", category="ai_gateway.api.v2.chat.agent")],
+                None,
             ),
             (
                 CloudConnectorUser(
@@ -543,6 +558,7 @@ class TestReActAgentStream:
                 200,
                 "",
                 [call("request_duo_chat", category="ai_gateway.api.v2.chat.agent")],
+                None,
             ),
             (
                 CloudConnectorUser(
@@ -567,6 +583,7 @@ class TestReActAgentStream:
                 200,
                 "",
                 [call("request_duo_chat", category="ai_gateway.api.v2.chat.agent")],
+                None,
             ),
             (
                 CloudConnectorUser(
@@ -584,6 +601,7 @@ class TestReActAgentStream:
                 200,
                 "",
                 [call("request_duo_chat", category="ai_gateway.api.v2.chat.agent")],
+                None,
             ),
             (
                 CloudConnectorUser(
@@ -601,6 +619,7 @@ class TestReActAgentStream:
                 200,
                 "",
                 [call("request_duo_chat", category="ai_gateway.api.v2.chat.agent")],
+                None,
             ),
             (
                 CloudConnectorUser(
@@ -619,6 +638,7 @@ class TestReActAgentStream:
                 403,
                 '{"detail":"Unauthorized to access duo chat"}',
                 [],
+                None,
             ),
             (
                 CloudConnectorUser(
@@ -633,11 +653,6 @@ class TestReActAgentStream:
                             additional_context=None,
                         )
                     ],
-                    model_metadata=AmazonQModelMetadata(
-                        name="amazon_q",
-                        provider="amazon_q",
-                        role_arn="role-arn",
-                    ),
                 ),
                 200,
                 "",
@@ -647,6 +662,11 @@ class TestReActAgentStream:
                         category="ai_gateway.api.v2.chat.agent",
                     )
                 ],
+                AmazonQModelMetadata(
+                    name="amazon_q",
+                    provider="amazon_q",
+                    role_arn="role-arn",
+                ),
             ),
             (
                 CloudConnectorUser(
@@ -664,6 +684,7 @@ class TestReActAgentStream:
                 403,
                 '{"detail":"Unauthorized to access include_file_context"}',
                 [],
+                None,
             ),
         ],
     )
@@ -677,14 +698,20 @@ class TestReActAgentStream:
         expected_error: str,
         expected_internal_events,
         mock_track_internal_event: Mock,
+        model_metadata,
     ):
+        json_params = agent_request.model_dump(mode="json")
+
+        if model_metadata:
+            json_params["model_metadata"] = model_metadata.model_dump(mode="json")
+
         response = mock_client.post(
             "/chat/agent",
             headers={
                 "Authorization": "Bearer 12345",
                 "X-Gitlab-Authentication-Type": "oidc",
             },
-            json=agent_request.model_dump(mode="json"),
+            json=json_params,
         )
 
         assert response.status_code == expected_status_code

@@ -235,6 +235,17 @@ class TestModelMetadataToParams:
             "custom_llm_provider": "provider",
         }
 
+    def test_anthropic_provider(self):
+        model_metadata = ModelMetadata(
+            identifier="model_identifier", name="base", provider="anthropic"
+        )
+
+        params = model_metadata.to_params()
+
+        assert params == {
+            "model": "model_identifier",
+        }
+
 
 def test_create_model_metadata_with_none_data():
     result = create_model_metadata(None)

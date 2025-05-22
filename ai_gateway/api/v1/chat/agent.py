@@ -101,7 +101,6 @@ def convert_v1_to_v2_inputs(chat_request: ChatRequest) -> AgentRequest:
     return AgentRequest(
         messages=messages,
         options=None,
-        model_metadata=None,
     )
 
 
@@ -137,7 +136,7 @@ async def chat(
     agent_request = convert_v1_to_v2_inputs(chat_request)
     payload = chat_request.prompt_components[0].payload
 
-    agent = get_agent(current_user, agent_request, prompt_registry)
+    agent = get_agent(current_user, prompt_registry)
 
     gl_version = request.headers.get(X_GITLAB_VERSION_HEADER, "")
 
