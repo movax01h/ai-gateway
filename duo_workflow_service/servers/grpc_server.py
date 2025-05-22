@@ -57,6 +57,13 @@ def string_to_category_enum(category_string: str) -> CategoryEnum:
         return CategoryEnum.WORKFLOW_SOFTWARE_DEVELOPMENT
 
 
+def clean_start_request(start_workflow_request: contract_pb2.ClientEvent):
+    request = contract_pb2.ClientEvent()
+    request.CopyFrom(start_workflow_request)
+    request.startRequest.ClearField("workflowMetadata")
+    return request
+
+
 class GrpcServer(contract_pb2_grpc.DuoWorkflowServicer):
     # Set to 2 seconds to provide a reasonable balance between:
     # - Giving tasks enough time to properly clean up resources
@@ -82,7 +89,8 @@ class GrpcServer(contract_pb2_grpc.DuoWorkflowServicer):
         )
         workflow_id = start_workflow_request.startRequest.workflowID
         set_workflow_id(workflow_id)
-        log.info("Starting workflow %s", start_workflow_request)
+        log.info("Starting workflow %s", clean_start_request(start_workflow_request))
+
         goal = start_workflow_request.startRequest.goal
         workflow_metadata = {}
         workflow_definition = start_workflow_request.startRequest.workflowDefinition

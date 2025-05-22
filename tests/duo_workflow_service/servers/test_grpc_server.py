@@ -19,6 +19,7 @@ from duo_workflow_service.interceptors.authentication_interceptor import current
 from duo_workflow_service.internal_events.event_enum import CategoryEnum
 from duo_workflow_service.servers.grpc_server import (
     GrpcServer,
+    clean_start_request,
     grpc_serve,
     string_to_category_enum,
 )
@@ -330,6 +331,30 @@ async def test_execute_workflow_valid_workflow_metadata(
         context_elements=[],
         invocation_metadata={"base_url": "http://test.url", "gitlab_token": "123"},
     )
+
+
+def test_clean_start_request():
+    # Create a test request with workflow metadata
+    start_request = contract_pb2.StartWorkflowRequest(
+        workflowID="test-id",
+        goal="test-goal",
+        workflowMetadata=json.dumps({"key": "value"}),
+    )
+    client_event = contract_pb2.ClientEvent(startRequest=start_request)
+
+    # Call the clean_start_request function
+    cleaned_request = clean_start_request(client_event)
+
+    # Verify that the cleaned request is a new object (not the same instance)
+    assert cleaned_request is not client_event
+
+    # Verify that the original request still has its metadata
+    assert client_event.startRequest.workflowMetadata == json.dumps({"key": "value"})
+
+    # Verify that the cleaned request has no metadata but retains other fields
+    assert cleaned_request.startRequest.workflowMetadata == ""
+    assert cleaned_request.startRequest.workflowID == "test-id"
+    assert cleaned_request.startRequest.goal == "test-goal"
 
 
 def test_string_to_category_enum():
