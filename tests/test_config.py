@@ -488,6 +488,10 @@ def test_amazon_q():
                 }
             ),
         ),
+        (
+            {"AIGW_MODEL_ENGINE_LIMITS": '{"engine": {"model": {"concurrency": 30}}}'},
+            ConfigModelLimits({"engine": {"model": {"concurrency": 30}}}),
+        ),
     ],
 )
 def test_config_model_limits(values: dict, expected: ConfigModelLimits):

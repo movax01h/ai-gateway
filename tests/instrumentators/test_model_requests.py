@@ -185,7 +185,7 @@ class TestModelRequestInstrumentator:
         ]
 
     @mock.patch("prometheus_client.Gauge.labels")
-    def test_watch_with_limit(self, mock_gauges):
+    def test_watch_with_limits(self, mock_gauges):
         instrumentator = ModelRequestInstrumentator(
             model_engine="anthropic",
             model_name="claude",
@@ -201,6 +201,22 @@ class TestModelRequestInstrumentator:
                     mock.call().set(5),
                     mock.call(model_engine="anthropic", model_name="claude"),
                     mock.call().set(10),
+                ]
+            )
+
+    @mock.patch("prometheus_client.Gauge.labels")
+    def test_watch_with_partial_limits(self, mock_gauges):
+        instrumentator = ModelRequestInstrumentator(
+            model_engine="anthropic",
+            model_name="claude",
+            limits={"concurrency": 15},
+        )
+
+        with instrumentator.watch():
+            mock_gauges.assert_has_calls(
+                [
+                    mock.call(model_engine="anthropic", model_name="claude"),
+                    mock.call().set(15),
                 ]
             )
 
