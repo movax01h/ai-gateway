@@ -118,3 +118,9 @@ configurable_unit_primitives:
     selectable_models:
       - "claude_sonnet_3_7_20250219"
       - "claude_3_5_sonnet_20240620"
+  - feature_setting: "duo_chat_summarize_comments"
+    unit_primitives:
+      - "summarize_comments"
+    default_model: "claude_3_5_sonnet_20240620"
+    selectable_models:
+      - "claude_3_5_sonnet_20240620"
