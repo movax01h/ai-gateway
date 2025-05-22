@@ -17,6 +17,8 @@ class VertexConfig:
     @property
     def model_name(self) -> str:
         feature_flags = current_feature_flag_context.get()
+        if "duo_workflow_claude_sonnet_4" in feature_flags:
+            return "claude-sonnet-4@20250514"
         if "duo_workflow_claude_3_7" in feature_flags:
             return "claude-3-7-sonnet@20250219"
 
@@ -87,6 +89,8 @@ def validate_llm_access(config: VertexConfig = VertexConfig()):
 def get_anthropic_model_name() -> str:
     feature_flags = current_feature_flag_context.get()
 
+    if "duo_workflow_claude_sonnet_4" in feature_flags:
+        return "claude-sonnet-4-20250514"
     if "duo_workflow_claude_3_7" in feature_flags:
         return "claude-3-7-sonnet-20250219"
 
