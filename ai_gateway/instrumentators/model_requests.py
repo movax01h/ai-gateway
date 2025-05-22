@@ -87,16 +87,16 @@ class ModelRequestInstrumentator:
             """
             self.start_time = time.perf_counter()
 
-            if self.limits is not None:
-                if self.limits["concurrency"] is not None:
+            if self.limits:
+                if "concurrency" in self.limits:
                     MAX_CONCURRENT_MODEL_INFERENCES.labels(**self.labels).set(
                         self.limits["concurrency"]
                     )
-                if self.limits["input_tokens"] is not None:
+                if "input_tokens" in self.limits:
                     MAX_MODEL_INPUT_TOKENS.labels(**self.labels).set(
                         self.limits["input_tokens"]
                     )
-                if self.limits["output_tokens"] is not None:
+                if "output_tokens" in self.limits:
                     MAX_MODEL_OUTPUT_TOKENS.labels(**self.labels).set(
                         self.limits["output_tokens"]
                     )
