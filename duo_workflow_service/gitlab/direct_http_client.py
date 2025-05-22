@@ -1,4 +1,5 @@
 from typing import Any, Callable, Dict, Optional, Union
+from urllib.parse import urljoin
 
 import structlog
 
@@ -41,7 +42,7 @@ class DirectGitLabHttpClient(GitlabHttpClient):
             The API response, parsed as JSON if parse_json=True
         """
 
-        url = f"{self.base_url}/{path}"
+        url = urljoin(self.base_url, path)
 
         # Handle request arguments
         kwargs = {}

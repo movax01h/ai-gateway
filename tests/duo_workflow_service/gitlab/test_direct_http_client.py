@@ -88,7 +88,7 @@ async def mock_session():
 async def client(mock_session):
     """Fixture that provides a configured client using the mock session."""
     client = DirectGitLabHttpClient(
-        base_url="https://gitlab.example.com/api/v4", gitlab_token="test_token"
+        base_url="https://gitlab.example.com", gitlab_token="test_token"
     )
     yield client
 
@@ -97,10 +97,18 @@ async def client(mock_session):
 @pytest.mark.parametrize(
     "method, path, body, params, parse_json, response_data, expected_result",
     [
-        ("GET", "projects/1", None, None, True, {"key": "value"}, {"key": "value"}),
         (
             "GET",
-            "projects/1/jobs/102/trace",
+            "/api/v4/projects/1",
+            None,
+            None,
+            True,
+            {"key": "value"},
+            {"key": "value"},
+        ),
+        (
+            "GET",
+            "/api/v4/projects/1/jobs/102/trace",
             None,
             None,
             False,
@@ -109,7 +117,7 @@ async def client(mock_session):
         ),
         (
             "GET",
-            "projects",
+            "api/v4/projects",
             None,
             {"per_page": 100},
             True,
@@ -175,7 +183,7 @@ async def test_direct_gitlab_http_client(
         result = None
 
     # Check that the session was called with the correct parameters
-    expected_url = f"{client.base_url}/{path}"
+    expected_url = f"{client.base_url}/{path.lstrip('/')}"
     expected_headers = {
         "Authorization": f"Bearer {client.gitlab_token}",
         "Content-Type": "application/json",
