@@ -3,7 +3,12 @@ import time
 
 import structlog
 import uvicorn
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi import Depends, FastAPI, WebSocket, WebSocketDisconnect
+
+from duo_workflow_service.interceptors.correlation_id_interceptor import (
+    CorrelationIdMiddleware,
+)
+from duo_workflow_service.interceptors.websocket_middleware import MiddlewareChain
 
 log = structlog.stdlib.get_logger("websocket_server")
 
@@ -17,7 +22,16 @@ class WebSocketServer:
 
     def _setup_routes(self):
         @self.app.websocket("/ws")
-        async def websocket_endpoint(websocket: WebSocket):
+        async def websocket_endpoint(
+            websocket: WebSocket,
+            _=Depends(
+                MiddlewareChain(
+                    [
+                        CorrelationIdMiddleware(),
+                    ]
+                )
+            ),
+        ):
             # Only allow one active connection at a time
             async with self.active_connection_lock:
                 if self.active_connection is not None:
