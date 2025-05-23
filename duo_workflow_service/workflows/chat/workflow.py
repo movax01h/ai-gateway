@@ -66,6 +66,8 @@ CHAT_READ_ONLY_TOOLS = [
     "scan_directory_tree",
     "list_epic_notes",
     "get_epic_note",
+    "get_commit",
+    "list_commits",
 ]
 
 
