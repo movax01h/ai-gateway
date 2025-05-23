@@ -817,3 +817,83 @@ class TestGitLabUrlParser:
         assert project_path == expected_project_path
         assert ref == expected_ref
         assert file_path == expected_file_path
+
+    @pytest.mark.parametrize(
+        "url, gitlab_host, expected_project_path, expected_commit_sha",
+        [
+            # Test standard commit URL
+            (
+                "https://gitlab.com/namespace/project/-/commit/c34bb66f7a5e3a45b5e2d70edd9be12d64855cd6",
+                "gitlab.com",
+                quote("namespace/project", safe=""),
+                "c34bb66f7a5e3a45b5e2d70edd9be12d64855cd6",
+            ),
+            # Test commit URL with custom GitLab instance
+            (
+                "https://gitlab.example.com/namespace/project/-/commit/c34bb66f7a5e3a45b5e2d70edd9be12d64855cd6",
+                "gitlab.example.com",
+                quote("namespace/project", safe=""),
+                "c34bb66f7a5e3a45b5e2d70edd9be12d64855cd6",
+            ),
+            # Test commit URL with subgroups
+            (
+                "https://gitlab.com/group/subgroup/project/-/commit/c34bb66f7a5e3a45b5e2d70edd9be12d64855cd6",
+                "gitlab.com",
+                quote("group/subgroup/project", safe=""),
+                "c34bb66f7a5e3a45b5e2d70edd9be12d64855cd6",
+            ),
+            # Test commit URL with encoded characters in project path
+            (
+                "https://gitlab.com/namespace/project-with-dashes/-/commit/c34bb66f7a5e3a45b5e2d70edd9be12d64855cd6",
+                "gitlab.com",
+                quote("namespace/project-with-dashes", safe=""),
+                "c34bb66f7a5e3a45b5e2d70edd9be12d64855cd6",
+            ),
+            # Test commit URL with short SHA
+            (
+                "https://gitlab.com/namespace/project/-/commit/c34bb66f",
+                "gitlab.com",
+                quote("namespace/project", safe=""),
+                "c34bb66f",
+            ),
+        ],
+    )
+    def test_parse_commit_url(
+        self, url, gitlab_host, expected_project_path, expected_commit_sha
+    ):
+        project_path, commit_sha = GitLabUrlParser.parse_commit_url(url, gitlab_host)
+        assert project_path == expected_project_path
+        assert commit_sha == expected_commit_sha
+
+    @pytest.mark.parametrize(
+        "url, gitlab_host, error_message",
+        [
+            # Test invalid URL (no commit SHA)
+            (
+                "https://gitlab.com/namespace/project/-/commit",
+                "gitlab.com",
+                "Could not parse commit URL",
+            ),
+            # Test invalid URL (not a commit URL)
+            (
+                "https://gitlab.com/namespace/project",
+                "gitlab.com",
+                "Could not parse commit URL",
+            ),
+            # Test URL with invalid SHA format
+            (
+                "https://gitlab.com/namespace/project/-/commit/invalid-sha",
+                "gitlab.com",
+                "Could not parse commit URL",
+            ),
+            # Test URL with non-matching netloc
+            (
+                "https://gitlab.example.com/namespace/project/-/commit/c34bb66f7a5e3a45b5e2d70edd9be12d64855cd6",
+                "gitlab.com",
+                "URL netloc 'gitlab.example.com' does not match gitlab_host 'gitlab.com'",
+            ),
+        ],
+    )
+    def test_parse_commit_url_error(self, url, gitlab_host, error_message):
+        with pytest.raises(GitLabUrlParseError, match=error_message):
+            GitLabUrlParser.parse_commit_url(url, gitlab_host)

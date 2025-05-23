@@ -105,6 +105,8 @@ EXECUTOR_TOOLS = [
     "list_dir",
     "list_epic_notes",
     "get_epic_note",
+    "get_commit",
+    "list_commits",
 ]
 
 CONTEXT_BUILDER_TOOLS = [
@@ -133,6 +135,8 @@ CONTEXT_BUILDER_TOOLS = [
     "get_repository_file",
     "list_epic_notes",
     "get_epic_note",
+    "get_commit",
+    "list_commits",
 ]
 
 PLANNER_TOOLS = [

@@ -9,6 +9,7 @@ EPIC_URL_REGEX = r"^(?:groups/)?(.+?)/-/epics/(\d+)"
 MR_URL_REGEX = r"^(.+?)/-/merge_requests/(\d+)"
 JOB_URL_REGEX = r"^(.+?)/-/jobs/(\d+)"
 REPOSITORY_FILE_URL_REGEX = r"^(.+?)/-/blob/([^/]+)/(.+)$"
+COMMIT_URL_REGEX = r"^(.+?)/-/commit/([a-fA-F0-9]{5,40})"
 
 
 class GitLabUrlParseError(Exception):
@@ -314,3 +315,33 @@ class GitLabUrlParser:
         file_path = components[2]
 
         return project_path, ref, file_path
+
+    @staticmethod
+    def parse_commit_url(url: str, gitlab_host: str) -> Tuple[str, str]:
+        """Extract project path and commit SHA from a GitLab commit URL.
+
+        Example URLs:
+        - https://gitlab.com/namespace/project/-/commit/c34bb66f7a5e3a45b5e2d70edd9be12d64855cd6
+        - https://gitlab.example.com/namespace/project/-/commit/c34bb66f7a5e3a45b5e2d70edd9be12d64855cd6
+
+        Args:
+            url: The GitLab commit URL to parse
+            gitlab_host: The GitLab host to validate against
+
+        Returns:
+            A tuple containing the URL-encoded project path and the commit SHA
+
+        Raises:
+            GitLabUrlParseError: If the URL cannot be parsed or if the netloc doesn't match gitlab_host
+        """
+        GitLabUrlParser._validate_url_netloc(url, gitlab_host)
+
+        components = GitLabUrlParser._extract_path_components(
+            url, COMMIT_URL_REGEX, "Could not parse commit URL"
+        )
+
+        # URL-encode the project path for API calls
+        encoded_path = quote(components[0], safe="")
+        commit_sha = components[1]
+
+        return encoded_path, commit_sha
