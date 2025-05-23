@@ -68,6 +68,8 @@ _READ_ONLY_GITLAB_TOOLS: list[Type[BaseTool]] = [
     tools.GetEpicNote,
     tools.GetCommit,
     tools.ListCommits,
+    tools.GetCommitDiff,
+    tools.GetCommitComments,
 ]
 
 _AGENT_PRIVILEGES: dict[str, list[Type[BaseTool]]] = {
@@ -163,7 +165,13 @@ class ToolsRegistry:
         for privilege in enabled_tools:
             for tool_cls in _AGENT_PRIVILEGES[privilege]:
                 if (
-                    tool_cls in [tools.GetCommit, tools.ListCommits]
+                    tool_cls
+                    in [
+                        tools.GetCommit,
+                        tools.ListCommits,
+                        tools.GetCommitDiff,
+                        tools.GetCommitComments,
+                    ]
                     and "duo_workflow_commit_tools" not in feature_flags
                 ):
                     continue

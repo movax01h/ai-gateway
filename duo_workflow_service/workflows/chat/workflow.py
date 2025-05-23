@@ -68,6 +68,8 @@ CHAT_READ_ONLY_TOOLS = [
     "get_epic_note",
     "get_commit",
     "list_commits",
+    "get_commit_comments",
+    "get_commit_diff",
 ]
 
 
