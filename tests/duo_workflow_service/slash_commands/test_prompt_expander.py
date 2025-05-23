@@ -11,7 +11,7 @@ import pytest
 from duo_workflow_service.slash_commands.prompt_expander import ProcessSlashCommand
 
 
-@patch("duo_workflow_service.slash_commands.goal_parser.SlashCommandsGoalParser")
+@patch("duo_workflow_service.slash_commands.goal_parser.parse")
 @patch("duo_workflow_service.slash_commands.definition.SlashCommandDefinition")
 def test_process_slash_command_not_slash_command(mock_definition, mock_parser):
     """Test processing a non-slash command message."""
@@ -28,7 +28,7 @@ def test_process_slash_command_not_slash_command(mock_definition, mock_parser):
     pytest.skip()
 
 
-@patch("duo_workflow_service.slash_commands.goal_parser.SlashCommandsGoalParser")
+@patch("duo_workflow_service.slash_commands.goal_parser.parse")
 @patch("duo_workflow_service.slash_commands.definition.SlashCommandDefinition")
 def test_process_slash_command_success(mock_definition, mock_parser):
     """Test successful processing of a slash command."""
@@ -59,7 +59,7 @@ def test_process_slash_command_success(mock_definition, mock_parser):
     pytest.skip()
 
 
-@patch("duo_workflow_service.slash_commands.goal_parser.SlashCommandsGoalParser")
+@patch("duo_workflow_service.slash_commands.goal_parser.parse")
 @patch("duo_workflow_service.slash_commands.definition.SlashCommandDefinition")
 def test_process_slash_command_error(mock_definition, mock_parser):
     """Test error handling in slash command processing."""
@@ -86,7 +86,7 @@ def test_process_slash_command_error(mock_definition, mock_parser):
     pytest.skip()
 
 
-@patch("duo_workflow_service.slash_commands.goal_parser.SlashCommandsGoalParser")
+@patch("duo_workflow_service.slash_commands.goal_parser.parse")
 @patch("duo_workflow_service.slash_commands.definition.SlashCommandDefinition")
 def test_process_slash_command_missing_parameters(mock_definition, mock_parser):
     """Test handling missing required parameters."""
