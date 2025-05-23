@@ -1,41 +1,59 @@
-from typing import Optional
-
-from pydantic import BaseModel
+from typing import Optional, Tuple
 
 
-class ParsedSlashCommand(BaseModel):
+def parse(goal: str) -> Tuple[Optional[str], Optional[str]]:
     """
-    Represents a slash command that has been parsed from the user's input goal.
-    Contains the extracted command type and any additional text provided.
+    Parse a goal string to extract the slash command and remaining text.
+
+    Args:
+        goal: The user input string (e.g., "/explain This code is confusing")
+
+    Returns:
+        ParsedSlashCommand containing the command type and remaining text
     """
+    goal = goal.strip()
 
-    command_type: str = ""
-    remaining_text: Optional[str] = None
+    parts = goal.split(maxsplit=1)
+
+    return _parse_parts(parts)
 
 
-class SlashCommandsGoalParser:
+def _parse_parts(parts: list) -> Tuple[Optional[str], Optional[str]]:
     """
-    Parser for user input containing slash commands.
+    Parse command parts to extract command type and remaining text.
 
-    This class is responsible for extracting the command type and
-    separating it from any additional text in the goal.
+    Args:
+        parts (list): List of command parts split by some delimiter
+
+    Returns:
+        tuple: (command_type, remaining_text) where remaining_text may be None
     """
+    command_part = parts[0][1:]
 
-    def parse(self, goal: str) -> ParsedSlashCommand:
-        """
-        Parse a goal string to extract the slash command and remaining text.
+    if command_part == "":
+        command_type, remaining_text = _parse_space_after_slash(parts)
+    else:
+        command_type = command_part
+        remaining_text = parts[1] if len(parts) > 1 else None
 
-        Args:
-            goal: The user input string (e.g., "/explain This code is confusing")
+    return command_type, remaining_text
 
-        Returns:
-            ParsedSlashCommand containing the command type and remaining text
-        """
-        command_type = ""
-        remaining_text = ""
 
-        # Separate slash command and the rest of the string in user's input.
+def _parse_space_after_slash(parts: list) -> Tuple[Optional[str], Optional[str]]:
+    """
+    Parse command parts to extract command type and remaining text if there is a space after the slash.
 
-        return ParsedSlashCommand(
-            command_type=command_type, remaining_text=remaining_text
-        )
+    Args:
+        parts (list): List of command parts
+
+    Returns:
+        tuple: (command_type, remaining_text) where remaining_text may be None
+    """
+    if len(parts) <= 1:
+        return None, None
+
+    remaining_parts = parts[1].split(maxsplit=1)
+    command_type = remaining_parts[0]
+    remaining_text = remaining_parts[1] if len(remaining_parts) > 1 else None
+
+    return command_type, remaining_text
