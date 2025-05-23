@@ -1,6 +1,4 @@
-"""
-Tests for the slash_commands.definition module.
-"""
+"""Tests for the slash_commands.definition module."""
 
 # pylint: disable=file-naming-for-tests,unused-import
 

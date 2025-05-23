@@ -22,8 +22,7 @@ AI_GATEWAY_THREADS_COUNT = Gauge(
 
 
 async def monitor_threads(loop: AbstractEventLoop, interval: int):
-    """
-    Monitor the thread activities of the server.
+    """Monitor the thread activities of the server.
 
     This task runs in the main event loop, meaning the web server will stop responding during the execution.
     Keep it light-weight, or consider running them in a separate thread in daemon mode.

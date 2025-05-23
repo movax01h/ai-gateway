@@ -43,9 +43,7 @@ DEFAULT_FORMATTER_MAPPING["jinja2"] = jinja2_formatter
 
 
 class PromptLoggingHandler(BaseCallbackHandler):
-    """
-    Logs the full prompt that is sent to the LLM.
-    """
+    """Logs the full prompt that is sent to the LLM."""
 
     def on_llm_start(
         self, serialized: dict[str, Any], prompts: list[str], **kwargs: Any

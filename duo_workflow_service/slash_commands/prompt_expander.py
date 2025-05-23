@@ -1,8 +1,6 @@
-"""
-Main processor module for slash commands.
+"""Main processor module for slash commands.
 
-This module integrates the parser, config loader, and template expander
-to process slash commands end-to-end.
+This module integrates the parser, config loader, and template expander to process slash commands end-to-end.
 """
 
 import structlog
@@ -14,19 +12,17 @@ log = structlog.stdlib.get_logger("slash_commands")
 
 
 class ProcessSlashCommand:
-    """
-    Class for processing slash commands.
+    """Class for processing slash commands.
 
-    This class encapsulates the logic for processing slash commands,
-    handling their parameters, and generating appropriate responses.
+    This class encapsulates the logic for processing slash commands, handling their parameters, and generating
+    appropriate responses.
     """
 
     def __init__(self):
         """Initialize the slash command processor."""
 
     def process(self, message: str, context_element_type: str) -> Result:
-        """
-        Process a slash command.
+        """Process a slash command.
 
         Args:
             message: The message text to process

@@ -15,8 +15,7 @@ class FeatureFlag(StrEnum):
 
 
 def is_feature_enabled(feature_name: FeatureFlag | str) -> bool:
-    """
-    Check if a feature is enabled.
+    """Check if a feature is enabled.
 
     Args:
         feature_name: The name of the feature.

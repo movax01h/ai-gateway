@@ -1,6 +1,4 @@
-"""
-Tests for the slash_commands.prompt_expander module.
-"""
+"""Tests for the slash_commands.prompt_expander module."""
 
 # pylint: disable=file-naming-for-tests,unused-import
 

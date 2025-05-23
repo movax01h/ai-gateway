@@ -55,9 +55,8 @@ class InvocationMetadata(TypedDict):
 
 class AbstractWorkflow(ABC):
     OUTBOX_CHECK_INTERVAL = 0.5
+    """Abstract base class for workflow implementations.
 
-    """
-    Abstract base class for workflow implementations.
     Provides a structure for creating workflow classes with common functionality.
     """
 

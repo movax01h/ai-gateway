@@ -12,8 +12,8 @@ TOOL_TITLE = "handover_tool"
 
 
 class HandoverTool(BaseModel):
-    """
-    A final response to the user.
+    """A final response to the user.
+
     DO NOT call this tool without providing a summary.
     """
 

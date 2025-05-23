@@ -127,8 +127,10 @@ class LocalPromptRegistry(BasePromptRegistry):
         custom_models_enabled: bool = False,
         disable_streaming: bool = False,
     ) -> "LocalPromptRegistry":
-        """Iterate over all prompt definition files matching [usecase]/[type]/[version].yml,
-        and create a corresponding prompt for each one. The base Prompt class is
+        """Iterate over all prompt definition files matching [usecase]/[type]/[version].yml, and create a corresponding
+        prompt for each one.
+
+        The base Prompt class is
         used if no matching override is provided in `class_overrides`.
         """
 

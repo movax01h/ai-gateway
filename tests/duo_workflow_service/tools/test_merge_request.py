@@ -61,7 +61,7 @@ URL_ERROR_CASES = [
 
 @pytest.fixture
 def merge_request_data():
-    """Fixture for common merge request data"""
+    """Fixture for common merge request data."""
     return {
         "id": 1,
         "title": "Test Merge Request",

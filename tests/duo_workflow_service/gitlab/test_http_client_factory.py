@@ -14,7 +14,7 @@ def queues():
 
 
 def test_get_http_client_custom_gitlab(queues):
-    """Test that get_http_client returns ExecutorGitLabHttpClient for custom GitLab instances"""
+    """Test that get_http_client returns ExecutorGitLabHttpClient for custom GitLab instances."""
     outbox, inbox = queues
     base_url = "https://custom.gitlab.example.com"
     gitlab_token = "test-token"
@@ -27,7 +27,7 @@ def test_get_http_client_custom_gitlab(queues):
 
 
 def test_get_http_client_with_env_var(queues):
-    """Test that the factory respects the DUO_WORKFLOW_DIRECT_CONNECTION_BASE_URL environment variable"""
+    """Test that the factory respects the DUO_WORKFLOW_DIRECT_CONNECTION_BASE_URL environment variable."""
     outbox, inbox = queues
     custom_base_url = "https://custom.direct.gitlab"
     gitlab_token = "test-token"

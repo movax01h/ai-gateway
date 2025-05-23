@@ -206,9 +206,7 @@ def find_non_whitespace_point(value: str, start_index: int = 0) -> tuple[int, in
 
 
 def find_newline_position(value: str, start_index: int = 0) -> int:
-    """
-    Finds the nearest newline position close to `start_index`
-    """
+    """Finds the nearest newline position close to `start_index`"""
     substring = value[:start_index]
     substring_rstrip = substring.rstrip(" \t")
 
@@ -231,8 +229,8 @@ def find_common_lines(
     target: list[str],
     comparison_func: Callable[[str, str], bool] = compare_exact,
 ) -> list[tuple]:
-    """
-    Finds the common strings between two lists, keeping track of repeated ranges.
+    """Finds the common strings between two lists, keeping track of repeated ranges.
+
     Example:
     ----------
     >>> source = ["abc", "def", "g"]
@@ -317,8 +315,8 @@ def find_common_lines(
 def split_on_point(
     source_code: str, point: tuple[int, int]
 ) -> tuple[Optional[str], Optional[str]]:
-    """
-    Splits the source_code into a prefix and a suffix.
+    """Splits the source_code into a prefix and a suffix.
+
     Returns (None,None) if the splitting point is invalid.
     """
     pos = find_cursor_position(source_code, point)
@@ -331,9 +329,7 @@ def split_on_point(
 
 
 def find_cursor_position(source_code: str, point: tuple[int, int]) -> int:
-    """
-    Converts a 2D point to its 1D position in the source_code.
-    """
+    """Converts a 2D point to its 1D position in the source_code."""
     if not source_code:
         return -1
 
@@ -353,9 +349,7 @@ def find_cursor_position(source_code: str, point: tuple[int, int]) -> int:
 def convert_point_to_relative_point_in_node(
     node: Node, point: tuple[int, int]
 ) -> tuple[int, int]:
-    """
-    Converts the global point to the relative point within the node.
-    """
+    """Converts the global point to the relative point within the node."""
     row = point[0] - node.start_point[0]
     col = point[1] - node.start_point[1]
     return (row, col)

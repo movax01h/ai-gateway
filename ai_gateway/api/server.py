@@ -256,10 +256,11 @@ def setup_prometheus_fastapi_instrumentator(app: FastAPI):
 
 
 def setup_gcp_service_account(config: Config):
-    """
-    Inject service account credential from the `AIGW_GOOGLE_CLOUD_PLATFORM__SERVICE_ACCOUNT_JSON_KEY` environment variable.
-    This method should only be used for testing purpose such as CI/CD pipelines.
-    For production environment, we don't use this method but use Application Default Credentials (ADC) authentication instead.
+    """Inject service account credential from the `AIGW_GOOGLE_CLOUD_PLATFORM__SERVICE_ACCOUNT_JSON_KEY` environment
+    variable.
+
+    This method should only be used for testing purpose such as CI/CD pipelines. For production environment, we don't
+    use this method but use Application Default Credentials (ADC) authentication instead.
     """
     if config.google_cloud_platform.service_account_json_key:
         with open("/tmp/gcp-service-account.json", "w") as f:

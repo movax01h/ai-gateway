@@ -65,7 +65,7 @@ URL_ERROR_CASES = [
 
 @pytest.fixture
 def issue_data():
-    """Fixture for common issue data"""
+    """Fixture for common issue data."""
     return {
         "id": 1,
         "title": "Test Issue",
@@ -107,7 +107,7 @@ def metadata(gitlab_client_mock):
 
 @pytest.fixture
 def issue_tool_setup():
-    """Fixture that provides a mock GitLab client and metadata with standard issue data"""
+    """Fixture that provides a mock GitLab client and metadata with standard issue data."""
     gitlab_client_mock = AsyncMock()
     gitlab_client_mock.aget.return_value = {
         "id": 1,

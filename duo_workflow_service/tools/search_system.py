@@ -43,9 +43,7 @@ class Grep(DuoBaseTool):
         search_directory: str = ".",
         case_insensitive: bool = False,
     ) -> str:
-        """
-        Execute the standard grep command with the specified parameters.
-        """
+        """Execute the standard grep command with the specified parameters."""
         if search_directory and ".." in search_directory:
             return "Searching above the current directory is not allowed"
 

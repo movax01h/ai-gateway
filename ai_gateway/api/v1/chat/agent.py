@@ -66,8 +66,8 @@ path_unit_primitive_map = {ci.name: ci.unit_primitive for ci in CHAT_INVOKABLES}
 
 
 def convert_v1_to_v2_inputs(chat_request: ChatRequest) -> AgentRequest:
-    """
-    Adapts a v1 ChatRequest into a v2 AgentRequest.
+    """Adapts a v1 ChatRequest into a v2 AgentRequest.
+
     If the payload content is a string, wrap it in a Message.
     """
     prompt_component = chat_request.prompt_components[0]

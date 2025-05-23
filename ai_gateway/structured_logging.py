@@ -23,11 +23,10 @@ CUSTOM_MODELS_ENABLED = False
 
 # https://github.com/hynek/structlog/issues/35#issuecomment-591321744
 def rename_event_key(_, __, event_dict: EventDict) -> EventDict:
-    """
-    Log entries keep the text message in the `event` field, but Elasticsearch
-    uses the `message` field. This processor moves the value from one field to
-    the other.
-    See https://github.com/hynek/structlog/issues/35#issuecomment-591321744
+    """Log entries keep the text message in the `event` field, but Elasticsearch uses the `message` field.
+
+    This processor moves the value from one field to the other. See
+    https://github.com/hynek/structlog/issues/35#issuecomment-591321744
     """
     event_dict["message"] = event_dict.pop("event")
 
@@ -35,18 +34,16 @@ def rename_event_key(_, __, event_dict: EventDict) -> EventDict:
 
 
 def drop_color_message_key(_, __, event_dict: EventDict) -> EventDict:
-    """
-    Uvicorn logs the message a second time in the extra `color_message`, but we don't
-    need it. This processor drops the key from the event dict if it exists.
+    """Uvicorn logs the message a second time in the extra `color_message`, but we don't need it.
+
+    This processor drops the key from the event dict if it exists.
     """
     event_dict.pop("color_message", None)
     return event_dict
 
 
 def add_custom_keys(_, __, event_dict: EventDict) -> EventDict:
-    """
-    Add fields that are expected by our logging infrastructure
-    """
+    """Add fields that are expected by our logging infrastructure."""
     event_dict["type"] = "mlops"
     event_dict["stage"] = "main"
     return event_dict

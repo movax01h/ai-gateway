@@ -70,13 +70,11 @@ class ReActPlainTextParser(BaseCumulativeTransformOutputParser):
         return None
 
     def _modify_tool_name(self, name: str) -> str:
-        """Process special case when LLM returns wrong name
+        """Process special case when LLM returns wrong name.
 
-        In some cases LLM could return the name of the Merge Request tool
-        in CamelCase, not in underscore_case.
-        This bug was fixed in upstream version of GitLab 17.7
-        However older GitLab instances could still have this bug.
-        Would be cleaned up with
+        In some cases LLM could return the name of the Merge Request tool in CamelCase, not in underscore_case. This bug
+        was fixed in upstream version of GitLab 17.7 However older GitLab instances could still have this bug. Would be
+        cleaned up with
         https://gitlab.com/gitlab-org/modelops/applied-ml/code-suggestions/ai-assist/-/issues/757
         """
         if name == "MergeRequestReader":

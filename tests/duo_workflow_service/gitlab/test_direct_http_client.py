@@ -10,8 +10,7 @@ from duo_workflow_service.gitlab.direct_http_client import DirectGitLabHttpClien
 
 
 def setup_mock_response(data, status=200, content_type="application/json"):
-    """
-    Create a mock response object that mimics aiohttp.ClientResponse.
+    """Create a mock response object that mimics aiohttp.ClientResponse.
 
     Args:
         data: The response data (can be a dict or string)
@@ -49,10 +48,7 @@ def setup_mock_response(data, status=200, content_type="application/json"):
 
 
 def setup_request_mock(session_mock, response):
-    """
-    Replace session_mock.request with a mock that returns an async context manager
-    wrapping the response.
-    """
+    """Replace session_mock.request with a mock that returns an async context manager wrapping the response."""
     # Create a mock for the async context manager
     mock_cm = AsyncMock()
     mock_cm.__aenter__.return_value = response

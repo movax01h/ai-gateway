@@ -77,8 +77,7 @@ TypeModelMetadata = AmazonQModelMetadata | ModelMetadata
 
 
 def parameters_for_gitlab_provider(parameters) -> dict[str, Any]:
-    """
-    Retrieve model parameters for a given GitLab identifier.
+    """Retrieve model parameters for a given GitLab identifier.
 
     This function also allows setting custom provider details based on the identifier, like fetching endpoints based on
     AIGW location.

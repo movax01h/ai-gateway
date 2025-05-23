@@ -1,8 +1,7 @@
-"""
-Configuration module for slash commands.
+"""Configuration module for slash commands.
 
-This module is responsible for loading and parsing YAML configuration files
-for slash commands from the config/slash_commands directory.
+This module is responsible for loading and parsing YAML configuration files for slash commands from the
+config/slash_commands directory.
 """
 
 from pathlib import Path
@@ -31,9 +30,7 @@ class SlashCommandDefinition(BaseModel):
 
     @classmethod
     def load_slash_command_definition(cls, slash_command_name):
-        """
-        Loads slash command configurations from YAML file.
-        """
+        """Loads slash command configurations from YAML file."""
         # Ensure the config directory exists
 
         # Use filename as fallback

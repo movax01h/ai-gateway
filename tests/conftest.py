@@ -118,7 +118,7 @@ def mock_detect_abuse():
 def mock_client(
     test_client, stub_auth_provider, auth_user, mock_container, model_metadata_context
 ):
-    """Setup all the needed mocks to perform requests in the test environment"""
+    """Setup all the needed mocks to perform requests in the test environment."""
     with patch.object(stub_auth_provider, "authenticate", return_value=auth_user):
         yield test_client
 

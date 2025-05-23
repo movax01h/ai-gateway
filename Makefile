@@ -150,19 +150,24 @@ isort: install-lint-deps
 	@echo "Running isort format..."
 	@poetry run isort ${LINT_WORKING_DIR}
 
+.PHONY: docformatter
+docformatter: install-lint-deps
+	@echo "Running docformatter format..."
+	@poetry run docformatter -i -r ${LINT_WORKING_DIR}
+
 .PHONY: check-model-selection
 check-model-selection:
 	@poetry install
 	@poetry run validate-model-selection-config
 
 .PHONY: format
-format: codespell black isort
+format: codespell black isort docformatter
 
 .PHONY: lint
 lint: lint-code lint-doc
 
 .PHONY: lint-code
-lint-code: flake8 check-black check-isort check-pylint check-mypy check-codespell
+lint-code: flake8 check-black check-isort check-pylint check-mypy check-codespell check-docformatter
 
 .PHONY: lint-commit
 lint-commit:
@@ -203,6 +208,11 @@ endif
 check-codespell: install-lint-deps
 	@echo "Running codespell check..."
 	@poetry run codespell
+
+.PHONY: check-docformatter
+check-docformatter: install-lint-deps
+	@echo "Running docformatter check..."
+	@poetry run docformatter -c -r ${LINT_WORKING_DIR}
 
 .PHONY: install-test-deps
 install-test-deps:

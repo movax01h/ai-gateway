@@ -11,8 +11,7 @@ class WebSocketMiddleware:
 
 
 class MiddlewareChain:
-    """
-    A manager class that runs multiple WebSocket middlewares in sequence.
+    """A manager class that runs multiple WebSocket middlewares in sequence.
 
     Since FastAPI's built-in middleware system doesn't work with WebSocket connections,
     we need to use the `Depends` instead. This class serves as a workaround to
@@ -42,8 +41,7 @@ class MiddlewareChain:
         self.middlewares = middlewares
 
     async def __call__(self, websocket: WebSocket):
-        """
-        Execute all middlewares in sequence, passing all parameters to each.
+        """Execute all middlewares in sequence, passing all parameters to each.
 
         Args:
             websocket: The WebSocket connection

@@ -38,9 +38,9 @@ def fetch_event_mapping(
     event_type: str,
     event_by_user: bool,
 ) -> Tuple[EventEnum, EventLabelEnum, EventPropertyEnum]:
-    """
-    Since we cannot track an event based on event_type alone, we check if the event is by user or plan,
-    Pause and Resume events can triggered by users or plans.
+    """Since we cannot track an event based on event_type alone, we check if the event is by user or plan, Pause and
+    Resume events can triggered by users or plans.
+
     We differentiate these by checking the event_by_user flag.
     """
     event_enum, label_enum, property_enum = EVENT_MAPPING[event_type]

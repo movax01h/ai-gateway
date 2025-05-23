@@ -99,8 +99,8 @@ class ConfigModelKeys(BaseModel):
 
 
 def _build_location(default: str = "us-central1") -> str:
-    """
-    Reads the GCP region from the environment.
+    """Reads the GCP region from the environment.
+
     Returns the default argument when not configured.
     """
     # pylint: disable=direct-environment-variable-reference
@@ -109,11 +109,10 @@ def _build_location(default: str = "us-central1") -> str:
 
 
 def _build_endpoint() -> str:
-    """
-    Returns the default endpoint for Vertex AI.
+    """Returns the default endpoint for Vertex AI.
 
-    This code assumes that the Runway region (i.e. Cloud Run region) is the same as the Vertex AI region.
-    To support other Cloud Run regions, this code will need to be updated to map to a nearby Vertex AI region instead.
+    This code assumes that the Runway region (i.e. Cloud Run region) is the same as the Vertex AI region. To support
+    other Cloud Run regions, this code will need to be updated to map to a nearby Vertex AI region instead.
     """
     return f"{_build_location()}-aiplatform.googleapis.com"
 
@@ -273,7 +272,7 @@ class Config(BaseSettings):
         )
 
     def _apply_global_configs(self, parent: BaseModel, children: list[BaseModel]):
-        """Set a parent config to child configs if the field value is not specified"""
+        """Set a parent config to child configs if the field value is not specified."""
         for field in parent.model_fields_set:
             parent_value = getattr(parent, field)
 

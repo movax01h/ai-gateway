@@ -2,8 +2,7 @@ from typing import Optional, Tuple
 
 
 def parse(goal: str) -> Tuple[Optional[str], Optional[str]]:
-    """
-    Parse a goal string to extract the slash command and remaining text.
+    """Parse a goal string to extract the slash command and remaining text.
 
     Args:
         goal: The user input string (e.g., "/explain This code is confusing")
@@ -19,8 +18,7 @@ def parse(goal: str) -> Tuple[Optional[str], Optional[str]]:
 
 
 def _parse_parts(parts: list) -> Tuple[Optional[str], Optional[str]]:
-    """
-    Parse command parts to extract command type and remaining text.
+    """Parse command parts to extract command type and remaining text.
 
     Args:
         parts (list): List of command parts split by some delimiter
@@ -40,8 +38,7 @@ def _parse_parts(parts: list) -> Tuple[Optional[str], Optional[str]]:
 
 
 def _parse_space_after_slash(parts: list) -> Tuple[Optional[str], Optional[str]]:
-    """
-    Parse command parts to extract command type and remaining text if there is a space after the slash.
+    """Parse command parts to extract command type and remaining text if there is a space after the slash.
 
     Args:
         parts (list): List of command parts

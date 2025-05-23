@@ -11,8 +11,7 @@ class EnabledInstanceVerboseAiLogsHeaderPlugin(Plugin):
     key = "enabled-instance-verbose-ai-logs"
 
     async def process_request(self, request: Union[Request, HTTPConnection]) -> bool:
-        """
-        Extract the 'my-header' value from the request headers.
+        """Extract the 'my-header' value from the request headers.
 
         Args:
             request: The incoming HTTP request
