@@ -1,9 +1,10 @@
 import asyncio
 import os
 from abc import ABC, abstractmethod
-from typing import Any, Dict, TypedDict
+from typing import Any, Dict, Type, TypedDict
 
 import structlog
+from langchain.tools import BaseTool
 from langchain_core.runnables import RunnableConfig
 
 # pylint disable are going to be fixed via
@@ -37,6 +38,7 @@ from duo_workflow_service.internal_events import (
 )
 from duo_workflow_service.internal_events.event_enum import CategoryEnum, EventEnum
 from duo_workflow_service.monitoring import duo_workflow_metrics
+from duo_workflow_service.tools import convert_mcp_tools_to_langchain_tools
 from duo_workflow_service.tracking import log_exception
 
 # Constants
@@ -72,6 +74,7 @@ class AbstractWorkflow(ABC):
     _workflow_type: CategoryEnum
     _stream: bool = False
     _context_elements: list
+    _additional_tools: list[Type[BaseTool]]
 
     def __init__(
         self,
@@ -83,6 +86,7 @@ class AbstractWorkflow(ABC):
             "base_url": "",
             "gitlab_token": "",
         },
+        mcp_tools: list[contract_pb2.McpTool] = [],
     ):
         self._outbox = asyncio.Queue(maxsize=QUEUE_MAX_SIZE)
         self._inbox = asyncio.Queue(maxsize=QUEUE_MAX_SIZE)
@@ -98,6 +102,7 @@ class AbstractWorkflow(ABC):
             invocation_metadata.get("gitlab_token", ""),
         )
         self._workflow_type = workflow_type
+        self._additional_tools = self._build_additional_tools(mcp_tools)
 
     async def run(self, goal: str) -> None:
         with duo_workflow_metrics.time_workflow(
@@ -197,6 +202,7 @@ class AbstractWorkflow(ABC):
                 workflow_config=self._workflow_config,
                 gl_http_client=self._http_client,
                 gitlab_host=gitlab_host,
+                additional_tools=self._additional_tools,
             )
             checkpoint_notifier = UserInterface(
                 outbox=self._streaming_outbox, goal=goal
@@ -316,6 +322,15 @@ class AbstractWorkflow(ABC):
             event_name=event_name.value,
             additional_properties=additional_properties,
             category=category.value if category else self.__class__.__name__,
+        )
+
+    def _build_additional_tools(
+        self,
+        mcp_tools: list[contract_pb2.McpTool],
+    ):
+        metadata = {"inbox": self._inbox, "outbox": self._outbox}
+        return convert_mcp_tools_to_langchain_tools(
+            metadata=metadata, mcp_tools=mcp_tools
         )
 
 

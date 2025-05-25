@@ -1,7 +1,9 @@
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from langchain.tools import BaseTool
 
+from contract import contract_pb2
 from duo_workflow_service.internal_events import InternalEventAdditionalProperties
 from duo_workflow_service.internal_events.event_enum import CategoryEnum, EventEnum
 from duo_workflow_service.workflows.abstract_workflow import (
@@ -60,11 +62,16 @@ async def test_init():
     workflow_id = "test-workflow-id"
     metadata = {"key": "value"}
     context_elements = [{"type": 1, "name": "test", "contents": "test content"}]
+    mcp_tools = [
+        contract_pb2.McpTool(name="get_issue", description="Tool to get issue")
+    ]
     workflow = MockWorkflow(
         workflow_id,
         metadata,
         CategoryEnum.WORKFLOW_SOFTWARE_DEVELOPMENT,
         context_elements,
+        {},
+        mcp_tools,
     )
 
     assert workflow._workflow_id == workflow_id
@@ -73,6 +80,10 @@ async def test_init():
     assert workflow.is_done is False
     assert workflow._outbox.maxsize == 1
     assert workflow._inbox.maxsize == 1
+    assert len(workflow._additional_tools) == 1
+    tool = workflow._additional_tools[0]
+    assert tool.name == "get_issue"
+    assert tool.description == "Tool to get issue"
 
 
 @pytest.mark.asyncio
