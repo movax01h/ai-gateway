@@ -23,6 +23,7 @@ message StartWorkflowRequest {
     string workflowMetadata = 5;
     repeated string clientCapabilities = 6;
     repeated ContextElement context = 7;
+    repeated McpTool mcpTools = 8;
 }
 
 message ActionResponse {
@@ -59,6 +60,7 @@ message Action {
         ListDirectory listDirectory = 9;
         Grep grep = 10;
         FindFiles findFiles = 11;
+        RunMCPTool runMCPTool = 12;
     };
 }
 
@@ -138,4 +140,15 @@ message Grep {
 
 message FindFiles {
   string name_pattern = 1;
+}
+
+message McpTool {
+    string name = 1;
+    string description = 2;
+    string inputSchema = 3;
+}
+
+message RunMCPTool {
+    string name = 1;
+    string args = 2;
 }
