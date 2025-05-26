@@ -5,6 +5,25 @@ from prometheus_client import REGISTRY, Histogram
 
 log = structlog.stdlib.get_logger("monitoring")
 
+WORKFLOW_TIME_SCALE_BUCKETS = [
+    0.1,
+    0.5,
+    1,
+    2,
+    5,
+    10,
+    20,
+    30,
+    60,
+    120,
+    300,
+    600,
+    1200,
+    1800,
+    3600,
+]
+LLM_TIME_SCALE_BUCKETS = [0.25, 0.5, 1, 2, 4, 7, 10, 20, 30, 60]
+
 
 class DuoWorkflowMetrics:
     def __init__(self, registry=REGISTRY):
@@ -13,6 +32,7 @@ class DuoWorkflowMetrics:
             "Total duration of Duo Workflow processing",
             ["workflow_type"],
             registry=registry,
+            buckets=WORKFLOW_TIME_SCALE_BUCKETS,
         )
 
         self.llm_request_duration = Histogram(
@@ -20,6 +40,7 @@ class DuoWorkflowMetrics:
             "Duration of LLM requests in Duo Workflow",
             ["model", "request_type"],
             registry=registry,
+            buckets=LLM_TIME_SCALE_BUCKETS,
         )
 
         self.tool_call_duration = Histogram(
