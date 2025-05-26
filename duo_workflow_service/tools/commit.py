@@ -223,3 +223,85 @@ class GetCommit(CommitBaseTool):
         if args.url:
             return f"Read commit {args.url}"
         return f"Read commit {args.commit_sha} in project {args.project_id}"
+
+
+class GetCommitDiff(CommitBaseTool):
+    name: str = "get_commit_diff"
+    description: str = f"""Get the diff of a specific commit in a GitLab project.
+
+    {COMMIT_IDENTIFICATION_DESCRIPTION}
+
+    For example:
+    - Given project_id 13 and commit_sha "6104942438c14ec7bd21c6cd5bd995272b3faff6", the tool call would be:
+        get_commit_diff(project_id=13, commit_sha="6104942438c14ec7bd21c6cd5bd995272b3faff6")
+    - Given the URL https://gitlab.com/namespace/project/-/commit/6104942438c14ec7bd21c6cd5bd995272b3faff6, the tool call would be:
+        get_commit_diff(url="https://gitlab.com/namespace/project/-/commit/6104942438c14ec7bd21c6cd5bd995272b3faff6")
+    """
+    args_schema: Type[BaseModel] = CommitResourceInput  # type: ignore
+
+    async def _arun(self, **kwargs: Any) -> str:
+        url = kwargs.get("url")
+        project_id = kwargs.get("project_id")
+        commit_sha = kwargs.get("commit_sha")
+
+        project_id, commit_sha, errors = self._validate_commit_url(
+            url, project_id, commit_sha
+        )
+
+        if errors:
+            return json.dumps({"error": "; ".join(errors)})
+
+        try:
+            response = await self.gitlab_client.aget(
+                path=f"/api/v4/projects/{project_id}/repository/commits/{commit_sha}/diff",
+                parse_json=False,
+            )
+            return json.dumps({"diff": response})
+        except Exception as e:
+            return json.dumps({"error": str(e)})
+
+    def format_display_message(self, args: CommitResourceInput) -> str:
+        if args.url:
+            return f"Get diff for commit {args.url}"
+        return f"Get diff for commit {args.commit_sha} in project {args.project_id}"
+
+
+class GetCommitComments(CommitBaseTool):
+    name: str = "get_commit_comments"
+    description: str = f"""Get the comments on a specific commit in a GitLab project.
+
+    {COMMIT_IDENTIFICATION_DESCRIPTION}
+
+    For example:
+    - Given project_id 13 and commit_sha "6104942438c14ec7bd21c6cd5bd995272b3faff6", the tool call would be:
+        get_commit_comments(project_id=13, commit_sha="6104942438c14ec7bd21c6cd5bd995272b3faff6")
+    - Given the URL https://gitlab.com/namespace/project/-/commit/6104942438c14ec7bd21c6cd5bd995272b3faff6, the tool call would be:
+        get_commit_comments(url="https://gitlab.com/namespace/project/-/commit/6104942438c14ec7bd21c6cd5bd995272b3faff6")
+    """
+    args_schema: Type[BaseModel] = CommitResourceInput  # type: ignore
+
+    async def _arun(self, **kwargs: Any) -> str:
+        url = kwargs.get("url")
+        project_id = kwargs.get("project_id")
+        commit_sha = kwargs.get("commit_sha")
+
+        project_id, commit_sha, errors = self._validate_commit_url(
+            url, project_id, commit_sha
+        )
+
+        if errors:
+            return json.dumps({"error": "; ".join(errors)})
+
+        try:
+            response = await self.gitlab_client.aget(
+                path=f"/api/v4/projects/{project_id}/repository/commits/{commit_sha}/comments",
+                parse_json=False,
+            )
+            return json.dumps({"comments": response})
+        except Exception as e:
+            return json.dumps({"error": str(e)})
+
+    def format_display_message(self, args: CommitResourceInput) -> str:
+        if args.url:
+            return f"Get comments for commit {args.url}"
+        return f"Get comments for commit {args.commit_sha} in project {args.project_id}"

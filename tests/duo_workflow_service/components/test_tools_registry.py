@@ -588,3 +588,7 @@ def test_commit_tools_feature_flag(
 
     assert ("get_commit" in registry._enabled_tools) == should_include_commit_tools
     assert ("list_commits" in registry._enabled_tools) == should_include_commit_tools
+    assert ("get_commit_diff" in registry._enabled_tools) == should_include_commit_tools
+    assert (
+        "get_commit_comments" in registry._enabled_tools
+    ) == should_include_commit_tools
