@@ -305,7 +305,7 @@ class TestAnthropicModel:
 
     @pytest.mark.asyncio
     async def test_anthropic_model_generate_stream_instrumented(self):
-        async def mock_stream(*args, **kwargs):
+        async def mock_stream(*_args, **_kwargs):
             completions = [
                 Completion(
                     id="compl_01CtvorJWMstkmATFkR7qVYM",
@@ -393,7 +393,7 @@ class TestAnthropicModel:
         completion_chunks: list[Completion],
         expected_chunks: list[str],
     ):
-        async def _stream_generator(*args, **kwargs):
+        async def _stream_generator(*_args, **_kwargs):
             for chunk in completion_chunks:
                 yield chunk
 
@@ -726,7 +726,7 @@ class TestAnthropicChatModel:
 
     @pytest.mark.asyncio
     async def test_anthropic_model_generate_stream_instrumented(self):
-        async def mock_stream(*args, **kwargs):
+        async def mock_stream(*_args, **_kwargs):
             completions = [
                 RawMessageStartEvent(
                     message=AMessage(
@@ -856,7 +856,7 @@ class TestAnthropicChatModel:
         completion_chunks: list,
         expected_chunks: list[str],
     ):
-        async def _stream_generator(*args, **kwargs):
+        async def _stream_generator(*_args, **_kwargs):
             for chunk in completion_chunks:
                 yield chunk
 

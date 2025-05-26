@@ -31,7 +31,7 @@ router = APIRouter()
 @router.post("/user_access_token")
 @feature_category(GitLabFeatureCategory.CODE_SUGGESTIONS)
 async def user_access_token(
-    request: Request,
+    request: Request,  # pylint: disable=unused-argument
     current_user: Annotated[StarletteUser, Depends(get_current_user)],
     token_authority: Annotated[TokenAuthority, Depends(get_token_authority)],
     internal_event_client: Annotated[

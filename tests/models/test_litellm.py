@@ -362,7 +362,7 @@ class TestLiteLlmChatModel:
 
     @pytest.mark.asyncio
     async def test_generate_stream_instrumented(self, lite_llm_chat_model):
-        async def mock_stream(*args, **kwargs):
+        async def mock_stream(*_args, **_kwargs):
             completions = [
                 AsyncMock(
                     choices=[AsyncMock(delta=AsyncMock(content="Streamed content"))]
@@ -1192,7 +1192,7 @@ class TestLiteLlmTextGenModel:
 
     @pytest.mark.asyncio
     async def test_generate_stream_instrumented(self, lite_llm_text_model):
-        async def mock_stream(*args, **kwargs):
+        async def mock_stream(*_args, **_kwargs):
             completions = [
                 AsyncMock(
                     choices=[AsyncMock(delta=AsyncMock(content="Streamed content"))]

@@ -30,7 +30,8 @@ router = APIRouter()
 @feature_categories(FEATURE_CATEGORIES_FOR_PROXY_ENDPOINTS)
 async def anthropic(
     request: Request,
-    background_tasks: BackgroundTasks,
+    background_tasks: BackgroundTasks,  # pylint: disable=unused-argument
+    # pylint: disable=unused-argument
     abuse_detector: Annotated[AbuseDetector, Depends(get_abuse_detector)],
     anthropic_proxy_client: Annotated[
         AnthropicProxyClient, Depends(get_anthropic_proxy_client)

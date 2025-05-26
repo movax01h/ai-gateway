@@ -34,7 +34,7 @@ def sentry_tracking_available():
     return False
 
 
-def remove_private_info_fields(event, hint):
+def remove_private_info_fields(event, hint):  # pylint: disable=unused-argument
     # Remove sensitive information from event data
     updated_event = event
 

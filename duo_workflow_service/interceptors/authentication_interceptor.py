@@ -55,6 +55,7 @@ class AuthenticationInterceptor(grpc.aio.ServerInterceptor):
     def _abort_handler(
         self, code: grpc.StatusCode, details: str
     ) -> grpc.RpcMethodHandler:
+        # pylint: disable=unused-argument
         async def handler(request: object, context: ServicerContext) -> object:
             await context.abort(code, details)
             return None

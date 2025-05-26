@@ -37,7 +37,7 @@ router = APIRouter()
 )
 @feature_category(GitLabFeatureCategory.AI_ABSTRACTION_LAYER)
 async def invoke(
-    request: Request,
+    request: Request,  # pylint: disable=unused-argument
     prompt_request: PromptRequest,
     prompt_id: str,
     current_user: Annotated[StarletteUser, Depends(get_current_user)],

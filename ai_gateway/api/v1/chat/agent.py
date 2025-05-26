@@ -117,13 +117,15 @@ def convert_v1_to_v2_inputs(chat_request: ChatRequest) -> AgentRequest:
 async def chat(
     request: Request,
     chat_request: ChatRequest,
-    chat_invokable: str,
+    chat_invokable: str,  # pylint: disable=unused-argument
     current_user: Annotated[StarletteUser, Depends(get_current_user)],
-    anthropic_claude_factory: Annotated[
+    anthropic_claude_factory: Annotated[  # pylint: disable=unused-argument
         FactoryAggregate, Depends(get_chat_anthropic_claude_factory_provider)
     ],
-    litellm_factory: Annotated[Factory, Depends(get_chat_litellm_factory_provider)],
-    internal_event_client: Annotated[
+    litellm_factory: Annotated[  # pylint: disable=unused-argument
+        Factory, Depends(get_chat_litellm_factory_provider)
+    ],
+    internal_event_client: Annotated[  # pylint: disable=unused-argument
         InternalEventsClient, Depends(get_internal_event_client)
     ],
     prompt_registry: Annotated[BasePromptRegistry, Depends(get_prompt_registry)],

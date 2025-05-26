@@ -34,7 +34,7 @@ class AddNewTask(BaseTool):
 
     args_schema: Type[BaseModel] = AddNewTaskInput
 
-    def _run(self, description: str) -> str:
+    def _run(self, description: str) -> str:  # pylint: disable=unused-argument
         return "New task added"
 
     def format_display_message(self, args: AddNewTaskInput) -> str:
@@ -131,7 +131,7 @@ class CreatePlan(BaseTool):
 
     args_schema: Type[BaseModel] = CreatePlanInput
 
-    def _run(self, tasks: List[str]) -> str:
+    def _run(self, tasks: List[str]) -> str:  # pylint: disable=unused-argument
         return "Plan created successfully"
 
     def format_display_message(self, args: CreatePlanInput) -> str:

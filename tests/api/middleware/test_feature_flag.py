@@ -34,7 +34,7 @@ def feature_flag_middleware(mock_app, disallowed_flags):
     ],
 )
 async def test_middleware_feature_flag(
-    feature_flag_middleware, headers, disallowed_flags, expected_flags
+    feature_flag_middleware, headers, expected_flags
 ):
     request = Request(
         {

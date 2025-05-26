@@ -164,7 +164,6 @@ disable = [
   "too-few-public-methods",
   "no-member",
   "fixme",
-  "unused-argument",
   "protected-access",
   "too-many-arguments",
   "no-name-in-module",

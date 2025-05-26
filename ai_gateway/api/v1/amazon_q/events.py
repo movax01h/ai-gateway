@@ -24,7 +24,7 @@ router = APIRouter()
 @router.post("/events")
 @feature_category(GitLabFeatureCategory.DUO_CHAT)
 async def events(
-    request: Request,
+    request: Request,  # pylint: disable=unused-argument
     event_request: EventRequest,
     current_user: Annotated[StarletteUser, Depends(get_current_user)],
     internal_event_client: Annotated[

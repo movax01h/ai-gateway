@@ -79,8 +79,8 @@ class VertexAISearch(Searcher):
         client: discoveryengine.SearchServiceAsyncClient,
         project: str,
         fallback_datastore_version: str,
-        *args: Any,
-        **kwargs: Any,
+        *_args: Any,
+        **_kwargs: Any,
     ):
         self.client = client
         self.project = project

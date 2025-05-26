@@ -93,3 +93,7 @@ make test-integration
   since it can lead to divergences between test and runtime behavior. See
   [this issue](https://gitlab.com/gitlab-org/modelops/applied-ml/code-suggestions/ai-assist/-/issues/511)
   for more details.
+- If you need to use a fixture in a test but the value of the fixture is not used within the test itself, use
+  `@pytest.mark.usefixtures` instead of adding an unused argument. See
+  [the pytest docs](https://docs.pytest.org/en/7.1.x/how-to/fixtures.html#use-fixtures-in-classes-and-modules-with-usefixtures)
+  for more details.

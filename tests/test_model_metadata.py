@@ -59,7 +59,7 @@ def test_create_regular_model_metadata():
 
 
 class TestCreateGitlabModelMetadata:
-    @pytest.fixture
+    @pytest.fixture(autouse=True)
     def get_llm_definitions(self):
         mock_models = {
             "gitlab_model1": LLMDefinition(
@@ -86,7 +86,7 @@ class TestCreateGitlabModelMetadata:
         ) as mock_method:
             yield mock_method
 
-    def test_create_gitlab_model_metadata_with_identifier(self, get_llm_definitions):
+    def test_create_gitlab_model_metadata_with_identifier(self):
         data = {
             "provider": "gitlab",
             "identifier": "gitlab_model1",
@@ -98,9 +98,7 @@ class TestCreateGitlabModelMetadata:
         assert result.identifier == "mixtral_8x7b"
         assert result.name == "mixtral"
 
-    def test_create_gitlab_model_metadata_with_feature_setting(
-        self, get_llm_definitions
-    ):
+    def test_create_gitlab_model_metadata_with_feature_setting(self):
         data = {
             "provider": "gitlab",
             "feature_setting": "duo_chat",
@@ -112,7 +110,7 @@ class TestCreateGitlabModelMetadata:
         assert result.identifier == "mixtral_8x7b"
         assert result.name == "mixtral"
 
-    def test_required_parameters(self, get_llm_definitions):
+    def test_required_parameters(self):
         data = {
             "provider": "gitlab",
         }
@@ -123,7 +121,7 @@ class TestCreateGitlabModelMetadata:
         ):
             create_model_metadata(data)
 
-    def test_create_gitlab_model_metadata_non_existing(self, get_llm_definitions):
+    def test_create_gitlab_model_metadata_non_existing(self):
         data = {
             "provider": "gitlab",
             "identifier": "non_existing_gitlab_model",

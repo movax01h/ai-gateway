@@ -59,7 +59,7 @@ def mock_fs(fs: FakeFilesystem):
 
 
 @pytest.fixture
-def selection_config(mock_fs):
+def selection_config(mock_fs):  # pylint: disable=unused-argument
     return ModelSelectionConfig()
 
 
@@ -112,7 +112,8 @@ def test_get_unit_primitive_config_map(selection_config):
     }
 
 
-def test_is_singleton(mock_fs):
+@pytest.mark.usefixtures("mock_fs")
+def test_is_singleton():
     config_instance_1 = ModelSelectionConfig()
     config_instance_2 = ModelSelectionConfig()
 
@@ -151,7 +152,8 @@ def test_get_gitlab_model_for_feature_no_feature(selection_config):
         selection_config.get_gitlab_model_for_feature("random-feature")
 
 
-def test_validate_without_error(mock_fs):
+@pytest.mark.usefixtures("mock_fs")
+def test_validate_without_error():
     assert ModelSelectionConfig().validate() is None
 
 

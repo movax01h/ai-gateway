@@ -36,7 +36,7 @@ router = APIRouter()
 )
 @feature_category(GitLabFeatureCategory.CODE_SUGGESTIONS)
 async def libraries(
-    request: Request,
+    request: Request,  # pylint: disable=unused-argument
     payload: XRayRequest,
     current_user: Annotated[StarletteUser, Depends(get_current_user)],
     model: Annotated[AnthropicModel, Depends(get_x_ray_anthropic_claude)],

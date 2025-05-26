@@ -185,7 +185,7 @@ class LiteLlmChatModel(ChatModelBase):
         temperature: float = 0.2,
         max_output_tokens: int = 2048,
         top_p: float = 0.95,
-        code_context: Optional[Sequence[str]] = None,
+        code_context: Optional[Sequence[str]] = None,  # pylint: disable=unused-argument
     ) -> Union[TextGenModelOutput, AsyncIterator[TextGenModelChunk]]:
         should_stream = not self.disable_streaming and stream
 
@@ -342,7 +342,7 @@ class LiteLlmTextGenModel(TextGenModelBase):
         temperature: float = 0.95,
         max_output_tokens: int = 16,
         top_p: float = 0.95,
-        code_context: Optional[Sequence[str]] = None,
+        code_context: Optional[Sequence[str]] = None,  # pylint: disable=unused-argument
         snowplow_event_context: Optional[SnowplowEventContext] = None,
     ) -> Union[TextGenModelOutput, AsyncIterator[TextGenModelChunk]]:
         should_stream = not self.disable_streaming and stream
@@ -476,7 +476,7 @@ class LiteLlmTextGenModel(TextGenModelBase):
             max_output_tokens_used=max_output_tokens_used,
         )
 
-    def _get_stop_tokens(self, suffix):
+    def _get_stop_tokens(self, suffix):  # pylint: disable=unused-argument
         return self.stop_tokens
 
     def _is_vertex(self):

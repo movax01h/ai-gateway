@@ -29,7 +29,7 @@ router = APIRouter()
 @router.post("/application")
 @feature_category(GitLabFeatureCategory.DUO_CHAT)
 async def oauth_create_application(
-    request: Request,
+    request: Request,  # pylint: disable=unused-argument
     application_request: ApplicationRequest,
     current_user: Annotated[StarletteUser, Depends(get_current_user)],
     internal_event_client: Annotated[
@@ -66,7 +66,7 @@ async def oauth_create_application(
 @router.post("/application/delete")
 @feature_category(GitLabFeatureCategory.DUO_CHAT)
 async def oauth_delete_application(
-    request: Request,
+    request: Request,  # pylint: disable=unused-argument
     application_request: ApplicationDeleteRequest,
     current_user: Annotated[StarletteUser, Depends(get_current_user)],
     internal_event_client: Annotated[
@@ -103,7 +103,7 @@ async def oauth_delete_application(
 @router.post("/application/verify")
 @feature_category(GitLabFeatureCategory.DUO_CHAT)
 async def validate_auth_app(
-    request: Request,
+    request: Request,  # pylint: disable=unused-argument
     health_request: HealthRequest,
     current_user: Annotated[StarletteUser, Depends(get_current_user)],
     internal_event_client: Annotated[

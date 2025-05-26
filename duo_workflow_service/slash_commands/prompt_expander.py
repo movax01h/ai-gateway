@@ -24,6 +24,7 @@ class ProcessSlashCommand:
     def __init__(self):
         """Initialize the slash command processor."""
 
+    # pylint: disable=unused-argument
     def process(self, message: str, context_element_type: str) -> Result:
         """
         Process a slash command.

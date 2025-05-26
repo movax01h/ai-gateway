@@ -18,7 +18,6 @@ def config_values(custom_models_enabled: bool):
 )
 def test_container(
     mock_container: containers.DeclarativeContainer,
-    custom_models_enabled: bool,
     search_provider_class: Type[Searcher],
 ):
     searches = cast(providers.Container, mock_container.searches)
