@@ -124,7 +124,7 @@ test-local:
 
 .PHONY: lint-local
 lint-local:
-	$(COMPOSE) run -v "$(ROOT_DIR):/app" api bash -c 'poetry install --only lint && poetry run flake8 ai_gateway'
+	$(COMPOSE) run -v "$(ROOT_DIR):/app" api bash -c 'poetry install --with lint && poetry run flake8 ai_gateway'
 
 .PHONY: clean
 clean:
@@ -133,7 +133,7 @@ clean:
 .PHONY: install-lint-deps
 install-lint-deps:
 	@echo "Installing lint dependencies..."
-	@poetry install --only lint
+	@poetry install --with lint
 
 .PHONY: codespell
 codespell: install-lint-deps
