@@ -456,6 +456,7 @@ def _build_code_completions(
     payload: CompletionsRequestWithVersion,
     current_user: StarletteUser,
     prompt_registry: BasePromptRegistry,
+    # pylint: disable=unused-argument
     completions_legacy_factory: Factory[CodeCompletionsLegacy],
     completions_anthropic_factory: Factory[CodeCompletions],
     completions_litellm_factory: Factory[CodeCompletions],

@@ -39,7 +39,8 @@ def test_configure_cache_enabled():
 
 
 @pytest.mark.asyncio
-async def test_start_servers_grpc_only(mock_env_vars):
+@pytest.mark.usefixtures("mock_env_vars")
+async def test_start_servers_grpc_only():
     with patch("duo_workflow_service.server.grpc_serve") as mock_grpc_serve, patch(
         "duo_workflow_service.server.websocket_serve"
     ) as mock_websocket_serve:
@@ -53,7 +54,8 @@ async def test_start_servers_grpc_only(mock_env_vars):
 
 
 @pytest.mark.asyncio
-async def test_start_servers_with_websocket(mock_env_vars):
+@pytest.mark.usefixtures("mock_env_vars")
+async def test_start_servers_with_websocket():
     with patch.dict(
         os.environ, {"WEBSOCKET_SERVER": "true", "WEBSOCKET_PORT": "8080"}
     ), patch("duo_workflow_service.server.grpc_serve") as mock_grpc_serve, patch(
@@ -91,7 +93,8 @@ async def test_start_servers_with_custom_ports():
         mock_websocket_serve.assert_called_once_with(9000)
 
 
-def test_run(mock_env_vars):
+@pytest.mark.usefixtures("mock_env_vars")
+def test_run():
     with patch(
         "duo_workflow_service.server.setup_profiling"
     ) as mock_setup_profiling, patch(

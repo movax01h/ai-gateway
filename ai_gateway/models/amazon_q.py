@@ -56,7 +56,7 @@ class AmazonQModel(TextGenModelBase):
         filename: str,
         language: str,
         stream: bool,
-        **kwargs,
+        **_kwargs,
     ) -> (
         TextGenModelOutput | list[TextGenModelOutput] | AsyncIterator[TextGenModelChunk]
     ):

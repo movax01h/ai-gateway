@@ -26,7 +26,6 @@ from ai_gateway.model_metadata import (
 from ai_gateway.models.v2.anthropic_claude import ChatAnthropic
 from ai_gateway.prompts import BasePromptRegistry, Prompt
 from ai_gateway.prompts.config.base import PromptParams
-from ai_gateway.prompts.typing import Model
 
 
 @pytest.fixture
@@ -249,9 +248,7 @@ class TestPromptTimeout:
             ),
         ],
     )
-    async def test_timeout(
-        self, prompt: Prompt, model: Model, expected_exception: Type
-    ):
+    async def test_timeout(self, prompt: Prompt, expected_exception: Type):
         with pytest.raises(expected_exception):
             await prompt.ainvoke(
                 {"name": "Duo", "content": "Print pi with 400 decimals"}
@@ -267,7 +264,7 @@ def registry(
             self.internal_event_client = internal_event_client
             self.model_limits = model_limits
 
-        def get(self, *args, **kwargs):
+        def get(self, *_args, **_kwargs):
             return prompt
 
     return Registry()
@@ -350,8 +347,6 @@ class TestBaseRegistry:
         user: StarletteUser,
         prompt: Prompt,
         model_metadata: Optional[TypeModelMetadata],
-        unit_primitives: list[GitLabUnitPrimitive],
-        scopes: list[str],
         success: bool,
         expected_internal_events,
     ):
@@ -393,9 +388,6 @@ class TestBaseRegistry:
         internal_event_client: Mock,
         registry: BasePromptRegistry,
         user: StarletteUser,
-        prompt: Prompt,
-        unit_primitives: list[GitLabUnitPrimitive],
-        scopes: list[str],
         internal_event_category: str,
         expected_internal_events,
     ):
@@ -425,7 +417,6 @@ class TestBaseRegistry:
         registry: BasePromptRegistry,
         user: StarletteUser,
         prompt: Prompt,
-        unit_primitives: list[GitLabUnitPrimitive],
         model_metadata: TypeModelMetadata,
     ):
         current_model_metadata_context.set(model_metadata)

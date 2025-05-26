@@ -40,12 +40,11 @@ def mock_sleep():  # So we don't have to wait
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(("response_text"), ['{"error": "something went wrong"}'])
+@pytest.mark.usefixtures("mock_sleep")
 async def test_ainvoke(
-    mock_sleep: Mock,
     mock_http: Mock,
     mock_http_handler: AsyncMock,
     prompt: Prompt,
-    response_text: str,
 ):
     with pytest.raises(litellm.APIConnectionError, match="something went wrong"), patch(
         "google.auth.default",
@@ -67,12 +66,11 @@ async def test_ainvoke(
         'data:{"type":"error","error":{"details":null,"type":"api_error","message":"something went wrong"}}'
     ],
 )
+@pytest.mark.usefixtures("mock_sleep")
 async def test_astream(
-    mock_sleep: Mock,
     mock_http: Mock,
     mock_http_handler: AsyncMock,
     prompt: Prompt,
-    response_text: str,
 ):
     litellm.module_level_aclient = mock_http_handler
 

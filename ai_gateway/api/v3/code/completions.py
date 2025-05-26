@@ -62,7 +62,7 @@ async def get_prompt_registry():
 
 async def handle_stream(
     stream: AsyncIterator[CodeSuggestionsChunk],
-    metadata: ResponseMetadataBase,
+    metadata: ResponseMetadataBase,  # pylint: disable=unused-argument
 ) -> StreamSuggestionsResponse:
     async def _stream_response_generator():
         async for chunk in stream:
@@ -267,6 +267,7 @@ async def code_generation(
     generations_amazon_q_factory: Factory[CodeGenerations] = Provide[
         ContainerApplication.code_suggestions.generations.amazon_q_factory.provider
     ],
+    # pylint: disable=unused-argument
     code_context: Optional[list[CodeContextPayload]] = None,
     model_metadata: Optional[TypeModelMetadata] = None,
 ):

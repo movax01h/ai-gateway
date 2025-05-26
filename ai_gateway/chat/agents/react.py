@@ -125,8 +125,8 @@ class ReActPromptTemplate(Runnable[ReActAgentInputs, PromptValue]):
     def invoke(
         self,
         input: ReActAgentInputs,
-        config: Optional[RunnableConfig] = None,
-        **kwargs: Any,
+        config: Optional[RunnableConfig] = None,  # pylint: disable=unused-argument
+        **_kwargs: Any,
     ) -> PromptValue:
         messages: list[BaseMessage] = []
 

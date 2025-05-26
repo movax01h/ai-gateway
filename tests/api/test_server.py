@@ -167,7 +167,7 @@ async def test_lifespan(config, app, unused_port, monkeypatch, vertex_project):
     mock_credentials = MagicMock()
     mock_credentials.client_id = "mocked_client_id"
 
-    def mock_default(*args, **kwargs):
+    def mock_default(*_args, **_kwargs):
         return (mock_credentials, "mocked_project_id")
 
     monkeypatch.setattr("google.auth.default", mock_default)
@@ -217,7 +217,7 @@ def test_middleware_authentication(fastapi_server_app: FastAPI, auth_enabled: bo
     assert response.status_code == 200
 
 
-def test_middleware_log_request(fastapi_server_app: FastAPI, caplog):
+def test_middleware_log_request(fastapi_server_app: FastAPI):
     client = TestClient(fastapi_server_app)
 
     with capture_logs() as cap_logs:
@@ -226,10 +226,11 @@ def test_middleware_log_request(fastapi_server_app: FastAPI, caplog):
         assert len(correlation_ids) > 0
 
 
+@pytest.mark.usefixtures("fastapi_server_app")
 @pytest.mark.parametrize(
     "test_path,expected", [("/v2/chat/agent", True), ("/monitoring/healthz", False)]
 )
-def test_middleware_internal_event(fastapi_server_app: FastAPI, test_path, expected):
+def test_middleware_internal_event(test_path, expected):
     config = Config(
         _env_file=None,
         auth=ConfigAuth(bypass_external=True),
@@ -248,10 +249,11 @@ def test_middleware_internal_event(fastapi_server_app: FastAPI, test_path, expec
             mock_event_context.set.assert_not_called()
 
 
+@pytest.mark.usefixtures("fastapi_server_app")
 @pytest.mark.parametrize(
     "test_path,expected", [("/v2/chat/agent", True), ("/monitoring/healthz", False)]
 )
-def test_middleware_distributed_trace(fastapi_server_app: FastAPI, test_path, expected):
+def test_middleware_distributed_trace(test_path, expected):
     config = Config(
         _env_file=None,
         auth=ConfigAuth(bypass_external=True),
@@ -275,7 +277,8 @@ def test_middleware_distributed_trace(fastapi_server_app: FastAPI, test_path, ex
             mock_tracing_context.assert_not_called()
 
 
-def test_middleware_feature_flag(fastapi_server_app: FastAPI):
+@pytest.mark.usefixtures("fastapi_server_app")
+def test_middleware_feature_flag():
     config = Config(
         _env_file=None,
         auth=ConfigAuth(bypass_external=True),
@@ -429,7 +432,7 @@ def test_validation_exception_handler_without_log_request_data(
     mock_can_log_request_data, mock_context, app
 ):
     @app.post("/test")
-    def test_route(required_field: str):
+    def test_route(_required_field: str):
         return {"message": "success"}
 
     setup_custom_exception_handlers(app)
@@ -448,7 +451,7 @@ def test_validation_exception_handler_with_log_request_data(
     mock_can_log_request_data, mock_context, app
 ):
     @app.post("/test")
-    def test_route(required_field: str):
+    def test_route(_required_field: str):
         return {"message": "success"}
 
     setup_custom_exception_handlers(app)

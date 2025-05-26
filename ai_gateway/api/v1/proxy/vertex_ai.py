@@ -30,7 +30,8 @@ router = APIRouter()
 @feature_categories(FEATURE_CATEGORIES_FOR_PROXY_ENDPOINTS)
 async def vertex_ai(
     request: Request,
-    background_tasks: BackgroundTasks,
+    background_tasks: BackgroundTasks,  # pylint: disable=unused-argument
+    # pylint: disable=unused-argument
     abuse_detector: Annotated[AbuseDetector, Depends(get_abuse_detector)],
     vertex_ai_proxy_client: Annotated[
         VertexAIProxyClient, Depends(get_vertex_ai_proxy_client)

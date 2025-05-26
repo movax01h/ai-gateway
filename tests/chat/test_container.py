@@ -59,7 +59,6 @@ def test_container(mock_container: containers.DeclarativeContainer, mock_agent: 
 )
 def test_container_with_config(
     mock_container: containers.DeclarativeContainer,
-    custom_models_enabled: bool,
     expected_tool_type: Type[BaseTool],
 ):
     chat = cast(providers.Container, mock_container.chat)

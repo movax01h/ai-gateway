@@ -59,9 +59,9 @@ def mock_os_path_to_db():
         "10.11.12-pre",
     ],
 )
+@pytest.mark.usefixtures("mock_os_path_to_db")
 async def test_sqlite_search(
     mock_sqlite_search_struct_data,
-    mock_os_path_to_db,
     gl_version,
     sqlite_search_factory,
 ):

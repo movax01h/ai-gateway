@@ -75,14 +75,14 @@ def text_gen_base_model():
 @pytest.fixture(scope="class")
 def stub_auth_provider():
     class StubKeyAuthProvider:
-        def authenticate(self, token):
+        def authenticate(self, *_args):
             return None
 
     return StubKeyAuthProvider()
 
 
 @pytest.fixture(scope="class")
-def test_client(fast_api_router, stub_auth_provider, request):
+def test_client(fast_api_router, stub_auth_provider):
     middlewares = [
         Middleware(RawContextMiddleware),
         Middleware(AccessLogMiddleware, skip_endpoints=[]),
@@ -116,7 +116,11 @@ def mock_detect_abuse():
 
 @pytest.fixture
 def mock_client(
-    test_client, stub_auth_provider, auth_user, mock_container, model_metadata_context
+    test_client,
+    stub_auth_provider,
+    auth_user,
+    mock_container,  # pylint: disable=unused-argument
+    model_metadata_context,  # pylint: disable=unused-argument
 ):
     """Setup all the needed mocks to perform requests in the test environment"""
     with patch.object(stub_auth_provider, "authenticate", return_value=auth_user):
@@ -149,7 +153,9 @@ def mock_config(config_values: dict[str, Any]):
 
 @pytest.fixture
 def mock_container(
-    mock_config: Config, mock_connect_vertex: Mock, mock_connect_vertex_search: Mock
+    mock_config: Config,
+    mock_connect_vertex: Mock,  # pylint: disable=unused-argument
+    mock_connect_vertex_search: Mock,  # pylint: disable=unused-argument
 ):
     container_application = ContainerApplication()
     container_application.config.from_dict(mock_config.model_dump())
@@ -179,7 +185,7 @@ def _mock_generate(klass: str, mock_output: TextGenModelOutput):
 
 @contextmanager
 def _mock_async_generate(klass: str, mock_output: TextGenModelOutput):
-    async def _stream(*args: Any, **kwargs: Any) -> AsyncIterator[TextGenModelChunk]:
+    async def _stream(*_args: Any, **_kwargs: Any) -> AsyncIterator[TextGenModelChunk]:
         for c in list(mock_output.text):
             yield TextGenModelChunk(text=c)
 
@@ -360,7 +366,9 @@ def mock_completions(mock_suggestions_output: CodeSuggestionsOutput):
 
 @contextmanager
 def _mock_async_execute(klass: str, mock_suggestions_output: CodeSuggestionsOutput):
-    async def _stream(*args: Any, **kwargs: Any) -> AsyncIterator[CodeSuggestionsChunk]:
+    async def _stream(
+        *_args: Any, **_kwargs: Any
+    ) -> AsyncIterator[CodeSuggestionsChunk]:
         for c in list(mock_suggestions_output.text):
             yield CodeSuggestionsChunk(text=c)
 

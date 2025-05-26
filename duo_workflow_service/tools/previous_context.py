@@ -29,7 +29,7 @@ class GetWorkflowContext(DuoBaseTool):
     """
     args_schema: Type[BaseModel] = GetWorkflowContextInput  # type: ignore
 
-    async def _arun(self, previous_workflow_id: int, **kwargs: Any) -> str:
+    async def _arun(self, previous_workflow_id: int, **_kwargs: Any) -> str:
         try:
             response = await self.gitlab_client.aget(
                 path=f"/api/v4/ai/duo_workflows/workflows/{previous_workflow_id}/checkpoints?per_page=1",

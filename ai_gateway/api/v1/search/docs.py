@@ -95,7 +95,7 @@ def log_search_results(
 )
 @feature_category(GitLabFeatureCategory.DUO_CHAT)
 async def docs(
-    request: Request,
+    request: Request,  # pylint: disable=unused-argument
     current_user: Annotated[StarletteUser, Depends(get_current_user)],
     search_request: SearchRequest,
     config: Annotated[Config, Depends(get_config)],

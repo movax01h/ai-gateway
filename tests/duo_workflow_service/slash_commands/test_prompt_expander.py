@@ -13,7 +13,7 @@ from duo_workflow_service.slash_commands.prompt_expander import ProcessSlashComm
 
 @patch("duo_workflow_service.slash_commands.goal_parser.parse")
 @patch("duo_workflow_service.slash_commands.definition.SlashCommandDefinition")
-def test_process_slash_command_not_slash_command(mock_definition, mock_parser):
+def test_process_slash_command_not_slash_command(_mock_definition, _mock_parser):
     """Test processing a non-slash command message."""
     # TODO: Implement this test once process_slash_command is implemented
     # mock_parser_instance = MagicMock()
@@ -30,7 +30,7 @@ def test_process_slash_command_not_slash_command(mock_definition, mock_parser):
 
 @patch("duo_workflow_service.slash_commands.goal_parser.parse")
 @patch("duo_workflow_service.slash_commands.definition.SlashCommandDefinition")
-def test_process_slash_command_success(mock_definition, mock_parser):
+def test_process_slash_command_success(_mock_definition, _mock_parser):
     """Test successful processing of a slash command."""
     # TODO: Implement this test once process_slash_command is implemented
     # Set up mocks for a successful slash command processing
@@ -61,7 +61,7 @@ def test_process_slash_command_success(mock_definition, mock_parser):
 
 @patch("duo_workflow_service.slash_commands.goal_parser.parse")
 @patch("duo_workflow_service.slash_commands.definition.SlashCommandDefinition")
-def test_process_slash_command_error(mock_definition, mock_parser):
+def test_process_slash_command_error(_mock_definition, _mock_parser):
     """Test error handling in slash command processing."""
     # TODO: Implement this test once process_slash_command is implemented
     # Set up mocks for slash command processing with error
@@ -88,7 +88,7 @@ def test_process_slash_command_error(mock_definition, mock_parser):
 
 @patch("duo_workflow_service.slash_commands.goal_parser.parse")
 @patch("duo_workflow_service.slash_commands.definition.SlashCommandDefinition")
-def test_process_slash_command_missing_parameters(mock_definition, mock_parser):
+def test_process_slash_command_missing_parameters(_mock_definition, _mock_parser):
     """Test handling missing required parameters."""
     # TODO: Implement this test once process_slash_command is implemented
     # This would test the case where a slash command is missing required parameters

@@ -84,6 +84,7 @@ def _set_task_status(args: dict, plan: Plan) -> tuple[Plan, str]:
     return plan, f"Task not found: {args['task_id']}"
 
 
+# pylint: disable=unused-argument
 def _create_plan(args: dict, plan: Plan) -> tuple[Plan, str]:
     tasks = args.get("tasks", "")
     steps: List[Task] = []

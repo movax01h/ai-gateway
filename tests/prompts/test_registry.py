@@ -378,9 +378,9 @@ def registry(
 
 
 class TestLocalPromptRegistry:
+    @pytest.mark.usefixtures("mock_fs")
     def test_from_local_yaml(
         self,
-        mock_fs: FakeFilesystem,
         model_factories: dict[ModelClassProvider, TypeModelFactory],
         prompts_registered: dict[str, PromptRegistered],
         internal_event_client: Mock,
@@ -780,11 +780,10 @@ class TestLocalPromptRegistry:
         assert prompt.model_name == expected_model
         assert binding.kwargs == expected_kwargs
 
+    @pytest.mark.usefixtures("mock_fs")
     def test_default_prompts(
         self,
-        mock_fs: FakeFilesystem,
         model_factories: dict[ModelClassProvider, TypeModelFactory],
-        prompts_registered: dict[str, PromptRegistered],
         internal_event_client: Mock,
         model_limits: ConfigModelLimits,
     ):
@@ -803,7 +802,6 @@ class TestLocalPromptRegistry:
 
     def test_get_prompt_config_no_compatible_versions(
         self,
-        prompts_registered: dict[str, PromptRegistered],
         model_factories: dict[ModelClassProvider, TypeModelFactory],
         internal_event_client: Mock,
         model_limits: ConfigModelLimits,
@@ -865,9 +863,9 @@ class TestLocalPromptRegistry:
             str(exc_info.value) == "No prompt version found matching the query: 2.0.0"
         )
 
+    @pytest.mark.usefixtures("mock_fs")
     def test_load_prompt_without_unit_primitive(
         self,
-        mock_fs: FakeFilesystem,
         model_factories,
         internal_event_client: Mock,
         model_limits: ConfigModelLimits,
@@ -923,7 +921,6 @@ class TestLocalPromptRegistry:
 
     def test_get_on_behalf_no_unit_primitive(
         self,
-        registry: LocalPromptRegistry,
         user: StarletteUser,
         prompt: Prompt,
         internal_event_client: Mock,

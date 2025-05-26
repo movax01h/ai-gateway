@@ -48,7 +48,7 @@ class AsyncStream(AsyncIterator[_T]):
 
 
 class AsyncClient(AsyncMock):
-    async def send(self, *args, **kwargs):
+    async def send(self, *_args, **_kwargs):
         return httpx.Response(
             status_code=status.HTTP_200_OK,
             headers={
@@ -61,7 +61,7 @@ class AsyncClient(AsyncMock):
 
 
 class ProxyClient(AsyncMock):
-    async def proxy(self, *args, **kwargs):
+    async def proxy(self, *_args, **_kwargs):
         return fastapi.Response(
             content=json.dumps({"response": "mocked"}).encode("utf-8"),
             status_code=status.HTTP_200_OK,
@@ -70,7 +70,7 @@ class ProxyClient(AsyncMock):
 
 
 class SearchClient(AsyncMock):
-    async def search(self, *args, **kwargs):
+    async def search(self, *_args, **_kwargs):
         return {}
 
 
@@ -133,10 +133,11 @@ class FakeModel(SimpleChatModel):
 
     def _call(
         self,
-        messages: List[BaseMessage],
-        stop: Optional[List[str]] = None,
+        messages: List[BaseMessage],  # pylint: disable=unused-argument
+        stop: Optional[List[str]] = None,  # pylint: disable=unused-argument
+        # pylint: disable=unused-argument
         run_manager: Optional[CallbackManagerForLLMRun] = None,
-        **kwargs: Any,
+        **_kwargs: Any,
     ) -> str:
         return "mock"
 

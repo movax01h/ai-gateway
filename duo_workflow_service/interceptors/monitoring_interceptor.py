@@ -140,7 +140,7 @@ class MonitoringInterceptor(ServerInterceptor):
     # pylint: disable=too-many-positional-arguments
     def _handle_error(
         self,
-        e: Exception,
+        e: Exception,  # pylint: disable=unused-argument
         grpc_type: GRPCMethodType,
         grpc_service_name: str,
         grpc_method_name: str,

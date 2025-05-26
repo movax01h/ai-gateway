@@ -146,10 +146,10 @@ async def test_vertex_ai_search_with_retry_failed_all_attempts(
         ("10.11.12-pre", "gitlab-docs-10-11"),
     ],
 )
+@pytest.mark.usefixtures("mock_vertex_search_response")
 async def test_vertex_ai_search(
     mock_search_service_client,
     mock_vertex_search_request,
-    mock_vertex_search_response,
     mock_vertex_search_struct_data,
     gl_version,
     expected_data_store_id,

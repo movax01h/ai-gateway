@@ -36,7 +36,7 @@ class MockInstrumentor:
         self.watcher.register_lang = Mock()
 
     @contextmanager
-    def watch(self, prompt: str, **kwargs: Any):
+    def watch(self, _prompt: str, **_kwargs: Any):
         yield self.watcher
 
 
@@ -79,7 +79,7 @@ def _side_effect_unknown_tpl(
 
 
 def _side_effect_unknown_tpl_palm(
-    prefix: str,
+    _prefix: str,
     _suffix: str,
     filename: str,
     model_output: str,
@@ -119,9 +119,9 @@ def _side_effect_lang_prepended(
 
 
 def _side_effect_with_suffix(
-    content: str,
+    _content: str,
     suffix: str,
-    filename: str,
+    _filename: str,
     model_output: str,
     safety_attributes: SafetyAttributes,
 ):
@@ -147,12 +147,12 @@ def _side_effect_with_suffix(
 
 def _side_effect_with_imports(
     content: str,
-    suffix: str,
-    filename: str,
+    _suffix: str,
+    _filename: str,
     model_output: str,
     safety_attributes: SafetyAttributes,
 ):
-    def _fn(prompt: str, suffix: str):
+    def _fn(_prompt: str, _suffix: str):
         assert content.startswith("import os\nimport pytest")
 
         return [
@@ -165,13 +165,13 @@ def _side_effect_with_imports(
 
 
 def _side_effect_with_tokens_consumption_metadata(
-    content: str,
-    suffix: str,
-    filename: str,
+    _content: str,
+    _suffix: str,
+    _filename: str,
     model_output: str,
     safety_attributes: SafetyAttributes,
 ):
-    def _fn(prompt: str, suffix: str):
+    def _fn(_prompt: str, _suffix: str):
         return [
             TextGenModelOutput(
                 text=model_output,
@@ -185,26 +185,26 @@ def _side_effect_with_tokens_consumption_metadata(
 
 
 def _side_effect_with_connection_exception(
-    content: str,
-    suffix: str,
-    filename: str,
-    model_output: str,
-    safety_attributes: SafetyAttributes,
+    _content: str,
+    _suffix: str,
+    _filename: str,
+    _model_output: str,
+    _safety_attributes: SafetyAttributes,
 ):
-    def _fn(prompt: str, suffix: str):
+    def _fn(_prompt: str, _suffix: str):
         raise VertexAPIConnectionError("connection exception")
 
     return _fn
 
 
 def _side_effect_with_status_exception(
-    content: str,
-    suffix: str,
-    filename: str,
-    model_output: str,
-    safety_attributes: SafetyAttributes,
+    _content: str,
+    _suffix: str,
+    _filename: str,
+    _model_output: str,
+    _safety_attributes: SafetyAttributes,
 ):
-    def _fn(prompt: str, suffix: str):
+    def _fn(_prompt: str, _suffix: str):
         VertexAPIStatusError.code = 404
         raise VertexAPIStatusError("status exception")
 

@@ -37,7 +37,8 @@ def fastapi_server_app(mock_config: Config) -> FastAPI:
 
 @pytest.fixture
 def client(
-    fastapi_server_app: FastAPI, mock_container: containers.Container
+    fastapi_server_app: FastAPI,
+    mock_container: containers.Container,  # pylint: disable=unused-argument
 ) -> TestClient:
     return TestClient(fastapi_server_app)
 
@@ -54,10 +55,10 @@ def test_healthz(client: TestClient):
     assert response.status_code == 200
 
 
+@pytest.mark.usefixtures("mock_completions_legacy")
 def test_ready(
     client: TestClient,
     mock_generations: Mock,
-    mock_completions_legacy: Mock,
     mock_llm_text: Mock,
 ):
     with patch("ai_gateway.api.monitoring.cloud_connector_ready", return_value=True):
@@ -119,12 +120,8 @@ def model_failure(*args, **kwargs):
 # assert response.status_code == 503
 
 
-def test_ready_anthropic_failure(
-    client: TestClient,
-    mock_generations: Mock,
-    mock_completions_legacy: Mock,
-    mock_llm_text: Mock,
-):
+@pytest.mark.usefixtures("mock_completions_legacy", "mock_llm_text")
+def test_ready_anthropic_failure(client: TestClient, mock_generations: Mock):
     mock_generations.side_effect = model_failure
 
     response = client.get("/monitoring/ready")
@@ -153,25 +150,18 @@ def test_ready_anthropic_failure(
     assert response.status_code == 503
 
 
-def test_ready_fireworks_failure(
-    client: TestClient,
-    mock_generations: Mock,
-    mock_completions_legacy: Mock,
-    mock_llm_text: Mock,
-):
+@pytest.mark.usefixtures("mock_generations", "mock_completions_legacy")
+def test_ready_fireworks_failure(client: TestClient, mock_llm_text: Mock):
     mock_llm_text.side_effect = model_failure
     response = client.get("/monitoring/ready")
 
     assert response.status_code == 503
 
 
-def test_ready_cloud_connector_failure_from_library(
-    client: TestClient,
-    mock_generations: Mock,
-    mock_completions_legacy: Mock,
-    mock_llm_text: Mock,
-    mock_config: Config,
-):
+@pytest.mark.usefixtures(
+    "mock_generations", "mock_completions_legacy", "mock_llm_text", "mock_config"
+)
+def test_ready_cloud_connector_failure_from_library(client: TestClient):
     with patch("ai_gateway.api.monitoring.cloud_connector_ready", return_value=False):
         response = client.get("/monitoring/ready")
 
@@ -197,13 +187,12 @@ class TestCustomModelEnabled:
             },
         }
 
+    @pytest.mark.usefixtures(
+        "mock_generations", "mock_completions_legacy", "mock_llm_text", "mock_config"
+    )
     def test_ready_custom_models_enabled_skips_cloud_connector(
         self,
         client: TestClient,
-        mock_generations: Mock,
-        mock_completions_legacy: Mock,
-        mock_llm_text: Mock,
-        mock_config: Config,
     ):
         # Even if cloud_connector_ready would return False, the endpoint should still work
         with patch(

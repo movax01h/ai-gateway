@@ -162,7 +162,7 @@ class TestSlashCommandDefinition:
             "  max_tokens: 1024\n"
         ),
     )
-    def test_load_slash_command_definition_success(self, mock_file, mock_exists):
+    def test_load_slash_command_definition_success(self, _mock_file, mock_exists):
         """Test loading a slash command definition from YAML."""
         # TODO: Implement this test once the load_slash_command_definition method is fully implemented
         # Mock that the file exists
@@ -194,7 +194,7 @@ class TestSlashCommandDefinition:
 
     @patch("pathlib.Path.exists")
     @patch("builtins.open", new_callable=mock_open, read_data="invalid: yaml: content")
-    def test_load_slash_command_definition_invalid_yaml(self, mock_file, mock_exists):
+    def test_load_slash_command_definition_invalid_yaml(self, _mock_file, mock_exists):
         """Test error handling when YAML is invalid."""
         # TODO: Implement this test once the load_slash_command_definition method is fully implemented
         # Mock that the file exists

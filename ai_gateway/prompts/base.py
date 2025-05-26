@@ -48,7 +48,10 @@ class PromptLoggingHandler(BaseCallbackHandler):
     """
 
     def on_llm_start(
-        self, serialized: dict[str, Any], prompts: list[str], **kwargs: Any
+        self,
+        serialized: dict[str, Any],  # pylint: disable=unused-argument
+        prompts: list[str],
+        **_kwargs: Any,
     ) -> Any:
         get_request_logger("prompt").info(
             "Performing LLM request", prompt="\n".join(prompts)
@@ -228,7 +231,9 @@ class Prompt(RunnableBinding[Input, Output]):
 
     @classmethod
     def _build_prompt_template(
-        cls, prompt_template: dict[str, str], model_config: ModelConfig
+        cls,
+        prompt_template: dict[str, str],
+        model_config: ModelConfig,  # pylint: disable=unused-argument
     ) -> Runnable[Input, PromptValue]:
         messages = []
 

@@ -48,7 +48,8 @@ def patch_unit_primitive():
 
 
 @pytest.mark.asyncio
-async def test_feature_category(patch_feature_category):
+@pytest.mark.usefixtures("patch_feature_category")
+async def test_feature_category():
     @feature_category(DummyGitLabFeatureCategory.AWESOME_CATEGORY_1)
     async def to_be_decorated():
         pass
@@ -110,13 +111,12 @@ def test_current_feature_category():
         ),
     ],
 )
+@pytest.mark.usefixtures("patch_unit_primitive", "patch_feature_category")
 async def test_feature_categories(
     headers,
     expected_error,
     expected_unit_primitive,
     expected_category,
-    patch_unit_primitive,
-    patch_feature_category,
 ):
     @feature_categories(
         {
@@ -124,7 +124,7 @@ async def test_feature_categories(
             DummyGitLabUnitPrimitive.AWESOME_FEATURE_2: DummyGitLabFeatureCategory.AWESOME_CATEGORY_2,
         }
     )
-    async def to_be_decorated(request: Request):
+    async def to_be_decorated(request: Request):  # pylint: disable=unused-argument
         pass
 
     request = Mock(spec=Request)
@@ -184,7 +184,7 @@ async def test_track_metadata(
     expected_context: dict,
 ):
     @track_metadata(path_param, path_param_unit_primitive_map)
-    async def to_be_decorated(request: Request):
+    async def to_be_decorated(request: Request):  # pylint: disable=unused-argument
         pass
 
     request = Mock(spec=Request)

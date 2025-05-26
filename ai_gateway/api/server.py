@@ -193,7 +193,7 @@ async def model_api_exception_handler(request: Request, exc: ModelAPIError) -> R
 
 
 async def validation_exception_handler(
-    request: Request, exc: RequestValidationError
+    request: Request, exc: RequestValidationError  # pylint: disable=unused-argument
 ) -> JSONResponse:
     if can_log_request_data():
         context["exception_message"] = str(exc)

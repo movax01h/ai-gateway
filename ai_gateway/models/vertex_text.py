@@ -125,7 +125,7 @@ class KindVertexTextModel(StrEnum):
     # It's necessary because we're using LiteLLM abstraction
     # instead of the Vertex AI SDK directly for the codestral@2405
     # model in code completions
-    def _text_provider_prefix(self, provider):
+    def _text_provider_prefix(self, provider):  # pylint: disable=unused-argument
         # KindModelProvider.VERTEX_AI is 'vertex-ai', whereas LiteLLM uses 'vertex_ai' as the key for Vertex provider
         # We need to transform the provider prefix to what's compatible with LiteLLM
         return "vertex_ai"
@@ -160,7 +160,7 @@ class PalmCodeGenBaseModel(TextGenModelBase):
         top_k: int,
         candidate_count: int = 1,
         stop_sequences: Optional[Sequence[str]] = None,
-        code_context: Optional[Sequence[str]] = None,
+        code_context: Optional[Sequence[str]] = None,  # pylint: disable=unused-argument
     ) -> (
         TextGenModelOutput | list[TextGenModelOutput] | AsyncIterator[TextGenModelChunk]
     ):

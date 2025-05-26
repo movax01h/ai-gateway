@@ -39,7 +39,7 @@ class TestEnabledInstanceVerboseAiLogsHeaderPlugin:
 
     @pytest.mark.asyncio
     @pytest.mark.parametrize("headers", [[(HEADER_KEY.encode(), b"true")]])
-    async def test_process_request_with_header(self, headers, mock_request, plugin):
+    async def test_process_request_with_header(self, mock_request, plugin):
         result = await plugin.process_request(mock_request)
         assert result
 
@@ -56,7 +56,7 @@ class TestEnabledInstanceVerboseAiLogsHeaderPlugin:
 class TestEnabledInstanceVerboseAiLogsHeader:
     @pytest.fixture
     def client(self):
-        async def test_endpoint(request):
+        async def test_endpoint(_request):
             return JSONResponse(context.data)
 
         app = Starlette(
