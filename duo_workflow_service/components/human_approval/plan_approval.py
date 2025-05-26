@@ -19,6 +19,6 @@ class PlanApprovalComponent(HumanApprovalComponent):
         self, state: WorkflowState
     ) -> result.Result[str, RuntimeError]:
         return result.Ok(
-            "On the left, review the proposed plan. Then ask questions or request changes. "
+            "Review the proposed plan. Then ask questions or request changes. "
             "To execute the plan, select Approve plan."
         )

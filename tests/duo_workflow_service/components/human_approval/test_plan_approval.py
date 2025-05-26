@@ -112,7 +112,7 @@ class TestPlanApprovalComponent:
             chat_log = response["ui_chat_log"][0]
             assert chat_log["correlation_id"] is None
             assert chat_log["message_type"] == MessageTypeEnum.REQUEST
-            assert "review the proposed plan" in chat_log["content"]
+            assert "Review the proposed plan" in chat_log["content"]
             assert "select Approve plan" in chat_log["content"]
             assert chat_log["timestamp"] is not None
             assert chat_log["status"] == ToolStatus.SUCCESS
