@@ -1,6 +1,8 @@
 lint:
   extends: .poetry
   stage: test
+  needs:
+    - install
   script:
     - make lint-code
     - poetry lock --no-cache
@@ -16,6 +18,8 @@ lint:
 lint:model_config_files:
   stage: test
   extends: .poetry
+  needs:
+    - install
   rules:
     - changes:
         - "ai_gateway/model_selection/*.{yml}"
@@ -25,6 +29,7 @@ lint:model_config_files:
 lint:doc:
   stage: test
   image: ${DOCS_LINT_IMAGE}
+  needs: []
   rules:
     - changes:
         - "**/*.{md}"

@@ -80,9 +80,8 @@ def convert_v1_to_v2_inputs(chat_request: ChatRequest) -> AgentRequest:
         messages = []
 
         for message_data in payload.content:
-            message_data = message_data.model_dump()
-            role = message_data["role"]
-            content = message_data["content"]
+            role = message_data.role
+            content = message_data.content
 
             if role == "system":
                 system_message_buffer.append(content)
@@ -95,7 +94,7 @@ def convert_v1_to_v2_inputs(chat_request: ChatRequest) -> AgentRequest:
                 message = Message(role=Role.USER, content=full_user_content)
                 messages.append(message)
             else:
-                message = Message(message_data)
+                message = Message(**message_data.model_dump())
                 messages.append(message)
 
     return AgentRequest(

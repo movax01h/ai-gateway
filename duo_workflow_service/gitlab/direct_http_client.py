@@ -60,6 +60,6 @@ class DirectGitLabHttpClient(GitlabHttpClient):
         # Get the session from the singleton connection pool
         session = connection_pool.session
 
-        async with session.request(method, url, headers=headers, **kwargs) as response:
+        async with session.request(method, url, headers=headers, **kwargs) as response:  # type: ignore
             raw_response = await response.text()
             return self._parse_response(raw_response, parse_json, object_hook)
