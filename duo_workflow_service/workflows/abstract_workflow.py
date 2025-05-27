@@ -101,7 +101,9 @@ class AbstractWorkflow(ABC):
         self._workflow_type = workflow_type
 
     async def run(self, goal: str) -> None:
-        with duo_workflow_metrics.time_workflow(workflow_type=self.__class__.__name__):
+        with duo_workflow_metrics.time_workflow(
+            workflow_type=self._workflow_type.value
+        ):
             extended_logging = self._workflow_metadata.get("extended_logging", False)
             tracing_metadata = {
                 "git_url": self._workflow_metadata.get("git_url", ""),
