@@ -24,6 +24,14 @@ WORKFLOW_TIME_SCALE_BUCKETS = [
 ]
 LLM_TIME_SCALE_BUCKETS = [0.25, 0.5, 1, 2, 4, 7, 10, 20, 30, 60]
 
+ANTHROPIC_STOP_REASONS = [
+    "end_turn",
+    "max_tokens",
+    "stop_sequence",
+    "tool_use",
+    "unknown",
+]
+
 
 class DuoWorkflowMetrics:
     def __init__(self, registry=REGISTRY):
@@ -81,19 +89,11 @@ class DuoWorkflowMetrics:
     def count_llm_response(
         self, model="unknown", request_type="unknown", stop_reason="unknown"
     ):
-        # Documented stop reasons for Anthropic models
-        anthropic_stop_reasons = [
-            "end_turn",
-            "max_tokens",
-            "stop_sequence",
-            "tool_use",
-            "unknown",
-        ]
         self.llm_response_counter.labels(
             model=model,
             request_type=request_type,
             stop_reason=(
-                stop_reason if stop_reason in anthropic_stop_reasons else "other"
+                stop_reason if stop_reason in ANTHROPIC_STOP_REASONS else "other"
             ),
         ).inc()
 
