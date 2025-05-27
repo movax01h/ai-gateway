@@ -8,6 +8,14 @@ models:
       temperature: 0.2
       max_tokens: 4_096
       max_retries: 1
+  - name: "Claude Sonnet 4.0 - Anthropic"
+    gitlab_identifier: "claude_sonnet_4_20250514"
+    provider: "anthropic"
+    provider_identifier: "claude-sonnet-4-20250514"
+    params:
+      temperature: 0.0
+      max_tokens: 4_096
+      max_retries: 1
   - name: "Claude Sonnet 3.7 - Anthropic"
     gitlab_identifier: "claude_sonnet_3_7_20250219"
     provider: "anthropic"
