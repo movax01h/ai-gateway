@@ -97,6 +97,7 @@ class Workflow(AbstractWorkflow):
     async def _execute_agent(self, state: ChatWorkflowState) -> Dict[str, Any]:
         # First run the agent
         agent_result = await self._agent.run(state)
+        contextElements = self._context_elements or []
 
         history: List[BaseMessage] = agent_result["conversation_history"][AGENT_NAME]
         if not history:
@@ -118,12 +119,15 @@ class Workflow(AbstractWorkflow):
                     status=ToolStatus.SUCCESS,
                     correlation_id=None,
                     tool_info=None,
+                    context_elements=contextElements,
                 )
             ]
 
         return result
 
     def get_workflow_state(self, goal: str) -> ChatWorkflowState:
+        contextElements = self._context_elements or []
+
         initial_ui_chat_log = UiChatLog(
             message_type=MessageTypeEnum.TOOL,
             content=f"Starting chat: {goal}",
@@ -131,6 +135,7 @@ class Workflow(AbstractWorkflow):
             status=ToolStatus.SUCCESS,
             correlation_id=None,
             tool_info=None,
+            context_elements=contextElements,
         )
 
         system_prompt = CHAT_SYSTEM_PROMPT.format(
@@ -151,7 +156,7 @@ class Workflow(AbstractWorkflow):
             },
             ui_chat_log=[initial_ui_chat_log],
             last_human_input=None,
-            context_elements=self._context_elements or [],
+            context_elements=contextElements,
         )
 
     async def get_graph_input(self, goal: str, status_event: str) -> Any:

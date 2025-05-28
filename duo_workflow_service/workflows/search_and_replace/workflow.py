@@ -181,6 +181,7 @@ def _log_ai_message(state: SearchAndReplaceWorkflowState):
                 status=ToolStatus.SUCCESS,
                 correlation_id=None,
                 tool_info=None,
+                context_elements=None,
             )
         ],
         "conversation_history": {
@@ -212,6 +213,7 @@ def _detect_affected_components_output_parser(
             status=ToolStatus.SUCCESS,
             correlation_id=None,
             tool_info=None,
+            context_elements=None,
         )
     ]
 
@@ -225,6 +227,7 @@ def _detect_affected_components_output_parser(
                 status=ToolStatus.SUCCESS,
                 correlation_id=None,
                 tool_info=None,
+                context_elements=None,
             )
         )
 
@@ -279,6 +282,7 @@ def _append_affected_file(
                 status=ToolStatus.FAILURE,
                 correlation_id=None,
                 tool_info=None,
+                context_elements=None,
             )
         )
     else:
@@ -290,6 +294,7 @@ def _append_affected_file(
                 status=ToolStatus.SUCCESS,
                 correlation_id=None,
                 tool_info=None,
+                context_elements=None,
             )
         )
 
@@ -497,6 +502,7 @@ class Workflow(AbstractWorkflow):
             status=ToolStatus.SUCCESS,
             correlation_id=None,
             tool_info=None,
+            context_elements=None,
         )
 
         return SearchAndReplaceWorkflowState(

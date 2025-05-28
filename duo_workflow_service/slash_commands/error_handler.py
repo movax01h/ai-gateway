@@ -51,6 +51,7 @@ def create_error_ui_chat_log(error_message: str) -> UiChatLog:
         status=SlashCommandStatus.FAILURE,
         correlation_id=None,
         tool_info=None,
+        context_elements=None,
     )
 
 
