@@ -139,7 +139,8 @@ class DuoBaseTool(BaseTool):
                 and merge_request_iid != url_merge_request_iid
             ):
                 errors.append(
-                    f"Merge Request ID mismatch: provided '{merge_request_iid}' but URL contains '{url_merge_request_iid}'"
+                    f"Merge Request ID mismatch: provided '{merge_request_iid}' but URL contains "
+                    f"'{url_merge_request_iid}'"
                 )
 
             # Use the IDs from the URL

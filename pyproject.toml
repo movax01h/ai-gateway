@@ -155,6 +155,9 @@ load-plugins = [
   "lints.file_naming_for_tests",
 ]
 
+[tool.pylint.format]
+max-line-length = 120
+
 [tool.pylint.messages_control]
 disable = [
   "missing-module-docstring",

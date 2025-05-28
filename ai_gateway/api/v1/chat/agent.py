@@ -108,7 +108,8 @@ def convert_v1_to_v2_inputs(chat_request: ChatRequest) -> AgentRequest:
     response_model=ChatResponse,
     deprecated=True,
     summary="Deprecated endpoint",
-    description="This endpoint is deprecated and will be removed https://gitlab.com/gitlab-org/modelops/applied-ml/code-suggestions/ai-assist/-/issues/825",
+    description="This endpoint is deprecated and will be removed "
+    "https://gitlab.com/gitlab-org/modelops/applied-ml/code-suggestions/ai-assist/-/issues/825",
     status_code=status.HTTP_200_OK,
 )
 @authorize_with_unit_primitive("chat_invokable", chat_invokables=CHAT_INVOKABLES)

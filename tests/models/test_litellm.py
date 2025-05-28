@@ -751,7 +751,8 @@ class TestLiteLlmTextGenModel:
                     "api_key": "fireworks-api-key",
                     "messages": [
                         {
-                            "content": "<|fim_prefix|>def hello_world():<|fim_suffix|>def goodbye_world():<|fim_middle|>",
+                            "content": "<|fim_prefix|>def hello_world():<|fim_suffix|>"
+                            "def goodbye_world():<|fim_middle|>",
                             "role": Role.USER,
                         }
                     ],

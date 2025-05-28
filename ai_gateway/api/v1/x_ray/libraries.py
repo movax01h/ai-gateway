@@ -32,7 +32,8 @@ router = APIRouter()
     response_model=XRayResponse,
     deprecated=True,
     summary="Deprecated endpoint",
-    description="This endpoint is deprecated and will be removed https://gitlab.com/gitlab-org/modelops/applied-ml/code-suggestions/ai-assist/-/issues/692",
+    description="This endpoint is deprecated and will be removed "
+    "https://gitlab.com/gitlab-org/modelops/applied-ml/code-suggestions/ai-assist/-/issues/692",
 )
 @feature_category(GitLabFeatureCategory.CODE_SUGGESTIONS)
 async def libraries(

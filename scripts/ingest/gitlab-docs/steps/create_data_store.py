@@ -25,7 +25,8 @@ def create_data_store():
         json_schema = f.read()
 
     schema = discoveryengine.Schema(
-        name=f"projects/{project_id}/locations/global/collections/default_collection/dataStores/{data_store_id}/schemas/default_schema",
+        name=f"projects/{project_id}/locations/global/collections/default_collection/dataStores/{data_store_id}/"
+        "schemas/default_schema",
         json_schema=json_schema,
     )
 

@@ -97,7 +97,10 @@ def _pretrim_large_messages(
     for message in messages:
         if token_counter.count_tokens([message]) > MAX_SINGLE_MESSAGE_TOKENS:
             message_copy = message.model_copy()
-            message_copy.content = "Previous message was too large for context window and was omitted. Please respond based on the visible context."
+            message_copy.content = (
+                "Previous message was too large for context window and was omitted. Please respond "
+                "based on the visible context."
+            )
             processed_messages.append(message_copy)
         else:
             processed_messages.append(message)

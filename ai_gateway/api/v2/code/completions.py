@@ -529,10 +529,11 @@ def _build_code_completions(
         # sets the default temperature and max_output_tokens in the `generate` function signature
         # To override those values, the kwargs passed to `generate` is updated here
         # For further details, see:
-        #     https://gitlab.com/gitlab-org/modelops/applied-ml/code-suggestions/ai-assist/-/merge_requests/1172#note_2060587592
+        # https://gitlab.com/gitlab-org/modelops/applied-ml/code-suggestions/ai-assist/-/merge_requests/1172#note_2060587592 # pylint: disable=line-too-long
         #
         # The temperature value is taken from Mistral's docs: https://docs.mistral.ai/api/#operation/createFIMCompletion
-        # context_max_percent is set to 0.3 to limit the amount of context right now because latency increases with larger context
+        # context_max_percent is set to 0.3 to limit the amount of context right now because latency increases with
+        # larger context
         kwargs.update(
             {"temperature": 0.7, "max_output_tokens": 64, "context_max_percent": 0.3}
         )

@@ -9,7 +9,8 @@ class UnsafeDependencyResolution(BaseChecker):
         "W5001": (
             "Unsafe dependency resolution detected.",
             "unsafe-dependency-resolution",
-            "See https://gitlab.com/gitlab-org/modelops/applied-ml/code-suggestions/ai-assist/-/merge_requests/606 for more information.",
+            "See https://gitlab.com/gitlab-org/modelops/applied-ml/code-suggestions/ai-assist/-/merge_requests/606 "
+            "for more information.",
         )
     }
 

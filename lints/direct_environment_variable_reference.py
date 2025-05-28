@@ -9,7 +9,7 @@ class DirectEnvironmentVariableReference(BaseChecker):
         "W5002": (
             "Direct environment variable reference detected.",
             "direct-environment-variable-reference",
-            "See https://gitlab.com/gitlab-org/modelops/applied-ml/code-suggestions/ai-assist/-/blob/main/docs/application_settings.md for more information.",
+            "See https://gitlab.com/gitlab-org/modelops/applied-ml/code-suggestions/ai-assist/-/blob/main/docs/application_settings.md for more information.",  # pylint: disable=line-too-long
         )
     }
 

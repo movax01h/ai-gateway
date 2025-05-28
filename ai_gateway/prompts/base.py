@@ -181,7 +181,7 @@ class Prompt(RunnableBinding[Input, Output]):
         config: Optional[RunnableConfig] = None,
         **kwargs: Optional[Any],
     ) -> AsyncIterator[Output]:
-        # pylint: disable=contextmanager-generator-missing-cleanup
+        # pylint: disable=contextmanager-generator-missing-cleanup,line-too-long
         # To properly address this pylint issue, the upstream function would need to be altered to ensure proper cleanup.
         # See https://pylint.readthedocs.io/en/latest/user_guide/messages/warning/contextmanager-generator-missing-cleanup.html
         with self.instrumentator.watch(
@@ -197,7 +197,7 @@ class Prompt(RunnableBinding[Input, Output]):
             self.handle_usage_metadata(watcher, cb.usage_metadata)
 
             await watcher.afinish()
-        # pylint: enable=contextmanager-generator-missing-cleanup
+        # pylint: enable=contextmanager-generator-missing-cleanup,line-too-long
 
     def handle_usage_metadata(
         self,

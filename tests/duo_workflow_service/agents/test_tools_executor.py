@@ -581,13 +581,17 @@ async def test_run_with_state_manipulating_tools(
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
-    "tool_call, tool_side_effect, tool_args_schema, expected_response, expected_error, expected_log_prefix, expected_tool_info",
+    "tool_call, tool_side_effect, tool_args_schema, expected_response, expected_error, expected_log_prefix,"
+    "expected_tool_info",
     [
         (
             {"id": "1", "name": "test_tool", "args": {}},
             TypeError("Wrong arguments"),
             AddNewTaskInput,
-            "Tool test_tool execution failed due to wrong arguments. You must adhere to the tool args schema! The schema is: {'properties': {'description': {'description': 'The description of the new task to add', 'title': 'Description', 'type': 'string'}}, 'required': ['description'], 'title': 'AddNewTaskInput', 'type': 'object'}",
+            "Tool test_tool execution failed due to wrong arguments. You must adhere to the tool args schema! The "
+            "schema is: {'properties': {'description': {'description': 'The description of the new task to add', "
+            "'title': 'Description', 'type': 'string'}}, 'required': ['description'], 'title': 'AddNewTaskInput', "
+            "'type': 'object'}",
             False,
             "Failed: Using test_tool:  - Invalid arguments",
             ToolInfo(name="test_tool", args={}),

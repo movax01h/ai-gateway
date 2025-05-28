@@ -91,7 +91,7 @@ class CreateIssueInput(ProjectResourceInput):
     labels: Optional[str] = Field(
         default=None,
         description="""Comma-separated label names to assign to the new issue.
-                                  If a label does not already exist, this creates a new project label and assigns it to the issue.""",
+If a label does not already exist, this creates a new project label and assigns it to the issue.""",
     )
     assignee_ids: Optional[list[int]] = Field(
         default=None, description="The IDs of the users to assign the issue to"
@@ -114,14 +114,14 @@ class CreateIssue(IssueBaseTool):
     name: str = "create_issue"
     description: str = f"""Create a new issue in a GitLab project.
 
-    {PROJECT_IDENTIFICATION_DESCRIPTION}
+{PROJECT_IDENTIFICATION_DESCRIPTION}
 
-    For example:
-    - Given project_id 13 and the title "Fix bug in login form", the tool call would be:
-        create_issue(project_id=13, title="Fix bug in login form")
-    - Given the URL https://gitlab.com/namespace/project and the title "Fix bug in login form", the tool call would be:
-        create_issue(url="https://gitlab.com/namespace/project", title="Fix bug in login form")
-    """
+For example:
+- Given project_id 13 and the title "Fix bug in login form", the tool call would be:
+    create_issue(project_id=13, title="Fix bug in login form")
+- Given the URL https://gitlab.com/namespace/project and the title "Fix bug in login form", the tool call would be:
+    create_issue(url="https://gitlab.com/namespace/project", title="Fix bug in login form")
+"""
     args_schema: Type[BaseModel] = CreateIssueInput  # type: ignore
 
     async def _arun(self, title: str, **kwargs: Any) -> str:
@@ -154,45 +154,49 @@ class ListIssuesInput(ProjectResourceInput):
     assignee_id: Optional[int] = Field(
         default=None,
         description="""Return issues assigned to the given user ID. It can't be used together with assignee_usernames.
-                              None returns unassigned issues. Any returns issues with an assignee.""",
+None returns unassigned issues. Any returns issues with an assignee.""",
     )
     assignee_usernames: Optional[List[str]] = Field(
         default=None,
+        # pylint: disable=line-too-long
         description="""Return issues assigned to the given username. This works like assignee_id but can't be used together with it. In GitLab CE,
-                        assignee_username can only have one value. If there's more than one, an error will be returned.""",
+assignee_username can only have one value. If there's more than one, an error will be returned.""",
     )
     author_id: Optional[int] = Field(
         default=None,
         description="""Return issues created by the given user id.
-                                     It can't be used together with author_username.
-                                     Combine with scope=all or scope=assigned_to_me.""",
+It can't be used together with author_username.
+Combine with scope=all or scope=assigned_to_me.""",
     )
     author_username: Optional[str] = Field(
         default=None,
         description="""Return issues created by the given username.
-                                           Similar to author_id and it can't be used together with author_id.
-                                           Combine with scope=all or scope=assigned_to_me.""",
+Similar to author_id and it can't be used together with author_id.
+Combine with scope=all or scope=assigned_to_me.""",
     )
     confidential: Optional[bool] = Field(
         default=None, description="Filter confidential or public issues"
     )
     created_after: Optional[str] = Field(
         default=None,
-        description="Return issues created on or after the given time. Expected in ISO 8601 date and time format (YYYY-MM-DDTHH:MM:SSZ)",
+        description="Return issues created on or after the given time. Expected in ISO 8601 date and time format "
+        "(YYYY-MM-DDTHH:MM:SSZ)",
     )
     created_before: Optional[str] = Field(
         default=None,
-        description="Return issues created on or before the given time. Expected in ISO 8601 date and time format (YYYY-MM-DDTHH:MM:SSZ)",
+        description="Return issues created on or before the given time. Expected in ISO 8601 date and time format "
+        "(YYYY-MM-DDTHH:MM:SSZ)",
     )
     due_date: Optional[str] = Field(
         default=None,
+        # pylint: disable=line-too-long
         description="""Return issues that have no due date, are overdue, or whose due date is this week, this month, or between two weeks ago and next month.
-        Accepts: 0 (no due date), any, today, tomorrow, overdue, week, month, next_month_and_previous_two_weeks.""",
+Accepts: 0 (no due date), any, today, tomorrow, overdue, week, month, next_month_and_previous_two_weeks.""",
     )
     health_status: Optional[str] = Field(
         default=None,
         description="""Return issues with the specified health_status. None returns issues with no
-            health status assigned, and Any returns issues with a health status assigned.""",
+health status assigned, and Any returns issues with a health status assigned.""",
     )
     issue_type: Optional[str] = Field(
         default=None,
@@ -200,12 +204,14 @@ class ListIssuesInput(ProjectResourceInput):
     )
     labels: Optional[str] = Field(
         default=None,
+        # pylint: disable=line-too-long
         description="""Comma-separated list of label names, issues must have all labels to be returned.
-                                  None lists all issues with no labels. Any lists all issues with at least one label. Predefined names are case-insensitive.""",
+None lists all issues with no labels. Any lists all issues with at least one label. Predefined names are case-insensitive.""",
     )
     scope: Optional[str] = Field(
         default=None,
-        description="Return issues for the given scope: created_by_me, assigned_to_me or all. Defaults to created_by_me.",
+        description="Return issues for the given scope: created_by_me, assigned_to_me or all. "
+        "Defaults to created_by_me.",
     )
     search: Optional[str] = Field(
         default=None, description="Search issues against their title and description"
@@ -313,7 +319,8 @@ class UpdateIssueInput(IssueResourceInput):
     )
     assignee_ids: Optional[list[int]] = Field(
         default=None,
-        description="The ID of the users to assign the issue to. Set to `0` or provide an empty value to unassign all assignees.",
+        description="The ID of the users to assign the issue to. Set to `0` or provide an empty value to unassign all "
+        "assignees.",
     )
     confidential: Optional[bool] = Field(
         default=None, description="Set to true to make the issue confidential"
@@ -327,7 +334,8 @@ class UpdateIssueInput(IssueResourceInput):
     )
     discussion_locked: Optional[bool] = Field(
         default=None,
-        description="Flag indicating if the issue's discussion is locked. If the discussion is locked only project members can add or edit comments.",
+        description="Flag indicating if the issue's discussion is locked. If the discussion is locked only project "
+        "members can add or edit comments.",
     )
 
 
@@ -384,16 +392,16 @@ class CreateIssueNote(IssueBaseTool):
     name: str = "create_issue_note"
     description: str = f"""Create a new note (comment) on a GitLab issue.
 
-    {ISSUE_IDENTIFICATION_DESCRIPTION}
+{ISSUE_IDENTIFICATION_DESCRIPTION}
 
-    For example:
-    - Given project_id 13, issue_iid 9, and body "This is a comment", the tool call would be:
-        create_issue_note(project_id=13, issue_iid=9, body="This is a comment")
-    - Given the URL https://gitlab.com/namespace/project/-/issues/103 and body "This is a comment", the tool call would be:
-        create_issue_note(url="https://gitlab.com/namespace/project/-/issues/103", body="This is a comment")
+For example:
+- Given project_id 13, issue_iid 9, and body "This is a comment", the tool call would be:
+    create_issue_note(project_id=13, issue_iid=9, body="This is a comment")
+- Given the URL https://gitlab.com/namespace/project/-/issues/103 and body "This is a comment", the tool call would be:
+    create_issue_note(url="https://gitlab.com/namespace/project/-/issues/103", body="This is a comment")
 
-    The body parameter is always required.
-    """
+The body parameter is always required.
+"""
     args_schema: Type[BaseModel] = CreateIssueNoteInput  # type: ignore
 
     async def _arun(self, body: str, **kwargs: Any) -> str:
