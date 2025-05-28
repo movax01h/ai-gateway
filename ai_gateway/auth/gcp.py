@@ -6,8 +6,8 @@ from google.auth.credentials import Credentials, TokenState
 
 
 def access_token() -> str:
-    """
-    Get access token from Google Application Default Credentials (ADC).
+    """Get access token from Google Application Default Credentials (ADC).
+
     See https://google-auth.readthedocs.io/en/latest/user-guide.html#application-default-credentials
     """
 

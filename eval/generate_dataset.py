@@ -15,8 +15,7 @@ from ai_gateway.prompts.base import BasePromptRegistry
 
 
 def get_message_source(prompt_template: dict[str, str]) -> dict[str, str]:
-    """
-    Gets the raw Jinja templates content from include statements.
+    """Gets the raw Jinja templates content from include statements.
 
     Args:
         prompt_template: A dictionary of template strings keyed by their role (e.g., "system", "user")
@@ -152,8 +151,7 @@ def run(
         ),
     ] = None,
 ):
-    """
-    Generate a synthetic dataset for evaluating prompts using templates from the prompt registry.
+    """Generate a synthetic dataset for evaluating prompts using templates from the prompt registry.
 
     Args:
         prompt_id: The ID of the prompt template in the registry (e.g., 'chat/explain_code')

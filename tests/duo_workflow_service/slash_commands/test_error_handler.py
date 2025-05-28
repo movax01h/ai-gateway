@@ -1,6 +1,4 @@
-"""
-Tests for the slash_commands.error_handler module.
-"""
+"""Tests for the slash_commands.error_handler module."""
 
 # pylint: disable=file-naming-for-tests,unused-import
 

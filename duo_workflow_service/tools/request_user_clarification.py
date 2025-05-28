@@ -10,8 +10,8 @@ TOOL_TITLE = "request_user_clarification_tool"
 class RequestUserClarificationTool(BaseModel):
     """Tool for requesting user input with recommendations from the LLM judge Agent.
 
-    This tool is used to structure communication with the user when clarification is needed,
-    particularly in the disambiguation component.
+    This tool is used to structure communication with the user when clarification is needed, particularly in the
+    disambiguation component.
     """
 
     message: str = Field(description="The main message to the user")

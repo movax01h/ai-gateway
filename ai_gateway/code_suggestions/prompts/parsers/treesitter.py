@@ -68,8 +68,7 @@ class CodeParser(BaseCodeParser):
         return counts
 
     def suffix_near_cursor(self, point: tuple[int, int]) -> Optional[str]:
-        """
-        Finds the suffix near the cursor based on language-specific rules.
+        """Finds the suffix near the cursor based on language-specific rules.
 
         Returns None if there are no rules for the language or no relevant context was found.
         """

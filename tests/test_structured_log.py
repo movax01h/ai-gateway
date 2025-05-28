@@ -70,7 +70,7 @@ class TestPreventLoggingIfDisabled:
         feature_flag_enabled: bool
 
     def _setup_logging_patches(self, case):
-        """Helper method to set up common patches for logging tests"""
+        """Helper method to set up common patches for logging tests."""
         return [
             patch(
                 "ai_gateway.structured_logging.ENABLE_REQUEST_LOGGING",

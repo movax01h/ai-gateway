@@ -37,8 +37,7 @@ class LoggingConfig:
 
 
 def setup_logging(json_format: bool, to_file: Optional[str]):
-    """
-    Set up structured logging.
+    """Set up structured logging.
 
     Args:s
         json_format: Whether to use JSON formatting (default: True)

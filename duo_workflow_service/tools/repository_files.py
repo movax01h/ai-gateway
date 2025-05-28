@@ -128,8 +128,8 @@ class GetRepositoryFile(RepositoryFileBaseTool):
         return f"Get repository file {args.file_path} from project {args.project_id} at ref {args.ref}"
 
     def _is_binary_string(self, content):
-        """
-        Detect if content is binary using Perl-inspired heuristic.
+        """Detect if content is binary using Perl-inspired heuristic.
+
         https://code.activestate.com/recipes/173220-test-if-a-file-or-string-is-text-or-binary/
         Returns True if content appears to be binary, False if it's text.
         """

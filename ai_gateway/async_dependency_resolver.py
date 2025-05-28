@@ -1,5 +1,4 @@
-"""
-This module allows you to resolve the dependencies with Python async/coroutines.
+"""This module allows you to resolve the dependencies with Python async/coroutines.
 
 Do NOT use FastAPI's `Depends` and Dependency Injector's Wiring (a.k.a `Provide`/`@inject`) in the following way:
 
@@ -10,10 +9,12 @@ async def chat(
     ...
 ```
 
-This is [an example usage](https://python-dependency-injector.ets-labs.org/examples/fastapi.html) provided by Dependency Injector.
-However, since `Provide` object is not async/coroutine compatible, FastAPI runs a new thread for resolving the dependency.
+This is [an example usage](https://python-dependency-injector.ets-labs.org/examples/fastapi.html) provided by Dependency
+Injector. However, since `Provide` object is not async/coroutine compatible, FastAPI runs a new thread for resolving the
+dependency.
 
-See https://gitlab.com/gitlab-org/modelops/applied-ml/code-suggestions/ai-assist/-/merge_requests/606 for more information.
+See https://gitlab.com/gitlab-org/modelops/applied-ml/code-suggestions/ai-assist/-/merge_requests/606 for more
+information.
 """
 
 from dependency_injector.wiring import Provide, inject

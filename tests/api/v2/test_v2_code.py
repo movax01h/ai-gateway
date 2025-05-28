@@ -1323,7 +1323,7 @@ class TestCodeCompletions:
         )
 
     def test_gitlab_model_provider(self, mock_client):
-        """Test that v2/completions works with 'gitlab' as the model_provider"""
+        """Test that v2/completions works with 'gitlab' as the model_provider."""
 
         test_model = LLMDefinition(
             name="Test Model",

@@ -1,9 +1,7 @@
-"""
-Result module for handling operation outcomes.
+"""Result module for handling operation outcomes.
 
-This module defines a type-safe approach to handling operation results
-inspired by Rust's Result type. It provides Ok and Error types to represent
-successful and failed outcomes, and utilities for working with these types.
+This module defines a type-safe approach to handling operation results inspired by Rust's Result type. It provides Ok
+and Error types to represent successful and failed outcomes, and utilities for working with these types.
 """
 
 from typing import Generic, Literal, TypeGuard, TypeVar, Union
@@ -29,7 +27,7 @@ class Ok(Generic[T_co]):
         return True
 
     def is_err(self) -> Literal[False]:
-        """Ok result always returns False"""
+        """Ok result always returns False."""
         return False
 
 
@@ -50,7 +48,7 @@ class Error(Generic[E_co]):
         return False
 
     def is_err(self) -> Literal[True]:
-        """Error result always returns True"""
+        """Error result always returns True."""
         return True
 
 

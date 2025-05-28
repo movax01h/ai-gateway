@@ -228,17 +228,15 @@ class GrpcServer(contract_pb2_grpc.DuoWorkflowServicer):
 
 
 async def grpc_serve(port: int) -> None:
-    """
-    grpc.keepalive_time_ms: The period (in milliseconds) after which a keepalive ping is
-        sent on the transport.
-    grpc.keepalive_timeout_ms: The amount of time (in milliseconds) the sender of the keepalive
-        ping waits for an acknowledgement. If it does not receive an acknowledgement within
-        this time, it will close the connection.
-    grpc.http2.min_ping_interval_without_data_ms: Minimum allowed time (in milliseconds)
-        between a server receiving successive ping frames without sending any data/header frame.
-    grpc.keepalive_permit_without_calls: If set to 1 (0 : false; 1 : true), allows keepalive
-        pings to be sent even if there are no calls in flight.
-    For more details, check: https://github.com/grpc/grpc/blob/master/doc/keepalive.md
+    """grpc.keepalive_time_ms: The period (in milliseconds) after which a keepalive ping is sent on the transport.
+
+    grpc.keepalive_timeout_ms: The amount of time (in milliseconds) the sender of the keepalive     ping waits for an
+    acknowledgement. If it does not receive an acknowledgement within     this time, it will close the connection.
+    grpc.http2.min_ping_interval_without_data_ms: Minimum allowed time (in milliseconds)     between a server receiving
+    successive ping frames without sending any data/header frame. grpc.keepalive_permit_without_calls: If set to 1 (0 :
+    false; 1 : true), allows keepalive     pings to be sent even if there are no calls in flight. For more details,
+    check:
+    https://github.com/grpc/grpc/blob/master/doc/keepalive.md
     """
     connection_pool.set_options(
         pool_size=100,  # Adjust based on your needs

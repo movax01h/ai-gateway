@@ -262,6 +262,7 @@ class GitLabWorkflow(BaseCheckpointSaver[Any], AbstractAsyncContextManager[Any])
 
     async def __aexit__(self, exc_type, exc_value, trcback):
         """Handle workflow completion and tracking in both success and failure scenarios.
+
         Returns:
             bool: True if workflow completed successfully, False otherwise
         """
@@ -547,9 +548,10 @@ class GitLabWorkflow(BaseCheckpointSaver[Any], AbstractAsyncContextManager[Any])
         checkpoint: Checkpoint,
         metadata: CheckpointMetadata,
     ) -> Optional[WorkflowStatusEventEnum]:
-        """
-        Status events are accepted by GitLab Rails API to change a workflow status from one to another,
-        using a state machine. For example, `drop` status event changes a workflow status from
+        """Status events are accepted by GitLab Rails API to change a workflow status from one to another, using a state
+        machine.
+
+        For example, `drop` status event changes a workflow status from
         `created`, `running` or `paused` to `failed`.
         """
         status_event = None

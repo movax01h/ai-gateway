@@ -11,13 +11,11 @@ __all__ = ["ChatAnthropic"]
 
 
 class ChatAnthropic(_LChatAnthropic):
-    """
-    A wrapper around `langchain_anthropic.ChatAnthropic`
-    that accepts the Anthropic asynchronous client as an input parameter
-    """
+    """A wrapper around `langchain_anthropic.ChatAnthropic` that accepts the Anthropic asynchronous client as an input
+    parameter."""
 
     async_client: AsyncAnthropic
-    """Anthropic async HTTP client"""
+    """Anthropic async HTTP client."""
 
     default_request_timeout: float | None = 60.0
     """Timeout for requests to Anthropic Completion API."""

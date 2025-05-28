@@ -82,8 +82,9 @@ class ModelRequestInstrumentator:
             self.start_time = None
 
         def start(self):
-            """Register the start of the inference request. Sets the start time to be used for
-            duration calculations when `finish()` is called.
+            """Register the start of the inference request.
+
+            Sets the start time to be used for duration calculations when `finish()` is called.
             """
             self.start_time = time.perf_counter()
 
@@ -118,6 +119,7 @@ class ModelRequestInstrumentator:
 
         def finish(self):
             """Register the end of the inference request.
+
             Duration is calculated from the start time set by `start()`.
             """
             INFERENCE_IN_FLIGHT_GAUGE.labels(**self.labels).dec()

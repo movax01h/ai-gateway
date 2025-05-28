@@ -47,7 +47,7 @@ class TestChatAmazonQ:
         return mock.MagicMock()
 
     def assert_chunk_content(self, chunks, expected_content):
-        """Helper method to assert chunk content"""
+        """Helper method to assert chunk content."""
         chunk_list = list(chunks)
         if not expected_content:
             assert len(chunk_list) == 1
@@ -57,7 +57,7 @@ class TestChatAmazonQ:
             assert chunk_list[0].message.content == expected_content
 
     def test_process_complete_reference(self, chat_amazon_q):
-        """Test processing a complete reference with all fields present"""
+        """Test processing a complete reference with all fields present."""
         event = {
             "codeReferenceEvent": {
                 "references": [
@@ -75,7 +75,7 @@ class TestChatAmazonQ:
         self.assert_chunk_content(chunks, expected)
 
     def test_process_multiple_references(self, chat_amazon_q):
-        """Test processing multiple references"""
+        """Test processing multiple references."""
         event = {
             "codeReferenceEvent": {
                 "references": [
@@ -102,7 +102,7 @@ class TestChatAmazonQ:
         self.assert_chunk_content(chunks, expected)
 
     def test_process_missing_optional_fields(self, chat_amazon_q):
-        """Test processing reference with missing optional fields"""
+        """Test processing reference with missing optional fields."""
         event = {
             "codeReferenceEvent": {
                 "references": [
@@ -118,7 +118,7 @@ class TestChatAmazonQ:
         self.assert_chunk_content(chunks, expected)
 
     def test_process_direct_string_values(self, chat_amazon_q):
-        """Test processing reference with direct string values instead of shape objects"""
+        """Test processing reference with direct string values instead of shape objects."""
         event = {
             "codeReferenceEvent": {
                 "references": [
@@ -136,13 +136,13 @@ class TestChatAmazonQ:
         self.assert_chunk_content(chunks, expected)
 
     def test_process_empty_references(self, chat_amazon_q):
-        """Test processing empty references list"""
+        """Test processing empty references list."""
         event = {"codeReferenceEvent": {"references": []}}
         chunks = chat_amazon_q._process_code_reference_event(event)
         self.assert_chunk_content(chunks, "")
 
     def test_process_mixed_shape_and_direct_values(self, chat_amazon_q):
-        """Test processing reference with mixed shape objects and direct values"""
+        """Test processing reference with mixed shape objects and direct values."""
         event = {
             "codeReferenceEvent": {
                 "references": [
@@ -160,7 +160,7 @@ class TestChatAmazonQ:
         self.assert_chunk_content(chunks, expected)
 
     def test_process_null_values(self, chat_amazon_q):
-        """Test processing reference with null values"""
+        """Test processing reference with null values."""
         event = {
             "codeReferenceEvent": {
                 "references": [
@@ -178,7 +178,7 @@ class TestChatAmazonQ:
         self.assert_chunk_content(chunks, expected)
 
     def test_process_invalid_event_structure(self, chat_amazon_q):
-        """Test processing invalid event structure"""
+        """Test processing invalid event structure."""
         invalid_events = [
             {},  # Empty event
             {"wrongKey": {}},  # Wrong key
@@ -191,7 +191,7 @@ class TestChatAmazonQ:
             self.assert_chunk_content(chunks, "")
 
     def test_process_invalid_reference_data(self, chat_amazon_q):
-        """Test processing invalid reference data"""
+        """Test processing invalid reference data."""
         event = {
             "codeReferenceEvent": {
                 "references": [
@@ -209,7 +209,7 @@ class TestChatAmazonQ:
         self.assert_chunk_content(chunks, "")
 
     def test_process_repository_only(self, chat_amazon_q):
-        """Test processing reference with only repository field"""
+        """Test processing reference with only repository field."""
         event = {
             "codeReferenceEvent": {"references": [{"repository": {"shape": "aws-sdk"}}]}
         }
@@ -218,7 +218,7 @@ class TestChatAmazonQ:
         self.assert_chunk_content(chunks, expected)
 
     def test_process_multiple_mixed_references(self, chat_amazon_q):
-        """Test processing multiple references with mixed valid and invalid data"""
+        """Test processing multiple references with mixed valid and invalid data."""
         event = {
             "codeReferenceEvent": {
                 "references": [
@@ -239,7 +239,7 @@ class TestChatAmazonQ:
         self.assert_chunk_content(chunks, expected)
 
     def test_reference_span_model(self):
-        """Test ReferenceSpan model creation and validation"""
+        """Test ReferenceSpan model creation and validation."""
         # Test valid shape
         span = ReferenceSpan(shape="test-shape")
         assert span.shape == "test-shape"
@@ -253,7 +253,7 @@ class TestChatAmazonQ:
             ReferenceSpan()
 
     def test_reference_model_with_span_objects(self):
-        """Test Reference model with ReferenceSpan objects"""
+        """Test Reference model with ReferenceSpan objects."""
         reference = Reference(
             repository=ReferenceSpan(shape="repo-name"),
             licenseName=ReferenceSpan(shape="MIT"),
@@ -267,7 +267,7 @@ class TestChatAmazonQ:
         assert reference.get_span() == "lines 1-10"
 
     def test_reference_model_with_direct_strings(self):
-        """Test Reference model with direct string values"""
+        """Test Reference model with direct string values."""
         reference = Reference(
             repository="repo-name",
             licenseName="MIT",
@@ -281,7 +281,7 @@ class TestChatAmazonQ:
         assert reference.get_span() == "lines 1-10"
 
     def test_reference_model_with_mixed_values(self):
-        """Test Reference model with mixed ReferenceSpan and string values"""
+        """Test Reference model with mixed ReferenceSpan and string values."""
         reference = Reference(
             repository=ReferenceSpan(shape="repo-name"),
             licenseName="MIT",
@@ -295,7 +295,7 @@ class TestChatAmazonQ:
         assert reference.get_span() == "lines 1-10"
 
     def test_reference_model_with_none_values(self):
-        """Test Reference model with None values"""
+        """Test Reference model with None values."""
         reference = Reference(
             repository=None, licenseName=None, url=None, recommendationContentSpan=None
         )
@@ -306,7 +306,7 @@ class TestChatAmazonQ:
         assert reference.get_span() is None
 
     def test_reference_format_all_fields(self):
-        """Test format_reference with all fields present"""
+        """Test format_reference with all fields present."""
         reference = Reference(
             repository="repo-name",
             licenseName="MIT",
@@ -318,7 +318,7 @@ class TestChatAmazonQ:
         assert reference.format_reference() == expected
 
     def test_reference_format_partial_fields(self):
-        """Test format_reference with partial fields"""
+        """Test format_reference with partial fields."""
         test_cases = [
             {"input": {"repository": "repo-name"}, "expected": "repo-name"},
             {
@@ -347,7 +347,7 @@ class TestChatAmazonQ:
             assert reference.format_reference() == case["expected"]
 
     def test_reference_model_validation(self):
-        """Test Reference model validation"""
+        """Test Reference model validation."""
         # Test with invalid ReferenceSpan
         with pytest.raises(ValueError):
             Reference(repository=ReferenceSpan(shape=""))
@@ -360,12 +360,12 @@ class TestChatAmazonQ:
             Reference(url=["invalid"])  # type: ignore
 
     def test_reference_format_empty(self):
-        """Test format_reference with empty Reference"""
+        """Test format_reference with empty Reference."""
         reference = Reference()
         assert reference.format_reference() == ""
 
     def test_model_validate_method(self):
-        """Test model_validate method with various inputs"""
+        """Test model_validate method with various inputs."""
         # Valid input with shape objects
         input_data = {
             "repository": {"shape": "repo-name"},

@@ -146,8 +146,7 @@ async def fix_end_block_errors_legacy(
     suffix: str,
     lang_id: Optional[LanguageId] = None,
 ) -> str:
-    """
-    Strips suffix from completion only if the resulting code has zero parsing errors.
+    """Strips suffix from completion only if the resulting code has zero parsing errors.
 
     This processor is more conservative in its approach. It will only strip the suffix
     if the resulting code has absolutely no parsing errors. If the original code had
@@ -199,8 +198,7 @@ async def fix_end_block_errors(
     suffix: str,
     lang_id: Optional[LanguageId] = None,
 ) -> str:
-    """
-    Strips suffix from completion if it doesn't introduce new parsing errors.
+    """Strips suffix from completion if it doesn't introduce new parsing errors.
 
     This processor takes a more lenient approach compared to fix_end_block_errors_legacy.
     It will strip the suffix even if the original code had parsing errors, as long as
@@ -296,9 +294,7 @@ async def fix_truncation(
     raw_completion: str,
     lang_id: Optional[LanguageId] = None,
 ) -> str:
-    """
-    Trims back a truncated completion to a more sensible stopping point if it does not
-    introduce new parsing errors.
+    """Trims back a truncated completion to a more sensible stopping point if it does not introduce new parsing errors.
 
     This process trims back to the last space of the last line. If the last line does
     not contain any non-leading and non-trailing spaces, it trims off the entire last

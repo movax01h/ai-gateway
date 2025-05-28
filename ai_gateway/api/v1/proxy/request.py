@@ -13,10 +13,10 @@ from ai_gateway.api.feature_category import X_GITLAB_UNIT_PRIMITIVE
 
 
 def authorize_with_unit_primitive_header():
-    """
-    Authorize with x-gitlab-unit-primitive header.
+    """Authorize with x-gitlab-unit-primitive header.
 
-    See https://gitlab.com/gitlab-org/modelops/applied-ml/code-suggestions/ai-assist/-/blob/main/docs/auth.md#use-x-gitlab-unit-primitive-header
+    See
+    https://gitlab.com/gitlab-org/modelops/applied-ml/code-suggestions/ai-assist/-/blob/main/docs/auth.md#use-x-gitlab-unit-primitive-header
     for more information.
     """
 

@@ -9,10 +9,7 @@ __all__ = ["ChatLiteLLM"]
 
 
 class ChatLiteLLM(_LChatLiteLLM):
-    """
-    A wrapper around `langchain_community.chat_models.litellm.ChatLiteLLM`
-    that adds custom stream_options
-    """
+    """A wrapper around `langchain_community.chat_models.litellm.ChatLiteLLM` that adds custom stream_options."""
 
     async def _astream(
         self,

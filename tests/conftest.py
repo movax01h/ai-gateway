@@ -122,7 +122,7 @@ def mock_client(
     mock_container,  # pylint: disable=unused-argument
     model_metadata_context,  # pylint: disable=unused-argument
 ):
-    """Setup all the needed mocks to perform requests in the test environment"""
+    """Setup all the needed mocks to perform requests in the test environment."""
     with patch.object(stub_auth_provider, "authenticate", return_value=auth_user):
         yield test_client
 

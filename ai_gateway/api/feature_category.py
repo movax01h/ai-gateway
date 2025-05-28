@@ -17,8 +17,7 @@ _UNKNOWN_FEATURE_CATEGORY = "unknown"
 
 
 def feature_category(name: GitLabFeatureCategory):
-    """
-    Track a feature category in a single purpose endpoint.
+    """Track a feature category in a single purpose endpoint.
 
     Example:
 
@@ -43,8 +42,7 @@ def feature_category(name: GitLabFeatureCategory):
 
 
 def feature_categories(mapping: dict[GitLabUnitPrimitive, GitLabFeatureCategory]):
-    """
-    Track feature categories in a multi purpose endpoint.
+    """Track feature categories in a multi purpose endpoint.
 
     It gets the purpose of API call from X-GitLab-Unit-Primitive header,
     identifies the corresponding feature category and stores them in the Starlette context.
@@ -95,8 +93,7 @@ def feature_categories(mapping: dict[GitLabUnitPrimitive, GitLabFeatureCategory]
 
 
 def track_metadata(request_param: str, mapping: dict[str, GitLabUnitPrimitive]):
-    """
-    Track feature category and unit primitive from request path.
+    """Track feature category and unit primitive from request path.
 
     Example:
 
@@ -135,9 +132,7 @@ def track_metadata(request_param: str, mapping: dict[str, GitLabUnitPrimitive]):
 
 
 def current_feature_category() -> str:
-    """
-    Get the feature category set to the current request context.
-    """
+    """Get the feature category set to the current request context."""
     if context.exists():
         feature_category = context.get(_CATEGORY_CONTEXT_KEY, _UNKNOWN_FEATURE_CATEGORY)
 

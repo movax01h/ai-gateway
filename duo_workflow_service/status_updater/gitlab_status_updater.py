@@ -17,8 +17,7 @@ class GitLabStatusUpdater:
         return result.get("status")
 
     async def update_workflow_status(self, workflow_id: str, status_event: str) -> None:
-        """
-        Update the status of a workflow in GitLab.
+        """Update the status of a workflow in GitLab.
 
         Args:
             workflow_id (str): The ID of the workflow to update.

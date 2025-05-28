@@ -213,9 +213,7 @@ async def test_unparseable(lang_id: LanguageId, source_code: str):
 
 
 def string_equal(a: str, b: str):
-    """
-    Determine if two strings are equal, but ignoring any leading or trailing newlines.
-    """
+    """Determine if two strings are equal, but ignoring any leading or trailing newlines."""
     a = a.strip()
     b = b.strip()
     return a == b

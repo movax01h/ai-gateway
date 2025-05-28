@@ -404,9 +404,8 @@ class ModelEngineCompletions(ModelEngineBase):
         lang_id: Optional[LanguageId] = None,
         as_comments: bool = True,
     ) -> _CodeInfo:
-        """
-        Convert a list of code snippets into `_CodeInfo`, which includes metadata like text length and token length.
-        """
+        """Convert a list of code snippets into `_CodeInfo`, which includes metadata like text length and token
+        length."""
         if len(contents) == 0:
             return _CodeInfo(content=[])
 

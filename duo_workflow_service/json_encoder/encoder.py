@@ -7,13 +7,10 @@ from duo_workflow_service.entities.state import SearchAndReplaceConfig
 
 
 class CustomEncoder(json.JSONEncoder):
-    """
-    Custom JSON encoder class that extends json.JSONEncoder to handle langchain object types.
-    """
+    """Custom JSON encoder class that extends json.JSONEncoder to handle langchain object types."""
 
     def default(self, o: Any) -> Any:
-        """
-        Overrides the default method to provide custom encoding for specific types.
+        """Overrides the default method to provide custom encoding for specific types.
 
         Args:
             o: The object to encode.

@@ -78,8 +78,8 @@ class KindAnthropicModel(StrEnum):
 
 
 class AnthropicModel(TextGenModelBase):
-    """This class uses the deprecated Completions API from Anthropic.
-    Claude models v3 and above should use AnthropicChatModel.
+    """This class uses the deprecated Completions API from Anthropic. Claude models v3 and above should use
+    AnthropicChatModel.
 
     Ref: https://docs.anthropic.com/claude/reference/migrating-from-text-completions-to-messages
     """

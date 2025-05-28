@@ -1,8 +1,7 @@
-"""
-Error handling for slash commands.
+"""Error handling for slash commands.
 
-This module provides error handling mechanisms for slash commands,
-helping to report errors without crashing the service.
+This module provides error handling mechanisms for slash commands, helping to report errors without crashing the
+service.
 """
 
 from datetime import datetime, timezone
@@ -37,8 +36,7 @@ class SlashCommandValidationError(SlashCommandError):
 
 
 def create_error_ui_chat_log(error_message: str) -> UiChatLog:
-    """
-    Create a UI chat log entry for a slash command error.
+    """Create a UI chat log entry for a slash command error.
 
     Args:
         error_message: The error message to display
@@ -57,8 +55,7 @@ def create_error_ui_chat_log(error_message: str) -> UiChatLog:
 
 
 def format_error_response(error: SlashCommandError) -> str:
-    """
-    Format a slash command error into a user-friendly error message.
+    """Format a slash command error into a user-friendly error message.
 
     Args:
         error: The slash command error
@@ -81,8 +78,7 @@ def log_command_error(
     error: Exception,
     context: Optional[Dict] = None,
 ) -> None:
-    """
-    Log a slash command error with appropriate context.
+    """Log a slash command error with appropriate context.
 
     Args:
         command_name: The name of the command that caused the error, if known

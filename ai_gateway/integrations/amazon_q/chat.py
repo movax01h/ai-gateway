@@ -115,9 +115,8 @@ class ChatAmazonQ(BaseChatModel):
     def _process_code_reference_event(
         self, event: Dict
     ) -> Iterator[ChatGenerationChunk]:
-        """
-        Process code reference events and format them into a readable string.
-        Uses Pydantic models for data validation and parsing.
+        """Process code reference events and format them into a readable string. Uses Pydantic models for data
+        validation and parsing.
 
         Args:
             event (Dict): The event containing code references
@@ -186,8 +185,7 @@ class ChatAmazonQ(BaseChatModel):
         role_arn: str,
         **_kwargs,
     ):
-        """
-        Performs a `send_message` request to Q API.
+        """Performs a `send_message` request to Q API.
 
         This method creates a Q client and performs a `send_message` request passing `message` and `history`.
 
@@ -213,8 +211,8 @@ class ChatAmazonQ(BaseChatModel):
         self,
         messages: List[BaseMessage],
     ):
-        """
-        Build a message and history from a list of provided messages that can be later passed to the `send_message` endpoint of Q API.
+        """Build a message and history from a list of provided messages that can be later passed to the `send_message`
+        endpoint of Q API.
 
         Args:
             messages (List[BaseMessage]): A list of messages, including system, user, and assistant messages.

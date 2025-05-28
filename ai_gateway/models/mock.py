@@ -75,8 +75,8 @@ class SearchClient(AsyncMock):
 
 
 class LLM(TextGenModelBase):
-    """
-    Implementation of the stub model that inherits the `TextGenBaseModel` interface.
+    """Implementation of the stub model that inherits the `TextGenBaseModel` interface.
+
     Please, use this class if you require to mock such models as `AnthropicModel` or `PalmCodeGeckoModel`
     """
 
@@ -143,8 +143,8 @@ class FakeModel(SimpleChatModel):
 
 
 class ChatModel(ChatModelBase):
-    """
-    Implementation of the stub model that inherits the `ChatModelBase` interface.
+    """Implementation of the stub model that inherits the `ChatModelBase` interface.
+
     Please, use this class if you require to mock such models as `AnthropicChatModel`
     """
 

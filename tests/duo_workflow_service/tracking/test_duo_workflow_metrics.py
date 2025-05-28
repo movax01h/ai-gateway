@@ -14,7 +14,7 @@ class TestDuoWorkflowMetrics(unittest.TestCase):
         self._setup_histogram_mocks()
 
     def _setup_histogram_mocks(self):
-        """Set up properly typed mocks for all histograms"""
+        """Set up properly typed mocks for all histograms."""
         for metric_name in [
             "workflow_duration",
             "llm_request_duration",

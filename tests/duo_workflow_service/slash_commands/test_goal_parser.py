@@ -38,11 +38,11 @@ from duo_workflow_service.slash_commands.goal_parser import parse
     ],
 )
 def test_parse_slash_commands(goal, expected_command, expected_text):
-    """
-    Test that parse correctly extracts command types and remaining text from various slash command formats.
-    This parametrized test covers multiple command formats including commands with arguments,
-    commands without arguments, commands with extra spaces, and edge cases.
-    The parse method now returns a tuple of (command_type, remaining_text) instead of a class instance.
+    """Test that parse correctly extracts command types and remaining text from various slash command formats.
+
+    This parametrized test covers multiple command formats including commands with arguments, commands without
+    arguments, commands with extra spaces, and edge cases. The parse method now returns a tuple of (command_type,
+    remaining_text) instead of a class instance.
     """
     command_type, remaining_text = parse(goal)
     assert command_type == expected_command
