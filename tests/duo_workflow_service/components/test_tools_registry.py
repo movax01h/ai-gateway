@@ -271,6 +271,8 @@ async def test_registry_configuration(gl_http_client):
         "id": "test_workflow",
         "agent_privileges_names": ["run_commands"],
     }
+    extra_tool = MagicMock(spec=BaseTool)
+    extra_tool.name = "extra_tool"
 
     registry = await ToolsRegistry.configure(
         workflow_config=workflow_config,
@@ -278,6 +280,7 @@ async def test_registry_configuration(gl_http_client):
         outbox=_outbox,
         inbox=_inbox,
         gitlab_host="gitlab.example.com",
+        additional_tools=[extra_tool],
     )
 
     # Verify configured tools based on privileges
@@ -291,6 +294,7 @@ async def test_registry_configuration(gl_http_client):
         "run_command",
         "handover_tool",
         "request_user_clarification_tool",
+        "extra_tool",
     }
 
 

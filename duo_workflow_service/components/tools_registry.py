@@ -114,8 +114,8 @@ class ToolsRegistry:
         gl_http_client: GitlabHttpClient,
         outbox: asyncio.Queue,
         inbox: asyncio.Queue,
-        *,
         gitlab_host: str,
+        additional_tools: Optional[list[Type[BaseTool]]] = None,
     ):
         if not workflow_config:
             raise RuntimeError("Failed to find tools configuration for workflow")
@@ -124,6 +124,9 @@ class ToolsRegistry:
             raise RuntimeError(
                 f"Failed to find tools configuration for workflow {workflow_config.get('id', 'None')}"
             )
+
+        if not additional_tools:
+            additional_tools = []
 
         agent_privileges = workflow_config.get("agent_privileges_names", [])
         preapproved_tools = workflow_config.get(
@@ -140,18 +143,23 @@ class ToolsRegistry:
             enabled_tools=agent_privileges,
             preapproved_tools=preapproved_tools,
             tool_metadata=tool_metadata,
+            additional_tools=additional_tools,
         )
 
     def __init__(
         self,
         enabled_tools: list[str],
         preapproved_tools: list[str],
-        *,
         tool_metadata: ToolMetadata,
+        additional_tools: Optional[list[Type[BaseTool]]] = None,
     ):
+        if not additional_tools:
+            additional_tools = []
+
         self._enabled_tools = {
             **{tool_cls.tool_title: tool_cls for tool_cls in NO_OP_TOOLS},  # type: ignore
             **{tool.name: tool for tool in [tool_cls() for tool_cls in _DEFAULT_TOOLS]},
+            **{tool.name: tool for tool in additional_tools},
         }
 
         feature_flags = current_feature_flag_context.get()

@@ -290,6 +290,7 @@ async def test_execute_workflow_missing_workflow_metadata(
         workflow_type=CategoryEnum.WORKFLOW_SOFTWARE_DEVELOPMENT,
         context_elements=[],
         invocation_metadata={"base_url": "", "gitlab_token": ""},
+        mcp_tools=[],
     )
 
 
@@ -304,11 +305,16 @@ async def test_execute_workflow_valid_workflow_metadata(
     mock_workflow.run = AsyncMock()
     mock_workflow.cleanup = AsyncMock()
     mock_resolve_workflow.return_value = mock_abstract_workflow_class
+    mcp_tools = [
+        contract_pb2.McpTool(name="get_issue", description="Tool to get issue")
+    ]
 
     async def mock_request_iterator() -> AsyncIterable[contract_pb2.ClientEvent]:
         yield contract_pb2.ClientEvent(
             startRequest=contract_pb2.StartWorkflowRequest(
-                workflowID="123", workflowMetadata=json.dumps({"key": "value"})
+                workflowID="123",
+                workflowMetadata=json.dumps({"key": "value"}),
+                mcpTools=mcp_tools,
             )
         )
 
@@ -330,6 +336,7 @@ async def test_execute_workflow_valid_workflow_metadata(
         workflow_type=CategoryEnum.WORKFLOW_SOFTWARE_DEVELOPMENT,
         context_elements=[],
         invocation_metadata={"base_url": "http://test.url", "gitlab_token": "123"},
+        mcp_tools=mcp_tools,
     )
 
 

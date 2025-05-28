@@ -9,6 +9,7 @@ from .git import *
 from .handover import *
 from .issue import *
 from .job import *
+from .mcp_tools import *
 from .merge_request import *
 from .pipeline import *
 from .planner import *

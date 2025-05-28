@@ -108,6 +108,10 @@ class GrpcServer(contract_pb2_grpc.DuoWorkflowServicer):
         if start_workflow_request.startRequest.context:
             context_elements = list(start_workflow_request.startRequest.context)
 
+        mcp_tools = []
+        if start_workflow_request.startRequest.mcpTools:
+            mcp_tools = list(start_workflow_request.startRequest.mcpTools)
+
         workflow_type = string_to_category_enum(workflow_definition)
         workflow_class: TypeWorkflow = resolve_workflow_class(workflow_definition)
 
@@ -117,6 +121,7 @@ class GrpcServer(contract_pb2_grpc.DuoWorkflowServicer):
             workflow_id=workflow_id,
             workflow_metadata=workflow_metadata,
             workflow_type=workflow_type,
+            mcp_tools=mcp_tools,
             context_elements=context_elements,
             invocation_metadata={
                 "base_url": invocation_metadata.get("x-gitlab-base-url", ""),
