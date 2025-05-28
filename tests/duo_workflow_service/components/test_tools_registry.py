@@ -56,6 +56,7 @@ _outbox = MagicMock(spec=asyncio.Queue)
         (
             ["read_only_gitlab"],
             {
+                "ci_linter",
                 "create_plan",
                 "add_new_task",
                 "remove_task",
@@ -94,6 +95,7 @@ _outbox = MagicMock(spec=asyncio.Queue)
         (
             ["read_write_gitlab"],
             {
+                "ci_linter",
                 "create_plan",
                 "add_new_task",
                 "remove_task",
@@ -206,6 +208,7 @@ def test_registry_initialization_initialises_tools_with_correct_attributes(
         tool_metadata=tool_metadata,
     )
     expected_tools = {
+        "ci_linter": tools.CiLinter(metadata=tool_metadata),
         "create_plan": tools.CreatePlan(),
         "add_new_task": tools.AddNewTask(),
         "remove_task": tools.RemoveTask(),
