@@ -3,8 +3,10 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from duo_workflow_service.interceptors.feature_flag_interceptor import (
+    X_GITLAB_ENABLED_FEATURE_FLAGS,
     X_GITLAB_REALM_HEADER,
     FeatureFlagInterceptor,
+    FeatureFlagMiddleware,
     current_feature_flag_context,
 )
 
@@ -159,3 +161,62 @@ class TestFeatureFlagInterceptor:
         # Assert
         mock_continuation.assert_called_once_with(mock_handler_call_details)
         assert current_feature_flag_context.get() == {"flag1", "flag2"}
+
+
+@pytest.fixture
+def mock_websocket():
+    websocket = AsyncMock()
+    websocket.headers = {}
+    return websocket
+
+
+@pytest.mark.parametrize(
+    "test_case, headers, disallowed_flags, expected_flags",
+    [
+        ("no_feature_flags", {}, None, {""}),
+        (
+            "with_feature_flags",
+            {X_GITLAB_ENABLED_FEATURE_FLAGS: "flag1,flag2,flag3"},
+            None,
+            {"flag1", "flag2", "flag3"},
+        ),
+        (
+            "with_disallowed_flags",
+            {
+                X_GITLAB_ENABLED_FEATURE_FLAGS: "flag1,flag2,flag3",
+                X_GITLAB_REALM_HEADER: "realm1",
+            },
+            {"realm1": {"flag1", "flag3"}},
+            {"flag2"},
+        ),
+        (
+            "with_unknown_realm",
+            {
+                X_GITLAB_ENABLED_FEATURE_FLAGS: "flag1,flag2,flag3",
+                X_GITLAB_REALM_HEADER: "unknown_realm",
+            },
+            {"realm1": {"flag1", "flag3"}},
+            {"flag1", "flag2", "flag3"},
+        ),
+        ("with_empty_feature_flags", {X_GITLAB_ENABLED_FEATURE_FLAGS: ""}, None, {""}),
+    ],
+)
+@pytest.mark.asyncio
+async def test_feature_flag_middleware(
+    reset_context,
+    mock_websocket,
+    test_case,
+    headers,
+    disallowed_flags,
+    expected_flags,
+):
+    """Test the FeatureFlagMiddleware with various scenarios."""
+    # Setup
+    middleware = FeatureFlagMiddleware(disallowed_flags=disallowed_flags)
+    mock_websocket.headers = headers
+
+    # Execute
+    await middleware(mock_websocket)
+
+    # Assert
+    assert current_feature_flag_context.get() == expected_flags
