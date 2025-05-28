@@ -104,7 +104,8 @@ class ListCommitsInput(ProjectResourceInput):
     )
     order: Optional[str] = Field(
         default=None,
-        description="List commits in order. Possible values: default, topo. Default value: default (chronological order).",
+        description="List commits in order. Possible values: default, topo. Default value: default "
+        "(chronological order).",
     )
     path: Optional[str] = Field(
         default=None,
@@ -182,16 +183,17 @@ class GetCommitInput(CommitResourceInput):
 
 class GetCommit(CommitBaseTool):
     name: str = "get_commit"
+    # pylint: disable=line-too-long
     description: str = f"""Get a single commit from a GitLab project repository.
 
-    {COMMIT_IDENTIFICATION_DESCRIPTION}
+{COMMIT_IDENTIFICATION_DESCRIPTION}
 
-    For example:
-    - Given project_id 13 and commit_sha "6104942438c14ec7bd21c6cd5bd995272b3faff6", the tool call would be:
-        get_commit(project_id=13, commit_sha="6104942438c14ec7bd21c6cd5bd995272b3faff6")
-    - Given the URL https://gitlab.com/namespace/project/-/commit/6104942438c14ec7bd21c6cd5bd995272b3faff6, the tool call would be:
-        get_commit(url="https://gitlab.com/namespace/project/-/commit/6104942438c14ec7bd21c6cd5bd995272b3faff6")
-    """
+For example:
+- Given project_id 13 and commit_sha "6104942438c14ec7bd21c6cd5bd995272b3faff6", the tool call would be:
+    get_commit(project_id=13, commit_sha="6104942438c14ec7bd21c6cd5bd995272b3faff6")
+- Given the URL https://gitlab.com/namespace/project/-/commit/6104942438c14ec7bd21c6cd5bd995272b3faff6, the tool call would be:
+    get_commit(url="https://gitlab.com/namespace/project/-/commit/6104942438c14ec7bd21c6cd5bd995272b3faff6")
+"""
     args_schema: Type[BaseModel] = GetCommitInput  # type: ignore
 
     async def _arun(self, **kwargs: Any) -> str:

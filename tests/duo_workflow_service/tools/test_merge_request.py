@@ -680,7 +680,7 @@ async def test_create_merge_request_note_blocks_quick_actions(
         {
             "status": "error",
             "message": """Notes containing GitLab quick actions are not allowed. Quick actions are text-based shortcuts for common GitLab actions.
-                                  They are commands that are on their own line and start with a backslash. Examples include /merge, /approve, /close, etc.""",
+They are commands that are on their own line and start with a backslash. Examples include /merge, /approve, /close, etc.""",
         }
     )
 

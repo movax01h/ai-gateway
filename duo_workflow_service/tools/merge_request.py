@@ -112,7 +112,10 @@ class CreateMergeRequest(DuoBaseTool):
     def format_display_message(self, args: CreateMergeRequestInput) -> str:
         if args.url:
             return f"Create merge request from '{args.source_branch}' to '{args.target_branch}' in {args.url}"
-        return f"Create merge request from '{args.source_branch}' to '{args.target_branch}' in project {args.project_id}"
+        return (
+            f"Create merge request from '{args.source_branch}' to '{args.target_branch}' "
+            f"in project {args.project_id}"
+        )
 
 
 class GetMergeRequest(DuoBaseTool):
@@ -143,7 +146,8 @@ class GetMergeRequest(DuoBaseTool):
 
         try:
             response = await self.gitlab_client.aget(
-                path=f"/api/v4/projects/{validation_result.project_id}/merge_requests/{validation_result.merge_request_iid}",
+                path=f"/api/v4/projects/{validation_result.project_id}/merge_requests/"
+                f"{validation_result.merge_request_iid}",
                 parse_json=False,
             )
             return json.dumps({"merge_request": response})
@@ -186,7 +190,8 @@ class ListMergeRequestDiffs(DuoBaseTool):
 
         try:
             response = await self.gitlab_client.aget(
-                path=f"/api/v4/projects/{validation_result.project_id}/merge_requests/{validation_result.merge_request_iid}/diffs",
+                path=f"/api/v4/projects/{validation_result.project_id}/merge_requests/"
+                f"{validation_result.merge_request_iid}/diffs",
                 parse_json=False,
             )
             return json.dumps({"diffs": response})
@@ -209,20 +214,21 @@ class CreateMergeRequestNoteInput(MergeRequestResourceInput):
 
 class CreateMergeRequestNote(DuoBaseTool):
     name: str = "create_merge_request_note"
+    # pylint: disable=line-too-long
     description: str = f"""Create a note (comment) on a merge request. You are NOT allowed to ever use a GitLab quick action in a merge request note.
-                    Quick actions are text-based shortcuts for common GitLab actions. They are commands that are on their own line and
-                    start with a backslash. Examples include /merge, /approve, /close, etc.
+Quick actions are text-based shortcuts for common GitLab actions. They are commands that are on their own line and
+start with a backslash. Examples include /merge, /approve, /close, etc.
 
-    {MERGE_REQUEST_IDENTIFICATION_DESCRIPTION}
+{MERGE_REQUEST_IDENTIFICATION_DESCRIPTION}
 
-    For example:
-    - Given project_id 13, merge_request_iid 9, and body "This is a comment", the tool call would be:
-        create_merge_request_note(project_id=13, merge_request_iid=9, body="This is a comment")
-    - Given the URL https://gitlab.com/namespace/project/-/merge_requests/103 and body "This is a comment", the tool call would be:
-        create_merge_request_note(url="https://gitlab.com/namespace/project/-/merge_requests/103", body="This is a comment")
+For example:
+- Given project_id 13, merge_request_iid 9, and body "This is a comment", the tool call would be:
+    create_merge_request_note(project_id=13, merge_request_iid=9, body="This is a comment")
+- Given the URL https://gitlab.com/namespace/project/-/merge_requests/103 and body "This is a comment", the tool call would be:
+    create_merge_request_note(url="https://gitlab.com/namespace/project/-/merge_requests/103", body="This is a comment")
 
-    The body parameter is always required.
-    """
+The body parameter is always required.
+"""
     args_schema: Type[BaseModel] = CreateMergeRequestNoteInput  # type: ignore
 
     def _contains_quick_action(self, body: str) -> bool:
@@ -244,14 +250,16 @@ class CreateMergeRequestNote(DuoBaseTool):
             return json.dumps(
                 {
                     "status": "error",
+                    # pylint: disable=line-too-long
                     "message": """Notes containing GitLab quick actions are not allowed. Quick actions are text-based shortcuts for common GitLab actions.
-                                  They are commands that are on their own line and start with a backslash. Examples include /merge, /approve, /close, etc.""",
+They are commands that are on their own line and start with a backslash. Examples include /merge, /approve, /close, etc.""",
                 }
             )
 
         try:
             response = await self.gitlab_client.apost(
-                path=f"/api/v4/projects/{validation_result.project_id}/merge_requests/{validation_result.merge_request_iid}/notes",
+                path=f"/api/v4/projects/{validation_result.project_id}/merge_requests/"
+                f"{validation_result.merge_request_iid}/notes",
                 body=json.dumps(
                     {
                         "body": body,
@@ -296,7 +304,8 @@ class ListAllMergeRequestNotes(DuoBaseTool):
 
         try:
             response = await self.gitlab_client.aget(
-                path=f"/api/v4/projects/{validation_result.project_id}/merge_requests/{validation_result.merge_request_iid}/notes",
+                path=f"/api/v4/projects/{validation_result.project_id}/merge_requests/"
+                f"{validation_result.merge_request_iid}/notes",
                 parse_json=False,
             )
             return json.dumps({"notes": response})
@@ -316,7 +325,8 @@ class UpdateMergeRequestInput(MergeRequestResourceInput):
     )
     assignee_ids: Optional[list[int]] = Field(
         default=None,
-        description="The ID of the users to assign the merge request to. Set to 0 or provide an empty value to unassign all assignees.",
+        description="The ID of the users to assign the merge request to. Set to 0 or provide an empty value to "
+        "unassign all assignees.",
     )
     description: Optional[str] = Field(
         default=None,
@@ -324,11 +334,13 @@ class UpdateMergeRequestInput(MergeRequestResourceInput):
     )
     discussion_locked: Optional[bool] = Field(
         default=None,
-        description="Flag indicating if the merge request’s discussion is locked. Only project members can add, edit or resolve notes to locked discussions.",
+        description="Flag indicating if the merge request’s discussion is locked. Only project members can add, edit "
+        "or resolve notes to locked discussions.",
     )
     milestone_id: Optional[int] = Field(
         default=None,
-        description="The global ID of a milestone to assign the merge request to. Set to 0 or provide an empty value to unassign a milestone.",
+        description="The global ID of a milestone to assign the merge request to. Set to 0 or provide an empty value "
+        "to unassign a milestone.",
     )
     remove_source_branch: Optional[bool] = Field(
         default=None,
@@ -356,16 +368,17 @@ class UpdateMergeRequestInput(MergeRequestResourceInput):
 
 class UpdateMergeRequest(DuoBaseTool):
     name: str = "update_merge_request"
+    # pylint: disable=line-too-long
     description: str = f"""Updates an existing merge request. You can change the target branch, title, or even close the MR.
-    Max character limit of {DESCRIPTION_CHARACTER_LIMIT} characters.
+Max character limit of {DESCRIPTION_CHARACTER_LIMIT} characters.
 
-    {MERGE_REQUEST_IDENTIFICATION_DESCRIPTION}
+{MERGE_REQUEST_IDENTIFICATION_DESCRIPTION}
 
-    For example:
-    - Given project_id 13, merge_request_iid 9, and title "Updated title", the tool call would be:
-        update_merge_request(project_id=13, merge_request_iid=9, title="Updated title")
-    - Given the URL https://gitlab.com/namespace/project/-/merge_requests/103 and title "Updated title", the tool call would be:
-        update_merge_request(url="https://gitlab.com/namespace/project/-/merge_requests/103", title="Updated title")
+For example:
+- Given project_id 13, merge_request_iid 9, and title "Updated title", the tool call would be:
+    update_merge_request(project_id=13, merge_request_iid=9, title="Updated title")
+- Given the URL https://gitlab.com/namespace/project/-/merge_requests/103 and title "Updated title", the tool call would be:
+    update_merge_request(url="https://gitlab.com/namespace/project/-/merge_requests/103", title="Updated title")
     """
     args_schema: Type[BaseModel] = UpdateMergeRequestInput
 
@@ -385,7 +398,8 @@ class UpdateMergeRequest(DuoBaseTool):
 
         try:
             response = await self.gitlab_client.aput(
-                path=f"/api/v4/projects/{validation_result.project_id}/merge_requests/{validation_result.merge_request_iid}",
+                path=f"/api/v4/projects/{validation_result.project_id}/merge_requests/"
+                f"{validation_result.merge_request_iid}",
                 body=json.dumps(data),
             )
             return json.dumps({"updated_merge_request": response})

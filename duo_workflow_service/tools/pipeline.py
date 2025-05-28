@@ -65,7 +65,8 @@ class GetPipelineErrorsForMergeRequest(DuoBaseTool):
             raise PipelineMergeRequestNotFoundError("Merge request not found")
 
         pipelines = await self.gitlab_client.aget(
-            path=f"/api/v4/projects/{validation_result.project_id}/merge_requests/{validation_result.merge_request_iid}/pipelines"
+            path=f"/api/v4/projects/{validation_result.project_id}/merge_requests/"
+            f"{validation_result.merge_request_iid}/pipelines"
         )
 
         if not isinstance(pipelines, list) or len(pipelines) == 0:

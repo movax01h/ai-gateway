@@ -283,7 +283,10 @@ class ToolsExecutor:
             else "The tool does not accept any argument"
         )
 
-        tool_response = f"Tool {tool_name} execution failed due to wrong arguments. You must adhere to the tool args schema! {schema}"
+        tool_response = (
+            f"Tool {tool_name} execution failed due to wrong arguments. You must adhere to the tool args "
+            f"schema! {schema}"
+        )
         self._track_internal_event(
             event_name=EventEnum.WORKFLOW_TOOL_FAILURE,
             tool_name=tool_name,

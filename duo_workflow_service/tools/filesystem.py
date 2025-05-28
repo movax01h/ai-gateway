@@ -78,11 +78,11 @@ class FindFiles(DuoBaseTool):
     name: str = "find_files"
     description: str = """Find files, recursively, with names matching a specific pattern in the repository.
 
-    It includes all files (tracked and untracked) and respects .gitignore rules.
+It includes all files (tracked and untracked) and respects .gitignore rules.
 
-    This name_pattern uses the same syntax as `find --name` or `bash` filename expansion and matches are done against the full path
-    relative to the project root.
-    """
+This name_pattern uses the same syntax as `find --name` or `bash` filename expansion and matches are done against the
+full path relative to the project root.
+"""
     args_schema: Type[BaseModel] = FindFilesInput  # type: ignore
 
     async def _arun(
@@ -143,7 +143,8 @@ class EditFileInput(BaseModel):
     file_path: str = Field(description="the path of the file to edit.")
     old_str: str = Field(
         "",
-        description="The string to replace. Please provide at least one line above and below to make it unique across the file. *This is required*",
+        description="The string to replace. Please provide at least one line above and below to make it unique across "
+        "the file. *This is required*",
     )
     new_str: str = Field(
         "", description="The new value of the string. *This is required*"
@@ -152,71 +153,72 @@ class EditFileInput(BaseModel):
 
 class EditFile(DuoBaseTool):
     name: str = "edit_file"
+    # pylint: disable=line-too-long
     description: str = """Use this tool to edit an existing file.
 
-    IMPORTANT:
-    - When making similar changes to multiple files, include batches of tool calls in a single response
-    - Do not make separate responses for each file - group related files together
+IMPORTANT:
+- When making similar changes to multiple files, include batches of tool calls in a single response
+- Do not make separate responses for each file - group related files together
 
-    Examples of individual file edits:
-    - Update a function parameter:
-      edit_file(
-          file_path="src/utils.py",
-          old_str="# Utility functions\n\ndef process_data(data):\n
-              # Process the input data\n    return data.upper()\n\n# More functions below",
-          new_str="# Utility functions\n\ndef process_data(data, transform=True):\n
-              # Process the input data\n    return data.upper() if transform else data\n\n# More functions below"
-      )
+Examples of individual file edits:
+- Update a function parameter:
+    edit_file(
+        file_path="src/utils.py",
+        old_str="# Utility functions\n\ndef process_data(data):\n
+            # Process the input data\n    return data.upper()\n\n# More functions below",
+        new_str="# Utility functions\n\ndef process_data(data, transform=True):\n
+            # Process the input data\n    return data.upper() if transform else data\n\n# More functions below"
+    )
 
-    - Fix a bug in a specific file:
-      edit_file(
-          file_path="src/api/endpoints.py",
-          old_str="# User endpoints\n@app.route('/users/<id>')\ndef get_user(id):\n
-              return db.find_user(id)\n\n# Other endpoints",
-          new_str="# User endpoints\n@app.route('/users/<id>')\ndef get_user(id):\n
-              user = db.find_user(id)\n    return user if user else {'error': 'User not found'}\n\n# Other endpoints"
-      )
+- Fix a bug in a specific file:
+    edit_file(
+        file_path="src/api/endpoints.py",
+        old_str="# User endpoints\n@app.route('/users/<id>')\ndef get_user(id):\n
+            return db.find_user(id)\n\n# Other endpoints",
+        new_str="# User endpoints\n@app.route('/users/<id>')\ndef get_user(id):\n
+            user = db.find_user(id)\n    return user if user else {'error': 'User not found'}\n\n# Other endpoints"
+    )
 
-    - Add a new import statement:
-      edit_file(
-          file_path="src/models.py",
-          old_str="import os\nimport sys\n\nclass User:",
-          new_str="import os\nimport sys\nimport datetime\n\nclass User:"
-      )
+- Add a new import statement:
+    edit_file(
+        file_path="src/models.py",
+        old_str="import os\nimport sys\n\nclass User:",
+        new_str="import os\nimport sys\nimport datetime\n\nclass User:"
+    )
 
-    Examples of batched file edits:
-    - Rename a function across multiple files:
-      edit_file(
-          file_path="src/utils.py",
-          old_str="# Configuration functions\ndef get_config():\n    return load_config()\n\n# Other utility functions",
-          new_str="# Configuration functions\ndef fetch_config():\n    return load_config()\n\n# Other utility functions"
-      )
-      edit_file(
-          file_path="src/app.py",
-          old_str="from utils import get_config\n\nconfig = get_config()\n\n# Application setup",
-          new_str="from utils import fetch_config\n\nconfig = fetch_config()\n\n# Application setup"
-      )
-      edit_file(
-          file_path="tests/test_utils.py",
-          old_str="# Test configuration\ndef test_get_config():\n    config = get_config()\n    assert config is not None",
-          new_str="# Test configuration\ndef test_fetch_config():\n    config = fetch_config()\n    assert config is not None"
-      )
+Examples of batched file edits:
+- Rename a function across multiple files:
+    edit_file(
+        file_path="src/utils.py",
+        old_str="# Configuration functions\ndef get_config():\n    return load_config()\n\n# Other utility functions",
+        new_str="# Configuration functions\ndef fetch_config():\n    return load_config()\n\n# Other utility functions"
+    )
+    edit_file(
+        file_path="src/app.py",
+        old_str="from utils import get_config\n\nconfig = get_config()\n\n# Application setup",
+        new_str="from utils import fetch_config\n\nconfig = fetch_config()\n\n# Application setup"
+    )
+    edit_file(
+        file_path="tests/test_utils.py",
+        old_str="# Test configuration\ndef test_get_config():\n    config = get_config()\n    assert config is not None",
+        new_str="# Test configuration\ndef test_fetch_config():\n    config = fetch_config()\n    assert config is not None"
+    )
 
-    - Update version number across the codebase:
-      edit_file(
-          file_path="src/version.py",
-          old_str="# Version information\nVERSION = '1.0.0'\n# End of version info",
-          new_str="# Version information\nVERSION = '1.1.0'\n# End of version info"
-      )
-      edit_file(
-          file_path="README.md",
-          old_str="# Project Documentation\n\n## MyApp v1.0.0\n\n### Features",
-          new_str="# Project Documentation\n\n## MyApp v1.1.0\n\n### Features"
-      )
-      edit_file(
-          file_path="docs/changelog.md",
-          old_str="# Changelog\n\n## 1.0.0",
-          new_str="# Changelog\n\n## 1.1.0\n- Bug fixes\n- Performance improvements\n\n## 1.0.0"
+- Update version number across the codebase:
+    edit_file(
+        file_path="src/version.py",
+        old_str="# Version information\nVERSION = '1.0.0'\n# End of version info",
+        new_str="# Version information\nVERSION = '1.1.0'\n# End of version info"
+    )
+    edit_file(
+        file_path="README.md",
+        old_str="# Project Documentation\n\n## MyApp v1.0.0\n\n### Features",
+        new_str="# Project Documentation\n\n## MyApp v1.1.0\n\n### Features"
+    )
+    edit_file(
+        file_path="docs/changelog.md",
+        old_str="# Changelog\n\n## 1.0.0",
+        new_str="# Changelog\n\n## 1.1.0\n- Bug fixes\n- Performance improvements\n\n## 1.0.0"
       )"""
     args_schema: Type[BaseModel] = EditFileInput  # type: ignore
 

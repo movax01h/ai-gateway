@@ -206,7 +206,8 @@ class InternalEventMiddleware:
                 )
             )
         )
-        # Supporting the legacy header https://gitlab.com/gitlab-org/modelops/applied-ml/code-suggestions/ai-assist/-/issues/561.
+        # Supporting the legacy header
+        # https://gitlab.com/gitlab-org/modelops/applied-ml/code-suggestions/ai-assist/-/issues/561.
         if not feature_enabled_by_namespace_ids:
             feature_enabled_by_namespace_ids = list(
                 CommaSeparatedStrings(
@@ -271,7 +272,8 @@ class DistributedTraceMiddleware:
             return
 
         if self.environment == "development" and "langsmith-trace" in request.headers:
-            # Set the distributed tracing LangSmith header to the tracing context, which is sent from Langsmith::RunHelpers of GitLab-Rails/Sidekiq.
+            # Set the distributed tracing LangSmith header to the tracing context, which is sent from
+            # Langsmith::RunHelpers of GitLab-Rails/Sidekiq.
             # See https://docs.gitlab.com/ee/development/ai_features/duo_chat.html#tracing-with-langsmith
             # and https://docs.smith.langchain.com/how_to_guides/tracing/distributed_tracing
             with tracing_context(parent=request.headers["langsmith-trace"]):

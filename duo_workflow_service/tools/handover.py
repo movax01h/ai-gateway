@@ -18,7 +18,8 @@ class HandoverTool(BaseModel):
     """
 
     summary: str = Field(
-        description="The summary of the work done based on the past conversation between human, agent and tools executions"
+        description="The summary of the work done based on the past conversation between human, agent and tools "
+        "executions"
     )
 
     tool_title: ClassVar[str] = TOOL_TITLE

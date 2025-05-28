@@ -55,7 +55,8 @@ class InternalEventMiddleware:
                 )
             )
         )
-        # Supporting the legacy header https://gitlab.com/gitlab-org/modelops/applied-ml/code-suggestions/ai-assist/-/issues/561.
+        # Supporting the legacy header
+        # https://gitlab.com/gitlab-org/modelops/applied-ml/code-suggestions/ai-assist/-/issues/561.
         if not feature_enabled_by_namespace_ids:
             feature_enabled_by_namespace_ids = list(
                 CommaSeparatedStrings(

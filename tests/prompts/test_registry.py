@@ -196,7 +196,10 @@ params:
 @pytest.fixture
 def model_factories():
     return {
-        ModelClassProvider.ANTHROPIC: lambda model, **kwargs: ChatAnthropic(model=model, **kwargs),  # type: ignore[call-arg]
+        # type: ignore[call-arg]
+        ModelClassProvider.ANTHROPIC: lambda model, **kwargs: ChatAnthropic(
+            model=model, **kwargs
+        ),
         ModelClassProvider.LITE_LLM: lambda model, **kwargs: ChatLiteLLM(
             model=model, **kwargs
         ),
@@ -714,6 +717,7 @@ class TestLocalPromptRegistry:
             "user_instruction": "// write a function to find min abs value from an array",
         }
         expected_rendered_prompt = [
+            # pylint: disable=line-too-long
             SystemMessage(
                 dedent(
                     """\

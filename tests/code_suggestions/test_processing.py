@@ -292,7 +292,8 @@ async def test_strip_whitespaces(completion, expected_output):
             "# some comment\n\nfunc (p *PsWriter) RmDir(path string) {",
         ),
         (
-            "Path)\n\n\treturn dirPath\n}\n\n# multiple\n\n// comments\n\n/* foo\nbar\n*/\n\nfunc (p *PsWriter) RmDir(path string) {",
+            "Path)\n\n\treturn dirPath\n}\n\n# multiple\n\n// comments\n\n/* foo\nbar\n*/\n\n"
+            "func (p *PsWriter) RmDir(path string) {",
             0.8,
             "# multiple\n\n// comments\n\n/* foo\nbar\n*/\n\nfunc (p *PsWriter) RmDir(path string) {",
         ),

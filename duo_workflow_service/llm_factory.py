@@ -82,7 +82,8 @@ def validate_llm_access(config: VertexConfig = VertexConfig()):
         )
 
     content = anthropic_response.content
-    # feature flags are not yet loaded, so logging the model name here could be misleaeding if the model name depends on feature flags.
+    # feature flags are not yet loaded, so logging the model name here could be misleading if the model name depends on
+    # feature flags.
     log.info(str(content))
 
 

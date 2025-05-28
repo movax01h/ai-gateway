@@ -55,10 +55,11 @@ class MonitoringInterceptor(ServerInterceptor):
         # Wrap an RPC handler with the behavior that captures metrics.
         # The handler is of RpcMethodHandler type:
         #
-        # https://github.com/grpc/grpc/blob/46c658ac018ba750e3e42c00a5fa1864780cc0f5/src/python/grpcio/grpc/__init__.py#L1325
+        # https://github.com/grpc/grpc/blob/46c658ac018ba750e3e42c00a5fa1864780cc0f5/src/python/grpcio/grpc/__init__.py#L1325  # pylint: disable=line-too-long
         #
         # The handler contains implementations which are called based on the request/response types.
-        # We wrap the implementations based on whether response is streamed or not with the behavior that captures the metrics.
+        # We wrap the implementations based on whether response is streamed or not with the behavior that captures the
+        # metrics.
         if handler.request_streaming and handler.response_streaming:
             handler_factory = grpc.stream_stream_rpc_method_handler
             handler_func = stream_fn(
@@ -81,7 +82,7 @@ class MonitoringInterceptor(ServerInterceptor):
         # As a result, an grpc.RpcMethodHandler object is build with the correct arguments set.
         # For example, for stream_stream case:
         #
-        # https://github.com/grpc/grpc/blob/b64756acca2eb942c97a416850ce5ab95a544d3e/src/python/grpcio/grpc/__init__.py#L1653
+        # https://github.com/grpc/grpc/blob/b64756acca2eb942c97a416850ce5ab95a544d3e/src/python/grpcio/grpc/__init__.py#L1653  # pylint: disable=line-too-long
         return handler_factory(
             handler_func,
             request_deserializer=handler.request_deserializer,

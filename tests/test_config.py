@@ -388,7 +388,7 @@ def test_config_vertex_text_model(values: dict, expected: ConfigVertexTextModel)
         ({}, ConfigModelEndpoints()),
         (
             {
-                "AIGW_MODEL_ENDPOINTS__FIREWORKS_REGIONAL_ENDPOINTS": '{"location": {"model": {"endpoint": "endpoint"}}}',
+                "AIGW_MODEL_ENDPOINTS__FIREWORKS_REGIONAL_ENDPOINTS": '{"location": {"model": {"endpoint": "endpoint"}}}',  # pylint: disable=line-too-long
                 "AIGW_GOOGLE_CLOUD_PLATFORM__LOCATION": "location",
                 "RUNWAY_REGION": "test-case1",  # ignored
             },
@@ -474,7 +474,7 @@ def test_amazon_q():
         ({}, ConfigModelLimits()),
         (
             {
-                "AIGW_MODEL_ENGINE_LIMITS": '{"engine": {"model": {"input_tokens": 10, "output_tokens": 20, "concurrency": 30}}}'
+                "AIGW_MODEL_ENGINE_LIMITS": '{"engine": {"model": {"input_tokens": 10, "output_tokens": 20, "concurrency": 30}}}'  # pylint: disable=line-too-long
             },
             ConfigModelLimits(
                 {

@@ -296,12 +296,13 @@ class ListEpicsInput(GroupResourceInput):
     )
     labels: Optional[str] = Field(
         default=None,
-        description="Return epics matching a comma-separated list of label names. Label names from the epic group or a parent group can be used",
+        description="Return epics matching a comma-separated list of label names. Label names from the epic group or a "
+        "parent group can be used",
     )
     with_labels_details: Optional[bool] = Field(
         default=None,
-        description="""If true, response returns more details for each label in labels field: :name, :color, :description,
-        :description_html, :text_color. Default is false""",
+        description="If true, response returns more details for each label in labels field: :name, :color, "
+        ":description, :description_html, :text_color. Default is false",
     )
     order_by: Optional[str] = Field(
         default=None,
@@ -320,19 +321,23 @@ class ListEpicsInput(GroupResourceInput):
     )
     created_after: Optional[str] = Field(
         default=None,
-        description="Return epics created on or after the given time. Expected in ISO 8601 format (2019-03-15T08:00:00Z)",
+        description="Return epics created on or after the given time. Expected in ISO 8601 format "
+        "(2019-03-15T08:00:00Z)",
     )
     created_before: Optional[str] = Field(
         default=None,
-        description="Return epics created on or before the given time. Expected in ISO 8601 format (2019-03-15T08:00:00Z)",
+        description="Return epics created on or before the given time. Expected in ISO 8601 format "
+        "(2019-03-15T08:00:00Z)",
     )
     updated_before: Optional[str] = Field(
         default=None,
-        description="Return epics updated on or before the given time. Expected in ISO 8601 format (2019-03-15T08:00:00Z)",
+        description="Return epics updated on or before the given time. Expected in ISO 8601 format "
+        "(2019-03-15T08:00:00Z)",
     )
     updated_after: Optional[str] = Field(
         default=None,
-        description="Return epics updated on or after the given time. Expected in ISO 8601 format (2019-03-15T08:00:00Z)",
+        description="Return epics updated on or after the given time. Expected in ISO 8601 format "
+        "(2019-03-15T08:00:00Z)",
     )
     include_ancestor_groups: Optional[bool] = Field(
         default=None,
@@ -344,12 +349,13 @@ class ListEpicsInput(GroupResourceInput):
     )
     my_reaction_emoji: Optional[str] = Field(
         default=None,
-        description="""Return epics reacted by the authenticated user by the given emoji. None returns epics not given a reaction.
-        Any returns epics given at least one reaction""",
+        description="""Return epics reacted by the authenticated user by the given emoji. None returns epics not given a
+reaction. Any returns epics given at least one reaction""",
     )
     negate: Optional[dict] = Field(
         default=None,
-        description="Return epics that do not match the parameters supplied. Accepts: author_id, author_username and labels.",
+        description="Return epics that do not match the parameters supplied. Accepts: author_id, author_username and "
+        "labels.",
     )
 
 
@@ -453,14 +459,14 @@ class UpdateEpic(EpicBaseTool):
     name: str = "update_epic"
     description: str = f"""Update an existing epic in a GitLab group.
 
-    {EPIC_IDENTIFICATION_DESCRIPTION}
+{EPIC_IDENTIFICATION_DESCRIPTION}
 
-    For example:
-    - Given group_id 'namespace/group', epic_iid 42, and title 'Updated Epic', the tool call would be:
-        update_epic(group_id='namespace/group', epic_iid=42, title='Updated Epic')
-    - Given the URL https://gitlab.com/groups/namespace/group/-/epics/42 and title 'Updated Epic', the tool call would be:
-      update_epic(url="https://gitlab.com/groups/namespace/group/-/epics/42", title='Updated Epic')
-    """
+For example:
+- Given group_id 'namespace/group', epic_iid 42, and title 'Updated Epic', the tool call would be:
+    update_epic(group_id='namespace/group', epic_iid=42, title='Updated Epic')
+- Given the URL https://gitlab.com/groups/namespace/group/-/epics/42 and title 'Updated Epic', the tool call would be:
+    update_epic(url="https://gitlab.com/groups/namespace/group/-/epics/42", title='Updated Epic')
+"""
     args_schema: Type[BaseModel] = UpdateEpicInput  # type: ignore
 
     async def _arun(self, **kwargs: Any) -> str:

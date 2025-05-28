@@ -23,7 +23,7 @@ class PromptParams(BaseModel):
     stop: list[str] | None = None
     # NOTE: In langchain, some providers accept the timeout when initializing the client. However, support
     # and naming is inconsistent between them. Therefore, we bind the timeout to the prompt instead.
-    # See https://gitlab.com/gitlab-org/modelops/applied-ml/code-suggestions/ai-assist/-/merge_requests/1035#note_2020952732
+    # See https://gitlab.com/gitlab-org/modelops/applied-ml/code-suggestions/ai-assist/-/merge_requests/1035#note_2020952732 # pylint: disable=line-too-long
     timeout: float | None = None
     vertex_location: str | None = None
 
