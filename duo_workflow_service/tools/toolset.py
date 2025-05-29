@@ -2,13 +2,22 @@ import collections.abc
 from typing import Type, Union
 
 from langchain.tools import BaseTool
-from pydantic import BaseModel
+from langchain_core.messages import ToolCall
+from pydantic import BaseModel, ValidationError
 
 ToolType = Union[BaseTool, Type[BaseModel]]
 
 
 class UnknownToolError(Exception):
     """Exception raised when trying to access an unknown tool."""
+
+
+class MalformedToolCallError(Exception):
+    tool_call: ToolCall
+
+    def __init__(self, msg: str, tool_call: ToolCall):
+        super().__init__(msg)
+        self.tool_call = tool_call
 
 
 class Toolset(collections.abc.Mapping):
@@ -77,3 +86,32 @@ class Toolset(collections.abc.Mapping):
             raise UnknownToolError(f"Tool '{tool_name}' does not exist")
 
         return tool_name in self._pre_approved
+
+    def validate_tool_call(self, call: ToolCall) -> ToolCall:
+        tool_name = call.get("name")
+
+        if tool_name not in self._all_tools:
+            raise MalformedToolCallError(
+                f"Tool: '{call['name']}' not found. Please provide a valid tool name",
+                tool_call=call,
+            )
+
+        try:
+            tool = self._all_tools[tool_name]
+
+            if isinstance(tool, BaseTool):
+                tool_input_schema_cls = tool.get_input_schema()
+            else:
+                tool_input_schema_cls = tool
+
+            tool_input_schema_cls.model_validate(call["args"])
+
+            return call
+        except ValidationError:
+            raise MalformedToolCallError(
+                (
+                    f"Invalid arguments {call['args']} were passed to the tool: '{tool_name}'."
+                    f"Please adhere to the tool schema {tool_input_schema_cls.model_json_schema()}.'"
+                ),
+                tool_call=call,
+            )

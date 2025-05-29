@@ -1,5 +1,5 @@
 from typing import Type
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 import pytest
 from langchain.tools import BaseTool
@@ -152,4 +152,4 @@ def test_format_tool_display_message_for_tool_with_args_schema_when_error():
     result = format_tool_display_message(mock_tool, args)
 
     assert result == "Tool msg"
-    mock_tool.format_display_message.assert_called_once_with(args)
+    mock_tool.format_display_message.assert_called_once_with(DuoBaseTool, args)

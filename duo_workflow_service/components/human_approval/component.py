@@ -73,7 +73,7 @@ class HumanApprovalComponent(ABC):
             self._approval_request_router,
             {
                 Routes.CONTINUE: f"{self._node_prefix}_check_{self._approved_agent_name}",
-                Routes.SKIP: next_node,
+                Routes.BACK: back_node,
             },
         )
 
@@ -118,10 +118,10 @@ class HumanApprovalComponent(ABC):
 
     def _approval_request_router(
         self, state: WorkflowState
-    ) -> Literal[Routes.SKIP, Routes.CONTINUE]:
+    ) -> Literal[Routes.CONTINUE, Routes.BACK]:
         if state["status"] == self._approval_req_workflow_state:
             return Routes.CONTINUE
-        return Routes.SKIP
+        return Routes.BACK
 
     def _request_approval(self, state: WorkflowState):
         approval_request = self._build_approval_request(state)

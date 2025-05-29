@@ -31,24 +31,24 @@ class HumanApprovalComponentTestProxy(HumanApprovalComponent):
         return result.Ok("Test approval message")
 
 
-class HumanApprovalComponentSkipInterruptionTestProxy(HumanApprovalComponentTestProxy):
+class HumanApprovalComponentReturnToTheAgentTestProxy(HumanApprovalComponentTestProxy):
     def _build_approval_request(self, state):
         return result.Error(RuntimeError("Error building approval request"))
 
 
 def set_up_graph(
-    node_return_value, component: HumanApprovalComponent
+    node_return_values, component: HumanApprovalComponent
 ) -> tuple[Runnable, AsyncMock, AsyncMock, AsyncMock]:
     graph = StateGraph(WorkflowState)
     graph.set_entry_point("first_node")
-    mock_entry_node = AsyncMock(return_value=node_return_value)
+    mock_entry_node = AsyncMock(side_effect=node_return_values)
     graph.add_node("first_node", mock_entry_node)
 
-    mock_termination_node = AsyncMock(return_value=node_return_value)
+    mock_termination_node = AsyncMock(side_effect=node_return_values)
     graph.add_node("termination", mock_termination_node)
     graph.add_edge("termination", END)
 
-    mock_continuation_node = AsyncMock(return_value=node_return_value)
+    mock_continuation_node = AsyncMock(side_effect=node_return_values)
     graph.add_node("continuation", mock_continuation_node)
     graph.add_edge("continuation", END)
     entry_point = component.attach(
@@ -58,7 +58,14 @@ def set_up_graph(
         next_node="continuation",
     )
 
-    graph.add_edge("first_node", entry_point)
+    graph.add_conditional_edges(
+        "first_node",
+        lambda s: (
+            "termination"
+            if s["status"] == WorkflowStatusEnum.CANCELLED
+            else entry_point
+        ),
+    )
     return (
         graph.compile(),
         mock_entry_node,
@@ -67,21 +74,20 @@ def set_up_graph(
     )
 
 
+def node_return_value(conversation_history={}, status=WorkflowStatusEnum.PLANNING):
+    return {
+        "status": status,
+        "conversation_history": conversation_history,
+        "last_human_input": None,
+        "handover": [],
+        "ui_chat_log": [],
+    }
+
+
 class TestHumanApprovalComponent:
     @pytest.fixture
-    def node_return_value(self):
-        return {
-            "status": WorkflowStatusEnum.PLANNING,
-            "conversation_history": {},
-            "last_human_input": None,
-            "handover": [],
-            "ui_chat_log": [],
-        }
-
-    @pytest.fixture
-    def mock_check_executor(self, node_return_value):
+    def mock_check_executor(self):
         mock = MagicMock(spec=HumanApprovalCheckExecutor)
-        mock.run.return_value = node_return_value
         return mock
 
     @pytest.fixture
@@ -102,15 +108,14 @@ class TestHumanApprovalComponent:
         graph_config,
         graph_input: WorkflowState,
         mock_check_executor,
-        node_return_value,
     ):
         with patch.dict(os.environ, mock_env):
             graph = StateGraph(WorkflowState)
             graph.set_entry_point("first_node")
-            mock_entry_node = AsyncMock(return_value=node_return_value)
+            mock_entry_node = AsyncMock(return_value=node_return_value())
             graph.add_node("first_node", mock_entry_node)
 
-            mock_continuation_node = AsyncMock(return_value=node_return_value)
+            mock_continuation_node = AsyncMock(return_value=node_return_value())
             graph.add_node("continuation", mock_continuation_node)
             graph.add_edge("continuation", END)
             entry_point = component.attach(
@@ -136,7 +141,6 @@ class TestHumanApprovalComponent:
         graph_config,
         graph_input: WorkflowState,
         mock_check_executor,
-        node_return_value,
     ):
         with patch(
             "duo_workflow_service.components.human_approval.component.HumanApprovalCheckExecutor",
@@ -144,7 +148,7 @@ class TestHumanApprovalComponent:
         ), patch.dict(os.environ, {"WORKFLOW_INTERRUPT": "True"}):
 
             graph, mock_entry_node, mock_continuation_node, mock_termination_node = (
-                set_up_graph(node_return_value, component)
+                set_up_graph([node_return_value()], component)
             )
 
             mock_check_executor.run.return_value = {
@@ -177,7 +181,6 @@ class TestHumanApprovalComponent:
         graph_config,
         graph_input: WorkflowState,
         mock_check_executor,
-        node_return_value,
     ):
 
         with patch(
@@ -186,7 +189,7 @@ class TestHumanApprovalComponent:
         ), patch.dict(os.environ, {"WORKFLOW_INTERRUPT": "True"}):
 
             graph, mock_entry_node, mock_continuation_node, mock_termination_node = (
-                set_up_graph(node_return_value, component)
+                set_up_graph([node_return_value()], component)
             )
 
             mock_check_executor.run.return_value = {
@@ -219,7 +222,6 @@ class TestHumanApprovalComponent:
         graph_config,
         graph_input: WorkflowState,
         mock_check_executor,
-        node_return_value,
     ):
 
         with patch(
@@ -228,7 +230,7 @@ class TestHumanApprovalComponent:
         ), patch.dict(os.environ, {"WORKFLOW_INTERRUPT": "True"}):
 
             graph, mock_entry_node, mock_continuation_node, mock_termination_node = (
-                set_up_graph(node_return_value, component)
+                set_up_graph([node_return_value(), node_return_value()], component)
             )
 
             mock_check_executor.run.side_effect = [
@@ -273,25 +275,30 @@ class TestHumanApprovalComponent:
             mock_termination_node.assert_not_called()
 
     @pytest.mark.asyncio
-    async def test_attach_with_skip_interruption(
+    async def test_attach_with_return_to_the_agent(
         self,
         graph_config,
         graph_input: WorkflowState,
         mock_check_executor,
-        node_return_value,
     ):
 
         with patch(
             "duo_workflow_service.components.human_approval.component.HumanApprovalCheckExecutor",
             return_value=mock_check_executor,
         ), patch.dict(os.environ, {"WORKFLOW_INTERRUPT": "True"}):
-            component = HumanApprovalComponentSkipInterruptionTestProxy(
+            component = HumanApprovalComponentReturnToTheAgentTestProxy(
                 workflow_id=graph_config["configurable"]["thread_id"],
                 approved_agent_name="test-agent",
             )
 
             graph, mock_entry_node, mock_continuation_node, mock_termination_node = (
-                set_up_graph(node_return_value, component)
+                set_up_graph(
+                    [
+                        node_return_value(),
+                        node_return_value(status=WorkflowStatusEnum.CANCELLED),
+                    ],
+                    component,
+                )
             )
             # Run the graph
             response = await graph.ainvoke(input=graph_input, config=graph_config)
@@ -299,17 +306,15 @@ class TestHumanApprovalComponent:
             assert "ui_chat_log" in response
             assert len(response["ui_chat_log"]) == 0
 
-            mock_entry_node.assert_called_once()
+            assert mock_entry_node.call_count == 2
             mock_check_executor.run.assert_not_called()
-            mock_continuation_node.assert_called_once()
-            mock_termination_node.assert_not_called()
+            mock_continuation_node.assert_not_called()
 
     @pytest.mark.asyncio
     async def test_attach_node_creation(
         self,
         component: HumanApprovalComponent,
         mock_check_executor,
-        node_return_value,
     ):
 
         with patch(
@@ -319,7 +324,7 @@ class TestHumanApprovalComponent:
             os.environ, {"WORKFLOW_INTERRUPT": "True"}
         ):
 
-            set_up_graph(node_return_value, component)
+            set_up_graph(node_return_value(), component)
 
             mock_check_exec_cls.assert_called_once_with(
                 agent_name="test-agent", workflow_id="test-workflow"
