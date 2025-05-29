@@ -31,7 +31,7 @@ def format_tool_display_message(tool: BaseTool, args: Any) -> Optional[str]:
             return tool.format_display_message(parsed)
 
     except Exception:
-        return tool.format_display_message(args)
+        return tool.format_display_message(DuoBaseTool, args)
 
     return tool.format_display_message(args)
 
