@@ -159,7 +159,10 @@ async def test_compile_and_run_graph(
     await workflow._compile_and_run_graph("Test goal")
 
     # Assertions
-    assert workflow.is_done is True
+    assert workflow.is_done
+    mock_tools_registry.assert_called_once()
+    mock_fetch_project.assert_called_once()
+    mock_workflow_config.assert_called_once()
 
 
 @pytest.mark.asyncio
@@ -260,7 +263,10 @@ async def test_compile_and_run_graph_with_exception(
     with pytest.raises(TraceableException) as exc_info:
         await workflow._compile_and_run_graph("Test goal")
 
-    assert workflow.is_done is True
+    mock_tools_registry.assert_called_once()
+    mock_fetch_project.assert_called_once()
+    mock_workflow_config.assert_called_once()
+    assert workflow.is_done
     assert isinstance(exc_info.value.original_exception, Exception)
     assert str(exc_info.value.original_exception) == "Test exception"
 
