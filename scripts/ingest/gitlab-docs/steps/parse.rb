@@ -6,7 +6,6 @@ puts "clone dir: #{ENV['GITLAB_DOCS_CLONE_DIR']}"
 
 DOC_DIR = ENV['GITLAB_DOCS_CLONE_DIR']
 ROOT_URL = ENV.fetch('GITLAB_DOCS_WEB_ROOT_URL')
-METADATA_KEYS = %w[title md5sum source source_type source_url].freeze
 
 require 'json'
 require_relative "base_content_parser"
@@ -36,8 +35,6 @@ def export(entries)
   File.delete(log_name) if File.exist?(log_name)
   File.open(log_name, 'w') do |f|
     entries.flatten.each do |entry|
-      entry = entry.dup
-      entry[:metadata] = entry[:metadata].slice(*METADATA_KEYS)
       f.puts JSON.dump(entry)
     end
   end

@@ -38,14 +38,11 @@ module Gitlab
 
           def parse_content_and_metadata(content, md5sum, source_name, url)
             match = content.match(METADATA_REGEX)
-            metadata = if match
-                         metadata = YAML.safe_load(content.match(METADATA_REGEX)[:metadata])
-                         content = match.post_match.strip
-                         metadata
-                       else
-                         {}
-                       end
+            if match
+              content = match.post_match.strip
+            end
 
+            metadata = {}
             metadata['title'] = title(content)
             metadata['md5sum'] = md5sum
             metadata['source'] = source_name
