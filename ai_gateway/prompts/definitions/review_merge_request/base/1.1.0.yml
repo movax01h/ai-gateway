@@ -1,7 +1,7 @@
 ---
-name: Claude 3.7 Review Merge Request
+name: Claude 4.0 Review Merge Request
 model:
-  config_file: claude_3_7
+  config_file: claude_4_0
   params:
     max_tokens: 8_192
 unit_primitives:
