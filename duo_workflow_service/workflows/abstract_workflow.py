@@ -103,6 +103,7 @@ class AbstractWorkflow(ABC):
         )
         self._workflow_type = workflow_type
         self._additional_tools = self._build_additional_tools(mcp_tools)
+        self._workflow_config = {}
 
     async def run(self, goal: str) -> None:
         with duo_workflow_metrics.time_workflow(
