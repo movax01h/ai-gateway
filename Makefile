@@ -1,6 +1,7 @@
 ROOT_DIR := $(shell pwd)
 AI_GATEWAY_DIR := ${ROOT_DIR}/ai_gateway
 DUO_WORKFLOW_SERVICE_DIR := ${ROOT_DIR}/duo_workflow_service
+DOC_DIR := ${ROOT_DIR}/docs
 LIB_DIR := ${ROOT_DIR}/lib
 EVAL_DIR := ${ROOT_DIR}/eval
 LINTS_DIR := ${ROOT_DIR}/lints
@@ -271,3 +272,8 @@ install-eval-deps:
 eval: install-eval-deps
 	@echo "Running evaluation..."
 	@poetry run eval --prompt-id $(PROMPT_ID) --prompt-version $(PROMPT_VERSION) --dataset $(DATASET) $(EVALUATORS)
+
+.PHONY: duo-workflow-docs
+duo-workflow-docs:
+	@echo "Generating Duo Workflow Service graph documentation..."
+	@ANTHROPIC_API_KEY=temporary_key poetry run python scripts/generate_graph_docs.py ${DOC_DIR}/duo_workflow_service_graphs.md

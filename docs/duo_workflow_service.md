@@ -179,57 +179,8 @@ Each layer is restricted to using only entities from the layer directly below it
 
 ### Current Graph structure
 
-```mermaid
-%%{init: {'flowchart': {'curve': 'linear'}}}%%
-graph TD;
-   __start__([<p>__start__</p>]):::first
-   build_context(build_context)
-   build_context_tools(build_context_tools)
-   build_context_handover(build_context_handover)
-   build_context_supervisor(build_context_supervisor)
-   planning(planning)
-   update_plan(update_plan)
-   planning_supervisor(planning_supervisor)
-   planning_approval_entry(planning_approval_entry)
-   planning_approval_check(planning_approval_check)
-   plan_terminator(plan_terminator)
-   set_status_to_execution(set_status_to_execution)
-   execution(execution)
-   execution_tools(execution_tools)
-   execution_supervisor(execution_supervisor)
-   execution_handover(execution_handover)
-   __end__([<p>__end__</p>]):::last
-   __start__ --> build_context;
-   build_context_handover --> planning;
-   build_context_supervisor --> build_context;
-   execution_handover --> __end__;
-   execution_supervisor --> execution;
-   execution_tools --> execution;
-   plan_terminator --> __end__;
-   planning_approval_entry --> planning_approval_check;
-   planning_supervisor --> planning;
-   set_status_to_execution --> execution;
-   update_plan --> planning;
-   build_context -. &nbsp;call_tool&nbsp; .-> build_context_tools;
-   build_context -. &nbsp;HandoverAgent&nbsp; .-> build_context_handover;
-   build_context -. &nbsp;PlanSupervisorAgent&nbsp; .-> build_context_supervisor;
-   build_context_tools -.-> build_context;
-   build_context_tools -. &nbsp;stop&nbsp; .-> plan_terminator;
-   planning -. &nbsp;call_tool&nbsp; .-> update_plan;
-   planning -. &nbsp;PlanSupervisorAgent&nbsp; .-> planning_supervisor;
-   planning -. &nbsp;HandoverAgent&nbsp; .-> planning_approval_entry;
-   planning -. &nbsp;stop&nbsp; .-> plan_terminator;
-   planning_approval_check -. &nbsp;HandoverAgent&nbsp; .-> set_status_to_execution;
-   planning_approval_check -. &nbsp;stop&nbsp; .-> plan_terminator;
-   planning_approval_check -. &nbsp;chat&nbsp; .-> planning;
-   execution -. &nbsp;call_tool&nbsp; .-> execution_tools;
-   execution -. &nbsp;HandoverAgent&nbsp; .-> execution_handover;
-   execution -. &nbsp;PlanSupervisorAgent&nbsp; .-> execution_supervisor;
-   execution -. &nbsp;stop&nbsp; .-> plan_terminator;
-   classDef default fill:#f2f0ff,line-height:1.2
-   classDef first fill-opacity:0
-   classDef last fill:#bfb6fc
-```
+To visualise current graphs, you can check [the current structure](duo_workflow_service_graphs.md), or if you've
+made changes, run `make duo-workflow-docs`. This will generate updated mermaid diagrams.
 
 ## Using memory checkpointer
 
@@ -240,34 +191,6 @@ be useful to store checkpoints only in memory - you can use `USE_MEMSAVER=1`
 environment variable to use `MemorySaver`.
 
 When using `MemorySaver`, human in the loop features and workflow status updates are disabled.
-
-### Visualise graph
-
-To visualise current graph structure use following snippet in Python console, use the following code snippet.
-
-```python
-from unittest.mock import AsyncMock, MagicMock, call, patch
-from duo_workflow_service.components import ToolsRegistry
-from duo_workflow_service.internal_events.event_enum import CategoryEnum
-from duo_workflow_service import tools
-
-from duo_workflow_service.workflows.software_development import Workflow
-from langchain_core.runnables.graph import CurveStyle, MermaidDrawMethod, NodeStyles
-from langgraph.checkpoint.memory import MemorySaver
-
-tools_reg = MagicMock(spec=ToolsRegistry)
-tools_reg.get.return_value = tools.SetTaskStatus()
-tools_reg.get_batch.return_value = [tools.GetPlan(), tools.AddNewTask(), tools.RemoveTask(), tools.UpdateTaskDescription(), tools.SetTaskStatus()]
-tools_reg.get_handlers.return_value = [tools.GetPlan()]
-
-wrk = Workflow('test123', {}, workflow_type=CategoryEnum.WORKFLOW_SOFTWARE_DEVELOPMENT)
-wrk._project = { "id": "test-project", "name": "test-project", "http_url_to_repo": 'http://gdk.test:3000' }
-graph = wrk._compile('test goals', tools_reg, MemorySaver())
-
-print(graph.get_graph().draw_mermaid())
-```
-
-As a result, a new string with a mermaid chart that represents current graph structure is going to be printed out.
 
 ### Logging
 
