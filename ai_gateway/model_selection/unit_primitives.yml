@@ -20,6 +20,7 @@ configurable_unit_primitives:
       - "complete_code"
     default_model: "codestral_2501_fireworks"
     selectable_models:
+      - "codestral_2501_fireworks"
       - "codestral_2501_vertex"
       - "claude_sonnet_3_7_20250219"
       - "claude_3_5_sonnet_20240620"
