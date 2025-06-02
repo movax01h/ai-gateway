@@ -21,6 +21,7 @@ from duo_workflow_service.entities.state import (
     WorkflowState,
     WorkflowStatusEnum,
 )
+from duo_workflow_service.errors.error_handler import ModelErrorHandler
 from duo_workflow_service.gitlab.http_client import GitlabHttpClient
 from duo_workflow_service.internal_events import InternalEventAdditionalProperties
 from duo_workflow_service.internal_events.event_enum import (
@@ -370,7 +371,7 @@ class TestAgent:
         self, chat_mock, planner_agent, workflow_state
     ):
         # Configure the error handler class to return mock instance
-        mock_error_handler = AsyncMock()
+        mock_error_handler = AsyncMock(spec=ModelErrorHandler)
         mock_error_handler.handle_error.return_value = AsyncMock()
         planner_agent._error_handler = mock_error_handler
 
@@ -419,7 +420,7 @@ class TestAgent:
         )
 
         # Configure the error handler class to return mock instance
-        mock_error_handler = AsyncMock()
+        mock_error_handler = AsyncMock(spec=ModelErrorHandler)
         mock_error_handler.handle_error.return_value = AsyncMock()
         planner_agent._error_handler = mock_error_handler
 
