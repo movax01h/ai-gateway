@@ -74,6 +74,8 @@ class ModelSelectionConfig:
         gitlab_models_ids = models.keys()
 
         errors: set[str] = set()
+        default_model_not_selectable_errors: list[str] = []
+
         for unit_primitive_config in unit_primitive_configs:
             ids = chain(
                 [unit_primitive_config.default_model],
@@ -87,10 +89,32 @@ class ModelSelectionConfig:
                 if gitlab_model_id not in gitlab_models_ids
             )
 
+            # Validate that the default model is also included in selectable_models
+            if (
+                unit_primitive_config.default_model
+                not in unit_primitive_config.selectable_models
+            ):
+                default_model_not_selectable_errors.append(
+                    f"Feature '{unit_primitive_config.feature_setting}' has default model "
+                    f"'{unit_primitive_config.default_model}' that is not in selectable_models."
+                )
+
+        error_messages = []
         if errors:
-            raise ValueError(
-                f"The following gitlab models ids are used but are not defined in models.yml: {", ".join(errors)}"
+            error_messages.append(
+                f"The following gitlab models ids are used but are not defined in models.yml: {', '.join(errors)}"
             )
+
+        if default_model_not_selectable_errors:
+            error_messages.append(
+                "Default models must be included in selectable_models:\n"
+                + "\n".join(
+                    f"  - {error}" for error in default_model_not_selectable_errors
+                )
+            )
+
+        if error_messages:
+            raise ValueError("\n".join(error_messages))
 
     def refresh(self):
         """Refresh the configuration by reloading from source files."""

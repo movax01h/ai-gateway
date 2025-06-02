@@ -202,3 +202,68 @@ def test_validate_with_error(fs: FakeFilesystem):
     assert "non_existent_model" in error_message
     assert "another_non_existent_model" in error_message
     assert "third_non_existent_model" in error_message
+
+
+def test_validate_default_model_not_in_selectable_models(fs: FakeFilesystem):
+    """Test that validation fails when default models are not in selectable_models."""
+    model_selection_dir = (
+        Path(__file__).parent.parent.parent / "ai_gateway" / "model_selection"
+    )
+
+    fs.create_file(
+        model_selection_dir / "models.yml",
+        contents=dedent(
+            """
+            models:
+              - model_identifier: model1
+                name: Model One
+                gitlab_identifier: model_1
+                provider: provider1
+                provider_identifier: provider-model-1
+              - model_identifier: model2
+                name: Model Two
+                gitlab_identifier: model_2
+                provider: provider2
+                provider_identifier: provider-model-2
+              - model_identifier: model3
+                name: Model Three
+                gitlab_identifier: model_3
+                provider: provider3
+                provider_identifier: provider-model-3
+            """
+        ),
+    )
+
+    fs.create_file(
+        model_selection_dir / "unit_primitives.yml",
+        contents=dedent(
+            """
+            configurable_unit_primitives:
+              - feature_setting: "test_config"
+                unit_primitives:
+                  - "ask_commit"
+                default_model: "model_1"
+                selectable_models:
+                  - "model_2"
+                  - "model_3"
+              - feature_setting: "another_config"
+                unit_primitives:
+                  - "generate_code"
+                default_model: "model_2"
+                selectable_models:
+                  - "model_1"
+                  - "model_3"
+            """
+        ),
+    )
+
+    with pytest.raises(ValueError) as excinfo:
+        ModelSelectionConfig().validate()
+
+    error_message = str(excinfo.value)
+    expected_error = (
+        "Default models must be included in selectable_models:\n"
+        "  - Feature 'test_config' has default model 'model_1' that is not in selectable_models.\n"
+        "  - Feature 'another_config' has default model 'model_2' that is not in selectable_models."
+    )
+    assert error_message == expected_error
