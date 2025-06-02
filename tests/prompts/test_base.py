@@ -3,7 +3,7 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Generator, Iterator, Optional, Type
 from unittest import mock
-from unittest.mock import Mock, call
+from unittest.mock import ANY, MagicMock, Mock, call
 
 import pytest
 from anthropic import APITimeoutError, AsyncAnthropic
@@ -20,6 +20,7 @@ from pyfakefs.fake_filesystem import FakeFilesystem
 
 from ai_gateway.api.auth_utils import StarletteUser
 from ai_gateway.config import ConfigModelLimits
+from ai_gateway.feature_flags.context import current_feature_flag_context
 from ai_gateway.instrumentators.model_requests import ModelRequestInstrumentator
 from ai_gateway.model_metadata import (
     AmazonQModelMetadata,
@@ -29,7 +30,7 @@ from ai_gateway.model_metadata import (
 )
 from ai_gateway.models.v2.anthropic_claude import ChatAnthropic
 from ai_gateway.prompts import BasePromptRegistry, Prompt
-from ai_gateway.prompts.config.base import PromptParams
+from ai_gateway.prompts.config.base import PromptConfig, PromptParams
 from tests.conftest import FakeModel
 
 
@@ -97,6 +98,40 @@ class TestPrompt:
         assert prompt.model_provider == model_params["model_class_provider"]
         assert prompt.model_engine == expected_model_engine
         assert isinstance(prompt.bound, Runnable)
+
+    @pytest.mark.parametrize(
+        ("prompt_config_name", "enabled_feature_flags", "expected_model_name"),
+        [
+            ("test_prompt", {}, "test_model"),
+            (
+                "Default configuration for the Duo Chat ReAct Agent",
+                {"duo_chat_react_agent_claude_4_0"},
+                "claude-sonnet-4-20250514",
+            ),
+            (
+                "Default configuration for the Duo Chat ReAct Agent",
+                {},
+                "test_model",
+            ),
+        ],
+    )
+    def test_model_override(
+        self,
+        prompt_config: PromptConfig,
+        model,
+        prompt_config_name,
+        enabled_feature_flags,
+        expected_model_name,
+    ):
+        prompt_config.name = prompt_config_name
+        current_feature_flag_context.set(enabled_feature_flags)
+
+        mock_model_factory = MagicMock(return_value=model)
+        Prompt(mock_model_factory, prompt_config)
+
+        mock_model_factory.assert_called_once_with(
+            model=expected_model_name, disable_streaming=ANY, max_retries=ANY
+        )
 
     def test_build_prompt_template(self, prompt_template, model_config):
         prompt_template = Prompt._build_prompt_template(prompt_template, model_config)
