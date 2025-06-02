@@ -30,7 +30,7 @@ class ClientEvent(_message.Message):
     def __init__(self, startRequest: _Optional[_Union[StartWorkflowRequest, _Mapping]] = ..., actionResponse: _Optional[_Union[ActionResponse, _Mapping]] = ...) -> None: ...
 
 class StartWorkflowRequest(_message.Message):
-    __slots__ = ("clientVersion", "workflowID", "workflowDefinition", "goal", "workflowMetadata", "clientCapabilities", "context", "mcpTools")
+    __slots__ = ("clientVersion", "workflowID", "workflowDefinition", "goal", "workflowMetadata", "clientCapabilities", "context", "mcpTools", "additional_context")
     CLIENTVERSION_FIELD_NUMBER: _ClassVar[int]
     WORKFLOWID_FIELD_NUMBER: _ClassVar[int]
     WORKFLOWDEFINITION_FIELD_NUMBER: _ClassVar[int]
@@ -39,6 +39,7 @@ class StartWorkflowRequest(_message.Message):
     CLIENTCAPABILITIES_FIELD_NUMBER: _ClassVar[int]
     CONTEXT_FIELD_NUMBER: _ClassVar[int]
     MCPTOOLS_FIELD_NUMBER: _ClassVar[int]
+    ADDITIONAL_CONTEXT_FIELD_NUMBER: _ClassVar[int]
     clientVersion: str
     workflowID: str
     workflowDefinition: str
@@ -47,7 +48,8 @@ class StartWorkflowRequest(_message.Message):
     clientCapabilities: _containers.RepeatedScalarFieldContainer[str]
     context: _containers.RepeatedCompositeFieldContainer[ContextElement]
     mcpTools: _containers.RepeatedCompositeFieldContainer[McpTool]
-    def __init__(self, clientVersion: _Optional[str] = ..., workflowID: _Optional[str] = ..., workflowDefinition: _Optional[str] = ..., goal: _Optional[str] = ..., workflowMetadata: _Optional[str] = ..., clientCapabilities: _Optional[_Iterable[str]] = ..., context: _Optional[_Iterable[_Union[ContextElement, _Mapping]]] = ..., mcpTools: _Optional[_Iterable[_Union[McpTool, _Mapping]]] = ...) -> None: ...
+    additional_context: _containers.RepeatedCompositeFieldContainer[AdditionalContext]
+    def __init__(self, clientVersion: _Optional[str] = ..., workflowID: _Optional[str] = ..., workflowDefinition: _Optional[str] = ..., goal: _Optional[str] = ..., workflowMetadata: _Optional[str] = ..., clientCapabilities: _Optional[_Iterable[str]] = ..., context: _Optional[_Iterable[_Union[ContextElement, _Mapping]]] = ..., mcpTools: _Optional[_Iterable[_Union[McpTool, _Mapping]]] = ..., additional_context: _Optional[_Iterable[_Union[AdditionalContext, _Mapping]]] = ...) -> None: ...
 
 class ActionResponse(_message.Message):
     __slots__ = ("requestID", "response", "plainTextResponse", "httpResponse")
@@ -243,3 +245,15 @@ class RunMCPTool(_message.Message):
     name: str
     args: str
     def __init__(self, name: _Optional[str] = ..., args: _Optional[str] = ...) -> None: ...
+
+class AdditionalContext(_message.Message):
+    __slots__ = ("category", "id", "content", "metadata")
+    CATEGORY_FIELD_NUMBER: _ClassVar[int]
+    ID_FIELD_NUMBER: _ClassVar[int]
+    CONTENT_FIELD_NUMBER: _ClassVar[int]
+    METADATA_FIELD_NUMBER: _ClassVar[int]
+    category: str
+    id: str
+    content: str
+    metadata: str
+    def __init__(self, category: _Optional[str] = ..., id: _Optional[str] = ..., content: _Optional[str] = ..., metadata: _Optional[str] = ...) -> None: ...

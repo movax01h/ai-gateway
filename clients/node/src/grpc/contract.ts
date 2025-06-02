@@ -94,6 +94,7 @@ export interface StartWorkflowRequest {
   clientCapabilities: string[];
   context: ContextElement[];
   mcpTools: McpTool[];
+  additionalContext: AdditionalContext[];
 }
 
 export interface ActionResponse {
@@ -214,6 +215,13 @@ export interface RunMCPTool {
   args: string;
 }
 
+export interface AdditionalContext {
+  category: string;
+  id?: string | undefined;
+  content?: string | undefined;
+  metadata?: string | undefined;
+}
+
 function createBaseClientEvent(): ClientEvent {
   return { startRequest: undefined, actionResponse: undefined };
 }
@@ -304,6 +312,7 @@ function createBaseStartWorkflowRequest(): StartWorkflowRequest {
     clientCapabilities: [],
     context: [],
     mcpTools: [],
+    additionalContext: [],
   };
 }
 
@@ -332,6 +341,9 @@ export const StartWorkflowRequest: MessageFns<StartWorkflowRequest> = {
     }
     for (const v of message.mcpTools) {
       McpTool.encode(v!, writer.uint32(66).fork()).join();
+    }
+    for (const v of message.additionalContext) {
+      AdditionalContext.encode(v!, writer.uint32(74).fork()).join();
     }
     return writer;
   },
@@ -407,6 +419,14 @@ export const StartWorkflowRequest: MessageFns<StartWorkflowRequest> = {
           message.mcpTools.push(McpTool.decode(reader, reader.uint32()));
           continue;
         }
+        case 9: {
+          if (tag !== 74) {
+            break;
+          }
+
+          message.additionalContext.push(AdditionalContext.decode(reader, reader.uint32()));
+          continue;
+        }
       }
       if ((tag & 7) === 4 || tag === 0) {
         break;
@@ -430,6 +450,9 @@ export const StartWorkflowRequest: MessageFns<StartWorkflowRequest> = {
         ? object.context.map((e: any) => ContextElement.fromJSON(e))
         : [],
       mcpTools: globalThis.Array.isArray(object?.mcpTools) ? object.mcpTools.map((e: any) => McpTool.fromJSON(e)) : [],
+      additionalContext: globalThis.Array.isArray(object?.additionalContext)
+        ? object.additionalContext.map((e: any) => AdditionalContext.fromJSON(e))
+        : [],
     };
   },
 
@@ -459,6 +482,9 @@ export const StartWorkflowRequest: MessageFns<StartWorkflowRequest> = {
     if (message.mcpTools?.length) {
       obj.mcpTools = message.mcpTools.map((e) => McpTool.toJSON(e));
     }
+    if (message.additionalContext?.length) {
+      obj.additionalContext = message.additionalContext.map((e) => AdditionalContext.toJSON(e));
+    }
     return obj;
   },
 
@@ -475,6 +501,7 @@ export const StartWorkflowRequest: MessageFns<StartWorkflowRequest> = {
     message.clientCapabilities = object.clientCapabilities?.map((e) => e) || [];
     message.context = object.context?.map((e) => ContextElement.fromPartial(e)) || [];
     message.mcpTools = object.mcpTools?.map((e) => McpTool.fromPartial(e)) || [];
+    message.additionalContext = object.additionalContext?.map((e) => AdditionalContext.fromPartial(e)) || [];
     return message;
   },
 };
@@ -2336,6 +2363,114 @@ export const RunMCPTool: MessageFns<RunMCPTool> = {
     const message = createBaseRunMCPTool();
     message.name = object.name ?? "";
     message.args = object.args ?? "";
+    return message;
+  },
+};
+
+function createBaseAdditionalContext(): AdditionalContext {
+  return { category: "", id: undefined, content: undefined, metadata: undefined };
+}
+
+export const AdditionalContext: MessageFns<AdditionalContext> = {
+  encode(message: AdditionalContext, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
+    if (message.category !== "") {
+      writer.uint32(10).string(message.category);
+    }
+    if (message.id !== undefined) {
+      writer.uint32(18).string(message.id);
+    }
+    if (message.content !== undefined) {
+      writer.uint32(26).string(message.content);
+    }
+    if (message.metadata !== undefined) {
+      writer.uint32(34).string(message.metadata);
+    }
+    return writer;
+  },
+
+  decode(input: BinaryReader | Uint8Array, length?: number): AdditionalContext {
+    const reader = input instanceof BinaryReader ? input : new BinaryReader(input);
+    let end = length === undefined ? reader.len : reader.pos + length;
+    const message = createBaseAdditionalContext();
+    while (reader.pos < end) {
+      const tag = reader.uint32();
+      switch (tag >>> 3) {
+        case 1: {
+          if (tag !== 10) {
+            break;
+          }
+
+          message.category = reader.string();
+          continue;
+        }
+        case 2: {
+          if (tag !== 18) {
+            break;
+          }
+
+          message.id = reader.string();
+          continue;
+        }
+        case 3: {
+          if (tag !== 26) {
+            break;
+          }
+
+          message.content = reader.string();
+          continue;
+        }
+        case 4: {
+          if (tag !== 34) {
+            break;
+          }
+
+          message.metadata = reader.string();
+          continue;
+        }
+      }
+      if ((tag & 7) === 4 || tag === 0) {
+        break;
+      }
+      reader.skip(tag & 7);
+    }
+    return message;
+  },
+
+  fromJSON(object: any): AdditionalContext {
+    return {
+      category: isSet(object.category) ? globalThis.String(object.category) : "",
+      id: isSet(object.id) ? globalThis.String(object.id) : undefined,
+      content: isSet(object.content) ? globalThis.String(object.content) : undefined,
+      metadata: isSet(object.metadata) ? globalThis.String(object.metadata) : undefined,
+    };
+  },
+
+  toJSON(message: AdditionalContext): unknown {
+    const obj: any = {};
+    if (message.category !== "") {
+      obj.category = message.category;
+    }
+    if (message.id !== undefined) {
+      obj.id = message.id;
+    }
+    if (message.content !== undefined) {
+      obj.content = message.content;
+    }
+    if (message.metadata !== undefined) {
+      obj.metadata = message.metadata;
+    }
+    return obj;
+  },
+
+  create<I extends Exact<DeepPartial<AdditionalContext>, I>>(base?: I): AdditionalContext {
+    return AdditionalContext.fromPartial(base ?? ({} as any));
+  },
+  fromPartial<I extends Exact<DeepPartial<AdditionalContext>, I>>(object: I): AdditionalContext {
+    const message = createBaseAdditionalContext();
+    message.category = object.category ?? "";
+    message.id = object.id ?? undefined;
+    message.content = object.content ?? undefined;
+    message.metadata = object.metadata ?? undefined;
     return message;
   },
 };
