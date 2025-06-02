@@ -150,7 +150,7 @@ def _conversation_history_reducer(
             reduced[agent_name] = _restore_message_consistency(trimmed_messages)
 
             # If trimming resulted in empty list, keep at least the last few messages along with the system message
-            if not reduced[agent_name]:
+            if not reduced[agent_name] or len(reduced[agent_name]) == 1:
                 all_messages = current.get(agent_name, []) + processed_messages
                 system_messages = [
                     msg for msg in all_messages if isinstance(msg, SystemMessage)
@@ -167,7 +167,7 @@ def _conversation_history_reducer(
                 reduced[agent_name] = _restore_message_consistency(fallback_messages)
 
                 logger.warning(
-                    "Trim resulted in empty messages - falling back to minimal context",
+                    "Trim resulted in empty messages/invalid messages - falling back to minimal context",
                     agent_name=agent_name,
                 )
 

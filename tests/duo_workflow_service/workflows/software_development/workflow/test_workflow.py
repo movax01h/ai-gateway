@@ -368,18 +368,11 @@ async def test_workflow_run_with_memory_saver(
         },
     ]
 
-    mock_handover_agent.return_value.run.side_effect = [
-        {
-            "plan": Plan(steps=[]),
-            "status": WorkflowStatusEnum.COMPLETED,
-            "conversation_history": {},
-        },
-        {
-            "plan": Plan(steps=[]),
-            "status": WorkflowStatusEnum.COMPLETED,
-            "conversation_history": {},
-        },
-    ]
+    mock_handover_agent.return_value.run.return_value = {
+        "plan": Plan(steps=[]),
+        "status": WorkflowStatusEnum.COMPLETED,
+        "conversation_history": {},
+    }
 
     mock_agent.return_value.run.side_effect = [
         *_agent_responses(
