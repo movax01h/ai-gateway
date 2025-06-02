@@ -24,6 +24,7 @@ message StartWorkflowRequest {
     repeated string clientCapabilities = 6;
     repeated ContextElement context = 7;
     repeated McpTool mcpTools = 8;
+    repeated AdditionalContext additional_context = 9;
 }
 
 message ActionResponse {
@@ -151,4 +152,11 @@ message McpTool {
 message RunMCPTool {
     string name = 1;
     string args = 2;
+}
+
+message AdditionalContext {
+    string category = 1;
+    optional string id = 2;
+    optional string content = 3;
+    optional string metadata = 4;
 }

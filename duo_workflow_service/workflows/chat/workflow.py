@@ -151,7 +151,12 @@ class Workflow(AbstractWorkflow):
             conversation_history={
                 AGENT_NAME: [
                     SystemMessage(content=system_prompt),
-                    HumanMessage(content=goal),
+                    HumanMessage(
+                        content=goal,
+                        additional_kwargs={
+                            "additional_context": self._additional_context
+                        },
+                    ),
                 ]
             },
             ui_chat_log=[initial_ui_chat_log],
@@ -169,7 +174,14 @@ class Workflow(AbstractWorkflow):
                     update={
                         "status": WorkflowStatusEnum.EXECUTION,
                         "conversation_history": {
-                            AGENT_NAME: [HumanMessage(content=goal)]
+                            AGENT_NAME: [
+                                HumanMessage(
+                                    content=goal,
+                                    additional_kwargs={
+                                        "additional_context": self._additional_context
+                                    },
+                                )
+                            ]
                         },
                     },
                 )

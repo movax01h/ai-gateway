@@ -1,6 +1,6 @@
 {
   "name": "@gitlab-org/duo-workflow-service",
-  "version": "0.1.8",
+  "version": "0.1.10",
   "description": "Node client for the GitLab Duo Workflow Service",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",

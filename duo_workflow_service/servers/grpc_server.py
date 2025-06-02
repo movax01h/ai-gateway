@@ -34,6 +34,7 @@ from duo_workflow_service.interceptors.internal_events_interceptor import (
 from duo_workflow_service.interceptors.monitoring_interceptor import (
     MonitoringInterceptor,
 )
+from duo_workflow_service.internal_events import DuoWorkflowInternalEvent
 from duo_workflow_service.internal_events.event_enum import CategoryEnum
 from duo_workflow_service.structured_logging import set_workflow_id
 from duo_workflow_service.tracking import MonitoringContext, current_monitoring_context
@@ -43,6 +44,7 @@ from duo_workflow_service.workflows.abstract_workflow import (
     TypeWorkflow,
 )
 from duo_workflow_service.workflows.registry import resolve_workflow_class
+from duo_workflow_service.workflows.typing import AdditionalContext
 
 log = structlog.stdlib.get_logger("server")
 
@@ -71,6 +73,28 @@ class GrpcServer(contract_pb2_grpc.DuoWorkflowServicer):
     # - Not delaying the server response for too long when handling errors
     TASK_CANCELLATION_TIMEOUT = 2.0
 
+    async def authorize_additional_context(
+        self,
+        current_user: CloudConnectorUser,
+        client_event: contract_pb2.ClientEvent,
+        context: grpc.ServicerContext,
+    ):
+        if client_event.startRequest.additional_context:
+            for additional_context in client_event.startRequest.additional_context:
+                unit_primitive = GitLabUnitPrimitive[
+                    f"include_{additional_context.category}_context".upper()
+                ]
+                if current_user.can(unit_primitive):
+                    DuoWorkflowInternalEvent.track_event(
+                        event_name=f"request_{unit_primitive}",
+                        category=__name__,
+                    )
+                else:
+                    await context.abort(
+                        grpc.StatusCode.PERMISSION_DENIED,
+                        f"Unauthorized to access {unit_primitive}",
+                    )
+
     # pylint: disable=invalid-overridden-method
     async def ExecuteWorkflow(
         self,
@@ -90,11 +114,32 @@ class GrpcServer(contract_pb2_grpc.DuoWorkflowServicer):
         start_workflow_request: contract_pb2.ClientEvent = await anext(
             aiter(request_iterator)
         )
+
+        await self.authorize_additional_context(
+            current_user=user,
+            client_event=start_workflow_request,
+            context=context,
+        )
+
         workflow_id = start_workflow_request.startRequest.workflowID
         set_workflow_id(workflow_id)
         log.info("Starting workflow %s", clean_start_request(start_workflow_request))
 
         goal = start_workflow_request.startRequest.goal
+
+        if start_workflow_request.startRequest.additional_context:
+            additional_context = [
+                AdditionalContext(
+                    category=e.category,
+                    id=e.id,
+                    content=e.content,
+                    metadata=json.loads(e.metadata),
+                )
+                for e in start_workflow_request.startRequest.additional_context
+            ]
+        else:
+            additional_context = None
+
         workflow_metadata = {}
         workflow_definition = start_workflow_request.startRequest.workflowDefinition
         monitoring_context.workflow_id = workflow_id
@@ -122,6 +167,7 @@ class GrpcServer(contract_pb2_grpc.DuoWorkflowServicer):
             workflow_metadata=workflow_metadata,
             workflow_type=workflow_type,
             mcp_tools=mcp_tools,
+            additional_context=additional_context,
             context_elements=context_elements,
             invocation_metadata={
                 "base_url": invocation_metadata.get("x-gitlab-base-url", ""),

@@ -136,12 +136,25 @@ class Agent:
                     self.name
                 ).count_tokens(messages)
 
+                new_messages: list[BaseMessage] = []
+
+                for message in messages:
+                    if (
+                        isinstance(message, HumanMessage)
+                        and "additional_context" in message.additional_kwargs
+                    ):
+                        # TODO: Use Jinja's Template Render instead of python string formatter.
+                        # https://gitlab.com/gitlab-org/gitlab/-/issues/546558
+                        new_messages.append(message)
+                    else:
+                        new_messages.append(message)
+
                 model_name = getattr(self._model, "model_name", "unknown")
                 request_type = f"{self.name}_completion"
                 with duo_workflow_metrics.time_llm_request(
                     model=model_name, request_type=request_type
                 ):
-                    response = await self._model.ainvoke(messages)
+                    response = await self._model.ainvoke(new_messages)
 
                 self._track_tokens_data(response, approximate_token_count)
                 duo_workflow_metrics.count_llm_response(

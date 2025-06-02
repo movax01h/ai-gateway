@@ -1,7 +1,7 @@
 import asyncio
 import os
 from abc import ABC, abstractmethod
-from typing import Any, Dict, Type, TypedDict
+from typing import Any, Dict, Optional, Type, TypedDict
 
 import structlog
 from langchain.tools import BaseTool
@@ -40,6 +40,7 @@ from duo_workflow_service.internal_events.event_enum import CategoryEnum, EventE
 from duo_workflow_service.monitoring import duo_workflow_metrics
 from duo_workflow_service.tools import convert_mcp_tools_to_langchain_tools
 from duo_workflow_service.tracking import log_exception
+from duo_workflow_service.workflows.typing import AdditionalContext
 
 # Constants
 QUEUE_MAX_SIZE = 1
@@ -73,6 +74,7 @@ class AbstractWorkflow(ABC):
     is_done: bool = False
     _workflow_type: CategoryEnum
     _stream: bool = False
+    _additional_context: list[AdditionalContext] | None
     _context_elements: list
     _additional_tools: list[Type[BaseTool]]
 
@@ -87,6 +89,7 @@ class AbstractWorkflow(ABC):
             "gitlab_token": "",
         },
         mcp_tools: list[contract_pb2.McpTool] = [],
+        additional_context: Optional[list[AdditionalContext]] = None,
     ):
         self._outbox = asyncio.Queue(maxsize=QUEUE_MAX_SIZE)
         self._inbox = asyncio.Queue(maxsize=QUEUE_MAX_SIZE)
@@ -102,6 +105,7 @@ class AbstractWorkflow(ABC):
             invocation_metadata.get("gitlab_token", ""),
         )
         self._workflow_type = workflow_type
+        self._additional_context = additional_context
         self._additional_tools = self._build_additional_tools(mcp_tools)
         self._workflow_config = {}
 
