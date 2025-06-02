@@ -150,6 +150,36 @@ def test_conversation_history_reducer_exceeding_context_limit():
     }
 
 
+@patch("duo_workflow_service.entities.state.MAX_CONTEXT_TOKENS", 20)
+def test_conversation_history_reducer_exceeding_context_limit_for_existing_message():
+    current: Dict[str, List[BaseMessage]] = {
+        "agent_a": [
+            SystemMessage(content="system message"),
+            HumanMessage(content="first a message"),
+            AIMessage(content="first ai message"),
+            ToolMessage(content="first tool message", tool_call_id="tool-call-1"),
+            AIMessage(content="second ai message"),
+        ]
+    }
+
+    new: Optional[Dict[str, List[BaseMessage]]] = {
+        "agent_a": [
+            ToolMessage(content="second tool message", tool_call_id="tool-call-2")
+        ]
+    }
+
+    result = _conversation_history_reducer(current, new)
+
+    assert result == {
+        "agent_a": [
+            SystemMessage(content="system message"),
+            HumanMessage(content="first tool message"),
+            AIMessage(content="second ai message"),
+            HumanMessage(content="second tool message"),
+        ]
+    }
+
+
 @patch("duo_workflow_service.entities.state.MAX_SINGLE_MESSAGE_TOKENS", 100)
 def test_conversation_history_reducer_single_message_too_large():
     current: Dict[str, List[BaseMessage]] = {
@@ -301,11 +331,12 @@ def test_conversation_history_reducer_with_loop_warning(
     current: Dict[str, List[BaseMessage]] = {
         "agent_a": [
             SystemMessage(content="system message"),
+            HumanMessage(content="first human message"),
         ],
     }
 
     new: Dict[str, List[BaseMessage]] = {
-        "agent_a": [HumanMessage(content="new message")],
+        "agent_a": [HumanMessage(content="new human message")],
     }
 
     # Configure the mock to return only existing messages, indicating possible loop
