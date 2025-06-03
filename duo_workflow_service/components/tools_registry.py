@@ -70,6 +70,7 @@ _READ_ONLY_GITLAB_TOOLS: list[Type[BaseTool]] = [
     tools.ListCommits,
     tools.GetCommitDiff,
     tools.GetCommitComments,
+    tools.GetWorkflowContext,
 ]
 
 _AGENT_PRIVILEGES: dict[str, list[Type[BaseTool]]] = {
@@ -163,11 +164,6 @@ class ToolsRegistry:
         }
 
         feature_flags = current_feature_flag_context.get()
-        if "duo_workflow_previous_workflow_tool" in feature_flags:
-            self._enabled_tools["get_previous_workflow_context"] = (
-                tools.GetWorkflowContext(metadata=tool_metadata)  # type: ignore
-            )
-
         self._preapproved_tool_names = set(self._enabled_tools.keys())
 
         for privilege in enabled_tools:
