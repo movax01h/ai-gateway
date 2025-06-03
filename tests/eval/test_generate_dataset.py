@@ -2,6 +2,8 @@ import os
 from unittest.mock import MagicMock, Mock, patch
 
 import pytest
+from eli5.datasets.generator import DatasetGenerator, ModelConfig, PromptConfig
+from eli5.datasets.serializers import JsonFileSerializer, LangSmithSerializer
 from langsmith import Client
 
 from ai_gateway.prompts.base import BasePromptRegistry
@@ -233,15 +235,11 @@ class TestGetPromptSource:
 
 
 class TestCreateLangsmithClient:
-    def test_create_langsmith_client_with_upload_false(self):
-        result = create_langsmith_client(upload=False)
-        assert result is None
-
     # pylint: disable=direct-environment-variable-reference
     @patch.dict(os.environ, {}, clear=True)
     def test_create_langsmith_client_missing_api_key(self):
         with pytest.raises(Exception):
-            create_langsmith_client(upload=True)
+            create_langsmith_client()
 
     @patch.dict(os.environ, {"LANGCHAIN_API_KEY": "test_key"})
     @patch("eval.generate_dataset.Client")
@@ -249,7 +247,7 @@ class TestCreateLangsmithClient:
         mock_client = Mock(spec=Client)
         mock_client_class.return_value = mock_client
 
-        result = create_langsmith_client(upload=True)
+        result = create_langsmith_client()
 
         assert result == mock_client
         mock_client_class.assert_called_once_with(api_key="test_key")
@@ -260,7 +258,7 @@ class TestCreateLangsmithClient:
         mock_client_class.side_effect = Exception("Connection error")
 
         with pytest.raises(Exception):
-            create_langsmith_client(upload=True)
+            create_langsmith_client()
 
     # pylint: enable=direct-environment-variable-reference
 
@@ -277,14 +275,10 @@ class TestRun:
             mock_container.config = mock_config
             yield mock_container
 
-    @pytest.fixture
-    def mock_eli5_generate_dataset(self):
-        with patch("eval.generate_dataset.eli5_generate_dataset") as mock_generate:
-            mock_output_file = Mock()
-            mock_output_file.resolve.return_value = "/path/to/output/dataset.json"
-            mock_generate.return_value = mock_output_file
-            yield mock_generate
-
+    @patch("eval.generate_dataset.DatasetGenerator")
+    @patch("eval.generate_dataset.JsonFileSerializer")
+    @patch("eval.generate_dataset.PromptConfig")
+    @patch("eval.generate_dataset.ModelConfig")
     @patch("eval.generate_dataset.create_langsmith_client")
     @patch("eval.generate_dataset.get_prompt_source")
     @patch("eval.generate_dataset.typer.echo")
@@ -293,8 +287,11 @@ class TestRun:
         mock_echo,
         mock_get_prompt_source,
         mock_create_client,
+        mock_model_config_class,
+        mock_prompt_config_class,
+        mock_json_serializer_class,
+        mock_dataset_generator_class,
         mock_container_application,
-        mock_eli5_generate_dataset,
     ):
         prompt_id = "chat/explain_code"
         prompt_version = "1.0.0"
@@ -303,6 +300,21 @@ class TestRun:
         mock_create_client.return_value = None
         mock_prompt_source = {"name": "Test Prompt", "prompt_template": {}}
         mock_get_prompt_source.return_value = mock_prompt_source
+
+        mock_prompt_config = Mock(spec=PromptConfig)
+        mock_prompt_config_class.from_source.return_value = mock_prompt_config
+
+        mock_model_config = Mock(spec=ModelConfig)
+        mock_model_config_class.return_value = mock_model_config
+
+        mock_json_serializer = Mock(spec=JsonFileSerializer)
+        mock_output_path = Mock()
+        mock_output_path.resolve.return_value = "/path/to/output/dataset.json"
+        mock_json_serializer.output_path = mock_output_path
+        mock_json_serializer_class.return_value = mock_json_serializer
+
+        mock_generator = Mock(spec=DatasetGenerator)
+        mock_dataset_generator_class.return_value = mock_generator
 
         result = run(
             prompt_id=prompt_id,
@@ -317,21 +329,25 @@ class TestRun:
         mock_container_application.wire.assert_called_once_with(
             modules=["eval.generate_dataset"]
         )
-        mock_create_client.assert_called_once_with(False)
+        mock_create_client.assert_not_called()
         mock_get_prompt_source.assert_called_once_with(prompt_id, prompt_version)
-        mock_eli5_generate_dataset.assert_called_once_with(
-            prompt_source=mock_prompt_source,
-            dataset_name=dataset_name,
-            output_dir=None,
-            num_examples=10,
-            temperature=0.7,
-            upload=False,
-            langsmith_client=None,
-            dataset_description=None,
+        mock_prompt_config_class.from_source.assert_called_once_with(mock_prompt_source)
+        mock_model_config_class.assert_called_once_with(temperature=0.7)
+        mock_json_serializer_class.assert_called_once_with(dataset_name, None)
+        mock_dataset_generator_class.assert_called_once_with(
+            prompt_config=mock_prompt_config,
+            model_config=mock_model_config,
+            serializers=[mock_json_serializer],
         )
+        mock_generator.generate.assert_called_once_with(num_examples=10)
         assert mock_echo.call_count == 2
         assert result.resolve() == "/path/to/output/dataset.json"
 
+    @patch("eval.generate_dataset.DatasetGenerator")
+    @patch("eval.generate_dataset.LangSmithSerializer")
+    @patch("eval.generate_dataset.JsonFileSerializer")
+    @patch("eval.generate_dataset.PromptConfig")
+    @patch("eval.generate_dataset.ModelConfig")
     @patch("eval.generate_dataset.create_langsmith_client")
     @patch("eval.generate_dataset.get_prompt_source")
     @patch("eval.generate_dataset.typer.echo")
@@ -340,7 +356,11 @@ class TestRun:
         mock_echo,
         mock_get_prompt_source,
         mock_create_client,
-        mock_eli5_generate_dataset,
+        mock_model_config_class,
+        mock_prompt_config_class,
+        mock_json_serializer_class,
+        mock_langsmith_serializer_class,
+        mock_dataset_generator_class,
     ):
         prompt_id = "chat/explain_code"
         prompt_version = "1.0.0"
@@ -348,10 +368,28 @@ class TestRun:
         description = "Test dataset description"
 
         mock_client = Mock(spec=Client)
-
         mock_create_client.return_value = mock_client
         mock_prompt_source = {"name": "Test Prompt", "prompt_template": {}}
         mock_get_prompt_source.return_value = mock_prompt_source
+
+        mock_prompt_config = Mock(spec=PromptConfig)
+        mock_prompt_config.name = "Test Prompt"
+        mock_prompt_config_class.from_source.return_value = mock_prompt_config
+
+        mock_model_config = Mock(spec=ModelConfig)
+        mock_model_config_class.return_value = mock_model_config
+
+        mock_json_serializer = Mock(spec=JsonFileSerializer)
+        mock_output_path = Mock()
+        mock_output_path.resolve.return_value = "/path/to/output/dataset.json"
+        mock_json_serializer.output_path = mock_output_path
+        mock_json_serializer_class.return_value = mock_json_serializer
+
+        mock_langsmith_serializer = Mock(spec=LangSmithSerializer)
+        mock_langsmith_serializer_class.return_value = mock_langsmith_serializer
+
+        mock_generator = Mock(spec=DatasetGenerator)
+        mock_dataset_generator_class.return_value = mock_generator
 
         run(
             prompt_id=prompt_id,
@@ -364,17 +402,23 @@ class TestRun:
             description=description,
         )
 
-        mock_create_client.assert_called_once_with(True)
-        mock_eli5_generate_dataset.assert_called_once_with(
-            prompt_source=mock_prompt_source,
+        mock_create_client.assert_called_once()
+        mock_prompt_config_class.from_source.assert_called_once_with(mock_prompt_source)
+        mock_model_config_class.assert_called_once_with(temperature=0.5)
+        mock_json_serializer_class.assert_called_once_with(
+            dataset_name, "/custom/output"
+        )
+        mock_langsmith_serializer_class.assert_called_once_with(
+            client=mock_client,
             dataset_name=dataset_name,
-            output_dir="/custom/output",
-            num_examples=5,
-            temperature=0.5,
-            upload=True,
-            langsmith_client=mock_client,
             dataset_description=description,
         )
+        mock_dataset_generator_class.assert_called_once_with(
+            prompt_config=mock_prompt_config,
+            model_config=mock_model_config,
+            serializers=[mock_json_serializer, mock_langsmith_serializer],
+        )
+        mock_generator.generate.assert_called_once_with(num_examples=5)
         assert any(
             "uploaded to LangSmith" in call.args[0] for call in mock_echo.call_args_list
         )

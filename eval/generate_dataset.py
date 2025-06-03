@@ -3,7 +3,12 @@ from typing import Annotated, Optional, cast
 
 import typer
 from dependency_injector.wiring import Provide, inject
-from eli5.datasets.generator import generate_dataset as eli5_generate_dataset
+from eli5.datasets.generator import DatasetGenerator, ModelConfig, PromptConfig
+from eli5.datasets.serializers import (
+    DatasetSerializer,
+    JsonFileSerializer,
+    LangSmithSerializer,
+)
 from jinja2 import PackageLoader
 from jinja2.loaders import BaseLoader
 from jinja2.sandbox import SandboxedEnvironment
@@ -98,10 +103,7 @@ def get_prompt_source(
     }
 
 
-def create_langsmith_client(upload: bool = False) -> Optional[Client]:
-    if not upload:
-        return None
-
+def create_langsmith_client() -> Client:
     # pylint: disable=direct-environment-variable-reference
     langsmith_api_key = os.environ.get("LANGCHAIN_API_KEY")
     # pylint: enable=direct-environment-variable-reference
@@ -170,30 +172,44 @@ def run(
     container_application.config.from_dict(Config().model_dump())
     container_application.wire(modules=[__name__])
 
-    langsmith_client = create_langsmith_client(upload)
+    prompt_source = get_prompt_source(prompt_id, prompt_version)
+    prompt_config = PromptConfig.from_source(prompt_source)
+    model_config = ModelConfig(
+        temperature=temperature,
+    )
+    json_serializer = JsonFileSerializer(dataset_name, output_dir)
+    serializers: list[DatasetSerializer] = [json_serializer]
+
+    if upload:
+        langsmith_client = create_langsmith_client()
+        if description is None and prompt_config.name:
+            description = f"Synthetic dataset for prompt: {prompt_config.name}"
+
+        serializers.append(
+            LangSmithSerializer(
+                client=langsmith_client,
+                dataset_name=dataset_name,
+                dataset_description=description,
+            )
+        )
 
     typer.echo(
         f"Generating dataset with {num_examples} examples from prompt: {prompt_id}"
     )
 
-    prompt_source = get_prompt_source(prompt_id, prompt_version)
-
-    output_file = eli5_generate_dataset(
-        prompt_source=prompt_source,
-        dataset_name=dataset_name,
-        output_dir=output_dir,
-        num_examples=num_examples,
-        temperature=temperature,
-        upload=upload,
-        langsmith_client=langsmith_client,
-        dataset_description=description,
+    generator = DatasetGenerator(
+        prompt_config=prompt_config,
+        model_config=model_config,
+        serializers=serializers,
     )
 
-    typer.echo(f"Dataset generated successfully: {output_file.resolve()}")
+    generator.generate(num_examples=num_examples)
+
+    typer.echo(f"Dataset generated successfully: {json_serializer.output_path}")
     if upload:
         typer.echo(f"Dataset '{dataset_name}' uploaded to LangSmith")
 
-    return output_file
+    return json_serializer.output_path
 
 
 def main() -> None:
