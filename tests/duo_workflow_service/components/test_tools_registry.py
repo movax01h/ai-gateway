@@ -8,7 +8,6 @@ from duo_workflow_service import tools
 from duo_workflow_service.components.tools_registry import (
     _DEFAULT_TOOLS,
     NO_OP_TOOLS,
-    ToolMetadata,
     Toolset,
     ToolsRegistry,
 )
@@ -89,6 +88,7 @@ _outbox = MagicMock(spec=asyncio.Queue)
                 "get_repository_file",
                 "list_epic_notes",
                 "get_epic_note",
+                "get_previous_workflow_context",
             },
         ),
         (
@@ -134,6 +134,7 @@ _outbox = MagicMock(spec=asyncio.Queue)
                 "get_repository_file",
                 "list_epic_notes",
                 "get_epic_note",
+                "get_previous_workflow_context",
             },
         ),
         (
@@ -260,6 +261,9 @@ def test_registry_initialization_initialises_tools_with_correct_attributes(
         "get_repository_file": tools.GetRepositoryFile(metadata=tool_metadata),
         "list_epic_notes": tools.ListEpicNotes(metadata=tool_metadata),
         "get_epic_note": tools.GetEpicNote(metadata=tool_metadata),
+        "get_previous_workflow_context": tools.GetWorkflowContext(
+            metadata=tool_metadata
+        ),
     }
 
     assert registry._enabled_tools == expected_tools
@@ -484,36 +488,6 @@ async def test_registry_configuration_error(gl_http_client, workflow_config):
             inbox=_inbox,
             gitlab_host="gitlab.example.com",
         )
-
-
-@pytest.mark.asyncio
-@pytest.mark.parametrize(
-    "feature_flag_value, should_include_context_tool",
-    [
-        ("duo_workflow_previous_workflow_tool", True),
-        ("", False),
-    ],
-)
-@patch("duo_workflow_service.components.tools_registry.current_feature_flag_context")
-async def test_feature_flag_behavior(
-    mock_feature_flags_context,
-    feature_flag_value,
-    should_include_context_tool,
-    tool_metadata,
-):
-    mock_feature_flags_context.get.return_value = feature_flag_value
-
-    registry = ToolsRegistry(
-        enabled_tools=["read_write_gitlab"],
-        preapproved_tools=[],
-        tool_metadata=tool_metadata,
-    )
-
-    tool_keys = registry._preapproved_tool_names
-    if should_include_context_tool:
-        assert "get_previous_workflow_context" in tool_keys
-    else:
-        assert "get_previous_workflow_context" not in tool_keys
 
 
 @pytest.mark.parametrize(
