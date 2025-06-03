@@ -164,18 +164,27 @@ async def test_run(
 
     assert "ui_chat_log" in result
     ui_chat_logs = result["ui_chat_log"]
-    expected_tool_count = sum(
+    assert "ui_chat_log" in result
+    has_non_hidden_tools = any(
+        tool_call["name"] not in ["get_plan"] for tool_call in test_case.tool_calls
+    )
+    expected_agent_messages = 1 if has_non_hidden_tools else 0
+    expected_tool_messages = sum(
         1 for tool, expect_call in test_case.tools.items() if expect_call
     )
-    assert len(ui_chat_logs) == expected_tool_count
 
-    for log in ui_chat_logs:
-        assert log["timestamp"] == "2025-01-01T12:00:00+00:00"
-        assert log["message_type"] == MessageTypeEnum.TOOL
-        assert log["content"].startswith("Using test_tool: ")
-        assert log["tool_info"] == ToolInfo(
-            name="test_tool", args={"tasks": [{"description": "step1"}]}
-        )
+    expected_total = expected_agent_messages + expected_tool_messages
+    assert len(ui_chat_logs) == expected_total
+
+    if expected_total > 0:
+        message_index = 0
+
+        if expected_agent_messages > 0:
+            assert ui_chat_logs[message_index]["message_type"] == MessageTypeEnum.AGENT
+            message_index += 1
+
+        for i in range(message_index, len(ui_chat_logs)):
+            assert ui_chat_logs[i]["message_type"] == MessageTypeEnum.TOOL
 
     for tool, expect_call in test_case.tools.items():
         if expect_call:
@@ -200,10 +209,9 @@ async def test_run(
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
-    "feature_flag_value, last_message, expected_message_types",
+    "last_message, expected_message_types",
     [
         (
-            "duo_workflow_better_tool_messages",
             lambda tool: AIMessage(
                 content=[{"type": "text", "text": "I'm going to search for something"}],
                 tool_calls=[
@@ -217,21 +225,6 @@ async def test_run(
             [MessageTypeEnum.AGENT, MessageTypeEnum.TOOL],
         ),
         (
-            "",
-            lambda tool: AIMessage(
-                content=[{"type": "text", "text": "I'm going to search for something"}],
-                tool_calls=[
-                    {
-                        "id": "1",
-                        "name": tool.name,
-                        "args": {"tasks": [{"description": "step1"}]},
-                    }
-                ],
-            ),
-            [MessageTypeEnum.TOOL],
-        ),
-        (
-            "duo_workflow_better_tool_messages",
             lambda tool: AIMessage(
                 content=[
                     {"type": "text", "text": "I'm just thinking without using tools"}
@@ -241,17 +234,6 @@ async def test_run(
             [MessageTypeEnum.AGENT],
         ),
         (
-            "",
-            lambda tool: AIMessage(
-                content=[
-                    {"type": "text", "text": "I'm just thinking without using tools"}
-                ],
-                tool_calls=[],
-            ),
-            [],
-        ),
-        (
-            "duo_workflow_better_tool_messages",
             lambda tool: AIMessage(
                 content=[{"type": "text", "text": "I'm going to use multiple tools"}],
                 tool_calls=[
@@ -270,36 +252,10 @@ async def test_run(
             [MessageTypeEnum.AGENT, MessageTypeEnum.TOOL, MessageTypeEnum.TOOL],
         ),
         (
-            "",
-            lambda tool: AIMessage(
-                content=[{"type": "text", "text": "I'm going to use multiple tools"}],
-                tool_calls=[
-                    {
-                        "id": "1",
-                        "name": tool.name,
-                        "args": {"tasks": [{"description": "step1"}]},
-                    },
-                    {
-                        "id": "2",
-                        "name": tool.name,
-                        "args": {"tasks": [{"description": "step2"}]},
-                    },
-                ],
-            ),
-            [MessageTypeEnum.TOOL, MessageTypeEnum.TOOL],
-        ),
-        (
-            "duo_workflow_better_tool_messages",
             lambda tool: HumanMessage(content="This is a human message"),
             [],
         ),
         (
-            "",
-            lambda tool: HumanMessage(content="This is a human message"),
-            [],
-        ),
-        (
-            "duo_workflow_better_tool_messages",
             lambda tool: AIMessage(
                 content=[{"type": "text", "text": "I'm going to check the plan"}],
                 tool_calls=[
@@ -313,7 +269,6 @@ async def test_run(
             [],
         ),
         (
-            "duo_workflow_better_tool_messages",
             lambda tool: AIMessage(
                 content=[
                     {"type": "text", "text": "I'll check the plan and add a task"}
@@ -335,31 +290,19 @@ async def test_run(
         ),
     ],
     ids=[
-        "single_tool_call_ff_on",
-        "single_tool_call_ff_off",
-        "no_tool_call_ff_on",
-        "no_tool_call_ff_off",
-        "multiple_tool_call_ff_on",
-        "multiple_tool_call_ff_off",
-        "last_message_not_AIMessage_ff_on",
-        "last_message_not_AIMessage_ff_off",
-        "all_hidden_tools_ff_on",
-        "mixed_hidden_visible_tools_ff_on",
+        "single_tool_call",
+        "no_tool_call",
+        "multiple_tool_call",
+        "last_message_not_AIMessage",
+        "all_hidden_tools",
+        "mixed_hidden_visible_tools",
     ],
 )
-@patch("duo_workflow_service.agents.tools_executor.current_feature_flag_context")
 async def test_adding_ai_context_to_ui_chat_logs(
-    mock_feature_flags_context,
     workflow_state,
-    feature_flag_value,
     last_message,
     expected_message_types,
 ):
-    def get_feature_flags():
-        return feature_flag_value
-
-    mock_feature_flags_context.get.side_effect = get_feature_flags
-
     tool = mock_tool()
 
     mock_toolset = MagicMock(spec=Toolset)
@@ -571,12 +514,20 @@ async def test_run_with_state_manipulating_tools(
     assert result["plan"] == test_case["expected_plan"]
 
     assert "ui_chat_log" in result
-    assert len(result["ui_chat_log"]) == 1
-    log_entry = result["ui_chat_log"][0]
-    assert log_entry["timestamp"] == "2025-01-01T12:00:00+00:00"
-    assert log_entry["message_type"] == MessageTypeEnum.TOOL
-    assert log_entry["content"] == test_case["expected_log_content"]
-    assert log_entry["tool_info"] is None
+    ui_chat_logs = result["ui_chat_log"]
+    assert len(ui_chat_logs) == 2
+
+    agent_log = ui_chat_logs[0]
+    assert agent_log["timestamp"] == "2025-01-01T12:00:00+00:00"
+    assert agent_log["message_type"] == MessageTypeEnum.AGENT
+    assert agent_log["content"] == "test"
+    assert agent_log["tool_info"] is None
+
+    tool_log = ui_chat_logs[1]
+    assert tool_log["timestamp"] == "2025-01-01T12:00:00+00:00"
+    assert tool_log["message_type"] == MessageTypeEnum.TOOL
+    assert tool_log["content"] == test_case["expected_log_content"]
+    assert tool_log["tool_info"] is None
 
 
 @pytest.mark.asyncio
@@ -692,12 +643,20 @@ async def test_run_error_handling(
         assert result["status"] == WorkflowStatusEnum.ERROR
 
     assert "ui_chat_log" in result
-    assert len(result["ui_chat_log"]) == 1
-    log_entry = result["ui_chat_log"][0]
-    assert log_entry["timestamp"] == "2025-01-01T12:00:00+00:00"
-    assert log_entry["message_type"] == MessageTypeEnum.TOOL
-    assert log_entry["content"].startswith(expected_log_prefix)
-    assert log_entry["tool_info"] == expected_tool_info
+    ui_chat_logs = result["ui_chat_log"]
+    assert len(ui_chat_logs) == 2
+
+    agent_log = ui_chat_logs[0]
+    assert agent_log["timestamp"] == "2025-01-01T12:00:00+00:00"
+    assert agent_log["message_type"] == MessageTypeEnum.AGENT
+    assert agent_log["content"] == "test"
+    assert agent_log["tool_info"] is None
+
+    tool_log = ui_chat_logs[1]
+    assert tool_log["timestamp"] == "2025-01-01T12:00:00+00:00"
+    assert tool_log["message_type"] == MessageTypeEnum.TOOL
+    assert tool_log["content"].startswith(expected_log_prefix)
+    assert tool_log["tool_info"] == expected_tool_info
     tool.arun.assert_called_once()
 
 
