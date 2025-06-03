@@ -383,11 +383,10 @@ def _build_code_generations(
             generations_agent_factory,
         )
 
+    tracking_event = f"request_{GitLabUnitPrimitive.GENERATE_CODE}"
+
     # If we didn't use the prompt registry, we have to track the internal event manually
-    internal_event_client.track_event(
-        f"request_{GitLabUnitPrimitive.GENERATE_CODE}",
-        category=__name__,
-    )
+    _track_code_suggestions_event(tracking_event, internal_event_client)
 
     if payload.model_provider == KindModelProvider.ANTHROPIC:
         return _resolve_code_generations_anthropic_chat(
@@ -496,6 +495,8 @@ def _build_code_completions(
             completions_litellm_factory=completions_litellm_factory,
         )
 
+        _track_code_suggestions_event(tracking_event, internal_event_client)
+
         return code_completions, kwargs
     elif payload.model_provider == KindModelProvider.AMAZON_Q:
         unit_primitive = GitLabUnitPrimitive.AMAZON_Q_INTEGRATION
@@ -517,6 +518,8 @@ def _build_code_completions(
             completions_agent_factory=completions_agent_factory,
             completions_litellm_factory=completions_fireworks_factory,
         )
+
+        _track_code_suggestions_event(tracking_event, internal_event_client)
 
         return code_completions, kwargs
     else:
@@ -548,10 +551,7 @@ def _build_code_completions(
             detail="Unauthorized to access code completions",
         )
 
-    internal_event_client.track_event(
-        tracking_event,
-        category=__name__,
-    )
+    _track_code_suggestions_event(tracking_event, internal_event_client)
 
     return code_completions, kwargs
 
@@ -663,3 +663,12 @@ async def _execute_code_completion(
     if isinstance(code_completions, CodeCompletions):
         return [output]
     return output
+
+
+def _track_code_suggestions_event(
+    tracking_event: str, internal_event_client: InternalEventsClient
+):
+    internal_event_client.track_event(
+        tracking_event,
+        category=__name__,
+    )
