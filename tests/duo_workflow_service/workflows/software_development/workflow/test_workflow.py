@@ -433,8 +433,10 @@ async def test_workflow_run_with_memory_saver(
     "duo_workflow_service.workflows.software_development.workflow.GoalDisambiguationComponent",
     autospec=True,
 )
+@patch("duo_workflow_service.workflows.abstract_workflow.log_exception")
 @patch.dict(os.environ, {"DW_INTERNAL_EVENT__ENABLED": "true"})
 async def test_workflow_run_when_exception(
+    mock_log_exception,
     mock_goal_disambiguator_component,
     chat_client,
     mock_fetch_workflow_config,
@@ -481,7 +483,7 @@ async def test_workflow_run_when_exception(
         def __aiter__(self):
             return self
 
-        def __anext__(self):
+        async def __anext__(self):
             raise asyncio.CancelledError()
 
     workflow = Workflow(
@@ -619,7 +621,9 @@ async def test_workflow_run_with_error_state(
     "duo_workflow_service.workflows.software_development.workflow.GoalDisambiguationComponent",
     autospec=True,
 )
+@patch("duo_workflow_service.workflows.abstract_workflow.log_exception")
 async def test_workflow_run_with_tools_registry(
+    mock_log_exception,
     mock_goal_disambiguator_component,
     mock_gitlab_workflow,
     chat_client,
@@ -667,7 +671,7 @@ async def test_workflow_run_with_tools_registry(
         def __aiter__(self):
             return self
 
-        def __anext__(self):
+        async def __anext__(self):
             raise asyncio.CancelledError()
 
     workflow = Workflow(
@@ -945,8 +949,10 @@ async def test_workflow_run_with_invalid_web_url(
     "duo_workflow_service.workflows.software_development.workflow.GoalDisambiguationComponent",
     autospec=True,
 )
+@patch("duo_workflow_service.workflows.abstract_workflow.log_exception")
 @patch.dict(os.environ, {"DW_INTERNAL_EVENT__ENABLED": "true"})
 async def test_workflow_run_with_retry(
+    mock_log_exception,
     mock_goal_disambiguator_component,
     chat_client,
     mock_fetch_workflow_config,
