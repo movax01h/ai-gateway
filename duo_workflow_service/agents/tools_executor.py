@@ -19,9 +19,6 @@ from duo_workflow_service.entities.state import (
     ToolStatus,
     UiChatLog,
 )
-from duo_workflow_service.interceptors.feature_flag_interceptor import (
-    current_feature_flag_context,
-)
 from duo_workflow_service.internal_events import (
     DuoWorkflowInternalEvent,
     InternalEventAdditionalProperties,
@@ -197,9 +194,8 @@ class ToolsExecutor:
             return
 
         ai_message_content = self._extract_ai_message_text(message)
-        feature_flags = current_feature_flag_context.get()
 
-        if "duo_workflow_better_tool_messages" in feature_flags and ai_message_content:
+        if ai_message_content:
             ui_chat_logs.append(
                 UiChatLog(
                     message_type=MessageTypeEnum.AGENT,
