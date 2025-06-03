@@ -21,7 +21,6 @@ from ai_gateway.code_suggestions import (
     CodeSuggestionsChunk,
     ModelProvider,
 )
-from ai_gateway.model_metadata import TypeModelMetadata
 from ai_gateway.models import KindVertexTextModel, Message
 from ai_gateway.models.base import KindModelProvider
 
@@ -122,7 +121,6 @@ class CompletionRequest(BaseModel):
     prompt_components: Annotated[
         List[PromptComponent], Field(min_length=1, max_length=100)
     ]
-    model_metadata: Optional[TypeModelMetadata] = None
 
 
 class ModelMetadata(BaseModel):

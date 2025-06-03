@@ -40,7 +40,7 @@ from ai_gateway.code_suggestions.base import SAAS_PROMPT_MODEL_MAP
 from ai_gateway.config import Config
 from ai_gateway.container import ContainerApplication
 from ai_gateway.feature_flags.context import current_feature_flag_context
-from ai_gateway.model_metadata import TypeModelMetadata
+from ai_gateway.model_metadata import TypeModelMetadata, current_model_metadata_context
 from ai_gateway.models import KindModelProvider
 from ai_gateway.prompts import BasePromptRegistry
 from ai_gateway.structured_logging import get_request_logger
@@ -136,7 +136,7 @@ async def code_suggestions(
             code_context=code_context,
             stream_handler=stream_handler,
             snowplow_event_context=snowplow_code_suggestion_context,
-            model_metadata=payload.model_metadata,
+            model_metadata=current_model_metadata_context.get(),
         )
     if component.type == CodeEditorComponents.GENERATION:
         return await code_generation(
@@ -146,7 +146,7 @@ async def code_suggestions(
             prompt_registry=prompt_registry,
             stream_handler=stream_handler,
             snowplow_event_context=snowplow_code_suggestion_context,
-            model_metadata=payload.model_metadata,
+            model_metadata=current_model_metadata_context.get(),
         )
 
 
