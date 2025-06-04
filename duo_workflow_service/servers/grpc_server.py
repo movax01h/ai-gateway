@@ -44,7 +44,7 @@ from duo_workflow_service.workflows.abstract_workflow import (
     TypeWorkflow,
 )
 from duo_workflow_service.workflows.registry import resolve_workflow_class
-from duo_workflow_service.workflows.typing import AdditionalContext
+from duo_workflow_service.workflows.type_definitions import AdditionalContext
 
 log = structlog.stdlib.get_logger("server")
 

@@ -52,7 +52,7 @@ from duo_workflow_service.entities import (
 from duo_workflow_service.interceptors.feature_flag_interceptor import (
     current_feature_flag_context,
 )
-from duo_workflow_service.llm_factory import new_chat_client
+from duo_workflow_service.llm_factory import create_chat_model
 from duo_workflow_service.tracking.errors import log_exception
 from duo_workflow_service.workflows.abstract_workflow import AbstractWorkflow
 
@@ -336,7 +336,10 @@ class Workflow(AbstractWorkflow):
         last_node_name = self._add_context_builder_nodes(graph, goal, tools_registry)
         disambiguation_component = GoalDisambiguationComponent(
             goal=goal,
-            model=new_chat_client(max_tokens=MAX_TOKENS_TO_SAMPLE),
+            model=create_chat_model(
+                max_tokens=MAX_TOKENS_TO_SAMPLE,
+                config=self._model_config,
+            ),
             http_client=self._http_client,
             workflow_id=self._workflow_id,
             tools_registry=tools_registry,
@@ -439,8 +442,14 @@ class Workflow(AbstractWorkflow):
         tools_registry: ToolsRegistry,
         checkpointer: BaseCheckpointSaver,
     ):
-        base_model_planner = new_chat_client(max_tokens=MAX_TOKENS_TO_SAMPLE)
-        base_model_executor = new_chat_client(max_tokens=MAX_TOKENS_TO_SAMPLE)
+        base_model_planner = create_chat_model(
+            max_tokens=MAX_TOKENS_TO_SAMPLE,
+            config=self._model_config,
+        )
+        base_model_executor = create_chat_model(
+            max_tokens=MAX_TOKENS_TO_SAMPLE,
+            config=self._model_config,
+        )
 
         graph = StateGraph(WorkflowState)
 
@@ -536,7 +545,10 @@ class Workflow(AbstractWorkflow):
         context_builder_toolset = tools_registry.toolset(CONTEXT_BUILDER_TOOLS)
         context_builder = Agent(
             goal=goal,
-            model=new_chat_client(max_tokens=MAX_TOKENS_TO_SAMPLE),  # type: ignore
+            model=create_chat_model(
+                max_tokens=MAX_TOKENS_TO_SAMPLE,
+                config=self._model_config,
+            ),  # type: ignore
             name="context_builder",
             system_prompt=BUILD_CONTEXT_SYSTEM_MESSAGE.format(
                 handover_tool_name=HANDOVER_TOOL_NAME,

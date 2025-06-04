@@ -1,6 +1,6 @@
 """Test module for search and replace workflow components."""
 
-from unittest.mock import AsyncMock, MagicMock, Mock, patch
+from unittest.mock import Mock, patch
 
 import pytest
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
@@ -15,7 +15,6 @@ from duo_workflow_service.entities import (
     WorkflowStatusEnum,
 )
 from duo_workflow_service.entities.state import MAX_CONTEXT_TOKENS, ReplacementRule
-from duo_workflow_service.gitlab.http_client import GitlabHttpClient
 from duo_workflow_service.internal_events.event_enum import CategoryEnum
 from duo_workflow_service.workflows.search_and_replace.prompts import (
     SEARCH_AND_REPLACE_FILE_USER_MESSAGE,
@@ -350,7 +349,7 @@ def mock_checkpointer():
 
 
 @pytest.mark.asyncio
-@patch("duo_workflow_service.workflows.search_and_replace.workflow.new_chat_client")
+@patch("duo_workflow_service.workflows.search_and_replace.workflow.create_chat_model")
 @patch("duo_workflow_service.workflows.search_and_replace.workflow.Agent")
 async def test_workflow_compilation(
     mock_agent, mock_new_chat_client, mock_tools_registry, mock_checkpointer
@@ -403,7 +402,7 @@ async def test_workflow_initialization():
 
 
 @pytest.mark.asyncio
-@patch("duo_workflow_service.workflows.search_and_replace.workflow.new_chat_client")
+@patch("duo_workflow_service.workflows.search_and_replace.workflow.create_chat_model")
 async def test_accessibility_tools(
     tools_registry_with_all_privileges, mock_checkpointer
 ):
@@ -413,7 +412,6 @@ async def test_accessibility_tools(
         workflow_metadata={},
         workflow_type=CategoryEnum.WORKFLOW_SEARCH_AND_REPLACE,
     )
-
     captured_tool_names = []
 
     # The accessibility agent is initialized with tools via `tools=tools_registry.get_batch(accessibility_tools),`
@@ -439,7 +437,7 @@ async def test_accessibility_tools(
 
 
 @pytest.mark.asyncio
-@patch("duo_workflow_service.workflows.search_and_replace.workflow.new_chat_client")
+@patch("duo_workflow_service.workflows.search_and_replace.workflow.create_chat_model")
 async def test_non_accessibility_tools(
     tools_registry_with_all_privileges, mock_checkpointer
 ):

@@ -2,7 +2,7 @@ import asyncio
 from unittest.mock import AsyncMock, MagicMock, Mock, patch
 
 import pytest
-from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
+from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 
 from duo_workflow_service.components.tools_registry import (
     _AGENT_PRIVILEGES,
@@ -101,7 +101,7 @@ def mock_agent_response():
 
 
 @pytest.mark.asyncio
-@patch("duo_workflow_service.workflows.convert_to_gitlab_ci.workflow.new_chat_client")
+@patch("duo_workflow_service.workflows.convert_to_gitlab_ci.workflow.create_chat_model")
 async def test_translation_tools(
     tools_registry_with_all_privileges, mock_checkpointer, mock_workflow
 ):
@@ -171,7 +171,7 @@ async def test_workflow_initialization():
 
 
 @pytest.mark.asyncio
-@patch("duo_workflow_service.workflows.convert_to_gitlab_ci.workflow.new_chat_client")
+@patch("duo_workflow_service.workflows.convert_to_gitlab_ci.workflow.create_chat_model")
 @patch("duo_workflow_service.workflows.convert_to_gitlab_ci.workflow.Agent")
 async def test_workflow_compilation(
     mock_agent, mock_new_chat_client, mock_tools_registry, mock_checkpointer
@@ -215,7 +215,7 @@ async def test_workflow_compilation(
     "duo_workflow_service.workflows.abstract_workflow.fetch_project_data_with_workflow_id"
 )
 @patch("duo_workflow_service.workflows.abstract_workflow.fetch_workflow_config")
-@patch("duo_workflow_service.workflows.convert_to_gitlab_ci.workflow.new_chat_client")
+@patch("duo_workflow_service.workflows.convert_to_gitlab_ci.workflow.create_chat_model")
 @patch("duo_workflow_service.workflows.abstract_workflow.GitLabWorkflow", autospec=True)
 @patch("duo_workflow_service.workflows.abstract_workflow.UserInterface", autospec=True)
 async def test_workflow_run(
@@ -321,7 +321,7 @@ async def test_workflow_run(
     "duo_workflow_service.workflows.abstract_workflow.fetch_project_data_with_workflow_id"
 )
 @patch("duo_workflow_service.workflows.abstract_workflow.fetch_workflow_config")
-@patch("duo_workflow_service.workflows.convert_to_gitlab_ci.workflow.new_chat_client")
+@patch("duo_workflow_service.workflows.convert_to_gitlab_ci.workflow.create_chat_model")
 @patch("duo_workflow_service.workflows.abstract_workflow.GitLabWorkflow", autospec=True)
 @patch("duo_workflow_service.workflows.abstract_workflow.UserInterface", autospec=True)
 @patch("duo_workflow_service.workflows.convert_to_gitlab_ci.workflow.log_exception")
@@ -395,7 +395,7 @@ async def test_workflow_run_with_file_not_found(
     "duo_workflow_service.workflows.abstract_workflow.fetch_project_data_with_workflow_id"
 )
 @patch("duo_workflow_service.workflows.abstract_workflow.fetch_workflow_config")
-@patch("duo_workflow_service.workflows.convert_to_gitlab_ci.workflow.new_chat_client")
+@patch("duo_workflow_service.workflows.convert_to_gitlab_ci.workflow.create_chat_model")
 @patch("duo_workflow_service.workflows.abstract_workflow.GitLabWorkflow", autospec=True)
 async def test_workflow_run_with_exception(
     mock_gitlab_workflow,
