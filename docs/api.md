@@ -26,6 +26,26 @@ For more information, see:
 
 ## Code Suggestions
 
+### Code Suggestions Endpoints Summary
+
+#### Code Generation
+
+| Version | Endpoint            | Status                          | Notes                                                            |
+|---------|---------------------|---------------------------------|------------------------------------------------------------------|
+| v4      | `/code/suggestions` | Current                         | Used when client supports SSE Streaming                          |
+| v3      | `/code/completions` | Current                         | Used when client doesn't support SSE Streaming                   |
+| v2      | `/code/generations` | Kept for backward compatibility | Appears to be used by older versions of GitLab (v17.5 and older) |
+
+#### Code Completion
+
+| Version | Endpoint          | Status         | Notes                                              |
+|---------|-------------------|----------------|----------------------------------------------------|
+| v2 | `/completions`         | Current        | Called directly from VSCode GitLab language server |
+| v2 | `/code/completions`    | Current        | Called from Rails side, less frequently            |
+
+To see the active endpoints on Kibana (internal link), check out [the logs here](https://log.gprd.gitlab.net/app/r/s/Jh53x).
+The logs are available in the data view `pubsub-mlops-inf-gprd-*`.
+
 ### V4
 
 We have updated the endpoint name from `completions` to `suggestions` to avoid confusion with `code completions`. The v4 endpoint is functionally equivalent to the [v3](#v3) endpoint except for one difference: for streaming responses, v4 returns chunks in SSE format instead of plain text.
