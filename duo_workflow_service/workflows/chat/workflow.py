@@ -24,7 +24,7 @@ from duo_workflow_service.entities.state import (
 from duo_workflow_service.interceptors.feature_flag_interceptor import (
     current_feature_flag_context,
 )
-from duo_workflow_service.llm_factory import new_chat_client
+from duo_workflow_service.llm_factory import create_chat_model
 from duo_workflow_service.tracking.errors import log_exception
 from duo_workflow_service.workflows.abstract_workflow import AbstractWorkflow
 
@@ -216,7 +216,10 @@ class Workflow(AbstractWorkflow):
             goal="",
             system_prompt="",
             name=AGENT_NAME,
-            model=new_chat_client(max_tokens=MAX_TOKENS_TO_SAMPLE),
+            model=create_chat_model(
+                max_tokens=MAX_TOKENS_TO_SAMPLE,
+                config=self._model_config,
+            ),
             toolset=agents_toolset,
             workflow_id=self._workflow_id,
             http_client=self._http_client,

@@ -1,8 +1,8 @@
 from datetime import datetime
-from unittest.mock import ANY, AsyncMock, MagicMock, Mock, patch
+from unittest.mock import AsyncMock, MagicMock, Mock, patch
 
 import pytest
-from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
+from langchain_core.messages import AIMessage, SystemMessage
 
 from contract import contract_pb2
 from contract.contract_pb2 import ContextElement, ContextElementType
@@ -249,7 +249,7 @@ def test_are_tools_called_with_tool_use():
 
 
 @pytest.mark.asyncio
-@patch("duo_workflow_service.workflows.chat.workflow.new_chat_client")
+@patch("duo_workflow_service.workflows.chat.workflow.create_chat_model")
 @patch("duo_workflow_service.workflows.abstract_workflow.ToolsRegistry")
 @patch("duo_workflow_service.workflows.abstract_workflow.GitLabWorkflow", autospec=True)
 @patch(
@@ -366,7 +366,7 @@ def test_tools_registry_interaction(
     tools_registry = MagicMock(spec=ToolsRegistry)
     checkpointer = MagicMock()
 
-    with patch("duo_workflow_service.workflows.chat.workflow.new_chat_client"):
+    with patch("duo_workflow_service.workflows.chat.workflow.create_chat_model"):
         workflow._compile("Test goal", tools_registry, checkpointer)
 
     assert tools_registry.toolset.called

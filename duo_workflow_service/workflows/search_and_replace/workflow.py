@@ -22,7 +22,7 @@ from duo_workflow_service.entities import (
     WorkflowStatusEnum,
 )
 from duo_workflow_service.entities.state import Plan
-from duo_workflow_service.llm_factory import new_chat_client
+from duo_workflow_service.llm_factory import create_chat_model
 from duo_workflow_service.token_counter.approximate_token_counter import (
     ApproximateTokenCounter,
 )
@@ -446,7 +446,10 @@ class Workflow(AbstractWorkflow):
             goal="N/A",  # "Not used, Agent always gets prepared messages from previous steps",
             system_prompt="N/A",
             name=AGENT_NAME,
-            model=new_chat_client(max_tokens=MAX_TOKENS_TO_SAMPLE),
+            model=create_chat_model(
+                max_tokens=MAX_TOKENS_TO_SAMPLE,
+                config=self._model_config,
+            ),
             toolset=agents_toolset,
             http_client=self._http_client,
             workflow_id=self._workflow_id,
