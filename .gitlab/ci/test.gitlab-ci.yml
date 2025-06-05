@@ -154,3 +154,21 @@ check-proto-node:
         - clients/node/src/**/*.ts
         - clients/node/package.json
         - clients/node/package-lock.json
+
+check-duo-workflow-docs:
+  extends: .poetry
+  stage: test
+  needs:
+    - install
+  script:
+    - make duo-workflow-docs
+    - |
+      if [ "$CI_PIPELINE_SOURCE" = "merge_request_event" ]; then
+        (git diff --exit-code docs/duo_workflow_service_graphs.md || (echo "ERROR: The documentation at docs/duo_workflow_service_graphs.md is out of date. Run 'make duo-workflow-docs' locally to generate updated documentation." && exit 1))
+      fi
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+      changes:
+        - duo_workflow_service/**/*
+        - scripts/generate_graph_docs.py
+        - docs/duo_workflow_service_graphs.md
