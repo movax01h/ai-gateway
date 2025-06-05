@@ -1,10 +1,13 @@
 import importlib
+import logging
+import os
 import sys
 from unittest.mock import MagicMock
 
+import structlog
 from langgraph.checkpoint.memory import MemorySaver
 
-from duo_workflow_service.components import ToolsRegistry
+from duo_workflow_service.components import GoalDisambiguationComponent, ToolsRegistry
 from duo_workflow_service.internal_events.event_enum import CategoryEnum
 
 HEADER_TEXT = """
@@ -16,6 +19,18 @@ this file, instead update it by running `make duo-workflow-docs`.
 
 
 def main():
+    # Setup variables so we can see the full graphs:
+    # pylint: disable=direct-environment-variable-reference
+    os.environ["FEATURE_GOAL_DISAMBIGUATION"] = "true"
+    os.environ["WORKFLOW_INTERRUPT"] = "true"
+    GoalDisambiguationComponent._allowed_to_clarify = MagicMock(return_value=True)
+
+    structlog.configure(
+        wrapper_class=structlog.make_filtering_bound_logger(logging.ERROR),
+    )
+    os.environ["ANTHROPIC_API_KEY"] = "real_key_not_required_for_graph"
+    # pylint: enable=direct-environment-variable-reference
+
     output_file_path = sys.argv[1]
     with open(output_file_path, "w") as output_file:
         output_file.write(HEADER_TEXT)
