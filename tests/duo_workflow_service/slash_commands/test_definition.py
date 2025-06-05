@@ -22,7 +22,6 @@ class TestSlashCommandDefinition:
         data = {
             "name": "explain",
             "description": "Explain code",
-            "system_prompt": "You are a code explainer",
             "goal": "Explain the following: {text}",
             "parameters": {"max_tokens": 1024},
         }
@@ -31,7 +30,6 @@ class TestSlashCommandDefinition:
         command = SlashCommandDefinition.model_validate(data)
         assert command.name == "explain"
         assert command.description == "Explain code"
-        assert command.system_prompt == "You are a code explainer"
         assert command.goal == "Explain the following: {text}"
         assert command.parameters == {"max_tokens": 1024}
 
@@ -39,7 +37,6 @@ class TestSlashCommandDefinition:
         model_dict = command.model_dump()
         assert model_dict["name"] == "explain"
         assert model_dict["description"] == "Explain code"
-        assert model_dict["system_prompt"] == "You are a code explainer"
         assert model_dict["goal"] == "Explain the following: {text}"
         assert model_dict["parameters"] == {"max_tokens": 1024}
 
@@ -56,7 +53,6 @@ class TestSlashCommandDefinition:
 
         assert command.name == "explain"
         assert command.description == ""
-        assert command.system_prompt == ""
         assert command.goal == ""
         assert not command.parameters
 
@@ -81,7 +77,6 @@ class TestSlashCommandDefinition:
         read_data=(
             "name: explain\n"
             "description: Explains code or concepts\n"
-            "system_prompt: You are a helpful assistant who explains code.\n"
             "goal: Explain the following code {code}\n"
             "parameters:\n"
             "  max_tokens: 1024\n"
@@ -96,7 +91,6 @@ class TestSlashCommandDefinition:
 
         assert command.name == "explain"
         assert command.description == "Explains code or concepts"
-        assert command.system_prompt == "You are a helpful assistant who explains code."
         assert command.goal == "Explain the following code {code}"
         assert command.parameters == {"max_tokens": 1024}
 
