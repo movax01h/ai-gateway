@@ -107,7 +107,7 @@ configurable_unit_primitives:
   - feature_setting: "duo_chat_troubleshoot_job"
     unit_primitives:
       - "troubleshoot_job"
-    default_model: "claude_3_5_sonnet_20240620"
+    default_model: "claude_sonnet_3_7_20250219"
     selectable_models:
       - "claude_3_sonnet_20240229"
       - "claude_3_5_sonnet_20240620"
