@@ -1,4 +1,4 @@
-# pylint: disable=file-naming-for-tests,unused-import,direct-environment-variable-reference
+# pylint: disable=unused-import,direct-environment-variable-reference
 
 import os
 from datetime import datetime, timezone

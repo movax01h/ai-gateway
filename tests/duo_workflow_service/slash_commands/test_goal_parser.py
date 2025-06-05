@@ -1,5 +1,3 @@
-# pylint: disable=file-naming-for-tests
-
 import pytest
 
 from duo_workflow_service.slash_commands.goal_parser import parse

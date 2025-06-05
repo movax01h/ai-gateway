@@ -1,4 +1,4 @@
-# pylint: disable=file-naming-for-tests,direct-environment-variable-reference
+# pylint: disable=direct-environment-variable-reference
 
 import asyncio
 import os

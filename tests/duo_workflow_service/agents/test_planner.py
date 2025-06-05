@@ -1,5 +1,3 @@
-# pylint: disable=file-naming-for-tests
-
 import pytest
 from langchain_core.messages import HumanMessage
 
