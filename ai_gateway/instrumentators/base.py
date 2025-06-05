@@ -219,7 +219,7 @@ class TelemetryInstrumentator:
                     "lang": stats.lang,
                 }
 
-                telemetry_logger.info("telemetry", **(stats.dict() | labels))
+                telemetry_logger.info("telemetry", **(stats.model_dump() | labels))
 
                 ACCEPTS_COUNTER.labels(**labels).inc(stats.accepts)
                 REQUESTS_COUNTER.labels(**labels).inc(stats.requests)

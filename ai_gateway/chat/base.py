@@ -3,7 +3,7 @@ from typing import Optional
 
 from gitlab_cloud_connector import GitLabUnitPrimitive
 from packaging.version import InvalidVersion, Version
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 
 from ai_gateway.api.auth_utils import StarletteUser
 from ai_gateway.chat.tools import BaseTool
@@ -15,8 +15,7 @@ __all__ = [
 
 
 class UnitPrimitiveToolset(BaseModel):
-    class Config:
-        arbitrary_types_allowed = True
+    model_config = ConfigDict(arbitrary_types_allowed=True)
 
     name: GitLabUnitPrimitive
     tools: list[BaseTool]

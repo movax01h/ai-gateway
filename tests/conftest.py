@@ -8,7 +8,7 @@ import structlog
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from gitlab_cloud_connector import CloudConnectorUser, GitLabUnitPrimitive, UserClaims
-from langchain.chat_models.fake import FakeListChatModel
+from langchain_community.chat_models.fake import FakeListChatModel
 from langchain_core.messages import BaseMessage
 from langchain_core.messages.ai import AIMessage, UsageMetadata
 from langchain_core.outputs import ChatGenerationChunk, ChatResult
