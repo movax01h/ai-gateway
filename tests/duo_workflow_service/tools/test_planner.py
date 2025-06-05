@@ -20,7 +20,12 @@ from duo_workflow_service.tools.planner import (
     "tool_class, input_class, input_data, expected_result",
     [
         (AddNewTask, AddNewTaskInput, {"description": "New task"}, "New task added"),
-        (RemoveTask, RemoveTaskInput, {"task_id": "1"}, "Task with ID 1 removed"),
+        (
+            RemoveTask,
+            RemoveTaskInput,
+            {"task_id": "1", "description": "Task 1"},
+            "Task with ID 1 removed",
+        ),
         (
             UpdateTaskDescription,
             UpdateTaskDescriptionInput,
@@ -67,7 +72,9 @@ def test_get_plan():
 )
 def test_set_task_status(task_id, status, expected_result):
     set_task_status = SetTaskStatus(description="test description")
-    input_data = SetTaskStatusInput(task_id=task_id, status=status)
+    input_data = SetTaskStatusInput(
+        task_id=task_id, status=status, description="test description"
+    )
     result = set_task_status._run(task_id=input_data.task_id, status=input_data.status)
     assert result == expected_result
 
@@ -79,18 +86,18 @@ def test_add_new_task_format_display_message():
 
     message = tool.format_display_message(input_data)
 
-    expected_message = "Add new task to the plan: Create new feature..."
+    expected_message = "Add new task to the plan: Create new feature"
     assert message == expected_message
 
 
 def test_remove_task_format_display_message():
     tool = RemoveTask(description="Remove task")
 
-    input_data = RemoveTaskInput(task_id="task-1")
+    input_data = RemoveTaskInput(task_id="task-1", description="Task 1")
 
     message = tool.format_display_message(input_data)
 
-    expected_message = "Remove task 2"
+    expected_message = "Remove task 'Task 1'"
     assert message == expected_message
 
 
@@ -103,19 +110,58 @@ def test_update_task_description_format_display_message():
 
     message = tool.format_display_message(input_data)
 
-    expected_message = "Update description for task 2"
+    expected_message = "Update description for task 'Update project documentation'"
     assert message == expected_message
 
 
-def test_set_task_status_format_display_message():
+@pytest.mark.parametrize(
+    "task_id, status, description, expected_result",
+    [
+        (
+            "task-1",
+            "In Progress",
+            "This is a test task",
+            "Set task 'This is a test task' to 'In Progress'",
+        ),
+        (
+            "task-2",
+            "In Progress",
+            "Thisisatestwithalongcharacterinputtomakesureitsshortened",
+            "Set task 'Thisisatestwithalongcharacterinputtomakesureitssho...' to 'In Progress'",
+        ),
+        (
+            "task-3",
+            "Not Started",
+            "Supercalifragilisticexpialidocious to test a long first word",
+            "Set task 'Supercalifragilisticexpialidocious to test a long...' to 'Not Started'",
+        ),
+        (
+            "task-4",
+            "Completed",
+            "This is a very long task description that exceeds both the word and character limits significantly",
+            "Set task 'This is a very long...' to 'Completed'",
+        ),
+        (
+            "task-5",
+            "Cancelled",
+            "Supercalifragilisticexpialidocious antidisestablishmentarianism",
+            "Set task 'Supercalifragilisticexpialidocious...' to 'Cancelled'",
+        ),
+    ],
+)
+def test_set_task_status_format_display_message(
+    task_id, status, description, expected_result
+):
     tool = SetTaskStatus(description="Set task status")
 
-    input_data = SetTaskStatusInput(task_id="task-1", status="In Progress")
+    input_data = SetTaskStatusInput(
+        task_id=task_id,
+        status=status,
+        description=description,
+    )
 
     message = tool.format_display_message(input_data)
-
-    expected_message = "Set task 2 to 'In Progress'"
-    assert message == expected_message
+    assert message == expected_result
 
 
 def test_create_plan():

@@ -34,7 +34,7 @@ from duo_workflow_service.tools import (
     Toolset,
     format_tool_display_message,
 )
-from duo_workflow_service.tools.planner import format_task_number
+from duo_workflow_service.tools.planner import format_short_task_description
 
 _HIDDEN_TOOLS = ["get_plan"]
 
@@ -424,12 +424,14 @@ class ToolsExecutor:
         message = f"Using {tool_name}: {args_str}"
 
         if tool_name in _ACTION_HANDLERS:
-            task_num = format_task_number(args.get("task_id", ""))
+            short_description = format_short_task_description(
+                args.get("description", ""), word_limit=5, char_limit=50, suffix="..."
+            )
             action_messages = {
-                "add_new_task": f"Add new task to the plan: {args.get('description', '')[:100]}...",
-                "remove_task": f"Remove task {task_num}",
-                "update_task_description": f"Update description for task {task_num}",
-                "set_task_status": f"Set task {task_num} to '{args.get('status', '')}'",
+                "add_new_task": f"Add new task to the plan: {format_short_task_description(args.get('description', ''), char_limit=100)}",
+                "remove_task": f"Remove task '{short_description}'",
+                "update_task_description": f"Update description for task '{format_short_task_description(args.get('new_description', ''), word_limit=5)}'",
+                "set_task_status": f"Set task '{short_description}' to '{args.get('status', '')}'",
                 "create_plan": f"Create plan with {len(args.get('tasks', []))} tasks",
             }
             message = action_messages.get(tool_name, "")

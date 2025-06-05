@@ -1,4 +1,4 @@
-from typing import List, Type
+from typing import List, Optional, Type
 
 from langchain.tools import BaseTool
 from pydantic import BaseModel, Field
@@ -22,6 +22,27 @@ def format_task_number(task_id: str) -> str:
         return task_id
 
 
+def format_short_task_description(
+    description: str,
+    word_limit: Optional[int] = None,
+    char_limit: int = 100,
+    suffix: str = "...",
+) -> str:
+
+    words = description.strip().split()
+    shortened_description = " ".join(words[:word_limit])
+
+    if len(shortened_description) > char_limit:
+        shortened_description = shortened_description[:char_limit].rsplit(" ", 1)[0]
+
+    return (
+        f"{shortened_description}{suffix}"
+        if (word_limit and len(words) > word_limit)
+        or len(shortened_description) < len(description.strip())
+        else shortened_description
+    )
+
+
 class AddNewTaskInput(BaseModel):
     description: str = Field(description="The description of the new task to add")
 
@@ -38,11 +59,12 @@ class AddNewTask(BaseTool):
         return "New task added"
 
     def format_display_message(self, args: AddNewTaskInput) -> str:
-        return f"Add new task to the plan: {args.description[:100]}..."
+        return f"Add new task to the plan: {format_short_task_description(args.description, char_limit=100)}"
 
 
 class RemoveTaskInput(BaseModel):
     task_id: str = Field(description="The ID of the task to remove")
+    description: str = Field(description="The description of the task to remove")
 
 
 class RemoveTask(BaseTool):
@@ -52,12 +74,16 @@ class RemoveTask(BaseTool):
     This tool removes a task from the list of tasks."""
     args_schema: Type[BaseModel] = RemoveTaskInput
 
-    def _run(self, task_id: str) -> str:
+    def _run(
+        self, task_id: str, description: str  # pylint: disable=unused-argument
+    ) -> str:
         return f"Task with ID {task_id} removed"
 
     def format_display_message(self, args: RemoveTaskInput) -> str:
-        task_num = format_task_number(args.task_id)
-        return f"Remove task {task_num}"
+        short_description = format_short_task_description(
+            args.description, word_limit=5, char_limit=50
+        )
+        return f"Remove task '{short_description}'"
 
 
 class UpdateTaskDescriptionInput(BaseModel):
@@ -76,8 +102,10 @@ class UpdateTaskDescription(BaseTool):
         return f"Task with ID {task_id} updated with description: {new_description}"
 
     def format_display_message(self, args: UpdateTaskDescriptionInput) -> str:
-        task_num = format_task_number(args.task_id)
-        return f"Update description for task {task_num}"
+        short_new_description = format_short_task_description(
+            args.new_description, word_limit=5, char_limit=50
+        )
+        return f"Update description for task '{short_new_description}'"
 
 
 class GetPlan(BaseTool):
@@ -96,6 +124,7 @@ class SetTaskStatusInput(BaseModel):
                         The status can be `Not Started`, `In Progress`,
                         `Completed` or `Cancelled`"""
     )
+    description: str = Field(description="A description of the task for context")
 
 
 class SetTaskStatus(BaseTool):
@@ -107,8 +136,10 @@ class SetTaskStatus(BaseTool):
         return f"Status of task with ID {task_id} set to {status}"
 
     def format_display_message(self, args: SetTaskStatusInput) -> str:
-        task_num = format_task_number(args.task_id)
-        return f"Set task {task_num} to '{args.status}'"
+        task_description = format_short_task_description(
+            args.description, word_limit=5, char_limit=50
+        )
+        return f"Set task '{task_description}' to '{args.status}'"
 
 
 class CreatePlanInput(BaseModel):
