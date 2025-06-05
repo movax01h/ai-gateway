@@ -21,14 +21,12 @@ class SlashCommandDefinition(BaseModel):
     Attributes:
         name: The name of the slash command
         description: A brief description of what the slash command does
-        system_prompt: The prompt provided to the AI system
         goal: The intended outcome of the slash command
         parameters: Optional parameters that can be passed to the slash command
     """
 
     name: str = ""
     description: str = ""
-    system_prompt: str = ""
     goal: str = ""
     parameters: Dict[str, Any] = Field(default_factory=dict)
 

@@ -7,6 +7,7 @@ from langchain_core.messages import AIMessage, SystemMessage
 from contract import contract_pb2
 from contract.contract_pb2 import ContextElement, ContextElementType
 from duo_workflow_service.agents.prompts import CHAT_SYSTEM_PROMPT
+from duo_workflow_service.checkpointer.gitlab_workflow import WorkflowStatusEventEnum
 from duo_workflow_service.components.tools_registry import ToolsRegistry
 from duo_workflow_service.entities import (
     MessageTypeEnum,
@@ -70,6 +71,7 @@ def workflow_with_project(context_element):
         "description": "A test project",
     }
     workflow._http_client = MagicMock()
+    workflow.slash_command_expander = MagicMock()
     return workflow
 
 
@@ -340,6 +342,10 @@ async def test_workflow_run(
         ),
         ([], CHAT_READ_ONLY_TOOLS),
         (["duo_workflow_mcp_support"], CHAT_READ_ONLY_TOOLS + ["extra_tool"]),
+        (
+            ["duo_workflow_chat_mutation_tools", "duo_workflow_mcp_support"],
+            CHAT_READ_ONLY_TOOLS + CHAT_MUTATION_TOOLS + ["extra_tool"],
+        ),
     ],
 )
 @patch("duo_workflow_service.workflows.chat.workflow.current_feature_flag_context")
@@ -381,3 +387,97 @@ def test_tools_registry_interaction(
     mock_agent.assert_called_once()
     _, kwargs = mock_agent.call_args
     assert kwargs.get("check_events") is False
+
+
+@pytest.mark.asyncio
+async def test_get_graph_input_start(workflow_with_project):
+    workflow_with_project.slash_command_expander.process.return_value = Mock(
+        is_ok=lambda: False
+    )
+
+    result = await workflow_with_project.get_graph_input(
+        "Test goal", WorkflowStatusEventEnum.START
+    )
+
+    assert result["status"] == WorkflowStatusEnum.NOT_STARTED
+    assert result["conversation_history"][AGENT_NAME][1].content == "Test goal"
+
+
+@pytest.mark.asyncio
+async def test_get_graph_input_resume(workflow_with_project):
+    result = await workflow_with_project.get_graph_input(
+        "New input", WorkflowStatusEventEnum.RESUME
+    )
+
+    assert result.goto == "agent"
+    assert result.update["status"] == WorkflowStatusEnum.EXECUTION
+    assert result.update["conversation_history"][AGENT_NAME][0].content == "New input"
+
+
+@pytest.mark.asyncio
+async def test_get_graph_input_slash_command(workflow_with_project):
+    workflow_with_project.slash_command_expander.process.return_value = Mock(
+        is_ok=lambda: True, value={"goal": "Expanded command"}
+    )
+
+    result = await workflow_with_project.get_graph_input(
+        "/command", WorkflowStatusEventEnum.START
+    )
+
+    assert result["conversation_history"][AGENT_NAME][1].content == "Expanded command"
+    workflow_with_project.slash_command_expander.process.assert_called_with("/command")
+
+
+@pytest.mark.asyncio
+@patch("duo_workflow_service.workflows.chat.workflow.log_exception")
+async def test_handle_workflow_failure(mock_log_exception, workflow_with_project):
+    error = Exception("Test error")
+    compiled_graph = MagicMock()
+    graph_config = MagicMock()
+
+    await workflow_with_project._handle_workflow_failure(
+        error=error, compiled_graph=compiled_graph, graph_config=graph_config
+    )
+
+    mock_log_exception.assert_called_once_with(
+        error, extra={"workflow_id": workflow_with_project._workflow_id}
+    )
+
+
+@patch("logging.Logger.info")
+def test_log_workflow_elements(mock_logger_info, workflow_with_project):
+    element = {
+        "ui_chat_log": [
+            {
+                "message_type": MessageTypeEnum.AGENT,
+                "content": "Test message content",
+                "timestamp": datetime.now().isoformat(),
+                "status": ToolStatus.SUCCESS,
+            }
+        ]
+    }
+
+    workflow_with_project.log = Mock()
+    workflow_with_project.log_workflow_elements(element)
+
+    workflow_with_project.log.info.assert_any_call("###############################")
+
+    format_call_args = workflow_with_project.log.info.call_args_list[1][0]
+    assert format_call_args[0].startswith(
+        "%s"
+    )  # Format string starts with message type
+    assert "Test message content" in format_call_args[2]  # Second arg is content
+
+
+@pytest.mark.asyncio
+async def test_get_graph_input_slash_command_error(workflow_with_project):
+    mock_result = Mock(is_ok=lambda: False, error="Invalid command")
+    workflow_with_project.slash_command_expander.process.return_value = mock_result
+
+    with pytest.raises(Exception) as excinfo:
+        await workflow_with_project.get_graph_input(
+            "/invalid_command", WorkflowStatusEventEnum.START
+        )
+
+    assert "Failed to process slash command" in str(excinfo.value)
+    assert "Invalid command" in str(excinfo.value)
