@@ -1,5 +1,3 @@
-# pylint: disable=file-naming-for-tests
-
 import astroid
 import astroid.nodes
 import pylint.testutils

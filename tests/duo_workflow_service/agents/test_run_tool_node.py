@@ -1,7 +1,5 @@
 """Test module for RunToolNode class."""
 
-# pylint: disable=file-naming-for-tests
-
 from unittest.mock import AsyncMock, Mock
 
 import pytest

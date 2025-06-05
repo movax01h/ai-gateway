@@ -1,5 +1,3 @@
-# pylint: disable=file-naming-for-tests
-
 import pytest
 
 from lib.result import Error, Ok, Result, ok

@@ -1,4 +1,4 @@
-# pylint: disable=file-naming-for-tests,unused-import
+# pylint: disable=unused-import
 
 from unittest.mock import MagicMock, patch
 

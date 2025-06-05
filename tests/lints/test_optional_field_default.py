@@ -1,5 +1,3 @@
-# pylint: disable=file-naming-for-tests
-
 import astroid
 import pytest
 from pylint.testutils import CheckerTestCase, MessageTest
