@@ -342,7 +342,7 @@ def _build_model_messages(messages: list[Message]) -> dict:
         if message.role == Role.SYSTEM:
             request["system"] = message.content
         else:
-            request["messages"].append(message.dict())
+            request["messages"].append(message.model_dump())
 
     return request
 

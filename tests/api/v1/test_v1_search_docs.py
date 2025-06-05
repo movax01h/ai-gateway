@@ -93,7 +93,7 @@ async def test_success(
         ),
     )
 
-    assert response.json() == expected_response.dict()
+    assert response.json() == expected_response.model_dump()
 
     mock_search_with_retry.assert_called_once_with(
         query=request_body["payload"]["query"],

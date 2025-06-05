@@ -159,9 +159,9 @@ class DuoBaseTool(BaseTool):
         # Handle both dictionary and Pydantic model arguments
         if isinstance(args, dict):
             args_str = ", ".join(f"{k}={v}" for k, v in args.items())
-        elif hasattr(args, "dict"):
+        elif isinstance(args, BaseModel):
             # Handle Pydantic model instances
-            args_str = ", ".join(f"{k}={v}" for k, v in args.dict().items())
+            args_str = ", ".join(f"{k}={v}" for k, v in args.model_dump().items())
         else:
             args_str = str(args)
 

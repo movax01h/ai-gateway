@@ -694,7 +694,7 @@ class TestAnthropicChatModel:
                     + [NOT_GIVEN]  # Use NOT_GIVEN by default
                 ).pop(0),
                 "messages": [
-                    message.dict()
+                    message.model_dump()
                     for message in messages
                     if message.role in (Role.USER, Role.ASSISTANT)
                 ],
