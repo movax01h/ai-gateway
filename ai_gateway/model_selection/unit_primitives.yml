@@ -13,6 +13,7 @@ configurable_unit_primitives:
       - "generate_code"
     default_model: "claude_sonnet_3_7_20250219"
     selectable_models:
+      - "claude_sonnet_4_20250514"
       - "claude_sonnet_3_7_20250219"
       - "claude_3_5_sonnet_20240620"
   - feature_setting: "code_completions"
