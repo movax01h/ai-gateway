@@ -133,6 +133,12 @@ testpaths = ["tests"]
 filterwarnings = ["error::UserWarning"]
 asyncio_default_fixture_loop_scope = "function"
 
+[tool.coverage.run]
+omit = [
+  "tests/*",
+  "*.jinja"
+]
+
 [tool.poetry.scripts]
 ai_gateway = "ai_gateway.main:run_app"
 ai-gateway = "ai_gateway.main:run_app"
