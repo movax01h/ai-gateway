@@ -11,6 +11,7 @@ from ai_gateway.config import ConfigModelLimits
 from ai_gateway.model_metadata import ModelMetadata
 from ai_gateway.prompts import Prompt
 from ai_gateway.prompts.registry import LocalPromptRegistry
+from duo_workflow_service.agents.chat_agent import ChatAgent
 
 
 @pytest.fixture
@@ -84,6 +85,8 @@ def test_container(mock_container: containers.DeclarativeContainer):
 
             if isinstance(prompt, ReActAgent):
                 prompt_template = prompt.bound.middle[0]  # type: ignore[attr-defined]
+            elif isinstance(prompt, ChatAgent):
+                prompt_template = prompt.bound.first  # type: ignore[attr-defined]
             else:
                 prompt_template = prompt.bound.first  # type: ignore[attr-defined]
 

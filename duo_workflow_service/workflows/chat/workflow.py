@@ -1,16 +1,17 @@
 import os
 from datetime import datetime, timezone
 from enum import StrEnum
-from typing import Any, Dict, List
+from typing import Any, List
 
-from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage
-from langchain_core.output_parsers.string import StrOutputParser
+from dependency_injector.wiring import Provide, inject
+from langchain_core.messages import AIMessage, BaseMessage, HumanMessage
 from langgraph.checkpoint.memory import BaseCheckpointSaver
 from langgraph.graph import END, StateGraph
 from langgraph.types import Command
 
-from duo_workflow_service.agents.agent import Agent
-from duo_workflow_service.agents.prompts import CHAT_SYSTEM_PROMPT
+from ai_gateway.container import ContainerApplication
+from ai_gateway.prompts.registry import LocalPromptRegistry
+from duo_workflow_service.agents.chat_agent import ChatAgent
 from duo_workflow_service.agents.tools_executor import ToolsExecutor
 from duo_workflow_service.checkpointer.gitlab_workflow import WorkflowStatusEventEnum
 from duo_workflow_service.components.tools_registry import ToolsRegistry
@@ -24,8 +25,6 @@ from duo_workflow_service.entities.state import (
 from duo_workflow_service.interceptors.feature_flag_interceptor import (
     current_feature_flag_context,
 )
-from duo_workflow_service.llm_factory import create_chat_model
-from duo_workflow_service.slash_commands.processor import SlashCommandsProcessor
 from duo_workflow_service.tracking.errors import log_exception
 from duo_workflow_service.workflows.abstract_workflow import AbstractWorkflow
 
@@ -33,7 +32,6 @@ MAX_TOKENS_TO_SAMPLE = 8192
 DEBUG = os.getenv("DEBUG")
 MAX_MESSAGE_LENGTH = 200
 RECURSION_LIMIT = 500
-AGENT_NAME = "Chat Agent"
 
 
 class Routes(StrEnum):
@@ -83,49 +81,18 @@ CHAT_MUTATION_TOOLS = [
 
 class Workflow(AbstractWorkflow):
     _stream: bool = True
-    slash_command_expander = SlashCommandsProcessor()
+    _agent: ChatAgent
 
     def _are_tools_called(self, state: ChatWorkflowState) -> Routes:
         if state["status"] in [WorkflowStatusEnum.CANCELLED, WorkflowStatusEnum.ERROR]:
             return Routes.STOP
 
-        history: List[BaseMessage] = state["conversation_history"][AGENT_NAME]
+        history: List[BaseMessage] = state["conversation_history"][self._agent.name]
         last_message = history[-1]
         if isinstance(last_message, AIMessage) and len(last_message.tool_calls) > 0:
             return Routes.TOOL_USE
 
         return Routes.STOP
-
-    async def _execute_agent(self, state: ChatWorkflowState) -> Dict[str, Any]:
-        # First run the agent
-        agent_result = await self._agent.run(state)
-        contextElements = self._context_elements or []
-
-        history: List[BaseMessage] = agent_result["conversation_history"][AGENT_NAME]
-        if not history:
-            return {"status": WorkflowStatusEnum.EXECUTION}
-        last_message = history[-1]
-
-        # Combine the agent result with the UI message
-        result = {
-            **agent_result,
-            "status": WorkflowStatusEnum.INPUT_REQUIRED,
-        }
-
-        if not isinstance(last_message, AIMessage) or len(last_message.tool_calls) == 0:
-            result["ui_chat_log"] = [
-                UiChatLog(
-                    message_type=MessageTypeEnum.AGENT,
-                    content=StrOutputParser().invoke(last_message) or "",
-                    timestamp=datetime.now(timezone.utc).isoformat(),
-                    status=ToolStatus.SUCCESS,
-                    correlation_id=None,
-                    tool_info=None,
-                    context_elements=contextElements,
-                )
-            ]
-
-        return result
 
     def get_workflow_state(self, goal: str) -> ChatWorkflowState:
         contextElements = self._context_elements or []
@@ -140,19 +107,11 @@ class Workflow(AbstractWorkflow):
             context_elements=contextElements,
         )
 
-        system_prompt = CHAT_SYSTEM_PROMPT.format(
-            current_date=datetime.now().strftime("%Y-%m-%d"),
-            project_id=self._project.get("id", "unknown"),
-            project_name=self._project.get("name", "unknown"),
-            project_url=self._project.get("web_url", "unknown"),
-        )
-
         return ChatWorkflowState(
             plan={"steps": []},
             status=WorkflowStatusEnum.NOT_STARTED,
             conversation_history={
-                AGENT_NAME: [
-                    SystemMessage(content=system_prompt),
+                self._agent.name: [
                     HumanMessage(
                         content=goal,
                         additional_kwargs={
@@ -164,22 +123,10 @@ class Workflow(AbstractWorkflow):
             ui_chat_log=[initial_ui_chat_log],
             last_human_input=None,
             context_elements=contextElements,
+            project=self._project,
         )
 
     async def get_graph_input(self, goal: str, status_event: str) -> Any:
-
-        if goal.strip().startswith("/"):
-            result = self.slash_command_expander.process(goal)
-            if result.is_ok():
-                slash_command_result = result.value
-                if slash_command_result is not None:
-                    goal = slash_command_result["goal"]
-            else:
-                error_msg = (
-                    f"Failed to process slash command: {goal}. Error: {result.error}"
-                )
-                self.log.error(error_msg, workflow_id=self._workflow_id)
-                raise Exception(error_msg)
         match status_event:
             case WorkflowStatusEventEnum.START:
                 return self.get_workflow_state(goal)
@@ -189,7 +136,7 @@ class Workflow(AbstractWorkflow):
                     update={
                         "status": WorkflowStatusEnum.EXECUTION,
                         "conversation_history": {
-                            AGENT_NAME: [
+                            self._agent.name: [
                                 HumanMessage(
                                     content=goal,
                                     additional_kwargs={
@@ -203,11 +150,15 @@ class Workflow(AbstractWorkflow):
             case _:
                 return None
 
+    @inject
     def _compile(
         self,
         goal: str,
         tools_registry: ToolsRegistry,
         checkpointer: BaseCheckpointSaver,
+        prompt_registry: LocalPromptRegistry = Provide[
+            ContainerApplication.pkg_prompts.prompt_registry
+        ],
     ):
         self.log.info(
             "ChatWorkflow._compile: Starting chat workflow compilation",
@@ -220,29 +171,18 @@ class Workflow(AbstractWorkflow):
         tools = self._get_tools()
         agents_toolset = tools_registry.toolset(tools)
 
+        self._agent: ChatAgent = prompt_registry.get(  # type: ignore[assignment]
+            "chat/agent", tools=agents_toolset.bindable, prompt_version="^1.0.0"  # type: ignore[arg-type]
+        )
+
         tools_runner = ToolsExecutor(
-            tools_agent_name=AGENT_NAME,
+            tools_agent_name=self._agent.name,
             toolset=agents_toolset,
             workflow_id=self._workflow_id,
             workflow_type=self._workflow_type,
         ).run
 
-        self._agent = Agent(
-            goal="",
-            system_prompt="",
-            name=AGENT_NAME,
-            model=create_chat_model(
-                max_tokens=MAX_TOKENS_TO_SAMPLE,
-                config=self._model_config,
-            ),
-            toolset=agents_toolset,
-            workflow_id=self._workflow_id,
-            http_client=self._http_client,
-            workflow_type=self._workflow_type,
-            check_events=False,
-        )
-
-        graph.add_node("agent", self._execute_agent)
+        graph.add_node("agent", self._agent.run)
         graph.add_node("run_tools", tools_runner)
 
         graph.set_entry_point("agent")

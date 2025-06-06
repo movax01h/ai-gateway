@@ -1,15 +1,17 @@
 from abc import ABC, abstractmethod
-from typing import Any, AsyncIterator, Mapping, Optional, Tuple, TypeVar, cast
+from typing import Any, AsyncIterator, List, Mapping, Optional, Tuple, TypeVar, cast
 
 from gitlab_cloud_connector import GitLabUnitPrimitive, WrongUnitPrimitives
 from jinja2 import PackageLoader, meta
 from jinja2.sandbox import SandboxedEnvironment
 from langchain_core.callbacks import BaseCallbackHandler, get_usage_metadata_callback
+from langchain_core.language_models import BaseChatModel
 from langchain_core.messages.ai import UsageMetadata
 from langchain_core.prompt_values import PromptValue
 from langchain_core.prompts import ChatPromptTemplate, string
 from langchain_core.prompts.string import DEFAULT_FORMATTER_MAPPING
 from langchain_core.runnables import Runnable, RunnableBinding, RunnableConfig
+from langchain_core.tools import BaseTool
 
 from ai_gateway.api.auth_utils import StarletteUser
 from ai_gateway.config import ConfigModelLimits, ModelLimits
@@ -90,6 +92,7 @@ class Prompt(RunnableBinding[Input, Output]):
         config: PromptConfig,
         model_metadata: Optional[TypeModelMetadata] = None,
         disable_streaming: bool = False,
+        tools: Optional[List[BaseTool]] = None,
     ):
         model_override = None
         if (
@@ -102,6 +105,8 @@ class Prompt(RunnableBinding[Input, Output]):
         model = self._build_model(
             model_factory, config.model, disable_streaming, model_override
         )
+        if tools and isinstance(model, BaseChatModel):
+            model = model.bind_tools(tools)  # type: ignore[assignment]
         prompt = self._build_prompt_template(config.prompt_template, config.model)
         chain = self._build_chain(
             cast(

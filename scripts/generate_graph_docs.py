@@ -7,6 +7,8 @@ from unittest.mock import MagicMock
 import structlog
 from langgraph.checkpoint.memory import MemorySaver
 
+from ai_gateway.config import Config
+from ai_gateway.container import ContainerApplication
 from duo_workflow_service.components import GoalDisambiguationComponent, ToolsRegistry
 from duo_workflow_service.internal_events.event_enum import CategoryEnum
 
@@ -30,6 +32,9 @@ def main():
     )
     os.environ["ANTHROPIC_API_KEY"] = "real_key_not_required_for_graph"
     # pylint: enable=direct-environment-variable-reference
+
+    container_application = ContainerApplication()
+    container_application.config.from_dict(Config().model_dump())
 
     output_file_path = sys.argv[1]
     with open(output_file_path, "w") as output_file:

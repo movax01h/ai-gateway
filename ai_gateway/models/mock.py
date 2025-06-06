@@ -141,6 +141,11 @@ class FakeModel(SimpleChatModel):
     ) -> str:
         return "mock"
 
+    def bind_tools(
+        self, *args: Any, **kwargs: Any  # pylint: disable=unused-argument
+    ) -> Any:
+        return self
+
 
 class ChatModel(ChatModelBase):
     """Implementation of the stub model that inherits the `ChatModelBase` interface.
