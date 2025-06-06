@@ -51,19 +51,8 @@ tests:evaluation:
 
 .test-base: &test-base
   stage: test
-  # Trigger test pipeline via trigger API.
-  script:
-    - "curl -X POST \
-      --fail \
-      -F token=$DUO_WORKFLOW_TESTS_TRIGGER_TOKEN \
-      -F variables[LS_DATASET]=$LS_DATASET \
-      -F variables[LANGCHAIN_PROJECT]=$LANGCHAIN_PROJECT \
-      -F variables[DW_SERVICE_REF]=$DW_SERVICE_REF \
-      -F variables[DW_CONCURRENCY]=$DW_CONCURRENCY \
-      -F variables[SWEBENCH_START]=$SWEBENCH_START \
-      -F variables[LS_DATASET_SPLIT]=$LS_DATASET_SPLIT \
-      -F ref=main \
-      $CI_API_V4_URL/projects/60530059/trigger/pipeline"
+  trigger:
+    project: gitlab-org/duo-workflow/testing/duo-workflow-tests
 
 .test-variables: &test-variables
   LS_DATASET: "duo_workflow.swe-bench-verified-test.1"
