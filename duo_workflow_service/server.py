@@ -8,6 +8,8 @@ from dotenv import load_dotenv
 from langchain.globals import set_llm_cache
 from langchain_community.cache import SQLiteCache
 
+from ai_gateway.config import Config
+from ai_gateway.container import ContainerApplication
 from duo_workflow_service.internal_events.client import DuoWorkflowInternalEvent
 from duo_workflow_service.llm_factory import validate_llm_access
 from duo_workflow_service.monitoring import setup_monitoring
@@ -47,8 +49,14 @@ def setup_cloud_connector():
     os.environ["CLOUD_CONNECTOR_SERVICE_NAME"] = cloud_connector_service_name
 
 
+def setup_container():
+    container_application = ContainerApplication()
+    container_application.config.from_dict(Config().model_dump())
+
+
 def run():
     load_dotenv()
+    setup_container()
     setup_cloud_connector()
     setup_profiling()
     setup_error_tracking()

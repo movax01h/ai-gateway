@@ -2,11 +2,12 @@ from datetime import datetime
 from unittest.mock import AsyncMock, MagicMock, Mock, patch
 
 import pytest
-from langchain_core.messages import AIMessage, SystemMessage
+from dependency_injector import containers
+from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
 
 from contract import contract_pb2
 from contract.contract_pb2 import ContextElement, ContextElementType
-from duo_workflow_service.agents.prompts import CHAT_SYSTEM_PROMPT
+from duo_workflow_service.agents.chat_agent import ChatAgent
 from duo_workflow_service.checkpointer.gitlab_workflow import WorkflowStatusEventEnum
 from duo_workflow_service.components.tools_registry import ToolsRegistry
 from duo_workflow_service.entities import (
@@ -17,7 +18,6 @@ from duo_workflow_service.entities import (
 from duo_workflow_service.entities.state import ChatWorkflowState
 from duo_workflow_service.internal_events.event_enum import CategoryEnum
 from duo_workflow_service.workflows.chat.workflow import (
-    AGENT_NAME,
     CHAT_MUTATION_TOOLS,
     CHAT_READ_ONLY_TOOLS,
     Routes,
@@ -56,12 +56,25 @@ def context_element():
 
 
 @pytest.fixture
-def workflow_with_project(context_element):
+def prompt_class():
+    return ChatAgent
+
+
+@pytest.fixture
+def config_values():
+    yield {"mock_model_responses": True}
+
+
+@pytest.fixture
+def workflow_with_project(
+    context_element, mock_container: containers.Container, prompt: ChatAgent
+):
     workflow = Workflow(
         workflow_id="test-id",
         workflow_metadata={},
         workflow_type=CategoryEnum.WORKFLOW_CHAT,
         context_elements=[context_element],
+        mcp_tools=[contract_pb2.McpTool(name="extra_tool", description="Extra tool")],
     )
     workflow._project = {
         "id": 123,
@@ -71,111 +84,80 @@ def workflow_with_project(context_element):
         "description": "A test project",
     }
     workflow._http_client = MagicMock()
-    workflow.slash_command_expander = MagicMock()
+    workflow._context_elements = []
+    workflow._agent = prompt
     return workflow
 
 
 @pytest.mark.asyncio
-async def test_workflow_initialization(workflow_with_project, context_element):
+async def test_workflow_initialization(workflow_with_project):
     initial_state = workflow_with_project.get_workflow_state("Test chat goal")
-    expected_system_prompt = CHAT_SYSTEM_PROMPT.format(
-        current_date=datetime.now().strftime("%Y-%m-%d"),
-        project_id="123",
-        project_name="test-project",
-        project_url="https://example.com/test-project",
-    )
 
     assert initial_state["status"] == WorkflowStatusEnum.NOT_STARTED
-    assert (
-        initial_state["conversation_history"][AGENT_NAME][0].content
-        == expected_system_prompt
-    )
     assert initial_state["plan"] == {"steps": []}
     assert len(initial_state["ui_chat_log"]) == 1
     assert initial_state["ui_chat_log"][0]["message_type"] == MessageTypeEnum.TOOL
     assert "Starting chat: Test chat goal" in initial_state["ui_chat_log"][0]["content"]
     assert initial_state["ui_chat_log"][0]["status"] == ToolStatus.SUCCESS
-    assert initial_state["context_elements"] == [context_element]
+    assert initial_state["context_elements"] == []
+    assert initial_state["project"]["name"] == "test-project"
 
 
 @pytest.mark.asyncio
 async def test_execute_agent(workflow_with_project):
-    # Setup test data
-    test_message = "Test response"
-    mock_agent_result = {
-        "conversation_history": {
-            AGENT_NAME: [
-                SystemMessage(content="test system"),
-                AIMessage(content=test_message),
-            ]
-        },
-        "status": WorkflowStatusEnum.EXECUTION,
-    }
-
-    workflow_with_project._agent = AsyncMock()
-    workflow_with_project._agent.run.return_value = mock_agent_result
     workflow_with_project._context_elements = []
 
     state = ChatWorkflowState(
         plan={"steps": []},
         status=WorkflowStatusEnum.EXECUTION,
-        conversation_history={AGENT_NAME: []},
+        conversation_history={"test_prompt": []},
         ui_chat_log=[],
         last_human_input=None,
         context_elements=[],
     )
 
-    result = await workflow_with_project._execute_agent(state)
+    result = await workflow_with_project._agent.run(state)
 
     assert result["status"] == WorkflowStatusEnum.INPUT_REQUIRED
     assert len(result["ui_chat_log"]) == 1
-    assert result["ui_chat_log"][0]["content"] == test_message
+    assert result["ui_chat_log"][0]["content"] == "Hello there!"
     assert "context_elements" in result["ui_chat_log"][0]
     assert result["ui_chat_log"][0]["context_elements"] == []
     assert result["ui_chat_log"][0]["message_type"] == MessageTypeEnum.AGENT
     assert result["ui_chat_log"][0]["status"] == ToolStatus.SUCCESS
 
 
-@pytest.mark.asyncio
-async def test_execute_agent_with_tools(workflow_with_project):
-    # Setup test data
-    test_message = "Test response"
-    mock_agent_result = {
-        "conversation_history": {
-            AGENT_NAME: [
-                SystemMessage(content="test system"),
-                AIMessage(
-                    content=test_message,
-                    tool_calls=[
-                        {
-                            "name": "list_issues",
-                            "args": {"project_id": "123"},
-                            "id": "1",
-                        }
-                    ],
-                ),
-            ]
-        },
-        "status": WorkflowStatusEnum.EXECUTION,
-    }
+class TestExecuteAgentWithTools:
+    @pytest.fixture
+    def model_response(self):
+        return ToolMessage(content="tool calling", tool_call_id="random_id")
 
-    workflow_with_project._agent = AsyncMock()
-    workflow_with_project._agent.run.return_value = mock_agent_result
-    workflow_with_project._context_elements = []
+    @pytest.fixture
+    def model_disable_streaming(self):
+        return "tool_calling"
 
-    state = ChatWorkflowState(
-        plan={"steps": []},
-        status=WorkflowStatusEnum.EXECUTION,
-        conversation_history={AGENT_NAME: []},
-        ui_chat_log=[],
-        last_human_input=None,
-        context_elements=[],
-    )
+    @pytest.mark.asyncio
+    async def test_execute_agent_with_tools(self, workflow_with_project):
+        workflow_with_project._context_elements = []
 
-    result = await workflow_with_project._execute_agent(state)
+        state = ChatWorkflowState(
+            plan={"steps": []},
+            status=WorkflowStatusEnum.EXECUTION,
+            conversation_history={"test_prompt": [HumanMessage(content="hi")]},
+            ui_chat_log=[],
+            last_human_input=None,
+            context_elements=[],
+        )
 
-    assert result["status"] == WorkflowStatusEnum.INPUT_REQUIRED
-    assert "ui_chat_log" not in result
+        result = await workflow_with_project._agent.run(state)
+
+        assert result["status"] == WorkflowStatusEnum.INPUT_REQUIRED
+        assert len(result["ui_chat_log"]) == 1
+        assert result["ui_chat_log"][0]["content"] == "tool calling"
+        assert "context_elements" in result["ui_chat_log"][0]
+        assert result["ui_chat_log"][0]["context_elements"] == []
+        assert result["ui_chat_log"][0]["message_type"] == MessageTypeEnum.AGENT
+        assert result["ui_chat_log"][0]["status"] == ToolStatus.SUCCESS
 
 
 @pytest.mark.parametrize(
@@ -195,21 +177,20 @@ async def test_execute_agent_with_tools(workflow_with_project):
         "Test with list content but no tool_use",
     ],
 )
-def test_are_tools_called_with_various_content(message_content, expected_result):
-    workflow = Workflow(
-        workflow_id="test-id",
-        workflow_metadata={},
-        workflow_type=CategoryEnum.WORKFLOW_CHAT,
-    )
+def test_are_tools_called_with_various_content(
+    workflow_with_project, message_content, expected_result
+):
+    workflow = workflow_with_project
     workflow._context_elements = []
 
     state: ChatWorkflowState = {
-        "conversation_history": {AGENT_NAME: [AIMessage(content=message_content)]},
+        "conversation_history": {"test_prompt": [AIMessage(content=message_content)]},
         "plan": {"steps": []},
         "status": WorkflowStatusEnum.EXECUTION,
         "ui_chat_log": [],
         "last_human_input": None,
         "context_elements": [],
+        "project": None,
     }
     assert workflow._are_tools_called(state) == expected_result
 
@@ -222,12 +203,8 @@ def test_are_tools_called_with_various_content(message_content, expected_result)
     assert workflow._are_tools_called(state) == Routes.STOP
 
 
-def test_are_tools_called_with_tool_use():
-    workflow = Workflow(
-        workflow_id="test-id",
-        workflow_metadata={},
-        workflow_type=CategoryEnum.WORKFLOW_CHAT,
-    )
+def test_are_tools_called_with_tool_use(workflow_with_project):
+    workflow = workflow_with_project
     workflow._context_elements = []
 
     tool_message = AIMessage(content="Using tools")
@@ -240,18 +217,18 @@ def test_are_tools_called_with_tool_use():
     ]
 
     state: ChatWorkflowState = {
-        "conversation_history": {AGENT_NAME: [tool_message]},
+        "conversation_history": {"test_prompt": [tool_message]},
         "plan": {"steps": []},
         "status": WorkflowStatusEnum.EXECUTION,
         "ui_chat_log": [],
         "last_human_input": None,
         "context_elements": [],
+        "project": None,
     }
     assert workflow._are_tools_called(state) == Routes.TOOL_USE
 
 
 @pytest.mark.asyncio
-@patch("duo_workflow_service.workflows.chat.workflow.create_chat_model")
 @patch("duo_workflow_service.workflows.abstract_workflow.ToolsRegistry")
 @patch("duo_workflow_service.workflows.abstract_workflow.GitLabWorkflow", autospec=True)
 @patch(
@@ -267,7 +244,7 @@ async def test_workflow_run(
     mock_fetch_project_data,
     mock_gitlab_workflow,
     mock_tools_registry,
-    mock_chat_client,
+    workflow_with_project,
 ):
     mock_user_interface_instance = mock_user_interface.return_value
     mock_tools_registry.configure = AsyncMock(
@@ -317,11 +294,7 @@ async def test_workflow_run(
         mock_graph = mock_graph_cls.return_value
         mock_graph.compile.return_value = compiled_graph
 
-        workflow = Workflow(
-            workflow_id="test-id",
-            workflow_metadata={},
-            workflow_type=CategoryEnum.WORKFLOW_CHAT,
-        )
+        workflow = workflow_with_project
 
         await workflow.run("Test chat goal")
 
@@ -350,30 +323,23 @@ async def test_workflow_run(
 )
 @patch("duo_workflow_service.workflows.chat.workflow.current_feature_flag_context")
 @patch("duo_workflow_service.components.tools_registry.ToolsRegistry.toolset")
-@patch("duo_workflow_service.workflows.chat.workflow.Agent")
 def test_tools_registry_interaction(
-    mock_agent,
     mock_toolset,
     mock_feature_flag_context,
     feature_flags,
     expected_tools,
+    workflow_with_project,
 ):
     mock_feature_flag_context.get.return_value = feature_flags
 
     mock_toolset.return_value = [Mock(name=f"mock_{tool}") for tool in expected_tools]
 
-    workflow = Workflow(
-        workflow_id="test-id",
-        workflow_metadata={},
-        workflow_type=CategoryEnum.WORKFLOW_CHAT,
-        mcp_tools=[contract_pb2.McpTool(name="extra_tool", description="Extra tool")],
-    )
+    workflow = workflow_with_project
     workflow._context_elements = []
     tools_registry = MagicMock(spec=ToolsRegistry)
     checkpointer = MagicMock()
 
-    with patch("duo_workflow_service.workflows.chat.workflow.create_chat_model"):
-        workflow._compile("Test goal", tools_registry, checkpointer)
+    workflow._compile("Test goal", tools_registry, checkpointer)
 
     assert tools_registry.toolset.called
 
@@ -383,24 +349,15 @@ def test_tools_registry_interaction(
     for tool in expected_tools:
         assert tool in tools_passed_to_get_batch
 
-    # Verify Agent initialization parameters
-    mock_agent.assert_called_once()
-    _, kwargs = mock_agent.call_args
-    assert kwargs.get("check_events") is False
-
 
 @pytest.mark.asyncio
 async def test_get_graph_input_start(workflow_with_project):
-    workflow_with_project.slash_command_expander.process.return_value = Mock(
-        is_ok=lambda: False
-    )
-
     result = await workflow_with_project.get_graph_input(
         "Test goal", WorkflowStatusEventEnum.START
     )
 
     assert result["status"] == WorkflowStatusEnum.NOT_STARTED
-    assert result["conversation_history"][AGENT_NAME][1].content == "Test goal"
+    assert result["conversation_history"]["test_prompt"][0].content == "Test goal"
 
 
 @pytest.mark.asyncio
@@ -411,21 +368,9 @@ async def test_get_graph_input_resume(workflow_with_project):
 
     assert result.goto == "agent"
     assert result.update["status"] == WorkflowStatusEnum.EXECUTION
-    assert result.update["conversation_history"][AGENT_NAME][0].content == "New input"
-
-
-@pytest.mark.asyncio
-async def test_get_graph_input_slash_command(workflow_with_project):
-    workflow_with_project.slash_command_expander.process.return_value = Mock(
-        is_ok=lambda: True, value={"goal": "Expanded command"}
+    assert (
+        result.update["conversation_history"]["test_prompt"][0].content == "New input"
     )
-
-    result = await workflow_with_project.get_graph_input(
-        "/command", WorkflowStatusEventEnum.START
-    )
-
-    assert result["conversation_history"][AGENT_NAME][1].content == "Expanded command"
-    workflow_with_project.slash_command_expander.process.assert_called_with("/command")
 
 
 @pytest.mark.asyncio
@@ -467,17 +412,3 @@ def test_log_workflow_elements(mock_logger_info, workflow_with_project):
         "%s"
     )  # Format string starts with message type
     assert "Test message content" in format_call_args[2]  # Second arg is content
-
-
-@pytest.mark.asyncio
-async def test_get_graph_input_slash_command_error(workflow_with_project):
-    mock_result = Mock(is_ok=lambda: False, error="Invalid command")
-    workflow_with_project.slash_command_expander.process.return_value = mock_result
-
-    with pytest.raises(Exception) as excinfo:
-        await workflow_with_project.get_graph_input(
-            "/invalid_command", WorkflowStatusEventEnum.START
-        )
-
-    assert "Failed to process slash command" in str(excinfo.value)
-    assert "Invalid command" in str(excinfo.value)

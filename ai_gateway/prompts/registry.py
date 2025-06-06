@@ -1,8 +1,9 @@
 from pathlib import Path
-from typing import NamedTuple, Optional, Type
+from typing import List, NamedTuple, Optional, Type
 
 import structlog
 import yaml
+from langchain.tools import BaseTool
 from poetry.core.constraints.version import Version, parse_constraint
 
 from ai_gateway.config import ConfigModelLimits
@@ -87,6 +88,7 @@ class LocalPromptRegistry(BasePromptRegistry):
         prompt_id: str,
         prompt_version: str,
         model_metadata: Optional[TypeModelMetadata] = None,
+        tools: Optional[List[BaseTool]] = None,
     ) -> Prompt:
         prompt_id = self._resolve_id(prompt_id, model_metadata)
 
@@ -114,6 +116,7 @@ class LocalPromptRegistry(BasePromptRegistry):
             config,
             model_metadata,
             disable_streaming=self.disable_streaming,
+            tools=tools,
         )
 
     @classmethod

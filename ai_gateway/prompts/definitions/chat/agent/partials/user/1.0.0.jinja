@@ -1,0 +1,9 @@
+{%- with additional_context = message.additional_kwargs.additional_context %}
+    {%- include 'chat/agent/partials/additional_context/1.0.0.jinja' %}
+{%- endwith %}
+{# Context should be placed before the query https://docs.anthropic.com/en/docs/build-with-claude/prompt-engineering/long-context-tips. #}
+{%- if slash_command.name == 'explain' %}
+{%- include 'chat/agent/partials/slash_commands/explain_code/1.0.0.jinja' %}
+{%- else %}
+{{message.content}}
+{%- endif %}

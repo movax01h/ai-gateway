@@ -31,6 +31,7 @@ class ContainerApplication(containers.DeclarativeContainer):
             "ai_gateway.api.server",
             "ai_gateway.api.monitoring",
             "ai_gateway.async_dependency_resolver",
+            "duo_workflow_service.workflows.chat.workflow",
         ]
     )
 

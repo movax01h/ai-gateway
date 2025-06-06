@@ -1,6 +1,6 @@
 from contextlib import contextmanager
 from pathlib import Path
-from typing import Any, AsyncIterator, Optional, Type
+from typing import Any, AsyncIterator, Literal, Optional, Type, Union
 from unittest.mock import AsyncMock, Mock, PropertyMock, patch
 
 import pytest
@@ -9,9 +9,9 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from gitlab_cloud_connector import CloudConnectorUser, GitLabUnitPrimitive, UserClaims
 from langchain_community.chat_models.fake import FakeListChatModel
-from langchain_core.messages import BaseMessage
+from langchain_core.messages import BaseMessage, ToolMessage
 from langchain_core.messages.ai import AIMessage, UsageMetadata
-from langchain_core.outputs import ChatGenerationChunk, ChatResult
+from langchain_core.outputs import ChatGeneration, ChatGenerationChunk, ChatResult
 from starlette.middleware import Middleware
 from starlette_context.middleware import RawContextMiddleware
 
@@ -459,6 +459,11 @@ def usage_metadata():
     return None
 
 
+@pytest.fixture
+def model_disable_streaming():
+    return False
+
+
 class FakeModel(FakeListChatModel):
     model_engine: str
     model_name: str
@@ -474,6 +479,9 @@ class FakeModel(FakeListChatModel):
         return {**super()._identifying_params, **{"model": self.model_name}}
 
     def _generate(self, *args, **kwargs) -> ChatResult:
+        if len(self.responses) == 1 and isinstance(self.responses[0], ToolMessage):
+            return ChatResult(generations=[ChatGeneration(message=self.responses[0])])
+
         result = super()._generate(*args, **kwargs)
 
         self._set_usage_metadata(result.generations[0].message)
@@ -507,21 +515,26 @@ class FakeModel(FakeListChatModel):
 
 @pytest.fixture
 def model(
-    model_response: str,
+    model_response: str | ToolMessage,
     model_engine: str,
     model_name: str,
     model_error: Exception,
     usage_metadata: Optional[UsageMetadata],
+    model_disable_streaming: Union[bool, Literal["tool_calling"]],
 ):
     # our default Assistant prompt template already contains "Thought: "
-    text = model_response.removeprefix("Thought: ") if model_response else ""
+    if isinstance(model_response, str):
+        response = model_response.removeprefix("Thought: ")
+    else:
+        response = model_response  # type: ignore[assignment]
 
     return FakeModel(
         model_engine=model_engine,
         model_name=model_name,
-        responses=[text],
+        responses=[response],
         model_error=model_error,
         usage_metadata=usage_metadata,
+        disable_streaming=model_disable_streaming,
     )
 
 
