@@ -3,7 +3,7 @@ from unittest.mock import AsyncMock, MagicMock, Mock, patch
 
 import pytest
 from dependency_injector import containers
-from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
+from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 
 from contract import contract_pb2
 from contract.contract_pb2 import ContextElement, ContextElementType
@@ -412,3 +412,139 @@ def test_log_workflow_elements(mock_logger_info, workflow_with_project):
         "%s"
     )  # Format string starts with message type
     assert "Test message content" in format_call_args[2]  # Second arg is content
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "conversation_content,response_content,tool_calls,expected_status,has_ui_log",
+    [
+        (
+            [HumanMessage(content="List issues")],
+            "I'll help you with that.",
+            [{"id": "call_123", "name": "list_issues", "args": {"project_id": 123}}],
+            WorkflowStatusEnum.EXECUTION,
+            False,
+        ),
+        (
+            [HumanMessage(content="Hello")],
+            "Here's my response to your question.",
+            None,
+            WorkflowStatusEnum.INPUT_REQUIRED,
+            True,
+        ),
+        (
+            [HumanMessage(content="Simple question")],
+            "No tools needed for this response.",
+            [],
+            WorkflowStatusEnum.INPUT_REQUIRED,
+            True,
+        ),
+        (
+            [],
+            "Hello there!",
+            None,
+            WorkflowStatusEnum.INPUT_REQUIRED,
+            True,
+        ),
+    ],
+    ids=[
+        "with_tool_calls_sets_execution_status",
+        "without_tool_calls_sets_input_required_status",
+        "with_empty_tool_calls_sets_input_required_status",
+        "without_tools_returns_input_required",
+    ],
+)
+@patch("ai_gateway.prompts.base.Prompt.ainvoke")
+async def test_chat_agent_status_handling(
+    mock_ainvoke,
+    workflow_with_project,
+    conversation_content,
+    response_content,
+    tool_calls,
+    expected_status,
+    has_ui_log,
+):
+    workflow_with_project._context_elements = []
+
+    state = ChatWorkflowState(
+        plan={"steps": []},
+        status=WorkflowStatusEnum.EXECUTION,
+        conversation_history={"test_prompt": conversation_content},
+        ui_chat_log=[],
+        last_human_input=None,
+        context_elements=[],
+    )
+
+    ai_response = AIMessage(content=response_content)
+    if tool_calls is not None:
+        ai_response.tool_calls = tool_calls
+    mock_ainvoke.return_value = ai_response
+
+    result = await workflow_with_project._agent.run(state)
+
+    assert result["status"] == expected_status
+
+    if has_ui_log:
+        assert "ui_chat_log" in result
+        assert len(result["ui_chat_log"]) == 1
+        assert result["ui_chat_log"][0]["content"] == response_content
+        if conversation_content:  # Only check these for non-empty conversation
+            assert result["ui_chat_log"][0]["message_type"] == MessageTypeEnum.AGENT
+            assert result["ui_chat_log"][0]["status"] == ToolStatus.SUCCESS
+        else:  # For empty conversation case
+            assert "context_elements" in result["ui_chat_log"][0]
+            assert result["ui_chat_log"][0]["context_elements"] == []
+            assert result["ui_chat_log"][0]["message_type"] == MessageTypeEnum.AGENT
+            assert result["ui_chat_log"][0]["status"] == ToolStatus.SUCCESS
+    else:
+        assert "ui_chat_log" not in result
+
+
+@pytest.mark.asyncio
+@patch("ai_gateway.prompts.base.Prompt.ainvoke")
+async def test_chat_workflow_status_flow_integration(
+    mock_ainvoke, workflow_with_project
+):
+    workflow_with_project._context_elements = []
+
+    # Test sequence: agent with tools -> tools execution -> agent final response
+    # 1. Agent responds with tool calls (should be EXECUTION status)
+    state_1 = ChatWorkflowState(
+        plan={"steps": []},
+        status=WorkflowStatusEnum.EXECUTION,
+        conversation_history={"test_prompt": [HumanMessage(content="List issues")]},
+        ui_chat_log=[],
+        last_human_input=None,
+        context_elements=[],
+    )
+
+    ai_response_with_tools = AIMessage(content="I'll list the issues for you.")
+    ai_response_with_tools.tool_calls = [
+        {"id": "call_123", "name": "list_issues", "args": {}}
+    ]
+    mock_ainvoke.return_value = ai_response_with_tools
+
+    result_1 = await workflow_with_project._agent.run(state_1)
+    assert result_1["status"] == WorkflowStatusEnum.EXECUTION
+
+    # 2. After tools execute, agent provides final response (should be INPUT_REQUIRED)
+    state_2 = ChatWorkflowState(
+        plan={"steps": []},
+        status=WorkflowStatusEnum.EXECUTION,
+        conversation_history={
+            "test_prompt": [
+                HumanMessage(content="List issues"),
+                ai_response_with_tools,
+            ]
+        },
+        ui_chat_log=[],
+        last_human_input=None,
+        context_elements=[],
+    )
+
+    ai_response_final = AIMessage(content="Here are the issues I found: ...")
+    mock_ainvoke.return_value = ai_response_final
+
+    result_2 = await workflow_with_project._agent.run(state_2)
+    assert result_2["status"] == WorkflowStatusEnum.INPUT_REQUIRED
+    assert "ui_chat_log" in result_2

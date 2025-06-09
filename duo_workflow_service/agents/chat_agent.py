@@ -78,10 +78,14 @@ class ChatAgent(Prompt[ChatWorkflowState, BaseMessage]):
     async def run(self, input: ChatWorkflowState) -> Dict[str, Any]:
         agent_response = await super().ainvoke(input=input, agent_name=self.name)
 
-        # Combine the agent result with the UI message
+        if isinstance(agent_response, AIMessage) and len(agent_response.tool_calls) > 0:
+            status = WorkflowStatusEnum.EXECUTION
+        else:
+            status = WorkflowStatusEnum.INPUT_REQUIRED
+
         result = {
             "conversation_history": {self.name: [agent_response]},
-            "status": WorkflowStatusEnum.INPUT_REQUIRED,
+            "status": status,
         }
 
         if (
