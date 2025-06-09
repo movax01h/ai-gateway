@@ -13,18 +13,22 @@ infrastructure.
 
 ## Local development with GDK
 
-You should [set up GitLab Duo Workflow with the GitLab Development Kit (GDK)](https://gitlab.com/gitlab-org/gitlab-development-kit/-/blob/main/doc/howto/duo_workflow.md).
+You
+should [set up GitLab Duo Workflow with the GitLab Development Kit (GDK)](https://gitlab.com/gitlab-org/gitlab-development-kit/-/blob/main/doc/howto/duo_workflow.md).
 
 The GDK setup documentation also explains how ensure that all feature flags and
 settings enabled so that Duo Workflow works.
 
-## Local developmment without GDK
+## Local development without GDK
 
-If for some reason you cannot [set up Duo Workflow Service directly with GDK](https://gitlab.com/gitlab-org/gitlab-development-kit/-/blob/main/doc/howto/duo_workflow.md), you can manually set it up following these steps:
+If for some reason you
+cannot [set up Duo Workflow Service directly with GDK](https://gitlab.com/gitlab-org/gitlab-development-kit/-/blob/main/doc/howto/duo_workflow.md),
+you can manually set it up following these steps:
 
 1. Ensure you have met all prerequisites locally (this list may not be exhaustive, GDK setup script is)
    - [GitLab Ultimate cloud license](https://docs.gitlab.com/development/ai_features/ai_development_license)
-   - [Experiment and beta features setting](https://docs.gitlab.com/user/gitlab_duo/turn_on_off/#turn-on-beta-and-experimental-features) enabled
+   - [Experiment and beta features setting](https://docs.gitlab.com/user/gitlab_duo/turn_on_off/#turn-on-beta-and-experimental-features)
+     enabled
    - Feature flag enabled: `Feature.enable(:duo_workflow)`
 
 1. Install dependencies with [poetry](https://python-poetry.org/docs/#installing-with-pipx).
@@ -58,7 +62,9 @@ If for some reason you cannot [set up Duo Workflow Service directly with GDK](ht
    gcloud auth application-default login --disable-quota-project
    ```
 
-1. Optional: The `ai-enablement-dev-69497ba7` Google Cloud project should by available to all engineers at GitLab. If you do not have access to this project, unset `DUO_WORKFLOW__VERTEX_PROJECT_ID` in `.env` and instead set `ANTHROPIC_API_KEY` to a valid Anthropic API key.
+1. Optional: The `ai-enablement-dev-69497ba7` Google Cloud project should by available to all engineers at GitLab. If
+   you do not have access to this project, unset `DUO_WORKFLOW__VERTEX_PROJECT_ID` in `.env` and instead set
+   `ANTHROPIC_API_KEY` to a valid Anthropic API key.
 
 1. Optional: You can disable auth for local development in the `.env` file. This
    disables authentication or the gRPC connection between the Duo Workflow Service
@@ -84,7 +90,8 @@ If for some reason you cannot [set up Duo Workflow Service directly with GDK](ht
 
 ## Debugging and troubleshooting
 
-See the Duo Workflow [troubleshooting handbook page](https://handbook.gitlab.com/handbook/engineering/development/data-science/ai-powered/duo-workflow/troubleshooting/).
+See the Duo
+Workflow [troubleshooting handbook page](https://handbook.gitlab.com/handbook/engineering/development/data-science/ai-powered/duo-workflow/troubleshooting/).
 
 ### Issues connecting to 50052 port
 
@@ -148,7 +155,8 @@ cache.
 
 ### LangGraph Abstraction Layers
 
-The Duo Workflow Service is organized into three distinct abstraction layers to support modularity, flexibility, and future extensibility.
+The Duo Workflow Service is organized into three distinct abstraction layers to support modularity, flexibility, and
+future extensibility.
 
 ![Workflow layered architecture](docs/layers_duo_workflow_service.png)
 
@@ -171,7 +179,8 @@ The Duo Workflow Service is organized into three distinct abstraction layers to 
    - Configured with prompts and agent configurations from `AgentRegistry`.
    - Serves as a simplified entry point for building agentic features
 
-Each layer is restricted to using only entities from the layer directly below it, enforced through static scanning in CI. This architecture ensures:
+Each layer is restricted to using only entities from the layer directly below it, enforced through static scanning in
+CI. This architecture ensures:
 
 - Modular and maintainable codebase.
 - Support for future extensions like YAML DSL for external workflow configurations.
@@ -194,9 +203,13 @@ When using `MemorySaver`, human in the loop features and workflow status updates
 
 ### Logging
 
-Production logs are collected via LangSmith, visit this [link](https://smith.langchain.com/o/477de7ad-583e-47b6-a1c4-c4a0300e7aca/projects/p/5409132b-2cf3-4df8-9f14-70204f90ed9b?timeModel=%7B%22duration%22%3A%227d%22%7D&searchModel=%7B%22filter%22%3A%22and%28eq%28is_root%2C+true%29%2C+eq%28run_type%2C+%5C%22chain%5C%22%29%29%22%7D) to view logs.
+Production logs are collected via LangSmith, visit
+this [link](https://smith.langchain.com/o/477de7ad-583e-47b6-a1c4-c4a0300e7aca/projects/p/5409132b-2cf3-4df8-9f14-70204f90ed9b?timeModel=%7B%22duration%22%3A%227d%22%7D&searchModel=%7B%22filter%22%3A%22and%28eq%28is_root%2C+true%29%2C+eq%28run_type%2C+%5C%22chain%5C%22%29%29%22%7D)
+to view logs.
 
-You will need access to LangSmith to view the logs. Please fill out an [Access Request](https://handbook.gitlab.com/handbook/it/end-user-services/onboarding-access-requests/access-requests/) to get access to LangSmith.
+You will need access to LangSmith to view the logs. Please fill out
+an [Access Request](https://handbook.gitlab.com/handbook/it/end-user-services/onboarding-access-requests/access-requests/)
+to get access to LangSmith.
 
 On local environment, set `DEBUG=1` to enable extended log output.
 
@@ -205,17 +218,22 @@ On local environment, set `DEBUG=1` to enable extended log output.
 Please refer to official guidelines for:
 
 1. Available tracing options [documentation](https://github.com/grpc/grpc/blob/master/doc/trace_flags.md).
-1. Available environment variables [documentation](https://github.com/grpc/grpc/blob/master/doc/environment_variables.md).
+1. Available environment
+   variables [documentation](https://github.com/grpc/grpc/blob/master/doc/environment_variables.md).
 
-A past [commit](https://gitlab.com/gitlab-org/duo-workflow/duo-workflow-service/-/commit/775462e46b838e9ad39d0394b9a51bc647d91121) that modified gRPC tracing configuration.
+A
+past [commit](https://gitlab.com/gitlab-org/duo-workflow/duo-workflow-service/-/commit/775462e46b838e9ad39d0394b9a51bc647d91121)
+that modified gRPC tracing configuration.
 
 ### Events Tracking
 
-We use GitLab Internal event tracking to track workflow events. See [internal_events](docs/internal_events.md) for details.
+We use GitLab Internal event tracking to track workflow events. See [internal_events](docs/internal_events.md) for
+details.
 
 ## Testing with SWE Bench
 
-For any changes that you think will have a markedly positive impact on Duo Workflow's ability to independently solve coding tasks such as SWE bench, run the manual SWE bench job to confirm the behavior of Duo Workflow with your changes.
+For any changes that you think will have a markedly positive impact on Duo Workflow's ability to independently solve
+coding tasks such as SWE bench, run the manual SWE bench job to confirm the behavior of Duo Workflow with your changes.
 
 ### Running the manual SWE bench job
 
@@ -230,4 +248,10 @@ For any changes that you think will have a markedly positive impact on Duo Workf
 - After updating the underlying LLM or adjusting model parameters
 - When implementing new tools or enhancing existing tool functionality
 
-Running SWE bench tests before submitting your changes for review can help identify potential regressions and validate improvements in Duo Workflow's problem-solving capabilities.
+Running SWE bench tests before submitting your changes for review can help identify potential regressions and validate
+improvements in Duo Workflow's problem-solving capabilities.
+
+## Adding a New Tool to the System
+
+For comprehensive instructions on adding a new tool to the Duo Workflow Service, refer to the dedicated
+guide: [Adding New Tool](adding_new_tool.md).
