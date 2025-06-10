@@ -114,7 +114,7 @@ def test_validate_anthropic_variables(
                 "ANTHROPIC_API_KEY": "test-key",
             },
             AnthropicConfig,
-            "claude-3-5-sonnet-20241022",  # Required for AnthropicConfig
+            "claude-3-7-sonnet-20250219",  # Required for AnthropicConfig
             "anthropic",
         ),
     ],
@@ -195,8 +195,8 @@ def test_clients_receive_max_retries_from_config(
                 "ANTHROPIC_API_KEY": "test-key",
             },
             "anthropic",
-            "claude-3-5-sonnet-20241022",
-            "claude-3-5-sonnet-20241022",
+            "claude-3-7-sonnet-20250219",
+            "claude-3-7-sonnet-20250219",
             "anthropic",
         ),
         (
