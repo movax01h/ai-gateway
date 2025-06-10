@@ -1,6 +1,6 @@
 import json
 
-from duo_workflow_service.gitlab.http_client import GitlabHttpClient
+from duo_workflow_service.gitlab.http_client import GitlabHttpClient, GitLabHttpResponse
 
 
 class GitLabStatusUpdater:
@@ -30,9 +30,15 @@ class GitLabStatusUpdater:
             path=f"{self.workflow_api_path}/{workflow_id}",
             body=json.dumps({"status_event": status_event}),
             parse_json=True,
+            use_http_response=True,
         )
 
-        if isinstance(result, dict) and "status" in result and result["status"] != 200:
+        if not isinstance(result, GitLabHttpResponse):
+            raise Exception(
+                f"Unexpected response from client, status update might have failed. response: {result}"
+            )
+
+        if result.status_code != 200:
             raise Exception(
                 f"Failed to update workflow with '{status_event}' status: {result}"
             )

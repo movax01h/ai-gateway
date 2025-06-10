@@ -17,11 +17,14 @@ class MockGitLabHttpClient(GitlabHttpClient):
         path,
         method,
         parse_json=True,
+        use_http_response=False,
         data=None,
         params=None,
         object_hook=None,
     ):
-        return await self.mock_call(path, method, parse_json, data, params, object_hook)
+        return await self.mock_call(
+            path, method, parse_json, use_http_response, data, params, object_hook
+        )
 
 
 @pytest.fixture
@@ -31,7 +34,7 @@ def client():
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
-    "method, path, body, params, parse_json, mock_return_value, expected_result",
+    "method, path, body, params, parse_json, use_http_response, mock_return_value, expected_result",
     [
         (
             "GET",
@@ -39,6 +42,7 @@ def client():
             None,
             None,
             True,
+            False,
             {"key": "value"},
             {"key": "value"},
         ),
@@ -47,6 +51,7 @@ def client():
             "/api/v4/projects/1/jobs/102/trace",
             None,
             None,
+            False,
             False,
             "Non-JSON response",
             "Non-JSON response",
@@ -57,6 +62,27 @@ def client():
             None,
             {"per_page": 100},
             True,
+            False,
+            {"projects": []},
+            {"projects": []},
+        ),
+        (
+            "GET",
+            "/api/v4/projects",
+            None,
+            None,
+            True,
+            True,
+            {"projects": []},
+            {"projects": []},
+        ),
+        (
+            "GET",
+            "/api/v4/projects",
+            None,
+            None,
+            False,
+            True,
             {"projects": []},
             {"projects": []},
         ),
@@ -66,6 +92,7 @@ def client():
             '{ "test": 1 }',
             None,
             True,
+            False,
             {"key": "value"},
             {"key": "value"},
         ),
@@ -75,6 +102,7 @@ def client():
             '{ "test": 1 }',
             None,
             True,
+            False,
             {"key": "value"},
             {"key": "value"},
         ),
@@ -84,6 +112,7 @@ def client():
             '{ "test": 1 }',
             None,
             True,
+            False,
             {"key": "value"},
             {"key": "value"},
         ),
@@ -96,30 +125,42 @@ async def test_gitlab_http_client_interface_methods(
     body,
     params,
     parse_json,
+    use_http_response,
     mock_return_value,
     expected_result,
 ):
     client.mock_call.return_value = mock_return_value
 
     if method == "GET":
-        result = await client.aget(path, params=params, parse_json=parse_json)
+        result = await client.aget(
+            path,
+            params=params,
+            parse_json=parse_json,
+            use_http_response=use_http_response,
+        )
         client.mock_call.assert_called_once_with(
-            path, "GET", parse_json, None, params, None
+            path, "GET", parse_json, use_http_response, None, params, None
         )
     elif method == "POST":
-        result = await client.apost(path, body, parse_json=parse_json)
+        result = await client.apost(
+            path, body, parse_json=parse_json, use_http_response=use_http_response
+        )
         client.mock_call.assert_called_once_with(
-            path, "POST", parse_json, body, None, None
+            path, "POST", parse_json, use_http_response, body, None, None
         )
     elif method == "PUT":
-        result = await client.aput(path, body, parse_json=parse_json)
+        result = await client.aput(
+            path, body, parse_json=parse_json, use_http_response=use_http_response
+        )
         client.mock_call.assert_called_once_with(
-            path, "PUT", parse_json, body, None, None
+            path, "PUT", parse_json, use_http_response, body, None, None
         )
     elif method == "PATCH":
-        result = await client.apatch(path, body, parse_json=parse_json)
+        result = await client.apatch(
+            path, body, parse_json=parse_json, use_http_response=use_http_response
+        )
         client.mock_call.assert_called_once_with(
-            path, "PATCH", parse_json, body, None, None
+            path, "PATCH", parse_json, use_http_response, body, None, None
         )
     else:
         pytest.fail(f"Unexpected HTTP method: {method}")
@@ -141,7 +182,9 @@ async def test_gitlab_http_client_with_object_hook(client):
     }
 
     # Configure the mock to actually apply the object_hook to the returned data
-    def side_effect(path, method, parse_json, data, params, object_hook):
+    def side_effect(
+        path, method, parse_json, use_http_response, data, params, object_hook
+    ):
         if object_hook:
             return object_hook(checkpoint_json)
         return checkpoint_json
@@ -155,7 +198,7 @@ async def test_gitlab_http_client_with_object_hook(client):
 
     # Verify the object hook was passed correctly
     client.mock_call.assert_called_once_with(
-        "/api/test", "GET", True, None, None, checkpoint_decoder
+        "/api/test", "GET", True, False, None, None, checkpoint_decoder
     )
 
     # Result should be a SystemMessage instance

@@ -19,7 +19,9 @@ def record_metrics(action_class: str, duration: float):
     ACTION_LATENCY.labels(action_class=action_class).observe(duration)
 
 
-async def _execute_action(metadata: Dict[str, Any], action: contract_pb2.Action):
+async def _execute_action_and_get_action_response(
+    metadata: Dict[str, Any], action: contract_pb2.Action
+):
     outbox: asyncio.Queue = metadata["outbox"]
     inbox: asyncio.Queue = metadata["inbox"]
     log = structlog.stdlib.get_logger("workflow")
@@ -48,4 +50,10 @@ async def _execute_action(metadata: Dict[str, Any], action: contract_pb2.Action)
         record_metrics(action_class, duration)
 
     inbox.task_done()
-    return event.actionResponse.response
+    return event.actionResponse
+
+
+async def _execute_action(metadata: Dict[str, Any], action: contract_pb2.Action):
+    actionResponse = await _execute_action_and_get_action_response(metadata, action)
+
+    return actionResponse.response

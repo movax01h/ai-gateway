@@ -2,6 +2,7 @@ from unittest.mock import AsyncMock
 
 import pytest
 
+from duo_workflow_service.gitlab.http_client import GitLabHttpResponse
 from duo_workflow_service.status_updater.gitlab_status_updater import (
     GitLabStatusUpdater,
 )
@@ -31,7 +32,9 @@ async def test_get_workflow_status(gitlab_status_updater):
 @pytest.mark.asyncio
 async def test_update_workflow_status(gitlab_status_updater):
     gitlab_status_updater._client.apatch = AsyncMock(
-        return_value={"workflow": {"id": 391, "status": 3}}
+        return_value=GitLabHttpResponse(
+            status_code=200, body={"workflow": {"id": 391, "status": 3}}
+        )
     )
 
     result = await gitlab_status_updater.update_workflow_status(
