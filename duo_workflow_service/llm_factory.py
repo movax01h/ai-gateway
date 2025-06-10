@@ -15,6 +15,8 @@ from duo_workflow_service.interceptors.feature_flag_interceptor import (
     current_feature_flag_context,
 )
 
+SONNET_4_FEATURE_FLAG = "duo_workflow_claude_sonnet_4"
+
 
 class ModelConfig(BaseModel):
     max_retries: int = 6
@@ -43,13 +45,10 @@ class VertexConfig(ModelConfig):
     @staticmethod
     def _get_model_name() -> str:
         feature_flags = current_feature_flag_context.get()
-        if KindAnthropicModel.CLAUDE_SONNET_4.value in feature_flags:
+        if SONNET_4_FEATURE_FLAG in feature_flags:
             return KindAnthropicModel.CLAUDE_SONNET_4.value
 
-        if KindAnthropicModel.CLAUDE_3_7_SONNET_VERTEX.value in feature_flags:
-            return KindAnthropicModel.CLAUDE_3_7_SONNET_VERTEX.value
-
-        return KindAnthropicModel.CLAUDE_3_5_SONNET_V2_VERTEX.value
+        return KindAnthropicModel.CLAUDE_3_7_SONNET_VERTEX.value
 
     @staticmethod
     def _get_project_id() -> str:
