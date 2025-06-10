@@ -2,7 +2,7 @@ import os
 from datetime import datetime, timezone
 from enum import StrEnum
 from functools import partial
-from typing import Annotated
+from typing import Annotated, Union
 
 # pylint disables are going to be fixed via
 # https://gitlab.com/gitlab-org/duo-workflow/duo-workflow-service/-/issues/78
@@ -52,9 +52,16 @@ from duo_workflow_service.entities import (
 from duo_workflow_service.interceptors.feature_flag_interceptor import (
     current_feature_flag_context,
 )
-from duo_workflow_service.llm_factory import create_chat_model
+from duo_workflow_service.llm_factory import (
+    AnthropicConfig,
+    VertexConfig,
+    create_chat_model,
+)
 from duo_workflow_service.tracking.errors import log_exception
 from duo_workflow_service.workflows.abstract_workflow import AbstractWorkflow
+from duo_workflow_service.workflows.model_selection_utils import (
+    get_sonnet_4_config_with_feature_flag,
+)
 
 # Constants
 QUEUE_MAX_SIZE = 1
@@ -196,6 +203,11 @@ def _should_continue(
 
 
 class Workflow(AbstractWorkflow):
+    def _get_model_config(self) -> Union[AnthropicConfig, VertexConfig]:
+        """Override to use Sonnet 4 model for software development tasks."""
+        config = get_sonnet_4_config_with_feature_flag(self._workflow_type)
+        return config if config else super()._get_model_config()
+
     async def _handle_workflow_failure(
         self, error: BaseException, compiled_graph, graph_config
     ):

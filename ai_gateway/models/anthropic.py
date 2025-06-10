@@ -79,6 +79,7 @@ class KindAnthropicModel(StrEnum):
     CLAUDE_3_7_SONNET = "claude-3-7-sonnet-20250219"
     CLAUDE_3_7_SONNET_VERTEX = "claude-3-7-sonnet@20250219"
     CLAUDE_SONNET_4 = "claude-sonnet-4-20250514"
+    CLAUDE_SONNET_4_VERTEX = "claude-sonnet-4-sonnet@20250514"
 
 
 class AnthropicModel(TextGenModelBase):
