@@ -53,6 +53,7 @@ tests:evaluation:
   stage: test
   trigger:
     project: gitlab-org/duo-workflow/testing/duo-workflow-tests
+    strategy: depend
 
 .test-variables: &test-variables
   LS_DATASET: "duo_workflow.swe-bench-verified-test.1"
