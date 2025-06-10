@@ -1,5 +1,5 @@
 {%- if additional_context %}
-User added additional context below enclosed in <additional_context></additional_context> tags. Each additional context has an ID, category, and content:
+User added additional context below enclosed in <additional_context></additional_context> tags. Each additional context has an ID, category, content and metadata:
 
 {%- for added_context in additional_context %}
 <additional_context>
@@ -8,6 +8,9 @@ User added additional context below enclosed in <additional_context></additional
     <content>
     {{ added_context.content }}
     </content>
+    <metadata>
+    {{ added_context.metadata }}
+    </metadata>
 </additional_context>
 {%- endfor %}
 {%- endif %}
