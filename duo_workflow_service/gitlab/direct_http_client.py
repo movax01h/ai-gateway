@@ -4,7 +4,7 @@ from urllib.parse import urljoin
 import structlog
 
 from duo_workflow_service.gitlab.connection_pool import connection_pool
-from duo_workflow_service.gitlab.http_client import GitlabHttpClient
+from duo_workflow_service.gitlab.http_client import GitlabHttpClient, GitLabHttpResponse
 
 log = structlog.stdlib.get_logger(__name__)
 
@@ -24,6 +24,7 @@ class DirectGitLabHttpClient(GitlabHttpClient):
         path: str,
         method: str,
         parse_json: bool = True,
+        use_http_response: bool = False,
         data: Optional[str] = None,
         params: Optional[Dict[str, Any]] = None,
         object_hook: Union[Callable, None] = None,
@@ -62,4 +63,15 @@ class DirectGitLabHttpClient(GitlabHttpClient):
 
         async with session.request(method, url, headers=headers, **kwargs) as response:  # type: ignore
             raw_response = await response.text()
-            return self._parse_response(raw_response, parse_json, object_hook)
+            parsed_response = self._parse_response(
+                raw_response, parse_json=parse_json, object_hook=object_hook
+            )
+
+            if use_http_response:
+                return GitLabHttpResponse(
+                    status_code=response.status,
+                    body=parsed_response,
+                    headers=response.headers,
+                )
+            else:
+                return parsed_response

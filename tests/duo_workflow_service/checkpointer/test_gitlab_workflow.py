@@ -18,7 +18,10 @@ from duo_workflow_service.checkpointer.gitlab_workflow import (
     WorkflowStatusEventEnum,
 )
 from duo_workflow_service.entities.state import WorkflowStatusEnum
-from duo_workflow_service.gitlab.http_client import checkpoint_decoder
+from duo_workflow_service.gitlab.http_client import (
+    GitLabHttpResponse,
+    checkpoint_decoder,
+)
 from duo_workflow_service.internal_events import InternalEventAdditionalProperties
 from duo_workflow_service.internal_events.event_enum import (
     CategoryEnum,
@@ -56,7 +59,7 @@ def http_client_for_retry(http_client, workflow_id):
             raise ValueError(f"Unexpected path: {path}")
 
     http_client.aget = mock_aget
-    http_client.apatch.return_value = {"status": 200}
+    http_client.apatch.return_value = GitLabHttpResponse(status_code=200, body={})
     http_client.apost.return_value = {"status": 200}
 
     return http_client
@@ -142,7 +145,11 @@ async def test_workflow_event_tracking_for_cancelled_workflow(
             return {"status": "stopped"}  # Workflow was cancelled
         raise ValueError(f"Unexpected path: {path}")
 
+    async def mock_apatch(path, **kwargs):
+        return GitLabHttpResponse(status_code=200, body={})
+
     http_client.aget.side_effect = mock_aget
+    http_client.apatch.side_effect = mock_apatch
 
     async with gitlab_workflow as workflow:
         assert isinstance(workflow, GitLabWorkflow)
@@ -151,6 +158,7 @@ async def test_workflow_event_tracking_for_cancelled_workflow(
         path=f"/api/v4/ai/duo_workflows/workflows/{workflow_id}",
         body=json.dumps({"status_event": WorkflowStatusEventEnum.START.value}),
         parse_json=True,
+        use_http_response=True,
     )
 
     assert mock_internal_event_tracker.track_event.call_count == 2
@@ -187,6 +195,7 @@ async def test_workflow_context_manager_success(
     workflow_id,
     workflow_type,
 ):
+
     async def mock_aget(path, **kwargs):
         if (
             path
@@ -197,7 +206,11 @@ async def test_workflow_context_manager_success(
             return {"status": "finished"}
         raise ValueError(f"Unexpected path: {path}")
 
+    async def mock_apatch(path, **kwargs):
+        return GitLabHttpResponse(status_code=200, body={})
+
     http_client.aget.side_effect = mock_aget
+    http_client.apatch.side_effect = mock_apatch
 
     async with gitlab_workflow as workflow:
         assert isinstance(workflow, GitLabWorkflow)
@@ -206,6 +219,7 @@ async def test_workflow_context_manager_success(
         path=f"/api/v4/ai/duo_workflows/workflows/{workflow_id}",
         body=json.dumps({"status_event": WorkflowStatusEventEnum.START.value}),
         parse_json=True,
+        use_http_response=True,
     )
 
     assert mock_internal_event_tracker.track_event.call_count == 2
@@ -247,6 +261,10 @@ async def test_workflow_context_manager_startup_error(
 ):
     http_client.aget.side_effect = ValueError("Startup error simulated")
 
+    async def mock_apatch(path, **kwargs):
+        return GitLabHttpResponse(status_code=200, body={})
+
+    http_client.apatch.side_effect = mock_apatch
     with pytest.raises(ValueError) as exc_info:
         async with gitlab_workflow:
             pytest.fail("Context manager body should not execute")
@@ -257,6 +275,7 @@ async def test_workflow_context_manager_startup_error(
         path=f"/api/v4/ai/duo_workflows/workflows/{workflow_id}",
         body=json.dumps({"status_event": WorkflowStatusEventEnum.DROP.value}),
         parse_json=True,
+        use_http_response=True,
     )
 
     mock_internal_event_tracker.track_event.assert_called_once_with(
@@ -299,6 +318,7 @@ async def test_workflow_context_manager_startup_error_with_status_update_failure
         path=f"/api/v4/ai/duo_workflows/workflows/{workflow_id}",
         body=json.dumps({"status_event": WorkflowStatusEventEnum.DROP.value}),
         parse_json=True,
+        use_http_response=True,
     )
 
     mock_internal_event_tracker.track_event.assert_called_once_with(
@@ -410,6 +430,7 @@ async def test_workflow_context_manager_retry_success(
         path=f"/api/v4/ai/duo_workflows/workflows/{workflow_id}",
         body=json.dumps({"status_event": WorkflowStatusEventEnum.RETRY.value}),
         parse_json=True,
+        use_http_response=True,
     )
 
     assert mock_internal_event_tracker.track_event.call_count == 2
@@ -447,6 +468,7 @@ async def test_workflow_context_manager_error(
     workflow_type,
 ):
     http_client.aget.return_value = []
+    http_client.apatch.return_value = GitLabHttpResponse(status_code=200, body={})
 
     with pytest.raises(ValueError):
         async with gitlab_workflow:
@@ -456,6 +478,7 @@ async def test_workflow_context_manager_error(
         path=f"/api/v4/ai/duo_workflows/workflows/{workflow_id}",
         body=json.dumps({"status_event": WorkflowStatusEventEnum.DROP.value}),
         parse_json=True,
+        use_http_response=True,
     )
 
     assert mock_internal_event_tracker.track_event.call_count == 2
@@ -596,6 +619,8 @@ async def test_aput(
     checkpoint = checkpoint_data[0]["checkpoint"]
     checkpoint["channel_values"]["status"] = WorkflowStatusEnum.COMPLETED
 
+    http_client.apatch.return_value = GitLabHttpResponse(status_code=200, body={})
+
     result = await gitlab_workflow.aput(
         config, checkpoint, checkpoint_metadata, ChannelVersions()
     )
@@ -617,6 +642,7 @@ async def test_aput(
         path=f"/api/v4/ai/duo_workflows/workflows/{workflow_id}",
         body=json.dumps({"status_event": WorkflowStatusEventEnum.FINISH.value}),
         parse_json=True,
+        use_http_response=True,
     )
 
     assert result == {
@@ -704,6 +730,8 @@ async def test_workflow_status_events(
     }
     config: RunnableConfig = {"configurable": {}}
 
+    http_client.apatch.return_value = GitLabHttpResponse(status_code=200, body={})
+
     await gitlab_workflow.aput(
         config, checkpoint, checkpoint_metadata, ChannelVersions()
     )
@@ -712,6 +740,7 @@ async def test_workflow_status_events(
         path=f"/api/v4/ai/duo_workflows/workflows/{workflow_id}",
         body=json.dumps({"status_event": expected_event.value}),
         parse_json=True,
+        use_http_response=True,
     )
     http_client.apatch.reset_mock()
 
@@ -726,6 +755,8 @@ async def test_resume_status_event(
     }
     config: RunnableConfig = {"configurable": {}}
 
+    http_client.apatch.return_value = GitLabHttpResponse(status_code=200, body={})
+
     await gitlab_workflow.aput(
         config, checkpoint, checkpoint_metadata, ChannelVersions()
     )
@@ -734,6 +765,7 @@ async def test_resume_status_event(
         path=f"/api/v4/ai/duo_workflows/workflows/{workflow_id}",
         body=json.dumps({"status_event": WorkflowStatusEventEnum.RESUME.value}),
         parse_json=True,
+        use_http_response=True,
     )
 
 
