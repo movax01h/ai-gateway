@@ -380,8 +380,7 @@ class TestRun:
         mock_model_config_class.return_value = mock_model_config
 
         mock_json_serializer = Mock(spec=JsonFileSerializer)
-        mock_output_path = Mock()
-        mock_output_path.resolve.return_value = "/path/to/output/dataset.json"
+        mock_output_path = Path("/path/to/output/dataset.json")
         mock_json_serializer.output_path = mock_output_path
         mock_json_serializer_class.return_value = mock_json_serializer
 
