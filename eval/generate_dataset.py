@@ -1,4 +1,5 @@
 import os
+from pathlib import Path
 from typing import Annotated, Optional, cast
 
 import typer
@@ -125,12 +126,9 @@ def run(
     prompt_version: Annotated[str, typer.Argument(help="Prompt version constraint")],
     dataset_name: Annotated[str, typer.Argument(help="Name for the dataset")],
     output_dir: Annotated[
-        Optional[str],
-        typer.Option(
-            os.path.join(os.path.dirname(__file__), ".."),
-            help="Directory to save the dataset (default: current directory)",
-        ),
-    ] = None,
+        Path,
+        typer.Option(help="Directory to save the dataset (default: current directory)"),
+    ] = Path.cwd(),
     num_examples: Annotated[
         int, typer.Option(help="Number of examples to generate")
     ] = 10,
