@@ -80,7 +80,7 @@ def test_validate_anthropic_variables(
             call_kwargs = mock_vertex_client.call_args.kwargs
             assert (
                 call_kwargs["model_name"]
-                == KindAnthropicModel.CLAUDE_3_5_SONNET_V2_VERTEX.value
+                == KindAnthropicModel.CLAUDE_3_7_SONNET_VERTEX.value
             )
             assert call_kwargs["project"] == "test-proj"
             assert call_kwargs["location"] == "test-loc"
@@ -187,7 +187,7 @@ def test_clients_receive_max_retries_from_config(
             },
             "vertex",
             None,
-            "claude-3-5-sonnet-v2@20241022",  # Default when no feature flags
+            "claude-3-7-sonnet@20250219",  # Default when no feature flags
             "vertex",
         ),
         (
@@ -256,3 +256,53 @@ def test_new_chat_client_with_custom_model(
                 mock_anthropic_client.call_args.kwargs["model_name"] == expected_model
             )
             mock_vertex_client.assert_not_called()
+
+
+@pytest.mark.parametrize(
+    "feature_flags,expected_model",
+    [
+        (
+            {"duo_workflow_claude_sonnet_4"},  # Feature flag is present
+            KindAnthropicModel.CLAUDE_SONNET_4.value,
+        ),
+        (
+            set(),  # Feature flag is not present
+            KindAnthropicModel.CLAUDE_3_7_SONNET_VERTEX.value,
+        ),
+        (
+            {"some_other_flag"},  # Different feature flag present
+            KindAnthropicModel.CLAUDE_3_7_SONNET_VERTEX.value,
+        ),
+    ],
+)
+@patch("duo_workflow_service.llm_factory.current_feature_flag_context")
+@patch("duo_workflow_service.llm_factory.ChatAnthropicVertex")
+def test_vertex_config_respects_sonnet_4_feature_flag(
+    mock_vertex_client,
+    mock_feature_flag_context,
+    feature_flags,
+    expected_model,
+):
+    """Test that VertexConfig uses the correct model based on SONNET_4_FEATURE_FLAG."""
+    # Set up the feature flag context
+    mock_feature_flag_context.get.return_value = feature_flags
+
+    # Set up environment variables for VertexConfig
+    env_vars = {
+        "DUO_WORKFLOW__VERTEX_PROJECT_ID": "test-project",
+        "DUO_WORKFLOW__VERTEX_LOCATION": "us-central1",
+    }
+
+    with patch("os.environ", env_vars):
+        # Create VertexConfig instance
+        config = VertexConfig()
+
+        # Verify the model name is set correctly based on a feature flag
+        assert config.model_name == expected_model
+
+        # Create the chat model to ensure it's passed through correctly
+        create_chat_model(config=config)
+
+        # Verify the client was created with the correct model
+        mock_vertex_client.assert_called_once()
+        assert mock_vertex_client.call_args.kwargs["model_name"] == expected_model
