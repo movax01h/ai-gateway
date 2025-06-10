@@ -12,6 +12,7 @@ from ai_gateway.code_suggestions.processing.ops import (
 from ai_gateway.models import (
     KindAmazonQModel,
     KindAnthropicModel,
+    KindGitLabModel,
     KindLiteLlmModel,
     KindModelProvider,
     KindVertexTextModel,
@@ -48,6 +49,7 @@ PROVIDERS_MODELS_MAP = {
     KindModelProvider.MISTRALAI: set(KindLiteLlmModel),
     KindModelProvider.FIREWORKS: set(KindLiteLlmModel),
     KindModelProvider.AMAZON_Q: set(KindAmazonQModel),
+    KindModelProvider.GITLAB: set(KindGitLabModel),
 }
 
 USE_CASES_MODELS_MAP = {
@@ -69,6 +71,12 @@ USE_CASES_MODELS_MAP = {
         KindLiteLlmModel.GPT,
         KindLiteLlmModel.QWEN_2_5,
         KindAmazonQModel.AMAZON_Q,
+        KindGitLabModel.CODESTRAL_2501_FIREWORKS,
+        KindGitLabModel.CODESTRAL_2501_VERTEX,
+        KindGitLabModel.CLAUDE_SONNET_3_7,
+        KindGitLabModel.CLAUDE_3_5_SONNET,
+        KindGitLabModel.CLAUDE_3_5_HAIKU,
+        KindGitLabModel.GITLAB_DEFAULT_MODEL,
     },
     KindUseCase.CODE_GENERATIONS: {
         KindVertexTextModel.CODE_BISON_002,

@@ -25,6 +25,7 @@ __all__ = [
     "LiteLlmChatModel",
     "LiteLlmTextGenModel",
     "KindLiteLlmModel",
+    "KindGitLabModel",
     "LiteLlmAPIConnectionError",
     "LiteLlmInternalServerError",
 ]
@@ -46,6 +47,15 @@ class LiteLlmInternalServerError(ModelAPIError):
         wrapper = cls(ex.message, errors=(ex,))
 
         return wrapper
+
+
+class KindGitLabModel(StrEnum):
+    CODESTRAL_2501_FIREWORKS = "codestral_2501_fireworks"
+    CODESTRAL_2501_VERTEX = "codestral_2501_vertex"
+    CLAUDE_SONNET_3_7 = "claude_sonnet_3_7_20250219"
+    CLAUDE_3_5_SONNET = "claude_3_5_sonnet_20240620"
+    CLAUDE_3_5_HAIKU = "claude_3_5_haiku_20241022"
+    GITLAB_DEFAULT_MODEL = ""
 
 
 class KindLiteLlmModel(StrEnum):

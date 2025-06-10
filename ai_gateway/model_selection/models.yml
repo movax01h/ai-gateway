@@ -3,15 +3,16 @@ models:
   - name: "Codestral 25.01 - Fireworks"
     gitlab_identifier: "codestral_2501_fireworks"
     provider: "fireworks_ai"
-    provider_identifier: "fireworks_ai/codestral-2501"
+    provider_identifier: "codestral-2501"
     params:
       temperature: 0.7
       max_tokens: 64
       max_retries: 1
+
   - name: "Codestral 25.01 - Vertex"
     gitlab_identifier: "codestral_2501_vertex"
-    provider: "vertex_ai"
-    provider_identifier: "vertex_ai/codestral-2501"
+    provider: "vertex-ai"
+    provider_identifier: "codestral-2501"
     params:
       temperature: 0.7
       max_tokens: 64
