@@ -137,6 +137,16 @@ class TestEditorContentGenerationStream:
                 },
                 {"flag_a", "flag_b"},
             ),
+            (
+                "code_suggestions/generations",
+                None,
+                "1.1.0-dev",
+                {
+                    "engine": "agent",
+                    "name": "Claude Sonnet 4 Code Generations Agent",
+                },
+                {"flag_a", "flag_b"},
+            ),
         ],
     )
     def test_successful_stream_response(
