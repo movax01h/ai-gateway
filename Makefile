@@ -232,12 +232,12 @@ test-watch: install-test-deps
 .PHONY: test-coverage
 test-coverage: install-test-deps
 	@echo "Running tests with coverage..."
-	@poetry run pytest --cov=ai_gateway --cov=lints --cov-report term --cov-report html -n auto
+	@poetry run pytest --cov --cov-report term --cov-report html -n auto
 
 .PHONY: test-coverage-ci
 test-coverage-ci: install-test-deps
 	@echo "Running tests with coverage on CI..."
-	@poetry run pytest --cov=ai_gateway --cov=lints --cov-report term --cov-report xml:.test-reports/coverage.xml --junitxml=".test-reports/tests.xml" -n auto
+	@poetry run pytest --cov --cov-report term --cov-report xml:.test-reports/coverage.xml --junitxml=".test-reports/tests.xml" -n auto
 
 .PHONY: test-integration
 test-integration: install-test-deps

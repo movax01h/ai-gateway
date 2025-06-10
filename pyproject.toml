@@ -134,9 +134,16 @@ filterwarnings = ["error::UserWarning"]
 asyncio_default_fixture_loop_scope = "function"
 
 [tool.coverage.run]
+source = [
+  "ai_gateway",
+  "duo_workflow_service",
+  "eval",
+  "lib",
+  "lints",
+]
 omit = [
   "tests/*",
-  "*.jinja"
+  "*.jinja",
 ]
 
 [tool.poetry.scripts]
