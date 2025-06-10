@@ -21,6 +21,8 @@ configurable_unit_primitives:
       - "complete_code"
     default_model: "codestral_2501_fireworks"
     selectable_models:
+      # Make sure to also add the following models in `KindGitLabModel`
+      # and `KindUseCase.CODE_COMPLETIONS`
       - "codestral_2501_fireworks"
       - "codestral_2501_vertex"
       - "claude_sonnet_3_7_20250219"

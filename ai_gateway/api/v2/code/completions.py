@@ -413,26 +413,13 @@ def _resolve_code_completions_litellm(
     completions_litellm_factory: Factory[CodeCompletions],
 ) -> CodeCompletions:
     if payload.prompt_version == 2 and not payload.prompt:
-        if payload.model_provider == KindModelProvider.GITLAB:
-            if not payload.model_identifier:
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail="model_identifier is required when provider is gitlab",
-                )
-            model_metadata = create_model_metadata(
-                {
-                    "provider": KindModelProvider.GITLAB,
-                    "identifier": payload.model_identifier,
-                }
-            )
-        else:
-            model_metadata = ModelMetadata(
-                name=payload.model_name,
-                endpoint=payload.model_endpoint,
-                api_key=payload.model_api_key,
-                identifier=payload.model_identifier,
-                provider=payload.model_provider or "text-completion-openai",
-            )
+        model_metadata = ModelMetadata(
+            name=payload.model_name,
+            endpoint=payload.model_endpoint,
+            api_key=payload.model_api_key,
+            identifier=payload.model_identifier,
+            provider=payload.model_provider or "text-completion-openai",
+        )
 
         return _resolve_agent_code_completions(
             model_metadata=model_metadata,
@@ -475,7 +462,52 @@ def _build_code_completions(
     unit_primitive = GitLabUnitPrimitive.COMPLETE_CODE
     tracking_event = f"request_{unit_primitive}"
 
-    if payload.model_provider == KindModelProvider.ANTHROPIC:
+    if payload.model_provider == KindModelProvider.GITLAB:
+        model_metadata = create_model_metadata(
+            {
+                "provider": KindModelProvider.GITLAB,
+                "identifier": payload.model_name,
+                "feature_setting": "code_completions",
+            }
+        )
+
+        payload.model_name = model_metadata.identifier
+        payload.model_provider = model_metadata.provider
+
+        if model_metadata.provider == KindModelProvider.ANTHROPIC:
+            AnthropicHandler(payload, request, kwargs).update_completion_params()
+            code_completions = completions_anthropic_factory(
+                model__name=payload.model_name,
+            )
+        elif model_metadata.provider == KindModelProvider.FIREWORKS:
+            FireworksHandler(payload, request, kwargs).update_completion_params()
+            code_completions = _resolve_code_completions_litellm(
+                payload=payload,
+                current_user=current_user,
+                prompt_registry=prompt_registry,
+                use_llm_prompt_caching=use_llm_prompt_caching,
+                completions_agent_factory=completions_agent_factory,
+                completions_litellm_factory=completions_fireworks_factory,
+            )
+        elif model_metadata.provider == KindModelProvider.VERTEX_AI:
+            code_completions = _resolve_code_completions_vertex_codestral(
+                payload=payload,
+                completions_litellm_vertex_codestral_factory=completions_litellm_vertex_codestral_factory,
+            )
+
+            kwargs.update(
+                {
+                    "temperature": 0.7,
+                    "max_output_tokens": 64,
+                    "context_max_percent": 0.3,
+                }
+            )
+            if payload.context:
+                kwargs.update(
+                    {"code_context": [ctx.content for ctx in payload.context]}
+                )
+
+    elif payload.model_provider == KindModelProvider.ANTHROPIC:
         AnthropicHandler(payload, request, kwargs).update_completion_params()
         code_completions = completions_anthropic_factory(
             model__name=payload.model_name,
@@ -483,7 +515,6 @@ def _build_code_completions(
     elif payload.model_provider in (
         KindModelProvider.LITELLM,
         KindModelProvider.MISTRALAI,
-        KindModelProvider.GITLAB,
     ):
         LiteLlmHandler(payload, request, kwargs).update_completion_params()
         code_completions = _resolve_code_completions_litellm(

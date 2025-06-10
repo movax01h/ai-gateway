@@ -1427,14 +1427,73 @@ class TestCodeCompletions:
             json=params,
         )
 
-    def test_gitlab_model_provider(self, mock_client, mock_track_internal_event: Mock):
-        """Test that v2/completions works with 'gitlab' as the model_provider."""
+
+class TestGitLabModelProvider:
+    """Tests for the GitLab model provider functionality."""
+
+    @pytest.mark.parametrize(
+        (
+            "provider",
+            "gitlab_identifier",
+            "provider_identifier",
+            "expected_provider",
+            "expected_model_name",
+            "expected_engine",
+            "extra_kwargs",
+        ),
+        [
+            (
+                "gitlab",
+                "codestral_2501_fireworks",
+                "codestral-2501",
+                "fireworks_ai",
+                "codestral-2501",
+                "fireworks_ai",
+                {"temperature": 0.7, "max_output_tokens": 48},
+            ),
+            (
+                "gitlab",
+                "codestral_2501_vertex",
+                "codestral-2501",
+                "vertex-ai",
+                "codestral-2501",
+                "vertex-ai",
+                {
+                    "temperature": 0.7,
+                    "max_output_tokens": 64,
+                    "context_max_percent": 0.3,
+                },
+            ),
+            (
+                "gitlab",
+                "claude_sonnet_3_7_20250219",
+                "claude-3-7-sonnet-20250219",
+                "anthropic",
+                "claude-3-7-sonnet-20250219",
+                "anthropic",
+                {},
+            ),
+        ],
+    )
+    def test_gitlab_model_provider_with_different_providers(
+        self,
+        mock_client,
+        mock_track_internal_event: Mock,
+        provider: str,
+        gitlab_identifier: str,
+        provider_identifier: str,
+        expected_provider: str,
+        expected_model_name: str,
+        expected_engine: str,
+        extra_kwargs: dict,
+    ):
+        """Test that v2/completions works with 'gitlab' as the model_provider and different underlying providers."""
 
         test_model = LLMDefinition(
             name="Test Model",
-            gitlab_identifier="test-model-id",
-            provider="custom_openai",
-            provider_identifier="test-provider-id",
+            gitlab_identifier=gitlab_identifier,
+            provider=expected_provider,
+            provider_identifier=provider_identifier,
             family="test-family",
             params={"temperature": 0.0, "max_tokens": 4096},
         )
@@ -1444,8 +1503,8 @@ class TestCodeCompletions:
         mock_suggestion.score = 1.0
 
         mock_model = Mock()
-        mock_model.engine = "test-engine"
-        mock_model.name = "test-model"
+        mock_model.engine = expected_engine
+        mock_model.name = expected_model_name
         mock_suggestion.model = mock_model
 
         mock_suggestion.lang = "python"
@@ -1459,7 +1518,7 @@ class TestCodeCompletions:
             )
 
             mock_completions = Mock()
-            return (mock_completions, {})
+            return (mock_completions, extra_kwargs)
 
         with patch(
             "ai_gateway.model_selection.ModelSelectionConfig.get_gitlab_model"
@@ -1473,10 +1532,6 @@ class TestCodeCompletions:
             mock_get_gitlab_model.return_value = test_model
             mock_execute.return_value = [mock_suggestion]
 
-            mock_completions = Mock()
-            mock_build.return_value = (mock_completions, {})
-
-            # Test
             response = mock_client.post(
                 "/code/completions",
                 headers={
@@ -1486,52 +1541,169 @@ class TestCodeCompletions:
                     "X-GitLab-Realm": "self-managed",
                 },
                 json={
-                    "prompt_version": 2,
+                    "prompt_version": 3,
+                    "prompt": [{"role": "user", "content": "foo"}],
                     "current_file": {
                         "file_name": "main.py",
                         "content_above_cursor": "def test():",
                         "content_below_cursor": "\n",
                         "language_identifier": "python",
                     },
-                    "model_provider": "gitlab",
-                    "model_identifier": "test-model-id",
+                    "model_provider": provider,
+                    "model_name": gitlab_identifier,
                 },
             )
 
             assert response.status_code == 200
             assert mock_build.called
             build_args, build_kwargs = mock_build.call_args
-            assert build_args[1].model_provider == "gitlab"
-            assert build_args[1].model_identifier == "test-model-id"
+            assert build_args[1].model_provider == provider
+            assert build_args[1].model_name == gitlab_identifier
 
             mock_track_internal_event.assert_called_once_with(
                 "request_complete_code",
                 category="ai_gateway.api.v2.code.completions",
             )
 
-        # Test error case when model_identifier is missing
-        response = mock_client.post(
-            "/code/completions",
-            headers={
-                "Authorization": "Bearer 12345",
-                "X-Gitlab-Authentication-Type": "oidc",
-                "X-GitLab-Instance-Id": "1234",
-                "X-GitLab-Realm": "self-managed",
-            },
-            json={
-                "prompt_version": 2,
-                "current_file": {
-                    "file_name": "main.py",
-                    "content_above_cursor": "def test():",
-                    "content_below_cursor": "\n",
-                },
-                "model_provider": "gitlab",
-                # model_identifier deliberately left out
-            },
+            body = response.json()
+            assert body["model"]["engine"] == expected_engine
+            assert body["model"]["name"] == expected_model_name
+            assert body["choices"][0]["text"] == "test completion"
+
+    def test_gitlab_model_provider_without_model_name(
+        self, mock_client, mock_track_internal_event: Mock
+    ):
+        """Test that v2/completions works with 'gitlab' as the model_provider when no model name is provided."""
+
+        test_model = LLMDefinition(
+            name="Test Model",
+            gitlab_identifier="test-model-id",
+            provider="vertex-ai",
+            provider_identifier="test-provider-id",
+            params={"temperature": 0.0, "max_tokens": 4096},
         )
 
-        assert response.status_code == 400
-        assert "model_identifier is required" in response.json()["detail"]
+        mock_suggestion = Mock()
+        mock_suggestion.text = "test completion"
+        mock_suggestion.score = 1.0
+
+        mock_model = Mock()
+        mock_model.engine = "vertex-ai"
+        mock_model.name = "codestral-2501"
+        mock_suggestion.model = mock_model
+
+        mock_suggestion.lang = "python"
+        mock_suggestion.metadata = None
+
+        with patch(
+            "ai_gateway.model_selection.ModelSelectionConfig.get_gitlab_model_for_feature"
+        ) as mock_get_gitlab_model, patch(
+            "ai_gateway.api.v2.code.completions._execute_code_completion"
+        ) as mock_execute:
+            mock_get_gitlab_model.return_value = test_model
+            mock_execute.return_value = [mock_suggestion]
+
+            # Test case when model_identifier is empty
+            response = mock_client.post(
+                "/code/completions",
+                headers={
+                    "Authorization": "Bearer 12345",
+                    "X-Gitlab-Authentication-Type": "oidc",
+                    "X-GitLab-Instance-Id": "1234",
+                    "X-GitLab-Realm": "self-managed",
+                },
+                json={
+                    "prompt_version": 3,
+                    "prompt": [{"role": "user", "content": "foo"}],
+                    "current_file": {
+                        "file_name": "main.py",
+                        "content_above_cursor": "def test():",
+                        "content_below_cursor": "\n",
+                    },
+                    "model_provider": "gitlab",
+                    "model_name": "",
+                },
+            )
+
+            assert response.status_code == 200
+            assert mock_get_gitlab_model.called
+
+            build_args, build_kwargs = mock_get_gitlab_model.call_args
+            assert build_args[0] == "code_completions"
+
+            body = response.json()
+            assert body["model"]["engine"] == "vertex-ai"
+            assert body["model"]["name"] == "codestral-2501"
+            assert body["choices"][0]["text"] == "test completion"
+
+    def test_gitlab_model_provider_with_invalid_model_name(
+        self, mock_client, mock_track_internal_event: Mock
+    ):
+        """Test that v2/completions works with 'gitlab' as the model_provider when an invalid model name is provided."""
+
+        test_model = LLMDefinition(
+            name="Test Model",
+            gitlab_identifier="test-model-id",
+            provider="vertex-ai",
+            provider_identifier="test-provider-id",
+            family="test-family",
+            params={"temperature": 0.0, "max_tokens": 4096},
+        )
+
+        mock_suggestion = Mock()
+        mock_suggestion.text = "test completion"
+        mock_suggestion.score = 1.0
+
+        mock_model = Mock()
+        mock_model.engine = "vertex-ai"
+        mock_model.name = "codestral-2501"
+        mock_suggestion.model = mock_model
+
+        mock_suggestion.lang = "python"
+        mock_suggestion.metadata = None
+
+        with patch(
+            "ai_gateway.model_selection.ModelSelectionConfig.get_gitlab_model_for_feature"
+        ) as mock_get_gitlab_model, patch(
+            "ai_gateway.api.v2.code.completions._execute_code_completion"
+        ) as mock_execute:
+            mock_get_gitlab_model.return_value = test_model
+            mock_execute.return_value = [mock_suggestion]
+
+            response = mock_client.post(
+                "/code/completions",
+                headers={
+                    "Authorization": "Bearer 12345",
+                    "X-Gitlab-Authentication-Type": "oidc",
+                    "X-GitLab-Instance-Id": "1234",
+                    "X-GitLab-Realm": "self-managed",
+                },
+                json={
+                    "prompt_version": 3,
+                    "prompt": [{"role": "user", "content": "foo"}],
+                    "current_file": {
+                        "file_name": "main.py",
+                        "content_above_cursor": "def test():",
+                        "content_below_cursor": "\n",
+                    },
+                    "model_provider": "gitlab",
+                    "model_name": "invalid-model-name",
+                },
+            )
+
+            assert response.status_code == 422
+            body = response.json()
+            expected_error_message = [
+                {
+                    "ctx": {"error": {}},
+                    "input": "invalid-model-name",
+                    "loc": ["body", 3, "model_name"],
+                    "msg": "Value error, model invalid-model-name is not supported by use case code completions and provider gitlab",
+                    "type": "value_error",
+                }
+            ]
+
+            assert (body["detail"]) == expected_error_message
 
 
 class TestCodeGenerations:
