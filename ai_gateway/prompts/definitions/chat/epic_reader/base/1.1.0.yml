@@ -1,0 +1,18 @@
+---
+name: Epic identifier parser for Duo Chat
+model:
+  config_file: claude_4_0
+  params:
+    temperature: 0.1
+    max_tokens: 2_048
+unit_primitives:
+  - ask_epic
+prompt_template:
+  system: |
+    {% include 'chat/epic_reader/system/1.0.0.jinja' %}
+  user: |
+    {% include 'chat/epic_reader/user/1.0.0.jinja' %}
+  assistant: |
+    {% include 'chat/epic_reader/assistant/1.0.0.jinja' %}
+params:
+  timeout: 60

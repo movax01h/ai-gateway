@@ -1,0 +1,17 @@
+---
+name: Merge Request identifier parser for Duo Chat
+model:
+  config_file: claude_4_0
+  params:
+    max_tokens: 2_048
+unit_primitives:
+  - ask_merge_request
+prompt_template:
+  system: |
+    {% include 'chat/merge_request_reader/system/1.0.0.jinja' %}
+  user: |
+    {% include 'chat/merge_request_reader/user/1.0.0.jinja' %}
+  assistant: |
+    {% include 'chat/merge_request_reader/assistant/1.0.0.jinja' %}
+params:
+  timeout: 60
