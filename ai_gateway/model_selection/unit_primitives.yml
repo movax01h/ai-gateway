@@ -66,6 +66,7 @@ configurable_unit_primitives:
     selectable_models:
       - "claude_sonnet_3_7_20250219"
       - "claude_3_5_sonnet_20240620"
+      - "claude_sonnet_4_20250514"
   - feature_setting: "summarize_review"
     unit_primitives:
       - "summarize_review"
