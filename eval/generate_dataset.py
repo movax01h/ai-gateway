@@ -207,8 +207,6 @@ def run(
     if upload:
         typer.echo(f"Dataset '{dataset_name}' uploaded to LangSmith")
 
-    return json_serializer.output_path
-
 
 def main() -> None:
     typer.run(run)

@@ -1,5 +1,6 @@
 import os
-from unittest.mock import MagicMock, Mock, patch
+from pathlib import Path
+from unittest.mock import MagicMock, Mock, call, patch
 
 import pytest
 from eli5.datasets.generator import DatasetGenerator, ModelConfig, PromptConfig
@@ -308,19 +309,16 @@ class TestRun:
         mock_model_config_class.return_value = mock_model_config
 
         mock_json_serializer = Mock(spec=JsonFileSerializer)
-        mock_output_path = Mock()
-        mock_output_path.resolve.return_value = "/path/to/output/dataset.json"
-        mock_json_serializer.output_path = mock_output_path
+        mock_json_serializer.output_path = Path("/path/to/output/dataset.json")
         mock_json_serializer_class.return_value = mock_json_serializer
 
         mock_generator = Mock(spec=DatasetGenerator)
         mock_dataset_generator_class.return_value = mock_generator
 
-        result = run(
+        run(
             prompt_id=prompt_id,
             prompt_version=prompt_version,
             dataset_name=dataset_name,
-            output_dir=None,
             num_examples=10,
             temperature=0.7,
             upload=False,
@@ -333,15 +331,18 @@ class TestRun:
         mock_get_prompt_source.assert_called_once_with(prompt_id, prompt_version)
         mock_prompt_config_class.from_source.assert_called_once_with(mock_prompt_source)
         mock_model_config_class.assert_called_once_with(temperature=0.7)
-        mock_json_serializer_class.assert_called_once_with(dataset_name, None)
+        mock_json_serializer_class.assert_called_once_with(dataset_name, Path.cwd())
         mock_dataset_generator_class.assert_called_once_with(
             prompt_config=mock_prompt_config,
             model_config=mock_model_config,
             serializers=[mock_json_serializer],
         )
         mock_generator.generate.assert_called_once_with(num_examples=10)
-        assert mock_echo.call_count == 2
-        assert result.resolve() == "/path/to/output/dataset.json"
+
+        assert mock_echo.call_args_list == [
+            call("Generating dataset with 10 examples from prompt: chat/explain_code"),
+            call("Dataset generated successfully: /path/to/output/dataset.json"),
+        ]
 
     @patch("eval.generate_dataset.DatasetGenerator")
     @patch("eval.generate_dataset.LangSmithSerializer")
@@ -366,6 +367,7 @@ class TestRun:
         prompt_version = "1.0.0"
         dataset_name = "test_dataset"
         description = "Test dataset description"
+        output_dir = "/custom/output"
 
         mock_client = Mock(spec=Client)
         mock_create_client.return_value = mock_client
@@ -380,8 +382,7 @@ class TestRun:
         mock_model_config_class.return_value = mock_model_config
 
         mock_json_serializer = Mock(spec=JsonFileSerializer)
-        mock_output_path = Path("/path/to/output/dataset.json")
-        mock_json_serializer.output_path = mock_output_path
+        mock_json_serializer.output_path = Path("/path/to/output/dataset.json")
         mock_json_serializer_class.return_value = mock_json_serializer
 
         mock_langsmith_serializer = Mock(spec=LangSmithSerializer)
@@ -394,7 +395,7 @@ class TestRun:
             prompt_id=prompt_id,
             prompt_version=prompt_version,
             dataset_name=dataset_name,
-            output_dir="/custom/output",
+            output_dir=output_dir,
             num_examples=5,
             temperature=0.5,
             upload=True,
@@ -404,9 +405,7 @@ class TestRun:
         mock_create_client.assert_called_once()
         mock_prompt_config_class.from_source.assert_called_once_with(mock_prompt_source)
         mock_model_config_class.assert_called_once_with(temperature=0.5)
-        mock_json_serializer_class.assert_called_once_with(
-            dataset_name, "/custom/output"
-        )
+        mock_json_serializer_class.assert_called_once_with(dataset_name, output_dir)
         mock_langsmith_serializer_class.assert_called_once_with(
             client=mock_client,
             dataset_name=dataset_name,
@@ -421,3 +420,8 @@ class TestRun:
         assert any(
             "uploaded to LangSmith" in call.args[0] for call in mock_echo.call_args_list
         )
+        assert mock_echo.call_args_list == [
+            call("Generating dataset with 5 examples from prompt: chat/explain_code"),
+            call("Dataset generated successfully: /path/to/output/dataset.json"),
+            call("Dataset 'test_dataset' uploaded to LangSmith"),
+        ]
