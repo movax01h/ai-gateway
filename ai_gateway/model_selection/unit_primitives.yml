@@ -32,6 +32,7 @@ configurable_unit_primitives:
       - "fix_code"
     default_model: "claude_sonnet_3_7_20250219"
     selectable_models:
+      - "claude_sonnet_4_20250514"
       - "claude_sonnet_3_7_20250219"
       - "claude_3_5_sonnet_20240620"
   - feature_setting: "duo_chat_refactor_code"
@@ -39,6 +40,7 @@ configurable_unit_primitives:
       - "refactor_code"
     default_model: "claude_sonnet_3_7_20250219"
     selectable_models:
+      - "claude_sonnet_4_20250514"
       - "claude_sonnet_3_7_20250219"
       - "claude_3_5_sonnet_20240620"
   - feature_setting: "duo_chat_write_tests"
@@ -46,6 +48,7 @@ configurable_unit_primitives:
       - "write_tests"
     default_model: "claude_sonnet_3_7_20250219"
     selectable_models:
+      - "claude_sonnet_4_20250514"
       - "claude_sonnet_3_7_20250219"
       - "claude_3_5_sonnet_20240620"
   - feature_setting: "duo_chat_explain_code"
@@ -53,6 +56,7 @@ configurable_unit_primitives:
       - "explain_code"
     default_model: "claude_sonnet_3_7_20250219"
     selectable_models:
+      - "claude_sonnet_4_20250514"
       - "claude_sonnet_3_7_20250219"
       - "claude_3_5_sonnet_20240620"
   - feature_setting: "generate_commit_message"
