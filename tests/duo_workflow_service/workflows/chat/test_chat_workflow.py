@@ -307,16 +307,23 @@ async def test_workflow_run(
 
 
 @pytest.mark.parametrize(
-    "feature_flags, expected_tools",
+    ("feature_flags", "workflow_config", "expected_tools"),
     [
         (
             ["duo_workflow_chat_mutation_tools"],
+            {},
             CHAT_READ_ONLY_TOOLS + CHAT_MUTATION_TOOLS,
         ),
-        ([], CHAT_READ_ONLY_TOOLS),
-        (["duo_workflow_mcp_support"], CHAT_READ_ONLY_TOOLS + ["extra_tool"]),
+        ([], {}, CHAT_READ_ONLY_TOOLS),
+        (["duo_workflow_mcp_support"], {}, CHAT_READ_ONLY_TOOLS + ["extra_tool"]),
+        (
+            [],
+            {"mcp_enabled": True},
+            CHAT_READ_ONLY_TOOLS + ["extra_tool"],
+        ),
         (
             ["duo_workflow_chat_mutation_tools", "duo_workflow_mcp_support"],
+            {"mcp_enabled": True},
             CHAT_READ_ONLY_TOOLS + CHAT_MUTATION_TOOLS + ["extra_tool"],
         ),
     ],
@@ -327,6 +334,7 @@ def test_tools_registry_interaction(
     mock_toolset,
     mock_feature_flag_context,
     feature_flags,
+    workflow_config,
     expected_tools,
     workflow_with_project,
 ):
@@ -336,6 +344,7 @@ def test_tools_registry_interaction(
 
     workflow = workflow_with_project
     workflow._context_elements = []
+    workflow._workflow_config = workflow_config
     tools_registry = MagicMock(spec=ToolsRegistry)
     checkpointer = MagicMock()
 

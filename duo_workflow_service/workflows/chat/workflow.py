@@ -215,7 +215,8 @@ class Workflow(AbstractWorkflow):
         if "duo_workflow_chat_mutation_tools" in feature_flags:
             available_tools = CHAT_READ_ONLY_TOOLS + CHAT_MUTATION_TOOLS
 
-        if "duo_workflow_mcp_support" in feature_flags:
+        mcp_enabled = self._workflow_config.get("mcp_enabled", False)
+        if "duo_workflow_mcp_support" in feature_flags or mcp_enabled:
             available_tools += [tool.name for tool in self._additional_tools]
 
         return available_tools
