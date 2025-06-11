@@ -3,7 +3,7 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Generator, Iterator, Optional, Type
 from unittest import mock
-from unittest.mock import ANY, MagicMock, Mock, call
+from unittest.mock import Mock, call
 
 import pytest
 from anthropic import APITimeoutError, AsyncAnthropic
@@ -20,7 +20,6 @@ from pyfakefs.fake_filesystem import FakeFilesystem
 
 from ai_gateway.api.auth_utils import StarletteUser
 from ai_gateway.config import ConfigModelLimits
-from ai_gateway.feature_flags.context import current_feature_flag_context
 from ai_gateway.instrumentators.model_requests import ModelRequestInstrumentator
 from ai_gateway.model_metadata import (
     AmazonQModelMetadata,
@@ -30,7 +29,7 @@ from ai_gateway.model_metadata import (
 )
 from ai_gateway.models.v2.anthropic_claude import ChatAnthropic
 from ai_gateway.prompts import BasePromptRegistry, Prompt
-from ai_gateway.prompts.config.base import PromptConfig, PromptParams
+from ai_gateway.prompts.config.base import PromptParams
 from tests.conftest import FakeModel
 
 
@@ -81,7 +80,10 @@ class TestPrompt:
         [
             ({"model_class_provider": "litellm"}, "litellm"),
             (
-                {"model_class_provider": "litellm", "custom_llm_provider": "my_engine"},
+                {
+                    "model_class_provider": "litellm",
+                    "custom_llm_provider": "my_engine",
+                },
                 "my_engine",
             ),
         ],
@@ -99,45 +101,14 @@ class TestPrompt:
         assert prompt.model_engine == expected_model_engine
         assert isinstance(prompt.bound, Runnable)
 
-    @pytest.mark.parametrize(
-        ("prompt_config_name", "enabled_feature_flags", "expected_model_name"),
-        [
-            ("test_prompt", {}, "test_model"),
-            (
-                "Default configuration for the Duo Chat ReAct Agent",
-                {"duo_chat_react_agent_claude_4_0"},
-                "claude-sonnet-4-20250514",
-            ),
-            (
-                "Default configuration for the Duo Chat ReAct Agent",
-                {},
-                "test_model",
-            ),
-        ],
-    )
-    def test_model_override(
-        self,
-        prompt_config: PromptConfig,
-        model,
-        prompt_config_name,
-        enabled_feature_flags,
-        expected_model_name,
-    ):
-        prompt_config.name = prompt_config_name
-        current_feature_flag_context.set(enabled_feature_flags)
-
-        mock_model_factory = MagicMock(return_value=model)
-        Prompt(mock_model_factory, prompt_config)
-
-        mock_model_factory.assert_called_once_with(
-            model=expected_model_name, disable_streaming=ANY, max_retries=ANY
-        )
-
     def test_build_prompt_template(self, prompt_template, model_config):
         prompt_template = Prompt._build_prompt_template(prompt_template, model_config)
 
         assert prompt_template == ChatPromptTemplate.from_messages(
-            [("system", "{% include 'system.jinja' %}"), ("user", "{{content}}")],
+            [
+                ("system", "{% include 'system.jinja' %}"),
+                ("user", "{{content}}"),
+            ],
             template_format="jinja2",
         )
 
@@ -188,7 +159,8 @@ class TestPrompt:
         async for c in prompt.astream({"name": "Duo", "content": "What's up?"}):
             response += c.content
 
-            mock_watcher.afinish.assert_not_awaited()  # Make sure we don't finish prematurely
+            # Make sure we don't finish prematurely
+            mock_watcher.afinish.assert_not_awaited()
 
         mock_logger.info.assert_called_with(
             "Performing LLM request",
@@ -266,7 +238,8 @@ class TestPrompt:
     @pytest.mark.asyncio
     async def test_ainvoke_missing_inputs(self, prompt: Prompt):
         with pytest.raises(
-            KeyError, match="Input to ChatPromptTemplate is missing variables {'name'}"
+            KeyError,
+            match="Input to ChatPromptTemplate is missing variables {'name'}",
         ):
             await prompt.ainvoke({"content": "What's up?"})
 
@@ -293,7 +266,8 @@ class TestPrompt:
     @pytest.mark.asyncio
     async def test_astream_missing_inputs(self, prompt: Prompt):
         with pytest.raises(
-            KeyError, match="Input to ChatPromptTemplate is missing variables {'name'}"
+            KeyError,
+            match="Input to ChatPromptTemplate is missing variables {'name'}",
         ):
             await anext(prompt.astream({"content": "What's up?"}))
 
@@ -337,19 +311,22 @@ class TestPromptTimeout:
         [
             (
                 ChatAnthropic(
-                    async_client=AsyncAnthropic(), model="claude-3-sonnet-20240229"  # type: ignore[call-arg]
+                    async_client=AsyncAnthropic(),
+                    model="claude-3-sonnet-20240229",  # type: ignore[call-arg]
                 ),
                 APITimeoutError,
             ),
             (
                 ChatLiteLLM(
-                    model="claude-3-sonnet@20240229", custom_llm_provider="vertex_ai"  # type: ignore[call-arg]
+                    model="claude-3-sonnet@20240229",
+                    custom_llm_provider="vertex_ai",  # type: ignore[call-arg]
                 ),
                 Timeout,
             ),
             (
                 ChatLiteLLM(
-                    model="claude-3-5-sonnet-v2@20241022", custom_llm_provider="vertex_ai"  # type: ignore[call-arg]
+                    model="claude-3-5-sonnet-v2@20241022",
+                    custom_llm_provider="vertex_ai",  # type: ignore[call-arg]
                 ),
                 Timeout,
             ),

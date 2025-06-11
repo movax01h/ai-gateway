@@ -12,7 +12,6 @@ class FeatureFlag(StrEnum):
     ENABLE_ANTHROPIC_PROMPT_CACHING = "enable_anthropic_prompt_caching"
     DISABLE_CODE_GECKO_DEFAULT = "disable_code_gecko_default"
     CHAT_V1_REDIRECT = "redirect_v1_chat_request"
-    DUO_CHAT_REACT_AGENT_CLAUDE_4_0 = "duo_chat_react_agent_claude_4_0"
 
 
 def is_feature_enabled(feature_name: FeatureFlag | str) -> bool:
