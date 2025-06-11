@@ -96,8 +96,8 @@ async def test_workflow_initialization(workflow_with_project):
     assert initial_state["status"] == WorkflowStatusEnum.NOT_STARTED
     assert initial_state["plan"] == {"steps": []}
     assert len(initial_state["ui_chat_log"]) == 1
-    assert initial_state["ui_chat_log"][0]["message_type"] == MessageTypeEnum.TOOL
-    assert "Starting chat: Test chat goal" in initial_state["ui_chat_log"][0]["content"]
+    assert initial_state["ui_chat_log"][0]["message_type"] == MessageTypeEnum.USER
+    assert "Test chat goal" in initial_state["ui_chat_log"][0]["content"]
     assert initial_state["ui_chat_log"][0]["status"] == ToolStatus.SUCCESS
     assert initial_state["context_elements"] == []
     assert initial_state["project"]["name"] == "test-project"
@@ -358,6 +358,8 @@ async def test_get_graph_input_start(workflow_with_project):
 
     assert result["status"] == WorkflowStatusEnum.NOT_STARTED
     assert result["conversation_history"]["test_prompt"][0].content == "Test goal"
+    assert result["ui_chat_log"][0]["message_type"] == MessageTypeEnum.USER
+    assert "Test goal" in result["ui_chat_log"][0]["content"]
 
 
 @pytest.mark.asyncio
@@ -371,6 +373,8 @@ async def test_get_graph_input_resume(workflow_with_project):
     assert (
         result.update["conversation_history"]["test_prompt"][0].content == "New input"
     )
+    assert result.update["ui_chat_log"][-1]["message_type"] == MessageTypeEnum.USER
+    assert result.update["ui_chat_log"][-1]["content"] == "New input"
 
 
 @pytest.mark.asyncio
