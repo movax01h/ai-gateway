@@ -15,7 +15,6 @@ from langchain_core.tools import BaseTool
 
 from ai_gateway.api.auth_utils import StarletteUser
 from ai_gateway.config import ConfigModelLimits, ModelLimits
-from ai_gateway.feature_flags.context import FeatureFlag, is_feature_enabled
 from ai_gateway.instrumentators.model_requests import ModelRequestInstrumentator
 from ai_gateway.internal_events.client import InternalEventsClient
 from ai_gateway.model_metadata import TypeModelMetadata, current_model_metadata_context
@@ -95,11 +94,6 @@ class Prompt(RunnableBinding[Input, Output]):
         tools: Optional[List[BaseTool]] = None,
     ):
         model_override = None
-        if (
-            config.name == "Default configuration for the Duo Chat ReAct Agent"
-            and is_feature_enabled(FeatureFlag.DUO_CHAT_REACT_AGENT_CLAUDE_4_0)
-        ):
-            model_override = "claude-sonnet-4-20250514"
         model_provider = config.model.params.model_class_provider
         model_kwargs = self._build_model_kwargs(config.params, model_metadata)
         model = self._build_model(
