@@ -672,6 +672,22 @@ def test_aput_with_no_status_update(
     assert status_event is None
 
 
+def test_aput_with_noop_status_update(
+    checkpoint_data,
+    checkpoint_metadata,
+    http_client,
+    workflow_id,
+    workflow_type,
+):
+    workflow = GitLabWorkflow(http_client, workflow_id, workflow_type=workflow_type)
+    checkpoint = checkpoint_data[0]["checkpoint"]
+
+    # no status update in checkpoint
+    checkpoint["channel_values"]["status"] = "approval_error"
+    status_event = workflow._get_workflow_status_event(checkpoint, checkpoint_metadata)
+    assert status_event is None
+
+
 def test_aput_with_no_status_update_and_human_input(
     checkpoint_data,
     checkpoint_metadata,
@@ -714,6 +730,11 @@ def test_aput_with_no_status_update_and_human_input(
             WorkflowStatusEnum.PLAN_APPROVAL_REQUIRED,
             WorkflowStatusEventEnum.REQUIRE_PLAN_APPROVAL,
         ),
+        (WorkflowStatusEnum.INPUT_REQUIRED, WorkflowStatusEventEnum.REQUIRE_INPUT),
+        (
+            WorkflowStatusEnum.TOOL_CALL_APPROVAL_REQUIRED,
+            WorkflowStatusEventEnum.REQUIRE_TOOL_CALL_APPROVAL,
+        ),
     ],
 )
 async def test_workflow_status_events(
@@ -743,30 +764,6 @@ async def test_workflow_status_events(
         use_http_response=True,
     )
     http_client.apatch.reset_mock()
-
-
-@pytest.mark.asyncio
-async def test_resume_status_event(
-    gitlab_workflow, http_client, checkpoint_metadata, workflow_id
-):
-    checkpoint = {
-        "id": "resume-checkpoint",
-        "channel_values": {"last_human_input": {"event_type": "resume"}},
-    }
-    config: RunnableConfig = {"configurable": {}}
-
-    http_client.apatch.return_value = GitLabHttpResponse(status_code=200, body={})
-
-    await gitlab_workflow.aput(
-        config, checkpoint, checkpoint_metadata, ChannelVersions()
-    )
-
-    http_client.apatch.assert_called_with(
-        path=f"/api/v4/ai/duo_workflows/workflows/{workflow_id}",
-        body=json.dumps({"status_event": WorkflowStatusEventEnum.RESUME.value}),
-        parse_json=True,
-        use_http_response=True,
-    )
 
 
 @pytest.mark.asyncio

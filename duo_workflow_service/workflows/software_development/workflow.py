@@ -377,6 +377,7 @@ class Workflow(AbstractWorkflow):
         planner_approval_component = PlanApprovalComponent(
             workflow_id=self._workflow_id,
             approved_agent_name=planner_components["agent"].name,
+            approved_agent_state=WorkflowStatusEnum.PLANNING,
         )
 
         planning_approval_entry_node = planner_approval_component.attach(
@@ -421,6 +422,7 @@ class Workflow(AbstractWorkflow):
         execution_approval_component = ToolsApprovalComponent(
             workflow_id=self._workflow_id,
             approved_agent_name=executor_components["agent"].name,
+            approved_agent_state=WorkflowStatusEnum.EXECUTION,
             toolset=executor_components["toolset"],
         )
 
@@ -609,6 +611,7 @@ class Workflow(AbstractWorkflow):
         context_builder_approval_component = ToolsApprovalComponent(
             workflow_id=self._workflow_id,
             approved_agent_name="context_builder",
+            approved_agent_state=WorkflowStatusEnum.NOT_STARTED,
             toolset=context_builder_components["toolset"],
         )
 

@@ -61,6 +61,9 @@ def not_implemented_sync_method(func: T) -> T:
     return wrapper  # type: ignore
 
 
+NOOP_WORKFLOW_STATUSES = [WorkflowStatusEnum.APPROVAL_ERROR]
+
+
 class WorkflowStatusEventEnum(StrEnum):
     START = "start"
     FINISH = "finish"
@@ -74,14 +77,33 @@ class WorkflowStatusEventEnum(StrEnum):
     REQUIRE_TOOL_CALL_APPROVAL = "require_tool_call_approval"
 
 
-WorkflowStatusToStatusEvent = {
-    WorkflowStatusEnum.COMPLETED: WorkflowStatusEventEnum.FINISH,
-    WorkflowStatusEnum.ERROR: WorkflowStatusEventEnum.DROP,
-    WorkflowStatusEnum.CANCELLED: WorkflowStatusEventEnum.STOP,
-    WorkflowStatusEnum.PAUSED: WorkflowStatusEventEnum.PAUSE,
-    WorkflowStatusEnum.INPUT_REQUIRED: WorkflowStatusEventEnum.REQUIRE_INPUT,
-    WorkflowStatusEnum.PLAN_APPROVAL_REQUIRED: WorkflowStatusEventEnum.REQUIRE_PLAN_APPROVAL,
-    WorkflowStatusEnum.TOOL_CALL_APPROVAL_REQUIRED: WorkflowStatusEventEnum.REQUIRE_TOOL_CALL_APPROVAL,
+# Maps current checkpoint status to the rails workflow state machine's event (if applicable)
+CheckpointStatusToStatusEvent = {
+    "FINISHED": WorkflowStatusEventEnum.FINISH,
+    "FAILED": WorkflowStatusEventEnum.DROP,
+    "STOPPED": WorkflowStatusEventEnum.STOP,
+    "PAUSED": WorkflowStatusEventEnum.PAUSE,
+    "INPUT_REQUIRED": WorkflowStatusEventEnum.REQUIRE_INPUT,
+    "PLAN_APPROVAL_REQUIRED": WorkflowStatusEventEnum.REQUIRE_PLAN_APPROVAL,
+    "TOOL_CALL_APPROVAL_REQUIRED": WorkflowStatusEventEnum.REQUIRE_TOOL_CALL_APPROVAL,
+}
+
+# Maps WorkflowStatus(status key in LangGraph's WorkflowState) to checkpoint status.
+# Checkpoint status represents status human-readable workflow status (displayed in the UI)
+WORKFLOW_STATUS_TO_CHECKPOINT_STATUS = {
+    **{
+        WorkflowStatusEnum.EXECUTION: "RUNNING",
+        WorkflowStatusEnum.ERROR: "FAILED",
+        WorkflowStatusEnum.INPUT_REQUIRED: "INPUT_REQUIRED",
+        WorkflowStatusEnum.PLANNING: "RUNNING",
+        WorkflowStatusEnum.PAUSED: "PAUSED",
+        WorkflowStatusEnum.PLAN_APPROVAL_REQUIRED: "PLAN_APPROVAL_REQUIRED",
+        WorkflowStatusEnum.NOT_STARTED: "CREATED",
+        WorkflowStatusEnum.COMPLETED: "FINISHED",
+        WorkflowStatusEnum.CANCELLED: "STOPPED",
+        WorkflowStatusEnum.TOOL_CALL_APPROVAL_REQUIRED: "TOOL_CALL_APPROVAL_REQUIRED",
+    },
+    **{status: "RUNNING" for status in NOOP_WORKFLOW_STATUSES},
 }
 
 
@@ -143,7 +165,8 @@ class GitLabWorkflow(BaseCheckpointSaver[Any], AbstractAsyncContextManager[Any])
         config: RunnableConfig,
         writes: Sequence[Tuple[str, Any]],
         task_id: str,
-        task_path: str = "",  # We are ignoring this parameter for now since we don't care for the order the pending writes are fetched in
+        task_path: str = "",
+        # We are ignoring this parameter for now since we don't care for the order the pending writes are fetched in
     ) -> None:
         return
 
@@ -461,7 +484,8 @@ class GitLabWorkflow(BaseCheckpointSaver[Any], AbstractAsyncContextManager[Any])
         config: RunnableConfig,
         writes: Sequence[Tuple[str, Any]],
         task_id: str,
-        task_path: str = "",  # We are ignoring this parameter for now since we don't care for the order the pending writes are fetched in
+        task_path: str = "",
+        # We are ignoring this parameter for now since we don't care for the order the pending writes are fetched in
     ) -> None:
         configurable = config.get("configurable", {})
         checkpoint_id = configurable.get("checkpoint_id")
@@ -553,40 +577,18 @@ class GitLabWorkflow(BaseCheckpointSaver[Any], AbstractAsyncContextManager[Any])
 
         For example, `drop` status event changes a workflow status from
         `created`, `running` or `paused` to `failed`.
+        For workflow status `not started`, there is no status event
+        Resume, Retry and start workflow events are handled with  self._status_event method
         """
         status_event = None
         if _attribute_dirty("status", metadata):
             workflow_status = checkpoint["channel_values"].get("status")
-            if workflow_status:
-                status_event = WorkflowStatusToStatusEvent.get(workflow_status)
-
-            if status_event:
+            if workflow_status is None or workflow_status in NOOP_WORKFLOW_STATUSES:
                 return status_event
+            checkpoint_status = WORKFLOW_STATUS_TO_CHECKPOINT_STATUS.get(
+                workflow_status
+            )
+            if checkpoint_status:
+                status_event = CheckpointStatusToStatusEvent.get(checkpoint_status)
 
-        # there is no resume status
-        # when event_type is resume, status can be planning or execution
-        # thus, we check the last human input event type to get a status event
-        if _attribute_dirty("last_human_input", metadata):
-            return self._get_status_event_from_human_input(checkpoint)
-        else:
-            return None
-
-    def _get_status_event_from_human_input(
-        self,
-        checkpoint: Checkpoint,
-    ) -> Optional[WorkflowStatusEventEnum]:
-        last_human_input = checkpoint["channel_values"].get("last_human_input")
-        if not (last_human_input and "event_type" in last_human_input):
-            return None
-
-        # workflow was already resumed when it was started again
-        # this can be unified when human input check uses interrupts too
-        if last_human_input["event_type"] == "resume" and checkpoint[
-            "channel_values"
-        ].get("status") not in (
-            WorkflowStatusEnum.INPUT_REQUIRED,
-            WorkflowStatusEnum.PLAN_APPROVAL_REQUIRED,
-        ):
-            return WorkflowStatusEventEnum.RESUME
-
-        return None
+        return status_event

@@ -27,10 +27,13 @@ class ToolsApprovalComponent(HumanApprovalComponent):
         self,
         workflow_id: str,
         approved_agent_name: str,
+        approved_agent_state: str,
         toolset: Toolset,
     ):
         super().__init__(
-            workflow_id=workflow_id, approved_agent_name=approved_agent_name
+            workflow_id=workflow_id,
+            approved_agent_name=approved_agent_name,
+            approved_agent_state=approved_agent_state,
         )
         self._toolset = toolset
 
@@ -40,7 +43,7 @@ class ToolsApprovalComponent(HumanApprovalComponent):
 
         if not isinstance(last_message, AIMessage) or not last_message.tool_calls:
             return {
-                "status": state["status"],
+                "status": WorkflowStatusEnum.APPROVAL_ERROR,
                 "conversation_history": {
                     self._approved_agent_name: [
                         HumanMessage(
@@ -56,7 +59,7 @@ class ToolsApprovalComponent(HumanApprovalComponent):
 
         if len(invalid_tool_calls) > 0:
             return {
-                "status": state["status"],
+                "status": WorkflowStatusEnum.APPROVAL_ERROR,
                 "conversation_history": {
                     self._approved_agent_name: [
                         ToolMessage(

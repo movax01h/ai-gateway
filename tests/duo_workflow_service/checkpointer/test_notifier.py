@@ -6,11 +6,10 @@ import pytest
 from langchain.load.dump import dumps
 from langchain_core.messages import HumanMessage
 
-from contract import contract_pb2
-from duo_workflow_service.checkpointer.notifier import (
+from duo_workflow_service.checkpointer.gitlab_workflow import (
     WORKFLOW_STATUS_TO_CHECKPOINT_STATUS,
-    UserInterface,
 )
+from duo_workflow_service.checkpointer.notifier import UserInterface
 from duo_workflow_service.entities.state import MessageTypeEnum, WorkflowStatusEnum
 
 
@@ -89,7 +88,8 @@ def test_workflow_status_mapping():
         WorkflowStatusEnum.NOT_STARTED: "CREATED",
         WorkflowStatusEnum.COMPLETED: "FINISHED",
         WorkflowStatusEnum.CANCELLED: "STOPPED",
-        WorkflowStatusEnum.TOOL_CALL_APPROVAL_REQUIRED: "REQUIRE_TOOL_CALL_APPROVAL",
+        WorkflowStatusEnum.TOOL_CALL_APPROVAL_REQUIRED: "TOOL_CALL_APPROVAL_REQUIRED",
+        WorkflowStatusEnum.APPROVAL_ERROR: "RUNNING",
     }
 
     for workflow_status, checkpoint_status in expected_mapping.items():
