@@ -8,24 +8,14 @@ from langchain_core.messages import BaseMessage
 from langchain_core.output_parsers.string import StrOutputParser
 
 from contract import contract_pb2
+from duo_workflow_service.checkpointer.gitlab_workflow import (
+    WORKFLOW_STATUS_TO_CHECKPOINT_STATUS,
+)
 from duo_workflow_service.entities.state import (
     MessageTypeEnum,
     UiChatLog,
     WorkflowStatusEnum,
 )
-
-WORKFLOW_STATUS_TO_CHECKPOINT_STATUS = {
-    WorkflowStatusEnum.EXECUTION: "RUNNING",
-    WorkflowStatusEnum.ERROR: "FAILED",
-    WorkflowStatusEnum.INPUT_REQUIRED: "INPUT_REQUIRED",
-    WorkflowStatusEnum.PLANNING: "RUNNING",
-    WorkflowStatusEnum.PAUSED: "PAUSED",
-    WorkflowStatusEnum.PLAN_APPROVAL_REQUIRED: "PLAN_APPROVAL_REQUIRED",
-    WorkflowStatusEnum.NOT_STARTED: "CREATED",
-    WorkflowStatusEnum.COMPLETED: "FINISHED",
-    WorkflowStatusEnum.CANCELLED: "STOPPED",
-    WorkflowStatusEnum.TOOL_CALL_APPROVAL_REQUIRED: "REQUIRE_TOOL_CALL_APPROVAL",
-}
 
 
 class UserInterface:

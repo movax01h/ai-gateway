@@ -54,6 +54,7 @@ class WorkflowStatusEnum(StrEnum):
     INPUT_REQUIRED = "input_required"
     PLAN_APPROVAL_REQUIRED = "plan_approval_required"
     TOOL_CALL_APPROVAL_REQUIRED = "tool_call_approval_required"
+    APPROVAL_ERROR = "approval_error"
 
 
 class MessageTypeEnum(StrEnum):

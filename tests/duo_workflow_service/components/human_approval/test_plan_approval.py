@@ -79,6 +79,7 @@ class TestPlanApprovalComponent:
         return PlanApprovalComponent(
             workflow_id=graph_config["configurable"]["thread_id"],
             approved_agent_name="test-agent",
+            approved_agent_state=WorkflowStatusEnum.PLANNING,
         )
 
     @pytest.mark.asyncio

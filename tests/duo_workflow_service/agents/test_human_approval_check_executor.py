@@ -43,11 +43,15 @@ class TestHumanApprovalCheckExecutor:
     async def test_run_with_resume(self, mock_interrupt, workflow_state):
         event = {"event_type": WorkflowEventType.RESUME}
         mock_interrupt.return_value = event
-        executor = HumanApprovalCheckExecutor("agent", "1234")
+        executor = HumanApprovalCheckExecutor("agent", "1234", "approved-agent-status")
 
         result = await executor.run(workflow_state)
 
-        assert result == {"last_human_input": event, "ui_chat_log": []}
+        assert result == {
+            "last_human_input": event,
+            "ui_chat_log": [],
+            "status": "approved-agent-status",
+        }
 
     @patch.dict(os.environ, {"WORKFLOW_INTERRUPT": "true"})
     @pytest.mark.asyncio
@@ -55,7 +59,7 @@ class TestHumanApprovalCheckExecutor:
     async def test_run_with_message(self, mock_interrupt, workflow_state):
         event = {"event_type": WorkflowEventType.MESSAGE, "message": "response"}
         mock_interrupt.return_value = event
-        executor = HumanApprovalCheckExecutor("agent", "1234")
+        executor = HumanApprovalCheckExecutor("agent", "1234", "approved-agent-status")
         workflow_state["conversation_history"] = {
             "agent": [
                 AIMessage(
@@ -67,6 +71,7 @@ class TestHumanApprovalCheckExecutor:
 
         result = await executor.run(workflow_state)
 
+        assert result["status"] == "approved-agent-status"
         assert result["last_human_input"] == event
         assert result["conversation_history"]["agent"] == [
             ToolMessage(
@@ -84,7 +89,7 @@ class TestHumanApprovalCheckExecutor:
     async def test_run_with_empty_message(self, mock_interrupt, workflow_state):
         event = {"event_type": WorkflowEventType.MESSAGE, "message": ""}
         mock_interrupt.return_value = event
-        executor = HumanApprovalCheckExecutor("agent", "1234")
+        executor = HumanApprovalCheckExecutor("agent", "1234", "approved-agent-status")
         workflow_state["conversation_history"] = {
             "agent": [
                 AIMessage(
@@ -96,6 +101,7 @@ class TestHumanApprovalCheckExecutor:
 
         result = await executor.run(workflow_state)
 
+        assert result["status"] == "approved-agent-status"
         assert result["last_human_input"] == event
         assert len(result["ui_chat_log"]) == 1
         assert result["ui_chat_log"][0]["message_type"] == MessageTypeEnum.AGENT
