@@ -277,3 +277,10 @@ duo-workflow-docs:
 	@echo "Generating Duo Workflow Service graph documentation..."
 	@poetry install
 	@poetry run python scripts/generate_graph_docs.py ${DOC_DIR}/duo_workflow_service_graphs.md
+
+.PHONY: duo-workflow-service-reload
+duo-workflow-service-reload:
+	poetry run watchmedo auto-restart \
+    --directory=./duo_workflow_service \
+    --pattern="*.py" \
+    --recursive  -- duo-workflow-service
