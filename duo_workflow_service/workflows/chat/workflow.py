@@ -98,8 +98,8 @@ class Workflow(AbstractWorkflow):
         contextElements = self._context_elements or []
 
         initial_ui_chat_log = UiChatLog(
-            message_type=MessageTypeEnum.TOOL,
-            content=f"Starting chat: {goal}",
+            message_type=MessageTypeEnum.USER,
+            content=goal,
             timestamp=datetime.now(timezone.utc).isoformat(),
             status=ToolStatus.SUCCESS,
             correlation_id=None,
@@ -131,6 +131,15 @@ class Workflow(AbstractWorkflow):
             case WorkflowStatusEventEnum.START:
                 return self.get_workflow_state(goal)
             case WorkflowStatusEventEnum.RESUME:
+                new_message_chat_log = UiChatLog(
+                    message_type=MessageTypeEnum.USER,
+                    content=goal,
+                    timestamp=datetime.now(timezone.utc).isoformat(),
+                    status=ToolStatus.SUCCESS,
+                    correlation_id=None,
+                    tool_info=None,
+                    context_elements=None,
+                )
                 return Command(
                     goto="agent",
                     update={
@@ -145,6 +154,7 @@ class Workflow(AbstractWorkflow):
                                 )
                             ]
                         },
+                        "ui_chat_log": [new_message_chat_log],
                     },
                 )
             case _:
