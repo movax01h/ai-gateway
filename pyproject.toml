@@ -75,7 +75,7 @@ priority = "supplemental"
 optional = true
 
 [tool.poetry.group.eval.dependencies]
-eli5 = { version = "^0.3.1", source = "prompt_library" }
+eli5 = { version = "^0.3.2", source = "prompt_library" }
 typer = "^0.15.4"
 
 [tool.poetry.group.test]

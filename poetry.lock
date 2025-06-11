@@ -766,7 +766,7 @@ version = "0.6.7"
 description = "Easily serialize dataclasses to and from JSON."
 optional = false
 python-versions = "<4.0,>=3.7"
-groups = ["main", "eval"]
+groups = ["main"]
 files = [
     {file = "dataclasses_json-0.6.7-py3-none-any.whl", hash = "sha256:0dbf33f26c8d5305befd61b39d2b3414e8a407bedc2834dea9b8d642666fb40a"},
     {file = "dataclasses_json-0.6.7.tar.gz", hash = "sha256:b6b3e528266ea45b9535223bc53ca645f5208833c29229e847b3f26a1cc55fc0"},
@@ -903,13 +903,13 @@ gmpy2 = ["gmpy2"]
 
 [[package]]
 name = "eli5"
-version = "0.3.1"
+version = "0.3.2"
 description = "GitLab Eval Like I'm 5"
 optional = false
 python-versions = ">=3.11.0,<3.13.0"
 groups = ["eval"]
 files = [
-    {file = "eli5-0.3.1-py3-none-any.whl", hash = "sha256:cd77fd25fb26490c78f2537039d147450b59959cc0f51ce03c745021445aaf69"},
+    {file = "eli5-0.3.2-py3-none-any.whl", hash = "sha256:78610c80c858c8c487a8f9c2c505067b61e6f7c6d930d5a0c78c90575745d014"},
 ]
 
 [package.dependencies]
@@ -919,10 +919,9 @@ boto3 = ">=1.35.80,<2.0.0"
 cerebras-cloud-sdk = ">=1.2.0,<2.0.0"
 fireworks-ai = ">=0.15.4,<0.16.0"
 genson = ">=1.3.0,<2.0.0"
-groq = ">=0.24.0,<0.25.0"
+groq = ">=0.25.0,<0.26.0"
 langchain = ">=0.3.0,<0.4.0"
 langchain-anthropic = ">=0.3.0,<0.4.0"
-langchain-community = ">=0.3.0,<0.4.0"
 langchain-google-vertexai = ">=2.0.0,<3.0.0"
 langchain-openai = ">=0.3.0,<0.4.0"
 langchain-text-splitters = ">=0.3.0,<0.4.0"
@@ -932,7 +931,7 @@ litellm = ">=1.35.20,<2.0.0"
 numpy = ">=2.2.3,<3.0.0"
 openai = ">=1.44.1,<2.0.0"
 pandas = ">=2.2.2,<3.0.0"
-pydantic = "2.11.4"
+pydantic = ">=2.11.5,<3.0.0"
 python-dotenv = ">=1.0.1,<2.0.0"
 python-gitlab = {version = ">=5.1.0,<6.0.0", extras = ["graphql"]}
 rapidfuzz = ">=3.9.3,<4.0.0"
@@ -943,6 +942,9 @@ tree-sitter-languages = ">=1.10.2,<2.0.0"
 typer = ">=0.15.0,<0.16.0"
 unidiff = ">=0.7.5,<0.8.0"
 websockets = ">=15.0.0,<15.1.0"
+
+[package.extras]
+swebench = ["docker (>=7.1.0,<8.0.0)", "swebench (==3.0.12)"]
 
 [package.source]
 type = "legacy"
@@ -1760,14 +1762,14 @@ test = ["objgraph", "psutil"]
 
 [[package]]
 name = "groq"
-version = "0.24.0"
+version = "0.25.0"
 description = "The official Python library for the groq API"
 optional = false
 python-versions = ">=3.8"
 groups = ["eval"]
 files = [
-    {file = "groq-0.24.0-py3-none-any.whl", hash = "sha256:0020e6b0b2b267263c9eb7c318deef13c12f399c6525734200b11d777b00088e"},
-    {file = "groq-0.24.0.tar.gz", hash = "sha256:e821559de8a77fb81d2585b3faec80ff923d6d64fd52339b33f6c94997d6f7f5"},
+    {file = "groq-0.25.0-py3-none-any.whl", hash = "sha256:aadc78b40b1809cdb196b1aa8c7f7293108767df1508cafa3e0d5045d9328e7a"},
+    {file = "groq-0.25.0.tar.gz", hash = "sha256:6e1c7466b0da0130498187b825bd239f86fb77bf7551eacfbfa561d75048746a"},
 ]
 
 [package.dependencies]
@@ -2457,7 +2459,7 @@ version = "0.3.24"
 description = "Community contributed LangChain integrations."
 optional = false
 python-versions = ">=3.9"
-groups = ["main", "eval"]
+groups = ["main"]
 files = [
     {file = "langchain_community-0.3.24-py3-none-any.whl", hash = "sha256:b6cdb376bf1c2f4d2503aca20f8f35f2d5b3d879c52848277f20ce1950e7afaf"},
     {file = "langchain_community-0.3.24.tar.gz", hash = "sha256:62d9e8cf9aadf35182ec3925f9ec1c8e5e84fb4f199f67a01aee496d289dc264"},
@@ -2784,7 +2786,7 @@ version = "3.21.3"
 description = "A lightweight library for converting complex datatypes to and from native Python datatypes."
 optional = false
 python-versions = ">=3.8"
-groups = ["main", "eval"]
+groups = ["main"]
 files = [
     {file = "marshmallow-3.21.3-py3-none-any.whl", hash = "sha256:86ce7fb914aa865001a4b2092c4c2872d13bc347f3d42673272cabfdbad386f1"},
     {file = "marshmallow-3.21.3.tar.gz", hash = "sha256:4f57c5e050a54d66361e826f94fba213eb10b67b2fdb02c3e0343ce207ba1662"},
@@ -2981,7 +2983,7 @@ version = "1.0.0"
 description = "Type system extensions for programs checked with the mypy type checker."
 optional = false
 python-versions = ">=3.5"
-groups = ["main", "eval", "lint"]
+groups = ["main", "lint"]
 files = [
     {file = "mypy_extensions-1.0.0-py3-none-any.whl", hash = "sha256:4392f6c0eb8a5668a69e23d168ffa70f0be9ccfd32b5cc2d26a34ae5b844552d"},
     {file = "mypy_extensions-1.0.0.tar.gz", hash = "sha256:75dbf8955dc00442a438fc4d0666508a9a97b6bd41aa2f0ffe9d2f2725af0782"},
@@ -3784,14 +3786,14 @@ markers = {eval = "platform_python_implementation == \"PyPy\""}
 
 [[package]]
 name = "pydantic"
-version = "2.11.4"
+version = "2.11.5"
 description = "Data validation using Python type hints"
 optional = false
 python-versions = ">=3.9"
 groups = ["main", "eval"]
 files = [
-    {file = "pydantic-2.11.4-py3-none-any.whl", hash = "sha256:d9615eaa9ac5a063471da949c8fc16376a84afb5024688b3ff885693506764eb"},
-    {file = "pydantic-2.11.4.tar.gz", hash = "sha256:32738d19d63a226a52eed76645a98ee07c1f410ee41d93b4afbfa85ed8111c2d"},
+    {file = "pydantic-2.11.5-py3-none-any.whl", hash = "sha256:f9c26ba06f9747749ca1e5c94d6a85cb84254577553c8785576fd38fa64dc0f7"},
+    {file = "pydantic-2.11.5.tar.gz", hash = "sha256:7f853db3d0ce78ce8bbb148c401c2cdd6431b3473c0cdff2755c7690952a7b7a"},
 ]
 
 [package.dependencies]
@@ -3922,7 +3924,7 @@ version = "2.9.1"
 description = "Settings management using Pydantic"
 optional = false
 python-versions = ">=3.9"
-groups = ["main", "eval"]
+groups = ["main"]
 files = [
     {file = "pydantic_settings-2.9.1-py3-none-any.whl", hash = "sha256:59b4f431b1defb26fe620c71a7d3968a710d719f5f4cdbbdb7926edeb770f6ef"},
     {file = "pydantic_settings-2.9.1.tar.gz", hash = "sha256:c509bf79d27563add44e8446233359004ed85066cd096d8b510f715e6ef5d268"},
@@ -5629,7 +5631,7 @@ version = "0.9.0"
 description = "Runtime inspection utilities for typing module."
 optional = false
 python-versions = "*"
-groups = ["main", "eval"]
+groups = ["main"]
 files = [
     {file = "typing_inspect-0.9.0-py3-none-any.whl", hash = "sha256:9ee6fc59062311ef8547596ab6b955e1b8aa46242d854bfc78f4f6b0eff35f9f"},
     {file = "typing_inspect-0.9.0.tar.gz", hash = "sha256:b23fc42ff6f6ef6954e4852c1fb512cdd18dbea03134f91f856a95ccc9461f78"},
@@ -6299,4 +6301,4 @@ cffi = ["cffi (>=1.11)"]
 [metadata]
 lock-version = "2.1"
 python-versions = "~3.12.0"
-content-hash = "a0d026b50c79c35375a631387b7427d4a62268d769cb26fae7274e7a79d950ef"
+content-hash = "fdc7cacb1105f551c3ded1a7693c709bf530bf39de958fdd6fed0ab9bd1070a3"
