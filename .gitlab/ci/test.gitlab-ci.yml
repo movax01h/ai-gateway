@@ -84,7 +84,7 @@ regression-tests:
     DEBIAN_VERSION: "bookworm"
     RUBY_VERSION: "3.3"
     GO_VERSION: "1.22"
-    PYTHON_VERSION: "3.12.10"
+    PYTHON_VERSION: "3.12.11"
     POETRY_VERSION: "2.0.1"
 
 check-proto-go:
