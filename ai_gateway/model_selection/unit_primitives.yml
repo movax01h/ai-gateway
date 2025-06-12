@@ -126,7 +126,9 @@ configurable_unit_primitives:
       - "review_merge_request"
     default_model: "claude_sonnet_3_7_20250219"
     selectable_models:
+      - "claude_3_5_sonnet_20240620"
       - "claude_sonnet_3_7_20250219"
+      - "claude_sonnet_4_20250514"
   - feature_setting: "duo_generate_issue_description"
     unit_primitives:
       - "generate_issue_description"
