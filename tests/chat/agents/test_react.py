@@ -21,7 +21,6 @@ from ai_gateway.chat.agents.typing import (
 )
 from ai_gateway.chat.context.current_page import Context, IssueContext
 from ai_gateway.chat.tools.gitlab import IssueReader, MergeRequestReader
-from ai_gateway.feature_flags.context import current_feature_flag_context
 from ai_gateway.models.base_chat import Role
 from ai_gateway.prompts.config.models import (
     ChatAnthropicParams,
@@ -29,6 +28,7 @@ from ai_gateway.prompts.config.models import (
     ModelClassProvider,
     TypeModelParams,
 )
+from lib.feature_flags.context import current_feature_flag_context
 
 
 @pytest.fixture

@@ -9,9 +9,9 @@ from gitlab_cloud_connector import CloudConnectorUser, UserClaims
 from pydantic import AnyUrl
 
 from ai_gateway.api.v3 import api_router
-from ai_gateway.feature_flags.context import current_feature_flag_context
 from ai_gateway.models.base import KindModelProvider
 from ai_gateway.tracking import SnowplowEventContext
+from lib.feature_flags.context import current_feature_flag_context
 
 __all__ = [
     "auth_user",

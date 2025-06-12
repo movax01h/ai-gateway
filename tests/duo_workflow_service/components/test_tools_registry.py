@@ -12,6 +12,7 @@ from duo_workflow_service.components.tools_registry import (
     ToolsRegistry,
 )
 from duo_workflow_service.gitlab.http_client import GitlabHttpClient
+from lib.feature_flags import current_feature_flag_context
 
 
 @pytest.fixture
@@ -549,14 +550,12 @@ def test_toolset_method(tool_metadata, tool_names, expected_preapproved):
         ("", False),
     ],
 )
-@patch("duo_workflow_service.components.tools_registry.current_feature_flag_context")
 def test_commit_tools_feature_flag(
-    mock_feature_flags_context,
     feature_flag_value,
     should_include_commit_tools,
     tool_metadata,
 ):
-    mock_feature_flags_context.get.return_value = feature_flag_value
+    current_feature_flag_context.set({feature_flag_value})
 
     registry = ToolsRegistry(
         enabled_tools=["read_only_gitlab"],

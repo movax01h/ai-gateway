@@ -2,11 +2,9 @@ import os
 from typing import Optional, Union
 
 from ai_gateway.models import KindAnthropicModel
-from duo_workflow_service.interceptors.feature_flag_interceptor import (
-    current_feature_flag_context,
-)
 from duo_workflow_service.internal_events.event_enum import CategoryEnum
 from duo_workflow_service.llm_factory import AnthropicConfig, VertexConfig
+from lib.feature_flags.context import FeatureFlag, current_feature_flag_context
 
 
 def get_sonnet_4_config_with_feature_flag(
@@ -30,8 +28,8 @@ def get_sonnet_4_config_with_feature_flag(
     _vertex_project_id = os.getenv("DUO_WORKFLOW__VERTEX_PROJECT_ID")
 
     feature_flag_map = {
-        CategoryEnum.WORKFLOW_SOFTWARE_DEVELOPMENT.value: "duo_workflow_claude_sonnet_4",
-        CategoryEnum.WORKFLOW_CHAT.value: "duo_workflow_chat_workflow_claude_sonnet_4",
+        CategoryEnum.WORKFLOW_SOFTWARE_DEVELOPMENT.value: FeatureFlag.DUO_WORKFLOW_CLAUDE_SONNET_4.value,
+        CategoryEnum.WORKFLOW_CHAT.value: FeatureFlag.DUO_WORKFLOW_CHAT_WORKFLOW_CLAUDE_SONNET_4.value,
     }
 
     if workflow_type in feature_flag_map:

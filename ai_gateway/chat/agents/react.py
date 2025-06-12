@@ -18,17 +18,17 @@ from ai_gateway.chat.agents.typing import (
     ReActAgentInputs,
     TypeAgentEvent,
 )
-from ai_gateway.feature_flags import FeatureFlag, is_feature_enabled
 from ai_gateway.models.base_chat import Role
 from ai_gateway.prompts import Prompt, jinja2_formatter
 from ai_gateway.prompts.config import ModelClassProvider, ModelConfig
+from ai_gateway.structured_logging import get_request_logger
+from lib.feature_flags import FeatureFlag, is_feature_enabled
 
 __all__ = [
     "ReActPlainTextParser",
     "ReActAgent",
 ]
 
-from ai_gateway.structured_logging import get_request_logger
 
 _REACT_AGENT_TOOL_ACTION_CONTEXT_KEY = "duo_chat.agent_tool_action"
 

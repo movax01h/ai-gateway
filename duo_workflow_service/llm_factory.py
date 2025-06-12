@@ -11,11 +11,7 @@ from langsmith import tracing_context
 from pydantic import BaseModel, Field, field_validator
 
 from ai_gateway.models import KindAnthropicModel
-from duo_workflow_service.interceptors.feature_flag_interceptor import (
-    current_feature_flag_context,
-)
-
-SONNET_4_FEATURE_FLAG = "duo_workflow_claude_sonnet_4"
+from lib.feature_flags.context import FeatureFlag, is_feature_enabled
 
 
 class ModelConfig(BaseModel):
@@ -44,8 +40,7 @@ class VertexConfig(ModelConfig):
 
     @staticmethod
     def _get_model_name() -> str:
-        feature_flags = current_feature_flag_context.get()
-        if SONNET_4_FEATURE_FLAG in feature_flags:
+        if is_feature_enabled(FeatureFlag.DUO_WORKFLOW_CLAUDE_SONNET_4):
             return KindAnthropicModel.CLAUDE_SONNET_4.value
 
         return KindAnthropicModel.CLAUDE_3_7_SONNET_VERTEX.value

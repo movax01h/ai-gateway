@@ -49,9 +49,6 @@ from duo_workflow_service.entities import (
     WorkflowState,
     WorkflowStatusEnum,
 )
-from duo_workflow_service.interceptors.feature_flag_interceptor import (
-    current_feature_flag_context,
-)
 from duo_workflow_service.llm_factory import (
     AnthropicConfig,
     VertexConfig,
@@ -62,6 +59,7 @@ from duo_workflow_service.workflows.abstract_workflow import AbstractWorkflow
 from duo_workflow_service.workflows.model_selection_utils import (
     get_sonnet_4_config_with_feature_flag,
 )
+from lib.feature_flags.context import FeatureFlag, is_feature_enabled
 
 # Constants
 QUEUE_MAX_SIZE = 1
@@ -259,8 +257,7 @@ class Workflow(AbstractWorkflow):
         base_model_planner,
         executor_toolset,
     ):
-        available_feature_flags = current_feature_flag_context.get()
-        if "batch_duo_workflow_planner_tasks" in available_feature_flags:
+        if is_feature_enabled(FeatureFlag.BATCH_DUO_WORKFLOW_PLANNER_TASKS):
             planner_tools = PLANNER_TOOLS + ["create_plan"]
             planner_toolset = tools_registry.toolset(planner_tools)
             planner = Agent(
@@ -524,8 +521,7 @@ class Workflow(AbstractWorkflow):
             self.log.info("###############################")
 
     def planner_instructions(self, tools_registry):
-        available_feature_flags = current_feature_flag_context.get()
-        if "batch_duo_workflow_planner_tasks" in available_feature_flags:
+        if is_feature_enabled(FeatureFlag.BATCH_DUO_WORKFLOW_PLANNER_TASKS):
             self.log.info("Using batched planner")
             return PLANNER_TASK_BATCH_INSTRUCTIONS.format(
                 create_plan_tool_name=tools_registry.get("create_plan").name,  # type: ignore

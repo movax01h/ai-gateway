@@ -13,13 +13,13 @@ from ai_gateway.api.v1.chat.typing import ChatRequest, PromptPayload
 from ai_gateway.api.v2.chat.typing import AgentRequest
 from ai_gateway.chat.agents import AgentStep, AgentToolAction, Message, ReActAgentInputs
 from ai_gateway.chat.agents.typing import AgentFinalAnswer, TypeAgentEvent
-from ai_gateway.feature_flags import (
+from ai_gateway.models import KindAnthropicModel
+from ai_gateway.models.base_chat import Role
+from lib.feature_flags import (
     FeatureFlag,
     current_feature_flag_context,
     is_feature_enabled,
 )
-from ai_gateway.models import KindAnthropicModel
-from ai_gateway.models.base_chat import Role
 
 
 @pytest.fixture

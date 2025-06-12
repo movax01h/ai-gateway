@@ -22,11 +22,9 @@ from duo_workflow_service.entities.state import (
     UiChatLog,
     WorkflowStatusEnum,
 )
-from duo_workflow_service.interceptors.feature_flag_interceptor import (
-    current_feature_flag_context,
-)
 from duo_workflow_service.tracking.errors import log_exception
 from duo_workflow_service.workflows.abstract_workflow import AbstractWorkflow
+from lib.feature_flags.context import FeatureFlag, is_feature_enabled
 
 MAX_TOKENS_TO_SAMPLE = 8192
 DEBUG = os.getenv("DEBUG")
@@ -221,12 +219,11 @@ class Workflow(AbstractWorkflow):
 
     def _get_tools(self):
         available_tools = CHAT_READ_ONLY_TOOLS
-        feature_flags = current_feature_flag_context.get()
-        if "duo_workflow_chat_mutation_tools" in feature_flags:
+        if is_feature_enabled(FeatureFlag.DUO_WORKFLOW_CHAT_MUTATION_TOOLS):
             available_tools = CHAT_READ_ONLY_TOOLS + CHAT_MUTATION_TOOLS
 
         mcp_enabled = self._workflow_config.get("mcp_enabled", False)
-        if "duo_workflow_mcp_support" in feature_flags or mcp_enabled:
+        if is_feature_enabled(FeatureFlag.DUO_WORKFLOW_MCP_SUPPORT) or mcp_enabled:
             available_tools += [tool.name for tool in self._additional_tools]
 
         return available_tools

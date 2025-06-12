@@ -1,7 +1,4 @@
-from ai_gateway.feature_flags.context import (
-    current_feature_flag_context,
-    is_feature_enabled,
-)
+from lib.feature_flags.context import current_feature_flag_context, is_feature_enabled
 
 
 def test_is_feature_enabled_with_empty_context():
