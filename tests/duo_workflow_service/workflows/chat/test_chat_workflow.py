@@ -23,6 +23,7 @@ from duo_workflow_service.workflows.chat.workflow import (
     Routes,
     Workflow,
 )
+from lib.feature_flags import current_feature_flag_context
 
 
 @pytest.fixture
@@ -328,17 +329,15 @@ async def test_workflow_run(
         ),
     ],
 )
-@patch("duo_workflow_service.workflows.chat.workflow.current_feature_flag_context")
 @patch("duo_workflow_service.components.tools_registry.ToolsRegistry.toolset")
 def test_tools_registry_interaction(
     mock_toolset,
-    mock_feature_flag_context,
     feature_flags,
     workflow_config,
     expected_tools,
     workflow_with_project,
 ):
-    mock_feature_flag_context.get.return_value = feature_flags
+    current_feature_flag_context.set(set(feature_flags))
 
     mock_toolset.return_value = [Mock(name=f"mock_{tool}") for tool in expected_tools]
 

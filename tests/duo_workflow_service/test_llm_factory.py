@@ -10,6 +10,7 @@ from duo_workflow_service.llm_factory import (
     create_chat_model,
     validate_llm_access,
 )
+from lib.feature_flags import current_feature_flag_context
 
 
 @pytest.mark.parametrize(
@@ -50,19 +51,15 @@ from duo_workflow_service.llm_factory import (
         ),
     ],
 )
-@patch("duo_workflow_service.llm_factory.current_feature_flag_context")
 @patch("duo_workflow_service.llm_factory.ChatAnthropicVertex")
 @patch("duo_workflow_service.llm_factory.ChatAnthropic")
 def test_validate_anthropic_variables(
     mock_anthropic_client,
     mock_vertex_client,
-    mock_feature_flag_context,
     env_vars,
     expectation,
     calls_llm,
 ):
-    mock_feature_flag_context.get.return_value = set()
-
     # Mock the invoke method to return a response
     mock_response = Mock()
     mock_response.content = "I am Claude, an AI assistant."
@@ -119,21 +116,16 @@ def test_validate_anthropic_variables(
         ),
     ],
 )
-@patch("duo_workflow_service.llm_factory.current_feature_flag_context")
 @patch("duo_workflow_service.llm_factory.ChatAnthropicVertex")
 @patch("duo_workflow_service.llm_factory.ChatAnthropic")
 def test_clients_receive_max_retries_from_config(
     mock_anthropic_client,
     mock_vertex_client,
-    mock_feature_flag_context,
     env_vars,
     config_class,
     model_name,
     calls_llm,
 ):
-    # Mock feature flags to return empty set
-    mock_feature_flag_context.get.return_value = set()
-
     # Mock the invoke method to return a response
     mock_response = Mock()
     mock_response.content = "I am Claude, an AI assistant."
@@ -210,22 +202,17 @@ def test_clients_receive_max_retries_from_config(
         ),
     ],
 )
-@patch("duo_workflow_service.llm_factory.current_feature_flag_context")
 @patch("duo_workflow_service.llm_factory.ChatAnthropicVertex")
 @patch("duo_workflow_service.llm_factory.ChatAnthropic")
 def test_new_chat_client_with_custom_model(
     mock_anthropic_client,
     mock_vertex_client,
-    mock_feature_flag_context,
     env_vars,
     config_type,
     model_param,
     expected_model,
     calls_llm,
 ):
-    # Mock feature flags to return an empty set
-    mock_feature_flag_context.get.return_value = set()
-
     with patch("os.environ", env_vars):
         if config_type == "vertex":
             if model_param:
@@ -275,17 +262,15 @@ def test_new_chat_client_with_custom_model(
         ),
     ],
 )
-@patch("duo_workflow_service.llm_factory.current_feature_flag_context")
 @patch("duo_workflow_service.llm_factory.ChatAnthropicVertex")
 def test_vertex_config_respects_sonnet_4_feature_flag(
     mock_vertex_client,
-    mock_feature_flag_context,
     feature_flags,
     expected_model,
 ):
     """Test that VertexConfig uses the correct model based on SONNET_4_FEATURE_FLAG."""
     # Set up the feature flag context
-    mock_feature_flag_context.get.return_value = feature_flags
+    current_feature_flag_context.set(feature_flags)
 
     # Set up environment variables for VertexConfig
     env_vars = {

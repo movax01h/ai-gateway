@@ -30,7 +30,6 @@ from ai_gateway.code_suggestions.processing.typing import (
 )
 from ai_gateway.config import Config, ConfigModelLimits
 from ai_gateway.container import ContainerApplication
-from ai_gateway.feature_flags.context import current_feature_flag_context
 from ai_gateway.internal_events.client import InternalEventsClient
 from ai_gateway.model_metadata import TypeModelMetadata, current_model_metadata_context
 from ai_gateway.models.base import ModelMetadata, TokensConsumptionMetadata
@@ -50,6 +49,7 @@ from duo_workflow_service.entities.state import (
     WorkflowState,
     WorkflowStatusEnum,
 )
+from lib.feature_flags.context import current_feature_flag_context
 
 pytest_plugins = ("pytest_asyncio",)
 

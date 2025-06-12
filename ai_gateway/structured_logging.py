@@ -13,8 +13,8 @@ from ai_gateway.api.middleware.self_hosted_logging import (
     enabled_instance_verbose_ai_logs,
 )
 from ai_gateway.config import ConfigLogging
-from ai_gateway.feature_flags import FeatureFlag, is_feature_enabled
 from ai_gateway.model_metadata import ModelMetadata
+from lib.feature_flags import FeatureFlag, is_feature_enabled
 
 access_logger = structlog.stdlib.get_logger("api.access")
 ENABLE_REQUEST_LOGGING = False

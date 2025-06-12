@@ -16,12 +16,12 @@ from structlog.testing import capture_logs
 from ai_gateway.api.error_utils import capture_validation_errors
 from ai_gateway.api.v2 import api_router
 from ai_gateway.api.v2.code.completions import _track_code_suggestions_event
-from ai_gateway.feature_flags.context import current_feature_flag_context
 from ai_gateway.model_selection import LLMDefinition
 from ai_gateway.models.base_chat import Message, Role
 from ai_gateway.tracking.container import ContainerTracking
 from ai_gateway.tracking.instrumentator import SnowplowInstrumentator
 from ai_gateway.tracking.snowplow import SnowplowEvent, SnowplowEventContext
+from lib.feature_flags.context import current_feature_flag_context
 
 
 @pytest.fixture(scope="class")

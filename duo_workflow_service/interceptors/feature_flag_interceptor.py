@@ -1,4 +1,3 @@
-from contextvars import ContextVar
 from typing import Dict, Optional, Set
 
 import grpc
@@ -6,11 +5,7 @@ from fastapi import WebSocket
 
 from duo_workflow_service.interceptors import X_GITLAB_REALM_HEADER
 from duo_workflow_service.interceptors.websocket_middleware import WebSocketMiddleware
-
-# Context variable to store feature flags
-current_feature_flag_context: ContextVar[set] = ContextVar(
-    "current_feature_flag_context", default=set()
-)
+from lib.feature_flags.context import current_feature_flag_context
 
 X_GITLAB_ENABLED_FEATURE_FLAGS = "x-gitlab-enabled-feature-flags"
 

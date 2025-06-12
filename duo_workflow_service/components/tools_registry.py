@@ -6,10 +6,8 @@ from pydantic import BaseModel
 
 from duo_workflow_service import tools
 from duo_workflow_service.gitlab.http_client import GitlabHttpClient
-from duo_workflow_service.interceptors.feature_flag_interceptor import (
-    current_feature_flag_context,
-)
 from duo_workflow_service.tools import Toolset, ToolType
+from lib.feature_flags.context import FeatureFlag, is_feature_enabled
 
 
 class ToolMetadata(TypedDict):
@@ -163,21 +161,16 @@ class ToolsRegistry:
             **{tool.name: tool for tool in additional_tools},
         }
 
-        feature_flags = current_feature_flag_context.get()
         self._preapproved_tool_names = set(self._enabled_tools.keys())
 
         for privilege in enabled_tools:
             for tool_cls in _AGENT_PRIVILEGES[privilege]:
-                if (
-                    tool_cls
-                    in [
-                        tools.GetCommit,
-                        tools.ListCommits,
-                        tools.GetCommitDiff,
-                        tools.GetCommitComments,
-                    ]
-                    and "duo_workflow_commit_tools" not in feature_flags
-                ):
+                if tool_cls in [
+                    tools.GetCommit,
+                    tools.ListCommits,
+                    tools.GetCommitDiff,
+                    tools.GetCommitComments,
+                ] and not is_feature_enabled(FeatureFlag.DUO_WORKFLOW_COMMIT_TOOLS):
                     continue
 
                 tool = tool_cls(metadata=tool_metadata)

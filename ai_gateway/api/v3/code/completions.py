@@ -39,12 +39,12 @@ from ai_gateway.code_suggestions import (
 from ai_gateway.code_suggestions.base import SAAS_PROMPT_MODEL_MAP
 from ai_gateway.config import Config
 from ai_gateway.container import ContainerApplication
-from ai_gateway.feature_flags.context import current_feature_flag_context
 from ai_gateway.model_metadata import TypeModelMetadata, current_model_metadata_context
 from ai_gateway.models import KindModelProvider
 from ai_gateway.prompts import BasePromptRegistry
 from ai_gateway.structured_logging import get_request_logger
 from ai_gateway.tracking import SnowplowEventContext
+from lib.feature_flags.context import current_feature_flag_context
 
 __all__ = [
     "router",
