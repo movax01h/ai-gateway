@@ -1,4 +1,4 @@
-FROM python:3.12.10-slim AS base-image
+FROM python:3.12.11-slim AS base-image
 
 # HF_HOME and POETRY_* are needed to allow the docker image to be run from a non-root users
 # without having issues with permissions

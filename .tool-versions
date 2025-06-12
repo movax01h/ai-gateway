@@ -1,5 +1,5 @@
 lefthook 1.11.13 # datasource=github-releases depName=evilmartians/lefthook
-python 3.12.10 # datasource=github-tags depName=python/cpython
+python 3.12.11 # datasource=github-tags depName=python/cpython
 gcloud 517.0.0 # datasource=github-tags depName=GoogleCloudPlatform/cloud-sdk-docker
 poetry 2.0.1 # datasource=pypi depName=poetry
 ruby 3.3.0 # Temporary dependency until https://gitlab.com/gitlab-org/modelops/applied-ml/code-suggestions/ai-assist/-/issues/447 is done.
