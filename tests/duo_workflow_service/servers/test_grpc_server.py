@@ -3,7 +3,7 @@ import json
 import os
 from datetime import datetime, timedelta, timezone
 from typing import AsyncIterable
-from unittest.mock import ANY, AsyncMock, MagicMock, patch
+from unittest.mock import ANY, AsyncMock, MagicMock, call, patch
 
 import grpc
 import pytest
@@ -196,7 +196,13 @@ async def test_generate_token(mock_generate_token_response, mock_token_authority
         authenticated=True,
         is_debug=False,
         claims=UserClaims(
-            issuer="gitlab.com", scopes=["duo_workflow_execute_workflow"]
+            issuer="gitlab.com",
+            scopes=[
+                "duo_workflow_execute_workflow",
+                "duo_chat",
+                "include_file_context",
+                "unknown_scope",
+            ],
         ),
     )
     current_user.set(user)
@@ -204,9 +210,13 @@ async def test_generate_token(mock_generate_token_response, mock_token_authority
     servicer = GrpcServer()
     await servicer.GenerateToken(contract_pb2.GenerateTokenRequest(), mock_context)
 
-    mock_token_authority.return_value.encode.assert_called_once_with(
-        None, None, user, None, [GitLabUnitPrimitive.DUO_WORKFLOW_EXECUTE_WORKFLOW]
-    )
+    args = mock_token_authority.return_value.encode.call_args.args
+    passed_scopes = args[-1]
+    assert set(passed_scopes) == {
+        "duo_workflow_execute_workflow",
+        "duo_chat",
+        "include_file_context",
+    }
     mock_generate_token_response.assert_called_once_with(
         token="token", expiresAt=one_hour_later
     )

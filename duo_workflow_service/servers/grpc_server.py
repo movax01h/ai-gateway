@@ -14,6 +14,7 @@ from gitlab_cloud_connector import (
     GitLabUnitPrimitive,
     TokenAuthority,
 )
+from gitlab_cloud_connector.data_model.unit_primitive import list_unit_primitives
 from grpc_reflection.v1alpha import reflection
 
 from contract import contract_pb2, contract_pb2_grpc
@@ -47,6 +48,12 @@ from duo_workflow_service.workflows.registry import resolve_workflow_class
 from duo_workflow_service.workflows.type_definitions import AdditionalContext
 
 log = structlog.stdlib.get_logger("server")
+
+allowed_ijwt_scopes = {
+    unit_primitive.name
+    for unit_primitive in list_unit_primitives()
+    if "duo_workflow_service" in unit_primitive.backend_services
+}
 
 
 def string_to_category_enum(category_string: str) -> CategoryEnum:
@@ -262,6 +269,12 @@ class GrpcServer(contract_pb2_grpc.DuoWorkflowServicer):
         gitlab_realm = metadata.get("x-gitlab-realm")
         gitlab_instance_id = metadata.get("x-gitlab-instance-id")
 
+        scopes = []
+        if user.is_debug:
+            scopes = list(allowed_ijwt_scopes)
+        else:
+            scopes = list(set(user.claims.scopes) & allowed_ijwt_scopes)
+
         token_authority = TokenAuthority(
             os.environ.get("DUO_WORKFLOW_SELF_SIGNED_JWT__SIGNING_KEY")
         )
@@ -270,7 +283,7 @@ class GrpcServer(contract_pb2_grpc.DuoWorkflowServicer):
             gitlab_realm,
             user,
             gitlab_instance_id,
-            [GitLabUnitPrimitive.DUO_WORKFLOW_EXECUTE_WORKFLOW],
+            scopes,
         )
 
         return contract_pb2.GenerateTokenResponse(token=token, expiresAt=expires_at)
