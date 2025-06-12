@@ -40,5 +40,5 @@ class GitLabStatusUpdater:
 
         if result.status_code != 200:
             raise Exception(
-                f"Failed to update workflow with '{status_event}' status: {result}"
+                f"Failed to update workflow with '{status_event}' status: {result.status_code}"
             )
