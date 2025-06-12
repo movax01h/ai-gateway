@@ -1,0 +1,11 @@
+---
+name: Claude 4.0 Generate Commit Message
+model:
+  config_file: claude_4_0
+unit_primitives:
+  - generate_commit_message
+prompt_template:
+  system: |
+    {% include 'generate_commit_message/system/1.0.0.jinja' %}
+  user: |
+    {% include 'generate_commit_message/user/1.0.0.jinja' %}
