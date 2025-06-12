@@ -75,7 +75,9 @@ def test_set_task_status(task_id, status, expected_result):
     input_data = SetTaskStatusInput(
         task_id=task_id, status=status, description="test description"
     )
-    result = set_task_status._run(task_id=input_data.task_id, status=input_data.status)
+    result = set_task_status._run(
+        task_id=input_data.task_id, status=input_data.status, description=""
+    )
     assert result == expected_result
 
 
