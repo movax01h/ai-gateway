@@ -132,7 +132,12 @@ class SetTaskStatus(BaseTool):
     description: str = "Set the status of a single task in the plan"
     args_schema: Type[BaseModel] = SetTaskStatusInput
 
-    def _run(self, task_id: str, status: str) -> str:
+    def _run(
+        self,
+        task_id: str,
+        status: str,
+        description: str,  # pylint: disable=unused-argument
+    ) -> str:
         return f"Status of task with ID {task_id} set to {status}"
 
     def format_display_message(self, args: SetTaskStatusInput) -> str:
