@@ -28,69 +28,6 @@ engineer agent."""
 PLANNER_GOAL = """
 Follow these instructions carefully to create an effective plan.
 
-First, review the engineer agent prompt:
-<engineer_agent_prompt>
-{executor_agent_prompt}
-</engineer_agent_prompt>
-
-The engineer agent is limited to use only the following abilities:
-<engineer_agent_abilities>
-{executor_agent_tools}
-</engineer_agent_abilities>
-
-To create the plan, follow these steps:
-
-1. Analyze the goal carefully.
-2. Break down the goal into smaller, manageable tasks.
-3. Order these tasks logically, considering dependencies and efficiency.
-4. For each task, provide detailed instructions that the engineer agent can follow.
-5. Ensure each task can be completed using the engineer agent's abilities.
-6. If a required task is not within the engineer agent's abilities, stop the plan at that point.
-
-You can only use the following tools:
-1. {add_new_task_tool_name} - adds tasks with a description, status, and ID to a plan.
-2. {remove_task_tool_name} - removes a task from a plan by ID.
-3. {update_task_description_tool_name} - changes a task's description in a plan. This tool never updates the status of a task.
-4. {handover_tool_name} - called when a whole plan is ready and can passed to the engineer for implementation.
-5. {get_plan_tool_name} - a tool to get the entire plan.
-
-Guidelines for creating an effective plan:
-- Be specific and clear in your instructions.
-- Consider potential challenges or edge cases the engineer might encounter.
-- Include tasks for error handling or verification where appropriate.
-- Ensure that each task is achievable using the available engineer agent abilities.
-- If a task requires multiple actions, break it down further.
-- Ensure tasks can be completed sequentially, without iterating, looping, repeating, or returning to previous tasks.
-  If iteration is required, include all the steps to iterate over into a single task.
-- Do not include steps to create backups of files tracked by git.
-- If a task involves a URL from the goal, you must include the URL in the task description.
-
-Now, create a detailed plan for the following goal:
-<goal>
-Prepare detailed and accurate plan how to: {goal}
-</goal>
-
-Begin by analyzing the goal and outlining your plan. Then, use the {add_new_task_tool_name} tool, {remove_task_tool_name} tool, and
-{update_task_description_tool_name} tool to save each task in your plan. Once the plan is complete, use the {handover_tool_name} tool to finalize it.
-
-Here is the project information for the current GitLab project:
-<project>
-  <project_id>{project_id}</project_id>
-  <project_name>{project_name}</project_name>
-  <project_url>{project_url}</project_url>
-</project>
-
-Remember:
-- You are forbidden to take action on any of the plan's tasks.
-- You are forbidden to make any changes except for updating the plan.
-- You are forbidden to use any other tool than {add_new_task_tool_name}, {remove_task_tool_name},
-{update_task_description_tool_name}, {handover_tool_name} or {get_plan_tool_name}.
-{planner_instructions}
-"""
-
-BATCH_PLANNER_GOAL = """
-Follow these instructions carefully to create an effective plan.
-
 The engineer agent has access only to these abilities:
 <engineer_agent_abilities>
 {executor_agent_tools}
@@ -149,7 +86,7 @@ Now, generate a detailed and accurate plan for the following goal:
 {planner_instructions}
 """
 
-PLANNER_TASK_BATCH_INSTRUCTIONS = """
+PLANNER_INSTRUCTIONS = """
 Begin by analyzing the goal, then proceed to create a complete plan
 involving all the tasks broken down to the most granular level.
 Use `{create_plan_tool_name}` to save the plan ONCE after you've created it.
@@ -176,31 +113,6 @@ When you are satisfied with the plan, finalize it using `{handover_tool_name}`.
   <project_name>{project_name}</project_name>
   <project_url>{project_url}</project_url>
 </project>
-"""
-
-PLANNER_INSTRUCTIONS = """Begin by analyzing the goal and outlining your plan. Then, use the {add_new_task_tool_name}
-tool, {remove_task_tool_name} tool, and {update_task_description_tool_name} tool to save each task in your plan. Once
-the plan is complete, use the {handover_tool_name} tool to finalize it.
-
-Here is the project information for the current GitLab project:
-<project>
-  <project_id>{project_id}</project_id>
-  <project_name>{project_name}</project_name>
-  <project_url>{project_url}</project_url>
-</project>
-
-Remember:
-- You are forbidden to take action on any of the plan's tasks.
-- You are forbidden to make any changes except for updating the plan.
-- You are forbidden to use any other tool than {add_new_task_tool_name}, {remove_task_tool_name},
-{update_task_description_tool_name}, {handover_tool_name} or {get_plan_tool_name}.
-
-Start your planning process now. Begin with a brief analysis of the goal, then proceed to create a complete plan
-involving all the tasks broken down to the most granular level. After saving the plan with all its tasks, review the
-plan tasks to make sure that none of the tasks uses any abilities that are not available to the engineer agent. Write
-name of engineer's agent ability supporting the task next to it. If you need to remove tasks or update task
-descriptions in the plan, use the {remove_task_tool_name} tool or the {update_task_description_tool_name}
-accordingly. Once you are satisfied with the plan, use the {handover_tool_name} tool to finalize the plan.
 """
 
 EXECUTOR_SYSTEM_MESSAGE = """
