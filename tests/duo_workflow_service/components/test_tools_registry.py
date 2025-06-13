@@ -90,6 +90,10 @@ _outbox = MagicMock(spec=asyncio.Queue)
                 "list_epic_notes",
                 "get_epic_note",
                 "get_previous_workflow_context",
+                "get_commit",
+                "list_commits",
+                "get_commit_diff",
+                "get_commit_comments",
             },
         ),
         (
@@ -136,6 +140,10 @@ _outbox = MagicMock(spec=asyncio.Queue)
                 "list_epic_notes",
                 "get_epic_note",
                 "get_previous_workflow_context",
+                "get_commit",
+                "list_commits",
+                "get_commit_diff",
+                "get_commit_comments",
             },
         ),
         (
@@ -265,6 +273,10 @@ def test_registry_initialization_initialises_tools_with_correct_attributes(
         "get_previous_workflow_context": tools.GetWorkflowContext(
             metadata=tool_metadata
         ),
+        "get_commit": tools.GetCommit(metadata=tool_metadata),
+        "list_commits": tools.ListCommits(metadata=tool_metadata),
+        "get_commit_diff": tools.GetCommitDiff(metadata=tool_metadata),
+        "get_commit_comments": tools.GetCommitComments(metadata=tool_metadata),
     }
 
     assert registry._enabled_tools == expected_tools
@@ -541,31 +553,3 @@ def test_toolset_method(tool_metadata, tool_names, expected_preapproved):
             pre_approved=expected_preapproved, all_tools=expected_all_tools
         )
         assert toolset == mock_toolset
-
-
-@pytest.mark.parametrize(
-    "feature_flag_value, should_include_commit_tools",
-    [
-        ("duo_workflow_commit_tools", True),
-        ("", False),
-    ],
-)
-def test_commit_tools_feature_flag(
-    feature_flag_value,
-    should_include_commit_tools,
-    tool_metadata,
-):
-    current_feature_flag_context.set({feature_flag_value})
-
-    registry = ToolsRegistry(
-        enabled_tools=["read_only_gitlab"],
-        preapproved_tools=[],
-        tool_metadata=tool_metadata,
-    )
-
-    assert ("get_commit" in registry._enabled_tools) == should_include_commit_tools
-    assert ("list_commits" in registry._enabled_tools) == should_include_commit_tools
-    assert ("get_commit_diff" in registry._enabled_tools) == should_include_commit_tools
-    assert (
-        "get_commit_comments" in registry._enabled_tools
-    ) == should_include_commit_tools
