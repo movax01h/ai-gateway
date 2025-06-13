@@ -25,14 +25,12 @@ from duo_workflow_service.agents import (
     ToolsExecutor,
 )
 from duo_workflow_service.agents.prompts import (
-    BATCH_PLANNER_GOAL,
     BUILD_CONTEXT_SYSTEM_MESSAGE,
     EXECUTOR_SYSTEM_MESSAGE,
     HANDOVER_TOOL_NAME,
     PLANNER_GOAL,
     PLANNER_INSTRUCTIONS,
     PLANNER_PROMPT,
-    PLANNER_TASK_BATCH_INSTRUCTIONS,
     SET_TASK_STATUS_TOOL_NAME,
 )
 from duo_workflow_service.components import (
@@ -59,7 +57,6 @@ from duo_workflow_service.workflows.abstract_workflow import AbstractWorkflow
 from duo_workflow_service.workflows.model_selection_utils import (
     get_sonnet_4_config_with_feature_flag,
 )
-from lib.feature_flags.context import FeatureFlag, is_feature_enabled
 
 # Constants
 QUEUE_MAX_SIZE = 1
@@ -154,6 +151,7 @@ PLANNER_TOOLS = [
     "remove_task",
     "update_task_description",
     "handover_tool",
+    "create_plan",
 ]
 
 
@@ -257,66 +255,33 @@ class Workflow(AbstractWorkflow):
         base_model_planner,
         executor_toolset,
     ):
-        if is_feature_enabled(FeatureFlag.BATCH_DUO_WORKFLOW_PLANNER_TASKS):
-            planner_tools = PLANNER_TOOLS + ["create_plan"]
-            planner_toolset = tools_registry.toolset(planner_tools)
-            planner = Agent(
-                goal=BATCH_PLANNER_GOAL.format(
-                    executor_agent_prompt=EXECUTOR_SYSTEM_MESSAGE,
-                    handover_tool_name=HANDOVER_TOOL_NAME,
-                    executor_agent_tools="\n".join(
-                        [
-                            f"{tool_name}: {tool.description}"
-                            for tool_name, tool in executor_toolset.items()
-                        ]
-                    ),
-                    goal=goal,
-                    create_plan_tool_name=tools_registry.get("create_plan").name,  # type: ignore
-                    get_plan_tool_name=tools_registry.get("get_plan").name,  # type: ignore
-                    add_new_task_tool_name=tools_registry.get("add_new_task").name,  # type: ignore
-                    remove_task_tool_name=tools_registry.get("remove_task").name,  # type: ignore
-                    update_task_description_tool_name=tools_registry.get("update_task_description").name,  # type: ignore
-                    planner_instructions=self.planner_instructions(tools_registry),
+        planner_toolset = tools_registry.toolset(PLANNER_TOOLS)
+        planner = Agent(
+            goal=PLANNER_GOAL.format(
+                executor_agent_prompt=EXECUTOR_SYSTEM_MESSAGE,
+                handover_tool_name=HANDOVER_TOOL_NAME,
+                executor_agent_tools="\n".join(
+                    [
+                        f"{tool_name}: {tool.description}"
+                        for tool_name, tool in executor_toolset.items()
+                    ]
                 ),
-                model=base_model_planner,
-                name="planner",
-                workflow_id=self._workflow_id,
-                http_client=self._http_client,
-                system_prompt=PLANNER_PROMPT,
-                toolset=planner_toolset,
-                workflow_type=self._workflow_type,
-            )
-        else:
-            planner_tools = PLANNER_TOOLS
-            planner_toolset = tools_registry.toolset(PLANNER_TOOLS)
-            planner = Agent(
-                goal=PLANNER_GOAL.format(
-                    executor_agent_prompt=EXECUTOR_SYSTEM_MESSAGE,
-                    handover_tool_name=HANDOVER_TOOL_NAME,
-                    executor_agent_tools="\n".join(
-                        [
-                            f"{tool_name}: {tool.description}"
-                            for tool_name, tool in executor_toolset.items()
-                        ]
-                    ),
-                    goal=goal,
-                    get_plan_tool_name=tools_registry.get("get_plan").name,  # type: ignore
-                    add_new_task_tool_name=tools_registry.get("add_new_task").name,  # type: ignore
-                    remove_task_tool_name=tools_registry.get("remove_task").name,  # type: ignore
-                    update_task_description_tool_name=tools_registry.get("update_task_description").name,  # type: ignore
-                    project_id=self._project["id"],
-                    project_name=self._project["name"],
-                    project_url=self._project["http_url_to_repo"],
-                    planner_instructions=self.planner_instructions(tools_registry),
-                ),
-                model=base_model_planner,
-                name="planner",
-                workflow_id=self._workflow_id,
-                http_client=self._http_client,
-                system_prompt=PLANNER_PROMPT,
-                toolset=planner_toolset,
-                workflow_type=self._workflow_type,
-            )
+                goal=goal,
+                create_plan_tool_name=tools_registry.get("create_plan").name,  # type: ignore
+                get_plan_tool_name=tools_registry.get("get_plan").name,  # type: ignore
+                add_new_task_tool_name=tools_registry.get("add_new_task").name,  # type: ignore
+                remove_task_tool_name=tools_registry.get("remove_task").name,  # type: ignore
+                update_task_description_tool_name=tools_registry.get("update_task_description").name,  # type: ignore
+                planner_instructions=self.planner_instructions(tools_registry),
+            ),
+            model=base_model_planner,
+            name="planner",
+            workflow_id=self._workflow_id,
+            http_client=self._http_client,
+            system_prompt=PLANNER_PROMPT,
+            toolset=planner_toolset,
+            workflow_type=self._workflow_type,
+        )
 
         return {
             "agent": planner,
@@ -521,21 +486,8 @@ class Workflow(AbstractWorkflow):
             self.log.info("###############################")
 
     def planner_instructions(self, tools_registry):
-        if is_feature_enabled(FeatureFlag.BATCH_DUO_WORKFLOW_PLANNER_TASKS):
-            self.log.info("Using batched planner")
-            return PLANNER_TASK_BATCH_INSTRUCTIONS.format(
-                create_plan_tool_name=tools_registry.get("create_plan").name,  # type: ignore
-                add_new_task_tool_name=tools_registry.get("add_new_task").name,  # type: ignore
-                remove_task_tool_name=tools_registry.get("remove_task").name,  # type: ignore
-                update_task_description_tool_name=tools_registry.get("update_task_description").name,  # type: ignore
-                get_plan_tool_name=tools_registry.get("get_plan").name,  # type: ignore
-                handover_tool_name=HANDOVER_TOOL_NAME,
-                project_id=self._project["id"],
-                project_name=self._project["name"],
-                project_url=self._project["http_url_to_repo"],
-            )
-
         return PLANNER_INSTRUCTIONS.format(
+            create_plan_tool_name=tools_registry.get("create_plan").name,  # type: ignore
             add_new_task_tool_name=tools_registry.get("add_new_task").name,  # type: ignore
             remove_task_tool_name=tools_registry.get("remove_task").name,  # type: ignore
             update_task_description_tool_name=tools_registry.get("update_task_description").name,  # type: ignore
