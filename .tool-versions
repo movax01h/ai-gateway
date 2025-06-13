@@ -6,4 +6,4 @@ ruby 3.3.0 # Temporary dependency until https://gitlab.com/gitlab-org/modelops/a
 vale 3.11.2 # datasource=github-releases depName=errata-ai/vale
 nodejs 20.17.0 # Dependency for markdownlint-cli2
 markdownlint-cli2 0.17.2 # datasource=github-tags depName=DavidAnson/markdownlint-cli2
-golang 1.22.3
+golang 1.22.3 # datasource=golang-version depName=golang/go
