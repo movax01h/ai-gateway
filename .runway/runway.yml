@@ -31,7 +31,7 @@ spec:
     timeout_seconds: 5
   scalability:
     min_instances: 4
-    max_instances: 200
+    max_instances: 100
     max_instance_request_concurrency: 40
   resources:
     startup_cpu_boost: true
@@ -43,3 +43,5 @@ spec:
   load_balancing:
     external_load_balancer:
       backend_protocol: HTTPS
+  vpc_access:
+    enabled: true
