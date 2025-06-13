@@ -17,7 +17,6 @@ class FeatureFlag(StrEnum):
     DUO_WORKFLOW_CHAT_WORKFLOW_CLAUDE_SONNET_4 = (
         "duo_workflow_chat_workflow_claude_sonnet_4"
     )
-    DUO_WORKFLOW_CHAT_MUTATION_TOOLS = "duo_workflow_chat_mutation_tools"
     DUO_WORKFLOW_MCP_SUPPORT = "duo_workflow_mcp_support"
     BATCH_DUO_WORKFLOW_PLANNER_TASKS = "batch_duo_workflow_planner_tasks"
 
