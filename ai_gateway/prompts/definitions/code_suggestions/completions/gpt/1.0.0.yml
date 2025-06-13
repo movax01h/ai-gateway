@@ -4,25 +4,14 @@ model:
   params:
     model_class_provider: litellm
     temperature: 0.0
-    max_tokens: 128
+    max_tokens: 64
     max_retries: 1
 unit_primitives:
   - complete_code
 prompt_template:
   system: |
-    {% include 'code_suggestions/completions/system/1.0.0.jinja' %}
+    {% include 'code_suggestions/completions/gpt_system/1.0.0.jinja' %}
   user: |
-    <PREFIX>
-    {{prefix}}
-    </PREFIX>
-    <cursor />
-    <SUFFIX>
-    {{suffix}}
-    </SUFFIX>
+    {% include 'code_suggestions/completions/gpt_user/1.0.0.jinja' %}
 params:
   timeout: 60
-  stop:
-    - "[INST]"
-    - "[/INST]"
-    - "</PREFIX>"
-    - "</SUFFIX>"
