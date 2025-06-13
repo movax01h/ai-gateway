@@ -173,6 +173,7 @@ class GrpcServer(contract_pb2_grpc.DuoWorkflowServicer):
             workflow_id=workflow_id,
             workflow_metadata=workflow_metadata,
             workflow_type=workflow_type,
+            user=user,
             mcp_tools=mcp_tools,
             additional_context=additional_context,
             context_elements=context_elements,

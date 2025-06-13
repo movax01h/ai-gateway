@@ -1,6 +1,7 @@
 import asyncio
 from typing import Any, Optional, Type, TypedDict, Union
 
+from gitlab_cloud_connector import CloudConnectorUser
 from langchain.tools import BaseTool
 from pydantic import BaseModel
 
@@ -115,6 +116,7 @@ class ToolsRegistry:
         inbox: asyncio.Queue,
         gitlab_host: str,
         additional_tools: Optional[list[Type[BaseTool]]] = None,
+        user: Optional[CloudConnectorUser] = None,
     ):
         if not workflow_config:
             raise RuntimeError("Failed to find tools configuration for workflow")
@@ -143,6 +145,7 @@ class ToolsRegistry:
             preapproved_tools=preapproved_tools,
             tool_metadata=tool_metadata,
             additional_tools=additional_tools,
+            user=user,
         )
 
     def __init__(
@@ -151,6 +154,7 @@ class ToolsRegistry:
         preapproved_tools: list[str],
         tool_metadata: ToolMetadata,
         additional_tools: Optional[list[Type[BaseTool]]] = None,
+        user: Optional[CloudConnectorUser] = None,
     ):
         if not additional_tools:
             additional_tools = []
@@ -174,6 +178,13 @@ class ToolsRegistry:
                     continue
 
                 tool = tool_cls(metadata=tool_metadata)
+
+                # If user is passed, we check user permission to access this tool
+                if user:
+                    tool_primitive = getattr(tool, "unit_primitive", None)
+                    if tool_primitive and not user.can(tool_primitive):
+                        continue
+
                 self._enabled_tools[tool.name] = tool
                 if privilege in preapproved_tools:
                     self._preapproved_tool_names.add(tool.name)

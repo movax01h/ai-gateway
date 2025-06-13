@@ -1,6 +1,7 @@
 import json
 from typing import Any, Optional, Type
 
+from gitlab_cloud_connector import GitLabUnitPrimitive
 from pydantic import BaseModel, Field
 
 from duo_workflow_service.tools.duo_base_tool import DuoBaseTool
@@ -44,6 +45,8 @@ class GetPipelineErrorsForMergeRequest(DuoBaseTool):
         get_pipeline_errors(url="https://gitlab.com/namespace/project/-/merge_requests/103")
     """
     args_schema: Type[BaseModel] = GetPipelineErrorsInput  # type: ignore
+
+    unit_primitive: GitLabUnitPrimitive = GitLabUnitPrimitive.ASK_MERGE_REQUEST
 
     async def _arun(self, **kwargs: Any) -> str:
         url = kwargs.get("url", None)

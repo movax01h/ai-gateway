@@ -4,6 +4,7 @@ from abc import ABC, abstractmethod
 from typing import Any, Dict, Optional, Type, TypedDict, Union
 
 import structlog
+from gitlab_cloud_connector import CloudConnectorUser
 from langchain.tools import BaseTool
 from langchain_core.runnables import RunnableConfig
 
@@ -91,6 +92,7 @@ class AbstractWorkflow(ABC):
             "gitlab_token": "",
         },
         mcp_tools: list[contract_pb2.McpTool] = [],
+        user: Optional[CloudConnectorUser] = None,
         additional_context: Optional[list[AdditionalContext]] = None,
     ):
         self._outbox = asyncio.Queue(maxsize=QUEUE_MAX_SIZE)
@@ -99,6 +101,7 @@ class AbstractWorkflow(ABC):
         self._workflow_id = workflow_id
         self._workflow_metadata = workflow_metadata
         self._context_elements = context_elements or []
+        self._user = user
         self.log = structlog.stdlib.get_logger("workflow").bind(workflow_id=workflow_id)
         self._http_client = get_http_client(
             self._outbox,
@@ -204,6 +207,12 @@ class AbstractWorkflow(ABC):
                 self._http_client, self._workflow_id
             )
 
+            user_for_registry = (
+                self._user
+                if self._workflow_type == CategoryEnum.WORKFLOW_CHAT
+                else None
+            )
+
             tools_registry = await ToolsRegistry.configure(
                 outbox=self._outbox,
                 inbox=self._inbox,
@@ -211,6 +220,7 @@ class AbstractWorkflow(ABC):
                 gl_http_client=self._http_client,
                 gitlab_host=gitlab_host,
                 additional_tools=self._additional_tools,
+                user=user_for_registry,
             )
             checkpoint_notifier = UserInterface(
                 outbox=self._streaming_outbox, goal=goal

@@ -287,7 +287,8 @@ async def test_execute_workflow_missing_workflow_metadata(
             startRequest=contract_pb2.StartWorkflowRequest(workflowID="123")
         )
 
-    current_user.set(CloudConnectorUser(authenticated=True, is_debug=True))
+    user = CloudConnectorUser(authenticated=True, is_debug=True)
+    current_user.set(user)
     mock_context = MagicMock(spec=grpc.ServicerContext)
     servicer = GrpcServer()
     result = servicer.ExecuteWorkflow(mock_request_iterator(), mock_context)
@@ -298,6 +299,7 @@ async def test_execute_workflow_missing_workflow_metadata(
         workflow_id="123",
         workflow_metadata={},
         workflow_type=CategoryEnum.WORKFLOW_SOFTWARE_DEVELOPMENT,
+        user=user,
         additional_context=None,
         context_elements=[],
         invocation_metadata={"base_url": "", "gitlab_token": ""},
@@ -329,7 +331,8 @@ async def test_execute_workflow_valid_workflow_metadata(
             )
         )
 
-    current_user.set(CloudConnectorUser(authenticated=True, is_debug=True))
+    user = CloudConnectorUser(authenticated=True, is_debug=True)
+    current_user.set(user)
     mock_context = MagicMock(spec=grpc.ServicerContext)
     mock_context.invocation_metadata.return_value = [
         ("x-gitlab-base-url", "http://test.url"),
@@ -345,6 +348,7 @@ async def test_execute_workflow_valid_workflow_metadata(
         workflow_id="123",
         workflow_metadata={"key": "value"},
         workflow_type=CategoryEnum.WORKFLOW_SOFTWARE_DEVELOPMENT,
+        user=user,
         additional_context=None,
         context_elements=[],
         invocation_metadata={"base_url": "http://test.url", "gitlab_token": "123"},

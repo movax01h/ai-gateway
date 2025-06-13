@@ -2,6 +2,7 @@ import json
 import re
 from typing import Any, Optional, Type
 
+from gitlab_cloud_connector import GitLabUnitPrimitive
 from pydantic import BaseModel, Field
 
 from duo_workflow_service.tools.duo_base_tool import DuoBaseTool
@@ -71,6 +72,8 @@ class CreateMergeRequest(DuoBaseTool):
     """
     args_schema: Type[BaseModel] = CreateMergeRequestInput
 
+    unit_primitive: GitLabUnitPrimitive = GitLabUnitPrimitive.ASK_MERGE_REQUEST
+
     async def _arun(
         self,
         source_branch: str,
@@ -132,6 +135,8 @@ class GetMergeRequest(DuoBaseTool):
     """
     args_schema: Type[BaseModel] = MergeRequestResourceInput  # type: ignore
 
+    unit_primitive: GitLabUnitPrimitive = GitLabUnitPrimitive.ASK_MERGE_REQUEST
+
     async def _arun(self, **kwargs: Any) -> str:
         url = kwargs.get("url")
         project_id = kwargs.get("project_id")
@@ -175,6 +180,8 @@ class ListMergeRequestDiffs(DuoBaseTool):
         list_merge_request_diffs(url="https://gitlab.com/namespace/project/-/merge_requests/103")
     """
     args_schema: Type[BaseModel] = MergeRequestResourceInput  # type: ignore
+
+    unit_primitive: GitLabUnitPrimitive = GitLabUnitPrimitive.ASK_MERGE_REQUEST
 
     async def _arun(self, **kwargs: Any) -> str:
         url = kwargs.get("url")
@@ -230,6 +237,8 @@ For example:
 The body parameter is always required.
 """
     args_schema: Type[BaseModel] = CreateMergeRequestNoteInput  # type: ignore
+
+    unit_primitive: GitLabUnitPrimitive = GitLabUnitPrimitive.ASK_MERGE_REQUEST
 
     def _contains_quick_action(self, body: str) -> bool:
         quick_action_pattern = r"(?m)^/[a-zA-Z]+"
@@ -289,6 +298,8 @@ class ListAllMergeRequestNotes(DuoBaseTool):
         list_all_merge_request_notes(url="https://gitlab.com/namespace/project/-/merge_requests/103")
     """
     args_schema: Type[BaseModel] = MergeRequestResourceInput  # type: ignore
+
+    unit_primitive: GitLabUnitPrimitive = GitLabUnitPrimitive.ASK_MERGE_REQUEST
 
     async def _arun(self, **kwargs: Any) -> str:
         url = kwargs.get("url")
@@ -381,6 +392,8 @@ For example:
     update_merge_request(url="https://gitlab.com/namespace/project/-/merge_requests/103", title="Updated title")
     """
     args_schema: Type[BaseModel] = UpdateMergeRequestInput
+
+    unit_primitive: GitLabUnitPrimitive = GitLabUnitPrimitive.ASK_MERGE_REQUEST
 
     async def _arun(self, **kwargs: Any) -> str:
         url = kwargs.pop("url", None)

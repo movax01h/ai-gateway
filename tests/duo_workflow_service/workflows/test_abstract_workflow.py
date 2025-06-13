@@ -67,6 +67,7 @@ async def test_init():
     mcp_tools = [
         contract_pb2.McpTool(name="get_issue", description="Tool to get issue")
     ]
+    user = MagicMock()
     workflow = MockWorkflow(
         workflow_id,
         metadata,
@@ -74,6 +75,7 @@ async def test_init():
         context_elements,
         {},
         mcp_tools,
+        user,
     )
 
     assert workflow._workflow_id == workflow_id
@@ -86,6 +88,7 @@ async def test_init():
     tool = workflow._additional_tools[0]
     assert tool.name == "get_issue"
     assert tool.description == "Tool to get issue"
+    assert workflow._user == user
 
 
 @pytest.mark.asyncio
