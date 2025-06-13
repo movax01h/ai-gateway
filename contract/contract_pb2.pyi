@@ -31,7 +31,7 @@ class ClientEvent(_message.Message):
     def __init__(self, startRequest: _Optional[_Union[StartWorkflowRequest, _Mapping]] = ..., actionResponse: _Optional[_Union[ActionResponse, _Mapping]] = ...) -> None: ...
 
 class StartWorkflowRequest(_message.Message):
-    __slots__ = ("clientVersion", "workflowID", "workflowDefinition", "goal", "workflowMetadata", "clientCapabilities", "context", "mcpTools", "additional_context")
+    __slots__ = ("clientVersion", "workflowID", "workflowDefinition", "goal", "workflowMetadata", "clientCapabilities", "context", "mcpTools", "additional_context", "approval")
     CLIENTVERSION_FIELD_NUMBER: _ClassVar[int]
     WORKFLOWID_FIELD_NUMBER: _ClassVar[int]
     WORKFLOWDEFINITION_FIELD_NUMBER: _ClassVar[int]
@@ -41,6 +41,7 @@ class StartWorkflowRequest(_message.Message):
     CONTEXT_FIELD_NUMBER: _ClassVar[int]
     MCPTOOLS_FIELD_NUMBER: _ClassVar[int]
     ADDITIONAL_CONTEXT_FIELD_NUMBER: _ClassVar[int]
+    APPROVAL_FIELD_NUMBER: _ClassVar[int]
     clientVersion: str
     workflowID: str
     workflowDefinition: str
@@ -50,7 +51,8 @@ class StartWorkflowRequest(_message.Message):
     context: _containers.RepeatedCompositeFieldContainer[ContextElement]
     mcpTools: _containers.RepeatedCompositeFieldContainer[McpTool]
     additional_context: _containers.RepeatedCompositeFieldContainer[AdditionalContext]
-    def __init__(self, clientVersion: _Optional[str] = ..., workflowID: _Optional[str] = ..., workflowDefinition: _Optional[str] = ..., goal: _Optional[str] = ..., workflowMetadata: _Optional[str] = ..., clientCapabilities: _Optional[_Iterable[str]] = ..., context: _Optional[_Iterable[_Union[ContextElement, _Mapping]]] = ..., mcpTools: _Optional[_Iterable[_Union[McpTool, _Mapping]]] = ..., additional_context: _Optional[_Iterable[_Union[AdditionalContext, _Mapping]]] = ...) -> None: ...
+    approval: Approval
+    def __init__(self, clientVersion: _Optional[str] = ..., workflowID: _Optional[str] = ..., workflowDefinition: _Optional[str] = ..., goal: _Optional[str] = ..., workflowMetadata: _Optional[str] = ..., clientCapabilities: _Optional[_Iterable[str]] = ..., context: _Optional[_Iterable[_Union[ContextElement, _Mapping]]] = ..., mcpTools: _Optional[_Iterable[_Union[McpTool, _Mapping]]] = ..., additional_context: _Optional[_Iterable[_Union[AdditionalContext, _Mapping]]] = ..., approval: _Optional[_Union[Approval, _Mapping]] = ...) -> None: ...
 
 class ActionResponse(_message.Message):
     __slots__ = ("requestID", "response", "plainTextResponse", "httpResponse")
@@ -258,3 +260,19 @@ class AdditionalContext(_message.Message):
     content: str
     metadata: str
     def __init__(self, category: _Optional[str] = ..., id: _Optional[str] = ..., content: _Optional[str] = ..., metadata: _Optional[str] = ...) -> None: ...
+
+class Approval(_message.Message):
+    __slots__ = ("approval", "rejection")
+    class Approved(_message.Message):
+        __slots__ = ()
+        def __init__(self) -> None: ...
+    class Rejected(_message.Message):
+        __slots__ = ("message",)
+        MESSAGE_FIELD_NUMBER: _ClassVar[int]
+        message: str
+        def __init__(self, message: _Optional[str] = ...) -> None: ...
+    APPROVAL_FIELD_NUMBER: _ClassVar[int]
+    REJECTION_FIELD_NUMBER: _ClassVar[int]
+    approval: Approval.Approved
+    rejection: Approval.Rejected
+    def __init__(self, approval: _Optional[_Union[Approval.Approved, _Mapping]] = ..., rejection: _Optional[_Union[Approval.Rejected, _Mapping]] = ...) -> None: ...

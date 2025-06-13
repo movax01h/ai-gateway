@@ -25,6 +25,7 @@ message StartWorkflowRequest {
     repeated ContextElement context = 7;
     repeated McpTool mcpTools = 8;
     repeated AdditionalContext additional_context = 9;
+    optional Approval approval = 10;
 }
 
 message ActionResponse {
@@ -159,4 +160,17 @@ message AdditionalContext {
     optional string id = 2;
     optional string content = 3;
     optional string metadata = 4;
+}
+
+message Approval {
+    message Approved {}
+
+    message Rejected {
+        optional string message = 1;
+    }
+
+    oneof user_decision {
+        Approved approval = 1;
+        Rejected rejection = 2;
+    }
 }

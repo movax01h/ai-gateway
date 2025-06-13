@@ -95,6 +95,7 @@ export interface StartWorkflowRequest {
   context: ContextElement[];
   mcpTools: McpTool[];
   additionalContext: AdditionalContext[];
+  approval?: Approval | undefined;
 }
 
 export interface ActionResponse {
@@ -222,6 +223,18 @@ export interface AdditionalContext {
   metadata?: string | undefined;
 }
 
+export interface Approval {
+  approval?: Approval_Approved | undefined;
+  rejection?: Approval_Rejected | undefined;
+}
+
+export interface Approval_Approved {
+}
+
+export interface Approval_Rejected {
+  message?: string | undefined;
+}
+
 function createBaseClientEvent(): ClientEvent {
   return { startRequest: undefined, actionResponse: undefined };
 }
@@ -313,6 +326,7 @@ function createBaseStartWorkflowRequest(): StartWorkflowRequest {
     context: [],
     mcpTools: [],
     additionalContext: [],
+    approval: undefined,
   };
 }
 
@@ -344,6 +358,9 @@ export const StartWorkflowRequest: MessageFns<StartWorkflowRequest> = {
     }
     for (const v of message.additionalContext) {
       AdditionalContext.encode(v!, writer.uint32(74).fork()).join();
+    }
+    if (message.approval !== undefined) {
+      Approval.encode(message.approval, writer.uint32(82).fork()).join();
     }
     return writer;
   },
@@ -427,6 +444,14 @@ export const StartWorkflowRequest: MessageFns<StartWorkflowRequest> = {
           message.additionalContext.push(AdditionalContext.decode(reader, reader.uint32()));
           continue;
         }
+        case 10: {
+          if (tag !== 82) {
+            break;
+          }
+
+          message.approval = Approval.decode(reader, reader.uint32());
+          continue;
+        }
       }
       if ((tag & 7) === 4 || tag === 0) {
         break;
@@ -453,6 +478,7 @@ export const StartWorkflowRequest: MessageFns<StartWorkflowRequest> = {
       additionalContext: globalThis.Array.isArray(object?.additionalContext)
         ? object.additionalContext.map((e: any) => AdditionalContext.fromJSON(e))
         : [],
+      approval: isSet(object.approval) ? Approval.fromJSON(object.approval) : undefined,
     };
   },
 
@@ -485,6 +511,9 @@ export const StartWorkflowRequest: MessageFns<StartWorkflowRequest> = {
     if (message.additionalContext?.length) {
       obj.additionalContext = message.additionalContext.map((e) => AdditionalContext.toJSON(e));
     }
+    if (message.approval !== undefined) {
+      obj.approval = Approval.toJSON(message.approval);
+    }
     return obj;
   },
 
@@ -502,6 +531,9 @@ export const StartWorkflowRequest: MessageFns<StartWorkflowRequest> = {
     message.context = object.context?.map((e) => ContextElement.fromPartial(e)) || [];
     message.mcpTools = object.mcpTools?.map((e) => McpTool.fromPartial(e)) || [];
     message.additionalContext = object.additionalContext?.map((e) => AdditionalContext.fromPartial(e)) || [];
+    message.approval = (object.approval !== undefined && object.approval !== null)
+      ? Approval.fromPartial(object.approval)
+      : undefined;
     return message;
   },
 };
@@ -2471,6 +2503,187 @@ export const AdditionalContext: MessageFns<AdditionalContext> = {
     message.id = object.id ?? undefined;
     message.content = object.content ?? undefined;
     message.metadata = object.metadata ?? undefined;
+    return message;
+  },
+};
+
+function createBaseApproval(): Approval {
+  return { approval: undefined, rejection: undefined };
+}
+
+export const Approval: MessageFns<Approval> = {
+  encode(message: Approval, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
+    if (message.approval !== undefined) {
+      Approval_Approved.encode(message.approval, writer.uint32(10).fork()).join();
+    }
+    if (message.rejection !== undefined) {
+      Approval_Rejected.encode(message.rejection, writer.uint32(18).fork()).join();
+    }
+    return writer;
+  },
+
+  decode(input: BinaryReader | Uint8Array, length?: number): Approval {
+    const reader = input instanceof BinaryReader ? input : new BinaryReader(input);
+    let end = length === undefined ? reader.len : reader.pos + length;
+    const message = createBaseApproval();
+    while (reader.pos < end) {
+      const tag = reader.uint32();
+      switch (tag >>> 3) {
+        case 1: {
+          if (tag !== 10) {
+            break;
+          }
+
+          message.approval = Approval_Approved.decode(reader, reader.uint32());
+          continue;
+        }
+        case 2: {
+          if (tag !== 18) {
+            break;
+          }
+
+          message.rejection = Approval_Rejected.decode(reader, reader.uint32());
+          continue;
+        }
+      }
+      if ((tag & 7) === 4 || tag === 0) {
+        break;
+      }
+      reader.skip(tag & 7);
+    }
+    return message;
+  },
+
+  fromJSON(object: any): Approval {
+    return {
+      approval: isSet(object.approval) ? Approval_Approved.fromJSON(object.approval) : undefined,
+      rejection: isSet(object.rejection) ? Approval_Rejected.fromJSON(object.rejection) : undefined,
+    };
+  },
+
+  toJSON(message: Approval): unknown {
+    const obj: any = {};
+    if (message.approval !== undefined) {
+      obj.approval = Approval_Approved.toJSON(message.approval);
+    }
+    if (message.rejection !== undefined) {
+      obj.rejection = Approval_Rejected.toJSON(message.rejection);
+    }
+    return obj;
+  },
+
+  create<I extends Exact<DeepPartial<Approval>, I>>(base?: I): Approval {
+    return Approval.fromPartial(base ?? ({} as any));
+  },
+  fromPartial<I extends Exact<DeepPartial<Approval>, I>>(object: I): Approval {
+    const message = createBaseApproval();
+    message.approval = (object.approval !== undefined && object.approval !== null)
+      ? Approval_Approved.fromPartial(object.approval)
+      : undefined;
+    message.rejection = (object.rejection !== undefined && object.rejection !== null)
+      ? Approval_Rejected.fromPartial(object.rejection)
+      : undefined;
+    return message;
+  },
+};
+
+function createBaseApproval_Approved(): Approval_Approved {
+  return {};
+}
+
+export const Approval_Approved: MessageFns<Approval_Approved> = {
+  encode(_: Approval_Approved, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
+    return writer;
+  },
+
+  decode(input: BinaryReader | Uint8Array, length?: number): Approval_Approved {
+    const reader = input instanceof BinaryReader ? input : new BinaryReader(input);
+    let end = length === undefined ? reader.len : reader.pos + length;
+    const message = createBaseApproval_Approved();
+    while (reader.pos < end) {
+      const tag = reader.uint32();
+      switch (tag >>> 3) {
+      }
+      if ((tag & 7) === 4 || tag === 0) {
+        break;
+      }
+      reader.skip(tag & 7);
+    }
+    return message;
+  },
+
+  fromJSON(_: any): Approval_Approved {
+    return {};
+  },
+
+  toJSON(_: Approval_Approved): unknown {
+    const obj: any = {};
+    return obj;
+  },
+
+  create<I extends Exact<DeepPartial<Approval_Approved>, I>>(base?: I): Approval_Approved {
+    return Approval_Approved.fromPartial(base ?? ({} as any));
+  },
+  fromPartial<I extends Exact<DeepPartial<Approval_Approved>, I>>(_: I): Approval_Approved {
+    const message = createBaseApproval_Approved();
+    return message;
+  },
+};
+
+function createBaseApproval_Rejected(): Approval_Rejected {
+  return { message: undefined };
+}
+
+export const Approval_Rejected: MessageFns<Approval_Rejected> = {
+  encode(message: Approval_Rejected, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
+    if (message.message !== undefined) {
+      writer.uint32(10).string(message.message);
+    }
+    return writer;
+  },
+
+  decode(input: BinaryReader | Uint8Array, length?: number): Approval_Rejected {
+    const reader = input instanceof BinaryReader ? input : new BinaryReader(input);
+    let end = length === undefined ? reader.len : reader.pos + length;
+    const message = createBaseApproval_Rejected();
+    while (reader.pos < end) {
+      const tag = reader.uint32();
+      switch (tag >>> 3) {
+        case 1: {
+          if (tag !== 10) {
+            break;
+          }
+
+          message.message = reader.string();
+          continue;
+        }
+      }
+      if ((tag & 7) === 4 || tag === 0) {
+        break;
+      }
+      reader.skip(tag & 7);
+    }
+    return message;
+  },
+
+  fromJSON(object: any): Approval_Rejected {
+    return { message: isSet(object.message) ? globalThis.String(object.message) : undefined };
+  },
+
+  toJSON(message: Approval_Rejected): unknown {
+    const obj: any = {};
+    if (message.message !== undefined) {
+      obj.message = message.message;
+    }
+    return obj;
+  },
+
+  create<I extends Exact<DeepPartial<Approval_Rejected>, I>>(base?: I): Approval_Rejected {
+    return Approval_Rejected.fromPartial(base ?? ({} as any));
+  },
+  fromPartial<I extends Exact<DeepPartial<Approval_Rejected>, I>>(object: I): Approval_Rejected {
+    const message = createBaseApproval_Rejected();
+    message.message = object.message ?? undefined;
     return message;
   },
 };
