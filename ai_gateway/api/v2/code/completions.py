@@ -10,6 +10,10 @@ from gitlab_cloud_connector import (
 )
 
 from ai_gateway.api.auth_utils import StarletteUser, get_current_user
+from ai_gateway.api.context_utils import (
+    GitLabAiRequestType,
+    populate_ai_metadata_in_context,
+)
 from ai_gateway.api.error_utils import capture_validation_errors
 from ai_gateway.api.feature_category import feature_category
 from ai_gateway.api.middleware.headers import X_GITLAB_MODEL_PROMPT_CACHE_ENABLED
@@ -149,6 +153,17 @@ async def completions(
     )
 
     snowplow_event_context = None
+
+    populate_ai_metadata_in_context(
+        model_metadata=ModelMetadata(
+            name=payload.model_name or "default",
+            identifier=payload.model_identifier or "default",
+            provider=payload.model_provider or "default",
+        ),
+        feature_id=GitLabUnitPrimitive.COMPLETE_CODE.value,
+        request_type=GitLabAiRequestType.COMPLETIONS,
+    )
+
     try:
         language = lang_from_filename(payload.current_file.file_name)
         language_name = language.name if language else ""
@@ -244,6 +259,17 @@ async def generations(
         )
 
     snowplow_event_context = None
+
+    populate_ai_metadata_in_context(
+        model_metadata=ModelMetadata(
+            name=payload.model_name or "default",
+            identifier=payload.model_identifier or "default",
+            provider=payload.model_provider or "default",
+        ),
+        feature_id=GitLabUnitPrimitive.GENERATE_CODE.value,
+        request_type=GitLabAiRequestType.GENERATIONS,
+    )
+
     try:
         language = lang_from_filename(payload.current_file.file_name)
         language_name = language.name if language else ""

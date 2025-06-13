@@ -11,6 +11,10 @@ from gitlab_cloud_connector import (
 from starlette.responses import StreamingResponse
 
 from ai_gateway.api.auth_utils import StarletteUser, get_current_user
+from ai_gateway.api.context_utils import (
+    GitLabAiRequestType,
+    populate_ai_metadata_in_context,
+)
 from ai_gateway.api.feature_category import feature_category
 from ai_gateway.api.middleware import X_GITLAB_VERSION_HEADER
 from ai_gateway.api.v2.chat.typing import AgentRequest
@@ -28,6 +32,7 @@ from ai_gateway.chat.agents import (
 )
 from ai_gateway.chat.executor import GLAgentRemoteExecutor
 from ai_gateway.internal_events import InternalEventsClient
+from ai_gateway.model_metadata import ModelMetadata
 from ai_gateway.prompts import BasePromptRegistry, Prompt
 
 __all__ = [
@@ -170,6 +175,12 @@ async def chat(
     ],
 ):
     agent = get_agent(current_user, prompt_registry)
+
+    populate_ai_metadata_in_context(
+        model_metadata=ModelMetadata(name=agent.name, provider=agent.model_provider),
+        feature_id=GitLabUnitPrimitive.DUO_CHAT.value,
+        request_type=GitLabAiRequestType.CHAT,
+    )
 
     authorize_additional_context(current_user, agent_request, internal_event_client)
 
