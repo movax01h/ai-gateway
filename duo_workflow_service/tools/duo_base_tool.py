@@ -1,5 +1,6 @@
 from typing import Any, List, NamedTuple, Optional
 
+from gitlab_cloud_connector import GitLabUnitPrimitive
 from langchain.tools import BaseTool
 from pydantic import BaseModel
 
@@ -37,6 +38,8 @@ def format_tool_display_message(tool: BaseTool, args: Any) -> Optional[str]:
 
 
 class DuoBaseTool(BaseTool):
+    unit_primitive: Optional[GitLabUnitPrimitive] = None
+
     @property
     def gitlab_client(self) -> GitlabHttpClient:
         client = self.metadata.get("gitlab_client")  # type: ignore

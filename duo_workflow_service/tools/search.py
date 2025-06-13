@@ -2,6 +2,7 @@ import json
 from abc import ABC, abstractmethod
 from typing import Any, Literal, Optional, Type
 
+from gitlab_cloud_connector import GitLabUnitPrimitive
 from pydantic import BaseModel, Field
 
 from duo_workflow_service.tools.duo_base_tool import DuoBaseTool
@@ -188,6 +189,8 @@ class IssueSearch(GitLabSearchBase):
     description: str = GitLabSearchBase._get_description(unique_description)
     args_schema: Type[BaseModel] = IssueSearchInput
 
+    unit_primitive: GitLabUnitPrimitive = GitLabUnitPrimitive.ASK_ISSUE
+
     async def _arun(
         self,
         *,
@@ -248,6 +251,8 @@ class MergeRequestSearch(GitLabSearchBase):
     """
     description: str = GitLabSearchBase._get_description(unique_description)
     args_schema: Type[BaseModel] = MergeRequestSearchInput
+
+    unit_primitive: GitLabUnitPrimitive = GitLabUnitPrimitive.ASK_MERGE_REQUEST
 
     async def _arun(
         self,
@@ -466,6 +471,8 @@ class CommitSearch(GitLabSearchBase):
     """
     description: str = GitLabSearchBase._get_description(unique_description)
     args_schema: Type[BaseModel] = RefSearchInput
+
+    unit_primitive: GitLabUnitPrimitive = GitLabUnitPrimitive.ASK_COMMIT
 
     async def _arun(
         self,

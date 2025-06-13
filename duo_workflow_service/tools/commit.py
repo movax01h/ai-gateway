@@ -1,6 +1,7 @@
 import json
 from typing import Any, List, NamedTuple, Optional, Type
 
+from gitlab_cloud_connector import GitLabUnitPrimitive
 from pydantic import BaseModel, Field
 
 from duo_workflow_service.gitlab.url_parser import GitLabUrlParseError, GitLabUrlParser
@@ -38,6 +39,8 @@ class CommitURLValidationResult(NamedTuple):
 
 
 class CommitBaseTool(DuoBaseTool):
+    unit_primitive: GitLabUnitPrimitive = GitLabUnitPrimitive.ASK_COMMIT
+
     def _validate_commit_url(
         self, url: Optional[str], project_id: Optional[Any], commit_sha: Optional[str]
     ) -> CommitURLValidationResult:

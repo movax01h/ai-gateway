@@ -1,6 +1,7 @@
 import json
 from typing import Any, List, Optional, Tuple, Type
 
+from gitlab_cloud_connector import GitLabUnitPrimitive
 from pydantic import BaseModel, Field
 
 from duo_workflow_service.gitlab.url_parser import GitLabUrlParseError, GitLabUrlParser
@@ -34,6 +35,8 @@ class IssueResourceInput(ProjectResourceInput):
 
 
 class IssueBaseTool(DuoBaseTool):
+    unit_primitive: GitLabUnitPrimitive = GitLabUnitPrimitive.ASK_ISSUE
+
     def _validate_issue_url(
         self, url: Optional[str], project_id: Optional[Any], issue_iid: Optional[int]
     ) -> Tuple[Optional[str], Optional[int], List[str]]:
