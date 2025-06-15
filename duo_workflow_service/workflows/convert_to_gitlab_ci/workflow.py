@@ -309,6 +309,7 @@ class Workflow(AbstractWorkflow):
             plan=Plan(steps=[]),
             handover=[],
             last_human_input=None,
+            files_changed=[],
         )
 
     def log_workflow_elements(self, element):
