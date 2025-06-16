@@ -4,6 +4,12 @@
 {# Context should be placed before the query https://docs.anthropic.com/en/docs/build-with-claude/prompt-engineering/long-context-tips. #}
 {%- if slash_command.name == 'explain' %}
 {%- include 'chat/agent/partials/slash_commands/explain_code/1.0.0.jinja' %}
+{%- elif slash_command.name == 'refactor' %}
+{%- include 'chat/agent/partials/slash_commands/refactor_code/1.0.0.jinja' %}
+{%- elif slash_command.name == 'tests' %}
+{%- include 'chat/agent/partials/slash_commands/write_tests/1.0.0.jinja' %}
+{%- elif slash_command.name == 'fix' %}
+{%- include 'chat/agent/partials/slash_commands/fix_code/1.0.0.jinja' %}
 {%- else %}
 {{message.content}}
 {%- endif %}
