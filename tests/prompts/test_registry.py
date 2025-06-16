@@ -18,7 +18,11 @@ from ai_gateway.api.auth_utils import StarletteUser
 from ai_gateway.config import ConfigModelLimits
 from ai_gateway.integrations.amazon_q.chat import ChatAmazonQ
 from ai_gateway.integrations.amazon_q.client import AmazonQClientFactory
-from ai_gateway.model_metadata import AmazonQModelMetadata, ModelMetadata
+from ai_gateway.model_metadata import (
+    AmazonQModelMetadata,
+    ModelMetadata,
+    TypeModelMetadata,
+)
 from ai_gateway.prompts import LocalPromptRegistry, Prompt, PromptRegistered
 from ai_gateway.prompts.config import (
     ChatAmazonQParams,
@@ -943,3 +947,44 @@ class TestLocalPromptRegistry:
             result_prompt = test_registry.get_on_behalf(user, prompt_id="test")
 
             assert result_prompt == prompt
+
+    @pytest.mark.parametrize(
+        ("model_metadata", "expected_identifier"),
+        [
+            (None, None),
+            (
+                ModelMetadata(
+                    name="custom",
+                    endpoint=HttpUrl("http://localhost:4000/"),
+                    api_key="token",
+                    provider="custom_openai",
+                    identifier="custom_model_id",
+                ),
+                "custom_model_id",
+            ),
+            (
+                AmazonQModelMetadata(
+                    name="amazon_q",
+                    provider="amazon_q",
+                    role_arn="role-arn",
+                ),
+                None,
+            ),
+        ],
+    )
+    def test_logging_with_model_identifier(
+        self,
+        registry: LocalPromptRegistry,
+        model_metadata: TypeModelMetadata,
+        expected_identifier: str,
+    ):
+        with patch("ai_gateway.prompts.registry.log") as mock_log:
+
+            registry.get(
+                "chat/react",
+                "^1.0.0",
+                model_metadata=model_metadata,
+            )
+
+            call_dict = mock_log.info.call_args[1]
+            assert call_dict["model_identifier"] == expected_identifier
