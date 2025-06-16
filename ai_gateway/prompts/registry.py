@@ -8,7 +8,7 @@ from poetry.core.constraints.version import Version, parse_constraint
 
 from ai_gateway.config import ConfigModelLimits
 from ai_gateway.internal_events.client import InternalEventsClient
-from ai_gateway.model_metadata import TypeModelMetadata
+from ai_gateway.model_metadata import ModelMetadata, TypeModelMetadata
 from ai_gateway.prompts.base import BasePromptRegistry, Prompt
 from ai_gateway.prompts.config import BaseModelConfig, ModelClassProvider, PromptConfig
 from ai_gateway.prompts.typing import TypeModelFactory
@@ -109,6 +109,11 @@ class LocalPromptRegistry(BasePromptRegistry):
             prompt_id=prompt_id,
             prompt_name=config.name,
             prompt_version=prompt_version,
+            model_identifier=(
+                model_metadata.identifier
+                if isinstance(model_metadata, ModelMetadata)
+                else None
+            ),
         )
 
         return prompt_registered.klass(
