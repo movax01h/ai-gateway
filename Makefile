@@ -133,7 +133,7 @@ clean:
 .PHONY: install-lint-deps
 install-lint-deps:
 	@echo "Installing lint dependencies..."
-	@poetry install --with lint
+	@poetry install --with eval,lint,test # Install all relevant dependencies so pylint has access to them
 
 .PHONY: codespell
 codespell: install-lint-deps

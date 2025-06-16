@@ -26,7 +26,7 @@ class SnowplowClientConfiguration:
 
 
 @dataclass
-class SnowplowEventContext:
+class SnowplowEventContext:  # pylint: disable=too-many-instance-attributes
     """Additional context attached to SnowplowEvent."""
 
     gitlab_realm: str
