@@ -1,10 +1,11 @@
+from datetime import datetime
 from http.client import responses
 from typing import Annotated, Any, AsyncIterator, Optional, Protocol
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from gitlab_cloud_connector import GitLabFeatureCategory, WrongUnitPrimitives
 from poetry.core.constraints.version.exceptions import ParseConstraintError
-from pydantic import BaseModel, RootModel
+from pydantic import BaseModel, RootModel, model_validator
 from starlette.responses import StreamingResponse
 
 from ai_gateway.api.auth_utils import StarletteUser, get_current_user
@@ -15,6 +16,12 @@ from ai_gateway.prompts import BasePromptRegistry, Prompt
 
 class PromptInputs(RootModel):
     root: dict[str, Any]
+
+    @model_validator(mode="before")
+    @classmethod
+    def add_current_date(cls, values: dict[str, Any]) -> dict[str, Any]:
+        values.setdefault("current_date", datetime.now().strftime("%B %d, %Y"))
+        return values
 
 
 class PromptRequest(BaseModel):

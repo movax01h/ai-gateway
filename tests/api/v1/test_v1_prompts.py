@@ -1,3 +1,4 @@
+from datetime import datetime
 from typing import Any, List, Optional, Type
 from unittest.mock import patch
 
@@ -45,14 +46,16 @@ class FakeModel(SimpleChatModel):
 @pytest.fixture
 def model_factory():
     return lambda model, **kwargs: FakeModel(
-        expected_message="Hi, I'm John and I'm 20 years old",
+        expected_message="Hi, I'm John and I'm 20 years old. It's now July 12, 2025.",
         response="Hi John!",
     )
 
 
 @pytest.fixture
 def prompt_template():
-    return {"system": "Hi, I'm {{name}} and I'm {{age}} years old"}
+    return {
+        "system": "Hi, I'm {{name}} and I'm {{age}} years old. It's now {{current_date}}."
+    }
 
 
 @pytest.fixture
@@ -79,6 +82,14 @@ def mock_registry_get(
             mock.side_effect = KeyError()
 
         yield mock
+
+
+@pytest.fixture
+def frozen_datetime_now():
+    frozen = datetime(2025, 7, 12, 12, 0, 0)
+    with patch("ai_gateway.api.v1.prompts.invoke.datetime") as mock_datetime:
+        mock_datetime.now.return_value = frozen
+        yield mock_datetime
 
 
 @pytest.fixture(scope="class")
@@ -205,7 +216,7 @@ class TestPrompt:
                 ("test", "^1.0.0", None),
                 422,
                 {
-                    "detail": "\"Input to ChatPromptTemplate is missing variables {'age'}.  Expected: ['age', 'name'] Received: ['name']"
+                    "detail": "\"Input to ChatPromptTemplate is missing variables {'age'}.  Expected: ['age', 'current_date', 'name'] Received: ['name', 'current_date']"
                 },
                 ["1.0.0"],
             ),
@@ -215,6 +226,7 @@ class TestPrompt:
         self,
         prompt_class,
         mock_registry_get,
+        frozen_datetime_now,
         mock_client,
         mock_track_internal_event,
         inputs: dict[str, str],
@@ -266,6 +278,7 @@ class TestPrompt:
         self,
         mock_client,
         mock_registry_get,
+        frozen_datetime_now,
     ):
         response = mock_client.post(
             "/prompts/test",
