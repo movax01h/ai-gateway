@@ -13,7 +13,6 @@ class FeatureFlag(StrEnum):
     DISABLE_CODE_GECKO_DEFAULT = "disable_code_gecko_default"
     CHAT_V1_REDIRECT = "redirect_v1_chat_request"
     DUO_CHAT_REACT_AGENT_CLAUDE_4_0 = "duo_chat_react_agent_claude_4_0"
-    DUO_WORKFLOW_CLAUDE_SONNET_4 = "duo_workflow_claude_sonnet_4"
     DUO_WORKFLOW_CHAT_WORKFLOW_CLAUDE_SONNET_4 = (
         "duo_workflow_chat_workflow_claude_sonnet_4"
     )

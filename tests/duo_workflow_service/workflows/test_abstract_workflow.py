@@ -303,7 +303,7 @@ async def test_workflow_get_chat_model_without_vertex():
     )
 
     anthropic_model: AnthropicConfig = workflow._get_model_config()
-    assert anthropic_model.model_name == "claude-3-7-sonnet-20250219"
+    assert anthropic_model.model_name == "claude-sonnet-4-20250514"
 
 
 @pytest.mark.asyncio
@@ -323,4 +323,4 @@ async def test_workflow_get_chat_model_with_vertex():
     )
 
     vertex_model: VertexConfig = workflow._get_model_config()
-    assert vertex_model.model_name == "claude-3-7-sonnet@20250219"
+    assert vertex_model.model_name == "claude-sonnet-4@20250514"

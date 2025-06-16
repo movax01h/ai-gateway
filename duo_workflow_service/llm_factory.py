@@ -11,7 +11,6 @@ from langsmith import tracing_context
 from pydantic import BaseModel, Field, field_validator
 
 from ai_gateway.models import KindAnthropicModel
-from lib.feature_flags.context import FeatureFlag, is_feature_enabled
 
 
 class ModelConfig(BaseModel):
@@ -40,10 +39,7 @@ class VertexConfig(ModelConfig):
 
     @staticmethod
     def _get_model_name() -> str:
-        if is_feature_enabled(FeatureFlag.DUO_WORKFLOW_CLAUDE_SONNET_4):
-            return KindAnthropicModel.CLAUDE_SONNET_4.value
-
-        return KindAnthropicModel.CLAUDE_3_7_SONNET_VERTEX.value
+        return KindAnthropicModel.CLAUDE_SONNET_4_VERTEX.value
 
     @staticmethod
     def _get_project_id() -> str:
@@ -104,7 +100,7 @@ def validate_llm_access(config: Optional[Union[AnthropicConfig, VertexConfig]] =
             config = VertexConfig()
         except RuntimeError:
             config = AnthropicConfig(
-                model_name=KindAnthropicModel.CLAUDE_3_7_SONNET.value
+                model_name=KindAnthropicModel.CLAUDE_SONNET_4.value
             )
 
     log = structlog.stdlib.get_logger("server")

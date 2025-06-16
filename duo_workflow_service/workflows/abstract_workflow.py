@@ -375,10 +375,10 @@ class AbstractWorkflow(ABC):
         _vertex_project_id = os.getenv("DUO_WORKFLOW__VERTEX_PROJECT_ID")
         if bool(_vertex_project_id and len(_vertex_project_id) > 1):
             return VertexConfig(
-                model_name=KindAnthropicModel.CLAUDE_3_7_SONNET_VERTEX.value
+                model_name=KindAnthropicModel.CLAUDE_SONNET_4_VERTEX.value
             )
 
-        return AnthropicConfig(model_name=KindAnthropicModel.CLAUDE_3_7_SONNET.value)
+        return AnthropicConfig(model_name=KindAnthropicModel.CLAUDE_SONNET_4.value)
 
 
 TypeWorkflow = type[AbstractWorkflow]
