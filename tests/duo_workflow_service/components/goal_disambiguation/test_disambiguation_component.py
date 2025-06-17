@@ -33,9 +33,11 @@ from duo_workflow_service.entities import (
 )
 from duo_workflow_service.gitlab.http_client import GitlabHttpClient
 from duo_workflow_service.internal_events.event_enum import CategoryEnum
+from duo_workflow_service.tools import HandoverTool
 from duo_workflow_service.tools.request_user_clarification import (
     RequestUserClarificationTool,
 )
+from lib.feature_flags import current_feature_flag_context
 
 
 class TestGoalDisambiguationComponent:
@@ -197,7 +199,8 @@ class TestGoalDisambiguationComponent:
                     SystemMessage(content=SYS_PROMPT),
                     HumanMessage(
                         content=PROMPT.format(
-                            clarification_tool=RequestUserClarificationTool.tool_title
+                            clarification_tool=RequestUserClarificationTool.tool_title,
+                            handover_tool=HandoverTool.tool_title,
                         )
                     ),
                     HumanMessage(
@@ -258,7 +261,7 @@ class TestGoalDisambiguationComponent:
         graph_input: WorkflowState,
         graph_config: RunnableConfig,
     ):
-
+        current_feature_flag_context.set({"duo_workflow_use_handover_summary"})
         graph = StateGraph(WorkflowState)
         input = WorkflowState(
             plan=Plan(steps=[]),
@@ -276,7 +279,18 @@ class TestGoalDisambiguationComponent:
             mock_agent_class.return_value = mock_agent
             mock_agent.run.return_value = {
                 "conversation_history": {
-                    "clarity_judge": [AIMessage(content="All clear please proceed")]
+                    "clarity_judge": [
+                        AIMessage(
+                            content="All clear please proceed",
+                            tool_calls=[
+                                {
+                                    "id": "1",
+                                    "name": "handover_tool",
+                                    "args": {"summary": "This is a summary"},
+                                }
+                            ],
+                        )
+                    ]
                 },
             }
 
@@ -302,85 +316,8 @@ class TestGoalDisambiguationComponent:
                 input=graph_input, config=graph_config
             )
 
-            assert (
-                len(response["handover"]) == 4
-            )  # 3 messages for the prompt + 1 for LLM Judge Response
-            assert (
-                response["handover"][-1]
-                == response["conversation_history"][_AGENT_NAME][-1]
-            )
-            assert response["handover"][-1] == AIMessage(
-                content="All clear please proceed"
-            )
-
-    @pytest.mark.asyncio
-    @patch.dict(os.environ, {"FEATURE_GOAL_DISAMBIGUATION": "True"})
-    async def test_component_run_with_clear_goal_cancel_pending_tasks(
-        self,
-        chat_mock: BaseChatModel,
-        tools_registry_mock: ToolsRegistry,
-        mock_http_client: GitlabHttpClient,
-        graph_input: WorkflowState,
-        graph_config: RunnableConfig,
-    ):
-        graph = StateGraph(WorkflowState)
-        judge_response = AIMessage(
-            content="The goal is clear but formally needs tool call cancellation",
-            tool_calls=[
-                {
-                    "id": "1",
-                    "name": "request_user_clarification_tool",
-                    "args": {
-                        "recommendations": [],
-                        "message": "Goal is clear",
-                        "clarity_score": 4.5,
-                        "clarity_verdict": "CLEAR",
-                    },
-                }
-            ],
-        )
-
-        with patch(
-            "duo_workflow_service.components.goal_disambiguation.component.Agent"
-        ) as mock_agent_class:
-            mock_agent = MagicMock(spec=Agent)
-            mock_agent_class.return_value = mock_agent
-            mock_agent.run.return_value = {
-                "conversation_history": {"clarity_judge": [judge_response]},
-            }
-
-            component = GoalDisambiguationComponent(
-                goal="Fix bug in pipeline configuration",
-                workflow_id=graph_config["configurable"]["thread_id"],
-                allow_agent_to_request_user=True,
-                model=chat_mock,
-                tools_registry=tools_registry_mock,
-                http_client=mock_http_client,
-                workflow_type=CategoryEnum.WORKFLOW_SOFTWARE_DEVELOPMENT,
-            )
-            entry_point = component.attach(
-                graph=graph,
-                component_exit_node=END,
-                component_execution_state=WorkflowStatusEnum.PLANNING,
-                graph_termination_node=END,
-            )
-            graph.set_entry_point(entry_point)
-            compiled_graph = graph.compile()
-
-            response = await compiled_graph.ainvoke(
-                input=graph_input, config=graph_config
-            )
-
-            # First 3 messages are from the prompt setup
-            assert len(response["handover"]) == 5
-            expected_last_messages = [
-                judge_response,
-                ToolMessage(
-                    tool_call_id="1",
-                    content="Task is specific enough, no further clarification is required.",
-                ),
-            ]
-            assert response["handover"][3:] == expected_last_messages
+            assert len(response["handover"]) == 1
+            assert response["handover"][-1] == AIMessage(content="This is a summary")
 
     @pytest.mark.asyncio
     @patch("duo_workflow_service.components.goal_disambiguation.component.interrupt")
@@ -395,7 +332,7 @@ class TestGoalDisambiguationComponent:
         graph_config: RunnableConfig,
         llm_judge_response_unclear: AIMessage,
     ):
-
+        current_feature_flag_context.set({"duo_workflow_use_handover_summary"})
         graph = StateGraph(WorkflowState)
         mock_interrupt.return_value = {
             "event_type": WorkflowEventType.MESSAGE,
@@ -415,7 +352,18 @@ class TestGoalDisambiguationComponent:
                 },
                 {
                     "conversation_history": {
-                        "clarity_judge": [AIMessage(content="All clear please proceed")]
+                        "clarity_judge": [
+                            AIMessage(
+                                content="All clear please proceed",
+                                tool_calls=[
+                                    {
+                                        "id": "1",
+                                        "name": "handover_tool",
+                                        "args": {"summary": "This is a summary"},
+                                    }
+                                ],
+                            )
+                        ]
                     },
                 },
             ]
@@ -445,7 +393,7 @@ class TestGoalDisambiguationComponent:
             # assert that the component requested user input
             mock_interrupt.assert_called_once()
             # assert correct ui communication between the component and UI client
-            assert len(response["ui_chat_log"]) == 2
+            assert len(response["ui_chat_log"]) == 3
             assert (
                 response["ui_chat_log"][0]["content"]
                 == "I need to understand which bug do you need to fix\n\nI'm ready to help with your project but I need a few key details:\n\n1. List issue links for bugs to fix"
@@ -456,26 +404,14 @@ class TestGoalDisambiguationComponent:
                 == "Bugs are described in issues 1, 2, 3, and 4"
             )
             assert response["ui_chat_log"][1]["message_type"] == MessageTypeEnum.USER
+            assert response["ui_chat_log"][2]["content"] == "This is a summary"
+            assert response["ui_chat_log"][2]["message_type"] == MessageTypeEnum.AGENT
 
             # assert clarity reevaluation cycle
             assert mock_agent.run.call_count == 2
-            # first 3 messages in handover are for the prompt, already covered in previous test
-            assert len(response["handover"]) == 7
-            except_handover = [
-                llm_judge_response_unclear,
-                ToolMessage(
-                    tool_call_id="1",
-                    content="Bugs are described in issues 1, 2, 3, and 4",
-                ),
-                HumanMessage(
-                    content=(
-                        "Review my feedback in the request_user_clarification_tool tool response.\n"
-                        "Answer all question within my feedback, and finally reevaluate clarity."
-                    )
-                ),
-                AIMessage(content="All clear please proceed"),
-            ]
-            assert response["handover"][3:7] == except_handover
+            # only 1 handover message which is a summary
+            assert len(response["handover"]) == 1
+            assert response["handover"][-1].content == "This is a summary"
 
     @pytest.mark.asyncio
     @patch("duo_workflow_service.components.goal_disambiguation.component.interrupt")

@@ -34,6 +34,7 @@ from duo_workflow_service.tools.request_user_clarification import (
 )
 
 from ...internal_events.event_enum import CategoryEnum
+from ...tools import HandoverTool
 from .prompts import (
     ASSIGNMENT_PROMPT,
     CLARITY_JUDGE_RESPONSE_TEMPLATE,
@@ -96,7 +97,7 @@ class GoalDisambiguationComponent:
             name=_AGENT_NAME,
             model=self._model,
             toolset=self._tools_registry.toolset(
-                [RequestUserClarificationTool.tool_title]
+                [RequestUserClarificationTool.tool_title, HandoverTool.tool_title]
             ),
             http_client=self._http_client,
             workflow_id=self._workflow_id,
@@ -115,7 +116,6 @@ class GoalDisambiguationComponent:
             self._clarification_required,
             {
                 Routes.CLEAR: "task_clarity_handover",
-                Routes.SKIP: "task_clarity_cancel_pending_tool_call",
                 Routes.UNCLEAR: "task_clarity_request_clarification",
                 Routes.STOP: graph_termination_node,
             },
@@ -139,10 +139,6 @@ class GoalDisambiguationComponent:
             },
         )
 
-        graph.add_node(
-            "task_clarity_cancel_pending_tool_call", self._cancel_optional_tool_call
-        )
-        graph.add_edge("task_clarity_cancel_pending_tool_call", "task_clarity_handover")
         graph.add_node("task_clarity_handover", task_clarity_handover.run)
         graph.add_edge("task_clarity_handover", component_exit_node)
 
@@ -166,7 +162,8 @@ class GoalDisambiguationComponent:
                     SystemMessage(content=SYS_PROMPT),
                     HumanMessage(
                         content=PROMPT.format(
-                            clarification_tool=RequestUserClarificationTool.tool_title
+                            clarification_tool=RequestUserClarificationTool.tool_title,
+                            handover_tool=HandoverTool.tool_title,
                         )
                     ),
                     HumanMessage(
@@ -288,12 +285,16 @@ class GoalDisambiguationComponent:
         if last_message.tool_calls is None or len(last_message.tool_calls) == 0:
             return Routes.CLEAR
 
-        tool_call = last_message.tool_calls[0]["args"]  # type: ignore
-        if (
-            tool_call["clarity_verdict"] == _MIN_CLARITY_GRADE
-            or tool_call["clarity_score"] >= _MIN_CLARITY_THRESHOLD
+        tool_call = last_message.tool_calls[0]  # type: ignore
+        tool_args = tool_call["args"]
+        if tool_call["name"] == "request_user_clarification_tool" and (
+            tool_args["clarity_verdict"] == _MIN_CLARITY_GRADE
+            or tool_args["clarity_score"] >= _MIN_CLARITY_THRESHOLD
         ):
-            return Routes.SKIP
+            return Routes.CLEAR
+
+        if tool_call["name"] == "handover_tool":
+            return Routes.CLEAR
 
         return Routes.UNCLEAR
 
@@ -312,9 +313,13 @@ class GoalDisambiguationComponent:
         last_message = state["conversation_history"][_AGENT_NAME][-1]
         messages: List[BaseMessage] = [
             ToolMessage(
-                content="Task is specific enough, no further clarification is required.",
+                content=(
+                    "Task is specific enough, no further clarification is required."
+                ),
                 tool_call_id=tool_call.get("id"),
             )
             for tool_call in getattr(last_message, "tool_calls", [])
+            if tool_call.get("name") != "handover_tool"
         ]
+
         return {"conversation_history": {_AGENT_NAME: messages}}
