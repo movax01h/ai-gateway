@@ -13,6 +13,7 @@ from duo_workflow_service.entities.state import (
     WorkflowState,
     WorkflowStatusEnum,
 )
+from lib.feature_flags import current_feature_flag_context
 
 
 class TestHandoverAgent:
@@ -118,7 +119,7 @@ class TestHandoverAgent:
                         tool_calls=[
                             ToolCall(
                                 id="2",
-                                name="awesome_summary_tool",
+                                name=str(HANDOVER_TOOL_NAME),
                                 args={"summary": "This is awesome summary"},
                             )
                         ],
@@ -127,22 +128,19 @@ class TestHandoverAgent:
                 True,
                 [
                     AIMessage(
-                        id="1",
-                        content="test_message",
-                        tool_calls=[
-                            ToolCall(
-                                id="1",
-                                name="read_file_tool",
-                                args={},
-                            )
-                        ],
-                    ),
-                    AIMessage(
-                        id="1",
-                        content="test_message",
+                        content="This is awesome summary",
                     ),
                 ],
                 [
+                    {
+                        "content": "This is awesome summary",
+                        "correlation_id": None,
+                        "message_type": MessageTypeEnum.AGENT,
+                        "status": ToolStatus.SUCCESS,
+                        "timestamp": "2025-01-01T12:00:00+00:00",
+                        "tool_info": None,
+                        "context_elements": None,
+                    },
                     {
                         "content": "Workflow completed successfully",
                         "correlation_id": None,
@@ -170,7 +168,7 @@ class TestHandoverAgent:
                     )
                 ],
                 True,
-                [HumanMessage(content="This is summary")],
+                [AIMessage(content="This is summary")],
                 [
                     {
                         "message_type": MessageTypeEnum.AGENT,
@@ -201,12 +199,7 @@ class TestHandoverAgent:
                     AIMessage(id="1", content="42"),
                 ],
                 True,
-                [
-                    HumanMessage(
-                        content="You are AGI prepare the answer to life the universe and everything"
-                    ),
-                    AIMessage(id="1", content="42"),
-                ],
+                [],
                 [
                     {
                         "content": "Workflow completed successfully",
@@ -235,9 +228,7 @@ class TestHandoverAgent:
                     )
                 ],
                 True,
-                [
-                    AIMessage(content="This is the analysis result", id="1")
-                ],  # Tool calls are stripped
+                [],
                 [
                     {
                         "content": "Workflow completed successfully",
@@ -266,9 +257,7 @@ class TestHandoverAgent:
                     )
                 ],
                 True,
-                [
-                    AIMessage(content="This is the analysis result", id="1")
-                ],  # Tool calls are stripped
+                [],
                 [
                     {
                         "content": "Workflow completed successfully",
@@ -297,6 +286,7 @@ class TestHandoverAgent:
             2025, 1, 1, 12, 0, tzinfo=timezone.utc
         )
         mock_datetime.timezone = timezone
+        current_feature_flag_context.set({"duo_workflow_use_handover_summary"})
 
         state = WorkflowState(
             plan=Plan(steps=[]),

@@ -24,7 +24,6 @@ graph TD;
     task_clarity_check(task_clarity_check)
     task_clarity_request_clarification(task_clarity_request_clarification)
     task_clarity_fetch_user_response(task_clarity_fetch_user_response)
-    task_clarity_cancel_pending_tool_call(task_clarity_cancel_pending_tool_call)
     task_clarity_handover(task_clarity_handover)
     planning(planning)
     update_plan(update_plan)
@@ -50,7 +49,6 @@ graph TD;
     planning_supervisor --> planning;
     set_status_to_execution --> execution;
     task_clarity_build_prompt --> task_clarity_check;
-    task_clarity_cancel_pending_tool_call --> task_clarity_handover;
     task_clarity_handover --> planning;
     task_clarity_request_clarification --> task_clarity_fetch_user_response;
     update_plan --> planning;
@@ -67,7 +65,6 @@ graph TD;
     build_context_tools -.-> build_context;
     build_context_tools -. &nbsp;stop&nbsp; .-> plan_terminator;
     task_clarity_check -. &nbsp;clear&nbsp; .-> task_clarity_handover;
-    task_clarity_check -. &nbsp;skip_further_clarification&nbsp; .-> task_clarity_cancel_pending_tool_call;
     task_clarity_check -. &nbsp;unclear&nbsp; .-> task_clarity_request_clarification;
     task_clarity_check -. &nbsp;stop&nbsp; .-> plan_terminator;
     task_clarity_fetch_user_response -. &nbsp;continue&nbsp; .-> task_clarity_check;
