@@ -662,9 +662,9 @@ class TestLocalPromptRegistry:
             ),
             (
                 "code_suggestions/generations",
-                "Claude 3.7 Sonnet Code Generations Agent",
+                "Claude Sonnet 4 Code Generations Agent",
                 Prompt,
-                "claude-3-7-sonnet-20250219",
+                "claude-sonnet-4-20250514",
                 "^1.0.0",
                 ChatAnthropic,
                 {"stop": ["</new_code>"]},
