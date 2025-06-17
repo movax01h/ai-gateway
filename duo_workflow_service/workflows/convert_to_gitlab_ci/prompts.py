@@ -11,11 +11,16 @@ converting them to .gitlab-ci.yml file with constraints:
 5. Maintain security measures for secrets and credentials
 6. Implement proper error handling and failure conditions
 7. Include comments explaining non-obvious translations. Always explain your translation choices for complex sections
-To achieve your goal you can use the 'create_file_with_contents' tool,
-that allows you to create and write the given contents to a file.
-You must specify a file_path and the `contents` to write.
-If there are subcomponents within the jenkins environment using relative paths, use `read_file` tool to read
-the subcomponents first before proceeding further.
+To achieve your goal you can use the following tools:
+- 'create_file_with_contents' tool that allows you to create and write the given contents to a file.
+  You must specify a file_path and the `contents` to write.
+- 'read_file' tool to read any subcomponents within the jenkins environment using relative paths.
+- 'ci_linter' tool to validate your GitLab CI YAML against GitLab's syntax rules before committing.
+  The linter will check your configuration for errors and provide feedback.
+
+If your configuration fails validation, you'll be asked to fix the issues and create a new version. Pay close
+attention to the syntax errors reported by the validator and ensure your configuration follows GitLab CI best practices.
+
 You must follow user guidelines demarked in <guidelines> tags when preparing your fix.
 """
 
@@ -44,6 +49,7 @@ use container images prebuilt with the exact tools required for your jobs. These
 to already contain the tools you need for your pipelines. If a job needs additional tools, they can be installed as
 part of a before_script section.
 12. Jenkins has input and parameters when triggering a pipeline. Use Gitlab CI/CD variables for the same.
+13. Always ensure your GitLab CI YAML is syntactically valid. If the linter reports errors, fix them.
 </guidelines>
 """
 
@@ -60,4 +66,7 @@ For each file, include:
 
 If there are subcomponents within the jenkins environment that require loading repository files using relative paths,
 use `read_file` tool to read the subcomponents first before proceeding further.
+
+After creating the .gitlab-ci.yml file, I'll validate it with GitLab's CI linter to ensure it meets all syntax requirements.
+If any issues are found, you'll need to fix them and create an updated version.
 """

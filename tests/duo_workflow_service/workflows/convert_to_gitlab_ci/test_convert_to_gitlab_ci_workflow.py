@@ -1,4 +1,5 @@
 import asyncio
+import json
 from unittest.mock import AsyncMock, MagicMock, Mock, patch
 
 import pytest
@@ -22,7 +23,9 @@ from duo_workflow_service.workflows.convert_to_gitlab_ci.prompts import (
     CI_PIPELINES_MANAGER_USER_GUIDELINES,
 )
 from duo_workflow_service.workflows.convert_to_gitlab_ci.workflow import (
+    Routes,
     _load_file_contents,
+    _router,
 )
 
 
@@ -456,3 +459,191 @@ async def test_workflow_run_with_exception(
         await workflow.run("test-file-path")
 
     assert workflow.is_done
+
+
+def test_router_ci_linter_validation_success():
+    """Test router handles successful ci_linter validation."""
+    state = WorkflowState(
+        status=WorkflowStatusEnum.EXECUTION,
+        conversation_history={
+            "ci_pipelines_manager_agent": [
+                AIMessage(
+                    content="",
+                    tool_calls=[
+                        {
+                            "name": "ci_linter",
+                            "args": {"project_id": 123, "content": "..."},
+                            "id": "1",
+                        }
+                    ],
+                ),
+                AIMessage(content='{"valid": true}'),
+            ]
+        },
+        plan=Plan(steps=[]),
+        handover=[],
+        last_human_input=None,
+        ui_chat_log=[],
+    )
+
+    assert _router(state) == Routes.COMMIT_CHANGES
+
+
+def test_router_ci_linter_validation_failure():
+    """Test router handles failed ci_linter validation."""
+    state = WorkflowState(
+        status=WorkflowStatusEnum.EXECUTION,
+        conversation_history={
+            "ci_pipelines_manager_agent": [
+                AIMessage(
+                    content="",
+                    tool_calls=[
+                        {
+                            "name": "ci_linter",
+                            "args": {"project_id": 123, "content": "..."},
+                            "id": "1",
+                        }
+                    ],
+                ),
+                AIMessage(content='{"valid": false, "errors": ["syntax error"]}'),
+            ]
+        },
+        plan=Plan(steps=[]),
+        handover=[],
+        last_human_input=None,
+        ui_chat_log=[],
+    )
+
+    assert _router(state) == Routes.AGENT
+
+
+def test_router_ci_linter_max_attempts():
+    """Test router handles max validation attempts."""
+    messages = []
+    # Add 3 ci_linter calls
+    for i in range(3):
+        messages.extend(
+            [
+                AIMessage(
+                    content=f"attempt {i}",
+                    tool_calls=[
+                        {
+                            "name": "ci_linter",
+                            "args": {"project_id": 123, "content": "..."},
+                            "id": str(i),
+                        }
+                    ],
+                ),
+                AIMessage(content='{"valid": false}'),
+            ]
+        )
+
+    state = WorkflowState(
+        status=WorkflowStatusEnum.EXECUTION,
+        conversation_history={"ci_pipelines_manager_agent": messages},
+        plan=Plan(steps=[]),
+        handover=[],
+        last_human_input=None,
+        ui_chat_log=[],
+    )
+
+    assert _router(state) == Routes.COMMIT_CHANGES
+
+
+def test_router_create_file_returns_to_agent():
+    """Test router returns to agent after file creation for validation."""
+    state = WorkflowState(
+        status=WorkflowStatusEnum.EXECUTION,
+        conversation_history={
+            "ci_pipelines_manager_agent": [
+                AIMessage(
+                    content="",
+                    tool_calls=[
+                        {
+                            "name": "create_file_with_contents",
+                            "args": {"file_path": ".gitlab-ci.yml", "contents": "..."},
+                            "id": "1",
+                        }
+                    ],
+                ),
+                AIMessage(content="File created"),
+            ]
+        },
+        plan=Plan(steps=[]),
+        handover=[],
+        last_human_input=None,
+        ui_chat_log=[],
+    )
+
+    assert _router(state) == Routes.AGENT
+
+
+@patch("duo_workflow_service.workflows.convert_to_gitlab_ci.workflow.log_exception")
+def test_router_ci_linter_json_parsing_error(mock_log_exception):
+    """Test router handles JSON parsing errors in ci_linter responses."""
+    state = WorkflowState(
+        status=WorkflowStatusEnum.EXECUTION,
+        conversation_history={
+            "ci_pipelines_manager_agent": [
+                AIMessage(
+                    content="",
+                    tool_calls=[
+                        {
+                            "name": "ci_linter",
+                            "args": {"project_id": 123, "content": "..."},
+                            "id": "1",
+                        }
+                    ],
+                ),
+                AIMessage(content="This is not valid JSON"),
+            ]
+        },
+        plan=Plan(steps=[]),
+        handover=[],
+        last_human_input=None,
+        ui_chat_log=[],
+        files_changed=[],
+    )
+
+    assert _router(state) == Routes.AGENT
+
+    mock_log_exception.assert_called_once()
+    args, kwargs = mock_log_exception.call_args
+
+    assert isinstance(args[0], json.JSONDecodeError)
+    assert kwargs["extra"]["tool_name"] == "ci_linter"
+    assert kwargs["extra"]["last_msg"] == "This is not valid JSON"
+    assert kwargs["extra"]["error_type"] == "json_parsing_error"
+
+
+def test_router_create_file_max_attempts():
+    """Test router prevents infinite file creation loops."""
+    messages = []
+    for i in range(3):
+        messages.extend(
+            [
+                AIMessage(
+                    content="",
+                    tool_calls=[
+                        {
+                            "name": "create_file_with_contents",
+                            "args": {"file_path": f"file{i}.yml", "contents": "..."},
+                            "id": str(i),
+                        }
+                    ],
+                ),
+                AIMessage(content="File created"),
+            ]
+        )
+
+    state = WorkflowState(
+        status=WorkflowStatusEnum.EXECUTION,
+        conversation_history={"ci_pipelines_manager_agent": messages},
+        plan=Plan(steps=[]),
+        handover=[],
+        last_human_input=None,
+        ui_chat_log=[],
+        files_changed=[],
+    )
+
+    assert _router(state) == Routes.COMMIT_CHANGES
