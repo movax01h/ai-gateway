@@ -30,7 +30,7 @@ configurable_unit_primitives:
   - feature_setting: "duo_chat_fix_code"
     unit_primitives:
       - "fix_code"
-    default_model: "claude_sonnet_3_7_20250219"
+    default_model: "claude_sonnet_4_20250514"
     selectable_models:
       - "claude_sonnet_4_20250514"
       - "claude_sonnet_3_7_20250219"
@@ -38,7 +38,7 @@ configurable_unit_primitives:
   - feature_setting: "duo_chat_refactor_code"
     unit_primitives:
       - "refactor_code"
-    default_model: "claude_sonnet_3_7_20250219"
+    default_model: "claude_sonnet_4_20250514"
     selectable_models:
       - "claude_sonnet_4_20250514"
       - "claude_sonnet_3_7_20250219"
@@ -46,7 +46,7 @@ configurable_unit_primitives:
   - feature_setting: "duo_chat_write_tests"
     unit_primitives:
       - "write_tests"
-    default_model: "claude_sonnet_3_7_20250219"
+    default_model: "claude_sonnet_4_20250514"
     selectable_models:
       - "claude_sonnet_4_20250514"
       - "claude_sonnet_3_7_20250219"
@@ -54,7 +54,7 @@ configurable_unit_primitives:
   - feature_setting: "duo_chat_explain_code"
     unit_primitives:
       - "explain_code"
-    default_model: "claude_sonnet_3_7_20250219"
+    default_model: "claude_sonnet_4_20250514"
     selectable_models:
       - "claude_sonnet_4_20250514"
       - "claude_sonnet_3_7_20250219"
