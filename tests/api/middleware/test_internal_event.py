@@ -183,7 +183,7 @@ async def test_middleware_set_context(internal_event_middleware):
                     b"1,2,a",
                 )
             ],
-            None,
+            [1, 2],
         ),
     ],
 )
