@@ -118,6 +118,9 @@ class KindVertexTextModel(StrEnum):
     # Mistral AI
     CODESTRAL_2501 = "codestral-2501"
 
+    # Gemini
+    GEMINI_2_5_FLASH = "gemini-2.5-flash"
+
     # This method handles the provider prefix transformation for
     # Vertex AI models
     # It's necessary because we're using LiteLLM abstraction
