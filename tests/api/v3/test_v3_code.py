@@ -334,7 +334,7 @@ class TestEditorContentCompletion:
 
         mock = mock_anthropic_chat if model_provider == "anthropic" else mock_code_gecko
 
-        mock.assert_called
+        mock.assert_called_once()
 
 
 class TestEditorContentCompletionStream:

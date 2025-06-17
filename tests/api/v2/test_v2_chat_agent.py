@@ -318,7 +318,7 @@ class TestReActAgentStream:
 
         assert response.status_code == 200
         assert actual_events == expected_events
-        mock_create_event_stream.assert_called_once
+        mock_create_event_stream.assert_called_once()
 
     @pytest.mark.asyncio
     @pytest.mark.parametrize(
@@ -453,7 +453,7 @@ class TestReActAgentStream:
         assert response.status_code == 200
         assert actual_actions == expected_actions
 
-        mock_create_event_stream.assert_called_once
+        mock_create_event_stream.assert_called_once()
 
         mock_track_internal_event.assert_called_once_with(
             "request_duo_chat",
