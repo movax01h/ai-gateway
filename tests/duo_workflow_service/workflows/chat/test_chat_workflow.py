@@ -311,19 +311,22 @@ async def test_workflow_run(
     ("feature_flags", "workflow_config", "expected_tools"),
     [
         (
-            ["duo_workflow_chat_mutation_tools"],
+            [],
             {},
             CHAT_READ_ONLY_TOOLS + CHAT_MUTATION_TOOLS,
         ),
-        ([], {}, CHAT_READ_ONLY_TOOLS),
-        (["duo_workflow_mcp_support"], {}, CHAT_READ_ONLY_TOOLS + ["extra_tool"]),
         (
             [],
             {"mcp_enabled": True},
-            CHAT_READ_ONLY_TOOLS + ["extra_tool"],
+            CHAT_READ_ONLY_TOOLS + CHAT_MUTATION_TOOLS + ["extra_tool"],
         ),
         (
-            ["duo_workflow_chat_mutation_tools", "duo_workflow_mcp_support"],
+            ["duo_workflow_mcp_support"],
+            {},
+            CHAT_READ_ONLY_TOOLS + CHAT_MUTATION_TOOLS + ["extra_tool"],
+        ),
+        (
+            ["duo_workflow_mcp_support"],
             {"mcp_enabled": True},
             CHAT_READ_ONLY_TOOLS + CHAT_MUTATION_TOOLS + ["extra_tool"],
         ),
