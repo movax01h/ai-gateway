@@ -1241,11 +1241,10 @@ async def test_workflow_cleanup():
 
 
 @pytest.mark.parametrize(
-    "feature_flags,env_vars,expected_config_type,expected_model",
+    "env_vars,expected_config_type,expected_model",
     [
-        # Feature flag enabled + Vertex
+        # Vertex (falls back to parent's hardcoded model)
         (
-            {"duo_workflow_claude_sonnet_4"},
             {
                 "DUO_WORKFLOW__VERTEX_PROJECT_ID": "test-project",
                 "DUO_WORKFLOW__VERTEX_LOCATION": "us-central1",
@@ -1253,34 +1252,15 @@ async def test_workflow_cleanup():
             VertexConfig,
             KindAnthropicModel.CLAUDE_SONNET_4_VERTEX.value,
         ),
-        # Feature flag enabled + Anthropic API
+        # Anthropic API (falls back to parent's hardcoded model)
         (
-            {"duo_workflow_claude_sonnet_4"},
             {"ANTHROPIC_API_KEY": "test-key"},
             AnthropicConfig,
             KindAnthropicModel.CLAUDE_SONNET_4.value,
         ),
-        # No feature flag + Vertex (falls back to parent's hardcoded model)
-        (
-            set(),
-            {
-                "DUO_WORKFLOW__VERTEX_PROJECT_ID": "test-project",
-                "DUO_WORKFLOW__VERTEX_LOCATION": "us-central1",
-            },
-            VertexConfig,
-            KindAnthropicModel.CLAUDE_3_7_SONNET_VERTEX.value,
-        ),
-        # No feature flag + Anthropic API (falls back to parent's hardcoded model)
-        (
-            set(),
-            {"ANTHROPIC_API_KEY": "test-key"},
-            AnthropicConfig,
-            KindAnthropicModel.CLAUDE_3_7_SONNET.value,
-        ),
     ],
 )
 def test_software_development_workflow_model_config(
-    feature_flags,
     env_vars,
     expected_config_type,
     expected_model,
@@ -1290,22 +1270,14 @@ def test_software_development_workflow_model_config(
         current_feature_flag_context,
     )
 
-    # Set up feature flag context
-    token = current_feature_flag_context.set(feature_flags)
+    with patch.dict(os.environ, env_vars, clear=True):
+        workflow = Workflow(
+            "123",
+            {},
+            workflow_type=CategoryEnum.WORKFLOW_SOFTWARE_DEVELOPMENT,
+        )
 
-    try:
-        with patch.dict(os.environ, env_vars, clear=True):
-            workflow = Workflow(
-                "123",
-                {},
-                workflow_type=CategoryEnum.WORKFLOW_SOFTWARE_DEVELOPMENT,
-            )
+        config = workflow._get_model_config()
 
-            config = workflow._get_model_config()
-
-            assert isinstance(config, expected_config_type)
-            assert config.model_name == expected_model
-
-    finally:
-        # Clean up feature flag context
-        current_feature_flag_context.reset(token)
+        assert isinstance(config, expected_config_type)
+        assert config.model_name == expected_model
