@@ -24,6 +24,7 @@ from duo_workflow_service.server import (
     serve,
     string_to_category_enum,
 )
+from lib.feature_flags import current_feature_flag_context
 
 
 def test_configure_cache_disabled():
@@ -403,7 +404,14 @@ async def test_execute_workflow_valid_workflow_metadata(
     )
 
 
-def test_clean_start_request():
+@pytest.mark.parametrize(
+    (
+        "feature_flags",
+        "expected_goal_output",
+    ),
+    [("duo_workflow_extended_logging", "test-goal"), ("", "")],
+)
+def test_clean_start_request(feature_flags, expected_goal_output):
     # Create a test request with workflow metadata
     start_request = contract_pb2.StartWorkflowRequest(
         workflowID="test-id",
@@ -412,19 +420,27 @@ def test_clean_start_request():
     )
     client_event = contract_pb2.ClientEvent(startRequest=start_request)
 
-    # Call the clean_start_request function
-    cleaned_request = clean_start_request(client_event)
+    # Set extended logging feature flag to true
+    token = current_feature_flag_context.set({feature_flags})
 
-    # Verify that the cleaned request is a new object (not the same instance)
-    assert cleaned_request is not client_event
+    try:
+        # Call the clean_start_request function
+        cleaned_request = clean_start_request(client_event)
 
-    # Verify that the original request still has its metadata
-    assert client_event.startRequest.workflowMetadata == json.dumps({"key": "value"})
+        # Verify that the cleaned request is a new object (not the same instance)
+        assert cleaned_request is not client_event
 
-    # Verify that the cleaned request has no metadata but retains other fields
-    assert cleaned_request.startRequest.workflowMetadata == ""
-    assert cleaned_request.startRequest.workflowID == "test-id"
-    assert cleaned_request.startRequest.goal == "test-goal"
+        # Verify that the original request still has its metadata
+        assert client_event.startRequest.workflowMetadata == json.dumps(
+            {"key": "value"}
+        )
+
+        # Verify that the cleaned request has no metadata but retains other fields
+        assert cleaned_request.startRequest.workflowMetadata == ""
+        assert cleaned_request.startRequest.workflowID == "test-id"
+        assert cleaned_request.startRequest.goal == expected_goal_output
+    finally:
+        current_feature_flag_context.reset(token)
 
 
 def test_string_to_category_enum():

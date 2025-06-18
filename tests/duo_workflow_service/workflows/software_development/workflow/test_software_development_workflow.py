@@ -1,6 +1,6 @@
 import asyncio
 import os
-from unittest.mock import ANY, AsyncMock, MagicMock, call, patch
+from unittest.mock import ANY, AsyncMock, MagicMock, Mock, call, patch
 from uuid import uuid4
 
 import pytest
@@ -24,6 +24,7 @@ from duo_workflow_service.workflows.software_development.workflow import (
     PLANNER_TOOLS,
     Workflow,
 )
+from lib.feature_flags import current_feature_flag_context
 
 
 class MockComponent:
@@ -1281,3 +1282,45 @@ def test_software_development_workflow_model_config(
 
         assert isinstance(config, expected_config_type)
         assert config.model_name == expected_model
+
+
+@pytest.mark.parametrize(
+    ("feature_flags", "expected_output"),
+    [
+        (
+            "duo_workflow_extended_logging",
+            ["%s", "AIMessage", "Test AI Message"],
+        ),
+        ("", None),
+    ],
+)
+@patch("logging.Logger.info")
+def test_log_workflow_elements(mock_logger_info, feature_flags, expected_output):
+    workflow = Workflow(
+        "123",
+        {},
+        workflow_type=CategoryEnum.WORKFLOW_SOFTWARE_DEVELOPMENT,
+    )
+
+    element = {
+        "conversation_history": {
+            "test_agent": [AIMessage(content="Test AI Message")],
+        }
+    }
+
+    token = current_feature_flag_context.set({feature_flags})
+    try:
+        workflow.log = Mock()
+        workflow.log_workflow_elements(element)
+        format_call_args = workflow.log.info.call_args_list
+        assert format_call_args[0][0][0] == "agent: %s"
+        assert format_call_args[0][0][1] == "test_agent"
+        if expected_output is not None:
+            assert len(format_call_args) == 4
+            assert format_call_args[1][0][0].startswith(expected_output[0])
+            assert format_call_args[1][0][1] == expected_output[1]
+            assert format_call_args[1][0][2] == expected_output[2]
+        else:
+            assert len(format_call_args) == 1
+    finally:
+        current_feature_flag_context.reset(token)

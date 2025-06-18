@@ -55,6 +55,7 @@ from duo_workflow_service.workflows.abstract_workflow import (
 )
 from duo_workflow_service.workflows.registry import resolve_workflow_class
 from duo_workflow_service.workflows.type_definitions import AdditionalContext
+from lib.feature_flags import FeatureFlag, is_feature_enabled
 
 log = structlog.stdlib.get_logger("server")
 
@@ -79,6 +80,8 @@ def string_to_category_enum(category_string: str) -> CategoryEnum:
 def clean_start_request(start_workflow_request: contract_pb2.ClientEvent):
     request = contract_pb2.ClientEvent()
     request.CopyFrom(start_workflow_request)
+    if not is_feature_enabled(FeatureFlag.DUO_WORKFLOW_EXTENDED_LOGGING):
+        request.startRequest.ClearField("goal")
     request.startRequest.ClearField("workflowMetadata")
     return request
 
