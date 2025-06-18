@@ -52,6 +52,7 @@ class PlanTerminatorAgent:
             "ui_chat_log": [
                 UiChatLog(
                     message_type=MessageTypeEnum.WORKFLOW_END,
+                    message_sub_type=None,
                     content=message,
                     timestamp=datetime.now(timezone.utc).isoformat(),
                     status=ToolStatus.FAILURE,

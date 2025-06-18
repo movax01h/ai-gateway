@@ -136,6 +136,7 @@ class HumanApprovalComponent(ABC):
             UiChatLog(
                 correlation_id=None,
                 message_type=MessageTypeEnum.REQUEST,
+                message_sub_type=None,
                 content=approval_request.value,
                 timestamp=datetime.now(timezone.utc).isoformat(),
                 status=ToolStatus.SUCCESS,

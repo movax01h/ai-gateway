@@ -207,6 +207,7 @@ class GoalDisambiguationComponent:
             "ui_chat_log": [
                 UiChatLog(
                     message_type=MessageTypeEnum.REQUEST,
+                    message_sub_type=None,
                     content=CLARITY_JUDGE_RESPONSE_TEMPLATE.format(
                         response=response,
                         message=tool_call.get("message", ""),
@@ -244,6 +245,7 @@ class GoalDisambiguationComponent:
                     event["correlation_id"] if event.get("correlation_id") else None
                 ),
                 message_type=MessageTypeEnum.USER,
+                message_sub_type=None,
                 content=message,
                 timestamp=datetime.now(timezone.utc).isoformat(),
                 status=ToolStatus.SUCCESS,

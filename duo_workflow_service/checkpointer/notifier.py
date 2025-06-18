@@ -84,6 +84,7 @@ class UserInterface:
                 status=None,
                 correlation_id=None,
                 message_type=MessageTypeEnum.AGENT,
+                message_sub_type=None,
                 timestamp=datetime.now(timezone.utc).isoformat(),
                 content="",
                 tool_info=None,

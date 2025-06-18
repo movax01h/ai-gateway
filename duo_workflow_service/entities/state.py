@@ -84,6 +84,7 @@ class ToolInfo(TypedDict):
 
 class UiChatLog(TypedDict):
     message_type: MessageTypeEnum
+    message_sub_type: Optional[str]
     content: str
     timestamp: str
     status: Optional[Union[ToolStatus, SlashCommandStatus]]

@@ -105,6 +105,7 @@ def _load_file_contents(file_contents: list[str], state: WorkflowState):
         logs.append(
             UiChatLog(
                 message_type=MessageTypeEnum.TOOL,
+                message_sub_type=None,
                 content="File too large, skipping.",
                 timestamp=datetime.now(timezone.utc).isoformat(),
                 status=ToolStatus.FAILURE,
@@ -117,6 +118,7 @@ def _load_file_contents(file_contents: list[str], state: WorkflowState):
         logs.append(
             UiChatLog(
                 message_type=MessageTypeEnum.TOOL,
+                message_sub_type=None,
                 content="Loaded Jenkins file",
                 timestamp=datetime.now(timezone.utc).isoformat(),
                 status=ToolStatus.SUCCESS,
@@ -137,6 +139,7 @@ def _git_output(command_output: list[str], state: WorkflowState):
     logs: list[UiChatLog] = [
         UiChatLog(
             message_type=MessageTypeEnum.TOOL,
+            message_sub_type=None,
             content=f"{command_output[-1]}",
             timestamp=datetime.now(timezone.utc).isoformat(),
             status=ToolStatus.SUCCESS,
@@ -290,6 +293,7 @@ class Workflow(AbstractWorkflow):
         target_file = goal
         initial_ui_chat_log = UiChatLog(
             message_type=MessageTypeEnum.TOOL,
+            message_sub_type=None,
             content=f"Starting Jenkinsfile translation workflow from file: {target_file}",
             timestamp=datetime.now(timezone.utc).isoformat(),
             status=ToolStatus.SUCCESS,

@@ -354,6 +354,7 @@ def test_ui_chat_log_reducer():
     current: List[UiChatLog] = [
         {
             "message_type": MessageTypeEnum.AGENT,
+            "message_sub_type": None,
             "content": "first message",
             "timestamp": "2024-01-01T10:00:00Z",
             "status": None,
@@ -363,6 +364,7 @@ def test_ui_chat_log_reducer():
         },
         {
             "message_type": MessageTypeEnum.TOOL,
+            "message_sub_type": None,
             "content": "second message",
             "timestamp": "2024-01-01T10:01:00Z",
             "status": None,
@@ -375,6 +377,7 @@ def test_ui_chat_log_reducer():
     new: Optional[List[UiChatLog]] = [
         {
             "message_type": MessageTypeEnum.USER,
+            "message_sub_type": None,
             "content": "third message",
             "timestamp": "2024-01-01T10:02:00Z",
             "status": None,
@@ -389,6 +392,7 @@ def test_ui_chat_log_reducer():
     assert result == [
         {
             "message_type": MessageTypeEnum.AGENT,
+            "message_sub_type": None,
             "content": "first message",
             "timestamp": "2024-01-01T10:00:00Z",
             "status": None,
@@ -398,6 +402,7 @@ def test_ui_chat_log_reducer():
         },
         {
             "message_type": MessageTypeEnum.TOOL,
+            "message_sub_type": None,
             "content": "second message",
             "timestamp": "2024-01-01T10:01:00Z",
             "status": None,
@@ -407,6 +412,7 @@ def test_ui_chat_log_reducer():
         },
         {
             "message_type": MessageTypeEnum.USER,
+            "message_sub_type": None,
             "content": "third message",
             "timestamp": "2024-01-01T10:02:00Z",
             "status": None,
@@ -421,6 +427,7 @@ def test_ui_chat_log_reducer_idempotency():
     current: List[UiChatLog] = [
         {
             "message_type": MessageTypeEnum.AGENT,
+            "message_sub_type": None,
             "content": "first message",
             "timestamp": "2024-01-01T10:00:00Z",
             "status": None,
@@ -433,6 +440,7 @@ def test_ui_chat_log_reducer_idempotency():
     new: Optional[List[UiChatLog]] = [
         {
             "message_type": MessageTypeEnum.USER,
+            "message_sub_type": None,
             "content": "second message",
             "timestamp": "2024-01-01T10:01:00Z",
             "status": None,
@@ -448,6 +456,7 @@ def test_ui_chat_log_reducer_idempotency():
     assert result == [
         {
             "message_type": MessageTypeEnum.AGENT,
+            "message_sub_type": None,
             "content": "first message",
             "timestamp": "2024-01-01T10:00:00Z",
             "status": None,
@@ -457,6 +466,7 @@ def test_ui_chat_log_reducer_idempotency():
         },
         {
             "message_type": MessageTypeEnum.USER,
+            "message_sub_type": None,
             "content": "second message",
             "timestamp": "2024-01-01T10:01:00Z",
             "status": None,
@@ -471,6 +481,7 @@ def test_ui_chat_log_reducer_with_none():
     current: List[UiChatLog] = [
         {
             "message_type": MessageTypeEnum.AGENT,
+            "message_sub_type": None,
             "content": "first message",
             "timestamp": "2024-01-01T10:00:00Z",
             "status": None,

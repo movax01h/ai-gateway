@@ -437,6 +437,7 @@ class Workflow(AbstractWorkflow):
     def get_workflow_state(self, goal: str) -> WorkflowState:
         initial_ui_chat_log = UiChatLog(
             message_type=MessageTypeEnum.TOOL,
+            message_sub_type=None,
             content=f"Starting workflow with goal: {goal}",
             timestamp=datetime.now(timezone.utc).isoformat(),
             status=ToolStatus.SUCCESS,

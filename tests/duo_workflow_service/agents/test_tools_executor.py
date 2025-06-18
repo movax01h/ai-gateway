@@ -1,5 +1,5 @@
 # pylint: disable=direct-environment-variable-reference
-
+import asyncio
 import os
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -24,7 +24,11 @@ from duo_workflow_service.internal_events.event_enum import (
     EventEnum,
     EventLabelEnum,
 )
-from duo_workflow_service.tools import PipelineMergeRequestNotFoundError, Toolset
+from duo_workflow_service.tools import (
+    PipelineMergeRequestNotFoundError,
+    RunCommand,
+    Toolset,
+)
 from duo_workflow_service.tools.planner import (
     AddNewTaskInput,
     CreatePlanInput,
@@ -763,3 +767,48 @@ def test_get_tool_display_message_unknown_tool():
         "unknown_tool", {"param": "value"}
     )
     assert message == "Using unknown_tool: param=value"
+
+
+@pytest.mark.asyncio
+async def test_run_command_output(workflow_state):
+
+    tool_set = Toolset(
+        pre_approved=set(),
+        all_tools={
+            "run_command": RunCommand(
+                metadata={
+                    "outbox": MagicMock(spec=asyncio.Queue),
+                    "inbox": MagicMock(spec=asyncio.Queue),
+                }
+            )
+        },
+    )
+
+    tools_executor = ToolsExecutor(
+        tools_agent_name="planner",
+        toolset=tool_set,
+        workflow_id="123",
+        workflow_type=CategoryEnum.WORKFLOW_SOFTWARE_DEVELOPMENT,
+    )
+
+    workflow_state["conversation_history"]["planner"] = [
+        AIMessage(
+            content=[{"type": "text", "text": "testing"}],
+            tool_calls=[
+                {
+                    "id": "1",
+                    "name": "run_command",
+                    "args": {
+                        "program": "echo",
+                        "arguments": ["/home"],
+                        "flags": ["-l"],
+                    },
+                }
+            ],
+        )
+    ]
+
+    result = await tools_executor.run(workflow_state)
+
+    assert result["ui_chat_log"][-1]["tool_info"]["tool_response"]
+    assert result["ui_chat_log"][-1]["message_sub_type"] == "command_output"

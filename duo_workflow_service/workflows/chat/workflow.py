@@ -97,6 +97,7 @@ class Workflow(AbstractWorkflow):
 
         initial_ui_chat_log = UiChatLog(
             message_type=MessageTypeEnum.TOOL,
+            message_sub_type=None,
             content=f"Starting chat: {goal}",
             timestamp=datetime.now(timezone.utc).isoformat(),
             status=ToolStatus.SUCCESS,

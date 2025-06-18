@@ -62,6 +62,7 @@ class HandoverAgent:
             ui_chat_logs.append(
                 UiChatLog(
                     message_type=MessageTypeEnum.WORKFLOW_END,
+                    message_sub_type=None,
                     content="Workflow completed successfully",
                     timestamp=datetime.now(timezone.utc).isoformat(),
                     status=ToolStatus.SUCCESS,
@@ -109,6 +110,7 @@ class HandoverAgent:
                 ui_chat_logs.append(
                     UiChatLog(
                         message_type=MessageTypeEnum.AGENT,
+                        message_sub_type=None,
                         content=summary,
                         timestamp=datetime.now(timezone.utc).isoformat(),
                         status=ToolStatus.SUCCESS,

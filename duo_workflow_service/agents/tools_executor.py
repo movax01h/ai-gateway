@@ -31,6 +31,7 @@ from duo_workflow_service.internal_events.event_enum import (
 from duo_workflow_service.monitoring import duo_workflow_metrics
 from duo_workflow_service.tools import (
     PipelineException,
+    RunCommand,
     Toolset,
     format_tool_display_message,
 )
@@ -105,6 +106,10 @@ _ACTION_HANDLERS = {
     "create_plan": _create_plan,
 }
 
+_COMMAND_OUTPUT_TOOLS = {
+    "run_command": RunCommand,
+}
+
 
 class ToolsExecutor:
     _tools_agent_name: str
@@ -149,6 +154,9 @@ class ToolsExecutor:
 
             if tool_name in self._toolset:
                 result = await self._execute_tool(tool_name, tool_args)
+                chat_logs = result.get("chat_logs", [])
+                if chat_logs and isinstance(chat_logs[0], dict):
+                    chat_logs[0].setdefault("message_sub_type", tool_name)
 
                 if result.get("status") == WorkflowStatusEnum.ERROR:
                     tools_responses.append(
@@ -168,7 +176,17 @@ class ToolsExecutor:
 
                 tool_response = result["response"]
 
-                if tool_name not in _ACTION_HANDLERS:
+                if tool_name in _COMMAND_OUTPUT_TOOLS:
+                    if chat_logs and "tool_info" in chat_logs[0]:
+                        chat_log = chat_logs[0]
+                        chat_log["tool_info"]["tool_response"] = result.get("response")
+                        chat_log["message_sub_type"] = "command_output"
+                        ui_chat_logs.extend([chat_log])
+
+                if (
+                    tool_name not in _ACTION_HANDLERS
+                    and tool_name not in _COMMAND_OUTPUT_TOOLS
+                ):
                     ui_chat_logs.extend(result.get("chat_logs", []))
 
             if tool_name == "get_plan":
@@ -199,6 +217,7 @@ class ToolsExecutor:
             ui_chat_logs.append(
                 UiChatLog(
                     message_type=MessageTypeEnum.AGENT,
+                    message_sub_type=None,
                     content=ai_message_content,
                     timestamp=datetime.now(timezone.utc).isoformat(),
                     status=ToolStatus.SUCCESS,
@@ -402,6 +421,7 @@ class ToolsExecutor:
 
         return UiChatLog(
             message_type=MessageTypeEnum.TOOL,
+            message_sub_type=tool_name,
             content=content,
             timestamp=datetime.now(timezone.utc).isoformat(),
             status=status,

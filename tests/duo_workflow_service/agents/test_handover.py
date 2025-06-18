@@ -35,6 +35,7 @@ class TestHandoverAgent:
                     "content": "Workflow completed successfully",
                     "correlation_id": None,
                     "message_type": MessageTypeEnum.WORKFLOW_END,
+                    "message_sub_type": None,
                     "status": ToolStatus.SUCCESS,
                     "timestamp": "2025-01-01T12:00:00+00:00",
                     "tool_info": None,
@@ -70,6 +71,7 @@ class TestHandoverAgent:
                         "content": "Workflow completed successfully",
                         "correlation_id": None,
                         "message_type": MessageTypeEnum.WORKFLOW_END,
+                        "message_sub_type": None,
                         "status": ToolStatus.SUCCESS,
                         "timestamp": "2025-01-01T12:00:00+00:00",
                         "tool_info": None,
@@ -92,6 +94,7 @@ class TestHandoverAgent:
                         "content": "Workflow completed successfully",
                         "correlation_id": None,
                         "message_type": MessageTypeEnum.WORKFLOW_END,
+                        "message_sub_type": None,
                         "status": ToolStatus.SUCCESS,
                         "timestamp": "2025-01-01T12:00:00+00:00",
                         "tool_info": None,
@@ -136,6 +139,7 @@ class TestHandoverAgent:
                         "content": "This is awesome summary",
                         "correlation_id": None,
                         "message_type": MessageTypeEnum.AGENT,
+                        "message_sub_type": None,
                         "status": ToolStatus.SUCCESS,
                         "timestamp": "2025-01-01T12:00:00+00:00",
                         "tool_info": None,
@@ -145,6 +149,7 @@ class TestHandoverAgent:
                         "content": "Workflow completed successfully",
                         "correlation_id": None,
                         "message_type": MessageTypeEnum.WORKFLOW_END,
+                        "message_sub_type": None,
                         "status": ToolStatus.SUCCESS,
                         "timestamp": "2025-01-01T12:00:00+00:00",
                         "tool_info": None,
@@ -172,6 +177,7 @@ class TestHandoverAgent:
                 [
                     {
                         "message_type": MessageTypeEnum.AGENT,
+                        "message_sub_type": None,
                         "content": "This is summary",
                         "timestamp": "2025-01-01T12:00:00+00:00",
                         "status": ToolStatus.SUCCESS,
@@ -183,6 +189,7 @@ class TestHandoverAgent:
                         "content": "Workflow completed successfully",
                         "correlation_id": None,
                         "message_type": MessageTypeEnum.WORKFLOW_END,
+                        "message_sub_type": None,
                         "status": ToolStatus.SUCCESS,
                         "timestamp": "2025-01-01T12:00:00+00:00",
                         "tool_info": None,
@@ -205,6 +212,7 @@ class TestHandoverAgent:
                         "content": "Workflow completed successfully",
                         "correlation_id": None,
                         "message_type": MessageTypeEnum.WORKFLOW_END,
+                        "message_sub_type": None,
                         "status": ToolStatus.SUCCESS,
                         "timestamp": "2025-01-01T12:00:00+00:00",
                         "tool_info": None,
@@ -234,6 +242,7 @@ class TestHandoverAgent:
                         "content": "Workflow completed successfully",
                         "correlation_id": None,
                         "message_type": MessageTypeEnum.WORKFLOW_END,
+                        "message_sub_type": None,
                         "status": ToolStatus.SUCCESS,
                         "timestamp": "2025-01-01T12:00:00+00:00",
                         "tool_info": None,
@@ -261,6 +270,7 @@ class TestHandoverAgent:
                 [
                     {
                         "content": "Workflow completed successfully",
+                        "message_sub_type": None,
                         "correlation_id": None,
                         "message_type": MessageTypeEnum.WORKFLOW_END,
                         "status": ToolStatus.SUCCESS,
@@ -297,6 +307,7 @@ class TestHandoverAgent:
             ui_chat_log=[
                 {
                     "message_type": MessageTypeEnum.AGENT,
+                    "message_sub_type": None,
                     "content": "This is summary",
                     "timestamp": "2025-01-08T12:00:00Z",
                     "status": ToolStatus.SUCCESS,
