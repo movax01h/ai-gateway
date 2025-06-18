@@ -22,7 +22,7 @@ message StartWorkflowRequest {
     string goal = 4;
     string workflowMetadata = 5;
     repeated string clientCapabilities = 6;
-    repeated ContextElement context = 7;
+    repeated ContextElement context = 7 [deprecated = true]; // Use additional_context instead
     repeated McpTool mcpTools = 8;
     repeated AdditionalContext additional_context = 9;
     optional Approval approval = 10;
@@ -109,6 +109,7 @@ message GenerateTokenResponse {
 }
 
 enum ContextElementType {
+    option deprecated = true; // Use AdditionalContext instead
     USER_PREFERENCE = 0;
     SELECTED_TEXT = 1;
     FILE = 2;
@@ -118,6 +119,7 @@ enum ContextElementType {
 }
 
 message ContextElement {
+    option deprecated = true;
     ContextElementType type = 1;
     string name = 2;
     string contents = 3;
