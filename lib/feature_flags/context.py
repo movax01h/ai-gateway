@@ -19,6 +19,7 @@ class FeatureFlag(StrEnum):
     DUO_WORKFLOW_MCP_SUPPORT = "duo_workflow_mcp_support"
     BATCH_DUO_WORKFLOW_PLANNER_TASKS = "batch_duo_workflow_planner_tasks"
     DUO_WORKFLOW_USE_HANDOVER_SUMMARY = "duo_workflow_use_handover_summary"
+    DUO_WORKFLOW_EXTENDED_LOGGING = "duo_workflow_extended_logging"
 
 
 def is_feature_enabled(feature_name: FeatureFlag | str) -> bool:
