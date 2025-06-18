@@ -176,6 +176,7 @@ def _log_ai_message(state: SearchAndReplaceWorkflowState):
         "ui_chat_log": [
             UiChatLog(
                 message_type=MessageTypeEnum.AGENT,
+                message_sub_type=None,
                 content=last_msg,
                 timestamp=datetime.now(timezone.utc).isoformat(),
                 status=ToolStatus.SUCCESS,
@@ -208,6 +209,7 @@ def _detect_affected_components_output_parser(
     logs = [
         UiChatLog(
             message_type=MessageTypeEnum.TOOL,
+            message_sub_type=None,
             content=f"Scanned file: {state['pending_files'][0]}",
             timestamp=datetime.now(timezone.utc).isoformat(),
             status=ToolStatus.SUCCESS,
@@ -222,6 +224,7 @@ def _detect_affected_components_output_parser(
         logs.append(
             UiChatLog(
                 message_type=MessageTypeEnum.TOOL,
+                message_sub_type=None,
                 content=f"Detected {components_cnt} components that require accessibility review.",
                 timestamp=datetime.now(timezone.utc).isoformat(),
                 status=ToolStatus.SUCCESS,
@@ -277,6 +280,7 @@ def _append_affected_file(
         logs.append(
             UiChatLog(
                 message_type=MessageTypeEnum.TOOL,
+                message_sub_type=None,
                 content=f"File too large, skipping {current_file}",
                 timestamp=datetime.now(timezone.utc).isoformat(),
                 status=ToolStatus.FAILURE,
@@ -289,6 +293,7 @@ def _append_affected_file(
         logs.append(
             UiChatLog(
                 message_type=MessageTypeEnum.TOOL,
+                message_sub_type=None,
                 content=f"Loaded {current_file}",
                 timestamp=datetime.now(timezone.utc).isoformat(),
                 status=ToolStatus.SUCCESS,
@@ -500,6 +505,7 @@ class Workflow(AbstractWorkflow):
         target_dir = goal
         initial_ui_chat_log = UiChatLog(
             message_type=MessageTypeEnum.TOOL,
+            message_sub_type=None,
             content=f"Starting UI accessibility workflow from directory: {target_dir}",
             timestamp=datetime.now(timezone.utc).isoformat(),
             status=ToolStatus.SUCCESS,

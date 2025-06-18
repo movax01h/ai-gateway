@@ -95,6 +95,7 @@ class ChatAgent(Prompt[ChatWorkflowState, BaseMessage]):
             result["ui_chat_log"] = [
                 UiChatLog(  # type: ignore[list-item]
                     message_type=MessageTypeEnum.AGENT,
+                    message_sub_type=None,
                     content=StrOutputParser().invoke(agent_response) or "",
                     timestamp=datetime.now(timezone.utc).isoformat(),
                     status=ToolStatus.SUCCESS,

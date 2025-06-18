@@ -81,6 +81,7 @@ class RunToolNode(Generic[WorkflowStateT]):
             logs.append(
                 UiChatLog(
                     message_type=MessageTypeEnum.TOOL,
+                    message_sub_type=None,
                     content=f"Run tool {self._tool.name} with params {tool_params}",
                     timestamp=datetime.now(timezone.utc).isoformat(),
                     status=ToolStatus.SUCCESS,

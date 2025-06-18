@@ -202,6 +202,7 @@ class Agent:
     def _create_ui_chat_log(self, content: str) -> UiChatLog:
         return UiChatLog(
             message_type=MessageTypeEnum.AGENT,
+            message_sub_type=None,
             content=content,
             timestamp=datetime.now(timezone.utc).isoformat(),
             status=None,

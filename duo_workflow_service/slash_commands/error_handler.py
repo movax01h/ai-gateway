@@ -46,6 +46,7 @@ def create_error_ui_chat_log(error_message: str) -> UiChatLog:
     """
     return UiChatLog(
         message_type=MessageTypeEnum.TOOL,
+        message_sub_type=None,
         content=f"Slash command error: {error_message}",
         timestamp=datetime.now(timezone.utc).isoformat(),
         status=SlashCommandStatus.FAILURE,
