@@ -33,10 +33,6 @@ async def get_config():
     yield get_container_application().config
 
 
-async def get_chat_anthropic_claude_factory_provider():
-    yield get_container_application().chat.anthropic_claude_factory
-
-
 async def get_search_factory_provider():
     yield get_container_application().searches.search_provider
 
@@ -99,10 +95,6 @@ async def get_code_suggestions_generations_litellm_factory_provider():
 
 async def get_code_suggestions_generations_agent_factory_provider():
     yield get_container_application().code_suggestions.generations.agent_factory
-
-
-async def get_chat_litellm_factory_provider():
-    yield get_container_application().chat.litellm_factory
 
 
 @inject

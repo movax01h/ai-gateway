@@ -2,7 +2,6 @@ from time import time
 from typing import Annotated, AsyncIterator, Tuple
 
 from dependency_injector import providers
-from dependency_injector.providers import Factory, FactoryAggregate
 from fastapi import APIRouter, Depends, Request, status
 from gitlab_cloud_connector import GitLabUnitPrimitive
 from starlette.responses import StreamingResponse
@@ -23,8 +22,6 @@ from ai_gateway.api.v2.chat.agent import (
 )
 from ai_gateway.api.v2.chat.typing import AgentRequest
 from ai_gateway.async_dependency_resolver import (
-    get_chat_anthropic_claude_factory_provider,
-    get_chat_litellm_factory_provider,
     get_internal_event_client,
     get_prompt_registry,
 )
@@ -119,12 +116,6 @@ async def chat(
     chat_request: ChatRequest,
     chat_invokable: str,  # pylint: disable=unused-argument
     current_user: Annotated[StarletteUser, Depends(get_current_user)],
-    anthropic_claude_factory: Annotated[  # pylint: disable=unused-argument
-        FactoryAggregate, Depends(get_chat_anthropic_claude_factory_provider)
-    ],
-    litellm_factory: Annotated[  # pylint: disable=unused-argument
-        Factory, Depends(get_chat_litellm_factory_provider)
-    ],
     internal_event_client: Annotated[  # pylint: disable=unused-argument
         InternalEventsClient, Depends(get_internal_event_client)
     ],
