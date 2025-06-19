@@ -524,13 +524,3 @@ class Workflow(AbstractWorkflow):
             plan=Plan(steps=[]),
             handover=[],
         )
-
-    def log_workflow_elements(self, element):
-        self.log.info("###############################")
-        if "ui_chat_log" in element:
-            for log in element["ui_chat_log"]:
-                self.log.info(
-                    f"%s: %{'' if DEBUG else f'.{MAX_MESSAGE_LENGTH}'}s",
-                    log["message_type"],
-                    log["content"],
-                )

@@ -24,8 +24,6 @@ from duo_workflow_service.token_counter.approximate_token_counter import (
 )
 from duo_workflow_service.tracking import log_exception
 from duo_workflow_service.workflows.abstract_workflow import (
-    DEBUG,
-    MAX_MESSAGE_LENGTH,
     MAX_TOKENS_TO_SAMPLE,
     RECURSION_LIMIT,
     AbstractWorkflow,
@@ -310,13 +308,3 @@ class Workflow(AbstractWorkflow):
             handover=[],
             last_human_input=None,
         )
-
-    def log_workflow_elements(self, element):
-        self.log.info("###############################")
-        if "ui_chat_log" in element:
-            for log in element["ui_chat_log"]:
-                self.log.info(
-                    f"%s: %{'' if DEBUG else f'.{MAX_MESSAGE_LENGTH}'}s",
-                    log["message_type"],
-                    log["content"],
-                )

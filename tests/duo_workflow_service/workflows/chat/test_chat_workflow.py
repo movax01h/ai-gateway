@@ -400,31 +400,6 @@ async def test_handle_workflow_failure(mock_log_exception, workflow_with_project
     )
 
 
-@patch("logging.Logger.info")
-def test_log_workflow_elements(mock_logger_info, workflow_with_project):
-    element = {
-        "ui_chat_log": [
-            {
-                "message_type": MessageTypeEnum.AGENT,
-                "content": "Test message content",
-                "timestamp": datetime.now().isoformat(),
-                "status": ToolStatus.SUCCESS,
-            }
-        ]
-    }
-
-    workflow_with_project.log = Mock()
-    workflow_with_project.log_workflow_elements(element)
-
-    workflow_with_project.log.info.assert_any_call("###############################")
-
-    format_call_args = workflow_with_project.log.info.call_args_list[1][0]
-    assert format_call_args[0].startswith(
-        "%s"
-    )  # Format string starts with message type
-    assert "Test message content" in format_call_args[2]  # Second arg is content
-
-
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
     "conversation_content,response_content,tool_calls,expected_status,has_ui_log",

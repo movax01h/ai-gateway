@@ -50,7 +50,6 @@ from duo_workflow_service.entities import (
 from duo_workflow_service.llm_factory import create_chat_model
 from duo_workflow_service.tracking.errors import log_exception
 from duo_workflow_service.workflows.abstract_workflow import AbstractWorkflow
-from lib.feature_flags import FeatureFlag, is_feature_enabled
 
 # Constants
 QUEUE_MAX_SIZE = 1
@@ -454,27 +453,6 @@ class Workflow(AbstractWorkflow):
             handover=[],
             ui_chat_log=[initial_ui_chat_log],
         )
-
-    def log_workflow_elements(self, element):
-        if "conversation_history" not in element:
-            return
-
-        for agent, messages in element["conversation_history"].items():
-            self.log.info("agent: %s", agent)
-            if is_feature_enabled(FeatureFlag.DUO_WORKFLOW_EXTENDED_LOGGING):
-                messages = messages if DEBUG else messages[-MAX_MESSAGES_TO_DISPLAY:]
-                for message in messages:
-                    self.log.info(
-                        f"%s: %{'' if DEBUG else f'.{MAX_MESSAGE_LENGTH}'}s",
-                        message.__class__.__name__,
-                        message.content,
-                    )
-                self.log.info("--------------------------")
-                if "status" in element:
-                    self.log.info(element["status"])
-                if "plan" in element:
-                    self.log.info(element["plan"])
-                self.log.info("###############################")
 
     def planner_instructions(self, tools_registry):
         return PLANNER_INSTRUCTIONS.format(
