@@ -63,7 +63,7 @@ LangChain and LiteLLM enable structured prompt construction and manage LLM inter
 ### Example Prompt Retrieval Code
 
 ```python
-from langchain_community.chat_models import ChatLiteLLM
+from langchain_litellm import ChatLiteLLM
 from ai_gateway.prompts import Prompt, LocalPromptRegistry
 from ai_gateway.chat.agents import ReActAgent, ReActAgentInputs
 
