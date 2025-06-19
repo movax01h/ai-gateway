@@ -39,6 +39,12 @@ class TestGetWorkflowContext:
                             {"id": "1", "description": "Task 1", "status": "Completed"}
                         ]
                     },
+                    "files_changed": [
+                        {
+                            "tool_args": {"contents": "Test", "file_path": "test.txt"},
+                            "tool_name": "create_file_with_contents",
+                        }
+                    ],
                     "status": "Completed",
                     "handover": [
                         {"type": "system", "content": "System message"},
@@ -77,6 +83,11 @@ class TestGetWorkflowContext:
         assert workflow["goal"] == "Create a feature"
         assert workflow["summary"] == "Task summary"
         assert "plan" in workflow
+        assert isinstance(workflow["files_changed"], list)
+        assert workflow["files_changed"][0] == {
+            "tool_args": {"contents": "Test", "file_path": "test.txt"},
+            "tool_name": "create_file_with_contents",
+        }
 
     @pytest.mark.asyncio
     async def test_arun_empty_response(self, get_last_checkpoint_tool, gitlab_client):
@@ -122,11 +133,11 @@ class TestGetWorkflowContext:
 
         context = json.loads(context_str)
         assert isinstance(context, dict)
-        print(context)
         assert context["workflow"]["id"] == "123"
         assert context["workflow"]["plan"] == {"steps": []}
         assert context["workflow"]["goal"] == "No goal available"
         assert context["workflow"]["summary"] == "No summary available"
+        assert context["workflow"]["files_changed"] == []
 
     @pytest.mark.asyncio
     async def test_format_checkpoint_context_invalid_data(
@@ -153,6 +164,7 @@ class TestGetWorkflowContext:
         assert context["workflow"]["plan"] == {"steps": []}
         assert context["workflow"]["goal"] == "No goal available"
         assert context["workflow"]["summary"] == "No summary available"
+        assert context["workflow"]["files_changed"] == []
 
     @pytest.mark.asyncio
     async def test_format_checkpoint_context_parsing_exception(
