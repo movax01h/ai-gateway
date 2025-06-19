@@ -318,12 +318,12 @@ async def test_workflow_run(
         (
             [],
             {"mcp_enabled": True},
-            CHAT_READ_ONLY_TOOLS + CHAT_MUTATION_TOOLS + ["extra_tool"],
+            CHAT_READ_ONLY_TOOLS + CHAT_MUTATION_TOOLS,
         ),
         (
             ["duo_workflow_mcp_support"],
             {},
-            CHAT_READ_ONLY_TOOLS + CHAT_MUTATION_TOOLS + ["extra_tool"],
+            CHAT_READ_ONLY_TOOLS + CHAT_MUTATION_TOOLS,
         ),
         (
             ["duo_workflow_mcp_support"],
