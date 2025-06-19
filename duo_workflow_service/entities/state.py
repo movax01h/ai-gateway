@@ -305,6 +305,7 @@ class ChatWorkflowState(TypedDict):
     last_human_input: Union[WorkflowEvent, None]
     context_elements: List[ContextElement]
     project: Project | None
+    cancel_tool_message: str | None
 
 
 DuoWorkflowStateType = Union[

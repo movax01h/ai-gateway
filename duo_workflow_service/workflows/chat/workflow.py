@@ -85,6 +85,9 @@ class Workflow(AbstractWorkflow):
         if state["status"] in [WorkflowStatusEnum.CANCELLED, WorkflowStatusEnum.ERROR]:
             return Routes.STOP
 
+        if state["status"] == WorkflowStatusEnum.TOOL_CALL_APPROVAL_REQUIRED:
+            return Routes.STOP
+
         history: List[BaseMessage] = state["conversation_history"][self._agent.name]
         last_message = history[-1]
         if isinstance(last_message, AIMessage) and len(last_message.tool_calls) > 0:
@@ -123,6 +126,7 @@ class Workflow(AbstractWorkflow):
             last_human_input=None,
             context_elements=contextElements,
             project=self._project,
+            cancel_tool_message=None,
         )
 
     async def get_graph_input(self, goal: str, status_event: str) -> Any:
@@ -130,11 +134,16 @@ class Workflow(AbstractWorkflow):
             case WorkflowStatusEventEnum.START:
                 return self.get_workflow_state(goal)
             case WorkflowStatusEventEnum.RESUME:
-                return Command(
-                    goto="agent",
-                    update={
-                        "status": WorkflowStatusEnum.EXECUTION,
-                        "conversation_history": {
+                state_update: dict[str, Any] = {"status": WorkflowStatusEnum.EXECUTION}
+                next_step = "agent"
+
+                match self._approval and self._approval.WhichOneof("user_decision"):
+                    case "approval":
+                        next_step = "run_tools"
+                    case "rejection":
+                        state_update["cancel_tool_message"] = self._approval.rejection.message  # type: ignore
+                    case _:
+                        state_update["conversation_history"] = {
                             self._agent.name: [
                                 HumanMessage(
                                     content=goal,
@@ -143,9 +152,9 @@ class Workflow(AbstractWorkflow):
                                     },
                                 )
                             ]
-                        },
-                    },
-                )
+                        }
+
+                return Command(goto=next_step, update=state_update)
             case _:
                 return None
 
@@ -173,6 +182,7 @@ class Workflow(AbstractWorkflow):
         self._agent: ChatAgent = prompt_registry.get(  # type: ignore[assignment]
             "chat/agent", tools=agents_toolset.bindable, prompt_version="^1.0.0"  # type: ignore[arg-type]
         )
+        self._agent.tools_registry = tools_registry
 
         tools_runner = ToolsExecutor(
             tools_agent_name=self._agent.name,

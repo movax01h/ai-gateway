@@ -193,6 +193,7 @@ class DuoWorkflowService(contract_pb2_grpc.DuoWorkflowServicer):
                 "base_url": invocation_metadata.get("x-gitlab-base-url", ""),
                 "gitlab_token": invocation_metadata.get("x-gitlab-oauth-token", ""),
             },
+            approval=start_workflow_request.startRequest.approval,
         )
 
         async def send_events():

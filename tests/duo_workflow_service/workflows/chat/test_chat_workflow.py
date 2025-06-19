@@ -90,6 +90,28 @@ def workflow_with_project(
     return workflow
 
 
+@pytest.fixture
+def workflow_with_approval(workflow_with_project):
+    workflow = workflow_with_project
+    workflow._approval = contract_pb2.Approval(
+        approval=contract_pb2.Approval.Approved()
+    )
+
+    return workflow
+
+
+@pytest.fixture
+def workflow_with_rejected_approval(workflow_with_project):
+    workflow = workflow_with_project
+    workflow._approval = contract_pb2.Approval(
+        rejection=contract_pb2.Approval.Rejected(
+            message="Rejected the tool usage because it's not safe",
+        )
+    )
+
+    return workflow
+
+
 @pytest.mark.asyncio
 async def test_workflow_initialization(workflow_with_project):
     initial_state = workflow_with_project.get_workflow_state("Test chat goal")
@@ -192,6 +214,7 @@ def test_are_tools_called_with_various_content(
         "last_human_input": None,
         "context_elements": [],
         "project": None,
+        "cancel_tool_message": "",
     }
     assert workflow._are_tools_called(state) == expected_result
 
@@ -225,6 +248,7 @@ def test_are_tools_called_with_tool_use(workflow_with_project):
         "last_human_input": None,
         "context_elements": [],
         "project": None,
+        "cancel_tool_message": "",
     }
     assert workflow._are_tools_called(state) == Routes.TOOL_USE
 
@@ -385,6 +409,36 @@ async def test_get_graph_input_resume(workflow_with_project):
 
 
 @pytest.mark.asyncio
+async def test_get_graph_input_resume_with_approval(workflow_with_approval):
+    """Test graph input with approved tool calls."""
+    result = await workflow_with_approval.get_graph_input(
+        "New input", WorkflowStatusEventEnum.RESUME
+    )
+
+    assert result.goto == "run_tools"
+    assert result.update["status"] == WorkflowStatusEnum.EXECUTION
+    assert "conversation_history" not in result.update
+
+
+@pytest.mark.asyncio
+async def test_get_graph_input_resume_with_rejected_approval(
+    workflow_with_rejected_approval,
+):
+    """Test graph input with rejected tool calls."""
+    result = await workflow_with_rejected_approval.get_graph_input(
+        "New input", WorkflowStatusEventEnum.RESUME
+    )
+
+    assert result.goto == "agent"
+    assert result.update["status"] == WorkflowStatusEnum.EXECUTION
+    assert "conversation_history" not in result.update
+    assert (
+        result.update["cancel_tool_message"]
+        == "Rejected the tool usage because it's not safe"
+    )
+
+
+@pytest.mark.asyncio
 @patch("duo_workflow_service.workflows.chat.workflow.log_exception")
 async def test_handle_workflow_failure(mock_log_exception, workflow_with_project):
     error = Exception("Test error")
@@ -527,6 +581,8 @@ async def test_chat_workflow_status_flow_integration(
         ui_chat_log=[],
         last_human_input=None,
         context_elements=[],
+        project=None,
+        cancel_tool_message=None,
     )
 
     ai_response_with_tools = AIMessage(content="I'll list the issues for you.")
@@ -551,6 +607,8 @@ async def test_chat_workflow_status_flow_integration(
         ui_chat_log=[],
         last_human_input=None,
         context_elements=[],
+        project=None,
+        cancel_tool_message=None,
     )
 
     ai_response_final = AIMessage(content="Here are the issues I found: ...")
@@ -559,3 +617,109 @@ async def test_chat_workflow_status_flow_integration(
     result_2 = await workflow_with_project._agent.run(state_2)
     assert result_2["status"] == WorkflowStatusEnum.INPUT_REQUIRED
     assert "ui_chat_log" in result_2
+
+
+@pytest.mark.asyncio
+async def test_agent_run_with_tool_approval_required(workflow_with_project):
+    """Test agent run method when tools require approval."""
+    workflow_with_project._agent.tools_registry = MagicMock()
+    workflow_with_project._agent.tools_registry.approval_required = MagicMock(
+        return_value=True
+    )
+
+    state = ChatWorkflowState(
+        plan={"steps": []},
+        status=WorkflowStatusEnum.EXECUTION,
+        conversation_history={"test_prompt": [HumanMessage(content="Create a file")]},
+        ui_chat_log=[],
+        last_human_input=None,
+        context_elements=[],
+        project=None,
+        cancel_tool_message=None,
+    )
+
+    ai_message = AIMessage(content="I'll create the file for you")
+    ai_message.tool_calls = [
+        {
+            "id": "toolu_approval_id",
+            "args": {"path": "/test/file.txt", "content": "Test content"},
+            "name": "create_file_with_contents",
+        }
+    ]
+
+    with patch("ai_gateway.prompts.base.Prompt.ainvoke", return_value=ai_message):
+        result = await workflow_with_project._agent.run(state)
+
+    assert result["status"] == WorkflowStatusEnum.TOOL_CALL_APPROVAL_REQUIRED
+    assert "ui_chat_log" in result
+    assert len(result["ui_chat_log"]) == 1
+    assert result["ui_chat_log"][0]["message_type"] == MessageTypeEnum.REQUEST
+    assert "requires approval" in result["ui_chat_log"][0]["content"]
+    assert result["ui_chat_log"][0]["tool_info"]["name"] == "create_file_with_contents"
+
+
+@pytest.mark.asyncio
+async def test_agent_run_with_cancel_tool_message(workflow_with_project):
+    """Test agent run method when a tool is cancelled with a message."""
+    # Setup a state with a previous AI message containing tool calls
+    ai_message_with_tools = AIMessage(content="I'll use a tool")
+    ai_message_with_tools.tool_calls = [
+        {
+            "id": "toolu_cancelled_id",
+            "args": {"project_id": 3},
+            "name": "create_file_with_contents",
+        }
+    ]
+
+    state = ChatWorkflowState(
+        plan={"steps": []},
+        status=WorkflowStatusEnum.EXECUTION,
+        conversation_history={
+            "test_prompt": [
+                HumanMessage(content="Create a file"),
+                ai_message_with_tools,
+            ]
+        },
+        ui_chat_log=[],
+        last_human_input=None,
+        context_elements=[],
+        project=None,
+        cancel_tool_message="I don't want this file created",
+    )
+
+    ai_response_after_cancel = AIMessage(
+        content="I understand you don't want the file created"
+    )
+
+    with patch(
+        "ai_gateway.prompts.base.Prompt.ainvoke", return_value=ai_response_after_cancel
+    ):
+        result = await workflow_with_project._agent.run(state)
+
+    assert result["status"] == WorkflowStatusEnum.INPUT_REQUIRED
+    assert "ui_chat_log" in result
+
+    tool_messages = [
+        msg
+        for msg in state["conversation_history"]["test_prompt"]
+        if hasattr(msg, "tool_call_id")
+    ]
+    assert len(tool_messages) == 1
+    assert "Tool cancelled" in tool_messages[0].content
+    assert "I don't want this file created" in tool_messages[0].content
+
+
+@pytest.mark.asyncio
+async def test_workflow_with_approval_object():
+    """Test creating a workflow with an approval object."""
+    approval = contract_pb2.Approval(approval=contract_pb2.Approval.Approved())
+
+    workflow = Workflow(
+        workflow_id="test-id",
+        workflow_metadata={},
+        workflow_type=CategoryEnum.WORKFLOW_CHAT,
+        approval=approval,
+    )
+
+    assert workflow._approval is not None
+    assert workflow._approval.WhichOneof("user_decision") == "approval"
