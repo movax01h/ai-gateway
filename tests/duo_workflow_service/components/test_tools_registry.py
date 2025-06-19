@@ -317,6 +317,7 @@ async def test_registry_configuration(gl_http_client):
         "request_user_clarification_tool",
         "extra_tool",
     }
+    assert registry.approval_required("extra_tool") == True
 
 
 @pytest.mark.parametrize(

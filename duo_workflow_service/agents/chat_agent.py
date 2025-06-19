@@ -1,16 +1,24 @@
 from datetime import datetime, timezone
 from typing import Any, Dict, Optional
 
-from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage
+from langchain_core.messages import (
+    AIMessage,
+    BaseMessage,
+    HumanMessage,
+    SystemMessage,
+    ToolMessage,
+)
 from langchain_core.output_parsers.string import StrOutputParser
 from langchain_core.prompt_values import ChatPromptValue, PromptValue
 from langchain_core.runnables import Runnable, RunnableConfig
 
 from ai_gateway.prompts import Prompt, jinja2_formatter
 from ai_gateway.prompts.config import ModelConfig
+from duo_workflow_service.components.tools_registry import ToolsRegistry
 from duo_workflow_service.entities.state import (
     ChatWorkflowState,
     MessageTypeEnum,
+    ToolInfo,
     ToolStatus,
     UiChatLog,
     WorkflowStatusEnum,
@@ -69,21 +77,64 @@ class ChatAgentPromptTemplate(Runnable[ChatWorkflowState, PromptValue]):
 
 
 class ChatAgent(Prompt[ChatWorkflowState, BaseMessage]):
+    tools_registry: Optional[ToolsRegistry] = None
+
     @classmethod
     def _build_prompt_template(
         cls, prompt_template: dict[str, str], model_config: ModelConfig
     ) -> Runnable:
         return ChatAgentPromptTemplate(prompt_template, model_config)
 
+    def _get_approvals(self, message: AIMessage) -> tuple[bool, list[UiChatLog]]:
+        approval_required = False
+        approval_messages = []
+
+        for call in message.tool_calls:
+            if self.tools_registry and self.tools_registry.approval_required(
+                call["name"]
+            ):
+                approval_required = True
+                approval_messages.append(
+                    UiChatLog(
+                        message_type=MessageTypeEnum.REQUEST,
+                        message_sub_type=None,
+                        content=f"Tool {call['name']} requires approval. Please confirm if you want to proceed.",
+                        timestamp=datetime.now(timezone.utc).isoformat(),
+                        status=ToolStatus.SUCCESS,
+                        correlation_id=None,
+                        tool_info=ToolInfo(name=call["name"], args=call["args"]),
+                        context_elements=[],
+                    )
+                )
+
+        return approval_required, approval_messages
+
     async def run(self, input: ChatWorkflowState) -> Dict[str, Any]:
+
+        new_messages = []
+
+        if input.get("cancel_tool_message", False):
+            last_message = input["conversation_history"][self.name][-1]
+            messages: list[BaseMessage] = [
+                ToolMessage(
+                    content=f"Tool cancelled temporarily as user has a comment. Comment: {input['cancel_tool_message']}",
+                    tool_call_id=tool_call.get("id"),
+                )
+                for tool_call in getattr(last_message, "tool_calls", [])
+            ]
+            new_messages.extend(messages)
+            # update history
+            input["conversation_history"][self.name].extend(messages)
+
         agent_response = await super().ainvoke(input=input, agent_name=self.name)
+        new_messages.append(agent_response)
 
         if isinstance(agent_response, AIMessage) and len(agent_response.tool_calls) > 0:
             status = WorkflowStatusEnum.EXECUTION
         else:
             status = WorkflowStatusEnum.INPUT_REQUIRED
 
-        result = {
+        result: dict[str, Any] = {
             "conversation_history": {self.name: [agent_response]},
             "status": status,
         }
@@ -104,5 +155,12 @@ class ChatAgent(Prompt[ChatWorkflowState, BaseMessage]):
                     context_elements=[],
                 )
             ]
+            result["status"] = WorkflowStatusEnum.INPUT_REQUIRED
+            return result
+
+        tools_need_approval, approval_messages = self._get_approvals(agent_response)
+        if len(agent_response.tool_calls) > 0 and tools_need_approval:
+            result["status"] = WorkflowStatusEnum.TOOL_CALL_APPROVAL_REQUIRED
+            result["ui_chat_log"] = approval_messages
 
         return result

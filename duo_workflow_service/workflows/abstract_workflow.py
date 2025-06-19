@@ -80,6 +80,7 @@ class AbstractWorkflow(ABC):
     _additional_context: list[AdditionalContext] | None
     _context_elements: list
     _additional_tools: list[Type[BaseTool]]
+    _approval: Optional[contract_pb2.Approval]
 
     def __init__(
         self,
@@ -94,6 +95,7 @@ class AbstractWorkflow(ABC):
         mcp_tools: list[contract_pb2.McpTool] = [],
         user: Optional[CloudConnectorUser] = None,
         additional_context: Optional[list[AdditionalContext]] = None,
+        approval: Optional[contract_pb2.Approval] = None,
     ):
         self._outbox = asyncio.Queue(maxsize=QUEUE_MAX_SIZE)
         self._inbox = asyncio.Queue(maxsize=QUEUE_MAX_SIZE)
@@ -114,6 +116,7 @@ class AbstractWorkflow(ABC):
         self._additional_tools = self._build_additional_tools(mcp_tools)
         self._workflow_config = {}
         self._model_config = self._get_model_config()
+        self._approval = approval
 
     async def run(self, goal: str) -> None:
         with duo_workflow_metrics.time_workflow(
@@ -258,6 +261,8 @@ class AbstractWorkflow(ABC):
             await self._handle_workflow_failure(e, compiled_graph, graph_config)
             raise TraceableException(e)
         finally:
+            # Wait until outbox is checked to gracefully stop a workflow
+            await asyncio.sleep(self.OUTBOX_CHECK_INTERVAL * 2)
             self.is_done = True
 
     async def get_graph_input(self, goal: str, status_event: str) -> Any:
