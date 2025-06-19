@@ -11,9 +11,7 @@ async def test_astream_with_stream_options():
     """Test that stream_options is added correctly to super()._astream call."""
     message = HumanMessage(content="Hello")
 
-    with patch(
-        "langchain_community.chat_models.ChatLiteLLM._astream"
-    ) as mock_super_astream:
+    with patch("langchain_litellm.ChatLiteLLM._astream") as mock_super_astream:
 
         chat = ChatLiteLLM()
 

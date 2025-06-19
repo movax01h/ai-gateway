@@ -1,15 +1,15 @@
 from typing import Any, AsyncIterator, List, Optional
 
-from langchain_community.chat_models.litellm import ChatLiteLLM as _LChatLiteLLM
 from langchain_core.callbacks import AsyncCallbackManagerForLLMRun
 from langchain_core.messages import BaseMessage
 from langchain_core.outputs import ChatGenerationChunk
+from langchain_litellm import ChatLiteLLM as _LChatLiteLLM
 
 __all__ = ["ChatLiteLLM"]
 
 
 class ChatLiteLLM(_LChatLiteLLM):
-    """A wrapper around `langchain_community.chat_models.litellm.ChatLiteLLM` that adds custom stream_options."""
+    """A wrapper around `langchain_litellm.ChatLiteLLM` that adds custom stream_options."""
 
     async def _astream(
         self,

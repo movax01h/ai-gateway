@@ -8,12 +8,12 @@ from unittest.mock import Mock, call
 import pytest
 from anthropic import APITimeoutError, AsyncAnthropic
 from gitlab_cloud_connector import GitLabUnitPrimitive, WrongUnitPrimitives
-from langchain_community.chat_models import ChatLiteLLM
 from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_core.messages.ai import UsageMetadata
 from langchain_core.prompt_values import ChatPromptValue
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.runnables import Runnable
+from langchain_litellm import ChatLiteLLM
 from litellm.exceptions import Timeout
 from pydantic import AnyUrl
 from pyfakefs.fake_filesystem import FakeFilesystem
