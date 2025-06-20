@@ -147,6 +147,7 @@ _outbox = MagicMock(spec=asyncio.Queue)
                 "list_commits",
                 "get_commit_diff",
                 "get_commit_comments",
+                "create_commit",
             },
         ),
         (
@@ -281,6 +282,7 @@ def test_registry_initialization_initialises_tools_with_correct_attributes(
         "list_commits": tools.ListCommits(metadata=tool_metadata),
         "get_commit_diff": tools.GetCommitDiff(metadata=tool_metadata),
         "get_commit_comments": tools.GetCommitComments(metadata=tool_metadata),
+        "create_commit": tools.CreateCommit(metadata=tool_metadata),
     }
 
     assert registry._enabled_tools == expected_tools

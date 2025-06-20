@@ -5,6 +5,9 @@ import pytest
 
 from duo_workflow_service.tools.commit import (
     CommitResourceInput,
+    CreateCommit,
+    CreateCommitAction,
+    CreateCommitInput,
     GetCommit,
     GetCommitComments,
     GetCommitDiff,
@@ -24,6 +27,20 @@ def metadata(gitlab_client_mock):
     return {
         "gitlab_client": gitlab_client_mock,
         "gitlab_host": "gitlab.com",
+    }
+
+
+@pytest.fixture
+def commit_data():
+    """Fixture for sample commit data."""
+    return {
+        "id": "6104942438c14ec7bd21c6cd5bd995272b3faff6",
+        "short_id": "61049424",
+        "title": "Test commit",
+        "author_name": "Test User",
+        "author_email": "test@example.com",
+        "created_at": "2025-04-29T11:35:36.000+02:00",
+        "message": "Test commit message",
     }
 
 
@@ -587,5 +604,389 @@ async def test_get_commit_comments_with_url_success(
 )
 def test_get_commit_comments_format_display_message(input_data, expected_message):
     tool = GetCommitComments(description="Read commit comments")
+    message = tool.format_display_message(input_data)
+    assert message == expected_message
+
+
+@pytest.mark.asyncio
+async def test_create_commit(gitlab_client_mock, metadata, commit_data):
+    """Test basic functionality of CreateCommit._arun method."""
+    gitlab_client_mock.apost = AsyncMock(return_value=commit_data)
+
+    tool = CreateCommit(metadata=metadata)
+
+    actions = [
+        CreateCommitAction(
+            action="create",
+            file_path="test.txt",
+            content="This is a test file",
+        ),
+        CreateCommitAction(
+            action="update",
+            file_path="existing.txt",
+            content="Updated content",
+        ),
+    ]
+
+    actions_list = [action.model_dump(exclude_none=True) for action in actions]
+
+    response = await tool._arun(
+        project_id=24,
+        branch="main",
+        commit_message="Test commit message",
+        actions=actions,
+        author_name="Test User",
+        author_email="test@example.com",
+    )
+
+    expected_params = {
+        "branch": "main",
+        "commit_message": "Test commit message",
+        "actions": actions_list,
+        "author_email": "test@example.com",
+        "author_name": "Test User",
+    }
+
+    expected_response = json.dumps(
+        {
+            "status": "success",
+            "data": expected_params,
+            "response": commit_data,
+        }
+    )
+
+    assert response == expected_response
+
+    gitlab_client_mock.apost.assert_called_once_with(
+        path="/api/v4/projects/24/repository/commits",
+        body=json.dumps(expected_params),
+    )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "url,project_id,expected_path",
+    [
+        (
+            "https://gitlab.com/namespace/project",
+            None,
+            "/api/v4/projects/namespace%2Fproject/repository/commits",
+        ),
+        (
+            "https://gitlab.com/namespace/project",
+            "namespace%2Fproject",
+            "/api/v4/projects/namespace%2Fproject/repository/commits",
+        ),
+    ],
+)
+async def test_create_commit_with_url_success(
+    url, project_id, expected_path, gitlab_client_mock, metadata, commit_data
+):
+    """Test CreateCommit._arun method with URL parameter."""
+    gitlab_client_mock.apost = AsyncMock(return_value=commit_data)
+
+    tool = CreateCommit(metadata=metadata)
+
+    actions = [
+        CreateCommitAction(
+            action="create",
+            file_path="test.txt",
+            content="This is a test file",
+        ),
+    ]
+
+    response = await tool._arun(
+        url=url,
+        project_id=project_id,
+        branch="main",
+        commit_message="Test commit message",
+        actions=actions,
+    )
+
+    actions_list = [action.model_dump(exclude_none=True) for action in actions]
+
+    expected_params = {
+        "branch": "main",
+        "commit_message": "Test commit message",
+        "actions": actions_list,
+    }
+
+    expected_response = json.dumps(
+        {
+            "status": "success",
+            "data": expected_params,
+            "response": commit_data,
+        }
+    )
+
+    assert response == expected_response
+
+    gitlab_client_mock.apost.assert_called_once_with(
+        path=expected_path,
+        body=json.dumps(expected_params),
+    )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "url,project_id,error_contains",
+    [
+        (
+            "https://gitlab.com/namespace/project",
+            "different%2Fproject",
+            "Project ID mismatch",
+        ),
+        (
+            "https://example.com/not-gitlab",
+            None,
+            "Failed to parse URL",
+        ),
+    ],
+)
+async def test_create_commit_with_url_error(
+    url, project_id, error_contains, gitlab_client_mock, metadata
+):
+    """Test error handling in CreateCommit._arun method with invalid URL."""
+    tool = CreateCommit(metadata=metadata)
+
+    actions = [
+        CreateCommitAction(
+            action="create",
+            file_path="test.txt",
+            content="This is a test file",
+        ),
+    ]
+
+    response = await tool._arun(
+        url=url,
+        project_id=project_id,
+        branch="main",
+        commit_message="Test commit message",
+        actions=actions,
+    )
+
+    response_json = json.loads(response)
+
+    assert "error" in response_json
+    assert error_contains in response_json["error"]
+    gitlab_client_mock.apost.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_create_commit_with_all_optional_params(
+    gitlab_client_mock, metadata, commit_data
+):
+    """Test CreateCommit._arun method with all optional parameters."""
+    gitlab_client_mock.apost = AsyncMock(return_value=commit_data)
+
+    tool = CreateCommit(metadata=metadata)
+
+    actions = [
+        CreateCommitAction(
+            action="create",
+            file_path="test.txt",
+            content="This is a test file",
+        ),
+    ]
+
+    response = await tool._arun(
+        project_id=24,
+        branch="feature-branch",
+        commit_message="Test commit message",
+        actions=actions,
+        start_branch="main",
+        start_sha="abcdef1234567890",
+        start_project="namespace/another-project",
+        author_email="author@example.com",
+        author_name="Author Name",
+    )
+
+    actions_list = [action.model_dump(exclude_none=True) for action in actions]
+
+    expected_params = {
+        "branch": "feature-branch",
+        "commit_message": "Test commit message",
+        "actions": actions_list,
+        "start_branch": "main",
+        "start_sha": "abcdef1234567890",
+        "start_project": "namespace/another-project",
+        "author_email": "author@example.com",
+        "author_name": "Author Name",
+    }
+
+    expected_response = json.dumps(
+        {
+            "status": "success",
+            "data": expected_params,
+            "response": commit_data,
+        }
+    )
+
+    assert response == expected_response
+
+    gitlab_client_mock.apost.assert_called_once_with(
+        path="/api/v4/projects/24/repository/commits",
+        body=json.dumps(expected_params),
+    )
+
+
+@pytest.mark.asyncio
+async def test_create_commit_with_multiple_action_types(
+    gitlab_client_mock, metadata, commit_data
+):
+    """Test CreateCommit._arun method with different action types."""
+    gitlab_client_mock.apost = AsyncMock(return_value=commit_data)
+
+    tool = CreateCommit(metadata=metadata)
+
+    actions = [
+        CreateCommitAction(
+            action="create",
+            file_path="new_file.txt",
+            content="This is a new file",
+        ),
+        CreateCommitAction(
+            action="update",
+            file_path="existing_file.txt",
+            content="Updated content",
+            last_commit_id="previous_commit_sha",
+        ),
+        CreateCommitAction(
+            action="delete",
+            file_path="delete_me.txt",
+            last_commit_id="delete_commit_sha",
+        ),
+        CreateCommitAction(
+            action="move",
+            file_path="new_path.txt",
+            previous_path="old_path.txt",
+        ),
+        CreateCommitAction(
+            action="chmod",
+            file_path="script.sh",
+            execute_filemode=True,
+        ),
+    ]
+
+    response = await tool._arun(
+        project_id=24,
+        branch="main",
+        commit_message="Multiple actions commit",
+        actions=actions,
+    )
+
+    actions_list = [action.model_dump(exclude_none=True) for action in actions[0:-1]]
+
+    expected_params = {
+        "branch": "main",
+        "commit_message": "Multiple actions commit",
+        "actions": actions_list,
+    }
+
+    expected_response = json.dumps(
+        {
+            "status": "success",
+            "data": expected_params,
+            "response": commit_data,
+        }
+    )
+
+    assert response == expected_response
+
+    gitlab_client_mock.apost.assert_called_once_with(
+        path="/api/v4/projects/24/repository/commits",
+        body=json.dumps(expected_params),
+    )
+
+
+@pytest.mark.asyncio
+async def test_create_commit_exception(gitlab_client_mock, metadata):
+    """Test exception handling in CreateCommit._arun method."""
+    error_message = "API error"
+    gitlab_client_mock.apost = AsyncMock(side_effect=Exception(error_message))
+
+    tool = CreateCommit(metadata=metadata)
+
+    actions = [
+        CreateCommitAction(
+            action="create",
+            file_path="test.txt",
+            content="This is a test file",
+        ),
+    ]
+
+    response = await tool._arun(
+        project_id=24,
+        branch="main",
+        commit_message="Test commit message",
+        actions=actions,
+    )
+
+    expected_response = json.dumps({"error": error_message})
+    assert response == expected_response
+
+
+@pytest.mark.parametrize(
+    "input_data,expected_message",
+    [
+        (
+            CreateCommitInput(
+                project_id=24,
+                branch="main",
+                commit_message="Test commit",
+                actions=[
+                    CreateCommitAction(
+                        action="create",
+                        file_path="test.txt",
+                        content="This is a test file",
+                    ),
+                ],
+            ),
+            "Create commit in project 24 with 1 file action (create)",
+        ),
+        (
+            CreateCommitInput(
+                project_id=24,
+                branch="main",
+                commit_message="Test commit",
+                actions=[
+                    CreateCommitAction(
+                        action="create",
+                        file_path="test1.txt",
+                        content="This is test file 1",
+                    ),
+                    CreateCommitAction(
+                        action="update",
+                        file_path="test2.txt",
+                        content="Updated content",
+                    ),
+                    CreateCommitAction(
+                        action="delete",
+                        file_path="test3.txt",
+                    ),
+                ],
+            ),
+            "Create commit in project 24 with 3 file actions (create, update, delete)",
+        ),
+        (
+            CreateCommitInput(
+                url="https://gitlab.com/namespace/project",
+                branch="main",
+                commit_message="Test commit",
+                actions=[
+                    CreateCommitAction(
+                        action="create",
+                        file_path="test.txt",
+                        content="This is a test file",
+                    ),
+                ],
+            ),
+            "Create commit in https://gitlab.com/namespace/project with 1 file action (create)",
+        ),
+    ],
+)
+def test_create_commit_format_display_message(input_data, expected_message):
+    """Test the format_display_message method of CreateCommit."""
+    tool = CreateCommit(description="Create commit")
     message = tool.format_display_message(input_data)
     assert message == expected_message

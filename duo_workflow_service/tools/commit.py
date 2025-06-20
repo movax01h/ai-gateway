@@ -310,3 +310,147 @@ class GetCommitComments(CommitBaseTool):
         if args.url:
             return f"Get comments for commit {args.url}"
         return f"Get comments for commit {args.commit_sha} in project {args.project_id}"
+
+
+class CreateCommitAction(BaseModel):
+    """Model representing a single action to be performed in a commit."""
+
+    action: str = Field(
+        description="The action to perform: 'create', 'delete', 'move', or 'update'."
+    )
+    file_path: str = Field(
+        description="Full path to the file. For example: 'lib/class.rb'."
+    )
+    previous_path: Optional[str] = Field(
+        default=None,
+        description="Original full path to the file being moved. Only considered for 'move' action.",
+    )
+    content: Optional[str] = Field(
+        default=None,
+        description="File content, required for 'create' and 'update' actions. For 'move' actions without content, existing file content is preserved.",
+    )
+    encoding: Optional[str] = Field(
+        default=None, description="'text' or 'base64'. Default is 'text'."
+    )
+    last_commit_id: Optional[str] = Field(
+        default=None,
+        description="Last known file commit ID. Only considered in 'update', 'move', and 'delete' actions.",
+    )
+
+
+class CreateCommitInput(ProjectResourceInput):
+    """Input model for creating a commit in a GitLab repository."""
+
+    branch: str = Field(
+        description="Name of the branch to commit into. To create a new branch, also provide either start_branch or start_sha, and optionally start_project."
+    )
+    commit_message: str = Field(description="Commit message.")
+    actions: List[CreateCommitAction] = Field(
+        description="JSON array of file actions. Each action requires 'action' and 'file_path'. For 'create' and 'update' actions, 'content' is also required."
+    )
+    start_branch: Optional[str] = Field(
+        default=None, description="Name of the branch to start the new branch from."
+    )
+    start_sha: Optional[str] = Field(
+        default=None, description="SHA of the commit to start the new branch from."
+    )
+    start_project: Optional[str] = Field(
+        default=None,
+        description="The ID or URL-encoded path of the project to start the new branch from.",
+    )
+    author_email: Optional[str] = Field(
+        default=None, description="Author's email address."
+    )
+    author_name: Optional[str] = Field(default=None, description="Author's name.")
+
+
+class CreateCommit(DuoBaseTool):
+    """Tool to create a commit with multiple file actions in a GitLab repository."""
+
+    name: str = "create_commit"
+    description: str = """Create a commit with multiple file actions in a GitLab repository.
+
+    To identify the project you must provide either:
+    - project_id parameter, or
+    - A GitLab URL like:
+      - https://gitlab.com/namespace/project
+      - https://gitlab.com/namespace/project/-/commits
+      - https://gitlab.com/group/subgroup/project
+      - https://gitlab.com/group/subgroup/project/-/commits
+
+    Actions can include creating, updating, deleting, moving, or changing file permissions.
+    Each action requires at minimum an 'action' type and 'file_path'.
+
+    For example:
+    - Creating a new file requires 'action': 'create', 'file_path', and 'content'
+    - Updating a file requires 'action': 'update', 'file_path', and 'content'
+    - Deleting a file requires 'action': 'delete' and 'file_path'
+    - Moving a file requires 'action': 'move', 'file_path', and 'previous_path'
+    """
+    args_schema: Type[BaseModel] = CreateCommitInput  # type: ignore
+
+    async def _arun(
+        self,
+        branch: str,
+        commit_message: str,
+        actions: List[CreateCommitAction],
+        **kwargs: Any,
+    ) -> str:
+        url = kwargs.pop("url", None)
+        project_id = kwargs.pop("project_id", None)
+
+        project_id, errors = self._validate_project_url(url, project_id)
+
+        if errors:
+            return json.dumps({"error": "; ".join(errors)})
+
+        # Convert actions to dictionary format for API
+        actions_data = []
+        for action in actions:
+            if action.action in ["create", "update", "delete", "move"]:
+                action_dict = action.model_dump(exclude_none=True)
+                actions_data.append(action_dict)
+
+        # Prepare request parameters
+        params = {
+            "branch": branch,
+            "commit_message": commit_message,
+            "actions": actions_data,
+        }
+
+        # Add optional parameters if provided
+        optional_params = [
+            "start_branch",
+            "start_sha",
+            "start_project",
+            "author_email",
+            "author_name",
+        ]
+
+        for param in optional_params:
+            if param in kwargs and kwargs[param] is not None:
+                params[param] = kwargs[param]
+
+        try:
+            response = await self.gitlab_client.apost(
+                path=f"/api/v4/projects/{project_id}/repository/commits",
+                body=json.dumps(params),
+            )
+            return json.dumps(
+                {"status": "success", "data": params, "response": response}
+            )
+        except Exception as e:
+            return json.dumps({"error": str(e)})
+
+    def format_display_message(self, args: CreateCommitInput) -> str:
+        """Format a user-friendly message describing the action being performed."""
+        action_types = [action.action for action in args.actions]
+        file_count = len(args.actions)
+
+        if args.url:
+            return f"Create commit in {args.url} with {file_count} file {self._pluralize('action', file_count)} ({', '.join(action_types)})"
+        return f"Create commit in project {args.project_id} with {file_count} file {self._pluralize('action', file_count)} ({', '.join(action_types)})"
+
+    def _pluralize(self, word: str, count: int) -> str:
+        """Helper method to pluralize words based on count."""
+        return f"{word}s" if count != 1 else word
