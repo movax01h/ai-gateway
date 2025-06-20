@@ -29,10 +29,9 @@ from duo_workflow_service.tools import (
     RunCommand,
     Toolset,
 )
-from duo_workflow_service.tools.filesystem import (
+from duo_workflow_service.tools.filesystem import (  # MkdirInput,
     EditFileInput,
     FindFilesInput,
-    MkdirInput,
     WriteFileInput,
 )
 from duo_workflow_service.tools.planner import (
@@ -558,16 +557,16 @@ async def test_run_with_state_manipulating_tools(
             },
             "tool_tracked": True,
         },
-        {
-            "tool_call": {
-                "id": "1",
-                "name": "mkdir",
-                "args": MkdirInput(
-                    directory_path="this_is_a_dir",
-                ).model_dump(),
-            },
-            "tool_tracked": True,
-        },
+        # {
+        #     "tool_call": {
+        #         "id": "1",
+        #         "name": "mkdir",
+        #         "args": MkdirInput(
+        #             directory_path="this_is_a_dir",
+        #         ).model_dump(),
+        #     },
+        #     "tool_tracked": True,
+        # },
         {
             "tool_call": {
                 "id": "1",

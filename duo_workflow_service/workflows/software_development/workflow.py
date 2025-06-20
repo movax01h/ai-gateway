@@ -84,7 +84,7 @@ EXECUTOR_TOOLS = [
     "edit_file",
     "find_files",
     "grep",
-    "mkdir",
+    # "mkdir",
     "add_new_task",
     "remove_task",
     "update_task_description",
