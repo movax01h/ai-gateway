@@ -18,6 +18,7 @@ from duo_workflow_service.entities import (
 from duo_workflow_service.entities.state import ChatWorkflowState
 from duo_workflow_service.internal_events.event_enum import CategoryEnum
 from duo_workflow_service.workflows.chat.workflow import (
+    CHAT_GITLAB_MUTATION_TOOLS,
     CHAT_MUTATION_TOOLS,
     CHAT_READ_ONLY_TOOLS,
     Routes,
@@ -338,6 +339,11 @@ async def test_workflow_run(
             [],
             {},
             CHAT_READ_ONLY_TOOLS + CHAT_MUTATION_TOOLS,
+        ),
+        (
+            ["duo_workflow_workhorse"],
+            {},
+            CHAT_READ_ONLY_TOOLS + CHAT_MUTATION_TOOLS + CHAT_GITLAB_MUTATION_TOOLS,
         ),
         (
             [],

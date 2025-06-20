@@ -70,6 +70,19 @@ CHAT_READ_ONLY_TOOLS = [
 ]
 
 
+CHAT_GITLAB_MUTATION_TOOLS = [
+    "create_issue",
+    "update_issue",
+    "create_issue_note",
+    "create_merge_request",
+    "update_merge_request",
+    "create_merge_request_note",
+    "create_epic",
+    "update_epic",
+    "create_commit",
+]
+
+
 CHAT_MUTATION_TOOLS = [
     "create_file_with_contents",
     "edit_file",
@@ -210,6 +223,9 @@ class Workflow(AbstractWorkflow):
 
     def _get_tools(self):
         available_tools = CHAT_READ_ONLY_TOOLS + CHAT_MUTATION_TOOLS
+
+        if is_feature_enabled(FeatureFlag.DUO_WORKFLOW_WORKHORSE):
+            available_tools += CHAT_GITLAB_MUTATION_TOOLS
 
         mcp_enabled = self._workflow_config.get("mcp_enabled", False)
         if is_feature_enabled(FeatureFlag.DUO_WORKFLOW_MCP_SUPPORT) and mcp_enabled:
