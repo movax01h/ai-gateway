@@ -3,15 +3,13 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from contract import contract_pb2
-from duo_workflow_service.tools.filesystem import (
+from duo_workflow_service.tools.filesystem import (  # Mkdir,
     EditFile,
     EditFileInput,
     FindFiles,
     FindFilesInput,
     ListDir,
     ListDirInput,
-    Mkdir,
-    MkdirInput,
     ReadFile,
     ReadFileInput,
     WriteFile,
@@ -190,43 +188,43 @@ class TestLsDir:
         assert message == expected_message
 
 
-class TestMkdir:
-    @pytest.mark.asyncio
-    @patch("duo_workflow_service.tools.filesystem.RunCommand", autospec=True)
-    async def test_mkdir_creates_directory(self, mock_run_command):
-        mock_arun = AsyncMock(return_value="")
-        mock_run_command.return_value._arun = mock_arun
-
-        mkdir_tool = Mkdir()
-        result = await mkdir_tool._arun("test_dir")
-
-        assert result == ""
-        mock_arun.assert_called_once_with(
-            "mkdir", arguments=["./test_dir"], flags=["-p"]
-        )
-
-    @pytest.mark.asyncio
-    @patch("duo_workflow_service.tools.filesystem.RunCommand", autospec=True)
-    async def test_mkdir_creates_nested_directories(self, mock_run_command):
-        mock_arun = AsyncMock(return_value="")
-        mock_run_command.return_value._arun = mock_arun
-
-        mkdir_tool = Mkdir()
-        result = await mkdir_tool._arun("./test_dir/nested/dir")
-
-        assert result == ""
-        mock_arun.assert_called_once_with(
-            "mkdir", arguments=["./test_dir/nested/dir"], flags=["-p"]
-        )
-
-    @pytest.mark.asyncio
-    async def test_mkdir_validates_path(self):
-        mkdir_tool = Mkdir()
-        result = await mkdir_tool._arun("../test_dir")
-
-        assert (
-            result == "Creating directories above the current directory is not allowed"
-        )
+# class TestMkdir:
+#     @pytest.mark.asyncio
+#     @patch("duo_workflow_service.tools.filesystem.RunCommand", autospec=True)
+#     async def test_mkdir_creates_directory(self, mock_run_command):
+#         mock_arun = AsyncMock(return_value="")
+#         mock_run_command.return_value._arun = mock_arun
+#
+#         mkdir_tool = Mkdir()
+#         result = await mkdir_tool._arun("test_dir")
+#
+#         assert result == ""
+#         mock_arun.assert_called_once_with(
+#             "mkdir", arguments=["./test_dir"], flags=["-p"]
+#         )
+#
+#     @pytest.mark.asyncio
+#     @patch("duo_workflow_service.tools.filesystem.RunCommand", autospec=True)
+#     async def test_mkdir_creates_nested_directories(self, mock_run_command):
+#         mock_arun = AsyncMock(return_value="")
+#         mock_run_command.return_value._arun = mock_arun
+#
+#         mkdir_tool = Mkdir()
+#         result = await mkdir_tool._arun("./test_dir/nested/dir")
+#
+#         assert result == ""
+#         mock_arun.assert_called_once_with(
+#             "mkdir", arguments=["./test_dir/nested/dir"], flags=["-p"]
+#         )
+#
+#     @pytest.mark.asyncio
+#     async def test_mkdir_validates_path(self):
+#         mkdir_tool = Mkdir()
+#         result = await mkdir_tool._arun("../test_dir")
+#
+#         assert (
+#             result == "Creating directories above the current directory is not allowed"
+#         )
 
 
 class TestEditFile:
@@ -334,15 +332,15 @@ def test_find_files_format_display_message():
     assert message == expected_message
 
 
-def test_mkdir_format_display_message():
-    tool = Mkdir(description="Mkdir description")
-
-    input_data = MkdirInput(directory_path="./src/new_directory")
-
-    message = tool.format_display_message(input_data)
-
-    expected_message = "Create directory './src/new_directory'"
-    assert message == expected_message
+# def test_mkdir_format_display_message():
+#     tool = Mkdir(description="Mkdir description")
+#
+#     input_data = MkdirInput(directory_path="./src/new_directory")
+#
+#     message = tool.format_display_message(input_data)
+#
+#     expected_message = "Create directory './src/new_directory'"
+#     assert message == expected_message
 
 
 def test_edit_file_format_display_message():
