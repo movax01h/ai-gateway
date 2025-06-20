@@ -1,6 +1,7 @@
 from datetime import datetime, timezone
 from typing import Any, Dict, Optional
 
+import structlog
 from langchain_core.messages import (
     AIMessage,
     BaseMessage,
@@ -25,6 +26,8 @@ from duo_workflow_service.entities.state import (
 )
 from duo_workflow_service.gitlab.gitlab_project import Project
 from duo_workflow_service.slash_commands.goal_parser import parse as slash_command_parse
+
+log = structlog.stdlib.get_logger("chat_agent")
 
 
 class ChatAgentPromptTemplate(Runnable[ChatWorkflowState, PromptValue]):
@@ -110,7 +113,6 @@ class ChatAgent(Prompt[ChatWorkflowState, BaseMessage]):
         return approval_required, approval_messages
 
     async def run(self, input: ChatWorkflowState) -> Dict[str, Any]:
-
         new_messages = []
 
         if input.get("cancel_tool_message", False):
@@ -126,41 +128,68 @@ class ChatAgent(Prompt[ChatWorkflowState, BaseMessage]):
             # update history
             input["conversation_history"][self.name].extend(messages)
 
-        agent_response = await super().ainvoke(input=input, agent_name=self.name)
-        new_messages.append(agent_response)
+        try:
+            agent_response = await super().ainvoke(input=input, agent_name=self.name)
+            new_messages.append(agent_response)
 
-        if isinstance(agent_response, AIMessage) and len(agent_response.tool_calls) > 0:
-            status = WorkflowStatusEnum.EXECUTION
-        else:
-            status = WorkflowStatusEnum.INPUT_REQUIRED
+            if (
+                isinstance(agent_response, AIMessage)
+                and len(agent_response.tool_calls) > 0
+            ):
+                status = WorkflowStatusEnum.EXECUTION
+            else:
+                status = WorkflowStatusEnum.INPUT_REQUIRED
 
-        result: dict[str, Any] = {
-            "conversation_history": {self.name: [agent_response]},
-            "status": status,
-        }
+            result: dict[str, Any] = {
+                "conversation_history": {self.name: [agent_response]},
+                "status": status,
+            }
 
-        if (
-            not isinstance(agent_response, AIMessage)
-            or len(agent_response.tool_calls) == 0
-        ):
-            result["ui_chat_log"] = [
-                UiChatLog(  # type: ignore[list-item]
-                    message_type=MessageTypeEnum.AGENT,
-                    message_sub_type=None,
-                    content=StrOutputParser().invoke(agent_response) or "",
-                    timestamp=datetime.now(timezone.utc).isoformat(),
-                    status=ToolStatus.SUCCESS,
-                    correlation_id=None,
-                    tool_info=None,
-                    context_elements=[],
-                )
-            ]
-            result["status"] = WorkflowStatusEnum.INPUT_REQUIRED
+            if (
+                not isinstance(agent_response, AIMessage)
+                or len(agent_response.tool_calls) == 0
+            ):
+                result["ui_chat_log"] = [
+                    UiChatLog(  # type: ignore[list-item]
+                        message_type=MessageTypeEnum.AGENT,
+                        message_sub_type=None,
+                        content=StrOutputParser().invoke(agent_response) or "",
+                        timestamp=datetime.now(timezone.utc).isoformat(),
+                        status=ToolStatus.SUCCESS,
+                        correlation_id=None,
+                        tool_info=None,
+                        context_elements=[],
+                    )
+                ]
+                result["status"] = WorkflowStatusEnum.INPUT_REQUIRED
+                return result
+
+            tools_need_approval, approval_messages = self._get_approvals(agent_response)
+            if len(agent_response.tool_calls) > 0 and tools_need_approval:
+                result["status"] = WorkflowStatusEnum.TOOL_CALL_APPROVAL_REQUIRED
+                result["ui_chat_log"] = approval_messages
+
             return result
+        except Exception as error:
+            log.warning(f"Error processing chat agent: {error}")
 
-        tools_need_approval, approval_messages = self._get_approvals(agent_response)
-        if len(agent_response.tool_calls) > 0 and tools_need_approval:
-            result["status"] = WorkflowStatusEnum.TOOL_CALL_APPROVAL_REQUIRED
-            result["ui_chat_log"] = approval_messages
+            error_message = HumanMessage(
+                content=f"There was an error processing your request: {error}"
+            )
 
-        return result
+            return {
+                "conversation_history": {self.name: [error_message]},
+                "status": WorkflowStatusEnum.INPUT_REQUIRED,
+                "ui_chat_log": [
+                    UiChatLog(
+                        message_type=MessageTypeEnum.AGENT,
+                        message_sub_type=None,
+                        content="There was an error processing your request. Please try again or contact support if the issue persists.",
+                        timestamp=datetime.now(timezone.utc).isoformat(),
+                        status=ToolStatus.FAILURE,
+                        correlation_id=None,
+                        tool_info=None,
+                        context_elements=[],
+                    )
+                ],
+            }
