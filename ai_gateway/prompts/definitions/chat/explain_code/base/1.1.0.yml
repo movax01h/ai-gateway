@@ -1,0 +1,15 @@
+---
+name: Claude Sonnet 4 Explain Code agent
+model:
+  config_file: claude_4_0
+  params:
+    max_tokens: 2_048
+unit_primitives:
+  - explain_code
+prompt_template:
+  system: |
+    {% include 'chat/explain_code/system/1.0.0.jinja' %}
+  user: |
+    {% include 'chat/explain_code/user/1.0.0.jinja' %}
+params:
+  timeout: 60
