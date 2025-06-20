@@ -1,3 +1,6 @@
+include:
+  - local: .gitlab/ci/dws-dependencies.yml
+
 tests:unit:
   extends: .poetry
   stage: test
@@ -62,11 +65,29 @@ tests:evaluation:
   DW_CONCURRENCY: 3
   SWEBENCH_START: "true"
 
+check-dws-dependencies:
+  extends: .poetry
+  stage: test
+  needs:
+    - install
+  script:
+    - make duo-workflow-service-dependencies
+    - |
+      if [ "$CI_PIPELINE_SOURCE" = "merge_request_event" ]; then
+        (git diff --exit-code .gitlab/ci/dws-dependencies.yml || (echo "ERROR: The dependencies at .gitlab/ci/dws-dependencies.yml are out of date. Run 'make duo-workflow-service-dependencies' locally to update the file." && exit 1))
+      fi
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+
 sanity-tests:
   # Runs SWE Bench tests on a small set of problems that are consistently resolved by Duo Workflow.
   <<: *test-base
-  when: always
   allow_failure: true # TODO: to be removed once swe-bench pipelines are stable enough
+  needs:
+    - check-dws-dependencies
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+      changes: !reference [.duo-workflow-service-dependencies, changes]
   variables:
     <<: *test-variables
     LS_DATASET_SPLIT: "solved_consistently_sm"

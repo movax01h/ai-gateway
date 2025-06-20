@@ -284,3 +284,9 @@ duo-workflow-service-reload:
     --directory=./duo_workflow_service \
     --pattern="*.py" \
     --recursive  -- duo-workflow-service
+
+.PHONY: duo-workflow-service-dependencies
+duo-workflow-service-dependencies:
+	@echo "Generating Duo Workflow Service dependencies for CI configuration..."
+	@poetry install
+	@poetry run python scripts/generate_dws_change_patterns.py
