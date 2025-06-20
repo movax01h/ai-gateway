@@ -11,7 +11,7 @@ configurable_unit_primitives:
   - feature_setting: "code_generations"
     unit_primitives:
       - "generate_code"
-    default_model: "claude_sonnet_3_7_20250219"
+    default_model: "claude_sonnet_4_20250514"
     selectable_models:
       - "claude_sonnet_4_20250514"
       - "claude_sonnet_3_7_20250219"
