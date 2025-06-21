@@ -3,7 +3,18 @@ from unittest import mock
 import pytest
 from structlog.testing import capture_logs
 
-from ai_gateway.instrumentators.model_requests import ModelRequestInstrumentator
+from ai_gateway.instrumentators.model_requests import (
+    ModelRequestInstrumentator,
+    get_token_usage,
+    token_usage,
+)
+
+
+def test_get_token_usage():
+    usage = {"claude": {"input_tokens": 10, "output_tokens": 20}}
+    token_usage.set(usage)
+    assert get_token_usage() == usage
+    assert token_usage.get() is None  # Ensure the usage is reset after being retrieved
 
 
 class TestWatchContainer:
@@ -37,6 +48,28 @@ class TestWatchContainer:
             ),
             mock.call().inc(15),
         ]
+        assert token_usage.get() == {
+            "claude": {"input_tokens": 10, "output_tokens": 15}
+        }
+
+        container.register_token_usage(
+            "claude", {"input_tokens": 5, "output_tokens": 10}
+        )
+
+        # It accumulates across multiple calls
+        assert token_usage.get() == {
+            "claude": {"input_tokens": 15, "output_tokens": 25}
+        }
+
+        container.register_token_usage(
+            "mymodel", {"input_tokens": 1, "output_tokens": 2}
+        )
+
+        # It tracks multiple models
+        assert token_usage.get() == {
+            "claude": {"input_tokens": 15, "output_tokens": 25},
+            "mymodel": {"input_tokens": 1, "output_tokens": 2},
+        }
 
     @mock.patch("prometheus_client.Gauge.labels")
     @mock.patch("prometheus_client.Counter.labels")

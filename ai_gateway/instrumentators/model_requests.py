@@ -1,5 +1,6 @@
 import time
 from contextlib import contextmanager
+from contextvars import ContextVar
 from typing import Optional
 
 import structlog
@@ -64,7 +65,28 @@ INFERENCE_OUTPUT_TOKENS = Counter(
     INFERENCE_DETAILS,
 )
 
+type TokenUsage = dict[str, dict[str, int]]
+token_usage: ContextVar[TokenUsage | None] = ContextVar("token_usage", default=None)
+
 logger = structlog.get_logger()
+
+
+def _update_token_usage(model: str, usage: UsageMetadata) -> None:
+    current_usage = token_usage.get() or {}
+    current_usage.setdefault(model, {"input_tokens": 0, "output_tokens": 0})
+    current_usage[model]["input_tokens"] += usage["input_tokens"]
+    current_usage[model]["output_tokens"] += usage["output_tokens"]
+
+    token_usage.set(current_usage)
+
+
+def get_token_usage() -> TokenUsage | None:
+    current_usage = token_usage.get()
+
+    # Reset the usage so multiple requests don't return the same values
+    token_usage.set(None)
+
+    return current_usage
 
 
 class ModelRequestInstrumentator:
@@ -109,6 +131,8 @@ class ModelRequestInstrumentator:
 
         def register_token_usage(self, model: str, usage: UsageMetadata):
             token_usage_labels = {**self._detail_labels(), "model_name": model}
+
+            _update_token_usage(model, usage)
 
             INFERENCE_INPUT_TOKENS.labels(**token_usage_labels).inc(
                 usage["input_tokens"]

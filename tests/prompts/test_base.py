@@ -221,6 +221,34 @@ class TestPrompt:
         )
 
     @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        ("model_response", "usage_metadata"),
+        [
+            # 2 characters ensures 2 yield before iteration stops
+            ("ab", UsageMetadata(input_tokens=1, output_tokens=1, total_tokens=2)),
+        ],
+    )
+    async def test_astream_usage_metadata_before_stream_end(
+        self, mock_watch: mock.Mock, internal_event_client: mock.Mock, prompt: Prompt
+    ):
+        mock_watcher = mock_watch.return_value.__enter__.return_value
+        prompt.internal_event_client = internal_event_client
+
+        iterator = prompt.astream({"name": "Duo", "content": "What's up?"})
+
+        # While the stream is being consumed, token usage is not registered yet
+        await anext(iterator)
+        mock_watcher.register_token_usage.assert_not_called()
+
+        # When the last message is yield, but before iteration stops, token usage is registered
+        await anext(iterator)
+        mock_watcher.register_token_usage.assert_called_once()
+
+        # Iteration ends
+        with pytest.raises(StopAsyncIteration):
+            await anext(iterator)
+
+    @pytest.mark.asyncio
     async def test_ainvoke_model_input(self, prompt: Prompt):
         with mock.patch.object(FakeModel, "ainvoke") as mock_ainvoke:
             await prompt.ainvoke({"name": "Duo", "content": "What's up?"})
