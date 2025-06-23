@@ -2,7 +2,7 @@
 
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List
 from unittest.mock import patch
 
 import pytest
@@ -107,10 +107,10 @@ class TestPlanTerminatorAgent:
     async def test_run_with_tasks(
         self,
         mock_datetime,
+        mock_now: datetime,
         base_workflow_state: WorkflowState,
         test_case: PlanTerminatorTestCase,
     ):
-        mock_now = datetime(2025, 1, 1, 12, 0, tzinfo=timezone.utc)
         mock_datetime.now.return_value = mock_now
         mock_datetime.timezone = timezone
 
