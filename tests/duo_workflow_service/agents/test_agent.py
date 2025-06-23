@@ -16,8 +16,6 @@ from duo_workflow_service.entities import WorkflowEventType
 from duo_workflow_service.entities.state import (
     MessageTypeEnum,
     Plan,
-    ToolStatus,
-    UiChatLog,
     WorkflowState,
     WorkflowStatusEnum,
 )
@@ -51,14 +49,15 @@ def workflow_resume_event():
 
 
 @pytest.fixture
-def workflow_state():
+def workflow_state(plan: Plan):
     return WorkflowState(
-        plan=Plan(steps=[]),
+        plan=plan,
         status=WorkflowStatusEnum.NOT_STARTED,
         conversation_history={},
         handover=[],
         last_human_input=None,
         ui_chat_log=[],
+        files_changed=[],
     )
 
 

@@ -1,11 +1,11 @@
-import json
-from copy import deepcopy
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
 import structlog
 from langchain_core.messages import AIMessage, BaseMessage, ToolMessage
+from langchain_core.messages.tool import ToolCall
 from langchain_core.output_parsers.string import StrOutputParser
+from langgraph.types import Command
 from pydantic import ValidationError
 
 from duo_workflow_service.entities import WorkflowStatusEnum
@@ -14,8 +14,6 @@ from duo_workflow_service.entities.state import (
     FileChanges,
     MessageTypeEnum,
     Plan,
-    Task,
-    TaskStatus,
     ToolInfo,
     ToolStatus,
     UiChatLog,
@@ -36,7 +34,7 @@ from duo_workflow_service.tools import (
     Toolset,
     format_tool_display_message,
 )
-from duo_workflow_service.tools.planner import format_short_task_description
+from duo_workflow_service.tools.planner import PlannerTool
 
 _HIDDEN_TOOLS = ["get_plan"]
 
@@ -46,72 +44,13 @@ _TRACK_FILE_CHANGES_TOOLS = [
     "edit_file",
 ]
 
-
-def _add_new_task(args: dict, plan: Plan) -> tuple[Plan, str]:
-    new_task: Task = {
-        "id": f"task-{len(plan['steps'])}",
-        "description": args["description"],
-        "status": TaskStatus.NOT_STARTED,
-    }
-    plan["steps"].append(new_task)
-    return plan, f"Step added: {new_task['id']}"
-
-
-def _remove_task(args: dict, plan: Plan) -> tuple[Plan, str]:
-    plan["steps"] = [step for step in plan["steps"] if step["id"] != args["task_id"]]
-    return plan, f"Task removed: {args['task_id']}"
-
-
-def _update_task_description(args: dict, plan: Plan) -> tuple[Plan, str]:
-    task_id = args.get("task_id")
-    new_description = args.get("new_description")
-
-    if task_id is None:
-        return plan, "No task_id provided"
-
-    for step in plan["steps"]:
-        if step["id"] == task_id:
-            if new_description:
-                step["description"] = new_description
-            return plan, f"Task updated: {task_id}"
-
-    return plan, f"Task not found: {task_id}"
-
-
-def _set_task_status(args: dict, plan: Plan) -> tuple[Plan, str]:
-    for step in plan["steps"]:
-        if step["id"] == args["task_id"]:
-            step["status"] = TaskStatus(args["status"])
-            return (
-                plan,
-                f"Task status set: {args['task_id']} - {args['status']}",
-            )
-    return plan, f"Task not found: {args['task_id']}"
-
-
-# pylint: disable=unused-argument
-def _create_plan(args: dict, plan: Plan) -> tuple[Plan, str]:
-    tasks = args.get("tasks", "")
-    steps: List[Task] = []
-    for i, task_description in enumerate(tasks):
-        steps.append(
-            Task(
-                id=f"task-{i}",
-                description=task_description,
-                status=TaskStatus.NOT_STARTED,
-            )
-        )
-
-    return Plan(steps=steps), "Plan created"
-
-
-_ACTION_HANDLERS = {
-    "add_new_task": _add_new_task,
-    "remove_task": _remove_task,
-    "update_task_description": _update_task_description,
-    "set_task_status": _set_task_status,
-    "create_plan": _create_plan,
-}
+_ACTION_HANDLERS = [
+    "add_new_task",
+    "remove_task",
+    "update_task_description",
+    "set_task_status",
+    "create_plan",
+]
 
 _COMMAND_OUTPUT_TOOLS = {
     "run_command": RunCommand,
@@ -137,87 +76,73 @@ class ToolsExecutor:
 
     async def run(self, state: DuoWorkflowStateType):
         last_message = state["conversation_history"][self._tools_agent_name][-1]
-        tool_calls = getattr(last_message, "tool_calls", [])
-        tools_responses = []
+        tool_calls: list[ToolCall] = getattr(last_message, "tool_calls", [])
+        state_updates = {}
+        responses: list[dict[str, Any] | Command] = []
         ui_chat_logs: List[UiChatLog] = []
         files_changed: List[FileChanges] = []
+        plan = state["plan"]
 
         self._create_ai_message_ui_chat_log(last_message, ui_chat_logs)
 
         for tool_call in tool_calls:
             tool_name = tool_call["name"]
-            tool_response = f"Tool {tool_name} not found"
-            tool_args = tool_call.get("args", {})
 
-            if tool_name in _ACTION_HANDLERS:
-                new_plan, tool_response = await self._handle_plan_modification(
-                    tool_name, tool_args, state["plan"]
+            if tool_name not in self._toolset:
+                responses.append(
+                    self._process_response(tool_call, f"Tool {tool_name} not found")
                 )
-                state["plan"] = new_plan
-                self._add_tool_ui_chat_log(
-                    tool_info={"name": tool_name, "args": tool_args},
-                    status=ToolStatus.SUCCESS,
-                    ui_chat_logs=ui_chat_logs,
+                continue
+
+            result = await self._execute_tool(tool_name, tool_call, plan)
+
+            chat_logs = result.get("chat_logs", [])
+            if chat_logs and isinstance(chat_logs[0], dict):
+                chat_logs[0].setdefault("message_sub_type", tool_name)
+
+            if tool_name in _TRACK_FILE_CHANGES_TOOLS:
+                files_changed.append(
+                    FileChanges(
+                        tool_name=tool_name,
+                        tool_args=tool_call.get("args", {}),
+                    )
                 )
 
-            if tool_name in self._toolset:
-                result = await self._execute_tool(tool_name, tool_args)
-                chat_logs = result.get("chat_logs", [])
-                if chat_logs and isinstance(chat_logs[0], dict):
-                    chat_logs[0].setdefault("message_sub_type", tool_name)
+            if tool_name in _COMMAND_OUTPUT_TOOLS:
+                if chat_logs and "tool_info" in chat_logs[0]:
+                    chat_log = chat_logs[0]
+                    chat_log["tool_info"]["tool_response"] = result.get("response")
+                    chat_log["message_sub_type"] = "command_output"
+                    ui_chat_logs.extend([chat_log])
+            else:
+                ui_chat_logs.extend(result.get("chat_logs", []))
 
-                if result.get("status") == WorkflowStatusEnum.ERROR:
-                    tools_responses.append(
-                        ToolMessage(
-                            content=result["response"],
-                            tool_call_id=tool_call.get("id"),
-                        )
-                    )
-                    ui_chat_logs.extend(result.get("chat_logs", []))
-                    return {
-                        "conversation_history": {
-                            self._tools_agent_name: tools_responses
-                        },
-                        "status": WorkflowStatusEnum.ERROR,
-                        "ui_chat_log": ui_chat_logs,
-                    }
+            responses.append(self._process_response(tool_call, result["response"]))
 
-                if tool_name in _TRACK_FILE_CHANGES_TOOLS:
-                    files_changed.append(
-                        FileChanges(
-                            tool_name=tool_name,
-                            tool_args=tool_args,
-                        )
-                    )
+            if result.get("status") == WorkflowStatusEnum.ERROR:
+                state_updates["status"] = WorkflowStatusEnum.ERROR
+                break
 
-                tool_response = result["response"]
-
-                if tool_name in _COMMAND_OUTPUT_TOOLS:
-                    if chat_logs and "tool_info" in chat_logs[0]:
-                        chat_log = chat_logs[0]
-                        chat_log["tool_info"]["tool_response"] = result.get("response")
-                        chat_log["message_sub_type"] = "command_output"
-                        ui_chat_logs.extend([chat_log])
-
-                if (
-                    tool_name not in _ACTION_HANDLERS
-                    and tool_name not in _COMMAND_OUTPUT_TOOLS
-                ):
-                    ui_chat_logs.extend(result.get("chat_logs", []))
-
-            if tool_name == "get_plan":
-                tool_response = json.dumps(state["plan"]["steps"])
-
-            tools_responses.append(
-                ToolMessage(content=tool_response, tool_call_id=tool_call.get("id"))
+        responses.append(
+            Command(
+                update={
+                    "ui_chat_log": ui_chat_logs,
+                    "files_changed": files_changed,
+                    **state_updates,
+                }
             )
+        )
 
-        return {
-            "conversation_history": {self._tools_agent_name: tools_responses},
-            "plan": state["plan"],
-            "ui_chat_log": ui_chat_logs,
-            "files_changed": files_changed,
-        }
+        return responses
+
+    def _process_response(self, tool_call, response) -> Command | dict[str, Any]:
+        if isinstance(response, Command):
+            return response
+
+        if isinstance(response, str):
+            response = ToolMessage(content=response, tool_call_id=tool_call.get("id"))
+
+        return {"conversation_history": {self._tools_agent_name: [response]}}
 
     def _create_ai_message_ui_chat_log(
         self, message: BaseMessage, ui_chat_logs: List[UiChatLog]
@@ -261,14 +186,20 @@ class ToolsExecutor:
             ui_chat_logs.append(chat_log)
 
     async def _execute_tool(
-        self, tool_name: str, tool_args: Dict[str, Any]
+        self, tool_name: str, tool_call: ToolCall, plan: Plan
     ) -> Dict[str, Any]:
+        tool_args = tool_call.get("args", {})
         tool = self._toolset[tool_name]
         chat_logs: List[UiChatLog] = []
 
+        if isinstance(tool, PlannerTool):
+            tool.plan = plan
+            tool.tools_agent_name = self._tools_agent_name
+            tool.tool_call_id = tool_call["id"]
+
         try:
             with duo_workflow_metrics.time_tool_call(tool_name=tool_name):
-                tool_response = await tool.arun(tool_args)
+                tool_response = await tool.ainvoke(tool_call)
 
             self._track_internal_event(
                 event_name=EventEnum.WORKFLOW_TOOL_SUCCESS,
@@ -411,15 +342,6 @@ class ToolsExecutor:
             category=self._workflow_type.value,
         )
 
-    async def _handle_plan_modification(
-        self, tool_name: str, args: dict, plan: Plan
-    ) -> tuple[Plan, str]:
-        handler = _ACTION_HANDLERS.get(tool_name)
-        if handler:
-            new_plan, response = handler(args, deepcopy(plan))
-            return new_plan, response
-        return plan, "Error handling plan modification"
-
     def _create_tool_ui_chat_log(
         self,
         tool_name: str,
@@ -460,20 +382,7 @@ class ToolsExecutor:
         args_str = ", ".join(f"{k}={v}" for k, v in args.items())
         message = f"Using {tool_name}: {args_str}"
 
-        if tool_name in _ACTION_HANDLERS:
-            short_description = format_short_task_description(
-                args.get("description", ""), word_limit=5, char_limit=50, suffix="..."
-            )
-            action_messages = {
-                "add_new_task": f"Add new task to the plan: {format_short_task_description(args.get('description', ''), char_limit=100)}",
-                "remove_task": f"Remove task '{short_description}'",
-                "update_task_description": f"Update description for task '{format_short_task_description(args.get('new_description', ''), word_limit=5)}'",
-                "set_task_status": f"Set task '{short_description}' to '{args.get('status', '')}'",
-                "create_plan": f"Create plan with {len(args.get('tasks', []))} tasks",
-            }
-            message = action_messages.get(tool_name, "")
-
-        elif tool_name in self._toolset:
+        if tool_name in self._toolset:
             tool = self._toolset[tool_name]
             message = format_tool_display_message(tool, args) or message
 

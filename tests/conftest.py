@@ -46,6 +46,7 @@ from ai_gateway.safety_attributes import SafetyAttributes
 from duo_workflow_service.entities.state import (
     MessageTypeEnum,
     Plan,
+    UiChatLog,
     WorkflowState,
     WorkflowStatusEnum,
 )
@@ -633,24 +634,32 @@ def user(user_is_debug: bool, scopes: list[str]):
     )
 
 
+@pytest.fixture
+def ui_chat_log() -> list[UiChatLog]:
+    return [
+        {
+            "message_type": MessageTypeEnum.AGENT,
+            "content": "This is a test message",
+            "timestamp": "2025-01-08T12:00:00Z",
+            "status": None,
+            "correlation_id": None,
+            "tool_info": None,
+            "context_elements": None,
+            "message_sub_type": None,
+        }
+    ]
+
+
 @pytest.fixture(scope="function")
-def workflow_state():
+def workflow_state(ui_chat_log: list[UiChatLog]):
     return WorkflowState(
         plan=Plan(steps=[]),
         status=WorkflowStatusEnum.NOT_STARTED,
         conversation_history={},
         handover=[],
         last_human_input=None,
-        ui_chat_log=[
-            {
-                "message_type": MessageTypeEnum.AGENT,
-                "content": "This is a test message",
-                "timestamp": "2025-01-08T12:00:00Z",
-                "status": None,
-                "correlation_id": None,
-                "tool_info": None,
-            }
-        ],
+        ui_chat_log=ui_chat_log,
+        files_changed=[],
     )
 
 
