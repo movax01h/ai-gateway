@@ -74,6 +74,7 @@ _outbox = MagicMock(spec=asyncio.Queue)
                 "get_project",
                 "gitlab_group_project_search",
                 "gitlab_issue_search",
+                "gitlab_documentation_search",
                 "gitlab_merge_request_search",
                 "gitlab_milestone_search",
                 "gitlab__user_search",
@@ -121,6 +122,7 @@ _outbox = MagicMock(spec=asyncio.Queue)
                 "get_project",
                 "gitlab_group_project_search",
                 "gitlab_issue_search",
+                "gitlab_documentation_search",
                 "gitlab_merge_request_search",
                 "gitlab_milestone_search",
                 "gitlab__user_search",
@@ -246,6 +248,9 @@ def test_registry_initialization_initialises_tools_with_correct_attributes(
         "get_project": tools.GetProject(metadata=tool_metadata),
         "gitlab_group_project_search": tools.GroupProjectSearch(metadata=tool_metadata),
         "gitlab_issue_search": tools.IssueSearch(metadata=tool_metadata),
+        "gitlab_documentation_search": tools.DocumentationSearch(
+            metadata=tool_metadata
+        ),
         "gitlab_merge_request_search": tools.MergeRequestSearch(metadata=tool_metadata),
         "gitlab_milestone_search": tools.MilestoneSearch(metadata=tool_metadata),
         "gitlab__user_search": tools.UserSearch(metadata=tool_metadata),
