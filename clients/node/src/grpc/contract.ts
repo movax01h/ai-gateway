@@ -141,6 +141,7 @@ export interface Action {
   grep?: Grep | undefined;
   findFiles?: FindFiles | undefined;
   runMCPTool?: RunMCPTool | undefined;
+  mkdir?: Mkdir | undefined;
 }
 
 export interface RunCommandAction {
@@ -240,6 +241,10 @@ export interface Approval_Approved {
 
 export interface Approval_Rejected {
   message?: string | undefined;
+}
+
+export interface Mkdir {
+  directoryPath: string;
 }
 
 function createBaseClientEvent(): ClientEvent {
@@ -952,6 +957,7 @@ function createBaseAction(): Action {
     grep: undefined,
     findFiles: undefined,
     runMCPTool: undefined,
+    mkdir: undefined,
   };
 }
 
@@ -992,6 +998,9 @@ export const Action: MessageFns<Action> = {
     }
     if (message.runMCPTool !== undefined) {
       RunMCPTool.encode(message.runMCPTool, writer.uint32(98).fork()).join();
+    }
+    if (message.mkdir !== undefined) {
+      Mkdir.encode(message.mkdir, writer.uint32(106).fork()).join();
     }
     return writer;
   },
@@ -1099,6 +1108,14 @@ export const Action: MessageFns<Action> = {
           message.runMCPTool = RunMCPTool.decode(reader, reader.uint32());
           continue;
         }
+        case 13: {
+          if (tag !== 106) {
+            break;
+          }
+
+          message.mkdir = Mkdir.decode(reader, reader.uint32());
+          continue;
+        }
       }
       if ((tag & 7) === 4 || tag === 0) {
         break;
@@ -1122,6 +1139,7 @@ export const Action: MessageFns<Action> = {
       grep: isSet(object.grep) ? Grep.fromJSON(object.grep) : undefined,
       findFiles: isSet(object.findFiles) ? FindFiles.fromJSON(object.findFiles) : undefined,
       runMCPTool: isSet(object.runMCPTool) ? RunMCPTool.fromJSON(object.runMCPTool) : undefined,
+      mkdir: isSet(object.mkdir) ? Mkdir.fromJSON(object.mkdir) : undefined,
     };
   },
 
@@ -1163,6 +1181,9 @@ export const Action: MessageFns<Action> = {
     if (message.runMCPTool !== undefined) {
       obj.runMCPTool = RunMCPTool.toJSON(message.runMCPTool);
     }
+    if (message.mkdir !== undefined) {
+      obj.mkdir = Mkdir.toJSON(message.mkdir);
+    }
     return obj;
   },
 
@@ -1203,6 +1224,7 @@ export const Action: MessageFns<Action> = {
     message.runMCPTool = (object.runMCPTool !== undefined && object.runMCPTool !== null)
       ? RunMCPTool.fromPartial(object.runMCPTool)
       : undefined;
+    message.mkdir = (object.mkdir !== undefined && object.mkdir !== null) ? Mkdir.fromPartial(object.mkdir) : undefined;
     return message;
   },
 };
@@ -2691,6 +2713,64 @@ export const Approval_Rejected: MessageFns<Approval_Rejected> = {
   fromPartial<I extends Exact<DeepPartial<Approval_Rejected>, I>>(object: I): Approval_Rejected {
     const message = createBaseApproval_Rejected();
     message.message = object.message ?? undefined;
+    return message;
+  },
+};
+
+function createBaseMkdir(): Mkdir {
+  return { directoryPath: "" };
+}
+
+export const Mkdir: MessageFns<Mkdir> = {
+  encode(message: Mkdir, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
+    if (message.directoryPath !== "") {
+      writer.uint32(10).string(message.directoryPath);
+    }
+    return writer;
+  },
+
+  decode(input: BinaryReader | Uint8Array, length?: number): Mkdir {
+    const reader = input instanceof BinaryReader ? input : new BinaryReader(input);
+    const end = length === undefined ? reader.len : reader.pos + length;
+    const message = createBaseMkdir();
+    while (reader.pos < end) {
+      const tag = reader.uint32();
+      switch (tag >>> 3) {
+        case 1: {
+          if (tag !== 10) {
+            break;
+          }
+
+          message.directoryPath = reader.string();
+          continue;
+        }
+      }
+      if ((tag & 7) === 4 || tag === 0) {
+        break;
+      }
+      reader.skip(tag & 7);
+    }
+    return message;
+  },
+
+  fromJSON(object: any): Mkdir {
+    return { directoryPath: isSet(object.directoryPath) ? globalThis.String(object.directoryPath) : "" };
+  },
+
+  toJSON(message: Mkdir): unknown {
+    const obj: any = {};
+    if (message.directoryPath !== "") {
+      obj.directoryPath = message.directoryPath;
+    }
+    return obj;
+  },
+
+  create<I extends Exact<DeepPartial<Mkdir>, I>>(base?: I): Mkdir {
+    return Mkdir.fromPartial(base ?? ({} as any));
+  },
+  fromPartial<I extends Exact<DeepPartial<Mkdir>, I>>(object: I): Mkdir {
+    const message = createBaseMkdir();
+    message.directoryPath = object.directoryPath ?? "";
     return message;
   },
 };
