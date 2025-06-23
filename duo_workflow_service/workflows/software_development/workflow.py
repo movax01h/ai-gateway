@@ -28,9 +28,6 @@ from duo_workflow_service.agents.prompts import (
     BUILD_CONTEXT_SYSTEM_MESSAGE,
     EXECUTOR_SYSTEM_MESSAGE,
     HANDOVER_TOOL_NAME,
-    PLANNER_GOAL,
-    PLANNER_INSTRUCTIONS,
-    PLANNER_PROMPT,
     SET_TASK_STATUS_TOOL_NAME,
 )
 from duo_workflow_service.components import (
@@ -39,6 +36,7 @@ from duo_workflow_service.components import (
     ToolsApprovalComponent,
     ToolsRegistry,
 )
+from duo_workflow_service.components.planner.component import PlannerComponent
 from duo_workflow_service.entities import (
     MessageTypeEnum,
     Plan,
@@ -236,58 +234,10 @@ class Workflow(AbstractWorkflow):
             ),
         }
 
-    def _setup_planner(
-        self,
-        goal: str,
-        tools_registry: ToolsRegistry,
-        base_model_planner,
-        executor_toolset,
-    ):
-        planner_toolset = tools_registry.toolset(PLANNER_TOOLS)
-        planner = Agent(
-            goal=PLANNER_GOAL.format(
-                executor_agent_prompt=EXECUTOR_SYSTEM_MESSAGE,
-                handover_tool_name=HANDOVER_TOOL_NAME,
-                executor_agent_tools="\n".join(
-                    [
-                        f"{tool_name}: {tool.description}"
-                        for tool_name, tool in executor_toolset.items()
-                    ]
-                ),
-                goal=goal,
-                create_plan_tool_name=tools_registry.get("create_plan").name,  # type: ignore
-                get_plan_tool_name=tools_registry.get("get_plan").name,  # type: ignore
-                add_new_task_tool_name=tools_registry.get("add_new_task").name,  # type: ignore
-                remove_task_tool_name=tools_registry.get("remove_task").name,  # type: ignore
-                update_task_description_tool_name=tools_registry.get("update_task_description").name,  # type: ignore
-                planner_instructions=self.planner_instructions(tools_registry),
-            ),
-            model=base_model_planner,
-            name="planner",
-            workflow_id=self._workflow_id,
-            http_client=self._http_client,
-            system_prompt=PLANNER_PROMPT,
-            toolset=planner_toolset,
-            workflow_type=self._workflow_type,
-        )
-
-        return {
-            "agent": planner,
-            "toolset": planner_toolset,
-            "supervisor": PlanSupervisorAgent(supervised_agent_name="planner"),
-            "tools_executor": ToolsExecutor(
-                tools_agent_name="planner",
-                toolset=planner_toolset,
-                workflow_id=self._workflow_id,
-                workflow_type=self._workflow_type,
-            ),
-        }
-
     def _setup_workflow_graph(
         self,
         graph: StateGraph,
         executor_components,
-        planner_components,
         tools_registry,
         goal,
     ):
@@ -317,37 +267,32 @@ class Workflow(AbstractWorkflow):
         )
 
         graph.add_edge(last_node_name, disambiguation_entry_node)
-        # graph.add_edge(disambiguation_exit_node, "planning")
-        graph.add_node("planning", planner_components["agent"].run)
-        graph.add_node("update_plan", planner_components["tools_executor"].run)
-        graph.add_node("planning_supervisor", planner_components["supervisor"].run)
-        graph.add_edge("update_plan", "planning")
-        graph.add_edge("planning_supervisor", "planning")
 
-        planner_approval_component = PlanApprovalComponent(
+        planner_component = PlannerComponent(
             workflow_id=self._workflow_id,
-            approved_agent_name=planner_components["agent"].name,
+            workflow_type=self._workflow_type,
+            planner_toolset=tools_registry.toolset(PLANNER_TOOLS),
+            executor_toolset=tools_registry.toolset(EXECUTOR_TOOLS),
+            tools_registry=tools_registry,
+            model_config=self._model_config,
+            goal=goal,
+            project=self._project,
+            http_client=self._http_client,
+        )
+
+        plan_approval_component = PlanApprovalComponent(
+            workflow_id=self._workflow_id,
+            approved_agent_name="planner",
             approved_agent_state=WorkflowStatusEnum.PLANNING,
         )
 
-        planning_approval_entry_node = planner_approval_component.attach(
+        planner_component.attach(
             graph=graph,
             next_node="set_status_to_execution",
-            back_node="planning",
             exit_node="plan_terminator",
+            approval_component=plan_approval_component,
         )
-
-        graph.add_conditional_edges(
-            "planning",
-            partial(_router, "planner", tools_registry),
-            {
-                Routes.CALL_TOOL: "update_plan",
-                Routes.SUPERVISOR: "planning_supervisor",
-                Routes.HANDOVER: planning_approval_entry_node,
-                Routes.STOP: "plan_terminator",
-            },
-        )
-
+        # graph.add_edge(disambiguation_exit_node, "planning")
         plan_terminator = PlanTerminatorAgent(workflow_id=self._workflow_id)
         graph.add_node("plan_terminator", plan_terminator.run)
 
@@ -355,7 +300,7 @@ class Workflow(AbstractWorkflow):
             "set_status_to_execution",
             HandoverAgent(
                 new_status=WorkflowStatusEnum.EXECUTION,
-                handover_from=planner_components["agent"].name,
+                handover_from="planner",
             ).run,
         )
         graph.add_node("execution", executor_components["agent"].run)
@@ -405,10 +350,6 @@ class Workflow(AbstractWorkflow):
         tools_registry: ToolsRegistry,
         checkpointer: BaseCheckpointSaver,
     ):
-        base_model_planner = create_chat_model(
-            max_tokens=MAX_TOKENS_TO_SAMPLE,
-            config=self._model_config,
-        )
         base_model_executor = create_chat_model(
             max_tokens=MAX_TOKENS_TO_SAMPLE,
             config=self._model_config,
@@ -419,14 +360,10 @@ class Workflow(AbstractWorkflow):
         executor_components = self._setup_executor(
             goal, tools_registry, base_model_executor
         )
-        planner_components = self._setup_planner(
-            goal, tools_registry, base_model_planner, executor_components["toolset"]
-        )
 
         graph = self._setup_workflow_graph(
             graph,
             executor_components,
-            planner_components,
             tools_registry,
             goal,
         )
@@ -452,19 +389,6 @@ class Workflow(AbstractWorkflow):
             last_human_input=None,
             handover=[],
             ui_chat_log=[initial_ui_chat_log],
-        )
-
-    def planner_instructions(self, tools_registry):
-        return PLANNER_INSTRUCTIONS.format(
-            create_plan_tool_name=tools_registry.get("create_plan").name,  # type: ignore
-            add_new_task_tool_name=tools_registry.get("add_new_task").name,  # type: ignore
-            remove_task_tool_name=tools_registry.get("remove_task").name,  # type: ignore
-            update_task_description_tool_name=tools_registry.get("update_task_description").name,  # type: ignore
-            get_plan_tool_name=tools_registry.get("get_plan").name,  # type: ignore
-            handover_tool_name=HANDOVER_TOOL_NAME,
-            project_id=self._project["id"],
-            project_name=self._project["name"],
-            project_url=self._project["http_url_to_repo"],
         )
 
     def _setup_context_builder(
