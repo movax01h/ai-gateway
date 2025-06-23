@@ -341,7 +341,7 @@ async def test_workflow_run(
             CHAT_READ_ONLY_TOOLS + CHAT_MUTATION_TOOLS,
         ),
         (
-            ["duo_workflow_workhorse"],
+            ["duo_workflow_web_chat_mutation_tools"],
             {},
             CHAT_READ_ONLY_TOOLS + CHAT_MUTATION_TOOLS + CHAT_GITLAB_MUTATION_TOOLS,
         ),

@@ -17,7 +17,7 @@ class FeatureFlag(StrEnum):
         "duo_workflow_chat_workflow_claude_sonnet_4"
     )
     DUO_WORKFLOW_MCP_SUPPORT = "duo_workflow_mcp_support"
-    DUO_WORKFLOW_WORKHORSE = "duo_workflow_workhorse"
+    DUO_WORKFLOW_WEB_CHAT_MUTATION_TOOLS = "duo_workflow_web_chat_mutation_tools"
     BATCH_DUO_WORKFLOW_PLANNER_TASKS = "batch_duo_workflow_planner_tasks"
     DUO_WORKFLOW_USE_HANDOVER_SUMMARY = "duo_workflow_use_handover_summary"
 
