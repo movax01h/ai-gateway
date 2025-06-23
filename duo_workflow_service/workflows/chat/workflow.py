@@ -54,6 +54,7 @@ CHAT_READ_ONLY_TOOLS = [
     "list_merge_request_diffs",
     "gitlab_issue_search",
     "gitlab_merge_request_search",
+    "gitlab_documentation_search",
     "read_file",
     "list_dir",
     "find_files",

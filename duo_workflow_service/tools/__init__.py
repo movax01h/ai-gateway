@@ -3,6 +3,7 @@
 from .ci_linter import *
 from .command import *
 from .commit import *
+from .documentation_search import *
 from .duo_base_tool import format_tool_display_message
 from .epic import *
 from .filesystem import *

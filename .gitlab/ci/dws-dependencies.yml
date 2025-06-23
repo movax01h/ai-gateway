@@ -12,3 +12,4 @@
     - ai_gateway/prompts/*.py
     - ai_gateway/prompts/config/*.py
     - ai_gateway/prompts/registry.py
+    - ai_gateway/searches/*.py
