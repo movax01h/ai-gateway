@@ -225,7 +225,7 @@ class Workflow(AbstractWorkflow):
     def _get_tools(self):
         available_tools = CHAT_READ_ONLY_TOOLS + CHAT_MUTATION_TOOLS
 
-        if is_feature_enabled(FeatureFlag.DUO_WORKFLOW_WORKHORSE):
+        if is_feature_enabled(FeatureFlag.DUO_WORKFLOW_WEB_CHAT_MUTATION_TOOLS):
             available_tools += CHAT_GITLAB_MUTATION_TOOLS
 
         mcp_enabled = self._workflow_config.get("mcp_enabled", False)
