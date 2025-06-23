@@ -152,11 +152,11 @@ def _agent_responses(status: WorkflowStatusEnum, agent_name: str):
 @patch("duo_workflow_service.workflows.software_development.workflow.create_chat_model")
 @patch("duo_workflow_service.workflows.abstract_workflow.GitLabWorkflow", autospec=True)
 @patch(
-    "duo_workflow_service.workflows.software_development.workflow.ToolsApprovalComponent",
+    "duo_workflow_service.workflows.software_development.workflow.PlannerComponent",
     autospec=True,
 )
 @patch(
-    "duo_workflow_service.workflows.software_development.workflow.PlanApprovalComponent",
+    "duo_workflow_service.workflows.software_development.workflow.ToolsApprovalComponent",
     autospec=True,
 )
 @patch(
@@ -168,8 +168,8 @@ def _agent_responses(status: WorkflowStatusEnum, agent_name: str):
 async def test_workflow_run(
     mock_checkpoint_notifier,
     mock_goal_disambiguator_component,
-    mock_plan_approval_component,
     mock_tools_approval_component,
+    mock_planner_component,
     mock_gitlab_workflow,
     mock_chat_client,
     mock_fetch_workflow_config,
@@ -216,11 +216,6 @@ async def test_workflow_run(
         },
         {
             "plan": Plan(steps=[]),
-            "status": WorkflowStatusEnum.PLANNING,
-            "conversation_history": {},
-        },
-        {
-            "plan": Plan(steps=[]),
             "status": WorkflowStatusEnum.EXECUTION,
             "conversation_history": {},
         },
@@ -236,7 +231,6 @@ async def test_workflow_run(
         *_agent_responses(
             WorkflowStatusEnum.PLANNING, "context_builder"
         ),  # context builder responses
-        *_agent_responses(WorkflowStatusEnum.PLANNING, "planner"),  # planner responses
         *_agent_responses(
             WorkflowStatusEnum.EXECUTION, "executor"
         ),  # executor responses
@@ -248,10 +242,10 @@ async def test_workflow_run(
         "conversation_history": {},
     }
 
-    mock_goal_disambiguator_component.return_value.attach.return_value = "planning"
-    mock_plan_approval_component.return_value.attach.return_value = (
+    mock_goal_disambiguator_component.return_value.attach.return_value = (
         "set_status_to_execution"
     )
+    mock_planner_component.return_value.attach.return_value = "set_status_to_execution"
     mock_tools_approval_component.return_value.attach.side_effect = [
         "build_context_tools",
         "execution_tools",
@@ -265,19 +259,19 @@ async def test_workflow_run(
     await workflow.run("test_goal")
 
     assert mock_goal_disambiguator_component.return_value.attach.call_count == 1
-    assert mock_plan_approval_component.return_value.attach.call_count == 1
+    assert mock_planner_component.return_value.attach.call_count == 1
     assert mock_tools_approval_component.return_value.attach.call_count == 2
 
-    assert mock_agent.call_count == 3
+    assert mock_agent.call_count == 2
     assert mock_agent.return_value.run.call_count >= 5
 
-    assert mock_tools_executor.call_count == 3
+    assert mock_tools_executor.call_count == 2
     assert mock_tools_executor.return_value.run.call_count >= 1
 
     assert mock_handover_agent.call_count == 3
     assert mock_handover_agent.return_value.run.call_count == 3
 
-    assert mock_plan_supervisor_agent.call_count == 3
+    assert mock_plan_supervisor_agent.call_count == 2
     assert mock_plan_supervisor_agent.return_value.run.call_count >= 2
 
     assert mock_git_lab_workflow_instance.aput.call_count >= 1
@@ -310,8 +304,13 @@ async def test_workflow_run(
     "duo_workflow_service.workflows.software_development.workflow.GoalDisambiguationComponent",
     autospec=True,
 )
+@patch(
+    "duo_workflow_service.workflows.software_development.workflow.PlannerComponent",
+    autospec=True,
+)
 @patch.dict(os.environ, {"DW_INTERNAL_EVENT__ENABLED": "true"})
 async def test_workflow_run_with_memory_saver(
+    mock_planner_component,
     mock_goal_disambiguator_component,
     mock_gitlab_workflow,
     mock_chat_client,
@@ -324,7 +323,10 @@ async def test_workflow_run_with_memory_saver(
     mock_tools_registry_cls,
     checkpoint_tuple,
 ):
-    mock_goal_disambiguator_component.return_value.attach.return_value = "planning"
+    mock_goal_disambiguator_component.return_value.attach.return_value = (
+        "set_status_to_execution"
+    )
+    mock_planner_component.return_value.attach.return_value = "set_status_to_execution"
     mock_tools_registry = MagicMock(spec=ToolsRegistry)
     mock_tools_registry_cls.configure = AsyncMock(return_value=mock_tools_registry)
     mock_tools_registry.approval_required.return_value = False
@@ -356,11 +358,6 @@ async def test_workflow_run_with_memory_saver(
         },
         {
             "plan": Plan(steps=[]),
-            "status": WorkflowStatusEnum.PLANNING,
-            "conversation_history": {},
-        },
-        {
-            "plan": Plan(steps=[]),
             "status": WorkflowStatusEnum.EXECUTION,
             "conversation_history": {},
         },
@@ -376,7 +373,6 @@ async def test_workflow_run_with_memory_saver(
         *_agent_responses(
             WorkflowStatusEnum.PLANNING, "context_builder"
         ),  # context builder responses
-        *_agent_responses(WorkflowStatusEnum.PLANNING, "planner"),  # planner responses
         *_agent_responses(
             WorkflowStatusEnum.EXECUTION, "executor"
         ),  # executor responses
@@ -395,20 +391,22 @@ async def test_workflow_run_with_memory_saver(
     )
     await workflow.run("test_goal")
 
-    assert mock_agent.call_count == 3
+    assert mock_agent.call_count == 2
     assert mock_agent.return_value.run.call_count >= 5
 
-    assert mock_tools_executor.call_count == 3
+    assert mock_tools_executor.call_count == 2
     assert mock_tools_executor.return_value.run.call_count >= 1
 
     assert mock_handover_agent.call_count == 3
     assert mock_handover_agent.return_value.run.call_count >= 1
 
-    assert mock_plan_supervisor_agent.call_count == 3
+    assert mock_plan_supervisor_agent.call_count == 2
     assert mock_plan_supervisor_agent.return_value.run.call_count >= 2
 
     assert mock_git_lab_workflow_instance.aput.call_count == 0
     assert mock_git_lab_workflow_instance.aget_tuple.call_count == 0
+
+    assert mock_planner_component.return_value.attach.call_count == 1
 
     assert workflow.is_done
 
@@ -431,10 +429,15 @@ async def test_workflow_run_with_memory_saver(
     "duo_workflow_service.workflows.software_development.workflow.GoalDisambiguationComponent",
     autospec=True,
 )
+@patch(
+    "duo_workflow_service.workflows.software_development.workflow.PlannerComponent",
+    autospec=True,
+)
 @patch("duo_workflow_service.workflows.abstract_workflow.log_exception")
 @patch.dict(os.environ, {"DW_INTERNAL_EVENT__ENABLED": "true"})
 async def test_workflow_run_when_exception(
     mock_log_exception,
+    mock_planner_component,
     mock_goal_disambiguator_component,
     chat_client,
     mock_fetch_workflow_config,
@@ -446,7 +449,10 @@ async def test_workflow_run_when_exception(
     mock_agent,
     mock_tools_registry,
 ):
-    mock_goal_disambiguator_component.return_value.attach.return_value = "planning"
+    mock_goal_disambiguator_component.return_value.attach.return_value = (
+        "set_status_to_execution"
+    )
+    mock_planner_component.return_value.attach.return_value = "set_status_to_execution"
     mock_tools_registry.configure = AsyncMock(
         return_value=MagicMock(spec=ToolsRegistry)
     )
@@ -524,8 +530,13 @@ async def test_workflow_run_when_exception(
     "duo_workflow_service.workflows.software_development.workflow.GoalDisambiguationComponent",
     autospec=True,
 )
+@patch(
+    "duo_workflow_service.workflows.software_development.workflow.PlannerComponent",
+    autospec=True,
+)
 @patch.dict(os.environ, {"DW_INTERNAL_EVENT__ENABLED": "true"})
 async def test_workflow_run_with_error_state(
+    mock_planner_component,
     mock_goal_disambiguator_component,
     mock_gitlab_workflow,
     mock_chat_client,
@@ -538,7 +549,10 @@ async def test_workflow_run_with_error_state(
     mock_tools_registry_cls,
     checkpoint_tuple,
 ):
-    mock_goal_disambiguator_component.return_value.attach.return_value = "planning"
+    mock_goal_disambiguator_component.return_value.attach.return_value = (
+        "set_status_to_execution"
+    )
+    mock_planner_component.return_value.attach.return_value = "set_status_to_execution"
     mock_tools_registry = MagicMock(spec=ToolsRegistry)
     mock_tools_registry_cls.configure = AsyncMock(return_value=mock_tools_registry)
     mock_tools_registry.approval_required.return_value = False
@@ -592,11 +606,13 @@ async def test_workflow_run_with_error_state(
 
     await workflow.run("test_goal")
 
-    assert mock_agent.call_count == 3
+    assert mock_agent.call_count == 2
     assert mock_agent.return_value.run.call_count == 2
 
-    assert mock_tools_executor.call_count == 3
+    assert mock_tools_executor.call_count == 2
     assert mock_tools_executor.return_value.run.call_count == 1
+
+    assert mock_planner_component.return_value.attach.call_count == 1
 
     assert workflow.is_done
 
@@ -619,9 +635,14 @@ async def test_workflow_run_with_error_state(
     "duo_workflow_service.workflows.software_development.workflow.GoalDisambiguationComponent",
     autospec=True,
 )
+@patch(
+    "duo_workflow_service.workflows.software_development.workflow.PlannerComponent",
+    autospec=True,
+)
 @patch("duo_workflow_service.workflows.abstract_workflow.log_exception")
 async def test_workflow_run_with_tools_registry(
     mock_log_exception,
+    mock_planner_component,
     mock_goal_disambiguator_component,
     mock_gitlab_workflow,
     chat_client,
@@ -634,7 +655,10 @@ async def test_workflow_run_with_tools_registry(
     mock_tools_registry_cls,
     checkpoint_tuple,
 ):
-    mock_goal_disambiguator_component.return_value.attach.return_value = "planning"
+    mock_goal_disambiguator_component.return_value.attach.return_value = (
+        "set_status_to_execution"
+    )
+    mock_planner_component.return_value.attach.return_value = "set_status_to_execution"
     mock_tools_registry = MagicMock(spec=ToolsRegistry)
     mock_tools_registry_cls.return_value = mock_tools_registry
     mock_tools_registry_cls.configure = AsyncMock(return_value=mock_tools_registry)
@@ -694,17 +718,8 @@ async def test_workflow_run_with_tools_registry(
         ],
         any_order=True,
     )
-    mock_tools_registry.get.assert_has_calls(
-        [
-            call("get_plan"),
-            call("add_new_task"),
-            call("remove_task"),
-            call("update_task_description"),
-        ],
-        any_order=True,
-    )
-    # Verify get_plan is called once in executor setup and twice in planner setup
-    assert mock_tools_registry.get.call_args_list.count(call("get_plan")) == 3
+    # Verify get_plan is called once in executor setup
+    assert mock_tools_registry.get.call_args_list.count(call("get_plan")) == 1
 
 
 @pytest.fixture
@@ -759,15 +774,6 @@ def test_executor_tools(tools_registry, software_development_workflow):
 
 
 @patch("duo_workflow_service.workflows.software_development.workflow.create_chat_model")
-def test_planner_tools(tools_registry, software_development_workflow):
-    agent_components = software_development_workflow._setup_planner(
-        "test goal", tools_registry, MagicMock(), MagicMock(spec=Toolset)
-    )
-    assert agent_components["toolset"] == tools_registry.toolset(PLANNER_TOOLS)
-    assert_tools_in_tools_registry(tools_registry, agent_components["toolset"])
-
-
-@patch("duo_workflow_service.workflows.software_development.workflow.create_chat_model")
 def test_context_builder_tools(tools_registry, software_development_workflow):
     """Test that all tools used by the context builder agent are available in the tools registry."""
     agent_components = software_development_workflow._setup_context_builder(
@@ -788,15 +794,23 @@ def test_context_builder_tools(tools_registry, software_development_workflow):
     "duo_workflow_service.workflows.software_development.workflow.GoalDisambiguationComponent",
     autospec=True,
 )
+@patch(
+    "duo_workflow_service.workflows.software_development.workflow.PlannerComponent",
+    autospec=True,
+)
 @patch.dict(os.environ, {"DW_INTERNAL_EVENT__ENABLED": "true"})
 async def test_workflow_run_with_setup_error(
+    mock_planner_component,
     mock_goal_disambiguator_component,
     mock_fetch_workflow_config,
     mock_fetch_project_data_with_workflow_id,
     mock_gitlab_workflow,
     mock_tools_registry,
 ):
-    mock_goal_disambiguator_component.return_value.attach.return_value = "planning"
+    mock_goal_disambiguator_component.return_value.attach.return_value = (
+        "set_status_to_execution"
+    )
+    mock_planner_component.return_value.attach.return_value = "set_status_to_execution"
     mock_tools_registry.configure = AsyncMock(
         side_effect=Exception("Failed to configure tools")
     )
@@ -947,10 +961,15 @@ async def test_workflow_run_with_invalid_web_url(
     "duo_workflow_service.workflows.software_development.workflow.GoalDisambiguationComponent",
     autospec=True,
 )
+@patch(
+    "duo_workflow_service.workflows.software_development.workflow.PlannerComponent",
+    autospec=True,
+)
 @patch("duo_workflow_service.workflows.abstract_workflow.log_exception")
 @patch.dict(os.environ, {"DW_INTERNAL_EVENT__ENABLED": "true"})
 async def test_workflow_run_with_retry(
     mock_log_exception,
+    mock_planner_component,
     mock_goal_disambiguator_component,
     chat_client,
     mock_fetch_workflow_config,
@@ -963,7 +982,10 @@ async def test_workflow_run_with_retry(
     mock_tools_registry,
     checkpoint_tuple,
 ):
-    mock_goal_disambiguator_component.return_value.attach.return_value = "planning"
+    mock_goal_disambiguator_component.return_value.attach.return_value = (
+        "set_status_to_execution"
+    )
+    mock_planner_component.return_value.attach.return_value = "set_status_to_execution"
     mock_tools_registry.configure = AsyncMock(
         return_value=MagicMock(spec=ToolsRegistry)
     )
@@ -1067,7 +1089,12 @@ async def test_workflow_run_with_retry(
 @patch("duo_workflow_service.workflows.software_development.workflow.Agent")
 @patch("duo_workflow_service.workflows.software_development.workflow.HandoverAgent")
 @patch(
-    "duo_workflow_service.workflows.software_development.workflow.PlanSupervisorAgent"
+    "duo_workflow_service.workflows.software_development.workflow.GoalDisambiguationComponent",
+    autospec=True,
+)
+@patch(
+    "duo_workflow_service.workflows.software_development.workflow.PlannerComponent",
+    autospec=True,
 )
 @patch("duo_workflow_service.workflows.software_development.workflow.ToolsExecutor")
 @patch(
@@ -1088,7 +1115,8 @@ async def test_workflow_run_with_tool_approvals(
     mock_fetch_workflow_config,
     mock_fetch_project_data_with_workflow_id,
     mock_tools_executor,
-    mock_plan_supervisor_agent,
+    mock_planner_component,
+    mock_disambiguation_component,
     mock_handover_agent,
     mock_agent,
     mock_tools_registry_cls,
@@ -1123,18 +1151,11 @@ async def test_workflow_run_with_tool_approvals(
     )
     mock_git_lab_workflow_instance.get_next_version = MagicMock(return_value=1)
 
-    mock_handover_agent.return_value.run.side_effect = [
-        {
-            "plan": Plan(steps=[]),
-            "status": WorkflowStatusEnum.COMPLETED,
-            "conversation_history": {},
-        },
-        {
-            "plan": Plan(steps=[]),
-            "status": WorkflowStatusEnum.COMPLETED,
-            "conversation_history": {},
-        },
-    ]
+    mock_handover_agent.return_value.run.return_value = {
+        "plan": Plan(steps=[]),
+        "status": WorkflowStatusEnum.COMPLETED,
+        "conversation_history": {},
+    }
 
     mock_tools_registry.approval_required.return_value = [True, False, False]
 
@@ -1147,12 +1168,30 @@ async def test_workflow_run_with_tool_approvals(
                     SystemMessage(content="system message"),
                     HumanMessage(content="human message"),
                     AIMessage(
-                        content="Tool calls are present, route to planner tools execution",
+                        content="Tool calls are present, route to build context tools execution",
                         tool_calls=[
                             {
                                 "id": "1",
-                                "name": "update_plan",
-                                "args": {"summary": "done"},
+                                "name": "run_command",
+                                "args": {"test": "test"},
+                            }
+                        ],
+                    ),
+                ],
+            },
+        },
+        {
+            "plan": Plan(steps=[]),
+            "status": WorkflowStatusEnum.EXECUTION,
+            "conversation_history": {
+                "context_builder": [
+                    AIMessage(
+                        content="Tool calls are present, route to build executor tools execution",
+                        tool_calls=[
+                            {
+                                "id": "1",
+                                "name": "run_command",
+                                "args": {"test": "test"},
                             }
                         ],
                     ),
@@ -1160,15 +1199,14 @@ async def test_workflow_run_with_tool_approvals(
             },
         },
     ]
-
-    mock_plan_supervisor_agent.return_value.run.return_value = {
-        "plan": Plan(steps=[]),
-        "status": WorkflowStatusEnum.EXECUTION,
-        "conversation_history": {},
-    }
-
+    mock_disambiguation_component.return_value.attach.return_value = (
+        "set_status_to_execution"
+    )
+    mock_planner_component.return_value.attach.return_value = "set_status_to_execution"
     mock_tools_aprroval_execution = MagicMock()
-    mock_tools_aprroval_execution.return_value = {"status": WorkflowStatusEnum.PLANNING}
+    mock_tools_aprroval_execution.return_value = {
+        "status": WorkflowStatusEnum.EXECUTION
+    }
     mock_tools_approval_component.side_effect = [
         MockComponent(
             mock_node_run=mock_tools_aprroval_execution,
@@ -1186,7 +1224,7 @@ async def test_workflow_run_with_tool_approvals(
     )
     await workflow.run("test_goal")
 
-    assert mock_agent.call_count == 3
+    assert mock_agent.call_count == 2
     assert mock_tools_aprroval_execution.call_count == 1
 
     assert workflow.is_done
