@@ -513,6 +513,7 @@ type Action struct {
 	//	*Action_Grep
 	//	*Action_FindFiles
 	//	*Action_RunMCPTool
+	//	*Action_Mkdir
 	Action isAction_Action `protobuf_oneof:"action"`
 }
 
@@ -637,6 +638,13 @@ func (x *Action) GetRunMCPTool() *RunMCPTool {
 	return nil
 }
 
+func (x *Action) GetMkdir() *Mkdir {
+	if x, ok := x.GetAction().(*Action_Mkdir); ok {
+		return x.Mkdir
+	}
+	return nil
+}
+
 type isAction_Action interface {
 	isAction_Action()
 }
@@ -685,6 +693,10 @@ type Action_RunMCPTool struct {
 	RunMCPTool *RunMCPTool `protobuf:"bytes,12,opt,name=runMCPTool,proto3,oneof"`
 }
 
+type Action_Mkdir struct {
+	Mkdir *Mkdir `protobuf:"bytes,13,opt,name=mkdir,proto3,oneof"`
+}
+
 func (*Action_RunCommand) isAction_Action() {}
 
 func (*Action_RunHTTPRequest) isAction_Action() {}
@@ -706,6 +718,8 @@ func (*Action_Grep) isAction_Action() {}
 func (*Action_FindFiles) isAction_Action() {}
 
 func (*Action_RunMCPTool) isAction_Action() {}
+
+func (*Action_Mkdir) isAction_Action() {}
 
 type RunCommandAction struct {
 	state         protoimpl.MessageState
@@ -1682,6 +1696,51 @@ func (*Approval_Approval) isApproval_UserDecision() {}
 
 func (*Approval_Rejection) isApproval_UserDecision() {}
 
+type Mkdir struct {
+	state         protoimpl.MessageState
+	sizeCache     protoimpl.SizeCache
+	unknownFields protoimpl.UnknownFields
+
+	DirectoryPath string `protobuf:"bytes,1,opt,name=directory_path,json=directoryPath,proto3" json:"directory_path,omitempty"`
+}
+
+func (x *Mkdir) Reset() {
+	*x = Mkdir{}
+	mi := &file_contract_contract_proto_msgTypes[23]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *Mkdir) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*Mkdir) ProtoMessage() {}
+
+func (x *Mkdir) ProtoReflect() protoreflect.Message {
+	mi := &file_contract_contract_proto_msgTypes[23]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use Mkdir.ProtoReflect.Descriptor instead.
+func (*Mkdir) Descriptor() ([]byte, []int) {
+	return file_contract_contract_proto_rawDescGZIP(), []int{23}
+}
+
+func (x *Mkdir) GetDirectoryPath() string {
+	if x != nil {
+		return x.DirectoryPath
+	}
+	return ""
+}
+
 type Approval_Approved struct {
 	state         protoimpl.MessageState
 	sizeCache     protoimpl.SizeCache
@@ -1690,7 +1749,7 @@ type Approval_Approved struct {
 
 func (x *Approval_Approved) Reset() {
 	*x = Approval_Approved{}
-	mi := &file_contract_contract_proto_msgTypes[24]
+	mi := &file_contract_contract_proto_msgTypes[25]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1702,7 +1761,7 @@ func (x *Approval_Approved) String() string {
 func (*Approval_Approved) ProtoMessage() {}
 
 func (x *Approval_Approved) ProtoReflect() protoreflect.Message {
-	mi := &file_contract_contract_proto_msgTypes[24]
+	mi := &file_contract_contract_proto_msgTypes[25]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1728,7 +1787,7 @@ type Approval_Rejected struct {
 
 func (x *Approval_Rejected) Reset() {
 	*x = Approval_Rejected{}
-	mi := &file_contract_contract_proto_msgTypes[25]
+	mi := &file_contract_contract_proto_msgTypes[26]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1740,7 +1799,7 @@ func (x *Approval_Rejected) String() string {
 func (*Approval_Rejected) ProtoMessage() {}
 
 func (x *Approval_Rejected) ProtoReflect() protoreflect.Message {
-	mi := &file_contract_contract_proto_msgTypes[25]
+	mi := &file_contract_contract_proto_msgTypes[26]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1836,7 +1895,7 @@ var file_contract_contract_proto_rawDesc = []byte{
 	0x48, 0x65, 0x61, 0x64, 0x65, 0x72, 0x73, 0x45, 0x6e, 0x74, 0x72, 0x79, 0x12, 0x10, 0x0a, 0x03,
 	0x6b, 0x65, 0x79, 0x18, 0x01, 0x20, 0x01, 0x28, 0x09, 0x52, 0x03, 0x6b, 0x65, 0x79, 0x12, 0x14,
 	0x0a, 0x05, 0x76, 0x61, 0x6c, 0x75, 0x65, 0x18, 0x02, 0x20, 0x01, 0x28, 0x09, 0x52, 0x05, 0x76,
-	0x61, 0x6c, 0x75, 0x65, 0x3a, 0x02, 0x38, 0x01, 0x22, 0xd0, 0x04, 0x0a, 0x06, 0x41, 0x63, 0x74,
+	0x61, 0x6c, 0x75, 0x65, 0x3a, 0x02, 0x38, 0x01, 0x22, 0xf0, 0x04, 0x0a, 0x06, 0x41, 0x63, 0x74,
 	0x69, 0x6f, 0x6e, 0x12, 0x1c, 0x0a, 0x09, 0x72, 0x65, 0x71, 0x75, 0x65, 0x73, 0x74, 0x49, 0x44,
 	0x18, 0x01, 0x20, 0x01, 0x28, 0x09, 0x52, 0x09, 0x72, 0x65, 0x71, 0x75, 0x65, 0x73, 0x74, 0x49,
 	0x44, 0x12, 0x33, 0x0a, 0x0a, 0x72, 0x75, 0x6e, 0x43, 0x6f, 0x6d, 0x6d, 0x61, 0x6e, 0x64, 0x18,
@@ -1873,7 +1932,9 @@ var file_contract_contract_proto_rawDesc = []byte{
 	0x65, 0x73, 0x12, 0x2d, 0x0a, 0x0a, 0x72, 0x75, 0x6e, 0x4d, 0x43, 0x50, 0x54, 0x6f, 0x6f, 0x6c,
 	0x18, 0x0c, 0x20, 0x01, 0x28, 0x0b, 0x32, 0x0b, 0x2e, 0x52, 0x75, 0x6e, 0x4d, 0x43, 0x50, 0x54,
 	0x6f, 0x6f, 0x6c, 0x48, 0x00, 0x52, 0x0a, 0x72, 0x75, 0x6e, 0x4d, 0x43, 0x50, 0x54, 0x6f, 0x6f,
-	0x6c, 0x42, 0x08, 0x0a, 0x06, 0x61, 0x63, 0x74, 0x69, 0x6f, 0x6e, 0x22, 0x89, 0x01, 0x0a, 0x10,
+	0x6c, 0x12, 0x1e, 0x0a, 0x05, 0x6d, 0x6b, 0x64, 0x69, 0x72, 0x18, 0x0d, 0x20, 0x01, 0x28, 0x0b,
+	0x32, 0x06, 0x2e, 0x4d, 0x6b, 0x64, 0x69, 0x72, 0x48, 0x00, 0x52, 0x05, 0x6d, 0x6b, 0x64, 0x69,
+	0x72, 0x42, 0x08, 0x0a, 0x06, 0x61, 0x63, 0x74, 0x69, 0x6f, 0x6e, 0x22, 0x89, 0x01, 0x0a, 0x10,
 	0x52, 0x75, 0x6e, 0x43, 0x6f, 0x6d, 0x6d, 0x61, 0x6e, 0x64, 0x41, 0x63, 0x74, 0x69, 0x6f, 0x6e,
 	0x12, 0x18, 0x0a, 0x07, 0x70, 0x72, 0x6f, 0x67, 0x72, 0x61, 0x6d, 0x18, 0x03, 0x20, 0x01, 0x28,
 	0x09, 0x52, 0x07, 0x70, 0x72, 0x6f, 0x67, 0x72, 0x61, 0x6d, 0x12, 0x1c, 0x0a, 0x09, 0x61, 0x72,
@@ -1976,7 +2037,10 @@ var file_contract_contract_proto_rawDesc = []byte{
 	0x67, 0x65, 0x18, 0x01, 0x20, 0x01, 0x28, 0x09, 0x48, 0x00, 0x52, 0x07, 0x6d, 0x65, 0x73, 0x73,
 	0x61, 0x67, 0x65, 0x88, 0x01, 0x01, 0x42, 0x0a, 0x0a, 0x08, 0x5f, 0x6d, 0x65, 0x73, 0x73, 0x61,
 	0x67, 0x65, 0x42, 0x0f, 0x0a, 0x0d, 0x75, 0x73, 0x65, 0x72, 0x5f, 0x64, 0x65, 0x63, 0x69, 0x73,
-	0x69, 0x6f, 0x6e, 0x2a, 0x7f, 0x0a, 0x12, 0x43, 0x6f, 0x6e, 0x74, 0x65, 0x78, 0x74, 0x45, 0x6c,
+	0x69, 0x6f, 0x6e, 0x22, 0x2e, 0x0a, 0x05, 0x4d, 0x6b, 0x64, 0x69, 0x72, 0x12, 0x25, 0x0a, 0x0e,
+	0x64, 0x69, 0x72, 0x65, 0x63, 0x74, 0x6f, 0x72, 0x79, 0x5f, 0x70, 0x61, 0x74, 0x68, 0x18, 0x01,
+	0x20, 0x01, 0x28, 0x09, 0x52, 0x0d, 0x64, 0x69, 0x72, 0x65, 0x63, 0x74, 0x6f, 0x72, 0x79, 0x50,
+	0x61, 0x74, 0x68, 0x2a, 0x7f, 0x0a, 0x12, 0x43, 0x6f, 0x6e, 0x74, 0x65, 0x78, 0x74, 0x45, 0x6c,
 	0x65, 0x6d, 0x65, 0x6e, 0x74, 0x54, 0x79, 0x70, 0x65, 0x12, 0x13, 0x0a, 0x0f, 0x55, 0x53, 0x45,
 	0x52, 0x5f, 0x50, 0x52, 0x45, 0x46, 0x45, 0x52, 0x45, 0x4e, 0x43, 0x45, 0x10, 0x00, 0x12, 0x11,
 	0x0a, 0x0d, 0x53, 0x45, 0x4c, 0x45, 0x43, 0x54, 0x45, 0x44, 0x5f, 0x54, 0x45, 0x58, 0x54, 0x10,
@@ -2015,7 +2079,7 @@ func file_contract_contract_proto_rawDescGZIP() []byte {
 }
 
 var file_contract_contract_proto_enumTypes = make([]protoimpl.EnumInfo, 1)
-var file_contract_contract_proto_msgTypes = make([]protoimpl.MessageInfo, 26)
+var file_contract_contract_proto_msgTypes = make([]protoimpl.MessageInfo, 27)
 var file_contract_contract_proto_goTypes = []any{
 	(ContextElementType)(0),       // 0: ContextElementType
 	(*ClientEvent)(nil),           // 1: ClientEvent
@@ -2041,9 +2105,10 @@ var file_contract_contract_proto_goTypes = []any{
 	(*RunMCPTool)(nil),            // 21: RunMCPTool
 	(*AdditionalContext)(nil),     // 22: AdditionalContext
 	(*Approval)(nil),              // 23: Approval
-	nil,                           // 24: HttpResponse.HeadersEntry
-	(*Approval_Approved)(nil),     // 25: Approval.Approved
-	(*Approval_Rejected)(nil),     // 26: Approval.Rejected
+	(*Mkdir)(nil),                 // 24: Mkdir
+	nil,                           // 25: HttpResponse.HeadersEntry
+	(*Approval_Approved)(nil),     // 26: Approval.Approved
+	(*Approval_Rejected)(nil),     // 27: Approval.Rejected
 }
 var file_contract_contract_proto_depIdxs = []int32{
 	2,  // 0: ClientEvent.startRequest:type_name -> StartWorkflowRequest
@@ -2054,7 +2119,7 @@ var file_contract_contract_proto_depIdxs = []int32{
 	23, // 5: StartWorkflowRequest.approval:type_name -> Approval
 	4,  // 6: ActionResponse.plainTextResponse:type_name -> PlainTextResponse
 	5,  // 7: ActionResponse.httpResponse:type_name -> HttpResponse
-	24, // 8: HttpResponse.headers:type_name -> HttpResponse.HeadersEntry
+	25, // 8: HttpResponse.headers:type_name -> HttpResponse.HeadersEntry
 	7,  // 9: Action.runCommand:type_name -> RunCommandAction
 	11, // 10: Action.runHTTPRequest:type_name -> RunHTTPRequest
 	8,  // 11: Action.runReadFile:type_name -> ReadFile
@@ -2066,18 +2131,19 @@ var file_contract_contract_proto_depIdxs = []int32{
 	18, // 17: Action.grep:type_name -> Grep
 	19, // 18: Action.findFiles:type_name -> FindFiles
 	21, // 19: Action.runMCPTool:type_name -> RunMCPTool
-	0,  // 20: ContextElement.type:type_name -> ContextElementType
-	25, // 21: Approval.approval:type_name -> Approval.Approved
-	26, // 22: Approval.rejection:type_name -> Approval.Rejected
-	1,  // 23: DuoWorkflow.ExecuteWorkflow:input_type -> ClientEvent
-	13, // 24: DuoWorkflow.GenerateToken:input_type -> GenerateTokenRequest
-	6,  // 25: DuoWorkflow.ExecuteWorkflow:output_type -> Action
-	14, // 26: DuoWorkflow.GenerateToken:output_type -> GenerateTokenResponse
-	25, // [25:27] is the sub-list for method output_type
-	23, // [23:25] is the sub-list for method input_type
-	23, // [23:23] is the sub-list for extension type_name
-	23, // [23:23] is the sub-list for extension extendee
-	0,  // [0:23] is the sub-list for field type_name
+	24, // 20: Action.mkdir:type_name -> Mkdir
+	0,  // 21: ContextElement.type:type_name -> ContextElementType
+	26, // 22: Approval.approval:type_name -> Approval.Approved
+	27, // 23: Approval.rejection:type_name -> Approval.Rejected
+	1,  // 24: DuoWorkflow.ExecuteWorkflow:input_type -> ClientEvent
+	13, // 25: DuoWorkflow.GenerateToken:input_type -> GenerateTokenRequest
+	6,  // 26: DuoWorkflow.ExecuteWorkflow:output_type -> Action
+	14, // 27: DuoWorkflow.GenerateToken:output_type -> GenerateTokenResponse
+	26, // [26:28] is the sub-list for method output_type
+	24, // [24:26] is the sub-list for method input_type
+	24, // [24:24] is the sub-list for extension type_name
+	24, // [24:24] is the sub-list for extension extendee
+	0,  // [0:24] is the sub-list for field type_name
 }
 
 func init() { file_contract_contract_proto_init() }
@@ -2106,6 +2172,7 @@ func file_contract_contract_proto_init() {
 		(*Action_Grep)(nil),
 		(*Action_FindFiles)(nil),
 		(*Action_RunMCPTool)(nil),
+		(*Action_Mkdir)(nil),
 	}
 	file_contract_contract_proto_msgTypes[10].OneofWrappers = []any{}
 	file_contract_contract_proto_msgTypes[11].OneofWrappers = []any{}
@@ -2114,14 +2181,14 @@ func file_contract_contract_proto_init() {
 		(*Approval_Approval)(nil),
 		(*Approval_Rejection)(nil),
 	}
-	file_contract_contract_proto_msgTypes[25].OneofWrappers = []any{}
+	file_contract_contract_proto_msgTypes[26].OneofWrappers = []any{}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: file_contract_contract_proto_rawDesc,
 			NumEnums:      1,
-			NumMessages:   26,
+			NumMessages:   27,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

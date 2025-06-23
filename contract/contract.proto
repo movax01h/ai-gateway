@@ -4,8 +4,8 @@ option go_package = "gitlab.com/gitlab-org/modelops/applied-ml/code-suggestions/
 option ruby_package = "DuoWorkflowService";
 
 service DuoWorkflow {
-    rpc ExecuteWorkflow(stream ClientEvent) returns (stream Action);
-    rpc GenerateToken(GenerateTokenRequest) returns (GenerateTokenResponse);
+    rpc ExecuteWorkflow (stream ClientEvent) returns (stream Action);
+    rpc GenerateToken (GenerateTokenRequest) returns (GenerateTokenResponse);
 }
 
 message ClientEvent {
@@ -32,8 +32,8 @@ message ActionResponse {
     string requestID = 1;
     string response = 2;
     oneof response_type {
-      PlainTextResponse plainTextResponse = 3;
-      HttpResponse httpResponse = 4;
+        PlainTextResponse plainTextResponse = 3;
+        HttpResponse httpResponse = 4;
     }
 }
 
@@ -63,6 +63,7 @@ message Action {
         Grep grep = 10;
         FindFiles findFiles = 11;
         RunMCPTool runMCPTool = 12;
+        Mkdir mkdir = 13;
     };
 }
 
@@ -137,13 +138,13 @@ message ListDirectory {
 }
 
 message Grep {
-  string search_directory = 1;
-  string pattern = 2;
-  bool case_insensitive = 3;
+    string search_directory = 1;
+    string pattern = 2;
+    bool case_insensitive = 3;
 }
 
 message FindFiles {
-  string name_pattern = 1;
+    string name_pattern = 1;
 }
 
 message McpTool {
@@ -175,4 +176,8 @@ message Approval {
         Approved approval = 1;
         Rejected rejection = 2;
     }
+}
+
+message Mkdir {
+    string directory_path = 1;
 }
