@@ -55,6 +55,7 @@ CHAT_READ_ONLY_TOOLS = [
     "gitlab_issue_search",
     "gitlab_merge_request_search",
     "read_file",
+    "get_repository_file",
     "list_dir",
     "find_files",
     "grep",
