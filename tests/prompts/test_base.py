@@ -9,7 +9,7 @@ import pytest
 from anthropic import APITimeoutError, AsyncAnthropic
 from gitlab_cloud_connector import GitLabUnitPrimitive, WrongUnitPrimitives
 from langchain_core.messages import HumanMessage, SystemMessage
-from langchain_core.messages.ai import UsageMetadata
+from langchain_core.messages.ai import InputTokenDetails, UsageMetadata
 from langchain_core.prompt_values import ChatPromptValue
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.runnables import Runnable
@@ -21,6 +21,7 @@ from pyfakefs.fake_filesystem import FakeFilesystem
 from ai_gateway.api.auth_utils import StarletteUser
 from ai_gateway.config import ConfigModelLimits
 from ai_gateway.instrumentators.model_requests import ModelRequestInstrumentator
+from ai_gateway.internal_events.context import InternalEventAdditionalProperties
 from ai_gateway.model_metadata import (
     AmazonQModelMetadata,
     ModelMetadata,
@@ -175,8 +176,28 @@ class TestPrompt:
 
     @pytest.mark.asyncio
     @pytest.mark.parametrize(
-        ("usage_metadata"),
-        [UsageMetadata(input_tokens=1, output_tokens=2, total_tokens=3)],
+        ("usage_metadata", "expected_additional_properties"),
+        [
+            (
+                UsageMetadata(
+                    input_tokens=1,
+                    output_tokens=2,
+                    total_tokens=3,
+                    input_token_details=InputTokenDetails(
+                        audio=0, cache_creation=0, cache_read=0
+                    ),
+                ),
+                InternalEventAdditionalProperties(
+                    label="cache_details",
+                    property=None,
+                    value=None,
+                    extra={
+                        "cache_read": 0,
+                        "cache_creation": 0,
+                    },
+                ),
+            )
+        ],
     )
     async def test_ainvoke_handle_usage_metadata(
         self,
@@ -184,6 +205,7 @@ class TestPrompt:
         internal_event_client: mock.Mock,
         prompt: Prompt,
         usage_metadata: UsageMetadata,
+        expected_additional_properties: InternalEventAdditionalProperties,
     ):
         mock_watcher = mock_watch.return_value.__enter__.return_value
 
@@ -192,13 +214,37 @@ class TestPrompt:
             await prompt.ainvoke({"name": "Duo", "content": "What's up?"})
 
         _assert_usage_metadata_handling(
-            mock_watcher, internal_event_client, prompt, usage_metadata
+            mock_watcher,
+            internal_event_client,
+            prompt,
+            usage_metadata,
+            expected_additional_properties,
         )
 
     @pytest.mark.asyncio
     @pytest.mark.parametrize(
-        ("usage_metadata"),
-        [UsageMetadata(input_tokens=1, output_tokens=2, total_tokens=3)],
+        ("usage_metadata", "expected_additional_properties"),
+        [
+            (
+                UsageMetadata(
+                    input_tokens=1,
+                    output_tokens=2,
+                    total_tokens=3,
+                    input_token_details=InputTokenDetails(
+                        audio=0, cache_creation=0, cache_read=0
+                    ),
+                ),
+                InternalEventAdditionalProperties(
+                    label="cache_details",
+                    property=None,
+                    value=None,
+                    extra={
+                        "cache_read": 0,
+                        "cache_creation": 0,
+                    },
+                ),
+            )
+        ],
     )
     async def test_astream_handle_usage_metadata(
         self,
@@ -206,6 +252,7 @@ class TestPrompt:
         internal_event_client: mock.Mock,
         prompt: Prompt,
         usage_metadata: UsageMetadata,
+        expected_additional_properties: InternalEventAdditionalProperties,
     ):
         mock_watcher = mock_watch.return_value.__enter__.return_value
 
@@ -217,7 +264,64 @@ class TestPrompt:
                 pass
 
         _assert_usage_metadata_handling(
-            mock_watcher, internal_event_client, prompt, usage_metadata
+            mock_watcher,
+            internal_event_client,
+            prompt,
+            usage_metadata,
+            expected_additional_properties,
+        )
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        ("usage_metadata", "expected_additional_properties"),
+        [
+            (
+                UsageMetadata(
+                    input_tokens=1,
+                    output_tokens=2,
+                    total_tokens=3,
+                    input_token_details=InputTokenDetails(
+                        audio=0, cache_creation=4, cache_read=0
+                    ),
+                ),
+                InternalEventAdditionalProperties(
+                    label="cache_details",
+                    property=None,
+                    value=None,
+                    extra={
+                        "cache_read": 0,
+                        "cache_creation": 4,
+                    },
+                ),
+            )
+        ],
+    )
+    async def test_astream_handle_usage_metadata_with_cache_control(
+        self,
+        mock_watch: mock.Mock,
+        internal_event_client: mock.Mock,
+        prompt: Prompt,
+        usage_metadata: UsageMetadata,
+        expected_additional_properties: InternalEventAdditionalProperties,
+    ):
+        mock_watcher = mock_watch.return_value.__enter__.return_value
+
+        prompt.internal_event_client = internal_event_client
+
+        with self._mock_usage_metadata(prompt.model_name, usage_metadata):
+            # Consume stream with cache control for Anthropic
+            async for _ in prompt.astream(
+                {"name": "Duo", "content": "What's up?"},
+                cache_control={"type": "ephemeral"},
+            ):
+                pass
+
+        _assert_usage_metadata_handling(
+            mock_watcher,
+            internal_event_client,
+            prompt,
+            usage_metadata,
+            expected_additional_properties,
         )
 
     @pytest.mark.asyncio
@@ -277,11 +381,13 @@ def _assert_usage_metadata_handling(
     internal_event_client: mock.Mock,
     prompt: Prompt,
     usage_metadata: UsageMetadata,
+    additional_properties: Optional[InternalEventAdditionalProperties] = None,
 ):
     mock_watcher.register_token_usage.assert_called_once_with(
         prompt.model_name, usage_metadata
     )
     for unit_primitive in prompt.unit_primitives:
+
         internal_event_client.track_event.assert_any_call(
             f"token_usage_{unit_primitive}",
             category="ai_gateway.prompts.base",
@@ -291,6 +397,7 @@ def _assert_usage_metadata_handling(
             model_engine=prompt.model_engine,
             model_name=prompt.model_name,
             model_provider=prompt.model_provider,
+            additional_properties=additional_properties,
         )
 
 
