@@ -32,12 +32,12 @@ graph TD;
     planning_supervisor(planning_supervisor)
     plan_terminator(plan_terminator)
     set_status_to_execution(set_status_to_execution)
+    tools_approval_entry_executor(tools_approval_entry_executor)
+    tools_approval_check_executor(tools_approval_check_executor)
     execution(execution)
     execution_tools(execution_tools)
     execution_supervisor(execution_supervisor)
     execution_handover(execution_handover)
-    tools_approval_entry_executor(tools_approval_entry_executor)
-    tools_approval_check_executor(tools_approval_check_executor)
     __end__([<p>__end__</p>]):::last
     __start__ --> build_context;
     build_context_handover --> task_clarity_build_prompt;

@@ -26,9 +26,7 @@ from duo_workflow_service.agents import (
 )
 from duo_workflow_service.agents.prompts import (
     BUILD_CONTEXT_SYSTEM_MESSAGE,
-    EXECUTOR_SYSTEM_MESSAGE,
     HANDOVER_TOOL_NAME,
-    SET_TASK_STATUS_TOOL_NAME,
 )
 from duo_workflow_service.components import (
     GoalDisambiguationComponent,
@@ -36,6 +34,7 @@ from duo_workflow_service.components import (
     ToolsApprovalComponent,
     ToolsRegistry,
 )
+from duo_workflow_service.components.executor.component import ExecutorComponent
 from duo_workflow_service.components.planner.component import PlannerComponent
 from duo_workflow_service.entities import (
     MessageTypeEnum,
@@ -195,49 +194,9 @@ class Workflow(AbstractWorkflow):
     ):
         log_exception(error, extra={"workflow_id": self._workflow_id})
 
-    def _setup_executor(
-        self, goal: str, tools_registry: ToolsRegistry, base_model_executor
-    ):
-        executors_toolset = tools_registry.toolset(EXECUTOR_TOOLS)
-        executor = Agent(
-            goal=goal,
-            model=base_model_executor,
-            name="executor",
-            system_prompt=EXECUTOR_SYSTEM_MESSAGE.format(
-                set_task_status_tool_name=SET_TASK_STATUS_TOOL_NAME,
-                handover_tool_name=HANDOVER_TOOL_NAME,
-                get_plan_tool_name=tools_registry.get("get_plan").name,  # type: ignore
-                project_id=self._project["id"],
-                project_name=self._project["name"],
-                project_url=self._project["http_url_to_repo"],
-            ),
-            toolset=executors_toolset,
-            workflow_id=self._workflow_id,
-            http_client=self._http_client,
-            workflow_type=self._workflow_type,
-        )
-
-        return {
-            "agent": executor,
-            "toolset": executors_toolset,
-            "supervisor": PlanSupervisorAgent(supervised_agent_name=executor.name),
-            "handover": HandoverAgent(
-                new_status=WorkflowStatusEnum.COMPLETED,
-                handover_from=executor.name,
-                include_conversation_history=True,
-            ),
-            "tools_executor": ToolsExecutor(
-                tools_agent_name="executor",
-                toolset=executors_toolset,
-                workflow_id=self._workflow_id,
-                workflow_type=self._workflow_type,
-            ),
-        }
-
     def _setup_workflow_graph(
         self,
         graph: StateGraph,
-        executor_components,
         tools_registry,
         goal,
     ):
@@ -303,42 +262,32 @@ class Workflow(AbstractWorkflow):
                 handover_from="planner",
             ).run,
         )
-        graph.add_node("execution", executor_components["agent"].run)
-
-        graph.add_node("execution_tools", executor_components["tools_executor"].run)
-        graph.add_node("execution_supervisor", executor_components["supervisor"].run)
-        graph.add_node("execution_handover", executor_components["handover"].run)
-
-        graph.add_edge("set_status_to_execution", "execution")
-        graph.add_edge("execution_supervisor", "execution")
-        graph.add_edge("execution_tools", "execution")
-        graph.add_edge("execution_handover", END)
 
         execution_approval_component = ToolsApprovalComponent(
             workflow_id=self._workflow_id,
-            approved_agent_name=executor_components["agent"].name,
+            approved_agent_name="executor",
             approved_agent_state=WorkflowStatusEnum.EXECUTION,
-            toolset=executor_components["toolset"],
+            toolset=tools_registry.toolset(EXECUTOR_TOOLS),
         )
 
-        execution_approval_entry_node = execution_approval_component.attach(
+        executor_component = ExecutorComponent(
+            workflow_id=self._workflow_id,
+            workflow_type=self._workflow_type,
+            executor_toolset=tools_registry.toolset(EXECUTOR_TOOLS),
+            tools_registry=tools_registry,
+            model_config=self._model_config,
+            goal=goal,
+            project=self._project,
+            http_client=self._http_client,
+        )
+
+        executor_entry_node = executor_component.attach(
             graph=graph,
-            next_node="execution_tools",
-            back_node="execution",
+            next_node=END,
             exit_node="plan_terminator",
+            approval_component=execution_approval_component,
         )
-
-        graph.add_conditional_edges(
-            "execution",
-            partial(_router, "executor", tools_registry),
-            {
-                Routes.TOOLS_APPROVAL: execution_approval_entry_node,
-                Routes.CALL_TOOL: "execution_tools",
-                Routes.HANDOVER: "execution_handover",
-                Routes.SUPERVISOR: "execution_supervisor",
-                Routes.STOP: "plan_terminator",
-            },
-        )
+        graph.add_edge("set_status_to_execution", executor_entry_node)
 
         graph.add_edge("plan_terminator", END)
 
@@ -350,20 +299,10 @@ class Workflow(AbstractWorkflow):
         tools_registry: ToolsRegistry,
         checkpointer: BaseCheckpointSaver,
     ):
-        base_model_executor = create_chat_model(
-            max_tokens=MAX_TOKENS_TO_SAMPLE,
-            config=self._model_config,
-        )
-
         graph = StateGraph(WorkflowState)
-
-        executor_components = self._setup_executor(
-            goal, tools_registry, base_model_executor
-        )
 
         graph = self._setup_workflow_graph(
             graph,
-            executor_components,
             tools_registry,
             goal,
         )
