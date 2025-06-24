@@ -259,13 +259,9 @@ def test_are_tools_called_with_tool_use(workflow_with_project):
 @patch(
     "duo_workflow_service.workflows.abstract_workflow.fetch_project_data_with_workflow_id"
 )
-@patch(
-    "duo_workflow_service.workflows.abstract_workflow.fetch_workflow_config",
-)
 @patch("duo_workflow_service.workflows.abstract_workflow.UserInterface", autospec=True)
 async def test_workflow_run(
     mock_user_interface,
-    mock_fetch_workflow_config,
     mock_fetch_project_data,
     mock_gitlab_workflow,
     mock_tools_registry,
@@ -275,13 +271,16 @@ async def test_workflow_run(
     mock_tools_registry.configure = AsyncMock(
         return_value=MagicMock(spec=ToolsRegistry)
     )
-    mock_fetch_project_data.return_value = {
-        "id": 1,
-        "name": "test-project",
-        "description": "Test project",
-        "http_url_to_repo": "https://example.com/project",
-        "web_url": "https://example.com/project",
-    }
+    mock_fetch_project_data.return_value = (
+        {
+            "id": 1,
+            "name": "test-project",
+            "description": "Test project",
+            "http_url_to_repo": "https://example.com/project",
+            "web_url": "https://example.com/project",
+        },
+        {"project_id": 1},
+    )
 
     mock_git_lab_workflow_instance = mock_gitlab_workflow.return_value
     mock_git_lab_workflow_instance.__aenter__.return_value = (

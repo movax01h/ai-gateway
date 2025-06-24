@@ -467,7 +467,14 @@ async def test_workflow_context_manager_error(
     workflow_id,
     workflow_type,
 ):
-    http_client.aget.return_value = []
+    # Mock different responses for different API calls
+    def mock_aget(path, **kwargs):
+        if "checkpoints" in path:
+            return []
+        else:
+            return {"status": "running"}
+
+    http_client.aget.side_effect = mock_aget
     http_client.apatch.return_value = GitLabHttpResponse(status_code=200, body={})
 
     with pytest.raises(ValueError):

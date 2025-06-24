@@ -138,7 +138,6 @@ async def test_add_to_inbox(workflow):
 
 
 @pytest.mark.asyncio
-@patch("duo_workflow_service.workflows.abstract_workflow.fetch_workflow_config")
 @patch(
     "duo_workflow_service.workflows.abstract_workflow.fetch_project_data_with_workflow_id"
 )
@@ -148,7 +147,6 @@ async def test_compile_and_run_graph(
     mock_tools_registry,
     mock_gitlab_workflow,
     mock_fetch_project,
-    mock_workflow_config,
     workflow,
     mock_project,
 ):
@@ -158,7 +156,7 @@ async def test_compile_and_run_graph(
     mock_checkpointer.aget_tuple = AsyncMock(return_value=None)
     mock_checkpointer.initial_status_event = "START"
     mock_gitlab_workflow.return_value.__aenter__.return_value = mock_checkpointer
-    mock_fetch_project.return_value = mock_project
+    mock_fetch_project.return_value = (mock_project, {"project_id": 1})
 
     # Run the method
     await workflow._compile_and_run_graph("Test goal")
@@ -167,7 +165,6 @@ async def test_compile_and_run_graph(
     assert workflow.is_done
     mock_tools_registry.assert_called_once()
     mock_fetch_project.assert_called_once()
-    mock_workflow_config.assert_called_once()
 
 
 @pytest.mark.asyncio
@@ -243,7 +240,6 @@ def test_track_internal_event(mock_track_event, workflow):
 
 
 @pytest.mark.asyncio
-@patch("duo_workflow_service.workflows.abstract_workflow.fetch_workflow_config")
 @patch(
     "duo_workflow_service.workflows.abstract_workflow.fetch_project_data_with_workflow_id"
 )
@@ -253,13 +249,12 @@ async def test_compile_and_run_graph_with_exception(
     mock_tools_registry,
     mock_gitlab_workflow,
     mock_fetch_project,
-    mock_workflow_config,
     workflow,
     mock_project,
 ):
     # Setup mocks to raise an exception
     mock_tools_registry.side_effect = Exception("Test exception")
-    mock_fetch_project.return_value = mock_project
+    mock_fetch_project.return_value = (mock_project, {"project_id": 1})
     workflow._inbox.get = AsyncMock(
         return_value=MagicMock(actionResponse=MagicMock(requestID="", response=""))
     )
@@ -270,7 +265,6 @@ async def test_compile_and_run_graph_with_exception(
 
     mock_tools_registry.assert_called_once()
     mock_fetch_project.assert_called_once()
-    mock_workflow_config.assert_called_once()
     assert workflow.is_done
     assert isinstance(exc_info.value.original_exception, Exception)
     assert str(exc_info.value.original_exception) == "Test exception"

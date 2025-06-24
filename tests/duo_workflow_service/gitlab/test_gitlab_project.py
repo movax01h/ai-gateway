@@ -24,7 +24,9 @@ async def test_fetch_project_data_with_workflow_id_success():
     ]
 
     workflow_id = "111"
-    project = await fetch_project_data_with_workflow_id(gitlab_client, workflow_id)
+    project, workflow_config = await fetch_project_data_with_workflow_id(
+        gitlab_client, workflow_id
+    )
 
     # Verify the first call: fetch workflow details
     gitlab_client.aget.assert_any_call(
@@ -37,6 +39,7 @@ async def test_fetch_project_data_with_workflow_id_success():
     assert project["description"] == "Test Project"
     assert project["name"] == "test-project"
     assert project["http_url_to_repo"] == "http://example.com/test-project.git"
+    assert workflow_config["project_id"] == 123
 
 
 @pytest.mark.asyncio
