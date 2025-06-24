@@ -62,7 +62,7 @@ Here are the MRs that can be used as a reference:
 ### Running prompt evaluations locally
 
 - Add a `LANGCHAIN_API_KEY` to your `.env` (see
-  [the eli5 prerequisites doc](https://gitlab.com/gitlab-org/modelops/ai-model-validation-and-research/ai-evaluation/prompt-library/-/tree/main/doc/eli5#prerequisites)
+  [the CEF prerequisites doc](https://gitlab.com/gitlab-org/modelops/ai-model-validation-and-research/ai-evaluation/prompt-library/-/tree/main#prerequisites)
   for instructions on how to gain access to LangSmith)
 - Run `make eval` with the appropriate variables.
 

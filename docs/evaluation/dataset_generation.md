@@ -16,7 +16,7 @@ Add the following to your `.env`:
 
 - `ANTHROPIC_API_KEY`
 - `LANGCHAIN_API_KEY` (see
-[the eli5 prerequisites doc](https://gitlab.com/gitlab-org/modelops/ai-model-validation-and-research/ai-evaluation/prompt-library/-/tree/main/doc/eli5#prerequisites)
+[the CEF prerequisites doc](https://gitlab.com/gitlab-org/modelops/ai-model-validation-and-research/ai-evaluation/prompt-library/-/tree/main#prerequisites)
 on instructions on how to gain access to LangSmith)
 
 ### Command-line Interface
@@ -77,7 +77,7 @@ poetry run generate-dataset \
 
 1. **Prompt Loading**: The tool loads the specified prompt from the AI Gateway registry.
 1. **Template Resolution**: All Jinja templates referenced in the prompt are resolved using `get_message_source()` function.
-1. **Dataset Generation**: The tool uses ELI5 libraries to generate examples:
+1. **Dataset Generation**: The tool uses CEF libraries to generate examples:
    - Extracts system and user templates from the prompt structure.
    - Creates diverse input examples with realistic values.
    - Generates expected outputs.

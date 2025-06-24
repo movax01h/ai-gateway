@@ -3,13 +3,14 @@ from pathlib import Path
 from typing import Annotated, Optional, cast
 
 import typer
-from dependency_injector.wiring import Provide, inject
-from eli5.datasets.generator import DatasetGenerator, ModelConfig, PromptConfig
-from eli5.datasets.serializers import (
+from cef.datasets.base import PromptConfig
+from cef.datasets.generator import DatasetGenerator, LangGraphAdapter, ModelConfig
+from cef.datasets.serializers import (
     DatasetSerializer,
     JsonFileSerializer,
     LangSmithSerializer,
 )
+from dependency_injector.wiring import Provide, inject
 from jinja2 import PackageLoader
 from jinja2.loaders import BaseLoader
 from jinja2.sandbox import SandboxedEnvironment
@@ -88,7 +89,7 @@ def get_prompt_source(
     if not user_message:
         raise ValueError("Prompt must include a user message")
 
-    # The LLM prompt in ELI5 that's used to generate the dataset examples only expects system or user messages.
+    # The LLM prompt in CEF that's used to generate the dataset examples only expects system or user messages.
     # Append any other messages to the user message.
     other_messages = []
     for role, content in source_messages.items():
@@ -195,9 +196,10 @@ def run(
         f"Generating dataset with {num_examples} examples from prompt: {prompt_id}"
     )
 
+    generator_adapter = LangGraphAdapter.from_model_config(model_config)
     generator = DatasetGenerator(
         prompt_config=prompt_config,
-        model_config=model_config,
+        generator_adapter=generator_adapter,
         serializers=serializers,
     )
 
