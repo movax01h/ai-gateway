@@ -402,6 +402,58 @@ files = [
 ]
 
 [[package]]
+name = "cef"
+version = "0.4.1"
+description = "GitLab Central Evaluation Framework"
+optional = false
+python-versions = ">=3.11.0,<3.13.0"
+groups = ["eval"]
+files = [
+    {file = "cef-0.4.1-py3-none-any.whl", hash = "sha256:388d1c4b0f644c48d8bf35046fe436a89142bb4ec12f0e13c46741164595f612"},
+]
+
+[package.dependencies]
+aiohttp = ">=3.11.16,<4.0.0"
+backoff = ">=2.2.1,<3.0.0"
+boto3 = ">=1.35.80,<2.0.0"
+cerebras-cloud-sdk = ">=1.2.0,<2.0.0"
+fireworks-ai = ">=0.15.4,<0.16.0"
+genson = ">=1.3.0,<2.0.0"
+groq = ">=0.26.0,<0.27.0"
+langchain = ">=0.3.0,<0.4.0"
+langchain-anthropic = ">=0.3.0,<0.4.0"
+langchain-community = ">=0.3.24,<0.4.0"
+langchain-google-vertexai = ">=2.0.0,<3.0.0"
+langchain-openai = ">=0.3.0,<0.4.0"
+langchain-text-splitters = ">=0.3.0,<0.4.0"
+langchainhub = ">=0.1.20,<0.2.0"
+langgraph = ">=0.2.76,<0.5"
+langsmith = ">=0.3.1,<0.4.0"
+litellm = ">=1.35.20,<2.0.0"
+numpy = ">=2.2.3,<3.0.0"
+openai = ">=1.44.1,<2.0.0"
+pandas = ">=2.2.2,<3.0.0"
+pydantic = ">=2.11.5,<3.0.0"
+python-dotenv = ">=1.0.1,<2.0.0"
+python-gitlab = {version = ">=6.0.0,<7.0.0", extras = ["graphql"]}
+rapidfuzz = ">=3.9.3,<4.0.0"
+ratelimit = ">=2.2.1,<3.0.0"
+result = ">=0.17.0,<0.18.0"
+tree-sitter = ">=0.21.0,<0.22.0"
+tree-sitter-languages = ">=1.10.2,<2.0.0"
+typer = ">=0.16.0,<0.17.0"
+unidiff = ">=0.7.5,<0.8.0"
+websockets = ">=15.0.0,<15.1.0"
+
+[package.extras]
+swebench = ["docker (>=7.1.0,<8.0.0)", "swebench (==3.0.12)"]
+
+[package.source]
+type = "legacy"
+url = "https://gitlab.com/api/v4/projects/46678122/packages/pypi/simple"
+reference = "cef"
+
+[[package]]
 name = "cerebras-cloud-sdk"
 version = "1.24.0"
 description = "The official Python library for the cerebras API"
@@ -766,7 +818,7 @@ version = "0.6.7"
 description = "Easily serialize dataclasses to and from JSON."
 optional = false
 python-versions = "<4.0,>=3.7"
-groups = ["main"]
+groups = ["main", "eval"]
 files = [
     {file = "dataclasses_json-0.6.7-py3-none-any.whl", hash = "sha256:0dbf33f26c8d5305befd61b39d2b3414e8a407bedc2834dea9b8d642666fb40a"},
     {file = "dataclasses_json-0.6.7.tar.gz", hash = "sha256:b6b3e528266ea45b9535223bc53ca645f5208833c29229e847b3f26a1cc55fc0"},
@@ -900,56 +952,6 @@ six = ">=1.9.0"
 [package.extras]
 gmpy = ["gmpy"]
 gmpy2 = ["gmpy2"]
-
-[[package]]
-name = "eli5"
-version = "0.3.2"
-description = "GitLab Eval Like I'm 5"
-optional = false
-python-versions = ">=3.11.0,<3.13.0"
-groups = ["eval"]
-files = [
-    {file = "eli5-0.3.2-py3-none-any.whl", hash = "sha256:78610c80c858c8c487a8f9c2c505067b61e6f7c6d930d5a0c78c90575745d014"},
-]
-
-[package.dependencies]
-aiohttp = ">=3.11.16,<4.0.0"
-backoff = ">=2.2.1,<3.0.0"
-boto3 = ">=1.35.80,<2.0.0"
-cerebras-cloud-sdk = ">=1.2.0,<2.0.0"
-fireworks-ai = ">=0.15.4,<0.16.0"
-genson = ">=1.3.0,<2.0.0"
-groq = ">=0.25.0,<0.26.0"
-langchain = ">=0.3.0,<0.4.0"
-langchain-anthropic = ">=0.3.0,<0.4.0"
-langchain-google-vertexai = ">=2.0.0,<3.0.0"
-langchain-openai = ">=0.3.0,<0.4.0"
-langchain-text-splitters = ">=0.3.0,<0.4.0"
-langchainhub = ">=0.1.20,<0.2.0"
-langsmith = ">=0.3.1,<0.4.0"
-litellm = ">=1.35.20,<2.0.0"
-numpy = ">=2.2.3,<3.0.0"
-openai = ">=1.44.1,<2.0.0"
-pandas = ">=2.2.2,<3.0.0"
-pydantic = ">=2.11.5,<3.0.0"
-python-dotenv = ">=1.0.1,<2.0.0"
-python-gitlab = {version = ">=5.1.0,<6.0.0", extras = ["graphql"]}
-rapidfuzz = ">=3.9.3,<4.0.0"
-ratelimit = ">=2.2.1,<3.0.0"
-result = ">=0.17.0,<0.18.0"
-tree-sitter = ">=0.21.0,<0.22.0"
-tree-sitter-languages = ">=1.10.2,<2.0.0"
-typer = ">=0.15.0,<0.16.0"
-unidiff = ">=0.7.5,<0.8.0"
-websockets = ">=15.0.0,<15.1.0"
-
-[package.extras]
-swebench = ["docker (>=7.1.0,<8.0.0)", "swebench (==3.0.12)"]
-
-[package.source]
-type = "legacy"
-url = "https://gitlab.com/api/v4/projects/46678122/packages/pypi/simple"
-reference = "prompt_library"
 
 [[package]]
 name = "execnet"
@@ -1789,14 +1791,14 @@ test = ["objgraph", "psutil"]
 
 [[package]]
 name = "groq"
-version = "0.25.0"
+version = "0.26.0"
 description = "The official Python library for the groq API"
 optional = false
 python-versions = ">=3.8"
 groups = ["eval"]
 files = [
-    {file = "groq-0.25.0-py3-none-any.whl", hash = "sha256:aadc78b40b1809cdb196b1aa8c7f7293108767df1508cafa3e0d5045d9328e7a"},
-    {file = "groq-0.25.0.tar.gz", hash = "sha256:6e1c7466b0da0130498187b825bd239f86fb77bf7551eacfbfa561d75048746a"},
+    {file = "groq-0.26.0-py3-none-any.whl", hash = "sha256:4dc0900d506876ea39a9aa1985f12a51859bacf486fe939664248eff1f451af3"},
+    {file = "groq-0.26.0.tar.gz", hash = "sha256:1f1e50d26c6134f6fb580ea7002e8f9ff5c7c1685c9e0f50d71adecd039ae5d4"},
 ]
 
 [package.dependencies]
@@ -2470,7 +2472,7 @@ version = "0.3.25"
 description = "Community contributed LangChain integrations."
 optional = false
 python-versions = ">=3.9"
-groups = ["main"]
+groups = ["main", "eval"]
 files = [
     {file = "langchain_community-0.3.25-py3-none-any.whl", hash = "sha256:0d7f673d463019ab1aca4e50e750048214a7772efd2c8e1d59256739b8318f97"},
     {file = "langchain_community-0.3.25.tar.gz", hash = "sha256:a536888a48b36184dee20df86d266827a01916397fb398af2088ab7c3dfee684"},
@@ -2610,7 +2612,7 @@ version = "0.2.76"
 description = "Building stateful, multi-actor applications with LLMs"
 optional = false
 python-versions = "<4.0,>=3.9.0"
-groups = ["main"]
+groups = ["main", "eval"]
 files = [
     {file = "langgraph-0.2.76-py3-none-any.whl", hash = "sha256:076b8b5d2fc5a9761c46a7618430cfa5c978a8012257c43cbc127b27e0fd7872"},
     {file = "langgraph-0.2.76.tar.gz", hash = "sha256:688f8dcd9b6797ba78384599e0de944773000c75156ad1e186490e99e89fa5c0"},
@@ -2627,7 +2629,7 @@ version = "2.0.24"
 description = "Library with base interfaces for LangGraph checkpoint savers."
 optional = false
 python-versions = "<4.0.0,>=3.9.0"
-groups = ["main"]
+groups = ["main", "eval"]
 files = [
     {file = "langgraph_checkpoint-2.0.24-py3-none-any.whl", hash = "sha256:3836e2909ef2387d1fa8d04ee3e2a353f980d519fd6c649af352676dc73d66b8"},
     {file = "langgraph_checkpoint-2.0.24.tar.gz", hash = "sha256:9596dad332344e7e871257be464df8a07c2e9bac66143081b11b9422b0167e5b"},
@@ -2643,7 +2645,7 @@ version = "0.1.61"
 description = "SDK for interacting with LangGraph API"
 optional = false
 python-versions = "<4.0.0,>=3.9.0"
-groups = ["main"]
+groups = ["main", "eval"]
 files = [
     {file = "langgraph_sdk-0.1.61-py3-none-any.whl", hash = "sha256:f2d774b12497c428862993090622d51e0dbc3f53e0cee3d74a13c7495d835cc6"},
     {file = "langgraph_sdk-0.1.61.tar.gz", hash = "sha256:87dd1f07ab82da8875ac343268ece8bf5414632017ebc9d1cef4b523962fd601"},
@@ -2815,7 +2817,7 @@ version = "3.21.3"
 description = "A lightweight library for converting complex datatypes to and from native Python datatypes."
 optional = false
 python-versions = ">=3.8"
-groups = ["main"]
+groups = ["main", "eval"]
 files = [
     {file = "marshmallow-3.21.3-py3-none-any.whl", hash = "sha256:86ce7fb914aa865001a4b2092c4c2872d13bc347f3d42673272cabfdbad386f1"},
     {file = "marshmallow-3.21.3.tar.gz", hash = "sha256:4f57c5e050a54d66361e826f94fba213eb10b67b2fdb02c3e0343ce207ba1662"},
@@ -3012,7 +3014,7 @@ version = "1.0.0"
 description = "Type system extensions for programs checked with the mypy type checker."
 optional = false
 python-versions = ">=3.5"
-groups = ["main", "lint"]
+groups = ["main", "eval", "lint"]
 files = [
     {file = "mypy_extensions-1.0.0-py3-none-any.whl", hash = "sha256:4392f6c0eb8a5668a69e23d168ffa70f0be9ccfd32b5cc2d26a34ae5b844552d"},
     {file = "mypy_extensions-1.0.0.tar.gz", hash = "sha256:75dbf8955dc00442a438fc4d0666508a9a97b6bd41aa2f0ffe9d2f2725af0782"},
@@ -3217,7 +3219,6 @@ files = [
     {file = "orjson-3.10.6-cp39-none-win_amd64.whl", hash = "sha256:49e3bc615652617d463069f91b867a4458114c5b104e13b7ae6872e5f79d0844"},
     {file = "orjson-3.10.6.tar.gz", hash = "sha256:e54b63d0a7c6c54a5f5f726bc93a2078111ef060fec4ecbf34c5db800ca3b3a7"},
 ]
-markers = {eval = "platform_python_implementation != \"PyPy\""}
 
 [[package]]
 name = "ormsgpack"
@@ -3225,7 +3226,7 @@ version = "1.9.1"
 description = "Fast, correct Python msgpack library supporting dataclasses, datetimes, and numpy"
 optional = false
 python-versions = ">=3.9"
-groups = ["main"]
+groups = ["main", "eval"]
 files = [
     {file = "ormsgpack-1.9.1-cp310-cp310-macosx_10_12_x86_64.macosx_11_0_arm64.macosx_10_12_universal2.whl", hash = "sha256:f1f804fd9c0fd84213a6022c34172f82323b34afa7052a4af18797582cf56365"},
     {file = "ormsgpack-1.9.1-cp310-cp310-manylinux_2_17_aarch64.manylinux2014_aarch64.whl", hash = "sha256:eab5cec99c46276b37071d570aab98603f3d0309b3818da3247eb64bb95e5cfc"},
@@ -3951,7 +3952,7 @@ version = "2.9.1"
 description = "Settings management using Pydantic"
 optional = false
 python-versions = ">=3.9"
-groups = ["main"]
+groups = ["main", "eval"]
 files = [
     {file = "pydantic_settings-2.9.1-py3-none-any.whl", hash = "sha256:59b4f431b1defb26fe620c71a7d3968a710d719f5f4cdbbdb7926edeb770f6ef"},
     {file = "pydantic_settings-2.9.1.tar.gz", hash = "sha256:c509bf79d27563add44e8446233359004ed85066cd096d8b510f715e6ef5d268"},
@@ -4192,14 +4193,14 @@ cli = ["click (>=5.0)"]
 
 [[package]]
 name = "python-gitlab"
-version = "5.6.0"
+version = "6.0.0"
 description = "The python wrapper for the GitLab REST and GraphQL APIs."
 optional = false
 python-versions = ">=3.9.0"
 groups = ["main", "eval"]
 files = [
-    {file = "python_gitlab-5.6.0-py3-none-any.whl", hash = "sha256:68980cd70929fc7f8f06d8a7b09bd046a6b79e1995c19d61249f046005099100"},
-    {file = "python_gitlab-5.6.0.tar.gz", hash = "sha256:bc531e8ba3e5641b60409445d4919ace68a2c18cb0ec6d48fbced6616b954166"},
+    {file = "python_gitlab-6.0.0-py3-none-any.whl", hash = "sha256:d63bb56b5f7781a7eb0a9846a3aed9b783c8036f67107d9d48653e17242a7130"},
+    {file = "python_gitlab-6.0.0.tar.gz", hash = "sha256:704bf548c258f1cfe2f09b8ece9af1cc8fa6ae828ac6fe6a1cbe957c98431414"},
 ]
 
 [package.dependencies]
@@ -5580,18 +5581,18 @@ tree-sitter = "*"
 
 [[package]]
 name = "typer"
-version = "0.15.4"
+version = "0.16.0"
 description = "Typer, build great CLIs. Easy to code. Based on Python type hints."
 optional = false
 python-versions = ">=3.7"
 groups = ["eval"]
 files = [
-    {file = "typer-0.15.4-py3-none-any.whl", hash = "sha256:eb0651654dcdea706780c466cf06d8f174405a659ffff8f163cfbfee98c0e173"},
-    {file = "typer-0.15.4.tar.gz", hash = "sha256:89507b104f9b6a0730354f27c39fae5b63ccd0c95b1ce1f1a6ba0cfd329997c3"},
+    {file = "typer-0.16.0-py3-none-any.whl", hash = "sha256:1f79bed11d4d02d4310e3c1b7ba594183bcedb0ac73b27a9e5f28f6fb5b98855"},
+    {file = "typer-0.16.0.tar.gz", hash = "sha256:af377ffaee1dbe37ae9440cb4e8f11686ea5ce4e9bae01b84ae7c63b87f1dd3b"},
 ]
 
 [package.dependencies]
-click = ">=8.0.0,<8.2"
+click = ">=8.0.0"
 rich = ">=10.11.0"
 shellingham = ">=1.3.0"
 typing-extensions = ">=3.7.4.3"
@@ -5653,7 +5654,7 @@ version = "0.9.0"
 description = "Runtime inspection utilities for typing module."
 optional = false
 python-versions = "*"
-groups = ["main"]
+groups = ["main", "eval"]
 files = [
     {file = "typing_inspect-0.9.0-py3-none-any.whl", hash = "sha256:9ee6fc59062311ef8547596ab6b955e1b8aa46242d854bfc78f4f6b0eff35f9f"},
     {file = "typing_inspect-0.9.0.tar.gz", hash = "sha256:b23fc42ff6f6ef6954e4852c1fb512cdd18dbea03134f91f856a95ccc9461f78"},
@@ -6323,4 +6324,4 @@ cffi = ["cffi (>=1.11)"]
 [metadata]
 lock-version = "2.1"
 python-versions = "~3.12.0"
-content-hash = "ec9150eeef060ce197315c365d9475fc5c81476f57f4ee909fe017fdb0bfe6d6"
+content-hash = "af7e4554c0108bebd0fa153a1f08e6bd87dc888c94cb8ac4324bd014dae10a2b"
