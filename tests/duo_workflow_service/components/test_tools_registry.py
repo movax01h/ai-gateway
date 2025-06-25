@@ -92,6 +92,7 @@ _outbox = MagicMock(spec=asyncio.Queue)
                 "list_epic_notes",
                 "get_epic_note",
                 "get_previous_workflow_context",
+                "list_vulnerabilities",
                 "get_commit",
                 "list_commits",
                 "get_commit_diff",
@@ -144,6 +145,7 @@ _outbox = MagicMock(spec=asyncio.Queue)
                 "list_epic_notes",
                 "get_epic_note",
                 "get_previous_workflow_context",
+                "list_vulnerabilities",
                 "get_commit",
                 "list_commits",
                 "get_commit_diff",
@@ -282,6 +284,7 @@ def test_registry_initialization_initialises_tools_with_correct_attributes(
         "get_previous_workflow_context": tools.GetWorkflowContext(
             metadata=tool_metadata
         ),
+        "list_vulnerabilities": tools.ListVulnerabilities(metadata=tool_metadata),
         "get_commit": tools.GetCommit(metadata=tool_metadata),
         "list_commits": tools.ListCommits(metadata=tool_metadata),
         "get_commit_diff": tools.GetCommitDiff(metadata=tool_metadata),
