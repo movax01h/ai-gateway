@@ -17,6 +17,7 @@ from ai_gateway.prompts import Prompt, jinja2_formatter
 from ai_gateway.prompts.config import ModelConfig
 from duo_workflow_service.components.tools_registry import ToolsRegistry
 from duo_workflow_service.entities.state import (
+    ApprovalStateRejection,
     ChatWorkflowState,
     MessageTypeEnum,
     ToolInfo,
@@ -116,12 +117,19 @@ class ChatAgent(Prompt[ChatWorkflowState, BaseMessage]):
 
     async def run(self, input: ChatWorkflowState) -> Dict[str, Any]:
         new_messages = []
+        approval_state = input.get("approval", None)
 
-        if input.get("cancel_tool_message", False):
+        if isinstance(approval_state, ApprovalStateRejection):
             last_message = input["conversation_history"][self.name][-1]
+
+            if approval_state.message:
+                tool_message = f"Tool is cancelled temporarily as user has a comment. Comment: {approval_state.message}"
+            else:
+                tool_message = "Tool is cancelled by user."
+
             messages: list[BaseMessage] = [
                 ToolMessage(
-                    content=f"Tool cancelled temporarily as user has a comment. Comment: {input['cancel_tool_message']}",
+                    content=tool_message,
                     tool_call_id=tool_call.get("id"),
                 )
                 for tool_call in getattr(last_message, "tool_calls", [])

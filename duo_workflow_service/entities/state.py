@@ -302,6 +302,10 @@ class SearchAndReplaceWorkflowState(TypedDict):
     pending_files: List[str]
 
 
+class ApprovalStateRejection(BaseModel):
+    message: Optional[str]
+
+
 class ChatWorkflowState(TypedDict):
     plan: Plan
     status: WorkflowStatusEnum
@@ -312,7 +316,7 @@ class ChatWorkflowState(TypedDict):
     last_human_input: Union[WorkflowEvent, None]
     context_elements: List[ContextElement]
     project: Project | None
-    cancel_tool_message: str | None
+    approval: ApprovalStateRejection | None
 
 
 DuoWorkflowStateType = Union[

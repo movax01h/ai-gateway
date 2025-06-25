@@ -16,6 +16,7 @@ from duo_workflow_service.agents.tools_executor import ToolsExecutor
 from duo_workflow_service.checkpointer.gitlab_workflow import WorkflowStatusEventEnum
 from duo_workflow_service.components.tools_registry import ToolsRegistry
 from duo_workflow_service.entities.state import (
+    ApprovalStateRejection,
     ChatWorkflowState,
     MessageTypeEnum,
     ToolStatus,
@@ -142,7 +143,7 @@ class Workflow(AbstractWorkflow):
             last_human_input=None,
             context_elements=contextElements,
             project=self._project,
-            cancel_tool_message=None,
+            approval=None,
         )
 
     async def get_graph_input(self, goal: str, status_event: str) -> Any:
@@ -157,7 +158,7 @@ class Workflow(AbstractWorkflow):
                     case "approval":
                         next_step = "run_tools"
                     case "rejection":
-                        state_update["cancel_tool_message"] = self._approval.rejection.message  # type: ignore
+                        state_update["approval"] = ApprovalStateRejection(message=self._approval.rejection.message)  # type: ignore
                     case _:
                         state_update["conversation_history"] = {
                             self._agent.name: [
