@@ -267,6 +267,149 @@ def test_get_commit_format_display_message(input_data, expected_message):
     assert message == expected_message
 
 
+@pytest.mark.parametrize(
+    "test_params,expected_params,expected_project_id,description",
+    [
+        # Basic parameters
+        (
+            {"project_id": 123, "all": True, "author": "john@example.com"},
+            {"all": True, "author": "john@example.com"},
+            123,
+            "Basic parameters with all=True and author",
+        ),
+        # Date filtering
+        (
+            {
+                "project_id": 123,
+                "since": "2024-01-01T00:00:00Z",
+                "until": "2024-01-31T23:59:59Z",
+            },
+            {"since": "2024-01-01T00:00:00Z", "until": "2024-01-31T23:59:59Z"},
+            123,
+            "Date filtering with since and until",
+        ),
+        # Path and branch filtering
+        (
+            {
+                "project_id": 123,
+                "path": "src/main.py",
+                "ref_name": "develop",
+                "first_parent": True,
+            },
+            {"path": "src/main.py", "ref_name": "develop", "first_parent": True},
+            123,
+            "Path and branch filtering with first_parent",
+        ),
+        # Stats and trailers
+        (
+            {"project_id": 123, "with_stats": True, "trailers": True, "order": "topo"},
+            {"with_stats": True, "trailers": True, "order": "topo"},
+            123,
+            "Stats, trailers, and topological order",
+        ),
+        # Pagination
+        ({"project_id": 123, "page": 2}, {"page": 2}, 123, "Pagination with page 2"),
+        # All parameters combined
+        (
+            {
+                "project_id": 123,
+                "all": False,
+                "author": "jane@example.com",
+                "first_parent": False,
+                "order": "default",
+                "path": "tests/",
+                "ref_name": "main",
+                "since": "2024-01-01T00:00:00Z",
+                "until": "2024-12-31T23:59:59Z",
+                "trailers": True,
+                "with_stats": True,
+                "page": 1,
+            },
+            {
+                "all": False,
+                "author": "jane@example.com",
+                "first_parent": False,
+                "order": "default",
+                "path": "tests/",
+                "ref_name": "main",
+                "since": "2024-01-01T00:00:00Z",
+                "until": "2024-12-31T23:59:59Z",
+                "trailers": True,
+                "with_stats": True,
+                "page": 1,
+            },
+            123,
+            "All parameters combined",
+        ),
+        # URL instead of project_id
+        (
+            {
+                "url": "https://gitlab.com/namespace/project",
+                "author": "test@example.com",
+            },
+            {"author": "test@example.com"},
+            "namespace%2Fproject",
+            "URL parameter with author",
+        ),
+        # None values should be filtered out
+        (
+            {
+                "project_id": 123,
+                "all": True,
+                "author": None,
+                "path": "src/",
+                "ref_name": None,
+                "since": "2024-01-01T00:00:00Z",
+                "until": None,
+                "page": None,
+            },
+            {"all": True, "path": "src/", "since": "2024-01-01T00:00:00Z"},
+            123,
+            "None values filtered out",
+        ),
+        # Empty parameters (only project_id)
+        ({"project_id": 123}, {}, 123, "Empty parameters only project_id"),
+    ],
+)
+@pytest.mark.asyncio
+async def test_list_commit(
+    gitlab_client_mock,
+    test_params,
+    expected_params,
+    expected_project_id,
+    description,
+    metadata,
+):
+    mock_response = [
+        {
+            "id": "6104942438c14ec7bd21c6cd5bd995272b3faff6",
+            "short_id": "6104942",
+            "title": "Test commit",
+            "author_name": "John Doe",
+            "author_email": "john@example.com",
+            "authored_date": "2024-01-01T10:00:00.000Z",
+            "committer_name": "John Doe",
+            "committer_email": "john@example.com",
+            "committed_date": "2024-01-01T10:00:00.000Z",
+            "created_at": "2024-01-01T10:00:00.000Z",
+            "message": "Test commit message",
+            "parent_ids": ["parent123"],
+            "web_url": "https://gitlab.example.com/project/-/commit/6104942438c14ec7bd21c6cd5bd995272b3faff6",
+        }
+    ]
+    gitlab_client_mock.aget = AsyncMock(return_value=mock_response)
+    tool = ListCommits(description=description, metadata=metadata)
+    result = await tool._arun(**test_params)
+    gitlab_client_mock.aget.assert_called_once_with(
+        path=f"/api/v4/projects/{expected_project_id}/repository/commits",
+        params=expected_params,
+        parse_json=False,
+    )
+    result_data = json.loads(result)
+    assert "commits" in result_data
+    assert result_data["commits"] == mock_response
+
+
 @pytest.mark.asyncio
 async def test_list_commits_success(gitlab_client_mock, metadata):
     sample_commits = [
