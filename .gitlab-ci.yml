@@ -112,17 +112,6 @@ cache:
   before_script:
     - docker login -u "$REGISTRY_USER" -p "$REGISTRY_PASSWORD" "$REGISTRY"
 
-tag-self-hosted:
-  stage: release
-  needs:
-    - build-docker-model-gateway
-  script:
-    - |
-      git tag "self-hosted-${GITLAB_VERSION}" ${CI_COMMIT_SHA}
-      git push origin "self-hosted-${GITLAB_VERSION}"
-  rules:
-    - if: $GITLAB_VERSION
-
 pages:
   stage: deploy_pages
   script:
