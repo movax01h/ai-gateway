@@ -95,7 +95,7 @@ class CommitBaseTool(DuoBaseTool):
 class ListCommitsInput(ProjectResourceInput):
     all: Optional[bool] = Field(
         default=False,
-        description="Retrieve every commit from the repository. Default is false.",
+        description="When set to true the ref_name parameter is ignored. Default is false.",
     )
     author: Optional[str] = Field(
         default=None,
@@ -120,7 +120,8 @@ class ListCommitsInput(ProjectResourceInput):
     )
     since: Optional[str] = Field(
         default=None,
-        description="Only commits after or on this date are returned in ISO 8601 format (YYYY-MM-DDTHH:MM:SSZ).",
+        description="Only commits after or on this date are returned."
+        "Use ISO 8601 format when specifying the date (YYYY-MM-DDTHH:MM:SSZ).",
     )
     trailers: Optional[bool] = Field(
         default=False,
@@ -128,17 +129,23 @@ class ListCommitsInput(ProjectResourceInput):
     )
     until: Optional[str] = Field(
         default=None,
-        description="Only commits before or on this date are returned in ISO 8601 format (YYYY-MM-DDTHH:MM:SSZ).",
+        description="Only commits before or on this date are returned."
+        "Use ISO 8601 format when specifying the date (YYYY-MM-DDTHH:MM:SSZ).",
     )
     with_stats: Optional[bool] = Field(
         default=False,
         description="Include commit stats. Default is false.",
+    )
+    page: Optional[int] = Field(
+        default=None,
+        description="Page number. Default is 1.",
     )
 
 
 class ListCommits(CommitBaseTool):
     name: str = "list_commits"
     description: str = f"""List commits in a GitLab project repository.
+    By default, only returns the first 20 commits - use pagination to get complete results.
 
     {PROJECT_IDENTIFICATION_DESCRIPTION}
 
