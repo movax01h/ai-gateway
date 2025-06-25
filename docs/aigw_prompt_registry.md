@@ -100,7 +100,7 @@ Each prompt configuration file in `prompts/definitions/` requires the following 
 ```yaml
 name: <string>                    # Required. Unique identifier for the prompt
 model:
-  name: <string>                  # Optional. Model identifier (e.g. "claude-3-sonnet-20240229"). Either config_file or model identifier needs to be present
+  name: <string>                  # Optional. Model identifier (e.g. "claude-sonnet-4-20250514"). Either config_file or model identifier needs to be present
   config_file: <string>           # Optional. Config identifier. Either config_file or model identifier needs to be present
   params:
      model_class_provider: litellm # Required. Provider interface
@@ -128,7 +128,7 @@ params:                           # Required. Request handling parameters
 ```yaml
 name: Code review prompt
 model:
-  name: claude-3-sonnet-20240229
+  name: claude-sonnet-4-20250514
   params:
      model_class_provider: litellm
      temperature: 0.2
