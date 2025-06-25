@@ -4,8 +4,8 @@ from unittest.mock import patch
 import pytest
 from snowplow_tracker import SelfDescribingJson, Snowplow, StructuredEvent
 
-from ai_gateway.internal_events.client import InternalEventsClient
-from ai_gateway.internal_events.context import (
+from lib.internal_events.client import InternalEventsClient
+from lib.internal_events.context import (
     EventContext,
     InternalEventAdditionalProperties,
     current_event_context,

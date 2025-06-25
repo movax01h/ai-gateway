@@ -1,7 +1,7 @@
 # pylint: disable=unused-import,unused-variable
 
 from typing import Any
-from unittest.mock import AsyncMock, MagicMock, call, patch
+from unittest.mock import AsyncMock, MagicMock, Mock, call, patch
 from xml.etree import ElementTree
 
 import pytest
@@ -20,13 +20,9 @@ from duo_workflow_service.entities.state import (
 )
 from duo_workflow_service.errors.error_handler import ModelErrorHandler
 from duo_workflow_service.gitlab.http_client import GitlabHttpClient
-from duo_workflow_service.internal_events import InternalEventAdditionalProperties
-from duo_workflow_service.internal_events.event_enum import (
-    CategoryEnum,
-    EventEnum,
-    EventPropertyEnum,
-)
 from duo_workflow_service.tools import Toolset
+from lib.internal_events import InternalEventAdditionalProperties
+from lib.internal_events.event_enum import CategoryEnum, EventEnum, EventPropertyEnum
 
 
 @pytest.fixture
@@ -57,6 +53,11 @@ def workflow_state(plan: Plan):
         last_human_input=None,
         ui_chat_log=[],
     )
+
+
+@pytest.fixture(autouse=True)
+def prepare_container(mock_container):  # pylint: disable=unused-argument
+    pass
 
 
 # pylint: disable=too-many-public-methods
@@ -143,17 +144,11 @@ class TestAgent:
 
     # pylint: disable=too-many-positional-arguments
     @pytest.mark.asyncio
-    @patch("duo_workflow_service.agents.agent.DuoWorkflowInternalEvent")
     async def test_run(
-        self,
-        mock_internal_event_tracker,
-        chat_mock,
-        planner_agent,
-        workflow_state,
+        self, chat_mock, planner_agent, workflow_state, internal_event_client: Mock
     ):
         workflow_type = CategoryEnum.WORKFLOW_SOFTWARE_DEVELOPMENT
-        mock_internal_event_tracker.instance = MagicMock(return_value=None)
-        mock_internal_event_tracker.track_event = MagicMock(return_value=None)
+        planner_agent._internal_event_client = internal_event_client
 
         tool_calls = [
             {
@@ -196,8 +191,8 @@ class TestAgent:
             )
         ]
 
-        assert mock_internal_event_tracker.track_event.call_count == 1
-        mock_internal_event_tracker.track_event.assert_has_calls(
+        assert internal_event_client.track_event.call_count == 1
+        internal_event_client.track_event.assert_has_calls(
             [
                 call(
                     event_name=EventEnum.TOKEN_PER_USER_PROMPT.value,
@@ -439,7 +434,12 @@ class TestAgent:
     @pytest.mark.asyncio
     @patch("duo_workflow_service.agents.agent.get_event")
     async def test_run_with_check_events_disabled(
-        self, mock_get_event, chat_mock, http_client_mock, mock_toolset, workflow_state
+        self,
+        mock_get_event,
+        chat_mock,
+        http_client_mock,
+        mock_toolset,
+        workflow_state,
     ):
         # Create agent with check_events=False
         agent = Agent(

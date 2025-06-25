@@ -117,7 +117,9 @@ def _should_continue(
     return Routes.BUILD_CONTEXT
 
 
-def _git_output(command_output: list[str], state: WorkflowState):
+def _git_output(
+    command_output: list[str], state: WorkflowState
+):  # pylint: disable=unused-argument
     logs: list[UiChatLog] = [
         UiChatLog(
             message_type=MessageTypeEnum.TOOL,

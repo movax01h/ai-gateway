@@ -2,6 +2,7 @@ from datetime import datetime, timezone
 from typing import Any, List, Union
 
 from anthropic import APIStatusError
+from dependency_injector.wiring import Provide, inject
 from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.messages import (
     AIMessage,
@@ -12,6 +13,7 @@ from langchain_core.messages import (
 )
 from langchain_core.runnables import Runnable
 
+from ai_gateway.container import ContainerApplication
 from duo_workflow_service.entities.event import WorkflowEvent, WorkflowEventType
 from duo_workflow_service.entities.state import (
     DuoWorkflowStateType,
@@ -22,24 +24,17 @@ from duo_workflow_service.entities.state import (
 from duo_workflow_service.errors.error_handler import ModelError, ModelErrorHandler
 from duo_workflow_service.gitlab.events import get_event
 from duo_workflow_service.gitlab.http_client import GitlabHttpClient
-from duo_workflow_service.internal_events import (
-    DuoWorkflowInternalEvent,
-    InternalEventAdditionalProperties,
-)
-from duo_workflow_service.internal_events.event_enum import (
-    CategoryEnum,
-    EventEnum,
-    EventPropertyEnum,
-)
 from duo_workflow_service.monitoring import duo_workflow_metrics
 from duo_workflow_service.structured_logging import _workflow_id
 from duo_workflow_service.token_counter.approximate_token_counter import (
     ApproximateTokenCounter,
 )
 from duo_workflow_service.tools import Toolset
+from lib.internal_events import InternalEventAdditionalProperties, InternalEventsClient
+from lib.internal_events.event_enum import CategoryEnum, EventEnum, EventPropertyEnum
 
 
-class Agent:
+class Agent:  # pylint: disable=too-many-instance-attributes
     name: str
 
     _model: Runnable
@@ -49,7 +44,9 @@ class Agent:
     _http_client: GitlabHttpClient
     _toolset: Toolset
     _check_events: bool
+    _internal_event_client: InternalEventsClient
 
+    @inject
     def __init__(
         self,
         *,
@@ -62,6 +59,9 @@ class Agent:
         http_client: GitlabHttpClient,
         workflow_type: CategoryEnum,
         check_events: bool = True,
+        internal_event_client: InternalEventsClient = Provide[
+            ContainerApplication.internal_event.client
+        ],
     ):
         self._model = model.bind_tools(toolset.bindable)
         self._goal = goal
@@ -73,6 +73,7 @@ class Agent:
         self._workflow_type = workflow_type
         self._toolset = toolset
         self._check_events = check_events
+        self._internal_event_client = internal_event_client
 
     async def run(self, state: DuoWorkflowStateType) -> dict:
         with duo_workflow_metrics.time_compute(
@@ -175,7 +176,7 @@ class Agent:
             total_tokens=usage_metadata.get("total_tokens"),
             estimated_input_tokens=estimated,
         )
-        DuoWorkflowInternalEvent.track_event(
+        self._internal_event_client.track_event(
             event_name=EventEnum.TOKEN_PER_USER_PROMPT.value,
             additional_properties=additional_properties,
             category=self._workflow_type.value,

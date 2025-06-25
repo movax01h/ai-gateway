@@ -1,14 +1,10 @@
 from typing import Tuple
 
-from duo_workflow_service.internal_events import (
-    DuoWorkflowInternalEvent,
-    InternalEventAdditionalProperties,
-)
-from duo_workflow_service.internal_events.event_enum import (
-    EventEnum,
-    EventLabelEnum,
-    EventPropertyEnum,
-)
+from dependency_injector.wiring import Provide, inject
+
+from ai_gateway.container import ContainerApplication
+from lib.internal_events import InternalEventAdditionalProperties, InternalEventsClient
+from lib.internal_events.event_enum import EventEnum, EventLabelEnum, EventPropertyEnum
 
 EVENT_MAPPING = {
     "require_input": (
@@ -57,11 +53,15 @@ def fetch_event_mapping(
     return event_enum, label_enum, property_enum
 
 
+@inject
 def track_workflow_event(
     workflow_id: str,
     event_type: str,
     category: str,
     event_by_user: bool,
+    internal_event_client: InternalEventsClient = Provide[
+        ContainerApplication.internal_event.client
+    ],
 ) -> None:
     """Track internal events based on the event type."""
     if event_type in EVENT_MAPPING:
@@ -74,7 +74,7 @@ def track_workflow_event(
             property=property_enum.value,
             value=workflow_id,
         )
-        DuoWorkflowInternalEvent.track_event(
+        internal_event_client.track_event(
             event_name=event_enum.value,
             additional_properties=additional_properties,
             category=category,

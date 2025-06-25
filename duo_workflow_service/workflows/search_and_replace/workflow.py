@@ -1,3 +1,4 @@
+# pylint: disable=direct-environment-variable-reference,raising-format-tuple,unused-argument
 import os
 from datetime import datetime, timezone
 from enum import StrEnum

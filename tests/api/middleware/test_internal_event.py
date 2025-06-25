@@ -20,7 +20,7 @@ from ai_gateway.api.middleware.headers import (
     X_GITLAB_VERSION_HEADER,
 )
 from ai_gateway.api.middleware.internal_event import InternalEventMiddleware
-from ai_gateway.internal_events import EventContext
+from lib.internal_events import EventContext
 
 
 @pytest.fixture

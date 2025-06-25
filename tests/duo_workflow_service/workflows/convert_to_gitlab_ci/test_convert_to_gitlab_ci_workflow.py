@@ -15,7 +15,6 @@ from duo_workflow_service.entities import (
     WorkflowState,
     WorkflowStatusEnum,
 )
-from duo_workflow_service.internal_events.event_enum import CategoryEnum
 from duo_workflow_service.workflows.convert_to_gitlab_ci import Workflow
 from duo_workflow_service.workflows.convert_to_gitlab_ci.prompts import (
     CI_PIPELINES_MANAGER_FILE_USER_MESSAGE,
@@ -27,6 +26,7 @@ from duo_workflow_service.workflows.convert_to_gitlab_ci.workflow import (
     _load_file_contents,
     _router,
 )
+from lib.internal_events.event_enum import CategoryEnum
 
 
 @pytest.fixture

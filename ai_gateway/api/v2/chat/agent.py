@@ -31,18 +31,17 @@ from ai_gateway.chat.agents import (
     TypeAgentEvent,
 )
 from ai_gateway.chat.executor import GLAgentRemoteExecutor
-from ai_gateway.internal_events import InternalEventsClient
-from ai_gateway.model_metadata import ModelMetadata
+from ai_gateway.model_metadata import ModelMetadata, current_model_metadata_context
+from ai_gateway.models import Role
 from ai_gateway.prompts import BasePromptRegistry, Prompt
+from ai_gateway.structured_logging import get_request_logger
+from lib.internal_events import InternalEventsClient
 
 __all__ = [
     "router",
     "create_event_stream",
 ]
 
-from ai_gateway.model_metadata import current_model_metadata_context
-from ai_gateway.models import Role
-from ai_gateway.structured_logging import get_request_logger
 
 request_log = get_request_logger("chat")
 

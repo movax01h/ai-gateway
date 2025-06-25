@@ -2,7 +2,7 @@ from typing import Optional
 
 from snowplow_tracker import AsyncEmitter, SelfDescribingJson, StructuredEvent, Tracker
 
-from ai_gateway.internal_events.context import (
+from lib.internal_events.context import (
     EventContext,
     InternalEventAdditionalProperties,
     current_event_context,

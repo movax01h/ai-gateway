@@ -1,3 +1,4 @@
+# pylint: disable=direct-environment-variable-reference,invalid-name,attribute-defined-outside-init
 import os
 from datetime import datetime, timezone
 from enum import StrEnum

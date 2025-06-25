@@ -12,9 +12,9 @@ from ai_gateway.async_dependency_resolver import (
     get_internal_event_client,
     get_vertex_ai_proxy_client,
 )
-from ai_gateway.internal_events import InternalEventsClient
 from ai_gateway.models.base import KindModelProvider
 from ai_gateway.proxy.clients import VertexAIProxyClient
+from lib.internal_events import InternalEventsClient
 
 __all__ = [
     "router",

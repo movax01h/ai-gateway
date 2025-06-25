@@ -1,17 +1,17 @@
 import os
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, Mock, patch
 
 import pytest
 
 from contract import contract_pb2
-from duo_workflow_service.internal_events import InternalEventAdditionalProperties
-from duo_workflow_service.internal_events.event_enum import CategoryEnum, EventEnum
 from duo_workflow_service.llm_factory import AnthropicConfig, VertexConfig
 from duo_workflow_service.workflows.abstract_workflow import (
     AbstractWorkflow,
     TraceableException,
 )
 from duo_workflow_service.workflows.chat import Workflow
+from lib.internal_events import InternalEventAdditionalProperties
+from lib.internal_events.event_enum import CategoryEnum, EventEnum
 
 
 # Concrete implementation for testing
@@ -34,6 +34,11 @@ class MockWorkflow(AbstractWorkflow):
         print(element)
 
 
+@pytest.fixture(autouse=True)
+def prepare_container(mock_container):
+    pass
+
+
 @pytest.fixture
 def workflow():
     workflow_id = "test-workflow-id"
@@ -43,7 +48,11 @@ def workflow():
         "git_sha": "abc123",
     }
     workflow_type = CategoryEnum.WORKFLOW_SOFTWARE_DEVELOPMENT
-    return MockWorkflow(workflow_id, metadata, workflow_type)
+    return MockWorkflow(
+        workflow_id,
+        metadata,
+        workflow_type,
+    )
 
 
 @pytest.fixture
@@ -213,14 +222,12 @@ async def test_cleanup_with_exception(mock_log_exception, workflow):
     assert kwargs["extra"]["context"] == "Workflow cleanup failed"
 
 
-@patch(
-    "duo_workflow_service.workflows.abstract_workflow.DuoWorkflowInternalEvent.track_event"
-)
-def test_track_internal_event(mock_track_event, workflow):
+def test_track_internal_event(workflow, internal_event_client: Mock):
     # Test tracking an internal event
     event_name = EventEnum.WORKFLOW_START
     workflow_type = CategoryEnum.WORKFLOW_SOFTWARE_DEVELOPMENT
     additional_properties = InternalEventAdditionalProperties()
+    workflow._internal_event_client = internal_event_client
 
     workflow._track_internal_event(
         event_name=event_name,
@@ -228,7 +235,7 @@ def test_track_internal_event(mock_track_event, workflow):
         category=workflow_type,
     )
 
-    mock_track_event.assert_called_once_with(
+    internal_event_client.track_event.assert_called_once_with(
         event_name=event_name.value,
         additional_properties=additional_properties,
         category=workflow_type,

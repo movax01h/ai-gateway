@@ -15,7 +15,6 @@ from duo_workflow_service.entities import (
     WorkflowStatusEnum,
 )
 from duo_workflow_service.entities.state import MAX_CONTEXT_TOKENS, ReplacementRule
-from duo_workflow_service.internal_events.event_enum import CategoryEnum
 from duo_workflow_service.workflows.search_and_replace.prompts import (
     SEARCH_AND_REPLACE_FILE_USER_MESSAGE,
 )
@@ -33,6 +32,7 @@ from duo_workflow_service.workflows.search_and_replace.workflow import (
     _scan_directory_tree_input_parser,
     _scan_directory_tree_output_parser,
 )
+from lib.internal_events.event_enum import CategoryEnum
 
 
 @pytest.fixture

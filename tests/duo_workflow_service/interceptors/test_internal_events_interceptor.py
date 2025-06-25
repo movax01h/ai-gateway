@@ -5,7 +5,7 @@ import pytest
 from duo_workflow_service.interceptors.internal_events_interceptor import (
     InternalEventsInterceptor,
 )
-from duo_workflow_service.internal_events import current_event_context
+from lib.internal_events import current_event_context
 
 
 @pytest.fixture

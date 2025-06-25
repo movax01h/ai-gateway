@@ -22,7 +22,7 @@ from ai_gateway.api.middleware.headers import (
     X_GITLAB_VERSION_HEADER,
 )
 from ai_gateway.api.middleware_utils import get_valid_namespace_ids
-from ai_gateway.internal_events import (
+from lib.internal_events import (
     EventContext,
     current_event_context,
     tracked_internal_events,

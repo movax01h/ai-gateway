@@ -58,7 +58,6 @@ from ai_gateway.code_suggestions.processing.base import ModelEngineOutput
 from ai_gateway.code_suggestions.processing.ops import lang_from_filename
 from ai_gateway.config import Config
 from ai_gateway.instrumentators.base import TelemetryInstrumentator
-from ai_gateway.internal_events import InternalEventsClient
 from ai_gateway.model_metadata import ModelMetadata, create_model_metadata
 from ai_gateway.models import KindModelProvider
 from ai_gateway.models.base import TokensConsumptionMetadata
@@ -68,6 +67,7 @@ from ai_gateway.tracking import SnowplowEvent, SnowplowEventContext
 from ai_gateway.tracking.errors import log_exception
 from ai_gateway.tracking.instrumentator import SnowplowInstrumentator
 from lib.feature_flags.context import current_feature_flag_context
+from lib.internal_events import InternalEventsClient
 
 __all__ = [
     "router",

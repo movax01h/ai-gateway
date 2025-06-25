@@ -32,8 +32,8 @@ from duo_workflow_service.gitlab.http_client import GitlabHttpClient
 from duo_workflow_service.tools.request_user_clarification import (
     RequestUserClarificationTool,
 )
+from lib.internal_events.event_enum import CategoryEnum
 
-from ...internal_events.event_enum import CategoryEnum
 from ...tools import HandoverTool
 from .prompts import (
     ASSIGNMENT_PROMPT,

@@ -17,7 +17,6 @@ from duo_workflow_service.components.tools_registry import (
     ToolsRegistry,
 )
 from duo_workflow_service.entities import Plan, WorkflowStatusEnum
-from duo_workflow_service.internal_events.event_enum import CategoryEnum
 from duo_workflow_service.llm_factory import AnthropicConfig, VertexConfig
 from duo_workflow_service.workflows.software_development.workflow import (
     CONTEXT_BUILDER_TOOLS,
@@ -25,6 +24,7 @@ from duo_workflow_service.workflows.software_development.workflow import (
     PLANNER_TOOLS,
     Workflow,
 )
+from lib.internal_events.event_enum import CategoryEnum
 
 
 class MockComponent:
@@ -48,6 +48,11 @@ class MockComponent:
         graph.add_edge(node_name, exit_node)
 
         return node_name
+
+
+@pytest.fixture(autouse=True)
+def prepare_container(mock_container):
+    pass
 
 
 @pytest.fixture

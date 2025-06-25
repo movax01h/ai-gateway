@@ -4,7 +4,7 @@ import os
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Type, cast
-from unittest.mock import MagicMock, call, patch
+from unittest.mock import MagicMock, Mock, call, patch
 
 import pytest
 from langchain.tools import BaseTool
@@ -23,12 +23,6 @@ from duo_workflow_service.entities.state import (
     WorkflowState,
     WorkflowStatusEnum,
 )
-from duo_workflow_service.internal_events import InternalEventAdditionalProperties
-from duo_workflow_service.internal_events.event_enum import (
-    CategoryEnum,
-    EventEnum,
-    EventLabelEnum,
-)
 from duo_workflow_service.tools import (
     PipelineMergeRequestNotFoundError,
     RunCommand,
@@ -43,6 +37,8 @@ from duo_workflow_service.tools.planner import (
     UpdateTaskDescription,
 )
 from duo_workflow_service.tools.toolset import ToolType
+from lib.internal_events import InternalEventAdditionalProperties
+from lib.internal_events.event_enum import CategoryEnum, EventEnum, EventLabelEnum
 
 
 def mock_tool(
@@ -58,6 +54,11 @@ def mock_tool(
             content=content, name=name, tool_call_id="fake-call-1"
         )
     return mock
+
+
+@pytest.fixture(autouse=True)
+def prepare_container(mock_container):  # pylint: disable=unused-argument
+    pass
 
 
 @pytest.fixture
@@ -216,15 +217,10 @@ class ToolTestCase:
         ),
     ],
 )
-@patch("duo_workflow_service.agents.tools_executor.DuoWorkflowInternalEvent")
 @patch.dict(os.environ, {"DW_INTERNAL_EVENT__ENABLED": "true"})
 async def test_run(
-    mock_internal_event_tracker,
-    workflow_state,
-    test_case: ToolTestCase,
+    workflow_state, test_case: ToolTestCase, internal_event_client: Mock
 ):
-    mock_internal_event_tracker.instance = MagicMock(return_value=None)
-    mock_internal_event_tracker.track_event = MagicMock(return_value=None)
     workflow_type = CategoryEnum.WORKFLOW_SOFTWARE_DEVELOPMENT
 
     # Create mock toolset
@@ -251,6 +247,7 @@ async def test_run(
         toolset=mock_toolset,
         workflow_id="123",
         workflow_type=workflow_type,
+        internal_event_client=internal_event_client,
     )
     workflow_state["conversation_history"]["planner"] = [
         AIMessage(content=test_case.ai_content, tool_calls=test_case.tool_calls),
@@ -287,8 +284,8 @@ async def test_run(
     for tool, expect_call in test_case.tools.items():
         if expect_call:
             tool.ainvoke.assert_called_once()
-            assert mock_internal_event_tracker.track_event.call_count == 1
-            mock_internal_event_tracker.track_event.assert_has_calls(
+            assert internal_event_client.track_event.call_count == 1
+            internal_event_client.track_event.assert_has_calls(
                 [
                     call(
                         event_name=EventEnum.WORKFLOW_TOOL_SUCCESS.value,
@@ -870,22 +867,19 @@ async def test_state_manipulation(
     ],
 )
 @pytest.mark.usefixtures("mock_datetime")
-@patch("duo_workflow_service.agents.tools_executor.DuoWorkflowInternalEvent")
 @patch.dict(os.environ, {"DW_INTERNAL_EVENT__ENABLED": "true"})
 async def test_run_error_handling(
-    mock_internal_event_tracker,
     workflow_state,
     *,
     tool_call,
     tool_side_effect,
     tool_args_schema,
+    internal_event_client: Mock,
     expected_response,
     expected_error,
     expected_log_prefix,
     expected_tool_info,
 ):
-    mock_internal_event_tracker.instance = MagicMock(return_value=None)
-    mock_internal_event_tracker.track_event = MagicMock(return_value=None)
     workflow_type = CategoryEnum.WORKFLOW_SOFTWARE_DEVELOPMENT
     tool = mock_tool(side_effect=tool_side_effect, args_schema=tool_args_schema)
 
@@ -899,6 +893,7 @@ async def test_run_error_handling(
         toolset=mock_toolset,
         workflow_id="123",
         workflow_type=workflow_type,
+        internal_event_client=internal_event_client,
     )
     workflow_state["conversation_history"]["planner"] = [
         AIMessage(content=[{"type": "text", "text": "test"}], tool_calls=[tool_call]),
@@ -906,8 +901,8 @@ async def test_run_error_handling(
 
     result = await tools_executor.run(workflow_state)
 
-    assert mock_internal_event_tracker.track_event.call_count == 1
-    mock_internal_event_tracker.track_event.assert_has_calls(
+    assert internal_event_client.track_event.call_count == 1
+    internal_event_client.track_event.assert_has_calls(
         [
             call(
                 event_name=EventEnum.WORKFLOW_TOOL_FAILURE.value,
@@ -929,9 +924,9 @@ async def test_run_error_handling(
     updates = cast(Command, result[1]).update
 
     if expected_error:
-        assert updates["status"] == WorkflowStatusEnum.ERROR
+        assert updates["status"] == WorkflowStatusEnum.ERROR  # type: ignore[index]
 
-    ui_chat_logs = updates["ui_chat_log"]
+    ui_chat_logs = updates["ui_chat_log"]  # type: ignore[index]
     assert len(ui_chat_logs) == 2
 
     agent_log = ui_chat_logs[0]

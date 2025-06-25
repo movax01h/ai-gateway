@@ -28,9 +28,9 @@ from ai_gateway.async_dependency_resolver import (
 from ai_gateway.chat.agents import ReActAgentInputs, TypeAgentEvent
 from ai_gateway.chat.agents.typing import Message
 from ai_gateway.chat.executor import GLAgentRemoteExecutor
-from ai_gateway.internal_events import InternalEventsClient
 from ai_gateway.models.base_chat import Role
 from ai_gateway.prompts import BasePromptRegistry
+from lib.internal_events import InternalEventsClient
 
 __all__ = [
     "router",

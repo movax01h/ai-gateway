@@ -19,7 +19,6 @@ from duo_workflow_service.entities.state import (
     ApprovalStateRejection,
     ChatWorkflowState,
 )
-from duo_workflow_service.internal_events.event_enum import CategoryEnum
 from duo_workflow_service.workflows.chat.workflow import (
     CHAT_GITLAB_MUTATION_TOOLS,
     CHAT_MUTATION_TOOLS,
@@ -29,6 +28,7 @@ from duo_workflow_service.workflows.chat.workflow import (
 )
 from duo_workflow_service.workflows.type_definitions import AdditionalContext
 from lib.feature_flags import current_feature_flag_context
+from lib.internal_events.event_enum import CategoryEnum
 
 
 @pytest.fixture

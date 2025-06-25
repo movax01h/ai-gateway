@@ -32,12 +32,12 @@ from duo_workflow_service.entities import (
     WorkflowStatusEnum,
 )
 from duo_workflow_service.gitlab.http_client import GitlabHttpClient
-from duo_workflow_service.internal_events.event_enum import CategoryEnum
 from duo_workflow_service.tools import HandoverTool
 from duo_workflow_service.tools.request_user_clarification import (
     RequestUserClarificationTool,
 )
 from lib.feature_flags import current_feature_flag_context
+from lib.internal_events.event_enum import CategoryEnum
 
 
 class TestGoalDisambiguationComponent:

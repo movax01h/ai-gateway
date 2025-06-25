@@ -1,3 +1,5 @@
+# pylint: disable=super-init-not-called,direct-environment-variable-reference,no-else-return,broad-exception-raised,attribute-defined-outside-init
+
 import base64
 import functools
 import json
@@ -16,6 +18,7 @@ from typing import (
 )
 
 import structlog
+from dependency_injector.wiring import Provide, inject
 from langchain_core.runnables import RunnableConfig
 from langgraph.checkpoint.base import (
     BaseCheckpointSaver,
@@ -26,28 +29,26 @@ from langgraph.checkpoint.base import (
 )
 from langgraph.checkpoint.memory import MemorySaver
 
+from ai_gateway.container import ContainerApplication
 from duo_workflow_service.checkpointer.gitlab_workflow_utils import (
     STATUS_TO_EVENT_PROPERTY,
 )
 from duo_workflow_service.entities import WorkflowStatusEnum
 from duo_workflow_service.gitlab.gitlab_project import WorkflowConfig
 from duo_workflow_service.gitlab.http_client import GitlabHttpClient, checkpoint_decoder
-from duo_workflow_service.internal_events import (
-    DuoWorkflowInternalEvent,
-    InternalEventAdditionalProperties,
-)
-from duo_workflow_service.internal_events.event_enum import (
-    CategoryEnum,
-    EventEnum,
-    EventLabelEnum,
-    EventPropertyEnum,
-)
 from duo_workflow_service.json_encoder.encoder import CustomEncoder
 from duo_workflow_service.monitoring import duo_workflow_metrics
 from duo_workflow_service.status_updater.gitlab_status_updater import (
     GitLabStatusUpdater,
 )
 from duo_workflow_service.tracking.errors import log_exception
+from lib.internal_events import InternalEventAdditionalProperties, InternalEventsClient
+from lib.internal_events.event_enum import (
+    CategoryEnum,
+    EventEnum,
+    EventLabelEnum,
+    EventPropertyEnum,
+)
 
 T = TypeVar("T", bound=callable)  # type: ignore
 
@@ -123,12 +124,16 @@ class GitLabWorkflow(BaseCheckpointSaver[Any], AbstractAsyncContextManager[Any])
     _logger: structlog.stdlib.BoundLogger
     _workflow_config: WorkflowConfig
 
+    @inject
     def __init__(
         self,
         client: GitlabHttpClient,
         workflow_id: str,
         workflow_type: CategoryEnum,
         workflow_config: WorkflowConfig,
+        internal_event_client: InternalEventsClient = Provide[
+            ContainerApplication.internal_event.client
+        ],
     ):
         self._offline_mode = os.getenv("USE_MEMSAVER")
         self._client = client
@@ -137,6 +142,7 @@ class GitLabWorkflow(BaseCheckpointSaver[Any], AbstractAsyncContextManager[Any])
         self._logger = structlog.stdlib.get_logger("workflow_checkpointer")
         self._workflow_type = workflow_type
         self._workflow_config = workflow_config
+        self._internal_event_client = internal_event_client
 
     @not_implemented_sync_method
     def get_tuple(self, config: RunnableConfig) -> Optional[CheckpointTuple]:
@@ -189,7 +195,7 @@ class GitLabWorkflow(BaseCheckpointSaver[Any], AbstractAsyncContextManager[Any])
             return
 
         self._logger.info("Tracking Internal event %s", event_name.value)
-        DuoWorkflowInternalEvent.track_event(
+        self._internal_event_client.track_event(
             event_name=event_name.value,
             additional_properties=additional_properties,
             category=self._workflow_type.value,
@@ -252,7 +258,7 @@ class GitLabWorkflow(BaseCheckpointSaver[Any], AbstractAsyncContextManager[Any])
             raise
 
     async def _status_event(
-        self, config: RunnableConfig
+        self, config: RunnableConfig  # pylint: disable=unused-argument
     ) -> tuple[WorkflowStatusEventEnum, EventPropertyEnum]:
         """Determine the workflow status event and event property.
 

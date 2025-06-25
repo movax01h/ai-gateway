@@ -12,7 +12,7 @@ from ai_gateway.async_dependency_resolver import (
     get_internal_event_client,
 )
 from ai_gateway.integrations.amazon_q.client import AmazonQClientFactory
-from ai_gateway.internal_events.client import InternalEventsClient
+from lib.internal_events import InternalEventsClient
 
 __all__ = [
     "router",

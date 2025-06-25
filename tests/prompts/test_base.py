@@ -22,7 +22,6 @@ from pyfakefs.fake_filesystem import FakeFilesystem
 from ai_gateway.api.auth_utils import StarletteUser
 from ai_gateway.config import ConfigModelLimits
 from ai_gateway.instrumentators.model_requests import ModelRequestInstrumentator
-from ai_gateway.internal_events.context import InternalEventAdditionalProperties
 from ai_gateway.model_metadata import (
     AmazonQModelMetadata,
     ModelMetadata,
@@ -32,6 +31,7 @@ from ai_gateway.model_metadata import (
 from ai_gateway.models.v2.anthropic_claude import ChatAnthropic
 from ai_gateway.prompts import BasePromptRegistry, Prompt
 from ai_gateway.prompts.config.base import PromptParams
+from lib.internal_events.context import InternalEventAdditionalProperties
 from tests.conftest import FakeModel
 
 

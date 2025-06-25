@@ -2,7 +2,7 @@ from contextvars import ContextVar
 
 import pytest
 
-from ai_gateway.internal_events.context import EventContext, current_event_context
+from lib.internal_events.context import EventContext, current_event_context
 
 
 def test_event_context_default_values():

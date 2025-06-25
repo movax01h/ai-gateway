@@ -30,7 +30,6 @@ from ai_gateway.code_suggestions.processing.typing import (
 )
 from ai_gateway.config import Config, ConfigModelLimits
 from ai_gateway.container import ContainerApplication
-from ai_gateway.internal_events.client import InternalEventsClient
 from ai_gateway.model_metadata import TypeModelMetadata, current_model_metadata_context
 from ai_gateway.models.base import ModelMetadata, TokensConsumptionMetadata
 from ai_gateway.models.base_text import (
@@ -51,6 +50,7 @@ from duo_workflow_service.entities.state import (
     WorkflowStatusEnum,
 )
 from lib.feature_flags.context import current_feature_flag_context
+from lib.internal_events.client import InternalEventsClient
 
 pytest_plugins = ("pytest_asyncio",)
 
@@ -105,7 +105,7 @@ def model_metadata_context():
 
 @pytest.fixture
 def mock_track_internal_event():
-    with patch("ai_gateway.internal_events.InternalEventsClient.track_event") as mock:
+    with patch("lib.internal_events.InternalEventsClient.track_event") as mock:
         yield mock
 
 
@@ -671,5 +671,7 @@ def disable_cached_logger():
 def reset_context():
     # This fixture will reset the context before and after each test
     current_feature_flag_context.set(set[str]())
+    current_model_metadata_context.set(None)
     yield
     current_feature_flag_context.set(set[str]())
+    current_model_metadata_context.set(None)

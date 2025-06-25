@@ -1,3 +1,4 @@
+# pylint: disable=direct-environment-variable-reference,unknown-option-value,too-many-instance-attributes,dangerous-default-value
 import asyncio
 import os
 from abc import ABC, abstractmethod
@@ -38,16 +39,13 @@ from duo_workflow_service.gitlab.gitlab_project import (
 from duo_workflow_service.gitlab.http_client import GitlabHttpClient
 from duo_workflow_service.gitlab.http_client_factory import get_http_client
 from duo_workflow_service.gitlab.url_parser import GitLabUrlParser
-from duo_workflow_service.internal_events import (
-    DuoWorkflowInternalEvent,
-    InternalEventAdditionalProperties,
-)
-from duo_workflow_service.internal_events.event_enum import CategoryEnum, EventEnum
 from duo_workflow_service.llm_factory import AnthropicConfig, VertexConfig
 from duo_workflow_service.monitoring import duo_workflow_metrics
 from duo_workflow_service.tools import convert_mcp_tools_to_langchain_tools
 from duo_workflow_service.tracking import log_exception
 from duo_workflow_service.workflows.type_definitions import AdditionalContext
+from lib.internal_events import InternalEventAdditionalProperties, InternalEventsClient
+from lib.internal_events.event_enum import CategoryEnum, EventEnum
 
 # Constants
 QUEUE_MAX_SIZE = 1
@@ -103,6 +101,9 @@ class AbstractWorkflow(ABC):
         prompt_registry: LocalPromptRegistry = Provide[
             ContainerApplication.pkg_prompts.prompt_registry
         ],
+        internal_event_client: InternalEventsClient = Provide[
+            ContainerApplication.internal_event.client
+        ],
     ):
         self._outbox = asyncio.Queue(maxsize=QUEUE_MAX_SIZE)
         self._inbox = asyncio.Queue(maxsize=QUEUE_MAX_SIZE)
@@ -124,6 +125,7 @@ class AbstractWorkflow(ABC):
         self._approval = approval
         self._prompt_registry = prompt_registry
         self._workflow_config = empty_workflow_config()
+        self._internal_event_client = internal_event_client
 
     async def run(self, goal: str) -> None:
         with duo_workflow_metrics.time_workflow(
@@ -342,7 +344,7 @@ class AbstractWorkflow(ABC):
         category: CategoryEnum,
     ):
         self.log.info("Tracking Internal event %s", event_name.value)
-        DuoWorkflowInternalEvent.track_event(
+        self._internal_event_client.track_event(
             event_name=event_name.value,
             additional_properties=additional_properties,
             category=category.value if category else self.__class__.__name__,

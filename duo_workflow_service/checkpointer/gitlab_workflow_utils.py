@@ -1,4 +1,4 @@
-from duo_workflow_service.internal_events.event_enum import EventPropertyEnum
+from lib.internal_events.event_enum import EventPropertyEnum
 
 STATUS_TO_EVENT_PROPERTY = {
     "finished": EventPropertyEnum.WORKFLOW_COMPLETED,

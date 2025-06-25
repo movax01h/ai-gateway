@@ -14,15 +14,14 @@ from ai_gateway.chat.agents import (
 from ai_gateway.chat.agents.react import ReActAgentInputs
 from ai_gateway.chat.base import BaseToolsRegistry
 from ai_gateway.chat.tools import BaseTool
-from ai_gateway.internal_events import InternalEventsClient
 from ai_gateway.model_metadata import TypeModelMetadata
 from ai_gateway.prompts.config.models import ModelClassProvider
+from ai_gateway.structured_logging import get_request_logger
+from lib.internal_events import InternalEventsClient
 
 __all__ = [
     "GLAgentRemoteExecutor",
 ]
-
-from ai_gateway.structured_logging import get_request_logger
 
 _REACT_AGENT_AVAILABLE_TOOL_NAMES_CONTEXT_KEY = "duo_chat.agent_available_tools"
 
