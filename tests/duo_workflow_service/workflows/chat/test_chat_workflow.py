@@ -15,7 +15,10 @@ from duo_workflow_service.entities import (
     ToolStatus,
     WorkflowStatusEnum,
 )
-from duo_workflow_service.entities.state import ChatWorkflowState
+from duo_workflow_service.entities.state import (
+    ApprovalStateRejection,
+    ChatWorkflowState,
+)
 from duo_workflow_service.internal_events.event_enum import CategoryEnum
 from duo_workflow_service.workflows.chat.workflow import (
     CHAT_GITLAB_MUTATION_TOOLS,
@@ -215,7 +218,7 @@ def test_are_tools_called_with_various_content(
         "last_human_input": None,
         "context_elements": [],
         "project": None,
-        "cancel_tool_message": "",
+        "approval": None,
     }
     assert workflow._are_tools_called(state) == expected_result
 
@@ -249,7 +252,7 @@ def test_are_tools_called_with_tool_use(workflow_with_project):
         "last_human_input": None,
         "context_elements": [],
         "project": None,
-        "cancel_tool_message": "",
+        "approval": None,
     }
     assert workflow._are_tools_called(state) == Routes.TOOL_USE
 
@@ -439,7 +442,7 @@ async def test_get_graph_input_resume_with_rejected_approval(
     assert result.update["status"] == WorkflowStatusEnum.EXECUTION
     assert "conversation_history" not in result.update
     assert (
-        result.update["cancel_tool_message"]
+        result.update["approval"].message
         == "Rejected the tool usage because it's not safe"
     )
 
@@ -563,7 +566,7 @@ async def test_chat_workflow_status_flow_integration(
         last_human_input=None,
         context_elements=[],
         project=None,
-        cancel_tool_message=None,
+        approval=None,
     )
 
     ai_response_with_tools = AIMessage(content="I'll list the issues for you.")
@@ -589,7 +592,7 @@ async def test_chat_workflow_status_flow_integration(
         last_human_input=None,
         context_elements=[],
         project=None,
-        cancel_tool_message=None,
+        approval=None,
     )
 
     ai_response_final = AIMessage(content="Here are the issues I found: ...")
@@ -616,7 +619,7 @@ async def test_agent_run_with_tool_approval_required(workflow_with_project):
         last_human_input=None,
         context_elements=[],
         project=None,
-        cancel_tool_message=None,
+        approval=None,
     )
 
     ai_message = AIMessage(content="I'll create the file for you")
@@ -640,7 +643,23 @@ async def test_agent_run_with_tool_approval_required(workflow_with_project):
 
 
 @pytest.mark.asyncio
-async def test_agent_run_with_cancel_tool_message(workflow_with_project):
+@pytest.mark.parametrize(
+    ("cancel_tool_message", "expected_tool_message"),
+    [
+        (
+            "I don't want this file created",
+            "Tool is cancelled temporarily as user has a comment. Comment: I don't want this file created",
+        ),
+        (None, "Tool is cancelled by user."),
+    ],
+    ids=[
+        "Test with simple string content",
+        "Test with list content but no tool_use",
+    ],
+)
+async def test_agent_run_with_cancel_tool_message(
+    workflow_with_project, cancel_tool_message, expected_tool_message
+):
     """Test agent run method when a tool is cancelled with a message."""
     # Setup a state with a previous AI message containing tool calls
     ai_message_with_tools = AIMessage(content="I'll use a tool")
@@ -665,7 +684,7 @@ async def test_agent_run_with_cancel_tool_message(workflow_with_project):
         last_human_input=None,
         context_elements=[],
         project=None,
-        cancel_tool_message="I don't want this file created",
+        approval=ApprovalStateRejection(message=cancel_tool_message),
     )
 
     ai_response_after_cancel = AIMessage(
@@ -686,8 +705,7 @@ async def test_agent_run_with_cancel_tool_message(workflow_with_project):
         if hasattr(msg, "tool_call_id")
     ]
     assert len(tool_messages) == 1
-    assert "Tool cancelled" in tool_messages[0].content
-    assert "I don't want this file created" in tool_messages[0].content
+    assert expected_tool_message == tool_messages[0].content
 
 
 @pytest.mark.asyncio

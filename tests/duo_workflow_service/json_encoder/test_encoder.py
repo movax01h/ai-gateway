@@ -1,6 +1,10 @@
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
 
-from duo_workflow_service.entities.state import ReplacementRule, SearchAndReplaceConfig
+from duo_workflow_service.entities.state import (
+    ApprovalStateRejection,
+    ReplacementRule,
+    SearchAndReplaceConfig,
+)
 from duo_workflow_service.json_encoder.encoder import CustomEncoder
 
 
@@ -102,4 +106,15 @@ def test_default_with_search_and_replace_config():
             },
         ],
         "type": "SearchAndReplaceConfig",
+    }
+
+
+def test_default_with_approval_state():
+    encoder = CustomEncoder()
+    o = ApprovalStateRejection(message="Cancel this tool")
+
+    encoded_approval_state = encoder.default(o)
+    assert encoded_approval_state == {
+        "message": "Cancel this tool",
+        "type": "ApprovalStateRejection",
     }
