@@ -57,7 +57,6 @@ def workflow_state(plan: Plan):
         handover=[],
         last_human_input=None,
         ui_chat_log=[],
-        files_changed=[],
     )
 
 

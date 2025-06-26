@@ -34,11 +34,6 @@ from duo_workflow_service.tools import (
     RunCommand,
     Toolset,
 )
-from duo_workflow_service.tools.filesystem import (  # MkdirInput,
-    EditFileInput,
-    FindFilesInput,
-    WriteFileInput,
-)
 from duo_workflow_service.tools.planner import (
     AddNewTask,
     AddNewTaskInput,
@@ -634,88 +629,6 @@ async def test_state_manipulation(
     assert tool_log["message_type"] == MessageTypeEnum.TOOL
     assert tool_log["content"] == test_case["expected_log_content"]
     assert tool_log["tool_info"] is None
-
-
-@pytest.mark.asyncio
-@pytest.mark.parametrize(
-    "test_case",
-    [
-        {
-            "tool_call": {
-                "id": "1",
-                "name": "edit_file",
-                "args": EditFileInput(
-                    file_path="test.txt", old_str="1", new_str="2"
-                ).model_dump(),
-            },
-            "tool_tracked": True,
-        },
-        # {
-        #     "tool_call": {
-        #         "id": "1",
-        #         "name": "mkdir",
-        #         "args": MkdirInput(
-        #             directory_path="this_is_a_dir",
-        #         ).model_dump(),
-        #     },
-        #     "tool_tracked": True,
-        # },
-        {
-            "tool_call": {
-                "id": "1",
-                "name": "create_file_with_contents",
-                "args": WriteFileInput(
-                    file_path="file.txt",
-                    contents="file contents",
-                ).model_dump(),
-            },
-            "tool_tracked": True,
-        },
-        {
-            "tool_call": {
-                "id": "1",
-                "name": "find_files",
-                "args": FindFilesInput(name_pattern="pattern").model_dump(),
-            },
-            "tool_tracked": False,
-        },
-    ],
-)
-async def test_tool_changes_are_tracked(
-    workflow_state,
-    test_case,
-):
-    mock_toolset = MagicMock(spec=Toolset)
-    tool = mock_tool(side_effect="Success", args_schema=test_case["tool_call"]["args"])
-    mock_toolset.__contains__ = MagicMock(return_value=True)
-    mock_toolset.__getitem__ = MagicMock(return_value=tool)
-
-    tools_executor = ToolsExecutor(
-        tools_agent_name="planner",
-        toolset=mock_toolset,
-        workflow_id="123",
-        workflow_type=CategoryEnum.WORKFLOW_SOFTWARE_DEVELOPMENT,
-    )
-    workflow_state["conversation_history"]["planner"] = [
-        AIMessage(
-            content=[{"type": "text", "text": "test"}],
-            tool_calls=[test_case["tool_call"]],
-        ),
-    ]
-
-    result = await tools_executor.run(workflow_state)
-    updates = cast(Command, result[1]).update
-
-    if test_case["tool_tracked"]:
-        assert len(updates["files_changed"]) == 1
-        assert (
-            updates["files_changed"][0]["tool_name"] == test_case["tool_call"]["name"]
-        )
-        assert (
-            updates["files_changed"][0]["tool_args"] == test_case["tool_call"]["args"]
-        )
-    else:
-        assert len(updates["files_changed"]) == 0
 
 
 @pytest.mark.asyncio

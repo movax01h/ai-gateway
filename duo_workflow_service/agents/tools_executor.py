@@ -11,7 +11,6 @@ from pydantic import ValidationError
 from duo_workflow_service.entities import WorkflowStatusEnum
 from duo_workflow_service.entities.state import (
     DuoWorkflowStateType,
-    FileChanges,
     MessageTypeEnum,
     Plan,
     ToolInfo,
@@ -37,12 +36,6 @@ from duo_workflow_service.tools import (
 from duo_workflow_service.tools.planner import PlannerTool
 
 _HIDDEN_TOOLS = ["get_plan"]
-
-_TRACK_FILE_CHANGES_TOOLS = [
-    "create_file_with_contents",
-    "mkdir",
-    "edit_file",
-]
 
 _ACTION_HANDLERS = [
     "add_new_task",
@@ -80,7 +73,6 @@ class ToolsExecutor:
         state_updates = {}
         responses: list[dict[str, Any] | Command] = []
         ui_chat_logs: List[UiChatLog] = []
-        files_changed: List[FileChanges] = []
         plan = state["plan"]
 
         self._create_ai_message_ui_chat_log(last_message, ui_chat_logs)
@@ -99,14 +91,6 @@ class ToolsExecutor:
             chat_logs = result.get("chat_logs", [])
             if chat_logs and isinstance(chat_logs[0], dict):
                 chat_logs[0].setdefault("message_sub_type", tool_name)
-
-            if tool_name in _TRACK_FILE_CHANGES_TOOLS:
-                files_changed.append(
-                    FileChanges(
-                        tool_name=tool_name,
-                        tool_args=tool_call.get("args", {}),
-                    )
-                )
 
             if tool_name in _COMMAND_OUTPUT_TOOLS:
                 if chat_logs and "tool_info" in chat_logs[0]:
@@ -127,7 +111,6 @@ class ToolsExecutor:
             Command(
                 update={
                     "ui_chat_log": ui_chat_logs,
-                    "files_changed": files_changed,
                     **state_updates,
                 }
             )
