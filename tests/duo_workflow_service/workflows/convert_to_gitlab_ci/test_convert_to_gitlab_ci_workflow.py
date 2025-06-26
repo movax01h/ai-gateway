@@ -217,7 +217,6 @@ async def test_workflow_compilation(
 @patch(
     "duo_workflow_service.workflows.abstract_workflow.fetch_project_data_with_workflow_id"
 )
-@patch("duo_workflow_service.workflows.abstract_workflow.fetch_workflow_config")
 @patch("duo_workflow_service.workflows.convert_to_gitlab_ci.workflow.create_chat_model")
 @patch("duo_workflow_service.workflows.abstract_workflow.GitLabWorkflow", autospec=True)
 @patch("duo_workflow_service.workflows.abstract_workflow.UserInterface", autospec=True)
@@ -225,7 +224,6 @@ async def test_workflow_run(
     mock_checkpoint_notifier,
     mock_gitlab_workflow,
     mock_chat_client,
-    mock_fetch_workflow_config,
     mock_fetch_project_data_with_workflow_id,
     mock_run_tool_node_generic_class,
     mock_tools_executor,
@@ -238,13 +236,16 @@ async def test_workflow_run(
     mock_checkpoint_notifier_instance = mock_checkpoint_notifier.return_value
     mock_tools_registry = MagicMock(spec=ToolsRegistry)
     mock_tools_registry_cls.configure = AsyncMock(return_value=mock_tools_registry)
-    mock_fetch_project_data_with_workflow_id.return_value = {
-        "id": 1,
-        "name": "test-project",
-        "description": "This is a test project",
-        "http_url_to_repo": "https://example.com/project",
-        "web_url": "https://example.com/project",
-    }
+    mock_fetch_project_data_with_workflow_id.return_value = (
+        {
+            "id": 1,
+            "name": "test-project",
+            "description": "This is a test project",
+            "http_url_to_repo": "https://example.com/project",
+            "web_url": "https://example.com/project",
+        },
+        {"project_id": 1},
+    )
 
     mock_git_lab_workflow_instance = mock_gitlab_workflow.return_value
     mock_git_lab_workflow_instance.__aenter__.return_value = (
@@ -323,7 +324,6 @@ async def test_workflow_run(
 @patch(
     "duo_workflow_service.workflows.abstract_workflow.fetch_project_data_with_workflow_id"
 )
-@patch("duo_workflow_service.workflows.abstract_workflow.fetch_workflow_config")
 @patch("duo_workflow_service.workflows.convert_to_gitlab_ci.workflow.create_chat_model")
 @patch("duo_workflow_service.workflows.abstract_workflow.GitLabWorkflow", autospec=True)
 @patch("duo_workflow_service.workflows.abstract_workflow.UserInterface", autospec=True)
@@ -333,7 +333,6 @@ async def test_workflow_run_with_file_not_found(
     mock_checkpoint_notifier,
     mock_gitlab_workflow,
     mock_chat_client,
-    mock_fetch_workflow_config,
     mock_fetch_project_data_with_workflow_id,
     mock_run_tool_node_generic_class,
     mock_agent,
@@ -343,13 +342,16 @@ async def test_workflow_run_with_file_not_found(
     mock_checkpoint_notifier_instance = mock_checkpoint_notifier.return_value
     mock_tools_registry = MagicMock(spec=ToolsRegistry)
     mock_tools_registry_cls.configure = AsyncMock(return_value=mock_tools_registry)
-    mock_fetch_project_data_with_workflow_id.return_value = {
-        "id": 1,
-        "name": "test-project",
-        "description": "This is a test project",
-        "http_url_to_repo": "https://example.com/project",
-        "web_url": "https://example.com/project",
-    }
+    mock_fetch_project_data_with_workflow_id.return_value = (
+        {
+            "id": 1,
+            "name": "test-project",
+            "description": "This is a test project",
+            "http_url_to_repo": "https://example.com/project",
+            "web_url": "https://example.com/project",
+        },
+        {"project_id": 1},
+    )
 
     mock_git_lab_workflow_instance = mock_gitlab_workflow.return_value
     mock_git_lab_workflow_instance.__aenter__.return_value = (
@@ -397,26 +399,27 @@ async def test_workflow_run_with_file_not_found(
 @patch(
     "duo_workflow_service.workflows.abstract_workflow.fetch_project_data_with_workflow_id"
 )
-@patch("duo_workflow_service.workflows.abstract_workflow.fetch_workflow_config")
 @patch("duo_workflow_service.workflows.convert_to_gitlab_ci.workflow.create_chat_model")
 @patch("duo_workflow_service.workflows.abstract_workflow.GitLabWorkflow", autospec=True)
 async def test_workflow_run_with_exception(
     mock_gitlab_workflow,
     mock_chat_client,
-    mock_fetch_workflow_config,
     mock_fetch_project_data_with_workflow_id,
     mock_tools_registry_cls,
     mock_state,
 ):
     mock_tools_registry = MagicMock(spec=ToolsRegistry)
     mock_tools_registry_cls.configure = AsyncMock(return_value=mock_tools_registry)
-    mock_fetch_project_data_with_workflow_id.return_value = {
-        "id": 1,
-        "name": "test-project",
-        "description": "This is a test project",
-        "http_url_to_repo": "https://example.com/project",
-        "web_url": "https://example.com/project",
-    }
+    mock_fetch_project_data_with_workflow_id.return_value = (
+        {
+            "id": 1,
+            "name": "test-project",
+            "description": "This is a test project",
+            "http_url_to_repo": "https://example.com/project",
+            "web_url": "https://example.com/project",
+        },
+        {"project_id": 1},
+    )
 
     mock_git_lab_workflow_instance = mock_gitlab_workflow.return_value
     mock_git_lab_workflow_instance.__aenter__.return_value = (

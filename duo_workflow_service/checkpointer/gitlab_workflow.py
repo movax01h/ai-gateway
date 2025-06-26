@@ -1,3 +1,4 @@
+import asyncio
 import base64
 import functools
 import json
@@ -264,10 +265,23 @@ class GitLabWorkflow(BaseCheckpointSaver[Any], AbstractAsyncContextManager[Any])
                 - WorkflowStatusEventEnum: The status event (START, RESUME, or RETRY)
                 - EventPropertyEnum: The associated event property for tracking
         """
-        if not await self.aget_tuple(config):
+        checkpoint_task = self.aget_tuple(config)
+        status_task = self._status_handler.get_workflow_status(self._workflow_id)
+
+        try:
+            checkpoint_tuple, status = await asyncio.gather(
+                checkpoint_task, status_task
+            )
+        except Exception as e:
+            self._logger.warning(
+                f"Parallel execution failed, falling back to sequential: {e}"
+            )
+            checkpoint_tuple = await self.aget_tuple(config)
+            status = await self._status_handler.get_workflow_status(self._workflow_id)
+
+        if not checkpoint_tuple:
             return WorkflowStatusEventEnum.START, EventPropertyEnum.WORKFLOW_ID
 
-        status = await self._status_handler.get_workflow_status(self._workflow_id)
         if status in [
             WorkflowStatusEnum.INPUT_REQUIRED,
             WorkflowStatusEnum.PLAN_APPROVAL_REQUIRED,
