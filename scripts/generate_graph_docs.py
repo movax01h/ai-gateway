@@ -9,7 +9,7 @@ from langgraph.checkpoint.memory import MemorySaver
 
 from ai_gateway.config import Config
 from ai_gateway.container import ContainerApplication
-from duo_workflow_service.components import GoalDisambiguationComponent, ToolsRegistry
+from duo_workflow_service.components import ToolsRegistry
 from duo_workflow_service.internal_events.event_enum import CategoryEnum
 
 HEADER_TEXT = """
@@ -25,7 +25,6 @@ def main():
     # pylint: disable=direct-environment-variable-reference
     os.environ["FEATURE_GOAL_DISAMBIGUATION"] = "true"
     os.environ["WORKFLOW_INTERRUPT"] = "true"
-    GoalDisambiguationComponent._allowed_to_clarify = MagicMock(return_value=True)
 
     structlog.configure(
         wrapper_class=structlog.make_filtering_bound_logger(logging.ERROR),
