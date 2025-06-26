@@ -346,7 +346,7 @@ class TestRun:
             generator_adapter=mock_adapter,
             serializers=[mock_json_serializer],
         )
-        mock_generator.generate.assert_called_once_with(num_examples=10)
+        mock_generator.generate.assert_called_once_with(num_examples=10, batch_size=5)
 
         assert mock_echo.call_args_list == [
             call("Generating dataset with 10 examples from prompt: chat/explain_code"),
@@ -433,7 +433,7 @@ class TestRun:
             generator_adapter=mock_adapter,
             serializers=[mock_json_serializer, mock_langsmith_serializer],
         )
-        mock_generator.generate.assert_called_once_with(num_examples=5)
+        mock_generator.generate.assert_called_once_with(num_examples=5, batch_size=5)
         assert any(
             "uploaded to LangSmith" in call.args[0] for call in mock_echo.call_args_list
         )
