@@ -489,7 +489,6 @@ async def test_workflow_run_when_exception(
             "configurable": {"thread_id": "123", "checkpoint_id": "checkpoint1"}
         }
     )
-    mock_git_lab_workflow_instance.get_next_version = MagicMock(return_value=1)
 
     class AsyncIterator:
         def __init__(self):
@@ -709,7 +708,6 @@ async def test_workflow_run_with_tools_registry(
             "configurable": {"thread_id": "123", "checkpoint_id": "checkpoint1"}
         }
     )
-    mock_git_lab_workflow_instance.get_next_version = MagicMock(return_value=1)
 
     class AsyncIterator:
         def __init__(self):
@@ -857,7 +855,6 @@ async def test_workflow_run_with_setup_error(
             "configurable": {"thread_id": "123", "checkpoint_id": "checkpoint1"}
         }
     )
-    mock_git_lab_workflow_instance.get_next_version = MagicMock(return_value=1)
 
     workflow = Workflow(
         "123",
@@ -904,7 +901,6 @@ async def test_workflow_run_with_missing_web_url(
             "configurable": {"thread_id": "123", "checkpoint_id": "checkpoint1"}
         }
     )
-    mock_git_lab_workflow_instance.get_next_version = MagicMock(return_value=1)
 
     workflow = Workflow(
         "123",
@@ -958,7 +954,6 @@ async def test_workflow_run_with_invalid_web_url(
             "configurable": {"thread_id": "123", "checkpoint_id": "checkpoint1"}
         }
     )
-    mock_git_lab_workflow_instance.get_next_version = MagicMock(return_value=1)
 
     workflow = Workflow(
         "123",
