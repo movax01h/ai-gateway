@@ -68,7 +68,6 @@ class GetWorkflowContext(DuoBaseTool):
                 workflow=WorkflowContext(
                     id=workflow_id,
                     plan={"steps": []},
-                    files_changed=[],
                     goal="No goal available",
                     summary="No summary available",
                 )
@@ -80,8 +79,6 @@ class GetWorkflowContext(DuoBaseTool):
             raise ValueError("Can only collect context on completed workflows")
 
         plan = channel_values.get("plan", {})
-
-        files_changed = channel_values.get("files_changed", [])
 
         goal = ""
         handover_messages = channel_values.get("handover", [])
@@ -111,7 +108,6 @@ class GetWorkflowContext(DuoBaseTool):
                 plan=plan,
                 goal=goal,
                 summary=summary,
-                files_changed=files_changed,
             )
         )
         return json.dumps(context)

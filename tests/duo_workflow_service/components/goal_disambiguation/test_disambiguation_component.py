@@ -73,7 +73,6 @@ class TestGoalDisambiguationComponent:
             last_human_input=None,
             handover=[],
             ui_chat_log=[],
-            files_changed=[],
         )
 
     @pytest.fixture
@@ -212,7 +211,6 @@ class TestGoalDisambiguationComponent:
                     ),
                 ]
             },
-            files_changed=[],
             ui_chat_log=[],
             handover=[human_msg, ai_msg],
             last_human_input=None,
@@ -272,7 +270,6 @@ class TestGoalDisambiguationComponent:
             last_human_input=None,
             handover=[],
             ui_chat_log=[],
-            files_changed=[],
         )
 
         with patch(

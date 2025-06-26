@@ -1,5 +1,4 @@
 from enum import StrEnum
-from operator import add
 from typing import Annotated, Any, Dict, List, Optional, TypedDict, Union
 
 import structlog
@@ -42,11 +41,6 @@ class Task(TypedDict):
 
 class Plan(TypedDict):
     steps: List[Task]
-
-
-class FileChanges(TypedDict):
-    tool_name: str
-    tool_args: Dict[str, Any]
 
 
 class WorkflowStatusEnum(StrEnum):
@@ -266,7 +260,6 @@ class WorkflowState(TypedDict):
     ui_chat_log: Annotated[List[UiChatLog], _ui_chat_log_reducer]
     handover: List[BaseMessage]
     last_human_input: Union[WorkflowEvent, None]
-    files_changed: Annotated[List[FileChanges], add]
 
 
 class ReplacementRule(BaseModel):
@@ -325,7 +318,6 @@ class WorkflowContext(TypedDict):
     plan: Plan
     goal: str
     summary: str
-    files_changed: List[FileChanges]
 
 
 class Context(TypedDict):

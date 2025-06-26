@@ -389,7 +389,6 @@ class Workflow(AbstractWorkflow):
             last_human_input=None,
             handover=[],
             ui_chat_log=[initial_ui_chat_log],
-            files_changed=[],
         )
 
     def _setup_context_builder(
