@@ -133,6 +133,16 @@ def run(
     num_examples: Annotated[
         int, typer.Option(help="Number of examples to generate")
     ] = 10,
+    batch_size: Annotated[
+        int,
+        typer.Option(
+            "--batch-size",
+            "-b",
+            help="Number of examples to generate per batch",
+            min=1,
+            max=5,
+        ),
+    ] = 5,
     temperature: Annotated[
         float, typer.Option(help="Temperature setting for generation")
     ] = 0.7,
@@ -203,7 +213,7 @@ def run(
         serializers=serializers,
     )
 
-    generator.generate(num_examples=num_examples)
+    generator.generate(num_examples=num_examples, batch_size=batch_size)
 
     typer.echo(f"Dataset generated successfully: {json_serializer.output_path}")
     if upload:

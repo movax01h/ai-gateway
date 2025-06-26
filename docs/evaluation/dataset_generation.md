@@ -37,6 +37,7 @@ poetry run generate-dataset [OPTIONS] PROMPT_ID PROMPT_VERSION DATASET_NAME
 
 - `--output-dir`: Directory to save the dataset (default: project root directory)
 - `--num-examples`: Number of examples to generate (default: 10)
+- `--batch-size`: Number of examples to generate per batch (default: 5)
 - `--temperature`: Temperature setting for generation (default: 0.7)
 - `--upload`, `-u`: Upload the dataset to LangSmith after generation (default: False)
 - `--description`: Optional description for the LangSmith dataset (only used with --upload)
@@ -50,6 +51,17 @@ poetry run generate-dataset \
   chat/explain_code \
   1.0.0 \
   duo_chat.explain_code.1
+```
+
+Generate a dataset with 20 examples using batch size of 5. Smaller batch size helps prevent issues with rate limits and ensures complete outputs without exceeding token constraints.
+
+```shell
+poetry run generate-dataset \
+  chat/explain_code \
+  1.0.0 \
+  duo_chat.explain_code.large \
+  --num-examples 20 \
+  --batch-size 5
 ```
 
 Generate a larger dataset with different temperature:
