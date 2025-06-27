@@ -646,6 +646,7 @@ def ui_chat_log() -> list[UiChatLog]:
             "tool_info": None,
             "context_elements": None,
             "message_sub_type": None,
+            "additional_context": None,
         }
     ]
 

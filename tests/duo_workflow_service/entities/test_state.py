@@ -361,6 +361,7 @@ def test_ui_chat_log_reducer():
             "correlation_id": None,
             "tool_info": None,
             "context_elements": None,
+            "additional_context": None,
         },
         {
             "message_type": MessageTypeEnum.TOOL,
@@ -371,6 +372,7 @@ def test_ui_chat_log_reducer():
             "correlation_id": None,
             "tool_info": {"name": "read_file", "args": {"file_path": "a/b/c.py"}},
             "context_elements": None,
+            "additional_context": None,
         },
     ]
 
@@ -384,6 +386,7 @@ def test_ui_chat_log_reducer():
             "correlation_id": None,
             "tool_info": None,
             "context_elements": None,
+            "additional_context": None,
         }
     ]
 
@@ -399,6 +402,7 @@ def test_ui_chat_log_reducer():
             "correlation_id": None,
             "tool_info": None,
             "context_elements": None,
+            "additional_context": None,
         },
         {
             "message_type": MessageTypeEnum.TOOL,
@@ -409,6 +413,7 @@ def test_ui_chat_log_reducer():
             "correlation_id": None,
             "tool_info": {"name": "read_file", "args": {"file_path": "a/b/c.py"}},
             "context_elements": None,
+            "additional_context": None,
         },
         {
             "message_type": MessageTypeEnum.USER,
@@ -419,6 +424,7 @@ def test_ui_chat_log_reducer():
             "correlation_id": None,
             "tool_info": None,
             "context_elements": None,
+            "additional_context": None,
         },
     ]
 
@@ -434,6 +440,7 @@ def test_ui_chat_log_reducer_idempotency():
             "correlation_id": None,
             "tool_info": None,
             "context_elements": None,
+            "additional_context": None,
         }
     ]
 
@@ -447,6 +454,7 @@ def test_ui_chat_log_reducer_idempotency():
             "correlation_id": None,
             "tool_info": None,
             "context_elements": None,
+            "additional_context": None,
         }
     ]
 
@@ -463,6 +471,7 @@ def test_ui_chat_log_reducer_idempotency():
             "correlation_id": None,
             "tool_info": None,
             "context_elements": None,
+            "additional_context": None,
         },
         {
             "message_type": MessageTypeEnum.USER,
@@ -473,6 +482,7 @@ def test_ui_chat_log_reducer_idempotency():
             "correlation_id": None,
             "tool_info": None,
             "context_elements": None,
+            "additional_context": None,
         },
     ]
 
@@ -488,6 +498,7 @@ def test_ui_chat_log_reducer_with_none():
             "correlation_id": None,
             "tool_info": None,
             "context_elements": None,
+            "additional_context": None,
         }
     ]
 

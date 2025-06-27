@@ -116,14 +116,15 @@ class Workflow(AbstractWorkflow):
         contextElements = self._context_elements or []
 
         initial_ui_chat_log = UiChatLog(
-            message_type=MessageTypeEnum.TOOL,
             message_sub_type=None,
-            content=f"Starting chat: {goal}",
+            message_type=MessageTypeEnum.USER,
+            content=goal,
             timestamp=datetime.now(timezone.utc).isoformat(),
             status=ToolStatus.SUCCESS,
             correlation_id=None,
             tool_info=None,
             context_elements=contextElements,
+            additional_context=self._additional_context,
         )
 
         return ChatWorkflowState(
@@ -170,6 +171,19 @@ class Workflow(AbstractWorkflow):
                                 )
                             ]
                         }
+
+                new_message_chat_log = UiChatLog(
+                    message_type=MessageTypeEnum.USER,
+                    message_sub_type=None,
+                    content=goal,
+                    timestamp=datetime.now(timezone.utc).isoformat(),
+                    status=ToolStatus.SUCCESS,
+                    correlation_id=None,
+                    tool_info=None,
+                    context_elements=None,
+                    additional_context=self._additional_context,
+                )
+                state_update["ui_chat_log"] = [new_message_chat_log]
 
                 return Command(goto=next_step, update=state_update)
             case _:

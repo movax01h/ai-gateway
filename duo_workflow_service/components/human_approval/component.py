@@ -142,6 +142,7 @@ class HumanApprovalComponent(ABC):
                 status=ToolStatus.SUCCESS,
                 tool_info=None,
                 context_elements=None,
+                additional_context=None,
             )
         ]
 

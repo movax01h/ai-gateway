@@ -162,6 +162,7 @@ def _load_file_contents(file_contents: list[str], state: WorkflowState):
                 correlation_id=None,
                 tool_info=None,
                 context_elements=None,
+                additional_context=None,
             )
         )
     else:
@@ -175,6 +176,7 @@ def _load_file_contents(file_contents: list[str], state: WorkflowState):
                 correlation_id=None,
                 tool_info=None,
                 context_elements=None,
+                additional_context=None,
             )
         )
 
@@ -196,6 +198,7 @@ def _git_output(command_output: list[str], state: WorkflowState):
             correlation_id=None,
             tool_info=None,
             context_elements=None,
+            additional_context=None,
         )
     ]
 
@@ -363,6 +366,7 @@ class Workflow(AbstractWorkflow):
             correlation_id=None,
             tool_info=None,
             context_elements=None,
+            additional_context=None,
         )
 
         return WorkflowState(

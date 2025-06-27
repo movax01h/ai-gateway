@@ -218,6 +218,7 @@ class GoalDisambiguationComponent:
                     correlation_id=None,
                     tool_info=None,
                     context_elements=None,
+                    additional_context=None,
                 )
             ],
             "status": WorkflowStatusEnum.INPUT_REQUIRED,
@@ -251,6 +252,7 @@ class GoalDisambiguationComponent:
                 status=ToolStatus.SUCCESS,
                 tool_info=None,
                 context_elements=None,
+                additional_context=None,
             )
         ]
 
