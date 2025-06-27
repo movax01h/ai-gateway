@@ -217,7 +217,7 @@ Examples of batched file edits:
         file_path="docs/changelog.md",
         old_str="# Changelog\n\n## 1.0.0",
         new_str="# Changelog\n\n## 1.1.0\n- Bug fixes\n- Performance improvements\n\n## 1.0.0"
-      )"""
+    )"""
     args_schema: Type[BaseModel] = EditFileInput  # type: ignore
 
     async def _arun(self, file_path: str, old_str: str, new_str: str) -> str:

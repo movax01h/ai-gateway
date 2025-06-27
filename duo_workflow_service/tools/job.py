@@ -23,6 +23,8 @@ class GetLogsFromJobInput(ProjectResourceInput):
 
 class GetLogsFromJob(DuoBaseTool):
     name: str = "get_job_logs"
+
+    # editorconfig-checker-disable
     description: str = """Get the trace for a job.
 
     Use this tool to get more details for specific jobs within a pipeline.
@@ -41,6 +43,8 @@ class GetLogsFromJob(DuoBaseTool):
 
     You can obtain the project_id and job_id from the pipeline details.
     """
+    # editorconfig-checker-enable
+
     args_schema: Type[BaseModel] = GetLogsFromJobInput  # type: ignore
 
     def _validate_job_url(

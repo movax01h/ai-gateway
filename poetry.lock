@@ -940,6 +940,17 @@ gmpy = ["gmpy"]
 gmpy2 = ["gmpy2"]
 
 [[package]]
+name = "editorconfig-checker"
+version = "3.2.1"
+description = "Python wrapper around invoking editorconfig-checker (https://github.com/editorconfig-checker/editorconfig-checker)"
+optional = false
+python-versions = ">=2.7"
+groups = ["lint"]
+files = [
+    {file = "editorconfig-checker-3.2.1.tar.gz", hash = "sha256:41c884129343f1418118fc160889dc0cba4e66e23b45bc9731f40d73be4ce204"},
+]
+
+[[package]]
 name = "execnet"
 version = "2.1.1"
 description = "execnet: rapid multi-Python deployment"
@@ -6461,4 +6472,4 @@ cffi = ["cffi (>=1.11)"]
 [metadata]
 lock-version = "2.1"
 python-versions = "~3.12.0"
-content-hash = "c6f73cad84ffa29660befabebd196334d91c3134777044c75343c7d194eb7e50"
+content-hash = "2a70933df8328b642282fb347740cf6ce7d728254e231a6d0c8dada6b3be0fa1"

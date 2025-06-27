@@ -14,7 +14,7 @@ GITLAB_DOCS_CLONE_DIR=${TEST_CLONE}
 GITLAB_DOCS_JSONL_EXPORT_PATH=${TEST_CLONE}/docs-${TEST_TAG}.jsonl
 
 echo "------------------------------------------------------- Clone Docs -------------------------------------------------------"
-rm -Rf "${GITLAB_DOCS_CLONE_DIR}" 
+rm -Rf "${GITLAB_DOCS_CLONE_DIR}"
 git clone --branch "${TEST_TAG}" --depth 1 "${GITLAB_DOCS_REPO}" "${GITLAB_DOCS_CLONE_DIR}"
 
 echo "------------------------------------------------------- Validating -------------------------------------------------------"

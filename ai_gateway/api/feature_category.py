@@ -99,11 +99,11 @@ def track_metadata(request_param: str, mapping: dict[str, GitLabUnitPrimitive]):
 
     ```
     @track_metadata(
-         "chat_invokable",
-         mapping={
-             "explain_vulnerability": GitLabUnitPrimitive.EXPLAIN_VULNERABILITY,
-             "troubleshoot_job": GitLabUnitPrimitive.TROUBLESHOOT_JOB,
-         }
+        "chat_invokable",
+        mapping={
+            "explain_vulnerability": GitLabUnitPrimitive.EXPLAIN_VULNERABILITY,
+            "troubleshoot_job": GitLabUnitPrimitive.TROUBLESHOOT_JOB,
+        }
     )
     ```
     """

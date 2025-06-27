@@ -39,6 +39,7 @@ class MockPromptClass(Prompt):
     pass
 
 
+# editorconfig-checker-disable
 @pytest.fixture
 def mock_fs(fs: FakeFilesystem):
     prompts_definitions_dir = (
@@ -195,6 +196,9 @@ params:
   model_class_provider: test
 """,
     )
+
+
+# editorconfig-checker-enable
 
 
 @pytest.fixture

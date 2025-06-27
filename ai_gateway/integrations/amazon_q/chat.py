@@ -220,9 +220,9 @@ class ChatAmazonQ(BaseChatModel):
         Returns:
             tuple: A tuple containing:
                 - message (dict): A dictionary with a "content" key that combines the system and the latest
-                  user and assistant messages.
+                    user and assistant messages.
                 - history (list): A list of dictionaries representing user and assistant message history,
-                  with either {"userInputMessage": { "content" ... }} or {"assistantResponseMessage": {"content" ... }} formats.
+                    with either {"userInputMessage": { "content" ... }} or {"assistantResponseMessage": {"content" ... }} formats.
         """
         input_messages = []
         # Extract the system message to always send it as an input

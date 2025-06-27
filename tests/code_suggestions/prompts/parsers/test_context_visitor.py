@@ -210,6 +210,7 @@ class SuggestionsResponse(BaseModel):
     choices: list[Choice]
 """
 
+# editorconfig-checker-disable
 JAVASCRIPT_SOURCE_SAMPLE = """
 import React, { useState } from "react";
 import dateFns from "date-fns";
@@ -379,8 +380,10 @@ Cypress.on("uncaught:exception", (err) => {
 
 Cypress.on("before:run", () => { // don't care
 """
+# editorconfig-checker-enable
 
 
+# editorconfig-checker-disable
 @pytest.mark.parametrize(
     (
         "lang_id",
@@ -639,6 +642,7 @@ Cypress.on("before:run", () => { // don't care
         ),
     ],
 )
+# editorconfig-checker-disable
 @pytest.mark.asyncio
 async def test_suffix_near_cursor(
     lang_id: LanguageId,

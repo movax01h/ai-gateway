@@ -3,6 +3,7 @@ import pytest
 from ai_gateway.code_suggestions.processing.base import LanguageId
 from ai_gateway.code_suggestions.prompts.parsers import CodeParser
 
+# editorconfig-checker-disable
 GO_SOURCE_SAMPLE = """package main
 
 import (
@@ -124,6 +125,7 @@ def addInt( a:Int, b:Int ) : Int = {
     return sum
 }
 """
+# editorconfig-checker-enable
 
 
 @pytest.mark.parametrize(

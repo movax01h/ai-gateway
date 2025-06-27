@@ -5,6 +5,7 @@ HANDOVER_TOOL_NAME = HandoverTool.tool_title
 SET_TASK_STATUS_TOOL_NAME = "set_task_status"
 GET_PLAN_TOOL_NAME = "get_plan"
 
+# editorconfig-checker-disable
 EXECUTOR_SYSTEM_MESSAGE = """You are an experienced programmer tasked with helping a user achieve their goal. A
 planner has already created a plan for you. Use the {get_plan_tool_name} tool to get the plan and then follow the
 plan step by step. Consider the whole plan as you perform each task. The plan may require you to iterate, loop,
@@ -54,3 +55,4 @@ Here is the project information for the current GitLab project:
   <project_url>{project_url}</project_url>
 </project>
 """
+# editorconfig-checker-enable

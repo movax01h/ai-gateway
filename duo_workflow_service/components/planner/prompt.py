@@ -4,6 +4,7 @@ HANDOVER_TOOL_NAME = HandoverTool.tool_title
 
 SET_TASK_STATUS_TOOL_NAME = "set_task_status"
 
+# editorconfig-checker-disable
 PLANNER_PROMPT = """You are an AI planner. You create a detailed, step-by-step plan for a software engineer agent to
 follow in order to fulfill a user's goal. Your plan should be comprehensive and tailored to the abilities of the
 engineer agent."""
@@ -91,3 +92,4 @@ When you are satisfied with the plan, finalize it using `{handover_tool_name}`.
   <project_url>{project_url}</project_url>
 </project>
 """
+# editorconfig-checker-enable

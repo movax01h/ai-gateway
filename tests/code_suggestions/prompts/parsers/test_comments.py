@@ -3,6 +3,7 @@ import pytest
 from ai_gateway.code_suggestions.processing.base import LanguageId
 from ai_gateway.code_suggestions.prompts.parsers import CodeParser
 
+# editorconfig-checker-disable
 EMPTY_SOURCE_FILE = ""
 
 C_SOURCE_SAMPLE_COMMENTS = """// foo
@@ -70,7 +71,7 @@ package main
 
 // The main function
 func main() {
-    
+
 }
 """
 
@@ -196,6 +197,7 @@ PHP_SOURCE_SAMPLE_MIXED = """
 echo "Hello World!";
 ?>
 """
+# editorconfig-checker-enable
 
 
 @pytest.mark.parametrize(

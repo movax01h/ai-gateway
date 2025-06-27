@@ -137,6 +137,7 @@ async def test_list_vulnerabilities(gitlab_client_mock, metadata, vulnerability_
     )
     assert response == expected_response
 
+    # editorconfig-checker-disable
     expected_query = """
         query($projectFullPath: ID!, $first: Int, $after: String, $severity: [VulnerabilitySeverity!]) {
           project(fullPath: $projectFullPath) {
@@ -161,6 +162,7 @@ async def test_list_vulnerabilities(gitlab_client_mock, metadata, vulnerability_
           }
         }
         """
+    # editorconfig-checker-enable
 
     gitlab_client_mock.apost.assert_called_once_with(
         path="/api/graphql",

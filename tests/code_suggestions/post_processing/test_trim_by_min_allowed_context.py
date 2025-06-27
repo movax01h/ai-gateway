@@ -3,6 +3,7 @@ import pytest
 from ai_gateway.code_suggestions.processing.ops import LanguageId, find_cursor_position
 from ai_gateway.code_suggestions.processing.post.ops import trim_by_min_allowed_context
 
+# editorconfig-checker-disable
 PYTHON_SAMPLE_1 = """
 class LineBasedCodeSnippets(BaseCodeSnippetsIterator):
     def __init__(self, content: str, num_lines: int, drop_last: bool = False):
@@ -76,6 +77,7 @@ const writeStringBackwards = (inpStr) => {
 const reverseString = (inpStr) => {
   let outStr = '';
 """
+# editorconfig-checker-enable
 
 
 @pytest.mark.parametrize(

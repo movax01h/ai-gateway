@@ -9,6 +9,7 @@ from duo_workflow_service.tools.duo_base_tool import DuoBaseTool
 
 DESCRIPTION_CHARACTER_LIMIT = 1_048_576
 
+# editorconfig-checker-disable
 GROUP_IDENTIFICATION_DESCRIPTION = """To identify the group you must provide either:
 - group_id parameter, or
 - A GitLab URL like:
@@ -21,6 +22,7 @@ EPIC_IDENTIFICATION_DESCRIPTION = """To identify an epic you must provide either
 - A GitLab URL like:
   - https://gitlab.com/groups/namespace/group/-/epics/42
 """
+# editorconfig-checker-enable
 
 
 class GroupURLValidationResult(NamedTuple):
@@ -262,6 +264,7 @@ class CreateEpic(EpicBaseTool):
     - Given the URL https://gitlab.com/groups/namespace/group and title 'New Feature', the tool call would be:
         create_epic(url="https://gitlab.com/groups/namespace/group", title='New Feature')
     """
+
     args_schema: Type[BaseModel] = WriteEpicInput
 
     async def _arun(self, title: str, **kwargs: Any) -> str:
@@ -364,6 +367,8 @@ reaction. Any returns epics given at least one reaction""",
 
 class ListEpics(EpicBaseTool):
     name: str = "list_epics"
+
+    # editorconfig-checker-disable
     description: str = f"""Get all epics of the requested group and its subgroups.
 
     {GROUP_IDENTIFICATION_DESCRIPTION}
@@ -374,6 +379,8 @@ class ListEpics(EpicBaseTool):
     - Given the URL https://gitlab.com/groups/namespace/group, the tool call would be:
         list_epics(url="https://gitlab.com/groups/namespace/group")
     """
+    # editorconfig-checker-enable
+
     args_schema: Type[BaseModel] = ListEpicsInput
 
     async def _arun(self, **kwargs: Any) -> str:
@@ -408,6 +415,8 @@ class ListEpics(EpicBaseTool):
 
 class GetEpic(EpicBaseTool):
     name: str = "get_epic"
+
+    # editorconfig-checker-disable
     description: str = f"""Get a single epic in a GitLab group
 
     {EPIC_IDENTIFICATION_DESCRIPTION}
@@ -418,6 +427,8 @@ class GetEpic(EpicBaseTool):
     - Given the URL https://gitlab.com/groups/namespace/group/-/epics/42, the tool call would be:
         get_epic(url="https://gitlab.com/groups/namespace/group/-/epics/42")
     """
+    # editorconfig-checker-enable
+
     args_schema: Type[BaseModel] = EpicResourceInput
 
     async def _arun(self, **kwargs: Any) -> str:

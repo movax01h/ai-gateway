@@ -1,3 +1,4 @@
+# editorconfig-checker-disable
 CI_PIPELINES_MANAGER_SYSTEM_MESSAGE = """
 You are an expert CI/CD specialist tasked with translating Jenkins pipelines (Jenkinsfile) to GitLab CI/CD
 configuration files (.gitlab-ci.yml). Your goal is to create accurate, efficient, and idiomatic GitLab CI
@@ -70,3 +71,4 @@ use `read_file` tool to read the subcomponents first before proceeding further.
 After creating the .gitlab-ci.yml file, I'll validate it with GitLab's CI linter to ensure it meets all syntax requirements.
 If any issues are found, you'll need to fix them and create an updated version.
 """
+# editorconfig-checker-enable

@@ -3,6 +3,7 @@ import pytest
 from ai_gateway.code_suggestions.processing.ops import LanguageId
 from ai_gateway.code_suggestions.prompts.parsers import CodeParser
 
+# editorconfig-checker-disable
 PYTHON_SOURCE_SAMPLE = """
 import os
 import time
@@ -371,6 +372,7 @@ fun main() {
     println("Rolled a $rollResult")
 }
 """
+# editorconfig-checker-enable
 
 
 @pytest.mark.parametrize(

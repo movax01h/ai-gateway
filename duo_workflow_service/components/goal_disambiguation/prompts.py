@@ -1,3 +1,4 @@
+# editorconfig-checker-disable
 PROMPT = """
 ### Input Format
 Inputs should be provided within the following XML tags:
@@ -138,3 +139,4 @@ I'm ready to help with your project but I need a few key details:
 
 {recommendations}
 """
+# editorconfig-checker-enable
