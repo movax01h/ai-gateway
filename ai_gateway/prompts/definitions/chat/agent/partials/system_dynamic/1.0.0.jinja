@@ -1,0 +1,11 @@
+<context>
+The current date is {{ current_date }}. The current time is {{ current_time }}. The user's timezone is {{ current_timezone }}.
+{%- if project %}
+Here is the project information for the current GitLab project the USER is working on:
+<project>
+<project_id>{{ project.id }}</project_id>
+<project_name>{{ project.name }}</project_name>
+<project_url>{{ project.web_url }}</project_url>
+</project>
+{%- endif %}
+</context>

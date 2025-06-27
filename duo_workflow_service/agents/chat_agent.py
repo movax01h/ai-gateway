@@ -46,15 +46,23 @@ class ChatAgentPromptTemplate(Runnable[ChatWorkflowState, PromptValue]):
         agent_name = _kwargs["agent_name"]
         project: Project | None = input.get("project")
 
-        if "system" in self.prompt_template:
-            content = jinja2_formatter(
-                self.prompt_template["system"],
+        # Handle system messages with static and dynamic parts
+        # Create separate system messages for static and dynamic parts
+        if "system_static" in self.prompt_template:
+            # Static content doesn't need Jinja2 processing
+            messages.append(
+                SystemMessage(content=self.prompt_template["system_static"])
+            )
+
+        if "system_dynamic" in self.prompt_template:
+            dynamic_content = jinja2_formatter(
+                self.prompt_template["system_dynamic"],
                 current_date=datetime.now().strftime("%Y-%m-%d"),
                 current_time=datetime.now().strftime("%H:%M:%S"),
                 current_timezone=datetime.now().astimezone().tzname(),
                 project=project,
             )
-            messages.append(SystemMessage(content=content))
+            messages.append(SystemMessage(content=dynamic_content))
 
         for m in input["conversation_history"][agent_name]:
             if isinstance(m, HumanMessage):
