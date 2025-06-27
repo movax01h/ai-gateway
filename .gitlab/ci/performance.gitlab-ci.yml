@@ -47,6 +47,8 @@ tests:performance:
     PARENT_PIPELINE_SOURCE: $CI_PIPELINE_SOURCE
     COMPONENT_MR_CI_COMMIT_SHA: $CI_COMMIT_SHORT_SHA
     COMPONENT_SERVICE_NAME: "ai-gateway-influx"
+    TEST_FILE_LOCATION: "performance_tests/k6_test"
+    DOCKER_COMPOSE_FILE_LOCATION: "performance_tests/setup"
   rules:
     - if: $CI_PROJECT_NAMESPACE =~ /^gitlab-org\/security.*/
       when: never
