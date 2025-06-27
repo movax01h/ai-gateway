@@ -1,6 +1,6 @@
 from datetime import datetime
 from http.client import responses
-from typing import Annotated, Any, AsyncIterator, Optional, Protocol
+from typing import Annotated, Any, AsyncIterator, Callable, Optional, Protocol
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from gitlab_cloud_connector import GitLabFeatureCategory, WrongUnitPrimitives
@@ -37,6 +37,10 @@ class PromptChunk(Protocol):
 router = APIRouter()
 
 
+def _process_chunk(chunk: PromptChunk):
+    return chunk.content
+
+
 @router.post(
     "/{prompt_id:path}",
     response_model=str,
@@ -50,12 +54,30 @@ async def invoke(
     current_user: Annotated[StarletteUser, Depends(get_current_user)],
     prompt_registry: Annotated[BasePromptRegistry, Depends(get_prompt_registry)],
 ):
+    return await _invoke(
+        prompt_request=prompt_request,
+        prompt_id=prompt_id,
+        current_user=current_user,
+        prompt_registry=prompt_registry,
+        process_chunk=_process_chunk,
+        internal_event_category=__name__,
+    )
+
+
+async def _invoke(
+    prompt_request: PromptRequest,
+    prompt_id: str,
+    current_user: StarletteUser,
+    prompt_registry: BasePromptRegistry,
+    process_chunk: Callable,
+    internal_event_category: str,
+):
     try:
         prompt = prompt_registry.get_on_behalf(
             current_user,
             prompt_id,
             prompt_request.prompt_version,
-            internal_event_category=__name__,
+            internal_event_category=internal_event_category,
         )
     except ParseConstraintError:
         raise HTTPException(
@@ -93,12 +115,18 @@ async def invoke(
 
             async def _handle_stream():
                 async for chunk in response:
-                    yield chunk.content
+                    processed_chunk = process_chunk(chunk)
+                    if isinstance(processed_chunk, BaseModel):
+                        processed_chunk = (
+                            processed_chunk.model_dump_json(exclude_none=True) + "\n"
+                        )
+
+                    yield processed_chunk
 
             return StreamingResponse(_handle_stream(), media_type="text/event-stream")
 
         response_chunk: PromptChunk = await prompt.ainvoke(prompt_request.inputs.root)
-        return response_chunk.content
+        return process_chunk(response_chunk)
     except KeyError as e:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,

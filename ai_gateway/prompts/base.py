@@ -193,14 +193,25 @@ class Prompt(RunnableBinding[Input, Output]):
         with self.instrumentator.watch(
             stream=True
         ) as watcher, get_usage_metadata_callback() as cb:
+            # The usage metadata callback only totals the usage at the `on_llm_end` event, so we need to be able to
+            # yield the last stream item _after_ that event. Otherwise we'd need to yield an extra event just for the
+            # usage metadata. To do this, we yield with a 1-item offset.
+            previous_item: Output | None = None
+
             async for item in super().astream(
                 input,
                 self._add_logger_to_config(config),
                 **kwargs,
             ):
-                yield item
+                if previous_item:
+                    yield previous_item
+                previous_item = item
 
             self.handle_usage_metadata(watcher, cb.usage_metadata)
+
+            # Now the usage metadata is available
+            if previous_item:
+                yield previous_item
 
             await watcher.afinish()
         # pylint: enable=contextmanager-generator-missing-cleanup,line-too-long

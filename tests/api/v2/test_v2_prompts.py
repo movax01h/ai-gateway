@@ -6,7 +6,8 @@ from fastapi import HTTPException
 from gitlab_cloud_connector import CloudConnectorUser, UserClaims
 from pydantic import AnyUrl
 
-from ai_gateway.api.v1 import api_router
+from ai_gateway.api.v2 import api_router
+from ai_gateway.instrumentators.model_requests import TokenUsage
 from ai_gateway.model_metadata import (
     AmazonQModelMetadata,
     ModelMetadata,
@@ -20,13 +21,23 @@ def fast_api_router():
     return api_router
 
 
+@pytest.fixture
+def mock_get_usage_metadata(token_usage: TokenUsage | None):
+    with patch(
+        "ai_gateway.api.v2.prompts.invoke.get_token_usage", return_value=token_usage
+    ) as mock:
+        yield mock
+
+
 class TestPrompt:
+    @pytest.mark.usefixtures("mock_get_usage_metadata", "frozen_datetime_now")
     @pytest.mark.parametrize(
         (
             "prompt_class",
             "inputs",
             "prompt_version",
             "model_metadata",
+            "token_usage",
             "expected_get_args",
             "expected_status",
             "expected_response",
@@ -38,9 +49,24 @@ class TestPrompt:
                 {"name": "John", "age": 20},
                 None,
                 None,
+                None,
                 ("test", "^1.0.0", None),
                 200,
-                "Hi John!",
+                {"content": "Hi John!"},
+                ["1.0.0"],
+            ),
+            (
+                Prompt,
+                {"name": "John", "age": 20},
+                None,
+                None,
+                {"model": {"input_tokens": 10, "output_tokens": 20}},
+                ("test", "^1.0.0", None),
+                200,
+                {
+                    "content": "Hi John!",
+                    "usage": {"model": {"input_tokens": 10, "output_tokens": 20}},
+                },
                 ["1.0.0"],
             ),
             (
@@ -48,9 +74,10 @@ class TestPrompt:
                 {"name": "John", "age": 20},
                 "^2.0.0",
                 None,
+                None,
                 ("test", "^2.0.0", None),
                 200,
-                "Hi John!",
+                {"content": "Hi John!"},
                 ["2.0.0"],
             ),
             (
@@ -63,6 +90,7 @@ class TestPrompt:
                     endpoint=AnyUrl("http://localhost:4000"),
                     api_key="token",
                 ),
+                None,
                 (
                     "test",
                     "^1.0.0",
@@ -74,7 +102,7 @@ class TestPrompt:
                     ),
                 ),
                 200,
-                "Hi John!",
+                {"content": "Hi John!"},
                 ["1.0.0"],
             ),
             (
@@ -86,6 +114,7 @@ class TestPrompt:
                     provider="amazon_q",
                     role_arn="role-arn",
                 ),
+                None,
                 (
                     "test",
                     "^1.0.0",
@@ -96,13 +125,14 @@ class TestPrompt:
                     ),
                 ),
                 200,
-                "Hi John!",
+                {"content": "Hi John!"},
                 ["1.0.0"],
             ),
             (
                 Prompt,
                 {"name": "John", "age": 20},
                 "^2.0.0",
+                None,
                 None,
                 ("test", "^2.0.0", None),
                 400,
@@ -114,6 +144,7 @@ class TestPrompt:
                 {"name": "John", "age": 20},
                 None,
                 None,
+                None,
                 ("test", "^1.0.0", None),
                 404,
                 {"detail": "Prompt 'test' not found"},
@@ -122,6 +153,7 @@ class TestPrompt:
             (
                 Prompt,
                 {"name": "John"},
+                None,
                 None,
                 None,
                 ("test", "^1.0.0", None),
@@ -137,12 +169,12 @@ class TestPrompt:
         self,
         prompt_class,
         mock_registry_get,
-        frozen_datetime_now,
         mock_client,
         mock_track_internal_event,
         inputs: dict[str, str],
         prompt_version: Optional[str],
         model_metadata: Optional[TypeModelMetadata],
+        token_usage: TokenUsage | None,
         expected_get_args: dict,
         expected_status: int,
         expected_response: Any,
@@ -167,10 +199,11 @@ class TestPrompt:
         assert response.status_code == expected_status
 
         actual_response = response.json()
-        if isinstance(expected_response, str):
-            assert actual_response == expected_response
-        else:
+
+        if "detail" in expected_response:
             assert expected_response["detail"] in actual_response["detail"]
+        else:
+            assert actual_response == expected_response
 
         if (
             prompt_class
@@ -179,17 +212,31 @@ class TestPrompt:
         ):
             mock_track_internal_event.assert_called_once_with(
                 "request_explain_vulnerability",
-                category="ai_gateway.api.v1.prompts.invoke",
+                category="ai_gateway.api.v2.prompts.invoke",
             )
         else:
             mock_track_internal_event.assert_not_called()
 
+    @pytest.mark.usefixtures("mock_get_usage_metadata", "frozen_datetime_now")
+    @pytest.mark.parametrize(
+        ("token_usage", "expected_response"),
+        [
+            (None, {"content": "Hi John!"}),
+            (
+                {"model": {"input_tokens": 10, "output_tokens": 20}},
+                {
+                    "content": "Hi John!",
+                    "usage": {"model": {"input_tokens": 10, "output_tokens": 20}},
+                },
+            ),
+        ],
+    )
     @pytest.mark.asyncio
     async def test_streaming_request(
         self,
         mock_client,
         mock_registry_get,
-        frozen_datetime_now,
+        expected_response,
     ):
         response = mock_client.post(
             "/prompts/test",
@@ -206,7 +253,7 @@ class TestPrompt:
 
         mock_registry_get.assert_called_with("test", "^2.0.0", None)
         assert response.status_code == 200
-        assert response.text == "Hi John!"
+        assert response.json() == expected_response
         assert response.headers["content-type"] == "text/event-stream; charset=utf-8"
 
 
