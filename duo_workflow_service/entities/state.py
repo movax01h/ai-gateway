@@ -18,6 +18,7 @@ from duo_workflow_service.gitlab.gitlab_project import Project
 from duo_workflow_service.token_counter.approximate_token_counter import (
     ApproximateTokenCounter,
 )
+from duo_workflow_service.workflows.type_definitions import AdditionalContext
 
 # max content tokens is 200K but adding a buffer of 5% just in case
 MAX_CONTEXT_TOKENS = int(200_000 * 0.95)
@@ -91,6 +92,7 @@ class UiChatLog(TypedDict):
     correlation_id: Optional[str]
     tool_info: Optional[ToolInfo]
     context_elements: Optional[List[ContextElement]]
+    additional_context: Optional[List[AdditionalContext]]
 
 
 def _pretrim_large_messages(

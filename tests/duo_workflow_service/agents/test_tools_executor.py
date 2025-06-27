@@ -885,6 +885,7 @@ async def test_multiple_tool_calls(workflow_state, graph):
             "tool_info": {"name": "a", "args": {"a1": 1}},
             "context_elements": None,
             "correlation_id": None,
+            "additional_context": None,
         },
         {
             "message_type": MessageTypeEnum.TOOL,
@@ -895,5 +896,6 @@ async def test_multiple_tool_calls(workflow_state, graph):
             "tool_info": {"name": "b", "args": {"b1": 1}},
             "context_elements": None,
             "correlation_id": None,
+            "additional_context": None,
         },
     ]

@@ -69,6 +69,7 @@ class HandoverAgent:
                     correlation_id=None,
                     tool_info=None,
                     context_elements=None,
+                    additional_context=None,
                 )
             )
 
@@ -117,6 +118,7 @@ class HandoverAgent:
                         correlation_id=None,
                         tool_info=None,
                         context_elements=None,
+                        additional_context=None,
                     )
                 )
                 return AIMessage(content=summary)

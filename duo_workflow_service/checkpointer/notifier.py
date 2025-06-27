@@ -89,6 +89,7 @@ class UserInterface:
                 content="",
                 tool_info=None,
                 context_elements=None,
+                additional_context=None,
             )
             self.ui_chat_log.append(last_message)
         else:

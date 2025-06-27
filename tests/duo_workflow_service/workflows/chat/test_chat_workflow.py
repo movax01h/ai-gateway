@@ -27,6 +27,7 @@ from duo_workflow_service.workflows.chat.workflow import (
     Routes,
     Workflow,
 )
+from duo_workflow_service.workflows.type_definitions import AdditionalContext
 from lib.feature_flags import current_feature_flag_context
 
 
@@ -81,6 +82,14 @@ def workflow_with_project(
         context_elements=[context_element],
         mcp_tools=[contract_pb2.McpTool(name="extra_tool", description="Extra tool")],
     )
+    additional_context = [
+        AdditionalContext(
+            category="file",
+            id="test-file-id",
+            content="test content",
+            metadata={"path": "/test/file.py"},
+        )
+    ]
     workflow._project = {
         "id": 123,
         "name": "test-project",
@@ -88,6 +97,7 @@ def workflow_with_project(
         "web_url": "https://example.com/test-project",
         "description": "A test project",
     }
+    workflow._additional_context = additional_context
     workflow._http_client = MagicMock()
     workflow._context_elements = []
     workflow._agent = prompt
@@ -123,11 +133,54 @@ async def test_workflow_initialization(workflow_with_project):
     assert initial_state["status"] == WorkflowStatusEnum.NOT_STARTED
     assert initial_state["plan"] == {"steps": []}
     assert len(initial_state["ui_chat_log"]) == 1
-    assert initial_state["ui_chat_log"][0]["message_type"] == MessageTypeEnum.TOOL
-    assert "Starting chat: Test chat goal" in initial_state["ui_chat_log"][0]["content"]
+    assert initial_state["ui_chat_log"][0]["message_type"] == MessageTypeEnum.USER
+    assert "Test chat goal" in initial_state["ui_chat_log"][0]["content"]
     assert initial_state["ui_chat_log"][0]["status"] == ToolStatus.SUCCESS
+    assert len(initial_state["ui_chat_log"][0]["additional_context"]) == 1
+    assert initial_state["ui_chat_log"][0]["additional_context"][0].category == "file"
     assert initial_state["context_elements"] == []
     assert initial_state["project"]["name"] == "test-project"
+
+
+@pytest.mark.asyncio
+async def test_workflow_initialization_with_additional_context(workflow_with_project):
+    additional_context = [
+        AdditionalContext(
+            category="file",
+            id="file1",
+            content="file content 1",
+            metadata={"path": "/path/to/file1"},
+        ),
+        AdditionalContext(
+            category="issue",
+            id="issue123",
+            content="issue description",
+            metadata={"title": "Bug report", "state": "open"},
+        ),
+        AdditionalContext(
+            category="terminal",
+            content="command output",
+            metadata={"command": "ls -la"},
+        ),
+    ]
+    workflow_with_project._additional_context = additional_context
+
+    initial_state = workflow_with_project.get_workflow_state("Test chat goal")
+
+    assert initial_state["status"] == WorkflowStatusEnum.NOT_STARTED
+    assert initial_state["ui_chat_log"][0]["additional_context"] == additional_context
+    assert len(initial_state["ui_chat_log"][0]["additional_context"]) == 3
+    assert initial_state["ui_chat_log"][0]["additional_context"][0].category == "file"
+    assert initial_state["ui_chat_log"][0]["additional_context"][1].category == "issue"
+    assert (
+        initial_state["ui_chat_log"][0]["additional_context"][2].category == "terminal"
+    )
+    assert (
+        initial_state["conversation_history"]["test_prompt"][0].additional_kwargs[
+            "additional_context"
+        ]
+        == additional_context
+    )
 
 
 @pytest.mark.asyncio
@@ -401,6 +454,10 @@ async def test_get_graph_input_start(workflow_with_project):
 
     assert result["status"] == WorkflowStatusEnum.NOT_STARTED
     assert result["conversation_history"]["test_prompt"][0].content == "Test goal"
+    assert result["ui_chat_log"][0]["message_type"] == MessageTypeEnum.USER
+    assert "Test goal" in result["ui_chat_log"][0]["content"]
+    assert len(result["ui_chat_log"][0]["additional_context"]) == 1
+    assert result["ui_chat_log"][0]["additional_context"][0].category == "file"
 
 
 @pytest.mark.asyncio
@@ -414,6 +471,10 @@ async def test_get_graph_input_resume(workflow_with_project):
     assert (
         result.update["conversation_history"]["test_prompt"][0].content == "New input"
     )
+    assert result.update["ui_chat_log"][-1]["message_type"] == MessageTypeEnum.USER
+    assert result.update["ui_chat_log"][-1]["content"] == "New input"
+    assert len(result.update["ui_chat_log"][-1]["additional_context"]) == 1
+    assert result.update["ui_chat_log"][-1]["additional_context"][0].category == "file"
 
 
 @pytest.mark.asyncio

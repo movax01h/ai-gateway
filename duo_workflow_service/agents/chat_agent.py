@@ -110,6 +110,7 @@ class ChatAgent(Prompt[ChatWorkflowState, BaseMessage]):
                         correlation_id=None,
                         tool_info=ToolInfo(name=call["name"], args=call["args"]),
                         context_elements=[],
+                        additional_context=None,
                     )
                 )
 
@@ -169,6 +170,7 @@ class ChatAgent(Prompt[ChatWorkflowState, BaseMessage]):
                         correlation_id=None,
                         tool_info=None,
                         context_elements=[],
+                        additional_context=None,
                     )
                 ]
                 result["status"] = WorkflowStatusEnum.INPUT_REQUIRED
@@ -200,6 +202,7 @@ class ChatAgent(Prompt[ChatWorkflowState, BaseMessage]):
                         correlation_id=None,
                         tool_info=None,
                         context_elements=[],
+                        additional_context=None,
                     )
                 ],
             }
