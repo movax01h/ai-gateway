@@ -227,11 +227,16 @@ None lists all issues with no labels. Any lists all issues with at least one lab
         default=None,
         description="Return all issues or just those that are opened or closed",
     )
+    page: Optional[int] = Field(
+        default=1,
+        description="Page number. Default is 1.",
+    )
 
 
 class ListIssues(IssueBaseTool):
     name: str = "list_issues"
     description: str = f"""List issues in a GitLab project.
+    By default, only returns the first 20 issues - use page parameter to get complete results.
 
     {PROJECT_IDENTIFICATION_DESCRIPTION}
 
@@ -447,11 +452,16 @@ class ListIssueNotesInput(IssueResourceInput):
         default=None,
         description="Return issue notes ordered by created_at or updated_at fields. Default is created_at",
     )
+    page: Optional[int] = Field(
+        default=1,
+        description="Page number. Default is 1.",
+    )
 
 
 class ListIssueNotes(IssueBaseTool):
     name: str = "list_issue_notes"
-    description: str = f"""Get a list of all notes (comments) for a specific issue.
+    description: str = f"""Get a list of issue notes (comments) for a specific issue.
+    By default, only returns the first 20 issue notes - use page parameter to get complete results.
 
     {ISSUE_IDENTIFICATION_DESCRIPTION}
 
