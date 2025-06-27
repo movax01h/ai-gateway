@@ -137,7 +137,7 @@ class ListCommitsInput(ProjectResourceInput):
         description="Include commit stats. Default is false.",
     )
     page: Optional[int] = Field(
-        default=None,
+        default=1,
         description="Page number. Default is 1.",
     )
 
@@ -145,7 +145,7 @@ class ListCommitsInput(ProjectResourceInput):
 class ListCommits(CommitBaseTool):
     name: str = "list_commits"
     description: str = f"""List commits in a GitLab project repository.
-    By default, only returns the first 20 commits - use pagination to get complete results.
+    By default, only returns the first 20 commits - use page parameter to get complete results.
 
     {PROJECT_IDENTIFICATION_DESCRIPTION}
 

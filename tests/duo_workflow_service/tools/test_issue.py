@@ -334,21 +334,23 @@ def test_create_issue_format_display_message(input_data, expected_message):
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
-    "state,labels,milestone,scope,search,expected_params",
+    "state,labels,milestone,scope,search,page,expected_params",
     [
-        (None, None, None, None, None, {}),
+        (None, None, None, None, None, None, {}),
         (
             "opened",
             "bug",
             "v1.0",
             "all",
             "important",
+            1,
             {
                 "state": "opened",
                 "labels": "bug",
                 "milestone": "v1.0",
                 "scope": "all",
                 "search": "important",
+                "page": 1,
             },
         ),
     ],
@@ -359,6 +361,7 @@ async def test_list_issues(
     milestone,
     scope,
     search,
+    page,
     expected_params,
     gitlab_client_mock,
     metadata,
@@ -375,6 +378,7 @@ async def test_list_issues(
         milestone=milestone,
         scope=scope,
         search=search,
+        page=page,
     )
 
     expected_response = json.dumps(
@@ -496,6 +500,7 @@ async def test_list_issues_with_url_error(
                 search=None,
                 sort=None,
                 state=None,
+                page=None,
             ),
             "List issues in project 123",
         ),
@@ -517,6 +522,7 @@ async def test_list_issues_with_url_error(
                 search=None,
                 sort=None,
                 state=None,
+                page=None,
             ),
             "List issues in https://gitlab.com/namespace/project",
         ),
@@ -1004,16 +1010,22 @@ def test_create_issue_note_format_display_message(input_data, expected_message):
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
-    "sort,order_by,expected_params",
+    "sort,order_by,page,expected_params",
     [
-        (None, None, {}),
-        ("asc", None, {"sort": "asc"}),
-        ("desc", "created_at", {"sort": "desc", "order_by": "created_at"}),
-        (None, "updated_at", {"order_by": "updated_at"}),
+        (None, None, None, {}),
+        ("asc", None, 1, {"sort": "asc", "page": 1}),
+        (
+            "desc",
+            "created_at",
+            1,
+            {"sort": "desc", "order_by": "created_at", "page": 1},
+        ),
+        (None, "updated_at", 2, {"order_by": "updated_at", "page": 2}),
+        (None, None, 1, {"page": 1}),
     ],
 )
 async def test_list_issue_notes(
-    sort, order_by, expected_params, gitlab_client_mock, metadata
+    sort, order_by, page, expected_params, gitlab_client_mock, metadata
 ):
     gitlab_client_mock.aget = AsyncMock(
         return_value=[
@@ -1025,7 +1037,7 @@ async def test_list_issue_notes(
     tool = ListIssueNotes(description="list issue notes description", metadata=metadata)
 
     response = await tool._arun(
-        project_id=1, issue_iid=123, sort=sort, order_by=order_by
+        project_id=1, issue_iid=123, sort=sort, order_by=order_by, page=page
     )
 
     expected_response = json.dumps(
@@ -1054,6 +1066,7 @@ async def test_list_issue_notes(
                 url="https://gitlab.com/namespace/project/-/issues/42",
                 sort="asc",
                 order_by="created_at",
+                page=1,
             ),
             "Read comments on issue https://gitlab.com/namespace/project/-/issues/42",
         ),

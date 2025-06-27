@@ -524,6 +524,7 @@ async def test_list_epics_success(gitlab_client_mock, metadata):
         state="opened",
         search="test",
         sort="asc",
+        page=1,
         with_labels_details=True,
         include_ancestor_groups=True,
         include_descendant_groups=True,
@@ -541,6 +542,7 @@ async def test_list_epics_success(gitlab_client_mock, metadata):
             "state": "opened",
             "search": "test",
             "sort": "asc",
+            "page": 1,
             "with_labels_details": True,
             "include_ancestor_groups": True,
             "include_descendant_groups": True,
@@ -1188,16 +1190,23 @@ async def test_update_epic_with_url_error(
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
-    "sort,order_by,expected_params",
+    "sort,order_by,page,expected_params",
     [
-        (None, None, {}),
-        ("asc", None, {"sort": "asc"}),
-        ("desc", "created_at", {"sort": "desc", "order_by": "created_at"}),
-        (None, "updated_at", {"order_by": "updated_at"}),
+        (None, None, None, {}),
+        ("asc", None, 1, {"sort": "asc", "page": 1}),
+        ("desc", "created_at", None, {"sort": "desc", "order_by": "created_at"}),
+        (
+            "desc",
+            "created_at",
+            1,
+            {"sort": "desc", "order_by": "created_at", "page": 1},
+        ),
+        (None, "updated_at", None, {"order_by": "updated_at"}),
+        (None, "updated_at", 2, {"order_by": "updated_at", "page": 2}),
     ],
 )
 async def test_list_epic_notes(
-    sort, order_by, expected_params, gitlab_client_mock, metadata
+    sort, order_by, page, expected_params, gitlab_client_mock, metadata
 ):
     gitlab_client_mock.aget = AsyncMock(
         return_value=[
@@ -1209,7 +1218,11 @@ async def test_list_epic_notes(
     tool = ListEpicNotes(description="list epic notes description", metadata=metadata)
 
     response = await tool._arun(
-        group_id="namespace%2Fgroup", epic_id=123, sort=sort, order_by=order_by
+        group_id="namespace%2Fgroup",
+        epic_id=123,
+        sort=sort,
+        order_by=order_by,
+        page=page,
     )
 
     expected_response = json.dumps(

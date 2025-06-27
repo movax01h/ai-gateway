@@ -360,11 +360,16 @@ reaction. Any returns epics given at least one reaction""",
         description="Return epics that do not match the parameters supplied. Accepts: author_id, author_username and "
         "labels.",
     )
+    page: Optional[int] = Field(
+        default=1,
+        description="Page number. Default is 1.",
+    )
 
 
 class ListEpics(EpicBaseTool):
     name: str = "list_epics"
     description: str = f"""Get all epics of the requested group and its subgroups.
+    By default, only returns the first 20 epics - use page parameter to get complete results.
 
     {GROUP_IDENTIFICATION_DESCRIPTION}
 
@@ -508,11 +513,16 @@ class ListEpicNotesInput(EpicResourceInput):
         default=None,
         description="Return epic notes ordered by created_at or updated_at fields. Default is created_at",
     )
+    page: Optional[int] = Field(
+        default=1,
+        description="Page number. Default is 1.",
+    )
 
 
 class ListEpicNotes(EpicBaseTool):
     name: str = "list_epic_notes"
     description: str = f"""Get a list of all notes (comments) for a specific epic.
+    By default, only returns the first 20 epic notes - use page parameter to get complete results.
 
     {EPIC_IDENTIFICATION_DESCRIPTION}
 
