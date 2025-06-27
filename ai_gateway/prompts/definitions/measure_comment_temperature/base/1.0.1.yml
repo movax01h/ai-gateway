@@ -11,7 +11,7 @@ model:
     top_k: 1
 unit_primitives:
   - measure_comment_temperature
-prompt_template:  
+prompt_template:
   system: |
     {% include 'measure_comment_temperature/system/1.0.0.jinja' %}
   user: |

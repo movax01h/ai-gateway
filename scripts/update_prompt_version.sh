@@ -86,13 +86,13 @@ if [ "$DIR_COUNT" -gt 1 ]; then
     echo "$i) $dir"
     i=$((i + 1))
   done
-  
+
   read -p "Select a directory (0-$((i-1))): " selection
   if ! echo "$selection" | grep -q '^[0-9]\+$' || [ "$selection" -lt 0 ] || [ "$selection" -ge "$i" ]; then
     echo "Invalid selection."
     exit 1
   fi
-  
+
   if [ "$selection" -eq 0 ]; then
     # User wants to update all directories
     SELECTED_DIRS="$UNIQUE_DIRS"
@@ -114,15 +114,15 @@ if [ "$is_stable" = "n" ] || [ "$is_stable" = "N" ]; then
   echo "3) alpha"
   echo "4) beta"
   read -p "Select a suffix (1-4): " suffix_choice
-  
+
   case $suffix_choice in
     1) VERSION_SUFFIX="-dev" ;;
     2) VERSION_SUFFIX="-rc" ;;
     3) VERSION_SUFFIX="-alpha" ;;
     4) VERSION_SUFFIX="-beta" ;;
-    *) 
+    *)
       echo "Invalid selection, using 'dev' as default."
-      VERSION_SUFFIX="-dev" 
+      VERSION_SUFFIX="-dev"
       ;;
   esac
 else
@@ -132,21 +132,21 @@ fi
 # Process each selected directory
 for SELECTED_DIR in $SELECTED_DIRS; do
   echo "Processing directory: $SELECTED_DIR"
-  
+
   # Get all version files in the selected directory
   DIRECTORY_FILES=$(find "$SELECTED_DIR" -type f -name "*.yml" | sort)
-  
+
   # Find the latest version
   LATEST_FILE=""
   HIGHEST_VERSION="0.0.0"
-  
+
   for file in $DIRECTORY_FILES; do
     filename=$(basename "$file")
     version_with_suffix=${filename%.yml}
-    
+
     # Extract the version number without any suffix
     version=$(echo "$version_with_suffix" | sed -E 's/(-dev|-rc|-alpha|-beta)$//')
-    
+
     # Check if the version follows semantic versioning pattern
     if echo "$version" | grep -q '^[0-9]\+\.[0-9]\+\.[0-9]\+$'; then
       # Compare versions using sort -V (version sort)
@@ -156,19 +156,19 @@ for SELECTED_DIR in $SELECTED_DIRS; do
       fi
     fi
   done
-  
+
   if [ -z "$LATEST_FILE" ]; then
     echo "Warning: Could not find a valid versioned file in $SELECTED_DIR, skipping."
     continue
   fi
-  
+
   echo "Found latest prompt definition: $LATEST_FILE (version $HIGHEST_VERSION)"
-  
+
   # Extract version components
   MAJOR=$(echo "$HIGHEST_VERSION" | cut -d. -f1)
   MINOR=$(echo "$HIGHEST_VERSION" | cut -d. -f2)
   PATCH=$(echo "$HIGHEST_VERSION" | cut -d. -f3)
-  
+
   # Increment version based on version type
   if [ "$VERSION_TYPE" = "minor" ]; then
     MINOR=$((MINOR + 1))
@@ -176,14 +176,14 @@ for SELECTED_DIR in $SELECTED_DIRS; do
   else  # patch
     PATCH=$((PATCH + 1))
   fi
-  
+
   # Create new version
   NEW_VERSION="$MAJOR.$MINOR.$PATCH$VERSION_SUFFIX"
   NEW_FILE_PATH="$SELECTED_DIR/$NEW_VERSION.yml"
-  
+
   # Copy file with new version
   cp "$LATEST_FILE" "$NEW_FILE_PATH"
-  
+
   echo "Created new version:"
   echo "  From: $LATEST_FILE"
   echo "  To:   $NEW_FILE_PATH"

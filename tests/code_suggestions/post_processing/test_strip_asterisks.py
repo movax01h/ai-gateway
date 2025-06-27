@@ -2,6 +2,7 @@ import pytest
 
 from ai_gateway.code_suggestions.processing.post.ops import strip_asterisks
 
+# editorconfig-checker-disable
 # a completion has asterisks at the start, with legitimate suggestions after it
 COMPLETION_RUBY_1_1 = """
 ****************************
@@ -47,6 +48,7 @@ COMPLETION_VUE_4 = """
       title="Hello World"
     >
 """
+# editorconfig-checker-enable
 
 
 @pytest.mark.parametrize(

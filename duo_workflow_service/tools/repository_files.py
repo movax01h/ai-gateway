@@ -81,6 +81,8 @@ class RepositoryFileBaseTool(DuoBaseTool):
 
 class GetRepositoryFile(RepositoryFileBaseTool):
     name: str = "get_repository_file"
+
+    # editorconfig-checker-disable
     description: str = """Get the contents of a file from a remote repository.
 
     To identify a file you must provide either:
@@ -89,6 +91,8 @@ class GetRepositoryFile(RepositoryFileBaseTool):
       - https://gitlab.com/namespace/project/-/blob/master/README.md
       - https://gitlab.com/group/subgroup/project/-/blob/main/src/file.py
     """
+    # editorconfig-checker-enable
+
     args_schema: Type[BaseModel] = RepositoryFileResourceInput  # type: ignore
 
     async def _arun(self, **kwargs) -> str:

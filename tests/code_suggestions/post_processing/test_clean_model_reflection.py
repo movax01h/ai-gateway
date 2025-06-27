@@ -2,6 +2,7 @@ import pytest
 
 from ai_gateway.code_suggestions.processing.post.ops import clean_model_reflection
 
+# editorconfig-checker-disable
 PREFIX_JAVASCRIPT_1 = """
 // This code has a filename of test-2.js and is written in JavaScript.
 testing
@@ -166,6 +167,7 @@ end
 
 # Create new code for the following description: method which checks if name is valid
 """
+# editorconfig-checker-enable
 
 
 @pytest.mark.parametrize(

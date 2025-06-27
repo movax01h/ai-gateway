@@ -679,6 +679,7 @@ async def test_model_engine_palm(
         watcher.register_safety_attributes.assert_not_called()
 
 
+# editorconfig-checker-disable
 JAVASCRIPT_SOURCE_SAMPLE = """
 import React, { useState } from "react";
 
@@ -705,6 +706,7 @@ const App = () => {
 
 export default App;
 """
+# editorconfig-checker-enable
 
 
 @pytest.mark.parametrize(

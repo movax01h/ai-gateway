@@ -229,6 +229,7 @@ def find_common_lines(
     target: list[str],
     comparison_func: Callable[[str, str], bool] = compare_exact,
 ) -> list[tuple]:
+    # editorconfig-checker-disable
     """Finds the common strings between two lists, keeping track of repeated ranges.
 
     Example:
@@ -260,6 +261,7 @@ def find_common_lines(
 
     :return: A list of indices of common strings grouped if they are consecutive lines
     """
+    # editorconfig-checker-enable
 
     len_source = len(source)
     len_target = len(target)

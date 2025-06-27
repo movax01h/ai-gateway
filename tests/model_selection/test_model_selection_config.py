@@ -12,6 +12,7 @@ from ai_gateway.model_selection.model_selection_config import (
 )
 
 
+# editorconfig-checker-disable
 @pytest.fixture
 def mock_fs(fs: FakeFilesystem):
     print(Path(__file__).parent.parent.parent / "ai_gateway" / "model_selection")
@@ -56,6 +57,9 @@ def mock_fs(fs: FakeFilesystem):
             """
         ),
     )
+
+
+# editorconfig-checker-enable
 
 
 @pytest.fixture
@@ -162,6 +166,7 @@ def test_validate_with_error(fs: FakeFilesystem):
         Path(__file__).parent.parent.parent / "ai_gateway" / "model_selection"
     )
 
+    # editorconfig-checker-disable
     fs.create_file(
         model_selection_dir / "unit_primitives.yml",
         contents=dedent(
@@ -194,6 +199,7 @@ def test_validate_with_error(fs: FakeFilesystem):
             """
         ),
     )
+    # editorconfig-checker-enable
 
     with pytest.raises(ValueError) as excinfo:
         ModelSelectionConfig().validate()
@@ -210,6 +216,7 @@ def test_validate_default_model_not_in_selectable_models(fs: FakeFilesystem):
         Path(__file__).parent.parent.parent / "ai_gateway" / "model_selection"
     )
 
+    # editorconfig-checker-disable
     fs.create_file(
         model_selection_dir / "models.yml",
         contents=dedent(
@@ -256,6 +263,7 @@ def test_validate_default_model_not_in_selectable_models(fs: FakeFilesystem):
             """
         ),
     )
+    # editorconfig-checker-enable
 
     with pytest.raises(ValueError) as excinfo:
         ModelSelectionConfig().validate()

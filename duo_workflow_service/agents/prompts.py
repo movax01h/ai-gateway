@@ -4,6 +4,7 @@ HANDOVER_TOOL_NAME = HandoverTool.tool_title
 
 SET_TASK_STATUS_TOOL_NAME = "set_task_status"
 
+# editorconfig-checker-disable
 BUILD_CONTEXT_SYSTEM_MESSAGE = """
 You are an experienced GitLab user.
 Given a goal set by Human and a set of tools available to you:
@@ -69,5 +70,6 @@ Here is the project information for the current GitLab project:
   <project_url>{project_url}</project_url>
 </project>
 """
+# editorconfig-checker-enable
 
 NEXT_STEP_PROMPT = f"What is the next task? Call the `{HANDOVER_TOOL_NAME}` tool if your task is complete"

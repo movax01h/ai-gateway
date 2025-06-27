@@ -1,6 +1,7 @@
 import ast
 from pathlib import Path
 
+# editorconfig-checker-disable
 HEADER_TEXT = """# Dependencies for Duo Workflow Service. Extended tests are run when these change patterns are matched.
 # Note: Do not modify this file manually. Instead, run: make duo-workflow-service-dependencies
 .duo-workflow-service-dependencies:
@@ -10,6 +11,7 @@ HEADER_TEXT = """# Dependencies for Duo Workflow Service. Extended tests are run
     - contract/**/*
     - pyproject.toml
 """
+# editorconfig-checker-enable
 
 OUTPUT_FILE_PATH = ".gitlab/ci/dws-dependencies.yml"
 

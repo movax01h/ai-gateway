@@ -53,6 +53,7 @@ class ListVulnerabilities(DuoBaseTool):
         per_page = kwargs.pop("per_page", 100)
         severity = kwargs.pop("severity", None)
 
+        # editorconfig-checker-disable
         # Build GraphQL query
         query = """
         query($projectFullPath: ID!, $first: Int, $after: String, $severity: [VulnerabilitySeverity!]) {
@@ -78,6 +79,7 @@ class ListVulnerabilities(DuoBaseTool):
           }
         }
         """
+        # editorconfig-checker-enable
 
         all_vulnerabilities = []
         cursor = None

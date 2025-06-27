@@ -9,6 +9,7 @@ from ai_gateway.code_suggestions.prompts.parsers import (
 )
 from ai_gateway.code_suggestions.prompts.parsers.treetraversal import tree_dfs
 
+# editorconfig-checker-disable
 PYTHON_SAMPLE = """
 class BaseContextVisitor(BaseVisitor):
     _TARGET_SYMBOLS = [
@@ -45,7 +46,7 @@ class BaseContextVisitor(BaseVisitor):
                     curr_best = node
                 elif:
                     pass
-                else: 
+                else:
                     pass
         return curr_best
 """
@@ -82,6 +83,7 @@ s = 'text'
 def print_hello():
     print("hello")
 """
+# editorconfig-checker-enable
 
 
 @pytest.mark.parametrize(

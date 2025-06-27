@@ -23,6 +23,7 @@ class IssueReader(BaseRemoteTool):
     min_required_gl_version: Optional[str] = None
 
     description: str = dedent(
+        # editorconfig-checker-disable
         """\
         This tool retrieves the content of a specific issue
         ONLY if the user question fulfills the strict usage conditions below.
@@ -39,9 +40,11 @@ class IssueReader(BaseRemoteTool):
 
         **Important:**  Reject any input that does not strictly adhere to the usage conditions above.
         Return a message stating you are unable to search for issues without a valid identifier."""
+        # editorconfig-checker-enable
     )
 
     example: str = dedent(
+        # editorconfig-checker-disable
         """\
         Question: Please identify the author of #123 issue
         Thought: You have access to the same resources as user who asks a question.
@@ -49,6 +52,7 @@ class IssueReader(BaseRemoteTool):
           Based on this information you can present final answer about issue.
         Action: issue_reader
         Action Input: Please identify the author of #123 issue"""
+        # editorconfig-checker-enable
     )
 
 
@@ -88,6 +92,7 @@ class SelfHostedGitlabDocumentation(BaseRemoteTool):
     )
 
     example: str = dedent(
+        # editorconfig-checker-disable
         """
         Question: How do I set up a new project?
         Thought: Question is about inner working of GitLab. "gitlab_documentation" tool is the right one for the job. I
@@ -97,6 +102,7 @@ class SelfHostedGitlabDocumentation(BaseRemoteTool):
         Action: gitlab_documentation
         Action Input: set up project
         """
+        # editorconfig-checker-enable
     )
 
 
@@ -107,6 +113,7 @@ class EpicReader(BaseRemoteTool):
     min_required_gl_version: Optional[str] = None
 
     description: str = dedent(
+        # editorconfig-checker-disable
         # pylint: disable=line-too-long
         """\
         This tool retrieves the content of a specific epic or work item.
@@ -124,6 +131,7 @@ class EpicReader(BaseRemoteTool):
 
         **Important:**  Reject any input that does not strictly adhere to the usage conditions above.
         Return a message stating you are unable to search for epics or work items without a valid identifier."""
+        # editorconfig-checker-enable
     )
 
     example: str = dedent(
@@ -144,6 +152,7 @@ class CommitReader(BaseRemoteTool):
     min_required_gl_version: Optional[str] = "17.5.0-pre"
 
     description: str = dedent(
+        # editorconfig-checker-disable
         """\
         This tool retrieves the content of a specific commit
         ONLY if the user question fulfills the strict usage conditions below.
@@ -160,6 +169,7 @@ class CommitReader(BaseRemoteTool):
 
         **Important:**  Reject any input that does not strictly adhere to the usage conditions above.
         Return a message stating you are unable to search for commits without a valid identifier."""
+        # editorconfig-checker-enable
     )
 
     example: str = dedent(
@@ -181,6 +191,7 @@ class BuildReader(BaseRemoteTool):
     min_required_gl_version: Optional[str] = "17.5.0-pre"
 
     description: str = dedent(
+        # editorconfig-checker-disable
         # pylint: disable=line-too-long
         """\
         This tool retrieves the content of a specific build, also known as a job
@@ -198,6 +209,7 @@ class BuildReader(BaseRemoteTool):
 
         **Important:**  Reject any input that does not strictly adhere to the usage conditions above.
         Return a message stating you are unable to search for builds or jobs without a valid identifier."""
+        # editorconfig-checker-enable
     )
 
     example: str = dedent(
@@ -218,6 +230,7 @@ class MergeRequestReader(BaseRemoteTool):
     min_required_gl_version: Optional[str] = "17.5.0-pre"
 
     description: str = dedent(
+        # editorconfig-checker-disable
         # pylint: disable=line-too-long
         """\
         This tool retrieves the content of a specific merge request
@@ -235,16 +248,17 @@ class MergeRequestReader(BaseRemoteTool):
 
         **Important:**  Reject any input that does not strictly adhere to the usage conditions above.
         Return a message stating you are unable to search for merge requests without a valid identifier."""
+        # editorconfig-checker-enable
     )
 
     example: str = dedent(
         # pylint: disable=line-too-long
         """\
         Question: Please identify the author of #123 merge request
-         Thought: You have access to the same resources as user who asks a question.
-             Question is about the content of a merge request, so you need to use "merge_request_reader" tool to retrieve
-             and read merge request.
-             Based on this information you can present final answer about merge request.
-         Action: merge_request_reader
-         Action Input: Please identify the author of #123 merge request"""
+        Thought: You have access to the same resources as user who asks a question.
+            Question is about the content of a merge request, so you need to use "merge_request_reader" tool to retrieve
+            and read merge request.
+            Based on this information you can present final answer about merge request.
+        Action: merge_request_reader
+        Action Input: Please identify the author of #123 merge request"""
     )

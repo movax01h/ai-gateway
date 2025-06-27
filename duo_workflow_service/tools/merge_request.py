@@ -10,6 +10,7 @@ from duo_workflow_service.tools.gitlab_resource_input import ProjectResourceInpu
 
 DESCRIPTION_CHARACTER_LIMIT = 1_048_576
 
+# editorconfig-checker-disable
 PROJECT_IDENTIFICATION_DESCRIPTION = """To identify the project you must provide either:
 - project_id parameter, or
 - A GitLab URL like:
@@ -25,6 +26,7 @@ MERGE_REQUEST_IDENTIFICATION_DESCRIPTION = """To identify a merge request you mu
   - https://gitlab.com/namespace/project/-/merge_requests/42
   - https://gitlab.com/group/subgroup/project/-/merge_requests/42
 """
+# editorconfig-checker-enable
 
 
 class MergeRequestResourceInput(ProjectResourceInput):
