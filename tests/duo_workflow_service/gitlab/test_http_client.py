@@ -1,3 +1,4 @@
+from typing import Any, Optional
 from unittest.mock import AsyncMock, patch
 
 import pytest
@@ -11,6 +12,7 @@ class MockGitLabHttpClient(GitlabHttpClient):
 
     def __init__(self):
         self.mock_call = AsyncMock()
+        self.mock_graphql = AsyncMock()
 
     async def _call(
         self,
@@ -25,6 +27,12 @@ class MockGitLabHttpClient(GitlabHttpClient):
         return await self.mock_call(
             path, method, parse_json, use_http_response, data, params, object_hook
         )
+
+    async def graphql(
+        self, query: str, variables: Optional[dict] = None, timeout: float = 10.0
+    ) -> Any:
+        """Mock implementation of the abstract graphql method."""
+        return await self.mock_graphql(query, variables, timeout)
 
 
 @pytest.fixture

@@ -1,3 +1,4 @@
+import json
 from typing import Any, Callable, Dict, Optional, Union
 from urllib.parse import urljoin
 
@@ -75,3 +76,49 @@ class DirectGitLabHttpClient(GitlabHttpClient):
                 )
             else:
                 return parsed_response
+
+    async def graphql(
+        self, query: str, variables: Optional[dict] = None, timeout: float = 10.0
+    ) -> Any:
+        """Execute a GraphQL query against the GitLab API.
+
+        Args:
+            query: The GraphQL query string
+            variables: Optional dictionary of variables for the query
+            timeout: Timeout in seconds for the request
+
+        Returns:
+            The data part of the GraphQL response
+
+        Raises:
+            Exception: If the request times out or the response contains errors
+        """
+        payload = {
+            "query": query,
+            "variables": variables or {},
+        }
+
+        url = urljoin(self.base_url, "/api/graphql")
+
+        headers = {
+            "Authorization": f"Bearer {self.gitlab_token}",
+            "Content-Type": "application/json",
+        }
+
+        # Get the session from the singleton connection pool
+        session = connection_pool.session
+
+        async with session.request(
+            "POST", url, headers=headers, json=payload
+        ) as response:
+            raw_response = await response.text()
+
+            try:
+                data = json.loads(raw_response)
+            except json.JSONDecodeError:
+                raise Exception(f"Invalid JSON response from GraphQL: {raw_response}")
+
+            if "errors" in data:
+                raise Exception(f"GraphQL errors: {data['errors']}")
+
+            return data["data"]

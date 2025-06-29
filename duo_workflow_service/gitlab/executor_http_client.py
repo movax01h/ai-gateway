@@ -1,4 +1,5 @@
 import asyncio
+import json
 import logging
 from typing import Any, Callable, Dict, Optional, Union
 from urllib.parse import urlencode
@@ -69,3 +70,38 @@ class ExecutorGitLabHttpClient(GitlabHttpClient):
         return self._parse_response(
             response, parse_json=parse_json, object_hook=object_hook
         )
+
+    async def graphql(
+        self, query: str, variables: Optional[dict] = None, timeout: float = 10.0
+    ) -> Any:
+        payload = {
+            "query": query,
+            "variables": variables or {},
+        }
+
+        try:
+            response = await asyncio.wait_for(
+                _execute_action(
+                    {"outbox": self.outbox, "inbox": self.inbox},
+                    contract_pb2.Action(
+                        runHTTPRequest=contract_pb2.RunHTTPRequest(
+                            path="/api/graphql",
+                            method="POST",
+                            body=json.dumps(payload),
+                        )
+                    ),
+                ),
+                timeout=timeout,
+            )
+        except asyncio.TimeoutError:
+            raise Exception(f"GraphQL request timed out after {timeout} seconds")
+
+        try:
+            data = json.loads(response)
+        except json.JSONDecodeError:
+            raise Exception(f"Invalid JSON response from GraphQL: {response}")
+
+        if "errors" in data:
+            raise Exception(f"GraphQL errors: {data['errors']}")
+
+        return data["data"]
