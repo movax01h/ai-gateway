@@ -252,3 +252,74 @@ async def test_direct_gitlab_http_client_invalid_json(client, mock_session):
 
     # Verify we got back the raw text
     assert result == {}
+
+
+@pytest.mark.asyncio
+async def test_direct_gitlab_http_client_graphql(client, mock_session):
+    """Test GraphQL query execution."""
+    # Define test query and variables
+    query = """
+    query GetProject($fullPath: ID!) {
+        project(fullPath: $fullPath) {
+            name
+            description
+        }
+    }
+    """
+    variables = {"fullPath": "group/project"}
+
+    # Expected GraphQL response
+    graphql_response = {
+        "data": {
+            "project": {"name": "Test Project", "description": "This is a test project"}
+        }
+    }
+
+    # Setup the mock response
+    mock_response = setup_mock_response(graphql_response)
+    setup_request_mock(mock_session, mock_response)
+
+    # Call the graphql method
+    result = await client.graphql(query, variables)
+
+    # Check the result
+    expected_result = graphql_response["data"]
+    assert result == expected_result
+
+    # Verify the request was made correctly
+    expected_url = f"{client.base_url}/api/graphql"
+    expected_headers = {
+        "Authorization": f"Bearer {client.gitlab_token}",
+        "Content-Type": "application/json",
+    }
+    expected_json = {"query": query, "variables": variables}
+
+    mock_session.request.assert_called_once_with(
+        "POST", expected_url, headers=expected_headers, json=expected_json
+    )
+
+
+@pytest.mark.asyncio
+async def test_direct_gitlab_http_client_graphql_error(client, mock_session):
+    """Test handling of GraphQL errors in the response."""
+    query = "query { viewer { username } }"
+
+    # GraphQL response with errors
+    error_response = {
+        "errors": [
+            {
+                "message": "Access denied",
+                "locations": [{"line": 1, "column": 1}],
+                "path": ["viewer"],
+            }
+        ],
+        "data": None,
+    }
+
+    # Setup the mock response
+    mock_response = setup_mock_response(error_response)
+    setup_request_mock(mock_session, mock_response)
+
+    # Call should raise an exception with the GraphQL error
+    with pytest.raises(Exception, match="GraphQL errors"):
+        await client.graphql(query)

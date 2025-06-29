@@ -183,3 +183,145 @@ async def test_executor_gitlab_http_client_with_object_hook(
     # Check that the hook was applied
     assert result["key"] == "value"
     assert result["nested"]["id"] == "ID-1"
+
+
+@pytest.mark.asyncio
+async def test_graphql_basic_query(client, monkeypatch_execute_action):
+    mock_response = json.dumps(
+        {
+            "data": {
+                "group": {
+                    "name": "Test Group",
+                    "projects": {
+                        "nodes": [
+                            {"id": "gid://gitlab/Project/1", "name": "Project 1"},
+                            {"id": "gid://gitlab/Project/2", "name": "Project 2"},
+                        ]
+                    },
+                }
+            }
+        }
+    )
+    monkeypatch_execute_action.return_value = mock_response
+
+    query = """
+    query GetGroupProjects($fullPath: ID!) {
+        group(fullPath: $fullPath) {
+            name
+            projects {
+                nodes {
+                    id
+                    name
+                }
+            }
+        }
+    }
+    """
+    variables = {"fullPath": "test-group"}
+
+    result = await client.graphql(query, variables)
+
+    assert result["group"]["name"] == "Test Group"
+    assert len(result["group"]["projects"]["nodes"]) == 2
+    assert result["group"]["projects"]["nodes"][0]["name"] == "Project 1"
+
+    monkeypatch_execute_action.assert_called_once()
+    call_args = monkeypatch_execute_action.call_args[0]
+
+    assert call_args[0]["outbox"] == client.outbox
+    assert call_args[0]["inbox"] == client.inbox
+
+    http_request = call_args[1].runHTTPRequest
+    assert http_request.path == "/api/graphql"
+    assert http_request.method == "POST"
+
+    payload = json.loads(http_request.body)
+    assert payload["query"] == query
+    assert payload["variables"] == variables
+
+
+@pytest.mark.asyncio
+async def test_graphql_without_variables(client, monkeypatch_execute_action):
+    mock_response = json.dumps(
+        {
+            "data": {
+                "currentUser": {"username": "test-user", "email": "test@example.com"}
+            }
+        }
+    )
+    monkeypatch_execute_action.return_value = mock_response
+
+    query = """
+    query {
+        currentUser {
+            username
+            email
+        }
+    }
+    """
+
+    result = await client.graphql(query)
+
+    assert result["currentUser"]["username"] == "test-user"
+    assert result["currentUser"]["email"] == "test@example.com"
+
+    monkeypatch_execute_action.assert_called_once()
+    call_args = monkeypatch_execute_action.call_args[0]
+
+    http_request = call_args[1].runHTTPRequest
+    assert http_request.path == "/api/graphql"
+    assert http_request.method == "POST"
+
+    payload = json.loads(http_request.body)
+    assert payload["query"] == query
+    assert payload["variables"] == {}  # Empty variables object
+
+
+@pytest.mark.asyncio
+async def test_graphql_invalid_json_response(client, monkeypatch_execute_action):
+    monkeypatch_execute_action.return_value = "This is not valid JSON"
+
+    # Define query
+    query = """
+    query {
+        currentUser {
+            username
+        }
+    }
+    """
+
+    with pytest.raises(Exception) as excinfo:
+        await client.graphql(query)
+
+    assert "Invalid JSON response from GraphQL" in str(excinfo.value)
+
+
+@pytest.mark.asyncio
+async def test_graphql_with_errors(client, monkeypatch_execute_action):
+    mock_response = json.dumps(
+        {
+            "errors": [
+                {
+                    "message": "Access denied",
+                    "locations": [{"line": 2, "column": 3}],
+                    "path": ["group"],
+                }
+            ],
+            "data": None,
+        }
+    )
+    monkeypatch_execute_action.return_value = mock_response
+
+    query = """
+    query {
+        group(fullPath: "private-group") {
+            name
+        }
+    }
+    """
+
+    with pytest.raises(Exception) as excinfo:
+        await client.graphql(query)
+
+    assert "GraphQL errors" in str(excinfo.value)
+    assert "Access denied" in str(excinfo.value)

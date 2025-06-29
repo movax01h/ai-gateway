@@ -6,6 +6,7 @@ from pydantic import BaseModel, Field
 
 from duo_workflow_service.gitlab.url_parser import GitLabUrlParseError, GitLabUrlParser
 from duo_workflow_service.tools.duo_base_tool import DuoBaseTool
+from duo_workflow_service.tools.queries.epics import GET_EPIC_NOTES_QUERY
 
 DESCRIPTION_CHARACTER_LIMIT = 1_048_576
 
@@ -33,13 +34,6 @@ class GroupURLValidationResult(NamedTuple):
 class EpicURLValidationResult(NamedTuple):
     group_id: Optional[str]
     epic_iid: Optional[int]
-    errors: List[str]
-
-
-class EpicIdsResult(NamedTuple):
-    group_id: Optional[str]
-    epic_iid: Optional[int]
-    epic_id: Optional[int]
     errors: List[str]
 
 
@@ -137,66 +131,6 @@ class EpicBaseTool(DuoBaseTool):
             return EpicURLValidationResult(
                 None if group_id is None else str(group_id), epic_iid, errors
             )
-
-    async def _get_epic_ids_from_url(
-        self,
-        url: Optional[str],
-        group_id: Optional[str],
-        epic_iid: Optional[int],
-        epic_id: Optional[int],
-    ) -> EpicIdsResult:
-        """Get group_id, epic_iid and epic_id from URL or direct parameters.
-
-        Args:
-            url: The GitLab URL to parse
-            group_id: The group ID provided by the user
-            epic_iid: The epic IID provided by the user
-            epic_id: The epic ID provided by the user
-
-        Returns:
-            EpicIdsResult containing:
-                - The validated group_id (or None if validation failed)
-                - The validated epic_iid (or None if validation failed)
-                - The validated/fetched epic_id (or None if validation or fetch failed)
-                - A list of error messages (empty if validation succeeded)
-        """
-        errors = []
-
-        # If URL is provided, use validation to get group_id and epic_iid
-        if url:
-            validation_result = self._validate_epic_url(url, group_id, epic_iid)
-            if validation_result.errors:
-                return EpicIdsResult(None, None, None, validation_result.errors)
-
-            # Use the validated group_id and epic_iid
-            group_id = validation_result.group_id
-            epic_iid = validation_result.epic_iid
-
-            # If epic_id is not provided, fetch it from the API using epic_iid
-            if epic_id is None and epic_iid is not None:
-                try:
-                    epic_data = await self.gitlab_client.aget(
-                        path=f"/api/v4/groups/{group_id}/epics/{epic_iid}",
-                        parse_json=True,
-                    )
-                    epic_id = epic_data.get("id")
-                    if not epic_id:
-                        errors.append(
-                            f"Could not find epic_id for epic with iid {epic_iid}"
-                        )
-                        return EpicIdsResult(group_id, epic_iid, None, errors)
-                except Exception as e:
-                    errors.append(f"Error looking up epic: {str(e)}")
-                    return EpicIdsResult(group_id, epic_iid, None, errors)
-
-        if group_id is None or epic_id is None:
-            if group_id is None:
-                errors.append("'group_id' must be provided when 'url' is not")
-            if epic_id is None:
-                errors.append("'epic_id' must be provided when 'url' is not")
-            return EpicIdsResult(group_id, epic_iid, epic_id, errors)
-
-        return EpicIdsResult(group_id, epic_iid, epic_id, errors)
 
 
 class GroupResourceInput(BaseModel):
@@ -538,12 +472,12 @@ class ListEpicNotes(EpicBaseTool):
     {EPIC_IDENTIFICATION_DESCRIPTION}
 
     For example:
-    - Given group_id 'namespace/group' and epic_id 42, the tool call would be:
-        list_epic_notes(group_id='namespace/group', epic_id=42)
+    - Given group_id 'namespace/group' and epic_iid 42, the tool call would be:
+        list_epic_notes(group_id='namespace/group', epic_iid=42)
     - Given the URL https://gitlab.com/groups/namespace/group/-/epics/42, the tool call would be:
         list_epic_notes(url="https://gitlab.com/groups/namespace/group/-/epics/42")
 
-    When using a URL, the tool will automatically fetch the epic details to get the correct epic_id.
+    When using a URL, the tool will automatically extract the group_id and epic_iid.
     """
     args_schema: Type[BaseModel] = ListEpicNotesInput
 
@@ -551,23 +485,35 @@ class ListEpicNotes(EpicBaseTool):
         url = kwargs.pop("url", None)
         group_id = kwargs.pop("group_id", None)
         epic_iid = kwargs.pop("epic_iid", None)
-        epic_id = kwargs.pop("epic_id", None)
 
-        result = await self._get_epic_ids_from_url(url, group_id, epic_iid, epic_id)
+        validation_result = self._validate_epic_url(url, group_id, epic_iid)
 
-        if result.errors:
-            return json.dumps({"error": "; ".join(result.errors)})
-        if result.epic_id is None:
-            return json.dumps({"error": "Could not determine epic_id."})
+        if validation_result.errors:
+            return json.dumps({"error": "; ".join(validation_result.errors)})
+        if validation_result.group_id is None or validation_result.epic_iid is None:
+            return json.dumps({"error": "Missing group_id or epic_iid"})
 
-        params = {k: v for k, v in kwargs.items() if v is not None}
+        variables = {
+            "fullPath": validation_result.group_id,
+            "epicIid": str(validation_result.epic_iid),
+        }
+
         try:
-            response = await self.gitlab_client.aget(
-                path=f"/api/v4/groups/{result.group_id}/epics/{result.epic_id}/notes",
-                params=params,
-                parse_json=False,
+            response = await self.gitlab_client.graphql(GET_EPIC_NOTES_QUERY, variables)
+            widgets = (
+                response.get("namespace", {}).get("workItem", {}).get("widgets", [])
             )
-            return json.dumps({"notes": response})
+            if not widgets:
+                return json.dumps({"error": "No widgets found in the response."})
+
+            notes = []
+
+            for widget in widgets:
+                if "notes" in widget:
+                    notes_nodes = widget.get("notes", {}).get("nodes", [])
+                    notes.extend(notes_nodes)
+
+            return json.dumps({"notes": notes}, indent=2)
         except Exception as e:
             return json.dumps({"error": str(e)})
 
@@ -575,52 +521,3 @@ class ListEpicNotes(EpicBaseTool):
         if args.url:
             return f"Read comments on epic {args.url}"
         return f"Read comments on epic #{args.epic_iid} in group {args.group_id}"
-
-
-class GetEpicNoteInput(EpicResourceInput):
-    note_id: int = Field(description="The ID of the note")
-
-
-class GetEpicNote(EpicBaseTool):
-    name: str = "get_epic_note"
-    description: str = f"""Get a single note (comment) from a specific epic.
-
-    {EPIC_IDENTIFICATION_DESCRIPTION}
-
-    For example:
-    - Given group_id 'namespace/group', epic_id 42, and note_id 5, the tool call would be:
-        get_epic_note(group_id='namespace/group', epic_id=42, note_id=5)
-    - Given the URL https://gitlab.com/groups/namespace/group/-/epics/42 and note_id 5, the tool call would be:
-        get_epic_note(url="https://gitlab.com/groups/namespace/group/-/epics/42", note_id=5)
-
-    When using a URL, the tool will automatically fetch the epic details to get the correct epic_id.
-    The note_id parameter is always required.
-    """
-    args_schema: Type[BaseModel] = GetEpicNoteInput
-
-    async def _arun(self, note_id: int, **kwargs: Any) -> str:
-        url = kwargs.pop("url", None)
-        group_id = kwargs.pop("group_id", None)
-        epic_iid = kwargs.pop("epic_iid", None)
-        epic_id = kwargs.pop("epic_id", None)
-
-        result = await self._get_epic_ids_from_url(url, group_id, epic_iid, epic_id)
-
-        if result.errors:
-            return json.dumps({"error": "; ".join(result.errors)})
-        if result.epic_id is None:
-            return json.dumps({"error": "Could not determine epic_id."})
-
-        try:
-            response = await self.gitlab_client.aget(
-                path=f"/api/v4/groups/{result.group_id}/epics/{result.epic_id}/notes/{note_id}",
-                parse_json=False,
-            )
-            return json.dumps({"note": response})
-        except Exception as e:
-            return json.dumps({"error": str(e)})
-
-    def format_display_message(self, args: GetEpicNoteInput) -> str:
-        if args.url:
-            return f"Read comment #{args.note_id} on epic {args.url}"
-        return f"Read comment #{args.note_id} on epic #{args.epic_iid} in group {args.group_id}"
