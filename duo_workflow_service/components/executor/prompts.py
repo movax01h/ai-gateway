@@ -54,5 +54,12 @@ Here is the project information for the current GitLab project:
   <project_name>{project_name}</project_name>
   <project_url>{project_url}</project_url>
 </project>
+
+{os_information}
+"""
+
+OS_INFORMATION_COMPONENT = """
+Here is the information about the operating system where you are executing these tasks:
+<os_information>{os_information}</os_information>
 """
 # editorconfig-checker-enable

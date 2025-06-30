@@ -85,6 +85,7 @@ class AdditionalContext(BaseModel):
         "terminal",
         "repository",
         "directory",
+        "os_information",
     ]
     id: Optional[str] = None
     content: Optional[str] = None

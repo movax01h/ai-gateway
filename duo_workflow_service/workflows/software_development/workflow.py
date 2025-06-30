@@ -277,6 +277,7 @@ class Workflow(AbstractWorkflow):
             goal=goal,
             project=self._project,
             http_client=self._http_client,
+            additional_context=self._additional_context,
         )
 
         executor_entry_node = executor_component.attach(
