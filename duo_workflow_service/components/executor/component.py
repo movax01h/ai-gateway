@@ -16,6 +16,7 @@ from duo_workflow_service.components.executor.prompts import (
     EXECUTOR_SYSTEM_MESSAGE,
     GET_PLAN_TOOL_NAME,
     HANDOVER_TOOL_NAME,
+    OS_INFORMATION_COMPONENT,
     SET_TASK_STATUS_TOOL_NAME,
 )
 from duo_workflow_service.entities import WorkflowState, WorkflowStatusEnum
@@ -27,6 +28,7 @@ from duo_workflow_service.llm_factory import (
     create_chat_model,
 )
 from duo_workflow_service.workflows.abstract_workflow import MAX_TOKENS_TO_SAMPLE
+from duo_workflow_service.workflows.type_definitions import AdditionalContext
 
 
 class Routes(StrEnum):
@@ -69,6 +71,7 @@ class ExecutorComponent:
         model_config: Union[AnthropicConfig, VertexConfig],
         project: Any,
         http_client: GitlabHttpClient,
+        additional_context: Optional[list[AdditionalContext]] = None,
     ):
         self.model_config = model_config
         self.workflow_id = workflow_id
@@ -78,6 +81,7 @@ class ExecutorComponent:
         self.tools_registry = tools_registry
         self.project = project
         self.http_client = http_client
+        self.additional_context = additional_context
 
     def attach(
         self,
@@ -94,14 +98,7 @@ class ExecutorComponent:
             goal=self.goal,
             model=base_model_executor,
             name="executor",
-            system_prompt=EXECUTOR_SYSTEM_MESSAGE.format(
-                set_task_status_tool_name=SET_TASK_STATUS_TOOL_NAME,
-                handover_tool_name=HANDOVER_TOOL_NAME,
-                get_plan_tool_name=GET_PLAN_TOOL_NAME,
-                project_id=self.project["id"],
-                project_name=self.project["name"],
-                project_url=self.project["http_url_to_repo"],
-            ),
+            system_prompt=self._format_system_prompt(),
             toolset=self.executor_toolset,
             workflow_id=self.workflow_id,
             http_client=self.http_client,
@@ -150,3 +147,25 @@ class ExecutorComponent:
         graph.add_edge("execution_handover", next_node)
 
         return "execution"
+
+    def _format_system_prompt(self) -> str:
+        os_information = ""
+        for additional_context in self.additional_context or []:
+            # We only want to add os_information if it's not empty
+            if (
+                additional_context.category == "os_information"
+                and additional_context.content
+            ):
+                os_information = OS_INFORMATION_COMPONENT.format(
+                    os_information=additional_context.content
+                )
+
+        return EXECUTOR_SYSTEM_MESSAGE.format(
+            set_task_status_tool_name=SET_TASK_STATUS_TOOL_NAME,
+            handover_tool_name=HANDOVER_TOOL_NAME,
+            get_plan_tool_name=GET_PLAN_TOOL_NAME,
+            project_id=self.project["id"],
+            project_name=self.project["name"],
+            project_url=self.project["http_url_to_repo"],
+            os_information=os_information,
+        )

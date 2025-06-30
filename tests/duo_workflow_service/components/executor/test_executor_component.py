@@ -9,6 +9,7 @@ from duo_workflow_service.components import ToolsApprovalComponent, ToolsRegistr
 from duo_workflow_service.components.executor.component import ExecutorComponent, Routes
 from duo_workflow_service.entities import Plan, WorkflowState, WorkflowStatusEnum
 from duo_workflow_service.tools import DuoBaseTool
+from duo_workflow_service.workflows.type_definitions import AdditionalContext
 
 
 @pytest.fixture
@@ -59,6 +60,7 @@ class TestExecutorComponent:
                 "http_url_to_repo": "https://gitlab.com/test/repo",
             },
             "http_client": gl_http_client,
+            "additional_context": None,
         }
 
     @pytest.fixture
@@ -432,3 +434,51 @@ class TestExecutorComponent:
         assert response["status"] == WorkflowStatusEnum.ERROR
         assert len(response["handover"]) == 0
         assert len(response["conversation_history"]["executor"]) == 4
+
+    @pytest.mark.parametrize(
+        "additional_context,expected_os_info",
+        [
+            (None, ""),
+            ([AdditionalContext(category="os_information", content="")], ""),
+            (
+                [AdditionalContext(category="os_information", content="Ubuntu 22.04")],
+                "Ubuntu 22.04",
+            ),
+            (
+                [
+                    AdditionalContext(category="other_info", content="some data"),
+                    AdditionalContext(category="os_information", content="Windows 11"),
+                    AdditionalContext(category="more_info", content="more data"),
+                ],
+                "Windows 11",
+            ),
+            ([], ""),
+            (
+                [AdditionalContext(category="other_category", content="some content")],
+                "",
+            ),
+        ],
+    )
+    def test_format_executor_message(
+        self, additional_context, expected_os_info, executor_component
+    ):
+        executor_component.project = {
+            "id": 123,
+            "name": "Test Project",
+            "http_url_to_repo": "https://github.com/test/project",
+            "description": "This is a test project description",
+            "web_url": "",
+        }
+        executor_component.additional_context = additional_context
+
+        result = executor_component._format_system_prompt()
+
+        assert "{os_information}" not in result
+
+        if expected_os_info:
+            assert f"<os_information>{expected_os_info}</os_information>" in result
+            assert "Here is the information about the operating system" in result
+        else:
+            assert "<os_information>" not in result
+
+        assert expected_os_info in result
