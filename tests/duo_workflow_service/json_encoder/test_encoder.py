@@ -1,6 +1,7 @@
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
 
 from duo_workflow_service.entities.state import (
+    AdditionalContext,
     ApprovalStateRejection,
     ReplacementRule,
     SearchAndReplaceConfig,
@@ -117,4 +118,28 @@ def test_default_with_approval_state():
     assert encoded_approval_state == {
         "message": "Cancel this tool",
         "type": "ApprovalStateRejection",
+    }
+
+
+def test_default_with_additional_context():
+    encoder = CustomEncoder()
+    additional_context = AdditionalContext(
+        category="merge_request",
+        id="12345",
+        content="This is the merge request content",
+        metadata={
+            "url": "https://gitlab.com/repo/merge_requests/12345",
+            "state": "open",
+        },
+    )
+    encoded_context = encoder.default(additional_context)
+    assert encoded_context == {
+        "type": "AdditionalContext",
+        "category": "merge_request",
+        "id": "12345",
+        "content": "This is the merge request content",
+        "metadata": {
+            "url": "https://gitlab.com/repo/merge_requests/12345",
+            "state": "open",
+        },
     }

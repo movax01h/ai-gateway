@@ -4,6 +4,7 @@ from typing import Any
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
 
 from duo_workflow_service.entities.state import (
+    AdditionalContext,
     ApprovalStateRejection,
     SearchAndReplaceConfig,
 )
@@ -30,6 +31,7 @@ class CustomEncoder(json.JSONEncoder):
                 ToolMessage,
                 SearchAndReplaceConfig,
                 ApprovalStateRejection,
+                AdditionalContext,
             ),
         ):
             data = o.model_dump()
