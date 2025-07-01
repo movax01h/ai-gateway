@@ -12,7 +12,6 @@ from langchain_core.messages import (
 )
 from pydantic import BaseModel
 
-from contract.contract_pb2 import ContextElement
 from duo_workflow_service.entities.event import WorkflowEvent
 from duo_workflow_service.gitlab.gitlab_project import Project
 from duo_workflow_service.token_counter.approximate_token_counter import (
@@ -93,7 +92,6 @@ class UiChatLog(TypedDict):
     status: Optional[Union[ToolStatus, SlashCommandStatus]]
     correlation_id: Optional[str]
     tool_info: Optional[ToolInfo]
-    context_elements: Optional[List[ContextElement]]
     additional_context: Optional[List[AdditionalContext]]
 
 
@@ -348,7 +346,6 @@ class ChatWorkflowState(TypedDict):
     ]
     ui_chat_log: Annotated[List[UiChatLog], _ui_chat_log_reducer]
     last_human_input: Union[WorkflowEvent, None]
-    context_elements: List[ContextElement]
     project: Project | None
     approval: ApprovalStateRejection | None
 

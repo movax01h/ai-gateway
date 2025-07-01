@@ -22,7 +22,7 @@ message StartWorkflowRequest {
     string goal = 4;
     string workflowMetadata = 5;
     repeated string clientCapabilities = 6;
-    repeated ContextElement context = 7 [deprecated = true]; // Use additional_context instead
+    reserved 7; // Previously used for removed ContextElement field
     repeated McpTool mcpTools = 8;
     repeated AdditionalContext additional_context = 9;
     optional Approval approval = 10;
@@ -107,23 +107,6 @@ message GenerateTokenRequest {}
 message GenerateTokenResponse {
     string token = 1;
     int64 expiresAt = 2;
-}
-
-enum ContextElementType {
-    option deprecated = true; // Use AdditionalContext instead
-    USER_PREFERENCE = 0;
-    SELECTED_TEXT = 1;
-    FILE = 2;
-    ISSUE = 3;
-    MERGE_REQUEST = 4;
-    PREVIOUS_WORKFLOW = 5;
-}
-
-message ContextElement {
-    option deprecated = true;
-    ContextElementType type = 1;
-    string name = 2;
-    string contents = 3;
 }
 
 message NewCheckpoint {

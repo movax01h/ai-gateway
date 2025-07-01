@@ -125,7 +125,6 @@ async def test_init_sets_attributes(outbox):
                     "timestamp": "2023-01-01T00:00:00+00:00",
                     "content": "New message",
                     "tool_info": None,
-                    "context_elements": None,
                     "additional_context": None,
                 }
             ],
@@ -140,7 +139,6 @@ async def test_init_sets_attributes(outbox):
                     "timestamp": "2023-01-01T00:00:00+00:00",
                     "content": "Existing ",
                     "tool_info": None,
-                    "context_elements": None,
                     "additional_context": None,
                 }
             ],
@@ -154,7 +152,6 @@ async def test_init_sets_attributes(outbox):
                     "timestamp": "2023-01-01T00:00:00+00:00",
                     "content": "Existing content",
                     "tool_info": None,
-                    "context_elements": None,
                     "additional_context": None,
                 }
             ],
@@ -169,7 +166,6 @@ async def test_init_sets_attributes(outbox):
                     "timestamp": "2023-01-01T00:00:00+00:00",
                     "content": "Completed message",
                     "tool_info": None,
-                    "context_elements": None,
                     "additional_context": None,
                 }
             ],
@@ -183,7 +179,6 @@ async def test_init_sets_attributes(outbox):
                     "timestamp": "2023-01-01T00:00:00+00:00",
                     "content": "Completed message",
                     "tool_info": None,
-                    "context_elements": None,
                     "additional_context": None,
                 },
                 {
@@ -194,7 +189,6 @@ async def test_init_sets_attributes(outbox):
                     "timestamp": "2023-01-01T00:00:00+00:00",
                     "content": "New message",
                     "tool_info": None,
-                    "context_elements": None,
                     "additional_context": None,
                 },
             ],
@@ -209,7 +203,6 @@ async def test_init_sets_attributes(outbox):
                     "timestamp": "2023-01-01T00:00:00+00:00",
                     "content": "User message",
                     "tool_info": None,
-                    "context_elements": None,
                     "additional_context": None,
                 }
             ],
@@ -223,7 +216,6 @@ async def test_init_sets_attributes(outbox):
                     "timestamp": "2023-01-01T00:00:00+00:00",
                     "content": "User message",
                     "tool_info": None,
-                    "context_elements": None,
                     "additional_context": None,
                 },
                 {
@@ -234,7 +226,6 @@ async def test_init_sets_attributes(outbox):
                     "timestamp": "2023-01-01T00:00:00+00:00",
                     "content": "Agent response",
                     "tool_info": None,
-                    "context_elements": None,
                     "additional_context": None,
                 },
             ],

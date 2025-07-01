@@ -128,7 +128,6 @@ class ChatAgent(Prompt[ChatWorkflowState, BaseMessage]):
                         status=ToolStatus.SUCCESS,
                         correlation_id=None,
                         tool_info=ToolInfo(name=call["name"], args=call["args"]),
-                        context_elements=[],
                         additional_context=None,
                     )
                 )
@@ -188,7 +187,6 @@ class ChatAgent(Prompt[ChatWorkflowState, BaseMessage]):
                         status=ToolStatus.SUCCESS,
                         correlation_id=None,
                         tool_info=None,
-                        context_elements=[],
                         additional_context=None,
                     )
                 ]
@@ -220,7 +218,6 @@ class ChatAgent(Prompt[ChatWorkflowState, BaseMessage]):
                         status=ToolStatus.FAILURE,
                         correlation_id=None,
                         tool_info=None,
-                        context_elements=[],
                         additional_context=None,
                     )
                 ],

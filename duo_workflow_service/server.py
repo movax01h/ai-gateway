@@ -168,10 +168,6 @@ class DuoWorkflowService(contract_pb2_grpc.DuoWorkflowServicer):
                 start_workflow_request.startRequest.workflowMetadata
             )
 
-        context_elements = []
-        if start_workflow_request.startRequest.context:
-            context_elements = list(start_workflow_request.startRequest.context)
-
         mcp_tools = []
         if start_workflow_request.startRequest.mcpTools:
             mcp_tools = list(start_workflow_request.startRequest.mcpTools)
@@ -188,7 +184,6 @@ class DuoWorkflowService(contract_pb2_grpc.DuoWorkflowServicer):
             user=user,
             mcp_tools=mcp_tools,
             additional_context=additional_context,
-            context_elements=context_elements,
             invocation_metadata={
                 "base_url": invocation_metadata.get("x-gitlab-base-url", ""),
                 "gitlab_token": invocation_metadata.get("x-gitlab-oauth-token", ""),

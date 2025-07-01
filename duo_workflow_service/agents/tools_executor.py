@@ -149,7 +149,6 @@ class ToolsExecutor:
                     status=ToolStatus.SUCCESS,
                     correlation_id=None,
                     tool_info=None,
-                    context_elements=None,
                     additional_context=None,
                 )
             )
@@ -355,7 +354,6 @@ class ToolsExecutor:
                 if status != ToolStatus.SUCCESS or tool_name not in _ACTION_HANDLERS
                 else None
             ),
-            context_elements=None,
             additional_context=None,
         )
 

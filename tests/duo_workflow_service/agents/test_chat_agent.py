@@ -47,7 +47,6 @@ class TestChatAgentPromptTemplate:
             conversation_history={"test_agent": [HumanMessage(content="Hello")]},
             ui_chat_log=[],
             last_human_input=None,
-            context_elements=[],
             project={
                 "id": 123,
                 "description": "Test project description",
@@ -120,7 +119,6 @@ class TestChatAgentPromptTemplate:
             conversation_history={"test_agent": [HumanMessage(content="Hello")]},
             ui_chat_log=[],
             last_human_input=None,
-            context_elements=[],
             project=None,
             approval=None,
         )
@@ -206,7 +204,6 @@ class TestChatAgentPromptTemplate:
             },
             ui_chat_log=[],
             last_human_input=None,
-            context_elements=[],
             project=None,
             approval=None,
         )
