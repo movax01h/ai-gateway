@@ -33,27 +33,6 @@ from lib.feature_flags import current_feature_flag_context
 
 
 @pytest.fixture
-def mock_state():
-    return {
-        "plan": {"steps": []},
-        "status": WorkflowStatusEnum.NOT_STARTED,
-        "conversation_history": {},
-        "ui_chat_log": [],
-        "last_human_input": None,
-        "context_elements": [],
-    }
-
-
-@pytest.fixture
-def mock_tools_registry():
-    mock_registry = MagicMock(spec=ToolsRegistry)
-    mock_registry.get_batch = Mock(return_value=[Mock(name="test_tool")])
-    mock_registry.get_handlers = Mock(return_value=[Mock(name="test_tool_handler")])
-    mock_registry.configure = AsyncMock(return_value=mock_registry)
-    return mock_registry
-
-
-@pytest.fixture
 def context_element():
     return ContextElement(
         type=ContextElementType.FILE,
@@ -89,6 +68,7 @@ def workflow_with_project(
     mock_container: containers.Container,
     prompt: ChatAgent,
     user: CloudConnectorUser,
+    mock_tools_registry: Mock,
 ):
     workflow = Workflow(
         workflow_id="test-id",
@@ -116,6 +96,7 @@ def workflow_with_project(
     workflow._additional_context = additional_context
     workflow._http_client = MagicMock()
     workflow._context_elements = []
+    prompt.tools_registry = mock_tools_registry
     workflow._agent = prompt
     return workflow
 
@@ -327,46 +308,16 @@ def test_are_tools_called_with_tool_use(workflow_with_project):
 
 
 @pytest.mark.asyncio
-@patch("duo_workflow_service.workflows.abstract_workflow.ToolsRegistry")
-@patch("duo_workflow_service.workflows.abstract_workflow.GitLabWorkflow", autospec=True)
-@patch(
-    "duo_workflow_service.workflows.abstract_workflow.fetch_project_data_with_workflow_id"
+@pytest.mark.usefixtures(
+    "mock_tools_registry_cls",
+    "mock_git_lab_workflow_instance",
+    "mock_fetch_project_data_with_workflow_id",
 )
-@patch("duo_workflow_service.workflows.abstract_workflow.UserInterface", autospec=True)
 async def test_workflow_run(
-    mock_user_interface,
-    mock_fetch_project_data,
-    mock_gitlab_workflow,
-    mock_tools_registry,
+    mock_checkpoint_notifier,
     workflow_with_project,
 ):
-    mock_user_interface_instance = mock_user_interface.return_value
-    mock_tools_registry.configure = AsyncMock(
-        return_value=MagicMock(spec=ToolsRegistry)
-    )
-    mock_fetch_project_data.return_value = (
-        {
-            "id": 1,
-            "name": "test-project",
-            "description": "Test project",
-            "http_url_to_repo": "https://example.com/project",
-            "web_url": "https://example.com/project",
-        },
-        {"project_id": 1},
-    )
-
-    mock_git_lab_workflow_instance = mock_gitlab_workflow.return_value
-    mock_git_lab_workflow_instance.__aenter__.return_value = (
-        mock_git_lab_workflow_instance
-    )
-    mock_git_lab_workflow_instance.__aexit__.return_value = None
-    mock_git_lab_workflow_instance.aget_tuple = AsyncMock(return_value=None)
-    mock_git_lab_workflow_instance.aput = AsyncMock(
-        return_value={
-            "configurable": {"thread_id": "test-id", "checkpoint_id": "checkpoint1"}
-        }
-    )
-
+    mock_user_interface_instance = mock_checkpoint_notifier.return_value
     state = {"status": "Not Started", "ui_chat_log": []}
 
     class AsyncIterator:
@@ -689,12 +640,10 @@ async def test_chat_workflow_status_flow_integration(
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("tool_approval_required", [True])
+@pytest.mark.usefixtures("mock_fetch_project_data_with_workflow_id")
 async def test_agent_run_with_tool_approval_required(workflow_with_project):
     """Test agent run method when tools require approval."""
-    workflow_with_project._agent.tools_registry = MagicMock()
-    workflow_with_project._agent.tools_registry.approval_required = MagicMock(
-        return_value=True
-    )
 
     state = ChatWorkflowState(
         plan={"steps": []},
