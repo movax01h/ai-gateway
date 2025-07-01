@@ -348,19 +348,22 @@ def mock_checkpointer():
     return Mock()
 
 
-@pytest.mark.asyncio
-@patch("duo_workflow_service.workflows.search_and_replace.workflow.create_chat_model")
-@patch("duo_workflow_service.workflows.search_and_replace.workflow.Agent")
-async def test_workflow_compilation(
-    mock_agent, mock_new_chat_client, mock_tools_registry, mock_checkpointer
-):
-    """Test workflow compilation process."""
-    workflow = Workflow(
+@pytest.fixture
+def workflow():
+    return Workflow(
         workflow_id="test_id",
         workflow_metadata={},
         workflow_type=CategoryEnum.WORKFLOW_SEARCH_AND_REPLACE,
     )
 
+
+@pytest.mark.asyncio
+@patch("duo_workflow_service.workflows.search_and_replace.workflow.create_chat_model")
+@patch("duo_workflow_service.workflows.search_and_replace.workflow.Agent")
+async def test_workflow_compilation(
+    mock_agent, mock_new_chat_client, mock_tools_registry, mock_checkpointer, workflow
+):
+    """Test workflow compilation process."""
     # Compile the workflow graph
     compiled_graph = workflow._compile(
         goal="/test/path",
@@ -384,13 +387,8 @@ async def test_workflow_compilation(
 
 
 @pytest.mark.asyncio
-async def test_workflow_initialization():
+async def test_workflow_initialization(workflow):
     """Test workflow initialization and state setup."""
-    workflow = Workflow(
-        workflow_id="test_id",
-        workflow_metadata={},
-        workflow_type=CategoryEnum.WORKFLOW_SEARCH_AND_REPLACE,
-    )
     initial_state = workflow.get_workflow_state("/test/path")
 
     assert initial_state["directory"] == "/test/path"
@@ -404,14 +402,9 @@ async def test_workflow_initialization():
 @pytest.mark.asyncio
 @patch("duo_workflow_service.workflows.search_and_replace.workflow.create_chat_model")
 async def test_accessibility_tools(
-    tools_registry_with_all_privileges, mock_checkpointer
+    tools_registry_with_all_privileges, mock_checkpointer, workflow
 ):
     """Test that all tools used by the accessibility agent are available in the tools registry."""
-    workflow = Workflow(
-        workflow_id="test_id",
-        workflow_metadata={},
-        workflow_type=CategoryEnum.WORKFLOW_SEARCH_AND_REPLACE,
-    )
     captured_tool_names = []
 
     # The accessibility agent is initialized with tools via `tools=tools_registry.get_batch(accessibility_tools),`
@@ -439,15 +432,9 @@ async def test_accessibility_tools(
 @pytest.mark.asyncio
 @patch("duo_workflow_service.workflows.search_and_replace.workflow.create_chat_model")
 async def test_non_accessibility_tools(
-    tools_registry_with_all_privileges, mock_checkpointer
+    tools_registry_with_all_privileges, mock_checkpointer, workflow
 ):
     """Test that all other tools used in the search and replace workflow are available in the tools registry."""
-    workflow = Workflow(
-        workflow_id="test_id",
-        workflow_metadata={},
-        workflow_type=CategoryEnum.WORKFLOW_SEARCH_AND_REPLACE,
-    )
-
     captured_tool_names = []
 
     # A few nodes use RunToolNode. For each, a single tool is specified. E.g., `tool=tools_registry.get("read_file")`
