@@ -14,8 +14,8 @@ __all__ = [
 
 
 class BaseCounterVisitor(BaseVisitor):
-    def __init__(self):
-        self._symbol_counter = Counter()
+    def __init__(self) -> None:
+        self._symbol_counter: Counter = Counter()
 
     @property
     def counts(self) -> dict:
