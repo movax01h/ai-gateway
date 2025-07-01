@@ -92,6 +92,10 @@ class LLM(TextGenModelBase):
         prefix: str,
         suffix: Optional[str] = None,
         stream: bool = False,
+        temperature: Optional[float] = None,
+        max_output_tokens: Optional[int] = None,
+        top_p: Optional[float] = None,
+        top_k: Optional[int] = None,
         **kwargs: Any,
     ) -> (
         TextGenModelOutput | list[TextGenModelOutput] | AsyncIterator[TextGenModelChunk]
@@ -102,6 +106,14 @@ class LLM(TextGenModelBase):
             "stream": stream,
             "kwargs": dict(kwargs),
         }
+        if temperature is not None:
+            scope["temperature"] = str(temperature)
+        if max_output_tokens is not None:
+            scope["max_output_tokens"] = str(max_output_tokens)
+        if top_p is not None:
+            scope["top_p"] = str(top_p)
+        if top_k is not None:
+            scope["top_k"] = str(top_k)
 
         # echo the current scope's local variables
         # default=vars prevents object is not JSON serializable error
@@ -166,11 +178,27 @@ class ChatModel(ChatModelBase):
         self,
         messages: list[Message],
         stream: bool = False,
+        temperature: Optional[float] = None,
+        max_output_tokens: Optional[int] = None,
+        top_p: Optional[float] = None,
+        top_k: Optional[int] = None,
         **kwargs: Any,
     ) -> TextGenModelOutput | AsyncIterator[TextGenModelChunk]:
-        messages = [message.model_dump(mode="json") for message in messages]
 
-        scope = {"messages": messages, "stream": stream, "kwargs": dict(kwargs)}
+        serialized_messages = [message.model_dump(mode="json") for message in messages]
+        scope = {
+            "messages": serialized_messages,
+            "stream": stream,
+            "kwargs": dict(kwargs),
+        }
+        if temperature is not None:
+            scope["temperature"] = str(temperature)
+        if max_output_tokens is not None:
+            scope["max_output_tokens"] = str(max_output_tokens)
+        if top_p is not None:
+            scope["top_p"] = str(top_p)
+        if top_k is not None:
+            scope["top_k"] = str(top_k)
         suggestion = (
             f"echo: {json.dumps(scope)}"  # echo the current scope's local variables
         )
