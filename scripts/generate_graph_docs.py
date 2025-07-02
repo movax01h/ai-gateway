@@ -5,6 +5,7 @@ import sys
 from unittest.mock import MagicMock
 
 import structlog
+from gitlab_cloud_connector import CloudConnectorUser
 from langgraph.checkpoint.memory import MemorySaver
 
 from ai_gateway.config import Config
@@ -49,7 +50,9 @@ def main():
             )
 
             tools_reg = MagicMock(spec=ToolsRegistry)
-            wrk = Workflow("", {}, workflow_type="")
+            wrk = Workflow(
+                "", {}, workflow_type="", user=CloudConnectorUser(True, is_debug=True)
+            )
             wrk._project = {"id": "", "name": "", "http_url_to_repo": ""}
             graph = wrk._compile("", tools_reg, MemorySaver())
 

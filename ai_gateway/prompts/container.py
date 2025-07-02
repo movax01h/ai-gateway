@@ -4,7 +4,6 @@ from ai_gateway.chat import agents as chat
 from ai_gateway.config import ConfigModelLimits
 from ai_gateway.prompts.config import ModelClassProvider
 from ai_gateway.prompts.registry import LocalPromptRegistry
-from duo_workflow_service.agents.chat_agent import ChatAgent
 
 __all__ = [
     "ContainerPrompts",
@@ -21,7 +20,7 @@ class ContainerPrompts(containers.DeclarativeContainer):
         class_overrides={
             "chat/react": chat.ReActAgent,
             "chat/react/vertex": chat.ReActAgent,
-            "chat/agent": ChatAgent,
+            "chat/agent": "duo_workflow_service.agents.chat_agent.ChatAgent",
         },
         model_factories={
             ModelClassProvider.ANTHROPIC: providers.Factory(

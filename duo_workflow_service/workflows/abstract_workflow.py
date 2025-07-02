@@ -4,6 +4,7 @@ from abc import ABC, abstractmethod
 from typing import Any, Dict, Optional, Type, TypedDict, Union
 
 import structlog
+from dependency_injector.wiring import Provide, inject
 from gitlab_cloud_connector import CloudConnectorUser
 from langchain.tools import BaseTool
 from langchain_core.runnables import RunnableConfig
@@ -16,7 +17,9 @@ from langgraph.checkpoint.base import (  # pylint: disable=no-langgraph-langchai
 from langgraph.types import Command
 from langsmith import traceable, tracing_context
 
+from ai_gateway.container import ContainerApplication
 from ai_gateway.models import KindAnthropicModel
+from ai_gateway.prompts.registry import LocalPromptRegistry
 from contract import contract_pb2
 from duo_workflow_service.checkpointer.gitlab_workflow import (
     GitLabWorkflow,
@@ -80,7 +83,9 @@ class AbstractWorkflow(ABC):
     _context_elements: list
     _additional_tools: list[Type[BaseTool]]
     _approval: Optional[contract_pb2.Approval]
+    _prompt_registry: LocalPromptRegistry
 
+    @inject
     def __init__(
         self,
         workflow_id: str,
@@ -95,6 +100,9 @@ class AbstractWorkflow(ABC):
         user: Optional[CloudConnectorUser] = None,
         additional_context: Optional[list[AdditionalContext]] = None,
         approval: Optional[contract_pb2.Approval] = None,
+        prompt_registry: LocalPromptRegistry = Provide[
+            ContainerApplication.pkg_prompts.prompt_registry
+        ],
     ):
         self._outbox = asyncio.Queue(maxsize=QUEUE_MAX_SIZE)
         self._inbox = asyncio.Queue(maxsize=QUEUE_MAX_SIZE)
@@ -116,6 +124,7 @@ class AbstractWorkflow(ABC):
         self._workflow_config = {}
         self._model_config = self._get_model_config()
         self._approval = approval
+        self._prompt_registry = prompt_registry
 
     async def run(self, goal: str) -> None:
         with duo_workflow_metrics.time_workflow(

@@ -3,6 +3,7 @@ from unittest.mock import AsyncMock, MagicMock, Mock, patch
 
 import pytest
 from dependency_injector import containers
+from gitlab_cloud_connector import CloudConnectorUser, UserClaims, WrongUnitPrimitives
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 
 from contract import contract_pb2
@@ -72,8 +73,22 @@ def config_values():
 
 
 @pytest.fixture
+def user():
+    return CloudConnectorUser(
+        authenticated=True,
+        claims=UserClaims(
+            scopes=["duo_chat"],
+            issuer="gitlab-duo-workflow-service",
+        ),
+    )
+
+
+@pytest.fixture
 def workflow_with_project(
-    context_element, mock_container: containers.Container, prompt: ChatAgent
+    context_element,
+    mock_container: containers.Container,
+    prompt: ChatAgent,
+    user: CloudConnectorUser,
 ):
     workflow = Workflow(
         workflow_id="test-id",
@@ -81,6 +96,7 @@ def workflow_with_project(
         workflow_type=CategoryEnum.WORKFLOW_CHAT,
         context_elements=[context_element],
         mcp_tools=[contract_pb2.McpTool(name="extra_tool", description="Extra tool")],
+        user=user,
     )
     additional_context = [
         AdditionalContext(
@@ -385,6 +401,25 @@ async def test_workflow_run(
             type="values", state=state, stream=True
         )
         assert mock_user_interface_instance.send_event.call_count == 1
+
+
+class TestUnauthorizedChatExecution:
+    @pytest.fixture
+    def user(self):
+        return CloudConnectorUser(
+            authenticated=True,
+            claims=UserClaims(
+                scopes=["unknown_scope"],
+                issuer="gitlab-duo-workflow-service",
+            ),
+        )
+
+    def test_workflow_run(
+        self,
+        workflow_with_project,
+    ):
+        with pytest.raises(WrongUnitPrimitives):
+            workflow_with_project._compile("Test goal", MagicMock(), MagicMock())
 
 
 @pytest.mark.parametrize(

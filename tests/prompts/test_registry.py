@@ -1,3 +1,4 @@
+# pylint: disable=too-many-lines
 from pathlib import Path
 from textwrap import dedent
 from typing import Sequence, Type, cast
@@ -390,16 +391,25 @@ def registry(
 
 class TestLocalPromptRegistry:
     @pytest.mark.usefixtures("mock_fs")
+    @pytest.mark.parametrize(
+        ("override_key", "override_class"),
+        [
+            ("chat/react", MockPromptClass),
+            ("chat/react", "tests.prompts.test_registry.MockPromptClass"),
+        ],
+    )
     def test_from_local_yaml(
         self,
         model_factories: dict[ModelClassProvider, TypeModelFactory],
         prompts_registered: dict[str, PromptRegistered],
         internal_event_client: Mock,
         model_limits: ConfigModelLimits,
+        override_key: str,
+        override_class: str | Type[Prompt],
     ):
         registry = LocalPromptRegistry.from_local_yaml(
             class_overrides={
-                "chat/react": MockPromptClass,
+                override_key: override_class,
             },
             model_factories=model_factories,
             default_prompts={},
@@ -410,6 +420,53 @@ class TestLocalPromptRegistry:
         )
 
         assert registry.prompts_registered == prompts_registered
+
+    @pytest.mark.usefixtures("mock_fs")
+    @pytest.mark.parametrize(
+        ("override_key", "override_class", "error_class", "error_message"),
+        [
+            (
+                "chat/react",
+                "tests.prompts.test_registry",
+                ValueError,
+                "The specified klass must be a subclass of Prompt",
+            ),
+            (
+                "chat/react",
+                "tests.prompts.test_registry.UnknownClass",
+                AttributeError,
+                "module 'tests.prompts.test_registry' has no attribute 'UnknownClass'",
+            ),
+            (
+                "chat/react",
+                "tests.unknown",
+                AttributeError,
+                "module 'tests' has no attribute 'unknown'",
+            ),
+        ],
+    )
+    def test_from_local_yaml_failure(
+        self,
+        model_factories: dict[ModelClassProvider, TypeModelFactory],
+        internal_event_client: Mock,
+        model_limits: ConfigModelLimits,
+        override_key: str,
+        override_class: str,
+        error_class: Type[Exception],
+        error_message: str,
+    ):
+        with pytest.raises(error_class, match=error_message):
+            LocalPromptRegistry.from_local_yaml(
+                class_overrides={
+                    override_key: override_class,
+                },
+                model_factories=model_factories,
+                default_prompts={},
+                internal_event_client=internal_event_client,
+                model_limits=model_limits,
+                custom_models_enabled=False,
+                disable_streaming=False,
+            )
 
     @pytest.mark.parametrize(
         (
