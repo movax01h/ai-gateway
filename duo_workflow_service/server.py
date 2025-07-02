@@ -14,8 +14,8 @@ from gitlab_cloud_connector import (
     CloudConnectorUser,
     GitLabUnitPrimitive,
     TokenAuthority,
+    data_model,
 )
-from gitlab_cloud_connector.data_model.unit_primitive import list_unit_primitives
 from grpc_reflection.v1alpha import reflection
 from langchain.globals import set_llm_cache
 from langchain_community.cache import SQLiteCache
@@ -58,9 +58,10 @@ from duo_workflow_service.workflows.type_definitions import AdditionalContext
 
 log = structlog.stdlib.get_logger("server")
 
+catalog = data_model.load_catalog()
 allowed_ijwt_scopes = {
     unit_primitive.name
-    for unit_primitive in list_unit_primitives()
+    for unit_primitive in catalog.unit_primitives
     if "duo_workflow_service" in unit_primitive.backend_services
 }
 
