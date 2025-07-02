@@ -73,7 +73,11 @@ def test_get_plan(tool: GetPlan, plan_steps: list[Task]):
 
 
 def assert_update(
-    tool: PlannerTool, result: Any, expected_message: str, expected_steps: list[Task]
+    tool: PlannerTool,
+    result: Any,
+    expected_message: str,
+    expected_steps: list[Task],
+    reset: bool = False,
 ):
     result = cast(Command, result).update
 
@@ -81,6 +85,7 @@ def assert_update(
         ToolMessage(name=tool.name, tool_call_id="1", content=expected_message)
     ]
     assert result["plan"]["steps"] == expected_steps
+    assert result["plan"].get("reset", False) == reset
 
 
 @pytest.mark.parametrize("tool_class", [SetTaskStatus])
@@ -92,14 +97,12 @@ def assert_update(
             "In Progress",
             [
                 {"id": "task-0", "description": "Task 1", "status": "In Progress"},
-                {"id": "task-1", "description": "Task 2", "status": "In Progress"},
             ],
         ),
         (
             "task-1",
             "Completed",
             [
-                {"id": "task-0", "description": "Task 1", "status": "Not Started"},
                 {"id": "task-1", "description": "Task 2", "status": "Completed"},
             ],
         ),
@@ -135,8 +138,6 @@ def test_add_new_task(tool: AddNewTask):
         result=result,
         expected_message="Step added: task-2",
         expected_steps=[
-            {"id": "task-0", "description": "Task 1", "status": TaskStatus.NOT_STARTED},
-            {"id": "task-1", "description": "Task 2", "status": TaskStatus.IN_PROGRESS},
             {
                 "id": "task-2",
                 "description": "Create new feature",
@@ -166,7 +167,12 @@ def test_remove_task(tool: RemoveTask):
         result=result,
         expected_message="Task removed: task-0",
         expected_steps=[
-            {"id": "task-1", "description": "Task 2", "status": TaskStatus.IN_PROGRESS},
+            {
+                "id": "task-0",
+                "description": "Task 1",
+                "status": TaskStatus.NOT_STARTED,
+                "delete": True,
+            },
         ],
     )
 
@@ -194,7 +200,6 @@ def test_update_task_description(tool: UpdateTaskDescription):
         result=result,
         expected_message=f"Task updated: {task_id}",
         expected_steps=[
-            {"id": "task-0", "description": "Task 1", "status": TaskStatus.NOT_STARTED},
             {
                 "id": "task-1",
                 "description": new_description,
@@ -281,6 +286,7 @@ def test_create_plan(tool: CreatePlan):
             Task(id="task-1", description="Task 2", status=TaskStatus.NOT_STARTED),
             Task(id="task-2", description="Task 3", status=TaskStatus.NOT_STARTED),
         ],
+        reset=True,
     )
 
 

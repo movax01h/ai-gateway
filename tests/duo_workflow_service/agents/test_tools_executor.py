@@ -1,4 +1,4 @@
-# pylint: disable=direct-environment-variable-reference
+# pylint: disable=direct-environment-variable-reference,too-many-lines
 import asyncio
 import os
 from dataclasses import dataclass, field
@@ -462,7 +462,44 @@ async def test_adding_ai_context_to_ui_chat_logs(
                     {"id": "task-2", "description": "Task 3", "status": "Not Started"},
                 ]
             },
-            "expected_log_content": "Create plan with 3 tasks",
+            "expected_log_content": ["Create plan with 3 tasks"],
+        },
+        {
+            "plan": {"steps": []},
+            "tool_calls": [
+                {
+                    "id": "1",
+                    "name": "create_plan",
+                    "args": {
+                        "tasks": ["Task 1", "Task 2", "Task 3"],
+                    },
+                },
+                {
+                    "id": "2",
+                    "name": "create_plan",
+                    "args": {
+                        "tasks": ["Task 4", "Task 5"],
+                    },
+                },
+            ],
+            "tools_response": [
+                ToolMessage(
+                    content="Plan created", name="create_plan", tool_call_id="1"
+                ),
+                ToolMessage(
+                    content="Plan created", name="create_plan", tool_call_id="2"
+                ),
+            ],
+            "expected_plan": {
+                "steps": [
+                    {"id": "task-0", "description": "Task 4", "status": "Not Started"},
+                    {"id": "task-1", "description": "Task 5", "status": "Not Started"},
+                ]
+            },
+            "expected_log_content": [
+                "Create plan with 3 tasks",
+                "Create plan with 2 tasks",
+            ],
         },
         {
             "plan": {"steps": []},
@@ -484,7 +521,7 @@ async def test_adding_ai_context_to_ui_chat_logs(
                 )
             ],
             "expected_plan": {"steps": []},
-            "expected_log_content": "Update description for task 'step1'",
+            "expected_log_content": ["Update description for task 'step1'"],
         },
         {
             "plan": {"steps": [{"id": "1", "description": "old step1"}]},
@@ -506,7 +543,7 @@ async def test_adding_ai_context_to_ui_chat_logs(
                 )
             ],
             "expected_plan": {"steps": [{"id": "1", "description": "new step1"}]},
-            "expected_log_content": "Update description for task 'new step1'",
+            "expected_log_content": ["Update description for task 'new step1'"],
         },
         {
             "plan": {"steps": []},
@@ -531,7 +568,7 @@ async def test_adding_ai_context_to_ui_chat_logs(
                     }
                 ]
             },
-            "expected_log_content": "Add new task to the plan: New task",
+            "expected_log_content": ["Add new task to the plan: New task"],
         },
         {
             "plan": {"steps": [{"id": "1", "description": "Task to remove"}]},
@@ -548,7 +585,7 @@ async def test_adding_ai_context_to_ui_chat_logs(
                 )
             ],
             "expected_plan": {"steps": []},
-            "expected_log_content": "Remove task 'Test description 1'",
+            "expected_log_content": ["Remove task 'Test description 1'"],
         },
         {
             "plan": {
@@ -587,7 +624,160 @@ async def test_adding_ai_context_to_ui_chat_logs(
                     }
                 ]
             },
-            "expected_log_content": "Set task 'Test description' to 'In Progress'",
+            "expected_log_content": ["Set task 'Test description' to 'In Progress'"],
+        },
+        {
+            "plan": {
+                "steps": [
+                    {
+                        "id": "1",
+                        "description": "Task 1",
+                        "status": TaskStatus.NOT_STARTED,
+                    },
+                    {
+                        "id": "2",
+                        "description": "Task 2",
+                        "status": TaskStatus.NOT_STARTED,
+                    },
+                ]
+            },
+            "tool_calls": [
+                {
+                    "id": "1",
+                    "name": "set_task_status",
+                    "args": {
+                        "task_id": "1",
+                        "status": TaskStatus.IN_PROGRESS,
+                        "description": "Test description",
+                    },
+                },
+                {
+                    "id": "2",
+                    "name": "update_task_description",
+                    "args": {
+                        "task_id": "2",
+                        "new_description": "New description",
+                    },
+                },
+            ],
+            "tools_response": [
+                ToolMessage(
+                    content="Task status set: 1 - In Progress",
+                    name="set_task_status",
+                    tool_call_id="1",
+                ),
+                ToolMessage(
+                    content="Task updated: 2",
+                    name="update_task_description",
+                    tool_call_id="2",
+                ),
+            ],
+            "expected_plan": {
+                "steps": [
+                    {
+                        "id": "1",
+                        "description": "Task 1",
+                        "status": TaskStatus.IN_PROGRESS,
+                    },
+                    {
+                        "id": "2",
+                        "description": "New description",
+                        "status": TaskStatus.NOT_STARTED,
+                    },
+                ]
+            },
+            "expected_log_content": [
+                "Set task 'Test description' to 'In Progress'",
+                "Update description for task 'New description'",
+            ],
+        },
+        {
+            "plan": {
+                "steps": [
+                    {
+                        "id": "1",
+                        "description": "Task 1",
+                        "status": TaskStatus.NOT_STARTED,
+                    },
+                    {
+                        "id": "2",
+                        "description": "Task 2",
+                        "status": TaskStatus.NOT_STARTED,
+                    },
+                ]
+            },
+            "tool_calls": [
+                {
+                    "id": "1",
+                    "name": "set_task_status",
+                    "args": {
+                        "task_id": "1",
+                        "status": TaskStatus.IN_PROGRESS,
+                        "description": "Task 1",
+                    },
+                },
+                {
+                    "id": "2",
+                    "name": "remove_task",
+                    "args": {
+                        "task_id": "2",
+                        "description": "Task 2",
+                    },
+                },
+            ],
+            "tools_response": [
+                ToolMessage(
+                    content="Task status set: 1 - In Progress",
+                    name="set_task_status",
+                    tool_call_id="1",
+                ),
+                ToolMessage(
+                    content="Task removed: 2",
+                    name="remove_task",
+                    tool_call_id="2",
+                ),
+            ],
+            "expected_plan": {
+                "steps": [
+                    {
+                        "id": "1",
+                        "description": "Task 1",
+                        "status": TaskStatus.IN_PROGRESS,
+                    },
+                ]
+            },
+            "expected_log_content": [
+                "Set task 'Task 1' to 'In Progress'",
+                "Remove task 'Task 2'",
+            ],
+        },
+        {
+            "plan": {"steps": [{"id": "1", "description": "Task to remove"}]},
+            "tool_calls": [
+                {
+                    "id": "1",
+                    "name": "remove_task",
+                    "args": {"task_id": "1", "description": "Test description 1"},
+                },
+                {
+                    "id": "2",
+                    "name": "remove_task",
+                    "args": {"task_id": "1", "description": "Test description 1"},
+                },
+            ],
+            "tools_response": [
+                ToolMessage(
+                    content="Task removed: 1", name="remove_task", tool_call_id="1"
+                ),
+                ToolMessage(
+                    content="Task removed: 1", name="remove_task", tool_call_id="2"
+                ),
+            ],
+            "expected_plan": {"steps": []},
+            "expected_log_content": [
+                "Remove task 'Test description 1'",
+                "Remove task 'Test description 1'",
+            ],
         },
     ],
 )
@@ -616,7 +806,7 @@ async def test_state_manipulation(
 
     assert "ui_chat_log" in result
     ui_chat_logs = result["ui_chat_log"]
-    assert len(ui_chat_logs) == 2
+    assert len(ui_chat_logs) == len(test_case["expected_log_content"]) + 1
 
     agent_log = ui_chat_logs[0]
     assert agent_log["timestamp"] == "2025-01-01T12:00:00+00:00"
@@ -624,11 +814,12 @@ async def test_state_manipulation(
     assert agent_log["content"] == "test"
     assert agent_log["tool_info"] is None
 
-    tool_log = ui_chat_logs[1]
-    assert tool_log["timestamp"] == "2025-01-01T12:00:00+00:00"
-    assert tool_log["message_type"] == MessageTypeEnum.TOOL
-    assert tool_log["content"] == test_case["expected_log_content"]
-    assert tool_log["tool_info"] is None
+    for i, expected_content in enumerate(test_case["expected_log_content"]):
+        tool_log = ui_chat_logs[i + 1]
+        assert tool_log["timestamp"] == "2025-01-01T12:00:00+00:00"
+        assert tool_log["message_type"] == MessageTypeEnum.TOOL
+        assert tool_log["content"] == expected_content
+        assert tool_log["tool_info"] is None
 
 
 @pytest.mark.asyncio
