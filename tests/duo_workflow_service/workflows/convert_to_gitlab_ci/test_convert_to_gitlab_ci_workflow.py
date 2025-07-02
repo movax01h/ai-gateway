@@ -45,30 +45,7 @@ def mock_checkpointer():
 
 
 @pytest.fixture
-def mock_state():
-    """Create a mock workflow state."""
-    return WorkflowState(
-        plan=Plan(steps=[]),
-        status=WorkflowStatusEnum.NOT_STARTED,
-        conversation_history={},
-        handover=[],
-        last_human_input=None,
-        ui_chat_log=[],
-    )
-
-
-@pytest.fixture
-def mock_tools_registry():
-    """Create a mock tools registry."""
-    registry = Mock()
-    registry.get = Mock(return_value=Mock(name="test_tool"))
-    registry.get_batch = Mock(return_value=[Mock(name="test_tool")])
-    registry.get_handlers = Mock(return_value=[Mock(name="test_tool")])
-    return registry
-
-
-@pytest.fixture
-def mock_workflow():
+def workflow():
     return Workflow(
         workflow_id="test_id",
         workflow_metadata={},
@@ -106,7 +83,7 @@ def mock_agent_response():
 @pytest.mark.asyncio
 @patch("duo_workflow_service.workflows.convert_to_gitlab_ci.workflow.create_chat_model")
 async def test_translation_tools(
-    tools_registry_with_all_privileges, mock_checkpointer, mock_workflow
+    tools_registry_with_all_privileges, mock_checkpointer, workflow
 ):
     """Test that all tools used by the gitlab ci translator agent are available in the tools registry."""
 
@@ -118,7 +95,7 @@ async def test_translation_tools(
         "get_batch",
         side_effect=lambda tool_names: captured_tool_names.extend(tool_names),
     ):
-        mock_workflow._compile(
+        workflow._compile(
             goal="/test/path",
             tools_registry=tools_registry_with_all_privileges,
             checkpointer=mock_checkpointer,
@@ -138,11 +115,11 @@ async def test_translation_tools(
     "duo_workflow_service.workflows.convert_to_gitlab_ci.workflow.ApproximateTokenCounter"
 )
 @pytest.mark.asyncio
-async def test_file_content_too_large(mock_token_counter, mock_state):
-    mock_state["conversation_history"] = {"ci_pipelines_manager_agent": []}
+async def test_file_content_too_large(mock_token_counter, workflow_state):
+    workflow_state["conversation_history"] = {"ci_pipelines_manager_agent": []}
     mock_token_counter.return_value.count_tokens.return_value = MAX_CONTEXT_TOKENS + 1
 
-    result = _load_file_contents(["large file content"], mock_state)
+    result = _load_file_contents(["large file content"], workflow_state)
 
     human_prompt = CI_PIPELINES_MANAGER_FILE_USER_MESSAGE.format(
         file_content="large file content"
@@ -160,13 +137,8 @@ async def test_file_content_too_large(mock_token_counter, mock_state):
 
 
 @pytest.mark.asyncio
-async def test_workflow_initialization():
+async def test_workflow_initialization(workflow):
     """Test workflow initialization and state setup."""
-    workflow = Workflow(
-        workflow_id="test_id",
-        workflow_metadata={},
-        workflow_type=CategoryEnum.WORKFLOW_CONVERT_TO_GITLAB_CI,
-    )
     initial_state = workflow.get_workflow_state("/test/path")
     assert initial_state["status"] == WorkflowStatusEnum.NOT_STARTED
     assert len(initial_state["ui_chat_log"]) == 1
@@ -177,15 +149,9 @@ async def test_workflow_initialization():
 @patch("duo_workflow_service.workflows.convert_to_gitlab_ci.workflow.create_chat_model")
 @patch("duo_workflow_service.workflows.convert_to_gitlab_ci.workflow.Agent")
 async def test_workflow_compilation(
-    mock_agent, mock_new_chat_client, mock_tools_registry, mock_checkpointer
+    mock_agent, mock_new_chat_client, mock_tools_registry, mock_checkpointer, workflow
 ):
     """Test workflow compilation process."""
-    workflow = Workflow(
-        workflow_id="test_id",
-        workflow_metadata={},
-        workflow_type=CategoryEnum.WORKFLOW_CONVERT_TO_GITLAB_CI,
-    )
-
     # Compile the workflow graph
     compiled_graph = workflow._compile(
         goal="/test/path",
@@ -209,58 +175,27 @@ async def test_workflow_compilation(
 
 
 @pytest.mark.asyncio
-@patch("duo_workflow_service.workflows.abstract_workflow.ToolsRegistry", autospec=True)
+@pytest.mark.usefixtures(
+    "mock_tools_registry_cls", "mock_fetch_project_data_with_workflow_id"
+)
 @patch("duo_workflow_service.workflows.convert_to_gitlab_ci.workflow.Agent")
 @patch("duo_workflow_service.workflows.convert_to_gitlab_ci.workflow.HandoverAgent")
 @patch("duo_workflow_service.workflows.convert_to_gitlab_ci.workflow.ToolsExecutor")
 @patch("duo_workflow_service.workflows.convert_to_gitlab_ci.workflow.RunToolNode")
-@patch(
-    "duo_workflow_service.workflows.abstract_workflow.fetch_project_data_with_workflow_id"
-)
 @patch("duo_workflow_service.workflows.convert_to_gitlab_ci.workflow.create_chat_model")
-@patch("duo_workflow_service.workflows.abstract_workflow.GitLabWorkflow", autospec=True)
-@patch("duo_workflow_service.workflows.abstract_workflow.UserInterface", autospec=True)
 async def test_workflow_run(
-    mock_checkpoint_notifier,
-    mock_gitlab_workflow,
     mock_chat_client,
-    mock_fetch_project_data_with_workflow_id,
     mock_run_tool_node_generic_class,
     mock_tools_executor,
     mock_handover_agent,
     mock_agent,
-    mock_tools_registry_cls,
+    mock_checkpoint_notifier,
     mock_agent_response,
-    mock_state,
+    workflow_state,
+    mock_git_lab_workflow_instance,
+    workflow,
 ):
     mock_checkpoint_notifier_instance = mock_checkpoint_notifier.return_value
-    mock_tools_registry = MagicMock(spec=ToolsRegistry)
-    mock_tools_registry_cls.configure = AsyncMock(return_value=mock_tools_registry)
-    mock_fetch_project_data_with_workflow_id.return_value = (
-        {
-            "id": 1,
-            "name": "test-project",
-            "description": "This is a test project",
-            "http_url_to_repo": "https://example.com/project",
-            "web_url": "https://example.com/project",
-        },
-        {"project_id": 1},
-    )
-
-    mock_git_lab_workflow_instance = mock_gitlab_workflow.return_value
-    mock_git_lab_workflow_instance.__aenter__.return_value = (
-        mock_git_lab_workflow_instance
-    )
-    mock_git_lab_workflow_instance.__aexit__.return_value = None
-    mock_git_lab_workflow_instance._offline_mode = False
-    mock_git_lab_workflow_instance.aget_tuple = AsyncMock(return_value=None)
-    mock_git_lab_workflow_instance.alist = AsyncMock(return_value=[])
-    mock_git_lab_workflow_instance.aput = AsyncMock(
-        return_value={
-            "configurable": {"thread_id": "123", "checkpoint_id": "checkpoint1"}
-        }
-    )
-    mock_git_lab_workflow_instance.get_next_version = MagicMock(return_value=1)
 
     mock_tools_executor.return_value.run.return_value = {
         "plan": Plan(steps=[]),
@@ -272,12 +207,12 @@ async def test_workflow_run(
     mock_run_tool_node_class.return_value.run.side_effect = [
         {
             "file_contents": ["test string"],
-            "state": mock_state,
+            "state": workflow_state,
             "ui_chat_log": [],
         },
         {
             "command_output": ["test string"],
-            "state": mock_state,
+            "state": workflow_state,
             "ui_chat_log": [],
         },
     ]
@@ -290,11 +225,6 @@ async def test_workflow_run(
 
     mock_agent.return_value.run.return_value = mock_agent_response
 
-    workflow = Workflow(
-        "123",
-        {},
-        workflow_type=CategoryEnum.WORKFLOW_CONVERT_TO_GITLAB_CI,
-    )
     await workflow.run("test-file-path")
 
     assert mock_agent.call_count == 1
@@ -318,55 +248,23 @@ async def test_workflow_run(
 
 
 @pytest.mark.asyncio
-@patch("duo_workflow_service.workflows.abstract_workflow.ToolsRegistry", autospec=True)
+@pytest.mark.usefixtures(
+    "mock_tools_registry_cls", "mock_fetch_project_data_with_workflow_id"
+)
 @patch("duo_workflow_service.workflows.convert_to_gitlab_ci.workflow.Agent")
 @patch("duo_workflow_service.workflows.convert_to_gitlab_ci.workflow.RunToolNode")
-@patch(
-    "duo_workflow_service.workflows.abstract_workflow.fetch_project_data_with_workflow_id"
-)
 @patch("duo_workflow_service.workflows.convert_to_gitlab_ci.workflow.create_chat_model")
-@patch("duo_workflow_service.workflows.abstract_workflow.GitLabWorkflow", autospec=True)
-@patch("duo_workflow_service.workflows.abstract_workflow.UserInterface", autospec=True)
 @patch("duo_workflow_service.workflows.convert_to_gitlab_ci.workflow.log_exception")
 async def test_workflow_run_with_file_not_found(
     mock_log_exception,
-    mock_checkpoint_notifier,
-    mock_gitlab_workflow,
     mock_chat_client,
-    mock_fetch_project_data_with_workflow_id,
     mock_run_tool_node_generic_class,
     mock_agent,
-    mock_tools_registry_cls,
-    mock_state,
+    mock_checkpoint_notifier,
+    mock_git_lab_workflow_instance,
+    workflow,
 ):
     mock_checkpoint_notifier_instance = mock_checkpoint_notifier.return_value
-    mock_tools_registry = MagicMock(spec=ToolsRegistry)
-    mock_tools_registry_cls.configure = AsyncMock(return_value=mock_tools_registry)
-    mock_fetch_project_data_with_workflow_id.return_value = (
-        {
-            "id": 1,
-            "name": "test-project",
-            "description": "This is a test project",
-            "http_url_to_repo": "https://example.com/project",
-            "web_url": "https://example.com/project",
-        },
-        {"project_id": 1},
-    )
-
-    mock_git_lab_workflow_instance = mock_gitlab_workflow.return_value
-    mock_git_lab_workflow_instance.__aenter__.return_value = (
-        mock_git_lab_workflow_instance
-    )
-    mock_git_lab_workflow_instance.__aexit__.return_value = None
-    mock_git_lab_workflow_instance._offline_mode = False
-    mock_git_lab_workflow_instance.aget_tuple = AsyncMock(return_value=None)
-    mock_git_lab_workflow_instance.alist = AsyncMock(return_value=[])
-    mock_git_lab_workflow_instance.aput = AsyncMock(
-        return_value={
-            "configurable": {"thread_id": "123", "checkpoint_id": "checkpoint1"}
-        }
-    )
-    mock_git_lab_workflow_instance.get_next_version = MagicMock(return_value=1)
 
     mock_run_tool_node_class = mock_run_tool_node_generic_class.__getitem__.return_value
     mock_run_tool_node_class.return_value.run = MagicMock(
@@ -375,11 +273,6 @@ async def test_workflow_run_with_file_not_found(
         )
     )
 
-    workflow = Workflow(
-        "123",
-        {},
-        workflow_type=CategoryEnum.WORKFLOW_CONVERT_TO_GITLAB_CI,
-    )
     await workflow.run("test-file-path")
 
     assert mock_log_exception.call_count == 1
@@ -395,45 +288,13 @@ async def test_workflow_run_with_file_not_found(
 
 
 @pytest.mark.asyncio
-@patch("duo_workflow_service.workflows.abstract_workflow.ToolsRegistry", autospec=True)
-@patch(
-    "duo_workflow_service.workflows.abstract_workflow.fetch_project_data_with_workflow_id"
+@pytest.mark.usefixtures(
+    "mock_tools_registry_cls",
+    "mock_fetch_project_data_with_workflow_id",
+    "mock_git_lab_workflow_instance",
 )
 @patch("duo_workflow_service.workflows.convert_to_gitlab_ci.workflow.create_chat_model")
-@patch("duo_workflow_service.workflows.abstract_workflow.GitLabWorkflow", autospec=True)
-async def test_workflow_run_with_exception(
-    mock_gitlab_workflow,
-    mock_chat_client,
-    mock_fetch_project_data_with_workflow_id,
-    mock_tools_registry_cls,
-    mock_state,
-):
-    mock_tools_registry = MagicMock(spec=ToolsRegistry)
-    mock_tools_registry_cls.configure = AsyncMock(return_value=mock_tools_registry)
-    mock_fetch_project_data_with_workflow_id.return_value = (
-        {
-            "id": 1,
-            "name": "test-project",
-            "description": "This is a test project",
-            "http_url_to_repo": "https://example.com/project",
-            "web_url": "https://example.com/project",
-        },
-        {"project_id": 1},
-    )
-
-    mock_git_lab_workflow_instance = mock_gitlab_workflow.return_value
-    mock_git_lab_workflow_instance.__aenter__.return_value = (
-        mock_git_lab_workflow_instance
-    )
-    mock_git_lab_workflow_instance.__aexit__.return_value = None
-    mock_git_lab_workflow_instance._offline_mode = False
-    mock_git_lab_workflow_instance.aget_tuple = AsyncMock(return_value=None)
-    mock_git_lab_workflow_instance.alist = AsyncMock(return_value=[])
-    mock_git_lab_workflow_instance.aput = AsyncMock(
-        return_value={
-            "configurable": {"thread_id": "123", "checkpoint_id": "checkpoint1"}
-        }
-    )
+async def test_workflow_run_with_exception(mock_chat_client, workflow):
 
     class AsyncIterator:
         def __init__(self):
@@ -445,11 +306,6 @@ async def test_workflow_run_with_exception(
         def __anext__(self):
             raise asyncio.CancelledError()
 
-    workflow = Workflow(
-        "123",
-        {},
-        workflow_type=CategoryEnum.WORKFLOW_CONVERT_TO_GITLAB_CI,
-    )
     with patch(
         "duo_workflow_service.workflows.convert_to_gitlab_ci.workflow.StateGraph"
     ) as graph:
