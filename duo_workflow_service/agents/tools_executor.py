@@ -1,3 +1,4 @@
+import copy
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
@@ -177,7 +178,7 @@ class ToolsExecutor:
         chat_logs: List[UiChatLog] = []
 
         if isinstance(tool, PlannerTool):
-            tool.plan = plan
+            tool.plan = copy.deepcopy(plan)
             tool.tools_agent_name = self._tools_agent_name
             tool.tool_call_id = tool_call["id"]
 

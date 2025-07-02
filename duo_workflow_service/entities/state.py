@@ -1,5 +1,5 @@
 from enum import StrEnum
-from typing import Annotated, Any, Dict, List, Optional, TypedDict, Union
+from typing import Annotated, Any, Dict, List, NotRequired, Optional, TypedDict, Union
 
 import structlog
 from langchain_core.messages import (
@@ -38,10 +38,12 @@ class Task(TypedDict):
     id: str
     description: str
     status: TaskStatus
+    delete: NotRequired[bool]  # Used to signal deletion in state updates
 
 
 class Plan(TypedDict):
     steps: List[Task]
+    reset: NotRequired[bool]  # Used in updates to discard previous steps
 
 
 class WorkflowStatusEnum(StrEnum):
@@ -110,6 +112,43 @@ def _pretrim_large_messages(
         else:
             processed_messages.append(message)
     return processed_messages
+
+
+def _plan_reducer(current: Plan, new: Optional[Plan]) -> Plan:
+    if new is None:
+        return current
+
+    if current is None or "steps" not in current:
+        current = Plan(steps=[])
+
+    # Discard existing steps if asked to reset
+    if new.get("reset"):
+        current["steps"] = new["steps"]
+        return current
+
+    for step in new["steps"]:
+        # Find existing step with same id
+        existing_step = next(
+            (item for item in current["steps"] if item["id"] == step["id"]), None
+        )
+
+        # Check if incoming step is marked for deletion
+        delete = step.get("delete", False)
+
+        # If step doesn't exist, add it
+        if existing_step is None:
+            # ... unless it's marked for deletion, in which case skip it
+            if not delete:
+                current["steps"].append(step)
+        else:
+            # If step exists and is marked for deletion, remove it
+            if delete:
+                current["steps"].remove(existing_step)
+            else:
+                # Update existing step with new values
+                existing_step.update(step)
+
+    return current
 
 
 # reducers can be called multiple times by the LangGraph framework. One MUST assure
@@ -254,7 +293,7 @@ def _ui_chat_log_reducer(
 
 
 class WorkflowState(TypedDict):
-    plan: Plan
+    plan: Annotated[Plan, _plan_reducer]
     status: WorkflowStatusEnum
     conversation_history: Annotated[
         Dict[str, List[BaseMessage]], _conversation_history_reducer

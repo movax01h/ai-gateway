@@ -66,7 +66,7 @@ class PlannerTool(DuoBaseTool):
     def tools_agent_name(self, tools_agent_name: str):
         self._tools_agent_name = tools_agent_name
 
-    def _command(self, tool_message: str):
+    def _command(self, steps: List[Task], tool_message: str, reset: bool = False):
         return LangGraphCommand(
             update={
                 "conversation_history": {
@@ -78,7 +78,7 @@ class PlannerTool(DuoBaseTool):
                         )
                     ],
                 },
-                "plan": self.plan,
+                "plan": Plan(steps=steps, reset=reset),
             }
         )
 
@@ -101,9 +101,8 @@ class AddNewTask(PlannerTool):
             description=description,
             status=TaskStatus.NOT_STARTED,
         )
-        self.plan["steps"].append(new_task)
 
-        return self._command(f"Step added: {new_task['id']}")
+        return self._command([new_task], f"Step added: {new_task['id']}")
 
     def format_display_message(self, args: AddNewTaskInput) -> str:
         return f"Add new task to the plan: {format_short_task_description(args.description, char_limit=100)}"
@@ -124,11 +123,19 @@ class RemoveTask(PlannerTool):
     def _run(
         self, task_id: str, description: str  # pylint: disable=unused-argument
     ) -> LangGraphCommand:
-        self.plan["steps"] = [
-            step for step in self.plan["steps"] if step["id"] != task_id
-        ]
+        steps: List[Task]
 
-        return self._command(f"Task removed: {task_id}")
+        step = next(
+            (step for step in self.plan["steps"] if step["id"] == task_id), None
+        )
+
+        if step:
+            step["delete"] = True
+            steps = [step]
+        else:
+            steps = []  # The step already doesn't exist, so no update is needed
+
+        return self._command(steps, f"Task removed: {task_id}")
 
     def format_display_message(self, args: RemoveTaskInput) -> str:
         short_description = format_short_task_description(
@@ -154,7 +161,7 @@ class UpdateTaskDescription(PlannerTool):
             if step["id"] == task_id:
                 if new_description:
                     step["description"] = new_description
-                    return self._command(f"Task updated: {task_id}")
+                    return self._command([step], f"Task updated: {task_id}")
 
         return f"Task not found: {task_id}"
 
@@ -198,7 +205,7 @@ class SetTaskStatus(PlannerTool):
         for step in self.plan["steps"]:
             if step["id"] == task_id:
                 step["status"] = TaskStatus(status)
-                return self._command(f"Task status set: {task_id} - {status}")
+                return self._command([step], f"Task status set: {task_id} - {status}")
 
         return f"Task not found: {task_id}"
 
@@ -239,10 +246,8 @@ class CreatePlan(PlannerTool):
                     status=TaskStatus.NOT_STARTED,
                 )
             )
-        # pylint: disable=unsupported-assignment-operation
-        self.plan = Plan(steps=steps)
 
-        return self._command("Plan created")
+        return self._command(steps, "Plan created", reset=True)
 
     def format_display_message(self, args: CreatePlanInput) -> str:
         return f"Create plan with {len(args.tasks)} tasks"
