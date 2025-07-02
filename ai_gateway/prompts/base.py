@@ -1,7 +1,11 @@
 from abc import ABC, abstractmethod
 from typing import Any, AsyncIterator, List, Mapping, Optional, Tuple, TypeVar, cast
 
-from gitlab_cloud_connector import GitLabUnitPrimitive, WrongUnitPrimitives
+from gitlab_cloud_connector import (
+    CloudConnectorUser,
+    GitLabUnitPrimitive,
+    WrongUnitPrimitives,
+)
 from jinja2 import PackageLoader, meta
 from jinja2.sandbox import SandboxedEnvironment
 from langchain_core.callbacks import BaseCallbackHandler, get_usage_metadata_callback
@@ -303,24 +307,28 @@ class BasePromptRegistry(ABC):
         prompt_id: str,
         prompt_version: str,
         model_metadata: Optional[TypeModelMetadata] = None,
+        tools: Optional[List[BaseTool]] = None,
     ) -> Prompt:
         pass
 
     def get_on_behalf(
         self,
-        user: StarletteUser,
+        # TODO: We should allow only `CloudConnectorUser` in the future.
+        # https://gitlab.com/gitlab-org/modelops/applied-ml/code-suggestions/ai-assist/-/issues/1224
+        user: StarletteUser | CloudConnectorUser,
         prompt_id: str,
         prompt_version: Optional[str] = None,
         model_metadata: Optional[TypeModelMetadata] = None,
         internal_event_category=__name__,
+        tools: Optional[List[BaseTool]] = None,
     ) -> Prompt:
         if not model_metadata:
             model_metadata = current_model_metadata_context.get()
 
-        if model_metadata:
+        if model_metadata and isinstance(user, StarletteUser):
             model_metadata.add_user(user)
 
-        prompt = self.get(prompt_id, prompt_version or "^1.0.0", model_metadata)
+        prompt = self.get(prompt_id, prompt_version or "^1.0.0", model_metadata, tools)
         prompt.internal_event_client = self.internal_event_client
         prompt.set_limits(self.model_limits)
 

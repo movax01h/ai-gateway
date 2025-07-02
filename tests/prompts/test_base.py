@@ -1,7 +1,7 @@
 import os
 from contextlib import contextmanager
 from pathlib import Path
-from typing import Generator, Iterator, Optional, Type
+from typing import Generator, Iterator, List, Optional, Type
 from unittest import mock
 from unittest.mock import Mock, call
 
@@ -13,6 +13,7 @@ from langchain_core.messages.ai import InputTokenDetails, UsageMetadata
 from langchain_core.prompt_values import ChatPromptValue
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.runnables import Runnable
+from langchain_core.tools import BaseTool
 from langchain_litellm import ChatLiteLLM
 from litellm.exceptions import Timeout
 from pydantic import AnyUrl
@@ -495,6 +496,7 @@ class TestBaseRegistry:
             "unit_primitives",
             "scopes",
             "model_metadata",
+            "tools",
             "success",
             "expected_internal_events",
         ),
@@ -503,12 +505,14 @@ class TestBaseRegistry:
                 [GitLabUnitPrimitive.COMPLETE_CODE],
                 ["complete_code"],
                 None,
+                None,
                 True,
                 [call("request_complete_code", category="ai_gateway.prompts.base")],
             ),
             (
                 [GitLabUnitPrimitive.COMPLETE_CODE, GitLabUnitPrimitive.ASK_BUILD],
                 ["complete_code", "ask_build"],
+                None,
                 None,
                 True,
                 [
@@ -525,6 +529,7 @@ class TestBaseRegistry:
                     endpoint=AnyUrl("http://localhost:4000"),
                     api_key="token",
                 ),
+                None,
                 True,
                 [
                     call("request_complete_code", category="ai_gateway.prompts.base"),
@@ -538,6 +543,7 @@ class TestBaseRegistry:
                     provider="amazon_q",
                     role_arn="role-arn",
                 ),
+                None,
                 True,
                 [
                     call(
@@ -546,7 +552,7 @@ class TestBaseRegistry:
                     ),
                 ],
             ),
-            ([GitLabUnitPrimitive.COMPLETE_CODE], [], None, False, []),
+            ([GitLabUnitPrimitive.COMPLETE_CODE], [], None, None, False, []),
             (
                 [
                     GitLabUnitPrimitive.COMPLETE_CODE,
@@ -554,8 +560,22 @@ class TestBaseRegistry:
                 ],
                 ["complete_code"],
                 None,
+                None,
                 False,
                 [],
+            ),
+            (
+                [GitLabUnitPrimitive.DUO_CHAT],
+                ["duo_chat"],
+                None,
+                [Mock(spec=BaseTool)],
+                True,
+                [
+                    call(
+                        "request_duo_chat",
+                        category="ai_gateway.prompts.base",
+                    ),
+                ],
             ),
         ],
     )
@@ -566,11 +586,17 @@ class TestBaseRegistry:
         user: StarletteUser,
         prompt: Prompt,
         model_metadata: Optional[TypeModelMetadata],
+        tools: Optional[List[BaseTool]],
         success: bool,
         expected_internal_events,
     ):
         if success:
-            assert registry.get_on_behalf(user, "test", None, model_metadata) == prompt
+            assert (
+                registry.get_on_behalf(
+                    user, "test", None, model_metadata, "ai_gateway.prompts.base", tools
+                )
+                == prompt
+            )
             assert prompt.internal_event_client == internal_event_client
 
             if model_metadata:

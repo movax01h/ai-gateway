@@ -6,6 +6,7 @@ import pytest
 from dependency_injector import containers
 from fastapi.testclient import TestClient
 from gitlab_cloud_connector import CloudConnectorUser, UserClaims
+from langchain.tools import BaseTool
 from pydantic import AnyUrl
 
 from ai_gateway.api.v3 import api_router
@@ -688,7 +689,9 @@ class TestEditorContentGeneration:
         @dataclass
         class Case:
             model_metadata: Optional[dict]
-            expected_arguments: tuple[str, str, Optional[ModelMetadata]]
+            expected_arguments: tuple[
+                str, str, Optional[ModelMetadata], Optional[BaseTool]
+            ]
 
         CASE_WITH_MODEL_PARAMS = Case(
             model_metadata={
@@ -708,12 +711,13 @@ class TestEditorContentGeneration:
                     api_key="token",
                     identifier="provider/some-model",
                 ),
+                None,
             ),
         )
 
         CASE_WITHOUT_MODEL_PARAMS = Case(
             model_metadata=None,
-            expected_arguments=("code_suggestions/generations", "2.0.1", None),
+            expected_arguments=("code_suggestions/generations", "2.0.1", None, None),
         )
 
         @pytest.mark.parametrize(

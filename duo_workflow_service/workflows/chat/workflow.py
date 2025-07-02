@@ -3,14 +3,11 @@ from datetime import datetime, timezone
 from enum import StrEnum
 from typing import Any, List
 
-from dependency_injector.wiring import Provide, inject
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage
 from langgraph.checkpoint.memory import BaseCheckpointSaver
 from langgraph.graph import END, StateGraph
 from langgraph.types import Command
 
-from ai_gateway.container import ContainerApplication
-from ai_gateway.prompts.registry import LocalPromptRegistry
 from duo_workflow_service.agents.chat_agent import ChatAgent
 from duo_workflow_service.agents.tools_executor import ToolsExecutor
 from duo_workflow_service.checkpointer.gitlab_workflow import WorkflowStatusEventEnum
@@ -188,15 +185,11 @@ class Workflow(AbstractWorkflow):
             case _:
                 return None
 
-    @inject
     def _compile(
         self,
         goal: str,
         tools_registry: ToolsRegistry,
         checkpointer: BaseCheckpointSaver,
-        prompt_registry: LocalPromptRegistry = Provide[
-            ContainerApplication.pkg_prompts.prompt_registry
-        ],
     ):
         self.log.info(
             "ChatWorkflow._compile: Starting chat workflow compilation",
@@ -209,8 +202,14 @@ class Workflow(AbstractWorkflow):
         tools = self._get_tools()
         agents_toolset = tools_registry.toolset(tools)
 
-        self._agent: ChatAgent = prompt_registry.get(  # type: ignore[assignment]
-            "chat/agent", tools=agents_toolset.bindable, prompt_version="^1.0.0"  # type: ignore[arg-type]
+        # TODO: Specify model metadata for model switching and custom model support
+        self._agent: ChatAgent = self._prompt_registry.get_on_behalf(  # type: ignore[assignment]
+            user=self._user,
+            prompt_id="chat/agent",
+            prompt_version="^1.0.0",
+            model_metadata=None,
+            internal_event_category=__name__,
+            tools=agents_toolset.bindable,  # type: ignore[arg-type]
         )
         self._agent.tools_registry = tools_registry
 

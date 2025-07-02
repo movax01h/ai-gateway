@@ -1,3 +1,4 @@
+import importlib
 from pathlib import Path
 from typing import List, NamedTuple, Optional, Type
 
@@ -127,7 +128,7 @@ class LocalPromptRegistry(BasePromptRegistry):
     @classmethod
     def from_local_yaml(
         cls,
-        class_overrides: dict[str, Type[Prompt]],
+        class_overrides: dict[str, Type[Prompt] | str],
         model_factories: dict[ModelClassProvider, TypeModelFactory],
         default_prompts: dict[str, str],
         internal_event_client: InternalEventsClient,
@@ -147,7 +148,7 @@ class LocalPromptRegistry(BasePromptRegistry):
         model_configs_dir = (
             base_path / "model_configs"
         )  # New directory for model configs
-        prompts_registered = {}
+        prompts_registered: dict[str, PromptRegistered] = {}
 
         # Parse model config YAML files
         model_configs = {
@@ -171,6 +172,16 @@ class LocalPromptRegistry(BasePromptRegistry):
             prompt_id_with_model_name = path.relative_to(prompts_definitions_dir)
 
             klass = class_overrides.get(str(prompt_id_with_model_name.parent), Prompt)
+
+            # Support string path for overrides
+            if isinstance(klass, str):
+                klass = cls._resolve_string_class_name(klass)
+
+            if not issubclass(klass, Prompt):
+                raise ValueError(
+                    f"The specified klass must be a subclass of Prompt: {klass}"
+                )
+
             prompts_registered[str(prompt_id_with_model_name)] = PromptRegistered(
                 klass=klass, versions=versions
             )
@@ -190,6 +201,12 @@ class LocalPromptRegistry(BasePromptRegistry):
             custom_models_enabled,
             disable_streaming,
         )
+
+    @classmethod
+    def _resolve_string_class_name(cls, path: str) -> Type[Prompt]:
+        parts = path.split(".")
+        module = importlib.import_module(".".join(parts[:-1]))
+        return getattr(module, parts[-1])
 
     @classmethod
     def _parse_base_model(cls, file_name: Path) -> BaseModelConfig:

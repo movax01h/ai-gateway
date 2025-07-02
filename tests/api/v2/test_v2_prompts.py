@@ -50,7 +50,7 @@ class TestPrompt:
                 None,
                 None,
                 None,
-                ("test", "^1.0.0", None),
+                ("test", "^1.0.0", None, None),
                 200,
                 {"content": "Hi John!"},
                 ["1.0.0"],
@@ -61,7 +61,7 @@ class TestPrompt:
                 None,
                 None,
                 {"model": {"input_tokens": 10, "output_tokens": 20}},
-                ("test", "^1.0.0", None),
+                ("test", "^1.0.0", None, None),
                 200,
                 {
                     "content": "Hi John!",
@@ -75,7 +75,7 @@ class TestPrompt:
                 "^2.0.0",
                 None,
                 None,
-                ("test", "^2.0.0", None),
+                ("test", "^2.0.0", None, None),
                 200,
                 {"content": "Hi John!"},
                 ["2.0.0"],
@@ -100,6 +100,7 @@ class TestPrompt:
                         endpoint=AnyUrl("http://localhost:4000"),
                         api_key="token",
                     ),
+                    None,
                 ),
                 200,
                 {"content": "Hi John!"},
@@ -123,6 +124,7 @@ class TestPrompt:
                         provider="amazon_q",
                         role_arn="role-arn",
                     ),
+                    None,
                 ),
                 200,
                 {"content": "Hi John!"},
@@ -134,7 +136,7 @@ class TestPrompt:
                 "^2.0.0",
                 None,
                 None,
-                ("test", "^2.0.0", None),
+                ("test", "^2.0.0", None, None),
                 400,
                 {"detail": "No prompt version found matching the query"},
                 [],
@@ -145,7 +147,7 @@ class TestPrompt:
                 None,
                 None,
                 None,
-                ("test", "^1.0.0", None),
+                ("test", "^1.0.0", None, None),
                 404,
                 {"detail": "Prompt 'test' not found"},
                 None,
@@ -156,7 +158,7 @@ class TestPrompt:
                 None,
                 None,
                 None,
-                ("test", "^1.0.0", None),
+                ("test", "^1.0.0", None, None),
                 422,
                 {
                     "detail": "\"Input to ChatPromptTemplate is missing variables {'age'}.  Expected: ['age', 'current_date', 'name'] Received: ['name', 'current_date']"
@@ -251,7 +253,7 @@ class TestPrompt:
             },
         )
 
-        mock_registry_get.assert_called_with("test", "^2.0.0", None)
+        mock_registry_get.assert_called_with("test", "^2.0.0", None, None)
         assert response.status_code == 200
         assert response.json() == expected_response
         assert response.headers["content-type"] == "text/event-stream; charset=utf-8"
@@ -306,6 +308,6 @@ class TestMisdirectedRequest:
                 and model_metadata.model_dump(mode="json"),
             },
         )
-        mock_registry_get.assert_called_with("test", "^1.0.0", model_metadata)
+        mock_registry_get.assert_called_with("test", "^1.0.0", model_metadata, None)
         assert response.status_code == 421
         assert response.json() == {"detail": "401: Unauthorized"}
