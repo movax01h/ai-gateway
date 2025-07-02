@@ -1,5 +1,5 @@
 from datetime import datetime, timezone
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Optional, Union
 
 import structlog
 from langchain_core.messages import (
@@ -27,6 +27,7 @@ from duo_workflow_service.entities.state import (
 )
 from duo_workflow_service.gitlab.gitlab_project import Project
 from duo_workflow_service.slash_commands.goal_parser import parse as slash_command_parse
+from lib.feature_flags.context import FeatureFlag, is_feature_enabled
 
 log = structlog.stdlib.get_logger("chat_agent")
 
@@ -49,10 +50,20 @@ class ChatAgentPromptTemplate(Runnable[ChatWorkflowState, PromptValue]):
         # Handle system messages with static and dynamic parts
         # Create separate system messages for static and dynamic parts
         if "system_static" in self.prompt_template:
-            # Static content doesn't need Jinja2 processing
-            messages.append(
-                SystemMessage(content=self.prompt_template["system_static"])
+            static_content_text = jinja2_formatter(
+                self.prompt_template["system_static"]
             )
+            if is_feature_enabled(FeatureFlag.ENABLE_ANTHROPIC_PROMPT_CACHING):
+                cached_static_content: list[Union[str, dict]] = [
+                    {
+                        "text": static_content_text,
+                        "type": "text",
+                        "cache_control": {"type": "ephemeral"},
+                    }
+                ]
+                messages.append(SystemMessage(content=cached_static_content))
+            else:
+                messages.append(SystemMessage(content=static_content_text))
 
         if "system_dynamic" in self.prompt_template:
             dynamic_content = jinja2_formatter(
