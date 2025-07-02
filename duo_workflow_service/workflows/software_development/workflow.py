@@ -198,6 +198,9 @@ class Workflow(AbstractWorkflow):
         tools_registry,
         goal,
     ):
+        allow_agent_to_request_user = self._workflow_config.get(
+            "allow_agent_to_request_user", True
+        )
         # Add nodes to the graph
         graph.set_entry_point("build_context")
 
@@ -211,9 +214,7 @@ class Workflow(AbstractWorkflow):
             http_client=self._http_client,
             workflow_id=self._workflow_id,
             tools_registry=tools_registry,
-            allow_agent_to_request_user=self._workflow_config.get(
-                "allow_agent_to_request_user", False
-            ),
+            allow_agent_to_request_user=allow_agent_to_request_user,
             workflow_type=self._workflow_type,
         )
         disambiguation_entry_node = disambiguation_component.attach(
@@ -237,11 +238,13 @@ class Workflow(AbstractWorkflow):
             http_client=self._http_client,
         )
 
-        plan_approval_component = PlanApprovalComponent(
-            workflow_id=self._workflow_id,
-            approved_agent_name="planner",
-            approved_agent_state=WorkflowStatusEnum.PLANNING,
-        )
+        plan_approval_component = None
+        if allow_agent_to_request_user:
+            plan_approval_component = PlanApprovalComponent(
+                workflow_id=self._workflow_id,
+                approved_agent_name="planner",
+                approved_agent_state=WorkflowStatusEnum.PLANNING,
+            )
 
         planner_component.attach(
             graph=graph,

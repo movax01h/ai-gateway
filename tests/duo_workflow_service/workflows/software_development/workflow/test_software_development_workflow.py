@@ -265,6 +265,19 @@ async def test_workflow_run(
     assert mock_goal_disambiguator_component.return_value.attach.call_count == 1
     assert mock_planner_component.return_value.attach.call_count == 1
     assert mock_executor_component.return_value.attach.call_count == 1
+    assert (
+        mock_planner_component.return_value.attach.call_args.kwargs.get(
+            "approval_component"
+        )
+        is not None
+    )
+    assert (
+        mock_executor_component.return_value.attach.call_args.kwargs.get(
+            "approval_component"
+        )
+        is not None
+    )
+
     assert mock_tools_approval_component.return_value.attach.call_count == 1
 
     assert mock_agent.call_count == 1
@@ -1251,6 +1264,123 @@ async def test_workflow_run_with_tool_approvals(
 
     assert mock_agent.call_count == 1
     assert mock_tools_approval_execution.call_count == 1
+
+    assert workflow.is_done
+
+
+@pytest.mark.asyncio
+@patch("duo_workflow_service.workflows.abstract_workflow.UserInterface", autospec=True)
+@patch("duo_workflow_service.workflows.abstract_workflow.ToolsRegistry", autospec=True)
+@patch("duo_workflow_service.workflows.software_development.workflow.Agent")
+@patch("duo_workflow_service.workflows.software_development.workflow.HandoverAgent")
+@patch(
+    "duo_workflow_service.workflows.software_development.workflow.GoalDisambiguationComponent",
+    autospec=True,
+)
+@patch(
+    "duo_workflow_service.workflows.software_development.workflow.PlannerComponent",
+    autospec=True,
+)
+@patch("duo_workflow_service.workflows.software_development.workflow.ToolsExecutor")
+@patch(
+    "duo_workflow_service.workflows.abstract_workflow.fetch_project_data_with_workflow_id"
+)
+@patch("duo_workflow_service.workflows.software_development.workflow.create_chat_model")
+@patch("duo_workflow_service.workflows.abstract_workflow.GitLabWorkflow", autospec=True)
+@patch(
+    "duo_workflow_service.workflows.software_development.workflow.PlanApprovalComponent",
+    autospec=True,
+)
+@patch(
+    "duo_workflow_service.workflows.software_development.workflow.ToolsApprovalComponent",
+    autospec=True,
+)
+@patch(
+    "duo_workflow_service.workflows.software_development.workflow.ExecutorComponent",
+    autospec=True,
+)
+@patch.dict(os.environ, {"DW_INTERNAL_EVENT__ENABLED": "true"})
+async def test_workflow_run_without_plan_approval_component(
+    mock_executor_component,
+    mock_tools_approval_component,
+    mock_plan_approval_component,
+    mock_gitlab_workflow,
+    mock_chat_client,
+    mock_fetch_project_data_with_workflow_id,
+    mock_tools_executor,
+    mock_planner_component,
+    mock_disambiguation_component,
+    mock_handover_agent,
+    mock_agent,
+    mock_tools_registry_cls,
+    checkpoint_tuple,
+):
+    mock_tools_registry = MagicMock(spec=ToolsRegistry)
+    mock_tools_registry_cls.configure = AsyncMock(return_value=mock_tools_registry)
+    mock_fetch_project_data_with_workflow_id.return_value = (
+        {
+            "id": 1,
+            "name": "test-project",
+            "description": "This is a test project",
+            "http_url_to_repo": "https://example.com/project",
+            "web_url": "https://example.com/project",
+        },
+        {"id": 1, "project_id": 1, "allow_agent_to_request_user": False},
+    )
+
+    mock_git_lab_workflow_instance = mock_gitlab_workflow.return_value
+    mock_git_lab_workflow_instance.__aenter__.return_value = (
+        mock_git_lab_workflow_instance
+    )
+    mock_git_lab_workflow_instance.__aexit__.return_value = None
+    mock_git_lab_workflow_instance._offline_mode = False
+    mock_git_lab_workflow_instance.aget_tuple = AsyncMock(return_value=None)
+    mock_git_lab_workflow_instance.alist = AsyncMock(return_value=[])
+    mock_git_lab_workflow_instance.aput = AsyncMock(
+        return_value={
+            "configurable": {"thread_id": "123", "checkpoint_id": "checkpoint1"}
+        }
+    )
+    mock_git_lab_workflow_instance.get_next_version = MagicMock(return_value=1)
+
+    class AsyncIterator:
+        def __init__(self):
+            pass
+
+        def __aiter__(self):
+            return self
+
+        async def __anext__(self):
+            raise asyncio.CancelledError()
+
+    workflow = Workflow(
+        "123",
+        {},
+        workflow_type=CategoryEnum.WORKFLOW_SOFTWARE_DEVELOPMENT,
+    )
+    with patch(
+        "duo_workflow_service.workflows.software_development.workflow.StateGraph"
+    ) as graph_cls:
+        compiled_graph = MagicMock()
+        compiled_graph.astream.return_value = AsyncIterator()
+        instance = graph_cls.return_value
+        instance.compile.return_value = compiled_graph
+        await workflow.run("test_goal")
+
+    assert mock_agent.call_count == 1
+    assert mock_planner_component.return_value.attach.call_count == 1
+    assert mock_executor_component.return_value.attach.call_count == 1
+
+    mock_planner_component.return_value.attach.assert_called_with(
+        graph=ANY,
+        next_node="set_status_to_execution",
+        exit_node="plan_terminator",
+        approval_component=None,
+    )
+    mock_executor_component.return_value.attach.assert_called_with(
+        graph=ANY, next_node=END, exit_node="plan_terminator", approval_component=ANY
+    )
+    mock_plan_approval_component.assert_not_called()
 
     assert workflow.is_done
 
