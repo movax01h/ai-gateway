@@ -1,19 +1,33 @@
-from datetime import datetime
+from datetime import datetime, timezone
 from unittest.mock import MagicMock, patch
 
 import pytest
 from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_core.prompt_values import ChatPromptValue
 
-from ai_gateway.prompts.config import ModelConfig
+from ai_gateway.prompts.config import ModelClassProvider, ModelConfig
 from duo_workflow_service.agents.chat_agent import ChatAgentPromptTemplate
 from duo_workflow_service.entities.state import ChatWorkflowState
+from lib.feature_flags import current_feature_flag_context
+
+
+@pytest.fixture
+def mock_datetime(mock_now: datetime):
+    with patch("duo_workflow_service.agents.chat_agent.datetime") as mock:
+        mock.now.return_value = mock_now
+        mock.timezone = timezone
+        yield mock
 
 
 class TestChatAgentPromptTemplate:
+
     @pytest.fixture
     def mock_model_config(self):
-        return MagicMock(spec=ModelConfig)
+        config = MagicMock(spec=ModelConfig)
+        # Properly configure the nested mock structure
+        config.params = MagicMock()
+        config.params.model_class_provider = ModelClassProvider.ANTHROPIC
+        return config
 
     @pytest.fixture
     def prompt_template_with_split_system(self):
@@ -45,21 +59,18 @@ class TestChatAgentPromptTemplate:
         )
 
     def test_split_system_prompts_create_separate_messages(
-        self, prompt_template_with_split_system, mock_model_config, chat_workflow_state
+        self,
+        prompt_template_with_split_system,
+        mock_model_config,
+        chat_workflow_state,
+        mock_datetime,
     ):
         """Test that system_static and system_dynamic create separate system messages."""
         template = ChatAgentPromptTemplate(
             prompt_template_with_split_system, mock_model_config
         )
 
-        with patch("duo_workflow_service.agents.chat_agent.datetime") as mock_datetime:
-            mock_now = datetime(2024, 12, 25, 14, 30, 0)
-            mock_datetime_instance = MagicMock()
-            mock_datetime_instance.strftime = mock_now.strftime
-            mock_datetime_instance.astimezone.return_value.tzname.return_value = "UTC"
-            mock_datetime.now.return_value = mock_datetime_instance
-
-            result = template.invoke(chat_workflow_state, agent_name="test_agent")
+        result = template.invoke(chat_workflow_state, agent_name="test_agent")
 
         assert isinstance(result, ChatPromptValue)
         messages = result.messages
@@ -74,11 +85,16 @@ class TestChatAgentPromptTemplate:
         assert "<core_mission>" in static_system_message.content
 
         # Second message should be dynamic system message
+
+        expected_date = mock_datetime.now().strftime("%Y-%m-%d")
+        expected_time = mock_datetime.now().strftime("%H:%M:%S")
+        expected_timezone = mock_datetime.now().astimezone().tzname()
+
         dynamic_system_message = messages[1]
         assert isinstance(dynamic_system_message, SystemMessage)
-        assert "2024-12-25" in dynamic_system_message.content
-        assert "14:30:00" in dynamic_system_message.content
-        assert "UTC" in dynamic_system_message.content
+        assert expected_date in dynamic_system_message.content
+        assert expected_time in dynamic_system_message.content
+        assert expected_timezone in dynamic_system_message.content
         assert "Test Project" in dynamic_system_message.content
         assert "<project_id>123</project_id>" in dynamic_system_message.content
         assert (
@@ -113,14 +129,7 @@ class TestChatAgentPromptTemplate:
             prompt_template_with_split_system, mock_model_config
         )
 
-        with patch("duo_workflow_service.agents.chat_agent.datetime") as mock_datetime:
-            mock_now = datetime(2024, 12, 25, 14, 30, 0)
-            mock_datetime_instance = MagicMock()
-            mock_datetime_instance.strftime = mock_now.strftime
-            mock_datetime_instance.astimezone.return_value.tzname.return_value = "UTC"
-            mock_datetime.now.return_value = mock_datetime_instance
-
-            result = template.invoke(state_without_project, agent_name="test_agent")
+        result = template.invoke(state_without_project, agent_name="test_agent")
 
         messages = result.messages
 
@@ -137,21 +146,18 @@ class TestChatAgentPromptTemplate:
         assert "project_id" not in dynamic_system_message.content
 
     def test_jinja2_variable_resolution(
-        self, prompt_template_with_split_system, mock_model_config, chat_workflow_state
+        self,
+        prompt_template_with_split_system,
+        mock_model_config,
+        chat_workflow_state,
+        mock_datetime,
     ):
         """Test that Jinja2 variables are properly resolved in both static and dynamic parts."""
         template = ChatAgentPromptTemplate(
             prompt_template_with_split_system, mock_model_config
         )
 
-        with patch("duo_workflow_service.agents.chat_agent.datetime") as mock_datetime:
-            mock_now = datetime(2024, 12, 25, 14, 30, 0)
-            mock_datetime_instance = MagicMock()
-            mock_datetime_instance.strftime = mock_now.strftime
-            mock_datetime_instance.astimezone.return_value.tzname.return_value = "UTC"
-            mock_datetime.now.return_value = mock_datetime_instance
-
-            result = template.invoke(chat_workflow_state, agent_name="test_agent")
+        result = template.invoke(chat_workflow_state, agent_name="test_agent")
 
         messages = result.messages
 
@@ -173,9 +179,14 @@ class TestChatAgentPromptTemplate:
         assert "{%- endif %}" not in dynamic_content
 
         # Verify actual values are present
-        assert "2024-12-25" in dynamic_content
-        assert "14:30:00" in dynamic_content
-        assert "UTC" in dynamic_content
+
+        expected_date = mock_datetime.now().strftime("%Y-%m-%d")
+        expected_time = mock_datetime.now().strftime("%H:%M:%S")
+        expected_timezone = mock_datetime.now().astimezone().tzname()
+
+        assert expected_date in dynamic_content
+        assert expected_time in dynamic_content
+        assert expected_timezone in dynamic_content
         assert "Test Project" in dynamic_content
         assert "123" in dynamic_content
         assert "https://gitlab.com/test/project" in dynamic_content
@@ -204,14 +215,7 @@ class TestChatAgentPromptTemplate:
             prompt_template_with_split_system, mock_model_config
         )
 
-        with patch("duo_workflow_service.agents.chat_agent.datetime") as mock_datetime:
-            mock_now = datetime(2024, 12, 25, 14, 30, 0)
-            mock_datetime_instance = MagicMock()
-            mock_datetime_instance.strftime = mock_now.strftime
-            mock_datetime_instance.astimezone.return_value.tzname.return_value = "UTC"
-            mock_datetime.now.return_value = mock_datetime_instance
-
-            result = template.invoke(state_with_history, agent_name="test_agent")
+        result = template.invoke(state_with_history, agent_name="test_agent")
 
         messages = result.messages
 
@@ -223,3 +227,98 @@ class TestChatAgentPromptTemplate:
         assert isinstance(messages[3], HumanMessage)  # Second user message
         assert messages[2].content == "First message"
         assert messages[3].content == "Second message"
+
+    def test_anthropic_cache_control_enabled(
+        self,
+        prompt_template_with_split_system,
+        mock_model_config,
+        chat_workflow_state,
+    ):
+        current_feature_flag_context.set({"enable_anthropic_prompt_caching"})
+
+        template = ChatAgentPromptTemplate(
+            prompt_template_with_split_system, mock_model_config
+        )
+
+        result = template.invoke(chat_workflow_state, agent_name="test_agent")
+
+        assert isinstance(result, ChatPromptValue)
+        messages = result.messages
+
+        # Should have 2 system messages and 1 user message
+        assert len(messages) == 3
+
+        # Check that the static system message has cache_control
+        static_system_message = messages[0]
+        assert isinstance(static_system_message, SystemMessage)
+
+        # Content should be a list with cache_control
+        assert isinstance(static_system_message.content, list)
+        assert len(static_system_message.content) == 1
+
+        content_block = static_system_message.content[0]
+        assert isinstance(content_block, dict)
+        assert content_block["type"] == "text"
+        # Fix: The text should contain the actual text content, not the SystemMessage object
+        assert "GitLab Duo Chat" in content_block["text"]
+        assert "<core_mission>" in content_block["text"]
+        assert content_block["cache_control"] == {"type": "ephemeral"}
+
+        # Dynamic system message should remain as plain text
+        dynamic_system_message = messages[1]
+        assert isinstance(dynamic_system_message, SystemMessage)
+        assert isinstance(dynamic_system_message.content, str)
+
+    def test_anthropic_cache_control_disabled(
+        self,
+        prompt_template_with_split_system,
+        mock_model_config,
+        chat_workflow_state,
+    ):
+        """Test that cache_control is NOT added when feature flag is disabled."""
+        current_feature_flag_context.set({})
+
+        template = ChatAgentPromptTemplate(
+            prompt_template_with_split_system, mock_model_config
+        )
+
+        result = template.invoke(chat_workflow_state, agent_name="test_agent")
+
+        messages = result.messages
+
+        # Static system message should remain as plain text
+        static_system_message = messages[0]
+        assert isinstance(static_system_message, SystemMessage)
+        assert isinstance(static_system_message.content, str)
+        assert "GitLab Duo Chat" in static_system_message.content
+
+    def test_cache_control_only_applied_to_static_system_message(
+        self,
+        prompt_template_with_split_system,
+        mock_model_config,
+        chat_workflow_state,
+        mock_datetime,
+    ):
+        current_feature_flag_context.set({"enable_anthropic_prompt_caching"})
+
+        template = ChatAgentPromptTemplate(
+            prompt_template_with_split_system, mock_model_config
+        )
+
+        result = template.invoke(chat_workflow_state, agent_name="test_agent")
+
+        messages = result.messages
+
+        # Static system message should have cache_control
+        static_system_message = messages[0]
+        assert isinstance(static_system_message.content, list)
+        assert static_system_message.content[0]["cache_control"] == {
+            "type": "ephemeral"
+        }
+
+        # Dynamic system message should NOT have cache_control
+        dynamic_system_message = messages[1]
+        assert isinstance(dynamic_system_message.content, str)
+        # Verify it's the dynamic content by checking for date
+        expected_date = mock_datetime.now().strftime("%Y-%m-%d")
+        assert expected_date in dynamic_system_message.content
