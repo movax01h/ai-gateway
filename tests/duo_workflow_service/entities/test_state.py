@@ -360,7 +360,6 @@ def test_ui_chat_log_reducer():
             "status": None,
             "correlation_id": None,
             "tool_info": None,
-            "context_elements": None,
             "additional_context": None,
         },
         {
@@ -371,7 +370,6 @@ def test_ui_chat_log_reducer():
             "status": None,
             "correlation_id": None,
             "tool_info": {"name": "read_file", "args": {"file_path": "a/b/c.py"}},
-            "context_elements": None,
             "additional_context": None,
         },
     ]
@@ -385,7 +383,6 @@ def test_ui_chat_log_reducer():
             "status": None,
             "correlation_id": None,
             "tool_info": None,
-            "context_elements": None,
             "additional_context": None,
         }
     ]
@@ -401,7 +398,6 @@ def test_ui_chat_log_reducer():
             "status": None,
             "correlation_id": None,
             "tool_info": None,
-            "context_elements": None,
             "additional_context": None,
         },
         {
@@ -412,7 +408,6 @@ def test_ui_chat_log_reducer():
             "status": None,
             "correlation_id": None,
             "tool_info": {"name": "read_file", "args": {"file_path": "a/b/c.py"}},
-            "context_elements": None,
             "additional_context": None,
         },
         {
@@ -423,7 +418,6 @@ def test_ui_chat_log_reducer():
             "status": None,
             "correlation_id": None,
             "tool_info": None,
-            "context_elements": None,
             "additional_context": None,
         },
     ]
@@ -439,7 +433,6 @@ def test_ui_chat_log_reducer_idempotency():
             "status": None,
             "correlation_id": None,
             "tool_info": None,
-            "context_elements": None,
             "additional_context": None,
         }
     ]
@@ -453,7 +446,6 @@ def test_ui_chat_log_reducer_idempotency():
             "status": None,
             "correlation_id": None,
             "tool_info": None,
-            "context_elements": None,
             "additional_context": None,
         }
     ]
@@ -470,7 +462,6 @@ def test_ui_chat_log_reducer_idempotency():
             "status": None,
             "correlation_id": None,
             "tool_info": None,
-            "context_elements": None,
             "additional_context": None,
         },
         {
@@ -481,7 +472,6 @@ def test_ui_chat_log_reducer_idempotency():
             "status": None,
             "correlation_id": None,
             "tool_info": None,
-            "context_elements": None,
             "additional_context": None,
         },
     ]
@@ -497,7 +487,6 @@ def test_ui_chat_log_reducer_with_none():
             "status": None,
             "correlation_id": None,
             "tool_info": None,
-            "context_elements": None,
             "additional_context": None,
         }
     ]

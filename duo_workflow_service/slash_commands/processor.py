@@ -44,7 +44,6 @@ class SlashCommandsProcessor:
                 log_command_error(command_name, e)
                 return Error(e)
 
-            # Replace the <ContextElementType> with the actual context element type variable
             goal = command_definition.goal
 
             # Build the result dictionary

@@ -7,7 +7,6 @@ from gitlab_cloud_connector import CloudConnectorUser, UserClaims, WrongUnitPrim
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 
 from contract import contract_pb2
-from contract.contract_pb2 import ContextElement, ContextElementType
 from duo_workflow_service.agents.chat_agent import ChatAgent
 from duo_workflow_service.checkpointer.gitlab_workflow import WorkflowStatusEventEnum
 from duo_workflow_service.components.tools_registry import ToolsRegistry
@@ -33,15 +32,6 @@ from lib.feature_flags import current_feature_flag_context
 
 
 @pytest.fixture
-def context_element():
-    return ContextElement(
-        type=ContextElementType.FILE,
-        name="Test file",
-        contents="Test file contents",
-    )
-
-
-@pytest.fixture
 def prompt_class():
     return ChatAgent
 
@@ -64,7 +54,6 @@ def user():
 
 @pytest.fixture
 def workflow_with_project(
-    context_element,
     mock_container: containers.Container,
     prompt: ChatAgent,
     user: CloudConnectorUser,
@@ -74,7 +63,6 @@ def workflow_with_project(
         workflow_id="test-id",
         workflow_metadata={},
         workflow_type=CategoryEnum.WORKFLOW_CHAT,
-        context_elements=[context_element],
         mcp_tools=[contract_pb2.McpTool(name="extra_tool", description="Extra tool")],
         user=user,
     )
@@ -95,7 +83,6 @@ def workflow_with_project(
     }
     workflow._additional_context = additional_context
     workflow._http_client = MagicMock()
-    workflow._context_elements = []
     prompt.tools_registry = mock_tools_registry
     workflow._agent = prompt
     return workflow
@@ -135,7 +122,6 @@ async def test_workflow_initialization(workflow_with_project):
     assert initial_state["ui_chat_log"][0]["status"] == ToolStatus.SUCCESS
     assert len(initial_state["ui_chat_log"][0]["additional_context"]) == 1
     assert initial_state["ui_chat_log"][0]["additional_context"][0].category == "file"
-    assert initial_state["context_elements"] == []
     assert initial_state["project"]["name"] == "test-project"
 
 
@@ -182,15 +168,12 @@ async def test_workflow_initialization_with_additional_context(workflow_with_pro
 
 @pytest.mark.asyncio
 async def test_execute_agent(workflow_with_project):
-    workflow_with_project._context_elements = []
-
     state = ChatWorkflowState(
         plan={"steps": []},
         status=WorkflowStatusEnum.EXECUTION,
         conversation_history={"test_prompt": []},
         ui_chat_log=[],
         last_human_input=None,
-        context_elements=[],
     )
 
     result = await workflow_with_project._agent.run(state)
@@ -198,8 +181,6 @@ async def test_execute_agent(workflow_with_project):
     assert result["status"] == WorkflowStatusEnum.INPUT_REQUIRED
     assert len(result["ui_chat_log"]) == 1
     assert result["ui_chat_log"][0]["content"] == "Hello there!"
-    assert "context_elements" in result["ui_chat_log"][0]
-    assert result["ui_chat_log"][0]["context_elements"] == []
     assert result["ui_chat_log"][0]["message_type"] == MessageTypeEnum.AGENT
     assert result["ui_chat_log"][0]["status"] == ToolStatus.SUCCESS
 
@@ -215,15 +196,12 @@ class TestExecuteAgentWithTools:
 
     @pytest.mark.asyncio
     async def test_execute_agent_with_tools(self, workflow_with_project):
-        workflow_with_project._context_elements = []
-
         state = ChatWorkflowState(
             plan={"steps": []},
             status=WorkflowStatusEnum.EXECUTION,
             conversation_history={"test_prompt": [HumanMessage(content="hi")]},
             ui_chat_log=[],
             last_human_input=None,
-            context_elements=[],
         )
 
         result = await workflow_with_project._agent.run(state)
@@ -231,8 +209,6 @@ class TestExecuteAgentWithTools:
         assert result["status"] == WorkflowStatusEnum.INPUT_REQUIRED
         assert len(result["ui_chat_log"]) == 1
         assert result["ui_chat_log"][0]["content"] == "tool calling"
-        assert "context_elements" in result["ui_chat_log"][0]
-        assert result["ui_chat_log"][0]["context_elements"] == []
         assert result["ui_chat_log"][0]["message_type"] == MessageTypeEnum.AGENT
         assert result["ui_chat_log"][0]["status"] == ToolStatus.SUCCESS
 
@@ -258,7 +234,6 @@ def test_are_tools_called_with_various_content(
     workflow_with_project, message_content, expected_result
 ):
     workflow = workflow_with_project
-    workflow._context_elements = []
 
     state: ChatWorkflowState = {
         "conversation_history": {"test_prompt": [AIMessage(content=message_content)]},
@@ -266,7 +241,6 @@ def test_are_tools_called_with_various_content(
         "status": WorkflowStatusEnum.EXECUTION,
         "ui_chat_log": [],
         "last_human_input": None,
-        "context_elements": [],
         "project": None,
         "approval": None,
     }
@@ -283,7 +257,6 @@ def test_are_tools_called_with_various_content(
 
 def test_are_tools_called_with_tool_use(workflow_with_project):
     workflow = workflow_with_project
-    workflow._context_elements = []
 
     tool_message = AIMessage(content="Using tools")
     tool_message.tool_calls = [
@@ -300,7 +273,6 @@ def test_are_tools_called_with_tool_use(workflow_with_project):
         "status": WorkflowStatusEnum.EXECUTION,
         "ui_chat_log": [],
         "last_human_input": None,
-        "context_elements": [],
         "project": None,
         "approval": None,
     }
@@ -406,7 +378,6 @@ def test_tools_registry_interaction(
     mock_toolset.return_value = [Mock(name=f"mock_{tool}") for tool in expected_tools]
 
     workflow = workflow_with_project
-    workflow._context_elements = []
     workflow._workflow_config = workflow_config
     tools_registry = MagicMock(spec=ToolsRegistry)
     checkpointer = MagicMock()
@@ -549,15 +520,12 @@ async def test_chat_agent_status_handling(
     expected_status,
     has_ui_log,
 ):
-    workflow_with_project._context_elements = []
-
     state = ChatWorkflowState(
         plan={"steps": []},
         status=WorkflowStatusEnum.EXECUTION,
         conversation_history={"test_prompt": conversation_content},
         ui_chat_log=[],
         last_human_input=None,
-        context_elements=[],
     )
 
     ai_response = AIMessage(content=response_content)
@@ -577,8 +545,6 @@ async def test_chat_agent_status_handling(
             assert result["ui_chat_log"][0]["message_type"] == MessageTypeEnum.AGENT
             assert result["ui_chat_log"][0]["status"] == ToolStatus.SUCCESS
         else:  # For empty conversation case
-            assert "context_elements" in result["ui_chat_log"][0]
-            assert result["ui_chat_log"][0]["context_elements"] == []
             assert result["ui_chat_log"][0]["message_type"] == MessageTypeEnum.AGENT
             assert result["ui_chat_log"][0]["status"] == ToolStatus.SUCCESS
     else:
@@ -590,8 +556,6 @@ async def test_chat_agent_status_handling(
 async def test_chat_workflow_status_flow_integration(
     mock_ainvoke, workflow_with_project
 ):
-    workflow_with_project._context_elements = []
-
     # Test sequence: agent with tools -> tools execution -> agent final response
     # 1. Agent responds with tool calls (should be EXECUTION status)
     state_1 = ChatWorkflowState(
@@ -600,7 +564,6 @@ async def test_chat_workflow_status_flow_integration(
         conversation_history={"test_prompt": [HumanMessage(content="List issues")]},
         ui_chat_log=[],
         last_human_input=None,
-        context_elements=[],
         project=None,
         approval=None,
     )
@@ -626,7 +589,6 @@ async def test_chat_workflow_status_flow_integration(
         },
         ui_chat_log=[],
         last_human_input=None,
-        context_elements=[],
         project=None,
         approval=None,
     )
@@ -651,7 +613,6 @@ async def test_agent_run_with_tool_approval_required(workflow_with_project):
         conversation_history={"test_prompt": [HumanMessage(content="Create a file")]},
         ui_chat_log=[],
         last_human_input=None,
-        context_elements=[],
         project=None,
         approval=None,
     )
@@ -716,7 +677,6 @@ async def test_agent_run_with_cancel_tool_message(
         },
         ui_chat_log=[],
         last_human_input=None,
-        context_elements=[],
         project=None,
         approval=ApprovalStateRejection(message=cancel_tool_message),
     )

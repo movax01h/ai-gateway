@@ -1,26 +1,10 @@
 from google.protobuf.internal import containers as _containers
-from google.protobuf.internal import enum_type_wrapper as _enum_type_wrapper
 from google.protobuf import descriptor as _descriptor
 from google.protobuf import message as _message
 from collections.abc import Iterable as _Iterable, Mapping as _Mapping
 from typing import ClassVar as _ClassVar, Optional as _Optional, Union as _Union
 
 DESCRIPTOR: _descriptor.FileDescriptor
-
-class ContextElementType(int, metaclass=_enum_type_wrapper.EnumTypeWrapper):
-    __slots__ = ()
-    USER_PREFERENCE: _ClassVar[ContextElementType]
-    SELECTED_TEXT: _ClassVar[ContextElementType]
-    FILE: _ClassVar[ContextElementType]
-    ISSUE: _ClassVar[ContextElementType]
-    MERGE_REQUEST: _ClassVar[ContextElementType]
-    PREVIOUS_WORKFLOW: _ClassVar[ContextElementType]
-USER_PREFERENCE: ContextElementType
-SELECTED_TEXT: ContextElementType
-FILE: ContextElementType
-ISSUE: ContextElementType
-MERGE_REQUEST: ContextElementType
-PREVIOUS_WORKFLOW: ContextElementType
 
 class ClientEvent(_message.Message):
     __slots__ = ("startRequest", "actionResponse")
@@ -31,14 +15,13 @@ class ClientEvent(_message.Message):
     def __init__(self, startRequest: _Optional[_Union[StartWorkflowRequest, _Mapping]] = ..., actionResponse: _Optional[_Union[ActionResponse, _Mapping]] = ...) -> None: ...
 
 class StartWorkflowRequest(_message.Message):
-    __slots__ = ("clientVersion", "workflowID", "workflowDefinition", "goal", "workflowMetadata", "clientCapabilities", "context", "mcpTools", "additional_context", "approval")
+    __slots__ = ("clientVersion", "workflowID", "workflowDefinition", "goal", "workflowMetadata", "clientCapabilities", "mcpTools", "additional_context", "approval")
     CLIENTVERSION_FIELD_NUMBER: _ClassVar[int]
     WORKFLOWID_FIELD_NUMBER: _ClassVar[int]
     WORKFLOWDEFINITION_FIELD_NUMBER: _ClassVar[int]
     GOAL_FIELD_NUMBER: _ClassVar[int]
     WORKFLOWMETADATA_FIELD_NUMBER: _ClassVar[int]
     CLIENTCAPABILITIES_FIELD_NUMBER: _ClassVar[int]
-    CONTEXT_FIELD_NUMBER: _ClassVar[int]
     MCPTOOLS_FIELD_NUMBER: _ClassVar[int]
     ADDITIONAL_CONTEXT_FIELD_NUMBER: _ClassVar[int]
     APPROVAL_FIELD_NUMBER: _ClassVar[int]
@@ -48,11 +31,10 @@ class StartWorkflowRequest(_message.Message):
     goal: str
     workflowMetadata: str
     clientCapabilities: _containers.RepeatedScalarFieldContainer[str]
-    context: _containers.RepeatedCompositeFieldContainer[ContextElement]
     mcpTools: _containers.RepeatedCompositeFieldContainer[McpTool]
     additional_context: _containers.RepeatedCompositeFieldContainer[AdditionalContext]
     approval: Approval
-    def __init__(self, clientVersion: _Optional[str] = ..., workflowID: _Optional[str] = ..., workflowDefinition: _Optional[str] = ..., goal: _Optional[str] = ..., workflowMetadata: _Optional[str] = ..., clientCapabilities: _Optional[_Iterable[str]] = ..., context: _Optional[_Iterable[_Union[ContextElement, _Mapping]]] = ..., mcpTools: _Optional[_Iterable[_Union[McpTool, _Mapping]]] = ..., additional_context: _Optional[_Iterable[_Union[AdditionalContext, _Mapping]]] = ..., approval: _Optional[_Union[Approval, _Mapping]] = ...) -> None: ...
+    def __init__(self, clientVersion: _Optional[str] = ..., workflowID: _Optional[str] = ..., workflowDefinition: _Optional[str] = ..., goal: _Optional[str] = ..., workflowMetadata: _Optional[str] = ..., clientCapabilities: _Optional[_Iterable[str]] = ..., mcpTools: _Optional[_Iterable[_Union[McpTool, _Mapping]]] = ..., additional_context: _Optional[_Iterable[_Union[AdditionalContext, _Mapping]]] = ..., approval: _Optional[_Union[Approval, _Mapping]] = ...) -> None: ...
 
 class ActionResponse(_message.Message):
     __slots__ = ("requestID", "response", "plainTextResponse", "httpResponse")
@@ -188,16 +170,6 @@ class GenerateTokenResponse(_message.Message):
     token: str
     expiresAt: int
     def __init__(self, token: _Optional[str] = ..., expiresAt: _Optional[int] = ...) -> None: ...
-
-class ContextElement(_message.Message):
-    __slots__ = ("type", "name", "contents")
-    TYPE_FIELD_NUMBER: _ClassVar[int]
-    NAME_FIELD_NUMBER: _ClassVar[int]
-    CONTENTS_FIELD_NUMBER: _ClassVar[int]
-    type: ContextElementType
-    name: str
-    contents: str
-    def __init__(self, type: _Optional[_Union[ContextElementType, str]] = ..., name: _Optional[str] = ..., contents: _Optional[str] = ...) -> None: ...
 
 class NewCheckpoint(_message.Message):
     __slots__ = ("status", "checkpoint", "goal", "errors")

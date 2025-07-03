@@ -110,8 +110,6 @@ class Workflow(AbstractWorkflow):
         return Routes.STOP
 
     def get_workflow_state(self, goal: str) -> ChatWorkflowState:
-        contextElements = self._context_elements or []
-
         initial_ui_chat_log = UiChatLog(
             message_sub_type=None,
             message_type=MessageTypeEnum.USER,
@@ -120,7 +118,6 @@ class Workflow(AbstractWorkflow):
             status=ToolStatus.SUCCESS,
             correlation_id=None,
             tool_info=None,
-            context_elements=contextElements,
             additional_context=self._additional_context,
         )
 
@@ -139,7 +136,6 @@ class Workflow(AbstractWorkflow):
             },
             ui_chat_log=[initial_ui_chat_log],
             last_human_input=None,
-            context_elements=contextElements,
             project=self._project,
             approval=None,
         )
@@ -177,7 +173,6 @@ class Workflow(AbstractWorkflow):
                     status=ToolStatus.SUCCESS,
                     correlation_id=None,
                     tool_info=None,
-                    context_elements=None,
                     additional_context=self._additional_context,
                 )
                 state_update["ui_chat_log"] = [new_message_chat_log]

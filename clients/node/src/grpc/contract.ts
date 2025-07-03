@@ -23,64 +23,6 @@ import {
 
 export const protobufPackage = "";
 
-/** @deprecated */
-export enum ContextElementType {
-  USER_PREFERENCE = 0,
-  SELECTED_TEXT = 1,
-  FILE = 2,
-  ISSUE = 3,
-  MERGE_REQUEST = 4,
-  PREVIOUS_WORKFLOW = 5,
-  UNRECOGNIZED = -1,
-}
-
-export function contextElementTypeFromJSON(object: any): ContextElementType {
-  switch (object) {
-    case 0:
-    case "USER_PREFERENCE":
-      return ContextElementType.USER_PREFERENCE;
-    case 1:
-    case "SELECTED_TEXT":
-      return ContextElementType.SELECTED_TEXT;
-    case 2:
-    case "FILE":
-      return ContextElementType.FILE;
-    case 3:
-    case "ISSUE":
-      return ContextElementType.ISSUE;
-    case 4:
-    case "MERGE_REQUEST":
-      return ContextElementType.MERGE_REQUEST;
-    case 5:
-    case "PREVIOUS_WORKFLOW":
-      return ContextElementType.PREVIOUS_WORKFLOW;
-    case -1:
-    case "UNRECOGNIZED":
-    default:
-      return ContextElementType.UNRECOGNIZED;
-  }
-}
-
-export function contextElementTypeToJSON(object: ContextElementType): string {
-  switch (object) {
-    case ContextElementType.USER_PREFERENCE:
-      return "USER_PREFERENCE";
-    case ContextElementType.SELECTED_TEXT:
-      return "SELECTED_TEXT";
-    case ContextElementType.FILE:
-      return "FILE";
-    case ContextElementType.ISSUE:
-      return "ISSUE";
-    case ContextElementType.MERGE_REQUEST:
-      return "MERGE_REQUEST";
-    case ContextElementType.PREVIOUS_WORKFLOW:
-      return "PREVIOUS_WORKFLOW";
-    case ContextElementType.UNRECOGNIZED:
-    default:
-      return "UNRECOGNIZED";
-  }
-}
-
 export interface ClientEvent {
   startRequest?: StartWorkflowRequest | undefined;
   actionResponse?: ActionResponse | undefined;
@@ -93,12 +35,6 @@ export interface StartWorkflowRequest {
   goal: string;
   workflowMetadata: string;
   clientCapabilities: string[];
-  /**
-   * Use additional_context instead
-   *
-   * @deprecated
-   */
-  context: ContextElement[];
   mcpTools: McpTool[];
   additionalContext: AdditionalContext[];
   approval?: Approval | undefined;
@@ -183,13 +119,6 @@ export interface GenerateTokenRequest {
 export interface GenerateTokenResponse {
   token: string;
   expiresAt: number;
-}
-
-/** @deprecated */
-export interface ContextElement {
-  type: ContextElementType;
-  name: string;
-  contents: string;
 }
 
 export interface NewCheckpoint {
@@ -335,7 +264,6 @@ function createBaseStartWorkflowRequest(): StartWorkflowRequest {
     goal: "",
     workflowMetadata: "",
     clientCapabilities: [],
-    context: [],
     mcpTools: [],
     additionalContext: [],
     approval: undefined,
@@ -361,9 +289,6 @@ export const StartWorkflowRequest: MessageFns<StartWorkflowRequest> = {
     }
     for (const v of message.clientCapabilities) {
       writer.uint32(50).string(v!);
-    }
-    for (const v of message.context) {
-      ContextElement.encode(v!, writer.uint32(58).fork()).join();
     }
     for (const v of message.mcpTools) {
       McpTool.encode(v!, writer.uint32(66).fork()).join();
@@ -432,14 +357,6 @@ export const StartWorkflowRequest: MessageFns<StartWorkflowRequest> = {
           message.clientCapabilities.push(reader.string());
           continue;
         }
-        case 7: {
-          if (tag !== 58) {
-            break;
-          }
-
-          message.context.push(ContextElement.decode(reader, reader.uint32()));
-          continue;
-        }
         case 8: {
           if (tag !== 66) {
             break;
@@ -483,9 +400,6 @@ export const StartWorkflowRequest: MessageFns<StartWorkflowRequest> = {
       clientCapabilities: globalThis.Array.isArray(object?.clientCapabilities)
         ? object.clientCapabilities.map((e: any) => globalThis.String(e))
         : [],
-      context: globalThis.Array.isArray(object?.context)
-        ? object.context.map((e: any) => ContextElement.fromJSON(e))
-        : [],
       mcpTools: globalThis.Array.isArray(object?.mcpTools) ? object.mcpTools.map((e: any) => McpTool.fromJSON(e)) : [],
       additionalContext: globalThis.Array.isArray(object?.additionalContext)
         ? object.additionalContext.map((e: any) => AdditionalContext.fromJSON(e))
@@ -514,9 +428,6 @@ export const StartWorkflowRequest: MessageFns<StartWorkflowRequest> = {
     if (message.clientCapabilities?.length) {
       obj.clientCapabilities = message.clientCapabilities;
     }
-    if (message.context?.length) {
-      obj.context = message.context.map((e) => ContextElement.toJSON(e));
-    }
     if (message.mcpTools?.length) {
       obj.mcpTools = message.mcpTools.map((e) => McpTool.toJSON(e));
     }
@@ -540,7 +451,6 @@ export const StartWorkflowRequest: MessageFns<StartWorkflowRequest> = {
     message.goal = object.goal ?? "";
     message.workflowMetadata = object.workflowMetadata ?? "";
     message.clientCapabilities = object.clientCapabilities?.map((e) => e) || [];
-    message.context = object.context?.map((e) => ContextElement.fromPartial(e)) || [];
     message.mcpTools = object.mcpTools?.map((e) => McpTool.fromPartial(e)) || [];
     message.additionalContext = object.additionalContext?.map((e) => AdditionalContext.fromPartial(e)) || [];
     message.approval = (object.approval !== undefined && object.approval !== null)
@@ -1848,98 +1758,6 @@ export const GenerateTokenResponse: MessageFns<GenerateTokenResponse> = {
     const message = createBaseGenerateTokenResponse();
     message.token = object.token ?? "";
     message.expiresAt = object.expiresAt ?? 0;
-    return message;
-  },
-};
-
-function createBaseContextElement(): ContextElement {
-  return { type: 0, name: "", contents: "" };
-}
-
-export const ContextElement: MessageFns<ContextElement> = {
-  encode(message: ContextElement, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
-    if (message.type !== 0) {
-      writer.uint32(8).int32(message.type);
-    }
-    if (message.name !== "") {
-      writer.uint32(18).string(message.name);
-    }
-    if (message.contents !== "") {
-      writer.uint32(26).string(message.contents);
-    }
-    return writer;
-  },
-
-  decode(input: BinaryReader | Uint8Array, length?: number): ContextElement {
-    const reader = input instanceof BinaryReader ? input : new BinaryReader(input);
-    const end = length === undefined ? reader.len : reader.pos + length;
-    const message = createBaseContextElement();
-    while (reader.pos < end) {
-      const tag = reader.uint32();
-      switch (tag >>> 3) {
-        case 1: {
-          if (tag !== 8) {
-            break;
-          }
-
-          message.type = reader.int32() as any;
-          continue;
-        }
-        case 2: {
-          if (tag !== 18) {
-            break;
-          }
-
-          message.name = reader.string();
-          continue;
-        }
-        case 3: {
-          if (tag !== 26) {
-            break;
-          }
-
-          message.contents = reader.string();
-          continue;
-        }
-      }
-      if ((tag & 7) === 4 || tag === 0) {
-        break;
-      }
-      reader.skip(tag & 7);
-    }
-    return message;
-  },
-
-  fromJSON(object: any): ContextElement {
-    return {
-      type: isSet(object.type) ? contextElementTypeFromJSON(object.type) : 0,
-      name: isSet(object.name) ? globalThis.String(object.name) : "",
-      contents: isSet(object.contents) ? globalThis.String(object.contents) : "",
-    };
-  },
-
-  toJSON(message: ContextElement): unknown {
-    const obj: any = {};
-    if (message.type !== 0) {
-      obj.type = contextElementTypeToJSON(message.type);
-    }
-    if (message.name !== "") {
-      obj.name = message.name;
-    }
-    if (message.contents !== "") {
-      obj.contents = message.contents;
-    }
-    return obj;
-  },
-
-  create<I extends Exact<DeepPartial<ContextElement>, I>>(base?: I): ContextElement {
-    return ContextElement.fromPartial(base ?? ({} as any));
-  },
-  fromPartial<I extends Exact<DeepPartial<ContextElement>, I>>(object: I): ContextElement {
-    const message = createBaseContextElement();
-    message.type = object.type ?? 0;
-    message.name = object.name ?? "";
-    message.contents = object.contents ?? "";
     return message;
   },
 };

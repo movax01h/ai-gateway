@@ -322,7 +322,6 @@ class Workflow(AbstractWorkflow):
             status=ToolStatus.SUCCESS,
             correlation_id=None,
             tool_info=None,
-            context_elements=None,
             additional_context=None,
         )
 

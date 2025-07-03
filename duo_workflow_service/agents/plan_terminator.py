@@ -58,7 +58,6 @@ class PlanTerminatorAgent:
                     status=ToolStatus.FAILURE,
                     correlation_id=None,
                     tool_info=None,
-                    context_elements=None,
                     additional_context=None,
                 )
             ],

@@ -67,7 +67,6 @@ class HumanApprovalCheckExecutor:
                         timestamp=datetime.now(timezone.utc).isoformat(),
                         status=ToolStatus.SUCCESS,
                         tool_info=None,
-                        context_elements=None,
                         additional_context=None,
                     )
                 )
@@ -81,7 +80,6 @@ class HumanApprovalCheckExecutor:
                         timestamp=datetime.now(timezone.utc).isoformat(),
                         status=ToolStatus.SUCCESS,
                         tool_info=None,
-                        context_elements=None,
                         additional_context=None,
                     )
                 )
