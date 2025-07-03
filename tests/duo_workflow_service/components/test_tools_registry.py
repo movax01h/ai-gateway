@@ -13,6 +13,7 @@ from duo_workflow_service.components.tools_registry import (
     ToolsRegistry,
 )
 from duo_workflow_service.gitlab.http_client import GitlabHttpClient
+from lib.feature_flags import current_feature_flag_context
 
 
 @pytest.fixture
@@ -599,3 +600,28 @@ def test_toolset_method(tool_metadata, tool_names, expected_preapproved):
             pre_approved=expected_preapproved, all_tools=expected_all_tools
         )
         assert toolset == mock_toolset
+
+
+@pytest.mark.parametrize(
+    "feature_flag_value, should_include_work_item_tools",
+    [
+        ("duo_workflow_work_item_tools", True),
+        ("", False),
+    ],
+)
+def test_work_item_tools_feature_flag(
+    feature_flag_value,
+    should_include_work_item_tools,
+    tool_metadata,
+):
+    current_feature_flag_context.set({feature_flag_value})
+
+    registry = ToolsRegistry(
+        enabled_tools=["read_only_gitlab"],
+        preapproved_tools=[],
+        tool_metadata=tool_metadata,
+    )
+
+    assert (
+        "get_work_item" in registry._enabled_tools
+    ) == should_include_work_item_tools

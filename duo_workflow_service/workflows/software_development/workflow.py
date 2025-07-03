@@ -99,6 +99,7 @@ EXECUTOR_TOOLS = [
     "list_commits",
     "get_commit_comments",
     "get_commit_diff",
+    "get_work_item",
 ]
 
 CONTEXT_BUILDER_TOOLS = [
@@ -130,6 +131,7 @@ CONTEXT_BUILDER_TOOLS = [
     "list_commits",
     "get_commit_comments",
     "get_commit_diff",
+    "get_work_item",
 ]
 
 PLANNER_TOOLS = [

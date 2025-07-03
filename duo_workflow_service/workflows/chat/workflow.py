@@ -66,6 +66,7 @@ CHAT_READ_ONLY_TOOLS = [
     "list_commits",
     "get_commit_comments",
     "get_commit_diff",
+    "get_work_item",
     "list_vulnerabilities",
 ]
 

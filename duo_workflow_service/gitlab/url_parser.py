@@ -1,5 +1,5 @@
 import re
-from typing import List, Tuple
+from typing import List, Literal, NamedTuple, Tuple
 from urllib.parse import quote, unquote, urlparse
 
 PROJECT_URL_REGEX = r"^(.+?)(?:/-/.*)?$"
@@ -10,6 +10,13 @@ MR_URL_REGEX = r"^(.+?)/-/merge_requests/(\d+)"
 JOB_URL_REGEX = r"^(.+?)/-/jobs/(\d+)"
 REPOSITORY_FILE_URL_REGEX = r"^(.+?)/-/blob/([^/]+)/(.+)$"
 COMMIT_URL_REGEX = r"^(.+?)/-/commit/([a-fA-F0-9]{5,40})"
+WORK_ITEM_URL_REGEX = r"^(?:groups/)?(?P<full_path>.+)/-/work_items/(?P<iid>\d+)$"
+
+
+class ParsedWorkItemUrl(NamedTuple):
+    parent_type: Literal["group", "project"]
+    full_path: str
+    work_item_iid: int
 
 
 class GitLabUrlParseError(Exception):
@@ -345,3 +352,67 @@ class GitLabUrlParser:
         commit_sha = components[1]
 
         return encoded_path, commit_sha
+
+    @staticmethod
+    def parse_work_item_url(url: str, gitlab_host: str) -> ParsedWorkItemUrl:
+        """Parse a GitLab work item URL and determine if it belongs to a group or project.
+
+        Example URLs:
+        - https://gitlab.com/groups/namespace/group/-/work_items/42 (group work item)
+        - https://gitlab.com/namespace/project/-/work_items/42 (project work item)
+
+        Args:
+            url: The GitLab URL to parse
+            gitlab_host: The GitLab host to validate against
+
+        Returns:
+            ParsedWorkItemUrl containing parent type, full path, and work item IID
+
+        Raises:
+            GitLabUrlParseError: If the URL cannot be parsed or is invalid
+        """
+        GitLabUrlParser._validate_url_netloc(url, gitlab_host)
+
+        try:
+            parsed_url = urlparse(url)
+            path = parsed_url.path.strip("/")
+
+            # Check if it's a work item URL
+            if "/-/work_items/" not in path:
+                raise GitLabUrlParseError(f"Not a work item URL: {url}")
+
+            parent_type = GitLabUrlParser.detect_parent_type(url)
+
+            # Extract components using regex
+            components = GitLabUrlParser._extract_path_components(
+                url, WORK_ITEM_URL_REGEX, "Could not parse work item URL"
+            )
+
+            if len(components) < 2:
+                raise GitLabUrlParseError(f"Invalid work item URL format: {url}")
+
+            full_path = components[0]
+
+            # Validate work item IID
+            try:
+                work_item_iid = int(components[1])
+                if work_item_iid < 1:
+                    raise ValueError("Work item IID must be a positive integer")
+            except ValueError as ve:
+                raise GitLabUrlParseError(f"Invalid work item IID in URL {url}: {ve}")
+
+            return ParsedWorkItemUrl(
+                parent_type=parent_type,
+                full_path=full_path,
+                work_item_iid=work_item_iid,
+            )
+        except Exception as e:
+            if isinstance(e, GitLabUrlParseError):
+                raise
+            raise GitLabUrlParseError(f"Could not parse work item URL: {url}") from e
+
+    @staticmethod
+    def detect_parent_type(url: str) -> Literal["group", "project"]:
+        """Detect whether a GitLab URL refers to a group or project based on path."""
+        path = urlparse(url).path.lower()
+        return "group" if "/groups/" in path else "project"

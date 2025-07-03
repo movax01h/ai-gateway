@@ -3,7 +3,11 @@ from urllib.parse import quote
 
 import pytest
 
-from duo_workflow_service.gitlab.url_parser import GitLabUrlParseError, GitLabUrlParser
+from duo_workflow_service.gitlab.url_parser import (
+    GitLabUrlParseError,
+    GitLabUrlParser,
+    ParsedWorkItemUrl,
+)
 
 
 class TestGitLabUrlParser:
@@ -897,3 +901,110 @@ class TestGitLabUrlParser:
     def test_parse_commit_url_error(self, url, gitlab_host, error_message):
         with pytest.raises(GitLabUrlParseError, match=error_message):
             GitLabUrlParser.parse_commit_url(url, gitlab_host)
+
+    @pytest.mark.parametrize(
+        "url, gitlab_host, expected_parent_type, expected_path, expected_iid",
+        [
+            # Group-level work item
+            (
+                "https://gitlab.com/groups/namespace/group/-/work_items/42",
+                "gitlab.com",
+                "group",
+                "namespace/group",
+                42,
+            ),
+            # Project-level work item
+            (
+                "https://gitlab.com/namespace/project/-/work_items/99",
+                "gitlab.com",
+                "project",
+                "namespace/project",
+                99,
+            ),
+            # Subgroup project
+            (
+                "https://gitlab.com/groups/parent/subgroup/-/work_items/123",
+                "gitlab.com",
+                "group",
+                "parent/subgroup",
+                123,
+            ),
+            # Deep nested project (non-group)
+            (
+                "https://gitlab.com/parent/subgroup/project/-/work_items/7",
+                "gitlab.com",
+                "project",
+                "parent/subgroup/project",
+                7,
+            ),
+            # Project with dashes
+            (
+                "https://gitlab.com/org/my-project-with-dash/-/work_items/55",
+                "gitlab.com",
+                "project",
+                "org/my-project-with-dash",
+                55,
+            ),
+        ],
+        ids=[
+            "group_work_item",
+            "project_work_item",
+            "subgroup_work_item",
+            "nested_project_work_item",
+            "project_with_dashes_work_item",
+        ],
+    )
+    def test_parse_work_item_url_success(
+        self, url, gitlab_host, expected_parent_type, expected_path, expected_iid
+    ):
+        result = GitLabUrlParser.parse_work_item_url(url, gitlab_host)
+        assert isinstance(result, ParsedWorkItemUrl)
+        assert result.parent_type == expected_parent_type
+        assert result.full_path == expected_path
+        assert result.work_item_iid == expected_iid
+
+    @pytest.mark.parametrize(
+        "url, gitlab_host, error_message",
+        [
+            # Not a work item URL
+            (
+                "https://gitlab.com/groups/namespace/group",
+                "gitlab.com",
+                "Not a work item URL",
+            ),
+            # Incorrect host
+            (
+                "https://gitlab.example.com/groups/namespace/group/-/work_items/1",
+                "gitlab.com",
+                "URL netloc 'gitlab.example.com' does not match gitlab_host 'gitlab.com'",
+            ),
+            # Malformed work item URL (no IID)
+            (
+                "https://gitlab.com/groups/namespace/group/-/work_items/",
+                "gitlab.com",
+                "Not a work item URL",
+            ),
+            # Missing dash section
+            (
+                "https://gitlab.com/groups/namespace/group/work_items/42",
+                "gitlab.com",
+                "Not a work item URL",
+            ),
+            # Non-numeric IID
+            (
+                "https://gitlab.com/groups/namespace/group/-/work_items/abc",
+                "gitlab.com",
+                "Could not parse work item URL",
+            ),
+        ],
+        ids=[
+            "not_a_work_item_url",
+            "incorrect_host",
+            "missing_iid",
+            "missing_dash_section",
+            "non_numeric_iid",
+        ],
+    )
+    def test_parse_work_item_url_errors(self, url, gitlab_host, error_message):
+        with pytest.raises(GitLabUrlParseError, match=error_message):
+            GitLabUrlParser.parse_work_item_url(url, gitlab_host)

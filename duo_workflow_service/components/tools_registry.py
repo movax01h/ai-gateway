@@ -8,6 +8,7 @@ from pydantic import BaseModel
 from duo_workflow_service import tools
 from duo_workflow_service.gitlab.http_client import GitlabHttpClient
 from duo_workflow_service.tools import Toolset, ToolType
+from lib.feature_flags import FeatureFlag, is_feature_enabled
 
 
 class ToolMetadata(TypedDict):
@@ -71,6 +72,7 @@ _READ_ONLY_GITLAB_TOOLS: list[Type[BaseTool]] = [
     tools.GetWorkflowContext,
     tools.ListVulnerabilities,
     tools.CiLinter,
+    tools.GetWorkItem,
 ]
 
 _AGENT_PRIVILEGES: dict[str, list[Type[BaseTool]]] = {
@@ -180,6 +182,11 @@ class ToolsRegistry:
 
         for privilege in enabled_tools:
             for tool_cls in _AGENT_PRIVILEGES[privilege]:
+                if tool_cls in [
+                    tools.GetWorkItem,
+                ] and not is_feature_enabled(FeatureFlag.DUO_WORKFLOW_WORK_ITEM_TOOLS):
+                    continue
+
                 tool = tool_cls(metadata=tool_metadata)
 
                 # If user is passed, we check user permission to access this tool
