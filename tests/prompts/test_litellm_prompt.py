@@ -4,7 +4,7 @@ import httpx
 import litellm
 import pytest
 from google.auth.credentials import Credentials
-from langchain_litellm import ChatLiteLLM
+from langchain_community.chat_models import ChatLiteLLM
 
 from ai_gateway.prompts import Prompt
 

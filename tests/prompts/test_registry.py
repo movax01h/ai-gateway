@@ -7,11 +7,11 @@ from unittest.mock import Mock, patch
 import pytest
 import yaml
 from langchain_anthropic import ChatAnthropic
+from langchain_community.chat_models import ChatLiteLLM
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.prompts.chat import MessageLikeRepresentation
 from langchain_core.runnables import RunnableBinding, RunnableSequence
-from langchain_litellm import ChatLiteLLM
 from pydantic import BaseModel, HttpUrl
 from pyfakefs.fake_filesystem import FakeFilesystem
 
