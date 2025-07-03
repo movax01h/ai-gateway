@@ -32,7 +32,7 @@ def format_tool_display_message(tool: BaseTool, args: Any) -> Optional[str]:
             return tool.format_display_message(parsed)
 
     except Exception:
-        return tool.format_display_message(DuoBaseTool, args)
+        return DuoBaseTool.format_display_message(tool, args)  # type: ignore[arg-type]
 
     return tool.format_display_message(args)
 
