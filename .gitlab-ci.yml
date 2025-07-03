@@ -40,13 +40,31 @@ variables:
   SAST_EXCLUDED_PATHS: "tests, tmp, api"
   CS_IMAGE: $TARGET_IMAGE
 
+.if-merge-request-labels-pipeline-expedited: &if-merge-request-labels-pipeline-expedited
+  if: '$CI_MERGE_REQUEST_LABELS =~ /pipeline::expedited/'
+
+.if-commit-message-pipeline-expedited: &if-commit-message-pipeline-expedited
+  if: '$CI_COMMIT_MESSAGE =~ /pipeline_expedited:\s*true/'
+
+.skip-when-expedited-include: &skip-when-expedited-include
+  - <<: *if-merge-request-labels-pipeline-expedited
+    when: never
+  - <<: *if-commit-message-pipeline-expedited
+    when: never
+  - when: always
+
 include:
   - local: .gitlab/ci/build.gitlab-ci.yml
   - local: .gitlab/ci/lint.gitlab-ci.yml
+    rules: *skip-when-expedited-include
   - local: .gitlab/ci/test.gitlab-ci.yml
+    rules: *skip-when-expedited-include
   - local: .gitlab/ci/performance.gitlab-ci.yml
+    rules: *skip-when-expedited-include
   - local: .gitlab/ci/release.gitlab-ci.yml
+    rules: *skip-when-expedited-include
   - local: .gitlab/ci/ingest.gitlab-ci.yml
+    rules: *skip-when-expedited-include
   - template: Jobs/Container-Scanning.latest.gitlab-ci.yml
   - template: Jobs/Dependency-Scanning.latest.gitlab-ci.yml
   - template: Jobs/SAST.latest.gitlab-ci.yml
@@ -121,4 +139,8 @@ pages:
     paths:
       - public
   rules:
+    - <<: *if-merge-request-labels-pipeline-expedited
+      when: never
+    - <<: *if-commit-message-pipeline-expedited
+      when: never
     - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
