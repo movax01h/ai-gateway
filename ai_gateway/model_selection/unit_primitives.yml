@@ -69,7 +69,7 @@ configurable_unit_primitives:
   - feature_setting: "summarize_new_merge_request"
     unit_primitives:
       - "summarize_new_merge_request"
-    default_model: "claude_sonnet_3_7_20250219"
+    default_model: "claude_sonnet_4_20250514"
     selectable_models:
       - "claude_sonnet_3_7_20250219"
       - "claude_3_5_sonnet_20240620"
