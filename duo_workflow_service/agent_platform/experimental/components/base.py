@@ -1,0 +1,58 @@
+from abc import ABC, abstractmethod
+from typing import Annotated, Any, ClassVar, Optional, Self
+
+from langgraph.graph import StateGraph
+from pydantic import BaseModel, ConfigDict, Field, model_validator
+
+from duo_workflow_service.agent_platform.experimental.routers.base import BaseRouter
+from duo_workflow_service.agent_platform.experimental.state import IOKey
+
+__all__ = ["BaseComponent"]
+
+
+class BaseComponent(BaseModel, ABC):
+    model_config = ConfigDict(arbitrary_types_allowed=True, frozen=True)
+
+    name: str
+    workflow_id: str | int
+    workflow_type: str
+
+    inputs: list[IOKey] = Field(default_factory=list)
+    output: Optional[IOKey] = None
+
+    _allowed_input_targets: ClassVar[tuple[str, ...]] = ()
+    _allowed_output_targets: ClassVar[tuple[str, ...]] = ()
+
+    @model_validator(mode="before")
+    @classmethod
+    def build_base_component(cls, data: dict[str, Any]) -> dict[str, Any]:
+        if "inputs" in data:
+            data["inputs"] = IOKey.parse_keys(data["inputs"])
+
+        if "output" in data:
+            data["output"] = IOKey.parse_key(data["output"])
+
+        return data
+
+    @model_validator(mode="after")
+    def validate_base_fields(self) -> Self:
+        for inp in self.inputs:
+            if inp.target not in self._allowed_input_targets:
+                raise ValueError(
+                    f"The '{self.__class__.__name__}' component doesn't support the input target '{inp.target}'."
+                )
+
+        if self.output and self.output.target not in self._allowed_output_targets:
+            raise ValueError(
+                f"The '{self.__class__.__name__}' component doesn't support the output target '{self.output.target}'."
+            )
+
+        return self
+
+    @abstractmethod
+    def attach(self, graph: StateGraph, router: BaseRouter) -> None:
+        pass
+
+    @abstractmethod
+    def __entry_hook__(self) -> Annotated[str, "Components entry node name"]:
+        pass
