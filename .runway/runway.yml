@@ -30,7 +30,7 @@ spec:
     path: "/monitoring/healthz"
     timeout_seconds: 5
   scalability:
-    min_instances: 4
+    min_instances: 8
     max_instances: 100
     max_instance_request_concurrency: 40
   resources:
