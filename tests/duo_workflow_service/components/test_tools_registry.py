@@ -625,3 +625,9 @@ def test_work_item_tools_feature_flag(
     assert (
         "get_work_item" in registry._enabled_tools
     ) == should_include_work_item_tools
+    assert (
+        "list_work_items" in registry._enabled_tools
+    ) == should_include_work_item_tools
+    assert (
+        "get_work_item_notes" in registry._enabled_tools
+    ) == should_include_work_item_tools
