@@ -13,6 +13,7 @@ __all__ = [
     "SelfHostedGitlabDocumentation",
     "EpicReader",
     "BuildReader",
+    "WorkItemReader",
 ]
 
 
@@ -53,6 +54,42 @@ class IssueReader(BaseRemoteTool):
         Action: issue_reader
         Action Input: Please identify the author of #123 issue"""
         # editorconfig-checker-enable
+    )
+
+
+class WorkItemReader(BaseRemoteTool):
+    name: str = "work_item_reader"
+    resource: str = "work_items"
+    unit_primitive: GitLabUnitPrimitive = GitLabUnitPrimitive.ASK_WORK_ITEM
+    min_required_gl_version: Optional[str] = None
+
+    description: str = dedent(
+        """\
+        This tool retrieves the content of a specific work items
+        ONLY if the user question fulfills the strict usage conditions below.
+
+        **Strict Usage Conditions:**
+        * **Condition 1: Work item ID Provided:** This tool MUST be used ONLY when the user provides a valid work item ID.
+        * **Condition 2: Work item URL Context:** This tool MUST be used ONLY when the user is actively viewing a specific
+        work item URL or a specific URL is provided by the user.
+
+        **Do NOT** attempt to search for or identify work items based on descriptions, keywords, or user questions.
+
+        **Action Input:**
+        * The original question asked by the user.
+
+        **Important:**  Reject any input that does not strictly adhere to the usage conditions above.
+        Return a message stating you are unable to search for work items without a valid identifier."""
+    )
+
+    example: str = dedent(
+        """\
+        Question: Please identify the author of https://some.host.name/some/long/path/-/work_items/410692
+        Thought: You have access to the same resources as user who asks a question.
+        Question is about the content of a work item, so you need to use "work_item_reader" tool to retrieve and read work item.
+        Based on this information you can present final answer about work item.
+        Action: work_item_reader
+        Action Input: Please identify the author of https://some.host.name/some/long/path/-/work_items/410692"""
     )
 
 

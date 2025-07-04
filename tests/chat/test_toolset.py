@@ -13,6 +13,7 @@ from ai_gateway.chat.tools.gitlab import (
     IssueReader,
     MergeRequestReader,
     SelfHostedGitlabDocumentation,
+    WorkItemReader,
 )
 from ai_gateway.chat.toolset import DuoChatToolsRegistry
 
@@ -28,6 +29,7 @@ class TestDuoChatToolRegistry:
                 MergeRequestReader,
                 GitlabDocumentation,
                 CommitReader,
+                WorkItemReader,
             }
         ],
     )
@@ -50,6 +52,7 @@ class TestDuoChatToolRegistry:
             IssueReader,
             MergeRequestReader,
             CommitReader,
+            WorkItemReader,
         }
 
     @pytest.mark.parametrize(
@@ -58,17 +61,20 @@ class TestDuoChatToolRegistry:
             ([GitLabUnitPrimitive.DOCUMENTATION_SEARCH], {GitlabDocumentation}),
             ([GitLabUnitPrimitive.ASK_EPIC], {EpicReader}),
             ([GitLabUnitPrimitive.ASK_ISSUE], {IssueReader}),
+            ([GitLabUnitPrimitive.ASK_WORK_ITEM], {WorkItemReader}),
             (
                 [
                     GitLabUnitPrimitive.DUO_CHAT,
                     GitLabUnitPrimitive.DOCUMENTATION_SEARCH,
                     GitLabUnitPrimitive.ASK_EPIC,
                     GitLabUnitPrimitive.ASK_ISSUE,
+                    GitLabUnitPrimitive.ASK_WORK_ITEM,
                 ],
                 {
                     GitlabDocumentation,
                     EpicReader,
                     IssueReader,
+                    WorkItemReader,
                 },
             ),
             (
