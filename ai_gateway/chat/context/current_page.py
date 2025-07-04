@@ -9,6 +9,7 @@ __all__ = [
     "EpicContext",
     "IssueContext",
     "MergeRequestContext",
+    "WorkItemContext",
     "CurrentPageContext",
 ]
 
@@ -50,6 +51,11 @@ class MergeRequestContext(BaseModel):
     title: str
 
 
+class WorkItemContext(BaseModel):
+    type: Literal["work_item"]
+    title: str
+
+
 # This Union allows to pass page context params and automatically
 # define a correct instance of specific context
 CurrentPageContext = Union[
@@ -59,4 +65,5 @@ CurrentPageContext = Union[
     EpicContext,
     IssueContext,
     MergeRequestContext,
+    WorkItemContext,
 ]

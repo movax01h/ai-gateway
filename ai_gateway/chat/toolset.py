@@ -9,6 +9,7 @@ from ai_gateway.chat.tools.gitlab import (
     IssueReader,
     MergeRequestReader,
     SelfHostedGitlabDocumentation,
+    WorkItemReader,
 )
 
 __all__ = ["DuoChatToolsRegistry"]
@@ -29,6 +30,7 @@ class DuoChatToolsRegistry(BaseToolsRegistry):
             IssueReader(),
             MergeRequestReader(),
             CommitReader(),
+            WorkItemReader(),
         ]
 
         if self.self_hosted_documentation_enabled:
