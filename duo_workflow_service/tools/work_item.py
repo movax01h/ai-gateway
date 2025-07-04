@@ -8,9 +8,24 @@ from pydantic import BaseModel, Field
 from duo_workflow_service.gitlab.url_parser import GitLabUrlParseError, GitLabUrlParser
 from duo_workflow_service.tools.duo_base_tool import DuoBaseTool
 from duo_workflow_service.tools.queries.work_items import (
+    GET_GROUP_WORK_ITEM_NOTES_QUERY,
     GET_GROUP_WORK_ITEM_QUERY,
+    GET_PROJECT_WORK_ITEM_NOTES_QUERY,
     GET_PROJECT_WORK_ITEM_QUERY,
+    LIST_GROUP_WORK_ITEMS_QUERY,
+    LIST_PROJECT_WORK_ITEMS_QUERY,
 )
+
+PARENT_IDENTIFICATION_DESCRIPTION = """To identify the parent (group or project) you must provide either:
+- group_id parameter, or
+- project_id parameter, or
+- A GitLab URL like:
+    - https://gitlab.com/namespace/group
+    - https://gitlab.com/groups/namespace/group
+    - https://gitlab.com/namespace/project
+    - https://gitlab.com/namespace/group/project
+"""
+
 
 WORK_ITEM_IDENTIFICATION_DESCRIPTION = """To identify a work item you must provide either:
 - group_id/project_id and work_item_iid
@@ -148,6 +163,109 @@ class ParentResourceInput(BaseModel):
     )
 
 
+class ListWorkItemsInput(ParentResourceInput):
+    state: Optional[str] = Field(
+        default=None,
+        description="Filter by work item state (e.g., 'opened', 'closed', 'all'). If not set, all states are included.",
+    )
+    search: Optional[str] = Field(
+        default=None, description="Search for work items by title or description."
+    )
+    author_username: Optional[str] = Field(
+        default=None, description="Filter by username of the author."
+    )
+    created_after: Optional[str] = Field(
+        default=None,
+        description="Include only work items created on or after this date (ISO 8601 format).",
+    )
+    created_before: Optional[str] = Field(
+        default=None,
+        description="Include only work items created on or before this date (ISO 8601 format).",
+    )
+    updated_after: Optional[str] = Field(
+        default=None,
+        description="Include only work items updated on or after this date (ISO 8601 format).",
+    )
+    updated_before: Optional[str] = Field(
+        default=None,
+        description="Include only work items updated on or before this date (ISO 8601 format).",
+    )
+    due_after: Optional[str] = Field(
+        default=None,
+        description="Include only work items due on or after this date (ISO 8601 format).",
+    )
+    due_before: Optional[str] = Field(
+        default=None,
+        description="Include only work items due on or before this date (ISO 8601 format).",
+    )
+    sort: Optional[str] = Field(
+        default=None,
+        description="Sort results by field and direction (e.g., 'CREATED_DESC', 'UPDATED_ASC').",
+    )
+
+
+class ListWorkItems(WorkItemBaseTool):
+    name: str = "list_work_items"
+    description: str = f"""Get all work items of the requested group or project.
+
+    {PARENT_IDENTIFICATION_DESCRIPTION}
+
+    For example:
+    - Given group_id 'namespace/group', the tool call would be:
+        list_work_items(group_id='namespace/group')
+    - Given project_id 'namespace/project', the tool call would be:
+        list_work_items(project_id='namespace/project')
+    - Given the URL https://gitlab.com/groups/namespace/group, the tool call would be:
+        list_work_items(url="https://gitlab.com/groups/namespace/group")
+    - Given the URL https://gitlab.com/namespace/project, the tool call would be:
+        list_work_items(url="https://gitlab.com/namespace/project")
+    """
+    args_schema: Type[BaseModel] = ListWorkItemsInput
+
+    async def _arun(self, **kwargs: Any) -> str:
+        url = kwargs.pop("url", None)
+        group_id = kwargs.pop("group_id", None)
+        project_id = kwargs.pop("project_id", None)
+
+        resolved = self._validate_parent_url(url, group_id, project_id)
+
+        if isinstance(resolved, str):
+            return json.dumps({"error": resolved})
+
+        query = (
+            LIST_GROUP_WORK_ITEMS_QUERY
+            if resolved.type == "group"
+            else LIST_PROJECT_WORK_ITEMS_QUERY
+        )
+
+        variables = {
+            "fullPath": resolved.full_path,
+            **{k: v for k, v in kwargs.items() if v is not None},
+        }
+
+        try:
+            response = await self.gitlab_client.graphql(query, variables)
+            data = response.get("data", response)
+            root_key = "namespace" if resolved.type == "group" else "project"
+
+            if root_key not in data:
+                return json.dumps({"error": f"No {root_key} found in response"})
+
+            work_items = data.get(root_key, {}).get("workItems", {}).get("nodes", [])
+
+            return json.dumps({"work_items": work_items})
+        except Exception as e:
+            return json.dumps({"error": str(e)})
+
+    def format_display_message(self, args: ListWorkItemsInput) -> str:
+        if args.url:
+            return f"List work items in {args.url}"
+        if args.group_id:
+            return f"List work items in group {args.group_id}"
+
+        return f"List work items in project {args.project_id}"
+
+
 class WorkItemResourceInput(ParentResourceInput):
     work_item_iid: Optional[int] = Field(
         default=None,
@@ -219,3 +337,83 @@ class GetWorkItem(WorkItemBaseTool):
             return f"Read work item #{args.work_item_iid} in group {args.group_id}"
 
         return f"Read work item #{args.work_item_iid} in project {args.project_id}"
+
+
+class GetWorkItemNotesInput(WorkItemResourceInput):
+    sort: Optional[str] = Field(
+        default=None,
+        description="Return work item notes sorted in asc or desc order. Default is desc.",
+    )
+    order_by: Optional[str] = Field(
+        default=None,
+        description="Return work item notes ordered by created_at or updated_at fields. Default is created_at",
+    )
+
+
+class GetWorkItemNotes(WorkItemBaseTool):
+    name: str = "get_work_item_notes"
+    description: str = f"""Get all comments (notes) for a specific work item.
+
+    {WORK_ITEM_IDENTIFICATION_DESCRIPTION}
+
+    For example:
+    - Given group_id 'namespace/group' and work_item_iid 42, the tool call would be:
+        get_work_item_notes(group_id='namespace/group', work_item_iid=42)
+    - Given project_id 'namespace/project' and work_item_iid 42, the tool call would be:
+        get_work_item_notes(project_id='namespace/project', work_item_iid=42)
+    - Given the URL https://gitlab.com/groups/namespace/group/-/work_items/42, the tool call would be:
+        get_work_item_notes(url="https://gitlab.com/groups/namespace/group/-/work_items/42")
+    - Given the URL https://gitlab.com/namespace/project/-/work_items/42, the tool call would be:
+        get_work_item_notes(url="https://gitlab.com/namespace/project/-/work_items/42")
+    """
+    args_schema: Type[BaseModel] = GetWorkItemNotesInput
+
+    async def _arun(self, **kwargs: Any) -> str:
+        url = kwargs.pop("url", None)
+        group_id = kwargs.pop("group_id", None)
+        project_id = kwargs.pop("project_id", None)
+        work_item_iid = kwargs.pop("work_item_iid", None)
+
+        resolved = self._validate_work_item_url(
+            url, group_id, project_id, work_item_iid
+        )
+
+        if isinstance(resolved, str):
+            return json.dumps({"error": resolved})
+
+        query = (
+            GET_GROUP_WORK_ITEM_NOTES_QUERY
+            if resolved.parent.type == "group"
+            else GET_PROJECT_WORK_ITEM_NOTES_QUERY
+        )
+
+        variables = {
+            "fullPath": resolved.parent.full_path,
+            "workItemIid": str(resolved.work_item_iid),
+        }
+
+        try:
+            response = await self.gitlab_client.graphql(query, variables)
+            root_key = "namespace" if resolved.parent.type == "group" else "project"
+            nodes = response.get(root_key, {}).get("workItems", {}).get("nodes", [])
+
+            if not nodes:
+                return json.dumps({"error": "No work item found."})
+
+            widgets = nodes[0].get("widgets", [])
+            for widget in widgets:
+                if "notes" in widget:
+                    notes = widget.get("notes", {}).get("nodes", [])
+                    return json.dumps({"notes": notes}, indent=2)
+
+            return json.dumps({"notes": []})
+        except Exception as e:
+            return json.dumps({"error": str(e)})
+
+    def format_display_message(self, args: GetWorkItemNotesInput) -> str:
+        if args.url:
+            return f"Read comments on work item {args.url}"
+        if args.group_id:
+            return f"Read comments on work item #{args.work_item_iid} in group {args.group_id}"
+
+        return f"Read comments on work item #{args.work_item_iid} in project {args.project_id}"

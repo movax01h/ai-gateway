@@ -73,6 +73,8 @@ _READ_ONLY_GITLAB_TOOLS: list[Type[BaseTool]] = [
     tools.ListVulnerabilities,
     tools.CiLinter,
     tools.GetWorkItem,
+    tools.ListWorkItems,
+    tools.GetWorkItemNotes,
 ]
 
 _AGENT_PRIVILEGES: dict[str, list[Type[BaseTool]]] = {
@@ -184,6 +186,8 @@ class ToolsRegistry:
             for tool_cls in _AGENT_PRIVILEGES[privilege]:
                 if tool_cls in [
                     tools.GetWorkItem,
+                    tools.ListWorkItems,
+                    tools.GetWorkItemNotes,
                 ] and not is_feature_enabled(FeatureFlag.DUO_WORKFLOW_WORK_ITEM_TOOLS):
                     continue
 
