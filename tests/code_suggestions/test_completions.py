@@ -27,6 +27,7 @@ from ai_gateway.models import (
     ModelMetadata,
     PalmCodeGeckoModel,
 )
+from ai_gateway.models.agent_model import AgentModel
 from ai_gateway.models.amazon_q import AmazonQModel
 from ai_gateway.models.base import TokensConsumptionMetadata
 from ai_gateway.models.base_text import (
@@ -816,3 +817,60 @@ class TestCodeCompletions:
             )
         else:
             assert actual.text == ""
+
+    async def test_execute_agent_model(self):
+        prefix = "def hello"
+        suffix = ":"
+        file_name = "test.py"
+        editor_lang = "python"
+        stream = False
+
+        agent_model = Mock(spec=AgentModel)
+        agent_model.input_token_limit = 16
+        agent_model.generate = AsyncMock(
+            return_value=TextGenModelOutput(
+                text="world()",
+                score=0,
+                safety_attributes=SafetyAttributes(),
+                metadata=Mock(output_tokens=10, spec_set=["output_tokens"]),
+            )
+        )
+
+        use_case = CodeCompletions(agent_model, Mock(spec=TokenStrategyBase))
+        use_case.instrumentator = InstrumentorMock(spec=TextGenModelInstrumentator)
+
+        # Mock prompt builder
+        use_case.prompt_builder = Mock(spec=PromptBuilderPrefixBased)
+        use_case.prompt_builder.build.return_value = Prompt(
+            prefix=prefix,
+            suffix=suffix,
+            metadata=MetadataPromptBuilder(
+                components={
+                    "prefix": MetadataCodeContent(length=10, length_tokens=2),
+                    "suffix": MetadataCodeContent(length=10, length_tokens=2),
+                }
+            ),
+        )
+
+        # Execute the code completion
+        actual = await use_case.execute(
+            prefix=prefix,
+            suffix=suffix,
+            file_name=file_name,
+            editor_lang=editor_lang,
+            stream=stream,
+        )
+
+        assert actual.text == "world()"
+        assert actual.lang_id == LanguageId.PYTHON
+
+        # Verify model.generate was called with correct parameters
+        agent_model.generate.assert_called_once_with(
+            {
+                "prefix": "def hello",
+                "suffix": ":",
+                "file_name": "test.py",
+                "language": "python",
+            },
+            False,
+        )
