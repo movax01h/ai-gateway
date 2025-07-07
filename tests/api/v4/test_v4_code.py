@@ -147,6 +147,16 @@ class TestEditorContentGenerationStream:
                 },
                 {"flag_a", "flag_b"},
             ),
+            (
+                "code_suggestions/generations",
+                None,
+                "1.2.0-dev",
+                {
+                    "engine": "agent",
+                    "name": "Gemini 2.5 Flash Code Generations Agent",
+                },
+                {"flag_a", "flag_b"},
+            ),
         ],
     )
     def test_successful_stream_response(

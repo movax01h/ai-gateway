@@ -17,6 +17,16 @@ models:
       temperature: 0.7
       max_tokens: 64
       max_retries: 1
+
+  - name: "Gemini 2.5 Flash - Vertex"
+    gitlab_identifier: "gemini_2_5_flash_vertex"
+    provider: "vertex-ai"
+    provider_identifier: "gemini-2.5-flash"
+    params:
+      temperature: 0.7
+      max_tokens: 4_096
+      max_retries: 1
+
   - name: "Claude Opus 4.0 - Anthropic"
     gitlab_identifier: "claude_opus_4_20250514"
     provider: "anthropic"
@@ -25,6 +35,7 @@ models:
       temperature: 0.0
       max_tokens: 4_096
       max_retries: 1
+
   - name: "Claude Sonnet 4.0 - Anthropic"
     gitlab_identifier: "claude_sonnet_4_20250514"
     provider: "anthropic"
@@ -33,6 +44,7 @@ models:
       temperature: 0.0
       max_tokens: 4_096
       max_retries: 1
+
   - name: "Claude Sonnet 3.7 - Anthropic"
     gitlab_identifier: "claude_sonnet_3_7_20250219"
     provider: "anthropic"
@@ -41,6 +53,7 @@ models:
       temperature: 0.0
       max_tokens: 4_096
       max_retries: 1
+
   - name: "Claude Sonnet 3.7 - Vertex"
     gitlab_identifier: "claude_sonnet_3_7_20250219_vertex"
     provider: "vertex_ai"
@@ -49,6 +62,7 @@ models:
       temperature: 0.0
       max_tokens: 4_096
       max_retries: 1
+
   - name: "Claude 3.5 Haiku - Anthropic"
     gitlab_identifier: "claude_3_5_haiku_20241022"
     provider: "anthropic"
@@ -57,6 +71,7 @@ models:
       temperature: 0.0
       max_tokens: 4_096
       max_retries: 1
+
   - name: "Claude Sonnet 3.5 - Anthropic"
     gitlab_identifier: "claude_3_5_sonnet_20240620"
     provider: "anthropic"
@@ -65,6 +80,7 @@ models:
       temperature: 0.0
       max_tokens: 4_096
       max_retries: 1
+
   - name: "Claude 3 Haiku - Anthropic"
     gitlab_identifier: "claude_3_haiku_20240307"
     provider: "anthropic"
@@ -73,6 +89,7 @@ models:
       temperature: 0.0
       max_tokens: 4_096
       max_retries: 1
+
   - name: "Claude Haiku 3 - Anthropic"
     gitlab_identifier: "claude_3_haiku_20240307"
     provider: "anthropic"
@@ -81,6 +98,7 @@ models:
       temperature: 0.2
       max_tokens: 4_096
       max_retries: 1
+
   - name: "Claude Sonnet 3 - Anthropic" # used by troubleshoot only
     gitlab_identifier: "claude_3_sonnet_20240229"
     provider: "anthropic"

@@ -80,6 +80,7 @@ USE_CASES_MODELS_MAP = {
     },
     KindUseCase.CODE_GENERATIONS: {
         KindVertexTextModel.CODE_BISON_002,
+        KindVertexTextModel.GEMINI_2_5_FLASH,
         KindAnthropicModel.CLAUDE_3_SONNET,
         KindAnthropicModel.CLAUDE_3_5_SONNET,
         KindAnthropicModel.CLAUDE_3_HAIKU,
@@ -111,6 +112,10 @@ SAAS_PROMPT_MODEL_MAP = {
     "1.1.0-dev": {
         "model_provider": ModelProvider.ANTHROPIC,
         "model_version": KindAnthropicModel.CLAUDE_SONNET_4,
+    },
+    "1.2.0-dev": {
+        "model_provider": ModelProvider.VERTEX_AI,
+        "model_version": KindVertexTextModel.GEMINI_2_5_FLASH,
     },
     "3.0.2-dev": {
         "model_provider": ModelProvider.ANTHROPIC,
