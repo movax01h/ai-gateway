@@ -329,6 +329,7 @@ class TestEvents:
         mock_q_boto3,
         mock_sts_client,
         mock_glgo,
+        mock_track_internal_event,
         credentials,
         payload,
     ):
@@ -339,6 +340,11 @@ class TestEvents:
         mock_q_boto3.client.return_value = mock_q_client_response
 
         response = perform_request(mock_client, payload)
+
+        mock_track_internal_event.assert_called_once_with(
+            "request_amazon_q_integration",
+            category="ai_gateway.api.v1.amazon_q.events",
+        )
 
         assert response.status_code == status.HTTP_204_NO_CONTENT
         mock_q_boto3.client.assert_called_once_with("q", **credentials)

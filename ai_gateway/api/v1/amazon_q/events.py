@@ -1,18 +1,18 @@
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
-from gitlab_cloud_connector import GitLabFeatureCategory, GitLabUnitPrimitive
+from fastapi import APIRouter, Depends, Request, Response, status
+from gitlab_cloud_connector import GitLabFeatureCategory
 
 from ai_gateway.api.auth_utils import StarletteUser, get_current_user
 from ai_gateway.api.feature_category import feature_category
 from ai_gateway.api.v1.amazon_q.typing import EventRequest
+from ai_gateway.api.v1.amazon_q.utils import authorized_q_client
 from ai_gateway.async_dependency_resolver import (
     get_amazon_q_client_factory,
     get_internal_event_client,
 )
 from ai_gateway.integrations.amazon_q.client import AmazonQClientFactory
-from ai_gateway.integrations.amazon_q.errors import AWSException
-from ai_gateway.internal_events import InternalEventsClient
+from ai_gateway.internal_events.client import InternalEventsClient
 
 __all__ = [
     "router",
@@ -34,25 +34,13 @@ async def events(
         AmazonQClientFactory, Depends(get_amazon_q_client_factory)
     ],
 ):
-    if not current_user.can(GitLabUnitPrimitive.AMAZON_Q_INTEGRATION):
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Unauthorized to perform action",
-        )
-
-    internal_event_client.track_event(
-        f"request_{GitLabUnitPrimitive.AMAZON_Q_INTEGRATION}",
-        category=__name__,
-    )
-
-    try:
-        q_client = amazon_q_client_factory.get_client(
-            current_user=current_user,
-            role_arn=event_request.role_arn,
-        )
-
+    with authorized_q_client(
+        current_user=current_user,
+        internal_event_client=internal_event_client,
+        amazon_q_client_factory=amazon_q_client_factory,
+        role_arn=event_request.role_arn,
+        internal_event_category=__name__,
+    ) as q_client:
         q_client.send_event(event_request)
-    except AWSException as e:
-        raise e.to_http_exception()
 
     return Response(status_code=status.HTTP_204_NO_CONTENT)

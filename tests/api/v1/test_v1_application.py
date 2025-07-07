@@ -296,6 +296,7 @@ class TestApplication:
         mock_q_boto3,
         mock_sts_client,
         mock_glgo,
+        mock_track_internal_event,
         credentials,
     ):
         mock_create_o_auth_app_connection = MagicMock(return_value=None)
@@ -307,6 +308,11 @@ class TestApplication:
         mock_q_boto3.client.return_value = mock_q_client_response
 
         response = perform_request(mock_client)
+
+        mock_track_internal_event.assert_called_once_with(
+            "request_amazon_q_integration",
+            category="ai_gateway.api.v1.amazon_q.application",
+        )
 
         assert response.status_code == status.HTTP_204_NO_CONTENT
         mock_q_boto3.client.assert_called_once_with("q", **credentials)
@@ -325,6 +331,7 @@ class TestApplication:
         mock_q_boto3,
         mock_sts_client,
         mock_glgo,
+        mock_track_internal_event,
         credentials,
     ):
         mock_delete_o_auth_app_connection = MagicMock(return_value=None)
@@ -336,6 +343,11 @@ class TestApplication:
         mock_q_boto3.client.return_value = mock_q_client_response
 
         response = perform_delete_request(mock_client)
+
+        mock_track_internal_event.assert_called_once_with(
+            "request_amazon_q_integration",
+            category="ai_gateway.api.v1.amazon_q.application",
+        )
 
         assert response.status_code == status.HTTP_204_NO_CONTENT
         mock_q_boto3.client.assert_called_once_with("q", **credentials)
@@ -417,6 +429,7 @@ class TestApplication:
         mock_q_boto3,
         mock_sts_client,
         mock_glgo,
+        mock_track_internal_event,
         credentials,
     ):
         verify_app_response = {"test1": "PASSED", "test2": "PASSED"}
@@ -443,6 +456,11 @@ class TestApplication:
                 "role_arn": "arn:aws:iam::123456789012:role/q-dev-role",
                 "code": "some.code",
             },
+        )
+
+        mock_track_internal_event.assert_called_once_with(
+            "validate_auth_amazon_q_integration",
+            category="ai_gateway.api.v1.amazon_q.application",
         )
 
         assert response.status_code == status.HTTP_200_OK
