@@ -2589,54 +2589,55 @@ types-requests = ">=2.31.0.2,<3.0.0.0"
 
 [[package]]
 name = "langgraph"
-version = "0.3.21"
+version = "0.4.8"
 description = "Building stateful, multi-actor applications with LLMs"
 optional = false
-python-versions = "<4.0,>=3.9.0"
+python-versions = ">=3.9"
 groups = ["main", "eval"]
 files = [
-    {file = "langgraph-0.3.21-py3-none-any.whl", hash = "sha256:2ec761bf832f05d3a5211f0303063cf0900566200495c2cdd5545c7b3fec89ea"},
-    {file = "langgraph-0.3.21.tar.gz", hash = "sha256:971a7f3ee5f1ab4c88032023f090b7a57d59cb93ea930658aa0b7ac4767f4bcb"},
+    {file = "langgraph-0.4.8-py3-none-any.whl", hash = "sha256:273b02782669a474ba55ef4296607ac3bac9e93639d37edc0d32d8cf1a41a45b"},
+    {file = "langgraph-0.4.8.tar.gz", hash = "sha256:48445ac8a351b7bdc6dee94e2e6a597f8582e0516ebd9dea0fd0164ae01b915e"},
 ]
 
 [package.dependencies]
-langchain-core = ">=0.1,<0.4"
-langgraph-checkpoint = ">=2.0.10,<3.0.0"
-langgraph-prebuilt = ">=0.1.1,<0.2"
-langgraph-sdk = ">=0.1.42,<0.2.0"
-xxhash = ">=3.5.0,<4.0.0"
+langchain-core = ">=0.1"
+langgraph-checkpoint = ">=2.0.26"
+langgraph-prebuilt = ">=0.2.0"
+langgraph-sdk = ">=0.1.42"
+pydantic = ">=2.7.4"
+xxhash = ">=3.5.0"
 
 [[package]]
 name = "langgraph-checkpoint"
-version = "2.0.24"
+version = "2.0.26"
 description = "Library with base interfaces for LangGraph checkpoint savers."
 optional = false
-python-versions = "<4.0.0,>=3.9.0"
+python-versions = ">=3.9"
 groups = ["main", "eval"]
 files = [
-    {file = "langgraph_checkpoint-2.0.24-py3-none-any.whl", hash = "sha256:3836e2909ef2387d1fa8d04ee3e2a353f980d519fd6c649af352676dc73d66b8"},
-    {file = "langgraph_checkpoint-2.0.24.tar.gz", hash = "sha256:9596dad332344e7e871257be464df8a07c2e9bac66143081b11b9422b0167e5b"},
+    {file = "langgraph_checkpoint-2.0.26-py3-none-any.whl", hash = "sha256:ad4907858ed320a208e14ac037e4b9244ec1cb5aa54570518166ae8b25752cec"},
+    {file = "langgraph_checkpoint-2.0.26.tar.gz", hash = "sha256:2b800195532d5efb079db9754f037281225ae175f7a395523f4bf41223cbc9d6"},
 ]
 
 [package.dependencies]
-langchain-core = ">=0.2.38,<0.4"
+langchain-core = {version = ">=0.2.38", markers = "python_version < \"4.0\""}
 ormsgpack = ">=1.8.0,<2.0.0"
 
 [[package]]
 name = "langgraph-prebuilt"
-version = "0.1.8"
+version = "0.2.3"
 description = "Library with high-level APIs for creating and executing LangGraph agents and tools."
 optional = false
-python-versions = "<4.0.0,>=3.9.0"
+python-versions = ">=3.9"
 groups = ["main", "eval"]
 files = [
-    {file = "langgraph_prebuilt-0.1.8-py3-none-any.whl", hash = "sha256:ae97b828ae00be2cefec503423aa782e1bff165e9b94592e224da132f2526968"},
-    {file = "langgraph_prebuilt-0.1.8.tar.gz", hash = "sha256:4de7659151829b2b955b6798df6800e580e617782c15c2c5b29b139697491831"},
+    {file = "langgraph_prebuilt-0.2.3-py3-none-any.whl", hash = "sha256:efa0bdfaf6e0b5b20e4fa55193ba7871c4aae70026be1c51d3960cb1742404c9"},
+    {file = "langgraph_prebuilt-0.2.3.tar.gz", hash = "sha256:4e5f81c062ae30c42384ece8d7a6e234216cf079320fd643a2cecb4cb80c33da"},
 ]
 
 [package.dependencies]
-langchain-core = ">=0.2.43,<0.3.0 || >0.3.0,<0.3.1 || >0.3.1,<0.3.2 || >0.3.2,<0.3.3 || >0.3.3,<0.3.4 || >0.3.4,<0.3.5 || >0.3.5,<0.3.6 || >0.3.6,<0.3.7 || >0.3.7,<0.3.8 || >0.3.8,<0.3.9 || >0.3.9,<0.3.10 || >0.3.10,<0.3.11 || >0.3.11,<0.3.12 || >0.3.12,<0.3.13 || >0.3.13,<0.3.14 || >0.3.14,<0.3.15 || >0.3.15,<0.3.16 || >0.3.16,<0.3.17 || >0.3.17,<0.3.18 || >0.3.18,<0.3.19 || >0.3.19,<0.3.20 || >0.3.20,<0.3.21 || >0.3.21,<0.3.22 || >0.3.22,<0.4.0"
-langgraph-checkpoint = ">=2.0.10,<3.0.0"
+langchain-core = ">=0.3.22"
+langgraph-checkpoint = ">=2.0.10"
 
 [[package]]
 name = "langgraph-sdk"
@@ -6456,4 +6457,4 @@ cffi = ["cffi (>=1.11)"]
 [metadata]
 lock-version = "2.1"
 python-versions = "~3.12.0"
-content-hash = "303b5d0db14941497444b204e6ee756e52080abdddabe4dc1b75e6b049b9019a"
+content-hash = "0901795cc15d1c0e07e7105b312861529bb6f0add7690ab1b5e4b6a5caa022d0"

@@ -70,7 +70,7 @@ def mock_git_lab_workflow_instance(mock_gitlab_workflow, offline_mode):
 
 @pytest.fixture
 def workflow_config() -> dict[str, Any]:
-    return {"project_id": 1}
+    return {"project_id": 1, "agent_privileges_names": []}
 
 
 @pytest.fixture

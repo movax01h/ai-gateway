@@ -249,15 +249,22 @@ async def test_workflow_initialization(workflow):
 
 
 @pytest.mark.asyncio
+@patch("duo_workflow_service.workflows.abstract_workflow.GitLabWorkflow.aget_tuple")
+@patch("duo_workflow_service.workflows.abstract_workflow.GitLabWorkflow.aput")
+@patch(
+    "duo_workflow_service.checkpointer.gitlab_workflow.GitLabStatusUpdater",
+    autospec=True,
+)
 @patch.dict(os.environ, {"DW_INTERNAL_EVENT__ENABLED": "true"})
 async def test_workflow_run(
+    mock_status_updater,
+    mock_gitlab_workflow_aput,
+    mock_gitlab_workflow_aget_tuple,
     mock_checkpoint_notifier,
     mock_goal_disambiguation_component,
     mock_tools_approval_component,
     mock_planner_component,
     mock_executor_component,
-    mock_gitlab_workflow,
-    mock_git_lab_workflow_instance,
     mock_chat_client,
     mock_fetch_project_data_with_workflow_id,
     mock_tools_executor,
@@ -268,6 +275,9 @@ async def test_workflow_run(
     checkpoint_tuple,
     workflow,
 ):
+    mock_gitlab_workflow_aput.return_value = None
+    mock_gitlab_workflow_aget_tuple.return_value = None
+
     mock_user_interface_instance = mock_checkpoint_notifier.return_value
 
     mock_tools_executor.return_value.run.side_effect = [
@@ -320,8 +330,8 @@ async def test_workflow_run(
     assert mock_plan_supervisor_agent.call_count == 1
     assert mock_plan_supervisor_agent.return_value.run.call_count == 1
 
-    assert mock_git_lab_workflow_instance.aput.call_count >= 1
-    assert mock_git_lab_workflow_instance.aget_tuple.call_count >= 1
+    assert mock_gitlab_workflow_aput.call_count >= 1
+    assert mock_gitlab_workflow_aget_tuple.call_count >= 1
 
     mock_user_interface_instance.send_event.assert_called_with(
         type=ANY, state=ANY, stream=False
@@ -423,23 +433,28 @@ async def test_workflow_run_when_exception(
 
 
 @pytest.mark.asyncio
+@patch("duo_workflow_service.workflows.abstract_workflow.GitLabWorkflow.aget_tuple")
+@patch("duo_workflow_service.workflows.abstract_workflow.GitLabWorkflow.aput")
+@patch(
+    "duo_workflow_service.checkpointer.gitlab_workflow.GitLabStatusUpdater",
+    autospec=True,
+)
 @patch.dict(os.environ, {"DW_INTERNAL_EVENT__ENABLED": "true"})
 async def test_workflow_run_with_error_state(
+    mock_status_updater,
+    mock_gitlab_workflow_aput,
+    mock_gitlab_workflow_aget_tuple,
     mock_checkpoint_notifier,
-    mock_executor_component,
     mock_planner_component,
     mock_goal_disambiguation_component,
-    mock_gitlab_workflow,
-    mock_git_lab_workflow_instance,
-    mock_chat_client,
     mock_fetch_project_data_with_workflow_id,
     mock_tools_executor,
-    mock_plan_supervisor_agent,
-    mock_handover_agent,
     mock_agent,
-    mock_tools_registry_cls,
     workflow,
 ):
+    mock_gitlab_workflow_aput.return_value = None
+    mock_gitlab_workflow_aget_tuple.return_value = None
+
     mock_tools_executor.return_value.run.side_effect = [
         {
             "plan": Plan(steps=[]),
