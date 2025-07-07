@@ -38,10 +38,11 @@ For more information, see:
 
 #### Code Completion
 
-| Version | Endpoint          | Status         | Notes                                              |
-|---------|-------------------|----------------|----------------------------------------------------|
-| v2 | `/completions`         | Current        | Called directly from VSCode GitLab language server |
-| v2 | `/code/completions`    | Current        | Called from Rails side, less frequently            |
+| Version | Endpoint                  | Status         | Notes                                                                                                                             |
+|---------|---------------------------|----------------|-----------------------------------------------------------------------------------------------------------------------------------|
+| v1      | `/code/user_access_token` | Current        | Called from Rails API Endpoint `code_suggestions/direct_access` to provide a token for the user to directly access the AI Gateway |
+| v2      | `/completions`            | Current        | Called directly from VSCode GitLab language server                                                                                |
+| v2      | `/code/completions`       | Current        | Called from Rails side, less frequently                                                                                           |
 
 To see the active endpoints on Kibana (internal link), check out [the logs here](https://log.gprd.gitlab.net/app/r/s/Jh53x).
 The logs are available in the data view `pubsub-mlops-inf-gprd-*`.
