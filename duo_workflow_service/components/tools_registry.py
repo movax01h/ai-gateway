@@ -76,6 +76,9 @@ _READ_ONLY_GITLAB_TOOLS: list[Type[BaseTool]] = [
     tools.GetWorkItem,
     tools.ListWorkItems,
     tools.GetWorkItemNotes,
+    tools.ListInstanceAuditEvents,
+    tools.ListGroupAuditEvents,
+    tools.ListProjectAuditEvents,
 ]
 
 _AGENT_PRIVILEGES: dict[str, list[Type[BaseTool]]] = {
