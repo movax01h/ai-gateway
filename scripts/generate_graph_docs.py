@@ -53,7 +53,7 @@ def main():
             wrk = Workflow(
                 "", {}, workflow_type="", user=CloudConnectorUser(True, is_debug=True)
             )
-            wrk._project = {"id": "", "name": "", "http_url_to_repo": ""}
+            wrk._project = {"id": "", "name": "", "http_url_to_repo": "", "web_url": ""}
             graph = wrk._compile("", tools_reg, MemorySaver())
 
             diagram = graph.get_graph().draw_mermaid()
