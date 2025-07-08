@@ -31,7 +31,9 @@ from duo_workflow_service.entities import DuoWorkflowStateType
 from duo_workflow_service.gitlab.events import get_event
 from duo_workflow_service.gitlab.gitlab_project import (
     Project,
-    fetch_project_data_with_workflow_id,
+    WorkflowConfig,
+    empty_workflow_config,
+    fetch_workflow_and_project_data,
 )
 from duo_workflow_service.gitlab.http_client import GitlabHttpClient
 from duo_workflow_service.gitlab.http_client_factory import get_http_client
@@ -73,7 +75,7 @@ class AbstractWorkflow(ABC):
     _streaming_outbox: asyncio.Queue
     _workflow_id: str
     _project: Project
-    _workflow_config: dict[str, Any]
+    _workflow_config: WorkflowConfig
     _http_client: GitlabHttpClient
     _workflow_metadata: dict[str, Any]
     is_done: bool = False
@@ -118,10 +120,10 @@ class AbstractWorkflow(ABC):
         self._workflow_type = workflow_type
         self._additional_context = additional_context
         self._additional_tools = self._build_additional_tools(mcp_tools)
-        self._workflow_config = {}
         self._model_config = self._get_model_config()
         self._approval = approval
         self._prompt_registry = prompt_registry
+        self._workflow_config = empty_workflow_config()
 
     async def run(self, goal: str) -> None:
         with duo_workflow_metrics.time_workflow(
@@ -192,7 +194,7 @@ class AbstractWorkflow(ABC):
         compiled_graph = None
         try:
             self._project, self._workflow_config = (
-                await fetch_project_data_with_workflow_id(
+                await fetch_workflow_and_project_data(
                     client=self._http_client,
                     workflow_id=self._workflow_id,
                 )
@@ -232,7 +234,10 @@ class AbstractWorkflow(ABC):
             )
 
             async with GitLabWorkflow(
-                self._http_client, self._workflow_id, self._workflow_type
+                self._http_client,
+                self._workflow_id,
+                self._workflow_type,
+                self._workflow_config,
             ) as checkpointer:
                 status_event = getattr(checkpointer, "initial_status_event", None)
                 if not status_event:

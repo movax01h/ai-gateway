@@ -1,4 +1,3 @@
-import asyncio
 import base64
 import functools
 import json
@@ -31,6 +30,7 @@ from duo_workflow_service.checkpointer.gitlab_workflow_utils import (
     STATUS_TO_EVENT_PROPERTY,
 )
 from duo_workflow_service.entities import WorkflowStatusEnum
+from duo_workflow_service.gitlab.gitlab_project import WorkflowConfig
 from duo_workflow_service.gitlab.http_client import GitlabHttpClient, checkpoint_decoder
 from duo_workflow_service.internal_events import (
     DuoWorkflowInternalEvent,
@@ -121,12 +121,14 @@ def _attribute_dirty(attribute: str, metadata: CheckpointMetadata) -> bool:
 class GitLabWorkflow(BaseCheckpointSaver[Any], AbstractAsyncContextManager[Any]):
     _client: GitlabHttpClient
     _logger: structlog.stdlib.BoundLogger
+    _workflow_config: WorkflowConfig
 
     def __init__(
         self,
         client: GitlabHttpClient,
         workflow_id: str,
         workflow_type: CategoryEnum,
+        workflow_config: WorkflowConfig,
     ):
         self._offline_mode = os.getenv("USE_MEMSAVER")
         self._client = client
@@ -134,6 +136,7 @@ class GitLabWorkflow(BaseCheckpointSaver[Any], AbstractAsyncContextManager[Any])
         self._status_handler = GitLabStatusUpdater(client)
         self._logger = structlog.stdlib.get_logger("workflow_checkpointer")
         self._workflow_type = workflow_type
+        self._workflow_config = workflow_config
 
     @not_implemented_sync_method
     def get_tuple(self, config: RunnableConfig) -> Optional[CheckpointTuple]:
@@ -265,19 +268,8 @@ class GitLabWorkflow(BaseCheckpointSaver[Any], AbstractAsyncContextManager[Any])
                 - WorkflowStatusEventEnum: The status event (START, RESUME, or RETRY)
                 - EventPropertyEnum: The associated event property for tracking
         """
-        checkpoint_task = self.aget_tuple(config)
-        status_task = self._status_handler.get_workflow_status(self._workflow_id)
-
-        try:
-            checkpoint_tuple, status = await asyncio.gather(
-                checkpoint_task, status_task
-            )
-        except Exception as e:
-            self._logger.warning(
-                f"Parallel execution failed, falling back to sequential: {e}"
-            )
-            checkpoint_tuple = await self.aget_tuple(config)
-            status = await self._status_handler.get_workflow_status(self._workflow_id)
+        checkpoint_tuple = self._workflow_config["first_checkpoint"]
+        status = self._workflow_config["workflow_status"]
 
         if not checkpoint_tuple:
             return WorkflowStatusEventEnum.START, EventPropertyEnum.WORKFLOW_ID

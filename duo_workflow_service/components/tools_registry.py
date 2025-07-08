@@ -1,11 +1,12 @@
 import asyncio
-from typing import Any, Optional, Type, TypedDict, Union
+from typing import Optional, Type, TypedDict, Union
 
 from gitlab_cloud_connector import CloudConnectorUser
 from langchain.tools import BaseTool
 from pydantic import BaseModel
 
 from duo_workflow_service import tools
+from duo_workflow_service.gitlab.gitlab_project import WorkflowConfig
 from duo_workflow_service.gitlab.http_client import GitlabHttpClient
 from duo_workflow_service.tools import Toolset, ToolType
 from lib.feature_flags import FeatureFlag, is_feature_enabled
@@ -116,7 +117,7 @@ class ToolsRegistry:
     @classmethod
     async def configure(
         cls,
-        workflow_config: dict[str, Any],
+        workflow_config: WorkflowConfig,
         gl_http_client: GitlabHttpClient,
         outbox: asyncio.Queue,
         inbox: asyncio.Queue,

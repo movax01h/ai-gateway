@@ -74,9 +74,9 @@ def workflow_config() -> dict[str, Any]:
 
 
 @pytest.fixture
-def mock_fetch_project_data_with_workflow_id(workflow_config: dict[str, Any]):
+def mock_fetch_workflow_and_project_data(workflow_config: dict[str, Any]):
     with patch(
-        "duo_workflow_service.workflows.abstract_workflow.fetch_project_data_with_workflow_id"
+        "duo_workflow_service.workflows.abstract_workflow.fetch_workflow_and_project_data"
     ) as mock:
         mock.return_value = (
             {
