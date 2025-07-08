@@ -314,7 +314,7 @@ See [release doc](docs/release.md).
 
 ## Rate limiting
 
-Access to AI Gateway is subjected to rate limiting defined as part of <https://gitlab.com/gitlab-com/gl-infra/scalability/-/issues/2719#note_1780449328>.
+Access to AI Gateway is subjected to rate limiting defined as part of <https://gitlab.com/gitlab-com/runbooks/-/blob/master/docs/cloud_connector/README.md#rate-limiting>.
 
 ## Multiple worker processes
 
