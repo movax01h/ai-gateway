@@ -120,8 +120,8 @@ def agent_responses() -> list[dict[str, Any]]:
                         tool_calls=[
                             {
                                 "id": "1",
-                                "name": "update_plan",
-                                "args": {"summary": "done"},
+                                "name": "test_tool",
+                                "args": {"test": "test"},
                             }
                         ],
                     ),
@@ -446,6 +446,7 @@ async def test_workflow_run_with_error_state(
     mock_gitlab_workflow_aget_tuple,
     mock_checkpoint_notifier,
     mock_planner_component,
+    mock_tools_approval_component,
     mock_goal_disambiguation_component,
     mock_fetch_project_data_with_workflow_id,
     mock_tools_executor,
@@ -462,6 +463,10 @@ async def test_workflow_run_with_error_state(
             "conversation_history": {},
         }
     ]
+
+    mock_tools_approval_component.return_value.attach.return_value = (
+        "build_context_tools"
+    )
 
     await workflow.run("test_goal")
 

@@ -5,6 +5,7 @@ from typing import Optional
 from duo_workflow_service.workflows import (
     chat,
     convert_to_gitlab_ci,
+    issue_to_merge_request,
     search_and_replace,
     software_development,
 )
@@ -18,6 +19,7 @@ _WORKFLOWS: list[TypeWorkflow] = [
     search_and_replace.Workflow,
     convert_to_gitlab_ci.Workflow,
     chat.Workflow,
+    issue_to_merge_request.Workflow,
 ]
 
 # Eg: {

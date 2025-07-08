@@ -54,3 +54,4 @@ class CategoryEnum(StrEnum):
     WORKFLOW_SEARCH_AND_REPLACE = "search_and_replace"
     WORKFLOW_CONVERT_TO_GITLAB_CI = "convert_to_gitlab_ci"
     WORKFLOW_CHAT = "chat"
+    WORKFLOW_ISSUE_TO_MERGE_REQUEST = "issue_to_merge_request"
