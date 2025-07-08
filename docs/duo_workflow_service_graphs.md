@@ -20,13 +20,6 @@ graph TD;
     build_context_supervisor(build_context_supervisor)
     tools_approval_entry_context_builder(tools_approval_entry_context_builder)
     tools_approval_check_context_builder(tools_approval_check_context_builder)
-    task_clarity_build_prompt(task_clarity_build_prompt)
-    task_clarity_check(task_clarity_check)
-    task_clarity_request_clarification(task_clarity_request_clarification)
-    task_clarity_fetch_user_response(task_clarity_fetch_user_response)
-    task_clarity_handover(task_clarity_handover)
-    plan_approval_entry_planner(plan_approval_entry_planner)
-    plan_approval_check_planner(plan_approval_check_planner)
     planning(planning)
     update_plan(update_plan)
     planning_supervisor(planning_supervisor)
@@ -45,7 +38,7 @@ graph TD;
     build_context -. &nbsp;call_tool&nbsp; .-> build_context_tools;
     build_context -. &nbsp;stop&nbsp; .-> plan_terminator;
     build_context -. &nbsp;tools_approval&nbsp; .-> tools_approval_entry_context_builder;
-    build_context_handover --> task_clarity_build_prompt;
+    build_context_handover --> planning;
     build_context_supervisor --> build_context;
     build_context_tools -.-> build_context;
     build_context_tools -. &nbsp;stop&nbsp; .-> plan_terminator;
@@ -56,25 +49,12 @@ graph TD;
     execution -. &nbsp;tools_approval&nbsp; .-> tools_approval_entry_executor;
     execution_supervisor --> execution;
     execution_tools --> execution;
-    plan_approval_check_planner -. &nbsp;stop&nbsp; .-> plan_terminator;
-    plan_approval_check_planner -. &nbsp;back&nbsp; .-> planning;
-    plan_approval_check_planner -. &nbsp;continue&nbsp; .-> set_status_to_execution;
-    plan_approval_entry_planner -. &nbsp;continue&nbsp; .-> plan_approval_check_planner;
-    plan_approval_entry_planner -. &nbsp;back&nbsp; .-> planning;
-    planning -. &nbsp;HandoverAgent&nbsp; .-> plan_approval_entry_planner;
     planning -. &nbsp;stop&nbsp; .-> plan_terminator;
     planning -. &nbsp;PlanSupervisorAgent&nbsp; .-> planning_supervisor;
+    planning -. &nbsp;HandoverAgent&nbsp; .-> set_status_to_execution;
     planning -. &nbsp;call_tool&nbsp; .-> update_plan;
     planning_supervisor --> planning;
     set_status_to_execution --> execution;
-    task_clarity_build_prompt --> task_clarity_check;
-    task_clarity_check -. &nbsp;stop&nbsp; .-> plan_terminator;
-    task_clarity_check -. &nbsp;clear&nbsp; .-> task_clarity_handover;
-    task_clarity_check -. &nbsp;unclear&nbsp; .-> task_clarity_request_clarification;
-    task_clarity_fetch_user_response -. &nbsp;stop&nbsp; .-> plan_terminator;
-    task_clarity_fetch_user_response -. &nbsp;continue&nbsp; .-> task_clarity_check;
-    task_clarity_handover --> planning;
-    task_clarity_request_clarification --> task_clarity_fetch_user_response;
     tools_approval_check_context_builder -. &nbsp;back&nbsp; .-> build_context;
     tools_approval_check_context_builder -. &nbsp;continue&nbsp; .-> build_context_tools;
     tools_approval_check_context_builder -. &nbsp;stop&nbsp; .-> plan_terminator;
@@ -88,7 +68,6 @@ graph TD;
     update_plan --> planning;
     execution_handover --> __end__;
     plan_terminator --> __end__;
-    task_clarity_fetch_user_response -. &nbsp;back&nbsp; .-> task_clarity_fetch_user_response;
     classDef default fill:#f2f0ff,line-height:1.2
     classDef first fill-opacity:0
     classDef last fill:#bfb6fc

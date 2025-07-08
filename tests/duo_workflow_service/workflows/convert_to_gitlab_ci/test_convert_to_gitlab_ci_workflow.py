@@ -176,7 +176,7 @@ async def test_workflow_compilation(
 
 @pytest.mark.asyncio
 @pytest.mark.usefixtures(
-    "mock_tools_registry_cls", "mock_fetch_project_data_with_workflow_id"
+    "mock_tools_registry_cls", "mock_fetch_workflow_and_project_data"
 )
 @patch("duo_workflow_service.workflows.convert_to_gitlab_ci.workflow.Agent")
 @patch("duo_workflow_service.workflows.convert_to_gitlab_ci.workflow.HandoverAgent")
@@ -249,7 +249,7 @@ async def test_workflow_run(
 
 @pytest.mark.asyncio
 @pytest.mark.usefixtures(
-    "mock_tools_registry_cls", "mock_fetch_project_data_with_workflow_id"
+    "mock_tools_registry_cls", "mock_fetch_workflow_and_project_data"
 )
 @patch("duo_workflow_service.workflows.convert_to_gitlab_ci.workflow.Agent")
 @patch("duo_workflow_service.workflows.convert_to_gitlab_ci.workflow.RunToolNode")
@@ -290,7 +290,7 @@ async def test_workflow_run_with_file_not_found(
 @pytest.mark.asyncio
 @pytest.mark.usefixtures(
     "mock_tools_registry_cls",
-    "mock_fetch_project_data_with_workflow_id",
+    "mock_fetch_workflow_and_project_data",
     "mock_git_lab_workflow_instance",
 )
 @patch("duo_workflow_service.workflows.convert_to_gitlab_ci.workflow.create_chat_model")

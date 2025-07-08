@@ -283,7 +283,7 @@ def test_are_tools_called_with_tool_use(workflow_with_project):
 @pytest.mark.usefixtures(
     "mock_tools_registry_cls",
     "mock_git_lab_workflow_instance",
-    "mock_fetch_project_data_with_workflow_id",
+    "mock_fetch_workflow_and_project_data",
 )
 async def test_workflow_run(
     mock_checkpoint_notifier,
@@ -603,7 +603,7 @@ async def test_chat_workflow_status_flow_integration(
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("tool_approval_required", [True])
-@pytest.mark.usefixtures("mock_fetch_project_data_with_workflow_id")
+@pytest.mark.usefixtures("mock_fetch_workflow_and_project_data")
 async def test_agent_run_with_tool_approval_required(workflow_with_project):
     """Test agent run method when tools require approval."""
 

@@ -53,7 +53,7 @@ def http_client_for_retry(http_client, workflow_id):
                 }
             ]
         elif path == f"/api/v4/ai/duo_workflows/workflows/{workflow_id}":
-            # Return any status except INPUT_REQUIRED to trigger the RETRY path
+            # Return status for workflow completion
             return {"status": "finished"}
         else:
             raise ValueError(f"Unexpected path: {path}")
@@ -86,15 +86,29 @@ def workflow_type():
 
 
 @pytest.fixture
+def workflow_config():
+    return {
+        "first_checkpoint": None,
+        "workflow_status": "created",
+        "agent_privileges_names": ["read_repository"],
+        "pre_approved_agent_privileges_names": [],
+        "mcp_enabled": True,
+        "allow_agent_to_request_user": True,
+    }
+
+
+@pytest.fixture
 def gitlab_workflow(
     http_client,
     workflow_id,
     workflow_type,
+    workflow_config,
 ):
     return GitLabWorkflow(
         http_client,
         workflow_id,
         workflow_type,
+        workflow_config,
     )
 
 
@@ -130,11 +144,27 @@ def checkpoint_metadata():
 @patch("duo_workflow_service.checkpointer.gitlab_workflow.DuoWorkflowInternalEvent")
 async def test_workflow_event_tracking_for_cancelled_workflow(
     mock_internal_event_tracker,
-    gitlab_workflow,
     http_client,
     workflow_id,
     workflow_type,
 ):
+    # Create a workflow config with no checkpoint to trigger START
+    workflow_config = {
+        "first_checkpoint": None,
+        "workflow_status": "created",
+        "agent_privileges_names": ["read_repository"],
+        "pre_approved_agent_privileges_names": [],
+        "mcp_enabled": True,
+        "allow_agent_to_request_user": True,
+    }
+
+    gitlab_workflow = GitLabWorkflow(
+        http_client,
+        workflow_id,
+        workflow_type,
+        workflow_config,
+    )
+
     async def mock_aget(path, **kwargs):
         if (
             path
@@ -190,11 +220,26 @@ async def test_workflow_event_tracking_for_cancelled_workflow(
 @patch("duo_workflow_service.checkpointer.gitlab_workflow.DuoWorkflowInternalEvent")
 async def test_workflow_context_manager_success(
     mock_internal_event_tracker,
-    gitlab_workflow,
     http_client,
     workflow_id,
     workflow_type,
 ):
+    # Create a workflow config with no checkpoint to trigger START
+    workflow_config = {
+        "first_checkpoint": None,
+        "workflow_status": "created",
+        "agent_privileges_names": ["read_repository"],
+        "pre_approved_agent_privileges_names": [],
+        "mcp_enabled": True,
+        "allow_agent_to_request_user": True,
+    }
+
+    gitlab_workflow = GitLabWorkflow(
+        http_client,
+        workflow_id,
+        workflow_type,
+        workflow_config,
+    )
 
     async def mock_aget(path, **kwargs):
         if (
@@ -254,28 +299,58 @@ async def test_workflow_context_manager_success(
 async def test_workflow_context_manager_startup_error(
     mock_log_exception,
     mock_internal_event_tracker,
-    gitlab_workflow,
     http_client,
     workflow_id,
     workflow_type,
+    workflow_config,
 ):
-    http_client.aget.side_effect = ValueError("Startup error simulated")
+    gitlab_workflow = GitLabWorkflow(
+        http_client,
+        workflow_id,
+        workflow_type,
+        workflow_config,
+    )
+
+    # Set up the mock to raise an exception during the first status update call
+    # but succeed on the second call (DROP status)
+    call_count = 0
 
     async def mock_apatch(path, **kwargs):
-        return GitLabHttpResponse(status_code=200, body={})
+        nonlocal call_count
+        call_count += 1
+
+        if call_count == 1:
+            # First call (START status) raises an exception
+            raise ValueError("Startup error simulated")
+        else:
+            # Second call (DROP status) succeeds
+            return GitLabHttpResponse(status_code=200, body={})
 
     http_client.apatch.side_effect = mock_apatch
+
     with pytest.raises(ValueError) as exc_info:
         async with gitlab_workflow:
             pytest.fail("Context manager body should not execute")
 
     assert str(exc_info.value) == "Startup error simulated"
 
-    http_client.apatch.assert_called_once_with(
-        path=f"/api/v4/ai/duo_workflows/workflows/{workflow_id}",
-        body=json.dumps({"status_event": WorkflowStatusEventEnum.DROP.value}),
-        parse_json=True,
-        use_http_response=True,
+    # Verify that apatch was called twice - first with START (which failed) and then with DROP
+    assert http_client.apatch.call_count == 2
+
+    # Check the first call was START
+    first_call = http_client.apatch.call_args_list[0]
+    assert first_call[1]["path"] == f"/api/v4/ai/duo_workflows/workflows/{workflow_id}"
+    assert (
+        json.loads(first_call[1]["body"])["status_event"]
+        == WorkflowStatusEventEnum.START.value
+    )
+
+    # Check the second call was DROP
+    second_call = http_client.apatch.call_args_list[1]
+    assert second_call[1]["path"] == f"/api/v4/ai/duo_workflows/workflows/{workflow_id}"
+    assert (
+        json.loads(second_call[1]["body"])["status_event"]
+        == WorkflowStatusEventEnum.DROP.value
     )
 
     mock_internal_event_tracker.track_event.assert_called_once_with(
@@ -288,7 +363,7 @@ async def test_workflow_context_manager_startup_error(
         category=workflow_type,
     )
 
-    # The log_exception for status update shouldn't be called since status update succeeded
+    # The log_exception for status update shouldn't be called since the second status update succeeded
     mock_log_exception.assert_not_called()
 
 
@@ -298,15 +373,46 @@ async def test_workflow_context_manager_startup_error(
 async def test_workflow_context_manager_startup_error_with_status_update_failure(
     mock_log_exception,
     mock_internal_event_tracker,
-    gitlab_workflow,
     http_client,
     workflow_id,
     workflow_type,
+    workflow_config,
 ):
-    http_client.aget.side_effect = ValueError("Startup error simulated")
+    gitlab_workflow = GitLabWorkflow(
+        http_client,
+        workflow_id,
+        workflow_type,
+        workflow_config,
+    )
 
+    # Set up the mock to raise an exception during the first status update call
+    # and fail on the second call (DROP status)
+    call_count = 0
+
+    # Create a specific instance of the error to use in both the mock and assertion
     status_error = ConnectionError("Status update failed")
-    http_client.apatch.side_effect = status_error
+
+    async def mock_apatch(path, **kwargs):
+        nonlocal call_count
+        call_count += 1
+
+        if call_count == 1:
+            # First call (START status) raises an exception
+            raise ValueError("Startup error simulated")
+        else:
+            # Second call (DROP status) fails with a connection error
+            raise status_error
+
+    http_client.apatch.side_effect = mock_apatch
+
+    # Set up aget to return empty checkpoints (for a new workflow)
+    async def mock_aget(path, **kwargs):
+        if "checkpoints" in path:
+            return []
+        else:
+            return {"status": "created"}
+
+    http_client.aget.side_effect = mock_aget
 
     with pytest.raises(ValueError) as exc_info:
         async with gitlab_workflow:
@@ -314,11 +420,23 @@ async def test_workflow_context_manager_startup_error_with_status_update_failure
 
     assert str(exc_info.value) == "Startup error simulated"
 
-    http_client.apatch.assert_called_once_with(
-        path=f"/api/v4/ai/duo_workflows/workflows/{workflow_id}",
-        body=json.dumps({"status_event": WorkflowStatusEventEnum.DROP.value}),
-        parse_json=True,
-        use_http_response=True,
+    # Verify that apatch was called twice - first with START (which failed) and then with DROP (which also failed)
+    assert http_client.apatch.call_count == 2
+
+    # Check the first call was START
+    first_call = http_client.apatch.call_args_list[0]
+    assert first_call[1]["path"] == f"/api/v4/ai/duo_workflows/workflows/{workflow_id}"
+    assert (
+        json.loads(first_call[1]["body"])["status_event"]
+        == WorkflowStatusEventEnum.START.value
+    )
+
+    # Check the second call was DROP
+    second_call = http_client.apatch.call_args_list[1]
+    assert second_call[1]["path"] == f"/api/v4/ai/duo_workflows/workflows/{workflow_id}"
+    assert (
+        json.loads(second_call[1]["body"])["status_event"]
+        == WorkflowStatusEventEnum.DROP.value
     )
 
     mock_internal_event_tracker.track_event.assert_called_once_with(
@@ -331,6 +449,7 @@ async def test_workflow_context_manager_startup_error_with_status_update_failure
         category=workflow_type,
     )
 
+    # Verify the status update error was logged
     mock_log_exception.assert_called_once_with(
         status_error,
         extra={
@@ -344,16 +463,28 @@ async def test_workflow_context_manager_startup_error_with_status_update_failure
 @patch("duo_workflow_service.checkpointer.gitlab_workflow.DuoWorkflowInternalEvent")
 async def test_workflow_context_manager_resume_interrupted(
     mock_internal_event_tracker,
-    gitlab_workflow,
     http_client,
     workflow_id,
     workflow_type,
 ):
+    # Create a workflow config with a checkpoint and INPUT_REQUIRED status
+    workflow_config = {
+        "first_checkpoint": {"checkpoint": "{}"},
+        "workflow_status": WorkflowStatusEnum.INPUT_REQUIRED,
+        "agent_privileges_names": ["read_repository"],
+        "pre_approved_agent_privileges_names": [],
+        "mcp_enabled": True,
+        "allow_agent_to_request_user": True,
+    }
+
+    gitlab_workflow = GitLabWorkflow(
+        http_client,
+        workflow_id,
+        workflow_type,
+        workflow_config,
+    )
+
     gitlab_workflow._status_handler = AsyncMock()
-    gitlab_workflow._status_handler.get_workflow_status.side_effect = [
-        WorkflowStatusEnum.INPUT_REQUIRED,
-        WorkflowStatusEnum.PLANNING,
-    ]
 
     async with gitlab_workflow as workflow:
         assert isinstance(workflow, GitLabWorkflow)
@@ -381,16 +512,28 @@ async def test_workflow_context_manager_resume_interrupted(
 @patch("duo_workflow_service.checkpointer.gitlab_workflow.DuoWorkflowInternalEvent")
 async def test_workflow_context_manager_resume_interrupted_approval(
     mock_internal_event_tracker,
-    gitlab_workflow,
     http_client,
     workflow_id,
     workflow_type,
 ):
+    # Create a workflow config with a checkpoint and PLAN_APPROVAL_REQUIRED status
+    workflow_config = {
+        "first_checkpoint": {"checkpoint": "{}"},
+        "workflow_status": WorkflowStatusEnum.PLAN_APPROVAL_REQUIRED,
+        "agent_privileges_names": ["read_repository"],
+        "pre_approved_agent_privileges_names": [],
+        "mcp_enabled": True,
+        "allow_agent_to_request_user": True,
+    }
+
+    gitlab_workflow = GitLabWorkflow(
+        http_client,
+        workflow_id,
+        workflow_type,
+        workflow_config,
+    )
+
     gitlab_workflow._status_handler = AsyncMock()
-    gitlab_workflow._status_handler.get_workflow_status.side_effect = [
-        WorkflowStatusEnum.PLAN_APPROVAL_REQUIRED,
-        WorkflowStatusEnum.EXECUTION,
-    ]
 
     async with gitlab_workflow as workflow:
         assert isinstance(workflow, GitLabWorkflow)
@@ -418,11 +561,27 @@ async def test_workflow_context_manager_resume_interrupted_approval(
 @patch("duo_workflow_service.checkpointer.gitlab_workflow.DuoWorkflowInternalEvent")
 async def test_workflow_context_manager_retry_success(
     mock_internal_event_tracker,
-    gitlab_workflow,
     http_client_for_retry,
     workflow_id,
     workflow_type,
 ):
+    # Create a workflow config with a checkpoint and a status that will trigger RETRY
+    workflow_config = {
+        "first_checkpoint": {"checkpoint": "{}"},
+        "workflow_status": "created",  # Any status that's not INPUT_REQUIRED or PLAN_APPROVAL_REQUIRED
+        "agent_privileges_names": ["read_repository"],
+        "pre_approved_agent_privileges_names": [],
+        "mcp_enabled": True,
+        "allow_agent_to_request_user": True,
+    }
+
+    gitlab_workflow = GitLabWorkflow(
+        http_client_for_retry,
+        workflow_id,
+        workflow_type,
+        workflow_config,
+    )
+
     async with gitlab_workflow as workflow:
         assert isinstance(workflow, GitLabWorkflow)
 
@@ -462,11 +621,27 @@ async def test_workflow_context_manager_retry_success(
 @patch("duo_workflow_service.checkpointer.gitlab_workflow.DuoWorkflowInternalEvent")
 async def test_workflow_context_manager_error(
     mock_internal_event_tracker,
-    gitlab_workflow,
     http_client,
     workflow_id,
     workflow_type,
 ):
+    # Create a workflow config with no checkpoint to trigger START
+    workflow_config = {
+        "first_checkpoint": None,
+        "workflow_status": "created",
+        "agent_privileges_names": ["read_repository"],
+        "pre_approved_agent_privileges_names": [],
+        "mcp_enabled": True,
+        "allow_agent_to_request_user": True,
+    }
+
+    gitlab_workflow = GitLabWorkflow(
+        http_client,
+        workflow_id,
+        workflow_type,
+        workflow_config,
+    )
+
     # Mock different responses for different API calls
     def mock_aget(path, **kwargs):
         if "checkpoints" in path:
@@ -663,8 +838,14 @@ def test_aput_with_no_status_update(
     http_client,
     workflow_id,
     workflow_type,
+    workflow_config,
 ):
-    workflow = GitLabWorkflow(http_client, workflow_id, workflow_type=workflow_type)
+    workflow = GitLabWorkflow(
+        http_client,
+        workflow_id,
+        workflow_type=workflow_type,
+        workflow_config=workflow_config,
+    )
     checkpoint = checkpoint_data[0]["checkpoint"]
 
     # no status update in checkpoint
@@ -685,8 +866,14 @@ def test_aput_with_noop_status_update(
     http_client,
     workflow_id,
     workflow_type,
+    workflow_config,
 ):
-    workflow = GitLabWorkflow(http_client, workflow_id, workflow_type=workflow_type)
+    workflow = GitLabWorkflow(
+        http_client,
+        workflow_id,
+        workflow_type=workflow_type,
+        workflow_config=workflow_config,
+    )
     checkpoint = checkpoint_data[0]["checkpoint"]
 
     # no status update in checkpoint
@@ -701,11 +888,13 @@ def test_aput_with_no_status_update_and_human_input(
     http_client,
     workflow_id,
     workflow_type,
+    workflow_config,
 ):
     workflow = GitLabWorkflow(
         client=http_client,
         workflow_id=workflow_id,
         workflow_type=workflow_type,
+        workflow_config=workflow_config,
     )
     checkpoint = checkpoint_data[0]["checkpoint"]
 
@@ -787,11 +976,12 @@ async def test_track_workflow_completion_early_return(
 
 @pytest.mark.asyncio
 @patch.dict("os.environ", {"USE_MEMSAVER": "true"}, clear=True)
-async def test_offline_mode(http_client, workflow_id, workflow_type):
+async def test_offline_mode(http_client, workflow_id, workflow_type, workflow_config):
     gitlab_workflow = GitLabWorkflow(
         client=http_client,
         workflow_id=workflow_id,
         workflow_type=workflow_type,
+        workflow_config=workflow_config,
     )
 
     async with gitlab_workflow as workflow:

@@ -135,7 +135,7 @@ async def test_add_to_inbox(workflow):
 
 @pytest.mark.asyncio
 @patch(
-    "duo_workflow_service.workflows.abstract_workflow.fetch_project_data_with_workflow_id"
+    "duo_workflow_service.workflows.abstract_workflow.fetch_workflow_and_project_data"
 )
 @patch("duo_workflow_service.workflows.abstract_workflow.GitLabWorkflow")
 @patch("duo_workflow_service.workflows.abstract_workflow.ToolsRegistry.configure")
@@ -237,7 +237,7 @@ def test_track_internal_event(mock_track_event, workflow):
 
 @pytest.mark.asyncio
 @patch(
-    "duo_workflow_service.workflows.abstract_workflow.fetch_project_data_with_workflow_id"
+    "duo_workflow_service.workflows.abstract_workflow.fetch_workflow_and_project_data"
 )
 @patch("duo_workflow_service.workflows.abstract_workflow.GitLabWorkflow")
 @patch("duo_workflow_service.workflows.abstract_workflow.ToolsRegistry.configure")
