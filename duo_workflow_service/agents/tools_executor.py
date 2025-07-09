@@ -3,12 +3,14 @@ from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
 import structlog
+from dependency_injector.wiring import Provide, inject
 from langchain_core.messages import AIMessage, BaseMessage, ToolMessage
 from langchain_core.messages.tool import ToolCall
 from langchain_core.output_parsers.string import StrOutputParser
 from langgraph.types import Command
 from pydantic import ValidationError
 
+from ai_gateway.container import ContainerApplication
 from duo_workflow_service.entities import WorkflowStatusEnum
 from duo_workflow_service.entities.state import (
     DuoWorkflowStateType,
@@ -18,15 +20,6 @@ from duo_workflow_service.entities.state import (
     ToolStatus,
     UiChatLog,
 )
-from duo_workflow_service.internal_events import (
-    DuoWorkflowInternalEvent,
-    InternalEventAdditionalProperties,
-)
-from duo_workflow_service.internal_events.event_enum import (
-    CategoryEnum,
-    EventEnum,
-    EventLabelEnum,
-)
 from duo_workflow_service.monitoring import duo_workflow_metrics
 from duo_workflow_service.tools import (
     PipelineException,
@@ -35,6 +28,8 @@ from duo_workflow_service.tools import (
     format_tool_display_message,
 )
 from duo_workflow_service.tools.planner import PlannerTool
+from lib.internal_events import InternalEventAdditionalProperties, InternalEventsClient
+from lib.internal_events.event_enum import CategoryEnum, EventEnum, EventLabelEnum
 
 _HIDDEN_TOOLS = ["get_plan"]
 
@@ -55,18 +50,23 @@ class ToolsExecutor:
     _tools_agent_name: str
     _toolset: Toolset
 
+    @inject
     def __init__(
         self,
         tools_agent_name: str,
         toolset: Toolset,
         workflow_id: str,
         workflow_type: CategoryEnum,
+        internal_event_client: InternalEventsClient = Provide[
+            ContainerApplication.internal_event.client
+        ],
     ) -> None:
         self._tools_agent_name = tools_agent_name
         self._toolset = toolset
         self._workflow_id = workflow_id
         self._logger = structlog.stdlib.get_logger("workflow")
         self._workflow_type = workflow_type
+        self._internal_event_client = internal_event_client
 
     async def run(self, state: DuoWorkflowStateType):
         last_message = state["conversation_history"][self._tools_agent_name][-1]
@@ -320,7 +320,7 @@ class ToolsExecutor:
             value=self._workflow_id,
             **extra,
         )
-        DuoWorkflowInternalEvent.track_event(
+        self._internal_event_client.track_event(
             event_name=event_name.value,
             additional_properties=additional_properties,
             category=self._workflow_type.value,

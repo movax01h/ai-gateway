@@ -10,8 +10,8 @@ from langgraph.checkpoint.memory import MemorySaver
 
 from duo_workflow_service.components import ToolsRegistry
 from duo_workflow_service.entities import Plan, WorkflowStatusEnum
-from duo_workflow_service.internal_events.event_enum import CategoryEnum
 from duo_workflow_service.workflows.issue_to_merge_request.workflow import Workflow
+from lib.internal_events.event_enum import CategoryEnum
 from tests.duo_workflow_service.components.conftest import graph_input
 
 

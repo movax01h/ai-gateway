@@ -8,6 +8,7 @@ from typing import AsyncIterable, AsyncIterator
 import aiohttp
 import grpc
 import structlog
+from dependency_injector.wiring import Provide, inject
 from dotenv import load_dotenv
 from gitlab_cloud_connector import (
     CloudConnectorConfig,
@@ -40,8 +41,6 @@ from duo_workflow_service.interceptors.internal_events_interceptor import (
 from duo_workflow_service.interceptors.monitoring_interceptor import (
     MonitoringInterceptor,
 )
-from duo_workflow_service.internal_events.client import DuoWorkflowInternalEvent
-from duo_workflow_service.internal_events.event_enum import CategoryEnum
 from duo_workflow_service.llm_factory import validate_llm_access
 from duo_workflow_service.monitoring import setup_monitoring
 from duo_workflow_service.profiling import setup_profiling
@@ -55,6 +54,8 @@ from duo_workflow_service.workflows.abstract_workflow import (
 )
 from duo_workflow_service.workflows.registry import resolve_workflow_class
 from duo_workflow_service.workflows.type_definitions import AdditionalContext
+from lib.internal_events import InternalEventsClient
+from lib.internal_events.event_enum import CategoryEnum
 
 log = structlog.stdlib.get_logger("server")
 
@@ -97,6 +98,7 @@ class DuoWorkflowService(contract_pb2_grpc.DuoWorkflowServicer):
         current_user: CloudConnectorUser,
         client_event: contract_pb2.ClientEvent,
         context: grpc.ServicerContext,
+        internal_event_client: InternalEventsClient,
     ):
         if client_event.startRequest.additional_context:
             for additional_context in client_event.startRequest.additional_context:
@@ -104,7 +106,7 @@ class DuoWorkflowService(contract_pb2_grpc.DuoWorkflowServicer):
                     f"include_{additional_context.category}_context".upper()
                 ]
                 if current_user.can(unit_primitive):
-                    DuoWorkflowInternalEvent.track_event(
+                    internal_event_client.track_event(
                         event_name=f"request_{unit_primitive}",
                         category=__name__,
                     )
@@ -115,10 +117,14 @@ class DuoWorkflowService(contract_pb2_grpc.DuoWorkflowServicer):
                     )
 
     # pylint: disable=invalid-overridden-method
+    @inject
     async def ExecuteWorkflow(
         self,
         request_iterator: AsyncIterable[contract_pb2.ClientEvent],
         context: grpc.ServicerContext,
+        internal_event_client: InternalEventsClient = Provide[
+            ContainerApplication.internal_event.client
+        ],
     ) -> AsyncIterator[contract_pb2.Action]:
         user: CloudConnectorUser = current_user.get()
 
@@ -138,6 +144,7 @@ class DuoWorkflowService(contract_pb2_grpc.DuoWorkflowServicer):
             current_user=user,
             client_event=start_workflow_request,
             context=context,
+            internal_event_client=internal_event_client,
         )
 
         workflow_id = start_workflow_request.startRequest.workflowID
@@ -379,7 +386,6 @@ def run():
     setup_logging(json_format=True, to_file=None)
     configure_cache()
     validate_llm_access()
-    DuoWorkflowInternalEvent.setup()
     port = int(os.environ.get("PORT", "50052"))
     asyncio.get_event_loop().run_until_complete(serve(port))
 

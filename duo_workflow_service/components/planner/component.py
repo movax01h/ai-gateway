@@ -19,13 +19,13 @@ from duo_workflow_service.components.planner.prompt import (
 )
 from duo_workflow_service.entities import WorkflowState, WorkflowStatusEnum
 from duo_workflow_service.gitlab.http_client import GitlabHttpClient
-from duo_workflow_service.internal_events.event_enum import CategoryEnum
 from duo_workflow_service.llm_factory import (
     AnthropicConfig,
     VertexConfig,
     create_chat_model,
 )
 from duo_workflow_service.workflows.abstract_workflow import MAX_TOKENS_TO_SAMPLE
+from lib.internal_events.event_enum import CategoryEnum
 
 
 class Routes(StrEnum):

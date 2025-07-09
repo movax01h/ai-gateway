@@ -1,3 +1,5 @@
+# pylint: disable=too-many-return-statements,unused-argument
+
 import json
 from datetime import datetime, timezone
 from enum import StrEnum
@@ -18,7 +20,6 @@ from duo_workflow_service.entities import (
     WorkflowState,
     WorkflowStatusEnum,
 )
-from duo_workflow_service.internal_events.event_enum import CategoryEnum
 from duo_workflow_service.llm_factory import create_chat_model
 from duo_workflow_service.token_counter.approximate_token_counter import (
     ApproximateTokenCounter,
@@ -34,6 +35,7 @@ from duo_workflow_service.workflows.convert_to_gitlab_ci.prompts import (
     CI_PIPELINES_MANAGER_SYSTEM_MESSAGE,
     CI_PIPELINES_MANAGER_USER_GUIDELINES,
 )
+from lib.internal_events.event_enum import CategoryEnum
 
 AGENT_NAME = "ci_pipelines_manager_agent"
 

@@ -15,8 +15,8 @@ from ai_gateway.async_dependency_resolver import (
     get_internal_event_client,
     get_x_ray_anthropic_claude,
 )
-from ai_gateway.internal_events import InternalEventsClient
 from ai_gateway.models import AnthropicModel
+from lib.internal_events import InternalEventsClient
 
 __all__ = [
     "router",

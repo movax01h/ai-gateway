@@ -6,7 +6,7 @@ from gitlab_cloud_connector import GitLabUnitPrimitive
 from ai_gateway.api.auth_utils import StarletteUser
 from ai_gateway.integrations.amazon_q.client import AmazonQClientFactory
 from ai_gateway.integrations.amazon_q.errors import AWSException
-from ai_gateway.internal_events.client import InternalEventsClient
+from lib.internal_events.client import InternalEventsClient
 
 
 @contextmanager

@@ -6,11 +6,11 @@ LANGSMITH_PROJECT: "duo-workflow-staging"
 SENTRY_ERROR_TRACKING_ENABLED: true
 DUO_WORKFLOW_CLOUD_CONNECTOR_SERVICE_NAME: "gitlab-duo-workflow-service"
 DUO_WORKFLOW_SERVICE_ENVIRONMENT: "staging"
-DW_INTERNAL_EVENT__ENABLED: true
-DW_INTERNAL_EVENT__ENDPOINT: "https://snowplowprd.trx.gitlab.net"
-DW_INTERNAL_EVENT__APP_ID: "gitlab_duo_workflow"
-DW_INTERNAL_EVENT__BATCH_SIZE: 1
-DW_INTERNAL_EVENT__THREAD_COUNT: 1
+AIGW_INTERNAL_EVENT__ENABLED: true
+AIGW_INTERNAL_EVENT__ENDPOINT: "https://snowplowprd.trx.gitlab.net"
+AIGW_INTERNAL_EVENT__APP_ID: "gitlab_duo_workflow"
+AIGW_INTERNAL_EVENT__BATCH_SIZE: 1
+AIGW_INTERNAL_EVENT__THREAD_COUNT: 1
 # https://github.com/grpc/grpc/blob/master/doc/trace_flags.md
 GRPC_TRACE: "http_keepalive"
 # https://github.com/grpc/grpc/blob/master/doc/environment_variables.md

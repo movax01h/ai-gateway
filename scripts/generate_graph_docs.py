@@ -11,7 +11,7 @@ from langgraph.checkpoint.memory import MemorySaver
 from ai_gateway.config import Config
 from ai_gateway.container import ContainerApplication
 from duo_workflow_service.components import ToolsRegistry
-from duo_workflow_service.internal_events.event_enum import CategoryEnum
+from lib.internal_events.event_enum import CategoryEnum
 
 HEADER_TEXT = """
 # Duo Workflow Service Graphs

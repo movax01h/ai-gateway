@@ -1,3 +1,6 @@
+# pylint: disable=direct-environment-variable-reference
+
+import os
 from datetime import datetime, timezone
 from typing import List, Optional
 
@@ -14,7 +17,7 @@ from duo_workflow_service.interceptors import (
     X_GITLAB_REALM_HEADER,
 )
 from duo_workflow_service.interceptors.correlation_id_interceptor import correlation_id
-from duo_workflow_service.internal_events import EventContext, current_event_context
+from lib.internal_events import EventContext, current_event_context
 
 
 def convert_feature_enabled_string_to_list(
@@ -51,6 +54,10 @@ class InternalEventsInterceptor(grpc.aio.ServerInterceptor):
 
         context = EventContext(
             realm=metadata.get(X_GITLAB_REALM_HEADER),
+            environment=os.environ.get(
+                "DUO_WORKFLOW_SERVICE_ENVIRONMENT", "development"
+            ),
+            source="duo-workflow-service-python",
             instance_id=metadata.get(X_GITLAB_INSTANCE_ID_HEADER),
             host_name=metadata.get(X_GITLAB_HOST_NAME),
             global_user_id=metadata.get(X_GITLAB_GLOBAL_USER_ID_HEADER),

@@ -8,11 +8,11 @@ from langchain.tools import BaseTool
 from poetry.core.constraints.version import Version, parse_constraint
 
 from ai_gateway.config import ConfigModelLimits
-from ai_gateway.internal_events.client import InternalEventsClient
 from ai_gateway.model_metadata import ModelMetadata, TypeModelMetadata
 from ai_gateway.prompts.base import BasePromptRegistry, Prompt
 from ai_gateway.prompts.config import BaseModelConfig, ModelClassProvider, PromptConfig
 from ai_gateway.prompts.typing import TypeModelFactory
+from lib.internal_events.client import InternalEventsClient
 
 __all__ = ["LocalPromptRegistry", "PromptRegistered"]
 

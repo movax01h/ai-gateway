@@ -1,6 +1,6 @@
 from dependency_injector import containers, providers
 
-from ai_gateway.internal_events.client import InternalEventsClient
+from lib.internal_events.client import InternalEventsClient
 
 __all__ = [
     "ContainerInternalEvent",

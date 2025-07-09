@@ -20,12 +20,12 @@ from langchain_core.tools import BaseTool
 from ai_gateway.api.auth_utils import StarletteUser
 from ai_gateway.config import ConfigModelLimits, ModelLimits
 from ai_gateway.instrumentators.model_requests import ModelRequestInstrumentator
-from ai_gateway.internal_events.client import InternalEventsClient
-from ai_gateway.internal_events.context import InternalEventAdditionalProperties
 from ai_gateway.model_metadata import TypeModelMetadata, current_model_metadata_context
 from ai_gateway.prompts.config.base import ModelConfig, PromptConfig, PromptParams
 from ai_gateway.prompts.typing import Model, TypeModelFactory
 from ai_gateway.structured_logging import get_request_logger
+from lib.internal_events.client import InternalEventsClient
+from lib.internal_events.context import InternalEventAdditionalProperties
 
 __all__ = [
     "Prompt",

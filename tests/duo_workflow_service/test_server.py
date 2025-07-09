@@ -14,8 +14,6 @@ from langchain_community.cache import SQLiteCache
 
 from contract import contract_pb2
 from duo_workflow_service.interceptors.authentication_interceptor import current_user
-from duo_workflow_service.internal_events.client import DuoWorkflowInternalEvent
-from duo_workflow_service.internal_events.event_enum import CategoryEnum
 from duo_workflow_service.server import (
     DuoWorkflowService,
     clean_start_request,
@@ -24,6 +22,7 @@ from duo_workflow_service.server import (
     serve,
     string_to_category_enum,
 )
+from lib.internal_events.event_enum import CategoryEnum
 
 
 def test_configure_cache_disabled():
@@ -51,9 +50,7 @@ def test_run():
         "duo_workflow_service.server.setup_logging"
     ) as mock_setup_logging, patch(
         "duo_workflow_service.server.validate_llm_access"
-    ) as mock_validate_llm_access, patch.object(
-        DuoWorkflowInternalEvent, "setup"
-    ) as mock_internal_event_setup, patch(
+    ) as mock_validate_llm_access, patch(
         "asyncio.get_event_loop"
     ) as mock_get_loop:
         mock_loop = MagicMock()
@@ -66,7 +63,6 @@ def test_run():
         mock_setup_monitoring.assert_called_once()
         mock_setup_logging.assert_called_once_with(json_format=True, to_file=None)
         mock_validate_llm_access.assert_called_once()
-        mock_internal_event_setup.assert_called_once()
 
         assert mock_loop.run_until_complete.call_count == 1
         actual_arg = mock_loop.run_until_complete.call_args[0][0]

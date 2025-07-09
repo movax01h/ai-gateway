@@ -6,13 +6,13 @@ from ai_gateway.auth.container import ContainerSelfSignedJwt
 from ai_gateway.chat.container import ContainerChat
 from ai_gateway.code_suggestions.container import ContainerCodeSuggestions
 from ai_gateway.integrations.container import ContainerIntegrations
-from ai_gateway.internal_events import ContainerInternalEvent
 from ai_gateway.models.container import ContainerModels
 from ai_gateway.models.v2.container import ContainerModels as ContainerModelsV2
 from ai_gateway.prompts.container import ContainerPrompts
 from ai_gateway.searches.container import ContainerSearches
 from ai_gateway.tracking.container import ContainerTracking
 from ai_gateway.x_ray.container import ContainerXRay
+from lib.internal_events import ContainerInternalEvent
 
 __all__ = [
     "ContainerApplication",

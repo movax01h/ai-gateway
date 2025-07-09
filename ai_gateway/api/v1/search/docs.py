@@ -20,14 +20,13 @@ from ai_gateway.async_dependency_resolver import (
     get_search_factory_provider,
 )
 from ai_gateway.config import Config
-from ai_gateway.internal_events import InternalEventsClient
 from ai_gateway.searches import Searcher
+from ai_gateway.structured_logging import get_request_logger
+from lib.internal_events import InternalEventsClient
 
 __all__ = [
     "router",
 ]
-
-from ai_gateway.structured_logging import get_request_logger
 
 router = APIRouter()
 
