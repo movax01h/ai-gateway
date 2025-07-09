@@ -1,14 +1,23 @@
 from datetime import datetime, timezone
-from unittest.mock import MagicMock, patch
+from unittest.mock import ANY, MagicMock, Mock, call, patch
 
 import pytest
-from langchain_core.messages import HumanMessage, SystemMessage
+from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
+from langchain_core.messages.ai import UsageMetadata
 from langchain_core.prompt_values import ChatPromptValue
 
 from ai_gateway.prompts.config import ModelClassProvider, ModelConfig
-from duo_workflow_service.agents.chat_agent import ChatAgentPromptTemplate
-from duo_workflow_service.entities.state import ChatWorkflowState
+from duo_workflow_service.agents.chat_agent import ChatAgent, ChatAgentPromptTemplate
+from duo_workflow_service.entities import WorkflowStatusEnum
+from duo_workflow_service.entities.state import (
+    ChatWorkflowState,
+    MessageTypeEnum,
+    ToolStatus,
+    UiChatLog,
+)
 from lib.feature_flags import current_feature_flag_context
+from lib.internal_events import InternalEventAdditionalProperties
+from lib.internal_events.event_enum import CategoryEnum, EventEnum, EventPropertyEnum
 
 
 @pytest.fixture
@@ -17,6 +26,94 @@ def mock_datetime(mock_now: datetime):
         mock.now.return_value = mock_now
         mock.timezone = timezone
         yield mock
+
+
+@pytest.fixture
+def prompt_name():
+    return "Chat Agent"
+
+
+@pytest.fixture
+def chat_agent(model_factory, prompt_config):
+    yield ChatAgent(model_factory=model_factory, config=prompt_config)
+
+
+@pytest.fixture
+def input():
+    return {
+        "conversation_history": {"Chat Agent": [HumanMessage(content="hi")]},
+        "plan": {"steps": []},
+        "status": WorkflowStatusEnum.EXECUTION,
+        "ui_chat_log": [],
+        "last_human_input": None,
+        "project": None,
+        "approval": None,
+    }
+
+
+@pytest.mark.asyncio
+async def test_run(chat_agent, input):
+    result = await chat_agent.run(input)
+
+    assert len(result["conversation_history"]["Chat Agent"]) == 1
+    assert isinstance(result["conversation_history"]["Chat Agent"][0], AIMessage)
+    assert result["conversation_history"]["Chat Agent"][0].content == "Hello there!"
+    assert result["ui_chat_log"] == [
+        UiChatLog(
+            message_type=MessageTypeEnum.AGENT,
+            message_sub_type=None,
+            content="Hello there!",
+            timestamp=ANY,
+            status=ToolStatus.SUCCESS,
+            correlation_id=None,
+            tool_info=None,
+            additional_context=None,
+        )
+    ]
+    assert result["status"] == WorkflowStatusEnum.INPUT_REQUIRED
+
+
+class TestChatAgentTrackTokensData:
+    @pytest.fixture
+    def unit_primitives(self):
+        return ["duo_chat"]
+
+    @pytest.fixture
+    def usage_metadata(self):
+        return UsageMetadata(input_tokens=1, output_tokens=2, total_tokens=3)
+
+    @pytest.mark.asyncio
+    async def test_track_tokens_data(
+        self, chat_agent, input, internal_event_client: Mock
+    ):
+        chat_agent.internal_event_client = internal_event_client
+
+        await chat_agent.run(input)
+
+        assert internal_event_client.track_event.call_count == 2
+        assert internal_event_client.track_event.call_args_list[0] == call(
+            "token_usage_duo_chat",
+            category="ai_gateway.prompts.base",
+            input_tokens=1,
+            output_tokens=2,
+            total_tokens=3,
+            model_engine="litellm",
+            model_name="fake-model",
+            model_provider="litellm",
+            additional_properties=ANY,
+        )
+        assert internal_event_client.track_event.call_args_list[1] == call(
+            event_name=EventEnum.TOKEN_PER_USER_PROMPT.value,
+            additional_properties=InternalEventAdditionalProperties(
+                label="Chat Agent",
+                property=EventPropertyEnum.WORKFLOW_ID.value,
+                value="undefined",
+                input_tokens=1,
+                output_tokens=2,
+                total_tokens=3,
+            ),
+            category=CategoryEnum.WORKFLOW_CHAT.value,
+        )
 
 
 class TestChatAgentPromptTemplate:

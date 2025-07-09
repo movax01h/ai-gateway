@@ -570,14 +570,20 @@ def prompt_params():
 
 
 @pytest.fixture
+def prompt_name():
+    return "test_prompt"
+
+
+@pytest.fixture
 def prompt_config(
+    prompt_name: str,
     model_config: ModelConfig,
     unit_primitives: list[GitLabUnitPrimitive],
     prompt_template: dict[str, str],
     prompt_params: PromptParams,
 ):
     return PromptConfig(
-        name="test_prompt",
+        name=prompt_name,
         model=model_config,
         unit_primitives=unit_primitives,
         prompt_template=prompt_template,

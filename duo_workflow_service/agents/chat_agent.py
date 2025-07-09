@@ -27,7 +27,10 @@ from duo_workflow_service.entities.state import (
 )
 from duo_workflow_service.gitlab.gitlab_project import Project
 from duo_workflow_service.slash_commands.goal_parser import parse as slash_command_parse
+from duo_workflow_service.structured_logging import _workflow_id
 from lib.feature_flags.context import FeatureFlag, is_feature_enabled
+from lib.internal_events import InternalEventAdditionalProperties
+from lib.internal_events.event_enum import CategoryEnum, EventEnum, EventPropertyEnum
 
 log = structlog.stdlib.get_logger("chat_agent")
 
@@ -161,6 +164,9 @@ class ChatAgent(Prompt[ChatWorkflowState, BaseMessage]):
             agent_response = await super().ainvoke(input=input, agent_name=self.name)
             new_messages.append(agent_response)
 
+            if isinstance(agent_response, AIMessage):
+                self._track_tokens_data(agent_response)
+
             if (
                 isinstance(agent_response, AIMessage)
                 and len(agent_response.tool_calls) > 0
@@ -222,3 +228,23 @@ class ChatAgent(Prompt[ChatWorkflowState, BaseMessage]):
                     )
                 ],
             }
+
+    def _track_tokens_data(self, message: AIMessage):
+        if not self.internal_event_client:
+            return
+
+        usage_metadata = message.usage_metadata if message.usage_metadata else {}  # type: ignore[typeddict-item]
+
+        additional_properties = InternalEventAdditionalProperties(
+            label=self.name,
+            property=EventPropertyEnum.WORKFLOW_ID.value,
+            value=_workflow_id.get(),
+            input_tokens=usage_metadata.get("input_tokens"),
+            output_tokens=usage_metadata.get("output_tokens"),
+            total_tokens=usage_metadata.get("total_tokens"),
+        )
+        self.internal_event_client.track_event(
+            event_name=EventEnum.TOKEN_PER_USER_PROMPT.value,
+            additional_properties=additional_properties,
+            category=CategoryEnum.WORKFLOW_CHAT.value,
+        )
