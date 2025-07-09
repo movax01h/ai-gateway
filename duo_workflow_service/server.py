@@ -3,7 +3,7 @@
 import asyncio
 import json
 import os
-from typing import AsyncIterable, AsyncIterator
+from typing import AsyncIterable, AsyncIterator, Optional
 
 import aiohttp
 import grpc
@@ -117,6 +117,7 @@ class DuoWorkflowService(contract_pb2_grpc.DuoWorkflowServicer):
                     )
 
     # pylint: disable=invalid-overridden-method
+    # pylint: disable=too-many-statements
     @inject
     async def ExecuteWorkflow(
         self,
@@ -135,12 +136,22 @@ class DuoWorkflowService(contract_pb2_grpc.DuoWorkflowServicer):
 
         workflow_definition = start_workflow_request.startRequest.workflowDefinition
         unit_primitive = choose_unit_primitive(workflow_definition)
+        legacy_unit_primitive = choose_legacy_unit_primitive(workflow_definition)
 
         if not user.can(unit_primitive):
-            await context.abort(
-                grpc.StatusCode.PERMISSION_DENIED,
-                f"Unauthorized to execute {workflow_definition or 'workflow'}",
-            )
+            # DUO_WORKFLOW_EXECUTE_WORKFLOW unit primitive is being deprecated and replaced with DUO_AGENT_PLATFORM
+            # While the migration is in progress, also check DUO_WORKFLOW_EXECUTE_WORKFLOW
+            if legacy_unit_primitive is None:
+                await context.abort(
+                    grpc.StatusCode.PERMISSION_DENIED,
+                    f"Unauthorized to execute {workflow_definition or 'workflow'}",
+                )
+
+            if not user.can(legacy_unit_primitive):
+                await context.abort(
+                    grpc.StatusCode.PERMISSION_DENIED,
+                    f"Unauthorized to execute {workflow_definition or 'workflow'}",
+                )
 
         monitoring_context: MonitoringContext = current_monitoring_context.get()
 
@@ -277,14 +288,26 @@ class DuoWorkflowService(contract_pb2_grpc.DuoWorkflowServicer):
 
         workflow_definition = request.workflowDefinition
         unit_primitive = choose_unit_primitive(workflow_definition)
+        legacy_unit_primitive = choose_legacy_unit_primitive(workflow_definition)
 
         if not user.can(
             unit_primitive=unit_primitive,
             disallowed_issuers=[CloudConnectorConfig().service_name],
         ):
-            await context.abort(
-                grpc.StatusCode.PERMISSION_DENIED, "Unauthorized to generate token"
-            )
+            # DUO_WORKFLOW_EXECUTE_WORKFLOW unit primitive is being deprecated and replaced with DUO_AGENT_PLATFORM
+            # While the migration is in progress, also check DUO_WORKFLOW_EXECUTE_WORKFLOW
+            if legacy_unit_primitive is None:
+                await context.abort(
+                    grpc.StatusCode.PERMISSION_DENIED, "Unauthorized to generate token"
+                )
+
+            if not user.can(
+                unit_primitive=legacy_unit_primitive,
+                disallowed_issuers=[CloudConnectorConfig().service_name],
+            ):
+                await context.abort(
+                    grpc.StatusCode.PERMISSION_DENIED, "Unauthorized to generate token"
+                )
 
         metadata = dict(context.invocation_metadata())
         global_user_id = metadata.get("x-gitlab-global-user-id")
@@ -311,6 +334,7 @@ class DuoWorkflowService(contract_pb2_grpc.DuoWorkflowServicer):
         return contract_pb2.GenerateTokenResponse(token=token, expiresAt=expires_at)
 
     # pylint: enable=invalid-overridden-method
+    # pylint: enable=too-many-statements
 
 
 async def serve(port: int) -> None:
@@ -380,6 +404,15 @@ def setup_cloud_connector():
 def choose_unit_primitive(workflow_definition: str) -> GitLabUnitPrimitive:
     if workflow_definition == "chat":
         return GitLabUnitPrimitive.DUO_CHAT
+
+    return GitLabUnitPrimitive.DUO_AGENT_PLATFORM
+
+
+def choose_legacy_unit_primitive(
+    workflow_definition: str,
+) -> Optional[GitLabUnitPrimitive]:
+    if workflow_definition == "chat":
+        return None
 
     return GitLabUnitPrimitive.DUO_WORKFLOW_EXECUTE_WORKFLOW
 

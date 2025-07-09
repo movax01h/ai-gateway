@@ -4,7 +4,7 @@ import json
 import os
 from datetime import datetime, timedelta, timezone
 from typing import AsyncIterable
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, call, patch
 
 import grpc
 import pytest
@@ -245,6 +245,49 @@ async def test_generate_token(mock_generate_token_response, mock_token_authority
         claims=UserClaims(
             issuer="gitlab.com",
             scopes=[
+                "duo_agent_platform",
+                "duo_chat",
+                "include_file_context",
+                "unknown_scope",
+            ],
+        ),
+    )
+    current_user.set(user)
+
+    servicer = DuoWorkflowService()
+    await servicer.GenerateToken(contract_pb2.GenerateTokenRequest(), mock_context)
+
+    args = mock_token_authority.return_value.encode.call_args.args
+    passed_scopes = args[-1]
+    assert set(passed_scopes) == {
+        "duo_agent_platform",
+        "duo_chat",
+        "include_file_context",
+    }
+    mock_generate_token_response.assert_called_once_with(
+        token="token", expiresAt=one_hour_later
+    )
+
+
+@pytest.mark.asyncio
+@patch("duo_workflow_service.server.TokenAuthority")
+@patch("contract.contract_pb2.GenerateTokenResponse")
+@patch.dict(os.environ, {"CLOUD_CONNECTOR_SERVICE_NAME": "gitlab-duo-workflow-service"})
+async def test_generate_token_with_legacy_duo_workflow_execute_workflow_up(
+    mock_generate_token_response, mock_token_authority
+):
+    one_hour_later = datetime.now(tz=timezone.utc) + timedelta(hours=1)
+    mock_token_authority.return_value.encode = MagicMock(
+        return_value=("token", one_hour_later)
+    )
+    mock_context = MagicMock(spec=grpc.ServicerContext)
+
+    user = CloudConnectorUser(
+        authenticated=True,
+        is_debug=False,
+        claims=UserClaims(
+            issuer="gitlab.com",
+            scopes=[
                 "duo_workflow_execute_workflow",
                 "duo_chat",
                 "include_file_context",
@@ -277,7 +320,7 @@ async def test_generate_token_with_self_signed_token_issuer():
         is_debug=False,
         claims=UserClaims(
             issuer=CloudConnectorConfig().service_name,
-            scopes=["duo_workflow_execute_workflow"],
+            scopes=["duo_agent_platform"],
         ),
     )
     current_user.set(user)
@@ -301,7 +344,7 @@ async def test_generate_token_unauthorized_for_chat_workflow():
         is_debug=False,
         claims=UserClaims(
             issuer="gitlab.com",
-            scopes=["duo_workflow_execute_workflow"],  # Missing duo_chat scope
+            scopes=["duo_agent_platform"],  # Missing duo_chat scope
         ),
     )
 
@@ -337,7 +380,7 @@ async def test_generate_token_unauthorized_for_any_flow():
         is_debug=False,
         claims=UserClaims(
             issuer="gitlab.com",
-            scopes=["duo_chat"],  # Missing duo_chat scope
+            scopes=["duo_chat"],  # Missing duo_agent_platform scope
         ),
     )
 
@@ -354,9 +397,17 @@ async def test_generate_token_unauthorized_for_any_flow():
     with pytest.raises(grpc.RpcError):
         await servicer.GenerateToken(request, mock_context)
 
-    user.can.assert_called_once_with(
-        unit_primitive=GitLabUnitPrimitive.DUO_WORKFLOW_EXECUTE_WORKFLOW,
-        disallowed_issuers=[CloudConnectorConfig().service_name],
+    user.can.assert_has_calls(
+        [
+            call(
+                unit_primitive=GitLabUnitPrimitive.DUO_AGENT_PLATFORM,
+                disallowed_issuers=[CloudConnectorConfig().service_name],
+            ),
+            call(
+                unit_primitive=GitLabUnitPrimitive.DUO_WORKFLOW_EXECUTE_WORKFLOW,
+                disallowed_issuers=[CloudConnectorConfig().service_name],
+            ),
+        ]
     )
 
     mock_context.abort.assert_called_once_with(
