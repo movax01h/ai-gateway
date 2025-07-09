@@ -101,9 +101,12 @@ class TestInternalEventsClient:
         category,
         kwargs,
     ):
-        with mock.patch("snowplow_tracker.Tracker.track") as mock_track, mock.patch(
-            "snowplow_tracker.events.StructuredEvent.__init__"
-        ) as mock_structured_event_init:
+        with (
+            mock.patch("snowplow_tracker.Tracker.track") as mock_track,
+            mock.patch(
+                "snowplow_tracker.events.StructuredEvent.__init__"
+            ) as mock_structured_event_init,
+        ):
             mock_structured_event_init.return_value = None
 
             # Set up current event context

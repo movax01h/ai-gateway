@@ -83,9 +83,12 @@ class TestSnowplowClient:
         ],
     )
     def test_track(self, inputs):
-        with mock.patch("snowplow_tracker.Tracker.track") as mock_track, mock.patch(
-            "snowplow_tracker.events.StructuredEvent.__init__"
-        ) as mock_structured_event_init:
+        with (
+            mock.patch("snowplow_tracker.Tracker.track") as mock_track,
+            mock.patch(
+                "snowplow_tracker.events.StructuredEvent.__init__"
+            ) as mock_structured_event_init,
+        ):
             configuration = SnowplowClientConfiguration(
                 namespace="gl",
                 endpoint="https://whitechoc.local",

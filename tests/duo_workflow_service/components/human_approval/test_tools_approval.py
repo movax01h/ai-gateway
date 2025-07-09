@@ -113,17 +113,19 @@ class TestToolsApprovalComponent:
         mock_check_executor,
     ):
 
-        with patch(
-            "duo_workflow_service.components.human_approval.component.HumanApprovalCheckExecutor",
-            return_value=mock_check_executor,
-        ), patch(
-            "duo_workflow_service.components.human_approval.tools_approval.format_tool_display_message",
-            side_effect=[
-                "Using mock tool1: {'arg1': 'value1'}",
-                "Using mock tool2: {'arg2': 'value2'}",
-            ],
-        ) as mock_format_tool_msg, patch.dict(
-            os.environ, {"WORKFLOW_INTERRUPT": "True"}
+        with (
+            patch(
+                "duo_workflow_service.components.human_approval.component.HumanApprovalCheckExecutor",
+                return_value=mock_check_executor,
+            ),
+            patch(
+                "duo_workflow_service.components.human_approval.tools_approval.format_tool_display_message",
+                side_effect=[
+                    "Using mock tool1: {'arg1': 'value1'}",
+                    "Using mock tool2: {'arg2': 'value2'}",
+                ],
+            ) as mock_format_tool_msg,
+            patch.dict(os.environ, {"WORKFLOW_INTERRUPT": "True"}),
         ):
             tool1_call = {
                 "id": "1",
@@ -215,10 +217,13 @@ class TestToolsApprovalComponent:
         mock_toolset,
         mock_check_executor,
     ):
-        with patch(
-            "duo_workflow_service.components.human_approval.component.HumanApprovalCheckExecutor",
-            return_value=mock_check_executor,
-        ), patch.dict(os.environ, {"WORKFLOW_INTERRUPT": "True"}):
+        with (
+            patch(
+                "duo_workflow_service.components.human_approval.component.HumanApprovalCheckExecutor",
+                return_value=mock_check_executor,
+            ),
+            patch.dict(os.environ, {"WORKFLOW_INTERRUPT": "True"}),
+        ):
             node_resp = [
                 node_return_value(
                     messages=[
@@ -264,14 +269,16 @@ class TestToolsApprovalComponent:
         graph_input: WorkflowState,
         mock_check_executor,
     ):
-        with patch(
-            "duo_workflow_service.components.human_approval.component.HumanApprovalCheckExecutor",
-            return_value=mock_check_executor,
-        ), patch(
-            "duo_workflow_service.components.human_approval.tools_approval.format_tool_display_message",
-            return_value=None,
-        ) as mock_format_tool_msg, patch.dict(
-            os.environ, {"WORKFLOW_INTERRUPT": "True"}
+        with (
+            patch(
+                "duo_workflow_service.components.human_approval.component.HumanApprovalCheckExecutor",
+                return_value=mock_check_executor,
+            ),
+            patch(
+                "duo_workflow_service.components.human_approval.tools_approval.format_tool_display_message",
+                return_value=None,
+            ) as mock_format_tool_msg,
+            patch.dict(os.environ, {"WORKFLOW_INTERRUPT": "True"}),
         ):
             node_resp = [
                 node_return_value(
@@ -310,14 +317,16 @@ class TestToolsApprovalComponent:
         mock_toolset,
         mock_check_executor,
     ):
-        with patch(
-            "duo_workflow_service.components.human_approval.component.HumanApprovalCheckExecutor",
-            return_value=mock_check_executor,
-        ), patch(
-            "duo_workflow_service.components.human_approval.tools_approval.format_tool_display_message",
-            return_value="Using mock tool1: {'arg1': 'value1'}",
-        ) as mock_format_tool_msg, patch.dict(
-            os.environ, {"WORKFLOW_INTERRUPT": "True"}
+        with (
+            patch(
+                "duo_workflow_service.components.human_approval.component.HumanApprovalCheckExecutor",
+                return_value=mock_check_executor,
+            ),
+            patch(
+                "duo_workflow_service.components.human_approval.tools_approval.format_tool_display_message",
+                return_value="Using mock tool1: {'arg1': 'value1'}",
+            ) as mock_format_tool_msg,
+            patch.dict(os.environ, {"WORKFLOW_INTERRUPT": "True"}),
         ):
             valid_tool_call = ToolCall(
                 id="1",
@@ -442,14 +451,16 @@ class TestToolsApprovalComponent:
         mock_toolset,
         mock_check_executor,
     ):
-        with patch(
-            "duo_workflow_service.components.human_approval.component.HumanApprovalCheckExecutor",
-            return_value=mock_check_executor,
-        ), patch(
-            "duo_workflow_service.components.human_approval.tools_approval.format_tool_display_message",
-            return_value="Using mock tool1: {'arg1': 'value1'}",
-        ) as mock_format_tool_msg, patch.dict(
-            os.environ, {"WORKFLOW_INTERRUPT": "True"}
+        with (
+            patch(
+                "duo_workflow_service.components.human_approval.component.HumanApprovalCheckExecutor",
+                return_value=mock_check_executor,
+            ),
+            patch(
+                "duo_workflow_service.components.human_approval.tools_approval.format_tool_display_message",
+                return_value="Using mock tool1: {'arg1': 'value1'}",
+            ) as mock_format_tool_msg,
+            patch.dict(os.environ, {"WORKFLOW_INTERRUPT": "True"}),
         ):
             invalid_tool_call = ToolCall(
                 id="1",
@@ -518,16 +529,18 @@ class TestToolsApprovalComponent:
         mock_check_executor,
     ):
 
-        with patch(
-            "duo_workflow_service.components.human_approval.component.HumanApprovalCheckExecutor",
-            return_value=mock_check_executor,
-        ), patch(
-            "duo_workflow_service.components.human_approval.tools_approval.format_tool_display_message",
-            side_effect=[
-                "Using mock tool1: {'arg1': 'value1'}",
-            ],
-        ) as mock_format_tool_msg, patch.dict(
-            os.environ, {"WORKFLOW_INTERRUPT": "True"}
+        with (
+            patch(
+                "duo_workflow_service.components.human_approval.component.HumanApprovalCheckExecutor",
+                return_value=mock_check_executor,
+            ),
+            patch(
+                "duo_workflow_service.components.human_approval.tools_approval.format_tool_display_message",
+                side_effect=[
+                    "Using mock tool1: {'arg1': 'value1'}",
+                ],
+            ) as mock_format_tool_msg,
+            patch.dict(os.environ, {"WORKFLOW_INTERRUPT": "True"}),
         ):
             tool1_call = {"id": "1", "name": "tool1", "args": {"arg1": "value1"}}
             no_op_tool_call = {

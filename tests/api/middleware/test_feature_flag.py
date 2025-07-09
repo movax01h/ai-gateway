@@ -47,9 +47,12 @@ async def test_middleware_feature_flag(
     receive = AsyncMock()
     send = AsyncMock()
 
-    with patch(
-        "ai_gateway.api.middleware.feature_flag.current_feature_flag_context"
-    ) as mock_feature_flag_context, request_cycle_context({}):
+    with (
+        patch(
+            "ai_gateway.api.middleware.feature_flag.current_feature_flag_context"
+        ) as mock_feature_flag_context,
+        request_cycle_context({}),
+    ):
         await feature_flag_middleware(scope, receive, send)
 
         mock_feature_flag_context.set.assert_called_once_with(expected_flags)

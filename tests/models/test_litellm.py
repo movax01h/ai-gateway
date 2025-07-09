@@ -321,9 +321,12 @@ class TestLiteLlmChatModel:
             ]
         )
 
-        with patch("ai_gateway.models.litellm.acompletion") as mock_acompletion, patch(
-            "ai_gateway.instrumentators.model_requests.ModelRequestInstrumentator.watch"
-        ) as mock_watch:
+        with (
+            patch("ai_gateway.models.litellm.acompletion") as mock_acompletion,
+            patch(
+                "ai_gateway.instrumentators.model_requests.ModelRequestInstrumentator.watch"
+            ) as mock_watch,
+        ):
             watcher = Mock()
             mock_watch.return_value.__enter__.return_value = watcher
 
@@ -374,9 +377,12 @@ class TestLiteLlmChatModel:
                     raise ValueError("broken")
                 yield item
 
-        with patch("ai_gateway.models.litellm.acompletion") as mock_acompletion, patch(
-            "ai_gateway.instrumentators.model_requests.ModelRequestInstrumentator.watch"
-        ) as mock_watch:
+        with (
+            patch("ai_gateway.models.litellm.acompletion") as mock_acompletion,
+            patch(
+                "ai_gateway.instrumentators.model_requests.ModelRequestInstrumentator.watch"
+            ) as mock_watch,
+        ):
             watcher = Mock()
             mock_watch.return_value.__enter__.return_value = watcher
 
@@ -1205,9 +1211,12 @@ class TestLiteLlmTextGenModel:
                     raise ValueError("broken")
                 yield item
 
-        with patch("ai_gateway.models.litellm.acompletion") as mock_acompletion, patch(
-            "ai_gateway.instrumentators.model_requests.ModelRequestInstrumentator.watch"
-        ) as mock_watch:
+        with (
+            patch("ai_gateway.models.litellm.acompletion") as mock_acompletion,
+            patch(
+                "ai_gateway.instrumentators.model_requests.ModelRequestInstrumentator.watch"
+            ) as mock_watch,
+        ):
             watcher = Mock()
             mock_watch.return_value.__enter__.return_value = watcher
 

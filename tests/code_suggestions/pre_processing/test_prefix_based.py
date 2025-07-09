@@ -443,7 +443,7 @@ class TestPromptBuilderPrefixBased:
                 suffix=suffix,
                 suffix_reserved_percent=suffix_reserved_percent,
                 context_max_percent=context_max_percent,
-                code_context=code_context
+                code_context=code_context,
             )
 
         actual = builder.build()

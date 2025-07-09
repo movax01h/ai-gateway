@@ -70,7 +70,7 @@ class ModelEngineBase(ABC):
         suffix: str,
         file_name: str,
         editor_lang_id: Optional[str] = None,
-        **kwargs: Any
+        **kwargs: Any,
     ) -> list[ModelEngineOutput]:
         lang_id = lang_from_filename(file_name)
         self.increment_lang_counter(file_name, lang_id, editor_lang_id)
@@ -105,7 +105,7 @@ class ModelEngineBase(ABC):
         file_name: str,
         lang_id: Optional[LanguageId] = None,
         editor_lang: Optional[str] = None,
-        **kwargs: Any
+        **kwargs: Any,
     ) -> list[ModelEngineOutput]:
         pass
 

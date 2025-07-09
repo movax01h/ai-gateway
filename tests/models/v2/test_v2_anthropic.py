@@ -35,7 +35,7 @@ class TestChatAnthropic:
         model = ChatAnthropic(
             async_client=AsyncAnthropic(),
             model="claude-3-5-sonnet-20241022",
-            **model_options
+            **model_options,
         )  # type: ignore[call-arg]
 
         assert isinstance(model._async_client, AsyncAnthropic)

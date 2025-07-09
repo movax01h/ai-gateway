@@ -1520,14 +1520,18 @@ class TestGitLabModelProvider:
             mock_completions = Mock()
             return (mock_completions, extra_kwargs)
 
-        with patch(
-            "ai_gateway.model_selection.ModelSelectionConfig.get_gitlab_model"
-        ) as mock_get_gitlab_model, patch(
-            "ai_gateway.api.v2.code.completions._execute_code_completion"
-        ) as mock_execute, patch(
-            "ai_gateway.api.v2.code.completions._build_code_completions",
-            side_effect=_mock_build_side_effect,
-        ) as mock_build:
+        with (
+            patch(
+                "ai_gateway.model_selection.ModelSelectionConfig.get_gitlab_model"
+            ) as mock_get_gitlab_model,
+            patch(
+                "ai_gateway.api.v2.code.completions._execute_code_completion"
+            ) as mock_execute,
+            patch(
+                "ai_gateway.api.v2.code.completions._build_code_completions",
+                side_effect=_mock_build_side_effect,
+            ) as mock_build,
+        ):
 
             mock_get_gitlab_model.return_value = test_model
             mock_execute.return_value = [mock_suggestion]
@@ -1595,11 +1599,14 @@ class TestGitLabModelProvider:
         mock_suggestion.lang = "python"
         mock_suggestion.metadata = None
 
-        with patch(
-            "ai_gateway.model_selection.ModelSelectionConfig.get_gitlab_model_for_feature"
-        ) as mock_get_gitlab_model, patch(
-            "ai_gateway.api.v2.code.completions._execute_code_completion"
-        ) as mock_execute:
+        with (
+            patch(
+                "ai_gateway.model_selection.ModelSelectionConfig.get_gitlab_model_for_feature"
+            ) as mock_get_gitlab_model,
+            patch(
+                "ai_gateway.api.v2.code.completions._execute_code_completion"
+            ) as mock_execute,
+        ):
             mock_get_gitlab_model.return_value = test_model
             mock_execute.return_value = [mock_suggestion]
 
@@ -1662,11 +1669,14 @@ class TestGitLabModelProvider:
         mock_suggestion.lang = "python"
         mock_suggestion.metadata = None
 
-        with patch(
-            "ai_gateway.model_selection.ModelSelectionConfig.get_gitlab_model_for_feature"
-        ) as mock_get_gitlab_model, patch(
-            "ai_gateway.api.v2.code.completions._execute_code_completion"
-        ) as mock_execute:
+        with (
+            patch(
+                "ai_gateway.model_selection.ModelSelectionConfig.get_gitlab_model_for_feature"
+            ) as mock_get_gitlab_model,
+            patch(
+                "ai_gateway.api.v2.code.completions._execute_code_completion"
+            ) as mock_execute,
+        ):
             mock_get_gitlab_model.return_value = test_model
             mock_execute.return_value = [mock_suggestion]
 
