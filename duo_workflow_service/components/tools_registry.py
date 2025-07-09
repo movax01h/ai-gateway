@@ -187,7 +187,7 @@ class ToolsRegistry:
         self._preapproved_tool_names = set(default_tools.keys())
 
         for privilege in enabled_tools:
-            for tool_cls in _AGENT_PRIVILEGES[privilege]:
+            for tool_cls in _AGENT_PRIVILEGES.get(privilege, []):
                 if tool_cls in [
                     tools.GetWorkItem,
                     tools.ListWorkItems,
