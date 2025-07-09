@@ -8,7 +8,12 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import grpc
 import pytest
-from gitlab_cloud_connector import CloudConnectorConfig, CloudConnectorUser, UserClaims
+from gitlab_cloud_connector import (
+    CloudConnectorConfig,
+    CloudConnectorUser,
+    GitLabUnitPrimitive,
+    UserClaims,
+)
 from langchain.globals import get_llm_cache
 from langchain_community.cache import SQLiteCache
 
@@ -289,7 +294,78 @@ async def test_generate_token_with_self_signed_token_issuer():
 
 
 @pytest.mark.asyncio
-async def test_grpc_serve():
+@patch.dict(os.environ, {"CLOUD_CONNECTOR_SERVICE_NAME": "gitlab-duo-workflow-service"})
+async def test_generate_token_unauthorized_for_chat_workflow():
+    user = CloudConnectorUser(
+        authenticated=True,
+        is_debug=False,
+        claims=UserClaims(
+            issuer="gitlab.com",
+            scopes=["duo_workflow_execute_workflow"],  # Missing duo_chat scope
+        ),
+    )
+
+    # Mock the can method to return False for chat primitive
+    user.can = MagicMock(return_value=False)
+    current_user.set(user)
+
+    mock_context = MagicMock(spec=grpc.ServicerContext)
+    mock_context.abort.side_effect = grpc.RpcError("Aborted")
+
+    servicer = DuoWorkflowService()
+    request = contract_pb2.GenerateTokenRequest(workflowDefinition="chat")
+
+    with pytest.raises(grpc.RpcError):
+        await servicer.GenerateToken(request, mock_context)
+
+    # Verify user.can was called with DUO_CHAT primitive
+    user.can.assert_called_once_with(
+        unit_primitive=GitLabUnitPrimitive.DUO_CHAT,
+        disallowed_issuers=[CloudConnectorConfig().service_name],
+    )
+
+    mock_context.abort.assert_called_once_with(
+        grpc.StatusCode.PERMISSION_DENIED, "Unauthorized to generate token"
+    )
+
+
+@pytest.mark.asyncio
+@patch.dict(os.environ, {"CLOUD_CONNECTOR_SERVICE_NAME": "gitlab-duo-workflow-service"})
+async def test_generate_token_unauthorized_for_any_flow():
+    user = CloudConnectorUser(
+        authenticated=True,
+        is_debug=False,
+        claims=UserClaims(
+            issuer="gitlab.com",
+            scopes=["duo_chat"],  # Missing duo_chat scope
+        ),
+    )
+
+    # Mock the can method to return False for chat primitive
+    user.can = MagicMock(return_value=False)
+    current_user.set(user)
+
+    mock_context = MagicMock(spec=grpc.ServicerContext)
+    mock_context.abort.side_effect = grpc.RpcError("Aborted")
+
+    servicer = DuoWorkflowService()
+    request = contract_pb2.GenerateTokenRequest(workflowDefinition="agent")
+
+    with pytest.raises(grpc.RpcError):
+        await servicer.GenerateToken(request, mock_context)
+
+    user.can.assert_called_once_with(
+        unit_primitive=GitLabUnitPrimitive.DUO_WORKFLOW_EXECUTE_WORKFLOW,
+        disallowed_issuers=[CloudConnectorConfig().service_name],
+    )
+
+    mock_context.abort.assert_called_once_with(
+        grpc.StatusCode.PERMISSION_DENIED, "Unauthorized to generate token"
+    )
+
+
+@pytest.mark.asyncio
+async def test_grpc_server():
     mock_server = AsyncMock()
     mock_server.add_insecure_port.return_value = None
     mock_server.start.return_value = None

@@ -160,8 +160,10 @@ class RunGitCommand(_message.Message):
     def __init__(self, command: _Optional[str] = ..., arguments: _Optional[str] = ..., repository_url: _Optional[str] = ...) -> None: ...
 
 class GenerateTokenRequest(_message.Message):
-    __slots__ = ()
-    def __init__(self) -> None: ...
+    __slots__ = ("workflowDefinition",)
+    WORKFLOWDEFINITION_FIELD_NUMBER: _ClassVar[int]
+    workflowDefinition: str
+    def __init__(self, workflowDefinition: _Optional[str] = ...) -> None: ...
 
 class GenerateTokenResponse(_message.Message):
     __slots__ = ("token", "expiresAt")
