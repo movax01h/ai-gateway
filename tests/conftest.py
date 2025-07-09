@@ -379,17 +379,21 @@ def _mock_async_execute(klass: str, mock_suggestions_output: CodeSuggestionsOutp
 
 @pytest.fixture
 def mock_generations_stream(mock_suggestions_output: CodeSuggestionsOutput):
-    with _mock_async_execute(  # pylint: disable=contextmanager-generator-missing-cleanup
-        "ai_gateway.code_suggestions.CodeGenerations", mock_suggestions_output
-    ) as mock:
+    with (  # pylint: disable=contextmanager-generator-missing-cleanup
+        _mock_async_execute(
+            "ai_gateway.code_suggestions.CodeGenerations", mock_suggestions_output
+        ) as mock
+    ):
         yield mock
 
 
 @pytest.fixture
 def mock_completions_stream(mock_suggestions_output: CodeSuggestionsOutput):
-    with _mock_async_execute(  # pylint: disable=contextmanager-generator-missing-cleanup
-        "ai_gateway.code_suggestions.CodeCompletions", mock_suggestions_output
-    ) as mock:
+    with (  # pylint: disable=contextmanager-generator-missing-cleanup
+        _mock_async_execute(
+            "ai_gateway.code_suggestions.CodeCompletions", mock_suggestions_output
+        ) as mock
+    ):
         yield mock
 
 

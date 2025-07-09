@@ -46,11 +46,14 @@ async def test_ainvoke(
     mock_http_handler: AsyncMock,
     prompt: Prompt,
 ):
-    with pytest.raises(litellm.APIConnectionError, match="something went wrong"), patch(
-        "google.auth.default",
-        return_value=(
-            MagicMock(spec=Credentials, token="mock_token"),
-            "mock_project_id",
+    with (
+        pytest.raises(litellm.APIConnectionError, match="something went wrong"),
+        patch(
+            "google.auth.default",
+            return_value=(
+                MagicMock(spec=Credentials, token="mock_token"),
+                "mock_project_id",
+            ),
         ),
     ):
         await prompt.ainvoke({"name": "Duo", "content": "What's up?"})
@@ -74,13 +77,14 @@ async def test_astream(
 ):
     litellm.module_level_aclient = mock_http_handler
 
-    with pytest.raises(
-        litellm.InternalServerError, match="something went wrong"
-    ), patch(
-        "google.auth.default",
-        return_value=(
-            MagicMock(spec=Credentials, token="mock_token"),
-            "mock_project_id",
+    with (
+        pytest.raises(litellm.InternalServerError, match="something went wrong"),
+        patch(
+            "google.auth.default",
+            return_value=(
+                MagicMock(spec=Credentials, token="mock_token"),
+                "mock_project_id",
+            ),
         ),
     ):
         await anext(prompt.astream({"name": "Duo", "content": "What's up?"}))

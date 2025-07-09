@@ -172,9 +172,10 @@ class Prompt(RunnableBinding[Input, Output]):
         config: Optional[RunnableConfig] = None,
         **kwargs: Optional[Any],
     ) -> Output:
-        with self.instrumentator.watch(
-            stream=False
-        ) as watcher, get_usage_metadata_callback() as cb:
+        with (
+            self.instrumentator.watch(stream=False) as watcher,
+            get_usage_metadata_callback() as cb,
+        ):
             result = await super().ainvoke(
                 input,
                 self._add_logger_to_config(config),
@@ -194,9 +195,10 @@ class Prompt(RunnableBinding[Input, Output]):
         # pylint: disable=contextmanager-generator-missing-cleanup,line-too-long
         # To properly address this pylint issue, the upstream function would need to be altered to ensure proper cleanup.
         # See https://pylint.readthedocs.io/en/latest/user_guide/messages/warning/contextmanager-generator-missing-cleanup.html
-        with self.instrumentator.watch(
-            stream=True
-        ) as watcher, get_usage_metadata_callback() as cb:
+        with (
+            self.instrumentator.watch(stream=True) as watcher,
+            get_usage_metadata_callback() as cb,
+        ):
             # The usage metadata callback only totals the usage at the `on_llm_end` event, so we need to be able to
             # yield the last stream item _after_ that event. Otherwise we'd need to yield an extra event just for the
             # usage metadata. To do this, we yield with a 1-item offset.

@@ -112,9 +112,12 @@ class TestGoalDisambiguationComponent:
     ):
         graph = StateGraph(WorkflowState)
 
-        with patch.dict(os.environ, {env_var: env_var_val}), patch(
-            "duo_workflow_service.components.goal_disambiguation.component.Agent"
-        ) as mock_agent_class:
+        with (
+            patch.dict(os.environ, {env_var: env_var_val}),
+            patch(
+                "duo_workflow_service.components.goal_disambiguation.component.Agent"
+            ) as mock_agent_class,
+        ):
             mock_agent = MagicMock(spec=Agent)
             mock_agent_class.return_value = mock_agent
 

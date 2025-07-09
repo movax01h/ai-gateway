@@ -56,9 +56,10 @@ async def test_set_options():
 
     mock_session = MagicMock(spec=aiohttp.ClientSession)
     mock_connector = MagicMock(spec=aiohttp.TCPConnector)
-    with patch("aiohttp.ClientSession") as mock_session_cls, patch(
-        "aiohttp.TCPConnector"
-    ) as mock_connector_cls:
+    with (
+        patch("aiohttp.ClientSession") as mock_session_cls,
+        patch("aiohttp.TCPConnector") as mock_connector_cls,
+    ):
         mock_connector_cls.return_value = mock_connector
         mock_session_cls.return_value = mock_session
         async with manager:

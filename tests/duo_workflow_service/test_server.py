@@ -40,19 +40,18 @@ def test_configure_cache_enabled():
 
 
 def test_run():
-    with patch(
-        "duo_workflow_service.server.setup_profiling"
-    ) as mock_setup_profiling, patch(
-        "duo_workflow_service.server.setup_error_tracking"
-    ) as mock_setup_error_tracking, patch(
-        "duo_workflow_service.server.setup_monitoring"
-    ) as mock_setup_monitoring, patch(
-        "duo_workflow_service.server.setup_logging"
-    ) as mock_setup_logging, patch(
-        "duo_workflow_service.server.validate_llm_access"
-    ) as mock_validate_llm_access, patch(
-        "asyncio.get_event_loop"
-    ) as mock_get_loop:
+    with (
+        patch("duo_workflow_service.server.setup_profiling") as mock_setup_profiling,
+        patch(
+            "duo_workflow_service.server.setup_error_tracking"
+        ) as mock_setup_error_tracking,
+        patch("duo_workflow_service.server.setup_monitoring") as mock_setup_monitoring,
+        patch("duo_workflow_service.server.setup_logging") as mock_setup_logging,
+        patch(
+            "duo_workflow_service.server.validate_llm_access"
+        ) as mock_validate_llm_access,
+        patch("asyncio.get_event_loop") as mock_get_loop,
+    ):
         mock_loop = MagicMock()
         mock_get_loop.return_value = mock_loop
 
@@ -296,14 +295,18 @@ async def test_grpc_serve():
     mock_server.start.return_value = None
     mock_server.wait_for_termination.return_value = None
 
-    with patch(
-        "duo_workflow_service.server.grpc.aio.server",
-        return_value=mock_server,
-    ), patch(
-        "duo_workflow_service.server.contract_pb2_grpc.add_DuoWorkflowServicer_to_server"
-    ) as mock_add_servicer, patch(
-        "duo_workflow_service.server.reflection.enable_server_reflection"
-    ) as mock_enable_reflection:
+    with (
+        patch(
+            "duo_workflow_service.server.grpc.aio.server",
+            return_value=mock_server,
+        ),
+        patch(
+            "duo_workflow_service.server.contract_pb2_grpc.add_DuoWorkflowServicer_to_server"
+        ) as mock_add_servicer,
+        patch(
+            "duo_workflow_service.server.reflection.enable_server_reflection"
+        ) as mock_enable_reflection,
+    ):
         await serve(50052)
 
     mock_server.add_insecure_port.assert_called_once_with("[::]:50052")

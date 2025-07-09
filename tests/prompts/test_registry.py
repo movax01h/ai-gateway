@@ -215,7 +215,7 @@ def model_factories():
         ModelClassProvider.AMAZON_Q: lambda model, **kwargs: ChatAmazonQ(
             model=model,
             amazon_q_client_factory=Mock(spec=AmazonQClientFactory),
-            **kwargs
+            **kwargs,
         ),
     }
 

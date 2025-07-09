@@ -229,9 +229,10 @@ class TestCodeGeneration:
             value=response_token_length,
         )
 
-        with patch.object(use_case, "tokenization_strategy") as mock, patch.object(
-            use_case, "snowplow_instrumentator"
-        ) as snowplow_mock:
+        with (
+            patch.object(use_case, "tokenization_strategy") as mock,
+            patch.object(use_case, "snowplow_instrumentator") as snowplow_mock,
+        ):
             mock.estimate_length = Mock(return_value=[4, 5])
 
             if stream:
