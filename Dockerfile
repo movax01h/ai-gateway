@@ -33,7 +33,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 COPY scripts /home/aigateway/app/scripts
 COPY vendor /home/aigateway/app/vendor
 
-RUN poetry install --no-interaction --no-ansi --no-cache --no-root --only main
+RUN poetry install --compile --no-interaction --no-ansi --no-cache --no-root --only main
 
 ##
 ## Final image copies dependencies from install-image
