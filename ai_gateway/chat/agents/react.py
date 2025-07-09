@@ -21,6 +21,7 @@ from ai_gateway.chat.agents.typing import (
 from ai_gateway.models.base_chat import Role
 from ai_gateway.prompts import Prompt, jinja2_formatter
 from ai_gateway.prompts.config import ModelClassProvider, ModelConfig
+from ai_gateway.prompts.config.base import PromptConfig
 from ai_gateway.structured_logging import get_request_logger
 from lib.feature_flags import FeatureFlag, is_feature_enabled
 
@@ -199,10 +200,8 @@ class ReActAgent(Prompt[ReActAgentInputs, TypeAgentEvent]):
         return chain | ReActPlainTextParser()
 
     @classmethod
-    def _build_prompt_template(
-        cls, prompt_template: dict[str, str], model_config: ModelConfig
-    ) -> Runnable:
-        return ReActPromptTemplate(prompt_template, model_config)
+    def _build_prompt_template(cls, config: PromptConfig) -> Runnable:
+        return ReActPromptTemplate(config.prompt_template, config.model)
 
     async def astream(
         self,

@@ -42,6 +42,7 @@ from ai_gateway.prompts.config.base import ModelConfig, PromptConfig, PromptPara
 from ai_gateway.prompts.config.models import ChatLiteLLMParams, TypeModelParams
 from ai_gateway.prompts.typing import Model, TypeModelFactory
 from ai_gateway.safety_attributes import SafetyAttributes
+from duo_workflow_service.entities.event import WorkflowEvent
 from duo_workflow_service.entities.state import (
     MessageTypeEnum,
     Plan,
@@ -484,8 +485,12 @@ class FakeModel(FakeListChatModel):
         return {**super()._identifying_params, **{"model": self.model_name}}
 
     def _generate(self, *args, **kwargs) -> ChatResult:
-        if len(self.responses) == 1 and isinstance(self.responses[0], ToolMessage):
-            return ChatResult(generations=[ChatGeneration(message=self.responses[0])])
+        if all(isinstance(response, ToolMessage) for response in self.responses):
+            return ChatResult(
+                generations=[
+                    ChatGeneration(message=response) for response in self.responses
+                ]
+            )
 
         result = super()._generate(*args, **kwargs)
 
@@ -520,7 +525,7 @@ class FakeModel(FakeListChatModel):
 
 @pytest.fixture
 def model(
-    model_response: str | ToolMessage,
+    model_response: str | list,
     model_engine: str,
     model_name: str,
     model_error: Exception,
@@ -529,14 +534,14 @@ def model(
 ):
     # our default Assistant prompt template already contains "Thought: "
     if isinstance(model_response, str):
-        response = model_response.removeprefix("Thought: ")
+        responses = [model_response.removeprefix("Thought: ")]
     else:
-        response = model_response  # type: ignore[assignment]
+        responses = model_response  # type: ignore[assignment]
 
     return FakeModel(
         model_engine=model_engine,
         model_name=model_name,
-        responses=[response],
+        responses=responses,
         model_error=model_error,
         usage_metadata=usage_metadata,
         disable_streaming=model_disable_streaming,
@@ -660,15 +665,31 @@ def ui_chat_log() -> list[UiChatLog]:
     ]
 
 
+@pytest.fixture
+def goal() -> str:
+    return "Make the world a better place"
+
+
+@pytest.fixture
+def last_human_input() -> WorkflowEvent | None:
+    return None
+
+
 @pytest.fixture(scope="function")
-def workflow_state(ui_chat_log: list[UiChatLog]):
+def workflow_state(
+    goal: str | None,
+    last_human_input: WorkflowEvent | None,
+    ui_chat_log: list[UiChatLog],
+):
     return WorkflowState(
         plan=Plan(steps=[]),
         status=WorkflowStatusEnum.NOT_STARTED,
         conversation_history={},
         handover=[],
-        last_human_input=None,
+        last_human_input=last_human_input,
         ui_chat_log=ui_chat_log,
+        project=None,
+        goal=goal,
     )
 
 

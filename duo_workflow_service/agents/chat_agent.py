@@ -14,7 +14,7 @@ from langchain_core.prompt_values import ChatPromptValue, PromptValue
 from langchain_core.runnables import Runnable, RunnableConfig
 
 from ai_gateway.prompts import Prompt, jinja2_formatter
-from ai_gateway.prompts.config import ModelConfig
+from ai_gateway.prompts.config.base import PromptConfig
 from duo_workflow_service.components.tools_registry import ToolsRegistry
 from duo_workflow_service.entities.state import (
     ApprovalStateRejection,
@@ -36,9 +36,8 @@ log = structlog.stdlib.get_logger("chat_agent")
 
 
 class ChatAgentPromptTemplate(Runnable[ChatWorkflowState, PromptValue]):
-    def __init__(self, prompt_template: dict[str, str], model_config: ModelConfig):
+    def __init__(self, prompt_template: dict[str, str]):
         self.prompt_template = prompt_template
-        self.model_config = model_config
 
     def invoke(
         self,
@@ -108,10 +107,8 @@ class ChatAgent(Prompt[ChatWorkflowState, BaseMessage]):
     tools_registry: Optional[ToolsRegistry] = None
 
     @classmethod
-    def _build_prompt_template(
-        cls, prompt_template: dict[str, str], model_config: ModelConfig
-    ) -> Runnable:
-        return ChatAgentPromptTemplate(prompt_template, model_config)
+    def _build_prompt_template(cls, config: PromptConfig) -> Runnable:
+        return ChatAgentPromptTemplate(config.prompt_template)
 
     def _get_approvals(self, message: AIMessage) -> tuple[bool, list[UiChatLog]]:
         approval_required = False

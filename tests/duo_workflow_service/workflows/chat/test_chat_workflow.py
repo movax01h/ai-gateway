@@ -188,7 +188,7 @@ async def test_execute_agent(workflow_with_project):
 class TestExecuteAgentWithTools:
     @pytest.fixture
     def model_response(self):
-        return ToolMessage(content="tool calling", tool_call_id="random_id")
+        return [ToolMessage(content="tool calling", tool_call_id="random_id")]
 
     @pytest.fixture
     def model_disable_streaming(self):

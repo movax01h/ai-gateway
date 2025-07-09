@@ -12,6 +12,8 @@ def graph_input() -> WorkflowState:
         handover=[],
         ui_chat_log=[],
         plan=Plan(steps=[]),
+        project=None,
+        goal=None,
     )
 
 

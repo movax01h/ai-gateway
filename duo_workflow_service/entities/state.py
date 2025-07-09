@@ -299,6 +299,8 @@ class WorkflowState(TypedDict):
     ui_chat_log: Annotated[List[UiChatLog], _ui_chat_log_reducer]
     handover: List[BaseMessage]
     last_human_input: Union[WorkflowEvent, None]
+    project: Project | None
+    goal: str | None
 
 
 class ReplacementRule(BaseModel):

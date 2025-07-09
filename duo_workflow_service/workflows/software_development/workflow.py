@@ -3,7 +3,7 @@ import os
 from datetime import datetime, timezone
 from enum import StrEnum
 from functools import partial
-from typing import Annotated
+from typing import Annotated, cast
 
 # pylint disables are going to be fixed via
 # https://gitlab.com/gitlab-org/duo-workflow/duo-workflow-service/-/issues/78
@@ -20,6 +20,7 @@ from langgraph.graph import (  # pylint: disable=no-langgraph-langchain-imports
 
 from duo_workflow_service.agents import (
     Agent,
+    AgentV2,
     HandoverAgent,
     PlanSupervisorAgent,
     PlanTerminatorAgent,
@@ -48,6 +49,7 @@ from duo_workflow_service.entities import (
 from duo_workflow_service.llm_factory import create_chat_model
 from duo_workflow_service.tracking.errors import log_exception
 from duo_workflow_service.workflows.abstract_workflow import AbstractWorkflow
+from lib.feature_flags.context import FeatureFlag, is_feature_enabled
 
 # Constants
 QUEUE_MAX_SIZE = 1
@@ -336,6 +338,8 @@ class Workflow(AbstractWorkflow):
             last_human_input=None,
             handover=[],
             ui_chat_log=[initial_ui_chat_log],
+            project=self._project,
+            goal=goal,
         )
 
     def _setup_context_builder(
@@ -344,24 +348,38 @@ class Workflow(AbstractWorkflow):
         tools_registry: ToolsRegistry,
     ):
         context_builder_toolset = tools_registry.toolset(CONTEXT_BUILDER_TOOLS)
-        context_builder = Agent(
-            goal=goal,
-            model=create_chat_model(
-                max_tokens=MAX_TOKENS_TO_SAMPLE,
-                config=self._model_config,
-            ),  # type: ignore
-            name="context_builder",
-            system_prompt=BUILD_CONTEXT_SYSTEM_MESSAGE.format(
-                handover_tool_name=HANDOVER_TOOL_NAME,
-                project_id=self._project["id"],
-                project_name=self._project["name"],
-                project_url=self._project["http_url_to_repo"],
-            ),
-            toolset=context_builder_toolset,
-            workflow_id=self._workflow_id,
-            http_client=self._http_client,
-            workflow_type=self._workflow_type,
-        )
+
+        if is_feature_enabled(FeatureFlag.DUO_WORKFLOW_PROMPT_REGISTRY):
+            context_builder: AgentV2 = cast(
+                AgentV2,
+                self._prompt_registry.get_on_behalf(
+                    self._user,
+                    "workflow/context_builder",
+                    "^1.0.0",
+                    tools=context_builder_toolset.bindable,  # type: ignore[arg-type]
+                    workflow_id=self._workflow_id,
+                    http_client=self._http_client,
+                ),
+            )
+        else:
+            context_builder = Agent(
+                goal=goal,
+                model=create_chat_model(
+                    max_tokens=MAX_TOKENS_TO_SAMPLE,
+                    config=self._model_config,
+                ),  # type: ignore
+                name="context_builder",
+                system_prompt=BUILD_CONTEXT_SYSTEM_MESSAGE.format(
+                    handover_tool_name=HANDOVER_TOOL_NAME,
+                    project_id=self._project["id"],
+                    project_name=self._project["name"],
+                    project_url=self._project["http_url_to_repo"],
+                ),
+                toolset=context_builder_toolset,
+                workflow_id=self._workflow_id,
+                http_client=self._http_client,
+                workflow_type=self._workflow_type,
+            )
 
         return {
             "agent": context_builder,

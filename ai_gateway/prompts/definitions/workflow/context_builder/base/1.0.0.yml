@@ -1,0 +1,13 @@
+---
+name: context_builder
+model:
+  config_file: claude_4_0
+  params:
+    max_tokens: 8_192
+unit_primitives:
+  - duo_workflow_execute_workflow
+prompt_template:
+  system: |
+    {% include 'workflow/context_builder/system/1.0.0.jinja' %}
+  user: |
+    {% include 'workflow/context_builder/user/1.0.0.jinja' %}

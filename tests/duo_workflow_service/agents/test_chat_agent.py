@@ -1,12 +1,11 @@
 from datetime import datetime, timezone
-from unittest.mock import ANY, MagicMock, Mock, call, patch
+from unittest.mock import ANY, Mock, call, patch
 
 import pytest
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 from langchain_core.messages.ai import UsageMetadata
 from langchain_core.prompt_values import ChatPromptValue
 
-from ai_gateway.prompts.config import ModelClassProvider, ModelConfig
 from duo_workflow_service.agents.chat_agent import ChatAgent, ChatAgentPromptTemplate
 from duo_workflow_service.entities import WorkflowStatusEnum
 from duo_workflow_service.entities.state import (
@@ -117,15 +116,6 @@ class TestChatAgentTrackTokensData:
 
 
 class TestChatAgentPromptTemplate:
-
-    @pytest.fixture
-    def mock_model_config(self):
-        config = MagicMock(spec=ModelConfig)
-        # Properly configure the nested mock structure
-        config.params = MagicMock()
-        config.params.model_class_provider = ModelClassProvider.ANTHROPIC
-        return config
-
     @pytest.fixture
     def prompt_template_with_split_system(self):
         """Prompt template with both system_static and system_dynamic parts."""
@@ -157,14 +147,11 @@ class TestChatAgentPromptTemplate:
     def test_split_system_prompts_create_separate_messages(
         self,
         prompt_template_with_split_system,
-        mock_model_config,
         chat_workflow_state,
         mock_datetime,
     ):
         """Test that system_static and system_dynamic create separate system messages."""
-        template = ChatAgentPromptTemplate(
-            prompt_template_with_split_system, mock_model_config
-        )
+        template = ChatAgentPromptTemplate(prompt_template_with_split_system)
 
         result = template.invoke(chat_workflow_state, agent_name="test_agent")
 
@@ -206,9 +193,7 @@ class TestChatAgentPromptTemplate:
         user_message = messages[2]
         assert isinstance(user_message, HumanMessage)
 
-    def test_system_prompts_without_project(
-        self, prompt_template_with_split_system, mock_model_config
-    ):
+    def test_system_prompts_without_project(self, prompt_template_with_split_system):
         """Test system prompts when no project is provided."""
         state_without_project = ChatWorkflowState(
             plan={"steps": []},
@@ -220,9 +205,7 @@ class TestChatAgentPromptTemplate:
             approval=None,
         )
 
-        template = ChatAgentPromptTemplate(
-            prompt_template_with_split_system, mock_model_config
-        )
+        template = ChatAgentPromptTemplate(prompt_template_with_split_system)
 
         result = template.invoke(state_without_project, agent_name="test_agent")
 
@@ -243,14 +226,11 @@ class TestChatAgentPromptTemplate:
     def test_jinja2_variable_resolution(
         self,
         prompt_template_with_split_system,
-        mock_model_config,
         chat_workflow_state,
         mock_datetime,
     ):
         """Test that Jinja2 variables are properly resolved in both static and dynamic parts."""
-        template = ChatAgentPromptTemplate(
-            prompt_template_with_split_system, mock_model_config
-        )
+        template = ChatAgentPromptTemplate(prompt_template_with_split_system)
 
         result = template.invoke(chat_workflow_state, agent_name="test_agent")
 
@@ -286,9 +266,7 @@ class TestChatAgentPromptTemplate:
         assert "123" in dynamic_content
         assert "https://gitlab.com/test/project" in dynamic_content
 
-    def test_conversation_history_processing(
-        self, prompt_template_with_split_system, mock_model_config
-    ):
+    def test_conversation_history_processing(self, prompt_template_with_split_system):
         """Test that conversation history is properly processed."""
         state_with_history = ChatWorkflowState(
             plan={"steps": []},
@@ -305,9 +283,7 @@ class TestChatAgentPromptTemplate:
             approval=None,
         )
 
-        template = ChatAgentPromptTemplate(
-            prompt_template_with_split_system, mock_model_config
-        )
+        template = ChatAgentPromptTemplate(prompt_template_with_split_system)
 
         result = template.invoke(state_with_history, agent_name="test_agent")
 
@@ -325,14 +301,11 @@ class TestChatAgentPromptTemplate:
     def test_anthropic_cache_control_enabled(
         self,
         prompt_template_with_split_system,
-        mock_model_config,
         chat_workflow_state,
     ):
         current_feature_flag_context.set({"enable_anthropic_prompt_caching"})
 
-        template = ChatAgentPromptTemplate(
-            prompt_template_with_split_system, mock_model_config
-        )
+        template = ChatAgentPromptTemplate(prompt_template_with_split_system)
 
         result = template.invoke(chat_workflow_state, agent_name="test_agent")
 
@@ -366,15 +339,12 @@ class TestChatAgentPromptTemplate:
     def test_anthropic_cache_control_disabled(
         self,
         prompt_template_with_split_system,
-        mock_model_config,
         chat_workflow_state,
     ):
         """Test that cache_control is NOT added when feature flag is disabled."""
         current_feature_flag_context.set({})
 
-        template = ChatAgentPromptTemplate(
-            prompt_template_with_split_system, mock_model_config
-        )
+        template = ChatAgentPromptTemplate(prompt_template_with_split_system)
 
         result = template.invoke(chat_workflow_state, agent_name="test_agent")
 
@@ -389,15 +359,12 @@ class TestChatAgentPromptTemplate:
     def test_cache_control_only_applied_to_static_system_message(
         self,
         prompt_template_with_split_system,
-        mock_model_config,
         chat_workflow_state,
         mock_datetime,
     ):
         current_feature_flag_context.set({"enable_anthropic_prompt_caching"})
 
-        template = ChatAgentPromptTemplate(
-            prompt_template_with_split_system, mock_model_config
-        )
+        template = ChatAgentPromptTemplate(prompt_template_with_split_system)
 
         result = template.invoke(chat_workflow_state, agent_name="test_agent")
 

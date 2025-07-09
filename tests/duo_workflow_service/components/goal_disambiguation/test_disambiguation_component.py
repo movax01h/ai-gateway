@@ -73,6 +73,8 @@ class TestGoalDisambiguationComponent:
             last_human_input=None,
             handover=[],
             ui_chat_log=[],
+            project=None,
+            goal=None,
         )
 
     @pytest.fixture
@@ -217,6 +219,8 @@ class TestGoalDisambiguationComponent:
             ui_chat_log=[],
             handover=[human_msg, ai_msg],
             last_human_input=None,
+            project=None,
+            goal=None,
         )
         with patch(
             "duo_workflow_service.components.goal_disambiguation.component.Agent"
@@ -273,6 +277,8 @@ class TestGoalDisambiguationComponent:
             last_human_input=None,
             handover=[],
             ui_chat_log=[],
+            project=None,
+            goal=None,
         )
 
         with patch(

@@ -28,6 +28,8 @@ class TestPlanTerminatorAgent:
             last_human_input=None,
             plan=Plan(steps=[]),
             ui_chat_log=[],
+            project=None,
+            goal=None,
         )
 
     @dataclass

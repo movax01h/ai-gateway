@@ -374,4 +374,6 @@ class Workflow(AbstractWorkflow):
             plan=Plan(steps=[]),
             handover=[],
             last_human_input=None,
+            project=None,
+            goal=goal,
         )

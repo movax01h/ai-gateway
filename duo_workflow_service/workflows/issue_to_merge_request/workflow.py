@@ -354,6 +354,8 @@ class Workflow(AbstractWorkflow):
             plan=Plan(steps=[]),
             handover=[],
             last_human_input=None,
+            project=self._project,
+            goal=goal,
         )
 
     def _fetch_issue_iid(self, issue_url: str):
