@@ -277,17 +277,23 @@ class GitLabWorkflow(BaseCheckpointSaver[Any], AbstractAsyncContextManager[Any])
         checkpoint_tuple = self._workflow_config["first_checkpoint"]
         status = self._workflow_config["workflow_status"]
 
-        if not checkpoint_tuple:
-            return WorkflowStatusEventEnum.START, EventPropertyEnum.WORKFLOW_ID
-
         if status in [
             WorkflowStatusEnum.INPUT_REQUIRED,
             WorkflowStatusEnum.PLAN_APPROVAL_REQUIRED,
             WorkflowStatusEnum.TOOL_CALL_APPROVAL_REQUIRED,
         ]:
+            if not checkpoint_tuple:
+                self._logger.warning(
+                    "Resuming a workflow, but first checkpoint is missing",
+                    **self._workflow_config,
+                )
+
             return WorkflowStatusEventEnum.RESUME, STATUS_TO_EVENT_PROPERTY.get(
                 status, EventPropertyEnum.WORKFLOW_RESUME_BY_PLAN
             )
+
+        if not checkpoint_tuple:
+            return WorkflowStatusEventEnum.START, EventPropertyEnum.WORKFLOW_ID
         else:
             # existing workflows which were not interrupted are retried
             return (
