@@ -1,10 +1,11 @@
 import asyncio
 import os
 from typing import Any
-from unittest.mock import ANY, AsyncMock, MagicMock, call, patch
+from unittest.mock import ANY, AsyncMock, MagicMock, Mock, call, patch
 from uuid import uuid4
 
 import pytest
+from gitlab_cloud_connector import CloudConnectorUser, UserClaims
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 from langgraph.checkpoint.base import CheckpointTuple
 from langgraph.checkpoint.memory import MemorySaver
@@ -17,6 +18,7 @@ from duo_workflow_service.components.tools_registry import (
     ToolsRegistry,
 )
 from duo_workflow_service.entities import Plan, WorkflowStatusEnum
+from duo_workflow_service.gitlab.http_client import GitlabHttpClient
 from duo_workflow_service.llm_factory import AnthropicConfig, VertexConfig
 from duo_workflow_service.workflows.software_development.workflow import (
     CONTEXT_BUILDER_TOOLS,
@@ -24,6 +26,7 @@ from duo_workflow_service.workflows.software_development.workflow import (
     PLANNER_TOOLS,
     Workflow,
 )
+from lib.feature_flags.context import current_feature_flag_context
 from lib.internal_events.event_enum import CategoryEnum
 
 
@@ -56,15 +59,29 @@ def prepare_container(mock_container):
 
 
 @pytest.fixture
-def workflow():
+def user():
+    return CloudConnectorUser(
+        authenticated=True,
+        claims=UserClaims(
+            scopes=["duo_workflow_execute_workflow"],
+            issuer="gitlab-duo-workflow-service",
+        ),
+    )
+
+
+@pytest.fixture
+def workflow(
+    mock_container: Mock, gl_http_client: GitlabHttpClient, user: CloudConnectorUser
+):
     """Create a software development workflow instance."""
     workflow = Workflow(
         "test",
         {},
         workflow_type=CategoryEnum.WORKFLOW_SOFTWARE_DEVELOPMENT,
+        user=user,
     )
     workflow._project = {"id": 1, "name": "test", "http_url_to_repo": "http://test"}  # type: ignore
-    workflow._http_client = MagicMock()
+    workflow._http_client = gl_http_client
     return workflow
 
 
@@ -169,10 +186,28 @@ def agent_responses() -> list[dict[str, Any]]:
 
 
 @pytest.fixture
-def mock_agent(agent_responses: list[dict[str, Any]]):
-    with patch(
-        "duo_workflow_service.workflows.software_development.workflow.Agent"
-    ) as mock:
+def duo_workflow_prompt_registry_enabled() -> bool:
+    return False
+
+
+@pytest.fixture(autouse=True)
+def stub_feature_flags(duo_workflow_prompt_registry_enabled: bool):
+    if duo_workflow_prompt_registry_enabled:
+        current_feature_flag_context.set({"duo_workflow_prompt_registry"})
+
+    yield
+
+
+@pytest.fixture
+def mock_agent(
+    agent_responses: list[dict[str, Any]], duo_workflow_prompt_registry_enabled: bool
+):
+    if duo_workflow_prompt_registry_enabled:
+        factory = "ai_gateway.prompts.registry.LocalPromptRegistry.get_on_behalf"
+    else:
+        factory = "duo_workflow_service.workflows.software_development.workflow.Agent"
+
+    with patch(factory) as mock:
         mock.return_value.run.side_effect = agent_responses
         yield mock
 
@@ -273,6 +308,7 @@ async def test_workflow_initialization(workflow):
     autospec=True,
 )
 @patch.dict(os.environ, {"DW_INTERNAL_EVENT__ENABLED": "true"})
+@pytest.mark.parametrize("duo_workflow_prompt_registry_enabled", [False, True])
 async def test_workflow_run(
     mock_status_updater,
     mock_gitlab_workflow_aput,
@@ -359,6 +395,7 @@ async def test_workflow_run(
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("duo_workflow_prompt_registry_enabled", [False, True])
 @pytest.mark.parametrize("offline_mode", [True])
 @patch.dict(os.environ, {"DW_INTERNAL_EVENT__ENABLED": "true"})
 async def test_workflow_run_with_memory_saver(
@@ -410,6 +447,7 @@ async def test_workflow_run_with_memory_saver(
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("duo_workflow_prompt_registry_enabled", [False, True])
 @patch.dict(os.environ, {"DW_INTERNAL_EVENT__ENABLED": "true"})
 async def test_workflow_run_when_exception(
     mock_log_exception,
@@ -456,6 +494,7 @@ async def test_workflow_run_when_exception(
     "duo_workflow_service.checkpointer.gitlab_workflow.GitLabStatusUpdater",
     autospec=True,
 )
+@pytest.mark.parametrize("duo_workflow_prompt_registry_enabled", [False, True])
 @patch.dict(os.environ, {"DW_INTERNAL_EVENT__ENABLED": "true"})
 async def test_workflow_run_with_error_state(
     mock_status_updater,
@@ -499,6 +538,7 @@ async def test_workflow_run_with_error_state(
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("duo_workflow_prompt_registry_enabled", [False, True])
 async def test_workflow_run_with_tools_registry(
     mock_log_exception,
     mock_executor_component,
@@ -576,8 +616,7 @@ def assert_tools_in_tools_registry(tools_registry, tools):
 # calls made when the workflow is run.
 # The next test check that the tools defined in the agent setup methods in the workflow are actually in
 # the registry and match the list in the test.
-
-
+@pytest.mark.parametrize("duo_workflow_prompt_registry_enabled", [False, True])
 def test_context_builder_tools(tools_registry, workflow):
     """Test that all tools used by the context builder agent are available in the tools registry."""
     agent_components = workflow._setup_context_builder("test goal", tools_registry)
@@ -586,6 +625,7 @@ def test_context_builder_tools(tools_registry, workflow):
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("duo_workflow_prompt_registry_enabled", [False, True])
 @patch.dict(os.environ, {"DW_INTERNAL_EVENT__ENABLED": "true"})
 async def test_workflow_run_with_setup_error(
     mock_executor_component,
@@ -611,6 +651,7 @@ async def test_workflow_run_with_setup_error(
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("duo_workflow_prompt_registry_enabled", [False, True])
 @patch.dict(os.environ, {"DW_INTERNAL_EVENT__ENABLED": "true"})
 async def test_workflow_run_with_missing_web_url(
     mock_fetch_workflow_and_project_data,
@@ -638,6 +679,7 @@ async def test_workflow_run_with_missing_web_url(
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("duo_workflow_prompt_registry_enabled", [False, True])
 @patch(
     "duo_workflow_service.workflows.abstract_workflow.GitLabUrlParser", autospec=True
 )
@@ -672,6 +714,7 @@ async def test_workflow_run_with_invalid_web_url(
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("duo_workflow_prompt_registry_enabled", [False, True])
 @patch.dict(os.environ, {"DW_INTERNAL_EVENT__ENABLED": "true"})
 async def test_workflow_run_with_retry(
     mock_log_exception,
@@ -757,6 +800,7 @@ async def test_workflow_run_with_retry(
 
 @pytest.mark.asyncio
 @patch.dict(os.environ, {"DW_INTERNAL_EVENT__ENABLED": "true"})
+@pytest.mark.parametrize("duo_workflow_prompt_registry_enabled", [False, True])
 @pytest.mark.parametrize(
     "agent_responses",
     [
@@ -835,6 +879,7 @@ async def test_workflow_run_with_tool_approvals(
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("duo_workflow_prompt_registry_enabled", [False, True])
 @pytest.mark.parametrize(
     "workflow_config", [{"project_id": 1, "allow_agent_to_request_user": False}]
 )
@@ -896,6 +941,7 @@ async def test_workflow_run_without_plan_approval_component(
     assert workflow.is_done
 
 
+@pytest.mark.parametrize("duo_workflow_prompt_registry_enabled", [False, True])
 @pytest.mark.asyncio
 async def test_get_from_outbox(workflow):
     workflow._outbox.put_nowait("test_item")
@@ -903,6 +949,7 @@ async def test_get_from_outbox(workflow):
     assert item == "test_item"
 
 
+@pytest.mark.parametrize("duo_workflow_prompt_registry_enabled", [False, True])
 def test_add_to_inbox(workflow):
     event = contract_pb2.ClientEvent()
     workflow.add_to_inbox(event)
@@ -910,6 +957,7 @@ def test_add_to_inbox(workflow):
     assert workflow._inbox.get_nowait() == event
 
 
+@pytest.mark.parametrize("duo_workflow_prompt_registry_enabled", [False, True])
 @pytest.mark.asyncio
 async def test_workflow_cleanup(workflow):
     assert workflow._outbox.empty()
@@ -929,6 +977,7 @@ async def test_workflow_cleanup(workflow):
     assert workflow._inbox.qsize() == 0
 
 
+@pytest.mark.parametrize("duo_workflow_prompt_registry_enabled", [False, True])
 @pytest.mark.parametrize(
     "env_vars,expected_config_type,expected_model",
     [

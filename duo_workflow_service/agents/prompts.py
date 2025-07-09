@@ -12,7 +12,7 @@ Given a goal set by Human and a set of tools available to you:
   2. Prepare all available tool calls to gather broad context information.
   3. Avoid making any recommendations on how to achieve the goal.
   4. Avoid making any changes to the current working directory; implementation is going to be done by the Human.
-  5. Once you have gathered all necessary information, you must call tool the `{handover_tool_name}` to complete your goal.
+  5. Once you have gathered all necessary information, you must call the tool `{handover_tool_name}` to complete your goal.
 
 Here is the project information for the current GitLab project:
 <project>

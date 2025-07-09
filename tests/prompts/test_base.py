@@ -30,7 +30,7 @@ from ai_gateway.model_metadata import (
 )
 from ai_gateway.models.v2.anthropic_claude import ChatAnthropic
 from ai_gateway.prompts import BasePromptRegistry, Prompt
-from ai_gateway.prompts.config.base import PromptParams
+from ai_gateway.prompts.config.base import PromptConfig, PromptParams
 from lib.internal_events.context import InternalEventAdditionalProperties
 from tests.conftest import FakeModel
 
@@ -103,8 +103,8 @@ class TestPrompt:
         assert prompt.model_engine == expected_model_engine
         assert isinstance(prompt.bound, Runnable)
 
-    def test_build_prompt_template(self, prompt_template, model_config):
-        prompt_template = Prompt._build_prompt_template(prompt_template, model_config)
+    def test_build_prompt_template(self, prompt_config: PromptConfig):
+        prompt_template: Runnable = Prompt._build_prompt_template(prompt_config)
 
         assert prompt_template == ChatPromptTemplate.from_messages(
             [

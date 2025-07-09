@@ -97,6 +97,7 @@ class Prompt(RunnableBinding[Input, Output]):
         model_metadata: Optional[TypeModelMetadata] = None,
         disable_streaming: bool = False,
         tools: Optional[List[BaseTool]] = None,
+        **kwargs: Any,
     ):
         model_override = None
         model_provider = config.model.params.model_class_provider
@@ -106,7 +107,7 @@ class Prompt(RunnableBinding[Input, Output]):
         )
         if tools and isinstance(model, BaseChatModel):
             model = model.bind_tools(tools)  # type: ignore[assignment]
-        prompt = self._build_prompt_template(config.prompt_template, config.model)
+        prompt = self._build_prompt_template(config)
         chain = self._build_chain(
             cast(
                 Runnable[Input, Output],
@@ -122,6 +123,7 @@ class Prompt(RunnableBinding[Input, Output]):
             unit_primitives=config.unit_primitives,
             bound=chain,
             prompt_tpl=prompt,
+            **kwargs,
         )  # type: ignore[call-arg]
 
     def _build_model_kwargs(
@@ -284,13 +286,11 @@ class Prompt(RunnableBinding[Input, Output]):
 
     @classmethod
     def _build_prompt_template(
-        cls,
-        prompt_template: dict[str, str],
-        model_config: ModelConfig,  # pylint: disable=unused-argument
+        cls, config: PromptConfig
     ) -> Runnable[Input, PromptValue]:
         messages = []
 
-        for role, template in cls._prompt_template_to_messages(prompt_template):
+        for role, template in cls._prompt_template_to_messages(config.prompt_template):
             messages.append((role, template))
 
         return cast(
@@ -310,6 +310,7 @@ class BasePromptRegistry(ABC):
         prompt_version: str,
         model_metadata: Optional[TypeModelMetadata] = None,
         tools: Optional[List[BaseTool]] = None,
+        **kwargs: Any,
     ) -> Prompt:
         pass
 
@@ -323,6 +324,7 @@ class BasePromptRegistry(ABC):
         model_metadata: Optional[TypeModelMetadata] = None,
         internal_event_category=__name__,
         tools: Optional[List[BaseTool]] = None,
+        **kwargs: Any,
     ) -> Prompt:
         if not model_metadata:
             model_metadata = current_model_metadata_context.get()
@@ -330,7 +332,9 @@ class BasePromptRegistry(ABC):
         if model_metadata and isinstance(user, StarletteUser):
             model_metadata.add_user(user)
 
-        prompt = self.get(prompt_id, prompt_version or "^1.0.0", model_metadata, tools)
+        prompt = self.get(
+            prompt_id, prompt_version or "^1.0.0", model_metadata, tools, **kwargs
+        )
         prompt.internal_event_client = self.internal_event_client
         prompt.set_limits(self.model_limits)
 

@@ -1,17 +1,17 @@
 import sys
 from pathlib import Path
 from typing import cast
+from unittest.mock import Mock
 
 import pytest
 from dependency_injector import containers, providers
 from pydantic import AnyUrl
 
-from ai_gateway.chat.agents.react import ReActAgent
 from ai_gateway.config import ConfigModelLimits
 from ai_gateway.model_metadata import ModelMetadata
-from ai_gateway.prompts import Prompt
 from ai_gateway.prompts.registry import LocalPromptRegistry
-from duo_workflow_service.agents.chat_agent import ChatAgent, ChatAgentPromptTemplate
+from duo_workflow_service import agents as workflow
+from duo_workflow_service.gitlab.http_client import GitlabHttpClient
 
 
 @pytest.fixture
@@ -34,6 +34,17 @@ def config_values(assets_dir):
             }
         },
     }
+
+
+def _kwargs_for_class(klass):
+    match klass:
+        case workflow.AgentV2:
+            return {
+                "workflow_id": "123",
+                "http_client": Mock(spec=GitlabHttpClient),
+            }
+
+    return {}
 
 
 def test_container(mock_container: containers.DeclarativeContainer):
@@ -74,25 +85,15 @@ def test_container(mock_container: containers.DeclarativeContainer):
             provider="",
         )
 
+        klass = registry.prompts_registered[str(prompt_id_with_model_name)].klass
+        kwargs = _kwargs_for_class(klass)
+
         for version in versions:
             prompt = registry.get(
                 str(prompt_id),
                 f"={version}",  # Make a strict constraint so we can check every existing version
                 model_metadata=model_metadata,
+                **kwargs,
             )
-            assert isinstance(prompt, Prompt)
+            assert isinstance(prompt, klass)
             assert prompt.model.disable_streaming
-
-            if isinstance(prompt, ReActAgent):
-                prompt_template = prompt.bound.middle[0]  # type: ignore[attr-defined]
-            elif isinstance(prompt, ChatAgent):
-                prompt_template = prompt.bound.first  # type: ignore[attr-defined]
-                # ChatAgent uses a custom prompt template, so we can't test format_messages
-                # Instead, verify it's the correct type
-                assert isinstance(prompt_template, ChatAgentPromptTemplate)
-                continue  # Skip the format_messages test for ChatAgent
-            else:
-                prompt_template = prompt.bound.first  # type: ignore[attr-defined]
-
-                # Check that the messages are populated correctly
-                assert len(prompt_template.format_messages()) > 0

@@ -16,6 +16,8 @@ class TestPlanSupervisorAgent:
             handover=[],
             last_human_input=None,
             ui_chat_log=[],
+            project=None,
+            goal=None,
         )
 
     @pytest.mark.asyncio

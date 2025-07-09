@@ -52,12 +52,9 @@ def workflow_state(plan: Plan):
         handover=[],
         last_human_input=None,
         ui_chat_log=[],
+        project=None,
+        goal=None,
     )
-
-
-@pytest.fixture(autouse=True)
-def prepare_container(mock_container):  # pylint: disable=unused-argument
-    pass
 
 
 # pylint: disable=too-many-public-methods
@@ -69,17 +66,13 @@ class TestAgent:
         return mock
 
     @pytest.fixture
-    def http_client_mock(self):
-        return MagicMock(spec=GitlabHttpClient)
-
-    @pytest.fixture
     def mock_toolset(self):
         mock = MagicMock(spec=Toolset)
         mock.bindable = []
         return mock
 
     @pytest.fixture
-    def planner_agent(self, chat_mock, http_client_mock, mock_toolset):
+    def planner_agent(self, chat_mock, gl_http_client, mock_toolset):
         return Agent(
             goal="Make the world a better place",
             model=chat_mock,
@@ -87,17 +80,17 @@ class TestAgent:
             system_prompt="You are AGI entity capable of anything",
             toolset=mock_toolset,
             workflow_id="test-workflow-123",
-            http_client=http_client_mock,
+            http_client=gl_http_client,
             workflow_type=CategoryEnum.WORKFLOW_SOFTWARE_DEVELOPMENT,
         )
 
-    def test_init(self, chat_mock, planner_agent, http_client_mock, mock_toolset):
+    def test_init(self, chat_mock, planner_agent, gl_http_client, mock_toolset):
         assert planner_agent._goal == "Make the world a better place"
         assert planner_agent._model == chat_mock
         assert planner_agent.name == "test agent"
         assert planner_agent._system_prompt == "You are AGI entity capable of anything"
         assert planner_agent._workflow_id == "test-workflow-123"
-        assert planner_agent._http_client == http_client_mock
+        assert planner_agent._http_client == gl_http_client
         assert planner_agent._toolset == mock_toolset
         chat_mock.bind_tools.assert_called_once_with(mock_toolset.bindable)
 
@@ -434,12 +427,7 @@ class TestAgent:
     @pytest.mark.asyncio
     @patch("duo_workflow_service.agents.agent.get_event")
     async def test_run_with_check_events_disabled(
-        self,
-        mock_get_event,
-        chat_mock,
-        http_client_mock,
-        mock_toolset,
-        workflow_state,
+        self, mock_get_event, chat_mock, gl_http_client, mock_toolset, workflow_state
     ):
         # Create agent with check_events=False
         agent = Agent(
@@ -449,7 +437,7 @@ class TestAgent:
             system_prompt="You are AGI entity capable of anything",
             toolset=mock_toolset,
             workflow_id="test-workflow-123",
-            http_client=http_client_mock,
+            http_client=gl_http_client,
             workflow_type=CategoryEnum.WORKFLOW_SOFTWARE_DEVELOPMENT,
             check_events=False,
         )
@@ -476,7 +464,7 @@ class TestAgent:
         self,
         mock_get_event,
         chat_mock,
-        http_client_mock,
+        gl_http_client,
         mock_toolset,
         workflow_state,
     ):
@@ -488,7 +476,7 @@ class TestAgent:
             system_prompt="You are AGI entity capable of anything",
             toolset=mock_toolset,
             workflow_id="test-workflow-123",
-            http_client=http_client_mock,
+            http_client=gl_http_client,
             workflow_type=CategoryEnum.WORKFLOW_SOFTWARE_DEVELOPMENT,
             check_events=True,
         )
@@ -508,7 +496,7 @@ class TestAgent:
 
         # Verify get_event was called
         mock_get_event.assert_called_once_with(
-            http_client_mock, "test-workflow-123", False
+            gl_http_client, "test-workflow-123", False
         )
 
         # Verify the agent processed the request
