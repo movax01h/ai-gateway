@@ -579,7 +579,7 @@ def test_available_tools_for_user(
 )
 def test_toolset_method(tool_metadata, tool_names, expected_preapproved):
     registry = ToolsRegistry(
-        enabled_tools=["read_write_files", "use_git"],
+        enabled_tools=["read_write_files", "use_git", "nonexistent_privilege"],
         preapproved_tools=["read_write_files"],
         tool_metadata=tool_metadata,
     )
