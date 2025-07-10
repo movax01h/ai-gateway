@@ -477,6 +477,7 @@ async def test_execute_workflow_missing_workflow_metadata(
         invocation_metadata={"base_url": "", "gitlab_token": ""},
         mcp_tools=[],
         approval=contract_pb2.Approval(),
+        language_server_version=None,
     )
 
 
@@ -528,6 +529,7 @@ async def test_execute_workflow_valid_workflow_metadata(
         invocation_metadata={"base_url": "http://test.url", "gitlab_token": "123"},
         mcp_tools=mcp_tools,
         approval=approval,
+        language_server_version=None,
     )
 
 

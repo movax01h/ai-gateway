@@ -8,6 +8,7 @@ __all__ = ["LanguageServerVersion"]
 log = structlog.stdlib.get_logger("codesuggestions")
 
 ADVANCED_CONTEXT_LANGUAGE_SERVER_VERSION = Version("7.17.1")
+MINIMUM_WORKFLOW_CLIENT_VERSION = Version("7.43.0")
 
 
 class LanguageServerVersion:
@@ -29,3 +30,6 @@ class LanguageServerVersion:
 
     def supports_advanced_context(self) -> bool:
         return self.version >= ADVANCED_CONTEXT_LANGUAGE_SERVER_VERSION
+
+    def supports_node_executor_tools(self) -> bool:
+        return self.version >= MINIMUM_WORKFLOW_CLIENT_VERSION

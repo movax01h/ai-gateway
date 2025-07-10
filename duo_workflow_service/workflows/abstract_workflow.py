@@ -18,6 +18,7 @@ from langgraph.checkpoint.base import (  # pylint: disable=no-langgraph-langchai
 from langgraph.types import Command
 from langsmith import traceable, tracing_context
 
+from ai_gateway.code_suggestions.language_server import LanguageServerVersion
 from ai_gateway.container import ContainerApplication
 from ai_gateway.models import KindAnthropicModel
 from ai_gateway.prompts.registry import LocalPromptRegistry
@@ -83,6 +84,7 @@ class AbstractWorkflow(ABC):
     _additional_tools: list[Type[BaseTool]]
     _approval: Optional[contract_pb2.Approval]
     _prompt_registry: LocalPromptRegistry
+    _language_server_version: Optional[LanguageServerVersion]
 
     @inject
     def __init__(
@@ -104,6 +106,7 @@ class AbstractWorkflow(ABC):
         internal_event_client: InternalEventsClient = Provide[
             ContainerApplication.internal_event.client
         ],
+        language_server_version: Optional[LanguageServerVersion] = None,
     ):
         self._outbox = asyncio.Queue(maxsize=QUEUE_MAX_SIZE)
         self._inbox = asyncio.Queue(maxsize=QUEUE_MAX_SIZE)
@@ -126,6 +129,7 @@ class AbstractWorkflow(ABC):
         self._prompt_registry = prompt_registry
         self._workflow_config = empty_workflow_config()
         self._internal_event_client = internal_event_client
+        self._language_server_version = language_server_version
 
     async def run(self, goal: str) -> None:
         with duo_workflow_metrics.time_workflow(
@@ -230,6 +234,7 @@ class AbstractWorkflow(ABC):
                 gitlab_host=gitlab_host,
                 additional_tools=self._additional_tools,
                 user=user_for_registry,
+                language_server_version=self._language_server_version,
             )
             checkpoint_notifier = UserInterface(
                 outbox=self._streaming_outbox, goal=goal

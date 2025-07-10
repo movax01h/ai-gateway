@@ -5,10 +5,12 @@ from gitlab_cloud_connector import CloudConnectorUser
 from langchain.tools import BaseTool
 from pydantic import BaseModel
 
+from ai_gateway.code_suggestions.language_server import LanguageServerVersion
 from duo_workflow_service import tools
 from duo_workflow_service.gitlab.gitlab_project import WorkflowConfig
 from duo_workflow_service.gitlab.http_client import GitlabHttpClient
 from duo_workflow_service.tools import Toolset, ToolType
+from duo_workflow_service.tools.duo_base_tool import DuoBaseTool
 from lib.feature_flags import FeatureFlag, is_feature_enabled
 
 
@@ -127,6 +129,7 @@ class ToolsRegistry:
         gitlab_host: str,
         additional_tools: Optional[list[Type[BaseTool]]] = None,
         user: Optional[CloudConnectorUser] = None,
+        language_server_version: Optional[LanguageServerVersion] = None,
     ):
         if not workflow_config:
             raise RuntimeError("Failed to find tools configuration for workflow")
@@ -156,6 +159,7 @@ class ToolsRegistry:
             tool_metadata=tool_metadata,
             additional_tools=additional_tools,
             user=user,
+            language_server_version=language_server_version,
         )
 
     def __init__(
@@ -165,6 +169,7 @@ class ToolsRegistry:
         tool_metadata: ToolMetadata,
         additional_tools: Optional[list[Type[BaseTool]]] = None,
         user: Optional[CloudConnectorUser] = None,
+        language_server_version: Optional[LanguageServerVersion] = None,
     ):
         if not additional_tools:
             additional_tools = []
@@ -201,6 +206,11 @@ class ToolsRegistry:
                 if user:
                     tool_primitive = getattr(tool, "unit_primitive", None)
                     if tool_primitive and not user.can(tool_primitive):
+                        continue
+
+                # If language server client was detected, restrict tool versions
+                if isinstance(tool, DuoBaseTool) and language_server_version:
+                    if not language_server_version.supports_node_executor_tools():
                         continue
 
                 self._enabled_tools[tool.name] = tool
