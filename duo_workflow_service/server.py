@@ -38,6 +38,10 @@ from duo_workflow_service.interceptors.feature_flag_interceptor import (
 from duo_workflow_service.interceptors.internal_events_interceptor import (
     InternalEventsInterceptor,
 )
+from duo_workflow_service.interceptors.language_server_version_interceptor import (
+    LanguageServerVersionInterceptor,
+    language_server_version,
+)
 from duo_workflow_service.interceptors.monitoring_interceptor import (
     MonitoringInterceptor,
 )
@@ -210,6 +214,7 @@ class DuoWorkflowService(contract_pb2_grpc.DuoWorkflowServicer):
                 "gitlab_token": invocation_metadata.get("x-gitlab-oauth-token", ""),
             },
             approval=start_workflow_request.startRequest.approval,
+            language_server_version=language_server_version.get(),
         )
 
         async def send_events():
@@ -367,6 +372,7 @@ async def serve(port: int) -> None:
                 FeatureFlagInterceptor(),
                 InternalEventsInterceptor(),
                 MonitoringInterceptor(),
+                LanguageServerVersionInterceptor(),
             ],
             options=server_options,
         )
