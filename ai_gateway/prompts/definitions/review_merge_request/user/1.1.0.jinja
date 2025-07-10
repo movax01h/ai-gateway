@@ -1,25 +1,24 @@
 First, you will be given the merge request title and description to understand the purpose of these changes, followed by a structured representation of the git diffs for all changed files in this merge request. These structured diffs contain the changes that you need to review.{{full_file_intro}}
 
-Merge Request Title:
 <mr_title>
 {{mr_title}}
 </mr_title>
 
-Merge Request Description:
 <mr_description>
 {{mr_description}}
 </mr_description>
 
 {{custom_instructions_section}}
 
-Here are the git diffs you need to review:
+<git_diffs>
 {{diff_lines}}
+</git_diffs>
 
 {{full_content_section}}
 
 To properly review this MR, follow these steps:
 
-1. Parse the git diffs:
+Step 1: Parse the git diffs:
    - Each file's diff is wrapped in `<file_diff filename="...">...</file_diff>` tags
    - Each `<line>` tag inside of the `<file_diff>` tags represents a line in git diff
    - The `type` attribute in `<line>` tag specifies whether the line is "context" (unchanged), "added", or "deleted"
@@ -30,21 +29,52 @@ To properly review this MR, follow these steps:
    - Context (unchanged) lines will have both `old_line` and `new_line`, but the line number may have changed if any changes were made above the line
    - `<chunk_header>` tags may be present to indicate the location of changes in the file (e.g., "@@ -13,6 +16,7 @@")
 
-2. First understand the overall purpose of the MR by examining all files together to get a complete picture of the changes
+Step 2: Understand the MR Intent:
+   Based on the title and description, determine the author's intent and goals by analyzing:
+    - What does the title suggest?
+    - What does the description explain?
+    - What problem is being solved?
+    - What changes were intentionally made?
 
-3. Analyze the changes carefully, strictly focus on the following criteria:
-   - Code correctness and functionality
-   - Code efficiency and performance impact
-   - Potential security vulnerabilities like SQL injection, XSS, etc.
-   - Potential bugs or edge cases that may have been missed
-   - Do not comment on documentations
-   - Focus on substantive feedback that will genuinely improve the code or prevent potential issues
+Step 3: Analyze Changes with Chain of Thought:
+   For each significant change, think through:
+    - What was the old behavior/code?
+    - What is the new behavior/code?
+    - Is this change aligned with the MR intent?
+    - Are there any genuine issues with the NEW code?
+    - Would my comment prevent a real problem or just state the obvious?
 
-4. Formulate your comments:
-   - Determine the most appropriate file and line for your comment
-   - When you notice multiple issues on the same line, leave only one comment on that line and list your issues together
+   Focus only on substantive issues in the NEW code that will genuinely improve the code or prevent potential issues. Remember: no comment is better than an unhelpful comment.
 
-5. Format your comments:
+Step 4: Apply Review Criteria:
+   Before finalizing any comment, ensure it:
+    - Identifies a genuine issue with the code
+    - Prevents a real problem (not just theoretical)
+    - Provides actionable guidance to the author
+
+   <examples>
+   BAD COMMENT EXAMPLES (avoid these):
+    - "You should add null checking here" (when the diff shows null checking was already added) - Suggesting changes that were already made in this MR (shows misunderstanding)
+    - "Consider adding tests for this method" - Recommending tests without identifying actual gaps (unnecessary suggestions)
+    - "This looks fine but double-check the logic" - Vague concerns without specific problems (provides no actionable guidance)
+    - "This could be optimized" - Generic performance advice without specific impact (provides no actionable guidance)
+    - "Make sure this is thread-safe" - Vague concurrency warning without identifying the actual race condition (unclear concern)
+    - "This might cause issues in production" - Unspecific warning without describing the actual failure scenario (creates anxiety without solutions)
+
+   GOOD COMMENT EXAMPLES:
+    - "This could cause a null pointer exception when userId is null and the validation is bypassed" (identifies specific bug with clear trigger condition)
+    - "This SQL query is vulnerable to injection attacks - use parameterized queries instead" (identifies security vulnerability with solution)
+    - "This will cause an infinite loop when the array is empty because the counter never increments" (identifies logic error with specific scenario)
+    - "This division operation will throw an exception when the denominator is zero, which occurs when no items match the filter" (identifies mathematical error with specific trigger condition)
+    - "This loads all records into memory at once, causing out-of-memory errors when the dataset exceeds available RAM" (identifies resource management issue with scaling impact)
+    - "This API call doesn't handle network timeouts, causing the application to hang indefinitely when the service is unavailable" (identifies integration failure with specific scenario)
+   </examples>
+
+Step 5: Formulate your comments:
+  - Determine the most appropriate file and line for your comment
+  - When you notice multiple issues on the same line, leave only one comment on that line and list your issues together
+
+Step 6: Format your comments:
    - Wrap each comment in a <comment> element
    - Include a `file` attribute with the full filename
    - Include the `old_line` and `new_line` attributes exactly as they appear in the chosen `<line>` tag for the comment
@@ -65,8 +95,4 @@ To properly review this MR, follow these steps:
    - Wrap your entire response in `<review></review>` tag.
    - Just return `<review></review>` as your entire response, if the change is acceptable
 
-Pay careful attention to the Merge Request title and description to understand the purpose of the changes. Some changes may involve intentional removals or modifications that align with the MR's stated goals. Note that in some cases, the MR description may not be provided.
-
-Remember to only focus on substantive feedback that will genuinely improve the code or prevent potential issues. Do not nitpick or comment on trivial matters.
-
-Begin your review now.
+Begin your review now by following the process above.
