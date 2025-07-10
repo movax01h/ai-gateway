@@ -23,6 +23,7 @@ from duo_workflow_service.workflows.chat.workflow import (
     CHAT_GITLAB_MUTATION_TOOLS,
     CHAT_MUTATION_TOOLS,
     CHAT_READ_ONLY_TOOLS,
+    RUN_COMMAND_TOOLS,
     Routes,
     Workflow,
 )
@@ -351,17 +352,23 @@ class TestUnauthorizedChatExecution:
         (
             [],
             {},
-            CHAT_READ_ONLY_TOOLS + CHAT_MUTATION_TOOLS,
+            CHAT_READ_ONLY_TOOLS + CHAT_MUTATION_TOOLS + RUN_COMMAND_TOOLS,
         ),
         (
             ["duo_workflow_web_chat_mutation_tools"],
             {},
-            CHAT_READ_ONLY_TOOLS + CHAT_MUTATION_TOOLS + CHAT_GITLAB_MUTATION_TOOLS,
+            CHAT_READ_ONLY_TOOLS
+            + CHAT_MUTATION_TOOLS
+            + RUN_COMMAND_TOOLS
+            + CHAT_GITLAB_MUTATION_TOOLS,
         ),
         (
             [],
             {"mcp_enabled": True},
-            CHAT_READ_ONLY_TOOLS + CHAT_MUTATION_TOOLS + ["extra_tool"],
+            CHAT_READ_ONLY_TOOLS
+            + CHAT_MUTATION_TOOLS
+            + RUN_COMMAND_TOOLS
+            + ["extra_tool"],
         ),
     ],
 )
@@ -645,7 +652,10 @@ async def test_agent_run_with_tool_approval_required(workflow_with_project):
             "I don't want this file created",
             "Tool is cancelled temporarily as user has a comment. Comment: I don't want this file created",
         ),
-        (None, "Tool is cancelled by user."),
+        (
+            None,
+            "Tool is cancelled by user. Don't run the command and stop tool execution in progress.",
+        ),
     ],
     ids=[
         "Test with simple string content",
