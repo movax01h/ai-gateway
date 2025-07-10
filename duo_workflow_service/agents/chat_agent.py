@@ -141,10 +141,16 @@ class ChatAgent(Prompt[ChatWorkflowState, BaseMessage]):
         if isinstance(approval_state, ApprovalStateRejection):
             last_message = input["conversation_history"][self.name][-1]
 
+            # An empty text box for tool cancellation results in a 'null' message. Converting to None
+            # todo: remove this line once we have fixed the frontend to return None instead of 'null'
+            # https://gitlab.com/gitlab-org/modelops/applied-ml/code-suggestions/ai-assist/-/issues/1259
+            if approval_state.message == "null":
+                approval_state.message = None
+
             if approval_state.message:
                 tool_message = f"Tool is cancelled temporarily as user has a comment. Comment: {approval_state.message}"
             else:
-                tool_message = "Tool is cancelled by user."
+                tool_message = "Tool is cancelled by user. Don't run the command and stop tool execution in progress."
 
             messages: list[BaseMessage] = [
                 ToolMessage(

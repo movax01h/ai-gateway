@@ -96,6 +96,8 @@ CHAT_MUTATION_TOOLS = [
     # "mkdir",
 ]
 
+RUN_COMMAND_TOOLS = ["run_command"]
+
 
 class Workflow(AbstractWorkflow):
     _stream: bool = True
@@ -240,7 +242,7 @@ class Workflow(AbstractWorkflow):
         return graph.compile(checkpointer=checkpointer)
 
     def _get_tools(self):
-        available_tools = CHAT_READ_ONLY_TOOLS + CHAT_MUTATION_TOOLS
+        available_tools = CHAT_READ_ONLY_TOOLS + CHAT_MUTATION_TOOLS + RUN_COMMAND_TOOLS
 
         if is_feature_enabled(FeatureFlag.DUO_WORKFLOW_WEB_CHAT_MUTATION_TOOLS):
             available_tools += CHAT_GITLAB_MUTATION_TOOLS
