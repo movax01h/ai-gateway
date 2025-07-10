@@ -1,6 +1,6 @@
 module gitlab.com/gitlab-org/modelops/applied-ml/code-suggestions/ai-assist/clients/gopb
 
-go 1.22.0
+go 1.24.4
 
 require (
 	google.golang.org/grpc v1.67.1
