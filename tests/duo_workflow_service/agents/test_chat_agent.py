@@ -14,7 +14,6 @@ from duo_workflow_service.entities.state import (
     ToolStatus,
     UiChatLog,
 )
-from lib.feature_flags import current_feature_flag_context
 from lib.internal_events import InternalEventAdditionalProperties
 from lib.internal_events.event_enum import CategoryEnum, EventEnum, EventPropertyEnum
 
@@ -153,7 +152,9 @@ class TestChatAgentPromptTemplate:
         """Test that system_static and system_dynamic create separate system messages."""
         template = ChatAgentPromptTemplate(prompt_template_with_split_system)
 
-        result = template.invoke(chat_workflow_state, agent_name="test_agent")
+        result = template.invoke(
+            chat_workflow_state, agent_name="test_agent", is_anthropic_model=False
+        )
 
         assert isinstance(result, ChatPromptValue)
         messages = result.messages
@@ -207,7 +208,9 @@ class TestChatAgentPromptTemplate:
 
         template = ChatAgentPromptTemplate(prompt_template_with_split_system)
 
-        result = template.invoke(state_without_project, agent_name="test_agent")
+        result = template.invoke(
+            state_without_project, agent_name="test_agent", is_anthropic_model=False
+        )
 
         messages = result.messages
 
@@ -232,7 +235,9 @@ class TestChatAgentPromptTemplate:
         """Test that Jinja2 variables are properly resolved in both static and dynamic parts."""
         template = ChatAgentPromptTemplate(prompt_template_with_split_system)
 
-        result = template.invoke(chat_workflow_state, agent_name="test_agent")
+        result = template.invoke(
+            chat_workflow_state, agent_name="test_agent", is_anthropic_model=False
+        )
 
         messages = result.messages
 
@@ -285,7 +290,9 @@ class TestChatAgentPromptTemplate:
 
         template = ChatAgentPromptTemplate(prompt_template_with_split_system)
 
-        result = template.invoke(state_with_history, agent_name="test_agent")
+        result = template.invoke(
+            state_with_history, agent_name="test_agent", is_anthropic_model=False
+        )
 
         messages = result.messages
 
@@ -303,11 +310,11 @@ class TestChatAgentPromptTemplate:
         prompt_template_with_split_system,
         chat_workflow_state,
     ):
-        current_feature_flag_context.set({"enable_anthropic_prompt_caching"})
-
         template = ChatAgentPromptTemplate(prompt_template_with_split_system)
 
-        result = template.invoke(chat_workflow_state, agent_name="test_agent")
+        result = template.invoke(
+            chat_workflow_state, agent_name="test_agent", is_anthropic_model=True
+        )
 
         assert isinstance(result, ChatPromptValue)
         messages = result.messages
@@ -341,12 +348,12 @@ class TestChatAgentPromptTemplate:
         prompt_template_with_split_system,
         chat_workflow_state,
     ):
-        """Test that cache_control is NOT added when feature flag is disabled."""
-        current_feature_flag_context.set({})
-
+        """Test that cache_control is NOT added when model is not Anthropic."""
         template = ChatAgentPromptTemplate(prompt_template_with_split_system)
 
-        result = template.invoke(chat_workflow_state, agent_name="test_agent")
+        result = template.invoke(
+            chat_workflow_state, agent_name="test_agent", is_anthropic_model=False
+        )
 
         messages = result.messages
 
@@ -362,11 +369,11 @@ class TestChatAgentPromptTemplate:
         chat_workflow_state,
         mock_datetime,
     ):
-        current_feature_flag_context.set({"enable_anthropic_prompt_caching"})
-
         template = ChatAgentPromptTemplate(prompt_template_with_split_system)
 
-        result = template.invoke(chat_workflow_state, agent_name="test_agent")
+        result = template.invoke(
+            chat_workflow_state, agent_name="test_agent", is_anthropic_model=True
+        )
 
         messages = result.messages
 

@@ -341,14 +341,12 @@ class TestReActAgent:
     @pytest.mark.asyncio
     @pytest.mark.parametrize(
         (
-            "feature_flag_enabled",
             "inputs",
             "model_params",
             "should_add_anthropic_cache",
         ),
         [
             (
-                True,
                 ReActAgentInputs(
                     messages=[
                         Message(
@@ -363,52 +361,6 @@ class TestReActAgent:
                 True,
             ),
             (
-                False,
-                ReActAgentInputs(
-                    messages=[
-                        Message(
-                            role=Role.USER,
-                            content="What's the title of this issue?",
-                        ),
-                    ],
-                    agent_scratchpad=[],
-                    tools=[IssueReader()],
-                ),
-                ChatAnthropicParams(model_class_provider=ModelClassProvider.ANTHROPIC),
-                False,
-            ),
-            (
-                False,
-                ReActAgentInputs(
-                    messages=[
-                        Message(
-                            role=Role.USER,
-                            content="What's the title of this issue?",
-                        ),
-                    ],
-                    agent_scratchpad=[],
-                    tools=[IssueReader()],
-                ),
-                ChatLiteLLMParams(model_class_provider=ModelClassProvider.LITE_LLM),
-                False,
-            ),
-            (
-                True,
-                ReActAgentInputs(
-                    messages=[
-                        Message(
-                            role=Role.USER,
-                            content="What's the title of this issue?",
-                        ),
-                    ],
-                    agent_scratchpad=[],
-                    tools=[IssueReader()],
-                ),
-                ChatLiteLLMParams(model_class_provider=ModelClassProvider.LITE_LLM),
-                False,
-            ),
-            (
-                True,
                 ReActAgentInputs(
                     messages=[
                         Message(
@@ -427,16 +379,10 @@ class TestReActAgent:
     async def test_message_cache_control(
         self,
         prompt: ReActAgent,
-        feature_flag_enabled: bool,
         inputs: ReActAgentInputs,
         model_params: TypeModelParams,
         should_add_anthropic_cache: bool,
     ):
-        if feature_flag_enabled:
-            current_feature_flag_context.set({"enable_anthropic_prompt_caching"})
-        else:
-            current_feature_flag_context.set(set[str]())
-
         prompt_value = prompt.prompt_tpl.invoke(inputs)
 
         for msg in prompt_value.to_messages():

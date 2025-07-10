@@ -23,7 +23,6 @@ from ai_gateway.prompts import Prompt, jinja2_formatter
 from ai_gateway.prompts.config import ModelClassProvider, ModelConfig
 from ai_gateway.prompts.config.base import PromptConfig
 from ai_gateway.structured_logging import get_request_logger
-from lib.feature_flags import FeatureFlag, is_feature_enabled
 
 __all__ = [
     "ReActPlainTextParser",
@@ -137,8 +136,7 @@ class ReActPromptTemplate(Runnable[ReActAgentInputs, PromptValue]):
                 current_date=input.current_date,
             )
             if (
-                is_feature_enabled(FeatureFlag.ENABLE_ANTHROPIC_PROMPT_CACHING)
-                and self.model_config.params.model_class_provider
+                self.model_config.params.model_class_provider
                 == ModelClassProvider.ANTHROPIC
             ):
                 content_block: list[Union[str, dict]] = [
