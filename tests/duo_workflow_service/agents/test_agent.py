@@ -72,7 +72,9 @@ class TestAgent:
         return mock
 
     @pytest.fixture
-    def planner_agent(self, chat_mock, gl_http_client, mock_toolset):
+    def planner_agent(
+        self, chat_mock, gl_http_client, mock_toolset, internal_event_client
+    ):
         return Agent(
             goal="Make the world a better place",
             model=chat_mock,
@@ -82,9 +84,17 @@ class TestAgent:
             workflow_id="test-workflow-123",
             http_client=gl_http_client,
             workflow_type=CategoryEnum.WORKFLOW_SOFTWARE_DEVELOPMENT,
+            internal_event_client=internal_event_client,
         )
 
-    def test_init(self, chat_mock, planner_agent, gl_http_client, mock_toolset):
+    def test_init(
+        self,
+        chat_mock,
+        planner_agent,
+        gl_http_client,
+        mock_toolset,
+        internal_event_client,
+    ):
         assert planner_agent._goal == "Make the world a better place"
         assert planner_agent._model == chat_mock
         assert planner_agent.name == "test agent"
@@ -92,6 +102,7 @@ class TestAgent:
         assert planner_agent._workflow_id == "test-workflow-123"
         assert planner_agent._http_client == gl_http_client
         assert planner_agent._toolset == mock_toolset
+        assert planner_agent._internal_event_client == internal_event_client
         chat_mock.bind_tools.assert_called_once_with(mock_toolset.bindable)
 
     @pytest.mark.asyncio
@@ -141,7 +152,6 @@ class TestAgent:
         self, chat_mock, planner_agent, workflow_state, internal_event_client: Mock
     ):
         workflow_type = CategoryEnum.WORKFLOW_SOFTWARE_DEVELOPMENT
-        planner_agent._internal_event_client = internal_event_client
 
         tool_calls = [
             {
@@ -427,7 +437,13 @@ class TestAgent:
     @pytest.mark.asyncio
     @patch("duo_workflow_service.agents.agent.get_event")
     async def test_run_with_check_events_disabled(
-        self, mock_get_event, chat_mock, gl_http_client, mock_toolset, workflow_state
+        self,
+        mock_get_event,
+        chat_mock,
+        gl_http_client,
+        mock_toolset,
+        workflow_state,
+        internal_event_client,
     ):
         # Create agent with check_events=False
         agent = Agent(
@@ -440,6 +456,7 @@ class TestAgent:
             http_client=gl_http_client,
             workflow_type=CategoryEnum.WORKFLOW_SOFTWARE_DEVELOPMENT,
             check_events=False,
+            internal_event_client=internal_event_client,
         )
 
         chat_mock.ainvoke.return_value = AIMessage(
@@ -467,6 +484,7 @@ class TestAgent:
         gl_http_client,
         mock_toolset,
         workflow_state,
+        internal_event_client,
     ):
         # Create agent with check_events=True (default)
         agent = Agent(
@@ -479,6 +497,7 @@ class TestAgent:
             http_client=gl_http_client,
             workflow_type=CategoryEnum.WORKFLOW_SOFTWARE_DEVELOPMENT,
             check_events=True,
+            internal_event_client=internal_event_client,
         )
 
         # Mock event response
