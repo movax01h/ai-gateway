@@ -336,7 +336,7 @@ class TestChatAgentPromptTemplate:
         # Fix: The text should contain the actual text content, not the SystemMessage object
         assert "GitLab Duo Chat" in content_block["text"]
         assert "<core_mission>" in content_block["text"]
-        assert content_block["cache_control"] == {"type": "ephemeral"}
+        assert content_block["cache_control"] == {"type": "ephemeral", "ttl": "1h"}
 
         # Dynamic system message should remain as plain text
         dynamic_system_message = messages[1]
@@ -381,7 +381,8 @@ class TestChatAgentPromptTemplate:
         static_system_message = messages[0]
         assert isinstance(static_system_message.content, list)
         assert static_system_message.content[0]["cache_control"] == {
-            "type": "ephemeral"
+            "type": "ephemeral",
+            "ttl": "1h",
         }
 
         # Dynamic system message should NOT have cache_control

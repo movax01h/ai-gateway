@@ -195,9 +195,84 @@ class TestPrompt:
                     extra={
                         "cache_read": 0,
                         "cache_creation": 0,
+                        "ephemeral_5m_input_tokens": 0,
+                        "ephemeral_1h_input_tokens": 0,
                     },
                 ),
-            )
+            ),
+            (
+                UsageMetadata(
+                    input_tokens=1,
+                    output_tokens=2,
+                    total_tokens=3,
+                    input_token_details=InputTokenDetails(
+                        audio=0,
+                        cache_creation=0,
+                        cache_read=0,
+                        ephemeral_5m_input_tokens=10,  # type: ignore[typeddict-unknown-key]
+                    ),
+                ),
+                InternalEventAdditionalProperties(
+                    label="cache_details",
+                    property=None,
+                    value=None,
+                    extra={
+                        "cache_read": 0,
+                        "cache_creation": 0,
+                        "ephemeral_5m_input_tokens": 10,
+                        "ephemeral_1h_input_tokens": 0,
+                    },
+                ),
+            ),
+            (
+                UsageMetadata(
+                    input_tokens=1,
+                    output_tokens=2,
+                    total_tokens=3,
+                    input_token_details=InputTokenDetails(
+                        audio=0,
+                        cache_creation=0,
+                        cache_read=0,
+                        ephemeral_1h_input_tokens=25,  # type: ignore[typeddict-unknown-key]
+                    ),
+                ),
+                InternalEventAdditionalProperties(
+                    label="cache_details",
+                    property=None,
+                    value=None,
+                    extra={
+                        "cache_read": 0,
+                        "cache_creation": 0,
+                        "ephemeral_5m_input_tokens": 0,
+                        "ephemeral_1h_input_tokens": 25,
+                    },
+                ),
+            ),
+            (
+                UsageMetadata(
+                    input_tokens=1,
+                    output_tokens=2,
+                    total_tokens=3,
+                    input_token_details=InputTokenDetails(
+                        audio=0,
+                        cache_creation=5,
+                        cache_read=15,
+                        ephemeral_5m_input_tokens=10,
+                        ephemeral_1h_input_tokens=25,  # type: ignore[typeddict-unknown-key]
+                    ),
+                ),
+                InternalEventAdditionalProperties(
+                    label="cache_details",
+                    property=None,
+                    value=None,
+                    extra={
+                        "cache_read": 15,
+                        "cache_creation": 5,
+                        "ephemeral_5m_input_tokens": 10,
+                        "ephemeral_1h_input_tokens": 25,
+                    },
+                ),
+            ),
         ],
     )
     async def test_ainvoke_handle_usage_metadata(
@@ -242,9 +317,35 @@ class TestPrompt:
                     extra={
                         "cache_read": 0,
                         "cache_creation": 0,
+                        "ephemeral_5m_input_tokens": 0,
+                        "ephemeral_1h_input_tokens": 0,
                     },
                 ),
-            )
+            ),
+            (
+                UsageMetadata(
+                    input_tokens=1,
+                    output_tokens=2,
+                    total_tokens=3,
+                    input_token_details=InputTokenDetails(
+                        audio=0,
+                        cache_creation=0,
+                        cache_read=0,
+                        ephemeral_5m_input_tokens=8,  # type: ignore[typeddict-unknown-key]
+                    ),
+                ),
+                InternalEventAdditionalProperties(
+                    label="cache_details",
+                    property=None,
+                    value=None,
+                    extra={
+                        "cache_read": 0,
+                        "cache_creation": 0,
+                        "ephemeral_5m_input_tokens": 8,
+                        "ephemeral_1h_input_tokens": 0,
+                    },
+                ),
+            ),
         ],
     )
     async def test_astream_handle_usage_metadata(
@@ -292,9 +393,35 @@ class TestPrompt:
                     extra={
                         "cache_read": 0,
                         "cache_creation": 4,
+                        "ephemeral_5m_input_tokens": 0,
+                        "ephemeral_1h_input_tokens": 0,
                     },
                 ),
-            )
+            ),
+            (
+                UsageMetadata(
+                    input_tokens=4,
+                    output_tokens=6,
+                    total_tokens=3,
+                    input_token_details=InputTokenDetails(
+                        audio=0,
+                        cache_creation=5,
+                        cache_read=0,
+                        ephemeral_1h_input_tokens=3,  # type: ignore[typeddict-unknown-key]
+                    ),
+                ),
+                InternalEventAdditionalProperties(
+                    label="cache_details",
+                    property=None,
+                    value=None,
+                    extra={
+                        "cache_read": 0,
+                        "cache_creation": 5,
+                        "ephemeral_5m_input_tokens": 0,
+                        "ephemeral_1h_input_tokens": 3,
+                    },
+                ),
+            ),
         ],
     )
     async def test_astream_handle_usage_metadata_with_cache_control(
