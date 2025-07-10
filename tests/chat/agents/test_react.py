@@ -391,7 +391,10 @@ class TestReActAgent:
                     if isinstance(msg.content[0], dict):
                         content_dict = msg.content[0]
                         assert content_dict["type"] == "text"
-                        assert content_dict["cache_control"] == {"type": "ephemeral"}
+                        assert content_dict["cache_control"] == {
+                            "type": "ephemeral",
+                            "ttl": "1h",
+                        }
                     else:
                         raise TypeError(
                             f"Expected msg.content[0] to be a dict, but got {type(msg.content[0])}"

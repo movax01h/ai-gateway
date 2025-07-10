@@ -86,6 +86,7 @@ def test_validate_anthropic_variables(
 
             call_kwargs = mock_anthropic_client.call_args.kwargs
             assert call_kwargs["model_name"] == KindAnthropicModel.CLAUDE_SONNET_4.value
+            assert call_kwargs["betas"] == ["extended-cache-ttl-2025-04-11"]
         else:
             mock_vertex_client.assert_not_called()
             mock_anthropic_client.assert_not_called()
@@ -149,10 +150,9 @@ def test_clients_receive_max_retries_from_config(
             mock_anthropic_client.assert_not_called()
         else:
             mock_anthropic_client.assert_called_once()
-            assert (
-                mock_anthropic_client.call_args.kwargs["max_retries"]
-                == expected_retries
-            )
+            call_kwargs = mock_anthropic_client.call_args.kwargs
+            assert call_kwargs["max_retries"] == expected_retries
+            assert call_kwargs["betas"] == ["extended-cache-ttl-2025-04-11"]
             mock_vertex_client.assert_not_called()
 
 
@@ -236,7 +236,7 @@ def test_new_chat_client_with_custom_model(
             mock_anthropic_client.assert_not_called()
         else:
             mock_anthropic_client.assert_called_once()
-            assert (
-                mock_anthropic_client.call_args.kwargs["model_name"] == expected_model
-            )
+            call_kwargs = mock_anthropic_client.call_args.kwargs
+            assert call_kwargs["model_name"] == expected_model
+            assert call_kwargs["betas"] == ["extended-cache-ttl-2025-04-11"]
             mock_vertex_client.assert_not_called()

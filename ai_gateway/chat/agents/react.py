@@ -143,7 +143,7 @@ class ReActPromptTemplate(Runnable[ReActAgentInputs, PromptValue]):
                     {
                         "text": content,
                         "type": "text",
-                        "cache_control": {"type": "ephemeral"},
+                        "cache_control": {"type": "ephemeral", "ttl": "1h"},
                     }
                 ]
                 messages.append(SystemMessage(content=content_block))
