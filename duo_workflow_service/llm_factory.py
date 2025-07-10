@@ -11,6 +11,7 @@ from langsmith import tracing_context
 from pydantic import BaseModel, Field, field_validator
 
 from ai_gateway.models import KindAnthropicModel
+from duo_workflow_service.tracking.errors import log_exception
 
 
 class ModelConfig(BaseModel):
@@ -107,9 +108,13 @@ def validate_llm_access(config: Optional[Union[AnthropicConfig, VertexConfig]] =
     anthropic_client = create_chat_model(config=config)
 
     with tracing_context(enabled=False):
-        anthropic_response = anthropic_client.invoke(
-            "Answer in under 80 characters: What LLM am I talking to?"
-        )
+        try:
+            anthropic_response = anthropic_client.invoke(
+                "Answer in under 80 characters: What LLM am I talking to?"
+            )
+        except Exception as e:
+            log_exception(e)
+            raise e
 
     content = anthropic_response.content
     # feature flags are not yet loaded, so logging the model name here could be misleading if the model name depends on
