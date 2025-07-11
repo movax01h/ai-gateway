@@ -1,4 +1,4 @@
-from typing import Annotated, List, Literal, Optional, Union
+from typing import Annotated, List, Literal, Optional, Union, cast
 
 from fastapi import Body
 from pydantic import (
@@ -181,7 +181,10 @@ def _validate_model_name(
     if not use_case_models or not provider_models:
         raise ValueError(f"model {model_name} is unknown")
 
-    valid_model_names = use_case_models & provider_models
+    # Cast both to set[str] to ensure proper type checking
+    valid_model_names: set[str] = cast(set[str], use_case_models) & cast(
+        set[str], provider_models
+    )
 
     if model_name not in valid_model_names:
         if model_name.startswith("claude-") and provider == KindModelProvider.ANTHROPIC:

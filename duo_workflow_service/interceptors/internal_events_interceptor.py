@@ -21,7 +21,7 @@ from lib.internal_events import EventContext, current_event_context
 
 
 def convert_feature_enabled_string_to_list(
-    enabled_features: str,
+    enabled_features: Optional[str] = None,
 ) -> Optional[List[int]]:
     if not enabled_features or enabled_features == "undefined":
         return None
@@ -34,7 +34,9 @@ class InternalEventsInterceptor(grpc.aio.ServerInterceptor):
     def __init__(self):
         pass
 
-    async def intercept_service(self, continuation, handler_call_details):
+    async def intercept_service(
+        self, continuation, handler_call_details: grpc.HandlerCallDetails
+    ) -> None:
         metadata = dict(handler_call_details.invocation_metadata)
 
         is_gitlab_member = metadata.get(X_GITLAB_IS_A_GITLAB_MEMBER, None)
@@ -44,6 +46,11 @@ class InternalEventsInterceptor(grpc.aio.ServerInterceptor):
 
         feature_enabled_by_namespace_ids = metadata.get(
             X_GITLAB_FEATURE_ENABLED_BY_NAMESPACE_IDS, None
+        )
+        feature_enabled_by_namespace_ids = (
+            str(feature_enabled_by_namespace_ids)
+            if feature_enabled_by_namespace_ids
+            else None
         )
 
         project_id = metadata.get(X_GITLAB_PROJECT_ID)
