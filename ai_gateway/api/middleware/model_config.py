@@ -1,5 +1,6 @@
 import json
-from typing import Any, Callable
+
+from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
 from ai_gateway.model_metadata import (
     create_model_metadata,
@@ -8,20 +9,20 @@ from ai_gateway.model_metadata import (
 
 
 class ModelConfigMiddleware:
-    def __init__(self, app):
+    def __init__(self, app: ASGIApp):
         self.app = app
 
     async def __call__(
         self,
-        scope: dict[str, Any],
-        receive: Callable,
-        send: Callable,
+        scope: Scope,
+        receive: Receive,
+        send: Send,
     ) -> None:
         if scope["type"] != "http":
             await self.app(scope, receive, send)
             return
 
-        async def fetch_model_metadata() -> dict[str, Any]:
+        async def fetch_model_metadata() -> Message:
             message = await receive()
 
             body: bytes = message.get("body", b"")

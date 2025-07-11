@@ -20,7 +20,6 @@ from starlette.middleware.authentication import (
     AuthenticationBackend,
     AuthenticationMiddleware,
 )
-from starlette.middleware.base import Request
 from starlette.responses import JSONResponse
 from starlette_context import context as starlette_context
 
@@ -122,7 +121,7 @@ class MiddlewareAuthentication(Middleware):
             return cloud_connector_authenticate(dict(headers), self.oidc_auth_provider)
 
     @staticmethod
-    def on_auth_error(_: Request, e: Exception):
+    def on_auth_error(_: HTTPConnection, e: AuthenticationError) -> JSONResponse:
         content = jsonable_encoder({"error": str(e)})
         starlette_context["auth_error_details"] = str(e)
         starlette_context["http_exception_details"] = str(e)
