@@ -71,8 +71,24 @@ def tool(metadata):
                 "content": "# -*- coding: utf-8 -*-\n\ndef λ_function():\n    return '你好，世界！'"
             },
         ),
+        (
+            {
+                "project_id": "gitlab-org/gitlab",
+                "ref": "master",
+                "file_path": "file/path/with/slashes",
+            },
+            "/api/v4/projects/gitlab-org/gitlab/repository/files/file%2Fpath%2Fwith%2Fslashes/raw",
+            "master",
+            "file content",
+            {"content": "file content"},
+        ),
     ],
-    ids=["Explicit params", "URL parameter", "Special characters in text content"],
+    ids=[
+        "Explicit params",
+        "URL parameter",
+        "Special characters in text content",
+        "Path with slashes",
+    ],
 )
 @pytest.mark.asyncio
 async def test_get_file_success(
@@ -127,11 +143,20 @@ async def test_get_file_success(
             },
             "Binary file detected",
         ),
+        (
+            {"url": "https://gitlab.com/namespace/project"},
+            {
+                "mock_type": "validate_error",
+                "mock_value": (None, None, None, []),
+            },
+            "Missing file_path",
+        ),
     ],
     ids=[
         "URL parsing error",
         "API error",
         "Binary file detection",
+        "Missing file path",
     ],
 )
 @pytest.mark.asyncio
