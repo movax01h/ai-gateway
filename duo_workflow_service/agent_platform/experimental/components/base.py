@@ -1,13 +1,22 @@
 from abc import ABC, abstractmethod
-from typing import Annotated, Any, ClassVar, Optional, Self
+from typing import Annotated, Any, ClassVar, Optional, Protocol, Self
 
 from langgraph.graph import StateGraph
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-from duo_workflow_service.agent_platform.experimental.routers.base import BaseRouter
-from duo_workflow_service.agent_platform.experimental.state import IOKey
+from duo_workflow_service.agent_platform.experimental.state import FlowState, IOKey
 
-__all__ = ["BaseComponent"]
+__all__ = ["RouterProtocol", "BaseComponent"]
+
+
+class RouterProtocol(Protocol):
+    """Protocol defining the interface for routers used by components."""
+
+    def attach(self, graph: StateGraph) -> None:
+        """Attach the router to a StateGraph."""
+
+    def route(self, state: FlowState) -> Annotated[str, "Next node"]:
+        """Determine the next node based on the current state."""
 
 
 class BaseComponent(BaseModel, ABC):
@@ -50,7 +59,7 @@ class BaseComponent(BaseModel, ABC):
         return self
 
     @abstractmethod
-    def attach(self, graph: StateGraph, router: BaseRouter) -> None:
+    def attach(self, graph: StateGraph, router: RouterProtocol) -> None:
         pass
 
     @abstractmethod

@@ -152,7 +152,9 @@ class IOKey(BaseModel):
 
         return cls(target=target, subkeys=subkeys)
 
-    def read_from_state(self, state: FlowState) -> dict[str, Any]:
+    def template_variable_from_state(self, state: FlowState) -> dict[str, Any]:
+        # self.target presence in state is validated in parse_valid_target
+        # thereby state[self.target] will always succeed
         current = state[self.target]  # type: ignore[literal-required]
         if not self.subkeys:
             return {self.target: current}
@@ -162,11 +164,22 @@ class IOKey(BaseModel):
 
         return {self.subkeys[-1]: current}  # pylint: disable=unsubscriptable-object
 
+    def value_from_state(self, state: FlowState) -> Any:
+        # self.target presence in state is validated in parse_valid_target
+        # thereby state[self.target] will always succeed
+        current = state[self.target]  # type: ignore[literal-required]
+        if self.subkeys:
+            for key in self.subkeys:  # pylint: disable=not-an-iterable
+                current = current[key]
+        return current
+
 
 def get_vars_from_state(inputs: list[IOKey], state: FlowState) -> dict[str, Any]:
     variables: dict[str, Any] = {}
 
     for inp in inputs:
-        variables = merge_nested_dict(variables, inp.read_from_state(state))
+        variables = merge_nested_dict(
+            variables, inp.template_variable_from_state(state)
+        )
 
     return variables

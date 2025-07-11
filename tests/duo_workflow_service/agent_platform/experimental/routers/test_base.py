@@ -11,7 +11,7 @@ from duo_workflow_service.agent_platform.experimental.state import FlowState, IO
 class ConcreteRouter(BaseRouter):
     """Concrete implementation of BaseRouter for testing purposes."""
 
-    _allowed_input_targets = tuple(["context"])
+    _allowed_input_targets = ("context",)
 
     def attach(self, graph: StateGraph):
         """Mock implementation of abstract method."""

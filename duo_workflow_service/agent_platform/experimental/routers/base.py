@@ -11,7 +11,7 @@ __all__ = ["BaseRouter"]
 
 class BaseRouter(BaseModel, ABC):
     DEFAULT_ROUTE: ClassVar[str] = "default_route"
-    _allowed_input_targets: ClassVar[tuple[str, ...]] = ()
+    _allowed_input_targets: ClassVar[tuple[str, ...]]
 
     input: Optional[IOKey] = None
 
