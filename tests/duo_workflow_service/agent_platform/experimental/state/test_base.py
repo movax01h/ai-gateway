@@ -228,130 +228,307 @@ class TestIOKey:
         assert io_keys[2].target == "ui_chat_log"
         assert io_keys[2].subkeys is None
 
-    def test_iokey_read_from_state_simple_target(self):
-        """Test reading simple target from state."""
-        state: FlowState = {
-            "status": FlowStatusEnum.PLANNING,
-            "conversation_history": {},
-            "ui_chat_log": [],
-            "context": {},
-        }
+    @pytest.mark.parametrize(
+        "target,subkeys,state_data,expected_result",
+        [
+            # Simple target without subkeys
+            (
+                "status",
+                None,
+                {
+                    "status": FlowStatusEnum.PLANNING,
+                    "conversation_history": {},
+                    "ui_chat_log": [],
+                    "context": {},
+                },
+                {"status": FlowStatusEnum.PLANNING},
+            ),
+            # Nested value using subkeys
+            (
+                "context",
+                ["project", "name"],
+                {
+                    "status": FlowStatusEnum.PLANNING,
+                    "conversation_history": {},
+                    "ui_chat_log": [],
+                    "context": {
+                        "project": {"name": "test-project", "version": "1.0.0"}
+                    },
+                },
+                {"name": "test-project"},
+            ),
+            # Deeply nested value
+            (
+                "context",
+                ["project", "config", "database", "host"],
+                {
+                    "status": FlowStatusEnum.PLANNING,
+                    "conversation_history": {},
+                    "ui_chat_log": [],
+                    "context": {
+                        "project": {
+                            "config": {"database": {"host": "localhost", "port": 5432}}
+                        }
+                    },
+                },
+                {"host": "localhost"},
+            ),
+            # Empty subkeys list
+            (
+                "context",
+                [],
+                {
+                    "status": FlowStatusEnum.PLANNING,
+                    "conversation_history": {},
+                    "ui_chat_log": [],
+                    "context": {"key": "value"},
+                },
+                {"context": {"key": "value"}},
+            ),
+            # None subkeys
+            (
+                "context",
+                None,
+                {
+                    "status": FlowStatusEnum.PLANNING,
+                    "conversation_history": {},
+                    "ui_chat_log": [],
+                    "context": {"key": "value"},
+                },
+                {"context": {"key": "value"}},
+            ),
+            # Complex structure - nested object
+            (
+                "context",
+                ["flow", "metadata", "tags"],
+                {
+                    "status": FlowStatusEnum.PLANNING,
+                    "conversation_history": {},
+                    "ui_chat_log": [],
+                    "context": {
+                        "flow": {
+                            "steps": [
+                                {"name": "step1", "status": "completed"},
+                                {"name": "step2", "status": "in_progress"},
+                            ],
+                            "metadata": {
+                                "created_at": "2023-01-01",
+                                "tags": ["important", "urgent"],
+                            },
+                        }
+                    },
+                },
+                {"tags": ["important", "urgent"]},
+            ),
+        ],
+        ids=[
+            "simple_target",
+            "nested_value_with_subkeys",
+            "deeply_nested_value",
+            "empty_subkeys_list",
+            "none_subkeys",
+            "complex_nested_object",
+        ],
+    )
+    def test_iokey_template_variable_from_state(
+        self, target, subkeys, state_data, expected_result
+    ):
+        """Test reading values from state using template_variable_from_state method."""
+        state: FlowState = state_data
+        io_key = IOKey(target=target, subkeys=subkeys)
+        result = io_key.template_variable_from_state(state)
 
-        io_key = IOKey(target="status")
-        result = io_key.read_from_state(state)
+        assert result == expected_result
 
-        assert result == {"status": FlowStatusEnum.PLANNING}
+    @pytest.mark.parametrize(
+        "target,subkeys,state_data,expected_result",
+        [
+            # List value from state
+            (
+                "conversation_history",
+                ["main"],
+                {
+                    "status": FlowStatusEnum.PLANNING,
+                    "conversation_history": {
+                        "main": [
+                            SystemMessage(content="System prompt"),
+                            HumanMessage(content="User input"),
+                        ]
+                    },
+                    "ui_chat_log": [],
+                    "context": {},
+                },
+                {
+                    "main": [
+                        SystemMessage(content="System prompt"),
+                        HumanMessage(content="User input"),
+                    ]
+                },
+            ),
+        ],
+        ids=["list_value_from_state"],
+    )
+    def test_iokey_template_variable_from_state_with_list_validation(
+        self, target, subkeys, state_data, expected_result
+    ):
+        """Test reading list values from state with additional validation."""
+        state: FlowState = state_data
+        io_key = IOKey(target=target, subkeys=subkeys)
+        result = io_key.template_variable_from_state(state)
 
-    def test_iokey_read_from_state_with_subkeys(self):
-        """Test reading nested value using subkeys."""
-        state: FlowState = {
-            "status": FlowStatusEnum.PLANNING,
-            "conversation_history": {},
-            "ui_chat_log": [],
-            "context": {"project": {"name": "test-project", "version": "1.0.0"}},
-        }
-
-        io_key = IOKey(target="context", subkeys=["project", "name"])
-        result = io_key.read_from_state(state)
-
-        assert result == {"name": "test-project"}
-
-    def test_iokey_read_from_state_deep_nesting(self):
-        """Test reading deeply nested value."""
-        state: FlowState = {
-            "status": FlowStatusEnum.PLANNING,
-            "conversation_history": {},
-            "ui_chat_log": [],
-            "context": {
-                "project": {"config": {"database": {"host": "localhost", "port": 5432}}}
-            },
-        }
-
-        io_key = IOKey(
-            target="context", subkeys=["project", "config", "database", "host"]
-        )
-        result = io_key.read_from_state(state)
-
-        assert result == {"host": "localhost"}
-
-    def test_iokey_read_from_state_empty_subkeys(self):
-        """Test reading with empty subkeys list."""
-        state: FlowState = {
-            "status": FlowStatusEnum.PLANNING,
-            "conversation_history": {},
-            "ui_chat_log": [],
-            "context": {"key": "value"},
-        }
-
-        io_key = IOKey(target="context", subkeys=[])
-        result = io_key.read_from_state(state)
-
-        assert result == {"context": {"key": "value"}}
-
-    def test_iokey_read_from_state_none_subkeys(self):
-        """Test reading with None subkeys."""
-        state: FlowState = {
-            "status": FlowStatusEnum.PLANNING,
-            "conversation_history": {},
-            "ui_chat_log": [],
-            "context": {"key": "value"},
-        }
-
-        io_key = IOKey(target="context", subkeys=None)
-        result = io_key.read_from_state(state)
-
-        assert result == {"context": {"key": "value"}}
-
-    def test_iokey_read_from_state_list_value(self):
-        """Test reading list value from state."""
-        messages = [
-            SystemMessage(content="System prompt"),
-            HumanMessage(content="User input"),
-        ]
-        state: FlowState = {
-            "status": FlowStatusEnum.PLANNING,
-            "conversation_history": {"main": messages},
-            "ui_chat_log": [],
-            "context": {},
-        }
-
-        io_key = IOKey(target="conversation_history", subkeys=["main"])
-        result = io_key.read_from_state(state)
-
-        assert result == {"main": messages}
+        assert result == expected_result
         assert len(result["main"]) == 2
         assert isinstance(result["main"][0], SystemMessage)
 
-    def test_iokey_read_from_state_complex_structure(self):
-        """Test reading complex nested structure."""
-        state: FlowState = {
-            "status": FlowStatusEnum.PLANNING,
-            "conversation_history": {},
-            "ui_chat_log": [],
-            "context": {
-                "flow": {
-                    "steps": [
-                        {"name": "step1", "status": "completed"},
-                        {"name": "step2", "status": "in_progress"},
-                    ],
-                    "metadata": {
-                        "created_at": "2023-01-01",
-                        "tags": ["important", "urgent"],
+    @pytest.mark.parametrize(
+        "target,subkeys,state_data,expected_result",
+        [
+            # Simple target without subkeys
+            (
+                "status",
+                None,
+                {
+                    "status": FlowStatusEnum.PLANNING,
+                    "conversation_history": {},
+                    "ui_chat_log": [],
+                    "context": {},
+                },
+                FlowStatusEnum.PLANNING,
+            ),
+            # Nested value using subkeys
+            (
+                "context",
+                ["project", "name"],
+                {
+                    "status": FlowStatusEnum.PLANNING,
+                    "conversation_history": {},
+                    "ui_chat_log": [],
+                    "context": {
+                        "project": {"name": "test-project", "version": "1.0.0"}
                     },
-                }
-            },
-        }
+                },
+                "test-project",
+            ),
+            # Deeply nested value
+            (
+                "context",
+                ["project", "config", "database", "host"],
+                {
+                    "status": FlowStatusEnum.PLANNING,
+                    "conversation_history": {},
+                    "ui_chat_log": [],
+                    "context": {
+                        "project": {
+                            "config": {"database": {"host": "localhost", "port": 5432}}
+                        }
+                    },
+                },
+                "localhost",
+            ),
+            # Empty subkeys list
+            (
+                "context",
+                [],
+                {
+                    "status": FlowStatusEnum.PLANNING,
+                    "conversation_history": {},
+                    "ui_chat_log": [],
+                    "context": {"key": "value"},
+                },
+                {"key": "value"},
+            ),
+            # None subkeys
+            (
+                "context",
+                None,
+                {
+                    "status": FlowStatusEnum.PLANNING,
+                    "conversation_history": {},
+                    "ui_chat_log": [],
+                    "context": {"key": "value"},
+                },
+                {"key": "value"},
+            ),
+            # Numeric value
+            (
+                "context",
+                ["project", "config", "database", "port"],
+                {
+                    "status": FlowStatusEnum.PLANNING,
+                    "conversation_history": {},
+                    "ui_chat_log": [],
+                    "context": {
+                        "project": {
+                            "config": {"database": {"host": "localhost", "port": 5432}}
+                        }
+                    },
+                },
+                5432,
+            ),
+            # Boolean value
+            (
+                "context",
+                ["project", "config", "debug"],
+                {
+                    "status": FlowStatusEnum.PLANNING,
+                    "conversation_history": {},
+                    "ui_chat_log": [],
+                    "context": {
+                        "project": {
+                            "config": {
+                                "debug": True,
+                                "features": ["feature1", "feature2"],
+                            }
+                        }
+                    },
+                },
+                True,
+            ),
+            # Complex nested object
+            (
+                "context",
+                ["flow", "metadata"],
+                {
+                    "status": FlowStatusEnum.PLANNING,
+                    "conversation_history": {},
+                    "ui_chat_log": [],
+                    "context": {
+                        "flow": {
+                            "steps": [
+                                {"name": "step1", "status": "completed"},
+                                {"name": "step2", "status": "in_progress"},
+                            ],
+                            "metadata": {
+                                "created_at": "2023-01-01",
+                                "tags": ["important", "urgent"],
+                            },
+                        }
+                    },
+                },
+                {
+                    "created_at": "2023-01-01",
+                    "tags": ["important", "urgent"],
+                },
+            ),
+        ],
+        ids=[
+            "simple_target",
+            "nested_value_with_subkeys",
+            "deeply_nested_value",
+            "empty_subkeys_list",
+            "none_subkeys",
+            "numeric_value",
+            "boolean_value",
+            "complex_nested_object",
+        ],
+    )
+    def test_iokey_value_from_state(self, target, subkeys, state_data, expected_result):
+        """Test reading values from state using value_from_state method."""
+        state: FlowState = state_data
+        io_key = IOKey(target=target, subkeys=subkeys)
+        result = io_key.value_from_state(state)
 
-        # Test reading array
-        io_key1 = IOKey(target="context", subkeys=["flow", "steps"])
-        result1 = io_key1.read_from_state(state)
-        assert len(result1["steps"]) == 2
-        assert result1["steps"][0]["name"] == "step1"
-
-        # Test reading nested object
-        io_key2 = IOKey(target="context", subkeys=["flow", "metadata", "tags"])
-        result2 = io_key2.read_from_state(state)
-        assert result2["tags"] == ["important", "urgent"]
+        assert result == expected_result
 
     def test_get_vars_from_state_multiple_keys(self):
         """Test extracting variables from state using multiple IOKeys."""
@@ -411,7 +588,7 @@ class TestIOKey:
 
         # These should work with the current implementation
         io_key1 = IOKey(target="context", subkeys=["special-key", "nested_key"])
-        result1 = io_key1.read_from_state(state)
+        result1 = io_key1.template_variable_from_state(state)
         assert result1["nested_key"] == "value"
 
 

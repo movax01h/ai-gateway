@@ -6,8 +6,8 @@ from pydantic import ValidationError
 
 from duo_workflow_service.agent_platform.experimental.components.base import (
     BaseComponent,
+    RouterProtocol,
 )
-from duo_workflow_service.agent_platform.experimental.routers.base import BaseRouter
 from duo_workflow_service.agent_platform.experimental.state import IOKey
 
 
@@ -17,7 +17,7 @@ class ConcreteComponent(BaseComponent):
     _allowed_input_targets = ("context", "conversation_history")
     _allowed_output_targets = ("context", "status")
 
-    def attach(self, graph: StateGraph, router: BaseRouter):
+    def attach(self, graph: StateGraph, router: RouterProtocol):
         """Mock implementation of abstract method."""
 
     def __entry_hook__(self) -> str:
