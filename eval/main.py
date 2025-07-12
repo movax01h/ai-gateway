@@ -2,7 +2,7 @@ import asyncio
 from typing import Annotated
 
 import typer
-from cef.core.evaluators.prebuilt import CorrectnessEvaluator
+from cef.core.evaluators.correctness import CorrectnessEvaluator
 from cef.evaluator import evaluate
 from dependency_injector.wiring import Provide, inject
 from langchain_anthropic import ChatAnthropic
