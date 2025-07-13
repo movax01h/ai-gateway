@@ -24,8 +24,9 @@ class RunCommand(DuoBaseTool):
     name: str = "run_command"
     description: str = (
         "Run a bash command in the current working directory. "
+        "This tool should be reserved for cases where specialized tools cannot accomplish the task. "
         f"Following bash commands are not supported: {', '.join(_DISALLOWED_COMMANDS)} "
-        "and will result in error."
+        "and will result in error. "
         "Pay extra attention to correctly escape special characters like '`'"
     )
     args_schema: Type[BaseModel] = RunCommandInput  # type: ignore
