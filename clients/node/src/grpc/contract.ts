@@ -26,6 +26,7 @@ export const protobufPackage = "";
 export interface ClientEvent {
   startRequest?: StartWorkflowRequest | undefined;
   actionResponse?: ActionResponse | undefined;
+  heartbeat?: HeartbeatRequest | undefined;
 }
 
 export interface StartWorkflowRequest {
@@ -45,6 +46,10 @@ export interface ActionResponse {
   response: string;
   plainTextResponse?: PlainTextResponse | undefined;
   httpResponse?: HttpResponse | undefined;
+}
+
+export interface HeartbeatRequest {
+  timestamp: number;
 }
 
 export interface PlainTextResponse {
@@ -178,7 +183,7 @@ export interface Mkdir {
 }
 
 function createBaseClientEvent(): ClientEvent {
-  return { startRequest: undefined, actionResponse: undefined };
+  return { startRequest: undefined, actionResponse: undefined, heartbeat: undefined };
 }
 
 export const ClientEvent: MessageFns<ClientEvent> = {
@@ -188,6 +193,9 @@ export const ClientEvent: MessageFns<ClientEvent> = {
     }
     if (message.actionResponse !== undefined) {
       ActionResponse.encode(message.actionResponse, writer.uint32(18).fork()).join();
+    }
+    if (message.heartbeat !== undefined) {
+      HeartbeatRequest.encode(message.heartbeat, writer.uint32(26).fork()).join();
     }
     return writer;
   },
@@ -215,6 +223,14 @@ export const ClientEvent: MessageFns<ClientEvent> = {
           message.actionResponse = ActionResponse.decode(reader, reader.uint32());
           continue;
         }
+        case 3: {
+          if (tag !== 26) {
+            break;
+          }
+
+          message.heartbeat = HeartbeatRequest.decode(reader, reader.uint32());
+          continue;
+        }
       }
       if ((tag & 7) === 4 || tag === 0) {
         break;
@@ -228,6 +244,7 @@ export const ClientEvent: MessageFns<ClientEvent> = {
     return {
       startRequest: isSet(object.startRequest) ? StartWorkflowRequest.fromJSON(object.startRequest) : undefined,
       actionResponse: isSet(object.actionResponse) ? ActionResponse.fromJSON(object.actionResponse) : undefined,
+      heartbeat: isSet(object.heartbeat) ? HeartbeatRequest.fromJSON(object.heartbeat) : undefined,
     };
   },
 
@@ -238,6 +255,9 @@ export const ClientEvent: MessageFns<ClientEvent> = {
     }
     if (message.actionResponse !== undefined) {
       obj.actionResponse = ActionResponse.toJSON(message.actionResponse);
+    }
+    if (message.heartbeat !== undefined) {
+      obj.heartbeat = HeartbeatRequest.toJSON(message.heartbeat);
     }
     return obj;
   },
@@ -252,6 +272,9 @@ export const ClientEvent: MessageFns<ClientEvent> = {
       : undefined;
     message.actionResponse = (object.actionResponse !== undefined && object.actionResponse !== null)
       ? ActionResponse.fromPartial(object.actionResponse)
+      : undefined;
+    message.heartbeat = (object.heartbeat !== undefined && object.heartbeat !== null)
+      ? HeartbeatRequest.fromPartial(object.heartbeat)
       : undefined;
     return message;
   },
@@ -571,6 +594,64 @@ export const ActionResponse: MessageFns<ActionResponse> = {
     message.httpResponse = (object.httpResponse !== undefined && object.httpResponse !== null)
       ? HttpResponse.fromPartial(object.httpResponse)
       : undefined;
+    return message;
+  },
+};
+
+function createBaseHeartbeatRequest(): HeartbeatRequest {
+  return { timestamp: 0 };
+}
+
+export const HeartbeatRequest: MessageFns<HeartbeatRequest> = {
+  encode(message: HeartbeatRequest, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
+    if (message.timestamp !== 0) {
+      writer.uint32(8).int64(message.timestamp);
+    }
+    return writer;
+  },
+
+  decode(input: BinaryReader | Uint8Array, length?: number): HeartbeatRequest {
+    const reader = input instanceof BinaryReader ? input : new BinaryReader(input);
+    const end = length === undefined ? reader.len : reader.pos + length;
+    const message = createBaseHeartbeatRequest();
+    while (reader.pos < end) {
+      const tag = reader.uint32();
+      switch (tag >>> 3) {
+        case 1: {
+          if (tag !== 8) {
+            break;
+          }
+
+          message.timestamp = longToNumber(reader.int64());
+          continue;
+        }
+      }
+      if ((tag & 7) === 4 || tag === 0) {
+        break;
+      }
+      reader.skip(tag & 7);
+    }
+    return message;
+  },
+
+  fromJSON(object: any): HeartbeatRequest {
+    return { timestamp: isSet(object.timestamp) ? globalThis.Number(object.timestamp) : 0 };
+  },
+
+  toJSON(message: HeartbeatRequest): unknown {
+    const obj: any = {};
+    if (message.timestamp !== 0) {
+      obj.timestamp = Math.round(message.timestamp);
+    }
+    return obj;
+  },
+
+  create<I extends Exact<DeepPartial<HeartbeatRequest>, I>>(base?: I): HeartbeatRequest {
+    return HeartbeatRequest.fromPartial(base ?? ({} as any));
+  },
+  fromPartial<I extends Exact<DeepPartial<HeartbeatRequest>, I>>(object: I): HeartbeatRequest {
+    const message = createBaseHeartbeatRequest();
+    message.timestamp = object.timestamp ?? 0;
     return message;
   },
 };
