@@ -243,7 +243,7 @@ class ListDirInput(BaseModel):
 class ListDir(DuoBaseTool):
     name: str = "list_dir"
     description: str = (
-        """Lists files in the given directory relative to the root of the project."""
+        """Lists files and subdirectories in the given directory relative to the root of the project. Use this tool to check directory contents, verify if a directory exists, or explore the file structure."""
     )
     args_schema: Type[BaseModel] = ListDirInput  # type: ignore
 
