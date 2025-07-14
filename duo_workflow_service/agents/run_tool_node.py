@@ -3,6 +3,7 @@
 from datetime import datetime, timezone
 from typing import Any, Generic, Protocol, TypeVar
 
+import structlog
 from langchain.tools import BaseTool
 
 from duo_workflow_service.entities import MessageTypeEnum, ToolStatus, UiChatLog
@@ -12,6 +13,10 @@ from duo_workflow_service.entities.state import (
     WorkflowState,
 )
 from duo_workflow_service.monitoring import duo_workflow_metrics
+from duo_workflow_service.security.prompt_security import (
+    PromptSecurity,
+    SecurityException,
+)
 
 WorkflowStateT_contra = TypeVar(
     "WorkflowStateT_contra",
@@ -61,6 +66,7 @@ class RunToolNode(Generic[WorkflowStateT]):
         self._tool = tool
         self._input_parser = input_parser
         self._output_parser = output_parser
+        self._logger = structlog.stdlib.get_logger("workflow")
 
     async def run(self, state: WorkflowStateT) -> dict[str, Any]:
         """Execute the tool with given state.
@@ -76,7 +82,19 @@ class RunToolNode(Generic[WorkflowStateT]):
 
         for tool_params in self._input_parser(state):
             with duo_workflow_metrics.time_tool_call(tool_name=self._tool.name):
-                output = await self._tool._arun(**tool_params)
+                if output := await self._tool._arun(**tool_params):
+                    try:
+                        secure_output = PromptSecurity.apply_security(
+                            response=output,
+                            tool_name=self._tool.name,
+                        )
+                        output = secure_output
+                    except SecurityException as e:
+                        self._logger.error(
+                            f"Security validation failed for tool {self._tool.name}: {e}"
+                        )
+                        raise
+
             outputs.append(output)
             logs.append(
                 UiChatLog(

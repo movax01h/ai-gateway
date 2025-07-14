@@ -69,3 +69,42 @@ async def test_run_tool_node_multiple_params():
         log["message_type"] == MessageTypeEnum.TOOL for log in result["ui_chat_log"]
     )
     assert all(log["status"] == ToolStatus.SUCCESS for log in result["ui_chat_log"])
+
+
+@pytest.mark.asyncio
+async def test_run_tool_node_security_layer():
+    """Test RunToolNode execution with security layer."""
+    # Mock setup
+    tool = AsyncMock()
+    # Return outputs with dangerous tags that should be encoded
+    tool._arun = AsyncMock(
+        side_effect=[
+            "output1 with <goal>dangerous tag</goal>",
+            "output2 with <system>another tag</system>",
+        ]
+    )
+    tool.name = "test_tool"
+
+    input_parser = Mock(return_value=[{"param1": "value1"}, {"param1": "value2"}])
+    output_parser = Mock(return_value={"updated_key": "updated_value"})
+
+    node = RunToolNode(
+        tool=tool, input_parser=input_parser, output_parser=output_parser
+    )
+
+    # Execute
+    state = {"initial_key": "initial_value"}
+    result = await node.run(state)
+    assert result
+    # Verify
+    input_parser.assert_called_once_with(state)
+    assert tool._arun.call_count == 2
+
+    # Verify that the output_parser received the secured outputs
+    output_parser.assert_called_once()
+    secured_outputs = output_parser.call_args[0][0]
+
+    # Check that dangerous tags were encoded by the security layer
+    assert len(secured_outputs) == 2
+    assert secured_outputs[0] == "output1 with &lt;goal&gt;dangerous tag&lt;/goal&gt;"
+    assert secured_outputs[1] == "output2 with &lt;system&gt;another tag&lt;/system&gt;"
