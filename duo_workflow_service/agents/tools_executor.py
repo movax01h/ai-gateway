@@ -21,6 +21,10 @@ from duo_workflow_service.entities.state import (
     UiChatLog,
 )
 from duo_workflow_service.monitoring import duo_workflow_metrics
+from duo_workflow_service.security.prompt_security import (
+    PromptSecurity,
+    SecurityException,
+)
 from duo_workflow_service.tools import (
     PipelineException,
     RunCommand,
@@ -88,6 +92,18 @@ class ToolsExecutor:
                 continue
 
             result = await self._execute_tool(tool_name, tool_call, plan)
+            response = result.get("response")
+            if response and hasattr(response, "content"):
+                try:
+                    result["response"].content = PromptSecurity.apply_security(
+                        response=result["response"].content,
+                        tool_name=tool_name,
+                    )
+                except SecurityException as e:
+                    self._logger.error(
+                        f"Security validation failed for tool {tool_name}: {e}"
+                    )
+                    raise
 
             chat_logs = result.get("chat_logs", [])
             if chat_logs and isinstance(chat_logs[0], dict):
