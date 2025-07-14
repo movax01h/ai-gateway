@@ -104,7 +104,7 @@ regression-tests:
   variables:
     DEBIAN_VERSION: "bookworm"
     RUBY_VERSION: "3.3"
-    GO_VERSION: "1.24.4"  # datasource=golang-version depName=golang/go
+    GO_VERSION: "1.24.5"  # datasource=golang-version depName=golang/go
     PYTHON_VERSION: "3.12.11"
     POETRY_VERSION: "2.0.1"
 
