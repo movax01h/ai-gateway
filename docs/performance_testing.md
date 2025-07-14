@@ -249,8 +249,6 @@ To add a new test:
 1. Update the comment sections with the respective values and code.
 
 ```javascript
-// Import necessary modules
-import { textSummary } from 'https://jslib.k6.io/k6-summary/0.0.1/index.js';
 export const TTFB_THRESHOLD= /* TTFB THRESHOLD VALUE EXPECTED */
 export const RPS_THRESHOLD= /* RPS THRESHOLD VALUE EXPECTED */;
 export const TEST_NAME=/* 'NAME OF THE TEST IN QUOTES' */
