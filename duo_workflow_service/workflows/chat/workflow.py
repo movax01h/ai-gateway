@@ -152,7 +152,7 @@ class Workflow(AbstractWorkflow):
         match status_event:
             case WorkflowStatusEventEnum.START:
                 return self.get_workflow_state(goal)
-            case WorkflowStatusEventEnum.RESUME:
+            case _:
                 state_update: dict[str, Any] = {"status": WorkflowStatusEnum.EXECUTION}
                 next_step = "agent"
 
@@ -186,8 +186,6 @@ class Workflow(AbstractWorkflow):
                 state_update["ui_chat_log"] = [new_message_chat_log]
 
                 return Command(goto=next_step, update=state_update)
-            case _:
-                return None
 
     def _compile(
         self,

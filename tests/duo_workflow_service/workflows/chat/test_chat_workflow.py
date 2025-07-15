@@ -416,10 +416,11 @@ async def test_get_graph_input_start(workflow_with_project):
 
 
 @pytest.mark.asyncio
-async def test_get_graph_input_resume(workflow_with_project):
-    result = await workflow_with_project.get_graph_input(
-        "New input", WorkflowStatusEventEnum.RESUME
-    )
+@pytest.mark.parametrize(
+    "status", [WorkflowStatusEventEnum.RETRY, WorkflowStatusEventEnum.RESUME]
+)
+async def test_get_graph_input(workflow_with_project, status):
+    result = await workflow_with_project.get_graph_input("New input", status)
 
     assert result.goto == "agent"
     assert result.update["status"] == WorkflowStatusEnum.EXECUTION
