@@ -1,9 +1,9 @@
 import asyncio
 from copy import deepcopy
 from datetime import datetime, timezone
+from json import dumps
 from typing import Union
 
-from langchain.load.dump import dumps
 from langchain_core.messages import BaseMessage
 from langchain_core.output_parsers.string import StrOutputParser
 
@@ -16,6 +16,7 @@ from duo_workflow_service.entities.state import (
     UiChatLog,
     WorkflowStatusEnum,
 )
+from duo_workflow_service.json_encoder.encoder import CustomEncoder
 
 
 class UserInterface:
@@ -64,7 +65,8 @@ class UserInterface:
                             "ui_chat_log": self.ui_chat_log,
                             "plan": {"steps": self.steps},
                         }
-                    }
+                    },
+                    cls=CustomEncoder,
                 ),
             ),
         )
