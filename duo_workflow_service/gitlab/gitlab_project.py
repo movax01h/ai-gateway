@@ -3,12 +3,18 @@ from typing import Optional, Tuple, TypedDict
 from duo_workflow_service.gitlab.http_client import GitlabHttpClient
 
 
+class Language(TypedDict):
+    name: str
+    share: float
+
+
 class Project(TypedDict):
     id: int
     description: str
     name: str
     http_url_to_repo: str
     web_url: str
+    languages: Optional[list[Language]]
 
 
 class Checkpoint(TypedDict):
@@ -38,6 +44,10 @@ async def fetch_workflow_and_project_data(
                     name
                     description
                     httpUrlToRepo
+                    languages {
+                        name
+                        share
+                    }
                     webUrl
                 }
                 agentPrivilegesNames
@@ -74,6 +84,7 @@ async def fetch_workflow_and_project_data(
         http_url_to_repo=project_data.get("httpUrlToRepo", ""),
         web_url=project_data.get("webUrl", ""),
         description=project_data.get("description", ""),
+        languages=project_data.get("languages", []),
     )
 
     # Build workflow config from the response
