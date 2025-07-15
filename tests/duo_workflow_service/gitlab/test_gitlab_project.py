@@ -51,6 +51,10 @@ async def test_fetch_workflow_and_project_data_success():
                         "description": "Test Project",
                         "httpUrlToRepo": "http://example.com/test-project.git",
                         "webUrl": "http://example.com/test-project",
+                        "languages": [
+                            {"name": "Python", "share": 75.5},
+                            {"name": "JavaScript", "share": 24.5},
+                        ],
                     },
                     "agentPrivilegesNames": ["read_repository", "write_repository"],
                     "preApprovedAgentPrivilegesNames": ["read_repository"],
@@ -81,6 +85,10 @@ async def test_fetch_workflow_and_project_data_success():
     assert project["name"] == "test-project"
     assert project["http_url_to_repo"] == "http://example.com/test-project.git"
     assert project["web_url"] == "http://example.com/test-project"
+    assert project["languages"] == [
+        {"name": "Python", "share": 75.5},
+        {"name": "JavaScript", "share": 24.5},
+    ]
 
     # Verify workflow config
     assert workflow_config["agent_privileges_names"] == [
@@ -108,3 +116,78 @@ async def test_fetch_workflow_and_project_data_no_workflow():
 
     # Verify GraphQL call
     gitlab_client.graphql.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_fetch_workflow_and_project_data_with_empty_languages():
+    gitlab_client = AsyncMock()
+    # Mock GraphQL response with empty languages
+    gitlab_client.graphql.return_value = {
+        "duoWorkflowWorkflows": {
+            "nodes": [
+                {
+                    "statusName": "created",
+                    "projectId": "gid://gitlab/Project/456",
+                    "project": {
+                        "id": "gid://gitlab/Project/456",
+                        "name": "empty-languages-project",
+                        "description": "Project with no languages",
+                        "httpUrlToRepo": "http://example.com/empty-project.git",
+                        "webUrl": "http://example.com/empty-project",
+                        "languages": [],
+                    },
+                    "agentPrivilegesNames": [],
+                    "preApprovedAgentPrivilegesNames": [],
+                    "mcpEnabled": False,
+                    "allowAgentToRequestUser": False,
+                    "firstCheckpoint": None,
+                }
+            ]
+        }
+    }
+
+    workflow_id = "456"
+    project, workflow_config = await fetch_workflow_and_project_data(
+        gitlab_client, workflow_id
+    )
+
+    # Verify project data with empty languages
+    assert project["id"] == 456
+    assert project["languages"] == []
+
+
+@pytest.mark.asyncio
+async def test_fetch_workflow_and_project_data_with_missing_languages():
+    gitlab_client = AsyncMock()
+    # Mock GraphQL response without languages field
+    gitlab_client.graphql.return_value = {
+        "duoWorkflowWorkflows": {
+            "nodes": [
+                {
+                    "statusName": "created",
+                    "projectId": "gid://gitlab/Project/789",
+                    "project": {
+                        "id": "gid://gitlab/Project/789",
+                        "name": "no-languages-project",
+                        "description": "Project without languages field",
+                        "httpUrlToRepo": "http://example.com/no-lang-project.git",
+                        "webUrl": "http://example.com/no-lang-project",
+                    },
+                    "agentPrivilegesNames": [],
+                    "preApprovedAgentPrivilegesNames": [],
+                    "mcpEnabled": False,
+                    "allowAgentToRequestUser": False,
+                    "firstCheckpoint": None,
+                }
+            ]
+        }
+    }
+
+    workflow_id = "789"
+    project, workflow_config = await fetch_workflow_and_project_data(
+        gitlab_client, workflow_id
+    )
+
+    # Verify project data with missing languages defaults to empty list
+    assert project["id"] == 789
+    assert project["languages"] == []
