@@ -21,6 +21,7 @@ from ai_gateway.api.middleware import (
     MiddlewareAuthentication,
     ModelConfigMiddleware,
 )
+from ai_gateway.api.server import CONTAINER_APPLICATION_MODULES
 from ai_gateway.code_suggestions.base import CodeSuggestionsChunk, CodeSuggestionsOutput
 from ai_gateway.code_suggestions.processing.base import ModelEngineOutput
 from ai_gateway.code_suggestions.processing.typing import (
@@ -50,6 +51,7 @@ from duo_workflow_service.entities.state import (
     WorkflowState,
     WorkflowStatusEnum,
 )
+from duo_workflow_service.server import CONTAINER_APPLICATION_PACKAGES
 from lib.feature_flags.context import current_feature_flag_context
 from lib.internal_events.client import InternalEventsClient
 
@@ -121,7 +123,7 @@ def mock_client(
     test_client,
     stub_auth_provider,
     auth_user,
-    mock_container,  # pylint: disable=unused-argument
+    mock_ai_gateway_container,  # pylint: disable=unused-argument
     model_metadata_context,  # pylint: disable=unused-argument
 ):
     """Setup all the needed mocks to perform requests in the test environment."""
@@ -163,6 +165,24 @@ def mock_container(
     container_application.config.from_dict(mock_config.model_dump())
 
     return container_application
+
+
+@pytest.fixture
+def mock_ai_gateway_container(
+    mock_container: ContainerApplication,
+) -> ContainerApplication:
+    mock_container.wire(modules=CONTAINER_APPLICATION_MODULES)
+
+    return mock_container
+
+
+@pytest.fixture
+def mock_duo_workflow_service_container(
+    mock_container: ContainerApplication,
+) -> ContainerApplication:
+    mock_container.wire(packages=CONTAINER_APPLICATION_PACKAGES)
+
+    return mock_container
 
 
 @pytest.fixture

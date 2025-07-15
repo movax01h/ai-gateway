@@ -30,8 +30,10 @@ def mock_agent():
 
 
 @pytest.mark.parametrize("custom_models_enabled", [False])
-def test_container(mock_container: containers.DeclarativeContainer, mock_agent: Mock):
-    chat = cast(providers.Container, mock_container.chat)
+def test_container(
+    mock_ai_gateway_container: containers.DeclarativeContainer, mock_agent: Mock
+):
+    chat = cast(providers.Container, mock_ai_gateway_container.chat)
 
     assert isinstance(
         chat.anthropic_claude_factory(
@@ -58,10 +60,10 @@ def test_container(mock_container: containers.DeclarativeContainer, mock_agent: 
     [(True, SelfHostedGitlabDocumentation), (False, GitlabDocumentation)],
 )
 def test_container_with_config(
-    mock_container: containers.DeclarativeContainer,
+    mock_ai_gateway_container: containers.DeclarativeContainer,
     expected_tool_type: Type[BaseTool],
 ):
-    chat = cast(providers.Container, mock_container.chat)
+    chat = cast(providers.Container, mock_ai_gateway_container.chat)
 
     tool_types = {
         type(tool)

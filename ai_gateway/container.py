@@ -20,21 +20,6 @@ __all__ = [
 
 
 class ContainerApplication(containers.DeclarativeContainer):
-    wiring_config = containers.WiringConfiguration(
-        modules=[
-            "ai_gateway.api.v1.x_ray.libraries",
-            "ai_gateway.api.v1.chat.agent",
-            "ai_gateway.api.v1.search.docs",
-            "ai_gateway.api.v2.code.completions",
-            "ai_gateway.api.v3.code.completions",
-            "ai_gateway.api.v4.code.suggestions",
-            "ai_gateway.api.server",
-            "ai_gateway.api.monitoring",
-            "ai_gateway.async_dependency_resolver",
-        ],
-        packages=["duo_workflow_service"],
-    )
-
     config = providers.Configuration(strict=True)
 
     interceptor: providers.Singleton = providers.Singleton(

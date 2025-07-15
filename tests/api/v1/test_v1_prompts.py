@@ -221,7 +221,7 @@ class TestUnauthorizedScopes:
         )
 
     def test_failed_authorization_scope(
-        self, mock_container, mock_client, mock_registry_get
+        self, mock_ai_gateway_container, mock_client, mock_registry_get
     ):
         response = mock_client.post(
             "/prompts/test",

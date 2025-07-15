@@ -57,7 +57,9 @@ def mock_tool(
 
 
 @pytest.fixture(autouse=True)
-def prepare_container(mock_container):  # pylint: disable=unused-argument
+def prepare_container(
+    mock_duo_workflow_service_container,
+):  # pylint: disable=unused-argument
     pass
 
 

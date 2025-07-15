@@ -970,7 +970,7 @@ class TestCodeCompletions:
     def test_snowplow_tracking(
         self,
         mock_client: TestClient,
-        mock_container: containers.Container,
+        mock_ai_gateway_container: containers.Container,
         mock_completions: Mock,
         auth_user: CloudConnectorUser,
         telemetry: List[Dict[str, Union[str, int, None]]],
@@ -1012,7 +1012,9 @@ class TestCodeCompletions:
             return_value=snowplow_instrumentator_mock
         )
 
-        with patch.object(mock_container, "snowplow", snowplow_container_mock):
+        with patch.object(
+            mock_ai_gateway_container, "snowplow", snowplow_container_mock
+        ):
             mock_client.post(
                 "/completions",
                 headers={
@@ -2107,7 +2109,7 @@ class TestCodeGenerations:
     def test_non_stream_response(
         self,
         mock_client,
-        mock_container: containers.Container,
+        mock_ai_gateway_container: containers.Container,
         mock_code_bison: Mock,
         mock_anthropic_chat: Mock,
         mock_llm_chat: Mock,

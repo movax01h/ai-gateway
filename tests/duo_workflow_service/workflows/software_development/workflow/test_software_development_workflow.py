@@ -54,7 +54,7 @@ class MockComponent:
 
 
 @pytest.fixture(autouse=True)
-def prepare_container(mock_container):
+def prepare_container(mock_duo_workflow_service_container):
     pass
 
 
@@ -71,7 +71,9 @@ def user():
 
 @pytest.fixture
 def workflow(
-    mock_container: Mock, gl_http_client: GitlabHttpClient, user: CloudConnectorUser
+    mock_duo_workflow_service_container: Mock,
+    gl_http_client: GitlabHttpClient,
+    user: CloudConnectorUser,
 ):
     """Create a software development workflow instance."""
     workflow = Workflow(

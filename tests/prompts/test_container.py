@@ -47,8 +47,8 @@ def _kwargs_for_class(klass):
     return {}
 
 
-def test_container(mock_container: containers.DeclarativeContainer):
-    prompts = cast(providers.Container, mock_container.pkg_prompts)
+def test_container(mock_ai_gateway_container: containers.DeclarativeContainer):
+    prompts = cast(providers.Container, mock_ai_gateway_container.pkg_prompts)
     registry = cast(LocalPromptRegistry, prompts.prompt_registry())
 
     assert registry.model_limits == ConfigModelLimits(

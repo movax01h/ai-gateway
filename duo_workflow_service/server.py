@@ -57,6 +57,8 @@ from duo_workflow_service.workflows.type_definitions import AdditionalContext
 from lib.internal_events import InternalEventsClient
 from lib.internal_events.event_enum import CategoryEnum
 
+CONTAINER_APPLICATION_PACKAGES = ["duo_workflow_service"]
+
 log = structlog.stdlib.get_logger("server")
 
 catalog = data_model.load_catalog()
@@ -419,6 +421,7 @@ def choose_legacy_unit_primitive(
 
 def setup_container():
     container_application = ContainerApplication()
+    container_application.wire(packages=CONTAINER_APPLICATION_PACKAGES)
     container_application.config.from_dict(Config().model_dump())
 
 

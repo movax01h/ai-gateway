@@ -271,11 +271,11 @@ class TestRun:
         with patch(
             "eval.generate_dataset.ContainerApplication"
         ) as mock_container_class:
-            mock_container = Mock()
-            mock_container_class.return_value = mock_container
+            mock_ai_gateway_container = Mock()
+            mock_container_class.return_value = mock_ai_gateway_container
             mock_config = Mock()
-            mock_container.config = mock_config
-            yield mock_container
+            mock_ai_gateway_container.config = mock_config
+            yield mock_ai_gateway_container
 
     @patch("eval.generate_dataset.LangGraphAdapter")
     @patch("eval.generate_dataset.DatasetGenerator")
