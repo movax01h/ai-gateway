@@ -23,6 +23,7 @@ from duo_workflow_service.server import (
     DuoWorkflowService,
     clean_start_request,
     configure_cache,
+    next_non_heartbeat_event,
     run,
     serve,
     string_to_category_enum,
@@ -573,3 +574,21 @@ def test_string_to_category_enum():
         mock_log.warning.assert_called_once_with(
             "Unknown category string: INVALID_CATEGORY"
         )
+
+
+@pytest.mark.asyncio
+async def test_next_non_heartbeat_event():
+    async def mock_request_iterator() -> AsyncIterable[contract_pb2.ClientEvent]:
+        yield contract_pb2.ClientEvent(
+            heartbeat=contract_pb2.HeartbeatRequest(timestamp=123)
+        )
+        yield contract_pb2.ClientEvent(
+            heartbeat=contract_pb2.HeartbeatRequest(timestamp=456)
+        )
+        yield contract_pb2.ClientEvent(
+            actionResponse=contract_pb2.ActionResponse(response="the response")
+        )
+
+    result = await next_non_heartbeat_event(mock_request_iterator())
+    assert result.actionResponse.response == "the response"
+    assert not result.HasField("heartbeat")

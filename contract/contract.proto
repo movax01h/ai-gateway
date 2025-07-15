@@ -12,6 +12,7 @@ message ClientEvent {
     oneof response {
         StartWorkflowRequest startRequest = 1;
         ActionResponse actionResponse = 2;
+        HeartbeatRequest heartbeat = 3;
     }
 }
 
@@ -35,6 +36,10 @@ message ActionResponse {
         PlainTextResponse plainTextResponse = 3;
         HttpResponse httpResponse = 4;
     }
+}
+
+message HeartbeatRequest {
+    int64 timestamp = 1;
 }
 
 message PlainTextResponse {

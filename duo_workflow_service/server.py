@@ -223,9 +223,8 @@ class DuoWorkflowService(contract_pb2_grpc.DuoWorkflowServicer):
                     streaming_action = workflow.get_from_streaming_outbox()
                     if isinstance(streaming_action, contract_pb2.Action):
                         yield streaming_action
-                        _event: contract_pb2.ClientEvent = await anext(  # noqa: F841
-                            aiter(request_iterator)
-                        )
+
+                        await next_non_heartbeat_event(request_iterator)
 
                         if workflow.outbox_empty():
                             continue
@@ -241,8 +240,8 @@ class DuoWorkflowService(contract_pb2_grpc.DuoWorkflowServicer):
 
                     yield action
 
-                    event: contract_pb2.ClientEvent = await anext(
-                        aiter(request_iterator)
+                    event: contract_pb2.ClientEvent = await next_non_heartbeat_event(
+                        request_iterator
                     )
 
                     workflow.add_to_inbox(event)
@@ -340,6 +339,16 @@ class DuoWorkflowService(contract_pb2_grpc.DuoWorkflowServicer):
 
     # pylint: enable=invalid-overridden-method
     # pylint: enable=too-many-statements
+
+
+async def next_non_heartbeat_event(
+    request_iterator: AsyncIterable[contract_pb2.ClientEvent],
+) -> contract_pb2.ClientEvent:
+    """Consumes the request iterator until a non-heartbeat event is found."""
+    while True:
+        event = await anext(aiter(request_iterator))
+        if not event.HasField("heartbeat"):
+            return event
 
 
 async def serve(port: int) -> None:
