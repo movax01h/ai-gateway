@@ -35,7 +35,11 @@ from duo_workflow_service.checkpointer.gitlab_workflow_utils import (
 )
 from duo_workflow_service.entities import WorkflowStatusEnum
 from duo_workflow_service.gitlab.gitlab_project import WorkflowConfig
-from duo_workflow_service.gitlab.http_client import GitlabHttpClient, checkpoint_decoder
+from duo_workflow_service.gitlab.http_client import (
+    GitlabHttpClient,
+    GitLabHttpResponse,
+    checkpoint_decoder,
+)
 from duo_workflow_service.json_encoder.encoder import CustomEncoder
 from duo_workflow_service.monitoring import duo_workflow_metrics
 from duo_workflow_service.status_updater.gitlab_status_updater import (
@@ -472,8 +476,9 @@ class GitLabWorkflow(BaseCheckpointSaver[Any], AbstractAsyncContextManager[Any])
         with duo_workflow_metrics.time_gitlab_response(
             endpoint=endpoint, method="POST"
         ):
-            await self._client.apost(
+            response = await self._client.apost(
                 path=endpoint,
+                use_http_response=True,
                 body=json.dumps(
                     {
                         "thread_ts": checkpoint["id"],
@@ -484,6 +489,12 @@ class GitLabWorkflow(BaseCheckpointSaver[Any], AbstractAsyncContextManager[Any])
                     cls=CustomEncoder,
                 ),
             )
+            if isinstance(response, GitLabHttpResponse) and response.status_code >= 400:
+                duo_workflow_metrics.count_checkpoint_error(
+                    endpoint=endpoint,
+                    status_code=response.status_code,
+                    method="POST",
+                )
         self._logger.info(
             "Checkpoint saved",
             thread_ts=checkpoint["id"],

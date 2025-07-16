@@ -86,6 +86,13 @@ class DuoWorkflowMetrics:
             registry=registry,
         )
 
+        self.checkpoint_error_counter = Counter(
+            "duo_workflow_checkpoint_error_total",
+            "Count of errors encountered while saving checkpoints",
+            ["endpoint", "status_code", "method"],
+            registry=registry,
+        )
+
     def count_llm_response(
         self, model="unknown", request_type="unknown", stop_reason="unknown"
     ):
@@ -95,6 +102,18 @@ class DuoWorkflowMetrics:
             stop_reason=(
                 stop_reason if stop_reason in ANTHROPIC_STOP_REASONS else "other"
             ),
+        ).inc()
+
+    def count_checkpoint_error(
+        self,
+        endpoint="unknown",
+        status_code="unknown",
+        method="unknown",
+    ):
+        self.checkpoint_error_counter.labels(
+            endpoint=endpoint,
+            status_code=status_code,
+            method=method,
         ).inc()
 
     def time_llm_request(self, model="unknown", request_type="unknown"):
