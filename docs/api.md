@@ -2,6 +2,7 @@
 
 An interactive API documentation site is available at <http://127.0.0.1:5001/docs>.
 For more information, please see the official FastAPI [doc](https://fastapi.tiangolo.com/tutorial/first-steps/?h=interactive+api+docs#interactive-api-docs).
+For information on how to send direct `curl` requests to the AIGW for Code Suggestions (completions and generations) in both production and staging environments see [these internal docs](https://internal.gitlab.com/handbook/product/ai-strategy/code-suggestions/testing_code_suggestions_aigw_api/)
 
 ## Authentication
 
