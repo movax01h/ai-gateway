@@ -226,7 +226,13 @@ class DuoWorkflowService(contract_pb2_grpc.DuoWorkflowServicer):
                     if isinstance(streaming_action, contract_pb2.Action):
                         yield streaming_action
 
-                        await next_non_heartbeat_event(request_iterator)
+                        if (
+                            invocation_metadata.get(
+                                "x-gitlab-unidirectional-streaming", ""
+                            )
+                            != "enabled"
+                        ):
+                            await next_non_heartbeat_event(request_iterator)
 
                         if workflow.outbox_empty():
                             continue

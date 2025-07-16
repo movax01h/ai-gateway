@@ -184,7 +184,19 @@ async def test_workflow_is_cancelled_on_parent_task_cancellation(
 @pytest.mark.asyncio
 @patch("duo_workflow_service.server.AbstractWorkflow")
 @patch("duo_workflow_service.server.resolve_workflow_class")
-async def test_execute_workflow(mock_resolve_workflow, mock_abstract_workflow_class):
+@pytest.mark.parametrize(
+    ("unidirectional_streaming_enabled", "request_iterator_count"),
+    [
+        ("", 6),
+        ("enabled", 3),
+    ],
+)
+async def test_execute_workflow(
+    mock_resolve_workflow,
+    mock_abstract_workflow_class,
+    unidirectional_streaming_enabled,
+    request_iterator_count,
+):
     mock_workflow_instance = mock_abstract_workflow_class.return_value
     mock_workflow_instance.is_done = False
     mock_workflow_instance.run = AsyncMock()
@@ -209,13 +221,16 @@ async def test_execute_workflow(mock_resolve_workflow, mock_abstract_workflow_cl
     mock_resolve_workflow.return_value = mock_abstract_workflow_class
 
     async def mock_request_iterator() -> AsyncIterable[contract_pb2.ClientEvent]:
-        while True:
+        for _ in range(request_iterator_count):
             yield contract_pb2.ClientEvent(
                 startRequest=contract_pb2.StartWorkflowRequest(goal="test")
             )
 
     current_user.set(CloudConnectorUser(authenticated=True, is_debug=True))
     mock_context = MagicMock(spec=grpc.ServicerContext)
+    mock_context.invocation_metadata.return_value = [
+        ("x-gitlab-unidirectional-streaming", unidirectional_streaming_enabled),
+    ]
     servicer = DuoWorkflowService()
     result = servicer.ExecuteWorkflow(mock_request_iterator(), mock_context)
     assert isinstance(result, AsyncIterable)
