@@ -179,7 +179,9 @@ class Prompt(RunnableBinding[Input, Output]):
         **kwargs: Optional[Any],
     ) -> Output:
         with (
-            self.instrumentator.watch(stream=False) as watcher,
+            self.instrumentator.watch(
+                stream=False, unit_primitives=self.unit_primitives
+            ) as watcher,
             get_usage_metadata_callback() as cb,
         ):
             result = await super().ainvoke(
@@ -202,7 +204,9 @@ class Prompt(RunnableBinding[Input, Output]):
         # To properly address this pylint issue, the upstream function would need to be altered to ensure proper cleanup.
         # See https://pylint.readthedocs.io/en/latest/user_guide/messages/warning/contextmanager-generator-missing-cleanup.html
         with (
-            self.instrumentator.watch(stream=True) as watcher,
+            self.instrumentator.watch(
+                stream=True, unit_primitives=self.unit_primitives
+            ) as watcher,
             get_usage_metadata_callback() as cb,
         ):
             # The usage metadata callback only totals the usage at the `on_llm_end` event, so we need to be able to

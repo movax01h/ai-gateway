@@ -1,8 +1,10 @@
 from unittest import mock
 
 import pytest
+from gitlab_cloud_connector import GitLabUnitPrimitive
 from structlog.testing import capture_logs
 
+from ai_gateway.api.feature_category import current_feature_category
 from ai_gateway.instrumentators.model_requests import (
     ModelRequestInstrumentator,
     get_token_usage,
@@ -24,6 +26,7 @@ class TestWatchContainer:
             labels={"model_engine": "anthropic", "model_name": "claude"},
             streaming=False,
             limits=None,
+            unit_primitives=None,
         )
 
         container.register_token_usage(
@@ -37,6 +40,7 @@ class TestWatchContainer:
                 error="no",
                 streaming="no",
                 feature_category="unknown",
+                unit_primitive="unknown",
             ),
             mock.call().inc(10),
             mock.call(
@@ -45,6 +49,7 @@ class TestWatchContainer:
                 error="no",
                 streaming="no",
                 feature_category="unknown",
+                unit_primitive="unknown",
             ),
             mock.call().inc(15),
         ]
@@ -86,6 +91,7 @@ class TestWatchContainer:
             labels={"model_engine": "anthropic", "model_name": "claude"},
             streaming=False,
             limits=None,
+            unit_primitives=None,
         )
         time_counter.side_effect = [1, 2]
 
@@ -111,6 +117,7 @@ class TestWatchContainer:
                 error="no",
                 streaming="no",
                 feature_category="unknown",
+                unit_primitive="unknown",
             ),
             mock.call().inc(),
         ]
@@ -121,6 +128,7 @@ class TestWatchContainer:
                 error="no",
                 streaming="no",
                 feature_category="unknown",
+                unit_primitive="unknown",
             ),
             mock.call().observe(1),
         ]
@@ -154,6 +162,7 @@ class TestModelRequestInstrumentator:
                 error="no",
                 streaming="no",
                 feature_category="unknown",
+                unit_primitive="unknown",
             ),
             mock.call().inc(),
         ]
@@ -164,6 +173,7 @@ class TestModelRequestInstrumentator:
                 error="no",
                 streaming="no",
                 feature_category="unknown",
+                unit_primitive="unknown",
             ),
             mock.call().observe(1),
         ]
@@ -203,6 +213,7 @@ class TestModelRequestInstrumentator:
                 error="yes",
                 streaming="no",
                 feature_category="unknown",
+                unit_primitive="unknown",
             ),
             mock.call().inc(),
         ]
@@ -213,6 +224,7 @@ class TestModelRequestInstrumentator:
                 error="yes",
                 streaming="no",
                 feature_category="unknown",
+                unit_primitive="unknown",
             ),
             mock.call().observe(1),
         ]
@@ -286,6 +298,7 @@ class TestModelRequestInstrumentator:
                     error="no",
                     streaming="yes",
                     feature_category="unknown",
+                    unit_primitive="unknown",
                 ),
                 mock.call().inc(),
             ]
@@ -296,6 +309,48 @@ class TestModelRequestInstrumentator:
                     error="no",
                     streaming="yes",
                     feature_category="unknown",
+                    unit_primitive="unknown",
                 ),
                 mock.call().observe(1),
             ]
+
+
+@pytest.fixture
+def instrumentator():
+
+    return ModelRequestInstrumentator(
+        model_engine="test_engine", model_name="test_model", limits=None
+    )
+
+
+class TestDetailLabels:
+    @pytest.mark.parametrize(
+        "unit_primitives,expected_unit_primitive,expected_feature_category",
+        [
+            ([GitLabUnitPrimitive.SUMMARIZE_COMMENTS], "summarize_comments", "unknown"),
+            (
+                [GitLabUnitPrimitive.DUO_CHAT, GitLabUnitPrimitive.CODE_SUGGESTIONS],
+                "duo_chat",
+                "unknown",
+            ),
+            (None, "unknown", "unknown"),
+        ],
+    )
+    def test_detail_labels(
+        self,
+        instrumentator,
+        unit_primitives,
+        expected_unit_primitive,
+        expected_feature_category,
+    ):
+        with instrumentator.watch(unit_primitives=unit_primitives) as watcher:
+            labels = watcher._detail_labels()
+            assert labels["unit_primitive"] == expected_unit_primitive
+            assert labels["feature_category"] == expected_feature_category
+            GitLabUnitPrimitive.CODE_SUGGESTIONS,
+
+    def test_detail_labels_without_unit_primitive(self, instrumentator):
+
+        with instrumentator.watch(unit_primitives=None) as watcher:
+            labels = watcher._detail_labels()
+            assert labels["unit_primitive"] == "unknown"
