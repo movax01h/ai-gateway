@@ -796,7 +796,7 @@ class TestEditorContentGeneration:
     def test_prompt(
         self,
         mock_client,
-        mock_container: containers.Container,
+        mock_ai_gateway_container: containers.Container,
         mock_generations: Mock,
         mock_with_prompt_prepared: Mock,
         prompt: str,

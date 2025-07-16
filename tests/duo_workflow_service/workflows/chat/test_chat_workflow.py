@@ -55,7 +55,7 @@ def user():
 
 @pytest.fixture
 def workflow_with_project(
-    mock_container: containers.Container,
+    mock_duo_workflow_service_container: containers.Container,
     prompt: ChatAgent,
     user: CloudConnectorUser,
     mock_tools_registry: Mock,

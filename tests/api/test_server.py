@@ -90,6 +90,20 @@ def auth_enabled():
 def fastapi_server_app(auth_enabled) -> FastAPI:
     config = Config(_env_file=None, auth=ConfigAuth(bypass_external=not auth_enabled))
     fast_api_container = ContainerApplication()
+    fast_api_container.wire(
+        modules=[
+            "ai_gateway.api.v1.x_ray.libraries",
+            "ai_gateway.api.v1.chat.agent",
+            "ai_gateway.api.v1.search.docs",
+            "ai_gateway.api.v2.code.completions",
+            "ai_gateway.api.v3.code.completions",
+            "ai_gateway.api.v4.code.suggestions",
+            "ai_gateway.api.server",
+            "ai_gateway.api.monitoring",
+            "ai_gateway.async_dependency_resolver",
+        ],
+    )
+
     fast_api_container.config.from_dict(config.model_dump())
     setup_logging(
         config.logging, custom_models_enabled=False, cache_logger_on_first_use=False

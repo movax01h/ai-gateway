@@ -106,6 +106,7 @@ class TestAgent:
         chat_mock.bind_tools.assert_called_once_with(mock_toolset.bindable)
 
     @pytest.mark.asyncio
+    @pytest.mark.usefixtures("mock_duo_workflow_service_container")
     async def test_run_with_empty_conversation(
         self, chat_mock, planner_agent, workflow_state
     ):
@@ -230,6 +231,7 @@ class TestAgent:
         assert result["ui_chat_log"][0]["content"] == simple_string
 
     @pytest.mark.asyncio
+    @pytest.mark.usefixtures("mock_duo_workflow_service_container")
     async def test_run_with_list_of_strings_content(
         self, chat_mock, planner_agent, workflow_state, workflow_msg_event
     ):
@@ -244,6 +246,7 @@ class TestAgent:
         assert result["ui_chat_log"][0]["content"] == "Line 1\nLine 2\nLine 3"
 
     @pytest.mark.asyncio
+    @pytest.mark.usefixtures("mock_duo_workflow_service_container")
     async def test_run_with_dict_content(
         self, chat_mock, planner_agent, workflow_state, workflow_msg_event
     ):
@@ -261,6 +264,7 @@ class TestAgent:
         assert result["ui_chat_log"][0]["content"] == "Message from dict"
 
     @pytest.mark.asyncio
+    @pytest.mark.usefixtures("mock_duo_workflow_service_container")
     async def test_run_with_invalid_content(
         self, chat_mock, planner_agent, workflow_state, workflow_msg_event
     ):
@@ -288,6 +292,7 @@ class TestAgent:
         assert not "ui_chat_log" in result
 
     @pytest.mark.asyncio
+    @pytest.mark.usefixtures("mock_duo_workflow_service_container")
     async def test_run_with_resume_event(
         self, chat_mock, planner_agent, workflow_state, workflow_resume_event
     ):
@@ -388,6 +393,7 @@ class TestAgent:
         assert mock_error_handler.handle_error.call_count == 3
 
     @pytest.mark.asyncio
+    @pytest.mark.usefixtures("mock_duo_workflow_service_container")
     async def test_run_with_api_error_status_tracking(
         self, chat_mock, planner_agent, workflow_state
     ):
@@ -476,6 +482,7 @@ class TestAgent:
         )
 
     @pytest.mark.asyncio
+    @pytest.mark.usefixtures("mock_duo_workflow_service_container")
     @patch("duo_workflow_service.agents.agent.get_event")
     async def test_run_with_check_events_enabled(
         self,

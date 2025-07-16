@@ -35,7 +35,7 @@ class MockWorkflow(AbstractWorkflow):
 
 
 @pytest.fixture(autouse=True)
-def prepare_container(mock_container):
+def prepare_container(mock_duo_workflow_service_container):
     pass
 
 

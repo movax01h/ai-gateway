@@ -38,7 +38,7 @@ def fastapi_server_app(mock_config: Config) -> FastAPI:
 @pytest.fixture
 def client(
     fastapi_server_app: FastAPI,
-    mock_container: containers.Container,  # pylint: disable=unused-argument
+    mock_ai_gateway_container: containers.Container,  # pylint: disable=unused-argument
 ) -> TestClient:
     return TestClient(fastapi_server_app)
 

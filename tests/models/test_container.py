@@ -145,8 +145,8 @@ def test_vertex_ai_proxy_client(args, expected_init):
 
 
 @pytest.mark.asyncio
-async def test_container(mock_container: containers.DeclarativeContainer):
-    models = cast(providers.Container, mock_container.pkg_models)
+async def test_container(mock_ai_gateway_container: containers.DeclarativeContainer):
+    models = cast(providers.Container, mock_ai_gateway_container.pkg_models)
 
     assert isinstance(models.anthropic_proxy_client(), AnthropicProxyClient)
     assert isinstance(models.vertex_ai_proxy_client(), VertexAIProxyClient)

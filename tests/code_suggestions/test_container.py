@@ -9,8 +9,8 @@ from ai_gateway.models.anthropic import KindAnthropicModel
 from ai_gateway.models.litellm import KindLiteLlmModel
 
 
-def test_container(mock_container: containers.DeclarativeContainer):
-    code_suggestions = mock_container.code_suggestions
+def test_container(mock_ai_gateway_container: containers.DeclarativeContainer):
+    code_suggestions = mock_ai_gateway_container.code_suggestions
     completions = code_suggestions.completions
     generations = code_suggestions.generations
 

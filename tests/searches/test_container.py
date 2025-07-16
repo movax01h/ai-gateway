@@ -17,9 +17,9 @@ def config_values(custom_models_enabled: bool):
     [(True, SqliteSearch), (False, VertexAISearch)],
 )
 def test_container(
-    mock_container: containers.DeclarativeContainer,
+    mock_ai_gateway_container: containers.DeclarativeContainer,
     search_provider_class: Type[Searcher],
 ):
-    searches = cast(providers.Container, mock_container.searches)
+    searches = cast(providers.Container, mock_ai_gateway_container.searches)
 
     assert isinstance(searches.search_provider(), search_provider_class)
