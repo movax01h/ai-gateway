@@ -363,14 +363,6 @@ class TestUnauthorizedChatExecution:
             + RUN_COMMAND_TOOLS
             + CHAT_GITLAB_MUTATION_TOOLS,
         ),
-        (
-            [],
-            {"mcp_enabled": True},
-            CHAT_READ_ONLY_TOOLS
-            + CHAT_MUTATION_TOOLS
-            + RUN_COMMAND_TOOLS
-            + ["extra_tool"],
-        ),
     ],
 )
 @patch("duo_workflow_service.components.tools_registry.ToolsRegistry.toolset")

@@ -245,9 +245,6 @@ class Workflow(AbstractWorkflow):
         if is_feature_enabled(FeatureFlag.DUO_WORKFLOW_WEB_CHAT_MUTATION_TOOLS):
             available_tools += CHAT_GITLAB_MUTATION_TOOLS
 
-        if self._workflow_config.get("mcp_enabled", False):
-            available_tools += [tool.name for tool in self._additional_tools]
-
         return available_tools
 
     async def _handle_workflow_failure(
