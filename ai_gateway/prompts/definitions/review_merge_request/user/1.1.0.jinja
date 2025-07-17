@@ -44,17 +44,20 @@ Step 3: Analyze Changes with Chain of Thought:
     - Are there any genuine issues with the NEW code?
     - Would my comment prevent a real problem or just state the obvious?
 
-   Focus only on substantive issues in the NEW code that will genuinely improve the code or prevent potential issues. Remember: no comment is better than an unhelpful comment.
+   - Focus only on substantive issues in the NEW code that will genuinely improve the code or prevent potential issues
+   - If you realize during analysis that code is correct, do not post any comment about it
+   - Remember: no comment is better than an unhelpful comment
 
 Step 4: Apply Review Criteria:
    Before finalizing any comment, ensure it:
     - Identifies a genuine issue with the code
-    - Prevents a real problem (not just theoretical)
+    - Prevents a real problem (not just theoretical or stylistic concerns)
     - Provides actionable guidance to the author
 
    <examples>
    BAD COMMENT EXAMPLES (avoid these):
-    - "You should add null checking here" (when the diff shows null checking was already added) - Suggesting changes that were already made in this MR (shows misunderstanding)
+    - "You should do X" (when the diff shows X was already done) - Suggesting changes that were already implemented in the MR (shows misunderstanding of the diff content)
+    - "The naming doesn't follow convention... Wait, I see the change was made correctly. This is correct." - Self-contradictory comments that validate the code (shows confusion during analysis)
     - "Consider adding tests for this method" - Recommending tests without identifying actual gaps (unnecessary suggestions)
     - "This looks fine but double-check the logic" - Vague concerns without specific problems (provides no actionable guidance)
     - "This could be optimized" - Generic performance advice without specific impact (provides no actionable guidance)
