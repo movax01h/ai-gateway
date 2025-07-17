@@ -161,6 +161,13 @@ class Agent:  # pylint: disable=too-many-instance-attributes
                     status_code=status_code,
                     message=error_message,
                 )
+                model_class = getattr(self._model, "bound", None)
+                duo_workflow_metrics.count_model_completion_errors(
+                    model=getattr(self._model, "model_name", "unknown"),
+                    provider=type(model_class).__name__ if model_class else "unknown",
+                    http_status=str(status_code),
+                    error_type=self._error_handler.get_error_type(status_code),
+                )
 
                 await self._error_handler.handle_error(model_error)
 

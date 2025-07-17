@@ -93,6 +93,13 @@ class DuoWorkflowMetrics:
             registry=registry,
         )
 
+        self.model_completion_error_counter = Counter(
+            "duo_workflow_model_completion_errors_total",
+            "Model completion error count in Duo Workflow Service",
+            ["model", "provider", "http_status", "error_type"],
+            registry=registry,
+        )
+
     def count_llm_response(
         self, model="unknown", request_type="unknown", stop_reason="unknown"
     ):
@@ -114,6 +121,20 @@ class DuoWorkflowMetrics:
             endpoint=endpoint,
             status_code=status_code,
             method=method,
+        ).inc()
+
+    def count_model_completion_errors(
+        self,
+        model="unknown",
+        provider="unknown",
+        http_status="unknown",
+        error_type="unknown",
+    ):
+        self.model_completion_error_counter.labels(
+            model=model,
+            provider=provider,
+            http_status=http_status,
+            error_type=error_type,
         ).inc()
 
     def time_llm_request(self, model="unknown", request_type="unknown"):
