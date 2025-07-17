@@ -66,13 +66,13 @@ class TestFlowConfig:
             "version": "experimental",
         }
 
-        config_file = tmp_path / "config.yaml"
+        config_file = tmp_path / "config.yml"
 
         with open(config_file, "w") as f:
             yaml.dump(config_data, f)
 
         with patch.object(FlowConfig, "DIRECTORY_PATH", Path(tmp_path)):
-            config = FlowConfig.from_yaml_config("config.yaml")
+            config = FlowConfig.from_yaml_config("config")
 
         assert config.flow["entry_point"] == "test_agent"
         assert config.environment == "local"
@@ -81,22 +81,83 @@ class TestFlowConfig:
     def test_flowconfig_from_yaml_config_file_not_found(self):
         """Test loading YAML config raises FileNotFoundError for missing file."""
         with pytest.raises(FileNotFoundError) as exc_info:
-            FlowConfig.from_yaml_config("nonexistent.yaml")
+            FlowConfig.from_yaml_config("nonexistent")
 
-        assert "nonexistent.yaml file not found" in str(exc_info.value)
+        assert "nonexistent file not found" in str(exc_info.value)
 
     def test_flowconfig_from_yaml_config_invalid_yaml(self, tmp_path):
         """Test loading invalid YAML raises YAMLError."""
-        config_file = tmp_path / "invalid_config.yaml"
+        config_file = tmp_path / "invalid_config.yml"
 
         with open(config_file, "w") as f:
             f.write("invalid: yaml: content: [unclosed")
 
         with patch.object(FlowConfig, "DIRECTORY_PATH", Path(tmp_path)):
             with pytest.raises(yaml.YAMLError) as exc_info:
-                FlowConfig.from_yaml_config("invalid_config.yaml")
+                FlowConfig.from_yaml_config("invalid_config")
 
         assert "Error parsing YAML file" in str(exc_info.value)
+
+    @pytest.mark.parametrize(
+        "malicious_path",
+        [
+            "config/../../etc/passwd",
+            "flows/.../.../.../config.yml",
+            r"configs\…..\\…..\\system.yml",
+            "templates%00../../../../../etc/passwd",
+            "flows%2e%2e%2fconfig.yml",
+            "configs%252e%252e%252fsystem.yml",
+            "templates%c0%ae%c0%ae%c0%afconfig.yml",
+            "flows%uff0e%uff0e%u2215config.yml",
+            "configs%uff0e%uff0e%u2216system.yml",
+            "/etc/config/absolute.yml",
+        ],
+    )
+    def test_flowconfig_from_yaml_config_path_traversal_protection(
+        self, tmp_path, malicious_path
+    ):
+        """Test that path traversal attempts are blocked."""
+        with patch.object(FlowConfig, "DIRECTORY_PATH", Path(tmp_path)):
+            with pytest.raises(ValueError, match="Path traversal detected"):
+                FlowConfig.from_yaml_config(malicious_path)
+
+    @pytest.mark.parametrize(
+        "safe_path",
+        [
+            "valid_config",
+            "config_name",
+            "test-config",
+            "config_123",
+            "nested/config",
+            "deeply/nested/config",
+        ],
+    )
+    def test_flowconfig_from_yaml_config_safe_paths_allowed(self, tmp_path, safe_path):
+        """Test that legitimate paths are allowed through security checks."""
+        config_data = {
+            "flow": {"entry_point": "test_agent"},
+            "components": [
+                {
+                    "name": "test_agent",
+                    "type": "AgentComponent",
+                    "inputs": ["context:goal"],
+                }
+            ],
+            "routers": [{"from": "test_agent", "to": "end"}],
+            "environment": "local",
+            "version": "experimental",
+        }
+
+        # Create nested directory structure if needed
+        config_path = tmp_path / f"{safe_path}.yml"
+        config_path.parent.mkdir(parents=True, exist_ok=True)
+
+        with open(config_path, "w") as f:
+            yaml.dump(config_data, f)
+
+        with patch.object(FlowConfig, "DIRECTORY_PATH", Path(tmp_path)):
+            config = FlowConfig.from_yaml_config(safe_path)
+            assert config.flow["entry_point"] == "test_agent"
 
 
 class TestLoadComponentClass:

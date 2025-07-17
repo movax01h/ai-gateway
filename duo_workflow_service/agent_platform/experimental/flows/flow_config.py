@@ -10,6 +10,19 @@ from duo_workflow_service.agent_platform.experimental import components
 __all__ = ["FlowConfig", "load_component_class"]
 
 
+_PREFIX_BLOCLIST = (
+    "..",
+    "/.../",
+    r"\…..\\",
+    "%00../../../../../",
+    "%2e%2e%2f",
+    "%252e%252e%252f",
+    "%c0%ae%c0%ae%c0%af",
+    "%uff0e%uff0e%u2215",
+    "%uff0e%uff0e%u2216",
+)
+
+
 class FlowConfig(BaseModel):
     DIRECTORY_PATH: ClassVar[Path] = Path(__file__).resolve().parent / "configs"
     flow: dict
@@ -21,7 +34,17 @@ class FlowConfig(BaseModel):
     @classmethod
     def from_yaml_config(cls, path: str) -> Self:
         try:
-            yaml_path = cls.DIRECTORY_PATH / path
+            # Validate path before resolving to prevent directory traversal
+            if any(prefix in path for prefix in _PREFIX_BLOCLIST) or path.startswith(
+                "/"
+            ):
+                raise ValueError(f"Path traversal detected: {path}")
+
+            base_path = cls.DIRECTORY_PATH.resolve()
+            yaml_path = (base_path / f"{path}.yml").resolve()
+
+            if not yaml_path.is_relative_to(base_path):
+                raise ValueError(f"Path traversal detected: {path}")
 
             with open(yaml_path, "r", encoding="utf-8") as file:
                 yaml_content = yaml.safe_load(file)

@@ -1,14 +1,19 @@
 from abc import ABC, abstractmethod
-from typing import Annotated, Any, ClassVar, Protocol, Self
+from typing import Annotated, Any, ClassVar, Optional, Protocol, Self
 
-from langgraph.graph import StateGraph
+from langgraph.graph import END, StateGraph
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-from duo_workflow_service.agent_platform.experimental.state import FlowState, IOKey
-from duo_workflow_service.agent_platform.experimental.state.base import IOKeyTemplate
+from duo_workflow_service.agent_platform.experimental.state import (
+    FlowState,
+    FlowStateKeys,
+    IOKey,
+    IOKeyTemplate,
+)
+from duo_workflow_service.entities.state import WorkflowStatusEnum
 from lib.internal_events.event_enum import CategoryEnum
 
-__all__ = ["RouterProtocol", "BaseComponent"]
+__all__ = ["RouterProtocol", "BaseComponent", "EndComponent"]
 
 
 class RouterProtocol(Protocol):
@@ -64,3 +69,17 @@ class BaseComponent(BaseModel, ABC):
     def outputs(self) -> tuple[IOKey, ...]:
         replacements = {IOKeyTemplate.COMPONENT_NAME_TEMPLATE: self.name}
         return tuple(output.to_iokey(replacements) for output in self._outputs)
+
+
+class EndComponent(BaseComponent):
+    def __entry_hook__(self) -> Annotated[str, "Components entry node name"]:
+        return "terminate_flow"
+
+    def attach(
+        self, graph: StateGraph, router: Optional[RouterProtocol] = None
+    ) -> None:
+        graph.add_node(self.__entry_hook__(), self._terminate_flow)
+        graph.add_edge(self.__entry_hook__(), END)
+
+    async def _terminate_flow(self, _state: FlowState) -> dict:
+        return {FlowStateKeys.STATUS: WorkflowStatusEnum.COMPLETED.value}
