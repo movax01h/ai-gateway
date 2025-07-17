@@ -7,12 +7,12 @@ from langchain.tools import BaseTool
 from contract import contract_pb2
 from duo_workflow_service.tools.mcp_tools import (
     McpTool,
-    convert_mcp_tools_to_langchain_tools,
+    convert_mcp_tools_to_langchain_tool_classes,
 )
 
 
 @pytest.mark.asyncio
-async def test_convert_mcp_tools_to_langchain_tools():
+async def test_convert_mcp_tools_to_langchain_tool_classes():
     metadata = {"outbox": AsyncMock()}
     mcp_tools = [
         contract_pb2.McpTool(
@@ -28,23 +28,30 @@ async def test_convert_mcp_tools_to_langchain_tools():
         "duo_workflow_service.tools.mcp_tools._execute_action", new_callable=AsyncMock
     ) as mock_execute_action:
         mock_execute_action.return_value = "Tool execution result"
-        result = convert_mcp_tools_to_langchain_tools(metadata, mcp_tools)
+        result = convert_mcp_tools_to_langchain_tool_classes(mcp_tools)
 
         assert len(result) == 2
-        assert all(isinstance(tool, McpTool) for tool in result)
-        assert all(isinstance(tool, BaseTool) for tool in result)
-        assert result[0].name == "tool1"
-        assert result[0].description == "Tool 1 description"
-        assert result[1].name == "tool2"
-        assert result[1].description == "Tool 2 description"
-        assert result[0].metadata == metadata
-        assert result[1].metadata == metadata
 
-        assert result[0].args_schema == {}
-        assert result[1].args_schema == {"properties": {}}
+        first_tool_cls = result[0]
+        second_tool_cls = result[1]
+
+        assert first_tool_cls.name == "tool1"
+        assert second_tool_cls.name == "tool2"
+
+        first_tool = first_tool_cls(metadata=metadata)
+        second_tool = second_tool_cls(metadata=metadata)
+
+        assert first_tool.name == "tool1"
+        assert second_tool.name == "tool2"
+        assert first_tool.description == "Tool 1 description"
+        assert second_tool.description == "Tool 2 description"
+        assert first_tool.metadata == metadata
+        assert second_tool.metadata == metadata
+        assert first_tool.args_schema == {}
+        assert second_tool.args_schema == {"properties": {}}
 
         test_args = {"arg1": "value1"}
-        execution_result = await result[0]._arun(**test_args)
+        execution_result = await first_tool._arun(**test_args)
         assert execution_result == "Tool execution result"
 
         mock_execute_action.assert_called_once_with(

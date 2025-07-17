@@ -17,6 +17,9 @@ from duo_workflow_service.components.tools_registry import (
     ToolsRegistry,
 )
 from duo_workflow_service.gitlab.http_client import GitlabHttpClient
+from duo_workflow_service.tools.mcp_tools import (
+    convert_mcp_tools_to_langchain_tool_classes,
+)
 from duo_workflow_service.tools.work_item import (
     GetWorkItem,
     GetWorkItemNotes,
@@ -30,6 +33,16 @@ def gl_http_client():
     return AsyncMock(spec=GitlabHttpClient)
 
 
+@pytest.fixture
+def mcp_tools():
+    mcp_tool_mock = MagicMock()
+    mcp_tool_mock.name = "extra_tool"
+    mcp_tool_mock.description = "extra tool description"
+    mcp_tool_mock.inputSchema = ""
+
+    return convert_mcp_tools_to_langchain_tool_classes(mcp_tools=[mcp_tool_mock])
+
+
 _inbox = MagicMock(spec=asyncio.Queue)
 _outbox = MagicMock(spec=asyncio.Queue)
 
@@ -38,7 +51,7 @@ _outbox = MagicMock(spec=asyncio.Queue)
     "config,expected_tools_set",
     [
         (
-            {},
+            [],
             {
                 "create_plan",
                 "add_new_task",
@@ -216,6 +229,7 @@ def test_registry_initialization(tool_metadata, config, expected_tools_set):
         enabled_tools=config,
         preapproved_tools=[],
         tool_metadata=tool_metadata,
+        mcp_tools=None,
     )
 
     assert set(registry._enabled_tools.keys()) == expected_tools_set
@@ -234,6 +248,7 @@ def test_registry_initialization_initialises_tools_with_correct_attributes(
         ],
         preapproved_tools=[],
         tool_metadata=tool_metadata,
+        mcp_tools=None,
     )
     expected_tools = {
         "ci_linter": tools.CiLinter(metadata=tool_metadata),
@@ -316,13 +331,11 @@ def test_registry_initialization_initialises_tools_with_correct_attributes(
 
 
 @pytest.mark.asyncio
-async def test_registry_configuration(gl_http_client):
+async def test_registry_configuration(gl_http_client, mcp_tools):
     workflow_config = {
         "id": "test_workflow",
-        "agent_privileges_names": ["run_commands"],
+        "agent_privileges_names": ["run_commands", "run_mcp_tools"],
     }
-    extra_tool = MagicMock(spec=BaseTool)
-    extra_tool.name = "extra_tool"
 
     registry = await ToolsRegistry.configure(
         workflow_config=workflow_config,
@@ -330,7 +343,7 @@ async def test_registry_configuration(gl_http_client):
         outbox=_outbox,
         inbox=_inbox,
         gitlab_host="gitlab.example.com",
-        additional_tools=[extra_tool],
+        mcp_tools=mcp_tools,
     )
 
     # Verify configured tools based on privileges
@@ -347,6 +360,7 @@ async def test_registry_configuration(gl_http_client):
         "extra_tool",
     }
     assert registry.approval_required("extra_tool") == True
+    assert registry._mcp_tool_names == ["extra_tool"]
 
 
 @pytest.mark.parametrize(
@@ -367,7 +381,7 @@ async def test_registry_configuration(gl_http_client):
             None,
             ["read_write_files"],
         ),
-        ("handover_tool", tools.HandoverTool, {}),
+        ("handover_tool", tools.HandoverTool, []),
     ],
     ids=["approved_tool", "not_approved_tool", "nonexistent_tool", "handover_tool"],
 )
@@ -390,7 +404,7 @@ def test_get_tool(tool_metadata, tool_name, expected_tool, config):
             [tools.ListIssues],
             ["read_only_gitlab"],
         ),
-        (["nonexistent_tool"], [], {}),
+        (["nonexistent_tool"], [], []),
     ],
     ids=["multiple_tools", "no_tools"],
 )
@@ -414,7 +428,7 @@ def test_get_batch_tools(tool_metadata, requested_tools, expected_tools, config)
             [tools.ReadFile],
             ["read_write_files"],
         ),
-        (["handover_tool"], [], {}),
+        (["handover_tool"], [], []),
     ],
     ids=["tools_and_noop_tools_mixed", "noop_tools_only"],
 )
@@ -573,37 +587,60 @@ def test_available_tools_for_user(
 
 
 @pytest.mark.parametrize(
-    "tool_names,expected_preapproved",
+    ("privileges", "tool_names", "expected_tool_names", "expected_preapproved"),
     [
         (
+            ["read_write_files", "use_git", "nonexistent_privilege"],
             ["read_file", "create_file_with_contents"],
+            ["read_file", "create_file_with_contents", "extra_tool"],
             set(["read_file", "create_file_with_contents"]),
         ),
         (
+            ["read_write_files", "use_git", "run_mcp_tools"],
+            ["read_file", "create_file_with_contents"],
+            ["read_file", "create_file_with_contents", "extra_tool"],
+            set(["read_file", "create_file_with_contents"]),
+        ),
+        (
+            ["read_write_files", "use_git"],
             ["run_git_command"],
+            ["run_git_command", "extra_tool"],
             set(),
         ),
         (
+            ["read_write_files", "use_git"],
             ["read_file", "run_git_command"],
+            ["read_file", "run_git_command", "extra_tool"],
             {"read_file"},
         ),
         (
+            ["read_write_files", "use_git"],
             ["nonexistent_tool"],  # Nonexistent tool should be filtered out
+            ["nonexistent_tool", "extra_tool"],
             set(),
         ),
     ],
     ids=[
         "with all tools being preapproved tools",
+        "with mcp tools enabled",
         "with all tools not being preapproved tools",
         "with mixed tools",
         "with nonexistent tool",
     ],
 )
-def test_toolset_method(tool_metadata, tool_names, expected_preapproved):
+def test_toolset_method(
+    tool_metadata,
+    privileges,
+    tool_names,
+    expected_tool_names,
+    expected_preapproved,
+    mcp_tools,
+):
     registry = ToolsRegistry(
-        enabled_tools=["read_write_files", "use_git", "nonexistent_privilege"],
+        enabled_tools=privileges,
         preapproved_tools=["read_write_files"],
         tool_metadata=tool_metadata,
+        mcp_tools=mcp_tools,
     )
 
     with patch("duo_workflow_service.components.tools_registry.Toolset") as MockToolset:
@@ -614,7 +651,7 @@ def test_toolset_method(tool_metadata, tool_names, expected_preapproved):
 
         expected_all_tools = {
             tool_name: registry.get(tool_name)
-            for tool_name in tool_names
+            for tool_name in expected_tool_names
             if registry.get(tool_name)
         }
 

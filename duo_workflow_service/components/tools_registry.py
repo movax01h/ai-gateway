@@ -83,6 +83,8 @@ _READ_ONLY_GITLAB_TOOLS: list[Type[BaseTool]] = [
     tools.ListProjectAuditEvents,
 ]
 
+_RUN_MCP_TOOLS_PRIVILEGE = "run_mcp_tools"
+
 _AGENT_PRIVILEGES: dict[str, list[Type[BaseTool]]] = {
     "read_write_files": [
         tools.ReadFile,
@@ -112,12 +114,14 @@ _AGENT_PRIVILEGES: dict[str, list[Type[BaseTool]]] = {
     "run_commands": [
         tools.RunCommand,
     ],
+    _RUN_MCP_TOOLS_PRIVILEGE: [],
 }
 
 
 class ToolsRegistry:
     _enabled_tools: dict[str, Union[BaseTool, Type[BaseModel]]]
     _preapproved_tool_names: set[str]
+    _mcp_tool_names: list[str]
 
     @classmethod
     async def configure(
@@ -127,7 +131,7 @@ class ToolsRegistry:
         outbox: asyncio.Queue,
         inbox: asyncio.Queue,
         gitlab_host: str,
-        additional_tools: Optional[list[Type[BaseTool]]] = None,
+        mcp_tools: Optional[list[type[BaseTool]]] = None,
         user: Optional[CloudConnectorUser] = None,
         language_server_version: Optional[LanguageServerVersion] = None,
     ):
@@ -138,9 +142,6 @@ class ToolsRegistry:
             raise RuntimeError(
                 f"Failed to find tools configuration for workflow {workflow_config.get('id', 'None')}"
             )
-
-        if not additional_tools:
-            additional_tools = []
 
         agent_privileges = workflow_config.get("agent_privileges_names", [])
         preapproved_tools = workflow_config.get(
@@ -157,7 +158,7 @@ class ToolsRegistry:
             enabled_tools=agent_privileges,
             preapproved_tools=preapproved_tools,
             tool_metadata=tool_metadata,
-            additional_tools=additional_tools,
+            mcp_tools=mcp_tools,
             user=user,
             language_server_version=language_server_version,
         )
@@ -167,32 +168,28 @@ class ToolsRegistry:
         enabled_tools: list[str],
         preapproved_tools: list[str],
         tool_metadata: ToolMetadata,
-        additional_tools: Optional[list[Type[BaseTool]]] = None,
+        mcp_tools: Optional[list[type[BaseTool]]] = None,
         user: Optional[CloudConnectorUser] = None,
         language_server_version: Optional[LanguageServerVersion] = None,
     ):
-        if not additional_tools:
-            additional_tools = []
+        tools_for_agent_privileges = _AGENT_PRIVILEGES
 
-        # Create a dictionary of default and NO_OP tools
-        default_tools: dict[str, Union[BaseTool, Type[BaseModel]]] = {
+        # Always enable mcp tools until it's reliably passed by clients as an agent privilege
+        enabled_tools.append(_RUN_MCP_TOOLS_PRIVILEGE)
+
+        if _RUN_MCP_TOOLS_PRIVILEGE in enabled_tools:
+            tools_for_agent_privileges[_RUN_MCP_TOOLS_PRIVILEGE] = mcp_tools or []
+
+        self._enabled_tools = {
             **{tool_cls.tool_title: tool_cls for tool_cls in NO_OP_TOOLS},  # type: ignore
             **{tool.name: tool for tool in [tool_cls() for tool_cls in _DEFAULT_TOOLS]},
         }
 
-        # Add additional tools separately
-        additional_tool_dict = {tool.name: tool for tool in additional_tools}
-
-        # Combine all tools
-        self._enabled_tools = {
-            **default_tools,
-            **additional_tool_dict,
-        }
-
-        self._preapproved_tool_names = set(default_tools.keys())
+        self._preapproved_tool_names = set(self._enabled_tools.keys())
+        self._mcp_tool_names = [tool.name for tool in mcp_tools or []]
 
         for privilege in enabled_tools:
-            for tool_cls in _AGENT_PRIVILEGES.get(privilege, []):
+            for tool_cls in tools_for_agent_privileges.get(privilege, []):
                 if tool_cls in [
                     tools.GetWorkItem,
                     tools.ListWorkItems,
@@ -257,6 +254,10 @@ class ToolsRegistry:
         Returns:
             A new Toolset instance containing the requested tools.
         """
+
+        # MCP tools if there are any are added to toolset
+        tool_names += self._mcp_tool_names
+
         all_tools = {
             tool_name: self._enabled_tools[tool_name]
             for tool_name in tool_names

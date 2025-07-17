@@ -89,8 +89,8 @@ async def test_init():
     assert workflow.is_done is False
     assert workflow._outbox.maxsize == 1
     assert workflow._inbox.maxsize == 1
-    assert len(workflow._additional_tools) == 1
-    tool = workflow._additional_tools[0]
+    assert len(workflow._mcp_tools) == 1
+    tool = workflow._mcp_tools[0](metadata={})
     assert tool.name == "get_issue"
     assert tool.description == "Tool to get issue"
     assert workflow._user == user
@@ -146,14 +146,19 @@ async def test_add_to_inbox(workflow):
 @patch(
     "duo_workflow_service.workflows.abstract_workflow.fetch_workflow_and_project_data"
 )
+@patch(
+    "duo_workflow_service.workflows.abstract_workflow.convert_mcp_tools_to_langchain_tool_classes"
+)
 @patch("duo_workflow_service.workflows.abstract_workflow.GitLabWorkflow")
 @patch("duo_workflow_service.workflows.abstract_workflow.ToolsRegistry.configure")
+@pytest.mark.parametrize("mcp_enabled", [True, False])
 async def test_compile_and_run_graph(
     mock_tools_registry,
     mock_gitlab_workflow,
+    mock_convert_mcp_tools,
     mock_fetch_project,
-    workflow,
     mock_project,
+    mcp_enabled,
 ):
     # Setup mocks
     mock_tools_registry.return_value = MagicMock()
@@ -161,15 +166,38 @@ async def test_compile_and_run_graph(
     mock_checkpointer.aget_tuple = AsyncMock(return_value=None)
     mock_checkpointer.initial_status_event = "START"
     mock_gitlab_workflow.return_value.__aenter__.return_value = mock_checkpointer
-    mock_fetch_project.return_value = (mock_project, {"project_id": 1})
+    mock_fetch_project.return_value = (
+        mock_project,
+        {"project_id": 1, "mcp_enabled": mcp_enabled},
+    )
+
+    mcp_tool = MagicMock()
+    mock_convert_mcp_tools.return_value = [mcp_tool]
+
+    workflow = MockWorkflow(
+        "id",
+        {},
+        CategoryEnum.WORKFLOW_SOFTWARE_DEVELOPMENT,
+        {},
+        [mcp_tool],
+    )
 
     # Run the method
     await workflow._compile_and_run_graph("Test goal")
 
     # Assertions
     assert workflow.is_done
-    mock_tools_registry.assert_called_once()
     mock_fetch_project.assert_called_once()
+    mock_tools_registry.assert_called_once_with(
+        outbox=workflow._outbox,
+        inbox=workflow._inbox,
+        workflow_config=workflow._workflow_config,
+        gl_http_client=workflow._http_client,
+        gitlab_host="example.com",
+        mcp_tools=[mcp_tool] if mcp_enabled else [],
+        user=None,
+        language_server_version=None,
+    )
 
 
 @pytest.mark.asyncio
