@@ -1,0 +1,39 @@
+apiVersion: runway/v1.0.0-beta
+kind: RunwayGKEService
+metadata:
+  name: ai-gateway-gke
+spec:
+  services:
+    frontend:
+      image: "registry.gitlab.com/gitlab-org/modelops/applied-ml/code-suggestions/ai-assist/model-gateway:{{ .AppVersion }}"
+      command: ["/home/aigateway/app/run.sh"]
+      container_port: 5052
+      protocol: http
+      scalability:
+        min_instances: 8
+        max_instances: 100
+        cpu_utilization: 70
+      resources:
+        requests:
+          cpu: "500m"
+          memory: "2Gi"
+          ephemeral-storage: "2Gi"
+        limits:
+          cpu: "2000m"
+          memory: "8Gi"
+          ephemeral-storage: "8Gi"
+      startup_probe:
+        path: "/monitoring/ready"
+        initial_delay_seconds: 20
+        # We have limited concurrency in staging, so picking a long period
+        timeout_seconds: 10
+        period_seconds: 17
+        failure_threshold: 24
+      liveness_probe:
+        path: "/monitoring/healthz"
+        timeout_seconds: 5
+      load_balancing:
+        external_load_balancer:
+          enabled: true
+        internal_load_balancer:
+          enabled: false
