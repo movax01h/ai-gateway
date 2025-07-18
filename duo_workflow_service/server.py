@@ -35,6 +35,9 @@ from duo_workflow_service.interceptors.correlation_id_interceptor import (
 from duo_workflow_service.interceptors.feature_flag_interceptor import (
     FeatureFlagInterceptor,
 )
+from duo_workflow_service.interceptors.gitlab_version_interceptor import (
+    GitLabVersionInterceptor,
+)
 from duo_workflow_service.interceptors.internal_events_interceptor import (
     InternalEventsInterceptor,
 )
@@ -390,6 +393,7 @@ async def serve(port: int) -> None:
                 InternalEventsInterceptor(),
                 MonitoringInterceptor(),
                 LanguageServerVersionInterceptor(),
+                GitLabVersionInterceptor(),
             ],
             options=server_options,
         )

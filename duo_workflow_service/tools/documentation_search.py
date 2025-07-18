@@ -8,10 +8,11 @@ from google.cloud import discoveryengine
 from pydantic import BaseModel, Field
 
 from ai_gateway.searches import VertexAISearch
+from duo_workflow_service.interceptors.gitlab_version_interceptor import gitlab_version
 from duo_workflow_service.tools.duo_base_tool import DuoBaseTool
 
 DEFAULT_PAGE_SIZE = 4
-GL_VERSION = "18.0.0"
+DEFAULT_GL_VERSION = "18.0.0"
 
 
 class SearchInput(BaseModel):
@@ -57,9 +58,7 @@ class DocumentationSearch(DuoBaseTool):
     async def _fetch_documentation(self, query: str) -> List[dict]:
         client = discoveryengine.SearchServiceAsyncClient()
 
-        # TODO: obtain version from request
-        # https://gitlab.com/gitlab-org/editor-extensions/gitlab-lsp/-/merge_requests/1812
-        gl_version = GL_VERSION
+        gl_version = gitlab_version.get() or DEFAULT_GL_VERSION
 
         # TODO: obtain project from Pydantic Setting
         # https://gitlab.com/gitlab-org/modelops/applied-ml/code-suggestions/ai-assist/-/issues/1188
