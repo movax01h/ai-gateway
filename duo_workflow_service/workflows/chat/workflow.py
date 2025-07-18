@@ -59,6 +59,7 @@ CHAT_READ_ONLY_TOOLS = [
     "list_dir",
     "find_files",
     "grep",
+    "list_repository_tree",
     "get_epic",
     "list_epics",
     "scan_directory_tree",

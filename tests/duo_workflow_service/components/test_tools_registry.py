@@ -112,6 +112,7 @@ _outbox = MagicMock(spec=asyncio.Queue)
                 "list_issue_notes",
                 "get_issue_note",
                 "get_repository_file",
+                "list_repository_tree",
                 "list_epic_notes",
                 "get_previous_workflow_context",
                 "list_vulnerabilities",
@@ -168,6 +169,7 @@ _outbox = MagicMock(spec=asyncio.Queue)
                 "list_issue_notes",
                 "get_issue_note",
                 "get_repository_file",
+                "list_repository_tree",
                 "list_epic_notes",
                 "get_previous_workflow_context",
                 "list_vulnerabilities",
@@ -310,6 +312,7 @@ def test_registry_initialization_initialises_tools_with_correct_attributes(
         "create_issue_note": tools.CreateIssueNote(metadata=tool_metadata),
         "create_merge_request": tools.CreateMergeRequest(metadata=tool_metadata),
         "get_repository_file": tools.GetRepositoryFile(metadata=tool_metadata),
+        "list_repository_tree": tools.ListRepositoryTree(metadata=tool_metadata),
         "list_epic_notes": tools.ListEpicNotes(metadata=tool_metadata),
         "get_previous_workflow_context": tools.GetWorkflowContext(
             metadata=tool_metadata
