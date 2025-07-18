@@ -47,12 +47,6 @@ class ModelMetadata(BaseModelMetadata):
 
         if self.endpoint:
             params["api_base"] = str(self.endpoint).removesuffix("/")
-        if self.api_key:
-            params["api_key"] = str(self.api_key)
-        else:
-            # Set a default dummy key to avoid LiteLLM errors
-            # See https://gitlab.com/gitlab-org/gitlab/-/issues/520512
-            params["api_key"] = "dummy_key"
 
         params["model"] = self.name
         params["custom_llm_provider"] = self.provider
@@ -69,6 +63,14 @@ class ModelMetadata(BaseModelMetadata):
             else:
                 params["custom_llm_provider"] = "custom_openai"
                 params["model"] = self.identifier
+
+        if self.api_key:
+            params["api_key"] = str(self.api_key)
+        else:
+            # Set a default dummy key to avoid LiteLLM errors
+            # See https://gitlab.com/gitlab-org/gitlab/-/issues/520512
+            if params["custom_llm_provider"] == "custom_openai":
+                params["api_key"] = "dummy_key"
 
         return params
 
