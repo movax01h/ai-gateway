@@ -1,11 +1,78 @@
 from enum import IntEnum
 from typing import Type
 
+import gitmatch
+from langchain.tools.base import ToolException
 from pydantic import BaseModel, Field
 
 from contract import contract_pb2
 from duo_workflow_service.executor.action import _execute_action
 from duo_workflow_service.tools.duo_base_tool import DuoBaseTool
+
+# Security denylist of sensitive directories and files that should not be accessed
+DEFAULT_CONTEXT_EXCLUSIONS = gitmatch.compile(
+    [
+        ".config/nvim",
+        ".docker",
+        ".emacs.d",
+        ".env.*",
+        ".env",
+        ".git",
+        ".gitlab/duo",
+        ".gitlab/rules",
+        ".gnupg",
+        ".idea",
+        ".metadata",
+        ".settings",
+        ".ssh",
+        ".sublime-project",
+        ".sublime-workspace",
+        ".vim",
+        ".vimrc",
+        ".vscode",
+        "Dockerfile.secrets",
+        "!.env.example",
+    ]
+)
+
+
+def validate_duo_context_exclusions(file_path: str) -> None:
+    """Check if the given file path is in the managed Duo Context Exclusion denylist of sensitive paths or contains path
+    traversal attempts.
+
+    Args:
+        file_path: The file path to check
+
+    Raises:
+        ToolException: If the path is in the denylist or an invalid path.
+    """
+    if not file_path:
+        return
+
+    file_path = file_path.replace("\\", "/")
+    while file_path.startswith("./"):
+        file_path = file_path.replace("./", "", 1)
+    for pattern in ["../", "..\\", "%2e%2e", "%252e%252e", "\u002e\u002e"]:
+        if pattern in file_path:
+            raise ToolException(
+                f"Access denied: Cannot access '{file_path}' as it contains path traversal patterns"
+            )
+
+    try:
+        excluded = DEFAULT_CONTEXT_EXCLUSIONS.match(file_path)
+        if excluded is not None and bool(excluded):
+            raise ToolException(
+                f"Access denied: Cannot access '{file_path}' as it matches Duo Context Exclusion"
+                f" patterns. Path '{excluded.path}' matches excluded pattern: '{excluded.pattern}'."
+            )
+    except gitmatch.InvalidPathError as ex:
+        raise ToolException(
+            f"Access denied: Not accessing invalid path '{file_path}'. {str(ex)}"
+        )
+
+    if file_path != file_path.lower():
+        validate_duo_context_exclusions(file_path.lower())
+        return
 
 
 class ReadFileInput(BaseModel):
@@ -22,8 +89,12 @@ class ReadFile(DuoBaseTool):
 
     """
     args_schema: Type[BaseModel] = ReadFileInput  # type: ignore
+    handle_tool_error: bool = True
 
     async def _arun(self, file_path: str) -> str:
+        # Check path security before proceeding
+        validate_duo_context_exclusions(file_path)
+
         return await _execute_action(
             self.metadata,  # type: ignore
             contract_pb2.Action(runReadFile=contract_pb2.ReadFile(filepath=file_path)),
@@ -46,8 +117,12 @@ class WriteFile(DuoBaseTool):
         "Create and write the given contents to a file. Please specify the `file_path` and the `contents` to write."
     )
     args_schema: Type[BaseModel] = WriteFileInput  # type: ignore
+    handle_tool_error: bool = True
 
     async def _arun(self, file_path: str, contents: str) -> str:
+        # Check path security before proceeding
+        validate_duo_context_exclusions(file_path)
+
         return await _execute_action(
             self.metadata,  # type: ignore
             contract_pb2.Action(
@@ -115,6 +190,9 @@ full path relative to the project root.
 #     args_schema: Type[BaseModel] = MkdirInput  # type: ignore
 #
 #     async def _arun(self, directory_path: str) -> str:
+#         # Check path security before proceeding
+#         validate_duo_context_exclusions(directory_path)
+#
 #         if ".." in directory_path:
 #             return "Creating directories above the current directory is not allowed"
 #
@@ -219,8 +297,12 @@ Examples of batched file edits:
         new_str="# Changelog\n\n## 1.1.0\n- Bug fixes\n- Performance improvements\n\n## 1.0.0"
     )"""
     args_schema: Type[BaseModel] = EditFileInput  # type: ignore
+    handle_tool_error: bool = True
 
     async def _arun(self, file_path: str, old_str: str, new_str: str) -> str:
+        # Check path security before proceeding
+        validate_duo_context_exclusions(file_path)
+
         return await _execute_action(
             self.metadata,  # type: ignore
             contract_pb2.Action(
@@ -248,6 +330,9 @@ class ListDir(DuoBaseTool):
     args_schema: Type[BaseModel] = ListDirInput  # type: ignore
 
     async def _arun(self, directory: str) -> str:
+        # Check path security before proceeding
+        validate_duo_context_exclusions(directory)
+
         return await _execute_action(
             self.metadata,  # type: ignore
             contract_pb2.Action(

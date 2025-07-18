@@ -1,9 +1,11 @@
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from langchain.tools.base import ToolException
 
 from contract import contract_pb2
 from duo_workflow_service.tools.filesystem import (  # Mkdir,
+    DEFAULT_CONTEXT_EXCLUSIONS,
     EditFile,
     EditFileInput,
     FindFiles,
@@ -14,6 +16,13 @@ from duo_workflow_service.tools.filesystem import (  # Mkdir,
     ReadFileInput,
     WriteFile,
     WriteFileInput,
+    validate_duo_context_exclusions,
+)
+from tests.duo_workflow_service.tools.constants import (
+    NORMAL_FILES,
+    SENSITIVE_DIRECTORIES,
+    SENSITIVE_FILES,
+    SUSPICIOUS_PATHS,
 )
 
 
@@ -187,6 +196,14 @@ class TestLsDir:
         expected_message = "Using list_dir: directory=./src"
         assert message == expected_message
 
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        "path", [*SENSITIVE_DIRECTORIES, *SENSITIVE_FILES, *SUSPICIOUS_PATHS]
+    )
+    async def test_list_dir_rejects_excluded_paths(self, path):
+        with pytest.raises(ToolException, match="Access denied"):
+            await ListDir(description="List files")._arun(path)
+
 
 # class TestMkdir:
 #     @pytest.mark.asyncio
@@ -263,6 +280,36 @@ class TestEditFile:
 
         with pytest.raises(NotImplementedError):
             tool._run("./main.py", "old", "new")
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        "path", [*SENSITIVE_DIRECTORIES, *SENSITIVE_FILES, *SUSPICIOUS_PATHS]
+    )
+    async def test_edit_file_rejects_excluded_paths(self, path):
+        with pytest.raises(ToolException, match="Access denied"):
+            await EditFile(description="Edit file content")._arun(path, "old", "new")
+
+
+class TestReadFile:
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        "path", [*SENSITIVE_DIRECTORIES, *SENSITIVE_FILES, *SUSPICIOUS_PATHS]
+    )
+    async def test_read_file_rejects_excluded_paths(self, path):
+        with pytest.raises(ToolException, match="Access denied"):
+            await ReadFile(description="Read file content")._arun(path)
+
+
+class TestWriteFile:
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        "path", [*SENSITIVE_DIRECTORIES, *SENSITIVE_FILES, *SUSPICIOUS_PATHS]
+    )
+    async def test_write_file_rejects_excluded_paths(self, path):
+        with pytest.raises(ToolException, match="Access denied"):
+            await WriteFile(description="Write file content")._arun(
+                path, "file contents"
+            )
 
 
 def test_read_file_format_display_message():
@@ -356,3 +403,91 @@ def test_edit_file_format_display_message():
 
     expected_message = "Edit file"
     assert message == expected_message
+
+
+@pytest.mark.parametrize("path", NORMAL_FILES)
+def test_validate_duo_context_exclusions_allows_normal_files(path):
+    # These should not raise exceptions
+    validate_duo_context_exclusions(path)
+
+
+@pytest.mark.parametrize(
+    "path", [*SENSITIVE_DIRECTORIES, *SENSITIVE_FILES, *SUSPICIOUS_PATHS]
+)
+def test_validate_duo_context_exclusions_rejects_sensitive_files(path):
+    with pytest.raises(ToolException, match="Access denied"):
+        validate_duo_context_exclusions(path)
+
+
+def test_default_context_exclusions_does_not_exclude_bang_patterns():
+    match = DEFAULT_CONTEXT_EXCLUSIONS.match(".env.example")
+    assert match is not None
+    assert not bool(match)
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        ".config/nvim",
+        ".config/nvim",
+        ".docker",
+        ".emacs.d",
+        ".git",
+        ".git",
+        ".gnupg",
+        ".idea",
+        ".metadata",
+        ".settings",
+        ".ssh",
+        ".ssh",
+        ".ssh",
+        ".vim",
+        ".vscode",
+    ],
+)
+def test_default_context_exclusions_excludes_directories(path):
+    dir_match = DEFAULT_CONTEXT_EXCLUSIONS.match(path)
+    assert dir_match is not None
+    assert bool(dir_match)
+
+
+@pytest.mark.parametrize(
+    "filepath",
+    [
+        ".config/nvim/init.lua",
+        ".config/nvim/init.vim",
+        ".docker/config.json",
+        ".emacs.d/init.el",
+        ".git/config",
+        ".git/info/exclude",
+        ".gnupg/gpg.conf",
+        ".idea/gitlab.xml",
+        ".metadata/.plugins/org.eclipse.jdt.core",
+        ".settings/org.eclipse.jdt.core.prefs",
+        ".ssh/authorized_keys",
+        ".ssh/config",
+        ".ssh/id_rsa",
+        ".vim/pack/vendor/start/vim-lsp/autoload/lsp.vim",
+        ".vscode/settings.json",
+    ],
+)
+def test_default_context_exclusions_excludes_files_under_directories(filepath):
+    path_match = DEFAULT_CONTEXT_EXCLUSIONS.match(filepath)
+    assert path_match is not None
+    assert bool(path_match)
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        ".env.production",
+        ".env.staging",
+        ".env",
+        ".vimrc",
+        "Dockerfile.secrets",
+    ],
+)
+def test_default_context_exclusions_excludes_patterns(path):
+    match = DEFAULT_CONTEXT_EXCLUSIONS.match(path)
+    assert match is not None
+    assert bool(match)
