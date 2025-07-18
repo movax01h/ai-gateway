@@ -9,6 +9,13 @@ from duo_workflow_service.agent_platform.experimental.components.base import (
     RouterProtocol,
 )
 from duo_workflow_service.agent_platform.experimental.state import IOKey
+from lib.internal_events.event_enum import CategoryEnum
+
+
+@pytest.fixture
+def flow_type():
+    """Fixture for flow type."""
+    return CategoryEnum.WORKFLOW_SOFTWARE_DEVELOPMENT
 
 
 class ConcreteComponent(BaseComponent):
@@ -29,7 +36,9 @@ class TestBaseComponentValidateFields:
     """Test BaseComponent field validation methods."""
 
     @patch("duo_workflow_service.agent_platform.experimental.components.base.IOKey")
-    def test_validate_input_fields_with_allowed_targets(self, mock_iokey_class):
+    def test_validate_input_fields_with_allowed_targets(
+        self, mock_iokey_class, flow_type
+    ):
         """Test validation passes when input targets are in allowed targets."""
         # Create real IOKey instances
         input1 = IOKey(target="context")
@@ -42,8 +51,8 @@ class TestBaseComponentValidateFields:
 
         component = ConcreteComponent(
             name="test_component",
-            workflow_id="test_workflow",
-            workflow_type="test_type",
+            flow_id="test_workflow",
+            flow_type=flow_type,
             inputs=["context", "conversation_history"],
             output="context",
         )
@@ -61,7 +70,7 @@ class TestBaseComponentValidateFields:
 
     @patch("duo_workflow_service.agent_platform.experimental.components.base.IOKey")
     def test_validate_input_fields_with_disallowed_input_target_raises_error(
-        self, mock_iokey_class
+        self, mock_iokey_class, flow_type
     ):
         """Test validation fails when input target is not in allowed targets."""
         # Create real IOKey instance with disallowed target
@@ -74,8 +83,8 @@ class TestBaseComponentValidateFields:
         with pytest.raises(ValidationError) as exc_info:
             ConcreteComponent(
                 name="test_component",
-                workflow_id="test_workflow",
-                workflow_type="test_type",
+                flow_id="test_workflow",
+                flow_type=flow_type,
                 inputs=["status"],  # This target is not in _allowed_input_targets
             )
 
@@ -87,7 +96,7 @@ class TestBaseComponentValidateFields:
 
     @patch("duo_workflow_service.agent_platform.experimental.components.base.IOKey")
     def test_validate_output_field_with_disallowed_output_target_raises_error(
-        self, mock_iokey_class
+        self, mock_iokey_class, flow_type
     ):
         """Test validation fails when output target is not in allowed targets."""
         # Create real IOKey instance with disallowed output target
@@ -100,8 +109,8 @@ class TestBaseComponentValidateFields:
         with pytest.raises(ValidationError) as exc_info:
             ConcreteComponent(
                 name="test_component",
-                workflow_id="test_workflow",
-                workflow_type="test_type",
+                flow_id="test_workflow",
+                flow_type=flow_type,
                 output="conversation_history",  # This target is not in _allowed_output_targets
             )
 
@@ -112,7 +121,7 @@ class TestBaseComponentValidateFields:
 
     @patch("duo_workflow_service.agent_platform.experimental.components.base.IOKey")
     def test_validate_mixed_valid_and_invalid_input_targets_raises_error(
-        self, mock_iokey_class
+        self, mock_iokey_class, flow_type
     ):
         """Test validation fails when one of multiple input targets is invalid."""
         # Create real IOKey instances - one valid, one invalid for this component
@@ -124,8 +133,8 @@ class TestBaseComponentValidateFields:
         with pytest.raises(ValidationError) as exc_info:
             ConcreteComponent(
                 name="test_component",
-                workflow_id="test_workflow",
-                workflow_type="test_type",
+                flow_id="test_workflow",
+                flow_type=flow_type,
                 inputs=["context", "status"],
             )
 
@@ -134,40 +143,26 @@ class TestBaseComponentValidateFields:
         assert "doesn't support the input target" in error_message
         assert "status" in error_message
 
-    def test_entry_hook_returns_expected_format(self):
+    def test_entry_hook_returns_expected_format(self, flow_type):
         """Test that __entry_hook__ returns the expected format."""
         component = ConcreteComponent(
             name="test_component",
-            workflow_id="test_workflow",
-            workflow_type="test_type",
+            flow_id="test_workflow",
+            flow_type=flow_type,
         )
 
         entry_name = component.__entry_hook__()
         assert entry_name == "test_component_entry"
 
-    def test_component_is_frozen(self):
-        """Test that BaseComponent instances are immutable (frozen)."""
-        component = ConcreteComponent(
-            name="test_component",
-            workflow_id="test_workflow",
-            workflow_type="test_type",
-        )
-
-        with pytest.raises(ValidationError) as exc_info:
-            component.name = "new_name"
-
-        assert (
-            "frozen" in str(exc_info.value).lower()
-            or "immutable" in str(exc_info.value).lower()
-        )
-
     @patch("duo_workflow_service.agent_platform.experimental.components.base.IOKey")
-    def test_component_without_inputs_or_output_fields(self, mock_iokey_class):
+    def test_component_without_inputs_or_output_fields(
+        self, mock_iokey_class, flow_type
+    ):
         """Test component creation when inputs and output are not provided."""
         component = ConcreteComponent(
             name="test_component",
-            workflow_id="test_workflow",
-            workflow_type="test_type",
+            flow_id="test_workflow",
+            flow_type=flow_type,
         )
 
         # IOKey parsing methods should not be called when fields are not provided

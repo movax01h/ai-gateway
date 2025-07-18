@@ -18,13 +18,15 @@ from duo_workflow_service.agent_platform.experimental.flows.flow_config import (
     load_component_class,
 )
 from duo_workflow_service.agent_platform.experimental.routers import Router
-from duo_workflow_service.agent_platform.experimental.state import (
-    FlowState,
-    FlowStatusEnum,
-)
+from duo_workflow_service.agent_platform.experimental.state import FlowState
 from duo_workflow_service.checkpointer.gitlab_workflow import WorkflowStatusEventEnum
 from duo_workflow_service.components.tools_registry import ToolsRegistry
-from duo_workflow_service.entities.state import MessageTypeEnum, ToolStatus, UiChatLog
+from duo_workflow_service.entities.state import (
+    MessageTypeEnum,
+    ToolStatus,
+    UiChatLog,
+    WorkflowStatusEnum,
+)
 from duo_workflow_service.tracking.errors import log_exception
 from duo_workflow_service.workflows.abstract_workflow import (
     AbstractWorkflow,
@@ -92,7 +94,7 @@ class Flow(AbstractWorkflow):
         )
 
         return FlowState(
-            status=FlowStatusEnum.NOT_STARTED,
+            status=WorkflowStatusEnum.NOT_STARTED,
             conversation_history={},
             ui_chat_log=[initial_ui_chat_log],
             context={

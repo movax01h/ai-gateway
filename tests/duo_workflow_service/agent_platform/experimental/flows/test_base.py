@@ -13,9 +13,8 @@ from duo_workflow_service.agent_platform.experimental.flows.flow_config import (
     FlowConfig,
 )
 from duo_workflow_service.agent_platform.experimental.routers.router import Router
-from duo_workflow_service.agent_platform.experimental.state import FlowStatusEnum
 from duo_workflow_service.checkpointer.gitlab_workflow import WorkflowStatusEventEnum
-from duo_workflow_service.entities.state import MessageTypeEnum
+from duo_workflow_service.entities.state import MessageTypeEnum, WorkflowStatusEnum
 from lib.internal_events.event_enum import CategoryEnum
 
 
@@ -211,7 +210,7 @@ class TestFlow:
             assert isinstance(input, expected_type)
             assert input["context"]["goal"] == goal
             assert input["context"]["project_id"] == 123
-            assert input["status"] == FlowStatusEnum.NOT_STARTED
+            assert input["status"] == WorkflowStatusEnum.NOT_STARTED
             assert "conversation_history" in input
             assert "ui_chat_log" in input
             assert len(input["ui_chat_log"]) == 1

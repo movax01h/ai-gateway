@@ -5,6 +5,7 @@ from langgraph.graph import StateGraph
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from duo_workflow_service.agent_platform.experimental.state import FlowState, IOKey
+from lib.internal_events.event_enum import CategoryEnum
 
 __all__ = ["RouterProtocol", "BaseComponent"]
 
@@ -20,11 +21,11 @@ class RouterProtocol(Protocol):
 
 
 class BaseComponent(BaseModel, ABC):
-    model_config = ConfigDict(arbitrary_types_allowed=True, frozen=True)
+    model_config = ConfigDict(arbitrary_types_allowed=True)
 
     name: str
-    workflow_id: str | int
-    workflow_type: str
+    flow_id: str
+    flow_type: CategoryEnum
 
     inputs: list[IOKey] = Field(default_factory=list)
     output: Optional[IOKey] = None
