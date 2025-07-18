@@ -122,6 +122,7 @@ _outbox = MagicMock(spec=asyncio.Queue)
                 "list_instance_audit_events",
                 "list_group_audit_events",
                 "list_project_audit_events",
+                "get_current_user",
             },
         ),
         (
@@ -178,6 +179,7 @@ _outbox = MagicMock(spec=asyncio.Queue)
                 "list_group_audit_events",
                 "list_project_audit_events",
                 "create_commit",
+                "get_current_user",
             },
         ),
         (
@@ -325,6 +327,7 @@ def test_registry_initialization_initialises_tools_with_correct_attributes(
         "list_project_audit_events": tools.ListProjectAuditEvents(
             metadata=tool_metadata
         ),
+        "get_current_user": tools.GetCurrentUser(metadata=tool_metadata),
     }
 
     assert registry._enabled_tools == expected_tools

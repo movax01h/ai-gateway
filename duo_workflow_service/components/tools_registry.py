@@ -81,6 +81,7 @@ _READ_ONLY_GITLAB_TOOLS: list[Type[BaseTool]] = [
     tools.ListInstanceAuditEvents,
     tools.ListGroupAuditEvents,
     tools.ListProjectAuditEvents,
+    tools.GetCurrentUser,
 ]
 
 _RUN_MCP_TOOLS_PRIVILEGE = "run_mcp_tools"
