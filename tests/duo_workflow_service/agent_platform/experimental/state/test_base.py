@@ -4,13 +4,13 @@ from pydantic import ValidationError
 
 from duo_workflow_service.agent_platform.experimental.state import (
     FlowState,
-    FlowStatusEnum,
     IOKey,
     create_nested_dict,
     get_vars_from_state,
     merge_nested_dict,
     merge_nested_dict_reducer,
 )
+from duo_workflow_service.entities.state import WorkflowStatusEnum
 
 
 class TestMergeNestedDict:
@@ -236,19 +236,19 @@ class TestIOKey:
                 "status",
                 None,
                 {
-                    "status": FlowStatusEnum.PLANNING,
+                    "status": WorkflowStatusEnum.PLANNING,
                     "conversation_history": {},
                     "ui_chat_log": [],
                     "context": {},
                 },
-                {"status": FlowStatusEnum.PLANNING},
+                {"status": WorkflowStatusEnum.PLANNING},
             ),
             # Nested value using subkeys
             (
                 "context",
                 ["project", "name"],
                 {
-                    "status": FlowStatusEnum.PLANNING,
+                    "status": WorkflowStatusEnum.PLANNING,
                     "conversation_history": {},
                     "ui_chat_log": [],
                     "context": {
@@ -262,7 +262,7 @@ class TestIOKey:
                 "context",
                 ["project", "config", "database", "host"],
                 {
-                    "status": FlowStatusEnum.PLANNING,
+                    "status": WorkflowStatusEnum.PLANNING,
                     "conversation_history": {},
                     "ui_chat_log": [],
                     "context": {
@@ -278,7 +278,7 @@ class TestIOKey:
                 "context",
                 [],
                 {
-                    "status": FlowStatusEnum.PLANNING,
+                    "status": WorkflowStatusEnum.PLANNING,
                     "conversation_history": {},
                     "ui_chat_log": [],
                     "context": {"key": "value"},
@@ -290,7 +290,7 @@ class TestIOKey:
                 "context",
                 None,
                 {
-                    "status": FlowStatusEnum.PLANNING,
+                    "status": WorkflowStatusEnum.PLANNING,
                     "conversation_history": {},
                     "ui_chat_log": [],
                     "context": {"key": "value"},
@@ -302,7 +302,7 @@ class TestIOKey:
                 "context",
                 ["flow", "metadata", "tags"],
                 {
-                    "status": FlowStatusEnum.PLANNING,
+                    "status": WorkflowStatusEnum.PLANNING,
                     "conversation_history": {},
                     "ui_chat_log": [],
                     "context": {
@@ -348,7 +348,7 @@ class TestIOKey:
                 "conversation_history",
                 ["main"],
                 {
-                    "status": FlowStatusEnum.PLANNING,
+                    "status": WorkflowStatusEnum.PLANNING,
                     "conversation_history": {
                         "main": [
                             SystemMessage(content="System prompt"),
@@ -388,19 +388,19 @@ class TestIOKey:
                 "status",
                 None,
                 {
-                    "status": FlowStatusEnum.PLANNING,
+                    "status": WorkflowStatusEnum.PLANNING,
                     "conversation_history": {},
                     "ui_chat_log": [],
                     "context": {},
                 },
-                FlowStatusEnum.PLANNING,
+                WorkflowStatusEnum.PLANNING,
             ),
             # Nested value using subkeys
             (
                 "context",
                 ["project", "name"],
                 {
-                    "status": FlowStatusEnum.PLANNING,
+                    "status": WorkflowStatusEnum.PLANNING,
                     "conversation_history": {},
                     "ui_chat_log": [],
                     "context": {
@@ -414,7 +414,7 @@ class TestIOKey:
                 "context",
                 ["project", "config", "database", "host"],
                 {
-                    "status": FlowStatusEnum.PLANNING,
+                    "status": WorkflowStatusEnum.PLANNING,
                     "conversation_history": {},
                     "ui_chat_log": [],
                     "context": {
@@ -430,7 +430,7 @@ class TestIOKey:
                 "context",
                 [],
                 {
-                    "status": FlowStatusEnum.PLANNING,
+                    "status": WorkflowStatusEnum.PLANNING,
                     "conversation_history": {},
                     "ui_chat_log": [],
                     "context": {"key": "value"},
@@ -442,7 +442,7 @@ class TestIOKey:
                 "context",
                 None,
                 {
-                    "status": FlowStatusEnum.PLANNING,
+                    "status": WorkflowStatusEnum.PLANNING,
                     "conversation_history": {},
                     "ui_chat_log": [],
                     "context": {"key": "value"},
@@ -454,7 +454,7 @@ class TestIOKey:
                 "context",
                 ["project", "config", "database", "port"],
                 {
-                    "status": FlowStatusEnum.PLANNING,
+                    "status": WorkflowStatusEnum.PLANNING,
                     "conversation_history": {},
                     "ui_chat_log": [],
                     "context": {
@@ -470,7 +470,7 @@ class TestIOKey:
                 "context",
                 ["project", "config", "debug"],
                 {
-                    "status": FlowStatusEnum.PLANNING,
+                    "status": WorkflowStatusEnum.PLANNING,
                     "conversation_history": {},
                     "ui_chat_log": [],
                     "context": {
@@ -489,7 +489,7 @@ class TestIOKey:
                 "context",
                 ["flow", "metadata"],
                 {
-                    "status": FlowStatusEnum.PLANNING,
+                    "status": WorkflowStatusEnum.PLANNING,
                     "conversation_history": {},
                     "ui_chat_log": [],
                     "context": {
@@ -533,7 +533,7 @@ class TestIOKey:
     def test_get_vars_from_state_multiple_keys(self):
         """Test extracting variables from state using multiple IOKeys."""
         state: FlowState = {
-            "status": FlowStatusEnum.EXECUTION,
+            "status": WorkflowStatusEnum.EXECUTION,
             "conversation_history": {"main": [HumanMessage(content="Hello")]},
             "ui_chat_log": [],
             "context": {"project": {"name": "test-project"}, "user": {"id": 123}},
@@ -547,14 +547,14 @@ class TestIOKey:
 
         variables = get_vars_from_state(io_keys, state)
 
-        assert variables["status"] == FlowStatusEnum.EXECUTION
+        assert variables["status"] == WorkflowStatusEnum.EXECUTION
         assert variables["name"] == "test-project"
         assert variables["id"] == 123
 
     def test_get_vars_from_state_overlapping_keys(self):
         """Test extracting variables with overlapping key names."""
         state: FlowState = {
-            "status": FlowStatusEnum.EXECUTION,
+            "status": WorkflowStatusEnum.EXECUTION,
             "conversation_history": {},
             "ui_chat_log": [],
             "context": {
@@ -577,7 +577,7 @@ class TestIOKey:
         """Test edge cases for IOKey functionality."""
         # Test with special characters in keys
         state: FlowState = {
-            "status": FlowStatusEnum.PLANNING,
+            "status": WorkflowStatusEnum.PLANNING,
             "conversation_history": {},
             "ui_chat_log": [],
             "context": {
@@ -779,7 +779,7 @@ class TestIntegration:
         """Test a complete workflow of state manipulation."""
         # Create initial state
         initial_state: FlowState = {
-            "status": FlowStatusEnum.NOT_STARTED,
+            "status": WorkflowStatusEnum.NOT_STARTED,
             "conversation_history": {},
             "ui_chat_log": [],
             "context": {},
@@ -795,7 +795,7 @@ class TestIntegration:
         # Update state
         updated_state = initial_state.copy()
         updated_state["context"] = updated_context
-        updated_state["status"] = FlowStatusEnum.PLANNING
+        updated_state["status"] = WorkflowStatusEnum.PLANNING
 
         # Extract variables
         variables = get_vars_from_state(io_keys, updated_state)
@@ -803,7 +803,7 @@ class TestIntegration:
         # Verify results
         assert variables["step"] == 1
         assert variables["name"] == "initialization"
-        assert updated_state["status"] == FlowStatusEnum.PLANNING
+        assert updated_state["status"] == WorkflowStatusEnum.PLANNING
         assert updated_state["context"]["flow"]["step"] == 1
 
     def test_io_key_parsing_and_variable_extraction(self):
