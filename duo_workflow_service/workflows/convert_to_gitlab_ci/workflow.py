@@ -376,4 +376,5 @@ class Workflow(AbstractWorkflow):
             last_human_input=None,
             project=None,
             goal=goal,
+            additional_context=None,
         )

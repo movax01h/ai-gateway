@@ -505,6 +505,7 @@ async def test_workflow_run_with_error_state(
     mock_checkpoint_notifier,
     mock_planner_component,
     mock_tools_approval_component,
+    mock_executor_component,
     mock_goal_disambiguation_component,
     mock_fetch_workflow_and_project_data,
     mock_tools_executor,

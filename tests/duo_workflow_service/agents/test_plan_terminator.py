@@ -30,6 +30,7 @@ class TestPlanTerminatorAgent:
             ui_chat_log=[],
             project=None,
             goal=None,
+            additional_context=None,
         )
 
     @dataclass

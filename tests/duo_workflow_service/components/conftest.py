@@ -14,6 +14,7 @@ def graph_input() -> WorkflowState:
         plan=Plan(steps=[]),
         project=None,
         goal=None,
+        additional_context=None,
     )
 
 

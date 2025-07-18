@@ -226,6 +226,7 @@ class Workflow(AbstractWorkflow):
             goal=goal,
             project=self._project,
             http_client=self._http_client,
+            user=self._user,
         )
 
         executor_entry_node = executor_component.attach(
@@ -356,6 +357,7 @@ class Workflow(AbstractWorkflow):
             last_human_input=None,
             project=self._project,
             goal=goal,
+            additional_context=None,
         )
 
     def _fetch_issue_iid(self, issue_url: str):

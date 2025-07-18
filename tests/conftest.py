@@ -51,7 +51,9 @@ from duo_workflow_service.entities.state import (
     WorkflowState,
     WorkflowStatusEnum,
 )
+from duo_workflow_service.gitlab.gitlab_project import Project
 from duo_workflow_service.server import CONTAINER_APPLICATION_PACKAGES
+from duo_workflow_service.workflows.type_definitions import AdditionalContext
 from lib.feature_flags.context import current_feature_flag_context
 from lib.internal_events.client import InternalEventsClient
 
@@ -695,11 +697,30 @@ def last_human_input() -> WorkflowEvent | None:
     return None
 
 
+@pytest.fixture
+def project() -> Project:
+    return {
+        "id": 123,
+        "name": "test-project",
+        "description": "This is a test project",
+        "languages": None,
+        "http_url_to_repo": "https://gitlab.com/test/repo",
+        "web_url": "https://gitlab.com/test/repo",
+    }
+
+
+@pytest.fixture
+def additional_context() -> list[AdditionalContext] | None:
+    return None
+
+
 @pytest.fixture(scope="function")
 def workflow_state(
+    project: Project,
     goal: str | None,
     last_human_input: WorkflowEvent | None,
     ui_chat_log: list[UiChatLog],
+    additional_context: list[AdditionalContext] | None,
 ):
     return WorkflowState(
         plan=Plan(steps=[]),
@@ -708,8 +729,9 @@ def workflow_state(
         handover=[],
         last_human_input=last_human_input,
         ui_chat_log=ui_chat_log,
-        project=None,
+        project=project,
         goal=goal,
+        additional_context=additional_context,
     )
 
 

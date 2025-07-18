@@ -47,6 +47,8 @@ class AgentPromptTemplate(Runnable[DuoWorkflowStateType, PromptValue]):
 
         inputs = cast(dict, input)
         inputs["handover_tool_name"] = HandoverTool.tool_title
+        inputs["get_plan_tool_name"] = "get_plan"
+        inputs["set_task_status_tool_name"] = "set_task_status"
 
         prompt_value = ChatPromptTemplate.from_messages(
             messages, template_format="jinja2"
