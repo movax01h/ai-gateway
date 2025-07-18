@@ -20,6 +20,7 @@ class FeatureFlag(StrEnum):
     DUO_WORKFLOW_USE_HANDOVER_SUMMARY = "duo_workflow_use_handover_summary"
     DUO_WORKFLOW_WORK_ITEM_TOOLS = "duo_workflow_work_item_tools"
     DUO_WORKFLOW_PROMPT_REGISTRY = "duo_workflow_prompt_registry"
+    USE_DUO_CONTEXT_EXCLUSION = "use_duo_context_exclusion"
 
 
 def is_feature_enabled(feature_name: FeatureFlag | str) -> bool:

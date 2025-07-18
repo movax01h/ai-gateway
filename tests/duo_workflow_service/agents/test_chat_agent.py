@@ -114,6 +114,7 @@ async def test_template_with_project(
         http_url_to_repo="",
         default_branch=None,
         languages=[],
+        exclusion_rules=None,
     )
 
     chat_agent: ChatAgent = prompt_registry.get_on_behalf(  # type: ignore[assignment]

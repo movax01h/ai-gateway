@@ -718,6 +718,7 @@ def project_fixture() -> Project:
         "http_url_to_repo": "https://gitlab.com/test/repo",
         "web_url": "https://gitlab.com/test/repo",
         "default_branch": "main",
+        "exclusion_rules": None,
     }
 
 

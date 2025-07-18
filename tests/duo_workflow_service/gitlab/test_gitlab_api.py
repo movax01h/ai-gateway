@@ -1,4 +1,4 @@
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, patch
 
 import pytest
 
@@ -23,6 +23,8 @@ def workflow_and_project_data_fixture():
                         "httpUrlToRepo": "http://example.com/no-lang-project.git",
                         "webUrl": "http://example.com/no-lang-project",
                     },
+                    "namespaceId": None,
+                    "namespace": None,
                     "agentPrivilegesNames": [],
                     "preApprovedAgentPrivilegesNames": [],
                     "mcpEnabled": False,
@@ -129,6 +131,7 @@ async def test_fetch_workflow_and_container_data_success():
 @pytest.mark.asyncio
 async def test_fetch_workflow_and_container_data_no_workflow():
     gitlab_client = AsyncMock()
+
     # Mock empty response
     gitlab_client.graphql.return_value = {"duoWorkflowWorkflows": {"nodes": []}}
 
@@ -296,3 +299,91 @@ async def test_fetch_namespace_level_workflow():
     assert namespace["name"] == "test-group"
     assert namespace["web_url"] == "http://example.com/test-group"
     assert project is None
+
+
+@pytest.mark.asyncio
+async def test_fetch_workflow_and_container_data_with_exclusion_rules():
+    """Test that exclusion rules are included when available in the response."""
+    gitlab_client = AsyncMock()
+
+    # Mock GraphQL response with exclusion rules
+    gitlab_client.graphql.return_value = {
+        "duoWorkflowWorkflows": {
+            "nodes": [
+                {
+                    "statusName": "created",
+                    "projectId": "gid://gitlab/Project/123",
+                    "project": {
+                        "id": "gid://gitlab/Project/123",
+                        "name": "test-project",
+                        "description": "Test Project",
+                        "httpUrlToRepo": "http://example.com/test-project.git",
+                        "webUrl": "http://example.com/test-project",
+                        "languages": [{"name": "Python", "share": 100.0}],
+                        "duoContextExclusionSettings": {
+                            "exclusionRules": ["*.secret", ".env"]
+                        },
+                    },
+                    "namespaceId": None,
+                    "namespace": None,
+                    "agentPrivilegesNames": [],
+                    "preApprovedAgentPrivilegesNames": [],
+                    "mcpEnabled": False,
+                    "allowAgentToRequestUser": False,
+                    "firstCheckpoint": None,
+                }
+            ]
+        }
+    }
+
+    workflow_id = "123"
+    project, namespace, workflow_config = await fetch_workflow_and_container_data(
+        gitlab_client, workflow_id
+    )
+
+    # Verify that exclusion rules are included
+    assert project["exclusion_rules"] is not None
+    assert len(project["exclusion_rules"]) == 2
+    assert project["exclusion_rules"][0] == "*.secret"
+    assert project["exclusion_rules"][1] == ".env"
+
+
+@pytest.mark.asyncio
+async def test_fetch_workflow_and_container_data_without_exclusion_rules():
+    """Test that exclusion rules default to empty list when not present."""
+    gitlab_client = AsyncMock()
+
+    # Mock GraphQL response without exclusion rules
+    gitlab_client.graphql.return_value = {
+        "duoWorkflowWorkflows": {
+            "nodes": [
+                {
+                    "statusName": "created",
+                    "projectId": "gid://gitlab/Project/123",
+                    "project": {
+                        "id": "gid://gitlab/Project/123",
+                        "name": "test-project",
+                        "description": "Test Project",
+                        "httpUrlToRepo": "http://example.com/test-project.git",
+                        "webUrl": "http://example.com/test-project",
+                        "languages": [{"name": "Python", "share": 100.0}],
+                    },
+                    "namespaceId": None,
+                    "namespace": None,
+                    "agentPrivilegesNames": [],
+                    "preApprovedAgentPrivilegesNames": [],
+                    "mcpEnabled": False,
+                    "allowAgentToRequestUser": False,
+                    "firstCheckpoint": None,
+                }
+            ]
+        }
+    }
+
+    workflow_id = "123"
+    project, namespace, workflow_config = await fetch_workflow_and_container_data(
+        gitlab_client, workflow_id
+    )
+
+    # Verify that exclusion rules default to empty list
+    assert project["exclusion_rules"] == []

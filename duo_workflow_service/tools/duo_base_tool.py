@@ -4,6 +4,7 @@ from gitlab_cloud_connector import GitLabUnitPrimitive
 from langchain.tools import BaseTool
 from pydantic import BaseModel
 
+from duo_workflow_service.gitlab.gitlab_api import Project
 from duo_workflow_service.gitlab.http_client import GitlabHttpClient
 from duo_workflow_service.gitlab.url_parser import GitLabUrlParseError, GitLabUrlParser
 
@@ -53,6 +54,10 @@ class DuoBaseTool(BaseTool):
         if not host:
             raise RuntimeError("gitlab_host is not set")
         return host
+
+    @property
+    def project(self) -> Project:
+        return self.metadata and self.metadata.get("project")  # type: ignore
 
     def _run(self, *args: Any, **kwargs: Any) -> Any:
         raise NotImplementedError("This tool can only be run asynchronously")

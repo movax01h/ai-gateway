@@ -21,6 +21,7 @@ class Project(TypedDict):
     web_url: str
     default_branch: Optional[str]
     languages: Optional[list[Language]]
+    exclusion_rules: Optional[list[str]]
 
 
 class Namespace(TypedDict):
@@ -96,6 +97,9 @@ query($workflowId: AiDuoWorkflowsWorkflowID!) {
                 statisticsDetailsPaths {
                     repository
                 }
+                duoContextExclusionSettings {
+                    exclusionRules
+                }
             }
             namespaceId
             namespace {
@@ -166,6 +170,9 @@ async def fetch_workflow_and_container_data(
             description=project_data.get("description", ""),
             languages=project_data.get("languages", []),
             default_branch=extract_default_branch_from_project_repository(workflow),
+            exclusion_rules=project_data.get("duoContextExclusionSettings", {}).get(
+                "exclusionRules", []
+            ),
         )
 
         web_url = project_data.get("webUrl", "")
