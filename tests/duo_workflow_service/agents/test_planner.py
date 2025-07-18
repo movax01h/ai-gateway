@@ -18,6 +18,7 @@ class TestPlanSupervisorAgent:
             ui_chat_log=[],
             project=None,
             goal=None,
+            additional_context=None,
         )
 
     @pytest.mark.asyncio

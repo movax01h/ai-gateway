@@ -301,6 +301,7 @@ class WorkflowState(TypedDict):
     last_human_input: Union[WorkflowEvent, None]
     project: Project | None
     goal: str | None
+    additional_context: list[AdditionalContext] | None
 
 
 class ReplacementRule(BaseModel):

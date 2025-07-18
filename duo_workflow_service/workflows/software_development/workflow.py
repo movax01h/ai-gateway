@@ -289,6 +289,7 @@ class Workflow(AbstractWorkflow):
             project=self._project,
             http_client=self._http_client,
             additional_context=self._additional_context,
+            user=self._user,
         )
 
         executor_entry_node = executor_component.attach(
@@ -340,6 +341,7 @@ class Workflow(AbstractWorkflow):
             ui_chat_log=[initial_ui_chat_log],
             project=self._project,
             goal=goal,
+            additional_context=self._additional_context,
         )
 
     def _setup_context_builder(

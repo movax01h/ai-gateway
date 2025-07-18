@@ -54,6 +54,7 @@ def workflow_state(plan: Plan):
         ui_chat_log=[],
         project=None,
         goal=None,
+        additional_context=None,
     )
 
 

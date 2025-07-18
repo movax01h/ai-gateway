@@ -1,12 +1,17 @@
 from enum import StrEnum
 from functools import partial
-from typing import Any, Optional, Union
+from typing import Any, Optional, Union, cast
 
+from dependency_injector.wiring import Provide, inject
+from gitlab_cloud_connector import CloudConnectorUser
 from langchain_core.messages import AIMessage
 from langgraph.graph import StateGraph
 
+from ai_gateway.container import ContainerApplication
+from ai_gateway.prompts.registry import LocalPromptRegistry
 from duo_workflow_service.agents import (
     Agent,
+    AgentV2,
     HandoverAgent,
     PlanSupervisorAgent,
     ToolsExecutor,
@@ -28,6 +33,7 @@ from duo_workflow_service.llm_factory import (
 )
 from duo_workflow_service.workflows.abstract_workflow import MAX_TOKENS_TO_SAMPLE
 from duo_workflow_service.workflows.type_definitions import AdditionalContext
+from lib.feature_flags.context import FeatureFlag, is_feature_enabled
 from lib.internal_events.event_enum import CategoryEnum
 
 
@@ -60,7 +66,8 @@ def _router(
     return Routes.SUPERVISOR
 
 
-class ExecutorComponent:
+class ExecutorComponent:  # pylint: disable=too-many-instance-attributes; there'll be less as we migrate to Prompt Registry
+    @inject
     def __init__(
         self,
         workflow_id: str,
@@ -72,6 +79,10 @@ class ExecutorComponent:
         project: Any,
         http_client: GitlabHttpClient,
         additional_context: Optional[list[AdditionalContext]] = None,
+        user: CloudConnectorUser | None = None,
+        prompt_registry: LocalPromptRegistry = Provide[
+            ContainerApplication.pkg_prompts.prompt_registry
+        ],
     ):
         self.model_config = model_config
         self.workflow_id = workflow_id
@@ -82,6 +93,8 @@ class ExecutorComponent:
         self.project = project
         self.http_client = http_client
         self.additional_context = additional_context
+        self.user = user
+        self.prompt_registry = prompt_registry
 
     def attach(
         self,
@@ -90,20 +103,36 @@ class ExecutorComponent:
         next_node: str,
         approval_component: Optional[ToolsApprovalComponent],
     ):
-        base_model_executor = create_chat_model(
-            max_tokens=MAX_TOKENS_TO_SAMPLE,
-            config=self.model_config,
-        )
-        agent = Agent(
-            goal=self.goal,
-            model=base_model_executor,
-            name="executor",
-            system_prompt=self._format_system_prompt(),
-            toolset=self.executor_toolset,
-            workflow_id=self.workflow_id,
-            http_client=self.http_client,
-            workflow_type=self.workflow_type,
-        )
+        if is_feature_enabled(FeatureFlag.DUO_WORKFLOW_PROMPT_REGISTRY):
+            agent_v2: AgentV2 = cast(
+                AgentV2,
+                self.prompt_registry.get_on_behalf(
+                    self.user,
+                    "workflow/executor",
+                    "^1.0.0",
+                    tools=self.executor_toolset.bindable,  # type: ignore[arg-type]
+                    workflow_id=self.workflow_id,
+                    http_client=self.http_client,
+                ),
+            )
+            graph.add_node("execution", agent_v2.run)
+        else:
+            base_model_executor = create_chat_model(
+                max_tokens=MAX_TOKENS_TO_SAMPLE,
+                config=self.model_config,
+            )
+            agent = Agent(
+                goal=self.goal,
+                model=base_model_executor,
+                name="executor",
+                system_prompt=self._format_system_prompt(),
+                toolset=self.executor_toolset,
+                workflow_id=self.workflow_id,
+                http_client=self.http_client,
+                workflow_type=self.workflow_type,
+            )
+            graph.add_node("execution", agent.run)
+
         tools_executor = ToolsExecutor(
             tools_agent_name="executor",
             toolset=self.executor_toolset,
@@ -126,7 +155,6 @@ class ExecutorComponent:
                 exit_node="plan_terminator",
             )
 
-        graph.add_node("execution", agent.run)
         graph.add_node("execution_tools", tools_executor.run)
         graph.add_node("execution_supervisor", supervisor.run)
         graph.add_node("execution_handover", handover.run)

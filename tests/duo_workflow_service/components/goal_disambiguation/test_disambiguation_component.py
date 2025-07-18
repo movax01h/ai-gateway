@@ -75,6 +75,7 @@ class TestGoalDisambiguationComponent:
             ui_chat_log=[],
             project=None,
             goal=None,
+            additional_context=None,
         )
 
     @pytest.fixture
@@ -221,6 +222,7 @@ class TestGoalDisambiguationComponent:
             last_human_input=None,
             project=None,
             goal=None,
+            additional_context=None,
         )
         with patch(
             "duo_workflow_service.components.goal_disambiguation.component.Agent"
@@ -279,6 +281,7 @@ class TestGoalDisambiguationComponent:
             ui_chat_log=[],
             project=None,
             goal=None,
+            additional_context=None,
         )
 
         with patch(
