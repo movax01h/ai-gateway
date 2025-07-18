@@ -1236,6 +1236,18 @@ url = "https://gitlab.com/api/v4/projects/58733651/packages/pypi/simple"
 reference = "gitlab_cloud_connector"
 
 [[package]]
+name = "gitmatch"
+version = "0.2.1"
+description = "Gitignore-style path matching"
+optional = false
+python-versions = ">=3.8"
+groups = ["main"]
+files = [
+    {file = "gitmatch-0.2.1-py3-none-any.whl", hash = "sha256:c74b370d78356e587c87374ded757ce953c5dd84b458ddea7e65918d7cd11972"},
+    {file = "gitmatch-0.2.1.tar.gz", hash = "sha256:46d2c5e25d579580ebed15632ceaaae696fa437f8b52634fb042d1b4fa432f52"},
+]
+
+[[package]]
 name = "gitpython"
 version = "3.1.44"
 description = "GitPython is a Python library used to interact with Git repositories"
@@ -6459,4 +6471,4 @@ cffi = ["cffi (>=1.11)"]
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.12.0,<3.13.0"
-content-hash = "77363e0153035dd6d1f00d7e6530ce407ccbc2891c24c1bb52728fa414fe72b7"
+content-hash = "f17136c1bfb99e002dddff09e6c699078894dd134c8d7e4766b055196fd21b2e"
