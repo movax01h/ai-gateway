@@ -23,12 +23,11 @@ class TestFlowConfig:
                     "name": "agent",
                     "type": "AgentComponent",
                     "inputs": ["context:goal"],
-                    "output": "context:agent.answer",
                 }
             ],
             "routers": [{"from": "agent", "to": "end"}],
             "environment": "remote",
-            "version": 1,
+            "version": "experimental",
         }
 
         config = FlowConfig(**config_data)
@@ -38,7 +37,7 @@ class TestFlowConfig:
         assert config.components[0]["name"] == "agent"
         assert len(config.routers) == 1
         assert config.environment == "remote"
-        assert config.version == 1
+        assert config.version == "experimental"
 
     def test_flowconfig_creation_missing_required_fields(self):
         """Test FlowConfig creation fails with missing required fields."""
@@ -64,7 +63,7 @@ class TestFlowConfig:
             ],
             "routers": [{"from": "test_agent", "to": "end"}],
             "environment": "local",
-            "version": 1,
+            "version": "experimental",
         }
 
         config_file = tmp_path / "config.yaml"
@@ -77,7 +76,7 @@ class TestFlowConfig:
 
         assert config.flow["entry_point"] == "test_agent"
         assert config.environment == "local"
-        assert config.version == 1
+        assert config.version == "experimental"
 
     def test_flowconfig_from_yaml_config_file_not_found(self):
         """Test loading YAML config raises FileNotFoundError for missing file."""

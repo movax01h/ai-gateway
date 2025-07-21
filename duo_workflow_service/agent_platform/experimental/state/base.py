@@ -12,7 +12,7 @@ from typing import (
 )
 
 from langchain_core.messages import BaseMessage
-from pydantic import BaseModel, ConfigDict, model_validator
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 # TODO: Remove dependency on legacy duo workflow packages
 from duo_workflow_service.entities.state import (
@@ -29,6 +29,7 @@ __all__ = [
     "create_nested_dict",
     "merge_nested_dict_reducer",
     "IOKey",
+    "IOKeyTemplate",
     "get_vars_from_state",
 ]
 
@@ -98,9 +99,14 @@ class IOKey(BaseModel):
 
     target: str
     subkeys: Optional[list[str]] = None
+    alias: Optional[str] = None
 
     _target_separator: ClassVar[str] = ":"
     _key_separator: ClassVar[str] = "."
+
+    class _AliasedIOKeyConfig(BaseModel):
+        from_: str = Field(alias="from")
+        as_: Optional[str] = Field(default=None, alias="as")
 
     @model_validator(mode="after")
     def parse_valid_target(self) -> Self:
@@ -133,11 +139,18 @@ class IOKey(BaseModel):
         return self
 
     @classmethod
-    def parse_keys(cls, keys: list[str]) -> list[Self]:
+    def parse_keys(cls, keys: list[str | dict]) -> list[Self]:
         return [cls.parse_key(key) for key in keys]
 
     @classmethod
-    def parse_key(cls, key: str) -> Self:
+    def parse_key(cls, key: str | dict) -> Self:
+        alias: Optional[str] = None
+
+        if isinstance(key, dict):
+            key_config = cls._AliasedIOKeyConfig(**key)
+            key = key_config.from_
+            alias = key_config.as_
+
         target, _, remaining = key.partition(cls._target_separator)
 
         if not remaining:
@@ -145,19 +158,19 @@ class IOKey(BaseModel):
         else:
             subkeys = remaining.split(cls._key_separator)
 
-        return cls(target=target, subkeys=subkeys)
+        return cls(target=target, subkeys=subkeys, alias=alias)
 
     def template_variable_from_state(self, state: FlowState) -> dict[str, Any]:
         # self.target presence in state is validated in parse_valid_target
         # thereby state[self.target] will always succeed
-        current = state[self.target]  # type: ignore[literal-required]
+        value = self.value_from_state(state)
+        if self.alias:
+            return {self.alias: value}
+
         if not self.subkeys:
-            return {self.target: current}
+            return {self.target: value}
 
-        for key in self.subkeys:  # pylint: disable=not-an-iterable
-            current = current[key]
-
-        return {self.subkeys[-1]: current}  # pylint: disable=unsubscriptable-object
+        return {self.subkeys[-1]: value}  # pylint: disable=unsubscriptable-object
 
     def value_from_state(self, state: FlowState) -> Any:
         # self.target presence in state is validated in parse_valid_target
@@ -167,6 +180,22 @@ class IOKey(BaseModel):
             for key in self.subkeys:  # pylint: disable=not-an-iterable
                 current = current[key]
         return current
+
+
+class IOKeyTemplate(IOKey):
+    COMPONENT_NAME_TEMPLATE: ClassVar[str] = "<name>"
+
+    def to_iokey(self, replacements: dict[str, str]) -> IOKey:
+        return IOKey(target=self.target, subkeys=self._resolved_subkeys(replacements))
+
+    def _resolved_subkeys(self, replacements: dict[str, str]) -> list[str] | None:
+        if not self.subkeys:
+            return None
+
+        return [
+            replacements.get(subkey, subkey)
+            for subkey in self.subkeys  # pylint: disable=not-an-iterable
+        ]
 
 
 def get_vars_from_state(inputs: list[IOKey], state: FlowState) -> dict[str, Any]:
