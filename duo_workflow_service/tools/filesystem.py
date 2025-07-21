@@ -150,13 +150,30 @@ class FindFilesInput(BaseModel):
 
 class FindFiles(DuoBaseTool):
     name: str = "find_files"
-    description: str = """Find files, recursively, with names matching a specific pattern in the repository.
+    description: str = """Find files by name patterns (equivalent to 'find' command).
 
-It includes all files (tracked and untracked) and respects .gitignore rules.
+    **Primary use cases:**
+    - Find files by filename or extension patterns
+    - Locate specific files across the codebase
+    - Get list of files matching naming conventions
 
-This name_pattern uses the same syntax as `find --name` or `bash` filename expansion and matches are done against the
-full path relative to the project root.
-"""
+    **Replaces these commands:**
+    - find . -name "*.py" → find_files(name_pattern="*.py")
+    - find tests -name "test_*.js" → find_files(name_pattern="tests/test_*.js")
+    - find src -name "*.json" → find_files(name_pattern="src/*.json")
+
+    **Examples:**
+    - All Python files: find_files(name_pattern="*.py")
+    - Test files: find_files(name_pattern="test_*.py")
+    - Config files: find_files(name_pattern="*.json")
+    - Files in directory: find_files(name_pattern="src/*.js")
+
+    **Don't use this for:**
+    - Searching text content within files (use grep instead)
+    - Finding where functions/variables are used (use grep instead)
+
+    Uses bash filename expansion syntax. Searches recursively and respects .gitignore rules.
+    """
     args_schema: Type[BaseModel] = FindFilesInput  # type: ignore
 
     async def _arun(
@@ -324,9 +341,31 @@ class ListDirInput(BaseModel):
 
 class ListDir(DuoBaseTool):
     name: str = "list_dir"
-    description: str = (
-        """Lists files and subdirectories in the given directory relative to the root of the project. Use this tool to check directory contents, verify if a directory exists, or explore the file structure."""
-    )
+    description: str = """List directory contents (equivalent to 'ls -la' command).
+
+    **Primary use cases:**
+    - See all files and subdirectories in a directory
+    - Check if files or directories exist
+    - Explore project structure and organization
+    - Get directory contents before reading specific files
+
+    **Replaces these commands:**
+    - ls -la → list_dir(directory=".")
+    - ls -l → list_dir(directory=".")
+    - ls → list_dir(directory=".")
+    - ls src/ → list_dir(directory="src/")
+    - ls -la tests/ → list_dir(directory="tests/")
+    - dir → list_dir(directory=".") (Windows equivalent)
+
+    **Examples:**
+    - List current directory: list_dir(directory=".")
+    - List source code: list_dir(directory="src/")
+    - Check if directory exists: list_dir(directory="tests/")
+    - Explore subdirectory: list_dir(directory="config/")
+
+    Shows files and subdirectories relative to the repository root.
+    Use this instead of trying to run 'ls' commands.
+    """
     args_schema: Type[BaseModel] = ListDirInput  # type: ignore
 
     async def _arun(self, directory: str) -> str:
