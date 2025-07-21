@@ -50,6 +50,7 @@ from lib.internal_events.event_enum import CategoryEnum, EventEnum
 
 # Constants
 QUEUE_MAX_SIZE = 1
+STREAMING_QUEUE_MAX_SIZE = 10
 MAX_TOKENS_TO_SAMPLE = 8192
 RECURSION_LIMIT = 300
 DEBUG = os.getenv("DEBUG")
@@ -110,7 +111,7 @@ class AbstractWorkflow(ABC):
     ):
         self._outbox = asyncio.Queue(maxsize=QUEUE_MAX_SIZE)
         self._inbox = asyncio.Queue(maxsize=QUEUE_MAX_SIZE)
-        self._streaming_outbox = asyncio.Queue(maxsize=QUEUE_MAX_SIZE)
+        self._streaming_outbox = asyncio.Queue(maxsize=STREAMING_QUEUE_MAX_SIZE)
         self._workflow_id = workflow_id
         self._workflow_metadata = workflow_metadata
         self._user = user
