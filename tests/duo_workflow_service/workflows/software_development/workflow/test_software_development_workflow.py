@@ -2,7 +2,6 @@ import asyncio
 import os
 from typing import Any
 from unittest.mock import ANY, AsyncMock, MagicMock, Mock, call, patch
-from uuid import uuid4
 
 import pytest
 from gitlab_cloud_connector import CloudConnectorUser, UserClaims
@@ -97,24 +96,6 @@ def workflow_config_fixture():
         "mcp_enabled": True,
         "allow_agent_to_request_user": True,
     }
-
-
-@pytest.fixture(name="checkpoint_tuple")
-def checkpoint_tuple_fixture():
-    return CheckpointTuple(
-        config={"configurable": {"thread_id": "123", "checkpoint_id": str(uuid4())}},
-        checkpoint={
-            "channel_values": {"status": WorkflowStatusEnum.NOT_STARTED},
-            "id": str(uuid4()),
-            "channel_versions": {},
-            "pending_sends": [],
-            "versions_seen": {},
-            "ts": "",
-            "v": 0,
-        },
-        metadata={"step": 0},
-        parent_config={"configurable": {"thread_id": "123", "checkpoint_id": None}},
-    )
 
 
 @pytest.fixture(name="mock_log_exception")

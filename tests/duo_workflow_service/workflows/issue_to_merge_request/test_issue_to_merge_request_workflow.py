@@ -14,24 +14,6 @@ from duo_workflow_service.workflows.issue_to_merge_request.workflow import Workf
 from lib.internal_events.event_enum import CategoryEnum
 
 
-@pytest.fixture(name="checkpoint_tuple")
-def checkpoint_tuple_fixture():
-    return CheckpointTuple(
-        config={"configurable": {"thread_id": "123", "checkpoint_id": str(uuid4())}},
-        checkpoint={
-            "channel_values": {"status": WorkflowStatusEnum.NOT_STARTED},
-            "id": str(uuid4()),
-            "channel_versions": {},
-            "pending_sends": [],
-            "versions_seen": {},
-            "ts": "",
-            "v": 0,
-        },
-        metadata={"step": 0},
-        parent_config={"configurable": {"thread_id": "123", "checkpoint_id": None}},
-    )
-
-
 @pytest.mark.asyncio
 @patch("duo_workflow_service.workflows.abstract_workflow.ToolsRegistry", autospec=True)
 @patch("duo_workflow_service.workflows.issue_to_merge_request.workflow.Agent")
@@ -270,7 +252,6 @@ async def test_workflow_run_when_exception(
             "configurable": {"thread_id": "123", "checkpoint_id": "checkpoint1"}
         }
     )
-    mock_git_lab_workflow_instance.get_next_version = MagicMock(return_value=1)
 
     class AsyncIterator:
         def __init__(self):
