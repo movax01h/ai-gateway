@@ -100,18 +100,6 @@ def workflow_with_approval(workflow_with_project):
     return workflow
 
 
-@pytest.fixture
-def workflow_with_rejected_approval(workflow_with_project):
-    workflow = workflow_with_project
-    workflow._approval = contract_pb2.Approval(
-        rejection=contract_pb2.Approval.Rejected(
-            message="Rejected the tool usage because it's not safe",
-        )
-    )
-
-    return workflow
-
-
 @pytest.mark.asyncio
 async def test_workflow_initialization(workflow_with_project):
     initial_state = workflow_with_project.get_workflow_state("Test chat goal")
@@ -429,30 +417,44 @@ async def test_get_graph_input(workflow_with_project, status):
 async def test_get_graph_input_resume_with_approval(workflow_with_approval):
     """Test graph input with approved tool calls."""
     result = await workflow_with_approval.get_graph_input(
-        "New input", WorkflowStatusEventEnum.RESUME
+        "", WorkflowStatusEventEnum.RESUME
     )
 
     assert result.goto == "run_tools"
     assert result.update["status"] == WorkflowStatusEnum.EXECUTION
     assert "conversation_history" not in result.update
+    assert "ui_chat_log" not in result.update
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "rejection_message", ["", "null", "Rejected the tool usage because it's not safe"]
+)
 async def test_get_graph_input_resume_with_rejected_approval(
-    workflow_with_rejected_approval,
+    rejection_message, workflow_with_project
 ):
     """Test graph input with rejected tool calls."""
+
+    workflow_with_rejected_approval = workflow_with_project
+    workflow_with_rejected_approval._approval = contract_pb2.Approval(
+        rejection=contract_pb2.Approval.Rejected(
+            message=rejection_message,
+        )
+    )
+
     result = await workflow_with_rejected_approval.get_graph_input(
-        "New input", WorkflowStatusEventEnum.RESUME
+        "", WorkflowStatusEventEnum.RESUME
     )
 
     assert result.goto == "agent"
     assert result.update["status"] == WorkflowStatusEnum.EXECUTION
     assert "conversation_history" not in result.update
-    assert (
-        result.update["approval"].message
-        == "Rejected the tool usage because it's not safe"
-    )
+    assert result.update["approval"].message == rejection_message
+
+    if rejection_message and rejection_message != "null":
+        result.update["ui_chat_log"][-1]["content"] == rejection_message
+    else:
+        assert "ui_chat_log" not in result.update
 
 
 @pytest.mark.asyncio

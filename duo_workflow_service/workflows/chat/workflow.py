@@ -151,6 +151,8 @@ class Workflow(AbstractWorkflow):
         )
 
     async def get_graph_input(self, goal: str, status_event: str) -> Any:
+        new_chat_message = goal
+
         match status_event:
             case WorkflowStatusEventEnum.START:
                 return self.get_workflow_state(goal)
@@ -162,7 +164,10 @@ class Workflow(AbstractWorkflow):
                     case "approval":
                         next_step = "run_tools"
                     case "rejection":
-                        state_update["approval"] = ApprovalStateRejection(message=self._approval.rejection.message)  # type: ignore
+                        new_chat_message = self._approval.rejection.message  # type: ignore
+                        state_update["approval"] = ApprovalStateRejection(
+                            message=new_chat_message
+                        )
                     case _:
                         state_update["conversation_history"] = {
                             self._agent.name: [
@@ -175,17 +180,18 @@ class Workflow(AbstractWorkflow):
                             ]
                         }
 
-                new_message_chat_log = UiChatLog(
-                    message_type=MessageTypeEnum.USER,
-                    message_sub_type=None,
-                    content=goal,
-                    timestamp=datetime.now(timezone.utc).isoformat(),
-                    status=ToolStatus.SUCCESS,
-                    correlation_id=None,
-                    tool_info=None,
-                    additional_context=self._additional_context,
-                )
-                state_update["ui_chat_log"] = [new_message_chat_log]
+                if new_chat_message and new_chat_message != "null":
+                    new_message_chat_log = UiChatLog(
+                        message_type=MessageTypeEnum.USER,
+                        message_sub_type=None,
+                        content=new_chat_message,
+                        timestamp=datetime.now(timezone.utc).isoformat(),
+                        status=ToolStatus.SUCCESS,
+                        correlation_id=None,
+                        tool_info=None,
+                        additional_context=self._additional_context,
+                    )
+                    state_update["ui_chat_log"] = [new_message_chat_log]
 
                 return Command(goto=next_step, update=state_update)
 
