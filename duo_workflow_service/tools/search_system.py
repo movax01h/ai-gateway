@@ -22,18 +22,24 @@ class GrepInput(BaseModel):
 
 class Grep(DuoBaseTool):
     name: str = "grep"
-    description: str = """Search for text patterns in files.
+    description: str = """Search code and text content within files across the entire codebase.
+
     This tool uses searches, recursively, through all files in the given directory, respecting .gitignore rules.
 
-    IMPORTANT: This tool automatically:
-    - Includes all files (tracked and untracked)
-    - Respects .gitignore rules
-    - Searches recursively by default
+    **Primary use cases:**
+    Fastest local search: Use this as your PRIMARY search tool for finding:
+    - Function definitions, class names, variable usage
+    - Code patterns, imports, API calls
+    - Error messages, comments, configuration values
 
-    Examples:
+    **Examples:**
     - Search for "TODO" in all files: grep(pattern="TODO")
     - Case-insensitive search: grep(pattern="error", case_insensitive=True)
     - Search in specific directory: grep(pattern="bug", search_directory="src/")
+
+    **Don't use this for:**
+    - Finding files by name patterns (use find_files instead)
+    - Listing directory contents (use list_dir instead)
     """
     args_schema: Type[BaseModel] = GrepInput  # type: ignore
 
