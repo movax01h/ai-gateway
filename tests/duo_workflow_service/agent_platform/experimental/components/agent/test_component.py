@@ -14,6 +14,7 @@ from duo_workflow_service.agent_platform.experimental.components.agent.nodes.age
     AgentFinalOutput,
 )
 from duo_workflow_service.agent_platform.experimental.state import FlowStateKeys
+from duo_workflow_service.agent_platform.experimental.state.base import IOKey
 
 
 @pytest.fixture
@@ -48,7 +49,6 @@ def agent_component(
         prompt_id=prompt_id,
         prompt_version=prompt_version,
         toolset=mock_toolset,
-        output="context:result",
         prompt_registry=mock_prompt_registry,
         internal_event_client=mock_internal_event_client,
     )
@@ -142,14 +142,13 @@ class TestAgentComponentInitialization:
         mock_internal_event_client,
         input_output,
     ):
-        """Test that component validates input and output targets correctly."""
+        """Test that component validates input targets correctly."""
         # This should succeed without raising an exception
         AgentComponent(
             name=component_name,
             flow_id=flow_id,
             flow_type=flow_type,
             inputs=[input_output],
-            output=input_output,
             prompt_id=prompt_id,
             prompt_version=prompt_version,
             toolset=mock_toolset,
@@ -184,7 +183,6 @@ class TestAgentComponentAttachNodes:
         flow_id,
         flow_type,
         inputs,
-        simple_output,
         mock_toolset,
         mock_internal_event_client,
         mock_prompt_registry,
@@ -232,7 +230,9 @@ class TestAgentComponentAttachNodes:
         final_call_kwargs = mock_final_response_node_cls.call_args[1]
         assert final_call_kwargs["name"] == f"{component_name}#final_response"
         assert final_call_kwargs["component_name"] == component_name
-        assert final_call_kwargs["output"] == simple_output
+        assert final_call_kwargs["output"] == IOKey(
+            target="context", subkeys=[component_name, "final_answer"]
+        )
 
 
 class TestAgentComponentAttachEdges:

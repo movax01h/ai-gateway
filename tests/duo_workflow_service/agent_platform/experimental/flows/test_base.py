@@ -145,13 +145,12 @@ class TestFlow:
                     "name": "agent",
                     "type": "AgentComponent",
                     "inputs": ["context:goal"],
-                    "output": "context:agent.answer",
                 },
                 {"name": "end", "type": "EndComponent"},
             ],
             routers=[{"from": "agent", "to": "end"}],
             environment="local",
-            version=1,
+            version="experimental",
         )
 
     @pytest.fixture
@@ -242,7 +241,7 @@ class TestFlow:
             ],
             routers=[{"from": "agent", "to": "agent"}],
             environment="local",
-            version=1,
+            version="experimental",
         )
 
         with (
@@ -285,7 +284,7 @@ class TestFlow:
     ):
         """Test Flow with complex configuration via run method to trigger _compile."""
         complex_config = FlowConfig(
-            version=1,
+            version="experimental",
             environment="remote",
             components=[
                 {
@@ -293,10 +292,13 @@ class TestFlow:
                     "type": "AgentComponent",
                     "prompt_id": "agents/awesome",
                     "inputs": ["context:goal"],
-                    "output": "context:agent.answer",
                     "toolset": ["read_file", "edit_file"],
                 },
-                {"name": "human_input", "type": "HiltChatBackComponent"},
+                {
+                    "name": "human_input",
+                    "type": "HiltChatBackComponent",
+                    "inputs": [{"from": "conversation_history:agent", "as": "history"}],
+                },
                 {"name": "end", "type": "EndComponent"},
             ],
             routers=[
@@ -386,7 +388,6 @@ class TestFlow:
             assert agent_call_args["workflow_type"] == CategoryEnum.WORKFLOW_CHAT
             assert agent_call_args["prompt_id"] == "agents/awesome"
             assert agent_call_args["inputs"] == ["context:goal"]
-            assert agent_call_args["output"] == "context:agent.answer"
             assert agent_call_args["toolset"] == [
                 "read_file",
                 "edit_file",
@@ -397,6 +398,9 @@ class TestFlow:
             human_input_call_args = mock_human_input_class.call_args[1]
             assert human_input_call_args["name"] == "human_input"
             assert human_input_call_args["workflow_id"] == "complex-workflow-123"
+            assert human_input_call_args["inputs"] == [
+                {"from": "conversation_history:agent", "as": "history"}
+            ]
             assert human_input_call_args["workflow_type"] == CategoryEnum.WORKFLOW_CHAT
 
             # End component

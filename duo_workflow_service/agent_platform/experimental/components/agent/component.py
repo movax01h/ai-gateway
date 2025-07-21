@@ -1,4 +1,4 @@
-from typing import Annotated, Optional
+from typing import Annotated, ClassVar, Optional
 
 from dependency_injector.wiring import Provide, inject
 from langchain_core.messages import AIMessage, BaseMessage
@@ -20,6 +20,7 @@ from duo_workflow_service.agent_platform.experimental.state import (
     FlowState,
     FlowStateKeys,
     IOKey,
+    IOKeyTemplate,
 )
 from duo_workflow_service.tools.toolset import Toolset
 from lib.internal_events import InternalEventsClient
@@ -33,6 +34,22 @@ class RoutingError(Exception):
 
 
 class AgentComponent(BaseComponent):
+    _final_answer_key: ClassVar[IOKeyTemplate] = IOKeyTemplate(
+        target="context",
+        subkeys=[IOKeyTemplate.COMPONENT_NAME_TEMPLATE, "final_answer"],
+    )
+
+    _outputs: ClassVar[tuple[IOKeyTemplate, ...]] = (
+        IOKeyTemplate(
+            target="conversation_history",
+            subkeys=[IOKeyTemplate.COMPONENT_NAME_TEMPLATE],
+        ),
+        IOKeyTemplate(target="status"),
+        _final_answer_key,
+    )
+
+    supported_environments: ClassVar[tuple[str, ...]] = ("platform",)
+
     prompt_id: str
     prompt_version: str
     toolset: Toolset
@@ -41,7 +58,6 @@ class AgentComponent(BaseComponent):
     internal_event_client: InternalEventsClient
 
     _allowed_input_targets = tuple(FlowState.__annotations__.keys())
-    _allowed_output_targets = tuple(FlowState.__annotations__.keys())
 
     @inject
     def __init__(
@@ -132,7 +148,9 @@ class AgentComponent(BaseComponent):
         node_final_response = FinalResponseNode(
             name=f"{self.name}#final_response",
             component_name=self.name,
-            output=self.output,
+            output=self._final_answer_key.to_iokey(
+                {IOKeyTemplate.COMPONENT_NAME_TEMPLATE: self.name}
+            ),
         )
 
         graph.add_node(self.__entry_hook__(), node_agent.run)

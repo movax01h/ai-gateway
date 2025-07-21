@@ -16,7 +16,7 @@ class FlowConfig(BaseModel):
     components: list[dict]
     routers: list[dict]
     environment: str
-    version: int
+    version: str
 
     @classmethod
     def from_yaml_config(cls, path: str) -> Self:
