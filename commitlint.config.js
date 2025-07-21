@@ -6,5 +6,6 @@ module.exports = {
       "always",
       "lowerCase"
     ],
+    "body-max-line-length": [0, "always", 150]
   },
 };

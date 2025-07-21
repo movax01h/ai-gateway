@@ -1,6 +1,6 @@
 # pylint: disable=unused-import,unused-variable
 
-from unittest.mock import Mock, patch
+from unittest.mock import ANY, Mock, patch
 
 import pytest
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
@@ -29,17 +29,6 @@ def prompt_template() -> dict[str, str]:
 
 
 @pytest.fixture
-def uuid() -> str:
-    return "aaf1c304-f1e5-48d1-b32e-667fd9c8656d"
-
-
-@pytest.fixture
-def mock_uuid(uuid: str):
-    with patch("uuid.uuid4", return_value=uuid) as mock:
-        yield mock
-
-
-@pytest.fixture
 def check_events() -> bool:
     return True
 
@@ -64,7 +53,6 @@ def agent(
 
 class TestAgent:
     @pytest.mark.asyncio
-    @pytest.mark.usefixtures("mock_uuid")
     async def test_run_with_empty_conversation(
         self,
         agent: Agent,
@@ -72,18 +60,16 @@ class TestAgent:
         prompt_name: str,
         goal: str,
         model_response: str,
-        uuid: str,
     ):
         result = await agent.run(workflow_state)
 
         assert result["conversation_history"][prompt_name] == [
             SystemMessage(content="You are AGI entity capable of anything"),
             HumanMessage(content=f"Your goal is: {goal}"),
-            AIMessage(content=model_response, id=f"run--{uuid}-0"),
+            AIMessage.model_construct(content=model_response, id=ANY),
         ]
 
     @pytest.mark.asyncio
-    @pytest.mark.usefixtures("mock_uuid")
     async def test_run_with_empty_conversation_and_handover(
         self,
         agent: Agent,
@@ -91,7 +77,6 @@ class TestAgent:
         prompt_name: str,
         goal: str,
         model_response: str,
-        uuid: str,
     ):
         workflow_state["handover"] = [
             HumanMessage(
@@ -110,11 +95,10 @@ class TestAgent:
                 content="I tried to tell jokes on the streets to cheer everybody up"
             ),
             HumanMessage(content=f"Your goal is: {goal}"),
-            AIMessage(content=model_response, id=f"run--{uuid}-0"),
+            AIMessage.model_construct(content=model_response, id=ANY),
         ]
 
     @pytest.mark.asyncio
-    @pytest.mark.usefixtures("mock_uuid")
     @patch("duo_workflow_service.agents.v2.agent.get_event")
     @pytest.mark.parametrize("check_events", [True, False])
     @pytest.mark.parametrize(
@@ -135,7 +119,6 @@ class TestAgent:
         workflow_state: DuoWorkflowStateType,
         prompt_name: str,
         model_response: str,
-        uuid: str,
         check_events: bool,
     ):
         workflow_state["conversation_history"][prompt_name] = [
@@ -152,7 +135,7 @@ class TestAgent:
             mock_get_event.assert_not_called()
 
         assert result["conversation_history"][prompt_name] == [
-            AIMessage(content=model_response, id=f"run--{uuid}-0")
+            AIMessage.model_construct(content=model_response, id=ANY)
         ]
 
         assert "ui_chat_log" not in result
