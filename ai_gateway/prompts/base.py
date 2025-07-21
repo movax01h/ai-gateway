@@ -97,6 +97,7 @@ class Prompt(RunnableBinding[Input, Output]):
         model_metadata: Optional[TypeModelMetadata] = None,
         disable_streaming: bool = False,
         tools: Optional[List[BaseTool]] = None,
+        tool_choice: Optional[str] = None,
         **kwargs: Any,
     ):
         model_override = None
@@ -105,8 +106,10 @@ class Prompt(RunnableBinding[Input, Output]):
         model = self._build_model(
             model_factory, config.model, disable_streaming, model_override
         )
+
         if tools and isinstance(model, BaseChatModel):
-            model = model.bind_tools(tools)  # type: ignore[assignment]
+            model = model.bind_tools(tools, tool_choice=tool_choice)  # type: ignore[assignment]
+
         prompt = self._build_prompt_template(config)
         chain = self._build_chain(
             cast(

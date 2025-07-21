@@ -90,6 +90,7 @@ class LocalPromptRegistry(BasePromptRegistry):
         prompt_version: str,
         model_metadata: Optional[TypeModelMetadata] = None,
         tools: Optional[List[BaseTool]] = None,
+        tool_choice: Optional[str] = None,  # auto, any, <tool name>. By default, auto.
         **kwargs: Any,
     ) -> Prompt:
         prompt_id = self._resolve_id(prompt_id, model_metadata)
@@ -124,6 +125,7 @@ class LocalPromptRegistry(BasePromptRegistry):
             model_metadata,
             disable_streaming=self.disable_streaming,
             tools=tools,
+            tool_choice=tool_choice,
             **kwargs,
         )
 

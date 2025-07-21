@@ -33,6 +33,7 @@ from ai_gateway.prompts.config import (
     ModelConfig,
     PromptConfig,
 )
+from ai_gateway.prompts.config.base import PromptParams
 from ai_gateway.prompts.typing import Model, TypeModelFactory
 
 
@@ -221,10 +222,10 @@ def model_factories():
 
 
 @pytest.fixture
-def prompts_registered():
+def prompts_registered(prompt_class: type[Prompt]):
     return {
         "test/base": PromptRegistered(
-            klass=Prompt,
+            klass=prompt_class,
             versions={
                 "1.0.0": PromptConfig(
                     name="Test prompt 1.0.0",
@@ -300,7 +301,7 @@ def prompts_registered():
                     ),
                     unit_primitives=["duo_chat"],
                     prompt_template={"system": "Template1", "user": "Template2"},
-                    params={"timeout": 60, "stop": ["Foo", "Bar"]},
+                    params=PromptParams(timeout=60, stop=["Foo", "Bar"]),
                 ),
             },
         ),
@@ -317,10 +318,7 @@ def prompts_registered():
                     ),
                     unit_primitives=["amazon_q_integration"],
                     prompt_template={"system": "Template1", "user": "Template2"},
-                    params={
-                        "timeout": 60,
-                        "stop": ["Foo", "Bar"],
-                    },
+                    params=PromptParams(timeout=60, stop=["Foo", "Bar"]),
                 ),
             },
         ),
@@ -342,11 +340,9 @@ def prompts_registered():
                     ),
                     unit_primitives=["duo_chat"],
                     prompt_template={"system": "Template1", "user": "Template2"},
-                    params={
-                        "timeout": 60,
-                        "stop": ["Foo", "Bar"],
-                        "vertex_location": "us-east1",
-                    },
+                    params=PromptParams(
+                        timeout=60, stop=["Foo", "Bar"], vertex_location="us-east1"
+                    ),
                 ),
             },
         ),
@@ -1049,3 +1045,38 @@ class TestLocalPromptRegistry:
 
             call_dict = mock_log.info.call_args[1]
             assert call_dict["model_identifier"] == expected_identifier
+
+    @pytest.mark.parametrize(
+        ("tool_choice", "prompt_class"),
+        [
+            ("auto", Mock(spec=Prompt)),
+            ("any", Mock(spec=Prompt)),
+            (None, Mock(spec=Prompt)),
+        ],
+    )
+    def test_get_with_tool_choice(
+        self,
+        prompt_class: Mock,
+        registry: LocalPromptRegistry,
+        tool_choice: str | None,
+    ):
+        """Test that tool_choice parameter is correctly passed from get method to Prompt constructor."""
+
+        # We have custom BaseTool in ai_gateway.chat.tools.
+        # To avoid potential collisions, we import BaseTool from LangChain locally.
+        from langchain_core.tools.base import (  # pylint: disable=import-outside-toplevel
+            BaseTool,
+        )
+
+        tools: list[BaseTool] = [Mock(spec=BaseTool)]
+
+        _ = registry.get(
+            prompt_id="test",
+            prompt_version="^1.0.0",
+            tools=tools,
+            tool_choice=tool_choice,
+        )
+
+        kwargs = prompt_class.call_args.kwargs
+        assert kwargs.get("tool_choice") == tool_choice
+        assert kwargs.get("tools") == tools

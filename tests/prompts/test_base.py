@@ -31,6 +31,7 @@ from ai_gateway.model_metadata import (
 from ai_gateway.models.v2.anthropic_claude import ChatAnthropic
 from ai_gateway.prompts import BasePromptRegistry, Prompt
 from ai_gateway.prompts.config.base import PromptConfig, PromptParams
+from ai_gateway.prompts.typing import TypeModelFactory
 from lib.internal_events.context import InternalEventAdditionalProperties
 from tests.conftest import FakeModel
 
@@ -530,6 +531,36 @@ class TestPrompt:
             match="Input to ChatPromptTemplate is missing variables {'name'}",
         ):
             await anext(prompt.astream({"content": "What's up?"}))
+
+    @pytest.mark.parametrize(
+        "tool_choice",
+        [
+            "auto",
+            None,
+            "any",
+        ],
+    )
+    def test_bind_tools_with_tool_choice(
+        self,
+        prompt_config: PromptConfig,
+        model_factory: TypeModelFactory,
+        model: FakeModel,
+        tool_choice: str | None,
+    ):
+        """Test that tool_choice parameter is correctly passed to bind_tools method."""
+
+        with mock.patch.object(FakeModel, "bind_tools") as mock_bind_tool:
+            mock_bind_tool.return_value = model
+            Prompt(
+                model_factory=model_factory,
+                config=prompt_config,
+                tools=[mock.Mock(spec=BaseTool)],
+                tool_choice=tool_choice,
+            )
+
+        kwargs = mock_bind_tool.call_args.kwargs
+
+        assert kwargs["tool_choice"] == tool_choice
 
 
 def _assert_usage_metadata_handling(
