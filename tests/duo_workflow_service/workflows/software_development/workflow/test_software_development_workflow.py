@@ -497,6 +497,7 @@ async def test_workflow_run_when_exception(
     autospec=True,
 )
 @pytest.mark.parametrize("duo_workflow_prompt_registry_enabled", [False, True])
+@pytest.mark.usefixtures("mock_chat_client")
 @patch.dict(os.environ, {"DW_INTERNAL_EVENT__ENABLED": "true"})
 async def test_workflow_run_with_error_state(
     mock_status_updater,
@@ -620,6 +621,7 @@ def assert_tools_in_tools_registry(tools_registry, tools):
 # The next test check that the tools defined in the agent setup methods in the workflow are actually in
 # the registry and match the list in the test.
 @pytest.mark.parametrize("duo_workflow_prompt_registry_enabled", [False, True])
+@pytest.mark.usefixtures("mock_chat_client")
 def test_context_builder_tools(tools_registry, workflow):
     """Test that all tools used by the context builder agent are available in the tools registry."""
     agent_components = workflow._setup_context_builder("test goal", tools_registry)
