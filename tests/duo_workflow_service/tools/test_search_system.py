@@ -39,24 +39,89 @@ class TestGrep:
         ),
     ]
 
-    @pytest.mark.asyncio
-    @pytest.mark.parametrize("params,expected_output,expected_args", valid_test_cases)
-    async def test_grep_arun(self, params, expected_output, expected_args):
-        # Set up the mock outbox and inbox
+    no_matches_test_cases = [
+        # Test empty string response
+        pytest.param(
+            {
+                "pattern": "nonexistent",
+                "search_directory": ".",
+                "case_insensitive": False,
+            },
+            "",
+            "No matches found for pattern 'nonexistent' in '.'.",
+            id="empty_string_response",
+        ),
+        # Test "No such file or directory" response
+        pytest.param(
+            {
+                "pattern": "test",
+                "search_directory": "nonexistent_dir",
+                "case_insensitive": False,
+            },
+            "No such file or directory",
+            "No matches found for pattern 'test' in 'nonexistent_dir'.",
+            id="no_such_file_or_directory",
+        ),
+        # Test "exit status 1" response
+        pytest.param(
+            {
+                "pattern": "test",
+                "search_directory": ".",
+                "case_insensitive": False,
+            },
+            "exit status 1",
+            "No matches found for pattern 'test' in '.'.",
+            id="exit_status_1",
+        ),
+    ]
+
+    def _setup_grep_tool_with_mocks(self, mock_response: str) -> Grep:
+        """Helper method to set up Grep tool with mocked outbox and inbox.
+
+        Args:
+            mock_response: The response string to return from the mocked inbox
+
+        Returns:
+            Configured Grep tool instance with mocked dependencies
+        """
         mock_outbox = MagicMock()
         mock_outbox.put = AsyncMock()
 
-        # Create a mock inbox that returns the expected_output for each test case
         mock_inbox = MagicMock()
         mock_inbox.get = AsyncMock(
             return_value=contract_pb2.ClientEvent(
-                actionResponse=contract_pb2.ActionResponse(response=expected_output)
+                actionResponse=contract_pb2.ActionResponse(response=mock_response)
             )
         )
 
         metadata = {"outbox": mock_outbox, "inbox": mock_inbox}
         grep_tool = Grep()
         grep_tool.metadata = metadata
+
+        return grep_tool
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("params,expected_output,expected_args", valid_test_cases)
+    async def test_grep_arun(self, params, expected_output, expected_args):
+        grep_tool = self._setup_grep_tool_with_mocks(expected_output)
+
+        result = await grep_tool._arun(
+            pattern=params["pattern"],
+            search_directory=params["search_directory"],
+            case_insensitive=params["case_insensitive"],
+        )
+
+        assert result == expected_output
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        "params,mock_response,expected_output", no_matches_test_cases
+    )
+    async def test_grep_no_matches_handling(
+        self, params, mock_response, expected_output
+    ):
+        """Test that various 'no matches' responses are properly formatted."""
+        grep_tool = self._setup_grep_tool_with_mocks(mock_response)
 
         result = await grep_tool._arun(
             pattern=params["pattern"],

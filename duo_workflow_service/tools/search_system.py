@@ -58,7 +58,11 @@ class Grep(DuoBaseTool):
             ),
         )
 
-        if "No such file or directory" in result or "exit status 1" in result:
+        if (
+            "No such file or directory" in result
+            or "exit status 1" in result
+            or result == ""
+        ):
             return _format_no_matches_message(pattern, search_directory)
 
         return result
