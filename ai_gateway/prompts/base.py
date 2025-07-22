@@ -1,5 +1,5 @@
 from abc import ABC, abstractmethod
-from typing import Any, AsyncIterator, List, Mapping, Optional, Tuple, TypeVar, cast
+from typing import Any, AsyncIterator, List, Mapping, Optional, Sequence, TypeVar, cast
 
 from gitlab_cloud_connector import (
     CloudConnectorUser,
@@ -12,7 +12,8 @@ from langchain_core.callbacks import BaseCallbackHandler, get_usage_metadata_cal
 from langchain_core.language_models import BaseChatModel
 from langchain_core.messages.ai import UsageMetadata
 from langchain_core.prompt_values import PromptValue
-from langchain_core.prompts import ChatPromptTemplate, string
+from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder, string
+from langchain_core.prompts.chat import MessageLikeRepresentation
 from langchain_core.prompts.string import DEFAULT_FORMATTER_MAPPING
 from langchain_core.runnables import Runnable, RunnableBinding, RunnableConfig
 from langchain_core.tools import BaseTool
@@ -294,17 +295,19 @@ class Prompt(RunnableBinding[Input, Output]):
     # Assume that the prompt template keys map to roles. Subclasses can
     # override this method to implement more complex logic.
     @staticmethod
-    def _prompt_template_to_messages(tpl: dict[str, str]) -> list[Tuple[str, str]]:
-        return list(tpl.items())
+    def _prompt_template_to_messages(
+        tpl: dict[str, str],
+    ) -> Sequence[MessageLikeRepresentation]:
+        return [
+            MessagesPlaceholder(content) if role == "placeholder" else (role, content)
+            for role, content in tpl.items()
+        ]
 
     @classmethod
     def _build_prompt_template(
         cls, config: PromptConfig
     ) -> Runnable[Input, PromptValue]:
-        messages = []
-
-        for role, template in cls._prompt_template_to_messages(config.prompt_template):
-            messages.append((role, template))
+        messages = cls._prompt_template_to_messages(config.prompt_template)
 
         return cast(
             Runnable[Input, PromptValue],

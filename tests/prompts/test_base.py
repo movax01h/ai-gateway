@@ -1,7 +1,7 @@
 import os
 from contextlib import contextmanager
 from pathlib import Path
-from typing import Generator, Iterator, List, Optional, Type
+from typing import Any, Generator, Iterator, List, Optional, Type
 from unittest import mock
 from unittest.mock import Mock, call
 
@@ -9,10 +9,10 @@ import pytest
 from anthropic import APITimeoutError, AsyncAnthropic
 from gitlab_cloud_connector import GitLabUnitPrimitive, WrongUnitPrimitives
 from langchain_community.chat_models import ChatLiteLLM
-from langchain_core.messages import HumanMessage, SystemMessage
+from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 from langchain_core.messages.ai import InputTokenDetails, UsageMetadata
 from langchain_core.prompt_values import ChatPromptValue
-from langchain_core.prompts import ChatPromptTemplate
+from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 from langchain_core.runnables import Runnable
 from langchain_core.tools import BaseTool
 from litellm.exceptions import Timeout
@@ -62,9 +62,16 @@ class TestPrompt:
         )
 
     @pytest.fixture
-    def prompt_template(self):
+    def prompt_template(self, request: Any):
         # Test inclusion and direct content
-        return {"system": "{% include 'system.jinja' %}", "user": "{{content}}"}
+        tpl = {"system": "{% include 'system.jinja' %}", "user": "{{content}}"}
+
+        if getattr(request, "param", None) and request.param.get(
+            "with_messages_placeholder", None
+        ):
+            tpl["placeholder"] = "messages"
+
+        return tpl
 
     @contextmanager
     def _mock_usage_metadata(
@@ -115,6 +122,21 @@ class TestPrompt:
             template_format="jinja2",
         )
 
+    @pytest.mark.parametrize(
+        "prompt_template", [{"with_messages_placeholder": True}], indirect=True
+    )
+    def test_build_prompt_template_with_placeholder(self, prompt_config: PromptConfig):
+        prompt_template: Runnable = Prompt._build_prompt_template(prompt_config)
+
+        assert prompt_template == ChatPromptTemplate.from_messages(
+            [
+                ("system", "{% include 'system.jinja' %}"),
+                ("user", "{{content}}"),
+                MessagesPlaceholder("messages"),
+            ],
+            template_format="jinja2",
+        )
+
     def test_instrumentator(self, model_engine: str, model_name: str, prompt: Prompt):
         assert prompt.instrumentator.labels == {
             "model_engine": model_engine,
@@ -146,6 +168,41 @@ class TestPrompt:
 
     @pytest.mark.asyncio
     @mock.patch("ai_gateway.prompts.base.get_request_logger")
+    @pytest.mark.parametrize(
+        "prompt_template", [{"with_messages_placeholder": True}], indirect=True
+    )
+    async def test_ainvoke_with_messages_placeholder(
+        self,
+        mock_get_logger: mock.Mock,
+        mock_watch: mock.Mock,
+        prompt: Prompt,
+        model_response: str,
+    ):
+        mock_logger = mock.MagicMock()
+        mock_get_logger.return_value = mock_logger
+
+        response = await prompt.ainvoke(
+            {
+                "name": "Duo",
+                "content": "What's up?",
+                "messages": [
+                    AIMessage(content="Fine, you?"),
+                    HumanMessage(content="Good."),
+                ],
+            }
+        )
+
+        assert response.content == model_response
+
+        mock_logger.info.assert_called_with(
+            "Performing LLM request",
+            prompt="System: Hi, I'm Duo\nHuman: What's up?\nAI: Fine, you?\nHuman: Good.",
+        )
+
+        mock_watch.assert_called_with(stream=False)
+
+    @pytest.mark.asyncio
+    @mock.patch("ai_gateway.prompts.base.get_request_logger")
     async def test_astream(
         self,
         mock_get_logger: mock.Mock,
@@ -168,6 +225,50 @@ class TestPrompt:
         mock_logger.info.assert_called_with(
             "Performing LLM request",
             prompt="System: Hi, I'm Duo\nHuman: What's up?",
+        )
+
+        assert response == model_response
+
+        mock_watch.assert_called_with(stream=True)
+
+        mock_watcher.afinish.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    @mock.patch("ai_gateway.prompts.base.get_request_logger")
+    @pytest.mark.parametrize(
+        "prompt_template", [{"with_messages_placeholder": True}], indirect=True
+    )
+    async def test_astream_with_messages_placeholder(
+        self,
+        mock_get_logger: mock.Mock,
+        mock_watch: mock.Mock,
+        prompt: Prompt,
+        model_response: str,
+    ):
+        response = ""
+
+        mock_watcher = mock_watch.return_value.__enter__.return_value
+        mock_logger = mock.MagicMock()
+        mock_get_logger.return_value = mock_logger
+
+        async for c in prompt.astream(
+            {
+                "name": "Duo",
+                "content": "What's up?",
+                "messages": [
+                    AIMessage(content="Fine, you?"),
+                    HumanMessage(content="Good."),
+                ],
+            }
+        ):
+            response += c.content
+
+            # Make sure we don't finish prematurely
+            mock_watcher.afinish.assert_not_awaited()
+
+        mock_logger.info.assert_called_with(
+            "Performing LLM request",
+            prompt="System: Hi, I'm Duo\nHuman: What's up?\nAI: Fine, you?\nHuman: Good.",
         )
 
         assert response == model_response
