@@ -8,6 +8,32 @@ from duo_workflow_service.gitlab.gitlab_project import (
 )
 
 
+@pytest.fixture
+def workflow_and_project_data():
+    return {
+        "duoWorkflowWorkflows": {
+            "nodes": [
+                {
+                    "statusName": "created",
+                    "projectId": "gid://gitlab/Project/789",
+                    "project": {
+                        "id": "gid://gitlab/Project/789",
+                        "name": "no-languages-project",
+                        "description": "Project without languages field",
+                        "httpUrlToRepo": "http://example.com/no-lang-project.git",
+                        "webUrl": "http://example.com/no-lang-project",
+                    },
+                    "agentPrivilegesNames": [],
+                    "preApprovedAgentPrivilegesNames": [],
+                    "mcpEnabled": False,
+                    "allowAgentToRequestUser": False,
+                    "firstCheckpoint": None,
+                }
+            ]
+        }
+    }
+
+
 def test_extract_project_id_from_workflow():
     # Test with GraphQL format project ID
     workflow = {"projectId": "gid://gitlab/Project/123"}
@@ -55,6 +81,9 @@ async def test_fetch_workflow_and_project_data_success():
                             {"name": "Python", "share": 75.5},
                             {"name": "JavaScript", "share": 24.5},
                         ],
+                        "statisticsDetailsPaths": {
+                            "repository": "https://example.com/test-project/-/tree/main",
+                        },
                     },
                     "agentPrivilegesNames": ["read_repository", "write_repository"],
                     "preApprovedAgentPrivilegesNames": ["read_repository"],
@@ -89,6 +118,7 @@ async def test_fetch_workflow_and_project_data_success():
         {"name": "Python", "share": 75.5},
         {"name": "JavaScript", "share": 24.5},
     ]
+    assert project["default_branch"] == "main"
 
     # Verify workflow config
     assert workflow_config["agent_privileges_names"] == [
@@ -157,31 +187,12 @@ async def test_fetch_workflow_and_project_data_with_empty_languages():
 
 
 @pytest.mark.asyncio
-async def test_fetch_workflow_and_project_data_with_missing_languages():
+async def test_fetch_workflow_and_project_data_with_missing_languages(
+    workflow_and_project_data,
+):
     gitlab_client = AsyncMock()
     # Mock GraphQL response without languages field
-    gitlab_client.graphql.return_value = {
-        "duoWorkflowWorkflows": {
-            "nodes": [
-                {
-                    "statusName": "created",
-                    "projectId": "gid://gitlab/Project/789",
-                    "project": {
-                        "id": "gid://gitlab/Project/789",
-                        "name": "no-languages-project",
-                        "description": "Project without languages field",
-                        "httpUrlToRepo": "http://example.com/no-lang-project.git",
-                        "webUrl": "http://example.com/no-lang-project",
-                    },
-                    "agentPrivilegesNames": [],
-                    "preApprovedAgentPrivilegesNames": [],
-                    "mcpEnabled": False,
-                    "allowAgentToRequestUser": False,
-                    "firstCheckpoint": None,
-                }
-            ]
-        }
-    }
+    gitlab_client.graphql.return_value = workflow_and_project_data
 
     workflow_id = "789"
     project, workflow_config = await fetch_workflow_and_project_data(
@@ -191,3 +202,20 @@ async def test_fetch_workflow_and_project_data_with_missing_languages():
     # Verify project data with missing languages defaults to empty list
     assert project["id"] == 789
     assert project["languages"] == []
+
+
+@pytest.mark.asyncio
+async def test_fetch_workflow_and_project_data_with_missing_repository(
+    workflow_and_project_data,
+):
+    gitlab_client = AsyncMock()
+    # Mock GraphQL response without repository field
+    gitlab_client.graphql.return_value = workflow_and_project_data
+
+    workflow_id = "1"
+    project, workflow_config = await fetch_workflow_and_project_data(
+        gitlab_client, workflow_id
+    )
+
+    assert project["id"] == 789
+    assert project["default_branch"] is None

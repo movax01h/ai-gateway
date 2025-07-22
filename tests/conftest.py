@@ -706,6 +706,7 @@ def project() -> Project:
         "languages": None,
         "http_url_to_repo": "https://gitlab.com/test/repo",
         "web_url": "https://gitlab.com/test/repo",
+        "default_branch": "main",
     }
 
 
