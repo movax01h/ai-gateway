@@ -14,6 +14,7 @@ class Project(TypedDict):
     name: str
     http_url_to_repo: str
     web_url: str
+    default_branch: Optional[str]
     languages: Optional[list[Language]]
 
 
@@ -49,6 +50,9 @@ async def fetch_workflow_and_project_data(
                         share
                     }
                     webUrl
+                    statisticsDetailsPaths {
+                        repository
+                    }
                 }
                 agentPrivilegesNames
                 preApprovedAgentPrivilegesNames
@@ -85,6 +89,7 @@ async def fetch_workflow_and_project_data(
         web_url=project_data.get("webUrl", ""),
         description=project_data.get("description", ""),
         languages=project_data.get("languages", []),
+        default_branch=extract_default_branch_from_project_repository(workflow),
     )
 
     # Build workflow config from the response
@@ -115,6 +120,18 @@ def extract_project_id_from_workflow(workflow: dict):
         project_id = int(project_id_str) if project_id_str else 0
 
     return project_id
+
+
+def extract_default_branch_from_project_repository(workflow: dict) -> Optional[str]:
+    repository_str = (
+        workflow.get("project", {}).get("statisticsDetailsPaths") or {}
+    ).get("repository", "")
+
+    default_branch = None
+    if repository_str and isinstance(repository_str, str):
+        default_branch = str(repository_str.split("/")[-1])
+
+    return default_branch
 
 
 def empty_workflow_config() -> WorkflowConfig:

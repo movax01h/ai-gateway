@@ -82,6 +82,7 @@ def workflow_with_project(
         "web_url": "https://example.com/test-project",
         "description": "A test project",
         "languages": [{"name": "Python", "share": 1.0}],
+        "default_branch": "main",
     }
     workflow._additional_context = additional_context
     workflow._http_client = MagicMock()
