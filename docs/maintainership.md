@@ -23,8 +23,8 @@ An exception to this is any engineers who are already maintaining multiple other
 
 While there is no strict guideline on how to become a maintainer, we generally recommend the following activities before submitting the request:
 
-- **Author 5+ MRs** that demonstrate understanding of the codebase
-- **Review 5+ MRs** showing the ability to provide quality feedback
+- **Author 5+ MRs** that demonstrate understanding of the codebase.
+- **Review 5+ MRs** showing the ability to provide quality feedback.
 
 ### Steps to become a maintainer
 
@@ -34,7 +34,9 @@ While there is no strict guideline on how to become a maintainer, we generally r
 1. **Assign the MR** to your manager and `@gitlab-org/maintainers/ai-gateway` for approval and merge.
 1. **Request group membership** after the MR is merged:
    - Ask an Owner of [`@gitlab-org/maintainers/ai-gateway`](https://gitlab.com/groups/gitlab-org/maintainers/ai-gateway/-/group_members?with_inherited_permissions=exclude) group to add you
-   - This makes you one of the [Code Owners](https://gitlab.com/gitlab-org/modelops/applied-ml/code-suggestions/ai-assist/-/blob/main/.gitlab/CODEOWNERS?ref_type=heads) whose approval is required for an MR to be merged
+   - This makes you one of the [Code Owners](https://gitlab.com/gitlab-org/modelops/applied-ml/code-suggestions/ai-assist/-/blob/main/.gitlab/CODEOWNERS?ref_type=heads) whose approval is required for an MR to be merged.
+1. **Enable dependency review notifications**: Add your username to `additionalReviewers` in [`renovate.json`](https://gitlab.com/gitlab-org/modelops/applied-ml/code-suggestions/ai-assist/-/blob/main/renovate.json)
+   - This includes you as a reviewer for dependency update merge requests.
 
 ## New team members
 
@@ -42,13 +44,11 @@ When you join the AI Engineering department as a backend or fullstack engineer, 
 
 ### Onboarding Checklist
 
-- [ ] **Study the codebase**: Familiarize yourself with the [preferred domain knowledge](#preferred-domain-knowledge)
-- [ ] **Add reviewer permissions**: Update your team member YAML file in [`www-gitlab-com`](https://gitlab.com/gitlab-com/www-gitlab-com) to become a reviewer
-- [ ] **Configure deployment access**: Add your username to the `members` of the `ai-gateway` and `duo-workflow-service` entries in [`workloads.yml`](https://gitlab.com/gitlab-com/gl-infra/platform/runway/provisioner/-/blob/main/config/runtimes/cloud-run/workloads.yml)
-  - This makes you a deployer of the [AI Gateway](https://gitlab.com/gitlab-com/gl-infra/platform/runway/deployments/ai-gateway) and [Duo Workflow Service](https://gitlab.com/gitlab-com/gl-infra/platform/runway/deployments/duo-workflow-svc)
-  - Deployments happen on merge (only maintainers can merge, but this prepares you for that role)
-- [ ] **Enable dependency review notifications**: Add your username to `additionalReviewers` in [`renovate.json`](https://gitlab.com/gitlab-org/modelops/applied-ml/code-suggestions/ai-assist/-/blob/main/renovate.json)
-  - This includes you as a reviewer for dependency update merge requests
+- [ ] **Study the codebase**: Familiarize yourself with the [preferred domain knowledge](#preferred-domain-knowledge).
+- [ ] **Add reviewer permissions**: Update your team member YAML file in [`www-gitlab-com`](https://gitlab.com/gitlab-com/www-gitlab-com) to become a reviewer.
+- [ ] **Configure deployment access**: Add your username to the `members` of the `ai-gateway` and `duo-workflow-service` entries in [`workloads.yml`](https://gitlab.com/gitlab-com/gl-infra/platform/runway/provisioner/-/blob/main/config/runtimes/cloud-run/workloads.yml).
+  - This makes you a deployer of the [AI Gateway](https://gitlab.com/gitlab-com/gl-infra/platform/runway/deployments/ai-gateway) and [Duo Workflow Service](https://gitlab.com/gitlab-com/gl-infra/platform/runway/deployments/duo-workflow-svc).
+  - Deployments happen on merge (only maintainers can merge, but this prepares you for that role).
 
 ## Preferred domain knowledge
 
