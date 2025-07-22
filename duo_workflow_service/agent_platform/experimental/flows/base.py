@@ -132,11 +132,6 @@ class Flow(AbstractWorkflow):
             if "toolset" in comp_params:
                 comp_params["toolset"] = tools_registry.toolset(comp_params["toolset"])
 
-            if "output_type" in comp_params:
-                comp_params["output_type"] = load_component_class(
-                    comp_params["output_type"]
-                )
-
             if comp_name in components:
                 raise ValueError(
                     f"Duplicate component name: '{comp_name}'. Component names must be unique."
