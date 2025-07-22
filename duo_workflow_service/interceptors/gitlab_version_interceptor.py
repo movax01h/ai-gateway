@@ -2,8 +2,7 @@ from contextvars import ContextVar
 from typing import Optional
 
 import grpc
-
-from duo_workflow_service.interceptors import X_GITLAB_VERSION
+from gitlab_cloud_connector.auth import X_GITLAB_VERSION_HEADER
 
 # Context variable to store GitLab version
 gitlab_version: ContextVar[Optional[str]] = ContextVar("gitlab_version", default=None)
@@ -24,7 +23,7 @@ class GitLabVersionInterceptor(grpc.aio.ServerInterceptor):
         metadata = dict(handler_call_details.invocation_metadata)
 
         # Extract GitLab version from metadata
-        version = metadata.get(X_GITLAB_VERSION, None)
+        version = metadata.get(X_GITLAB_VERSION_HEADER.lower(), None)
         if version:
             gitlab_version.set(version)
 
