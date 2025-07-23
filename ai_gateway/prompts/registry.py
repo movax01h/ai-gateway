@@ -1,4 +1,5 @@
 import importlib
+from functools import cache
 from pathlib import Path
 from typing import Any, List, NamedTuple, Optional, Type
 
@@ -29,7 +30,7 @@ class LocalPromptRegistry(BasePromptRegistry):
 
     def __init__(
         self,
-        prompts_registered: dict[str, PromptRegistered],
+        class_overrides: dict[str, Type[Prompt] | str],
         model_factories: dict[ModelClassProvider, TypeModelFactory],
         default_prompts: dict[str, str],
         internal_event_client: InternalEventsClient,
@@ -37,13 +38,21 @@ class LocalPromptRegistry(BasePromptRegistry):
         custom_models_enabled: bool,
         disable_streaming: bool = False,
     ):
-        self.prompts_registered = prompts_registered
+        self.class_overrides = class_overrides
         self.model_factories = model_factories
         self.default_prompts = default_prompts
         self.internal_event_client = internal_event_client
         self.model_limits = model_limits
         self.custom_models_enabled = custom_models_enabled
         self.disable_streaming = disable_streaming
+
+        # Load model configs once during init
+        base_path = Path(__file__).parent
+        model_configs_dir = base_path / "model_configs"
+        self.model_configs = {
+            file.stem: self._parse_base_model(file)
+            for file in model_configs_dir.glob("*.yml")
+        }
 
     def _resolve_id(
         self,
@@ -55,6 +64,44 @@ class LocalPromptRegistry(BasePromptRegistry):
 
         type = self.default_prompts.get(prompt_id, self.key_prompt_type_base)
         return f"{prompt_id}/{type}"
+
+    @cache  # pylint: disable=method-cache-max-size-none
+    def _load_prompt_definition(
+        self,
+        prompt_id: str,
+    ) -> PromptRegistered:
+        base_path = Path(__file__).parent
+        prompts_definitions_dir = base_path / "definitions"
+        prompt_path = prompts_definitions_dir / prompt_id
+
+        if not prompt_path.exists() or not prompt_path.is_dir():
+            raise FileNotFoundError(
+                f"Prompt definition directory not found: {prompt_path}"
+            )
+
+        versions = {
+            version.stem: self._process_version_file(version, self.model_configs)
+            for version in prompt_path.glob("*.yml")
+        }
+
+        if not versions:
+            raise ValueError(f"No version YAML files found for prompt id: {prompt_id}")
+
+        parent_path = str(Path(prompt_id).parent)
+        klass = self.class_overrides.get(parent_path, Prompt)
+
+        if isinstance(klass, str):
+            klass = self._resolve_string_class_name(klass)
+
+        if not issubclass(klass, Prompt):
+            raise ValueError(
+                f"The specified klass must be a subclass of Prompt: {klass}"
+            )
+
+        return PromptRegistered(
+            klass=klass,
+            versions=versions,
+        )
 
     def _get_prompt_config(
         self, versions: dict[str, PromptConfig], prompt_version: str
@@ -97,7 +144,13 @@ class LocalPromptRegistry(BasePromptRegistry):
 
         log.info("Resolved prompt id", prompt_id=prompt_id)
 
-        prompt_registered = self.prompts_registered[prompt_id]
+        try:
+            prompt_registered = self._load_prompt_definition(prompt_id)
+        except (FileNotFoundError, ValueError) as e:
+            raise ValueError(
+                f"Failed to load prompt definition for '{prompt_id}': {e}"
+            ) from e
+
         config = self._get_prompt_config(prompt_registered.versions, prompt_version)
         model_class_provider = config.model.params.model_class_provider
         model_factory = self.model_factories.get(model_class_provider, None)
@@ -140,64 +193,21 @@ class LocalPromptRegistry(BasePromptRegistry):
         custom_models_enabled: bool = False,
         disable_streaming: bool = False,
     ) -> "LocalPromptRegistry":
-        """Iterate over all prompt definition files matching [usecase]/[type]/[version].yml, and create a corresponding
-        prompt for each one.
+        """Create a LocalPromptRegistry with lazy loading enabled.
 
-        The base Prompt class is
-        used if no matching override is provided in `class_overrides`.
+        Prompt definition files matching [usecase]/[type]/[version].yml are loaded
+        on-demand when requested. The base Prompt class is used if no matching
+        override is provided in `class_overrides`.
         """
 
-        base_path = Path(__file__).parent
-        prompts_definitions_dir = base_path / "definitions"
-        model_configs_dir = (
-            base_path / "model_configs"
-        )  # New directory for model configs
-        prompts_registered: dict[str, PromptRegistered] = {}
-
-        # Parse model config YAML files
-        model_configs = {
-            file.stem: cls._parse_base_model(file)
-            for file in model_configs_dir.glob("*.yml")
-        }
-
-        # Iterate over each folder
-        for path in prompts_definitions_dir.glob("**"):
-            # Iterate over each version file
-            versions = {
-                version.stem: cls._process_version_file(version, model_configs)
-                for version in path.glob("*.yml")
-            }
-
-            # If there were no yml files in this folder, skip it
-            if not versions:
-                continue
-
-            # E.g., "chat/react/base", "generate_description/mistral", etc.
-            prompt_id_with_model_name = path.relative_to(prompts_definitions_dir)
-
-            klass = class_overrides.get(str(prompt_id_with_model_name.parent), Prompt)
-
-            # Support string path for overrides
-            if isinstance(klass, str):
-                klass = cls._resolve_string_class_name(klass)
-
-            if not issubclass(klass, Prompt):
-                raise ValueError(
-                    f"The specified klass must be a subclass of Prompt: {klass}"
-                )
-
-            prompts_registered[str(prompt_id_with_model_name)] = PromptRegistered(
-                klass=klass, versions=versions
-            )
-
         log.info(
-            "Initializing prompt registry from local yaml",
+            "Initializing prompt registry with lazy loading",
             default_prompts=default_prompts,
             custom_models_enabled=custom_models_enabled,
         )
 
         return cls(
-            prompts_registered,
+            class_overrides,
             model_factories,
             default_prompts,
             internal_event_client,
@@ -221,7 +231,7 @@ class LocalPromptRegistry(BasePromptRegistry):
         conversion of YAML data types to appropriate Python types.
 
         Args:
-            file (Path): A Path object pointing to the YAML file to be parsed.
+            file_name (Path): A Path object pointing to the YAML file to be parsed.
 
         Returns:
             BaseModelConfig: An instance of BaseModelConfig containing the
