@@ -12,6 +12,7 @@ from gitlab_cloud_connector.auth import (
     X_GITLAB_HOST_NAME_HEADER,
     X_GITLAB_INSTANCE_ID_HEADER,
     X_GITLAB_REALM_HEADER,
+    X_GITLAB_VERSION_HEADER,
 )
 from grpc.aio import ServerInterceptor
 from prometheus_client import REGISTRY, Counter
@@ -196,6 +197,9 @@ class MonitoringInterceptor(ServerInterceptor):
                 ),
                 "gitlab_authentication_type": invocation_metadata.get(
                     AUTH_TYPE_HEADER.lower()
+                ),
+                "gitlab_version": invocation_metadata.get(
+                    X_GITLAB_VERSION_HEADER.lower()
                 ),
                 "user_agent": invocation_metadata.get("user-agent"),
             }
