@@ -118,8 +118,17 @@ gen-proto-node: bin/protoc
 		@(cd clients/node; npm run after_generate)
 
 tmp/protoc-${PROTOC_VERSION}/bin/protoc:
-	wget https://github.com/protocolbuffers/protobuf/releases/download/v$(PROTOC_VERSION)/protoc-$(PROTOC_VERSION)-$(OS)-$(ARCH).zip -O tmp/protoc-$(PROTOC_VERSION)-$(OS)-$(ARCH).zip
-	unzip tmp/protoc-${PROTOC_VERSION}-$(OS)-$(ARCH).zip "bin/protoc" -d tmp/protoc-${PROTOC_VERSION}
+	$(eval URL := https://github.com/protocolbuffers/protobuf/releases/download/v$(PROTOC_VERSION)/protoc-$(PROTOC_VERSION)-$(OS)-$(ARCH).zip)
+	$(eval ZIP := tmp/protoc-$(PROTOC_VERSION)-$(OS)-$(ARCH).zip)
+	@if command -v wget >/dev/null 2>&1; then \
+		wget $(URL) -O $(ZIP); \
+		elif command -v curl >/dev/null 2>&1; then \
+		curl -L $(URL) -o $(ZIP); \
+		else \
+		echo "Error: Neither wget nor curl found"; exit 1; \
+		fi
+
+	unzip $(ZIP) "bin/protoc" -d tmp/protoc-${PROTOC_VERSION}
 
 bin/protoc: tmp/protoc-${PROTOC_VERSION}/bin/protoc
 	cp tmp/protoc-${PROTOC_VERSION}/bin/protoc bin/protoc
