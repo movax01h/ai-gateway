@@ -97,6 +97,14 @@ async def get_code_suggestions_generations_agent_factory_provider():
     yield get_container_application().code_suggestions.generations.agent_factory
 
 
+async def get_chat_litellm_factory_provider():
+    yield get_container_application().chat.litellm_factory
+
+
+async def get_chat_anthropic_claude_factory_provider():
+    yield get_container_application().chat.anthropic_claude_factory
+
+
 @inject
 async def get_anthropic_proxy_client(
     anthropic_proxy_client=Provide[

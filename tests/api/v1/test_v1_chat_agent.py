@@ -8,7 +8,6 @@ from gitlab_cloud_connector import CloudConnectorUser, UserClaims
 from starlette.testclient import TestClient
 
 from ai_gateway.api.v1 import api_router
-from ai_gateway.api.v1.chat.agent import convert_v1_to_v2_inputs
 from ai_gateway.api.v1.chat.typing import ChatRequest, PromptPayload
 from ai_gateway.api.v2.chat.typing import AgentRequest
 from ai_gateway.chat.agents import AgentStep, AgentToolAction, Message, ReActAgentInputs
@@ -150,69 +149,3 @@ def stub_executor_factory():
         return_value=lambda agent: _StubExecutor(),
     ):
         yield
-
-
-class TestConvertV1ToV2Inputs:
-    @pytest.mark.parametrize("content_fixture", ["text_content", "chat_messages"])
-    def test_convert_v1_to_v2_inputs(self, content_fixture, request_body, request):
-        current_feature_flag_context.set({FeatureFlag.CHAT_V1_REDIRECT})
-        chat_request = ChatRequest(**request_body)
-        expected_content = request.getfixturevalue(content_fixture)
-
-        agent_request = convert_v1_to_v2_inputs(chat_request)
-
-        if isinstance(expected_content, str):
-            assert [m.model_dump() for m in agent_request.messages] == [
-                Message(role=Role.USER, content=expected_content).model_dump()
-            ]
-        else:
-            assert [
-                m.model_dump() for m in agent_request.messages
-            ] == request.getfixturevalue("chat_response")
-
-
-class TestRedirectedV1ChatEndpoint:
-    @pytest.mark.asyncio
-    @pytest.mark.parametrize("content_fixture", ["text_content", "chat_messages"])
-    @pytest.mark.parametrize("stream", [False, True])
-    async def test_success_response(
-        self,
-        content_fixture,
-        mock_client: TestClient,
-        mock_create_event_stream: Mock,
-        request_body,
-        default_headers,
-        stream,
-    ):
-        async def _dummy_stream(*_, **__):
-            for ch in "answer":
-                yield AgentFinalAnswer(text=ch)
-
-        side_effect = mock_create_event_stream.side_effect
-
-        async def dynamic_side_effect(*args, **kwargs):
-            inputs_part, _ = await side_effect(*args, **kwargs)
-
-            return None, _dummy_stream()
-
-        mock_create_event_stream.side_effect = dynamic_side_effect
-
-        current_feature_flag_context.set({FeatureFlag.CHAT_V1_REDIRECT})
-
-        payload = dict(request_body)
-        payload["stream"] = stream
-
-        response = mock_client.post(
-            "/chat/agent",
-            headers=default_headers,
-            json=payload,
-        )
-
-        assert response.status_code == 200
-        if stream:
-            assert response.text == "answer"
-            assert response.headers["content-type"].startswith("text/event-stream")
-        else:
-            assert response.json()["response"] == "answer"
-
-        mock_create_event_stream.assert_called_once()
