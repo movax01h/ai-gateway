@@ -100,6 +100,10 @@ class Flow(AbstractWorkflow):
             context={
                 "project_id": self._project.get("id"),
                 "goal": goal,
+                "inputs": {
+                    additional_context.category: additional_context.model_dump()
+                    for additional_context in (self._additional_context or [])
+                },
             },
         )
 

@@ -15,6 +15,7 @@ from duo_workflow_service.agent_platform.experimental.flows.flow_config import (
 from duo_workflow_service.agent_platform.experimental.routers.router import Router
 from duo_workflow_service.checkpointer.gitlab_workflow import WorkflowStatusEventEnum
 from duo_workflow_service.entities.state import MessageTypeEnum, WorkflowStatusEnum
+from duo_workflow_service.workflows.type_definitions import AdditionalContext
 from lib.internal_events.event_enum import CategoryEnum
 
 
@@ -221,6 +222,45 @@ class TestFlow:
             assert input.resume == goal
         else:
             assert input is None
+
+    @pytest.mark.asyncio
+    async def test_graph_input_with_additional_context(
+        self,
+        goal,
+        mock_flow_metadata,
+        mock_invocation_metadata,
+        sample_flow_config,
+        mock_state_graph,  # pylint: disable=unused-argument
+        mock_checkpointer,  # pylint: disable=unused-argument
+        mock_tools_registry,  # pylint: disable=unused-argument
+    ):
+        """Test get_graph_input returns appropriate input based on status event."""
+        with (
+            self.mock_components(["AgentComponent", "EndComponent"]),
+            patch("duo_workflow_service.agent_platform.experimental.flows.base.Router"),
+        ):
+            additional_context = AdditionalContext(category="custom", content="test")
+            flow = Flow(
+                workflow_id="test-workflow-123",
+                workflow_metadata=mock_flow_metadata,
+                workflow_type=CategoryEnum.WORKFLOW_CHAT,
+                config=sample_flow_config,
+                invocation_metadata=mock_invocation_metadata,
+                additional_context=[additional_context],
+            )
+
+            await flow.run(goal)
+
+            kwargs = mock_state_graph.compile.return_value.astream.call_args[1]
+
+            input = kwargs.get("input")
+
+            assert "context" in input
+            assert "inputs" in input["context"]
+            assert (
+                input["context"]["inputs"][additional_context.category]
+                == additional_context.model_dump()
+            )
 
     @pytest.mark.asyncio
     async def test_flow_config_validation_duplicate_component_names(
