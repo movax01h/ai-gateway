@@ -164,7 +164,9 @@ class TestPrompt:
             prompt="System: Hi, I'm Duo\nHuman: What's up?",
         )
 
-        mock_watch.assert_called_with(stream=False)
+        mock_watch.assert_called_with(
+            stream=False, unit_primitives=prompt.unit_primitives
+        )
 
     @pytest.mark.asyncio
     @mock.patch("ai_gateway.prompts.base.get_request_logger")
@@ -199,7 +201,9 @@ class TestPrompt:
             prompt="System: Hi, I'm Duo\nHuman: What's up?\nAI: Fine, you?\nHuman: Good.",
         )
 
-        mock_watch.assert_called_with(stream=False)
+        mock_watch.assert_called_with(
+            stream=False, unit_primitives=prompt.unit_primitives
+        )
 
     @pytest.mark.asyncio
     @mock.patch("ai_gateway.prompts.base.get_request_logger")
@@ -229,7 +233,9 @@ class TestPrompt:
 
         assert response == model_response
 
-        mock_watch.assert_called_with(stream=True)
+        mock_watch.assert_called_with(
+            stream=True, unit_primitives=prompt.unit_primitives
+        )
 
         mock_watcher.afinish.assert_awaited_once()
 
@@ -273,7 +279,9 @@ class TestPrompt:
 
         assert response == model_response
 
-        mock_watch.assert_called_with(stream=True)
+        mock_watch.assert_called_with(
+            stream=True, unit_primitives=prompt.unit_primitives
+        )
 
         mock_watcher.afinish.assert_awaited_once()
 

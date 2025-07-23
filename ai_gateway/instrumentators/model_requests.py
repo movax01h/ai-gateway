@@ -1,9 +1,10 @@
 import time
 from contextlib import contextmanager
 from contextvars import ContextVar
-from typing import Optional
+from typing import List, Optional
 
 import structlog
+from gitlab_cloud_connector import GitLabUnitPrimitive
 from langchain_core.messages.ai import UsageMetadata
 from prometheus_client import Counter, Gauge, Histogram
 
@@ -12,7 +13,12 @@ from ai_gateway.config import ModelLimits
 from ai_gateway.tracking.errors import log_exception
 
 METRIC_LABELS = ["model_engine", "model_name"]
-INFERENCE_DETAILS = METRIC_LABELS + ["error", "streaming", "feature_category"]
+INFERENCE_DETAILS = METRIC_LABELS + [
+    "error",
+    "streaming",
+    "feature_category",
+    "unit_primitive",
+]
 
 INFERENCE_IN_FLIGHT_GAUGE = Gauge(
     "model_inferences_in_flight",
@@ -96,12 +102,14 @@ class ModelRequestInstrumentator:
             labels: dict[str, str],
             limits: Optional[ModelLimits],
             streaming: bool,
+            unit_primitives: Optional[List[GitLabUnitPrimitive]] = None,
         ):
             self.labels = labels
             self.limits = limits
             self.error = False
             self.streaming = streaming
             self.start_time = None
+            self.unit_primitives = unit_primitives
 
         def start(self):
             """Register the start of the inference request.
@@ -160,10 +168,16 @@ class ModelRequestInstrumentator:
             self.finish()
 
         def _detail_labels(self) -> dict[str, str]:
+            unit_primitive = (
+                self.unit_primitives[0].value
+                if self.unit_primitives and len(self.unit_primitives) > 0
+                else "unknown"
+            )
             detail_labels = {
                 "error": "yes" if self.error else "no",
                 "streaming": "yes" if self.streaming else "no",
                 "feature_category": current_feature_category(),
+                "unit_primitive": unit_primitive,
             }
             return {**self.labels, **detail_labels}
 
@@ -177,11 +191,12 @@ class ModelRequestInstrumentator:
         self.limits = limits
 
     @contextmanager
-    def watch(self, stream=False):
+    def watch(self, stream=False, unit_primitives=None):
         watcher = ModelRequestInstrumentator.WatchContainer(
             labels=self.labels,
             limits=self.limits,
             streaming=stream,
+            unit_primitives=unit_primitives,
         )
         watcher.start()
         try:
