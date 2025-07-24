@@ -7,6 +7,7 @@ from langgraph.types import Command
 
 from duo_workflow_service.agent_platform.experimental.components.base import (
     BaseComponent,
+    EndComponent,
 )
 from duo_workflow_service.agent_platform.experimental.flows.base import Flow
 from duo_workflow_service.agent_platform.experimental.flows.flow_config import (
@@ -148,7 +149,6 @@ class TestFlow:
                     "type": "AgentComponent",
                     "inputs": ["context:goal"],
                 },
-                {"name": "end", "type": "EndComponent"},
             ],
             routers=[{"from": "agent", "to": "end"}],
             environment="local",
@@ -167,7 +167,7 @@ class TestFlow:
     ):  # pylint: disable=unused-argument
         """Fixture providing a Flow instance with mocked dependencies."""
         with (
-            self.mock_components(["AgentComponent", "EndComponent"]),
+            self.mock_components(["AgentComponent"]),
             patch("duo_workflow_service.agent_platform.experimental.flows.base.Router"),
         ):
             flow = Flow(
@@ -196,7 +196,8 @@ class TestFlow:
         goal,
         expected_type,
         mock_checkpointer,
-        mock_state_graph,  # pylint: disable=unused-argument
+        mock_state_graph,
+        mock_project,
     ):
         """Test get_graph_input returns appropriate input based on status event."""
         mock_checkpointer.initial_status_event = status_event
@@ -206,17 +207,16 @@ class TestFlow:
         kwargs = mock_state_graph.compile.return_value.astream.call_args[1]
 
         input = kwargs.get("input")
-
         if expected_type == dict:
             assert isinstance(input, expected_type)
             assert input["context"]["goal"] == goal
-            assert input["context"]["project_id"] == 123
+            assert input["context"]["project_id"] == mock_project["id"]
             assert input["status"] == WorkflowStatusEnum.NOT_STARTED
             assert "conversation_history" in input
             assert "ui_chat_log" in input
             assert len(input["ui_chat_log"]) == 1
             assert input["ui_chat_log"][0]["message_type"] == MessageTypeEnum.TOOL
-            assert input["ui_chat_log"][0]["content"] == "Starting Flow: test goal"
+            assert input["ui_chat_log"][0]["content"] == "Starting Flow: " + goal
             assert "context" in input
         elif expected_type == Command:
             assert hasattr(input, "resume")
@@ -278,15 +278,15 @@ class TestFlow:
             flow={"entry_point": "agent"},
             components=[
                 {"name": "agent", "type": "AgentComponent"},
-                {"name": "agent", "type": "EndComponent"},  # Duplicate name
+                {"name": "agent", "type": "AnotherComponent"},  # Duplicate name
             ],
-            routers=[{"from": "agent", "to": "agent"}],
+            routers=[{"from": "agent", "to": "end"}],
             environment="local",
             version="experimental",
         )
 
         with (
-            self.mock_components(["AgentComponent", "EndComponent"]),
+            self.mock_components(["AgentComponent", "AnotherComponent"]),
             patch("duo_workflow_service.agent_platform.experimental.flows.base.Router"),
             patch(
                 "duo_workflow_service.agent_platform.experimental.flows.base.log_exception"
@@ -340,7 +340,6 @@ class TestFlow:
                     "type": "HiltChatBackComponent",
                     "inputs": [{"from": "conversation_history:agent", "as": "history"}],
                 },
-                {"name": "end", "type": "EndComponent"},
             ],
             routers=[
                 {"from": "agent", "to": "human_input"},
@@ -358,12 +357,11 @@ class TestFlow:
         # Create mock component instances
         mock_agent_component = self.mock_component("agent_entry")
         mock_human_input_component = self.mock_component("human_input_entry")
-        mock_end_component = self.mock_component("end_entry")
+        mock_end_component = Mock(spec=EndComponent)
 
         # Create mock component classes
         mock_agent_class = Mock(return_value=mock_agent_component)
         mock_human_input_class = Mock(return_value=mock_human_input_component)
-        mock_end_class = Mock(return_value=mock_end_component)
 
         # Create mock router instances
         mock_simple_router = Mock(spec=Router)
@@ -383,13 +381,16 @@ class TestFlow:
             patch(
                 "duo_workflow_service.agent_platform.experimental.flows.base.Router"
             ) as mock_router_class,
+            patch(
+                "duo_workflow_service.agent_platform.experimental.flows.base.EndComponent",
+                return_value=mock_end_component,
+            ) as mock_end_component_class,
         ):
 
             # Setup component loading mocks
             mock_load_class.side_effect = [
                 mock_agent_class,  # For "AgentComponent"
                 mock_human_input_class,  # For "HiltChatBackComponent"
-                mock_end_class,  # For "EndComponent"
             ]
 
             # Setup router creation mocks
@@ -411,11 +412,10 @@ class TestFlow:
             goal = "Complex workflow test"
             await flow.run(goal)
 
-            # Assert all component classes were loaded
-            assert mock_load_class.call_count == 3
+            # Assert all component classes were loaded (excluding EndComponent which is built-in)
+            assert mock_load_class.call_count == 2
             mock_load_class.assert_any_call("AgentComponent")
             mock_load_class.assert_any_call("HiltChatBackComponent")
-            mock_load_class.assert_any_call("EndComponent")
 
             # Assert all component instances were created with correct parameters
             # Agent component
@@ -425,8 +425,8 @@ class TestFlow:
             mock_agent_class.assert_called_once()
             agent_call_args = mock_agent_class.call_args[1]
             assert agent_call_args["name"] == "agent"
-            assert agent_call_args["workflow_id"] == "complex-workflow-123"
-            assert agent_call_args["workflow_type"] == CategoryEnum.WORKFLOW_CHAT
+            assert agent_call_args["flow_id"] == "complex-workflow-123"
+            assert agent_call_args["flow_type"] == CategoryEnum.WORKFLOW_CHAT
             assert agent_call_args["prompt_id"] == "agents/awesome"
             assert agent_call_args["inputs"] == ["context:goal"]
             assert agent_call_args["toolset"] == [
@@ -438,18 +438,19 @@ class TestFlow:
             mock_human_input_class.assert_called_once()
             human_input_call_args = mock_human_input_class.call_args[1]
             assert human_input_call_args["name"] == "human_input"
-            assert human_input_call_args["workflow_id"] == "complex-workflow-123"
             assert human_input_call_args["inputs"] == [
                 {"from": "conversation_history:agent", "as": "history"}
             ]
-            assert human_input_call_args["workflow_type"] == CategoryEnum.WORKFLOW_CHAT
+            assert human_input_call_args["flow_id"] == "complex-workflow-123"
+            assert human_input_call_args["flow_type"] == CategoryEnum.WORKFLOW_CHAT
 
-            # End component
-            mock_end_class.assert_called_once()
-            end_call_args = mock_end_class.call_args[1]
-            assert end_call_args["name"] == "end"
-            assert end_call_args["workflow_id"] == "complex-workflow-123"
-            assert end_call_args["workflow_type"] == CategoryEnum.WORKFLOW_CHAT
+            # EndComponent component
+            mock_end_component_class.assert_called_once()
+            end_component_call_args = mock_end_component_class.call_args[1]
+            assert end_component_call_args["name"] == "end"
+            assert end_component_call_args["flow_id"] == "complex-workflow-123"
+            assert end_component_call_args["flow_type"] == CategoryEnum.WORKFLOW_CHAT
+            mock_end_component.attach.assert_called_once_with(mock_state_graph)
 
             # Assert routers were created and attached
             assert mock_router_class.call_count == 2
@@ -466,11 +467,13 @@ class TestFlow:
                 == mock_human_input_component
             )
             assert conditional_router_call[1]["input"] == "status"
-            expected_to_components = {
-                "Execution": mock_agent_component,
-                "default_route": mock_end_component,
-            }
-            assert conditional_router_call[1]["to_component"] == expected_to_components
+            # Note: The "end" component in routes refers to the auto-created EndComponent
+            assert "Execution" in conditional_router_call[1]["to_component"]
+            assert "default_route" in conditional_router_call[1]["to_component"]
+            assert (
+                conditional_router_call[1]["to_component"]["default_route"]
+                == mock_end_component
+            )
 
             # Assert routers were attached to the graph
             mock_simple_router.attach.assert_called_once_with(mock_state_graph)

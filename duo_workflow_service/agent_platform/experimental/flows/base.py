@@ -12,6 +12,7 @@ from ai_gateway.prompts.registry import LocalPromptRegistry
 from contract import contract_pb2
 from duo_workflow_service.agent_platform.experimental.components.base import (
     BaseComponent,
+    EndComponent,
 )
 from duo_workflow_service.agent_platform.experimental.flows.flow_config import (
     FlowConfig,
@@ -64,6 +65,7 @@ class Flow(AbstractWorkflow):
         internal_event_client: InternalEventsClient = Provide[
             ContainerApplication.internal_event.client
         ],
+        **kwargs,
     ):
         super().__init__(
             workflow_id=workflow_id,
@@ -76,6 +78,7 @@ class Flow(AbstractWorkflow):
             approval=approval,
             prompt_registry=prompt_registry,
             internal_event_client=internal_event_client,
+            **kwargs,
         )
         self._config = config
 
@@ -117,9 +120,17 @@ class Flow(AbstractWorkflow):
                 return None
 
     def _build_components(
-        self, tools_registry: ToolsRegistry
+        self, tools_registry: ToolsRegistry, graph: StateGraph
     ) -> dict[str, BaseComponent]:
-        components: dict[str, BaseComponent] = {}
+        end_component = EndComponent(
+            name="end",
+            flow_id=self._workflow_id,
+            flow_type=self._workflow_type,
+        )
+        end_component.attach(graph)
+
+        components: dict[str, BaseComponent] = {"end": end_component}
+
         for comp_config in self._config.components:
             comp_name = comp_config["name"]  # explicit name field
             comp_class = load_component_class(comp_config["type"])
@@ -128,8 +139,8 @@ class Flow(AbstractWorkflow):
 
             comp_params.update(
                 {
-                    "workflow_id": self._workflow_id,
-                    "workflow_type": self._workflow_type,
+                    "flow_id": self._workflow_id,
+                    "flow_type": self._workflow_type,
                 }
             )
 
@@ -203,7 +214,7 @@ class Flow(AbstractWorkflow):
         checkpointer: BaseCheckpointSaver,
     ) -> Any:
         graph = StateGraph(FlowState)
-        components = self._build_components(tools_registry)
+        components = self._build_components(tools_registry, graph)
         self._build_routers(components, graph)
 
         entry_component = components[self._config.flow["entry_point"]]
