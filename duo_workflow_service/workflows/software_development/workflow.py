@@ -242,7 +242,7 @@ class Workflow(AbstractWorkflow):
             tools_registry=tools_registry,
             model_config=self._model_config,
             goal=goal,
-            project=self._project,
+            project=self._project,  # type: ignore[arg-type]
             http_client=self._http_client,
         )
 
@@ -286,7 +286,7 @@ class Workflow(AbstractWorkflow):
             tools_registry=tools_registry,
             model_config=self._model_config,
             goal=goal,
-            project=self._project,
+            project=self._project,  # type: ignore[arg-type]
             http_client=self._http_client,
             additional_context=self._additional_context,
             user=self._user,
@@ -373,9 +373,9 @@ class Workflow(AbstractWorkflow):
                 name="context_builder",
                 system_prompt=BUILD_CONTEXT_SYSTEM_MESSAGE.format(
                     handover_tool_name=HANDOVER_TOOL_NAME,
-                    project_id=self._project["id"],
-                    project_name=self._project["name"],
-                    project_url=self._project["http_url_to_repo"],
+                    project_id=self._project["id"],  # type: ignore[index]
+                    project_name=self._project["name"],  # type: ignore[index]
+                    project_url=self._project["http_url_to_repo"],  # type: ignore[index]
                 ),
                 toolset=context_builder_toolset,
                 workflow_id=self._workflow_id,

@@ -211,7 +211,7 @@ class Workflow(AbstractWorkflow):
             tools_registry=tools_registry,
             model_config=self._model_config,
             goal=goal,
-            project=self._project,
+            project=self._project,  # type: ignore[arg-type]
             http_client=self._http_client,
         )
 
@@ -250,7 +250,7 @@ class Workflow(AbstractWorkflow):
             tools_registry=tools_registry,
             model_config=self._model_config,
             goal=goal,
-            project=self._project,
+            project=self._project,  # type: ignore[arg-type]
             http_client=self._http_client,
             user=self._user,
         )
@@ -273,17 +273,17 @@ class Workflow(AbstractWorkflow):
                 tool=tools_registry.get("run_git_command"),  # type: ignore
                 input_parser=lambda _: [
                     {
-                        "repository_url": self._project["http_url_to_repo"],
+                        "repository_url": self._project["http_url_to_repo"],  # type: ignore[index]
                         "command": "add",
                         "args": "-A",
                     },
                     {
-                        "repository_url": self._project["http_url_to_repo"],
+                        "repository_url": self._project["http_url_to_repo"],  # type: ignore[index]
                         "command": "commit",
                         "args": f"-m 'Duo Workflow: Resolve issue #{issue_iid}'",
                     },
                     {
-                        "repository_url": self._project["http_url_to_repo"],
+                        "repository_url": self._project["http_url_to_repo"],  # type: ignore[index]
                         "command": "push",
                         "args": f"-o merge_request.create -o merge_request.title={shlex.quote(merge_request_title)}",
                     },
@@ -389,7 +389,7 @@ class Workflow(AbstractWorkflow):
     def _fetch_issue_iid(self, issue_url: str):
         try:
             gitlab_host = GitLabUrlParser.extract_host_from_url(
-                self._project["web_url"]
+                self._project["web_url"]  # type: ignore[index]
             )
             _, issue_iid = GitLabUrlParser.parse_issue_url(issue_url, gitlab_host)
             return issue_iid

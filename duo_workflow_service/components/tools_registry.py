@@ -7,7 +7,7 @@ from pydantic import BaseModel
 
 from ai_gateway.code_suggestions.language_server import LanguageServerVersion
 from duo_workflow_service import tools
-from duo_workflow_service.gitlab.gitlab_project import WorkflowConfig
+from duo_workflow_service.gitlab.gitlab_api import WorkflowConfig
 from duo_workflow_service.gitlab.http_client import GitlabHttpClient
 from duo_workflow_service.tools import Toolset, ToolType
 from duo_workflow_service.tools.duo_base_tool import DuoBaseTool
@@ -132,7 +132,6 @@ class ToolsRegistry:
         gl_http_client: GitlabHttpClient,
         outbox: asyncio.Queue,
         inbox: asyncio.Queue,
-        gitlab_host: str,
         mcp_tools: Optional[list[type[BaseTool]]] = None,
         user: Optional[CloudConnectorUser] = None,
         language_server_version: Optional[LanguageServerVersion] = None,
@@ -153,7 +152,7 @@ class ToolsRegistry:
             outbox=outbox,
             inbox=inbox,
             gitlab_client=gl_http_client,
-            gitlab_host=gitlab_host,
+            gitlab_host=workflow_config.get("gitlab_host", ""),
         )
 
         return cls(

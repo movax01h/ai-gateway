@@ -2,7 +2,7 @@
 import os
 from datetime import datetime, timezone
 from enum import StrEnum
-from typing import Any, List
+from typing import Any, List, override
 
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage
 from langgraph.checkpoint.memory import BaseCheckpointSaver
@@ -147,6 +147,7 @@ class Workflow(AbstractWorkflow):
             ui_chat_log=[initial_ui_chat_log],
             last_human_input=None,
             project=self._project,
+            namespace=self._namespace,
             approval=None,
         )
 
@@ -259,3 +260,7 @@ class Workflow(AbstractWorkflow):
         self, error: BaseException, compiled_graph: Any, graph_config: Any
     ):
         log_exception(error, extra={"workflow_id": self._workflow_id})
+
+    @override
+    def _support_namespace_level_workflow(self) -> bool:
+        return True

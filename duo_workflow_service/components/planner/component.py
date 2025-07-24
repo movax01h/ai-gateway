@@ -18,6 +18,7 @@ from duo_workflow_service.components.planner.prompt import (
     PLANNER_PROMPT,
 )
 from duo_workflow_service.entities import WorkflowState, WorkflowStatusEnum
+from duo_workflow_service.gitlab.gitlab_api import Project
 from duo_workflow_service.gitlab.http_client import GitlabHttpClient
 from duo_workflow_service.llm_factory import (
     AnthropicConfig,
@@ -62,7 +63,7 @@ class PlannerComponent:
         executor_toolset: Any,
         tools_registry: ToolsRegistry,
         model_config: Union[AnthropicConfig, VertexConfig],
-        project: Any,
+        project: Project,
         http_client: GitlabHttpClient,
     ):
         self.model_config = model_config

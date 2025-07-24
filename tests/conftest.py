@@ -51,7 +51,7 @@ from duo_workflow_service.entities.state import (
     WorkflowState,
     WorkflowStatusEnum,
 )
-from duo_workflow_service.gitlab.gitlab_project import Project
+from duo_workflow_service.gitlab.gitlab_api import Project
 from duo_workflow_service.server import CONTAINER_APPLICATION_PACKAGES
 from duo_workflow_service.workflows.type_definitions import AdditionalContext
 from lib.feature_flags.context import current_feature_flag_context

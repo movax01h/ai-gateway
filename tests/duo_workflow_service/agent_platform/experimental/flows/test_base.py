@@ -70,14 +70,14 @@ class TestFlow:
                 "duo_workflow_service.workflows.abstract_workflow.empty_workflow_config"
             ),
             patch(
-                "duo_workflow_service.workflows.abstract_workflow.fetch_workflow_and_project_data"
+                "duo_workflow_service.workflows.abstract_workflow.fetch_workflow_and_container_data"
             ) as mock_fetch,
             patch(
                 "duo_workflow_service.workflows.abstract_workflow.UserInterface",
                 return_value=ui_notifier,
             ),
             patch(
-                "duo_workflow_service.workflows.abstract_workflow.GitLabUrlParser"
+                "duo_workflow_service.gitlab.gitlab_api.GitLabUrlParser"
             ) as mock_parser,
             patch(
                 "duo_workflow_service.agent_platform.experimental.flows.base.StateGraph",
@@ -86,6 +86,7 @@ class TestFlow:
         ):
             mock_fetch.return_value = (
                 mock_project,
+                None,
                 {"config": "test"},
             )
             mock_parser.extract_host_from_url.return_value = "gitlab.com"
