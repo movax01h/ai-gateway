@@ -60,7 +60,7 @@ class TestFileNamingForTests(pylint.testutils.CheckerTestCase):
     def test_excluded_file(self, mock_is_file, node):
         """Test that excluded files don't trigger the warning."""
 
-        node.file = f"{os.getcwd()}/tests/test_structured_log.py"
+        node.file = f"{os.getcwd()}/tests/code_suggestions/test_engine.py"
 
         with self.assertNoMessages():
             mock_is_file.return_value = False
