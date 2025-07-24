@@ -74,9 +74,9 @@ def workflow_config() -> dict[str, Any]:
 
 
 @pytest.fixture
-def mock_fetch_workflow_and_project_data(workflow_config: dict[str, Any]):
+def mock_fetch_workflow_and_container_data(workflow_config: dict[str, Any]):
     with patch(
-        "duo_workflow_service.workflows.abstract_workflow.fetch_workflow_and_project_data"
+        "duo_workflow_service.workflows.abstract_workflow.fetch_workflow_and_container_data"
     ) as mock:
         mock.return_value = (
             {
@@ -86,6 +86,7 @@ def mock_fetch_workflow_and_project_data(workflow_config: dict[str, Any]):
                 "http_url_to_repo": "https://example.com/project",
                 "web_url": "https://example.com/project",
             },
+            None,
             workflow_config,
         )
         yield mock

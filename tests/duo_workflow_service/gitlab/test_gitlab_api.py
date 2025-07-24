@@ -2,9 +2,9 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from duo_workflow_service.gitlab.gitlab_project import (
-    extract_project_id_from_workflow,
-    fetch_workflow_and_project_data,
+from duo_workflow_service.gitlab.gitlab_api import (
+    extract_id_from_global_id,
+    fetch_workflow_and_container_data,
 )
 
 
@@ -34,35 +34,26 @@ def workflow_and_project_data():
     }
 
 
-def test_extract_project_id_from_workflow():
+def test_extract_id_from_global_id():
     # Test with GraphQL format project ID
-    workflow = {"projectId": "gid://gitlab/Project/123"}
-    assert extract_project_id_from_workflow(workflow) == 123
+    assert extract_id_from_global_id("gid://gitlab/Project/123") == 123
 
     # Test with numeric string project ID
-    workflow = {"projectId": "456"}
-    assert extract_project_id_from_workflow(workflow) == 456
+    assert extract_id_from_global_id("456") == 456
 
     # Test with missing project ID
-    workflow = {}
-    assert extract_project_id_from_workflow(workflow) == 0
+    assert extract_id_from_global_id(None) == 0
 
     # Test with empty string project ID
-    workflow = {"projectId": ""}
-    assert extract_project_id_from_workflow(workflow) == 0
-
-    # Test with None project ID
-    workflow = {"projectId": None}
-    assert extract_project_id_from_workflow(workflow) == 0
+    assert extract_id_from_global_id("") == 0
 
     # Test with non-numeric project ID that can't be converted
-    workflow = {"projectId": "not-a-number"}
     with pytest.raises(ValueError):
-        extract_project_id_from_workflow(workflow)
+        extract_id_from_global_id("not-a-number")
 
 
 @pytest.mark.asyncio
-async def test_fetch_workflow_and_project_data_success():
+async def test_fetch_workflow_and_container_data_success():
     gitlab_client = AsyncMock()
     # Mock GraphQL response
     gitlab_client.graphql.return_value = {
@@ -85,6 +76,8 @@ async def test_fetch_workflow_and_project_data_success():
                             "repository": "https://example.com/test-project/-/tree/main",
                         },
                     },
+                    "namespaceId": None,
+                    "namespace": None,
                     "agentPrivilegesNames": ["read_repository", "write_repository"],
                     "preApprovedAgentPrivilegesNames": ["read_repository"],
                     "mcpEnabled": True,
@@ -96,7 +89,7 @@ async def test_fetch_workflow_and_project_data_success():
     }
 
     workflow_id = "111"
-    project, workflow_config = await fetch_workflow_and_project_data(
+    project, namespace, workflow_config = await fetch_workflow_and_container_data(
         gitlab_client, workflow_id
     )
 
@@ -119,6 +112,7 @@ async def test_fetch_workflow_and_project_data_success():
         {"name": "JavaScript", "share": 24.5},
     ]
     assert project["default_branch"] == "main"
+    assert namespace is None
 
     # Verify workflow config
     assert workflow_config["agent_privileges_names"] == [
@@ -133,7 +127,7 @@ async def test_fetch_workflow_and_project_data_success():
 
 
 @pytest.mark.asyncio
-async def test_fetch_workflow_and_project_data_no_workflow():
+async def test_fetch_workflow_and_container_data_no_workflow():
     gitlab_client = AsyncMock()
     # Mock empty response
     gitlab_client.graphql.return_value = {"duoWorkflowWorkflows": {"nodes": []}}
@@ -142,14 +136,14 @@ async def test_fetch_workflow_and_project_data_no_workflow():
     with pytest.raises(
         Exception, match=f"No workflow found for workflow ID: {workflow_id}"
     ):
-        await fetch_workflow_and_project_data(gitlab_client, workflow_id)
+        await fetch_workflow_and_container_data(gitlab_client, workflow_id)
 
     # Verify GraphQL call
     gitlab_client.graphql.assert_called_once()
 
 
 @pytest.mark.asyncio
-async def test_fetch_workflow_and_project_data_with_empty_languages():
+async def test_fetch_workflow_and_container_data_with_empty_languages():
     gitlab_client = AsyncMock()
     # Mock GraphQL response with empty languages
     gitlab_client.graphql.return_value = {
@@ -166,6 +160,8 @@ async def test_fetch_workflow_and_project_data_with_empty_languages():
                         "webUrl": "http://example.com/empty-project",
                         "languages": [],
                     },
+                    "namespaceId": None,
+                    "namespace": None,
                     "agentPrivilegesNames": [],
                     "preApprovedAgentPrivilegesNames": [],
                     "mcpEnabled": False,
@@ -177,13 +173,14 @@ async def test_fetch_workflow_and_project_data_with_empty_languages():
     }
 
     workflow_id = "456"
-    project, workflow_config = await fetch_workflow_and_project_data(
+    project, namespace, workflow_config = await fetch_workflow_and_container_data(
         gitlab_client, workflow_id
     )
 
     # Verify project data with empty languages
     assert project["id"] == 456
     assert project["languages"] == []
+    assert namespace is None
 
 
 @pytest.mark.asyncio
@@ -194,8 +191,38 @@ async def test_fetch_workflow_and_project_data_with_missing_languages(
     # Mock GraphQL response without languages field
     gitlab_client.graphql.return_value = workflow_and_project_data
 
+
+@pytest.mark.asyncio
+async def test_fetch_workflow_and_container_data_with_missing_languages():
+    gitlab_client = AsyncMock()
+    # Mock GraphQL response without languages field
+    gitlab_client.graphql.return_value = {
+        "duoWorkflowWorkflows": {
+            "nodes": [
+                {
+                    "statusName": "created",
+                    "projectId": "gid://gitlab/Project/789",
+                    "project": {
+                        "id": "gid://gitlab/Project/789",
+                        "name": "no-languages-project",
+                        "description": "Project without languages field",
+                        "httpUrlToRepo": "http://example.com/no-lang-project.git",
+                        "webUrl": "http://example.com/no-lang-project",
+                    },
+                    "namespaceId": None,
+                    "namespace": None,
+                    "agentPrivilegesNames": [],
+                    "preApprovedAgentPrivilegesNames": [],
+                    "mcpEnabled": False,
+                    "allowAgentToRequestUser": False,
+                    "firstCheckpoint": None,
+                }
+            ]
+        }
+    }
+
     workflow_id = "789"
-    project, workflow_config = await fetch_workflow_and_project_data(
+    project, namespace, workflow_config = await fetch_workflow_and_container_data(
         gitlab_client, workflow_id
     )
 
@@ -213,9 +240,59 @@ async def test_fetch_workflow_and_project_data_with_missing_repository(
     gitlab_client.graphql.return_value = workflow_and_project_data
 
     workflow_id = "1"
-    project, workflow_config = await fetch_workflow_and_project_data(
+    project, namespace, workflow_config = await fetch_workflow_and_container_data(
         gitlab_client, workflow_id
     )
 
     assert project["id"] == 789
     assert project["default_branch"] is None
+    assert namespace is None
+
+
+@pytest.mark.asyncio
+async def test_fetch_namespace_level_workflow():
+    gitlab_client = AsyncMock()
+    # Mock GraphQL response
+    gitlab_client.graphql.return_value = {
+        "duoWorkflowWorkflows": {
+            "nodes": [
+                {
+                    "statusName": "created",
+                    "projectId": None,
+                    "project": None,
+                    "namespaceId": "gid://gitlab/Type::Namespace/123",
+                    "namespace": {
+                        "id": "gid://gitlab/Group/123",
+                        "name": "test-group",
+                        "description": "Test Group",
+                        "webUrl": "http://example.com/test-group",
+                    },
+                    "agentPrivilegesNames": ["read_repository", "write_repository"],
+                    "preApprovedAgentPrivilegesNames": ["read_repository"],
+                    "mcpEnabled": True,
+                    "allowAgentToRequestUser": True,
+                    "firstCheckpoint": {"checkpoint": "{}"},
+                }
+            ]
+        }
+    }
+
+    workflow_id = "111"
+    project, namespace, workflow_config = await fetch_workflow_and_container_data(
+        gitlab_client, workflow_id
+    )
+
+    # Verify GraphQL call
+    gitlab_client.graphql.assert_called_once()
+    call_args = gitlab_client.graphql.call_args[0]
+    assert isinstance(call_args[0], str)
+    assert call_args[1] == {
+        "workflowId": f"gid://gitlab/Ai::DuoWorkflows::Workflow/{workflow_id}"
+    }
+
+    # Verify project data
+    assert namespace["id"] == 123
+    assert namespace["description"] == "Test Group"
+    assert namespace["name"] == "test-group"
+    assert namespace["web_url"] == "http://example.com/test-group"
+    assert project is None

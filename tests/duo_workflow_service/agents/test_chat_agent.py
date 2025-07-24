@@ -1,11 +1,16 @@
 from datetime import datetime, timezone
+from typing import Any
 from unittest.mock import ANY, Mock, call, patch
 
 import pytest
+from dependency_injector.wiring import Provide, inject
+from gitlab_cloud_connector import CloudConnectorUser
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 from langchain_core.messages.ai import UsageMetadata
 from langchain_core.prompt_values import ChatPromptValue
 
+from ai_gateway.container import ContainerApplication
+from ai_gateway.prompts.registry import LocalPromptRegistry
 from duo_workflow_service.agents.chat_agent import ChatAgent, ChatAgentPromptTemplate
 from duo_workflow_service.entities import WorkflowStatusEnum
 from duo_workflow_service.entities.state import (
@@ -14,6 +19,7 @@ from duo_workflow_service.entities.state import (
     ToolStatus,
     UiChatLog,
 )
+from duo_workflow_service.gitlab.gitlab_api import Namespace, Project
 from lib.internal_events import InternalEventAdditionalProperties
 from lib.internal_events.event_enum import CategoryEnum, EventEnum, EventPropertyEnum
 
@@ -27,6 +33,16 @@ def mock_datetime(mock_now: datetime):
 
 
 @pytest.fixture
+def config_values():
+    return {"mock_model_responses": True}
+
+
+@pytest.fixture
+def user_is_debug():
+    return True
+
+
+@pytest.fixture
 def prompt_name():
     return "Chat Agent"
 
@@ -34,6 +50,15 @@ def prompt_name():
 @pytest.fixture
 def chat_agent(model_factory, prompt_config):
     yield ChatAgent(model_factory=model_factory, config=prompt_config)
+
+
+@pytest.fixture(autouse=True)
+def prepare_container(
+    mock_duo_workflow_service_container,
+):  # pylint: disable=unused-argument
+    mock_duo_workflow_service_container.wire(
+        modules=["tests.duo_workflow_service.agents.test_chat_agent"]
+    )
 
 
 @pytest.fixture
@@ -45,6 +70,7 @@ def input():
         "ui_chat_log": [],
         "last_human_input": None,
         "project": None,
+        "namespace": None,
         "approval": None,
     }
 
@@ -69,6 +95,86 @@ async def test_run(chat_agent, input):
         )
     ]
     assert result["status"] == WorkflowStatusEnum.INPUT_REQUIRED
+
+
+@pytest.mark.asyncio
+@inject
+async def test_template_with_project(
+    input,
+    user: CloudConnectorUser,
+    prompt_registry: LocalPromptRegistry = Provide[
+        ContainerApplication.pkg_prompts.prompt_registry
+    ],
+):
+    input["project"] = Project(
+        id=1,
+        name="gitlab project",
+        web_url="https://gitlab.com/gitlab-org/gitlab",
+        description="awesome project",
+        http_url_to_repo="",
+        default_branch=None,
+        languages=[],
+    )
+
+    chat_agent: ChatAgent = prompt_registry.get_on_behalf(  # type: ignore[assignment]
+        user=user,
+        prompt_id="chat/agent",
+        prompt_version="^1.0.0",
+        model_metadata=None,
+        internal_event_category=__name__,
+        tools=None,
+    )
+
+    result: Any = await chat_agent.prompt_tpl.ainvoke(input, agent_name=chat_agent.name)
+
+    assert isinstance(result.messages[1], SystemMessage)
+    assert "<project_id>1</project_id>" in result.messages[1].content
+    assert "<project_name>gitlab project</project_name>" in result.messages[1].content
+    assert (
+        "<project_url>https://gitlab.com/gitlab-org/gitlab</project_url>"
+        in result.messages[1].content
+    )
+    assert "<namespace>" not in result.messages[1].content
+
+
+@pytest.mark.asyncio
+@inject
+async def test_template_with_namespace(
+    input,
+    user: CloudConnectorUser,
+    prompt_registry: LocalPromptRegistry = Provide[
+        ContainerApplication.pkg_prompts.prompt_registry
+    ],
+):
+    input["namespace"] = Namespace(
+        id=1,
+        name="gitlab-org",
+        web_url="https://gitlab.com/gitlab-org",
+        description="awesome organization",
+    )
+    chat_agent: ChatAgent = prompt_registry.get_on_behalf(  # type: ignore[assignment]
+        user=user,
+        prompt_id="chat/agent",
+        prompt_version="^1.0.0",
+        model_metadata=None,
+        internal_event_category=__name__,
+        tools=None,
+    )
+
+    result: Any = await chat_agent.prompt_tpl.ainvoke(input, agent_name=chat_agent.name)
+
+    assert isinstance(result.messages[1], SystemMessage)
+    assert "<project>" not in result.messages[1].content
+    assert "<namespace_id>1</namespace_id>" in result.messages[1].content
+    assert (
+        "<namespace_description>awesome organization</namespace_description>"
+        in result.messages[1].content
+    )
+    assert "<namespace_name>gitlab-org</namespace_name>" in result.messages[1].content
+    assert (
+        "<namespace_url>https://gitlab.com/gitlab-org</namespace_url>"
+        in result.messages[1].content
+    )
 
 
 class TestChatAgentTrackTokensData:

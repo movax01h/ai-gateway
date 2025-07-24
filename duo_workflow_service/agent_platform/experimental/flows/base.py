@@ -98,7 +98,7 @@ class Flow(AbstractWorkflow):
             conversation_history={},
             ui_chat_log=[initial_ui_chat_log],
             context={
-                "project_id": self._project.get("id"),
+                "project_id": self._project.get("id"),  # type: ignore[union-attr]
                 "goal": goal,
                 "inputs": {
                     additional_context.category: additional_context.model_dump()

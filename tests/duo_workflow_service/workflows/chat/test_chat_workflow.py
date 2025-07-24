@@ -84,6 +84,7 @@ def workflow_with_project(
         "languages": [{"name": "Python", "share": 1.0}],
         "default_branch": "main",
     }
+    workflow._namespace = None
     workflow._additional_context = additional_context
     workflow._http_client = MagicMock()
     prompt.tools_registry = mock_tools_registry
@@ -233,6 +234,7 @@ def test_are_tools_called_with_various_content(
         "ui_chat_log": [],
         "last_human_input": None,
         "project": None,
+        "namespace": None,
         "approval": None,
     }
     assert workflow._are_tools_called(state) == expected_result
@@ -265,6 +267,7 @@ def test_are_tools_called_with_tool_use(workflow_with_project):
         "ui_chat_log": [],
         "last_human_input": None,
         "project": None,
+        "namespace": None,
         "approval": None,
     }
     assert workflow._are_tools_called(state) == Routes.TOOL_USE
@@ -274,7 +277,7 @@ def test_are_tools_called_with_tool_use(workflow_with_project):
 @pytest.mark.usefixtures(
     "mock_tools_registry_cls",
     "mock_git_lab_workflow_instance",
-    "mock_fetch_workflow_and_project_data",
+    "mock_fetch_workflow_and_container_data",
 )
 async def test_workflow_run(
     mock_checkpoint_notifier,
@@ -607,7 +610,7 @@ async def test_chat_workflow_status_flow_integration(
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("tool_approval_required", [True])
-@pytest.mark.usefixtures("mock_fetch_workflow_and_project_data")
+@pytest.mark.usefixtures("mock_fetch_workflow_and_container_data")
 async def test_agent_run_with_tool_approval_required(workflow_with_project):
     """Test agent run method when tools require approval."""
 

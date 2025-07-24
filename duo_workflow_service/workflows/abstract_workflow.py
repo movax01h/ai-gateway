@@ -31,15 +31,15 @@ from duo_workflow_service.checkpointer.notifier import UserInterface
 from duo_workflow_service.components import ToolsRegistry
 from duo_workflow_service.entities import DuoWorkflowStateType
 from duo_workflow_service.gitlab.events import get_event
-from duo_workflow_service.gitlab.gitlab_project import (
+from duo_workflow_service.gitlab.gitlab_api import (
+    Namespace,
     Project,
     WorkflowConfig,
     empty_workflow_config,
-    fetch_workflow_and_project_data,
+    fetch_workflow_and_container_data,
 )
 from duo_workflow_service.gitlab.http_client import GitlabHttpClient
 from duo_workflow_service.gitlab.http_client_factory import get_http_client
-from duo_workflow_service.gitlab.url_parser import GitLabUrlParser
 from duo_workflow_service.llm_factory import AnthropicConfig, VertexConfig
 from duo_workflow_service.monitoring import duo_workflow_metrics
 from duo_workflow_service.tools import convert_mcp_tools_to_langchain_tool_classes
@@ -74,7 +74,8 @@ class AbstractWorkflow(ABC):
     _inbox: asyncio.Queue
     _streaming_outbox: asyncio.Queue
     _workflow_id: str
-    _project: Project
+    _project: Project | None
+    _namespace: Namespace | None
     _workflow_config: WorkflowConfig
     _http_client: GitlabHttpClient
     _workflow_metadata: dict[str, Any]
@@ -202,25 +203,16 @@ class AbstractWorkflow(ABC):
         }
         compiled_graph = None
         try:
-            self._project, self._workflow_config = (
-                await fetch_workflow_and_project_data(
+            self._project, self._namespace, self._workflow_config = (
+                await fetch_workflow_and_container_data(
                     client=self._http_client,
                     workflow_id=self._workflow_id,
                 )
             )
 
-            if "web_url" not in self._project:
-                raise RuntimeError(
-                    f"Failed to get web_url from project for workflow {self._workflow_id}"
-                )
-
-            gitlab_host = GitLabUrlParser.extract_host_from_url(
-                self._project["web_url"]
-            )
-
-            if not gitlab_host:
-                raise RuntimeError(
-                    f"Failed to extract gitlab host from web_url for workflow {self._workflow_id}"
+            if self._namespace and self._support_namespace_level_workflow() is False:
+                raise NotImplementedError(
+                    f"This workflow {self._workflow_type.value} does not support namespace-level workflow"
                 )
 
             user_for_registry = (
@@ -234,7 +226,6 @@ class AbstractWorkflow(ABC):
                 inbox=self._inbox,
                 workflow_config=self._workflow_config,
                 gl_http_client=self._http_client,
-                gitlab_host=gitlab_host,
                 mcp_tools=(
                     self._mcp_tools
                     if self._workflow_config.get("mcp_enabled", False)
@@ -390,6 +381,15 @@ class AbstractWorkflow(ABC):
             )
 
         return AnthropicConfig(model_name=KindAnthropicModel.CLAUDE_SONNET_4.value)
+
+    def _support_namespace_level_workflow(self) -> bool:
+        """Indicate if a workflow class supports namespace-level workflows.
+
+        To support namespace-level workflows, make sure that the subclass of AbstractWorkflow
+        handle both self._project and self._namespace fields properly, then override this method to return `True`.
+        By default, namespace support is disabled in workflow classes.
+        """
+        return False
 
 
 TypeWorkflow = type[AbstractWorkflow]

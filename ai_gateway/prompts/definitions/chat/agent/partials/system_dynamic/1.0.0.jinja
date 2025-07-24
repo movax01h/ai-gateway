@@ -11,4 +11,13 @@ Information for the current GitLab project the USER is working on
 <project_languages>{{ project.languages }}</project_languages>
 </project>
 {%- endif %}
+{%- if namespace %}
+<namespace>
+Information for the current GitLab namespace the USER is working on
+<namespace_id>{{ namespace.id }}</namespace_id>
+<namespace_description>{{ namespace.description }}</namespace_description>
+<namespace_name>{{ namespace.name }}</namespace_name>
+<namespace_url>{{ namespace.web_url }}</namespace_url>
+</namespace>
+{%- endif %}
 </context>

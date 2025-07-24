@@ -25,6 +25,7 @@ from duo_workflow_service.components.executor.prompts import (
     SET_TASK_STATUS_TOOL_NAME,
 )
 from duo_workflow_service.entities import WorkflowState, WorkflowStatusEnum
+from duo_workflow_service.gitlab.gitlab_api import Project
 from duo_workflow_service.gitlab.http_client import GitlabHttpClient
 from duo_workflow_service.llm_factory import (
     AnthropicConfig,
@@ -76,7 +77,7 @@ class ExecutorComponent:  # pylint: disable=too-many-instance-attributes; there'
         executor_toolset: Any,
         tools_registry: ToolsRegistry,
         model_config: Union[AnthropicConfig, VertexConfig],
-        project: Any,
+        project: Project,
         http_client: GitlabHttpClient,
         additional_context: Optional[list[AdditionalContext]] = None,
         user: CloudConnectorUser | None = None,

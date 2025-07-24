@@ -321,7 +321,7 @@ async def test_workflow_run(
     mock_planner_component,
     mock_executor_component,
     mock_chat_client,
-    mock_fetch_workflow_and_project_data,
+    mock_fetch_workflow_and_container_data,
     mock_tools_executor,
     mock_plan_supervisor_agent,
     mock_handover_agent,
@@ -407,7 +407,7 @@ async def test_workflow_run_with_memory_saver(
     mock_goal_disambiguation_component,
     mock_gitlab_workflow,
     mock_chat_client,
-    mock_fetch_workflow_and_project_data,
+    mock_fetch_workflow_and_container_data,
     mock_tools_executor,
     mock_plan_supervisor_agent,
     mock_handover_agent,
@@ -457,7 +457,7 @@ async def test_workflow_run_when_exception(
     mock_executor_component,
     mock_goal_disambiguation_component,
     mock_chat_client,
-    mock_fetch_workflow_and_project_data,
+    mock_fetch_workflow_and_container_data,
     mock_gitlab_workflow,
     mock_tools_executor,
     mock_plan_supervisor_agent,
@@ -508,7 +508,7 @@ async def test_workflow_run_with_error_state(
     mock_tools_approval_component,
     mock_executor_component,
     mock_goal_disambiguation_component,
-    mock_fetch_workflow_and_project_data,
+    mock_fetch_workflow_and_container_data,
     mock_tools_executor,
     mock_agent,
     workflow,
@@ -550,7 +550,7 @@ async def test_workflow_run_with_tools_registry(
     mock_goal_disambiguation_component,
     mock_gitlab_workflow,
     mock_chat_client,
-    mock_fetch_workflow_and_project_data,
+    mock_fetch_workflow_and_container_data,
     mock_tools_executor,
     mock_plan_supervisor_agent,
     mock_handover_agent,
@@ -636,7 +636,7 @@ async def test_workflow_run_with_setup_error(
     mock_executor_component,
     mock_planner_component,
     mock_goal_disambiguation_component,
-    mock_fetch_workflow_and_project_data,
+    mock_fetch_workflow_and_container_data,
     mock_gitlab_workflow,
     mock_git_lab_workflow_instance,
     mock_tools_registry_cls,
@@ -659,13 +659,13 @@ async def test_workflow_run_with_setup_error(
 @pytest.mark.parametrize("duo_workflow_prompt_registry_enabled", [False, True])
 @patch.dict(os.environ, {"DW_INTERNAL_EVENT__ENABLED": "true"})
 async def test_workflow_run_with_missing_web_url(
-    mock_fetch_workflow_and_project_data,
+    mock_fetch_workflow_and_container_data,
     mock_gitlab_workflow,
     mock_git_lab_workflow_instance,
     checkpoint_tuple,
     workflow,
 ):
-    mock_fetch_workflow_and_project_data.return_value = (
+    mock_fetch_workflow_and_container_data.return_value = (
         {
             "id": 1,
             "name": "test-project",
@@ -673,6 +673,7 @@ async def test_workflow_run_with_missing_web_url(
             "http_url_to_repo": "https://example.com/project",
             # web_url is missing
         },
+        None,
         {"project_id": 1},
     )
 
@@ -685,20 +686,18 @@ async def test_workflow_run_with_missing_web_url(
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("duo_workflow_prompt_registry_enabled", [False, True])
-@patch(
-    "duo_workflow_service.workflows.abstract_workflow.GitLabUrlParser", autospec=True
-)
+@patch("duo_workflow_service.gitlab.gitlab_api.GitLabUrlParser", autospec=True)
 @patch.dict(os.environ, {"DW_INTERNAL_EVENT__ENABLED": "true"})
 async def test_workflow_run_with_invalid_web_url(
     mock_gitlab_url_parser,
-    mock_fetch_workflow_and_project_data,
+    mock_fetch_workflow_and_container_data,
     mock_gitlab_workflow,
     mock_git_lab_workflow_instance,
     checkpoint_tuple,
     workflow,
 ):
     # Test case for invalid web_url (cannot extract gitlab_host)
-    mock_fetch_workflow_and_project_data.return_value = (
+    mock_fetch_workflow_and_container_data.return_value = (
         {
             "id": 1,
             "name": "test-project",
@@ -706,6 +705,7 @@ async def test_workflow_run_with_invalid_web_url(
             "http_url_to_repo": "https://example.com/project",
             "web_url": "invalid-url",  # Invalid URL format
         },
+        None,
         {"project_id": 1},
     )
 
@@ -727,7 +727,7 @@ async def test_workflow_run_with_retry(
     mock_planner_component,
     mock_goal_disambiguation_component,
     mock_chat_client,
-    mock_fetch_workflow_and_project_data,
+    mock_fetch_workflow_and_container_data,
     mock_gitlab_workflow,
     mock_git_lab_workflow_instance,
     mock_tools_executor,
@@ -859,7 +859,7 @@ async def test_workflow_run_with_tool_approvals(
     mock_gitlab_workflow,
     mock_git_lab_workflow_instance,
     mock_chat_client,
-    mock_fetch_workflow_and_project_data,
+    mock_fetch_workflow_and_container_data,
     mock_tools_executor,
     mock_planner_component,
     mock_goal_disambiguation_component,
@@ -899,7 +899,7 @@ async def test_workflow_run_without_plan_approval_component(
     mock_tools_approval_component,
     mock_gitlab_workflow,
     mock_chat_client,
-    mock_fetch_workflow_and_project_data,
+    mock_fetch_workflow_and_container_data,
     mock_tools_executor,
     mock_planner_component,
     mock_goal_disambiguation_component,

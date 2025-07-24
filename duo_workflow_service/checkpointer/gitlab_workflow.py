@@ -34,7 +34,7 @@ from duo_workflow_service.checkpointer.gitlab_workflow_utils import (
     STATUS_TO_EVENT_PROPERTY,
 )
 from duo_workflow_service.entities import WorkflowStatusEnum
-from duo_workflow_service.gitlab.gitlab_project import WorkflowConfig
+from duo_workflow_service.gitlab.gitlab_api import WorkflowConfig
 from duo_workflow_service.gitlab.http_client import (
     GitlabHttpClient,
     GitLabHttpResponse,

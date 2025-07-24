@@ -341,6 +341,7 @@ async def test_registry_configuration(gl_http_client, mcp_tools):
     workflow_config = {
         "id": "test_workflow",
         "agent_privileges_names": ["run_commands", "run_mcp_tools"],
+        "gitlab_host": "gitlab.example.com",
     }
 
     registry = await ToolsRegistry.configure(
@@ -348,7 +349,6 @@ async def test_registry_configuration(gl_http_client, mcp_tools):
         gl_http_client=gl_http_client,
         outbox=_outbox,
         inbox=_inbox,
-        gitlab_host="gitlab.example.com",
         mcp_tools=mcp_tools,
     )
 
@@ -509,6 +509,7 @@ async def test_registry_configuration_with_preapproved_tools(gl_http_client):
         "id": "test_workflow",
         "agent_privileges_names": ["read_write_files", "run_commands"],
         "pre_approved_agent_privileges_names": ["read_write_files"],
+        "gitlab_host": "gitlab.example.com",
     }
 
     registry = await ToolsRegistry.configure(
@@ -516,7 +517,6 @@ async def test_registry_configuration_with_preapproved_tools(gl_http_client):
         gl_http_client=gl_http_client,
         outbox=_outbox,
         inbox=_inbox,
-        gitlab_host="gitlab.example.com",
     )
 
     always_enabled_tools = set([tool_cls.tool_title for tool_cls in NO_OP_TOOLS])  # type: ignore
@@ -553,7 +553,6 @@ async def test_registry_configuration_error(gl_http_client, workflow_config):
             gl_http_client=gl_http_client,
             outbox=_outbox,
             inbox=_inbox,
-            gitlab_host="gitlab.example.com",
         )
 
 
@@ -724,13 +723,13 @@ async def test_registry_configuration_with_restricted_language_server_client(
         "id": "test_workflow",
         "agent_privileges_names": list(_AGENT_PRIVILEGES.keys()),
         "pre_approved_agent_privileges_names": list(_AGENT_PRIVILEGES.keys()),
+        "gitlab_host": "gitlab.example.com",
     }
     registry = await ToolsRegistry.configure(
         workflow_config=workflow_config,
         gl_http_client=gl_http_client,
         outbox=_outbox,
         inbox=_inbox,
-        gitlab_host="gitlab.example.com",
         language_server_version=LanguageServerVersion.from_string(lsp_version),
     )
 
@@ -776,13 +775,13 @@ async def test_registry_configuration_with_unrestricted_language_server_client(
         "id": "test_workflow",
         "agent_privileges_names": list(_AGENT_PRIVILEGES.keys()),
         "pre_approved_agent_privileges_names": list(_AGENT_PRIVILEGES.keys()),
+        "gitlab_host": "gitlab.example.com",
     }
     registry = await ToolsRegistry.configure(
         workflow_config=workflow_config,
         gl_http_client=gl_http_client,
         outbox=_outbox,
         inbox=_inbox,
-        gitlab_host="gitlab.example.com",
         language_server_version=(
             LanguageServerVersion.from_string(lsp_version) if lsp_version else None
         ),
