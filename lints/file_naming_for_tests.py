@@ -9,12 +9,8 @@ from pylint.lint import PyLinter
 EXCLUDED_FILES = {
     "/tests/code_suggestions/test_authentication.py",
     "/tests/code_suggestions/test_engine.py",
-    "/tests/code_suggestions/test_instrumentators.py",
     "/tests/code_suggestions/test_logging.py",
-    "/tests/code_suggestions/test_processing.py",
     "/tests/prompts/test_litellm_prompt.py",
-    "/tests/searches/test_search_container.py",
-    "/tests/test_structured_log.py",
 }
 
 # Folders to scan for implementation files
