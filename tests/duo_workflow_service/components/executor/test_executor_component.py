@@ -5,11 +5,13 @@ from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 from langchain_core.prompt_values import ChatPromptValue
 from langgraph.constants import END
 from langgraph.graph import StateGraph
+from langsmith.evaluation.evaluator import Category
 
 from ai_gateway.models.mock import FakeModel
 from duo_workflow_service.components import ToolsApprovalComponent, ToolsRegistry
 from duo_workflow_service.components.executor.component import ExecutorComponent, Routes
 from duo_workflow_service.components.executor.prompts import (
+    DEPRECATED_OS_INFORMATION_COMPONENT,
     EXECUTOR_SYSTEM_MESSAGE,
     GET_PLAN_TOOL_NAME,
     HANDOVER_TOOL_NAME,
@@ -18,7 +20,10 @@ from duo_workflow_service.components.executor.prompts import (
 )
 from duo_workflow_service.entities import Plan, WorkflowState, WorkflowStatusEnum
 from duo_workflow_service.tools import DuoBaseTool
-from duo_workflow_service.workflows.type_definitions import AdditionalContext
+from duo_workflow_service.workflows.type_definitions import (
+    AdditionalContext,
+    OsInformationContext,
+)
 from lib.feature_flags.context import current_feature_flag_context
 
 
@@ -264,7 +269,7 @@ class TestExecutorComponent:
             mock_agent.assert_called_once_with(
                 executor_component.user,
                 "workflow/executor",
-                "^1.0.0",
+                "^2.0.0",
                 tools=executor_component.executor_toolset.bindable,
                 workflow_id="test-workflow-123",
                 http_client=executor_component.http_client,
@@ -506,65 +511,117 @@ class TestExecutorComponent:
         assert len(response["handover"]) == 0
         assert len(response["conversation_history"]["executor"]) == 4
 
-    @pytest.mark.asyncio
     @pytest.mark.parametrize(
-        "additional_context,expected_os_info",
+        "agent_user_environment,additional_context,expected_substrings",
         [
-            (None, ""),
-            ([AdditionalContext(category="os_information", content="")], ""),
+            # Happy case
             (
-                [AdditionalContext(category="os_information", content="Ubuntu 22.04")],
-                "Ubuntu 22.04",
+                {
+                    "os_information_context": OsInformationContext(
+                        platform="foo", architecture="bar"
+                    )
+                },
+                None,
+                (
+                    "<os_information>",
+                    "<platform>foo</platform>",
+                    "<architecture>bar</architecture>",
+                    "</os_information>",
+                ),
             ),
+            # We only use the old template if the new one is missing
             (
+                {
+                    "os_information_context": OsInformationContext(
+                        platform="foo", architecture="bar"
+                    )
+                },
                 [
-                    AdditionalContext(category="other_info", content="some data"),
-                    AdditionalContext(category="os_information", content="Windows 11"),
-                    AdditionalContext(category="more_info", content="more data"),
+                    AdditionalContext(
+                        category="os_information_context", content="old context format"
+                    )
                 ],
-                "Windows 11",
+                (
+                    "<os_information>",
+                    "<platform>foo</platform>",
+                    "<architecture>bar</architecture>",
+                    "</os_information>",
+                ),
             ),
-            ([], ""),
+            # We only use the old template if the new one is missing
             (
-                [AdditionalContext(category="other_category", content="some content")],
-                "",
+                {},
+                [
+                    AdditionalContext(
+                        category="os_information", content="old context format"
+                    )
+                ],
+                (
+                    "<os_information>",
+                    "old context format" "</os_information>",
+                ),
+            ),
+            # Assert no failure if there's no context
+            ({}, None, ()),
+        ],
+    )
+    def test_format_system_prompt(
+        self,
+        agent_user_environment,
+        additional_context,
+        expected_substrings,
+        executor_component,
+    ):
+        executor_component.agent_user_environment = agent_user_environment
+        executor_component.additional_context = additional_context
+        try:
+            prompt = executor_component._format_system_prompt()
+        except Exception:
+            assert False
+        for (
+            substring
+        ) in (
+            expected_substrings
+        ):  # use substrings to avoid formatting related flakiness
+            assert substring in prompt
+
+    @pytest.mark.parametrize(
+        "agent_user_environment,existing_prompt_template_inputs,want",
+        [
+            (
+                {"os_information_context": "some_context"},
+                {},
+                {"agent_user_environment": {"os_information_context": "some_context"}},
+            ),
+            (
+                {},
+                {},
+                {"agent_user_environment": {}},
+            ),
+            (
+                {"os_information_context": "some_context"},
+                {"agent_user_environment": {"shell_context": "some_other_context"}},
+                {
+                    "agent_user_environment": {
+                        "os_information_context": "some_context",
+                        "shell_context": "some_other_context",
+                    }
+                },
             ),
         ],
     )
-    async def test_messages_to_model(
+    def test_agentV2_prompt_template_inputs(
         self,
-        expected_os_info,
-        mock_model_ainvoke,
-        compiled_graph,
-        workflow_state,
-        graph_config,
-        project,
-        goal,
+        agent_user_environment,
+        existing_prompt_template_inputs,
+        want,
+        mock_agent,
+        executor_component,
+        duo_workflow_prompt_registry_enabled,
     ):
-        await compiled_graph.ainvoke(input=workflow_state, config=graph_config)
-
-        os_information = (
-            OS_INFORMATION_COMPONENT.format(os_information=expected_os_info)
-            if expected_os_info
-            else ""
-        )
-
-        expected_message = EXECUTOR_SYSTEM_MESSAGE.format(
-            set_task_status_tool_name=SET_TASK_STATUS_TOOL_NAME,
-            handover_tool_name=HANDOVER_TOOL_NAME,
-            get_plan_tool_name=GET_PLAN_TOOL_NAME,
-            project_id=project["id"],
-            project_name=project["name"],
-            project_url=project["http_url_to_repo"],
-            os_information=os_information,
-        )
-
-        ainvoke_messages = mock_model_ainvoke.call_args.args[0]
-
-        if isinstance(ainvoke_messages, ChatPromptValue):
-            ainvoke_messages = ainvoke_messages.messages
-
-        assert ainvoke_messages == [
-            SystemMessage(content=expected_message),
-            HumanMessage(content=f"Your goal is: {goal}"),
-        ]
+        mock_graph = Mock(spec=StateGraph)
+        mock_agent.return_value.prompt_template_inputs = existing_prompt_template_inputs
+        if duo_workflow_prompt_registry_enabled:
+            executor_component.agent_user_environment = agent_user_environment
+            executor_component.attach(mock_graph, "exit_node", "next_node", None)
+            assert mock_agent.return_value.prompt_template_inputs == want

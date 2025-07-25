@@ -86,6 +86,7 @@ class AdditionalContext(BaseModel):
         "repository",
         "directory",
         "os_information",
+        "agent_user_environment",
     ]
     id: Optional[str] = None
     content: Optional[str] = None

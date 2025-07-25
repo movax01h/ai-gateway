@@ -18,7 +18,7 @@ from langgraph.types import interrupt
 
 from duo_workflow_service.agents.agent import Agent
 from duo_workflow_service.agents.handover import HandoverAgent
-from duo_workflow_service.components.planner.base import BaseComponent
+from duo_workflow_service.components.base import BaseComponent
 from duo_workflow_service.entities.event import WorkflowEvent, WorkflowEventType
 from duo_workflow_service.entities.state import (
     MessageTypeEnum,

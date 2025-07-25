@@ -176,3 +176,8 @@ message Approval {
 message Mkdir {
     string directory_path = 1;
 }
+
+message OsInformationContext {
+    string platform = 1;
+    string architecture = 2;
+}

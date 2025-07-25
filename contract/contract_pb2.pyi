@@ -274,3 +274,11 @@ class Mkdir(_message.Message):
     DIRECTORY_PATH_FIELD_NUMBER: _ClassVar[int]
     directory_path: str
     def __init__(self, directory_path: _Optional[str] = ...) -> None: ...
+
+class OsInformationContext(_message.Message):
+    __slots__ = ("platform", "architecture")
+    PLATFORM_FIELD_NUMBER: _ClassVar[int]
+    ARCHITECTURE_FIELD_NUMBER: _ClassVar[int]
+    platform: str
+    architecture: str
+    def __init__(self, platform: _Optional[str] = ..., architecture: _Optional[str] = ...) -> None: ...
