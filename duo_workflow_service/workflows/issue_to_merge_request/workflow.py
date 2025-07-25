@@ -204,6 +204,7 @@ class Workflow(AbstractWorkflow):
         )
 
         planner_component = PlannerComponent(
+            user=self._user,
             workflow_id=self._workflow_id,
             workflow_type=self._workflow_type,
             planner_toolset=tools_registry.toolset(PLANNER_TOOLS),

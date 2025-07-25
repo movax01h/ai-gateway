@@ -22,7 +22,7 @@ from duo_workflow_service.monitoring import duo_workflow_metrics
 from duo_workflow_service.tools.handover import HandoverTool
 
 
-class AgentPromptTemplate(Runnable[DuoWorkflowStateType, PromptValue]):
+class AgentPromptTemplate(Runnable[dict, PromptValue]):
     messages: list[BaseMessage]
 
     def __init__(self, agent_name: str, prompt_template: dict[str, str]):
@@ -31,7 +31,7 @@ class AgentPromptTemplate(Runnable[DuoWorkflowStateType, PromptValue]):
 
     def invoke(
         self,
-        input: DuoWorkflowStateType,
+        input: dict,
         config: RunnableConfig | None = None,
         **kwargs: Any,
     ) -> PromptValue:
@@ -45,20 +45,15 @@ class AgentPromptTemplate(Runnable[DuoWorkflowStateType, PromptValue]):
         else:
             messages = self._conversation_preamble(input, self.prompt_template)
 
-        inputs = cast(dict, input)
-        inputs["handover_tool_name"] = HandoverTool.tool_title
-        inputs["get_plan_tool_name"] = "get_plan"
-        inputs["set_task_status_tool_name"] = "set_task_status"
-
         prompt_value = ChatPromptTemplate.from_messages(
             messages, template_format="jinja2"
-        ).invoke(inputs, config, **kwargs)
+        ).invoke(input, config, **kwargs)
         self.messages = prompt_value.to_messages()
 
         return prompt_value
 
     def _conversation_preamble(
-        self, state: DuoWorkflowStateType, prompt_template: dict[str, str]
+        self, state: dict, prompt_template: dict[str, str]
     ) -> list[MessageLikeRepresentation]:
         conversation_preamble: list[MessageLikeRepresentation] = []
 
@@ -81,15 +76,16 @@ class AgentPromptTemplate(Runnable[DuoWorkflowStateType, PromptValue]):
         return conversation_preamble
 
 
-class Agent(Prompt[DuoWorkflowStateType, BaseMessage]):
+class Agent(Prompt):
     check_events: bool = True
     workflow_id: str
     http_client: GitlabHttpClient
+    prompt_template_inputs: dict = {}
 
     @classmethod
     def _build_prompt_template(
         cls, config: PromptConfig
-    ) -> Runnable[DuoWorkflowStateType, PromptValue]:
+    ) -> Runnable[dict, PromptValue]:
         return AgentPromptTemplate(config.name, config.prompt_template)
 
     async def run(self, state: DuoWorkflowStateType) -> dict[str, Any]:
@@ -108,7 +104,8 @@ class Agent(Prompt[DuoWorkflowStateType, BaseMessage]):
                 if event and event["event_type"] == WorkflowEventType.STOP:
                     return {"status": WorkflowStatusEnum.CANCELLED}
 
-            model_completion = await super().ainvoke(state)
+            input = self._prepare_input(state)
+            model_completion = await super().ainvoke(input)
 
             if self.name in state["conversation_history"]:
                 updates["conversation_history"] = {self.name: [model_completion]}
@@ -122,6 +119,14 @@ class Agent(Prompt[DuoWorkflowStateType, BaseMessage]):
                 **updates,
                 **self._respond_to_human(state, model_completion),
             }
+
+    def _prepare_input(self, state: DuoWorkflowStateType) -> dict:
+        inputs = cast(dict, state)
+        inputs["handover_tool_name"] = HandoverTool.tool_title
+        inputs["get_plan_tool_name"] = "get_plan"
+        inputs["set_task_status_tool_name"] = "set_task_status"
+
+        return {**inputs, **self.prompt_template_inputs}
 
     def _respond_to_human(self, state, model_completion) -> dict[str, Any]:
         if not isinstance(model_completion, AIMessage):
