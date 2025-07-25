@@ -1,8 +1,9 @@
-from typing import Annotated, ClassVar, Optional
+from typing import Annotated, ClassVar, Literal, Optional
 
 from dependency_injector.wiring import Provide, inject
 from langchain_core.messages import AIMessage, BaseMessage
 from langgraph.graph import StateGraph
+from pydantic import Field
 
 from ai_gateway.container import ContainerApplication
 from ai_gateway.prompts import LocalPromptRegistry
@@ -11,6 +12,10 @@ from duo_workflow_service.agent_platform.experimental.components.agent.nodes imp
     AgentNode,
     FinalResponseNode,
     ToolNode,
+)
+from duo_workflow_service.agent_platform.experimental.components.agent.ui_log import (
+    UILogEventsAgent,
+    UILogWriterAgentTools,
 )
 from duo_workflow_service.agent_platform.experimental.components.base import (
     BaseComponent,
@@ -21,6 +26,10 @@ from duo_workflow_service.agent_platform.experimental.state import (
     FlowStateKeys,
     IOKey,
     IOKeyTemplate,
+)
+from duo_workflow_service.agent_platform.experimental.ui_log import (
+    UIHistory,
+    default_ui_log_writer_class,
 )
 from duo_workflow_service.tools.toolset import Toolset
 from lib.internal_events import InternalEventsClient
@@ -56,6 +65,9 @@ class AgentComponent(BaseComponent):
 
     prompt_registry: LocalPromptRegistry
     internal_event_client: InternalEventsClient
+
+    ui_log_events: list[UILogEventsAgent] = Field(default_factory=list)
+    ui_role_as: Literal["agent", "tool"] = "agent"
 
     _allowed_input_targets = tuple(FlowState.__annotations__.keys())
 
@@ -144,12 +156,21 @@ class AgentComponent(BaseComponent):
             flow_id=self.flow_id,
             flow_type=self.flow_type,
             internal_event_client=self.internal_event_client,
+            ui_history=UIHistory(
+                events=self.ui_log_events, writer_class=UILogWriterAgentTools
+            ),
         )
         node_final_response = FinalResponseNode(
             name=f"{self.name}#final_response",
             component_name=self.name,
             output=self._final_answer_key.to_iokey(
                 {IOKeyTemplate.COMPONENT_NAME_TEMPLATE: self.name}
+            ),
+            ui_history=UIHistory(
+                events=self.ui_log_events,
+                writer_class=default_ui_log_writer_class(
+                    events_class=UILogEventsAgent, ui_role_as=self.ui_role_as
+                ),
             ),
         )
 
