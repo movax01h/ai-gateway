@@ -1,4 +1,3 @@
-import shlex
 from datetime import datetime, timezone
 from enum import StrEnum
 from typing import Annotated, Any
@@ -68,6 +67,7 @@ CONTEXT_BUILDER_TOOLS = [
     "get_work_item",
     "list_work_items",
     "get_work_item_notes",
+    "create_merge_request",
 ]
 
 PLANNER_TOOLS = [
@@ -264,8 +264,6 @@ class Workflow(AbstractWorkflow):
         graph.add_edge("set_status_to_execution", executor_entry_node)
 
         issue_iid = self._fetch_issue_iid(goal)
-        merge_request_title = f"Draft: Resolve #{issue_iid}"
-
         # deterministic git actions
         graph.add_node(
             "git_actions",
@@ -285,20 +283,12 @@ class Workflow(AbstractWorkflow):
                     {
                         "repository_url": self._project["http_url_to_repo"],  # type: ignore[index]
                         "command": "push",
-                        "args": f"-o merge_request.create -o merge_request.title={shlex.quote(merge_request_title)}",
                     },
                 ],
                 output_parser=_git_output,  # type: ignore
             ).run,
         )
-        graph.add_node(
-            "complete",
-            HandoverAgent(
-                new_status=WorkflowStatusEnum.COMPLETED, handover_from="executor"
-            ).run,
-        )
-        graph.add_edge("git_actions", "complete")
-        graph.add_edge("complete", END)
+        graph.add_edge("git_actions", END)
         return graph
 
     def _add_context_builder_nodes(
@@ -350,6 +340,9 @@ class Workflow(AbstractWorkflow):
             system_prompt=BUILD_CONTEXT_SYSTEM_MESSAGE.format(
                 handover_tool_name=HANDOVER_TOOL_NAME,
                 issue_url=goal,
+                current_branch=self._workflow_metadata["git_branch"],
+                default_branch=self._project["default_branch"],  # type: ignore[index]
+                project_id=self._project["id"],  # type: ignore[index]
             ),
             toolset=context_builder_toolset,
             workflow_id=self._workflow_id,

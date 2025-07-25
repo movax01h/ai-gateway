@@ -87,6 +87,7 @@ async def test_workflow_run(
             "description": "This is a test project",
             "http_url_to_repo": "https://example.com/project",
             "web_url": "https://example.com/project",
+            "default_branch": "main",
         },
         None,
         {"id": 1, "project_id": 1},
@@ -168,7 +169,7 @@ async def test_workflow_run(
     workflow = Workflow(
         "123",
         workflow_type=CategoryEnum.WORKFLOW_ISSUE_TO_MERGE_REQUEST,
-        workflow_metadata={},
+        workflow_metadata={"git_branch": "test-branch"},
     )
     await workflow.run("https://example.com/project/-/issues/1")
 
@@ -192,8 +193,8 @@ async def test_workflow_run(
     assert mock_tools_executor.call_count == 1
     assert mock_tools_executor.return_value.run.call_count >= 1
 
-    assert mock_handover_agent.call_count == 3
-    assert mock_handover_agent.return_value.run.call_count == 3
+    assert mock_handover_agent.call_count == 2
+    assert mock_handover_agent.return_value.run.call_count == 2
 
     assert mock_git_lab_workflow_instance.aput.call_count == 0
     assert mock_git_lab_workflow_instance.aget_tuple.call_count == 0

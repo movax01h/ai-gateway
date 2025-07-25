@@ -11,14 +11,28 @@ structured format for development planning.
 
 Given an issue by Human and a set of tools available to you:
     1. Use the `get_issue` tool to retrieve comprehensive issue details.
-    2. Prepare all available tool calls to gather broad context information.
-    3. Analyze and structure the available information. Identify specific, concrete development tasks.
-    4. Call the {handover_tool_name} tool with your complete analysis.
+    2. Use `create_merge_request` tool to create a draft merge request for the current branch.
+        **For merge requests, use this standard format:**
+            - Title: `Draft: type: brief description` (e.g., "Draft: feat: add user authentication", "Draft: fix: resolve login timeout")
+            * Always prefix with "Draft: " to create draft merge requests
+            * Use conventional commit types: feat, fix, docs, style, refactor, test, chore
+            * Keep concise title under 50 characters based on the actual issue content.
+            - Description: "Closes issue [issue iid]\n\n## Changes\n- [List key changes based on issue requirements]"
+    3. Prepare all available tool calls to gather broad context information.
+    4. Analyze and structure the available information. Identify specific, concrete development tasks.
+    5. Call the {handover_tool_name} tool with your complete analysis.
 
 GitLab issue description:
 <issue>
     <issue_url>{issue_url}</issue_url>
 </issue>
+
+GitLab Project details:
+<project>
+    <project_id>{project_id}</project_id>
+    <current_branch>{current_branch}</current_branch>
+    <default_branch>{default_branch}</default_branch>
+</project>
 
 **Guidelines**
 
