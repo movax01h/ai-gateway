@@ -86,9 +86,9 @@ class DuoWorkflowMetrics:
             registry=registry,
         )
 
-        self.checkpoint_error_counter = Counter(
-            "duo_workflow_checkpoint_error_total",
-            "Count of errors encountered while saving checkpoints",
+        self.checkpoint_counter = Counter(
+            "duo_workflow_checkpoint_total",
+            "Count of checkpoint calls in Duo Workflow",
             ["endpoint", "status_code", "method"],
             registry=registry,
         )
@@ -111,13 +111,13 @@ class DuoWorkflowMetrics:
             ),
         ).inc()
 
-    def count_checkpoint_error(
+    def count_checkpoints(
         self,
         endpoint="unknown",
         status_code="unknown",
         method="unknown",
     ):
-        self.checkpoint_error_counter.labels(
+        self.checkpoint_counter.labels(
             endpoint=endpoint,
             status_code=status_code,
             method=method,

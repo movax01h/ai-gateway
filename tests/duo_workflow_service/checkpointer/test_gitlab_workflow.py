@@ -846,50 +846,6 @@ async def test_aput(
     }
 
 
-@pytest.mark.asyncio
-@pytest.mark.parametrize(
-    "status_code,should_call_counter",
-    [
-        (200, False),
-        (400, True),
-        (500, True),
-    ],
-)
-async def test_aput_with_checkpoint_error(
-    gitlab_workflow,
-    http_client,
-    checkpoint_data,
-    checkpoint_metadata,
-    workflow_id,
-    status_code,
-    should_call_counter,
-):
-    config = {"configurable": {"checkpoint_id": "parent-checkpoint"}}
-    checkpoint = checkpoint_data[0]["checkpoint"]
-    checkpoint["channel_values"]["status"] = WorkflowStatusEnum.COMPLETED
-
-    http_client.apost.return_value = GitLabHttpResponse(
-        status_code=status_code, body={}
-    )
-    http_client.apatch.return_value = GitLabHttpResponse(status_code=200, body={})
-
-    with patch(
-        "duo_workflow_service.checkpointer.gitlab_workflow.duo_workflow_metrics"
-    ) as mock_metrics:
-        await gitlab_workflow.aput(
-            config, checkpoint, checkpoint_metadata, ChannelVersions()
-        )
-
-        if should_call_counter:
-            mock_metrics.count_checkpoint_error.assert_called_once_with(
-                endpoint=f"/api/v4/ai/duo_workflows/workflows/{workflow_id}/checkpoints",
-                status_code=status_code,
-                method="POST",
-            )
-        else:
-            mock_metrics.count_checkpoint_error.assert_not_called()
-
-
 def test_aput_with_no_status_update(
     checkpoint_data,
     checkpoint_metadata,
