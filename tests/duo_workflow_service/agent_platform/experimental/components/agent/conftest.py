@@ -10,7 +10,8 @@ from ai_gateway.prompts.registry import LocalPromptRegistry
 from duo_workflow_service.agent_platform.experimental.components.agent.nodes.agent_node import (
     AgentFinalOutput,
 )
-from duo_workflow_service.agent_platform.experimental.state import IOKey
+from duo_workflow_service.agent_platform.experimental.state import FlowStateKeys, IOKey
+from duo_workflow_service.agent_platform.experimental.ui_log import UIHistory
 from duo_workflow_service.entities.state import WorkflowStatusEnum
 from duo_workflow_service.tools.toolset import Toolset
 from lib.internal_events import InternalEventsClient
@@ -75,6 +76,16 @@ def prompt_variables():
         "user_input": "Please help me with this task",
         "task_description": "Complete the workflow",
     }
+
+
+@pytest.fixture
+def ui_history():
+    """Fixture for mock UIHistory."""
+    mock_history = Mock(spec=UIHistory)
+    mock_log = Mock()
+    mock_history.log = mock_log
+    mock_history.pop_state_updates.return_value = {FlowStateKeys.UI_CHAT_LOG: []}
+    return mock_history
 
 
 @pytest.fixture

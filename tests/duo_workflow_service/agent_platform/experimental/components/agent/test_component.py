@@ -1,10 +1,10 @@
 """Test suite for AgentComponent class."""
 
+from typing import Literal
 from unittest.mock import Mock, patch
 
 import pytest
 from langchain_core.messages import AIMessage
-from langgraph.constants import END
 
 from duo_workflow_service.agent_platform.experimental.components.agent.component import (
     AgentComponent,
@@ -13,8 +13,12 @@ from duo_workflow_service.agent_platform.experimental.components.agent.component
 from duo_workflow_service.agent_platform.experimental.components.agent.nodes.agent_node import (
     AgentFinalOutput,
 )
+from duo_workflow_service.agent_platform.experimental.components.agent.ui_log import (
+    UILogEventsAgent,
+)
 from duo_workflow_service.agent_platform.experimental.state import FlowStateKeys
 from duo_workflow_service.agent_platform.experimental.state.base import IOKey
+from duo_workflow_service.agent_platform.experimental.ui_log import UIHistory
 
 
 @pytest.fixture
@@ -30,12 +34,24 @@ def prompt_version():
 
 
 @pytest.fixture
+def ui_log_events():
+    return []
+
+
+@pytest.fixture
+def ui_role_as() -> Literal["agent", "tool"]:
+    return "agent"
+
+
+@pytest.fixture
 def agent_component(
     component_name,
     flow_id,
     flow_type,
     prompt_id,
     prompt_version,
+    ui_log_events,
+    ui_role_as,
     mock_toolset,
     mock_prompt_registry,
     mock_internal_event_client,
@@ -51,6 +67,8 @@ def agent_component(
         toolset=mock_toolset,
         prompt_registry=mock_prompt_registry,
         internal_event_client=mock_internal_event_client,
+        ui_log_events=ui_log_events,
+        ui_role_as=ui_role_as,
     )
 
 
@@ -61,6 +79,8 @@ def agent_component_no_output(
     flow_type,
     prompt_id,
     prompt_version,
+    ui_log_events,
+    ui_role_as,
     mock_toolset,
     mock_prompt_registry,
     mock_internal_event_client,
@@ -76,6 +96,8 @@ def agent_component_no_output(
         toolset=mock_toolset,
         prompt_registry=mock_prompt_registry,
         internal_event_client=mock_internal_event_client,
+        ui_log_events=ui_log_events,
+        ui_role_as=ui_role_as,
     )
 
 
@@ -171,6 +193,25 @@ class TestAgentComponentEntryHook:
 class TestAgentComponentAttachNodes:
     """Test suite for AgentComponent attach method."""
 
+    @pytest.mark.parametrize(
+        ("ui_log_events", "ui_role_as"),
+        [
+            ([], "agent"),
+            # Default values
+            ([UILogEventsAgent.ON_AGENT_FINAL_ANSWER], "agent"),
+            # Custom events, default role
+            ([], "tool"),
+            # Default events, custom role
+            (
+                [
+                    UILogEventsAgent.ON_AGENT_FINAL_ANSWER,
+                    UILogEventsAgent.ON_TOOL_EXECUTION_SUCCESS,
+                ],
+                "tool",
+            ),
+            # Custom values
+        ],
+    )
     def test_attach_creates_nodes_with_correct_parameters(
         self,
         mock_final_response_node_cls,
@@ -188,6 +229,8 @@ class TestAgentComponentAttachNodes:
         mock_prompt_registry,
         prompt_id,
         prompt_version,
+        ui_log_events,
+        ui_role_as,
     ):
         """Test that nodes are created with correct parameters."""
         agent_component.attach(mock_state_graph, mock_router)
@@ -225,6 +268,11 @@ class TestAgentComponentAttachNodes:
         assert tool_call_kwargs["flow_type"] == flow_type
         assert tool_call_kwargs["internal_event_client"] == mock_internal_event_client
 
+        # Tool Node UI logging
+        assert "ui_history" in tool_call_kwargs
+        assert isinstance(tool_call_kwargs["ui_history"], UIHistory)
+        assert tool_call_kwargs["ui_history"].events == ui_log_events
+
         # Verify FinalResponseNode creation
         mock_final_response_node_cls.assert_called_once()
         final_call_kwargs = mock_final_response_node_cls.call_args[1]
@@ -233,6 +281,11 @@ class TestAgentComponentAttachNodes:
         assert final_call_kwargs["output"] == IOKey(
             target="context", subkeys=[component_name, "final_answer"]
         )
+
+        # FinalResponse Node UI logging
+        assert "ui_history" in final_call_kwargs
+        assert isinstance(final_call_kwargs["ui_history"], UIHistory)
+        assert final_call_kwargs["ui_history"].events == ui_log_events
 
 
 class TestAgentComponentAttachEdges:

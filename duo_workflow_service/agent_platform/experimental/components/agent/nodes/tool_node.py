@@ -5,10 +5,15 @@ from langchain_core.messages import ToolMessage
 from langchain_core.tools import BaseTool
 from pydantic_core import ValidationError
 
+from duo_workflow_service.agent_platform.experimental.components.agent.ui_log import (
+    UILogEventsAgent,
+    UILogWriterAgentTools,
+)
 from duo_workflow_service.agent_platform.experimental.state import (
     FlowState,
     FlowStateKeys,
 )
+from duo_workflow_service.agent_platform.experimental.ui_log import UIHistory
 from duo_workflow_service.monitoring import duo_workflow_metrics
 from duo_workflow_service.security.prompt_security import (
     PromptSecurity,
@@ -22,22 +27,16 @@ __all__ = ["ToolNode"]
 
 
 class ToolNode:
-    name: str
-    _component_name: str
-    _toolset: Toolset
-    _flow_id: str
-    _flow_type: CategoryEnum
-    _internal_event_client: InternalEventsClient
-    _logger: structlog.stdlib.BoundLogger
-
     def __init__(
         self,
+        *,
         name: str,
         component_name: str,
         toolset: Toolset,
         flow_id: str,
         flow_type: CategoryEnum,
         internal_event_client: InternalEventsClient,
+        ui_history: UIHistory[UILogWriterAgentTools, UILogEventsAgent],
     ):
         self.name = name
         self._component_name = component_name
@@ -46,6 +45,7 @@ class ToolNode:
         self._flow_type = flow_type
         self._internal_event_client = internal_event_client
         self._logger = structlog.stdlib.get_logger("agent_platform")
+        self._ui_history = ui_history
 
     async def run(self, state: FlowState) -> dict:
         conversation_history = state[FlowStateKeys.CONVERSATION_HISTORY].get(
@@ -87,6 +87,7 @@ class ToolNode:
             )
 
         return {
+            **self._ui_history.pop_state_updates(),
             FlowStateKeys.CONVERSATION_HISTORY: {
                 self._component_name: tools_responses,
             },
@@ -104,13 +105,28 @@ class ToolNode:
                 tool_name=tool.name,
             )
 
+            self._ui_history.log.success(
+                tool=tool,
+                tool_call_args=tool_call_args,
+                event=UILogEventsAgent.ON_TOOL_EXECUTION_SUCCESS,
+            )
+
             return tool_call_result
-        except TypeError as e:
-            return self._format_type_error_response(tool=tool, error=e)
-        except ValidationError as e:
-            return self._format_validation_error(tool_name=tool.name, error=e)
         except Exception as e:
-            return self._format_execution_error(tool_name=tool.name, error=e)
+            self._ui_history.log.error(
+                tool=tool,
+                tool_call_args=tool_call_args,
+                event=UILogEventsAgent.ON_TOOL_EXECUTION_FAILED,
+            )
+
+            if isinstance(e, TypeError):
+                err_format = self._format_type_error_response(tool=tool, error=e)
+            elif isinstance(e, ValidationError):
+                err_format = self._format_validation_error(tool_name=tool.name, error=e)
+            else:
+                err_format = self._format_execution_error(tool_name=tool.name, error=e)
+
+            return err_format
 
     def _sanitize_response(
         self, response: str | list | dict, tool_name: str

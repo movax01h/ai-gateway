@@ -8,10 +8,10 @@ from pydantic_core import ValidationError
 from duo_workflow_service.agent_platform.experimental.components.agent.nodes.tool_node import (
     ToolNode,
 )
-from duo_workflow_service.agent_platform.experimental.state import (
-    FlowState,
-    FlowStateKeys,
+from duo_workflow_service.agent_platform.experimental.components.agent.ui_log import (
+    UILogEventsAgent,
 )
+from duo_workflow_service.agent_platform.experimental.state import FlowStateKeys
 from duo_workflow_service.security.prompt_security import SecurityException
 from lib.internal_events.event_enum import CategoryEnum, EventEnum
 
@@ -56,6 +56,7 @@ def tool_node(
     mock_toolset,
     flow_id,
     flow_type,
+    ui_history,
     mock_internal_event_client,
     mock_tool_monitoring,
     mock_prompt_security,
@@ -69,6 +70,7 @@ def tool_node(
         flow_id=flow_id,
         flow_type=flow_type,
         internal_event_client=mock_internal_event_client,
+        ui_history=ui_history,
     )
 
 
@@ -85,6 +87,7 @@ class TestToolNode:
         mock_tool_call,
         mock_tool_monitoring,
         mock_prompt_security,
+        ui_history,
     ):
         """Test successful run with single tool call."""
         result = await tool_node.run(flow_state_with_tool_calls)
@@ -106,6 +109,16 @@ class TestToolNode:
         mock_prompt_security.apply_security.assert_called_once_with(
             response="Tool execution result", tool_name=mock_tool.name
         )
+
+        # Verify ui_history.log.success was called with the correct parameters
+        ui_history.log.success.assert_called_once_with(
+            tool=mock_tool,
+            tool_call_args=mock_tool_call["args"],
+            event=UILogEventsAgent.ON_TOOL_EXECUTION_SUCCESS,
+        )
+
+        # Verify ui_history.pop_state_updates was called
+        ui_history.pop_state_updates.assert_called_once()
 
     @pytest.mark.asyncio
     async def test_run_success_multiple_tool_calls(
@@ -186,6 +199,7 @@ class TestToolNode:
         mock_tool_call,
         mock_prompt_security,
         mock_internal_event_client,
+        ui_history,
     ):
         """Test run handles TypeError during tool execution."""
         # Configure tool to raise TypeError
@@ -217,6 +231,16 @@ class TestToolNode:
         call_args = mock_internal_event_client.track_event.call_args
         assert call_args[1]["event_name"] == EventEnum.WORKFLOW_TOOL_FAILURE.value
 
+        # Verify ui_history.log.error was called with the correct parameters
+        ui_history.log.error.assert_called_once_with(
+            tool=mock_tool,
+            tool_call_args=mock_tool_call["args"],
+            event=UILogEventsAgent.ON_TOOL_EXECUTION_FAILED,
+        )
+
+        # Verify ui_history.pop_state_updates was called
+        ui_history.pop_state_updates.assert_called_once()
+
     @pytest.mark.asyncio
     async def test_run_validation_error_handling(
         self,
@@ -227,6 +251,7 @@ class TestToolNode:
         mock_tool_call,
         mock_prompt_security,
         mock_internal_event_client,
+        ui_history,
     ):
         """Test run handles ValidationError during tool execution."""
         # Configure tool to raise ValidationError
@@ -255,6 +280,16 @@ class TestToolNode:
         call_args = mock_internal_event_client.track_event.call_args
         assert call_args[1]["event_name"] == EventEnum.WORKFLOW_TOOL_FAILURE.value
 
+        # Verify ui_history.log.error was called with the correct parameters
+        ui_history.log.error.assert_called_once_with(
+            tool=mock_tool,
+            tool_call_args=mock_tool_call["args"],
+            event=UILogEventsAgent.ON_TOOL_EXECUTION_FAILED,
+        )
+
+        # Verify ui_history.pop_state_updates was called
+        ui_history.pop_state_updates.assert_called_once()
+
     @pytest.mark.asyncio
     async def test_run_generic_exception_handling(
         self,
@@ -265,6 +300,7 @@ class TestToolNode:
         mock_tool_call,
         mock_prompt_security,
         mock_internal_event_client,
+        ui_history,
     ):
         """Test run handles generic exceptions during tool execution."""
         # Configure tool to raise generic exception
@@ -289,6 +325,16 @@ class TestToolNode:
         mock_internal_event_client.track_event.assert_called_once()
         call_args = mock_internal_event_client.track_event.call_args
         assert call_args[1]["event_name"] == EventEnum.WORKFLOW_TOOL_FAILURE.value
+
+        # Verify ui_history.log.error was called with the correct parameters
+        ui_history.log.error.assert_called_once_with(
+            tool=mock_tool,
+            tool_call_args=mock_tool_call["args"],
+            event=UILogEventsAgent.ON_TOOL_EXECUTION_FAILED,
+        )
+
+        # Verify ui_history.pop_state_updates was called
+        ui_history.pop_state_updates.assert_called_once()
 
     @pytest.mark.asyncio
     async def test_run_no_tool_calls(

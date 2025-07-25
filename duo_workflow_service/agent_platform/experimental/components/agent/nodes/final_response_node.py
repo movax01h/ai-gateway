@@ -5,25 +5,36 @@ from langchain_core.messages import AIMessage, ToolMessage
 from duo_workflow_service.agent_platform.experimental.components.agent.nodes.agent_node import (
     AgentFinalOutput,
 )
+from duo_workflow_service.agent_platform.experimental.components.agent.ui_log import (
+    UILogEventsAgent,
+)
 from duo_workflow_service.agent_platform.experimental.state import (
     FlowState,
     FlowStateKeys,
     IOKey,
     create_nested_dict,
 )
+from duo_workflow_service.agent_platform.experimental.ui_log import (
+    DefaultUILogWriter,
+    UIHistory,
+)
 
 __all__ = ["FinalResponseNode"]
 
 
 class FinalResponseNode:
-    name: str
-    _component_name: str
-    _output: Optional[IOKey]
-
-    def __init__(self, component_name: str, name: str, output: Optional[IOKey]):
+    def __init__(
+        self,
+        *,
+        component_name: str,
+        name: str,
+        output: Optional[IOKey],
+        ui_history: UIHistory[DefaultUILogWriter, UILogEventsAgent],
+    ):
         self._component_name = component_name
         self.name = name
         self._output = output
+        self._ui_history = ui_history
 
     async def run(self, state: FlowState) -> dict:
         history = state[FlowStateKeys.CONVERSATION_HISTORY].get(
@@ -59,8 +70,13 @@ class FinalResponseNode:
             )
 
         parsed_response = AgentFinalOutput(**final_response_call["args"])
+        self._ui_history.log.success(
+            parsed_response.final_response,
+            event=UILogEventsAgent.ON_AGENT_FINAL_ANSWER,
+        )
 
         updates: dict = {
+            **self._ui_history.pop_state_updates(),
             FlowStateKeys.CONVERSATION_HISTORY: {
                 self._component_name: [
                     ToolMessage(content="", tool_call_id=final_response_call["id"])

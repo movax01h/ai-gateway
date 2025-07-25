@@ -10,6 +10,7 @@ from duo_workflow_service.entities import UiChatLog
 __all__ = [
     "LogLevels",
     "BaseUILogEvents",
+    "UILogCallback",
     "BaseUILogWriter",
     "UIHistory",
 ]
@@ -70,7 +71,7 @@ class _UILogEntry(NamedTuple):
     event: BaseUILogEvents
 
 
-class _UILogCallback(Protocol):
+class UILogCallback(Protocol):
     def __call__(self, log_entry: _UILogEntry) -> None: ...
 
 
@@ -139,7 +140,7 @@ class BaseUILogWriter[E: BaseUILogEvents](ABC):
         ```
     """
 
-    def __init__(self, log_callback: _UILogCallback):
+    def __init__(self, log_callback: UILogCallback):
         self._log_callback = log_callback
         self._levels = {
             LogLevels.SUCCESS: self._log_success,
@@ -230,7 +231,7 @@ class UIHistory[W: BaseUILogWriter, E: BaseUILogEvents](BaseModel):
     """
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
-    writer_class: type[W]
+    writer_class: type[W] | Callable[[UILogCallback], W]
     events: list[E]
 
     _logs: list[_UILogEntry] = PrivateAttr(default_factory=list)
