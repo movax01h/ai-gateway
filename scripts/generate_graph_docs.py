@@ -53,9 +53,18 @@ def main():
 
             tools_reg = MagicMock(spec=ToolsRegistry)
             wrk = Workflow(
-                "", {}, workflow_type="", user=CloudConnectorUser(True, is_debug=True)
+                "",
+                {"git_branch": "test-branch"},
+                workflow_type="",
+                user=CloudConnectorUser(True, is_debug=True),
             )
-            wrk._project = {"id": "", "name": "", "http_url_to_repo": "", "web_url": ""}
+            wrk._project = {
+                "id": "",
+                "name": "",
+                "http_url_to_repo": "",
+                "web_url": "",
+                "default_branch": "main",
+            }
             graph = wrk._compile("", tools_reg, MemorySaver())
 
             diagram = graph.get_graph().draw_mermaid()

@@ -110,7 +110,15 @@ class CreateMergeRequest(DuoBaseTool):
                 path=f"/api/v4/projects/{project_id}/merge_requests",
                 body=json.dumps(data),
             )
-            return json.dumps({"status": "success", "data": data, "response": response})
+
+            if (
+                isinstance(response, dict)
+                and "status" in response
+                and response["status"] != 200
+            ):
+                return json.dumps({"error": "Failed to create merge request"})
+
+            return json.dumps({"status": "success", "merge_request": response})
         except Exception as e:
             return json.dumps({"error": str(e)})
 
