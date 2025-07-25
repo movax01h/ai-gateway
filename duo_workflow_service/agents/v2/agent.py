@@ -1,7 +1,7 @@
 from datetime import datetime, timezone
-from typing import Any, cast
+from typing import Any, Sequence, cast
 
-from langchain_core.messages import AIMessage, BaseMessage, HumanMessage
+from langchain_core.messages import AIMessage, BaseMessage
 from langchain_core.prompt_values import PromptValue
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.prompts.chat import MessageLikeRepresentation
@@ -25,9 +25,11 @@ from duo_workflow_service.tools.handover import HandoverTool
 class AgentPromptTemplate(Runnable[dict, PromptValue]):
     messages: list[BaseMessage]
 
-    def __init__(self, agent_name: str, prompt_template: dict[str, str]):
+    def __init__(
+        self, agent_name: str, preamble_messages: Sequence[MessageLikeRepresentation]
+    ):
         self.agent_name = agent_name
-        self.prompt_template = prompt_template
+        self.preamble_messages = preamble_messages
 
     def invoke(
         self,
@@ -35,15 +37,16 @@ class AgentPromptTemplate(Runnable[dict, PromptValue]):
         config: RunnableConfig | None = None,
         **kwargs: Any,
     ) -> PromptValue:
-        messages: list[MessageLikeRepresentation] = []
-
         if self.agent_name in input["conversation_history"]:
-            messages = cast(
-                list[MessageLikeRepresentation],
-                input["conversation_history"][self.agent_name],
-            )
+            messages = input["conversation_history"][self.agent_name]
         else:
-            messages = self._conversation_preamble(input, self.prompt_template)
+            if "handover" in input:
+                # Transform handover into an agent-readable representation
+                input["handover"] = "\n".join(
+                    map(lambda x: x.pretty_repr(), input["handover"])
+                )
+
+            messages = self.preamble_messages
 
         prompt_value = ChatPromptTemplate.from_messages(
             messages, template_format="jinja2"
@@ -51,29 +54,6 @@ class AgentPromptTemplate(Runnable[dict, PromptValue]):
         self.messages = prompt_value.to_messages()
 
         return prompt_value
-
-    def _conversation_preamble(
-        self, state: dict, prompt_template: dict[str, str]
-    ) -> list[MessageLikeRepresentation]:
-        conversation_preamble: list[MessageLikeRepresentation] = []
-
-        if "system" in prompt_template:
-            conversation_preamble.append(("system", prompt_template["system"]))
-
-        if state.get("handover"):  # type: ignore
-            conversation_preamble.extend(
-                [
-                    HumanMessage(
-                        content="The steps towards goal accomplished so far are as follow:"
-                    ),
-                    *state.get("handover"),  # type: ignore
-                ]
-            )
-
-        if "user" in prompt_template:
-            conversation_preamble.append(("user", prompt_template["user"]))
-
-        return conversation_preamble
 
 
 class Agent(Prompt):
@@ -86,7 +66,9 @@ class Agent(Prompt):
     def _build_prompt_template(
         cls, config: PromptConfig
     ) -> Runnable[dict, PromptValue]:
-        return AgentPromptTemplate(config.name, config.prompt_template)
+        messages = cls._prompt_template_to_messages(config.prompt_template)
+
+        return AgentPromptTemplate(agent_name=config.name, preamble_messages=messages)
 
     async def run(self, state: DuoWorkflowStateType) -> dict[str, Any]:
         with duo_workflow_metrics.time_compute(
