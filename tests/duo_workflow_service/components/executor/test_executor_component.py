@@ -1,8 +1,6 @@
-from typing import Any
 from unittest.mock import AsyncMock, MagicMock, Mock, call, patch
 
 import pytest
-from gitlab_cloud_connector import CloudConnectorUser, UserClaims
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 from langchain_core.prompt_values import ChatPromptValue
 from langgraph.constants import END
@@ -22,12 +20,6 @@ from duo_workflow_service.entities import Plan, WorkflowState, WorkflowStatusEnu
 from duo_workflow_service.tools import DuoBaseTool
 from duo_workflow_service.workflows.type_definitions import AdditionalContext
 from lib.feature_flags.context import current_feature_flag_context
-from lib.internal_events.event_enum import CategoryEnum
-
-
-@pytest.fixture
-def config_values():
-    return {"mock_model_responses": True}
 
 
 @pytest.fixture
@@ -77,20 +69,6 @@ def mock_tool_registry():
     registry = MagicMock(ToolsRegistry)
     registry.get.return_value = MagicMock(name="test_tool")
     return registry
-
-
-@pytest.fixture
-def end_message():
-    return AIMessage(
-        content="Done with the execution, over to handover agent",
-        tool_calls=[
-            {
-                "id": "1",
-                "name": "handover_tool",
-                "args": {"summary": "done"},
-            }
-        ],
-    )
 
 
 @pytest.fixture
@@ -168,24 +146,9 @@ def mock_handover_agent():
         yield mock
 
 
-@pytest.fixture
-def user():
-    return CloudConnectorUser(
-        authenticated=True,
-        claims=UserClaims(
-            scopes=["duo_workflow_execute_workflow"],
-            issuer="gitlab-duo-workflow-service",
-        ),
-    )
-
-
 @pytest.mark.usefixtures("mock_container")
 @pytest.mark.parametrize("duo_workflow_prompt_registry_enabled", [False, True])
 class TestExecutorComponent:
-    @pytest.fixture
-    def workflow_type(self) -> CategoryEnum:
-        return CategoryEnum.WORKFLOW_SOFTWARE_DEVELOPMENT
-
     @pytest.fixture
     def goal(self) -> str:
         return "Test goal"

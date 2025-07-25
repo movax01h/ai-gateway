@@ -1,14 +1,10 @@
 from enum import StrEnum
 from functools import partial
-from typing import Any, Optional, Union, cast
+from typing import Any, Optional, cast
 
-from dependency_injector.wiring import Provide, inject
-from gitlab_cloud_connector import CloudConnectorUser
 from langchain_core.messages import AIMessage
 from langgraph.graph import StateGraph
 
-from ai_gateway.container import ContainerApplication
-from ai_gateway.prompts.registry import LocalPromptRegistry
 from duo_workflow_service.agents import (
     Agent,
     AgentV2,
@@ -24,18 +20,12 @@ from duo_workflow_service.components.executor.prompts import (
     OS_INFORMATION_COMPONENT,
     SET_TASK_STATUS_TOOL_NAME,
 )
+from duo_workflow_service.components.planner.base import BaseComponent
 from duo_workflow_service.entities import WorkflowState, WorkflowStatusEnum
 from duo_workflow_service.gitlab.gitlab_api import Project
-from duo_workflow_service.gitlab.http_client import GitlabHttpClient
-from duo_workflow_service.llm_factory import (
-    AnthropicConfig,
-    VertexConfig,
-    create_chat_model,
-)
+from duo_workflow_service.llm_factory import create_chat_model
 from duo_workflow_service.workflows.abstract_workflow import MAX_TOKENS_TO_SAMPLE
-from duo_workflow_service.workflows.type_definitions import AdditionalContext
 from lib.feature_flags.context import FeatureFlag, is_feature_enabled
-from lib.internal_events.event_enum import CategoryEnum
 
 
 class Routes(StrEnum):
@@ -67,35 +57,11 @@ def _router(
     return Routes.SUPERVISOR
 
 
-class ExecutorComponent:  # pylint: disable=too-many-instance-attributes; there'll be less as we migrate to Prompt Registry
-    @inject
-    def __init__(
-        self,
-        workflow_id: str,
-        workflow_type: CategoryEnum,
-        goal: str,
-        executor_toolset: Any,
-        tools_registry: ToolsRegistry,
-        model_config: Union[AnthropicConfig, VertexConfig],
-        project: Project,
-        http_client: GitlabHttpClient,
-        additional_context: Optional[list[AdditionalContext]] = None,
-        user: CloudConnectorUser | None = None,
-        prompt_registry: LocalPromptRegistry = Provide[
-            ContainerApplication.pkg_prompts.prompt_registry
-        ],
-    ):
-        self.model_config = model_config
-        self.workflow_id = workflow_id
-        self.workflow_type = workflow_type
-        self.goal = goal
+class ExecutorComponent(BaseComponent):
+    def __init__(self, executor_toolset: Any, project: Project, **kwargs: Any):
         self.executor_toolset = executor_toolset
-        self.tools_registry = tools_registry
         self.project = project
-        self.http_client = http_client
-        self.additional_context = additional_context
-        self.user = user
-        self.prompt_registry = prompt_registry
+        super().__init__(**kwargs)
 
     def attach(
         self,
