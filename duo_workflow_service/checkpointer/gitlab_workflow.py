@@ -489,12 +489,15 @@ class GitLabWorkflow(BaseCheckpointSaver[Any], AbstractAsyncContextManager[Any])
                     cls=CustomEncoder,
                 ),
             )
-            if isinstance(response, GitLabHttpResponse) and response.status_code >= 400:
-                duo_workflow_metrics.count_checkpoint_error(
-                    endpoint=endpoint,
-                    status_code=response.status_code,
-                    method="POST",
-                )
+            duo_workflow_metrics.count_checkpoints(
+                endpoint=endpoint,
+                status_code=(
+                    response.status_code
+                    if isinstance(response, GitLabHttpResponse)
+                    else "unknown"
+                ),
+                method="POST",
+            )
         self._logger.info(
             "Checkpoint saved",
             thread_ts=checkpoint["id"],

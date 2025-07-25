@@ -23,7 +23,7 @@ class TestDuoWorkflowMetrics(unittest.TestCase):
             "gitlab_response_duration",
             "network_latency",
             "llm_response_counter",
-            "checkpoint_error_counter",
+            "checkpoint_counter",
             "model_completion_error_counter",
         ]:
             mock_histogram = MagicMock()
@@ -185,19 +185,17 @@ class TestDuoWorkflowMetrics(unittest.TestCase):
         labels_result_mock = MagicMock()
         labels_result_mock.inc = observe_mock
 
-        cast(MagicMock, self.metrics.checkpoint_error_counter.labels).return_value = (
+        cast(MagicMock, self.metrics.checkpoint_counter.labels).return_value = (
             labels_result_mock
         )
 
-        self.metrics.count_checkpoint_error(
+        self.metrics.count_checkpoints(
             endpoint="test_endpoint",
             status_code="test_status",
             method="POST",
         )
 
-        cast(
-            MagicMock, self.metrics.checkpoint_error_counter.labels
-        ).assert_called_once_with(
+        cast(MagicMock, self.metrics.checkpoint_counter.labels).assert_called_once_with(
             endpoint="test_endpoint", status_code="test_status", method="POST"
         )
 
