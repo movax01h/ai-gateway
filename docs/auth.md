@@ -81,6 +81,33 @@ AIGW_GITLAB_URL=http://<your-gdk-address>/    # e.g. http://gdk.test:3000/
 AIGW_CUSTOMER_PORTAL_URL=http://<your-customer-dot-address> # e.g. http://127.0.0.1:5000
 ```
 
+#### Self-signed SSL certificates
+
+If your GitLab instance is configured with a self-signed certificate, you need to pass your root CA's cert to the AI
+Gateway for authentication to succeed. You can do so by setting the `REQUESTS_CA_BUNDLE` environment variable (see
+<https://requests.readthedocs.io/en/latest/user/advanced/#ssl-cert-verification>). Since we rely on
+[`certifi`](https://github.com/certifi/python-certifi) for our base trusted CA list, you can configure a custom CA
+bundle as follows:
+
+- Download `certifi`'s `cacert.pem` file:
+
+```shell
+curl "https://raw.githubusercontent.com/certifi/python-certifi/2024.07.04/certifi/cacert.pem" -o cacert.pem
+```
+
+- Append your self-signed CA's root cert to the file. For example, if you used `mkcert` to create your certificate:
+
+```shell
+cat "$(mkcert -CAROOT)/rootCA.pem" >> /path/to/your/cacert.pem
+```
+
+- Set `REQUESTS_CA_BUNDLE` to the path of your `cacert.pem`. In GDK you can do so by adding the following to your
+`$GDK_ROOT/env.runit`:
+
+```env
+export REQUESTS_CA_BUNDLE=/path/to/your/cacert.pem
+```
+
 ### Ensure `CLOUD_CONNECTOR_SERVICE_NAME` is set
 
 **NOTE:** Only necessary if you don't use the Docker container.
