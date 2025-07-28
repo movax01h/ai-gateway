@@ -490,7 +490,7 @@ class GitLabWorkflow(BaseCheckpointSaver[Any], AbstractAsyncContextManager[Any])
                 ),
             )
             duo_workflow_metrics.count_checkpoints(
-                endpoint=endpoint,
+                endpoint="/api/v4/ai/duo_workflows/workflows/:id/checkpoints",
                 status_code=(
                     response.status_code
                     if isinstance(response, GitLabHttpResponse)
