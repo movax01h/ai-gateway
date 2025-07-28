@@ -302,6 +302,9 @@ async def test_compile_and_run_graph_with_exception(
 
 
 @pytest.mark.asyncio
+# pylint: disable=direct-environment-variable-reference
+@patch.dict(os.environ, {"LANGCHAIN_TRACING_V2": "true"})
+# pylint: enable=direct-environment-variable-reference
 @patch.object(MockWorkflow, "_compile_and_run_graph")
 async def test_run_passes_correct_metadata_to_langsmith_extra(
     mock_compile_and_run_graph, workflow

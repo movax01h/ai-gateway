@@ -1,3 +1,4 @@
+import os
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, AsyncIterator, Literal, Optional, Type, Union
@@ -58,6 +59,14 @@ from lib.feature_flags.context import current_feature_flag_context
 from lib.internal_events.client import InternalEventsClient
 
 pytest_plugins = ("pytest_asyncio",)
+
+
+# LANGCHAIN_TRACING_V2 is how Langchain decides whether to send traces
+# We do not want to send traces when running tests so we set it to false
+# see https://github.com/langchain-ai/langchain/issues/16429#issuecomment-1907051834
+# pylint: disable=direct-environment-variable-reference
+os.environ["LANGCHAIN_TRACING_V2"] = "false"
+# pylint: enable=direct-environment-variable-reference
 
 
 @pytest.fixture

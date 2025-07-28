@@ -267,7 +267,8 @@ def test_middleware_internal_event(test_path, expected):
 @pytest.mark.parametrize(
     "test_path,expected", [("/v2/chat/agent", True), ("/monitoring/healthz", False)]
 )
-def test_middleware_distributed_trace(test_path, expected):
+def test_middleware_distributed_trace_in_development(test_path, expected):
+    """Test that distributed tracing works in development environment with langsmith-trace header."""
     config = Config(
         _env_file=None,
         auth=ConfigAuth(bypass_external=True),
@@ -276,18 +277,85 @@ def test_middleware_distributed_trace(test_path, expected):
     server = create_fast_api_server(config)
     client = TestClient(server)
 
-    with patch(
-        "ai_gateway.api.middleware.base.tracing_context"
-    ) as mock_tracing_context:
-        client.post(
-            test_path,
-            headers={
-                "langsmith-trace": "20240808T090953171943Z18dfa1db-1dfc-4a48-aaf8-a139960955ce"
-            },
-        )
+    # pylint: disable=direct-environment-variable-reference
+    with patch.dict(os.environ, {"LANGCHAIN_TRACING_V2": "true"}):
+        with patch(
+            "ai_gateway.api.middleware.base.tracing_context"
+        ) as mock_tracing_context:
+            client.post(
+                test_path,
+                headers={
+                    "langsmith-trace": "20240808T090953171943Z18dfa1db-1dfc-4a48-aaf8-a139960955ce"
+                },
+            )
+        # pylint: enable=direct-environment-variable-reference
         if expected:
+            # Should be called with enabled=True in development
             mock_tracing_context.assert_called_once()
+            call_args = mock_tracing_context.call_args
+            assert call_args.kwargs["enabled"] is True
         else:
+            mock_tracing_context.assert_not_called()
+
+
+@pytest.mark.usefixtures("fastapi_server_app")
+@pytest.mark.parametrize("test_path", ["/v2/chat/agent", "/monitoring/healthz"])
+def test_middleware_distributed_trace_disabled_in_non_development(test_path):
+    """Test that distributed tracing is disabled in non-development environments."""
+    config = Config(
+        _env_file=None,
+        auth=ConfigAuth(bypass_external=True),
+        environment="production",
+    )
+    server = create_fast_api_server(config)
+    client = TestClient(server)
+
+    # pylint: disable=direct-environment-variable-reference
+    with patch.dict(os.environ, {"LANGCHAIN_TRACING_V2": "true"}):
+        with patch(
+            "ai_gateway.api.middleware.base.tracing_context"
+        ) as mock_tracing_context:
+            client.post(
+                test_path,
+                headers={
+                    "langsmith-trace": "20240808T090953171943Z18dfa1db-1dfc-4a48-aaf8-a139960955ce"
+                },
+            )
+        # pylint: enable=direct-environment-variable-reference
+        if test_path == "/v2/chat/agent":
+            # tracing_context should be called but with enabled=False in non-development environments
+            mock_tracing_context.assert_called_once()
+            call_args = mock_tracing_context.call_args
+            assert call_args.kwargs["enabled"] is False
+        else:
+            # Health endpoint should skip tracing entirely
+            mock_tracing_context.assert_not_called()
+
+
+@pytest.mark.usefixtures("fastapi_server_app")
+@pytest.mark.parametrize("test_path", ["/v2/chat/agent", "/monitoring/healthz"])
+def test_middleware_distributed_trace_disabled_without_header(test_path):
+    """Test that distributed tracing is disabled without langsmith-trace header."""
+    config = Config(
+        _env_file=None,
+        auth=ConfigAuth(bypass_external=True),
+        environment="development",
+    )
+    server = create_fast_api_server(config)
+    client = TestClient(server)
+
+    # pylint: disable=direct-environment-variable-reference
+    with patch.dict(os.environ, {"LANGCHAIN_TRACING_V2": "true"}):
+        with patch(
+            "ai_gateway.api.middleware.base.tracing_context"
+        ) as mock_tracing_context:
+            client.post(test_path)  # No langsmith-trace header
+        # pylint: enable=direct-environment-variable-reference
+        if test_path == "/v2/chat/agent":
+            # tracing_context should be called but with enabled=True and parent=None in development
+            mock_tracing_context.assert_called_once_with(parent=None, enabled=True)
+        else:
+            # Health endpoint should skip tracing entirely
             mock_tracing_context.assert_not_called()
 
 
