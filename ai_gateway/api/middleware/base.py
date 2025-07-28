@@ -188,12 +188,12 @@ class DistributedTraceMiddleware:
             await self.app(scope, receive, send)
             return
 
-        if self.environment == "development" and "langsmith-trace" in request.headers:
-            # Set the distributed tracing LangSmith header to the tracing context, which is sent from
-            # Langsmith::RunHelpers of GitLab-Rails/Sidekiq.
-            # See https://docs.gitlab.com/ee/development/ai_features/duo_chat.html#tracing-with-langsmith
-            # and https://docs.smith.langchain.com/how_to_guides/tracing/distributed_tracing
-            with tracing_context(parent=request.headers["langsmith-trace"]):
-                await self.app(scope, receive, send)
-        else:
+        # Set the distributed tracing LangSmith header to the tracing context, which is sent from
+        # Langsmith::RunHelpers of GitLab-Rails/Sidekiq.
+        # See https://docs.gitlab.com/ee/development/ai_features/duo_chat.html#tracing-with-langsmith
+        # and https://docs.smith.langchain.com/how_to_guides/tracing/distributed_tracing
+        with tracing_context(
+            parent=request.headers.get("langsmith-trace"),
+            enabled=self.environment == "development",
+        ):
             await self.app(scope, receive, send)
