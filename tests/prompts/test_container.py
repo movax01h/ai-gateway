@@ -85,7 +85,11 @@ def test_container(mock_ai_gateway_container: containers.DeclarativeContainer):
             provider="",
         )
 
-        klass = registry.prompts_registered[str(prompt_id_with_model_name)].klass
+        # Load the prompt definition to get the class
+        prompt_registered = registry._load_prompt_definition(
+            str(prompt_id_with_model_name)
+        )
+        klass = prompt_registered.klass
         kwargs = _kwargs_for_class(klass)
 
         for version in versions:

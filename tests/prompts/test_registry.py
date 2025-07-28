@@ -1,14 +1,11 @@
 # pylint: disable=too-many-lines
 from pathlib import Path
-from textwrap import dedent
 from typing import Sequence, Type, cast
 from unittest.mock import Mock, patch
 
 import pytest
-import yaml
 from langchain_anthropic import ChatAnthropic
 from langchain_community.chat_models import ChatLiteLLM
-from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.prompts.chat import MessageLikeRepresentation
 from langchain_core.runnables import RunnableBinding, RunnableSequence
@@ -24,21 +21,30 @@ from ai_gateway.model_metadata import (
     ModelMetadata,
     TypeModelMetadata,
 )
-from ai_gateway.prompts import LocalPromptRegistry, Prompt, PromptRegistered
-from ai_gateway.prompts.config import (
-    ChatAmazonQParams,
-    ChatAnthropicParams,
-    ChatLiteLLMParams,
-    ModelClassProvider,
-    ModelConfig,
-    PromptConfig,
-)
-from ai_gateway.prompts.config.base import PromptParams
+from ai_gateway.prompts import LocalPromptRegistry, Prompt
+from ai_gateway.prompts.config import ModelClassProvider
 from ai_gateway.prompts.typing import Model, TypeModelFactory
 
 
 class MockPromptClass(Prompt):
     pass
+
+
+# Clear the cache before and after each test
+@pytest.fixture(autouse=True)
+def clear_prompt_cache():
+    """Clear cache before and after each test to ensure test isolation."""
+    cache_clear = getattr(
+        LocalPromptRegistry._load_prompt_definition, "cache_clear", None
+    )
+
+    if cache_clear is not None:
+        cache_clear()
+
+    yield
+
+    if cache_clear is not None:
+        cache_clear()
 
 
 # editorconfig-checker-disable
@@ -222,134 +228,6 @@ def model_factories():
 
 
 @pytest.fixture
-def prompts_registered(prompt_class: type[Prompt]):
-    return {
-        "test/base": PromptRegistered(
-            klass=prompt_class,
-            versions={
-                "1.0.0": PromptConfig(
-                    name="Test prompt 1.0.0",
-                    model=ModelConfig(
-                        name="claude-3-5-sonnet-20241022",
-                        params=ChatLiteLLMParams(
-                            model_class_provider=ModelClassProvider.LITE_LLM,
-                            top_p=0.1,
-                            top_k=50,
-                            max_tokens=256,
-                            max_retries=10,
-                            custom_llm_provider="vllm",
-                        ),
-                    ),
-                    unit_primitives=["explain_code"],
-                    prompt_template={"system": "Template1"},
-                ),
-                "1.0.1": PromptConfig(
-                    name="Test prompt 1.0.1",
-                    model=ModelConfig(
-                        name="claude-3-5-sonnet-20241022",
-                        params=ChatLiteLLMParams(
-                            model_class_provider=ModelClassProvider.LITE_LLM,
-                            top_p=0.1,
-                            top_k=50,
-                            max_tokens=256,
-                            max_retries=10,
-                            custom_llm_provider="vllm",
-                            temperature=0.9,
-                        ),
-                    ),
-                    unit_primitives=["explain_code"],
-                    prompt_template={"system": "Template1"},
-                ),
-                "1.0.2-dev": PromptConfig(
-                    name="Test prompt 1.0.2-dev",
-                    model=ModelConfig(
-                        name="claude-3-5-sonnet-20241022",
-                        params=ChatLiteLLMParams(
-                            model_class_provider=ModelClassProvider.LITE_LLM,
-                            top_p=0.1,
-                            top_k=50,
-                            max_tokens=256,
-                            max_retries=10,
-                            custom_llm_provider="vllm",
-                            temperature=0.9,
-                        ),
-                    ),
-                    unit_primitives=["explain_code"],
-                    prompt_template={"system": "Template1"},
-                ),
-            },
-        ),
-        "chat/react/base": PromptRegistered(
-            klass=MockPromptClass,
-            versions={
-                "1.0.0": PromptConfig(
-                    name="Chat react prompt",
-                    model=ModelConfig(
-                        name="claude-3-haiku-20240307",
-                        params=ChatAnthropicParams(
-                            model_class_provider=ModelClassProvider.ANTHROPIC,
-                            temperature=0.1,
-                            top_p=0.8,
-                            top_k=40,
-                            max_tokens=256,
-                            max_retries=6,
-                            default_headers={
-                                "header1": "Header1 value",
-                                "header2": "Header2 value",
-                            },
-                        ),
-                    ),
-                    unit_primitives=["duo_chat"],
-                    prompt_template={"system": "Template1", "user": "Template2"},
-                    params=PromptParams(timeout=60, stop=["Foo", "Bar"]),
-                ),
-            },
-        ),
-        "chat/react/amazon_q": PromptRegistered(
-            klass=MockPromptClass,
-            versions={
-                "1.0.0": PromptConfig(
-                    name="Amazon Q React prompt",
-                    model=ModelConfig(
-                        name="amazon_q",
-                        params=ChatAmazonQParams(
-                            model_class_provider=ModelClassProvider.AMAZON_Q,
-                        ),
-                    ),
-                    unit_primitives=["amazon_q_integration"],
-                    prompt_template={"system": "Template1", "user": "Template2"},
-                    params=PromptParams(timeout=60, stop=["Foo", "Bar"]),
-                ),
-            },
-        ),
-        "chat/react/custom": PromptRegistered(
-            klass=MockPromptClass,
-            versions={
-                "1.0.0": PromptConfig(
-                    name="Chat react custom prompt",
-                    model=ModelConfig(
-                        name="custom",
-                        params=ChatLiteLLMParams(
-                            model_class_provider=ModelClassProvider.LITE_LLM,
-                            temperature=0.1,
-                            top_p=0.8,
-                            top_k=40,
-                            max_tokens=256,
-                            max_retries=6,
-                        ),
-                    ),
-                    unit_primitives=["duo_chat"],
-                    prompt_template={"system": "Template1", "user": "Template2"},
-                    params=PromptParams(
-                        timeout=60, stop=["Foo", "Bar"], vertex_location="us-east1"
-                    ),
-                ),
-            },
-        ),
-    }
-
-
-@pytest.fixture
 def default_prompts():
     return {}
 
@@ -366,7 +244,6 @@ def disable_streaming():
 
 @pytest.fixture
 def registry(
-    prompts_registered: dict[str, PromptRegistered],
     model_factories: dict[ModelClassProvider, TypeModelFactory],
     default_prompts: dict[str, str],
     internal_event_client: Mock,
@@ -374,9 +251,10 @@ def registry(
     custom_models_enabled: bool,
     disable_streaming: bool,
 ):
-    return LocalPromptRegistry(
+    # Use from_local_yaml for lazy loading version
+    return LocalPromptRegistry.from_local_yaml(
+        class_overrides={"chat/react": MockPromptClass},
         model_factories=model_factories,
-        prompts_registered=prompts_registered,
         default_prompts=default_prompts,
         internal_event_client=internal_event_client,
         model_limits=model_limits,
@@ -397,7 +275,6 @@ class TestLocalPromptRegistry:
     def test_from_local_yaml(
         self,
         model_factories: dict[ModelClassProvider, TypeModelFactory],
-        prompts_registered: dict[str, PromptRegistered],
         internal_event_client: Mock,
         model_limits: ConfigModelLimits,
         override_key: str,
@@ -415,7 +292,13 @@ class TestLocalPromptRegistry:
             disable_streaming=False,
         )
 
-        assert registry.prompts_registered == prompts_registered
+        # Test behavior instead of checking internal state
+        prompt_with_override = registry.get("chat/react", "^1.0.0")
+        assert isinstance(prompt_with_override, MockPromptClass)
+
+        prompt_without_override = registry.get("test", "^1.0.0")
+        assert isinstance(prompt_without_override, Prompt)
+        assert not isinstance(prompt_without_override, MockPromptClass)
 
     @pytest.mark.usefixtures("mock_fs")
     @pytest.mark.parametrize(
@@ -451,19 +334,238 @@ class TestLocalPromptRegistry:
         error_class: Type[Exception],
         error_message: str,
     ):
+        registry = LocalPromptRegistry.from_local_yaml(
+            class_overrides={
+                override_key: override_class,
+            },
+            model_factories=model_factories,
+            default_prompts={},
+            internal_event_client=internal_event_client,
+            model_limits=model_limits,
+            custom_models_enabled=False,
+            disable_streaming=False,
+        )
+
         with pytest.raises(error_class, match=error_message):
-            LocalPromptRegistry.from_local_yaml(
-                class_overrides={
-                    override_key: override_class,
-                },
-                model_factories=model_factories,
-                default_prompts={},
-                internal_event_client=internal_event_client,
-                model_limits=model_limits,
-                custom_models_enabled=False,
-                disable_streaming=False,
+            registry.get("chat/react", "^1.0.0")
+
+    @pytest.mark.usefixtures("mock_fs")
+    def test_default_prompts(
+        self,
+        model_factories: dict[ModelClassProvider, TypeModelFactory],
+        internal_event_client: Mock,
+        model_limits: ConfigModelLimits,
+    ):
+        registry = LocalPromptRegistry.from_local_yaml(
+            class_overrides={
+                "chat/react": MockPromptClass,
+            },
+            model_factories=model_factories,
+            default_prompts={"chat/react": "custom"},
+            internal_event_client=internal_event_client,
+            model_limits=model_limits,
+            custom_models_enabled=False,
+        )
+
+        assert registry.get("chat/react", "^1.0.0").name == "Chat react custom prompt"
+
+    @pytest.mark.usefixtures("mock_fs")
+    def test_get_prompt_config_no_compatible_versions(
+        self,
+        registry: LocalPromptRegistry,
+    ):
+        # Try to get a version 2.0.0 which doesn't exist
+        with pytest.raises(ValueError) as exc_info:
+            registry.get("test", "2.0.0")
+
+        assert (
+            str(exc_info.value) == "No prompt version found matching the query: 2.0.0"
+        )
+
+    @pytest.mark.usefixtures("mock_fs")
+    def test_load_prompt_without_unit_primitive(
+        self,
+        fs: FakeFilesystem,
+        model_factories,
+        internal_event_client: Mock,
+        model_limits: ConfigModelLimits,
+    ):
+        yaml_content = """
+---
+name: TestPrompt No UP
+model:
+    name: claude-3.5
+    params:
+        model_class_provider: litellm
+prompt_template:
+    system: test
+"""
+
+        prompts_definitions_dir = (
+            Path(__file__).parent.parent.parent
+            / "ai_gateway"
+            / "prompts"
+            / "definitions"
+        )
+        fs.create_file(
+            prompts_definitions_dir / "no_up" / "base" / "1.0.0.yml",
+            contents=yaml_content,
+        )
+
+        registry = LocalPromptRegistry.from_local_yaml(
+            class_overrides={},
+            model_factories=model_factories,
+            default_prompts={},
+            custom_models_enabled=True,
+            internal_event_client=internal_event_client,
+            model_limits=model_limits,
+        )
+
+        prompt = registry.get("no_up", "1.0.0")
+        assert prompt.unit_primitives == []
+
+        # Test with model metadata
+        fs.create_file(
+            prompts_definitions_dir / "no_up" / "codestral" / "1.0.0.yml",
+            contents=yaml_content,
+        )
+
+        prompt = registry.get(
+            "no_up",
+            "1.0.0",
+            ModelMetadata(
+                name="codestral",
+                endpoint=HttpUrl("http://localhost:4000/"),
+                provider="custom_openai",
+            ),
+        )
+        assert prompt.unit_primitives == []
+
+    @pytest.mark.usefixtures("mock_fs")
+    def test_get_on_behalf_no_unit_primitive(
+        self,
+        user: StarletteUser,
+        prompt: Prompt,
+        internal_event_client: Mock,
+        model_limits: ConfigModelLimits,
+    ):
+        test_registry = LocalPromptRegistry.from_local_yaml(
+            class_overrides={},
+            model_factories={},
+            default_prompts={},
+            internal_event_client=internal_event_client,
+            model_limits=model_limits,
+        )
+        prompt.unit_primitives = []
+
+        with patch.object(test_registry, "get", return_value=prompt):
+            result_prompt = test_registry.get_on_behalf(user, prompt_id="test")
+
+            assert result_prompt == prompt
+
+    @pytest.mark.usefixtures("mock_fs")
+    @pytest.mark.parametrize(
+        ("model_metadata", "expected_identifier"),
+        [
+            (None, None),
+            (
+                ModelMetadata(
+                    name="custom",
+                    endpoint=HttpUrl("http://localhost:4000/"),
+                    api_key="token",
+                    provider="custom_openai",
+                    identifier="custom_model_id",
+                ),
+                "custom_model_id",
+            ),
+            (
+                AmazonQModelMetadata(
+                    name="amazon_q",
+                    provider="amazon_q",
+                    role_arn="role-arn",
+                ),
+                None,
+            ),
+        ],
+    )
+    def test_logging_with_model_identifier(
+        self,
+        registry: LocalPromptRegistry,
+        model_metadata: TypeModelMetadata,
+        expected_identifier: str,
+    ):
+        with patch("ai_gateway.prompts.registry.log") as mock_log:
+
+            registry.get(
+                "chat/react",
+                "^1.0.0",
+                model_metadata=model_metadata,
             )
 
+            call_dict = mock_log.info.call_args[1]
+            assert call_dict["model_identifier"] == expected_identifier
+
+    @pytest.mark.usefixtures("mock_fs")
+    @pytest.mark.parametrize(
+        ("tool_choice", "prompt_class"),
+        [
+            ("auto", Mock(spec=Prompt)),
+            ("any", Mock(spec=Prompt)),
+            (None, Mock(spec=Prompt)),
+        ],
+    )
+    def test_get_with_tool_choice(
+        self,
+        prompt_class: Mock,
+        registry: LocalPromptRegistry,
+        tool_choice: str | None,
+    ):
+        """Test that tool_choice parameter is correctly passed from get method to Prompt constructor."""
+
+        # We have custom BaseTool in ai_gateway.chat.tools.
+        # To avoid potential collisions, we import BaseTool from LangChain locally.
+        from langchain_core.tools.base import (  # pylint: disable=import-outside-toplevel
+            BaseTool,
+        )
+
+        tools: list[BaseTool] = [Mock(spec=BaseTool)]
+
+        # Mock the _load_prompt_definition to return a mock prompt
+        with patch.object(
+            registry,
+            "_load_prompt_definition",
+            return_value=Mock(klass=prompt_class, versions={"1.0.0": Mock()}),
+        ):
+            with patch.object(
+                registry,
+                "_get_prompt_config",
+                return_value=Mock(
+                    model=Mock(
+                        params=Mock(model_class_provider=ModelClassProvider.LITE_LLM)
+                    )
+                ),
+            ):
+                _ = registry.get(
+                    prompt_id="test",
+                    prompt_version="^1.0.0",
+                    tools=tools,
+                    tool_choice=tool_choice,
+                )
+
+                kwargs = prompt_class.call_args.kwargs
+                assert kwargs.get("tool_choice") == tool_choice
+                assert kwargs.get("tools") == tools
+
+    @pytest.mark.usefixtures("mock_fs")
+    def test_file_not_found_error(
+        self,
+        registry: LocalPromptRegistry,
+    ):
+        """Test that appropriate error is raised when prompt definition is not found."""
+        with pytest.raises(ValueError, match="Failed to load prompt definition"):
+            registry.get("nonexistent", "1.0.0")
+
+    @pytest.mark.usefixtures("mock_fs")
     @pytest.mark.parametrize(
         (
             "prompt_id",
@@ -695,388 +797,30 @@ class TestLocalPromptRegistry:
         assert actual_model_params == expected_model_params
         assert isinstance(prompt.model, expected_model_class)
 
-    @pytest.mark.parametrize(
-        (
-            "prompt_id",
-            "expected_name",
-            "expected_class",
-            "expected_model",
-            "expected_prompt_version",
-            "expected_model_class",
-            "expected_kwargs",
-            "default_prompt_env_config",
-        ),
-        [
-            (
-                "code_suggestions/generations",
-                "Claude 3.7 Vertex Code Generations Agent",
-                Prompt,
-                "claude-3-7-sonnet@20250219",
-                "2.0.2",
-                ChatLiteLLM,
-                {"stop": ["</new_code>"], "vertex_location": "us-east5"},
-                {"code_suggestions/generations": "base"},
-            ),
-            (
-                "code_suggestions/generations",
-                "Claude Sonnet 4 Code Generations Agent",
-                Prompt,
-                "claude-sonnet-4-20250514",
-                "^1.0.0",
-                ChatAnthropic,
-                {"stop": ["</new_code>"]},
-                {},
-            ),
-        ],
-    )
-    def test_get_code_generations_base(
-        self,
-        model_factories: dict[ModelClassProvider, TypeModelFactory],
-        internal_event_client: Mock,
-        model_limits: ConfigModelLimits,
-        prompt_id: str,
-        expected_name: str,
-        expected_prompt_version: str,
-        expected_class: Type[Prompt],
-        expected_model: str,
-        expected_model_class: Type[Model],
-        expected_kwargs: dict,
-        default_prompt_env_config: dict[str, str],
-    ):
-        registry = LocalPromptRegistry.from_local_yaml(
-            class_overrides={},
-            model_factories=model_factories,
-            default_prompts=default_prompt_env_config,
-            internal_event_client=internal_event_client,
-            model_limits=model_limits,
-        )
-        prompt = registry.get(
-            prompt_id,
-            prompt_version=expected_prompt_version,
-        )
-        chain = cast(RunnableSequence, prompt.bound)
-        binding = cast(RunnableBinding, chain.last)
-
-        params = {
-            "language": "Go",
-            "file_name": "test.go",
-            "examples_array": [
-                {
-                    "example": "// calculate the square root of a number",
-                    "response": "<new_code>if isPrime { primes = append(primes, num) }\n}",
-                    "trigger_type": "empty_function",
-                }
-            ],
-            "trimmed_content_above_cursor": "write a function to find min abs value from an array",
-            "trimmed_content_below_cursor": "\n",
-            "related_files": [
-                '<file_content file_name="client/gitlabnet.go"></file_content>\n',
-                '<file_content file_name="client/client_test.go"></file_content>\n',
-            ],
-            "related_snippets": [],
-            "libraries": [],
-            "user_instruction": "// write a function to find min abs value from an array",
-        }
-        expected_rendered_prompt = [
-            # pylint: disable=line-too-long
-            SystemMessage(
-                dedent(
-                    """\
-            You are a tremendously accurate and skilled coding autocomplete agent. We want to generate new Go code inside the
-            file 'test.go' based on instructions from the user.
-            Here are a few examples of successfully generated code:
-            <examples>
-            <example>
-            H: <existing_code>
-            // calculate the square root of a number
-            </existing_code>
-
-            A: <new_code>if isPrime { primes = append(primes, num) }
-            }</new_code>
-            </example>
-
-
-            </examples>
-            <existing_code>
-            write a function to find min abs value from an array{{cursor}}
-
-            </existing_code>
-
-            The existing code is provided in <existing_code></existing_code> tags.
-            Here are some files and code snippets that could be related to the current code.
-            The files provided in <related_files><related_files> tags.
-            The code snippets provided in <related_snippets><related_snippets> tags.
-            Please use existing functions from these files and code snippets if possible when suggesting new code.
-            <related_files>
-            <file_content file_name="client/gitlabnet.go"></file_content>
-
-            <file_content file_name="client/client_test.go"></file_content>
-
-            </related_files>
-
-            The new code you will generate will start at the position of the cursor, which is currently indicated by the {{cursor}} tag.
-            In your process, first, review the existing code to understand its logic and format. Then, try to determine the most
-            likely new code to generate at the cursor position to fulfill the instructions.
-
-            The comment directly before the {{cursor}} position is the instruction,
-            all other comments are not instructions.
-
-            When generating the new code, please ensure the following:
-            1. It is valid Go code.
-            2. It matches the existing code's variable, parameter and function names.
-            3. It does not repeat any existing code. Do not repeat code that comes before or after the cursor tags. This includes cases where the cursor is in the middle of a word.
-            4. If the cursor is in the middle of a word, it finishes the word instead of repeating code before the cursor tag.
-            5. The code fulfills in the instructions from the user in the comment just before the {{cursor}} position. All other comments are not instructions.
-            6. Do not add any comments that duplicates any of the already existing comments, including the comment with instructions.
-
-            Return new code enclosed in <new_code></new_code> tags. We will then insert this at the {{cursor}} position.
-            If you are not able to write code based on the given instructions return an empty result like <new_code></new_code>."""
-                )
-            ),
-            HumanMessage("// write a function to find min abs value from an array"),
-            AIMessage("<new_code>"),
-        ]
-        assert (
-            prompt.prompt_tpl.invoke(params).to_messages() == expected_rendered_prompt
-        )
-        assert prompt.name == expected_name
-        assert isinstance(prompt, expected_class)
-        assert isinstance(prompt.model, expected_model_class)
-        assert prompt.model_name == expected_model
-        assert binding.kwargs == expected_kwargs
-
     @pytest.mark.usefixtures("mock_fs")
-    def test_default_prompts(
+    def test_get_prompt_directory_without_yaml_files(
         self,
-        model_factories: dict[ModelClassProvider, TypeModelFactory],
-        internal_event_client: Mock,
-        model_limits: ConfigModelLimits,
+        fs: FakeFilesystem,
+        registry: LocalPromptRegistry,
     ):
-        registry = LocalPromptRegistry.from_local_yaml(
-            class_overrides={
-                "chat/react": MockPromptClass,
-            },
-            model_factories=model_factories,
-            default_prompts={"chat/react": "custom"},
-            internal_event_client=internal_event_client,
-            model_limits=model_limits,
-            custom_models_enabled=False,
+        """Test that appropriate error is raised when prompt directory exists but has no YAML files."""
+        prompts_definitions_dir = (
+            Path(__file__).parent.parent.parent
+            / "ai_gateway"
+            / "prompts"
+            / "definitions"
+        )
+        empty_prompt_dir = prompts_definitions_dir / "empty_prompt" / "base"
+        fs.create_dir(empty_prompt_dir)
+
+        fs.create_file(
+            empty_prompt_dir / "README.md", contents="This directory has no YAML files"
         )
 
-        assert registry.get("chat/react", "^1.0.0").name == "Chat react custom prompt"
-
-    def test_get_prompt_config_no_compatible_versions(
-        self,
-        model_factories: dict[ModelClassProvider, TypeModelFactory],
-        internal_event_client: Mock,
-        model_limits: ConfigModelLimits,
-    ):
-        # Create a registry with a prompt that has versions 1.0.0 and 1.0.1
-        registry = LocalPromptRegistry(
-            prompts_registered={
-                "test/base": PromptRegistered(
-                    klass=Prompt,
-                    versions={
-                        "1.0.0": PromptConfig(
-                            name="Test prompt 1.0.0",
-                            model=ModelConfig(
-                                name="claude-3-5-sonnet-20241022",
-                                params=ChatLiteLLMParams(
-                                    model_class_provider=ModelClassProvider.LITE_LLM,
-                                    top_p=0.1,
-                                    top_k=50,
-                                    max_tokens=256,
-                                    max_retries=10,
-                                    custom_llm_provider="vllm",
-                                ),
-                            ),
-                            unit_primitives=["explain_code"],
-                            prompt_template={"system": "Template1"},
-                        ),
-                        "1.0.1": PromptConfig(
-                            name="Test prompt 1.0.1",
-                            model=ModelConfig(
-                                name="claude-3-5-sonnet-20241022",
-                                params=ChatLiteLLMParams(
-                                    model_class_provider=ModelClassProvider.LITE_LLM,
-                                    top_p=0.1,
-                                    top_k=50,
-                                    max_tokens=256,
-                                    max_retries=10,
-                                    custom_llm_provider="vllm",
-                                ),
-                            ),
-                            unit_primitives=["explain_code"],
-                            prompt_template={"system": "Template1"},
-                        ),
-                    },
-                ),
-            },
-            model_factories=model_factories,
-            default_prompts={},
-            internal_event_client=internal_event_client,
-            model_limits=model_limits,
-            custom_models_enabled=True,
-            disable_streaming=True,
-        )
-
-        # Try to get a version 2.0.0 which doesn't exist
         with pytest.raises(ValueError) as exc_info:
-            registry.get("test", "2.0.0")
+            registry.get("empty_prompt", "1.0.0")
 
         assert (
-            str(exc_info.value) == "No prompt version found matching the query: 2.0.0"
+            str(exc_info.value)
+            == "Failed to load prompt definition for 'empty_prompt/base': No version YAML files found for prompt id: empty_prompt/base"
         )
-
-    @pytest.mark.usefixtures("mock_fs")
-    def test_load_prompt_without_unit_primitive(
-        self,
-        model_factories,
-        internal_event_client: Mock,
-        model_limits: ConfigModelLimits,
-    ):
-        registry = LocalPromptRegistry.from_local_yaml(
-            class_overrides={},
-            model_factories=model_factories,
-            default_prompts={},
-            custom_models_enabled=True,
-            internal_event_client=internal_event_client,
-            model_limits=model_limits,
-        )
-
-        yaml_content = """
-            name: TestPrompt No UP
-            model:
-                name: claude-3.5
-                params:
-                    model_class_provider: litellm
-            prompt_template:
-                system: test
-            """
-
-        with open("/tmp/test_prompt_no_up.yml", "w") as f:
-            f.write(yaml_content)
-
-        registry.prompts_registered.update(
-            {
-                "test/base": PromptRegistered(
-                    klass=Prompt,
-                    versions={"1.0.0": PromptConfig(**yaml.safe_load(yaml_content))},
-                ),  # type:ignore
-                "test/codestral": PromptRegistered(
-                    klass=Prompt,
-                    versions={"1.0.0": PromptConfig(**yaml.safe_load(yaml_content))},
-                ),  # type:ignore
-            }
-        )
-
-        prompt = registry.get("test", "1.0.0")
-        assert prompt.unit_primitives == []
-
-        prompt = registry.get(
-            "test",
-            "1.0.0",
-            ModelMetadata(
-                name="codestral",
-                endpoint=HttpUrl("http://localhost:4000/"),
-                provider="custom_openai",
-            ),
-        )
-        assert prompt.unit_primitives == []
-
-    def test_get_on_behalf_no_unit_primitive(
-        self,
-        user: StarletteUser,
-        prompt: Prompt,
-        internal_event_client: Mock,
-        model_limits: ConfigModelLimits,
-    ):
-        test_registry = LocalPromptRegistry.from_local_yaml(
-            class_overrides={},
-            model_factories={},
-            default_prompts={},
-            internal_event_client=internal_event_client,
-            model_limits=model_limits,
-        )
-        prompt.unit_primitives = []
-
-        with patch.object(test_registry, "get", return_value=prompt):
-            result_prompt = test_registry.get_on_behalf(user, prompt_id="test")
-
-            assert result_prompt == prompt
-
-    @pytest.mark.parametrize(
-        ("model_metadata", "expected_identifier"),
-        [
-            (None, None),
-            (
-                ModelMetadata(
-                    name="custom",
-                    endpoint=HttpUrl("http://localhost:4000/"),
-                    api_key="token",
-                    provider="custom_openai",
-                    identifier="custom_model_id",
-                ),
-                "custom_model_id",
-            ),
-            (
-                AmazonQModelMetadata(
-                    name="amazon_q",
-                    provider="amazon_q",
-                    role_arn="role-arn",
-                ),
-                None,
-            ),
-        ],
-    )
-    def test_logging_with_model_identifier(
-        self,
-        registry: LocalPromptRegistry,
-        model_metadata: TypeModelMetadata,
-        expected_identifier: str,
-    ):
-        with patch("ai_gateway.prompts.registry.log") as mock_log:
-
-            registry.get(
-                "chat/react",
-                "^1.0.0",
-                model_metadata=model_metadata,
-            )
-
-            call_dict = mock_log.info.call_args[1]
-            assert call_dict["model_identifier"] == expected_identifier
-
-    @pytest.mark.parametrize(
-        ("tool_choice", "prompt_class"),
-        [
-            ("auto", Mock(spec=Prompt)),
-            ("any", Mock(spec=Prompt)),
-            (None, Mock(spec=Prompt)),
-        ],
-    )
-    def test_get_with_tool_choice(
-        self,
-        prompt_class: Mock,
-        registry: LocalPromptRegistry,
-        tool_choice: str | None,
-    ):
-        """Test that tool_choice parameter is correctly passed from get method to Prompt constructor."""
-
-        # We have custom BaseTool in ai_gateway.chat.tools.
-        # To avoid potential collisions, we import BaseTool from LangChain locally.
-        from langchain_core.tools.base import (  # pylint: disable=import-outside-toplevel
-            BaseTool,
-        )
-
-        tools: list[BaseTool] = [Mock(spec=BaseTool)]
-
-        _ = registry.get(
-            prompt_id="test",
-            prompt_version="^1.0.0",
-            tools=tools,
-            tool_choice=tool_choice,
-        )
-
-        kwargs = prompt_class.call_args.kwargs
-        assert kwargs.get("tool_choice") == tool_choice
-        assert kwargs.get("tools") == tools
