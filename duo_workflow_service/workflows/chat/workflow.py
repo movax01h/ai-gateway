@@ -9,6 +9,7 @@ from langgraph.checkpoint.memory import BaseCheckpointSaver
 from langgraph.graph import END, StateGraph
 from langgraph.types import Command
 
+from ai_gateway.model_metadata import current_model_metadata_context
 from duo_workflow_service.agents.chat_agent import ChatAgent
 from duo_workflow_service.agents.tools_executor import ToolsExecutor
 from duo_workflow_service.checkpointer.gitlab_workflow import WorkflowStatusEventEnum
@@ -212,12 +213,11 @@ class Workflow(AbstractWorkflow):
         tools = self._get_tools()
         agents_toolset = tools_registry.toolset(tools)
 
-        # TODO: Specify model metadata for model switching and custom model support
         self._agent: ChatAgent = self._prompt_registry.get_on_behalf(  # type: ignore[assignment]
             user=self._user,
             prompt_id="chat/agent",
             prompt_version="^1.0.0",
-            model_metadata=None,
+            model_metadata=current_model_metadata_context.get(),
             internal_event_category=__name__,
             tools=agents_toolset.bindable,  # type: ignore[arg-type]
         )

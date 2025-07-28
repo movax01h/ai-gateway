@@ -275,10 +275,15 @@ def test_are_tools_called_with_tool_use(workflow_with_project):
     "mock_git_lab_workflow_instance",
     "mock_fetch_workflow_and_project_data",
 )
+@patch("duo_workflow_service.workflows.chat.workflow.current_model_metadata_context")
 async def test_workflow_run(
+    mock_model_metadata_context,
     mock_checkpoint_notifier,
     workflow_with_project,
 ):
+    mock_model_metadata = MagicMock()
+    mock_model_metadata_context.get.return_value = mock_model_metadata
+
     mock_user_interface_instance = mock_checkpoint_notifier.return_value
     state = {"status": "Not Started", "ui_chat_log": []}
 
@@ -306,9 +311,25 @@ async def test_workflow_run(
 
         workflow = workflow_with_project
 
-        await workflow.run("Test chat goal")
+        mock_agent = MagicMock()
+        with patch.object(
+            workflow._prompt_registry, "get_on_behalf", return_value=mock_agent
+        ) as mock_get_on_behalf:
+            await workflow.run("Test chat goal")
 
-        assert workflow.is_done
+            assert workflow.is_done
+
+            mock_get_on_behalf.assert_called_once()
+            call_args = mock_get_on_behalf.call_args
+
+            assert call_args.kwargs["model_metadata"] == mock_model_metadata
+            assert call_args.kwargs["user"] == workflow._user
+            assert call_args.kwargs["prompt_id"] == "chat/agent"
+            assert call_args.kwargs["prompt_version"] == "^1.0.0"
+            assert (
+                call_args.kwargs["internal_event_category"]
+                == "duo_workflow_service.workflows.chat.workflow"
+            )
 
         mock_user_interface_instance.send_event.assert_called_with(
             type="values", state=state, stream=True
