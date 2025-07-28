@@ -31,12 +31,14 @@ from duo_workflow_service.agents.prompts import (
     HANDOVER_TOOL_NAME,
 )
 from duo_workflow_service.components import (
-    GoalDisambiguationComponent,
     PlanApprovalComponent,
     ToolsApprovalComponent,
     ToolsRegistry,
 )
 from duo_workflow_service.components.executor.component import ExecutorComponent
+from duo_workflow_service.components.goal_disambiguation import (
+    GoalDisambiguationComponent,
+)
 from duo_workflow_service.components.planner.component import PlannerComponent
 from duo_workflow_service.entities import (
     MessageTypeEnum,
@@ -217,10 +219,7 @@ class Workflow(AbstractWorkflow):
         last_node_name = self._add_context_builder_nodes(graph, goal, tools_registry)
         disambiguation_component = GoalDisambiguationComponent(
             goal=goal,
-            model=create_chat_model(
-                max_tokens=MAX_TOKENS_TO_SAMPLE,
-                config=self._model_config,
-            ),
+            model_config=self._model_config,
             http_client=self._http_client,
             workflow_id=self._workflow_id,
             tools_registry=tools_registry,
