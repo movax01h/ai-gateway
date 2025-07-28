@@ -166,11 +166,13 @@ class TestLoadComponentClass:
     def test_load_component_class_success(self):
         """Test loading existing component class successfully."""
         # Mock the components module to have a test class
-        mock_component_class = type("TestComponent", (), {})
+        mock_base_component_class = type("TestBaseComponent", (), {})
+        mock_component_class = type("TestComponent", (mock_base_component_class,), {})
 
         with patch(
             "duo_workflow_service.agent_platform.experimental.flows.flow_config.components"
         ) as mock_components:
+            mock_components.BaseComponent = mock_base_component_class
             mock_components.TestComponent = mock_component_class
 
             result = load_component_class("TestComponent")
@@ -203,4 +205,25 @@ class TestLoadComponentClass:
             with pytest.raises(TypeError) as exc_info:
                 load_component_class("NotAClass")
 
-            assert "'NotAClass' is not a class" in str(exc_info.value)
+            assert "'NotAClass' must inherit from the BaseComponent class" in str(
+                exc_info.value
+            )
+
+    def test_load_component_class_not_a_child_of_a_base_class(self):
+        """Test loading existing component class successfully."""
+        # Mock the components module to have a test class
+        mock_base_component_class = type("TestBaseComponent", (), {})
+        mock_component_class = type("TestComponent", (), {})
+
+        with patch(
+            "duo_workflow_service.agent_platform.experimental.flows.flow_config.components"
+        ) as mock_components:
+            mock_components.BaseComponent = mock_base_component_class
+            mock_components.TestComponent = mock_component_class
+
+            with pytest.raises(TypeError) as exc_info:
+                load_component_class("NotAClass")
+
+            assert "'NotAClass' must inherit from the BaseComponent class" in str(
+                exc_info.value
+            )

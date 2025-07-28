@@ -63,7 +63,9 @@ def load_component_class(cls_name: str) -> type:
 
     component_class = getattr(components, cls_name)
 
-    if not inspect.isclass(component_class):
-        raise TypeError(f"'{cls_name}' is not a class")
+    if not inspect.isclass(component_class) or not issubclass(
+        component_class, components.BaseComponent
+    ):
+        raise TypeError(f"'{cls_name}' must inherit from the BaseComponent class")
 
     return component_class
