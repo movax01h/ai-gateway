@@ -4,9 +4,8 @@ import os
 from datetime import datetime, timezone
 from enum import StrEnum
 from functools import partial
-from typing import Annotated, List, Literal, Union
+from typing import Annotated, Any, List, Literal, Union
 
-from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.messages import (
     AIMessage,
     BaseMessage,
@@ -19,7 +18,7 @@ from langgraph.types import interrupt
 
 from duo_workflow_service.agents.agent import Agent
 from duo_workflow_service.agents.handover import HandoverAgent
-from duo_workflow_service.components.tools_registry import ToolsRegistry
+from duo_workflow_service.components.planner.base import BaseComponent
 from duo_workflow_service.entities.event import WorkflowEvent, WorkflowEventType
 from duo_workflow_service.entities.state import (
     MessageTypeEnum,
@@ -28,11 +27,11 @@ from duo_workflow_service.entities.state import (
     WorkflowState,
     WorkflowStatusEnum,
 )
-from duo_workflow_service.gitlab.http_client import GitlabHttpClient
+from duo_workflow_service.llm_factory import create_chat_model
 from duo_workflow_service.tools.request_user_clarification import (
     RequestUserClarificationTool,
 )
-from lib.internal_events.event_enum import CategoryEnum
+from duo_workflow_service.workflows.abstract_workflow import MAX_TOKENS_TO_SAMPLE
 
 from ...tools import HandoverTool
 from .prompts import (
@@ -57,29 +56,13 @@ class Routes(StrEnum):
     STOP = "stop"
 
 
-class GoalDisambiguationComponent:
-    #: pylint: disable=too-many-positional-arguments
-    def __init__(
-        self,
-        goal: str,
-        model: BaseChatModel,
-        workflow_id: str,
-        allow_agent_to_request_user: bool,
-        tools_registry: ToolsRegistry,
-        http_client: GitlabHttpClient,
-        workflow_type: CategoryEnum,
-    ):
-        self._goal = goal
-        self._model = model
-        self._workflow_id = workflow_id
-        self._http_client = http_client
-        self._tools_registry = tools_registry
-        self._allow_agent_to_request_user = self._allowed_to_clarify(
+class GoalDisambiguationComponent(BaseComponent):
+    def __init__(self, allow_agent_to_request_user: bool, **kwargs: Any):
+        super().__init__(**kwargs)
+
+        self.allow_agent_to_request_user = self._allowed_to_clarify(
             allow_agent_to_request_user
         )
-        self._workflow_type = workflow_type
-
-    # pylint: enable=too-many-positional-arguments
 
     def attach(
         self,
@@ -88,20 +71,23 @@ class GoalDisambiguationComponent:
         component_execution_state: WorkflowStatusEnum,
         graph_termination_node: str = END,
     ) -> Annotated[str, "Entry node name"]:
-        if not self._allow_agent_to_request_user:
+        if not self.allow_agent_to_request_user:
             return component_exit_node
 
         task_clarity_judge = Agent(
             goal="N/A",  # "Not used, Agent always gets prepared messages from previous steps",
             system_prompt="N/A",
             name=_AGENT_NAME,
-            model=self._model,
-            toolset=self._tools_registry.toolset(
+            model=create_chat_model(
+                max_tokens=MAX_TOKENS_TO_SAMPLE,
+                config=self.model_config,
+            ),
+            toolset=self.tools_registry.toolset(
                 [RequestUserClarificationTool.tool_title, HandoverTool.tool_title]
             ),
-            http_client=self._http_client,
-            workflow_id=self._workflow_id,
-            workflow_type=self._workflow_type,
+            http_client=self.http_client,
+            workflow_id=self.workflow_id,
+            workflow_type=self.workflow_type,
         )
         task_clarity_handover = HandoverAgent(
             new_status=WorkflowStatusEnum.PLANNING,
@@ -168,7 +154,7 @@ class GoalDisambiguationComponent:
                     ),
                     HumanMessage(
                         content=ASSIGNMENT_PROMPT.format(
-                            goal=self._goal,
+                            goal=self.goal,
                             conversation_history="\n".join(
                                 map(
                                     lambda x: x.pretty_repr(),
