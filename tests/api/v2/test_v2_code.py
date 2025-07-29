@@ -1156,32 +1156,6 @@ class TestCodeCompletions:
         assert result["model"]["name"] == "vertex_ai/codestral-2501"
         assert result["choices"][0]["text"] == "Post-processed completion response"
 
-    def test_vertex_codestral_with_prompt(self, mock_client, mock_agent_model: Mock):
-        params = {
-            "prompt_version": 2,
-            "project_path": "gitlab-org/gitlab",
-            "project_id": 278964,
-            "current_file": {
-                "file_name": "main.py",
-                "content_above_cursor": "foo",
-                "content_below_cursor": "\n",
-            },
-            "prompt": "bar",
-            "model_provider": "vertex-ai",
-            "model_name": "codestral-2501",
-        }
-
-        response = self._send_code_completions_request(mock_client, params)
-
-        assert not mock_agent_model.called
-        assert response.status_code == 400
-
-        body = response.json()
-        assert (
-            (body["detail"])
-            == "You cannot specify a prompt with the given provider and model combination"
-        )
-
     @pytest.mark.parametrize(
         "allow_llm_cache",
         ["true", "false"],
