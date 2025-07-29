@@ -26,7 +26,7 @@ from duo_workflow_service.tracking.errors import log_exception
 from duo_workflow_service.workflows.abstract_workflow import AbstractWorkflow
 from lib.feature_flags.context import FeatureFlag, is_feature_enabled
 
-MAX_TOKENS_TO_SAMPLE = 8192
+MAX_TOKENS_TO_SAMPLE = 16384
 DEBUG = os.getenv("DEBUG")
 MAX_MESSAGE_LENGTH = 200
 RECURSION_LIMIT = 500
