@@ -47,7 +47,6 @@ langchainhub = "^0.1.20"
 langchain-community = "^0.3.5"
 boto3 = "^1.35.37"
 python-gitlab = "^6.0.0"
-gitpython = "^3.1.43"
 unique-names-generator = "^1.0.2"
 langchain-google-vertexai = "^2.0.8"
 gitlab-cloud-connector = { version = "^3.0.0", source = "gitlab_cloud_connector" }
