@@ -1,5 +1,5 @@
 import json
-from typing import Any, Optional, Type
+from typing import Any, List, Optional, Type
 
 from pydantic import BaseModel, Field
 
@@ -234,3 +234,93 @@ mutation($vulnerabilityId: VulnerabilityID!, $comment: String, $dismissalReason:
         self, args: DismissVulnerabilityInput, _tool_response: Any = None
     ) -> str:
         return f"Dismiss vulnerability {args.vulnerability_id}"
+
+
+class LinkVulnerabilityToIssueInput(BaseModel):
+    issue_id: str = Field(description="ID of the issue to link to.")
+    vulnerability_ids: List[str] = Field(
+        description="Array of vulnerability IDs to link to the given issue. Up to 100 can be provided."
+    )
+
+
+class LinkVulnerabilityToIssue(DuoBaseTool):
+    name: str = "link_vulnerability_to_issue"
+    description: str = f"""Link a GitLab issue to security vulnerabilities in a GitLab project using GraphQL.
+
+    {PROJECT_IDENTIFICATION_DESCRIPTION}
+
+    The tool supports linking a GitLab issue to vulnerabilities by ID.
+    Up to 100 IDs of vulnerabilities can be provided.
+
+    For example:
+    - Link issue with ID 1 to a vulnerabilities with ID 23 and 10:
+        link_vulnerability_to_issue(
+            issue_id="gid://gitlab/Issue/1",
+            vulnerability_ids=["gid://gitlab/Vulnerability/23", "gid://gitlab/Vulnerability/10"]
+        )
+    """
+    args_schema: Type[BaseModel] = LinkVulnerabilityToIssueInput
+
+    async def _arun(self, **kwargs: Any) -> str:
+        issue_id = kwargs.pop("issue_id")
+        vulnerability_ids = kwargs.pop("vulnerability_ids")
+
+        # editorconfig-checker-disable
+        # Build GraphQL mutation
+        mutation = """
+        mutation($vulnerabilityIds: [VulnerabilityID!]!, $issueId: IssueID!) {
+          vulnerabilityIssueLinkCreate(input: { issueId: $issueId, vulnerabilityIds: $vulnerabilityIds }) {
+            issueLinks {
+              id
+              issue {
+                id,
+                title,
+                name
+              }
+              linkType
+            }
+            errors
+          }
+        }
+        """
+        # editorconfig-checker-enable
+
+        # Ensure vulnerability_ids have proper GraphQL format
+        vulnerability_ids = [
+            (
+                f"gid://gitlab/Vulnerability/{vid}"
+                if not str(vid).startswith("gid://gitlab/Vulnerability/")
+                else str(vid)
+            )
+            for vid in vulnerability_ids
+        ]
+
+        issue_id = (
+            f"gid://gitlab/Issue/{issue_id}"
+            if not str(issue_id).startswith("gid://gitlab/Issue/")
+            else str(issue_id)
+        )
+
+        variables = {"issueId": issue_id, "vulnerabilityIds": vulnerability_ids}
+
+        response = await self.gitlab_client.apost(
+            path="/api/graphql",
+            body=json.dumps({"query": mutation, "variables": variables}),
+        )
+
+        errors = response["data"]["vulnerabilityIssueLinkCreate"]["errors"]
+        if errors:
+            return json.dumps({"error": "; ".join(errors)})
+
+        return json.dumps(
+            {
+                "issueLinks": response["data"]["vulnerabilityIssueLinkCreate"][
+                    "issueLinks"
+                ]
+            }
+        )
+
+    def format_display_message(
+        self, args: LinkVulnerabilityToIssueInput, _tool_response: Any = None
+    ) -> str:
+        return f"Link issue to vulnerability {args.vulnerability_ids}"
