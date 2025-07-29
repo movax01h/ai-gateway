@@ -11,30 +11,30 @@ from ai_gateway.auth.glgo import GlgoAuthority
 
 
 class TestGlgoAuthority:
-    @pytest.fixture
-    def base_url(self):
+    @pytest.fixture(name="base_url")
+    def base_url_fixture(self):
         return "https://example.com"
 
-    @pytest.fixture
-    def signing_key(self, assets_dir):
+    @pytest.fixture(name="signing_key")
+    def signing_key_fixture(self, assets_dir):
         filepath = assets_dir / "keys" / "signing_key.pem"
         return open(filepath).read()
 
-    @pytest.fixture
-    def public_key(self, assets_dir):
+    @pytest.fixture(name="public_key")
+    def public_key_fixture(self, assets_dir):
         filepath = assets_dir / "keys" / "public_key.pem"
         return open(filepath).read()
 
-    @pytest.fixture
-    def kid(self):
+    @pytest.fixture(name="kid")
+    def kid_fixture(self):
         return "7zzcwTGSip6wDUBxSOzfHDnRGcdlJwiMWE0Y4jnnUtY"
 
-    @pytest.fixture
-    def endpoint(self):
+    @pytest.fixture(name="endpoint")
+    def endpoint_fixture(self):
         return "https://example.com/cc/token"
 
-    @pytest.fixture
-    def glgo_authority(self, base_url, signing_key):
+    @pytest.fixture(name="glgo_authority")
+    def glgo_authority_fixture(self, base_url, signing_key):
         return GlgoAuthority(signing_key=signing_key, glgo_base_url=base_url)
 
     def test_kid(self, base_url, signing_key, kid):

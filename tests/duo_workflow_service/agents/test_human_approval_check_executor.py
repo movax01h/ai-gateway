@@ -29,12 +29,12 @@ def prepare_container(
 
 
 class TestHumanApprovalCheckExecutor:
-    @pytest.fixture
-    def mock_http_client(self):
+    @pytest.fixture(name="mock_http_client")
+    def mock_http_client_fixture(self):
         return AsyncMock(spec=GitlabHttpClient)
 
-    @pytest.fixture
-    def workflow_state(self):
+    @pytest.fixture(name="workflow_state")
+    def workflow_state_fixture(self):
         return WorkflowState(
             plan=Plan(steps=[]),
             status=WorkflowStatusEnum.PLANNING,

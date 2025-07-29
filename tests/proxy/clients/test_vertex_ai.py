@@ -7,8 +7,6 @@ from starlette.datastructures import URL
 
 from ai_gateway.proxy.clients.vertex_ai import VertexAIProxyClient
 
-from .fixtures import async_client_factory, limits, request_factory
-
 
 @pytest.mark.asyncio
 async def test_valid_proxy_request(async_client_factory, limits, request_factory):

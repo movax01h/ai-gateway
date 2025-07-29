@@ -8,8 +8,8 @@ from ai_gateway.api.v1.models.get_definitions import router
 from ai_gateway.model_selection import LLMDefinition, UnitPrimitiveConfig
 
 
-@pytest.fixture
-def client():
+@pytest.fixture(name="client")
+def client_fixture():
     from fastapi import FastAPI
 
     app = FastAPI()
@@ -17,8 +17,8 @@ def client():
     return TestClient(app)
 
 
-@pytest.fixture
-def mock_model_config():
+@pytest.fixture(name="mock_model_config")
+def mock_model_config_fixture():
     with patch(
         "ai_gateway.api.v1.models.get_definitions.ModelSelectionConfig",
     ) as mock:

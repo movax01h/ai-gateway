@@ -315,8 +315,8 @@ class TestModelRequestInstrumentator:
             ]
 
 
-@pytest.fixture
-def instrumentator():
+@pytest.fixture(name="instrumentator")
+def instrumentator_fixture():
 
     return ModelRequestInstrumentator(
         model_engine="test_engine", model_name="test_model", limits=None

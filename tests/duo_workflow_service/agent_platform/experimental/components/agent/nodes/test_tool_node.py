@@ -16,8 +16,8 @@ from duo_workflow_service.security.prompt_security import SecurityException
 from lib.internal_events.event_enum import CategoryEnum, EventEnum
 
 
-@pytest.fixture
-def mock_prompt_security():
+@pytest.fixture(name="mock_prompt_security")
+def mock_prompt_security_fixture():
     """Fixture for mocking PromptSecurity."""
     with patch(
         "duo_workflow_service.agent_platform.experimental.components.agent.nodes.tool_node.PromptSecurity"
@@ -26,8 +26,8 @@ def mock_prompt_security():
         yield mock_security
 
 
-@pytest.fixture
-def mock_logger():
+@pytest.fixture(name="mock_logger")
+def mock_logger_fixture():
     """Fixture for mocking structlog logger."""
     with patch(
         "duo_workflow_service.agent_platform.experimental.components.agent.nodes.tool_node.structlog"
@@ -37,8 +37,8 @@ def mock_logger():
         yield mock_logger
 
 
-@pytest.fixture
-def mock_tool_monitoring():
+@pytest.fixture(name="mock_tool_monitoring")
+def mock_tool_monitoring_fixture():
     """Fixture for mocking duo_workflow_metrics for tool operations."""
     with patch(
         "duo_workflow_service.agent_platform.experimental.components.agent.nodes.tool_node.duo_workflow_metrics"
@@ -50,8 +50,8 @@ def mock_tool_monitoring():
         yield mock_metrics
 
 
-@pytest.fixture
-def tool_node(
+@pytest.fixture(name="tool_node")
+def tool_node_fixture(
     component_name,
     mock_toolset,
     flow_id,

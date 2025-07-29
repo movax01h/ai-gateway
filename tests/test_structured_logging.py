@@ -11,8 +11,8 @@ from ai_gateway.structured_logging import prevent_logging_if_disabled, sanitize_
 
 
 class TestSanitizeLogs:
-    @pytest.fixture(scope="class")
-    def inputs_with_model_metadata(self):
+    @pytest.fixture(name="inputs_with_model_metadata", scope="class")
+    def inputs_with_model_metadata_fixture(self):
         inputs = MagicMock(
             model_metadata=ModelMetadata(
                 name="mistral",
@@ -117,8 +117,8 @@ class TestPreventLoggingIfDisabled:
     @pytest.mark.parametrize("case", CASES_WHERE_LOGS_SHOULD_NOT_BE_DROPPED)
     def test_events_are_not_dropped(self, case):
         with ExitStack() as stack:
-            for patch in self._setup_logging_patches(case):
-                stack.enter_context(patch)
+            for logging_patch in self._setup_logging_patches(case):
+                stack.enter_context(logging_patch)
             event_dict = {"key": "value"}
             result = prevent_logging_if_disabled(None, None, event_dict)
             assert result == event_dict
@@ -143,7 +143,7 @@ class TestPreventLoggingIfDisabled:
     @pytest.mark.parametrize("case", CASES_WHERE_LOGS_SHOULD_BE_DROPPED)
     def test_logging_disabled(self, case):
         with ExitStack() as stack:
-            for patch in self._setup_logging_patches(case):
-                stack.enter_context(patch)
+            for logging_patch in self._setup_logging_patches(case):
+                stack.enter_context(logging_patch)
             with pytest.raises(structlog.DropEvent):
                 prevent_logging_if_disabled(None, None, {"key": "value"})

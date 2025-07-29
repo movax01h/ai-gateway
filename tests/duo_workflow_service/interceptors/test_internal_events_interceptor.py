@@ -8,18 +8,18 @@ from duo_workflow_service.interceptors.internal_events_interceptor import (
 from lib.internal_events import current_event_context
 
 
-@pytest.fixture
-def mock_continuation():
+@pytest.fixture(name="mock_continuation")
+def mock_continuation_fixture():
     return AsyncMock()
 
 
-@pytest.fixture
-def interceptor():
+@pytest.fixture(name="interceptor")
+def interceptor_fixture():
     return InternalEventsInterceptor()
 
 
-@pytest.fixture
-def handler_call_details():
+@pytest.fixture(name="handler_call_details")
+def handler_call_details_fixture():
     mock_details = MagicMock()
     mock_details.invocation_metadata = (
         ("x-gitlab-realm", "test-realm"),
@@ -34,8 +34,8 @@ def handler_call_details():
     return mock_details
 
 
-@pytest.fixture
-def handler_call_details_with_empty_feature():
+@pytest.fixture(name="handler_call_details_with_empty_feature")
+def handler_call_details_with_empty_feature_fixture():
     mock_details = MagicMock()
     mock_details.invocation_metadata = (
         ("x-gitlab-realm", "test-realm"),
@@ -50,8 +50,8 @@ def handler_call_details_with_empty_feature():
     return mock_details
 
 
-@pytest.fixture
-def handler_call_details_with_empty_project_and_namespace_id():
+@pytest.fixture(name="handler_call_details_with_empty_project_and_namespace_id")
+def handler_call_details_with_empty_project_and_namespace_id_fixture():
     mock_details = MagicMock()
     mock_details.invocation_metadata = (
         ("x-gitlab-realm", "test-realm"),

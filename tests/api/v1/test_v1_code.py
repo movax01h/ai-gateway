@@ -57,19 +57,19 @@ YQIDAQAB
 GLOBAL_USER_ID = "777"
 
 
-@pytest.fixture(scope="class")
-def fast_api_router():
+@pytest.fixture(name="fast_api_router", scope="class")
+def fast_api_router_fixture():
     return api_router
 
 
-@pytest.fixture
-def auth_user(request):
+@pytest.fixture(name="auth_user")
+def auth_user_fixture(request):
     claims = UserClaims(scopes=["complete_code"])
     return CloudConnectorUser(authenticated=True, claims=claims)
 
 
-@pytest.fixture
-def config_values():
+@pytest.fixture(name="config_values")
+def config_values_fixture():
     return {
         "self_signed_jwt": {
             "signing_key": TEST_PRIVATE_KEY,
@@ -218,8 +218,8 @@ def test_user_access_token_gitlab_realm_header_missing(mock_client: TestClient):
 
 
 class TestUnauthorizedIssuer:
-    @pytest.fixture
-    def auth_user(self):
+    @pytest.fixture(name="auth_user")
+    def auth_user_fixture(self):
         return CloudConnectorUser(
             authenticated=True,
             claims=UserClaims(
@@ -247,8 +247,8 @@ class TestUnauthorizedIssuer:
 
 
 class TestUserAccessTokenJwtGenerationFailed:
-    @pytest.fixture
-    def config_values(self):
+    @pytest.fixture(name="config_values")
+    def config_values_fixture(self):
         yield {
             "self_signed_jwt": {
                 "signing_key": "BROKEN_KEY",

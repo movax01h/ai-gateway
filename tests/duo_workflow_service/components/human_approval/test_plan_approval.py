@@ -53,8 +53,8 @@ def set_up_graph(
 
 
 class TestPlanApprovalComponent:
-    @pytest.fixture
-    def node_return_value(self):
+    @pytest.fixture(name="node_return_value")
+    def node_return_value_fixture(self):
         return {
             "status": WorkflowStatusEnum.PLANNING,
             "conversation_history": {},
@@ -68,14 +68,14 @@ class TestPlanApprovalComponent:
             ),
         }
 
-    @pytest.fixture
-    def mock_check_executor(self, node_return_value):
+    @pytest.fixture(name="mock_check_executor")
+    def mock_check_executor_fixture(self, node_return_value):
         mock = MagicMock(spec=HumanApprovalCheckExecutor)
         mock.run.return_value = node_return_value
         return mock
 
-    @pytest.fixture
-    def component(self, graph_config):
+    @pytest.fixture(name="component")
+    def component_fixture(self, graph_config):
         return PlanApprovalComponent(
             workflow_id=graph_config["configurable"]["thread_id"],
             approved_agent_name="test-agent",

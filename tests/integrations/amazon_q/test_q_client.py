@@ -24,31 +24,31 @@ class AccessDeniedException(ClientError):
 
 
 class TestAmazonQClientFactory:
-    @pytest.fixture
-    def mock_glgo_authority(self):
+    @pytest.fixture(name="mock_glgo_authority")
+    def mock_glgo_authority_fixture(self):
         return MagicMock(spec=GlgoAuthority)
 
-    @pytest.fixture
-    def mock_sts_client(self):
+    @pytest.fixture(name="mock_sts_client")
+    def mock_sts_client_fixture(self):
         mock_client = MagicMock()
         return mock_client
 
-    @pytest.fixture
-    def mock_boto3(self, mock_sts_client):
+    @pytest.fixture(name="mock_boto3")
+    def mock_boto3_fixture(self, mock_sts_client):
         with patch("ai_gateway.integrations.amazon_q.client.boto3") as mock_boto3:
             mock_boto3.client.return_value = mock_sts_client
             yield mock_boto3
 
-    @pytest.fixture
-    def amazon_q_client_factory(self, mock_glgo_authority, mock_boto3):
+    @pytest.fixture(name="amazon_q_client_factory")
+    def amazon_q_client_factory_fixture(self, mock_glgo_authority, mock_boto3):
         return AmazonQClientFactory(
             glgo_authority=mock_glgo_authority,
             endpoint_url="https://mock.endpoint",
             region="us-east-1",
         )
 
-    @pytest.fixture
-    def mock_user(self):
+    @pytest.fixture(name="mock_user")
+    def mock_user_fixture(self):
         user = MagicMock(spec=StarletteUser)
         user.global_user_id = "test-user-id"
         user.cloud_connector_token = "mock-cloud-connector-token"
@@ -187,8 +187,8 @@ class TestAmazonQClientFactory:
 
 
 class TestAmazonQClient:
-    @pytest.fixture
-    def send_message_params(self):
+    @pytest.fixture(name="send_message_params")
+    def send_message_params_fixture(self):
         return {
             "message": {"content": "test message"},
             "history": [
@@ -198,16 +198,16 @@ class TestAmazonQClient:
             "conversationId": "conversation_id",
         }
 
-    @pytest.fixture
-    def mock_credentials(self):
+    @pytest.fixture(name="mock_credentials")
+    def mock_credentials_fixture(self):
         return {
             "AccessKeyId": "test-access-key",
             "SecretAccessKey": "test-secret-key",
             "SessionToken": "test-session-token",
         }
 
-    @pytest.fixture
-    def mock_application_request(self):
+    @pytest.fixture(name="mock_application_request")
+    def mock_application_request_fixture(self):
         class ApplicationRequest:
             client_id = "test-client-id"
             client_secret = "test-secret"
@@ -216,8 +216,8 @@ class TestAmazonQClient:
 
         return ApplicationRequest()
 
-    @pytest.fixture
-    def mock_event_request(self) -> Any:
+    @pytest.fixture(name="mock_event_request")
+    def mock_event_request_fixture(self) -> Any:
         class Payload(BaseModel):
             first_field: str = "test field"
             second_field: int = 1
@@ -228,23 +228,23 @@ class TestAmazonQClient:
 
         return EventRequest()
 
-    @pytest.fixture
-    def mock_q_client(self):
+    @pytest.fixture(name="mock_q_client")
+    def mock_q_client_fixture(self):
         with patch(
             "ai_gateway.integrations.amazon_q.client.q_boto3.client"
         ) as mock_client:
             yield mock_client.return_value
 
-    @pytest.fixture
-    def q_client(self, mock_credentials, mock_q_client):
+    @pytest.fixture(name="q_client")
+    def q_client_fixture(self, mock_credentials, mock_q_client):
         return AmazonQClient(
             url="https://q-api.example.com",
             region="us-west-2",
             credentials=mock_credentials,
         )
 
-    @pytest.fixture
-    def params(self):
+    @pytest.fixture(name="params")
+    def params_fixture(self):
         return dict(
             clientId="test-client-id",
             clientSecret="test-secret",

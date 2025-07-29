@@ -6,13 +6,13 @@ import pytest
 from duo_workflow_service.components.tools_registry import ToolsRegistry
 
 
-@pytest.fixture
-def tool_approval_required():
+@pytest.fixture(name="tool_approval_required")
+def tool_approval_required_fixture():
     return False
 
 
-@pytest.fixture
-def mock_tools_registry(tool_approval_required):
+@pytest.fixture(name="mock_tools_registry")
+def mock_tools_registry_fixture(tool_approval_required):
     mock = MagicMock(spec=ToolsRegistry)
 
     mock.approval_required.return_value = tool_approval_required
@@ -20,8 +20,8 @@ def mock_tools_registry(tool_approval_required):
     return mock
 
 
-@pytest.fixture
-def mock_tools_registry_cls(mock_tools_registry):
+@pytest.fixture(name="mock_tools_registry_cls")
+def mock_tools_registry_cls_fixture(mock_tools_registry):
     with patch(
         "duo_workflow_service.workflows.abstract_workflow.ToolsRegistry", autospec=True
     ) as mock:
@@ -29,29 +29,29 @@ def mock_tools_registry_cls(mock_tools_registry):
         yield mock
 
 
-@pytest.fixture
-def mock_gitlab_workflow():
+@pytest.fixture(name="mock_gitlab_workflow")
+def mock_gitlab_workflow_fixture():
     with patch(
         "duo_workflow_service.workflows.abstract_workflow.GitLabWorkflow", autospec=True
     ) as mock:
         yield mock
 
 
-@pytest.fixture
-def mock_checkpoint_notifier():
+@pytest.fixture(name="mock_checkpoint_notifier")
+def mock_checkpoint_notifier_fixture():
     with patch(
         "duo_workflow_service.workflows.abstract_workflow.UserInterface", autospec=True
     ) as mock:
         yield mock
 
 
-@pytest.fixture
-def offline_mode():
+@pytest.fixture(name="offline_mode")
+def offline_mode_fixture():
     return False
 
 
-@pytest.fixture
-def mock_git_lab_workflow_instance(mock_gitlab_workflow, offline_mode):
+@pytest.fixture(name="mock_git_lab_workflow_instance")
+def mock_git_lab_workflow_instance_fixture(mock_gitlab_workflow, offline_mode):
     mock = mock_gitlab_workflow.return_value
     mock.__aenter__.return_value = mock
     mock.__aexit__.return_value = None
@@ -68,13 +68,13 @@ def mock_git_lab_workflow_instance(mock_gitlab_workflow, offline_mode):
     return mock
 
 
-@pytest.fixture
-def workflow_config() -> dict[str, Any]:
+@pytest.fixture(name="workflow_config")
+def workflow_config_fixture() -> dict[str, Any]:
     return {"project_id": 1, "agent_privileges_names": []}
 
 
-@pytest.fixture
-def mock_fetch_workflow_and_container_data(workflow_config: dict[str, Any]):
+@pytest.fixture(name="mock_fetch_workflow_and_container_data")
+def mock_fetch_workflow_and_container_data_fixture(workflow_config: dict[str, Any]):
     with patch(
         "duo_workflow_service.workflows.abstract_workflow.fetch_workflow_and_container_data"
     ) as mock:

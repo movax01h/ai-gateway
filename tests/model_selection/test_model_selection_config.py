@@ -13,8 +13,8 @@ from ai_gateway.model_selection.model_selection_config import (
 
 
 # editorconfig-checker-disable
-@pytest.fixture
-def mock_fs(fs: FakeFilesystem):
+@pytest.fixture(name="mock_fs")
+def mock_fs_fixture(fs: FakeFilesystem):
     print(Path(__file__).parent.parent.parent / "ai_gateway" / "model_selection")
     model_selection_dir = (
         Path(__file__).parent.parent.parent / "ai_gateway" / "model_selection"
@@ -62,8 +62,8 @@ def mock_fs(fs: FakeFilesystem):
 # editorconfig-checker-enable
 
 
-@pytest.fixture
-def selection_config(mock_fs):  # pylint: disable=unused-argument
+@pytest.fixture(name="selection_config")
+def selection_config_fixture(mock_fs):  # pylint: disable=unused-argument
     return ModelSelectionConfig()
 
 

@@ -9,8 +9,8 @@ from ai_gateway.searches.search import Searcher, VertexAISearch
 from ai_gateway.searches.sqlite_search import SqliteSearch
 
 
-@pytest.fixture
-def config_values(custom_models_enabled: bool):
+@pytest.fixture(name="config_values")
+def config_values_fixture(custom_models_enabled: bool):
     return {"custom_models": {"enabled": custom_models_enabled}}
 
 

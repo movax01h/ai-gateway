@@ -25,15 +25,15 @@ from ai_gateway.model_metadata import (
 from ai_gateway.models.base_chat import Role
 
 
-@pytest.fixture
-def agent_events():
+@pytest.fixture(name="agent_events")
+def agent_events_fixture():
     return [
         AgentToolAction(thought="thought", tool="issue_reader", tool_input="tool_input")
     ]
 
 
-@pytest.fixture
-def agent(agent_events):
+@pytest.fixture(name="agent")
+def agent_fixture(agent_events):
     async def _stream_agent(*_args, **_kwargs):
         for action in agent_events:
             yield action
@@ -45,8 +45,8 @@ def agent(agent_events):
     return agent
 
 
-@pytest.fixture
-def tools_registry():
+@pytest.fixture(name="tools_registry")
+def tools_registry_fixture():
     return DuoChatToolsRegistry()
 
 

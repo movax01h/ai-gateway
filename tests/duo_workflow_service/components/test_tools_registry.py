@@ -28,13 +28,13 @@ from duo_workflow_service.tools.work_item import (
 from lib.feature_flags import current_feature_flag_context
 
 
-@pytest.fixture
-def gl_http_client():
+@pytest.fixture(name="gl_http_client")
+def gl_http_client_fixture():
     return AsyncMock(spec=GitlabHttpClient)
 
 
-@pytest.fixture
-def mcp_tools():
+@pytest.fixture(name="mcp_tools")
+def mcp_tools_fixture():
     mcp_tool_mock = MagicMock()
     mcp_tool_mock.name = "extra_tool"
     mcp_tool_mock.description = "extra tool description"

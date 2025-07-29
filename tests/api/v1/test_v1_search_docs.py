@@ -15,21 +15,21 @@ from ai_gateway.api.v1.search.typing import (
 )
 
 
-@pytest.fixture(scope="class")
-def fast_api_router():
+@pytest.fixture(name="fast_api_router", scope="class")
+def fast_api_router_fixture():
     return api_router
 
 
-@pytest.fixture
-def auth_user():
+@pytest.fixture(name="auth_user")
+def auth_user_fixture():
     return CloudConnectorUser(
         authenticated=True,
         claims=UserClaims(scopes=["documentation_search"]),
     )
 
 
-@pytest.fixture
-def request_body():
+@pytest.fixture(name="request_body")
+def request_body_fixture():
     return {
         "type": "search-docs",
         "metadata": {"source": "GitLab EE", "version": "17.0.0"},
@@ -37,8 +37,8 @@ def request_body():
     }
 
 
-@pytest.fixture
-def search_results():
+@pytest.fixture(name="search_results")
+def search_results_fixture():
     return [
         {
             "id": "doc_id_1",

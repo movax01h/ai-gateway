@@ -18,8 +18,8 @@ from duo_workflow_service.token_counter.approximate_token_counter import (
 from lib.internal_events.event_enum import CategoryEnum, EventEnum
 
 
-@pytest.fixture
-def mock_monitoring():
+@pytest.fixture(name="mock_monitoring")
+def mock_monitoring_fixture():
     """Fixture for mocking duo_workflow_metrics."""
     with patch(
         "duo_workflow_service.agent_platform.experimental.components.agent.nodes.agent_node.duo_workflow_metrics"
@@ -34,8 +34,8 @@ def mock_monitoring():
         yield mock_metrics
 
 
-@pytest.fixture
-def mock_prompt(mock_ai_message):
+@pytest.fixture(name="mock_prompt")
+def mock_prompt_fixture(mock_ai_message):
     """Fixture for mock prompt."""
     mock_prompt = Mock(spec=Prompt)
     mock_prompt.model = Mock()
@@ -45,8 +45,8 @@ def mock_prompt(mock_ai_message):
     return mock_prompt
 
 
-@pytest.fixture
-def mock_approximate_token_counter():
+@pytest.fixture(name="mock_approximate_token_counter")
+def mock_approximate_token_counter_fixture():
     """Fixture for mock approximate token counter."""
     with patch(
         "duo_workflow_service.agent_platform.experimental.components.agent.nodes.agent_node.ApproximateTokenCounter"
@@ -58,8 +58,8 @@ def mock_approximate_token_counter():
         yield mocked_token_counter
 
 
-@pytest.fixture
-def agent_node(
+@pytest.fixture(name="agent_node")
+def agent_node_fixture(
     flow_id,
     mock_prompt,
     inputs,
@@ -80,8 +80,8 @@ def agent_node(
     )
 
 
-@pytest.fixture
-def mock_get_vars_from_state(prompt_variables):
+@pytest.fixture(name="mock_get_vars_from_state")
+def mock_get_vars_from_state_fixture(prompt_variables):
     with patch(
         "duo_workflow_service.agent_platform.experimental.components.agent.nodes.agent_node.get_vars_from_state"
     ) as mock_get_vars_from_state:

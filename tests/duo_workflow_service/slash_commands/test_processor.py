@@ -20,12 +20,12 @@ LOG_PATH = f"{MODULE_PATH}.processor.log"
 
 
 class TestSlashCommandsGoalExpander:
-    @pytest.fixture
-    def processor(self):
+    @pytest.fixture(name="processor")
+    def processor_fixture(self):
         return SlashCommandsProcessor()
 
-    @pytest.fixture
-    def mock_parser_instance(self):
+    @pytest.fixture(name="mock_parser_instance")
+    def mock_parser_instance_fixture(self):
         return MagicMock()
 
     @patch(GOAL_PARSER_PATH)

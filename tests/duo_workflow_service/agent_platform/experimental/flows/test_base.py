@@ -40,8 +40,8 @@ class TestFlow:
             ]
             yield mock_components
 
-    @pytest.fixture
-    def mock_project(self):
+    @pytest.fixture(name="mock_project")
+    def mock_project_fixture(self):
         """Fixture providing mock project data."""
         return {
             "id": 123,
@@ -49,8 +49,8 @@ class TestFlow:
             "web_url": "https://gitlab.com/test/project",
         }
 
-    @pytest.fixture
-    def mock_state_graph(self, mock_project):
+    @pytest.fixture(name="mock_state_graph")
+    def mock_state_graph_fixture(self, mock_project):
         # Create mock StateGraph and compiled graph
         mock_state_graph = Mock(spec=StateGraph)
         mock_compiled_graph = Mock()
@@ -95,8 +95,8 @@ class TestFlow:
 
             yield mock_state_graph
 
-    @pytest.fixture
-    def mock_checkpointer(self):
+    @pytest.fixture(name="mock_checkpointer")
+    def mock_checkpointer_fixture(self):
         mock_checkpointer = Mock()
         mock_checkpointer.initial_status_event = WorkflowStatusEventEnum.START
         mock_gitlab_workflow = AsyncMock()
@@ -108,8 +108,8 @@ class TestFlow:
         ):
             yield mock_checkpointer
 
-    @pytest.fixture
-    def mock_tools_registry(self):
+    @pytest.fixture(name="mock_tools_registry")
+    def mock_tools_registry_fixture(self):
         with patch(
             "duo_workflow_service.workflows.abstract_workflow.ToolsRegistry"
         ) as mock_tools_registry_class:
@@ -121,8 +121,8 @@ class TestFlow:
             )
             yield mock_tools_registry
 
-    @pytest.fixture
-    def mock_flow_metadata(self):
+    @pytest.fixture(name="mock_flow_metadata")
+    def mock_flow_metadata_fixture(self):
         """Fixture providing mock flow metadata."""
         return {
             "git_url": "https://gitlab.com/test/project",
@@ -130,16 +130,16 @@ class TestFlow:
             "extended_logging": False,
         }
 
-    @pytest.fixture
-    def mock_invocation_metadata(self):
+    @pytest.fixture(name="mock_invocation_metadata")
+    def mock_invocation_metadata_fixture(self):
         """Fixture providing mock invocation metadata."""
         return {
             "base_url": "https://gitlab.com",
             "gitlab_token": "test-token",
         }
 
-    @pytest.fixture
-    def sample_flow_config(self):
+    @pytest.fixture(name="sample_flow_config")
+    def sample_flow_config_fixture(self):
         """Fixture providing a sample flow configuration."""
         return FlowConfig(
             flow={"entry_point": "agent"},
@@ -155,8 +155,8 @@ class TestFlow:
             version="experimental",
         )
 
-    @pytest.fixture
-    def flow_instance(
+    @pytest.fixture(name="flow_instance")
+    def flow_instance_fixture(
         self,
         mock_flow_metadata,
         mock_invocation_metadata,

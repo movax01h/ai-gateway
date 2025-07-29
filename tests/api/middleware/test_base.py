@@ -7,15 +7,15 @@ from starlette.requests import Request
 from ai_gateway.api.middleware import DistributedTraceMiddleware
 
 
-@pytest.fixture
-def distributed_trace_middleware_development(mock_app):
+@pytest.fixture(name="distributed_trace_middleware_development")
+def distributed_trace_middleware_development_fixture(mock_app):
     return DistributedTraceMiddleware(
         mock_app, skip_endpoints=["/health"], environment="development"
     )
 
 
-@pytest.fixture
-def distributed_trace_middleware_test(mock_app):
+@pytest.fixture(name="distributed_trace_middleware_test")
+def distributed_trace_middleware_test_fixture(mock_app):
     return DistributedTraceMiddleware(
         mock_app, skip_endpoints=["/health"], environment="test"
     )

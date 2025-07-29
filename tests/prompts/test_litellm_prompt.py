@@ -9,15 +9,15 @@ from langchain_community.chat_models import ChatLiteLLM
 from ai_gateway.prompts import Prompt
 
 
-@pytest.fixture
-def model():
+@pytest.fixture(name="model")
+def model_fixture():
     return ChatLiteLLM(
         model="claude-3-sonnet@20240229", custom_llm_provider="vertex_ai", max_retries=3  # type: ignore[call-arg]
     )
 
 
-@pytest.fixture
-def mock_http(mock_http_handler: Mock):
+@pytest.fixture(name="mock_http")
+def mock_http_fixture(mock_http_handler: Mock):
     with patch(
         "litellm.llms.custom_httpx.http_handler.AsyncHTTPHandler",
         return_value=mock_http_handler,
@@ -25,15 +25,15 @@ def mock_http(mock_http_handler: Mock):
         yield mock
 
 
-@pytest.fixture
-def mock_http_handler(response_text: str):
+@pytest.fixture(name="mock_http_handler")
+def mock_http_handler_fixture(response_text: str):
     handler = AsyncMock()
     handler.post.return_value = httpx.Response(status_code=200, text=response_text)
     return handler
 
 
-@pytest.fixture
-def mock_sleep():  # So we don't have to wait
+@pytest.fixture(name="mock_sleep")
+def mock_sleep_fixture():  # So we don't have to wait
     with patch("asyncio.sleep"):
         yield
 

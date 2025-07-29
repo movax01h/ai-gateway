@@ -8,8 +8,8 @@ from starlette.datastructures import URL
 from ai_gateway.config import ConfigModelLimits
 
 
-@pytest.fixture
-def async_client_factory():
+@pytest.fixture(name="async_client_factory")
+def async_client_factory_fixture():
     def create(
         response_status_code: int = 200,
         response_headers: dict = {
@@ -30,8 +30,8 @@ def async_client_factory():
     return create
 
 
-@pytest.fixture
-def limits():
+@pytest.fixture(name="limits")
+def limits_fixture():
     limits = Mock(spec=ConfigModelLimits)
     limits.for_model.return_value = {
         "concurrency": 100,
@@ -41,8 +41,8 @@ def limits():
     return limits
 
 
-@pytest.fixture
-def request_factory():
+@pytest.fixture(name="request_factory")
+def request_factory_fixture():
     def create(
         request_url: str = "http://0.0.0.0:5052/v1/proxy/test_service/valid_path",
         request_body: bytes = b'{"model": "model1"}',

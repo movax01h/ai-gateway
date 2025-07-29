@@ -62,32 +62,32 @@ def unused_port():
     return port
 
 
-@pytest.fixture
-def vertex_project():
+@pytest.fixture(name="vertex_project")
+def vertex_project_fixture():
     return "vertex-project"
 
 
-@pytest.fixture
-def config(vertex_project: str):
+@pytest.fixture(name="config")
+def config_fixture(vertex_project: str):
     return Config(
         google_cloud_platform=ConfigGoogleCloudPlatform(project=vertex_project)
     )
 
 
-@pytest.fixture
-def app():
+@pytest.fixture(name="app")
+def app_fixture():
     return FastAPI()
 
 
-@pytest.fixture(scope="session")
-def auth_enabled():
+@pytest.fixture(name="auth_enabled", scope="session")
+def auth_enabled_fixture():
     # pylint: disable=direct-environment-variable-reference
     return os.environ.get("AIGW_AUTH__BYPASS_EXTERNAL", "False") == "False"
     # pylint: enable=direct-environment-variable-reference
 
 
-@pytest.fixture(scope="session")
-def fastapi_server_app(auth_enabled) -> FastAPI:
+@pytest.fixture(name="fastapi_server_app", scope="session")
+def fastapi_server_app_fixture(auth_enabled) -> FastAPI:
     config = Config(_env_file=None, auth=ConfigAuth(bypass_external=not auth_enabled))
     fast_api_container = ContainerApplication()
     fast_api_container.wire(
@@ -250,8 +250,8 @@ def test_middleware_internal_event(test_path, expected):
         auth=ConfigAuth(bypass_external=True),
         internal_event=ConfigInternalEvent(enabled=True),
     )
-    server = create_fast_api_server(config)
-    client = TestClient(server)
+    app = create_fast_api_server(config)
+    client = TestClient(app)
 
     with patch(
         "ai_gateway.api.middleware.internal_event.current_event_context"
@@ -274,8 +274,8 @@ def test_middleware_distributed_trace_in_development(test_path, expected):
         auth=ConfigAuth(bypass_external=True),
         environment="development",
     )
-    server = create_fast_api_server(config)
-    client = TestClient(server)
+    app = create_fast_api_server(config)
+    client = TestClient(app)
 
     # pylint: disable=direct-environment-variable-reference
     with patch.dict(os.environ, {"LANGCHAIN_TRACING_V2": "true"}):
@@ -307,8 +307,8 @@ def test_middleware_distributed_trace_disabled_in_non_development(test_path):
         auth=ConfigAuth(bypass_external=True),
         environment="production",
     )
-    server = create_fast_api_server(config)
-    client = TestClient(server)
+    app = create_fast_api_server(config)
+    client = TestClient(app)
 
     # pylint: disable=direct-environment-variable-reference
     with patch.dict(os.environ, {"LANGCHAIN_TRACING_V2": "true"}):
@@ -341,8 +341,8 @@ def test_middleware_distributed_trace_disabled_without_header(test_path):
         auth=ConfigAuth(bypass_external=True),
         environment="development",
     )
-    server = create_fast_api_server(config)
-    client = TestClient(server)
+    app = create_fast_api_server(config)
+    client = TestClient(app)
 
     # pylint: disable=direct-environment-variable-reference
     with patch.dict(os.environ, {"LANGCHAIN_TRACING_V2": "true"}):
@@ -365,8 +365,8 @@ def test_middleware_feature_flag():
         _env_file=None,
         auth=ConfigAuth(bypass_external=True),
     )
-    server = create_fast_api_server(config)
-    client = TestClient(server)
+    app = create_fast_api_server(config)
+    client = TestClient(app)
 
     with patch(
         "ai_gateway.api.middleware.feature_flag.current_feature_flag_context"

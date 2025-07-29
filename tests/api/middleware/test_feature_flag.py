@@ -7,8 +7,8 @@ from starlette_context import context, request_cycle_context
 from ai_gateway.api.middleware import FeatureFlagMiddleware
 
 
-@pytest.fixture
-def feature_flag_middleware(mock_app, disallowed_flags):
+@pytest.fixture(name="feature_flag_middleware")
+def feature_flag_middleware_fixture(mock_app, disallowed_flags):
     return FeatureFlagMiddleware(mock_app, disallowed_flags)
 
 

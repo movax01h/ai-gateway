@@ -24,13 +24,13 @@ from ai_gateway.tracking.snowplow import SnowplowEvent, SnowplowEventContext
 from lib.feature_flags.context import current_feature_flag_context
 
 
-@pytest.fixture(scope="class")
-def fast_api_router():
+@pytest.fixture(name="fast_api_router", scope="class")
+def fast_api_router_fixture():
     return api_router
 
 
-@pytest.fixture
-def auth_user():
+@pytest.fixture(name="auth_user")
+def auth_user_fixture():
     return CloudConnectorUser(
         authenticated=True,
         claims=UserClaims(
@@ -42,8 +42,8 @@ def auth_user():
     )
 
 
-@pytest.fixture
-def config_values(assets_dir, gcp_location):
+@pytest.fixture(name="config_values")
+def config_values_fixture(assets_dir, gcp_location):
     return {
         "custom_models": {
             "enabled": True,
@@ -77,18 +77,18 @@ def config_values(assets_dir, gcp_location):
     }
 
 
-@pytest.fixture
-def unit_primitives():
+@pytest.fixture(name="unit_primitives")
+def unit_primitives_fixture():
     return ["complete_code", "generate_code"]
 
 
-@pytest.fixture
-def gcp_location():
+@pytest.fixture(name="gcp_location")
+def gcp_location_fixture():
     return "us-central1"
 
 
-@pytest.fixture
-def mock_post_processor():
+@pytest.fixture(name="mock_post_processor")
+def mock_post_processor_fixture():
     with patch("ai_gateway.code_suggestions.completions.PostProcessor.process") as mock:
         mock.return_value = "Post-processed completion response"
 
@@ -2179,8 +2179,8 @@ class TestCodeGenerations:
 
 
 class TestUnauthorizedScopes:
-    @pytest.fixture
-    def auth_user(self):
+    @pytest.fixture(name="auth_user")
+    def auth_user_fixture(self):
         return CloudConnectorUser(
             authenticated=True,
             claims=UserClaims(
@@ -2223,8 +2223,8 @@ class TestUnauthorizedScopes:
 
 
 class TestUnauthorizedIssuer:
-    @pytest.fixture
-    def auth_user(self):
+    @pytest.fixture(name="auth_user")
+    def auth_user_fixture(self):
         return CloudConnectorUser(
             authenticated=True,
             claims=UserClaims(
@@ -2261,8 +2261,8 @@ class TestUnauthorizedIssuer:
 
 
 class TestAmazonQIntegration:
-    @pytest.fixture
-    def auth_user(self):
+    @pytest.fixture(name="auth_user")
+    def auth_user_fixture(self):
         return CloudConnectorUser(
             authenticated=True,
             claims=UserClaims(

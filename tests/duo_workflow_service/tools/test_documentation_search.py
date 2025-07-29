@@ -13,12 +13,12 @@ from duo_workflow_service.tools.documentation_search import (
 
 
 class TestDocumentationSearch:
-    @pytest.fixture
-    def vertex_search_mock(self):
+    @pytest.fixture(name="vertex_search_mock")
+    def vertex_search_mock_fixture(self):
         return AsyncMock()
 
-    @pytest.fixture
-    def discoveryengine_client_mock(self):
+    @pytest.fixture(name="discoveryengine_client_mock")
+    def discoveryengine_client_mock_fixture(self):
         return AsyncMock()
 
     @pytest.mark.asyncio

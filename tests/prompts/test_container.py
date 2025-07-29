@@ -14,8 +14,8 @@ from duo_workflow_service import agents as workflow
 from duo_workflow_service.gitlab.http_client import GitlabHttpClient
 
 
-@pytest.fixture
-def config_values(assets_dir):
+@pytest.fixture(name="config_values")
+def config_values_fixture(assets_dir):
     return {
         "custom_models": {"enabled": True, "disable_streaming": True},
         "self_signed_jwt": {

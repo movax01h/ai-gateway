@@ -12,34 +12,34 @@ from duo_workflow_service.tools.repository_files import (
 )
 
 
-@pytest.fixture
-def gitlab_client_mock():
+@pytest.fixture(name="gitlab_client_mock")
+def gitlab_client_mock_fixture():
     mock = AsyncMock()
     return mock
 
 
-@pytest.fixture
-def binary_detection_tool(metadata):
+@pytest.fixture(name="binary_detection_tool")
+def binary_detection_tool_fixture(metadata):
     tool = GetRepositoryFile(metadata=metadata)
     return tool
 
 
-@pytest.fixture
-def tree_tool(metadata):
+@pytest.fixture(name="tree_tool")
+def tree_tool_fixture(metadata):
     tool = ListRepositoryTree(metadata=metadata)
     return tool
 
 
-@pytest.fixture
-def metadata(gitlab_client_mock):
+@pytest.fixture(name="metadata")
+def metadata_fixture(gitlab_client_mock):
     return {
         "gitlab_client": gitlab_client_mock,
         "gitlab_host": "gitlab.com",
     }
 
 
-@pytest.fixture
-def tool(metadata):
+@pytest.fixture(name="tool")
+def tool_fixture(metadata):
     tool = GetRepositoryFile(metadata=metadata)
     return tool
 

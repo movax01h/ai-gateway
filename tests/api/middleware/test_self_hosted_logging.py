@@ -18,16 +18,16 @@ from ai_gateway.api.middleware.self_hosted_logging import (
 
 class TestEnabledInstanceVerboseAiLogsHeaderPlugin:
 
-    @pytest.fixture(scope="class")
-    def plugin(self):
+    @pytest.fixture(name="plugin", scope="class")
+    def plugin_fixture(self):
         return EnabledInstanceVerboseAiLogsHeaderPlugin()
 
-    @pytest.fixture
-    def headers(self):
+    @pytest.fixture(name="headers")
+    def headers_fixture(self):
         return []
 
-    @pytest.fixture
-    def mock_request(self, headers):
+    @pytest.fixture(name="mock_request")
+    def mock_request_fixture(self, headers):
         return Request(
             {
                 "type": "http",
@@ -54,8 +54,8 @@ class TestEnabledInstanceVerboseAiLogsHeaderPlugin:
 
 
 class TestEnabledInstanceVerboseAiLogsHeader:
-    @pytest.fixture
-    def client(self):
+    @pytest.fixture(name="client")
+    def client_fixture(self):
         async def test_endpoint(_request):
             return JSONResponse(context.data)
 

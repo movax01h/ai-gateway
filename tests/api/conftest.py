@@ -35,28 +35,28 @@ class FakeModel(SimpleChatModel):
         return self.response
 
 
-@pytest.fixture
-def model_factory():
+@pytest.fixture(name="model_factory")
+def model_factory_fixture():
     return lambda model, **kwargs: FakeModel(
         expected_message="Hi, I'm John and I'm 20 years old. It's now July 12, 2025.",
         response="Hi John!",
     )
 
 
-@pytest.fixture
-def prompt_template():
+@pytest.fixture(name="prompt_template")
+def prompt_template_fixture():
     return {
         "system": "Hi, I'm {{name}} and I'm {{age}} years old. It's now {{current_date}}."
     }
 
 
-@pytest.fixture
-def compatible_versions():
+@pytest.fixture(name="compatible_versions")
+def compatible_versions_fixture():
     return ["1.0.0"]
 
 
-@pytest.fixture
-def mock_registry_get(
+@pytest.fixture(name="mock_registry_get")
+def mock_registry_get_fixture(
     request,
     prompt_class: type[Prompt],
     compatible_versions: list[str],
@@ -76,21 +76,21 @@ def mock_registry_get(
         yield mock
 
 
-@pytest.fixture
-def frozen_datetime_now():
+@pytest.fixture(name="frozen_datetime_now")
+def frozen_datetime_now_fixture():
     frozen = datetime(2025, 7, 12, 12, 0, 0)
     with patch("ai_gateway.api.v1.prompts.invoke.datetime") as mock_datetime:
         mock_datetime.now.return_value = frozen
         yield mock_datetime
 
 
-@pytest.fixture
-def unit_primitives():
+@pytest.fixture(name="unit_primitives")
+def unit_primitives_fixture():
     return ["explain_vulnerability"]
 
 
-@pytest.fixture
-def auth_user(unit_primitives: list[GitLabUnitPrimitive]):
+@pytest.fixture(name="auth_user")
+def auth_user_fixture(unit_primitives: list[GitLabUnitPrimitive]):
     return CloudConnectorUser(
         authenticated=True, claims=UserClaims(scopes=unit_primitives)
     )

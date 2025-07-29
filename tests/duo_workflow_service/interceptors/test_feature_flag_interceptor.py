@@ -9,30 +9,30 @@ from duo_workflow_service.interceptors.feature_flag_interceptor import (
 )
 
 
-@pytest.fixture
-def reset_context():
+@pytest.fixture(name="reset_context")
+def reset_context_fixture():
     """Reset the context variable after each test."""
     token = current_feature_flag_context.set(set())
     yield
     current_feature_flag_context.reset(token)
 
 
-@pytest.fixture
-def mock_handler_call_details():
+@pytest.fixture(name="mock_handler_call_details")
+def mock_handler_call_details_fixture():
     """Create a mock for the handler_call_details."""
     details = MagicMock()
     details.invocation_metadata = ()
     return details
 
 
-@pytest.fixture
-def mock_continuation():
+@pytest.fixture(name="mock_continuation")
+def mock_continuation_fixture():
     """Create a mock for the continuation function."""
     return AsyncMock()
 
 
-@pytest.fixture
-def interceptor():
+@pytest.fixture(name="interceptor")
+def interceptor_fixture():
     return FeatureFlagInterceptor()
 
 

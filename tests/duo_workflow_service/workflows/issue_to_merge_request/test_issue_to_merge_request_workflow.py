@@ -12,11 +12,10 @@ from duo_workflow_service.components import ToolsRegistry
 from duo_workflow_service.entities import Plan, WorkflowStatusEnum
 from duo_workflow_service.workflows.issue_to_merge_request.workflow import Workflow
 from lib.internal_events.event_enum import CategoryEnum
-from tests.duo_workflow_service.components.conftest import graph_input
 
 
-@pytest.fixture
-def checkpoint_tuple():
+@pytest.fixture(name="checkpoint_tuple")
+def checkpoint_tuple_fixture():
     return CheckpointTuple(
         config={"configurable": {"thread_id": "123", "checkpoint_id": str(uuid4())}},
         checkpoint={

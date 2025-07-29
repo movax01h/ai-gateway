@@ -24,31 +24,31 @@ from lib.internal_events import InternalEventAdditionalProperties
 from lib.internal_events.event_enum import CategoryEnum, EventEnum, EventPropertyEnum
 
 
-@pytest.fixture
-def mock_datetime(mock_now: datetime):
+@pytest.fixture(name="mock_datetime")
+def mock_datetime_fixture(mock_now: datetime):
     with patch("duo_workflow_service.agents.chat_agent.datetime") as mock:
         mock.now.return_value = mock_now
         mock.timezone = timezone
         yield mock
 
 
-@pytest.fixture
-def config_values():
+@pytest.fixture(name="config_values")
+def config_values_fixture():
     return {"mock_model_responses": True}
 
 
-@pytest.fixture
-def user_is_debug():
+@pytest.fixture(name="user_is_debug")
+def user_is_debug_fixture():
     return True
 
 
-@pytest.fixture
-def prompt_name():
+@pytest.fixture(name="prompt_name")
+def prompt_name_fixture():
     return "Chat Agent"
 
 
-@pytest.fixture
-def chat_agent(model_factory, prompt_config):
+@pytest.fixture(name="chat_agent")
+def chat_agent_fixture(model_factory, prompt_config):
     yield ChatAgent(model_factory=model_factory, config=prompt_config)
 
 
@@ -61,8 +61,8 @@ def prepare_container(
     )
 
 
-@pytest.fixture
-def input():
+@pytest.fixture(name="input")
+def input_fixture():
     return {
         "conversation_history": {"Chat Agent": [HumanMessage(content="hi")]},
         "plan": {"steps": []},
@@ -178,12 +178,12 @@ async def test_template_with_namespace(
 
 
 class TestChatAgentTrackTokensData:
-    @pytest.fixture
-    def unit_primitives(self):
+    @pytest.fixture(name="unit_primitives")
+    def unit_primitives_fixture(self):
         return ["duo_chat"]
 
-    @pytest.fixture
-    def usage_metadata(self):
+    @pytest.fixture(name="usage_metadata")
+    def usage_metadata_fixture(self):
         return UsageMetadata(input_tokens=1, output_tokens=2, total_tokens=3)
 
     @pytest.mark.asyncio
@@ -221,8 +221,8 @@ class TestChatAgentTrackTokensData:
 
 
 class TestChatAgentPromptTemplate:
-    @pytest.fixture
-    def prompt_template_with_split_system(self):
+    @pytest.fixture(name="prompt_template_with_split_system")
+    def prompt_template_with_split_system_fixture(self):
         """Prompt template with both system_static and system_dynamic parts."""
         return {
             "system_static": "You are GitLab Duo Chat, an AI coding assistant.\n\n<core_mission>\nYour primary role is collaborative programming.\n</core_mission>",
@@ -230,8 +230,8 @@ class TestChatAgentPromptTemplate:
             "user": "{{ message.content }}",
         }
 
-    @pytest.fixture
-    def chat_workflow_state(self):
+    @pytest.fixture(name="chat_workflow_state")
+    def chat_workflow_state_fixture(self):
         """Sample chat workflow state for testing."""
         return ChatWorkflowState(
             plan={"steps": []},

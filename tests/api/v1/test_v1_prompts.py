@@ -15,8 +15,8 @@ from ai_gateway.model_metadata import (
 from ai_gateway.prompts import Prompt
 
 
-@pytest.fixture(scope="class")
-def fast_api_router():
+@pytest.fixture(name="fast_api_router", scope="class")
+def fast_api_router_fixture():
     return api_router
 
 
@@ -213,8 +213,8 @@ class TestPrompt:
 
 
 class TestUnauthorizedScopes:
-    @pytest.fixture
-    def auth_user(self):
+    @pytest.fixture(name="auth_user")
+    def auth_user_fixture(self):
         return CloudConnectorUser(
             authenticated=True,
             claims=UserClaims(scopes=["unauthorized_scope"]),
@@ -237,8 +237,8 @@ class TestUnauthorizedScopes:
 
 
 class TestMisdirectedRequest:
-    @pytest.fixture
-    def mock_model_misdirection(self):
+    @pytest.fixture(name="mock_model_misdirection")
+    def mock_model_misdirection_fixture(self):
         with patch("ai_gateway.prompts.base.Prompt.ainvoke") as mock:
             mock.side_effect = HTTPException(
                 status_code=401, detail="Invalid credentials"

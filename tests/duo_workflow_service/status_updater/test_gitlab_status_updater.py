@@ -8,13 +8,13 @@ from duo_workflow_service.status_updater.gitlab_status_updater import (
 )
 
 
-@pytest.fixture
-def http_client():
+@pytest.fixture(name="http_client")
+def http_client_fixture():
     return AsyncMock()
 
 
-@pytest.fixture
-def gitlab_status_updater(http_client):
+@pytest.fixture(name="gitlab_status_updater")
+def gitlab_status_updater_fixture(http_client):
     return GitLabStatusUpdater(http_client)
 
 

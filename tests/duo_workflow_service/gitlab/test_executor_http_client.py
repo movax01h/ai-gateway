@@ -8,20 +8,20 @@ from contract import contract_pb2
 from duo_workflow_service.gitlab.executor_http_client import ExecutorGitLabHttpClient
 
 
-@pytest.fixture
-def mock_execute_action():
+@pytest.fixture(name="mock_execute_action")
+def mock_execute_action_fixture():
     return AsyncMock()
 
 
-@pytest.fixture
-def client():
+@pytest.fixture(name="client")
+def client_fixture():
     outbox = asyncio.Queue()
     inbox = asyncio.Queue()
     return ExecutorGitLabHttpClient(outbox, inbox)
 
 
-@pytest.fixture
-def monkeypatch_execute_action(monkeypatch, mock_execute_action):
+@pytest.fixture(name="monkeypatch_execute_action")
+def monkeypatch_execute_action_fixture(monkeypatch, mock_execute_action):
     monkeypatch.setattr(
         "duo_workflow_service.gitlab.executor_http_client._execute_action",
         mock_execute_action,

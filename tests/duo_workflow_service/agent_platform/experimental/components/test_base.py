@@ -18,8 +18,8 @@ from duo_workflow_service.entities.state import WorkflowStatusEnum
 from lib.internal_events.event_enum import CategoryEnum
 
 
-@pytest.fixture
-def flow_type():
+@pytest.fixture(name="flow_type")
+def flow_type_fixture():
     """Fixture for flow type."""
     return CategoryEnum.WORKFLOW_SOFTWARE_DEVELOPMENT
 
@@ -248,8 +248,8 @@ class TestBaseComponentSupportedEnvironments:
 class TestEndComponent:
     """Test EndComponent functionality."""
 
-    @pytest.fixture
-    def end_component(self, flow_type):
+    @pytest.fixture(name="end_component")
+    def end_component_fixture(self, flow_type):
         """Fixture providing an EndComponent instance."""
         return EndComponent(
             name="end",

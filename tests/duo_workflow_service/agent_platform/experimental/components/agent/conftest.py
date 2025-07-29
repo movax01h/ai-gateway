@@ -18,38 +18,38 @@ from lib.internal_events import InternalEventsClient
 from lib.internal_events.event_enum import CategoryEnum
 
 
-@pytest.fixture
-def flow_id():
+@pytest.fixture(name="flow_id")
+def flow_id_fixture():
     """Fixture for flow ID."""
     return "test_flow_id"
 
 
-@pytest.fixture
-def component_name():
+@pytest.fixture(name="component_name")
+def component_name_fixture():
     """Fixture for component name."""
     return "test_component"
 
 
-@pytest.fixture
-def flow_type():
+@pytest.fixture(name="flow_type")
+def flow_type_fixture():
     """Fixture for flow type."""
     return CategoryEnum.WORKFLOW_SOFTWARE_DEVELOPMENT
 
 
-@pytest.fixture
-def tool_call_id():
+@pytest.fixture(name="tool_call_id")
+def tool_call_id_fixture():
     """Fixture for tool call ID."""
     return "test_tool_call_id"
 
 
-@pytest.fixture
-def final_response_content():
+@pytest.fixture(name="final_response_content")
+def final_response_content_fixture():
     """Fixture for final response content."""
     return "Task completed successfully!"
 
 
-@pytest.fixture
-def inputs():
+@pytest.fixture(name="inputs")
+def inputs_fixture():
     """Fixture for input IOKeys."""
     return [
         IOKey(target="context", subkeys=["user_input"]),
@@ -57,20 +57,20 @@ def inputs():
     ]
 
 
-@pytest.fixture
-def simple_output():
+@pytest.fixture(name="simple_output")
+def simple_output_fixture():
     """Fixture for simple output IOKey."""
     return IOKey(target="context", subkeys=["result"])
 
 
-@pytest.fixture
-def nested_output():
+@pytest.fixture(name="nested_output")
+def nested_output_fixture():
     """Fixture for nested output IOKey."""
     return IOKey(target="context", subkeys=["workflow", "final", "response"])
 
 
-@pytest.fixture
-def prompt_variables():
+@pytest.fixture(name="prompt_variables")
+def prompt_variables_fixture():
     """Fixture for prompt variables."""
     return {
         "user_input": "Please help me with this task",
@@ -78,8 +78,8 @@ def prompt_variables():
     }
 
 
-@pytest.fixture
-def ui_history():
+@pytest.fixture(name="ui_history")
+def ui_history_fixture():
     """Fixture for mock UIHistory."""
     mock_history = Mock(spec=UIHistory)
     mock_log = Mock()
@@ -88,8 +88,8 @@ def ui_history():
     return mock_history
 
 
-@pytest.fixture
-def base_flow_state(prompt_variables):
+@pytest.fixture(name="base_flow_state")
+def base_flow_state_fixture(prompt_variables):
     """Fixture for base flow state."""
     return {
         "status": WorkflowStatusEnum.EXECUTION,
@@ -101,8 +101,8 @@ def base_flow_state(prompt_variables):
     }
 
 
-@pytest.fixture
-def flow_state_with_history(base_flow_state, component_name):
+@pytest.fixture(name="flow_state_with_history")
+def flow_state_with_history_fixture(base_flow_state, component_name):
     """Fixture for flow state with conversation history."""
     state = base_flow_state.copy()
     mock_message = Mock(spec=AIMessage)
@@ -112,24 +112,24 @@ def flow_state_with_history(base_flow_state, component_name):
     return state
 
 
-@pytest.fixture
-def flow_state_empty_history(base_flow_state, component_name):
+@pytest.fixture(name="flow_state_empty_history")
+def flow_state_empty_history_fixture(base_flow_state, component_name):
     """Fixture for flow state with empty conversation history."""
     state = base_flow_state.copy()
     state["conversation_history"] = {component_name: []}
     return state
 
 
-@pytest.fixture
-def flow_state_no_history(base_flow_state):
+@pytest.fixture(name="flow_state_no_history")
+def flow_state_no_history_fixture(base_flow_state):
     """Fixture for flow state with no conversation history."""
     state = base_flow_state.copy()
     state["conversation_history"] = {}
     return state
 
 
-@pytest.fixture
-def mock_ai_message():
+@pytest.fixture(name="mock_ai_message")
+def mock_ai_message_fixture():
     """Fixture for mock AI message."""
     mock_message = Mock(spec=AIMessage)
     mock_message.content = "Test response from agent"
@@ -144,8 +144,8 @@ def mock_ai_message():
     return mock_message
 
 
-@pytest.fixture
-def mock_ai_message_no_metadata():
+@pytest.fixture(name="mock_ai_message_no_metadata")
+def mock_ai_message_no_metadata_fixture():
     """Fixture for mock AI message without metadata."""
     mock_message = Mock(spec=AIMessage)
     mock_message.content = "Test response without metadata"
@@ -156,16 +156,16 @@ def mock_ai_message_no_metadata():
     return mock_message
 
 
-@pytest.fixture
-def mock_ai_message_empty_tools():
+@pytest.fixture(name="mock_ai_message_empty_tools")
+def mock_ai_message_empty_tools_fixture():
     """Fixture for mock AI message with empty tool calls."""
     mock_message = Mock(spec=AIMessage)
     mock_message.tool_calls = []
     return mock_message
 
 
-@pytest.fixture
-def mock_final_tool_call(tool_call_id, final_response_content):
+@pytest.fixture(name="mock_final_tool_call")
+def mock_final_tool_call_fixture(tool_call_id, final_response_content):
     """Fixture for mock final response tool call."""
     return {
         "id": tool_call_id,
@@ -174,8 +174,8 @@ def mock_final_tool_call(tool_call_id, final_response_content):
     }
 
 
-@pytest.fixture
-def mock_other_tool_call():
+@pytest.fixture(name="mock_other_tool_call")
+def mock_other_tool_call_fixture():
     """Fixture for mock other tool call."""
     return {
         "id": "other_tool_id",
@@ -184,8 +184,8 @@ def mock_other_tool_call():
     }
 
 
-@pytest.fixture
-def mock_tool_call():
+@pytest.fixture(name="mock_tool_call")
+def mock_tool_call_fixture():
     """Fixture for mock tool call."""
     return {
         "name": "test_tool",
@@ -194,8 +194,8 @@ def mock_tool_call():
     }
 
 
-@pytest.fixture
-def mock_multiple_tool_calls():
+@pytest.fixture(name="mock_multiple_tool_calls")
+def mock_multiple_tool_calls_fixture():
     """Fixture for multiple mock tool calls."""
     return [
         {
@@ -211,56 +211,58 @@ def mock_multiple_tool_calls():
     ]
 
 
-@pytest.fixture
-def mock_ai_message_with_final_tool(mock_final_tool_call):
+@pytest.fixture(name="mock_ai_message_with_final_tool")
+def mock_ai_message_with_final_tool_fixture(mock_final_tool_call):
     """Fixture for mock AI message with final response tool call."""
     mock_message = Mock(spec=AIMessage)
     mock_message.tool_calls = [mock_final_tool_call]
     return mock_message
 
 
-@pytest.fixture
-def mock_ai_message_with_multiple_tools(mock_other_tool_call, mock_final_tool_call):
+@pytest.fixture(name="mock_ai_message_with_multiple_tools")
+def mock_ai_message_with_multiple_tools_fixture(
+    mock_other_tool_call, mock_final_tool_call
+):
     """Fixture for mock AI message with multiple tool calls."""
     mock_message = Mock(spec=AIMessage)
     mock_message.tool_calls = [mock_other_tool_call, mock_final_tool_call]
     return mock_message
 
 
-@pytest.fixture
-def mock_ai_message_without_final_tool(mock_other_tool_call):
+@pytest.fixture(name="mock_ai_message_without_final_tool")
+def mock_ai_message_without_final_tool_fixture(mock_other_tool_call):
     """Fixture for mock AI message without final response tool call."""
     mock_message = Mock(spec=AIMessage)
     mock_message.tool_calls = [mock_other_tool_call]
     return mock_message
 
 
-@pytest.fixture
-def mock_ai_message_with_tool_calls(mock_tool_call):
+@pytest.fixture(name="mock_ai_message_with_tool_calls")
+def mock_ai_message_with_tool_calls_fixture(mock_tool_call):
     """Fixture for mock AI message with tool calls."""
     mock_message = Mock(spec=AIMessage)
     mock_message.tool_calls = [mock_tool_call]
     return mock_message
 
 
-@pytest.fixture
-def mock_ai_message_with_multiple_tool_calls(mock_multiple_tool_calls):
+@pytest.fixture(name="mock_ai_message_with_multiple_tool_calls")
+def mock_ai_message_with_multiple_tool_calls_fixture(mock_multiple_tool_calls):
     """Fixture for mock AI message with multiple tool calls."""
     mock_message = Mock(spec=AIMessage)
     mock_message.tool_calls = mock_multiple_tool_calls
     return mock_message
 
 
-@pytest.fixture
-def mock_ai_message_no_tool_calls():
+@pytest.fixture(name="mock_ai_message_no_tool_calls")
+def mock_ai_message_no_tool_calls_fixture():
     """Fixture for mock AI message without tool calls."""
     mock_message = Mock(spec=AIMessage)
     mock_message.tool_calls = []
     return mock_message
 
 
-@pytest.fixture
-def flow_state_with_message(
+@pytest.fixture(name="flow_state_with_message")
+def flow_state_with_message_fixture(
     base_flow_state, component_name, mock_ai_message_with_final_tool
 ):
     """Fixture for flow state with AI message."""
@@ -269,8 +271,8 @@ def flow_state_with_message(
     return state
 
 
-@pytest.fixture
-def flow_state_with_tool_calls(
+@pytest.fixture(name="flow_state_with_tool_calls")
+def flow_state_with_tool_calls_fixture(
     base_flow_state, component_name, mock_ai_message_with_tool_calls
 ):
     """Fixture for flow state with tool calls."""
@@ -279,14 +281,14 @@ def flow_state_with_tool_calls(
     return state
 
 
-@pytest.fixture
-def mock_internal_event_client():
+@pytest.fixture(name="mock_internal_event_client")
+def mock_internal_event_client_fixture():
     """Fixture for mock internal event client."""
     return Mock(spec=InternalEventsClient)
 
 
-@pytest.fixture
-def mock_tool():
+@pytest.fixture(name="mock_tool")
+def mock_tool_fixture():
     """Fixture for mock tool."""
     mock_tool = Mock(spec=BaseTool)
     mock_tool.name = "test_tool"
@@ -294,8 +296,8 @@ def mock_tool():
     return mock_tool
 
 
-@pytest.fixture
-def mock_toolset(mock_tool):
+@pytest.fixture(name="mock_toolset")
+def mock_toolset_fixture(mock_tool):
     """Fixture for mock toolset."""
     mock_toolset = Mock(spec=Toolset)
     mock_toolset.__contains__ = Mock(return_value=True)
@@ -304,8 +306,8 @@ def mock_toolset(mock_tool):
     return mock_toolset
 
 
-@pytest.fixture
-def mock_prompt_registry():
+@pytest.fixture(name="mock_prompt_registry")
+def mock_prompt_registry_fixture():
     """Fixture for mock prompt registry."""
     mock_registry = Mock(spec=LocalPromptRegistry)
     mock_prompt = Mock()
@@ -315,16 +317,16 @@ def mock_prompt_registry():
     return mock_registry
 
 
-@pytest.fixture
-def mock_router():
+@pytest.fixture(name="mock_router")
+def mock_router_fixture():
     """Fixture for mock router."""
     mock_router = Mock()
     mock_router.route.return_value = "END"
     return mock_router
 
 
-@pytest.fixture
-def mock_state_graph():
+@pytest.fixture(name="mock_state_graph")
+def mock_state_graph_fixture():
     """Fixture for mock StateGraph."""
     mock_graph = Mock()
     mock_graph.add_node = Mock()

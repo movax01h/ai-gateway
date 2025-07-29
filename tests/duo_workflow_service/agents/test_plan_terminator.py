@@ -19,8 +19,8 @@ from duo_workflow_service.entities.state import (
 
 
 class TestPlanTerminatorAgent:
-    @pytest.fixture
-    def base_workflow_state(self) -> WorkflowState:
+    @pytest.fixture(name="base_workflow_state")
+    def base_workflow_state_fixture(self) -> WorkflowState:
         return WorkflowState(
             status=WorkflowStatusEnum.ERROR,
             conversation_history={},

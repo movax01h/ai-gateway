@@ -35,8 +35,8 @@ class MockGitLabHttpClient(GitlabHttpClient):
         return await self.mock_graphql(query, variables, timeout)
 
 
-@pytest.fixture
-def client():
+@pytest.fixture(name="client")
+def client_fixture():
     return MockGitLabHttpClient()
 
 

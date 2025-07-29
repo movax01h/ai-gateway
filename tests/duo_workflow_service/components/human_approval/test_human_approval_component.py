@@ -85,13 +85,13 @@ def node_return_value(conversation_history={}, status=WorkflowStatusEnum.PLANNIN
 
 
 class TestHumanApprovalComponent:
-    @pytest.fixture
-    def mock_check_executor(self):
+    @pytest.fixture(name="mock_check_executor")
+    def mock_check_executor_fixture(self):
         mock = MagicMock(spec=HumanApprovalCheckExecutor)
         return mock
 
-    @pytest.fixture
-    def component(self, graph_config):
+    @pytest.fixture(name="component")
+    def component_fixture(self, graph_config):
         return HumanApprovalComponentTestProxy(
             workflow_id=graph_config["configurable"]["thread_id"],
             approved_agent_name="test-agent",

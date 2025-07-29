@@ -10,8 +10,8 @@ from google.protobuf.struct_pb2 import Struct
 from ai_gateway.searches.search import DataStoreNotFound, VertexAISearch
 
 
-@pytest.fixture
-def mock_vertex_search_struct_data():
+@pytest.fixture(name="mock_vertex_search_struct_data")
+def mock_vertex_search_struct_data_fixture():
     return {
         "content": "GitLab's mission is to make software development easier and more efficient.",
         "metadata": {
@@ -22,8 +22,8 @@ def mock_vertex_search_struct_data():
     }
 
 
-@pytest.fixture
-def mock_vertex_search_response(mock_vertex_search_struct_data):
+@pytest.fixture(name="mock_vertex_search_response")
+def mock_vertex_search_response_fixture(mock_vertex_search_struct_data):
     response_dict = {
         "results": [
             {
@@ -38,14 +38,14 @@ def mock_vertex_search_response(mock_vertex_search_struct_data):
     return discoveryengine.SearchResponse(**response_dict)
 
 
-@pytest.fixture
-def mock_vertex_search_request():
+@pytest.fixture(name="mock_vertex_search_request")
+def mock_vertex_search_request_fixture():
     with patch("ai_gateway.searches.container.discoveryengine.SearchRequest") as mock:
         yield mock
 
 
-@pytest.fixture
-def mock_search_service_client(mock_vertex_search_response):
+@pytest.fixture(name="mock_search_service_client")
+def mock_search_service_client_fixture(mock_vertex_search_response):
     with patch(
         "ai_gateway.searches.container.discoveryengine.SearchServiceAsyncClient"
     ) as mock:
@@ -54,8 +54,8 @@ def mock_search_service_client(mock_vertex_search_response):
         yield mock
 
 
-@pytest.fixture
-def vertex_ai_search_factory():
+@pytest.fixture(name="vertex_ai_search_factory")
+def vertex_ai_search_factory_fixture():
     def create(
         client: discoveryengine.SearchServiceAsyncClient,
         project: str = "test-project",

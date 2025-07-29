@@ -21,30 +21,30 @@ from duo_workflow_service.agent_platform.experimental.state.base import IOKey
 from duo_workflow_service.agent_platform.experimental.ui_log import UIHistory
 
 
-@pytest.fixture
-def prompt_id():
+@pytest.fixture(name="prompt_id")
+def prompt_id_fixture():
     """Fixture for prompt ID."""
     return "test_prompt_id"
 
 
-@pytest.fixture
-def prompt_version():
+@pytest.fixture(name="prompt_version")
+def prompt_version_fixture():
     """Fixture for prompt version."""
     return "v1.0"
 
 
-@pytest.fixture
-def ui_log_events():
+@pytest.fixture(name="ui_log_events")
+def ui_log_events_fixture():
     return []
 
 
-@pytest.fixture
-def ui_role_as() -> Literal["agent", "tool"]:
+@pytest.fixture(name="ui_role_as")
+def ui_role_as_fixture() -> Literal["agent", "tool"]:
     return "agent"
 
 
-@pytest.fixture
-def agent_component(
+@pytest.fixture(name="agent_component")
+def agent_component_fixture(
     component_name,
     flow_id,
     flow_type,
@@ -72,8 +72,8 @@ def agent_component(
     )
 
 
-@pytest.fixture
-def agent_component_no_output(
+@pytest.fixture(name="agent_component_no_output")
+def agent_component_no_output_fixture(
     component_name,
     flow_id,
     flow_type,
@@ -101,8 +101,8 @@ def agent_component_no_output(
     )
 
 
-@pytest.fixture
-def mock_agent_node_cls(component_name):
+@pytest.fixture(name="mock_agent_node_cls")
+def mock_agent_node_cls_fixture(component_name):
     """Fixture for mocked AgentNode class."""
     with patch(
         "duo_workflow_service.agent_platform.experimental.components.agent.component.AgentNode"
@@ -114,8 +114,8 @@ def mock_agent_node_cls(component_name):
         yield mock_cls
 
 
-@pytest.fixture
-def mock_tool_node_cls(component_name):
+@pytest.fixture(name="mock_tool_node_cls")
+def mock_tool_node_cls_fixture(component_name):
     """Fixture for mocked ToolNode class."""
     with patch(
         "duo_workflow_service.agent_platform.experimental.components.agent.component.ToolNode"
@@ -127,8 +127,8 @@ def mock_tool_node_cls(component_name):
         yield mock_cls
 
 
-@pytest.fixture
-def mock_final_response_node_cls(component_name):
+@pytest.fixture(name="mock_final_response_node_cls")
+def mock_final_response_node_cls_fixture(component_name):
     """Fixture for mocked FinalResponseNode class."""
     with patch(
         "duo_workflow_service.agent_platform.experimental.components.agent.component.FinalResponseNode"

@@ -7,8 +7,8 @@ from duo_workflow_service.entities.state import Plan, WorkflowState, WorkflowSta
 
 
 class TestPlanSupervisorAgent:
-    @pytest.fixture
-    def workflow_state(self) -> WorkflowState:
+    @pytest.fixture(name="workflow_state")
+    def workflow_state_fixture(self) -> WorkflowState:
         return WorkflowState(
             plan=Plan(steps=[]),
             status=WorkflowStatusEnum.NOT_STARTED,

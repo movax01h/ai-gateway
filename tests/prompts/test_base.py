@@ -36,8 +36,8 @@ from lib.internal_events.context import InternalEventAdditionalProperties
 from tests.conftest import FakeModel
 
 
-@pytest.fixture
-def mock_watch() -> Generator[mock.MagicMock, None, None]:
+@pytest.fixture(name="mock_watch")
+def mock_watch_fixture() -> Generator[mock.MagicMock, None, None]:
     with mock.patch(
         "ai_gateway.prompts.base.ModelRequestInstrumentator.watch"
     ) as mock_watch:
@@ -61,8 +61,8 @@ class TestPrompt:
             contents="Hi, I'm {{name}}",
         )
 
-    @pytest.fixture
-    def prompt_template(self, request: Any):
+    @pytest.fixture(name="prompt_template")
+    def prompt_template_fixture(self, request: Any):
         # Test inclusion and direct content
         tpl = {"system": "{% include 'system.jinja' %}", "user": "{{content}}"}
 
@@ -704,8 +704,8 @@ def _assert_usage_metadata_handling(
     reason="3rd party requests not enabled",
 )
 class TestPromptTimeout:
-    @pytest.fixture
-    def prompt_params(self):
+    @pytest.fixture(name="prompt_params")
+    def prompt_params_fixture(self):
         return PromptParams(timeout=0.1)
 
     @pytest.mark.asyncio
@@ -742,8 +742,8 @@ class TestPromptTimeout:
             )
 
 
-@pytest.fixture
-def registry(
+@pytest.fixture(name="registry")
+def registry_fixture(
     internal_event_client: Mock, model_limits: ConfigModelLimits, prompt: Prompt
 ):
     class Registry(BasePromptRegistry):

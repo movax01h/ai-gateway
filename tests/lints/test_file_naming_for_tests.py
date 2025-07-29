@@ -9,8 +9,8 @@ import pytest
 from lints import file_naming_for_tests
 
 
-@pytest.fixture
-def node():
+@pytest.fixture(name="node")
+def node_fixture():
     node = astroid.extract_node("def test():\n  pass")
     node.file = f"{os.getcwd()}/tests/path/to/test_filename.py"
     return node
