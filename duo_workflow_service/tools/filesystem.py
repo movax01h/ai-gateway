@@ -104,6 +104,34 @@ class ReadFile(DuoBaseTool):
         return "Read file"
 
 
+class ReadFilesInput(BaseModel):
+    file_paths: list[str] = Field(description="List of file paths to read")
+
+
+class ReadFiles(DuoBaseTool):
+    name: str = "read_files"
+    description: str = """Read one or more files in a single operation.
+    """
+    args_schema: Type[BaseModel] = ReadFilesInput  # type: ignore
+    handle_tool_error: bool = True
+
+    async def _arun(self, file_paths: list[str]) -> str:
+        # Check path security for all files before proceeding
+        for file_path in file_paths:
+            validate_duo_context_exclusions(file_path)
+
+        return await _execute_action(
+            self.metadata,  # type: ignore
+            contract_pb2.Action(
+                runReadFiles=contract_pb2.ReadFiles(filepaths=file_paths)
+            ),
+        )
+
+    def format_display_message(self, args: ReadFilesInput) -> str:
+        file_count = len(args.file_paths)
+        return f"Read {file_count} file{'s' if file_count != 1 else ''}"
+
+
 class WriteFileInput(BaseModel):
     file_path: str = Field(description="the file_path to write the file to")
     contents: str = Field(

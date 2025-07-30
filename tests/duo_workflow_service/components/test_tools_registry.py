@@ -208,6 +208,7 @@ _outbox = MagicMock(spec=asyncio.Queue)
                 "get_plan",
                 "set_task_status",
                 "read_file",
+                "read_files",
                 "create_file_with_contents",
                 "edit_file",
                 "list_dir",
@@ -294,6 +295,7 @@ def test_registry_initialization_initialises_tools_with_correct_attributes(
         "gitlab_wiki_blob_search": tools.WikiBlobSearch(metadata=tool_metadata),
         "gitlab_note_search": tools.NoteSearch(metadata=tool_metadata),
         "read_file": tools.ReadFile(metadata=tool_metadata),
+        "read_files": tools.ReadFiles(metadata=tool_metadata),
         "list_dir": tools.ListDir(metadata=tool_metadata),
         "create_file_with_contents": tools.WriteFile(metadata=tool_metadata),
         "edit_file": tools.EditFile(metadata=tool_metadata),
@@ -373,8 +375,8 @@ async def test_registry_configuration(gl_http_client, mcp_tools):
     "tool_name,expected_tool,config",
     [
         (
-            "read_file",
-            tools.ReadFile,
+            "read_files",
+            tools.ReadFiles,
             ["read_write_files"],
         ),
         (
@@ -471,6 +473,7 @@ def test_preapproved_tools_initialization(tool_metadata):
     # Tools from read_write_files privilege should be in preapproved_tools
     read_write_tools = {
         "read_file",
+        "read_files",
         "create_file_with_contents",
         "edit_file",
         "list_dir",
@@ -524,6 +527,7 @@ async def test_registry_configuration_with_preapproved_tools(gl_http_client):
 
     read_write_tools = {
         "read_file",
+        "read_files",
         "create_file_with_contents",
         "edit_file",
         "list_dir",
@@ -596,15 +600,15 @@ def test_available_tools_for_user(
     [
         (
             ["read_write_files", "use_git", "nonexistent_privilege"],
-            ["read_file", "create_file_with_contents"],
-            ["read_file", "create_file_with_contents", "extra_tool"],
-            set(["read_file", "create_file_with_contents"]),
+            ["read_files", "create_file_with_contents"],
+            ["read_files", "create_file_with_contents", "extra_tool"],
+            set(["read_files", "create_file_with_contents"]),
         ),
         (
             ["read_write_files", "use_git", "run_mcp_tools"],
-            ["read_file", "create_file_with_contents"],
-            ["read_file", "create_file_with_contents", "extra_tool"],
-            set(["read_file", "create_file_with_contents"]),
+            ["read_files", "create_file_with_contents"],
+            ["read_files", "create_file_with_contents", "extra_tool"],
+            set(["read_files", "create_file_with_contents"]),
         ),
         (
             ["read_write_files", "use_git"],
@@ -614,9 +618,9 @@ def test_available_tools_for_user(
         ),
         (
             ["read_write_files", "use_git"],
-            ["read_file", "run_git_command"],
-            ["read_file", "run_git_command", "extra_tool"],
-            {"read_file"},
+            ["read_files", "run_git_command"],
+            ["read_files", "run_git_command", "extra_tool"],
+            {"read_files"},
         ),
         (
             ["read_write_files", "use_git"],
