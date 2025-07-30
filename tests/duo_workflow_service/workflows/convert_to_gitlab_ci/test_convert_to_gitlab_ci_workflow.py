@@ -29,8 +29,8 @@ from duo_workflow_service.workflows.convert_to_gitlab_ci.workflow import (
 from lib.internal_events.event_enum import CategoryEnum
 
 
-@pytest.fixture
-def tools_registry_with_all_privileges(tool_metadata):
+@pytest.fixture(name="tools_registry_with_all_privileges")
+def tools_registry_with_all_privileges_fixture(tool_metadata):
     return ToolsRegistry(
         enabled_tools=list(_AGENT_PRIVILEGES.keys()),
         preapproved_tools=list(_AGENT_PRIVILEGES.keys()),
@@ -38,14 +38,14 @@ def tools_registry_with_all_privileges(tool_metadata):
     )
 
 
-@pytest.fixture
-def mock_checkpointer():
+@pytest.fixture(name="mock_checkpointer")
+def mock_checkpointer_fixture():
     """Create a mock checkpointer."""
     return Mock()
 
 
-@pytest.fixture
-def workflow():
+@pytest.fixture(name="workflow")
+def workflow_fixture():
     return Workflow(
         workflow_id="test_id",
         workflow_metadata={},
@@ -53,8 +53,8 @@ def workflow():
     )
 
 
-@pytest.fixture
-def mock_agent_response():
+@pytest.fixture(name="mock_agent_response")
+def mock_agent_response_fixture():
     return {
         "plan": Plan(steps=[]),
         "status": WorkflowStatusEnum.EXECUTION,

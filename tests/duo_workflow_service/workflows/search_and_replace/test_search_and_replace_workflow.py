@@ -35,8 +35,8 @@ from duo_workflow_service.workflows.search_and_replace.workflow import (
 from lib.internal_events.event_enum import CategoryEnum
 
 
-@pytest.fixture
-def tools_registry_with_all_privileges(tool_metadata):
+@pytest.fixture(name="tools_registry_with_all_privileges")
+def tools_registry_with_all_privileges_fixture(tool_metadata):
     return ToolsRegistry(
         tool_metadata=tool_metadata,
         enabled_tools=list(_AGENT_PRIVILEGES.keys()),
@@ -44,8 +44,8 @@ def tools_registry_with_all_privileges(tool_metadata):
     )
 
 
-@pytest.fixture
-def mock_config():
+@pytest.fixture(name="mock_config")
+def mock_config_fixture():
     """Create a mock search and replace configuration."""
     return SearchAndReplaceConfig(
         file_types=["*.vue"],
@@ -58,8 +58,8 @@ def mock_config():
     )
 
 
-@pytest.fixture
-def mock_state_with_file_types():
+@pytest.fixture(name="mock_state_with_file_types")
+def mock_state_with_file_types_fixture():
     """Create a mock state with multiple file types for testing directory scanning."""
     return {
         "config": SearchAndReplaceConfig(
@@ -77,8 +77,8 @@ def mock_state_with_file_types():
     }
 
 
-@pytest.fixture
-def mock_state(mock_config):
+@pytest.fixture(name="mock_state")
+def mock_state_fixture(mock_config):
     """Create a mock workflow state."""
     return {
         "config": mock_config,
@@ -332,8 +332,8 @@ def test_patches_present(mock_state):
     assert _patches_present(mock_state) == Routes.END
 
 
-@pytest.fixture
-def mock_tools_registry():
+@pytest.fixture(name="mock_tools_registry")
+def mock_tools_registry_fixture():
     """Create a mock tools registry."""
     registry = Mock()
     registry.get = Mock(return_value=Mock(name="test_tool"))
@@ -342,14 +342,14 @@ def mock_tools_registry():
     return registry
 
 
-@pytest.fixture
-def mock_checkpointer():
+@pytest.fixture(name="mock_checkpointer")
+def mock_checkpointer_fixture():
     """Create a mock checkpointer."""
     return Mock()
 
 
-@pytest.fixture
-def workflow():
+@pytest.fixture(name="workflow")
+def workflow_fixture():
     return Workflow(
         workflow_id="test_id",
         workflow_metadata={},

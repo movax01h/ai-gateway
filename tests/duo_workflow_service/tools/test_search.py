@@ -21,12 +21,12 @@ from duo_workflow_service.tools.search import (
 
 
 class TestSearch:
-    @pytest.fixture
-    def gitlab_client_mock(self):
+    @pytest.fixture(name="gitlab_client_mock")
+    def gitlab_client_mock_fixture(self):
         return AsyncMock()
 
-    @pytest.fixture
-    def metadata(self, gitlab_client_mock):
+    @pytest.fixture(name="metadata")
+    def metadata_fixture(self, gitlab_client_mock):
         return {"gitlab_client": gitlab_client_mock}
 
     @pytest.mark.asyncio

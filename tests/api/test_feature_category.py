@@ -26,8 +26,8 @@ class DummyGitLabUnitPrimitive(StrEnum):
     AWESOME_FEATURE_2 = "awesome_feature_2"
 
 
-@pytest.fixture
-def patch_feature_category():
+@pytest.fixture(name="patch_feature_category")
+def patch_feature_category_fixture():
     patcher = patch(
         "ai_gateway.api.feature_category.GitLabFeatureCategory",
         spec=GitLabFeatureCategory,
@@ -38,8 +38,8 @@ def patch_feature_category():
     patcher.stop()
 
 
-@pytest.fixture
-def patch_unit_primitive():
+@pytest.fixture(name="patch_unit_primitive")
+def patch_unit_primitive_fixture():
     patcher = patch("ai_gateway.api.feature_category.GitLabUnitPrimitive")
     mock_thing = patcher.start()
     mock_thing.side_effect = DummyGitLabUnitPrimitive

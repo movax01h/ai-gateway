@@ -7,14 +7,14 @@ from ai_gateway.api.middleware.model_config import ModelConfigMiddleware
 from ai_gateway.model_metadata import current_model_metadata_context
 
 
-@pytest.fixture
-def model_metadata_context():
+@pytest.fixture(name="model_metadata_context")
+def model_metadata_context_fixture():
     current_model_metadata_context.set(None)
     yield current_model_metadata_context
 
 
-@pytest.fixture
-def middleware_test_client(model_metadata_context):
+@pytest.fixture(name="middleware_test_client")
+def middleware_test_client_fixture(model_metadata_context):
     app = FastAPI(middleware=[Middleware(ModelConfigMiddleware)])
 
     @app.post("/test")

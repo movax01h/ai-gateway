@@ -74,27 +74,27 @@ def node_return_value(messages, status=WorkflowStatusEnum.PLANNING):
 
 
 class TestToolsApprovalComponent:
-    @pytest.fixture
-    def mock_check_executor(self):
+    @pytest.fixture(name="mock_check_executor")
+    def mock_check_executor_fixture(self):
         mock = MagicMock(spec=HumanApprovalCheckExecutor)
         return mock
 
-    @pytest.fixture
-    def mock_tool(self):
+    @pytest.fixture(name="mock_tool")
+    def mock_tool_fixture(self):
         mock = MagicMock(DuoBaseTool)
         mock.args_schema = None
         return mock
 
-    @pytest.fixture
-    def mock_toolset(self, mock_tool):
+    @pytest.fixture(name="mock_toolset")
+    def mock_toolset_fixture(self, mock_tool):
         mock = MagicMock()
         mock.bindable = []
         mock.__getitem__.return_value = mock_tool
         mock.approved.return_value = True
         return mock
 
-    @pytest.fixture
-    def component(self, graph_config, mock_toolset):
+    @pytest.fixture(name="component")
+    def component_fixture(self, graph_config, mock_toolset):
         return ToolsApprovalComponent(
             workflow_id=graph_config["configurable"]["thread_id"],
             approved_agent_name="test-agent",

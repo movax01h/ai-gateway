@@ -291,8 +291,8 @@ class TestCodeCompletionsLegacy:
 
 @pytest.mark.asyncio
 class TestCodeCompletions:
-    @pytest.fixture(scope="class")
-    def use_case(self):
+    @pytest.fixture(name="use_case", scope="class")
+    def use_case_fixture(self):
         model = Mock(spec=TextGenModelBase)
         type(model).input_token_limit = PropertyMock(return_value=2_048)
 
@@ -302,8 +302,8 @@ class TestCodeCompletions:
 
         yield use_case
 
-    @pytest.fixture(scope="class")
-    def completions_with_post_processing(self):
+    @pytest.fixture(name="completions_with_post_processing", scope="class")
+    def completions_with_post_processing_fixture(self):
         model = Mock(
             spec=TextGenModelBase,
             metadata=Mock(name="text-completion-openai/test-model"),

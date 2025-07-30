@@ -5,9 +5,9 @@ from pathlib import Path
 
 def get_yaml_versions(directory):
     versions = []
-    for f in Path(directory).glob("*"):
-        if f.suffix in [".yml", ".yaml"]:
-            versions.append(f.stem)
+    for file in Path(directory).glob("*"):
+        if file.suffix in [".yml", ".yaml"]:
+            versions.append(file.stem)
     return sorted(versions)
 
 
@@ -19,10 +19,10 @@ def process_model_directory(model_path):
     return None
 
 
-def process_feature_with_subfeatures(feature_path):
+def process_feature_with_subfeatures(path):
     feature_dict = {}
-    for subfeature in os.listdir(feature_path):
-        subfeature_path = feature_path / subfeature
+    for subfeature in os.listdir(path):
+        subfeature_path = path / subfeature
         if not subfeature_path.is_dir():
             continue
 
@@ -39,10 +39,10 @@ def process_feature_with_subfeatures(feature_path):
     return feature_dict
 
 
-def process_feature_without_subfeatures(feature_path):
+def process_feature_without_subfeatures(path):
     model_families = {}
-    for model_dir in os.listdir(feature_path):
-        model_path = feature_path / model_dir
+    for model_dir in os.listdir(path):
+        model_path = path / model_dir
         versions = process_model_directory(model_path)
         if versions:
             model_families[model_dir] = versions
@@ -50,33 +50,31 @@ def process_feature_without_subfeatures(feature_path):
     return model_families
 
 
-def get_feature_models():
-    base_path = "ai_gateway/prompts/definitions"
+if __name__ == "__main__":
+    BASE_PATH = "ai_gateway/prompts/definitions"
     feature_models = {}
 
     target_features_with_subfeatures = ["chat", "code_suggestions"]
-    all_features = [f for f in os.listdir(base_path) if Path(base_path, f).is_dir()]
+    all_features = [
+        file for file in os.listdir(BASE_PATH) if Path(BASE_PATH, file).is_dir()
+    ]
     target_features_without_subfeatures = [
         f for f in all_features if f not in target_features_with_subfeatures
     ]
 
     for feature in target_features_with_subfeatures:
-        feature_path = Path(base_path) / feature
+        feature_path = Path(BASE_PATH) / feature
         if feature_path.is_dir():
             result = process_feature_with_subfeatures(feature_path)
             if result:
                 feature_models[feature] = result
 
     for feature in target_features_without_subfeatures:
-        feature_path = Path(base_path) / feature
+        feature_path = Path(BASE_PATH) / feature
         if feature_path.is_dir():
             result = process_feature_without_subfeatures(feature_path)
             if result:
                 feature_models[feature] = result
 
-    return feature_models
-
-
-feature_models = get_feature_models()
-with open("public/prompt_directory_structure.json", "w") as f:
-    json.dump(feature_models, f, indent=2)
+    with open("public/prompt_directory_structure.json", "w") as f:
+        json.dump(feature_models, f, indent=2)

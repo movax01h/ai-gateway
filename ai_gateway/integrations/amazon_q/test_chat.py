@@ -9,16 +9,16 @@ from ai_gateway.integrations.amazon_q.client import AmazonQClientFactory
 
 
 class TestChatAmazonQ:
-    @pytest.fixture
-    def mock_q_client_factory(self):
+    @pytest.fixture(name="mock_q_client_factory")
+    def mock_q_client_factory_fixture(self):
         return mock.MagicMock(AmazonQClientFactory)
 
-    @pytest.fixture
-    def chat_amazon_q(self, mock_q_client_factory):
+    @pytest.fixture(name="chat_amazon_q")
+    def chat_amazon_q_fixture(self, mock_q_client_factory):
         return ChatAmazonQ(amazon_q_client_factory=mock_q_client_factory)
 
-    @pytest.fixture
-    def messages(self):
+    @pytest.fixture(name="messages")
+    def messages_fixture(self):
         return [
             SystemMessage(content="system message", role="user"),
             HumanMessage(content="user message", role="user"),
@@ -27,8 +27,8 @@ class TestChatAmazonQ:
             AIMessage(content="latest assistant message", role="user"),
         ]
 
-    @pytest.fixture
-    def mock_q_client(self, mock_q_client_factory):
+    @pytest.fixture(name="mock_q_client")
+    def mock_q_client_fixture(self, mock_q_client_factory):
         mock_stream = mock.MagicMock()
         mock_stream.close = mock.MagicMock()
         mock_stream.__iter__.return_value = [
@@ -42,8 +42,8 @@ class TestChatAmazonQ:
 
         return q_client
 
-    @pytest.fixture
-    def mock_user(self):
+    @pytest.fixture(name="mock_user")
+    def mock_user_fixture(self):
         return mock.MagicMock()
 
     def assert_chunk_content(self, chunks, expected_content):

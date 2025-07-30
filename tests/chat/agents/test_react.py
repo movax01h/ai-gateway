@@ -31,13 +31,13 @@ from ai_gateway.prompts.config.models import (
 from lib.feature_flags.context import current_feature_flag_context
 
 
-@pytest.fixture
-def prompt_class():
+@pytest.fixture(name="prompt_class")
+def prompt_class_fixture():
     return ReActAgent
 
 
-@pytest.fixture
-def inputs():
+@pytest.fixture(name="inputs")
+def inputs_fixture():
     return ReActAgentInputs(
         messages=[
             Message(role=Role.USER, content="Hi, how are you?"),
@@ -46,8 +46,8 @@ def inputs():
     )
 
 
-@pytest.fixture
-def prompt_template():
+@pytest.fixture(name="prompt_template")
+def prompt_template_fixture():
     return {
         "system": "{% include 'chat/react/system/1.0.0.jinja' %}",
         "user": "{% include 'chat/react/user/1.0.0.jinja' %}",

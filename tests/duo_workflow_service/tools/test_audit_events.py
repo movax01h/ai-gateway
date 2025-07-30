@@ -13,8 +13,8 @@ from duo_workflow_service.tools.audit_events import (
 )
 
 
-@pytest.fixture
-def instance_audit_event_data():
+@pytest.fixture(name="instance_audit_event_data")
+def instance_audit_event_data_fixture():
     """Fixture for instance audit event data."""
     return [
         {
@@ -37,8 +37,8 @@ def instance_audit_event_data():
     ]
 
 
-@pytest.fixture
-def group_audit_event_data():
+@pytest.fixture(name="group_audit_event_data")
+def group_audit_event_data_fixture():
     """Fixture for group audit event data."""
     return [
         {
@@ -61,8 +61,8 @@ def group_audit_event_data():
     ]
 
 
-@pytest.fixture
-def project_audit_event_data():
+@pytest.fixture(name="project_audit_event_data")
+def project_audit_event_data_fixture():
     """Fixture for project audit event data."""
     return [
         {
@@ -87,13 +87,13 @@ def project_audit_event_data():
     ]
 
 
-@pytest.fixture
-def gitlab_client_mock():
+@pytest.fixture(name="gitlab_client_mock")
+def gitlab_client_mock_fixture():
     return Mock()
 
 
-@pytest.fixture
-def metadata(gitlab_client_mock):
+@pytest.fixture(name="metadata")
+def metadata_fixture(gitlab_client_mock):
     return {
         "gitlab_client": gitlab_client_mock,
         "gitlab_host": "gitlab.com",

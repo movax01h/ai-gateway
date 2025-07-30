@@ -30,30 +30,23 @@ from ai_gateway.model_metadata import (
 )
 
 
-@pytest.fixture
-def route():
+@pytest.fixture(name="route")
+def route_fixture():
     return "/code/completions"
 
 
-@pytest.fixture(scope="class")
-def fast_api_router():
+@pytest.fixture(name="fast_api_router", scope="class")
+def fast_api_router_fixture():
     return api_router
 
 
-@pytest.fixture
-def auth_user():
-    return CloudConnectorUser(
-        authenticated=True,
-        claims=UserClaims(
-            scopes=["complete_code", "generate_code", "amazon_q_integration"],
-            subject="1234",
-            gitlab_realm="self-managed",
-        ),
-    )
+@pytest.fixture(name="unit_primitives")
+def unit_primitives_fixture():
+    return ["complete_code", "generate_code", "amazon_q_integration"]
 
 
-@pytest.fixture
-def config_values(assets_dir):
+@pytest.fixture(name="config_values")
+def config_values_fixture(assets_dir):
     return {
         "custom_models": {
             "enabled": True,
@@ -1003,8 +996,8 @@ class TestEditorContentGenerationStream:
 
 
 class TestUnauthorizedScopes:
-    @pytest.fixture
-    def auth_user(self):
+    @pytest.fixture(name="auth_user")
+    def auth_user_fixture(self):
         return CloudConnectorUser(
             authenticated=True,
             claims=UserClaims(
@@ -1141,8 +1134,8 @@ class TestIncomingRequest:
 
 
 class TestUnauthorizedIssuer:
-    @pytest.fixture
-    def auth_user(self):
+    @pytest.fixture(name="auth_user")
+    def auth_user_fixture(self):
         return CloudConnectorUser(
             authenticated=True,
             claims=UserClaims(

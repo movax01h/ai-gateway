@@ -7,8 +7,8 @@ import pytest
 from ai_gateway.searches.sqlite_search import SqliteSearch
 
 
-@pytest.fixture
-def mock_sqlite_search_struct_data():
+@pytest.fixture(name="mock_sqlite_search_struct_data")
+def mock_sqlite_search_struct_data_fixture():
     return {
         "id": "tmp/gitlab-master-doc/doc/topics/git/lfs/index.md",
         "metadata": {
@@ -20,8 +20,8 @@ def mock_sqlite_search_struct_data():
     }
 
 
-@pytest.fixture
-def mock_sqlite_search_response():
+@pytest.fixture(name="mock_sqlite_search_response")
+def mock_sqlite_search_response_fixture():
     return [
         json.dumps(
             {
@@ -33,16 +33,16 @@ def mock_sqlite_search_response():
     ]
 
 
-@pytest.fixture
-def sqlite_search_factory():
+@pytest.fixture(name="sqlite_search_factory")
+def sqlite_search_factory_fixture():
     def create() -> SqliteSearch:
         return SqliteSearch()
 
     return create
 
 
-@pytest.fixture
-def mock_os_path_to_db():
+@pytest.fixture(name="mock_os_path_to_db")
+def mock_os_path_to_db_fixture():
     current_dir = os.path.dirname(__file__)
     local_docs_example_path = current_dir.replace(
         "searches", "_assets/tpl/tools/searches/local_docs_example.db"

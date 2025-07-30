@@ -59,8 +59,8 @@ URL_ERROR_CASES = [
 ]
 
 
-@pytest.fixture
-def merge_request_data():
+@pytest.fixture(name="merge_request_data")
+def merge_request_data_fixture():
     """Fixture for common merge request data."""
     return {
         "id": 1,
@@ -70,8 +70,8 @@ def merge_request_data():
     }
 
 
-@pytest.fixture
-def note_data():
+@pytest.fixture(name="note_data")
+def note_data_fixture():
     return {
         "id": 1,
         "body": "Test note",
@@ -80,13 +80,13 @@ def note_data():
     }
 
 
-@pytest.fixture
-def gitlab_client_mock():
+@pytest.fixture(name="gitlab_client_mock")
+def gitlab_client_mock_fixture():
     return Mock()
 
 
-@pytest.fixture
-def metadata(gitlab_client_mock):
+@pytest.fixture(name="metadata")
+def metadata_fixture(gitlab_client_mock):
     return {
         "gitlab_client": gitlab_client_mock,
         "gitlab_host": "gitlab.com",

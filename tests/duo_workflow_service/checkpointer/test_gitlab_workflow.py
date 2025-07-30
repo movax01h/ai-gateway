@@ -35,8 +35,8 @@ class CustomRunnableConfig(TypedDict):
     configurable: Optional[dict]
 
 
-@pytest.fixture
-def http_client_for_retry(http_client, workflow_id):
+@pytest.fixture(name="http_client_for_retry")
+def http_client_for_retry_fixture(http_client, workflow_id):
     async def mock_aget(path, **kwargs):
         if (
             path
@@ -64,23 +64,23 @@ def http_client_for_retry(http_client, workflow_id):
     return http_client
 
 
-@pytest.fixture
-def config() -> CustomRunnableConfig:
+@pytest.fixture(name="config")
+def config_fixture() -> CustomRunnableConfig:
     return {"configurable": {"thread_id": "1234", "checkpoint_id": "5678"}}
 
 
-@pytest.fixture
-def http_client():
+@pytest.fixture(name="http_client")
+def http_client_fixture():
     return AsyncMock()
 
 
-@pytest.fixture
-def workflow_id():
+@pytest.fixture(name="workflow_id")
+def workflow_id_fixture():
     return "1234"
 
 
-@pytest.fixture
-def workflow_type():
+@pytest.fixture(name="workflow_type")
+def workflow_type_fixture():
     return CategoryEnum.WORKFLOW_SOFTWARE_DEVELOPMENT
 
 
@@ -89,8 +89,8 @@ def prepare_container(mock_duo_workflow_service_container):
     pass
 
 
-@pytest.fixture
-def workflow_config():
+@pytest.fixture(name="workflow_config")
+def workflow_config_fixture():
     return {
         "first_checkpoint": None,
         "workflow_status": "created",
@@ -101,8 +101,8 @@ def workflow_config():
     }
 
 
-@pytest.fixture
-def gitlab_workflow(
+@pytest.fixture(name="gitlab_workflow")
+def gitlab_workflow_fixture(
     http_client,
     workflow_id,
     workflow_type,
@@ -116,8 +116,8 @@ def gitlab_workflow(
     )
 
 
-@pytest.fixture
-def checkpoint_data():
+@pytest.fixture(name="checkpoint_data")
+def checkpoint_data_fixture():
     return [
         {
             "thread_ts": "5678",
@@ -137,8 +137,8 @@ def checkpoint_data():
     ]
 
 
-@pytest.fixture
-def checkpoint_metadata():
+@pytest.fixture(name="checkpoint_metadata")
+def checkpoint_metadata_fixture():
     metadata = CheckpointMetadata()
     metadata["writes"] = {"some_node": {"status": "Created", "last_human_input": {}}}
     return metadata

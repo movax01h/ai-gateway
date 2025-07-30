@@ -9,14 +9,14 @@ from duo_workflow_service.tools.previous_context import (
 )
 
 
-@pytest.fixture
-def gitlab_client():
+@pytest.fixture(name="gitlab_client")
+def gitlab_client_fixture():
     client = AsyncMock()
     return client
 
 
-@pytest.fixture
-def get_last_checkpoint_tool(gitlab_client):
+@pytest.fixture(name="get_last_checkpoint_tool")
+def get_last_checkpoint_tool_fixture(gitlab_client):
     return GetWorkflowContext(
         metadata={"gitlab_client": gitlab_client, "gitlab_host": "gitlab.example.com"}
     )

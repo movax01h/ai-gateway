@@ -44,8 +44,8 @@ def homepage(
     )
 
 
-@pytest.fixture(scope="class")
-def fast_api_router():
+@pytest.fixture(name="fast_api_router", scope="class")
+def fast_api_router_fixture():
     return router
 
 

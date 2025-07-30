@@ -47,8 +47,8 @@ class TestCodeGeneration:
         yield
         Snowplow.reset()
 
-    @pytest.fixture(scope="class")
-    def use_case(self):
+    @pytest.fixture(name="use_case", scope="class")
+    def use_case_fixture(self):
         model = Mock(spec=TextGenModelBase)
         type(model).input_token_limit = PropertyMock(return_value=2_048)
         tokenization_strategy_mock = Mock(spec=TokenStrategyBase)
@@ -75,8 +75,8 @@ class TestCodeGeneration:
 
         yield use_case
 
-    @pytest.fixture(scope="class")
-    def use_case_q(self):
+    @pytest.fixture(name="use_case_q", scope="class")
+    def use_case_q_fixture(self):
         model = Mock(spec=AmazonQModel)
         type(model).input_token_limit = PropertyMock(return_value=2_048)
         tokenization_strategy_mock = Mock(spec=TokenStrategyBase)

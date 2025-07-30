@@ -20,21 +20,21 @@ from duo_workflow_service.entities.state import (
 from duo_workflow_service.gitlab.http_client import GitlabHttpClient
 
 
-@pytest.fixture
-def prompt_template() -> dict[str, str]:
+@pytest.fixture(name="prompt_template")
+def prompt_template_fixture() -> dict[str, str]:
     return {
         "system": "You are AGI entity capable of anything",
         "user": "{% if handover %}Handover: {{handover}}.\n{% endif %}Your goal is: {{ goal }}",
     }
 
 
-@pytest.fixture
-def check_events() -> bool:
+@pytest.fixture(name="check_events")
+def check_events_fixture() -> bool:
     return True
 
 
-@pytest.fixture
-def agent(
+@pytest.fixture(name="agent")
+def agent_fixture(
     gl_http_client: GitlabHttpClient,
     model_factory: TypeModelFactory,
     prompt_config: PromptConfig,

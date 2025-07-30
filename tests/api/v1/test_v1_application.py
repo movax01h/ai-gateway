@@ -75,8 +75,8 @@ def delete_conflict_exception_error():
     )
 
 
-@pytest.fixture(scope="class")
-def fast_api_router():
+@pytest.fixture(name="fast_api_router", scope="class")
+def fast_api_router_fixture():
     return api_router
 
 
@@ -116,8 +116,8 @@ def perform_delete_request(mock_client):
     )
 
 
-@pytest.fixture
-def mock_glgo():
+@pytest.fixture(name="mock_glgo")
+def mock_glgo_fixture():
     with patch("requests.post") as requests_mock:
         requests_mock.json.return_value = {"token": "glgo valid token"}
         requests_mock.raise_for_status.return_value = None
@@ -125,8 +125,8 @@ def mock_glgo():
         yield requests_mock
 
 
-@pytest.fixture
-def credentials():
+@pytest.fixture(name="credentials")
+def credentials_fixture():
     return {
         "region_name": "us-west-1",
         "endpoint_url": "http://example.com",
@@ -136,8 +136,8 @@ def credentials():
     }
 
 
-@pytest.fixture
-def mock_sts_client(credentials):
+@pytest.fixture(name="mock_sts_client")
+def mock_sts_client_fixture(credentials):
     mock_client = MagicMock()
     mock_client.assume_role_with_web_identity.return_value = {
         "Credentials": {
@@ -151,21 +151,21 @@ def mock_sts_client(credentials):
     return mock_client
 
 
-@pytest.fixture
-def mock_boto3(mock_sts_client):
+@pytest.fixture(name="mock_boto3")
+def mock_boto3_fixture(mock_sts_client):
     with patch("ai_gateway.integrations.amazon_q.client.boto3") as mock_boto3:
         mock_boto3.client.return_value = mock_sts_client
         yield mock_boto3
 
 
-@pytest.fixture
-def mock_q_boto3():
+@pytest.fixture(name="mock_q_boto3")
+def mock_q_boto3_fixture():
     with patch("ai_gateway.integrations.amazon_q.client.q_boto3") as mock_q_boto3:
         yield mock_q_boto3
 
 
-@pytest.fixture
-def auth_user(self):
+@pytest.fixture(name="auth_user")
+def auth_user_fixture(self):
     return CloudConnectorUser(
         authenticated=True,
         global_user_id="1",
@@ -173,8 +173,8 @@ def auth_user(self):
     )
 
 
-@pytest.fixture
-def config_values(assets_dir, credentials):
+@pytest.fixture(name="config_values")
+def config_values_fixture(assets_dir, credentials):
     return {
         "amazon_q": {
             "endpoint_url": credentials["endpoint_url"],
@@ -187,8 +187,8 @@ def config_values(assets_dir, credentials):
 
 
 class TestUnauthorizedScopes:
-    @pytest.fixture
-    def auth_user(self):
+    @pytest.fixture(name="auth_user")
+    def auth_user_fixture(self):
         return CloudConnectorUser(
             authenticated=True,
             global_user_id="1",
@@ -209,8 +209,8 @@ class TestUnauthorizedScopes:
 
 
 class TestApplication:
-    @pytest.fixture
-    def auth_user(self):
+    @pytest.fixture(name="auth_user")
+    def auth_user_fixture(self):
         return CloudConnectorUser(
             authenticated=True,
             global_user_id="1",

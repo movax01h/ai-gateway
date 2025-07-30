@@ -25,8 +25,8 @@ from lib.internal_events import InternalEventAdditionalProperties
 from lib.internal_events.event_enum import CategoryEnum, EventEnum, EventPropertyEnum
 
 
-@pytest.fixture
-def workflow_msg_event():
+@pytest.fixture(name="workflow_msg_event")
+def workflow_msg_event_fixture():
     return {
         "id": "event-id",
         "event_type": "message",
@@ -34,8 +34,8 @@ def workflow_msg_event():
     }
 
 
-@pytest.fixture
-def workflow_resume_event():
+@pytest.fixture(name="workflow_resume_event")
+def workflow_resume_event_fixture():
     return {
         "id": "event-id",
         "event_type": "resume",
@@ -43,8 +43,8 @@ def workflow_resume_event():
     }
 
 
-@pytest.fixture
-def workflow_state(plan: Plan):
+@pytest.fixture(name="workflow_state")
+def workflow_state_fixture(plan: Plan):
     return WorkflowState(
         plan=plan,
         status=WorkflowStatusEnum.NOT_STARTED,
@@ -60,20 +60,20 @@ def workflow_state(plan: Plan):
 
 # pylint: disable=too-many-public-methods
 class TestAgent:
-    @pytest.fixture
-    def chat_mock(self):
+    @pytest.fixture(name="chat_mock")
+    def chat_mock_fixture(self):
         mock = MagicMock(BaseChatModel)
         mock.bind_tools.return_value = mock
         return mock
 
-    @pytest.fixture
-    def mock_toolset(self):
+    @pytest.fixture(name="mock_toolset")
+    def mock_toolset_fixture(self):
         mock = MagicMock(spec=Toolset)
         mock.bindable = []
         return mock
 
-    @pytest.fixture
-    def planner_agent(
+    @pytest.fixture(name="planner_agent")
+    def planner_agent_fixture(
         self, chat_mock, gl_http_client, mock_toolset, internal_event_client
     ):
         return Agent(

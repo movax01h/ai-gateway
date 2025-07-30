@@ -5,13 +5,13 @@ from gitlab_cloud_connector import CloudConnectorUser, UserClaims
 from ai_gateway.api.v2 import api_router
 
 
-@pytest.fixture(scope="class")
-def fast_api_router():
+@pytest.fixture(name="fast_api_router", scope="class")
+def fast_api_router_fixture():
     return api_router
 
 
-@pytest.fixture
-def auth_user():
+@pytest.fixture(name="auth_user")
+def auth_user_fixture():
     return CloudConnectorUser(
         authenticated=True,
         claims=UserClaims(
@@ -22,8 +22,8 @@ def auth_user():
     )
 
 
-@pytest.fixture
-def config_values():
+@pytest.fixture(name="config_values")
+def config_values_fixture():
     yield {"mock_model_responses": True}
 
 

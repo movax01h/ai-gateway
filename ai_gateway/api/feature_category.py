@@ -76,14 +76,14 @@ def feature_categories(mapping: dict[GitLabUnitPrimitive, GitLabFeatureCategory]
                 )
 
             try:
-                feature_category = mapping[unit_primitive]
+                gitlab_feature_category = mapping[unit_primitive]
             except KeyError:
                 raise HTTPException(
                     status_code=status.HTTP_400_BAD_REQUEST,
                     detail=f"This endpoint cannot be used for {unit_primitive} purpose",
                 )
 
-            context[_CATEGORY_CONTEXT_KEY] = feature_category
+            context[_CATEGORY_CONTEXT_KEY] = gitlab_feature_category
             context[_UNIT_PRIMITIVE_CONTEXT_KEY] = unit_primitive
             return await func(request, *args, **kwargs)
 
@@ -117,11 +117,11 @@ def track_metadata(request_param: str, mapping: dict[str, GitLabUnitPrimitive]):
 
             if request_param_val in mapping:
                 unit_primitive = mapping[request_param_val]
-                feature_category = FEATURE_CATEGORIES_FOR_PROXY_ENDPOINTS[
+                gitlab_feature_category = FEATURE_CATEGORIES_FOR_PROXY_ENDPOINTS[
                     unit_primitive
                 ]
 
-                context[_CATEGORY_CONTEXT_KEY] = feature_category.value
+                context[_CATEGORY_CONTEXT_KEY] = gitlab_feature_category.value
                 context[_UNIT_PRIMITIVE_CONTEXT_KEY] = unit_primitive.value
 
             return await func(request, *args, **kwargs)
@@ -134,11 +134,13 @@ def track_metadata(request_param: str, mapping: dict[str, GitLabUnitPrimitive]):
 def current_feature_category() -> str:
     """Get the feature category set to the current request context."""
     if context.exists():
-        feature_category = context.get(_CATEGORY_CONTEXT_KEY, _UNKNOWN_FEATURE_CATEGORY)
+        gitlab_feature_category = context.get(
+            _CATEGORY_CONTEXT_KEY, _UNKNOWN_FEATURE_CATEGORY
+        )
 
-        if isinstance(feature_category, GitLabFeatureCategory):
-            return feature_category.value
+        if isinstance(gitlab_feature_category, GitLabFeatureCategory):
+            return gitlab_feature_category.value
 
-        return feature_category
+        return gitlab_feature_category
 
     return _UNKNOWN_FEATURE_CATEGORY

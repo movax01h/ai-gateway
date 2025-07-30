@@ -10,8 +10,8 @@ from duo_workflow_service.slash_commands.definition import SlashCommandDefinitio
 from duo_workflow_service.slash_commands.error_handler import SlashCommandConfigError
 
 
-@pytest.fixture
-def mock_dir():
+@pytest.fixture(name="mock_dir")
+def mock_dir_fixture():
     mock = MagicMock(spec=Path)
     return mock
 

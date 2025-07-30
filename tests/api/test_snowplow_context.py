@@ -9,8 +9,8 @@ from ai_gateway.api.snowplow_context import (
 )
 
 
-@pytest.fixture
-def mock_request():
+@pytest.fixture(name="mock_request")
+def mock_request_fixture():
     request = Mock(spec=Request)
     request.user = None
     return request

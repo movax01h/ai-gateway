@@ -17,7 +17,6 @@ from tests.api.v3.test_v3_code import (  # pylint: disable=unused-import
     TestIncomingRequest,
     TestUnauthorizedIssuer,
     TestUnauthorizedScopes,
-    auth_user,
 )
 
 
@@ -27,14 +26,19 @@ def reset_sse_starlette_appstatus_event():
     AppStatus.should_exit_event = None
 
 
-@pytest.fixture
-def route():
+@pytest.fixture(name="route")
+def route_fixture():
     return "/code/suggestions"
 
 
-@pytest.fixture(scope="class")
-def fast_api_router():
+@pytest.fixture(name="fast_api_router", scope="class")
+def fast_api_router_fixture():
     return api_router
+
+
+@pytest.fixture(name="unit_primitives")
+def unit_primitives_fixture():
+    return ["complete_code", "generate_code", "amazon_q_integration"]
 
 
 class TestEditorContentCompletionStream:

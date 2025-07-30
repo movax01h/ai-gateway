@@ -6,13 +6,13 @@ from ai_gateway.api.server_utils import extract_retry_after_header
 from ai_gateway.models.base import ModelAPICallError
 
 
-@pytest.fixture
-def headers():
+@pytest.fixture(name="headers")
+def headers_fixture():
     return {"retry-after": "30"}
 
 
-@pytest.fixture
-def exception(headers):
+@pytest.fixture(name="exception")
+def exception_fixture(headers):
     mock_exc = MagicMock(spec=ModelAPICallError)
 
     mock_error = MagicMock()

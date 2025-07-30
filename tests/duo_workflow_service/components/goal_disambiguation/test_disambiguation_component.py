@@ -35,8 +35,8 @@ from lib.feature_flags import current_feature_flag_context
 from lib.internal_events.event_enum import CategoryEnum
 
 
-@pytest.fixture
-def mock_create_model():
+@pytest.fixture(name="mock_create_model")
+def mock_create_model_fixture():
     with patch(
         "duo_workflow_service.components.goal_disambiguation.component.create_chat_model"
     ) as mock:
@@ -45,8 +45,8 @@ def mock_create_model():
         yield mock
 
 
-@pytest.fixture
-def llm_judge_response_unclear() -> AIMessage:
+@pytest.fixture(name="llm_judge_response_unclear")
+def llm_judge_response_unclear_fixture() -> AIMessage:
     return AIMessage(
         content="Please list which bugs you want to be fixed",
         tool_calls=[
@@ -64,8 +64,8 @@ def llm_judge_response_unclear() -> AIMessage:
     )
 
 
-@pytest.fixture
-def mock_agent(llm_judge_response_unclear: AIMessage):
+@pytest.fixture(name="mock_agent")
+def mock_agent_fixture(llm_judge_response_unclear: AIMessage):
     with patch(
         "duo_workflow_service.components.goal_disambiguation.component.Agent"
     ) as mock:
@@ -84,8 +84,8 @@ def mock_agent(llm_judge_response_unclear: AIMessage):
         yield mock_agent
 
 
-@pytest.fixture
-def mock_interrupt():
+@pytest.fixture(name="mock_interrupt")
+def mock_interrupt_fixture():
     with patch(
         "duo_workflow_service.components.goal_disambiguation.component.interrupt"
     ) as mock:
@@ -97,37 +97,37 @@ def mock_interrupt():
 
 
 class TestGoalDisambiguationComponent:
-    @pytest.fixture
-    def graph_config(self) -> RunnableConfig:
+    @pytest.fixture(name="graph_config")
+    def graph_config_fixture(self) -> RunnableConfig:
         return RunnableConfig(
             recursion_limit=50,
             configurable={"thread_id": "test-workflow"},
         )
 
-    @pytest.fixture
-    def tools_registry_mock(self):
+    @pytest.fixture(name="tools_registry_mock")
+    def tools_registry_mock_fixture(self):
         mock = MagicMock(ToolsRegistry)
         mock.get_batch.return_value = [RequestUserClarificationTool]
         return mock
 
-    @pytest.fixture
-    def goal(str) -> str:
+    @pytest.fixture(name="goal")
+    def goal_fixture(str) -> str:
         return "Fix all the bugs"
 
-    @pytest.fixture
-    def graph(self) -> StateGraph:
+    @pytest.fixture(name="graph")
+    def graph_fixture(self) -> StateGraph:
         return StateGraph(WorkflowState)
 
-    @pytest.fixture
-    def component_env(self) -> dict[str, str]:
+    @pytest.fixture(name="component_env")
+    def component_env_fixture(self) -> dict[str, str]:
         return {"FEATURE_GOAL_DISAMBIGUATION": "True"}
 
-    @pytest.fixture
-    def allow_agent_to_request_user(self) -> bool:
+    @pytest.fixture(name="allow_agent_to_request_user")
+    def allow_agent_to_request_user_fixture(self) -> bool:
         return True
 
-    @pytest.fixture
-    def entry_point(
+    @pytest.fixture(name="entry_point")
+    def entry_point_fixture(
         self,
         component_env: dict[str, str],
         goal: str,
@@ -155,13 +155,13 @@ class TestGoalDisambiguationComponent:
             graph_termination_node=END,
         )
 
-    @pytest.fixture
-    def compiled_graph(self, graph: StateGraph, entry_point: str):
+    @pytest.fixture(name="compiled_graph")
+    def compiled_graph_fixture(self, graph: StateGraph, entry_point: str):
         graph.set_entry_point(entry_point)
         return graph.compile()
 
-    @pytest.fixture
-    def graph_input(self) -> WorkflowState:
+    @pytest.fixture(name="graph_input")
+    def graph_input_fixture(self) -> WorkflowState:
         return WorkflowState(
             plan=Plan(steps=[]),
             status=WorkflowStatusEnum.NOT_STARTED,

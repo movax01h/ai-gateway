@@ -6,13 +6,13 @@ from gitlab_cloud_connector import CloudConnectorUser, GitLabUnitPrimitive, User
 from ai_gateway.api.v1 import api_router
 
 
-@pytest.fixture(scope="class")
-def fast_api_router():
+@pytest.fixture(name="fast_api_router", scope="class")
+def fast_api_router_fixture():
     return api_router
 
 
-@pytest.fixture
-def auth_user():
+@pytest.fixture(name="auth_user")
+def auth_user_fixture():
     return CloudConnectorUser(
         authenticated=True,
         claims=UserClaims(
@@ -56,8 +56,8 @@ class TestProxyAnthropic:
 
 
 class TestUnauthorizedScopes:
-    @pytest.fixture
-    def auth_user(self):
+    @pytest.fixture(name="auth_user")
+    def auth_user_fixture(self):
         return CloudConnectorUser(
             authenticated=True,
             claims=UserClaims(scopes=["unauthorized_scope"]),

@@ -8,8 +8,8 @@ from duo_workflow_service.gitlab.executor_http_client import ExecutorGitLabHttpC
 from duo_workflow_service.gitlab.http_client_factory import get_http_client
 
 
-@pytest.fixture
-def queues():
+@pytest.fixture(name="queues")
+def queues_fixture():
     return asyncio.Queue(), asyncio.Queue()
 
 

@@ -41,8 +41,8 @@ class MockPydanticToolWithParams(BaseModel):
     age: int = Field(..., description="Age parameter")
 
 
-@pytest.fixture
-def mock_all_tools() -> dict[str, ToolType]:
+@pytest.fixture(name="mock_all_tools")
+def mock_all_tools_fixture() -> dict[str, ToolType]:
     """Create a dictionary of mock tools for testing."""
     return {
         "mock_tool": MockBaseTool(),
@@ -53,14 +53,14 @@ def mock_all_tools() -> dict[str, ToolType]:
     }
 
 
-@pytest.fixture
-def mock_pre_approved() -> list[str]:
+@pytest.fixture(name="mock_pre_approved")
+def mock_pre_approved_fixture() -> list[str]:
     """Create a list of pre-approved tool names for testing."""
     return ["mock_tool_pre_approved"]
 
 
-@pytest.fixture
-def toolset(mock_all_tools, mock_pre_approved) -> Toolset:
+@pytest.fixture(name="toolset")
+def toolset_fixture(mock_all_tools, mock_pre_approved) -> Toolset:
     """Create a ToolSet instance for testing."""
     return Toolset(pre_approved=mock_pre_approved, all_tools=mock_all_tools)
 

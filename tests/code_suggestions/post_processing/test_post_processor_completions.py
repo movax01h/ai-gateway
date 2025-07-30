@@ -11,8 +11,8 @@ from ai_gateway.code_suggestions.processing.post.completions import (
 )
 
 
-@pytest.fixture
-def mock_remove_comment_only_completion():
+@pytest.fixture(name="mock_remove_comment_only_completion")
+def mock_remove_comment_only_completion_fixture():
     with patch(
         "ai_gateway.code_suggestions.processing.post.completions.remove_comment_only_completion"
     ) as mock:
@@ -21,8 +21,8 @@ def mock_remove_comment_only_completion():
         yield mock
 
 
-@pytest.fixture
-def mock_trim_by_min_allowed_context():
+@pytest.fixture(name="mock_trim_by_min_allowed_context")
+def mock_trim_by_min_allowed_context_fixture():
     with patch(
         "ai_gateway.code_suggestions.processing.post.completions.trim_by_min_allowed_context"
     ) as mock:
@@ -31,8 +31,8 @@ def mock_trim_by_min_allowed_context():
         yield mock
 
 
-@pytest.fixture
-def mock_fix_end_block_errors():
+@pytest.fixture(name="mock_fix_end_block_errors")
+def mock_fix_end_block_errors_fixture():
     with patch(
         "ai_gateway.code_suggestions.processing.post.completions.fix_end_block_errors"
     ) as mock:
@@ -41,8 +41,8 @@ def mock_fix_end_block_errors():
         yield mock
 
 
-@pytest.fixture
-def mock_fix_end_block_errors_legacy():
+@pytest.fixture(name="mock_fix_end_block_errors_legacy")
+def mock_fix_end_block_errors_legacy_fixture():
     with patch(
         "ai_gateway.code_suggestions.processing.post.completions.fix_end_block_errors_legacy"
     ) as mock:
@@ -51,8 +51,8 @@ def mock_fix_end_block_errors_legacy():
         yield mock
 
 
-@pytest.fixture
-def mock_clean_model_reflection():
+@pytest.fixture(name="mock_clean_model_reflection")
+def mock_clean_model_reflection_fixture():
     with patch(
         "ai_gateway.code_suggestions.processing.post.completions.clean_model_reflection"
     ) as mock:
@@ -61,8 +61,8 @@ def mock_clean_model_reflection():
         yield mock
 
 
-@pytest.fixture
-def mock_strip_whitespaces():
+@pytest.fixture(name="mock_strip_whitespaces")
+def mock_strip_whitespaces_fixture():
     with patch(
         "ai_gateway.code_suggestions.processing.post.completions.strip_whitespaces"
     ) as mock:
@@ -71,8 +71,8 @@ def mock_strip_whitespaces():
         yield mock
 
 
-@pytest.fixture
-def mock_strip_asterisks():
+@pytest.fixture(name="mock_strip_asterisks")
+def mock_strip_asterisks_fixture():
     with patch(
         "ai_gateway.code_suggestions.processing.post.completions.strip_asterisks"
     ) as mock:
@@ -81,8 +81,8 @@ def mock_strip_asterisks():
         yield mock
 
 
-@pytest.fixture
-def mock_filter_score():
+@pytest.fixture(name="mock_filter_score")
+def mock_filter_score_fixture():
     with patch(
         "ai_gateway.code_suggestions.processing.post.completions.filter_score"
     ) as mock:
@@ -91,8 +91,8 @@ def mock_filter_score():
         yield mock
 
 
-@pytest.fixture
-def mock_fix_truncation():
+@pytest.fixture(name="mock_fix_truncation")
+def mock_fix_truncation_fixture():
     with patch(
         "ai_gateway.code_suggestions.processing.post.completions.fix_truncation"
     ) as mock:
@@ -101,8 +101,8 @@ def mock_fix_truncation():
         yield mock
 
 
-@pytest.fixture
-def mock_clean_irrelevant_keywords():
+@pytest.fixture(name="mock_clean_irrelevant_keywords")
+def mock_clean_irrelevant_keywords_fixture():
     with patch(
         "ai_gateway.code_suggestions.processing.post.completions.clean_irrelevant_keywords"
     ) as mock:

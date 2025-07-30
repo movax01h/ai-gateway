@@ -21,26 +21,26 @@ from lib.feature_flags import (
 )
 
 
-@pytest.fixture
-def auth_user():
+@pytest.fixture(name="auth_user")
+def auth_user_fixture():
     return CloudConnectorUser(
         authenticated=True,
         claims=UserClaims(scopes=["duo_chat", "amazon_q_integration"]),
     )
 
 
-@pytest.fixture(scope="class")
-def fast_api_router():
+@pytest.fixture(name="fast_api_router", scope="class")
+def fast_api_router_fixture():
     return api_router
 
 
-@pytest.fixture
-def text_content():
+@pytest.fixture(name="text_content")
+def text_content_fixture():
     return "\n\nHuman: hello, what is your name?\n\nAssistant:"
 
 
-@pytest.fixture
-def chat_messages():
+@pytest.fixture(name="chat_messages")
+def chat_messages_fixture():
     return [
         {
             "role": "system",
@@ -61,8 +61,8 @@ def chat_messages():
     ]
 
 
-@pytest.fixture
-def chat_response():
+@pytest.fixture(name="chat_response")
+def chat_response_fixture():
     return [
         {
             "role": "user",
@@ -75,8 +75,8 @@ def chat_response():
     ]
 
 
-@pytest.fixture
-def request_body(request, content_fixture):
+@pytest.fixture(name="request_body")
+def request_body_fixture(request, content_fixture):
     return {
         "prompt_components": [
             {
@@ -97,8 +97,8 @@ def request_body(request, content_fixture):
     }
 
 
-@pytest.fixture
-def default_headers():
+@pytest.fixture(name="default_headers")
+def default_headers_fixture():
     return {
         "Authorization": "Bearer 12345",
         "X-Gitlab-Authentication-Type": "oidc",
@@ -107,8 +107,8 @@ def default_headers():
     }
 
 
-@pytest.fixture
-def mock_create_event_stream():
+@pytest.fixture(name="mock_create_event_stream")
+def mock_create_event_stream_fixture():
     async def _dummy_create_event_stream(*args, **kwargs):
 
         async def _dummy_stream_events():
@@ -129,15 +129,15 @@ def mock_create_event_stream():
         yield mock
 
 
-@pytest.fixture
-def stub_get_agent():
+@pytest.fixture(name="stub_get_agent")
+def stub_get_agent_fixture():
     fake_agent = Mock(name="ReActAgent")
     with patch("ai_gateway.api.v2.chat.agent.get_agent", return_value=fake_agent):
         yield fake_agent
 
 
-@pytest.fixture
-def stub_executor_factory():
+@pytest.fixture(name="stub_executor_factory")
+def stub_executor_factory_fixture():
     class _StubExecutor:
         def on_behalf(self, *_, **__):
             pass

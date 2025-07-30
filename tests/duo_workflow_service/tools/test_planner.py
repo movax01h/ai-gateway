@@ -31,8 +31,8 @@ class Tool(PlannerTool):
         return "test"
 
 
-@pytest.fixture
-def tool(tool_class: type[PlannerTool], plan: Plan) -> PlannerTool:
+@pytest.fixture(name="tool")
+def tool_fixture(tool_class: type[PlannerTool], plan: Plan) -> PlannerTool:
     tool = tool_class()  # type: ignore[call-arg]
     tool.plan = plan
     tool.tools_agent_name = "test"
@@ -41,8 +41,8 @@ def tool(tool_class: type[PlannerTool], plan: Plan) -> PlannerTool:
     return tool
 
 
-@pytest.fixture
-def plan_steps() -> list[Task]:
+@pytest.fixture(name="plan_steps")
+def plan_steps_fixture() -> list[Task]:
     return [
         {"id": "task-0", "description": "Task 1", "status": TaskStatus.NOT_STARTED},
         {"id": "task-1", "description": "Task 2", "status": TaskStatus.IN_PROGRESS},

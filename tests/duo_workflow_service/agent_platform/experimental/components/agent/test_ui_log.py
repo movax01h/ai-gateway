@@ -11,18 +11,18 @@ from duo_workflow_service.entities import MessageTypeEnum, ToolInfo, ToolStatus
 
 
 class TestUILogWriterAgentTools:
-    @pytest.fixture
-    def mock_callback(self):
+    @pytest.fixture(name="mock_callback")
+    def mock_callback_fixture(self):
         """Fixture for a mock callback."""
         return Mock()
 
-    @pytest.fixture
-    def ui_log_writer(self, mock_callback):
+    @pytest.fixture(name="ui_log_writer")
+    def ui_log_writer_fixture(self, mock_callback):
         """Fixture for a UILogWriterAgentTools instance."""
         return UILogWriterAgentTools(mock_callback)
 
-    @pytest.fixture
-    def mock_tool(self):
+    @pytest.fixture(name="mock_tool")
+    def mock_tool_fixture(self):
         """Fixture for a mock BaseTool instance."""
         mock = Mock(spec=BaseTool)
         mock.name = "test_tool"

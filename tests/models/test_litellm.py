@@ -54,20 +54,20 @@ class TestKindLiteLlmModel:
 
 
 class TestLiteLlmChatModel:
-    @pytest.fixture
-    def endpoint(self):
+    @pytest.fixture(name="endpoint")
+    def endpoint_fixture(self):
         return "http://127.0.0.1:1111/v1"
 
-    @pytest.fixture
-    def api_key(self):
+    @pytest.fixture(name="api_key")
+    def api_key_fixture(self):
         return "specified-api-key"
 
-    @pytest.fixture
-    def identifier(self):
+    @pytest.fixture(name="identifier")
+    def identifier_fixture(self):
         return "provider/some-cool-model"
 
-    @pytest.fixture
-    def lite_llm_chat_model(self, endpoint, api_key, identifier):
+    @pytest.fixture(name="lite_llm_chat_model")
+    def lite_llm_chat_model_fixture(self, endpoint, api_key, identifier):
         return LiteLlmChatModel.from_model_name(
             name="mistral",
             endpoint=endpoint,
@@ -404,23 +404,23 @@ class TestLiteLlmChatModel:
 
 
 class TestLiteLlmTextGenModel:
-    @pytest.fixture
-    def endpoint(self):
+    @pytest.fixture(name="endpoint")
+    def endpoint_fixture(self):
         return "http://127.0.0.1:4000"
 
-    @pytest.fixture
-    def api_key(self):
+    @pytest.fixture(name="api_key")
+    def api_key_fixture(self):
         return "specified-api-key"
 
-    @pytest.fixture
-    def provider_keys(self):
+    @pytest.fixture(name="provider_keys")
+    def provider_keys_fixture(self):
         return {
             "mistral_api_key": "codestral-api-key",
             "fireworks_api_key": "fireworks-api-key",
         }
 
-    @pytest.fixture
-    def provider_endpoints(self):
+    @pytest.fixture(name="provider_endpoints")
+    def provider_endpoints_fixture(self):
         return {
             "fireworks_current_region_endpoint": {
                 "qwen2p5-coder-7b": {
@@ -434,8 +434,8 @@ class TestLiteLlmTextGenModel:
             }
         }
 
-    @pytest.fixture
-    def lite_llm_text_model(self, endpoint, api_key):
+    @pytest.fixture(name="lite_llm_text_model")
+    def lite_llm_text_model_fixture(self, endpoint, api_key):
         return LiteLlmTextGenModel.from_model_name(
             name="codegemma",
             endpoint=endpoint,

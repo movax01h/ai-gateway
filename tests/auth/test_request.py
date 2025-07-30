@@ -10,22 +10,22 @@ from ai_gateway.api.feature_category import X_GITLAB_UNIT_PRIMITIVE
 from ai_gateway.api.v1.proxy.request import authorize_with_unit_primitive_header
 
 
-@pytest.fixture
-def mock_request():
+@pytest.fixture(name="mock_request")
+def mock_request_fixture():
     request = Mock(spec=Request)
     request.headers = {}
     request.user = Mock(spec=StarletteUser)
     return request
 
 
-@pytest.fixture
-def mock_background_tasks():
+@pytest.fixture(name="mock_background_tasks")
+def mock_background_tasks_fixture():
     background_tasks = Mock(spec=BackgroundTasks)
     return background_tasks
 
 
-@pytest.fixture
-def mock_abuse_detector():
+@pytest.fixture(name="mock_abuse_detector")
+def mock_abuse_detector_fixture():
     abuse_detector = Mock(spec=AbuseDetector)
     return abuse_detector
 

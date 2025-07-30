@@ -39,8 +39,8 @@ def prepare_container(mock_duo_workflow_service_container):
     pass
 
 
-@pytest.fixture
-def workflow():
+@pytest.fixture(name="workflow")
+def workflow_fixture():
     workflow_id = "test-workflow-id"
     metadata = {
         "extended_logging": True,
@@ -55,8 +55,8 @@ def workflow():
     )
 
 
-@pytest.fixture
-def mock_project():
+@pytest.fixture(name="mock_project")
+def mock_project_fixture():
     return {
         "id": MagicMock(),
         "description": MagicMock(),
@@ -66,8 +66,8 @@ def mock_project():
     }
 
 
-@pytest.fixture
-def mock_namespace():
+@pytest.fixture(name="mock_namespace")
+def mock_namespace_fixture():
     return {
         "id": MagicMock(),
         "description": MagicMock(),

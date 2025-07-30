@@ -10,8 +10,8 @@ from ai_gateway.models.anthropic import AnthropicChatModel
 from ai_gateway.models.base_text import TextGenModelOutput
 
 
-@pytest.fixture
-def mock_request():
+@pytest.fixture(name="mock_request")
+def mock_request_fixture():
     request = MagicMock(spec=Request)
     request.url = "http://0.0.0.0:5052/v1/proxy/anthropic/v1/messages"
     request.headers = {
@@ -22,15 +22,15 @@ def mock_request():
     return request
 
 
-@pytest.fixture
-def mock_model():
+@pytest.fixture(name="mock_model")
+def mock_model_fixture():
     model = MagicMock(spec=AnthropicChatModel)
     model.generate = AsyncMock(return_value=TextGenModelOutput(text="0.2"))
     return model
 
 
-@pytest.fixture
-def abuse_detector(mock_model):
+@pytest.fixture(name="abuse_detector")
+def abuse_detector_fixture(mock_model):
     return AbuseDetector(enabled=True, sampling_rate=1.0, model=mock_model)
 
 

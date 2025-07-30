@@ -202,7 +202,6 @@ disable = [
   "too-many-ancestors",
   "abstract-method",
   "broad-exception-caught",
-  "redefined-outer-name",
   "duplicate-code",
 ]
 enable = [

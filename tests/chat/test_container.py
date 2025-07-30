@@ -19,13 +19,13 @@ from ai_gateway.models.anthropic import (
 from ai_gateway.models.litellm import KindLiteLlmModel, LiteLlmChatModel
 
 
-@pytest.fixture
-def config_values(custom_models_enabled: bool):
+@pytest.fixture(name="config_values")
+def config_values_fixture(custom_models_enabled: bool):
     return {"custom_models": {"enabled": custom_models_enabled}}
 
 
-@pytest.fixture
-def mock_agent():
+@pytest.fixture(name="mock_agent")
+def mock_agent_fixture():
     return Mock(spec=Runnable)
 
 
@@ -62,6 +62,7 @@ def test_container(
 def test_container_with_config(
     mock_ai_gateway_container: containers.DeclarativeContainer,
     expected_tool_type: Type[BaseTool],
+    mock_agent: Runnable,
 ):
     chat = cast(providers.Container, mock_ai_gateway_container.chat)
 

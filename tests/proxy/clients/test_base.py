@@ -6,8 +6,6 @@ from starlette.datastructures import URL
 
 from ai_gateway.proxy.clients.base import BaseProxyClient
 
-from .fixtures import async_client_factory, limits, request_factory
-
 
 class TestProxyClient(BaseProxyClient):
     __test__ = False

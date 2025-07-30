@@ -34,21 +34,21 @@ from ai_gateway.models.base_chat import Role
 from ai_gateway.prompts.typing import Model
 
 
-@pytest.fixture(scope="class")
-def fast_api_router():
+@pytest.fixture(name="fast_api_router", scope="class")
+def fast_api_router_fixture():
     return api_router
 
 
-@pytest.fixture
-def auth_user():
+@pytest.fixture(name="auth_user")
+def auth_user_fixture():
     return CloudConnectorUser(
         authenticated=True,
         claims=UserClaims(scopes=["duo_chat", "amazon_q_integration"]),
     )
 
 
-@pytest.fixture
-def mock_create_event_stream():
+@pytest.fixture(name="mock_create_event_stream")
+def mock_create_event_stream_fixture():
     async def _dummy_create_event_stream(*args, **kwargs):
         react_inputs = ReActAgentInputs(
             messages=(
@@ -85,14 +85,14 @@ def mock_create_event_stream():
         yield mock
 
 
-@pytest.fixture
-def mock_model(model: Model):
+@pytest.fixture(name="mock_model")
+def mock_model_fixture(model: Model):
     with patch("ai_gateway.prompts.Prompt._build_model", return_value=model) as mock:
         yield mock
 
 
-@pytest.fixture
-def mocked_tools():
+@pytest.fixture(name="mocked_tools")
+def mocked_tools_fixture():
     with patch(
         "ai_gateway.chat.executor.GLAgentRemoteExecutor.tools",
         new_callable=PropertyMock,
@@ -101,8 +101,8 @@ def mocked_tools():
         yield mock
 
 
-@pytest.fixture
-def config_values():
+@pytest.fixture(name="config_values")
+def config_values_fixture():
     return {"custom_models": {"enabled": True}}
 
 

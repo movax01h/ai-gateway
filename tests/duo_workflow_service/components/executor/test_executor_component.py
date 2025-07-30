@@ -22,8 +22,8 @@ from duo_workflow_service.workflows.type_definitions import AdditionalContext
 from lib.feature_flags.context import current_feature_flag_context
 
 
-@pytest.fixture
-def approval_component(mock_toolset):
+@pytest.fixture(name="approval_component")
+def approval_component_fixture(mock_toolset):
     mock = MagicMock(
         spec=ToolsApprovalComponent,
         toolset=mock_toolset,
@@ -33,8 +33,8 @@ def approval_component(mock_toolset):
     return mock
 
 
-@pytest.fixture
-def compiled_graph(executor_component, approval_component):
+@pytest.fixture(name="compiled_graph")
+def compiled_graph_fixture(executor_component, approval_component):
     graph = StateGraph(WorkflowState)
 
     entry_point = executor_component.attach(
@@ -48,31 +48,31 @@ def compiled_graph(executor_component, approval_component):
     return graph.compile()
 
 
-@pytest.fixture
-def mock_tool():
+@pytest.fixture(name="mock_tool")
+def mock_tool_fixture():
     mock = MagicMock(DuoBaseTool)
     mock.args_schema = None
     return mock
 
 
-@pytest.fixture
-def mock_toolset(mock_tool):
+@pytest.fixture(name="mock_toolset")
+def mock_toolset_fixture(mock_tool):
     mock = MagicMock()
     mock.__getitem__.return_value = mock_tool
     mock.approved.return_value = True
     return mock
 
 
-@pytest.fixture
-def mock_tool_registry():
+@pytest.fixture(name="mock_tool_registry")
+def mock_tool_registry_fixture():
     """Create a mock tool registry."""
     registry = MagicMock(ToolsRegistry)
     registry.get.return_value = MagicMock(name="test_tool")
     return registry
 
 
-@pytest.fixture
-def mock_create_model():
+@pytest.fixture(name="mock_create_model")
+def mock_create_model_fixture():
     with patch(
         "duo_workflow_service.components.executor.component.create_chat_model"
     ) as mock:
@@ -81,8 +81,8 @@ def mock_create_model():
         yield mock
 
 
-@pytest.fixture
-def mock_model_ainvoke(
+@pytest.fixture(name="mock_model_ainvoke")
+def mock_model_ainvoke_fixture(
     duo_workflow_prompt_registry_enabled, mock_create_model, end_message
 ):
     if duo_workflow_prompt_registry_enabled:
@@ -94,8 +94,8 @@ def mock_model_ainvoke(
         yield mock_create_model.ainvoke
 
 
-@pytest.fixture
-def duo_workflow_prompt_registry_enabled() -> bool:
+@pytest.fixture(name="duo_workflow_prompt_registry_enabled")
+def duo_workflow_prompt_registry_enabled_fixture() -> bool:
     return False
 
 
@@ -107,8 +107,8 @@ def stub_feature_flags(duo_workflow_prompt_registry_enabled: bool):
     yield
 
 
-@pytest.fixture
-def mock_agent(duo_workflow_prompt_registry_enabled: bool):
+@pytest.fixture(name="mock_agent")
+def mock_agent_fixture(duo_workflow_prompt_registry_enabled: bool):
     if duo_workflow_prompt_registry_enabled:
         factory = "ai_gateway.prompts.registry.LocalPromptRegistry.get_on_behalf"
     else:
@@ -118,24 +118,24 @@ def mock_agent(duo_workflow_prompt_registry_enabled: bool):
         yield mock
 
 
-@pytest.fixture
-def mock_tools_executor():
+@pytest.fixture(name="mock_tools_executor")
+def mock_tools_executor_fixture():
     with patch(
         "duo_workflow_service.components.executor.component.ToolsExecutor"
     ) as mock:
         yield mock
 
 
-@pytest.fixture
-def mock_supervisor_agent():
+@pytest.fixture(name="mock_supervisor_agent")
+def mock_supervisor_agent_fixture():
     with patch(
         "duo_workflow_service.components.executor.component.PlanSupervisorAgent"
     ) as mock:
         yield mock
 
 
-@pytest.fixture
-def mock_handover_agent():
+@pytest.fixture(name="mock_handover_agent")
+def mock_handover_agent_fixture():
     with patch(
         "duo_workflow_service.components.executor.component.HandoverAgent"
     ) as mock:
@@ -149,12 +149,12 @@ def mock_handover_agent():
 @pytest.mark.usefixtures("mock_container")
 @pytest.mark.parametrize("duo_workflow_prompt_registry_enabled", [False, True])
 class TestExecutorComponent:
-    @pytest.fixture
-    def goal(self) -> str:
+    @pytest.fixture(name="goal")
+    def goal_fixture(self) -> str:
         return "Test goal"
 
-    @pytest.fixture
-    def mock_dependencies(
+    @pytest.fixture(name="mock_dependencies")
+    def mock_dependencies_fixture(
         self,
         mock_toolset,
         mock_tool_registry,
@@ -178,8 +178,8 @@ class TestExecutorComponent:
             "user": user,
         }
 
-    @pytest.fixture
-    def executor_component(
+    @pytest.fixture(name="executor_component")
+    def executor_component_fixture(
         self, mock_dependencies, mock_duo_workflow_service_container
     ):
         return ExecutorComponent(**mock_dependencies)

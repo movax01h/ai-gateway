@@ -23,8 +23,8 @@ from ai_gateway.api.middleware.internal_event import InternalEventMiddleware
 from lib.internal_events import EventContext
 
 
-@pytest.fixture
-def internal_event_middleware(mock_app):
+@pytest.fixture(name="internal_event_middleware")
+def internal_event_middleware_fixture(mock_app):
     return InternalEventMiddleware(
         mock_app, skip_endpoints=["/health"], enabled=True, environment="test"
     )

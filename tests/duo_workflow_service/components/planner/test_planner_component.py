@@ -21,8 +21,8 @@ from duo_workflow_service.tools import DuoBaseTool
 from lib.feature_flags.context import current_feature_flag_context
 
 
-@pytest.fixture
-def approval_component(mock_toolset):
+@pytest.fixture(name="approval_component")
+def approval_component_fixture(mock_toolset):
     mock = MagicMock(
         spec=PlanApprovalComponent,
         toolset=mock_toolset,
@@ -31,8 +31,8 @@ def approval_component(mock_toolset):
     return mock
 
 
-@pytest.fixture
-def mock_tool():
+@pytest.fixture(name="mock_tool")
+def mock_tool_fixture():
     mock = MagicMock(DuoBaseTool)
     mock.args_schema = None
     mock.name = "test_tool"
@@ -40,23 +40,23 @@ def mock_tool():
     return mock
 
 
-@pytest.fixture
-def mock_toolset(mock_tool):
+@pytest.fixture(name="mock_toolset")
+def mock_toolset_fixture(mock_tool):
     mock = MagicMock()
     mock.__getitem__.return_value = mock_tool
     return mock
 
 
-@pytest.fixture
-def mock_tool_registry(mock_tool):
+@pytest.fixture(name="mock_tool_registry")
+def mock_tool_registry_fixture(mock_tool):
     """Create a mock tool registry."""
     registry = MagicMock(ToolsRegistry)
     registry.get.return_value = mock_tool
     return registry
 
 
-@pytest.fixture
-def mock_create_model():
+@pytest.fixture(name="mock_create_model")
+def mock_create_model_fixture():
     with patch(
         "duo_workflow_service.components.planner.component.create_chat_model"
     ) as mock:
@@ -65,8 +65,8 @@ def mock_create_model():
         yield mock
 
 
-@pytest.fixture
-def mock_model_ainvoke(
+@pytest.fixture(name="mock_model_ainvoke")
+def mock_model_ainvoke_fixture(
     duo_workflow_prompt_registry_enabled, mock_create_model, end_message
 ):
     if duo_workflow_prompt_registry_enabled:
@@ -78,8 +78,8 @@ def mock_model_ainvoke(
         yield mock_create_model.ainvoke
 
 
-@pytest.fixture
-def duo_workflow_prompt_registry_enabled() -> bool:
+@pytest.fixture(name="duo_workflow_prompt_registry_enabled")
+def duo_workflow_prompt_registry_enabled_fixture() -> bool:
     return False
 
 
@@ -91,8 +91,8 @@ def stub_feature_flags(duo_workflow_prompt_registry_enabled: bool):
     yield
 
 
-@pytest.fixture
-def mock_agent(duo_workflow_prompt_registry_enabled):
+@pytest.fixture(name="mock_agent")
+def mock_agent_fixture(duo_workflow_prompt_registry_enabled):
     if duo_workflow_prompt_registry_enabled:
         factory = "ai_gateway.prompts.registry.LocalPromptRegistry.get_on_behalf"
     else:
@@ -102,8 +102,8 @@ def mock_agent(duo_workflow_prompt_registry_enabled):
         yield mock
 
 
-@pytest.fixture
-def mock_tools_executor():
+@pytest.fixture(name="mock_tools_executor")
+def mock_tools_executor_fixture():
     with patch(
         "duo_workflow_service.components.planner.component.ToolsExecutor"
     ) as mock:
@@ -116,8 +116,8 @@ def mock_tools_executor():
         yield mock
 
 
-@pytest.fixture
-def mock_supervisor_agent():
+@pytest.fixture(name="mock_supervisor_agent")
+def mock_supervisor_agent_fixture():
     with patch(
         "duo_workflow_service.components.planner.component.PlanSupervisorAgent"
     ) as mock:
@@ -136,12 +136,12 @@ def mock_supervisor_agent():
 @pytest.mark.usefixtures("mock_duo_workflow_service_container")
 @pytest.mark.parametrize("duo_workflow_prompt_registry_enabled", [False, True])
 class TestPlannerComponent:
-    @pytest.fixture
-    def goal(self) -> str:
+    @pytest.fixture(name="goal")
+    def goal_fixture(self) -> str:
         return "Test goal"
 
-    @pytest.fixture
-    def mock_dependencies(
+    @pytest.fixture(name="mock_dependencies")
+    def mock_dependencies_fixture(
         self,
         workflow_type,
         goal,
@@ -165,12 +165,12 @@ class TestPlannerComponent:
             "user": user,
         }
 
-    @pytest.fixture
-    def planner_component(self, mock_dependencies):
+    @pytest.fixture(name="planner_component")
+    def planner_component_fixture(self, mock_dependencies):
         return PlannerComponent(**mock_dependencies)
 
-    @pytest.fixture
-    def compiled_graph(self, planner_component, approval_component):
+    @pytest.fixture(name="compiled_graph")
+    def compiled_graph_fixture(self, planner_component, approval_component):
         graph = StateGraph(WorkflowState)
 
         entry_point = planner_component.attach(

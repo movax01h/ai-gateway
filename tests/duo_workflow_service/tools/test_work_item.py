@@ -15,23 +15,23 @@ from duo_workflow_service.tools.work_item import (
 )
 
 
-@pytest.fixture
-def gitlab_client_mock():
+@pytest.fixture(name="gitlab_client_mock")
+def gitlab_client_mock_fixture():
     mock = Mock()
     mock.graphql = AsyncMock()
     return mock
 
 
-@pytest.fixture
-def metadata(gitlab_client_mock):
+@pytest.fixture(name="metadata")
+def metadata_fixture(gitlab_client_mock):
     return {
         "gitlab_client": gitlab_client_mock,
         "gitlab_host": "gitlab.com",
     }
 
 
-@pytest.fixture
-def work_item_data():
+@pytest.fixture(name="work_item_data")
+def work_item_data_fixture():
     """Fixture for sample work item data."""
     return {
         "id": "gid://gitlab/WorkItem/123",
@@ -45,8 +45,8 @@ def work_item_data():
     }
 
 
-@pytest.fixture
-def work_items_list():
+@pytest.fixture(name="work_items_list")
+def work_items_list_fixture():
     """Fixture for a list of work items."""
     return [
         {
@@ -520,8 +520,8 @@ def test_get_work_item_format_display_message(input_data, expected_message):
     assert message == expected_message
 
 
-@pytest.fixture
-def work_item_notes():
+@pytest.fixture(name="work_item_notes")
+def work_item_notes_fixture():
     """Fixture for sample work item notes."""
     return [
         {

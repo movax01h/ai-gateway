@@ -11,8 +11,8 @@ from ai_gateway.config import Config
 from ai_gateway.models import ModelAPIError
 
 
-@pytest.fixture
-def config_values():
+@pytest.fixture(name="config_values")
+def config_values_fixture():
     # test using a valid looking fireworks config so we can stub out the actual
     # call rather than the `from_model_name` classmethod
     return {
@@ -30,13 +30,13 @@ def config_values():
     }
 
 
-@pytest.fixture
-def fastapi_server_app(mock_config: Config) -> FastAPI:
+@pytest.fixture(name="fastapi_server_app")
+def fastapi_server_app_fixture(mock_config: Config) -> FastAPI:
     return create_fast_api_server(mock_config)
 
 
-@pytest.fixture
-def client(
+@pytest.fixture(name="client")
+def client_fixture(
     fastapi_server_app: FastAPI,
     mock_ai_gateway_container: containers.Container,  # pylint: disable=unused-argument
 ) -> TestClient:
@@ -170,8 +170,8 @@ def test_ready_cloud_connector_failure_from_library(client: TestClient):
 
 class TestCustomModelEnabled:
     # This overrides conftest.py `config_values` which is referenced by `mock_config`
-    @pytest.fixture
-    def config_values(self):
+    @pytest.fixture(name="config_values")
+    def config_values_fixture(self):
         yield {
             "custom_models": {"enabled": "true"},
             "model_keys": {"fireworks_api_key": "fw_api_key"},

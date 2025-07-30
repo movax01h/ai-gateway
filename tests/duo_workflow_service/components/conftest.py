@@ -2,37 +2,21 @@ import pytest
 from gitlab_cloud_connector import CloudConnectorUser, UserClaims
 from langchain_core.messages import AIMessage
 
-from duo_workflow_service.entities.state import Plan, WorkflowState, WorkflowStatusEnum
 from lib.internal_events.event_enum import CategoryEnum
 
 
-@pytest.fixture
-def config_values():
+@pytest.fixture(name="config_values")
+def config_values_fixture():
     return {"mock_model_responses": True}
 
 
-@pytest.fixture(scope="function")
-def graph_input() -> WorkflowState:
-    return WorkflowState(
-        status=WorkflowStatusEnum.NOT_STARTED,
-        conversation_history={},
-        last_human_input=None,
-        handover=[],
-        ui_chat_log=[],
-        plan=Plan(steps=[]),
-        project=None,
-        goal=None,
-        additional_context=None,
-    )
-
-
-@pytest.fixture
-def graph_config():
+@pytest.fixture(name="graph_config")
+def graph_config_fixture():
     return {"configurable": {"thread_id": "test-workflow"}}
 
 
-@pytest.fixture
-def end_message():
+@pytest.fixture(name="end_message")
+def end_message_fixture():
     return AIMessage(
         content="Done with the execution, over to handover agent",
         tool_calls=[
@@ -45,13 +29,13 @@ def end_message():
     )
 
 
-@pytest.fixture
-def workflow_type() -> CategoryEnum:
+@pytest.fixture(name="workflow_type")
+def workflow_type_fixture() -> CategoryEnum:
     return CategoryEnum.WORKFLOW_SOFTWARE_DEVELOPMENT
 
 
-@pytest.fixture
-def user():
+@pytest.fixture(name="user")
+def user_fixture():
     return CloudConnectorUser(
         authenticated=True,
         claims=UserClaims(

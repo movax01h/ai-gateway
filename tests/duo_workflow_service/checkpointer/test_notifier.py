@@ -14,13 +14,13 @@ from duo_workflow_service.entities.state import MessageTypeEnum, WorkflowStatusE
 from duo_workflow_service.workflows.type_definitions import AdditionalContext
 
 
-@pytest.fixture
-def outbox():
+@pytest.fixture(name="outbox")
+def outbox_fixture():
     return asyncio.Queue()
 
 
-@pytest.fixture
-def checkpoint_notifier(outbox):
+@pytest.fixture(name="checkpoint_notifier")
+def checkpoint_notifier_fixture(outbox):
     return UserInterface(outbox=outbox, goal="test_goal")
 
 

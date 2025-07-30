@@ -8,8 +8,8 @@ from ai_gateway.prompts.base import Prompt
 
 
 class TestAgentModel:
-    @pytest.fixture
-    def prompt(self) -> Prompt:
+    @pytest.fixture(name="prompt")
+    def prompt_fixture(self) -> Prompt:
         async def _stream_prompt(*_args, **_kwargs):
             for action in [AsyncMock(content="part 1"), AsyncMock(content="part 2")]:
                 yield action
@@ -23,12 +23,12 @@ class TestAgentModel:
 
         return prompt
 
-    @pytest.fixture
-    def model(self, prompt: Prompt):
+    @pytest.fixture(name="model")
+    def model_fixture(self, prompt: Prompt):
         return AgentModel(prompt)
 
-    @pytest.fixture
-    def mixtral_prompt(self) -> Prompt:
+    @pytest.fixture(name="mixtral_prompt")
+    def mixtral_prompt_fixture(self) -> Prompt:
         async def _stream_prompt(*_args, **_kwargs):
             for action in [
                 AsyncMock(content="part\\_1"),
@@ -48,12 +48,12 @@ class TestAgentModel:
 
         return prompt
 
-    @pytest.fixture
-    def mixtral_model(self, mixtral_prompt: Prompt):
+    @pytest.fixture(name="mixtral_model")
+    def mixtral_model_fixture(self, mixtral_prompt: Prompt):
         return AgentModel(mixtral_prompt)
 
-    @pytest.fixture
-    def params(self):
+    @pytest.fixture(name="params")
+    def params_fixture(self):
         return {"prefix": "def binary_search(s):", "suffix": "end"}
 
     def test_init(self, prompt, model):

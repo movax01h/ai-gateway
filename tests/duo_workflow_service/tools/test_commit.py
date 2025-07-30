@@ -16,22 +16,22 @@ from duo_workflow_service.tools.commit import (
 )
 
 
-@pytest.fixture
-def gitlab_client_mock():
+@pytest.fixture(name="gitlab_client_mock")
+def gitlab_client_mock_fixture():
     mock = Mock()
     return mock
 
 
-@pytest.fixture
-def metadata(gitlab_client_mock):
+@pytest.fixture(name="metadata")
+def metadata_fixture(gitlab_client_mock):
     return {
         "gitlab_client": gitlab_client_mock,
         "gitlab_host": "gitlab.com",
     }
 
 
-@pytest.fixture
-def commit_data():
+@pytest.fixture(name="commit_data")
+def commit_data_fixture():
     """Fixture for sample commit data."""
     return {
         "id": "6104942438c14ec7bd21c6cd5bd995272b3faff6",

@@ -48,8 +48,8 @@ def clear_prompt_cache():
 
 
 # editorconfig-checker-disable
-@pytest.fixture
-def mock_fs(fs: FakeFilesystem):
+@pytest.fixture(name="mock_fs")
+def mock_fs_fixture(fs: FakeFilesystem):
     prompts_definitions_dir = (
         Path(__file__).parent.parent.parent / "ai_gateway" / "prompts" / "definitions"
     )
@@ -209,8 +209,8 @@ params:
 # editorconfig-checker-enable
 
 
-@pytest.fixture
-def model_factories():
+@pytest.fixture(name="model_factories")
+def model_factories_fixture():
     return {
         # type: ignore[call-arg]
         ModelClassProvider.ANTHROPIC: lambda model, **kwargs: ChatAnthropic(
@@ -227,23 +227,23 @@ def model_factories():
     }
 
 
-@pytest.fixture
-def default_prompts():
+@pytest.fixture(name="default_prompts")
+def default_prompts_fixture():
     return {}
 
 
-@pytest.fixture
-def custom_models_enabled():
+@pytest.fixture(name="custom_models_enabled")
+def custom_models_enabled_fixture():
     return True
 
 
-@pytest.fixture
-def disable_streaming():
+@pytest.fixture(name="disable_streaming")
+def disable_streaming_fixture():
     return True
 
 
-@pytest.fixture
-def registry(
+@pytest.fixture(name="registry")
+def registry_fixture(
     model_factories: dict[ModelClassProvider, TypeModelFactory],
     default_prompts: dict[str, str],
     internal_event_client: Mock,

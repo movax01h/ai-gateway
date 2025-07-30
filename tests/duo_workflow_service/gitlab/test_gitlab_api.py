@@ -8,8 +8,8 @@ from duo_workflow_service.gitlab.gitlab_api import (
 )
 
 
-@pytest.fixture
-def workflow_and_project_data():
+@pytest.fixture(name="workflow_and_project_data")
+def workflow_and_project_data_fixture():
     return {
         "duoWorkflowWorkflows": {
             "nodes": [

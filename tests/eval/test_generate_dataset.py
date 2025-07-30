@@ -25,16 +25,16 @@ class TestGetMessageSource:
         mock_ast.body[0].template.value = template_path
         return mock_ast
 
-    @pytest.fixture
-    def mock_system_ast(self):
+    @pytest.fixture(name="mock_system_ast")
+    def mock_system_ast_fixture(self):
         return self.mock_ast("chat/explain_code/system/1.0.0.jinja")
 
-    @pytest.fixture
-    def mock_user_ast(self):
+    @pytest.fixture(name="mock_user_ast")
+    def mock_user_ast_fixture(self):
         return self.mock_ast("chat/explain_code/user/1.0.0.jinja")
 
-    @pytest.fixture
-    def mock_env(self, mock_system_ast, mock_user_ast):
+    @pytest.fixture(name="mock_env")
+    def mock_env_fixture(self, mock_system_ast, mock_user_ast):
         def parse_side_effect(template_str):
             if "system" in template_str:
                 return mock_system_ast
@@ -47,8 +47,8 @@ class TestGetMessageSource:
 
             yield mock_env
 
-    @pytest.fixture
-    def mock_loader(self, mock_env, mock_user_ast):
+    @pytest.fixture(name="mock_loader")
+    def mock_loader_fixture(self, mock_env, mock_user_ast):
         mock_loader = MagicMock()
         mock_env.loader = mock_loader
         mock_env.parse.return_value = mock_user_ast
@@ -275,8 +275,8 @@ class TestCreateLangsmithClient:
 
 
 class TestRun:
-    @pytest.fixture
-    def mock_container_application(self):
+    @pytest.fixture(name="mock_container_application")
+    def mock_container_application_fixture(self):
         with patch(
             "eval.generate_dataset.ContainerApplication"
         ) as mock_container_class:
