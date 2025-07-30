@@ -198,12 +198,45 @@ class GitLabWorkflow(BaseCheckpointSaver[Any], AbstractAsyncContextManager[Any])
         if self._offline_mode:
             return
 
+        self._record_metric(
+            event_name=event_name,
+            additional_properties=additional_properties,
+        )
+
         self._logger.info("Tracking Internal event %s", event_name.value)
         self._internal_event_client.track_event(
             event_name=event_name.value,
             additional_properties=additional_properties,
             category=self._workflow_type.value,
         )
+
+    def _record_metric(
+        self,
+        event_name: EventEnum,
+        additional_properties: InternalEventAdditionalProperties,
+    ) -> None:
+        """Records metrics to prometheus for real-time monitoring."""
+
+        # For flow start events
+        if event_name == EventEnum.WORKFLOW_START:
+            duo_workflow_metrics.count_agent_platform_session_start(
+                flow_type=self._workflow_type.value,
+            )
+
+        # For session success events
+        if event_name == EventEnum.WORKFLOW_FINISH_SUCCESS:
+            duo_workflow_metrics.count_agent_platform_session_success(
+                flow_type=self._workflow_type.value,
+            )
+
+        if event_name == EventEnum.WORKFLOW_FINISH_FAILURE:
+            error_type = additional_properties.extra.get("error_type", "unknown")
+            if not error_type or error_type == "str":
+                error_type = "unknown"
+            duo_workflow_metrics.count_agent_platform_session_failure(
+                flow_type=self._workflow_type.value,
+                failure_reason=error_type,
+            )
 
     async def __aenter__(self) -> BaseCheckpointSaver:
         try:
@@ -242,7 +275,9 @@ class GitLabWorkflow(BaseCheckpointSaver[Any], AbstractAsyncContextManager[Any])
                 label=EventLabelEnum.WORKFLOW_FINISH_LABEL.value,
                 property=repr(e),
                 value=self._workflow_id,
+                error_type=type(e).__name__,
             )
+            self._logger.info(f"Additional properties: {failure_properties}")
             self._track_internal_event(
                 event_name=EventEnum.WORKFLOW_FINISH_FAILURE,
                 additional_properties=failure_properties,
@@ -337,6 +372,7 @@ class GitLabWorkflow(BaseCheckpointSaver[Any], AbstractAsyncContextManager[Any])
             label=EventLabelEnum.WORKFLOW_FINISH_LABEL.value,
             property=repr(exc_value),
             value=self._workflow_id,
+            error_type=type(exc_value).__name__,
         )
         self._track_internal_event(
             event_name=EventEnum.WORKFLOW_FINISH_FAILURE,

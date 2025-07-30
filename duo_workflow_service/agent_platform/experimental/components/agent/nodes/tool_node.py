@@ -156,6 +156,10 @@ class ToolNode:
             value=self._flow_id,
             **extra,
         )
+        self._record_metric(
+            event_name=event_name,
+            additional_properties=additional_properties,
+        )
         self._internal_event_client.track_event(
             event_name=event_name.value,
             additional_properties=additional_properties,
@@ -176,7 +180,10 @@ class ToolNode:
         self._track_internal_event(
             event_name=EventEnum.WORKFLOW_TOOL_FAILURE,
             tool_name=tool.name,
-            extra={"error": str(error)},
+            extra={
+                "error": str(error),
+                "error_type": type(error).__name__,
+            },
         )
 
         return response
@@ -189,7 +196,10 @@ class ToolNode:
         self._track_internal_event(
             event_name=EventEnum.WORKFLOW_TOOL_FAILURE,
             tool_name=tool_name,
-            extra={"error": str(error)},
+            extra={
+                "error": str(error),
+                "error_type": type(error).__name__,
+            },
         )
         return f"Tool {tool_name} raised validation error {str(error)}"
 
@@ -201,7 +211,25 @@ class ToolNode:
         self._track_internal_event(
             event_name=EventEnum.WORKFLOW_TOOL_FAILURE,
             tool_name=tool_name,
-            extra={"error": str(error)},
+            extra={
+                "error": str(error),
+                "error_type": type(error).__name__,
+            },
         )
 
         return f"Tool runtime exception due to {str(error)}"
+
+    def _record_metric(
+        self,
+        event_name: EventEnum,
+        additional_properties: InternalEventAdditionalProperties,
+    ) -> None:
+
+        if event_name == EventEnum.WORKFLOW_TOOL_FAILURE:
+            tool_name = additional_properties.property or "unknown"
+            failure_reason = additional_properties.extra.get("error_type", "unknown")
+            duo_workflow_metrics.count_agent_platform_tool_failure(
+                flow_type=self._flow_type.value,
+                tool_name=tool_name,
+                failure_reason=failure_reason,
+            )
