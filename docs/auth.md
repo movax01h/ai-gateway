@@ -83,7 +83,7 @@ AIGW_CUSTOMER_PORTAL_URL=http://<your-customer-dot-address> # e.g. http://127.0.
 
 #### Self-signed SSL certificates
 
-If your GitLab instance is configured with a self-signed certificate, you need to pass your root CA's cert to the AI
+If your GitLab instance or model endpoint is configured either with a self-signed certificate, or a certificate from an custom certificate authority (CA), you need to pass your root CA's cert to the AI
 Gateway for authentication to succeed. You can do so by setting the `REQUESTS_CA_BUNDLE` environment variable (see
 <https://requests.readthedocs.io/en/latest/user/advanced/#ssl-cert-verification>). Since we rely on
 [`certifi`](https://github.com/certifi/python-certifi) for our base trusted CA list, you can configure a custom CA
