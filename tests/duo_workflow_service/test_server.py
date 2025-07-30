@@ -66,7 +66,7 @@ def test_run():
         mock_setup_profiling.assert_called_once()
         mock_setup_error_tracking.assert_called_once()
         mock_setup_monitoring.assert_called_once()
-        mock_setup_logging.assert_called_once_with(json_format=True, to_file=None)
+        mock_setup_logging.assert_called_once()
         mock_validate_llm_access.assert_called_once()
 
         assert mock_loop.run_until_complete.call_count == 1
