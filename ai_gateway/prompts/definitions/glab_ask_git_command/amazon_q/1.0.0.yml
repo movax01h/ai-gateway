@@ -1,0 +1,13 @@
+---
+name: Amazon Q Glab Ask Git Command
+model:
+  name: amazon_q
+  params:
+    model_class_provider: amazon_q
+unit_primitives:
+  - amazon_q_integration
+prompt_template:
+  system: |
+    {% include 'glab_ask_git_command/system/1.0.0.jinja' %}
+  user: |
+    {% include 'glab_ask_git_command/user/1.0.0.jinja' %}
