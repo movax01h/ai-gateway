@@ -1,10 +1,16 @@
 from pathlib import Path
+from typing import Annotated
 from unittest.mock import patch
 
 import pytest
 import yaml
+from langgraph.graph import StateGraph
 from pydantic import ValidationError
 
+from duo_workflow_service.agent_platform.experimental.components import (
+    BaseComponent,
+    RouterProtocol,
+)
 from duo_workflow_service.agent_platform.experimental.flows.flow_config import (
     FlowConfig,
     load_component_class,
@@ -161,69 +167,27 @@ class TestFlowConfig:
 
 
 class TestLoadComponentClass:
-    """Test load_component_class function."""
+    """Test load_component_class function with ComponentRegistry."""
 
-    def test_load_component_class_success(self):
-        """Test loading existing component class successfully."""
-        # Mock the components module to have a test class
-        mock_base_component_class = type("TestBaseComponent", (), {})
-        mock_component_class = type("TestComponent", (mock_base_component_class,), {})
+    def test_load_component_class_success(self, component_registry_instance_type):
+        """Test loading existing component class successfully from registry."""
 
-        with patch(
-            "duo_workflow_service.agent_platform.experimental.flows.flow_config.components"
-        ) as mock_components:
-            mock_components.BaseComponent = mock_base_component_class
-            mock_components.TestComponent = mock_component_class
+        class TestComponent(BaseComponent):
+            def attach(self, graph: StateGraph, router: RouterProtocol) -> None: ...
+            def __entry_hook__(self) -> Annotated[str, "Components entry node name"]:
+                return "mock"
 
-            result = load_component_class("TestComponent")
+        registry = component_registry_instance_type()
+        mock_component_class = TestComponent
+        registry.register(mock_component_class, decorators=[])
 
-            assert result == mock_component_class
+        result = load_component_class("TestComponent")
 
-    def test_load_component_class_not_found(self):
-        """Test loading non-existent component class raises AttributeError."""
-        with patch(
-            "duo_workflow_service.agent_platform.experimental.flows.flow_config.components"
-        ) as mock_components:
-            # Remove the attribute to simulate it not existing
-            del mock_components.NonExistentComponent
+        assert result is mock_component_class
 
-            with pytest.raises(AttributeError) as exc_info:
-                load_component_class("NonExistentComponent")
-
-            assert "Component class 'NonExistentComponent' not found" in str(
-                exc_info.value
-            )
-
-    def test_load_component_class_not_a_class(self):
-        """Test loading non-class object raises TypeError."""
-        with patch(
-            "duo_workflow_service.agent_platform.experimental.flows.flow_config.components"
-        ) as mock_components:
-            # Set attribute to a function instead of a class
-            mock_components.NotAClass = lambda: None
-
-            with pytest.raises(TypeError) as exc_info:
-                load_component_class("NotAClass")
-
-            assert "'NotAClass' must inherit from the BaseComponent class" in str(
-                exc_info.value
-            )
-
-    def test_load_component_class_not_a_child_of_a_base_class(self):
-        """Test loading existing component class successfully."""
-        # Mock the components module to have a test class
-        mock_base_component_class = type("TestBaseComponent", (), {})
-        mock_component_class = type("TestComponent", (), {})
-
-        with patch(
-            "duo_workflow_service.agent_platform.experimental.flows.flow_config.components"
-        ) as mock_components:
-            mock_components.BaseComponent = mock_base_component_class
-            mock_components.TestComponent = mock_component_class
-
-            with pytest.raises(TypeError) as exc_info:
-                load_component_class("NotAClass")
-
-            assert "'NotAClass' must inherit from the BaseComponent class" in str(
-                exc_info.value
-            )
+    def test_load_component_class_not_found_raises_error(
+        self, component_registry_instance_type  # pylint: disable=unused-argument
+    ):
+        """Test loading non-existent component class raises TypeError."""
+        with pytest.raises(KeyError):
+            load_component_class("NonExistentComponent")

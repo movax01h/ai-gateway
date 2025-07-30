@@ -1,4 +1,4 @@
-from typing import Annotated, ClassVar, Literal, Optional
+from typing import Annotated, ClassVar, Literal
 
 from dependency_injector.wiring import Provide, inject
 from langchain_core.messages import AIMessage, BaseMessage
@@ -21,10 +21,12 @@ from duo_workflow_service.agent_platform.experimental.components.base import (
     BaseComponent,
     RouterProtocol,
 )
+from duo_workflow_service.agent_platform.experimental.components.registry import (
+    register_component,
+)
 from duo_workflow_service.agent_platform.experimental.state import (
     FlowState,
     FlowStateKeys,
-    IOKey,
     IOKeyTemplate,
 )
 from duo_workflow_service.agent_platform.experimental.ui_log import (
@@ -33,15 +35,15 @@ from duo_workflow_service.agent_platform.experimental.ui_log import (
 )
 from duo_workflow_service.tools.toolset import Toolset
 from lib.internal_events import InternalEventsClient
-from lib.internal_events.event_enum import CategoryEnum
 
-__all__ = ["AgentComponent"]
+__all__ = ["AgentComponent", "RoutingError"]
 
 
 class RoutingError(Exception):
     """Exception raised when edge routers encounter unexpected conditions."""
 
 
+@register_component(decorators=[inject])
 class AgentComponent(BaseComponent):
     _final_answer_key: ClassVar[IOKeyTemplate] = IOKeyTemplate(
         target="context",
@@ -63,46 +65,17 @@ class AgentComponent(BaseComponent):
     prompt_version: str
     toolset: Toolset
 
-    prompt_registry: LocalPromptRegistry
-    internal_event_client: InternalEventsClient
+    prompt_registry: LocalPromptRegistry = Provide[
+        ContainerApplication.pkg_prompts.prompt_registry
+    ]
+    internal_event_client: InternalEventsClient = Provide[
+        ContainerApplication.internal_event.client
+    ]
 
     ui_log_events: list[UILogEventsAgent] = Field(default_factory=list)
     ui_role_as: Literal["agent", "tool"] = "agent"
 
     _allowed_input_targets = tuple(FlowState.__annotations__.keys())
-
-    @inject
-    def __init__(
-        self,
-        name: str,
-        flow_id: str,
-        flow_type: CategoryEnum,
-        inputs: list[IOKey],
-        prompt_id: str,
-        prompt_version: str,
-        toolset: Toolset,
-        output: Optional[IOKey] = None,
-        prompt_registry: LocalPromptRegistry = Provide[
-            ContainerApplication.pkg_prompts.prompt_registry
-        ],
-        internal_event_client: InternalEventsClient = Provide[
-            ContainerApplication.internal_event.client
-        ],
-        **kwargs,
-    ):
-        super().__init__(
-            name=name,
-            flow_id=flow_id,
-            flow_type=flow_type,
-            inputs=inputs,
-            output=output,
-            prompt_id=prompt_id,  # type: ignore[call-arg]
-            prompt_version=prompt_version,  # type: ignore[call-arg]
-            toolset=toolset,  # type: ignore[call-arg]
-            prompt_registry=prompt_registry,  # type: ignore[call-arg]
-            internal_event_client=internal_event_client,  # type: ignore[call-arg]
-            **kwargs,
-        )
 
     def _agent_node_router(self, state: FlowState) -> str:
         history: list[BaseMessage] = state[FlowStateKeys.CONVERSATION_HISTORY].get(
