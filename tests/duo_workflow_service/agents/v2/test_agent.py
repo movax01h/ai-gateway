@@ -24,7 +24,7 @@ from duo_workflow_service.gitlab.http_client import GitlabHttpClient
 def prompt_template() -> dict[str, str]:
     return {
         "system": "You are AGI entity capable of anything",
-        "user": "Your goal is: {{ goal }}",
+        "user": "{% if handover %}Handover: {{handover}}.\n{% endif %}Your goal is: {{ goal }}",
     }
 
 
@@ -79,22 +79,23 @@ class TestAgent:
         model_response: str,
     ):
         workflow_state["handover"] = [
-            HumanMessage(
-                content="I tried to tell jokes on the streets to cheer everybody up"
-            )
+            SystemMessage(content="System message"),
+            HumanMessage(content="Human message"),
         ]
+        expected_handover = """================================ System Message ================================
+
+System message
+================================ Human Message =================================
+
+Human message"""
 
         result = await agent.run(workflow_state)
 
         assert result["conversation_history"][prompt_name] == [
             SystemMessage(content="You are AGI entity capable of anything"),
             HumanMessage(
-                content="The steps towards goal accomplished so far are as follow:"
+                content=f"Handover: {expected_handover}.\nYour goal is: {goal}"
             ),
-            HumanMessage(
-                content="I tried to tell jokes on the streets to cheer everybody up"
-            ),
-            HumanMessage(content=f"Your goal is: {goal}"),
             AIMessage.model_construct(content=model_response, id=ANY),
         ]
 

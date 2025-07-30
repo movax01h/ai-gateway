@@ -10,6 +10,6 @@ prompt_template:
   system: |
     {% include 'workflow/executor/system/1.0.0.jinja' %}
   user: |
-    {% include 'workflow/executor/user/1.0.0.jinja' %}
+    {% include 'workflow/user/1.0.0.jinja' %}
 params:
   timeout: 30

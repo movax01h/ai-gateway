@@ -10,4 +10,4 @@ prompt_template:
   system: |
     {% include 'workflow/context_builder/system/1.0.0.jinja' %}
   user: |
-    {% include 'workflow/context_builder/user/1.0.0.jinja' %}
+    {% include 'workflow/user/1.0.0.jinja' %}
