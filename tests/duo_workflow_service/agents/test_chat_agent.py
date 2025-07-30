@@ -226,8 +226,23 @@ class TestChatAgentPromptTemplate:
     def prompt_template_with_split_system_fixture(self):
         """Prompt template with both system_static and system_dynamic parts."""
         return {
-            "system_static": "You are GitLab Duo Chat, an AI coding assistant.\n\n<core_mission>\nYour primary role is collaborative programming.\n</core_mission>",
-            "system_dynamic": "<context>\nThe current date is {{ current_date }}. The current time is {{ current_time }}. The user's timezone is {{ current_timezone }}.\n{%- if project %}\nHere is the project information for the current GitLab project the USER is working on:\n<project>\n<project_id>{{ project.id }}</project_id>\n<project_name>{{ project.name }}</project_name>\n<project_url>{{ project.web_url }}</project_url>\n</project>\n{%- endif %}\n</context>",
+            "system_static": """You are GitLab Duo Chat, an AI coding assistant.
+
+<core_mission>
+Your primary role is collaborative programming.
+</core_mission>""",
+            "system_dynamic": """<context>
+The current date is {{ current_date }}. The current time is {{ current_time }}. The user's timezone is
+{{ current_timezone }}.
+{%- if project %}
+Here is the project information for the current GitLab project the USER is working on:
+<project>
+<project_id>{{ project.id }}</project_id>
+<project_name>{{ project.name }}</project_name>
+<project_url>{{ project.web_url }}</project_url>
+</project>
+{%- endif %}
+</context>""",
             "user": "{{ message.content }}",
         }
 

@@ -822,5 +822,6 @@ prompt_template:
 
         assert (
             str(exc_info.value)
-            == "Failed to load prompt definition for 'empty_prompt/base': No version YAML files found for prompt id: empty_prompt/base"
+            == "Failed to load prompt definition for 'empty_prompt/base': No version YAML files found for prompt id: "
+            "empty_prompt/base"
         )

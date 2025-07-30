@@ -230,7 +230,8 @@ class ChatAgent(Prompt[ChatWorkflowState, BaseMessage]):
                     UiChatLog(
                         message_type=MessageTypeEnum.AGENT,
                         message_sub_type=None,
-                        content="There was an error processing your request. Please try again or contact support if the issue persists.",
+                        content="There was an error processing your request. Please try again or contact support if "
+                        "the issue persists.",
                         timestamp=datetime.now(timezone.utc).isoformat(),
                         status=ToolStatus.FAILURE,
                         correlation_id=None,

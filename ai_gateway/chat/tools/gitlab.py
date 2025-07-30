@@ -69,9 +69,10 @@ class WorkItemReader(BaseRemoteTool):
         ONLY if the user question fulfills the strict usage conditions below.
 
         **Strict Usage Conditions:**
-        * **Condition 1: Work item ID Provided:** This tool MUST be used ONLY when the user provides a valid work item ID.
-        * **Condition 2: Work item URL Context:** This tool MUST be used ONLY when the user is actively viewing a specific
-        work item URL or a specific URL is provided by the user.
+        * **Condition 1: Work item ID Provided:** This tool MUST be used ONLY when the user provides a valid work item
+        ID.
+        * **Condition 2: Work item URL Context:** This tool MUST be used ONLY when the user is actively viewing a
+        specific work item URL or a specific URL is provided by the user.
 
         **Do NOT** attempt to search for or identify work items based on descriptions, keywords, or user questions.
 
@@ -86,8 +87,8 @@ class WorkItemReader(BaseRemoteTool):
         """\
         Question: Please identify the author of https://some.host.name/some/long/path/-/work_items/410692
         Thought: You have access to the same resources as user who asks a question.
-        Question is about the content of a work item, so you need to use "work_item_reader" tool to retrieve and read work item.
-        Based on this information you can present final answer about work item.
+        Question is about the content of a work item, so you need to use "work_item_reader" tool to retrieve and read
+        work item. Based on this information you can present final answer about work item.
         Action: work_item_reader
         Action Input: Please identify the author of https://some.host.name/some/long/path/-/work_items/410692"""
     )
@@ -157,11 +158,13 @@ class EpicReader(BaseRemoteTool):
         ONLY if the user question fulfills the strict usage conditions below.
 
         **Strict Usage Conditions:**
-        * **Condition 1: epic ID Provided:** This tool MUST be used ONLY when the user provides a valid epic or work item ID.
+        * **Condition 1: epic ID Provided:** This tool MUST be used ONLY when the user provides a valid epic or work
+          item ID.
         * **Condition 2: epic URL Context:** This tool MUST be used ONLY when the user is actively viewing
           a specific epic or work item URL or a specific URL is provided by the user.
 
-        **Do NOT** attempt to search for or identify epics or work items based on descriptions, keywords, or user questions.
+        **Do NOT** attempt to search for or identify epics or work items based on descriptions, keywords, or user
+        questions.
 
         **Action Input:**
         * The original question asked by the user.
@@ -235,7 +238,8 @@ class BuildReader(BaseRemoteTool):
         ONLY if the user question fulfills the strict usage conditions below.
 
         **Strict Usage Conditions:**
-        * **Condition 1: build ID or job ID Provided:** This tool MUST be used ONLY when the user provides a valid build ID or job ID.
+        * **Condition 1: build ID or job ID Provided:** This tool MUST be used ONLY when the user provides a valid build
+        ID or job ID.
         * **Condition 2: build URL or job URL Context:** This tool MUST be used ONLY when the user is actively viewing
           a specific build URL/job URL or a specific URL is provided by the user.
 
@@ -274,7 +278,8 @@ class MergeRequestReader(BaseRemoteTool):
         ONLY if the user question fulfills the strict usage conditions below.
 
         **Strict Usage Conditions:**
-        * **Condition 1: Merge request ID Provided:** This tool MUST be used ONLY when the user provides a valid merge request ID.
+        * **Condition 1: Merge request ID Provided:** This tool MUST be used ONLY when the user provides a valid merge
+          request ID.
         * **Condition 2: Merge request URL Context:** This tool MUST be used ONLY when the user is actively viewing
           a specific merge request URL or a specific URL is provided by the user.
 

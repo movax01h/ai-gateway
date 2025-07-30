@@ -276,10 +276,11 @@ class Workflow(AbstractWorkflow):
             result = _load_file_contents(file_contents, state)
             # Inject project_id into the conversation
             if result.get("conversation_history", {}).get(AGENT_NAME):
+                project_id = self._project["id"]  # type: ignore[index]
                 messages = result["conversation_history"][AGENT_NAME]
                 messages.append(
                     HumanMessage(
-                        content=f"Note: The project_id for ci_linter validation is {self._project['id']}."  # type: ignore[index]
+                        content=f"Note: The project_id for ci_linter validation is {project_id}."
                     )
                 )
             return result

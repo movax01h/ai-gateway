@@ -187,7 +187,6 @@ max-statements = 65
 disable = [
   "missing-module-docstring",
   "missing-function-docstring",
-  "line-too-long",
   "missing-class-docstring",
   "too-few-public-methods",
   "no-member",

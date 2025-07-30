@@ -5,7 +5,7 @@ from pydantic import BaseModel, Field
 
 from duo_workflow_service.tools.duo_base_tool import DuoBaseTool
 
-PROJECT_IDENTIFICATION_DESCRIPTION = """The project must be specified using its full path (e.g., 'namespace/project' or 'group/subgroup/project')."""
+PROJECT_IDENTIFICATION_DESCRIPTION = "The project must be specified using its full path (e.g., 'namespace/project' or 'group/subgroup/project')."  # pylint: disable=line-too-long
 
 
 class ListVulnerabilitiesInput(BaseModel):
@@ -14,7 +14,8 @@ class ListVulnerabilitiesInput(BaseModel):
     )
     severity: Optional[str] = Field(
         default=None,
-        description="Filter vulnerabilities by severity (CRITICAL, HIGH, MEDIUM, LOW, INFO, UNKNOWN). If not specified, all severities will be returned.",
+        description="Filter vulnerabilities by severity (CRITICAL, HIGH, MEDIUM, LOW, INFO, UNKNOWN). If not specified,"
+        " all severities will be returned.",
     )
     per_page: Optional[int] = Field(
         default=100,
@@ -129,7 +130,8 @@ class DismissVulnerabilityInput(BaseModel):
         description="Comment why vulnerability was dismissed (maximum 50,000 characters)."
     )
     dismissal_reason: str = Field(
-        description="Reason why vulnerability should be dismissed (ACCEPTABLE_RISK, FALSE_POSITIVE, MITIGATING_CONTROL, USED_IN_TESTS, NOT_APPLICABLE)"
+        description="Reason why vulnerability should be dismissed (ACCEPTABLE_RISK, FALSE_POSITIVE, MITIGATING_CONTROL,"
+        " USED_IN_TESTS, NOT_APPLICABLE)"
     )
 
 
@@ -137,23 +139,23 @@ class DismissVulnerability(DuoBaseTool):
     name: str = "dismiss_vulnerability"
     description: str = f"""Dismiss a security vulnerability in a GitLab project using GraphQL.
 
-    {PROJECT_IDENTIFICATION_DESCRIPTION}
+{PROJECT_IDENTIFICATION_DESCRIPTION}
 
-    The tool supports dismissing a vulnerability by ID, with a dismissal reason, and comment.
-    The dismiss reason must be one of: ACCEPTABLE_RISK, FALSE_POSITIVE, MITIGATING_CONTROL, USED_IN_TESTS, NOT_APPLICABLE.
-    If a dismissal reason is not given, you will need to ask for one.
+The tool supports dismissing a vulnerability by ID, with a dismissal reason, and comment.
+The dismiss reason must be one of: ACCEPTABLE_RISK, FALSE_POSITIVE, MITIGATING_CONTROL, USED_IN_TESTS, NOT_APPLICABLE.
+If a dismissal reason is not given, you will need to ask for one.
 
-    A comment explaining the reason for the dismissal is required and can be up to 50,000 characters.
-    If a comment is not given, you will need to ask for one.
+A comment explaining the reason for the dismissal is required and can be up to 50,000 characters.
+If a comment is not given, you will need to ask for one.
 
-    For example:
-    - Dismiss a vulnerability for being a false positive:
-        dismiss_vulnerability(
-            vulnerability_id="gid://gitlab/Vulnerability/123",
-            dismissal_reason="FALSE_POSITIVE",
-            comment="Security review deemed this a false positive"
-        )
-    """
+For example:
+- Dismiss a vulnerability for being a false positive:
+    dismiss_vulnerability(
+        vulnerability_id="gid://gitlab/Vulnerability/123",
+        dismissal_reason="FALSE_POSITIVE",
+        comment="Security review deemed this a false positive"
+    )
+"""
     args_schema: Type[BaseModel] = DismissVulnerabilityInput
 
     async def _arun(self, **kwargs: Any) -> str:
@@ -172,7 +174,8 @@ class DismissVulnerability(DuoBaseTool):
         if dismissal_reason not in valid_dismissal_reasons:
             return json.dumps(
                 {
-                    "error": f"Invalid dismissal reason '{dismissal_reason}'. Must be one of: {', '.join(valid_dismissal_reasons)}"
+                    "error": f"Invalid dismissal reason '{dismissal_reason}'. Must be one of: "
+                    f"{', '.join(valid_dismissal_reasons)}"
                 }
             )
 
@@ -183,23 +186,23 @@ class DismissVulnerability(DuoBaseTool):
         # editorconfig-checker-disable
         # Build GraphQL mutation
         mutation = """
-        mutation($vulnerabilityId: VulnerabilityID!, $comment: String, $dismissalReason: VulnerabilityDismissalReason) {
-          vulnerabilityDismiss(input: {
-            id: $vulnerabilityId,
-            comment: $comment,
-            dismissalReason: $dismissalReason
-          }) {
-            errors
-            vulnerability {
-              id
-              description
-              state
-              dismissedAt
-              dismissalReason
-            }
-          }
-        }
-        """
+mutation($vulnerabilityId: VulnerabilityID!, $comment: String, $dismissalReason: VulnerabilityDismissalReason) {
+    vulnerabilityDismiss(input: {
+    id: $vulnerabilityId,
+    comment: $comment,
+    dismissalReason: $dismissalReason
+    }) {
+    errors
+    vulnerability {
+        id
+        description
+        state
+        dismissedAt
+        dismissalReason
+    }
+    }
+}
+"""
         # editorconfig-checker-enable
 
         # Ensure vulnerability_id has proper GraphQL format

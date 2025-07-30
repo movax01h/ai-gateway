@@ -47,7 +47,8 @@ class ToolsApprovalComponent(HumanApprovalComponent):
                 "conversation_history": {
                     self._approved_agent_name: [
                         HumanMessage(
-                            content="No tool calls has been found, please prepare tool calls for the current step in the plan"
+                            content="No tool calls has been found, please prepare tool calls for the current step in "
+                            "the plan"
                         )
                     ]
                 },
@@ -64,7 +65,8 @@ class ToolsApprovalComponent(HumanApprovalComponent):
                     self._approved_agent_name: [
                         ToolMessage(
                             tool_call_id=tool_call["id"],
-                            content="Tool call has been rejected due to other tool call in the last AIMessage being malformed",
+                            content="Tool call has been rejected due to other tool call in the last AIMessage being "
+                            "malformed",
                         )
                         for tool_call in valid_tool_calls
                     ]
