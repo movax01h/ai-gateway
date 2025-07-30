@@ -262,6 +262,35 @@ async def test_validate_merge_request_url_missing_params(
 
 
 @pytest.mark.asyncio
+async def test_get_pipeline_errors_jobs_error(gitlab_client_mock, metadata):
+    merge_request_response = {"id": 1, "title": "Merge Request 1"}
+    pipelines_response = [{"id": 10, "status": "success"}]
+    jobs_error_response = {"status": 404, "message": "Jobs not found"}
+
+    gitlab_client_mock.aget = AsyncMock()
+    gitlab_client_mock.aget.side_effect = [
+        merge_request_response,
+        pipelines_response,
+        jobs_error_response,
+    ]
+
+    tool = GetPipelineErrorsForMergeRequest(metadata=metadata)
+
+    response = await tool.arun({"project_id": "1", "merge_request_iid": "1"})
+    response_json = json.loads(response)
+
+    assert "error" in response_json
+    assert "Failed to fetch jobs" in response_json["error"]
+    assert str(jobs_error_response) in response_json["error"]
+
+    assert gitlab_client_mock.aget.call_args_list == [
+        call(path="/api/v4/projects/1/merge_requests/1"),
+        call(path="/api/v4/projects/1/merge_requests/1/pipelines"),
+        call(path="/api/v4/projects/1/pipelines/10/jobs"),
+    ]
+
+
+@pytest.mark.asyncio
 async def test_get_pipeline_errors_trace_exception(gitlab_client_mock, metadata):
     # Set up mock responses
     merge_request_response = {"id": 1, "title": "Merge Request 1"}
