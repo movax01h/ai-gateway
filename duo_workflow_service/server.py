@@ -461,7 +461,7 @@ def run():
     setup_profiling()
     setup_error_tracking()
     setup_monitoring()
-    setup_logging(json_format=True, to_file=None)
+    setup_logging()
     configure_cache()
     validate_llm_access()
     port = int(os.environ.get("PORT", "50052"))

@@ -1,12 +1,13 @@
 # pylint: disable=direct-environment-variable-reference
 
 import logging
-import os
 from contextvars import ContextVar
 from pathlib import Path
 from typing import Optional
 
 import structlog
+from pydantic import Field, field_validator
+from pydantic_settings import BaseSettings, SettingsConfigDict
 from structlog.dev import ConsoleRenderer
 from structlog.processors import JSONRenderer
 from structlog.typing import Processor
@@ -23,27 +24,24 @@ def set_workflow_id(wrk_id: str):
     _workflow_id.set(wrk_id)
 
 
-class LoggingConfig:
-    level: int
-    json_format: bool
-    to_file: Optional[str]
-    env: str
+class LoggingConfig(BaseSettings):
+    model_config = SettingsConfigDict(env_prefix="DUO_WORKFLOW_LOGGING__")
 
-    def __init__(self, **kwargs):
-        self.level = logging.getLevelName(os.environ.get("LOG_LEVEL", "INFO").upper())
-        self.json_format = kwargs.pop("json_format", True)
-        self.to_file = kwargs.pop("to_file", None)
-        self.env = os.environ.get("DUO_WORKFLOW_SERVICE_ENVIRONMENT", "development")
+    level: str = "INFO"
+    json_format: bool = True
+    to_file: Optional[str] = None
+    environment: str = Field(
+        default="development", alias="DUO_WORKFLOW_SERVICE_ENVIRONMENT"
+    )
+
+    @field_validator("level")
+    @classmethod
+    def level_to_upper(cls, v: str) -> str:
+        return v.upper()
 
 
-def setup_logging(json_format: bool, to_file: Optional[str]):
-    """Set up structured logging.
-
-    Args:s
-        json_format: Whether to use JSON formatting (default: True)
-        to_file: log file name (default: None)
-    """
-    logging_config = LoggingConfig(json_format=json_format, to_file=to_file)
+def setup_logging():
+    logging_config = LoggingConfig()
 
     # Configure basic logging
     logging.basicConfig(format="%(message)s", level=logging_config.level)
