@@ -45,7 +45,14 @@ def test_configure_cache_enabled():
         assert cache is not None
 
 
-def test_run():
+@pytest.mark.parametrize(
+    "custom_models_enabled,should_validate_llm",
+    [
+        ("true", False),
+        ("false", True),
+    ],
+)
+def test_run(custom_models_enabled, should_validate_llm):
     with (
         patch("duo_workflow_service.server.setup_profiling") as mock_setup_profiling,
         patch(
@@ -57,6 +64,7 @@ def test_run():
             "duo_workflow_service.server.validate_llm_access"
         ) as mock_validate_llm_access,
         patch("asyncio.get_event_loop") as mock_get_loop,
+        patch.dict(os.environ, {"AIGW_CUSTOM_MODELS__ENABLED": custom_models_enabled}),
     ):
         mock_loop = MagicMock()
         mock_get_loop.return_value = mock_loop
@@ -67,7 +75,11 @@ def test_run():
         mock_setup_error_tracking.assert_called_once()
         mock_setup_monitoring.assert_called_once()
         mock_setup_logging.assert_called_once()
-        mock_validate_llm_access.assert_called_once()
+
+        if should_validate_llm:
+            mock_validate_llm_access.assert_called_once()
+        else:
+            mock_validate_llm_access.assert_not_called()
 
         assert mock_loop.run_until_complete.call_count == 1
         actual_arg = mock_loop.run_until_complete.call_args[0][0]

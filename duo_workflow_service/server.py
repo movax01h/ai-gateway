@@ -455,6 +455,10 @@ def setup_container():
 
 
 def run():
+    self_hosted_mode = (
+        os.environ.get("AIGW_CUSTOM_MODELS__ENABLED", "false").lower() == "true"
+    )
+
     load_dotenv()
     setup_container()
     setup_cloud_connector()
@@ -463,7 +467,8 @@ def run():
     setup_monitoring()
     setup_logging()
     configure_cache()
-    validate_llm_access()
+    if not self_hosted_mode:
+        validate_llm_access()
     port = int(os.environ.get("PORT", "50052"))
     asyncio.get_event_loop().run_until_complete(serve(port))
 
