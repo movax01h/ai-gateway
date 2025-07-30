@@ -4,6 +4,8 @@ from unittest.mock import AsyncMock, Mock
 import pytest
 
 from duo_workflow_service.tools.security import (
+    DismissVulnerability,
+    DismissVulnerabilityInput,
     ListVulnerabilities,
     ListVulnerabilitiesInput,
 )
@@ -261,4 +263,262 @@ async def test_list_vulnerabilities_exception(gitlab_client_mock, metadata):
 )
 def test_list_vulnerabilities_format_display_message(input_data, expected_message):
     tool = ListVulnerabilities(metadata={})
+    assert tool.format_display_message(input_data) == expected_message
+
+
+@pytest.mark.asyncio
+async def test_dismiss_vulnerability(gitlab_client_mock, metadata):
+    gitlab_client_mock.apost = AsyncMock(
+        return_value={
+            "data": {
+                "vulnerabilityDismiss": {
+                    "errors": [],
+                    "vulnerability": {
+                        "id": "gid://gitlab/Vulnerability/123",
+                        "description": "Test vulnerability",
+                        "state": "DISMISSED",
+                        "dismissedAt": "2023-01-01T00:00:00Z",
+                        "dismissalReason": "FALSE_POSITIVE",
+                    },
+                }
+            }
+        }
+    )
+
+    tool = DismissVulnerability(metadata=metadata)
+
+    input_data = {
+        "vulnerability_id": "gid://gitlab/Vulnerability/123",
+        "comment": "Security review deemed this a false positive",
+        "dismissal_reason": "FALSE_POSITIVE",
+    }
+
+    response = await tool.arun(input_data)
+
+    expected_response = json.dumps(
+        {
+            "vulnerability": {
+                "id": "gid://gitlab/Vulnerability/123",
+                "description": "Test vulnerability",
+                "state": "DISMISSED",
+                "dismissedAt": "2023-01-01T00:00:00Z",
+                "dismissalReason": "FALSE_POSITIVE",
+            }
+        }
+    )
+    assert response == expected_response
+
+    # editorconfig-checker-disable
+    expected_mutation = """
+        mutation($vulnerabilityId: VulnerabilityID!, $comment: String, $dismissalReason: VulnerabilityDismissalReason) {
+          vulnerabilityDismiss(input: {
+            id: $vulnerabilityId,
+            comment: $comment,
+            dismissalReason: $dismissalReason
+          }) {
+            errors
+            vulnerability {
+              id
+              description
+              state
+              dismissedAt
+              dismissalReason
+            }
+          }
+        }
+        """
+    # editorconfig-checker-enable
+
+    gitlab_client_mock.apost.assert_called_once_with(
+        path="/api/graphql",
+        body=json.dumps(
+            {
+                "query": expected_mutation,
+                "variables": {
+                    "vulnerabilityId": "gid://gitlab/Vulnerability/123",
+                    "comment": "Security review deemed this a false positive",
+                    "dismissalReason": "FALSE_POSITIVE",
+                },
+            }
+        ),
+    )
+
+
+@pytest.mark.asyncio
+async def test_dismiss_vulnerability_with_numeric_id(gitlab_client_mock, metadata):
+    gitlab_client_mock.apost = AsyncMock(
+        return_value={
+            "data": {
+                "vulnerabilityDismiss": {
+                    "errors": [],
+                    "vulnerability": {
+                        "id": "gid://gitlab/Vulnerability/123",
+                        "description": "Test vulnerability",
+                        "state": "DISMISSED",
+                        "dismissedAt": "2023-01-01T00:00:00Z",
+                        "dismissalReason": "ACCEPTABLE_RISK",
+                    },
+                }
+            }
+        }
+    )
+
+    tool = DismissVulnerability(metadata=metadata)
+
+    input_data = {
+        "vulnerability_id": "123",  # Numeric ID without GraphQL prefix
+        "comment": "Acceptable risk after review",
+        "dismissal_reason": "ACCEPTABLE_RISK",
+    }
+
+    response = await tool.arun(input_data)
+
+    # Should automatically add the GraphQL prefix
+    gitlab_client_mock.apost.assert_called_once()
+    call_args = gitlab_client_mock.apost.call_args
+    body = json.loads(call_args[1]["body"])
+    assert body["variables"]["vulnerabilityId"] == "gid://gitlab/Vulnerability/123"
+
+
+@pytest.mark.asyncio
+async def test_dismiss_vulnerability_invalid_dismissal_reason(
+    gitlab_client_mock, metadata
+):
+    tool = DismissVulnerability(metadata=metadata)
+
+    input_data = {
+        "vulnerability_id": "gid://gitlab/Vulnerability/123",
+        "comment": "Test comment",
+        "dismissal_reason": "INVALID_REASON",
+    }
+
+    response = await tool.arun(input_data)
+
+    error_response = json.loads(response)
+    assert "error" in error_response
+    assert "Invalid dismissal reason" in error_response["error"]
+    assert "INVALID_REASON" in error_response["error"]
+
+    gitlab_client_mock.apost.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_dismiss_vulnerability_comment_too_long(gitlab_client_mock, metadata):
+    tool = DismissVulnerability(metadata=metadata)
+
+    input_data = {
+        "vulnerability_id": "gid://gitlab/Vulnerability/123",
+        "comment": "x" * 50001,  # 50,001 characters (should fail)
+        "dismissal_reason": "FALSE_POSITIVE",
+    }
+
+    response = await tool.arun(input_data)
+
+    error_response = json.loads(response)
+    assert "error" in error_response
+    assert "Comment must be 50,000 characters or less" in error_response["error"]
+
+    gitlab_client_mock.apost.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_dismiss_vulnerability_with_api_errors(gitlab_client_mock, metadata):
+    gitlab_client_mock.apost = AsyncMock(
+        return_value={
+            "data": {
+                "vulnerabilityDismiss": {
+                    "errors": ["Vulnerability not found", "Access denied"],
+                    "vulnerability": None,
+                }
+            }
+        }
+    )
+
+    tool = DismissVulnerability(metadata=metadata)
+
+    input_data = {
+        "vulnerability_id": "gid://gitlab/Vulnerability/123",
+        "comment": "Test comment",
+        "dismissal_reason": "FALSE_POSITIVE",
+    }
+
+    response = await tool.arun(input_data)
+
+    error_response = json.loads(response)
+    assert "error" in error_response
+    assert "Vulnerability not found; Access denied" in error_response["error"]
+
+
+@pytest.mark.parametrize(
+    "dismissal_reason",
+    [
+        "ACCEPTABLE_RISK",
+        "FALSE_POSITIVE",
+        "MITIGATING_CONTROL",
+        "USED_IN_TESTS",
+        "NOT_APPLICABLE",
+    ],
+)
+@pytest.mark.asyncio
+async def test_dismiss_vulnerability_valid_dismissal_reasons(
+    gitlab_client_mock, metadata, dismissal_reason
+):
+    gitlab_client_mock.apost = AsyncMock(
+        return_value={
+            "data": {
+                "vulnerabilityDismiss": {
+                    "errors": [],
+                    "vulnerability": {
+                        "id": "gid://gitlab/Vulnerability/123",
+                        "description": "Test vulnerability",
+                        "state": "DISMISSED",
+                        "dismissedAt": "2023-01-01T00:00:00Z",
+                        "dismissalReason": dismissal_reason,
+                    },
+                }
+            }
+        }
+    )
+
+    tool = DismissVulnerability(metadata=metadata)
+
+    input_data = {
+        "vulnerability_id": "gid://gitlab/Vulnerability/123",
+        "comment": "Test comment",
+        "dismissal_reason": dismissal_reason,
+    }
+
+    response = await tool.arun(input_data)
+
+    # Should not return an error
+    response_data = json.loads(response)
+    assert "error" not in response_data
+    assert "vulnerability" in response_data
+
+    gitlab_client_mock.apost.assert_called_once()
+
+
+@pytest.mark.parametrize(
+    "input_data,expected_message",
+    [
+        (
+            DismissVulnerabilityInput(
+                vulnerability_id="gid://gitlab/Vulnerability/123",
+                comment="Test comment",
+                dismissal_reason="FALSE_POSITIVE",
+            ),
+            "Dismiss vulnerability gid://gitlab/Vulnerability/123",
+        ),
+        (
+            DismissVulnerabilityInput(
+                vulnerability_id="456",
+                comment="Another test comment",
+                dismissal_reason="ACCEPTABLE_RISK",
+            ),
+            "Dismiss vulnerability 456",
+        ),
+    ],
+)
+def test_dismiss_vulnerability_format_display_message(input_data, expected_message):
+    tool = DismissVulnerability(metadata={})
     assert tool.format_display_message(input_data) == expected_message
