@@ -33,7 +33,7 @@ ANTHROPIC_STOP_REASONS = [
 ]
 
 
-class DuoWorkflowMetrics:
+class DuoWorkflowMetrics:  # pylint: disable=too-many-instance-attributes
     def __init__(self, registry=REGISTRY):
         self.workflow_duration = Histogram(
             "duo_workflow_total_seconds",
@@ -100,6 +100,34 @@ class DuoWorkflowMetrics:
             registry=registry,
         )
 
+        self.agent_platform_session_start_counter = Counter(
+            "agent_platform_session_start_total",
+            "Count of flow start events in Duo Workflow",
+            ["flow_type"],
+            registry=registry,
+        )
+
+        self.agent_platform_session_success_counter = Counter(
+            "agent_platform_session_success_total",
+            "Count of successful flow completions in Duo Workflow",
+            ["flow_type"],
+            registry=registry,
+        )
+
+        self.agent_platform_session_failure_counter = Counter(
+            "agent_platform_session_failure_total",
+            "Count of failed flows in Duo Workflow",
+            ["flow_type", "failure_reason"],
+            registry=registry,
+        )
+
+        self.agent_platform_tool_failure_counter = Counter(
+            "agent_platform_tool_failure_total",
+            "Count of failed tools in Duo Workflow",
+            ["flow_type", "tool_name", "failure_reason"],
+            registry=registry,
+        )
+
     def count_llm_response(
         self, model="unknown", request_type="unknown", stop_reason="unknown"
     ):
@@ -135,6 +163,44 @@ class DuoWorkflowMetrics:
             provider=provider,
             http_status=http_status,
             error_type=error_type,
+        ).inc()
+
+    def count_agent_platform_session_start(
+        self,
+        flow_type: str = "unknown",
+    ) -> None:
+        self.agent_platform_session_start_counter.labels(
+            flow_type=flow_type,
+        ).inc()
+
+    def count_agent_platform_session_success(
+        self,
+        flow_type: str = "unknown",
+    ) -> None:
+        self.agent_platform_session_success_counter.labels(
+            flow_type=flow_type,
+        ).inc()
+
+    def count_agent_platform_session_failure(
+        self,
+        flow_type: str = "unknown",
+        failure_reason: str = "unknown",
+    ) -> None:
+        self.agent_platform_session_failure_counter.labels(
+            flow_type=flow_type,
+            failure_reason=failure_reason,
+        ).inc()
+
+    def count_agent_platform_tool_failure(
+        self,
+        flow_type: str = "unknown",
+        tool_name: str = "unknown",
+        failure_reason: str = "unknown",
+    ) -> None:
+        self.agent_platform_tool_failure_counter.labels(
+            flow_type=flow_type,
+            tool_name=tool_name,
+            failure_reason=failure_reason,
         ).inc()
 
     def time_llm_request(self, model="unknown", request_type="unknown"):

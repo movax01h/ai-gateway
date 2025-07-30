@@ -200,6 +200,8 @@ class TestToolNode:
         mock_prompt_security,
         mock_internal_event_client,
         ui_history,
+        mock_tool_monitoring,
+        flow_type,
     ):
         """Test run handles TypeError during tool execution."""
         # Configure tool to raise TypeError
@@ -241,6 +243,13 @@ class TestToolNode:
         # Verify ui_history.pop_state_updates was called
         ui_history.pop_state_updates.assert_called_once()
 
+        # Verify tool error metric was called
+        mock_tool_monitoring.count_agent_platform_tool_failure.assert_called_once_with(
+            flow_type=flow_type.value,
+            tool_name=mock_tool.name,
+            failure_reason=type(type_error).__name__,
+        )
+
     @pytest.mark.asyncio
     async def test_run_validation_error_handling(
         self,
@@ -252,6 +261,8 @@ class TestToolNode:
         mock_prompt_security,
         mock_internal_event_client,
         ui_history,
+        mock_tool_monitoring,
+        flow_type,
     ):
         """Test run handles ValidationError during tool execution."""
         # Configure tool to raise ValidationError
@@ -290,6 +301,13 @@ class TestToolNode:
         # Verify ui_history.pop_state_updates was called
         ui_history.pop_state_updates.assert_called_once()
 
+        # Verify tool error metric was called
+        mock_tool_monitoring.count_agent_platform_tool_failure.assert_called_once_with(
+            flow_type=flow_type.value,
+            tool_name=mock_tool.name,
+            failure_reason=type(validation_error).__name__,
+        )
+
     @pytest.mark.asyncio
     async def test_run_generic_exception_handling(
         self,
@@ -301,6 +319,8 @@ class TestToolNode:
         mock_prompt_security,
         mock_internal_event_client,
         ui_history,
+        mock_tool_monitoring,
+        flow_type,
     ):
         """Test run handles generic exceptions during tool execution."""
         # Configure tool to raise generic exception
@@ -335,6 +355,13 @@ class TestToolNode:
 
         # Verify ui_history.pop_state_updates was called
         ui_history.pop_state_updates.assert_called_once()
+
+        # Verify tool error metric was called
+        mock_tool_monitoring.count_agent_platform_tool_failure.assert_called_once_with(
+            flow_type=flow_type.value,
+            tool_name=mock_tool.name,
+            failure_reason=type(generic_error).__name__,
+        )
 
     @pytest.mark.asyncio
     async def test_run_no_tool_calls(

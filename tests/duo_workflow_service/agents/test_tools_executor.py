@@ -870,7 +870,9 @@ async def test_state_manipulation(
 )
 @pytest.mark.usefixtures("mock_datetime")
 @patch.dict(os.environ, {"DW_INTERNAL_EVENT__ENABLED": "true"})
+@patch("duo_workflow_service.agents.tools_executor.duo_workflow_metrics")
 async def test_run_error_handling(
+    mock_duo_workflow_metrics,
     workflow_state,
     *,
     tool_call,
@@ -913,6 +915,7 @@ async def test_run_error_handling(
                     property=mock_tool().name,
                     value="123",
                     error=str(tool_side_effect),
+                    error_type=type(tool_side_effect).__name__,
                 ),
                 category=workflow_type.value,
             ),
@@ -942,6 +945,13 @@ async def test_run_error_handling(
     assert tool_log["message_type"] == MessageTypeEnum.TOOL
     assert tool_log["content"].startswith(expected_log_prefix)
     assert tool_log["tool_info"] == expected_tool_info
+
+    mock_duo_workflow_metrics.count_agent_platform_tool_failure.assert_called_once_with(
+        flow_type=workflow_type.value,
+        tool_name=mock_tool().name,
+        failure_reason=type(tool_side_effect).__name__,
+    )
+
     tool.ainvoke.assert_called_once()
 
 
