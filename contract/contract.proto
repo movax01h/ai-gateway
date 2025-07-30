@@ -69,6 +69,7 @@ message Action {
         FindFiles findFiles = 11;
         RunMCPTool runMCPTool = 12;
         Mkdir mkdir = 13;
+        ReadFiles runReadFiles = 14;
     };
 }
 
@@ -82,6 +83,10 @@ message RunCommandAction {
 
 message ReadFile {
     string filepath = 1;
+}
+
+message ReadFiles {
+    repeated string filepaths = 1;
 }
 
 message WriteFile {

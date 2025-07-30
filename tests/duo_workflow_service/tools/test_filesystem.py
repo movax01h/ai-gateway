@@ -14,6 +14,8 @@ from duo_workflow_service.tools.filesystem import (  # Mkdir,
     ListDirInput,
     ReadFile,
     ReadFileInput,
+    ReadFiles,
+    ReadFilesInput,
     WriteFile,
     WriteFileInput,
     validate_duo_context_exclusions,
@@ -298,6 +300,69 @@ class TestReadFile:
     async def test_read_file_rejects_excluded_paths(self, path):
         with pytest.raises(ToolException, match="Access denied"):
             await ReadFile(description="Read file content")._arun(path)
+
+
+class TestReadFiles:
+    @pytest.mark.asyncio
+    async def test_read_files_with_mixed_valid_invalid_paths(self):
+        mock_outbox = MagicMock()
+        mock_outbox.put = AsyncMock()
+
+        # Mock response with mixed success and error
+        mock_response = '{"file1.py": {"content": "print(\'hello\')"}, "nonexistent.py": {"error": "File not found"}}'
+        mock_inbox = MagicMock()
+        mock_inbox.get = AsyncMock(
+            return_value=contract_pb2.ClientEvent(
+                actionResponse=contract_pb2.ActionResponse(response=mock_response)
+            )
+        )
+
+        metadata = {"outbox": mock_outbox, "inbox": mock_inbox}
+
+        tool = ReadFiles(description="Read multiple files")
+        tool.metadata = metadata
+        file_paths = ["file1.py", "nonexistent.py"]
+
+        response = await tool._arun(file_paths)
+
+        assert response == mock_response
+
+        mock_outbox.put.assert_called_once()
+        action = mock_outbox.put.call_args[0][0]
+        assert action.runReadFiles.filepaths == file_paths
+
+    @pytest.mark.asyncio
+    async def test_read_files_rejects_excluded_paths(self):
+        tool = ReadFiles(description="Read multiple files")
+
+        # Test with one excluded path
+        with pytest.raises(ToolException, match="Access denied"):
+            await tool._arun([".ssh/config", "valid_file.py"])
+
+        # Test with multiple excluded paths
+        with pytest.raises(ToolException, match="Access denied"):
+            await tool._arun([".git/config", ".env"])
+
+    @pytest.mark.asyncio
+    async def test_read_files_not_implemented_error(self):
+        tool = ReadFiles(description="Read multiple files")
+
+        with pytest.raises(NotImplementedError):
+            tool._run(["file1.py", "file2.py"])
+
+    def test_read_files_format_display_message_single_file(self):
+        tool = ReadFiles(description="Read multiple files")
+        input_data = ReadFilesInput(file_paths=["single.py"])
+
+        message = tool.format_display_message(input_data)
+        assert message == "Read 1 file"
+
+    def test_read_files_format_display_message_multiple_files(self):
+        tool = ReadFiles(description="Read multiple files")
+        input_data = ReadFilesInput(file_paths=["file1.py", "file2.py", "file3.py"])
+
+        message = tool.format_display_message(input_data)
+        assert message == "Read 3 files"
 
 
 class TestWriteFile:

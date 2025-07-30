@@ -90,6 +90,7 @@ _RUN_MCP_TOOLS_PRIVILEGE = "run_mcp_tools"
 _AGENT_PRIVILEGES: dict[str, list[Type[BaseTool]]] = {
     "read_write_files": [
         tools.ReadFile,
+        tools.ReadFiles,
         tools.WriteFile,
         tools.EditFile,
         tools.ListDir,

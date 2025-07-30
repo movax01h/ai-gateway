@@ -83,6 +83,7 @@ export interface Action {
   findFiles?: FindFiles | undefined;
   runMCPTool?: RunMCPTool | undefined;
   mkdir?: Mkdir | undefined;
+  runReadFiles?: ReadFiles | undefined;
 }
 
 export interface RunCommandAction {
@@ -93,6 +94,10 @@ export interface RunCommandAction {
 
 export interface ReadFile {
   filepath: string;
+}
+
+export interface ReadFiles {
+  filepaths: string[];
 }
 
 export interface WriteFile {
@@ -950,6 +955,7 @@ function createBaseAction(): Action {
     findFiles: undefined,
     runMCPTool: undefined,
     mkdir: undefined,
+    runReadFiles: undefined,
   };
 }
 
@@ -993,6 +999,9 @@ export const Action: MessageFns<Action> = {
     }
     if (message.mkdir !== undefined) {
       Mkdir.encode(message.mkdir, writer.uint32(106).fork()).join();
+    }
+    if (message.runReadFiles !== undefined) {
+      ReadFiles.encode(message.runReadFiles, writer.uint32(114).fork()).join();
     }
     return writer;
   },
@@ -1108,6 +1117,14 @@ export const Action: MessageFns<Action> = {
           message.mkdir = Mkdir.decode(reader, reader.uint32());
           continue;
         }
+        case 14: {
+          if (tag !== 114) {
+            break;
+          }
+
+          message.runReadFiles = ReadFiles.decode(reader, reader.uint32());
+          continue;
+        }
       }
       if ((tag & 7) === 4 || tag === 0) {
         break;
@@ -1132,6 +1149,7 @@ export const Action: MessageFns<Action> = {
       findFiles: isSet(object.findFiles) ? FindFiles.fromJSON(object.findFiles) : undefined,
       runMCPTool: isSet(object.runMCPTool) ? RunMCPTool.fromJSON(object.runMCPTool) : undefined,
       mkdir: isSet(object.mkdir) ? Mkdir.fromJSON(object.mkdir) : undefined,
+      runReadFiles: isSet(object.runReadFiles) ? ReadFiles.fromJSON(object.runReadFiles) : undefined,
     };
   },
 
@@ -1176,6 +1194,9 @@ export const Action: MessageFns<Action> = {
     if (message.mkdir !== undefined) {
       obj.mkdir = Mkdir.toJSON(message.mkdir);
     }
+    if (message.runReadFiles !== undefined) {
+      obj.runReadFiles = ReadFiles.toJSON(message.runReadFiles);
+    }
     return obj;
   },
 
@@ -1217,6 +1238,9 @@ export const Action: MessageFns<Action> = {
       ? RunMCPTool.fromPartial(object.runMCPTool)
       : undefined;
     message.mkdir = (object.mkdir !== undefined && object.mkdir !== null) ? Mkdir.fromPartial(object.mkdir) : undefined;
+    message.runReadFiles = (object.runReadFiles !== undefined && object.runReadFiles !== null)
+      ? ReadFiles.fromPartial(object.runReadFiles)
+      : undefined;
     return message;
   },
 };
@@ -1369,6 +1393,68 @@ export const ReadFile: MessageFns<ReadFile> = {
   fromPartial<I extends Exact<DeepPartial<ReadFile>, I>>(object: I): ReadFile {
     const message = createBaseReadFile();
     message.filepath = object.filepath ?? "";
+    return message;
+  },
+};
+
+function createBaseReadFiles(): ReadFiles {
+  return { filepaths: [] };
+}
+
+export const ReadFiles: MessageFns<ReadFiles> = {
+  encode(message: ReadFiles, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
+    for (const v of message.filepaths) {
+      writer.uint32(10).string(v!);
+    }
+    return writer;
+  },
+
+  decode(input: BinaryReader | Uint8Array, length?: number): ReadFiles {
+    const reader = input instanceof BinaryReader ? input : new BinaryReader(input);
+    const end = length === undefined ? reader.len : reader.pos + length;
+    const message = createBaseReadFiles();
+    while (reader.pos < end) {
+      const tag = reader.uint32();
+      switch (tag >>> 3) {
+        case 1: {
+          if (tag !== 10) {
+            break;
+          }
+
+          message.filepaths.push(reader.string());
+          continue;
+        }
+      }
+      if ((tag & 7) === 4 || tag === 0) {
+        break;
+      }
+      reader.skip(tag & 7);
+    }
+    return message;
+  },
+
+  fromJSON(object: any): ReadFiles {
+    return {
+      filepaths: globalThis.Array.isArray(object?.filepaths)
+        ? object.filepaths.map((e: any) => globalThis.String(e))
+        : [],
+    };
+  },
+
+  toJSON(message: ReadFiles): unknown {
+    const obj: any = {};
+    if (message.filepaths?.length) {
+      obj.filepaths = message.filepaths;
+    }
+    return obj;
+  },
+
+  create<I extends Exact<DeepPartial<ReadFiles>, I>>(base?: I): ReadFiles {
+    return ReadFiles.fromPartial(base ?? ({} as any));
+  },
+  fromPartial<I extends Exact<DeepPartial<ReadFiles>, I>>(object: I): ReadFiles {
+    const message = createBaseReadFiles();
+    message.filepaths = object.filepaths?.map((e) => e) || [];
     return message;
   },
 };
