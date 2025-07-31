@@ -17,6 +17,7 @@ class ApproximateTokenCounter:
         "planner": 823,
         "executor": 5650,
         "replacement_agent": 1000,
+        "Chat Agent": 2500,
     }
 
     def __init__(self, agent_name: str):

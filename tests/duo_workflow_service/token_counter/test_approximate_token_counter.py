@@ -28,6 +28,18 @@ def test_messages_with_string_content_and_tools():
     assert result == 4758
 
 
+def test_messages_for_chat_agent():
+    messages = [
+        HumanMessage(content="This is a single message"),
+        HumanMessage(content="This is another single message"),
+    ]
+
+    result = ApproximateTokenCounter("Chat Agent").count_tokens(messages)  # type: ignore
+
+    # Chat Agent has 2500 tool tokens and these messages have 23
+    assert result == 2523
+
+
 def test_messages_with_mixed_content():
     messages = [
         HumanMessage(
