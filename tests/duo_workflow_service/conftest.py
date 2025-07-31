@@ -11,6 +11,7 @@ from duo_workflow_service.entities.state import (
     WorkflowState,
     WorkflowStatusEnum,
 )
+from duo_workflow_service.gitlab.gitlab_api import Project
 from duo_workflow_service.gitlab.http_client import GitlabHttpClient
 
 
@@ -34,13 +35,27 @@ def gl_http_client_fixture():
     return AsyncMock(spec=GitlabHttpClient)
 
 
+@pytest.fixture(name="project_mock", scope="function")
+def project_mock_fixture():
+    return Project(
+        id=1,
+        name="test-project",
+        description="Test project",
+        http_url_to_repo="http://example.com/repo.git",
+        web_url="http://example.com/repo",
+        languages=[],
+        exclusion_rules=None,
+    )
+
+
 @pytest.fixture(name="tool_metadata", scope="function")
-def tool_metadata_fixture(gl_http_client):
+def tool_metadata_fixture(gl_http_client, project_mock):
     return ToolMetadata(
         outbox=MagicMock(spec=asyncio.Queue),
         inbox=MagicMock(spec=asyncio.Queue),
         gitlab_client=gl_http_client,
         gitlab_host="gitlab.example.com",
+        project=project_mock,
     )
 
 

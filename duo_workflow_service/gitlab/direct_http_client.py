@@ -2,12 +2,8 @@ import json
 from typing import Any, Callable, Dict, Optional, Union
 from urllib.parse import urljoin
 
-import structlog
-
 from duo_workflow_service.gitlab.connection_pool import connection_pool
 from duo_workflow_service.gitlab.http_client import GitlabHttpClient, GitLabHttpResponse
-
-log = structlog.stdlib.get_logger(__name__)
 
 
 class DirectGitLabHttpClient(GitlabHttpClient):

@@ -7,6 +7,7 @@ from pydantic import BaseModel, Field
 
 from contract import contract_pb2
 from duo_workflow_service.executor.action import _execute_action
+from duo_workflow_service.policies.file_exclusion_policy import FileExclusionPolicy
 from duo_workflow_service.tools.duo_base_tool import DuoBaseTool
 
 # Security denylist of sensitive directories and files that should not be accessed
@@ -92,6 +93,10 @@ class ReadFile(DuoBaseTool):
     handle_tool_error: bool = True
 
     async def _arun(self, file_path: str) -> str:
+        # Check file exclusion policy
+        if not FileExclusionPolicy.is_allowed_for_project(self.project, file_path):
+            return FileExclusionPolicy.format_llm_exclusion_message([file_path])
+
         # Check path security before proceeding
         validate_duo_context_exclusions(file_path)
 
@@ -101,7 +106,11 @@ class ReadFile(DuoBaseTool):
         )
 
     def format_display_message(self, args: ReadFileInput) -> str:
-        return "Read file"
+        msg = "Read file"
+        if not FileExclusionPolicy.is_allowed_for_project(self.project, args.file_path):
+            msg += FileExclusionPolicy.format_user_exclusion_message([args.file_path])
+
+        return msg
 
 
 class ReadFilesInput(BaseModel):
@@ -148,6 +157,10 @@ class WriteFile(DuoBaseTool):
     handle_tool_error: bool = True
 
     async def _arun(self, file_path: str, contents: str) -> str:
+        # Check file exclusion policy
+        if not FileExclusionPolicy.is_allowed_for_project(self.project, file_path):
+            return FileExclusionPolicy.format_llm_exclusion_message([file_path])
+
         # Check path security before proceeding
         validate_duo_context_exclusions(file_path)
 
@@ -161,7 +174,11 @@ class WriteFile(DuoBaseTool):
         )
 
     def format_display_message(self, args: WriteFileInput) -> str:
-        return "Create file"
+        msg = "Create file"
+        if not FileExclusionPolicy.is_allowed_for_project(self.project, args.file_path):
+            msg += FileExclusionPolicy.format_user_exclusion_message([args.file_path])
+
+        return msg
 
 
 class FilesScopeEnum(IntEnum):
@@ -217,7 +234,21 @@ class FindFiles(DuoBaseTool):
             ),
         )
 
-        return result
+        # Filter results based on file exclusion policy
+        policy = FileExclusionPolicy(self.project)
+        lines = result.strip().split("\n") if result.strip() else []
+        allowed_files = policy.filter_allowed(lines)
+
+        # Build the response
+        response_parts = []
+        if allowed_files:
+            response_parts.append("\n".join(allowed_files))
+
+        return (
+            "\n\n".join(response_parts)
+            if response_parts
+            else _format_no_matches_message(name_pattern)
+        )
 
     def format_display_message(self, args: FindFilesInput) -> str:
         return f"Search files with pattern '{args.name_pattern}'"
@@ -345,6 +376,10 @@ Examples of batched file edits:
     handle_tool_error: bool = True
 
     async def _arun(self, file_path: str, old_str: str, new_str: str) -> str:
+        # Check file exclusion policy
+        if not FileExclusionPolicy.is_allowed_for_project(self.project, file_path):
+            return FileExclusionPolicy.format_llm_exclusion_message([file_path])
+
         # Check path security before proceeding
         validate_duo_context_exclusions(file_path)
 
@@ -360,7 +395,11 @@ Examples of batched file edits:
         )
 
     def format_display_message(self, args: EditFileInput) -> str:
-        return "Edit file"
+        msg = "Edit file"
+        if not FileExclusionPolicy.is_allowed_for_project(self.project, args.file_path):
+            msg += FileExclusionPolicy.format_user_exclusion_message([args.file_path])
+
+        return msg
 
 
 class ListDirInput(BaseModel):
@@ -397,15 +436,31 @@ class ListDir(DuoBaseTool):
     args_schema: Type[BaseModel] = ListDirInput  # type: ignore
 
     async def _arun(self, directory: str) -> str:
+        # Check file exclusion policy before executing action
+        if not FileExclusionPolicy.is_allowed_for_project(self.project, directory):
+            return FileExclusionPolicy.format_llm_exclusion_message([directory])
+
         # Check path security before proceeding
         validate_duo_context_exclusions(directory)
 
-        return await _execute_action(
+        result = await _execute_action(
             self.metadata,  # type: ignore
             contract_pb2.Action(
                 listDirectory=contract_pb2.ListDirectory(directory=directory)
             ),
         )
+
+        # Filter results based on file exclusion policy
+        policy = FileExclusionPolicy(self.project)
+        lines = result.strip().split("\n") if result.strip() else []
+        allowed_files = policy.filter_allowed(lines)
+
+        # Build the response
+        response_parts = []
+        if allowed_files:
+            response_parts.append("\n".join(allowed_files))
+
+        return "\n\n".join(response_parts)
 
 
 def _format_no_matches_message(pattern, search_directory=None):

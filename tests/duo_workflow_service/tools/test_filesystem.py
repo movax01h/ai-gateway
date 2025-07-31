@@ -4,6 +4,8 @@ import pytest
 from langchain.tools.base import ToolException
 
 from contract import contract_pb2
+from duo_workflow_service.gitlab.gitlab_api import Project
+from duo_workflow_service.policies.file_exclusion_policy import FileExclusionPolicy
 from duo_workflow_service.tools.filesystem import (  # Mkdir,
     DEFAULT_CONTEXT_EXCLUSIONS,
     EditFile,
@@ -28,8 +30,31 @@ from tests.duo_workflow_service.tools.constants import (
 )
 
 
-@pytest.mark.asyncio
-async def test_read_file():
+@pytest.fixture(autouse=True)
+def mock_feature_flag():
+    """Mock feature flag to return True for USE_DUO_CONTEXT_EXCLUSION."""
+    with patch(
+        "duo_workflow_service.policies.file_exclusion_policy.is_feature_enabled"
+    ) as mock:
+        mock.return_value = True
+        yield mock
+
+
+@pytest.fixture
+def mock_project():
+    return Project(
+        id=1,
+        name="test-project",
+        description="Test project",
+        http_url_to_repo="http://example.com/repo.git",
+        web_url="http://example.com/repo",
+        languages=[],
+        exclusion_rules=None,
+    )
+
+
+@pytest.fixture
+def metadata_with_project(mock_project):
     mock_outbox = MagicMock()
     mock_outbox.put = AsyncMock()
 
@@ -40,18 +65,21 @@ async def test_read_file():
         )
     )
 
-    metadata = {"outbox": mock_outbox, "inbox": mock_inbox}
+    return {"outbox": mock_outbox, "inbox": mock_inbox, "project": mock_project}
 
+
+@pytest.mark.asyncio
+async def test_read_file(metadata_with_project):
     tool = ReadFile(description="Read file content")
-    tool.metadata = metadata
+    tool.metadata = metadata_with_project
     path = "./somepath"
 
     response = await tool._arun(path)
 
     assert response == "test contents"
 
-    mock_outbox.put.assert_called_once()
-    action = mock_outbox.put.call_args[0][0]
+    metadata_with_project["outbox"].put.assert_called_once()
+    action = metadata_with_project["outbox"].put.call_args[0][0]
     assert action.runReadFile.filepath == path
 
 
@@ -64,7 +92,7 @@ async def test_read_file_not_implemented_error():
 
 
 @pytest.mark.asyncio
-async def test_write_file():
+async def test_write_file(metadata_with_project, mock_project):
     mock_outbox = MagicMock()
     mock_outbox.put = AsyncMock()
 
@@ -75,7 +103,7 @@ async def test_write_file():
         )
     )
 
-    metadata = {"outbox": mock_outbox, "inbox": mock_inbox}
+    metadata = {"outbox": mock_outbox, "inbox": mock_inbox, "project": mock_project}
 
     tool = WriteFile(description="Write file content")
     tool.metadata = metadata
@@ -102,7 +130,7 @@ async def test_write_file_not_implemented_error():
 
 class TestFindFiles:
     @pytest.mark.asyncio
-    async def test_find_files_arun_method(self):
+    async def test_find_files_arun_method(self, mock_project):
         mock_outbox = MagicMock()
         mock_outbox.put = AsyncMock()
 
@@ -115,7 +143,7 @@ class TestFindFiles:
             )
         )
 
-        metadata = {"outbox": mock_outbox, "inbox": mock_inbox}
+        metadata = {"outbox": mock_outbox, "inbox": mock_inbox, "project": mock_project}
         tool = FindFiles()
         tool.metadata = metadata
         name_pattern = "*.py"
@@ -149,7 +177,7 @@ class TestFindFiles:
 
 class TestLsDir:
     @pytest.mark.asyncio
-    async def test_list_dir_success(self):
+    async def test_list_dir_success(self, mock_project):
         # Set up the mock outbox and inbox
         mock_outbox = MagicMock()
         mock_outbox.put = AsyncMock()
@@ -163,7 +191,7 @@ class TestLsDir:
             )
         )
 
-        metadata = {"outbox": mock_outbox, "inbox": mock_inbox}
+        metadata = {"outbox": mock_outbox, "inbox": mock_inbox, "project": mock_project}
 
         # Create the tool and set its metadata
         list_dir_tool = ListDir()
@@ -248,7 +276,7 @@ class TestLsDir:
 
 class TestEditFile:
     @pytest.mark.asyncio
-    async def test_basic(self):
+    async def test_basic(self, mock_project):
         mock_outbox = MagicMock()
         mock_outbox.put = AsyncMock()
 
@@ -259,7 +287,7 @@ class TestEditFile:
             )
         )
 
-        metadata = {"outbox": mock_outbox, "inbox": mock_inbox}
+        metadata = {"outbox": mock_outbox, "inbox": mock_inbox, "project": mock_project}
 
         tool = EditFile(metadata=metadata)
         path = "./somefile.txt"
@@ -377,8 +405,9 @@ class TestWriteFile:
             )
 
 
-def test_read_file_format_display_message():
+def test_read_file_format_display_message(mock_project):
     tool = ReadFile(description="Read file description")
+    tool.metadata = {"project": mock_project}
 
     input_data = ReadFileInput(file_path="./src/main.py")
 
@@ -388,8 +417,9 @@ def test_read_file_format_display_message():
     assert message == expected_message
 
 
-def test_write_file_format_display_message():
+def test_write_file_format_display_message(mock_project):
     tool = WriteFile(description="Write file description")
+    tool.metadata = {"project": mock_project}
 
     input_data = WriteFileInput(
         file_path="./src/new_file.py", contents="print('Hello, world!')"
@@ -455,8 +485,9 @@ def test_find_files_format_display_message():
 #     assert message == expected_message
 
 
-def test_edit_file_format_display_message():
+def test_edit_file_format_display_message(mock_project):
     tool = EditFile(description="Edit file description")
+    tool.metadata = {"project": mock_project}
 
     input_data = EditFileInput(
         file_path="./src/main.py",
@@ -556,3 +587,235 @@ def test_default_context_exclusions_excludes_patterns(path):
     match = DEFAULT_CONTEXT_EXCLUSIONS.match(path)
     assert match is not None
     assert bool(match)
+
+
+class TestFileExclusionPolicy:
+    """Test suite for FileExclusionPolicy features."""
+
+    @pytest.fixture
+    def project_with_exclusions(self):
+        """Project with custom exclusion rules."""
+        return Project(
+            id=1,
+            name="test-project",
+            description="Test project with exclusions",
+            http_url_to_repo="http://example.com/repo.git",
+            web_url="http://example.com/repo",
+            languages=[],
+            exclusion_rules=[
+                "*.secret",
+                "config/private/*",
+                "!config/private/allowed.txt",
+                "temp/",
+            ],
+        )
+
+    @pytest.fixture
+    def project_without_exclusions(self):
+        """Project without exclusion rules."""
+        return Project(
+            id=2,
+            name="test-project-no-exclusions",
+            description="Test project without exclusions",
+            http_url_to_repo="http://example.com/repo.git",
+            web_url="http://example.com/repo",
+            languages=[],
+            exclusion_rules=None,
+        )
+
+    @pytest.fixture
+    def project_with_empty_exclusions(self):
+        """Project with empty exclusion rules list."""
+        return Project(
+            id=3,
+            name="test-project-empty-exclusions",
+            description="Test project with empty exclusions",
+            http_url_to_repo="http://example.com/repo.git",
+            web_url="http://example.com/repo",
+            languages=[],
+            exclusion_rules=[],
+        )
+
+    @pytest.mark.asyncio
+    async def test_read_file_with_exclusion_policy(self, project_with_exclusions):
+        """Test ReadFile tool respects FileExclusionPolicy."""
+        tool = ReadFile(description="Read file content")
+        tool.metadata = {"project": project_with_exclusions}
+
+        # Test excluded file
+        result = await tool._arun("file.secret")
+        expected = FileExclusionPolicy.format_llm_exclusion_message(["file.secret"])
+        assert result == expected
+
+    @pytest.mark.asyncio
+    async def test_write_file_with_exclusion_policy(self, project_with_exclusions):
+        """Test WriteFile tool respects FileExclusionPolicy."""
+        tool = WriteFile(description="Write file content")
+        tool.metadata = {"project": project_with_exclusions}
+
+        # Test excluded file
+        result = await tool._arun("file.secret", "content")
+        expected = FileExclusionPolicy.format_llm_exclusion_message(["file.secret"])
+        assert result == expected
+
+    @pytest.mark.asyncio
+    async def test_edit_file_with_exclusion_policy(self, project_with_exclusions):
+        """Test EditFile tool respects FileExclusionPolicy."""
+        tool = EditFile(description="Edit file content")
+        tool.metadata = {"project": project_with_exclusions}
+
+        # Test excluded file
+        result = await tool._arun("file.secret", "old", "new")
+        expected = FileExclusionPolicy.format_llm_exclusion_message(["file.secret"])
+        assert result == expected
+
+    @pytest.mark.asyncio
+    async def test_list_dir_with_exclusion_policy(self, project_with_exclusions):
+        """Test ListDir tool respects FileExclusionPolicy."""
+        mock_outbox = MagicMock()
+        mock_outbox.put = AsyncMock()
+
+        mock_inbox = MagicMock()
+        mock_inbox.get = AsyncMock(
+            return_value=contract_pb2.ClientEvent(
+                actionResponse=contract_pb2.ActionResponse(
+                    response="file1.txt\nfile2.secret\nconfig/private/secret.txt\nconfig/private/allowed.txt\ntemp/cache.txt"
+                )
+            )
+        )
+
+        metadata = {
+            "outbox": mock_outbox,
+            "inbox": mock_inbox,
+            "project": project_with_exclusions,
+        }
+
+        tool = ListDir()
+        tool.metadata = metadata
+
+        result = await tool._arun(".")
+
+        # Should only include allowed files
+        expected_files = ["file1.txt", "config/private/allowed.txt"]
+        assert result == "\n".join(expected_files)
+
+    @pytest.mark.asyncio
+    async def test_find_files_with_exclusion_policy(self, project_with_exclusions):
+        """Test FindFiles tool respects FileExclusionPolicy."""
+        mock_outbox = MagicMock()
+        mock_outbox.put = AsyncMock()
+
+        mock_inbox = MagicMock()
+        mock_inbox.get = AsyncMock(
+            return_value=contract_pb2.ClientEvent(
+                actionResponse=contract_pb2.ActionResponse(
+                    response="file1.txt\nfile2.secret\nconfig/private/secret.txt\nconfig/private/allowed.txt"
+                )
+            )
+        )
+
+        metadata = {
+            "outbox": mock_outbox,
+            "inbox": mock_inbox,
+            "project": project_with_exclusions,
+        }
+
+        tool = FindFiles()
+        tool.metadata = metadata
+
+        result = await tool._arun("*")
+
+        # Should only include allowed files
+        expected_files = ["file1.txt", "config/private/allowed.txt"]
+        assert result == "\n".join(expected_files)
+
+    def test_read_file_format_display_message_with_exclusion(
+        self, project_with_exclusions
+    ):
+        """Test ReadFile format_display_message includes exclusion message."""
+        tool = ReadFile(description="Read file description")
+        tool.metadata = {"project": project_with_exclusions}
+
+        # Test excluded file
+        input_data = ReadFileInput(file_path="file.secret")
+        message = tool.format_display_message(input_data)
+        expected = "Read file" + FileExclusionPolicy.format_user_exclusion_message(
+            ["file.secret"]
+        )
+        assert message == expected
+
+        # Test allowed file
+        input_data = ReadFileInput(file_path="file.txt")
+        message = tool.format_display_message(input_data)
+        assert message == "Read file"
+
+    def test_write_file_format_display_message_with_exclusion(
+        self, project_with_exclusions
+    ):
+        """Test WriteFile format_display_message includes exclusion message."""
+        tool = WriteFile(description="Write file description")
+        tool.metadata = {"project": project_with_exclusions}
+
+        # Test excluded file
+        input_data = WriteFileInput(file_path="file.secret", contents="content")
+        message = tool.format_display_message(input_data)
+        expected = "Create file" + FileExclusionPolicy.format_user_exclusion_message(
+            ["file.secret"]
+        )
+        assert message == expected
+
+        # Test allowed file
+        input_data = WriteFileInput(file_path="file.txt", contents="content")
+        message = tool.format_display_message(input_data)
+        assert message == "Create file"
+
+    def test_edit_file_format_display_message_with_exclusion(
+        self, project_with_exclusions
+    ):
+        """Test EditFile format_display_message includes exclusion message."""
+        tool = EditFile(description="Edit file description")
+        tool.metadata = {"project": project_with_exclusions}
+
+        # Test excluded file
+        input_data = EditFileInput(
+            file_path="file.secret", old_str="old", new_str="new"
+        )
+        message = tool.format_display_message(input_data)
+        expected = "Edit file" + FileExclusionPolicy.format_user_exclusion_message(
+            ["file.secret"]
+        )
+        assert message == expected
+
+        # Test allowed file
+        input_data = EditFileInput(file_path="file.txt", old_str="old", new_str="new")
+        message = tool.format_display_message(input_data)
+        assert message == "Edit file"
+
+    @pytest.mark.asyncio
+    async def test_list_dir_excluded_directory(self, project_with_exclusions):
+        """Test ListDir tool with excluded directory."""
+        mock_outbox = MagicMock()
+        mock_outbox.put = AsyncMock()
+
+        mock_inbox = MagicMock()
+        mock_inbox.get = AsyncMock(
+            return_value=contract_pb2.ClientEvent(
+                actionResponse=contract_pb2.ActionResponse(
+                    response="temp/cache.txt\ntemp/log.txt"
+                )
+            )
+        )
+
+        metadata = {
+            "outbox": mock_outbox,
+            "inbox": mock_inbox,
+            "project": project_with_exclusions,
+        }
+
+        tool = ListDir()
+        tool.metadata = metadata
+
+        # Test directory containing only excluded files
+        result = await tool._arun("temp/")
+        # Should return empty string since all files in temp/ are excluded
+        assert result == ""

@@ -205,6 +205,7 @@ async def test_compile_and_run_graph(
         workflow_config=workflow._workflow_config,
         gl_http_client=workflow._http_client,
         mcp_tools=[mcp_tool] if mcp_enabled else [],
+        project=mock_project,
         user=None,
         language_server_version=None,
     )

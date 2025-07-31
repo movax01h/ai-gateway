@@ -1,15 +1,26 @@
 import json
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, Mock, patch
 
 import pytest
 
 from duo_workflow_service.gitlab.url_parser import GitLabUrlParser
+from duo_workflow_service.policies.file_exclusion_policy import FileExclusionPolicy
 from duo_workflow_service.tools.repository_files import (
     GetRepositoryFile,
     ListRepositoryTree,
     RepositoryFileResourceInput,
     RepositoryTreeResourceInput,
 )
+
+
+@pytest.fixture(autouse=True)
+def mock_feature_flag():
+    """Mock feature flag to return True for USE_DUO_CONTEXT_EXCLUSION."""
+    with patch(
+        "duo_workflow_service.policies.file_exclusion_policy.is_feature_enabled"
+    ) as mock:
+        mock.return_value = True
+        yield mock
 
 
 @pytest.fixture(name="gitlab_client_mock")
@@ -35,6 +46,28 @@ def metadata_fixture(gitlab_client_mock):
     return {
         "gitlab_client": gitlab_client_mock,
         "gitlab_host": "gitlab.com",
+    }
+
+
+@pytest.fixture
+def metadata_with_project(gitlab_client_mock):
+    """Metadata with a mock project that has exclusion rules."""
+    project = {"exclusion_rules": ["*.log", "node_modules/", "*.tmp", "secret_*"]}
+    return {
+        "gitlab_client": gitlab_client_mock,
+        "gitlab_host": "gitlab.com",
+        "project": project,
+    }
+
+
+@pytest.fixture
+def metadata_no_exclusion_rules(gitlab_client_mock):
+    """Metadata with a project that has no exclusion rules."""
+    project = {"exclusion_rules": []}
+    return {
+        "gitlab_client": gitlab_client_mock,
+        "gitlab_host": "gitlab.com",
+        "project": project,
     }
 
 
@@ -568,3 +601,473 @@ async def test_complex_tree_structure(tree_tool, gitlab_client_mock):
     assert "tree" in response
     assert len(response["tree"]) == 4
     assert response["tree"] == complex_tree
+
+
+# FileExclusionPolicy Tests
+class TestFileExclusionPolicy:
+    """Test FileExclusionPolicy functionality in repository tools."""
+
+    @pytest.mark.parametrize(
+        "file_path,exclusion_rules,expected_allowed",
+        [
+            # Basic pattern matching
+            ("README.md", ["*.log"], True),
+            ("debug.log", ["*.log"], False),
+            ("app.log", ["*.log"], False),
+            # Directory patterns
+            ("node_modules/package.json", ["node_modules/"], False),
+            ("src/node_modules/lib.js", ["node_modules/"], False),
+            ("src/main.js", ["node_modules/"], True),
+            # Multiple patterns
+            ("config.tmp", ["*.log", "*.tmp"], False),
+            ("debug.log", ["*.log", "*.tmp"], False),
+            ("main.py", ["*.log", "*.tmp"], True),
+            # Prefix patterns
+            ("secret_key.txt", ["secret_*"], False),
+            ("secret_config.json", ["secret_*"], False),
+            ("public_key.txt", ["secret_*"], True),
+            # Path normalization
+            ("folder\\file.log", ["*.log"], False),
+            ("/absolute/path/file.log", ["*.log"], False),
+            ("./relative/file.log", ["*.log"], False),
+            # Empty rules
+            ("any_file.txt", [], True),
+            ("debug.log", [], True),
+        ],
+    )
+    def test_file_exclusion_policy_is_allowed(
+        self, file_path, exclusion_rules, expected_allowed
+    ):
+        """Test FileExclusionPolicy.is_allowed with various patterns."""
+        project = {"exclusion_rules": exclusion_rules}
+        policy = FileExclusionPolicy(project)
+
+        assert policy.is_allowed(file_path) == expected_allowed
+
+    def test_file_exclusion_policy_no_project(self):
+        """Test FileExclusionPolicy with None project."""
+        policy = FileExclusionPolicy(None)
+
+        assert policy.is_allowed("any_file.txt") is True
+        assert policy.is_allowed("debug.log") is True
+
+    def test_file_exclusion_policy_no_exclusion_rules(self):
+        """Test FileExclusionPolicy with project but no exclusion rules."""
+        project = {}
+        policy = FileExclusionPolicy(project)
+
+        assert policy.is_allowed("any_file.txt") is True
+        assert policy.is_allowed("debug.log") is True
+
+    @pytest.mark.parametrize(
+        "filenames,exclusion_rules,expected_allowed",
+        [
+            # Basic filtering
+            (
+                ["README.md", "debug.log", "main.py"],
+                ["*.log"],
+                ["README.md", "main.py"],
+            ),
+            # Multiple patterns
+            (
+                ["config.json", "debug.log", "temp.tmp", "main.py"],
+                ["*.log", "*.tmp"],
+                ["config.json", "main.py"],
+            ),
+            # Directory filtering
+            (
+                ["src/main.py", "node_modules/lib.js", "package.json"],
+                ["node_modules/"],
+                ["src/main.py", "package.json"],
+            ),
+            # Empty input
+            ([], ["*.log"], []),
+            # No exclusions
+            (["file1.txt", "file2.log"], [], ["file1.txt", "file2.log"]),
+            # Whitespace handling
+            (["  README.md  ", "\tdebug.log\t", "\n", "  "], ["*.log"], ["README.md"]),
+        ],
+    )
+    def test_file_exclusion_policy_filter_allowed(
+        self, filenames, exclusion_rules, expected_allowed
+    ):
+        """Test FileExclusionPolicy.filter_allowed with various inputs."""
+        project = {"exclusion_rules": exclusion_rules}
+        policy = FileExclusionPolicy(project)
+
+        result = policy.filter_allowed(filenames)
+        assert result == expected_allowed
+
+    def test_format_user_exclusion_message(self):
+        """Test user-facing exclusion message formatting."""
+        blocked_files = ["secret_key.txt", "debug.log"]
+        message = FileExclusionPolicy.format_user_exclusion_message(blocked_files)
+
+        expected = " - files excluded:\nsecret_key.txt\ndebug.log"
+        assert message == expected
+
+    def test_format_llm_exclusion_message(self):
+        """Test LLM-facing exclusion message formatting."""
+        blocked_files = ["secret_key.txt", "debug.log"]
+        message = FileExclusionPolicy.format_llm_exclusion_message(blocked_files)
+
+        expected = "Files excluded due to policy, continue without files:\nsecret_key.txt\ndebug.log"
+        assert message == expected
+
+    def test_is_allowed_for_project_static_method(self):
+        """Test static method is_allowed_for_project."""
+        project = {"exclusion_rules": ["*.log"]}
+
+        assert FileExclusionPolicy.is_allowed_for_project(project, "README.md") is True
+        assert FileExclusionPolicy.is_allowed_for_project(project, "debug.log") is False
+        assert FileExclusionPolicy.is_allowed_for_project(None, "any_file.txt") is True
+
+
+# Integration Tests for FileExclusionPolicy with GetRepositoryFile
+class TestGetRepositoryFileWithExclusion:
+    """Test GetRepositoryFile tool with FileExclusionPolicy integration."""
+
+    @pytest.mark.asyncio
+    async def test_get_file_blocked_by_policy(self, metadata_with_project):
+        """Test that GetRepositoryFile blocks files matching exclusion rules."""
+        tool = GetRepositoryFile(metadata=metadata_with_project)
+
+        input_params = {
+            "project_id": "test/project",
+            "ref": "main",
+            "file_path": "debug.log",  # This should be blocked by *.log rule
+        }
+
+        result = await tool._arun(**input_params)
+        response = json.loads(result)
+
+        assert "error" in response
+        assert "Files excluded due to policy" in response["error"]
+        assert "debug.log" in response["error"]
+
+    @pytest.mark.asyncio
+    async def test_get_file_allowed_by_policy(
+        self, metadata_with_project, gitlab_client_mock
+    ):
+        """Test that GetRepositoryFile allows files not matching exclusion rules."""
+        tool = GetRepositoryFile(metadata=metadata_with_project)
+        gitlab_client_mock.aget.return_value = "file content"
+
+        input_params = {
+            "project_id": "test/project",
+            "ref": "main",
+            "file_path": "README.md",  # This should be allowed
+        }
+
+        result = await tool._arun(**input_params)
+        response = json.loads(result)
+
+        assert "content" in response
+        assert response["content"] == "file content"
+        gitlab_client_mock.aget.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_get_file_no_exclusion_rules(
+        self, metadata_no_exclusion_rules, gitlab_client_mock
+    ):
+        """Test GetRepositoryFile with no exclusion rules."""
+        tool = GetRepositoryFile(metadata=metadata_no_exclusion_rules)
+        gitlab_client_mock.aget.return_value = "file content"
+
+        input_params = {
+            "project_id": "test/project",
+            "ref": "main",
+            "file_path": "debug.log",  # Should be allowed when no rules
+        }
+
+        result = await tool._arun(**input_params)
+        response = json.loads(result)
+
+        assert "content" in response
+        assert response["content"] == "file content"
+
+    @pytest.mark.asyncio
+    async def test_get_file_no_project(self, metadata, gitlab_client_mock):
+        """Test GetRepositoryFile with no project (no exclusion policy)."""
+        tool = GetRepositoryFile(metadata=metadata)
+        gitlab_client_mock.aget.return_value = "file content"
+
+        input_params = {
+            "project_id": "test/project",
+            "ref": "main",
+            "file_path": "debug.log",  # Should be allowed when no project
+        }
+
+        result = await tool._arun(**input_params)
+        response = json.loads(result)
+
+        assert "content" in response
+        assert response["content"] == "file content"
+
+    def test_get_file_format_display_message_blocked(self, metadata_with_project):
+        """Test display message formatting for blocked files."""
+        tool = GetRepositoryFile(metadata=metadata_with_project)
+
+        args = RepositoryFileResourceInput(
+            project_id="test/project",
+            ref="main",
+            file_path="secret_key.txt",  # Blocked by secret_* rule
+        )
+
+        message = tool.format_display_message(args)
+        assert " - files excluded:" in message
+        assert "secret_key.txt" in message
+
+    def test_get_file_format_display_message_allowed(self, metadata_with_project):
+        """Test display message formatting for allowed files."""
+        tool = GetRepositoryFile(metadata=metadata_with_project)
+
+        args = RepositoryFileResourceInput(
+            project_id="test/project", ref="main", file_path="README.md"  # Allowed file
+        )
+
+        message = tool.format_display_message(args)
+        assert (
+            "Get repository file README.md from project test/project at ref main"
+            == message
+        )
+
+    @pytest.mark.parametrize(
+        "file_path,should_be_blocked",
+        [
+            ("debug.log", True),  # *.log rule
+            ("app.log", True),  # *.log rule
+            ("node_modules/lib.js", True),  # node_modules/ rule
+            ("temp.tmp", True),  # *.tmp rule
+            ("secret_config.json", True),  # secret_* rule
+            ("README.md", False),  # Allowed
+            ("src/main.py", False),  # Allowed
+            ("config.json", False),  # Allowed
+        ],
+    )
+    @pytest.mark.asyncio
+    async def test_get_file_various_exclusion_patterns(
+        self, metadata_with_project, gitlab_client_mock, file_path, should_be_blocked
+    ):
+        """Test GetRepositoryFile with various exclusion patterns."""
+        tool = GetRepositoryFile(metadata=metadata_with_project)
+        gitlab_client_mock.aget.return_value = "file content"
+
+        input_params = {
+            "project_id": "test/project",
+            "ref": "main",
+            "file_path": file_path,
+        }
+
+        result = await tool._arun(**input_params)
+        response = json.loads(result)
+
+        if should_be_blocked:
+            assert "error" in response
+            assert "Files excluded due to policy" in response["error"]
+            gitlab_client_mock.aget.assert_not_called()
+        else:
+            assert "content" in response
+            assert response["content"] == "file content"
+            gitlab_client_mock.aget.assert_called_once()
+
+
+class TestListRepositoryTreeWithExclusion:
+    """Test ListRepositoryTree tool with FileExclusionPolicy integration."""
+
+    @pytest.mark.asyncio
+    async def test_list_tree_filters_excluded_files(
+        self, metadata_with_project, gitlab_client_mock
+    ):
+        """Test that ListRepositoryTree filters out excluded files."""
+        tool = ListRepositoryTree(metadata=metadata_with_project)
+
+        # Mock response with mixed allowed and excluded files
+        mock_response = [
+            {"id": "1", "name": "README.md", "type": "blob", "path": "README.md"},
+            {"id": "2", "name": "debug.log", "type": "blob", "path": "debug.log"},
+            {"id": "3", "name": "main.py", "type": "blob", "path": "src/main.py"},
+            {
+                "id": "4",
+                "name": "lib.js",
+                "type": "blob",
+                "path": "node_modules/lib.js",
+            },
+            {"id": "5", "name": "config.tmp", "type": "blob", "path": "config.tmp"},
+            {
+                "id": "6",
+                "name": "secret_key.txt",
+                "type": "blob",
+                "path": "secret_key.txt",
+            },
+        ]
+        gitlab_client_mock.aget.return_value = mock_response
+
+        result = await tool._arun(project_id="test/project")
+        response = json.loads(result)
+
+        # Should only include allowed files
+        expected_files = [
+            {"id": "1", "name": "README.md", "type": "blob", "path": "README.md"},
+            {"id": "3", "name": "main.py", "type": "blob", "path": "src/main.py"},
+        ]
+        assert response["tree"] == expected_files
+
+    @pytest.mark.asyncio
+    async def test_list_tree_no_exclusion_rules(
+        self, metadata_no_exclusion_rules, gitlab_client_mock
+    ):
+        """Test ListRepositoryTree with no exclusion rules."""
+        tool = ListRepositoryTree(metadata=metadata_no_exclusion_rules)
+
+        mock_response = [
+            {"id": "1", "name": "README.md", "type": "blob", "path": "README.md"},
+            {"id": "2", "name": "debug.log", "type": "blob", "path": "debug.log"},
+            {"id": "3", "name": "main.py", "type": "blob", "path": "src/main.py"},
+        ]
+        gitlab_client_mock.aget.return_value = mock_response
+
+        result = await tool._arun(project_id="test/project")
+        response = json.loads(result)
+
+        # All files should be included
+        assert response["tree"] == mock_response
+
+    @pytest.mark.asyncio
+    async def test_list_tree_empty_response(
+        self, metadata_with_project, gitlab_client_mock
+    ):
+        """Test ListRepositoryTree with empty API response."""
+        tool = ListRepositoryTree(metadata=metadata_with_project)
+
+        gitlab_client_mock.aget.return_value = []
+
+        result = await tool._arun(project_id="test/project")
+        response = json.loads(result)
+
+        assert response["tree"] == []
+
+    @pytest.mark.asyncio
+    async def test_list_tree_all_files_excluded(
+        self, metadata_with_project, gitlab_client_mock
+    ):
+        """Test ListRepositoryTree when all files are excluded."""
+        tool = ListRepositoryTree(metadata=metadata_with_project)
+
+        # All files match exclusion patterns
+        mock_response = [
+            {"id": "1", "name": "debug.log", "type": "blob", "path": "debug.log"},
+            {"id": "2", "name": "app.log", "type": "blob", "path": "app.log"},
+            {
+                "id": "3",
+                "name": "lib.js",
+                "type": "blob",
+                "path": "node_modules/lib.js",
+            },
+            {"id": "4", "name": "temp.tmp", "type": "blob", "path": "temp.tmp"},
+            {
+                "id": "5",
+                "name": "secret_config.json",
+                "type": "blob",
+                "path": "secret_config.json",
+            },
+        ]
+        gitlab_client_mock.aget.return_value = mock_response
+
+        result = await tool._arun(project_id="test/project")
+        response = json.loads(result)
+
+        assert response["tree"] == []
+
+    @pytest.mark.asyncio
+    async def test_list_tree_complex_patterns(self, gitlab_client_mock):
+        """Test ListRepositoryTree with complex exclusion patterns."""
+        # Custom project with more complex rules
+        project = {
+            "exclusion_rules": [
+                "*.log",
+                "*.tmp",
+                "node_modules/",
+                "build/",
+                "dist/",
+                "__pycache__/",
+                "*.pyc",
+                ".git/",
+                "secret_*",
+                "*.key",
+                "test_*.py",
+            ]
+        }
+        metadata = {
+            "gitlab_client": gitlab_client_mock,
+            "gitlab_host": "gitlab.com",
+            "project": project,
+        }
+        tool = ListRepositoryTree(metadata=metadata)
+
+        mock_response = [
+            {"id": "1", "name": "README.md", "type": "blob", "path": "README.md"},
+            {"id": "2", "name": "main.py", "type": "blob", "path": "src/main.py"},
+            {"id": "3", "name": "utils.py", "type": "blob", "path": "src/utils.py"},
+            {
+                "id": "4",
+                "name": "test_helper.py",
+                "type": "blob",
+                "path": "test_helper.py",
+            },
+            {"id": "5", "name": "debug.log", "type": "blob", "path": "debug.log"},
+            {"id": "6", "name": "output.js", "type": "blob", "path": "build/output.js"},
+            {
+                "id": "7",
+                "name": "index.js",
+                "type": "blob",
+                "path": "node_modules/react/index.js",
+            },
+            {
+                "id": "8",
+                "name": "module.pyc",
+                "type": "blob",
+                "path": "__pycache__/module.pyc",
+            },
+            {
+                "id": "9",
+                "name": "secret_config.json",
+                "type": "blob",
+                "path": "secret_config.json",
+            },
+            {"id": "10", "name": "api.key", "type": "blob", "path": "api.key"},
+            {"id": "11", "name": "config", "type": "blob", "path": ".git/config"},
+            {"id": "12", "name": "bundle.js", "type": "blob", "path": "dist/bundle.js"},
+            {"id": "13", "name": "temp.tmp", "type": "blob", "path": "temp.tmp"},
+        ]
+
+        gitlab_client_mock.aget.return_value = mock_response
+
+        result = await tool._arun(project_id="test/project")
+        response = json.loads(result)
+
+        # Only these should remain after filtering
+        expected_files = [
+            {"id": "1", "name": "README.md", "type": "blob", "path": "README.md"},
+            {"id": "2", "name": "main.py", "type": "blob", "path": "src/main.py"},
+            {"id": "3", "name": "utils.py", "type": "blob", "path": "src/utils.py"},
+        ]
+        assert response["tree"] == expected_files
+
+    @pytest.mark.asyncio
+    async def test_list_tree_no_project(self, metadata, gitlab_client_mock):
+        """Test ListRepositoryTree with no project (no exclusion policy)."""
+        tool = ListRepositoryTree(metadata=metadata)
+
+        mock_response = [
+            {"id": "1", "name": "README.md", "type": "blob", "path": "README.md"},
+            {"id": "2", "name": "debug.log", "type": "blob", "path": "debug.log"},
+            {"id": "3", "name": "main.py", "type": "blob", "path": "src/main.py"},
+        ]
+        gitlab_client_mock.aget.return_value = mock_response
+
+        result = await tool._arun(project_id="test/project")
+        response = json.loads(result)
+
+        # All files should be included when no project
+        assert response["tree"] == mock_response

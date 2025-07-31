@@ -226,6 +226,7 @@ class AbstractWorkflow(ABC):
                 inbox=self._inbox,
                 workflow_config=self._workflow_config,
                 gl_http_client=self._http_client,
+                project=self._project,
                 mcp_tools=(
                     self._mcp_tools
                     if self._workflow_config.get("mcp_enabled", False)

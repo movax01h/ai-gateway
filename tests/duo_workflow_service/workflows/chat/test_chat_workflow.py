@@ -83,6 +83,7 @@ def workflow_with_project_fixture(
         "description": "A test project",
         "languages": [{"name": "Python", "share": 1.0}],
         "default_branch": "main",
+        "exclusion_rules": None,
     }
     workflow._namespace = None
     workflow._additional_context = additional_context
