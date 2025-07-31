@@ -82,6 +82,9 @@ class GetPipelineErrorsForMergeRequest(DuoBaseTool):
             path=f"/api/v4/projects/{validation_result.project_id}/pipelines/{last_pipeline_id}/jobs"
         )
 
+        if not isinstance(jobs, list):
+            return json.dumps({"error": f"Failed to fetch jobs: {jobs}"})
+
         traces = "Failed Jobs:\n"
         for job in jobs:
             if job["status"] == "failed":
