@@ -20,7 +20,7 @@ def main():
     target_directory = "duo_workflow_service/"
 
     # Get lines that reference ai_gateway
-    change_patterns = set()
+    change_patterns = []
     target_dir_path = Path(target_directory)
     search_string = "ai_gateway"
     for root, _, filenames in target_dir_path.walk():
@@ -40,16 +40,16 @@ def main():
                             ]
                             if len(matching) > 0:
                                 import_path = convert_to_path(matching[0])
-                                change_patterns.add(import_path)
+                                change_patterns.append(import_path)
 
                         # Handle "from ... import" statements
                         elif isinstance(node, ast.ImportFrom):
                             module = node.module if node.module else ""
                             if module and search_string in module:
                                 import_path = convert_to_path(module)
-                                change_patterns.add(import_path)
+                                change_patterns.append(import_path)
 
-    change_patterns = sorted(change_patterns)
+    change_patterns = sorted(set(change_patterns))
     with open(OUTPUT_FILE_PATH, "w") as output_file:
         output_file.write(HEADER_TEXT)
         for pattern in change_patterns:

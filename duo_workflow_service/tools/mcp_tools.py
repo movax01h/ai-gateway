@@ -15,8 +15,10 @@ class McpTool(BaseTool):
         raise NotImplementedError("This tool can only be run asynchronously")
 
     async def _arun(self, **arguments):
+        metadata = self.metadata or {}
+
         return await _execute_action(
-            self.metadata,
+            metadata,
             contract_pb2.Action(
                 runMCPTool=contract_pb2.RunMCPTool(
                     name=self.name, args=json.dumps(arguments)
