@@ -464,6 +464,6 @@ class TestPlannerComponent:
         # Check the content of the HumanMessage ignoring whitespaces, since they may differ between jinja and in-code
         # templates
         assert (
-            re.sub("\s+", " ", ainvoke_messages[1].content).strip()
-            == re.sub("\s+", " ", f"Your goal is: {expected_goal}").strip()
+            re.sub(r"\s+", " ", ainvoke_messages[1].content).strip()
+            == re.sub(r"\s+", " ", f"Your goal is: {expected_goal}").strip()
         )
