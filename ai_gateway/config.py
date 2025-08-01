@@ -118,8 +118,8 @@ def _build_endpoint() -> str:
 
 
 class ConfigModelEndpoints(BaseModel):
-    def update_fireworks_current_region_endpoint(self, location):
-        regional_endpoints = self.fireworks_regional_endpoints
+    def update_fireworks_current_region_endpoint(self, location: str):
+        regional_endpoints = self.fireworks_regional_endpoints or {}
 
         matching_regions = [
             region for region in regional_endpoints if location.startswith(region)

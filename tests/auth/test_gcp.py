@@ -1,6 +1,7 @@
 import unittest
 from unittest.mock import MagicMock, PropertyMock, patch
 
+import pytest
 from google.auth.credentials import Credentials, TokenState
 
 from ai_gateway.auth.gcp import _fetch_application_default_credentials, access_token
@@ -33,6 +34,19 @@ class TestAccessToken(unittest.TestCase):
             access_token()
 
             self.assertEqual(mock_fetch.call_count, 2)
+
+    def test_access_token_empty(self):
+        with patch(
+            "ai_gateway.auth.gcp._fetch_application_default_credentials"
+        ) as mock_fetch:
+            mock_creds = MagicMock(spec=Credentials)
+            type(mock_creds).token = PropertyMock(return_value=None)
+            mock_fetch.return_value = mock_creds
+
+            with pytest.raises(
+                ValueError, match="Failed to retrieve Google Cloud access token"
+            ):
+                access_token()
 
 
 class TestFetchApplicationDefaultCredentials(unittest.TestCase):

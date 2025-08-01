@@ -17,7 +17,11 @@ def access_token() -> str:
         _fetch_application_default_credentials.cache_clear()
         creds = _fetch_application_default_credentials()
 
-    return creds.token
+    # Ensure we always return a string
+    token = creds.token
+    if token is None:
+        raise ValueError("Failed to retrieve Google Cloud access token")
+    return token
 
 
 @lru_cache(maxsize=1)
