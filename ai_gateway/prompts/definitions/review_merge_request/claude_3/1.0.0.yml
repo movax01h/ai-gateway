@@ -3,6 +3,7 @@ name: Claude 3 Review Merge Request
 model:
   config_file: claude_3_7
   params:
+    model_class_provider: litellm
     max_tokens: 8_192
 unit_primitives:
   - review_merge_request
