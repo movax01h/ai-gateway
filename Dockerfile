@@ -18,6 +18,14 @@ COPY poetry.lock pyproject.toml ./
 RUN pip install "poetry==$POETRY_VERSION"
 RUN mkdir -p -m 777 $POETRY_CONFIG_DIR $POETRY_DATA_DIR $POETRY_CACHE_DIR
 
+COPY README.md README.md
+COPY ai_gateway/ ai_gateway/
+COPY duo_workflow_service/ duo_workflow_service/
+COPY lib/ lib/
+COPY contract/ contract/
+COPY scripts/ scripts/
+COPY vendor/ vendor/
+
 ##
 ## Intermediate image contains build-essential for installing
 ## google-cloud-profiler's dependencies
@@ -30,17 +38,12 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
     && rm -rf /var/lib/apt/lists/*
 
-COPY scripts /home/aigateway/app/scripts
-COPY vendor /home/aigateway/app/vendor
-
-RUN poetry install --compile --no-interaction --no-ansi --no-cache --no-root --only main
+RUN poetry install --compile --no-interaction --no-ansi --no-cache --only main
 
 ##
 ## Final image copies dependencies from install-image
 ##
 FROM base-image AS final
-
-WORKDIR /home/aigateway/app
 
 RUN apt-get update && apt-get install -y parallel
 
@@ -50,18 +53,8 @@ USER aigateway
 
 COPY --chown=aigateway:aigateway --from=install-image /home/aigateway/app/venv/ /home/aigateway/app/venv/
 
-COPY --chown=aigateway:aigateway ai_gateway/ ai_gateway/
-COPY --chown=aigateway:aigateway duo_workflow_service/ duo_workflow_service/
-COPY --chown=aigateway:aigateway lib/ lib/
-COPY --chown=aigateway:aigateway contract/ contract/
-COPY --chown=aigateway:aigateway vendor/ /home/aigateway/app/vendor/
-
-# Environment variable TRANSFORMERS_CACHE controls where files are downloaded
-COPY --chown=aigateway:aigateway --from=install-image /home/aigateway/app/scripts/bootstrap.py .
-COPY --chown=aigateway:aigateway --from=install-image /home/aigateway/app/scripts/run.sh .
-
-RUN poetry run python bootstrap.py
+RUN poetry run python scripts/bootstrap.py
 
 EXPOSE 5052
 
-CMD ["./run.sh"]
+CMD ["./scripts/run.sh"]
