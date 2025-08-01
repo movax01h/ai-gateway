@@ -38,7 +38,8 @@ class BaseAuditEventsInput(BaseModel):
 class ListInstanceAuditEventsInput(BaseAuditEventsInput):
     entity_type: Optional[str] = Field(
         default=None,
-        description="Return audit events for the given entity type. Valid values are: User, Group, Project, or Gitlab::Audit::InstanceScope.",
+        description="Return audit events for the given entity type. Valid values are: User, Group, Project, or "
+        "Gitlab::Audit::InstanceScope.",
     )
     entity_id: Optional[int] = Field(
         default=None,

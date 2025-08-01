@@ -339,7 +339,8 @@ class CreateCommitAction(BaseModel):
     )
     content: Optional[str] = Field(
         default=None,
-        description="File content, required for 'create' and 'update' actions. For 'move' actions without content, existing file content is preserved.",
+        description="File content, required for 'create' and 'update' actions. For 'move' actions without content, "
+        "existing file content is preserved.",
     )
     encoding: Optional[str] = Field(
         default=None, description="'text' or 'base64'. Default is 'text'."
@@ -354,11 +355,13 @@ class CreateCommitInput(ProjectResourceInput):
     """Input model for creating a commit in a GitLab repository."""
 
     branch: str = Field(
-        description="Name of the branch to commit into. To create a new branch, also provide either start_branch or start_sha, and optionally start_project."
+        description="Name of the branch to commit into. To create a new branch, also provide either start_branch or "
+        "start_sha, and optionally start_project."
     )
     commit_message: str = Field(description="Commit message.")
     actions: List[CreateCommitAction] = Field(
-        description="JSON array of file actions. Each action requires 'action' and 'file_path'. For 'create' and 'update' actions, 'content' is also required."
+        description="JSON array of file actions. Each action requires 'action' and 'file_path'. For 'create' and "
+        "'update' actions, 'content' is also required."
     )
     start_branch: Optional[str] = Field(
         default=None, description="Name of the branch to start the new branch from."
@@ -464,8 +467,14 @@ class CreateCommit(DuoBaseTool):
         file_count = len(args.actions)
 
         if args.url:
-            return f"Create commit in {args.url} with {file_count} file {self._pluralize('action', file_count)} ({', '.join(action_types)})"
-        return f"Create commit in project {args.project_id} with {file_count} file {self._pluralize('action', file_count)} ({', '.join(action_types)})"
+            return (
+                f"Create commit in {args.url} with {file_count} file "
+                f"{self._pluralize('action', file_count)} ({', '.join(action_types)})"
+            )
+        return (
+            f"Create commit in project {args.project_id} with {file_count} file "
+            f"{self._pluralize('action', file_count)} ({', '.join(action_types)})"
+        )
 
     def _pluralize(self, word: str, count: int) -> str:
         """Helper method to pluralize words based on count."""

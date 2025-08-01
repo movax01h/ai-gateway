@@ -94,7 +94,9 @@ class PlannerComponent(BaseComponent):
                         "get_plan_tool_name": self.tools_registry.get("get_plan").name,  # type: ignore
                         "add_new_task_tool_name": self.tools_registry.get("add_new_task").name,  # type: ignore
                         "remove_task_tool_name": self.tools_registry.get("remove_task").name,  # type: ignore
-                        "update_task_description_tool_name": self.tools_registry.get("update_task_description").name,  # type: ignore
+                        "update_task_description_tool_name": self.tools_registry.get(
+                            "update_task_description"
+                        ).name,  # type: ignore
                     },
                 ),
             )
@@ -117,7 +119,9 @@ class PlannerComponent(BaseComponent):
                 get_plan_tool_name=self.tools_registry.get("get_plan").name,  # type: ignore
                 add_new_task_tool_name=self.tools_registry.get("add_new_task").name,  # type: ignore
                 remove_task_tool_name=self.tools_registry.get("remove_task").name,  # type: ignore
-                update_task_description_tool_name=self.tools_registry.get("update_task_description").name,  # type: ignore
+                update_task_description_tool_name=self.tools_registry.get(
+                    "update_task_description"
+                ).name,  # type: ignore
                 planner_instructions=self.planner_instructions(self.tools_registry),
             )
             planner = Agent(

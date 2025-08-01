@@ -310,23 +310,23 @@ async def test_dismiss_vulnerability(gitlab_client_mock, metadata):
 
     # editorconfig-checker-disable
     expected_mutation = """
-        mutation($vulnerabilityId: VulnerabilityID!, $comment: String, $dismissalReason: VulnerabilityDismissalReason) {
-          vulnerabilityDismiss(input: {
-            id: $vulnerabilityId,
-            comment: $comment,
-            dismissalReason: $dismissalReason
-          }) {
-            errors
-            vulnerability {
-              id
-              description
-              state
-              dismissedAt
-              dismissalReason
-            }
-          }
-        }
-        """
+mutation($vulnerabilityId: VulnerabilityID!, $comment: String, $dismissalReason: VulnerabilityDismissalReason) {
+    vulnerabilityDismiss(input: {
+    id: $vulnerabilityId,
+    comment: $comment,
+    dismissalReason: $dismissalReason
+    }) {
+    errors
+    vulnerability {
+        id
+        description
+        state
+        dismissedAt
+        dismissalReason
+    }
+    }
+}
+"""
     # editorconfig-checker-enable
 
     gitlab_client_mock.apost.assert_called_once_with(
