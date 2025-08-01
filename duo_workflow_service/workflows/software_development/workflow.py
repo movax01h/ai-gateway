@@ -219,6 +219,7 @@ class Workflow(AbstractWorkflow):
 
         last_node_name = self._add_context_builder_nodes(graph, goal, tools_registry)
         disambiguation_component = GoalDisambiguationComponent(
+            user=self._user,
             goal=goal,
             model_config=self._model_config,
             http_client=self._http_client,

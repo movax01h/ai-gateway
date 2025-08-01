@@ -327,6 +327,7 @@ async def test_workflow_run(
     mock_handover_agent,
     mock_agent,
     mock_tools_registry_cls,
+    mock_tools_registry,
     checkpoint_tuple,
     workflow,
 ):
@@ -354,6 +355,17 @@ async def test_workflow_run(
     ]
 
     await workflow.run("test_goal")
+
+    mock_goal_disambiguation_component.assert_called_once_with(
+        user=workflow._user,
+        goal="test_goal",
+        model_config=workflow._model_config,
+        http_client=workflow._http_client,
+        workflow_id=workflow._workflow_id,
+        tools_registry=mock_tools_registry,
+        allow_agent_to_request_user=True,
+        workflow_type=workflow._workflow_type,
+    )
 
     assert mock_goal_disambiguation_component.return_value.attach.call_count == 1
     assert mock_planner_component.return_value.attach.call_count == 1

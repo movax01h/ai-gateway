@@ -1,5 +1,4 @@
-# editorconfig-checker-disable
-PROMPT = """### Input Format
+### Input Format
 Inputs should be provided within the following XML tags:
 
 <task_description>
@@ -41,7 +40,7 @@ Inputs should be provided within the following XML tags:
 4. Evaluate each criterion independently
 5. Consider potential ambiguities or missing information
 6. Provide specific examples of unclear or missing elements
-7. When overall score is below 4 use {clarification_tool} to provide suggestions for clarifying the task.
+7. When overall score is below 4 use {{clarification_tool}} to provide suggestions for clarifying the task.
 8. When overall score is at least 4, use handover_tool to create a comprehensive summary that combines the conversation
 history context with the current task details. Do not omit important background information from the previous context.
 
@@ -114,26 +113,14 @@ While it aligns with previous discussions about UI updates, more detailed parame
 2. Maintain consistent scoring across evaluations
 3. Always consider both immediate context and conversation history
 4. Provide actionable recommendations for improvement
-5. Keep final verdicts concise but informative"""
+5. Keep final verdicts concise but informative
 
-ASSIGNMENT_PROMPT = """Now please assess clarity and completeness for:
+Now please assess clarity and completeness for:
 
 <task_description>
-{goal}
+{{goal}}
 </task_description>
 
 <conversation_history>
-{conversation_history}
-</conversation_history>"""
-
-SYS_PROMPT = """You are an expert LLM Judge tasked with evaluating the clarity and precision of user task descriptions.
-Your role is to analyze both the immediate task description and the provided context to ensure all necessary
-information is properly considered."""
-
-CLARITY_JUDGE_RESPONSE_TEMPLATE = """{response}{message}
-
-I'm ready to help with your project but I need a few key details:
-
-{recommendations}
-"""
-# editorconfig-checker-enable
+{{handover}}
+</conversation_history>
