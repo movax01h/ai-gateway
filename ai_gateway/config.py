@@ -74,6 +74,15 @@ class ConfigInternalEvent(BaseModel):
     thread_count: Optional[int] = 1
 
 
+class ConfigBillingEvent(BaseModel):
+    enabled: bool = False
+    app_id: str = "gitlab_ai_gateway"
+    namespace: str = "gl"
+    endpoint: Optional[str] = None
+    batch_size: Optional[int] = 1
+    thread_count: Optional[int] = 1
+
+
 # TODO: Migrate to InternalEvent
 # See https://gitlab.com/gitlab-org/modelops/applied-ml/code-suggestions/ai-assist/-/issues/698
 class ConfigSnowplow(ConfigInternalEvent):
@@ -221,6 +230,9 @@ class Config(BaseSettings):
     internal_event: Annotated[
         ConfigInternalEvent, Field(default_factory=ConfigInternalEvent)
     ] = ConfigInternalEvent()
+    billing_event: Annotated[
+        ConfigBillingEvent, Field(default_factory=ConfigBillingEvent)
+    ] = ConfigBillingEvent()
     google_cloud_platform: Annotated[
         ConfigGoogleCloudPlatform, Field(default_factory=ConfigGoogleCloudPlatform)
     ] = ConfigGoogleCloudPlatform()
