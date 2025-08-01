@@ -127,6 +127,10 @@ async def get_internal_event_client():
     return get_container_application().internal_event.client()
 
 
+async def get_billing_event_client():
+    return get_container_application().billing_event.client()
+
+
 @inject
 async def get_abuse_detector(
     abuse_detector=Provide[ContainerApplication.abuse_detection.abuse_detector],

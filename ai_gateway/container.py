@@ -12,6 +12,7 @@ from ai_gateway.prompts.container import ContainerPrompts
 from ai_gateway.searches.container import ContainerSearches
 from ai_gateway.tracking.container import ContainerTracking
 from ai_gateway.x_ray.container import ContainerXRay
+from lib.billing_events import ContainerBillingEvent
 from lib.internal_events import ContainerInternalEvent
 
 __all__ = [
@@ -38,6 +39,10 @@ class ContainerApplication(containers.DeclarativeContainer):
 
     internal_event = providers.Container(
         ContainerInternalEvent, config=config.internal_event
+    )
+
+    billing_event = providers.Container(
+        ContainerBillingEvent, config=config.billing_event
     )
 
     integrations = providers.Container(
