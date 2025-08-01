@@ -40,15 +40,17 @@ To view released versions of AI Gateway, visit the following links:
 - [Container Registry](https://gitlab.com/gitlab-org/modelops/applied-ml/code-suggestions/ai-assist/container_registry): This page lists the released Docker images e.g. `registry.gitlab.com/gitlab-org/modelops/applied-ml/code-suggestions/ai-assist/model-gateway:v1.0.0`
 - [DockerHub](https://gitlab.com/gitlab-org/modelops/applied-ml/code-suggestions/ai-assist/container_registry): This page lists the released images that match a GitLab version e.g. `docker/gitlab/model-gateway:gitlab-v17.2`
 
-### AI Gateway and GitLab releases compatibility
+## Self-hosted AI Gateway release process
 
-On each GitLab release, a new tag will be created named `gitlab-{gitlab-release}` on the same commit of the latest
-AI Gateway release before the cutoff. Users on self-hosted environments can use this to download a version of AI Gateway
-that is compatible with their GitLab installation. These images are available both on
+When a new minor GitLab version is released (vX.Y.0-ee), a new branch is created with the name `stable-{gitlab-major}-{gitlab-minor}-ee`, and new tag with name `self-hosted-vX.Y.0-ee` is created, which triggers the release of a new image. Users on self-hosted environments can use this to download a version of AI Gateway that is compatible with their GitLab installation. These images are available both on
 [GitLab container registry](https://gitlab.com/gitlab-org/modelops/applied-ml/code-suggestions/ai-assist/container_registry/3809284)
 and on [DockerHub](https://hub.docker.com/repository/docker/gitlab/model-gateway/tags).
 
-## Release a new version of AI Gateway
+### Releasing patches to previous versions
+
+Stable branches will not be receiving updates from main branch. If a bug at a version needs to be addressed, the developer can cherry-pick the necessary commits, and request a maintainer to bump the PATCH version and create a new release tag, publishing a new image. This allows AI teams to release fixes without getting blocked by GitLab-rails patch release process.
+
+## GitLab managed AI Gateway Release process
 
 1. Visit [the pipeline list on `main` branch](https://gitlab.com/gitlab-org/modelops/applied-ml/code-suggestions/ai-assist/-/pipelines?page=1&scope=all&ref=main).
 1. Select a pipeline that you want to publish.
