@@ -67,7 +67,7 @@ Follow these steps to build a basic AI agent flow that can interact with the rep
 ## Key Framework Concepts
 
 A **Component** is a reusable building block that performs a specific task in your flow.
-Each component declares its outputs, which will be available for subsequent components to read from. In addition each component may request inputs, that should be sourced from outputs of proceeding components, or initial flow trigger request data. Finally some components accepts additional configuration parameters like  _tools_ or _prompt_id_ and _prompt_version_. Consult component documentation to understand how it can be used, and what configuration it requires
+Each component declares its outputs, which will be available for subsequent components to read from. In addition each component may request inputs, that should be sourced from outputs of proceeding components, or initial flow trigger request data. Finally some components accept additional configuration parameters like  _tools_ or _prompt_id_ and _prompt_version_. Consult component documentation to understand how it can be used, and what configuration it requires.
 Components are stateless and compose together to create complex flows.
 
 A **Router** determines the flow control between components.
@@ -222,10 +222,10 @@ routers:
 
 This router uses the workflow status to determine the next step in processing, allowing for sophisticated error handling and partial result processing.
 
-## Existing components - Agent Component
+## Existing components - AgentComponent
 
-The Agent Component is the primary building block for AI-powered flows.
-An Agent Component uses a Large Language Model (LLM) to process inputs and generate responses. It provides these capabilities:
+The AgentComponent is the primary building block for AI-powered flows.
+An AgentComponent uses a Large Language Model (LLM) to process inputs and generate responses. It provides these capabilities:
 
 - Execute tools to interact with the environment (read files, run commands, etc.)
 - Maintain conversation history for context
@@ -265,7 +265,7 @@ Here are some examples:
 ### Prompts
 
 Prompts define how the AI agent behaves and responds to inputs.
-Every Agent Component requires a prompt that serves as the "instructions" for the AI agent, defining its personality, capabilities, and response patterns.
+Every AgentComponent requires a prompt that serves as the "instructions" for the AI agent, defining its personality, capabilities, and response patterns.
 Prompts include placeholders that get replaced with actual data from the flow state.
 
 ### Inputs
