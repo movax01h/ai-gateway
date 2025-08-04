@@ -14,4 +14,4 @@ ENV HF_HUB_OFFLINE=true
 
 RUN poetry run index_docs -o "./tmp/docs.db" -v ${TAG##self-hosted-}
 
-CMD ["./run.sh"]
+CMD ["./scripts/run.sh"]
