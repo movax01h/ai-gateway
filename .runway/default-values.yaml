@@ -6,7 +6,7 @@ spec:
   services:
     frontend:
       image: "registry.gitlab.com/gitlab-org/modelops/applied-ml/code-suggestions/ai-assist/model-gateway:{{ .AppVersion }}"
-      command: ["/home/aigateway/app/run.sh"]
+      command: ["/home/aigateway/app/scripts/run.sh"]
       container_port: 5052
       protocol: http
       scalability:
