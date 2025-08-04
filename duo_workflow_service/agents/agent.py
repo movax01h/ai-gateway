@@ -135,7 +135,15 @@ class Agent:  # pylint: disable=too-many-instance-attributes
                     self.name
                 ).count_tokens(messages)
 
-                model_name = getattr(self._model, "model_name", "unknown")
+                model_name_attrs = {
+                    "ChatAnthropicVertex": "model_name",
+                    "ChatAnthropic": "model",
+                }
+                model_name = getattr(
+                    self._model,
+                    model_name_attrs.get(self._model.get_name()) or "missing_attr",
+                    "unknown",
+                )
                 request_type = f"{self.name}_completion"
                 with duo_workflow_metrics.time_llm_request(
                     model=model_name, request_type=request_type
