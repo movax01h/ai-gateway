@@ -1,7 +1,9 @@
 from datetime import datetime, timezone
 from typing import Any, Sequence, cast
 
-from langchain_core.messages import AIMessage, BaseMessage
+import structlog
+from anthropic import APIStatusError
+from langchain_core.messages import AIMessage, BaseMessage, HumanMessage
 from langchain_core.prompt_values import PromptValue
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.prompts.chat import MessageLikeRepresentation
@@ -13,6 +15,7 @@ from duo_workflow_service.entities.event import WorkflowEvent, WorkflowEventType
 from duo_workflow_service.entities.state import (
     DuoWorkflowStateType,
     MessageTypeEnum,
+    ToolStatus,
     UiChatLog,
     WorkflowStatusEnum,
 )
@@ -20,6 +23,8 @@ from duo_workflow_service.gitlab.events import get_event
 from duo_workflow_service.gitlab.http_client import GitlabHttpClient
 from duo_workflow_service.monitoring import duo_workflow_metrics
 from duo_workflow_service.tools.handover import HandoverTool
+
+log = structlog.stdlib.get_logger("agent_v2")
 
 
 class AgentPromptTemplate(Runnable[dict, PromptValue]):
@@ -86,21 +91,46 @@ class Agent(Prompt):
                 if event and event["event_type"] == WorkflowEventType.STOP:
                     return {"status": WorkflowStatusEnum.CANCELLED}
 
-            input = self._prepare_input(state)
-            model_completion = await super().ainvoke(input)
+            try:
+                input = self._prepare_input(state)
+                model_completion = await super().ainvoke(input)
 
-            if self.name in state["conversation_history"]:
-                updates["conversation_history"] = {self.name: [model_completion]}
-            else:
-                messages = cast(AgentPromptTemplate, self.prompt_tpl).messages
-                updates["conversation_history"] = {
-                    self.name: [*messages, model_completion]
+                if self.name in state["conversation_history"]:
+                    updates["conversation_history"] = {self.name: [model_completion]}
+                else:
+                    messages = cast(AgentPromptTemplate, self.prompt_tpl).messages
+                    updates["conversation_history"] = {
+                        self.name: [*messages, model_completion]
+                    }
+
+                return {
+                    **updates,
+                    **self._respond_to_human(state, model_completion),
                 }
+            except APIStatusError as error:
+                log.warning(f"Error processing agent: {error}")
 
-            return {
-                **updates,
-                **self._respond_to_human(state, model_completion),
-            }
+                error_message = HumanMessage(
+                    content=f"There was an error processing your request: {error}"
+                )
+
+                return {
+                    "conversation_history": {self.name: [error_message]},
+                    "status": WorkflowStatusEnum.ERROR,
+                    "ui_chat_log": [
+                        UiChatLog(
+                            message_type=MessageTypeEnum.AGENT,
+                            message_sub_type=None,
+                            content="There was an error processing your request. "
+                            "Please try again or contact support if the issue persists.",
+                            timestamp=datetime.now(timezone.utc).isoformat(),
+                            status=ToolStatus.FAILURE,
+                            correlation_id=None,
+                            tool_info=None,
+                            additional_context=None,
+                        )
+                    ],
+                }
 
     def _prepare_input(self, state: DuoWorkflowStateType) -> dict:
         inputs = cast(dict, state)

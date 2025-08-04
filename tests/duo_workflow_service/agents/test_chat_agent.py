@@ -1,8 +1,9 @@
 from datetime import datetime, timezone
 from typing import Any
-from unittest.mock import ANY, Mock, call, patch
+from unittest.mock import ANY, AsyncMock, Mock, call, patch
 
 import pytest
+from anthropic import APIStatusError
 from dependency_injector.wiring import Provide, inject
 from gitlab_cloud_connector import CloudConnectorUser
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
@@ -513,3 +514,33 @@ Here is the project information for the current GitLab project the USER is worki
         # Verify it's the dynamic content by checking for date
         expected_date = mock_datetime.now().strftime("%Y-%m-%d")
         assert expected_date in dynamic_system_message.content
+
+
+@pytest.mark.asyncio
+async def test_chat_agent_api_error_handling(chat_agent, input):
+    """Test that ChatAgent properly handles APIStatusError exceptions."""
+    # Mock the superclass ainvoke method to raise an APIStatusError
+    with patch.object(
+        chat_agent.__class__.__bases__[0], "ainvoke", new_callable=AsyncMock
+    ) as mock_ainvoke:
+        mock_ainvoke.side_effect = APIStatusError(
+            message="Test API error",
+            response=Mock(status_code=500),
+            body={"error": {"message": "Internal server error"}},
+        )
+
+        result = await chat_agent.run(input)
+
+        # Verify error response structure
+        assert result["status"] == WorkflowStatusEnum.INPUT_REQUIRED
+        assert "conversation_history" in result
+        assert result["conversation_history"]["Chat Agent"][0].content.startswith(
+            "There was an error processing your request:"
+        )
+        assert len(result["ui_chat_log"]) == 1
+        assert result["ui_chat_log"][0]["message_type"] == MessageTypeEnum.AGENT
+        assert result["ui_chat_log"][0]["status"] == ToolStatus.FAILURE
+        assert (
+            result["ui_chat_log"][0]["content"]
+            == "There was an error processing your request. Please try again or contact support if the issue persists."
+        )
