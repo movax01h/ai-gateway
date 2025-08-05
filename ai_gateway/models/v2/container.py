@@ -33,10 +33,7 @@ class ContainerModels(containers.DeclarativeContainer):
         config.mock_model_responses,
     )
 
-    http_async_client_anthropic = providers.Singleton(
-        init_anthropic_client,
-        mock_model_responses=config.mock_model_responses,
-    )
+    http_async_client_anthropic = providers.Singleton(init_anthropic_client)
 
     anthropic_claude_chat_fn = providers.Selector(
         _mock_selector,

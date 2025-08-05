@@ -6,17 +6,17 @@ from anthropic import AsyncAnthropic
 from httpx import AsyncClient, Limits
 
 from ai_gateway.models import ModelMetadata
-from ai_gateway.models.base import connect_anthropic
+from ai_gateway.models.base import init_anthropic_client
 from ai_gateway.models.base_text import TextGenModelBase
 
 
 @pytest.mark.asyncio
-async def test_connect_anthropic():
+async def test_init_anthropic_client():
     with patch("ai_gateway.models.base._DefaultAsyncHttpxClient") as mock_client:
         mock_http_client = MagicMock(spec=AsyncClient)
         mock_client.return_value = mock_http_client
 
-        client = connect_anthropic()
+        client = init_anthropic_client()
 
         assert isinstance(client, AsyncAnthropic)
         mock_client.assert_called_once()

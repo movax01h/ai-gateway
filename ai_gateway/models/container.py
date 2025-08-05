@@ -47,24 +47,13 @@ def _init_async_fireworks_client(
     return None
 
 
-def _init_anthropic_proxy_client(
-    mock_model_responses: bool,
-) -> httpx.AsyncClient | mock.AsyncClient:
-    if mock_model_responses:
-        return mock.AsyncClient()
-
+def _init_anthropic_proxy_client() -> httpx.AsyncClient:
     return httpx.AsyncClient(
         base_url="https://api.anthropic.com/", timeout=httpx.Timeout(timeout=60.0)
     )
 
 
-def _init_vertex_ai_proxy_client(
-    mock_model_responses: bool,
-    endpoint: str,
-) -> httpx.AsyncClient | None:
-    if mock_model_responses:
-        return None
-
+def _init_vertex_ai_proxy_client(endpoint: str) -> httpx.AsyncClient:
     return httpx.AsyncClient(
         base_url=f"https://{endpoint}/",
         timeout=httpx.Timeout(timeout=60.0),
@@ -96,19 +85,12 @@ class ContainerModels(containers.DeclarativeContainer):
         model_endpoints=config.model_endpoints,
     )
 
-    http_client_anthropic = providers.Singleton(
-        init_anthropic_client,
-        mock_model_responses=config.mock_model_responses,
-    )
+    http_client_anthropic = providers.Singleton(init_anthropic_client)
 
-    http_client_anthropic_proxy = providers.Singleton(
-        _init_anthropic_proxy_client,
-        mock_model_responses=config.mock_model_responses,
-    )
+    http_client_anthropic_proxy = providers.Singleton(_init_anthropic_proxy_client)
 
     http_client_vertex_ai_proxy = providers.Singleton(
         _init_vertex_ai_proxy_client,
-        mock_model_responses=config.mock_model_responses,
         endpoint=config.vertex_text_model.endpoint,
     )
 
@@ -204,10 +186,14 @@ class ContainerModels(containers.DeclarativeContainer):
         mocked=providers.Factory(mock.LLM),
     )
 
-    anthropic_proxy_client = providers.Factory(
-        AnthropicProxyClient,
-        client=http_client_anthropic_proxy,
-        limits=providers.Factory(ConfigModelLimits, config.model_engine_limits),
+    anthropic_proxy_client = providers.Selector(
+        _mock_selector,
+        original=providers.Factory(
+            AnthropicProxyClient,
+            client=http_client_anthropic_proxy,
+            limits=providers.Factory(ConfigModelLimits, config.model_engine_limits),
+        ),
+        mocked=providers.Factory(mock.ProxyClient),
     )
 
     vertex_ai_proxy_client = providers.Selector(
