@@ -1,0 +1,14 @@
+---
+name: context_builder
+model:
+  config_file: conversation_performant
+  params:
+    model_class_provider: litellm
+    max_tokens: 4_096
+unit_primitives:
+  - duo_workflow_execute_workflow
+prompt_template:
+  system: |
+    {% include 'workflow/context_builder/system/1.0.0.jinja' %}
+  user: |
+    {% include 'workflow/user/1.0.0.jinja' %}

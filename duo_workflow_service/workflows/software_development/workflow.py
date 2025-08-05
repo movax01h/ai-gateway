@@ -18,6 +18,7 @@ from langgraph.graph import (  # pylint: disable=no-langgraph-langchain-imports
     StateGraph,
 )
 
+from ai_gateway.model_metadata import current_model_metadata_context
 from duo_workflow_service.agents import (
     Agent,
     AgentV2,
@@ -364,6 +365,7 @@ class Workflow(AbstractWorkflow):
                     tools=context_builder_toolset.bindable,  # type: ignore[arg-type]
                     workflow_id=self._workflow_id,
                     http_client=self._http_client,
+                    model_metadata=current_model_metadata_context.get(),
                 ),
             )
         else:
