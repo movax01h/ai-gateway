@@ -6,6 +6,7 @@ import pytest
 from ai_gateway.models import KindAnthropicModel
 from duo_workflow_service.llm_factory import (
     AnthropicConfig,
+    AnthropicStopReason,
     VertexConfig,
     create_chat_model,
     validate_llm_access,
@@ -240,3 +241,48 @@ def test_new_chat_client_with_custom_model(
             assert call_kwargs["model_name"] == expected_model
             assert call_kwargs["betas"] == ["extended-cache-ttl-2025-04-11"]
             mock_vertex_client.assert_not_called()
+
+
+class TestAnthropicStopReason:
+    """Test cases for AnthropicStopReason enum."""
+
+    def test_enum_values(self):
+        """Test that all enum values are correctly defined."""
+        assert AnthropicStopReason.END_TURN == "end_turn"
+        assert AnthropicStopReason.MAX_TOKENS == "max_tokens"
+        assert AnthropicStopReason.STOP_SEQUENCE == "stop_sequence"
+        assert AnthropicStopReason.TOOL_USE == "tool_use"
+        assert AnthropicStopReason.PAUSE_TURN == "pause_turn"
+        assert AnthropicStopReason.REFUSAL == "refusal"
+
+    def test_values_class_method(self):
+        """Test that values() returns all enum values as a list."""
+        expected_values = [
+            "end_turn",
+            "max_tokens",
+            "stop_sequence",
+            "tool_use",
+            "pause_turn",
+            "refusal",
+        ]
+        actual_values = AnthropicStopReason.values()
+
+        assert isinstance(actual_values, list)
+        assert len(actual_values) == 6
+        assert set(actual_values) == set(expected_values)
+
+    def test_abnormal_values_class_method(self):
+        """Test that abnormal_values() returns only abnormal stop reasons."""
+        expected_abnormal = ["max_tokens", "refusal"]
+        actual_abnormal = AnthropicStopReason.abnormal_values()
+
+        assert isinstance(actual_abnormal, list)
+        assert len(actual_abnormal) == 2
+        assert set(actual_abnormal) == set(expected_abnormal)
+
+    def test_abnormal_values_subset_of_all_values(self):
+        """Test that abnormal values are a subset of all values."""
+        all_values = set(AnthropicStopReason.values())
+        abnormal_values = set(AnthropicStopReason.abnormal_values())
+
+        assert abnormal_values.issubset(all_values)
