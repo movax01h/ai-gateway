@@ -198,7 +198,6 @@ disable = [
   "redefined-builtin",
   "arguments-renamed",
   "raise-missing-from",
-  "too-many-ancestors",
   "abstract-method",
   "broad-exception-caught",
   "duplicate-code",

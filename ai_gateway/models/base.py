@@ -166,7 +166,7 @@ async def log_request(request: httpx.Request):
         )
 
 
-def connect_anthropic(**kwargs: Any) -> AsyncAnthropic:
+def init_anthropic_client() -> AsyncAnthropic:
     # Setting 30 seconds to the keep-alive expiry to avoid TLS handshake on every request.
     # See https://www.python-httpx.org/advanced/resource-limits/ for more information.
     limits: httpx.Limits = httpx.Limits(
@@ -177,13 +177,4 @@ def connect_anthropic(**kwargs: Any) -> AsyncAnthropic:
         limits=limits, event_hooks={"request": [log_request]}
     )
 
-    return AsyncAnthropic(http_client=http_client, **kwargs)
-
-
-def init_anthropic_client(
-    mock_model_responses: bool,
-) -> AsyncAnthropic | None:
-    if mock_model_responses:
-        return None
-
-    return connect_anthropic()
+    return AsyncAnthropic(http_client=http_client)

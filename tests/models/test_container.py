@@ -57,30 +57,14 @@ def test_init_vertex_grpc_client(args, expected_init):
             mock_grpc_client.assert_not_called()
 
 
-@pytest.mark.parametrize(
-    ("args", "expected_init"),
-    [
-        (
-            {"mock_model_responses": False},
-            True,
-        ),
-        (
-            {"mock_model_responses": True},
-            False,
-        ),
-    ],
-)
-def test_anthropic_proxy_client(args, expected_init):
+def test_anthropic_proxy_client():
     with patch("httpx.AsyncClient") as mock_httpx_client:
-        _init_anthropic_proxy_client(**args)
+        _init_anthropic_proxy_client()
 
-        if expected_init:
-            mock_httpx_client.assert_called_once_with(
-                base_url="https://api.anthropic.com/",
-                timeout=httpx.Timeout(timeout=60.0),
-            )
-        else:
-            mock_httpx_client.assert_not_called()
+    mock_httpx_client.assert_called_once_with(
+        base_url="https://api.anthropic.com/",
+        timeout=httpx.Timeout(timeout=60.0),
+    )
 
 
 @pytest.mark.parametrize(
@@ -112,36 +96,14 @@ def _init_async_fireworks_client(args, expected_init):
             mock_openai_client.assert_not_called()
 
 
-@pytest.mark.parametrize(
-    ("args", "expected_init"),
-    [
-        (
-            {
-                "mock_model_responses": False,
-                "endpoint": "us-central1-aiplatform.googleapis.com",
-            },
-            True,
-        ),
-        (
-            {
-                "mock_model_responses": True,
-                "endpoint": "us-central1-aiplatform.googleapis.com",
-            },
-            False,
-        ),
-    ],
-)
-def test_vertex_ai_proxy_client(args, expected_init):
+def test_vertex_ai_proxy_client():
     with patch("httpx.AsyncClient") as mock_httpx_client:
-        _init_vertex_ai_proxy_client(**args)
+        _init_vertex_ai_proxy_client(endpoint="us-central1-aiplatform.googleapis.com")
 
-        if expected_init:
-            mock_httpx_client.assert_called_once_with(
-                base_url="https://us-central1-aiplatform.googleapis.com/",
-                timeout=httpx.Timeout(timeout=60.0),
-            )
-        else:
-            mock_httpx_client.assert_not_called()
+    mock_httpx_client.assert_called_once_with(
+        base_url="https://us-central1-aiplatform.googleapis.com/",
+        timeout=httpx.Timeout(timeout=60.0),
+    )
 
 
 @pytest.mark.asyncio

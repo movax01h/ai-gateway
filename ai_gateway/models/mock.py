@@ -4,7 +4,6 @@ from typing import Any, AsyncIterator, Callable, List, Optional, TypeVar
 from unittest.mock import AsyncMock
 
 import fastapi
-import httpx
 from fastapi import status
 from langchain_core.callbacks import CallbackManagerForLLMRun
 from langchain_core.language_models.chat_models import SimpleChatModel
@@ -21,7 +20,6 @@ from ai_gateway.safety_attributes import SafetyAttributes
 
 __all__ = [
     "AsyncStream",
-    "AsyncClient",
     "LLM",
     "ChatModel",
 ]
@@ -47,31 +45,13 @@ class AsyncStream(AsyncIterator[_T]):
         raise StopAsyncIteration
 
 
-class AsyncClient(AsyncMock):
-    async def send(self, *_args, **_kwargs):
-        return httpx.Response(
-            status_code=status.HTTP_200_OK,
-            headers={
-                "Content-Type": "application/json",
-                "date": "2024",
-                "transfer-encoding": "chunked",
-            },
-            json={"response": "mocked"},
-        )
-
-
-class ProxyClient(AsyncMock):
+class ProxyClient(AsyncMock):  # pylint: disable=too-many-ancestors
     async def proxy(self, *_args, **_kwargs):
         return fastapi.Response(
             content=json.dumps({"response": "mocked"}).encode("utf-8"),
             status_code=status.HTTP_200_OK,
             headers={"Content-Type": "application/json"},
         )
-
-
-class SearchClient(AsyncMock):
-    async def search(self, *_args, **_kwargs):
-        return {}
 
 
 class LLM(TextGenModelBase):
