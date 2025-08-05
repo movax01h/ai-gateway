@@ -506,6 +506,51 @@ prompt_template:
             assert call_dict["model_identifier"] == expected_identifier
 
     @pytest.mark.usefixtures("mock_fs")
+    def test_logging_with_feature_enabled_by_namespace_ids(
+        self,
+        registry: LocalPromptRegistry,
+    ):
+        """Test that feature_enabled_by_namespace_ids is correctly logged."""
+        with (
+            patch("ai_gateway.prompts.registry.log") as mock_log,
+            patch("ai_gateway.prompts.registry.current_event_context") as mock_context,
+        ):
+
+            mock_event_context = Mock()
+            mock_event_context.feature_enabled_by_namespace_ids = [123, 456]
+            mock_context.get.return_value = mock_event_context
+
+            registry.get(
+                "chat/react",
+                "^1.0.0",
+            )
+
+            call_dict = mock_log.info.call_args[1]
+            assert call_dict["feature_enabled_by_namespace_ids"] == [123, 456]
+
+    @pytest.mark.usefixtures("mock_fs")
+    def test_logging_with_missing_feature_enabled_by_namespace_ids(
+        self,
+        registry: LocalPromptRegistry,
+    ):
+        """Test that logging works when feature_enabled_by_namespace_ids is missing from context."""
+        with (
+            patch("ai_gateway.prompts.registry.log") as mock_log,
+            patch("ai_gateway.prompts.registry.current_event_context") as mock_context,
+        ):
+
+            mock_event_context = Mock(spec=[])
+            mock_context.get.return_value = mock_event_context
+
+            registry.get(
+                "chat/react",
+                "^1.0.0",
+            )
+
+            call_dict = mock_log.info.call_args[1]
+            assert call_dict["feature_enabled_by_namespace_ids"] is None
+
+    @pytest.mark.usefixtures("mock_fs")
     @pytest.mark.parametrize(
         ("tool_choice", "prompt_class"),
         [

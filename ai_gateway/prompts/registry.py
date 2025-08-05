@@ -14,6 +14,7 @@ from ai_gateway.prompts.base import BasePromptRegistry, Prompt
 from ai_gateway.prompts.config import BaseModelConfig, ModelClassProvider, PromptConfig
 from ai_gateway.prompts.typing import TypeModelFactory
 from lib.internal_events.client import InternalEventsClient
+from lib.internal_events.context import current_event_context
 
 __all__ = ["LocalPromptRegistry", "PromptRegistered"]
 
@@ -169,6 +170,9 @@ class LocalPromptRegistry(BasePromptRegistry):
                 model_metadata.identifier
                 if isinstance(model_metadata, ModelMetadata)
                 else None
+            ),
+            feature_enabled_by_namespace_ids=getattr(
+                current_event_context.get(), "feature_enabled_by_namespace_ids", None
             ),
         )
 
