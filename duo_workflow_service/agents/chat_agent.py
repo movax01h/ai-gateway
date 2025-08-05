@@ -27,6 +27,7 @@ from duo_workflow_service.entities.state import (
     WorkflowStatusEnum,
 )
 from duo_workflow_service.gitlab.gitlab_api import Namespace, Project
+from duo_workflow_service.llm_factory import AnthropicStopReason
 from duo_workflow_service.slash_commands.goal_parser import parse as slash_command_parse
 from duo_workflow_service.structured_logging import _workflow_id
 from lib.internal_events import InternalEventAdditionalProperties
@@ -173,6 +174,11 @@ class ChatAgent(Prompt[ChatWorkflowState, BaseMessage]):
             agent_response = await super().ainvoke(
                 input=input, agent_name=self.name, is_anthropic_model=is_anthropic_model
             )
+
+            stop_reason = agent_response.response_metadata.get("stop_reason")
+            if stop_reason in AnthropicStopReason.abnormal_values():
+                log.warning(f"LLM stopped abnormally with reason: {stop_reason}")
+
             new_messages.append(agent_response)
 
             if isinstance(agent_response, AIMessage):

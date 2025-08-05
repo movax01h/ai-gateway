@@ -21,6 +21,7 @@ from duo_workflow_service.entities.state import (
 )
 from duo_workflow_service.gitlab.events import get_event
 from duo_workflow_service.gitlab.http_client import GitlabHttpClient
+from duo_workflow_service.llm_factory import AnthropicStopReason
 from duo_workflow_service.monitoring import duo_workflow_metrics
 from duo_workflow_service.tools.handover import HandoverTool
 
@@ -94,6 +95,9 @@ class Agent(Prompt):
             try:
                 input = self._prepare_input(state)
                 model_completion = await super().ainvoke(input)
+                stop_reason = model_completion.response_metadata.get("stop_reason")
+                if stop_reason in AnthropicStopReason.abnormal_values():
+                    log.warning(f"LLM stopped abnormally with reason: {stop_reason}")
 
                 if self.name in state["conversation_history"]:
                     updates["conversation_history"] = {self.name: [model_completion]}

@@ -1,6 +1,7 @@
 # pylint: disable=direct-environment-variable-reference
 
 import os
+from enum import Enum
 from typing import Literal, Optional, Union
 
 import structlog
@@ -12,6 +13,26 @@ from pydantic import BaseModel, Field, field_validator
 
 from ai_gateway.models import KindAnthropicModel
 from duo_workflow_service.tracking.errors import log_exception
+
+
+class AnthropicStopReason(str, Enum):
+    END_TURN = "end_turn"
+    MAX_TOKENS = "max_tokens"
+    STOP_SEQUENCE = "stop_sequence"
+    TOOL_USE = "tool_use"
+    PAUSE_TURN = "pause_turn"
+    REFUSAL = "refusal"
+
+    @classmethod
+    def values(cls):
+        """Return all enum values as a list."""
+        return [e.value for e in cls]
+
+    @classmethod
+    def abnormal_values(cls):
+        """Return abnormal stop reason values as a list."""
+        abnormal = [cls.MAX_TOKENS, cls.REFUSAL]
+        return [e.value for e in abnormal]
 
 
 class ModelConfig(BaseModel):
