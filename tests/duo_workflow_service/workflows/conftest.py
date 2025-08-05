@@ -1,9 +1,12 @@
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
+from uuid import uuid4
 
 import pytest
+from langgraph.checkpoint.base import CheckpointTuple
 
 from duo_workflow_service.components.tools_registry import ToolsRegistry
+from duo_workflow_service.entities import Plan, WorkflowStatusEnum
 
 
 @pytest.fixture(name="tool_approval_required")
@@ -90,3 +93,21 @@ def mock_fetch_workflow_and_container_data_fixture(workflow_config: dict[str, An
             workflow_config,
         )
         yield mock
+
+
+@pytest.fixture(name="checkpoint_tuple")
+def checkpoint_tuple_fixture():
+    return CheckpointTuple(
+        config={"configurable": {"thread_id": "123", "checkpoint_id": str(uuid4())}},
+        checkpoint={
+            "channel_values": {"status": WorkflowStatusEnum.NOT_STARTED},
+            "id": str(uuid4()),
+            "channel_versions": {},
+            "pending_sends": [],
+            "versions_seen": {},
+            "ts": "",
+            "v": 0,
+        },
+        metadata={"step": 0},
+        parent_config={"configurable": {"thread_id": "123", "checkpoint_id": None}},
+    )
