@@ -54,10 +54,10 @@ tests:performance:
       when: never
     - if: '$CI_PIPELINE_SOURCE == "merge_request_event" && $CI_PROJECT_NAMESPACE =~ /^gitlab-org?($|\/)/'
       variables:
-        PARENT_PIPELINE_MR_IID: $CI_MERGE_REQUEST_IID
+        PARENT_PIPELINE_CONTEXT: $CI_MERGE_REQUEST_IID
       when: always
     - if: $CI_COMMIT_BRANCH == "main"
       variables:
-        PARENT_PIPELINE_MR_IID: "main"
+        PARENT_PIPELINE_CONTEXT: "main"
       when: always
     - when: never
