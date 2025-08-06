@@ -124,7 +124,9 @@ class GetLogsFromJob(DuoBaseTool):
         except Exception as e:
             return json.dumps({"error": str(e)})
 
-    def format_display_message(self, args: GetLogsFromJobInput) -> str:
+    def format_display_message(
+        self, args: GetLogsFromJobInput, _tool_response: Any = None
+    ) -> str:
         if args.url:
             return f"Get logs for {args.url}"
         return f"Get logs for job #{args.job_id} in project {args.project_id}"

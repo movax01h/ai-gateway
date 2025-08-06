@@ -43,7 +43,8 @@ class UILogWriterAgentTools(BaseUILogWriter):
     ) -> UiChatLog:
         return UiChatLog(
             message_type=MessageTypeEnum.TOOL,
-            content=message or self._format_message(tool, tool_call_args),
+            content=message
+            or self._format_message(tool, tool_call_args, kwargs.get("tool_response")),
             timestamp=datetime.now(timezone.utc).isoformat(),
             status=ToolStatus.SUCCESS,
             correlation_id=kwargs.get("correlation_id"),
@@ -60,7 +61,8 @@ class UILogWriterAgentTools(BaseUILogWriter):
         **kwargs,
     ) -> UiChatLog:
         if not message:
-            message = f"An error occurred when executing the tool: {self._format_message(tool, tool_call_args)}"
+            message = f"An error occurred when executing the tool: {
+                self._format_message(tool, tool_call_args, kwargs.get('tool_response'))}"
 
         return UiChatLog(
             message_type=MessageTypeEnum.TOOL,
@@ -74,7 +76,9 @@ class UILogWriterAgentTools(BaseUILogWriter):
         )
 
     @staticmethod
-    def _format_message(tool: BaseTool, tool_call_args: dict[str, Any]) -> str:
+    def _format_message(
+        tool: BaseTool, tool_call_args: dict[str, Any], tool_response: Any = None
+    ) -> str:
         if not hasattr(tool, "format_display_message"):
             args_str = ", ".join(f"{k}={str(v)}" for k, v in tool_call_args.items())
             return f"Using {tool.name}: {args_str}"
@@ -84,8 +88,10 @@ class UILogWriterAgentTools(BaseUILogWriter):
             if isinstance(schema, type) and issubclass(schema, BaseModel):
                 # type: ignore[arg-type]
                 parsed = schema(**tool_call_args)
-                return tool.format_display_message(parsed)
+                return tool.format_display_message(parsed, tool_response)
         except Exception:
-            return DuoBaseTool.format_display_message(tool, tool_call_args)  # type: ignore[return-value, arg-type]
+            return DuoBaseTool.format_display_message(
+                tool, tool_call_args, tool_response  # type: ignore[arg-type]
+            )  # type: ignore[return-value]
 
-        return tool.format_display_message(tool_call_args)
+        return tool.format_display_message(tool_call_args, tool_response)

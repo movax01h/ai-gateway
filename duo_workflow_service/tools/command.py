@@ -1,4 +1,4 @@
-from typing import Optional, Type
+from typing import Any, Optional, Type
 
 from pydantic import BaseModel, Field
 
@@ -64,7 +64,9 @@ Instead of '{disallowed_operator}' please use {self.name} multiple times consecu
             ),
         )
 
-    def format_display_message(self, args: RunCommandInput) -> str:
+    def format_display_message(
+        self, args: RunCommandInput, _tool_response: Any = None
+    ) -> str:
         args_str = " ".join(args.arguments) if args.arguments else ""
         flags_str = " ".join(args.flags) if args.flags else ""
 

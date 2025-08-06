@@ -391,8 +391,7 @@ class TestFileExclusionPolicy:
         blocked_files = []
 
         result = FileExclusionPolicy.format_user_exclusion_message(blocked_files)
-        expected = " - files excluded:\n"
-        assert result == expected
+        assert result == ""
 
     def test_format_llm_exclusion_message(self):
         """Test format_llm_exclusion_message static method."""
@@ -423,8 +422,7 @@ class TestFileExclusionPolicy:
         blocked_files = []
 
         result = FileExclusionPolicy.format_llm_exclusion_message(blocked_files)
-        expected = "Files excluded due to policy, continue without files:\n"
-        assert result == expected
+        assert result == ""
 
 
 class TestFileExclusionPolicyFeatureFlag:

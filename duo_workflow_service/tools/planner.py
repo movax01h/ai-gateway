@@ -1,5 +1,5 @@
 import json
-from typing import List, Optional, Type
+from typing import Any, List, Optional, Type
 
 from langchain_core.messages import ToolMessage
 from langgraph.types import Command as LangGraphCommand
@@ -104,7 +104,9 @@ class AddNewTask(PlannerTool):
 
         return self._command([new_task], f"Step added: {new_task['id']}")
 
-    def format_display_message(self, args: AddNewTaskInput) -> str:
+    def format_display_message(
+        self, args: AddNewTaskInput, _tool_response: Any = None
+    ) -> str:
         return f"Add new task to the plan: {format_short_task_description(args.description, char_limit=100)}"
 
 
@@ -137,7 +139,9 @@ class RemoveTask(PlannerTool):
 
         return self._command(steps, f"Task removed: {task_id}")
 
-    def format_display_message(self, args: RemoveTaskInput) -> str:
+    def format_display_message(
+        self, args: RemoveTaskInput, _tool_response: Any = None
+    ) -> str:
         short_description = format_short_task_description(
             args.description, word_limit=5, char_limit=50
         )
@@ -165,7 +169,9 @@ class UpdateTaskDescription(PlannerTool):
 
         return f"Task not found: {task_id}"
 
-    def format_display_message(self, args: UpdateTaskDescriptionInput) -> str:
+    def format_display_message(
+        self, args: UpdateTaskDescriptionInput, _tool_response: Any = None
+    ) -> str:
         short_new_description = format_short_task_description(
             args.new_description, word_limit=5, char_limit=50
         )
@@ -209,7 +215,9 @@ class SetTaskStatus(PlannerTool):
 
         return f"Task not found: {task_id}"
 
-    def format_display_message(self, args: SetTaskStatusInput) -> str:
+    def format_display_message(
+        self, args: SetTaskStatusInput, _tool_response: Any = None
+    ) -> str:
         task_description = format_short_task_description(
             args.description, word_limit=5, char_limit=50
         )
@@ -249,5 +257,7 @@ class CreatePlan(PlannerTool):
 
         return self._command(steps, "Plan created", reset=True)
 
-    def format_display_message(self, args: CreatePlanInput) -> str:
+    def format_display_message(
+        self, args: CreatePlanInput, _tool_response: Any = None
+    ) -> str:
         return f"Create plan with {len(args.tasks)} tasks"

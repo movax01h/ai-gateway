@@ -5,6 +5,7 @@ from typing import Any, Optional, Type
 from gitlab_cloud_connector import GitLabUnitPrimitive
 from pydantic import BaseModel, Field
 
+from duo_workflow_service.policies.diff_exclusion_policy import DiffExclusionPolicy
 from duo_workflow_service.tools.duo_base_tool import DuoBaseTool
 from duo_workflow_service.tools.gitlab_resource_input import ProjectResourceInput
 
@@ -122,7 +123,9 @@ class CreateMergeRequest(DuoBaseTool):
         except Exception as e:
             return json.dumps({"error": str(e)})
 
-    def format_display_message(self, args: CreateMergeRequestInput) -> str:
+    def format_display_message(
+        self, args: CreateMergeRequestInput, _tool_response: Any = None
+    ) -> str:
         if args.url:
             return f"Create merge request from '{args.source_branch}' to '{args.target_branch}' in {args.url}"
         return (
@@ -169,7 +172,9 @@ class GetMergeRequest(DuoBaseTool):
         except Exception as e:
             return json.dumps({"error": str(e)})
 
-    def format_display_message(self, args: MergeRequestResourceInput) -> str:
+    def format_display_message(
+        self, args: MergeRequestResourceInput, _tool_response: Any = None
+    ) -> str:
         if args.url:
             return f"Read merge request {args.url}"
         return (
@@ -211,14 +216,39 @@ class ListMergeRequestDiffs(DuoBaseTool):
                 f"{validation_result.merge_request_iid}/diffs",
                 parse_json=False,
             )
-            return json.dumps({"diffs": response})
+
+            # Parse the response and apply diff exclusion policy
+            diff_data = json.loads(response)
+            diff_policy = DiffExclusionPolicy(self.project)
+            filtered_diff, excluded_files = diff_policy.filter_allowed_diffs(diff_data)
+
+            result: dict[str, Any] = {"diffs": filtered_diff}
+
+            if len(excluded_files) > 0:
+                result["excluded_files"] = excluded_files
+                result["excluded_reason"] = (
+                    DiffExclusionPolicy.format_llm_exclusion_message(excluded_files)
+                )
+
+            return json.dumps(result)
         except Exception as e:
             return json.dumps({"error": str(e)})
 
-    def format_display_message(self, args: MergeRequestResourceInput) -> str:
+    def format_display_message(
+        self, args: MergeRequestResourceInput, tool_response: Any = None
+    ) -> str:
         if args.url:
-            return f"View changes in merge request {args.url}"
-        return f"View changes in merge request !{args.merge_request_iid} in project {args.project_id}"
+            msg = f"View changes in merge request {args.url}"
+        else:
+            msg = f"View changes in merge request !{args.merge_request_iid} in project {args.project_id}"
+
+        if tool_response:
+            excluded_files = json.loads(tool_response.content).get("excluded_files")
+            return msg + DiffExclusionPolicy.format_user_exclusion_message(
+                excluded_files
+            )
+
+        return msg
 
 
 # The merge_request_diff_head_sha parameter is required for the /merge quick action.
@@ -289,7 +319,9 @@ They are commands that are on their own line and start with a backslash. Example
         except Exception as e:
             return json.dumps({"error": str(e)})
 
-    def format_display_message(self, args: CreateMergeRequestNoteInput) -> str:
+    def format_display_message(
+        self, args: CreateMergeRequestNoteInput, _tool_response: Any = None
+    ) -> str:
         if args.url:
             return f"Add comment to merge request {args.url}"
         return f"Add comment to merge request !{args.merge_request_iid} in project {args.project_id}"
@@ -333,7 +365,9 @@ class ListAllMergeRequestNotes(DuoBaseTool):
         except Exception as e:
             return json.dumps({"error": str(e)})
 
-    def format_display_message(self, args: MergeRequestResourceInput) -> str:
+    def format_display_message(
+        self, args: MergeRequestResourceInput, _tool_response: Any = None
+    ) -> str:
         if args.url:
             return f"Read comments on merge request {args.url}"
         return f"Read comments on merge request !{args.merge_request_iid} in project {args.project_id}"
@@ -429,7 +463,9 @@ For example:
         except Exception as e:
             return json.dumps({"error": str(e)})
 
-    def format_display_message(self, args: UpdateMergeRequestInput) -> str:
+    def format_display_message(
+        self, args: UpdateMergeRequestInput, _tool_response: Any = None
+    ) -> str:
         if args.url:
             return f"Update merge request {args.url}"
         return f"Update merge request !{args.merge_request_iid} in project {args.project_id}"

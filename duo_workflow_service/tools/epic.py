@@ -221,7 +221,9 @@ class CreateEpic(EpicBaseTool):
         except Exception as e:
             return json.dumps({"error": str(e)})
 
-    def format_display_message(self, args: WriteEpicInput) -> str:
+    def format_display_message(
+        self, args: WriteEpicInput, _tool_response: Any = None
+    ) -> str:
         target = args.url if args.url else f"group {args.group_id}"
         return f"Create epic '{args.title}' in {target}"
 
@@ -347,7 +349,9 @@ class ListEpics(EpicBaseTool):
         except Exception as e:
             return json.dumps({"error": str(e)})
 
-    def format_display_message(self, args: ListEpicsInput) -> str:
+    def format_display_message(
+        self, args: ListEpicsInput, _tool_response: Any = None
+    ) -> str:
         target = args.url if args.url else f"group {args.group_id}"
         return f"List epics in {target}"
 
@@ -389,7 +393,9 @@ class GetEpic(EpicBaseTool):
         except Exception as e:
             return json.dumps({"error": str(e)})
 
-    def format_display_message(self, args: EpicResourceInput) -> str:
+    def format_display_message(
+        self, args: EpicResourceInput, _tool_response: Any = None
+    ) -> str:
         if args.url:
             return f"Read epic {args.url}"
         return f"Read epic #{args.epic_iid} in group {args.group_id}"
@@ -443,7 +449,9 @@ For example:
         except Exception as e:
             return json.dumps({"error": str(e)})
 
-    def format_display_message(self, args: UpdateEpicInput) -> str:
+    def format_display_message(
+        self, args: UpdateEpicInput, _tool_response: Any = None
+    ) -> str:
         if args.url:
             return f"Update epic {args.url}"
         return f"Update epic #{args.epic_iid}"
@@ -517,7 +525,9 @@ class ListEpicNotes(EpicBaseTool):
         except Exception as e:
             return json.dumps({"error": str(e)})
 
-    def format_display_message(self, args: ListEpicNotesInput) -> str:
+    def format_display_message(
+        self, args: ListEpicNotesInput, _tool_response: Any = None
+    ) -> str:
         if args.url:
             return f"Read comments on epic {args.url}"
         return f"Read comments on epic #{args.epic_iid} in group {args.group_id}"

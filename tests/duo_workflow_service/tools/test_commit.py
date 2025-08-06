@@ -1,8 +1,9 @@
 import json
-from unittest.mock import AsyncMock, Mock
+from unittest.mock import AsyncMock, Mock, patch
 
 import pytest
 
+from duo_workflow_service.gitlab.gitlab_api import Project
 from duo_workflow_service.tools.commit import (
     CommitResourceInput,
     CreateCommit,
@@ -22,11 +23,26 @@ def gitlab_client_mock_fixture():
     return mock
 
 
+@pytest.fixture(name="project_mock")
+def project_mock_fixture():
+    """Fixture for mock project with exclusion rules."""
+    return Project(
+        id=24,
+        name="test-project",
+        description="Test project",
+        http_url_to_repo="http://example.com/repo.git",
+        web_url="http://example.com/repo",
+        languages=[],
+        exclusion_rules=["**/*.log", "/secrets/**", "**/node_modules/**"],
+    )
+
+
 @pytest.fixture(name="metadata")
-def metadata_fixture(gitlab_client_mock):
+def metadata_fixture(gitlab_client_mock, project_mock):
     return {
         "gitlab_client": gitlab_client_mock,
         "gitlab_host": "gitlab.com",
+        "project": project_mock,
     }
 
 
@@ -508,7 +524,7 @@ async def test_get_commit_diff(gitlab_client_mock, metadata):
             "deleted_file": False,
         }
     ]
-    gitlab_client_mock.aget = AsyncMock(return_value=diff_data)
+    gitlab_client_mock.aget = AsyncMock(return_value=json.dumps(diff_data))
 
     tool = GetCommitDiff(description="Read commit diff", metadata=metadata)
 
@@ -577,7 +593,7 @@ async def test_get_commit_diff_with_url_success(
             "deleted_file": False,
         }
     ]
-    gitlab_client_mock.aget = AsyncMock(return_value=diff_data)
+    gitlab_client_mock.aget = AsyncMock(return_value=json.dumps(diff_data))
 
     tool = GetCommitDiff(description="Read commit diff", metadata=metadata)
 
@@ -1133,3 +1149,131 @@ def test_create_commit_format_display_message(input_data, expected_message):
     tool = CreateCommit(description="Create commit")
     message = tool.format_display_message(input_data)
     assert message == expected_message
+
+
+# Tests for DiffExclusionPolicy integration
+@pytest.mark.asyncio
+@patch("duo_workflow_service.policies.file_exclusion_policy.is_feature_enabled")
+@patch("duo_workflow_service.policies.diff_exclusion_policy.is_feature_enabled")
+async def test_get_commit_diff_with_diff_exclusion_policy_enabled(
+    mock_diff_feature_flag, mock_file_feature_flag, gitlab_client_mock, metadata
+):
+    """Test GetCommitDiff applies DiffExclusionPolicy when feature flag is enabled."""
+    mock_diff_feature_flag.return_value = True
+    mock_file_feature_flag.return_value = True
+
+    # Mock diff data with both allowed and excluded files
+    diff_data = [
+        {
+            "old_path": "src/main.py",
+            "new_path": "src/main.py",
+            "diff": "@@ -1,3 +1,3 @@\n-old content\n+new content",
+        },
+        {
+            "old_path": "app.log",
+            "new_path": "app.log",
+            "diff": "@@ -1,3 +1,3 @@\n-old log\n+new log",
+        },
+        {
+            "old_path": "secrets/api_key.txt",
+            "new_path": "secrets/api_key.txt",
+            "diff": "@@ -1,3 +1,3 @@\n-old key\n+new key",
+        },
+        {
+            "old_path": "node_modules/react/index.js",
+            "new_path": "node_modules/react/index.js",
+            "diff": "@@ -1,3 +1,3 @@\n-old react\n+new react",
+        },
+    ]
+
+    gitlab_client_mock.aget = AsyncMock(return_value=json.dumps(diff_data))
+
+    tool = GetCommitDiff(description="Read commit diff", metadata=metadata)
+
+    response = await tool._arun(
+        project_id=24, commit_sha="c34bb66f7a5e3a45b5e2d70edd9be12d64855cd6"
+    )
+
+    response_data = json.loads(response)
+
+    # Only the allowed diff should remain (src/main.py)
+    assert "diff" in response_data
+    assert len(response_data["diff"]) == 1
+
+    # Verify the remaining diff is the allowed one
+    remaining_diff = response_data["diff"][0]
+    assert remaining_diff["old_path"] == "src/main.py"
+    assert remaining_diff["new_path"] == "src/main.py"
+
+    # Check for excluded_files and excluded_reason when there are excluded files
+    assert "excluded_files" in response_data
+    assert "excluded_reason" in response_data
+
+    # Verify excluded files list contains the expected files
+    expected_excluded_files = [
+        "app.log",
+        "secrets/api_key.txt",
+        "node_modules/react/index.js",
+    ]
+    assert set(response_data["excluded_files"]) == set(expected_excluded_files)
+
+    # Verify excluded_reason contains the expected message format
+    assert (
+        "Files excluded due to policy, continue without files:"
+        in response_data["excluded_reason"]
+    )
+    for excluded_file in expected_excluded_files:
+        assert excluded_file in response_data["excluded_reason"]
+
+    gitlab_client_mock.aget.assert_called_once_with(
+        path="/api/v4/projects/24/repository/commits/c34bb66f7a5e3a45b5e2d70edd9be12d64855cd6/diff",
+        parse_json=False,
+    )
+
+
+@pytest.mark.asyncio
+@patch("duo_workflow_service.policies.file_exclusion_policy.is_feature_enabled")
+@patch("duo_workflow_service.policies.diff_exclusion_policy.is_feature_enabled")
+async def test_get_commit_diff_with_no_excluded_files(
+    mock_diff_feature_flag, mock_file_feature_flag, gitlab_client_mock, metadata
+):
+    """Test GetCommitDiff does not include excluded_files/excluded_reason when no files are excluded."""
+    mock_diff_feature_flag.return_value = True
+    mock_file_feature_flag.return_value = True
+
+    # Mock diff data with only allowed files
+    diff_data = [
+        {
+            "old_path": "src/main.py",
+            "new_path": "src/main.py",
+            "diff": "@@ -1,3 +1,3 @@\n-old content\n+new content",
+        },
+        {
+            "old_path": "src/utils.py",
+            "new_path": "src/utils.py",
+            "diff": "@@ -1,3 +1,3 @@\n-old utils\n+new utils",
+        },
+    ]
+
+    gitlab_client_mock.aget = AsyncMock(return_value=json.dumps(diff_data))
+
+    tool = GetCommitDiff(description="Read commit diff", metadata=metadata)
+
+    response = await tool._arun(
+        project_id=24, commit_sha="c34bb66f7a5e3a45b5e2d70edd9be12d64855cd6"
+    )
+
+    response_data = json.loads(response)
+
+    # All diffs should remain
+    assert "diff" in response_data
+    assert len(response_data["diff"]) == 2
+
+    # Should not include excluded_files or excluded_reason when no files are excluded
+    assert "excluded_files" not in response_data
+    assert "excluded_reason" not in response_data
+
+    gitlab_client_mock.aget.assert_called_once_with(
+        path="/api/v4/projects/24/repository/commits/c34bb66f7a5e3a45b5e2d70edd9be12d64855cd6/diff",
+        parse_json=False,
+    )

@@ -26,7 +26,7 @@ class McpTool(BaseTool):
             ),
         )
 
-    def format_display_message(self, arguments) -> str:
+    def format_display_message(self, arguments, _tool_response: Any = None) -> str:
         return f"Run MCP tool {self.name}: {arguments}"
 
 
