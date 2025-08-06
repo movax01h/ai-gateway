@@ -5,6 +5,7 @@ from typing import Any, Optional, cast
 from langchain_core.messages import AIMessage
 from langgraph.graph import StateGraph
 
+from ai_gateway.model_metadata import current_model_metadata_context
 from duo_workflow_service.agents import (
     Agent,
     AgentV2,
@@ -82,6 +83,7 @@ class ExecutorComponent(BaseComponent):
                     tools=self.executor_toolset.bindable,  # type: ignore[arg-type]
                     workflow_id=self.workflow_id,
                     http_client=self.http_client,
+                    model_metadata=current_model_metadata_context.get(),
                 ),
             )
             agent_v2.prompt_template_inputs.setdefault(
