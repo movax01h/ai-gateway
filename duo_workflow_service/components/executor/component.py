@@ -13,18 +13,20 @@ from duo_workflow_service.agents import (
     ToolsExecutor,
 )
 from duo_workflow_service.components import ToolsApprovalComponent, ToolsRegistry
+from duo_workflow_service.components.base import BaseComponent
 from duo_workflow_service.components.executor.prompts import (
+    DEPRECATED_OS_INFORMATION_COMPONENT,
     EXECUTOR_SYSTEM_MESSAGE,
     GET_PLAN_TOOL_NAME,
     HANDOVER_TOOL_NAME,
     OS_INFORMATION_COMPONENT,
     SET_TASK_STATUS_TOOL_NAME,
 )
-from duo_workflow_service.components.planner.base import BaseComponent
 from duo_workflow_service.entities import WorkflowState, WorkflowStatusEnum
 from duo_workflow_service.gitlab.gitlab_api import Project
 from duo_workflow_service.llm_factory import create_chat_model
 from duo_workflow_service.workflows.abstract_workflow import MAX_TOKENS_TO_SAMPLE
+from duo_workflow_service.workflows.type_definitions import OsInformationContext
 from lib.feature_flags.context import FeatureFlag, is_feature_enabled
 
 
@@ -76,12 +78,15 @@ class ExecutorComponent(BaseComponent):
                 self.prompt_registry.get_on_behalf(
                     self.user,
                     "workflow/executor",
-                    "^1.0.0",
+                    "^2.0.0",
                     tools=self.executor_toolset.bindable,  # type: ignore[arg-type]
                     workflow_id=self.workflow_id,
                     http_client=self.http_client,
                 ),
             )
+            agent_v2.prompt_template_inputs.setdefault(
+                "agent_user_environment", {}
+            ).update(self.agent_user_environment)
             graph.add_node("execution", agent_v2.run)
         else:
             base_model_executor = create_chat_model(
@@ -145,15 +150,25 @@ class ExecutorComponent(BaseComponent):
 
     def _format_system_prompt(self) -> str:
         os_information = ""
-        for additional_context in self.additional_context or []:
-            # We only want to add os_information if it's not empty
-            if (
-                additional_context.category == "os_information"
-                and additional_context.content
+        for context_type, context in self.agent_user_environment.items():
+            if context_type == "os_information_context" and isinstance(
+                context, OsInformationContext
             ):
                 os_information = OS_INFORMATION_COMPONENT.format(
-                    os_information=additional_context.content
+                    platform=context.platform,
+                    architecture=context.architecture,
                 )
+        # Temporary support for deprecated os_information message
+        if not os_information:
+            for additional_context in self.additional_context or []:
+                # We only want to add os_information if it's not empty
+                if (
+                    additional_context.category == "os_information"
+                    and additional_context.content
+                ):
+                    os_information = DEPRECATED_OS_INFORMATION_COMPONENT.format(
+                        os_information=additional_context.content
+                    )
 
         return EXECUTOR_SYSTEM_MESSAGE.format(
             set_task_status_tool_name=SET_TASK_STATUS_TOOL_NAME,

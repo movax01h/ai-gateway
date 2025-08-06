@@ -2,7 +2,7 @@ from typing import Optional
 
 from pydantic import BaseModel
 
-__all__ = ["AdditionalContext"]
+__all__ = ["AdditionalContext", "OsInformationContext"]
 
 
 # Note: additionaL_context is an alias for injected_context
@@ -14,3 +14,8 @@ class AdditionalContext(BaseModel):
     id: Optional[str] = None
     content: Optional[str] = None
     metadata: Optional[dict] = None
+
+
+class OsInformationContext(BaseModel):
+    platform: str
+    architecture: str

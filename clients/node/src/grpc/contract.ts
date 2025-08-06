@@ -187,6 +187,11 @@ export interface Mkdir {
   directoryPath: string;
 }
 
+export interface OsInformationContext {
+  platform: string;
+  architecture: string;
+}
+
 function createBaseClientEvent(): ClientEvent {
   return { startRequest: undefined, actionResponse: undefined, heartbeat: undefined };
 }
@@ -2774,6 +2779,82 @@ export const Mkdir: MessageFns<Mkdir> = {
   fromPartial<I extends Exact<DeepPartial<Mkdir>, I>>(object: I): Mkdir {
     const message = createBaseMkdir();
     message.directoryPath = object.directoryPath ?? "";
+    return message;
+  },
+};
+
+function createBaseOsInformationContext(): OsInformationContext {
+  return { platform: "", architecture: "" };
+}
+
+export const OsInformationContext: MessageFns<OsInformationContext> = {
+  encode(message: OsInformationContext, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
+    if (message.platform !== "") {
+      writer.uint32(10).string(message.platform);
+    }
+    if (message.architecture !== "") {
+      writer.uint32(18).string(message.architecture);
+    }
+    return writer;
+  },
+
+  decode(input: BinaryReader | Uint8Array, length?: number): OsInformationContext {
+    const reader = input instanceof BinaryReader ? input : new BinaryReader(input);
+    const end = length === undefined ? reader.len : reader.pos + length;
+    const message = createBaseOsInformationContext();
+    while (reader.pos < end) {
+      const tag = reader.uint32();
+      switch (tag >>> 3) {
+        case 1: {
+          if (tag !== 10) {
+            break;
+          }
+
+          message.platform = reader.string();
+          continue;
+        }
+        case 2: {
+          if (tag !== 18) {
+            break;
+          }
+
+          message.architecture = reader.string();
+          continue;
+        }
+      }
+      if ((tag & 7) === 4 || tag === 0) {
+        break;
+      }
+      reader.skip(tag & 7);
+    }
+    return message;
+  },
+
+  fromJSON(object: any): OsInformationContext {
+    return {
+      platform: isSet(object.platform) ? globalThis.String(object.platform) : "",
+      architecture: isSet(object.architecture) ? globalThis.String(object.architecture) : "",
+    };
+  },
+
+  toJSON(message: OsInformationContext): unknown {
+    const obj: any = {};
+    if (message.platform !== "") {
+      obj.platform = message.platform;
+    }
+    if (message.architecture !== "") {
+      obj.architecture = message.architecture;
+    }
+    return obj;
+  },
+
+  create<I extends Exact<DeepPartial<OsInformationContext>, I>>(base?: I): OsInformationContext {
+    return OsInformationContext.fromPartial(base ?? ({} as any));
+  },
+  fromPartial<I extends Exact<DeepPartial<OsInformationContext>, I>>(object: I): OsInformationContext {
+    const message = createBaseOsInformationContext();
+    message.platform = object.platform ?? "";
+    message.architecture = object.architecture ?? "";
     return message;
   },
 };

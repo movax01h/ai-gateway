@@ -11,10 +11,10 @@ from duo_workflow_service.agents import (
     PlanSupervisorAgent,
     ToolsExecutor,
 )
+from duo_workflow_service.components.base import BaseComponent
 from duo_workflow_service.components.human_approval.plan_approval import (
     PlanApprovalComponent,
 )
-from duo_workflow_service.components.planner.base import BaseComponent
 from duo_workflow_service.components.planner.prompt import (
     HANDOVER_TOOL_NAME,
     PLANNER_GOAL,
