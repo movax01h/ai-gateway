@@ -1008,3 +1008,28 @@ class TestGitLabUrlParser:
     def test_parse_work_item_url_errors(self, url, gitlab_host, error_message):
         with pytest.raises(GitLabUrlParseError, match=error_message):
             GitLabUrlParser.parse_work_item_url(url, gitlab_host)
+
+    @pytest.mark.parametrize(
+        "url, expected_parent_type",
+        [
+            # Explicit group path
+            ("https://gitlab.com/groups/mygroup", "group"),
+            ("https://gitlab.com/groups/mygroup/-/work_items/1", "group"),
+            # Explicit project path
+            ("https://gitlab.com/projects/mygroup/myproject", "project"),
+            ("https://gitlab.com/projects/mygroup/myproject/-/work_items/1", "project"),
+            # Ambiguous: one segment, should default to group
+            ("https://gitlab.com/mygroup", "group"),
+            # Ambiguous: two or more segments, should default to project
+            ("https://gitlab.com/mygroup/myproject", "project"),
+            ("https://gitlab.com/parent/subgroup/myproject", "project"),
+            # Paths with trailing slashes
+            ("https://gitlab.com/groups/mygroup/", "group"),
+            ("https://gitlab.com/mygroup/myproject/", "project"),
+            # Mixed casing
+            ("https://gitlab.com/GROUPS/MyGroup", "group"),
+            ("https://gitlab.com/PROJECTS/MyGroup/MyProject", "project"),
+        ],
+    )
+    def test_detect_parent_type(self, url, expected_parent_type):
+        assert GitLabUrlParser.detect_parent_type(url) == expected_parent_type

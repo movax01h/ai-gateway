@@ -414,5 +414,19 @@ class GitLabUrlParser:
     @staticmethod
     def detect_parent_type(url: str) -> Literal["group", "project"]:
         """Detect whether a GitLab URL refers to a group or project based on path."""
-        path = urlparse(url).path.lower()
-        return "group" if "/groups/" in path else "project"
+        path = urlparse(url).path.strip("/").lower()
+
+        if path.startswith("groups/"):
+            return "group"
+
+        if path.startswith("projects/"):
+            return "project"
+
+        # fallback for ambiguous paths (e.g., /gitlab-org or /gitlab-org/project)
+        parts = path.split("/")
+        if len(parts) == 1:
+            return "group"
+        if len(parts) >= 2:
+            return "project"
+
+        return "project"  # default fallback
