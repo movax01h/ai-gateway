@@ -404,13 +404,13 @@ files = [
 
 [[package]]
 name = "cef"
-version = "0.4.1"
-description = "GitLab Central Evaluation Framework"
+version = "0.5.0"
+description = "GitLab Centralized Evaluation Framework"
 optional = false
-python-versions = ">=3.11.0,<3.13.0"
+python-versions = ">=3.12.0,<3.13.0"
 groups = ["eval"]
 files = [
-    {file = "cef-0.4.1-py3-none-any.whl", hash = "sha256:388d1c4b0f644c48d8bf35046fe436a89142bb4ec12f0e13c46741164595f612"},
+    {file = "cef-0.5.0-py3-none-any.whl", hash = "sha256:2a1553c96dd032688e18156fe7bd7b3ae0cec139cfe471f72cede5fa9255bc2e"},
 ]
 
 [package.dependencies]
@@ -420,7 +420,7 @@ boto3 = ">=1.35.80,<2.0.0"
 cerebras-cloud-sdk = ">=1.2.0,<2.0.0"
 fireworks-ai = ">=0.15.4,<0.16.0"
 genson = ">=1.3.0,<2.0.0"
-groq = ">=0.26.0,<0.27.0"
+groq = ">=0.30.0,<0.31.0"
 langchain = ">=0.3.0,<0.4.0"
 langchain-anthropic = ">=0.3.0,<0.4.0"
 langchain-community = ">=0.3.24,<0.4.0"
@@ -428,7 +428,7 @@ langchain-google-vertexai = ">=2.0.0,<3.0.0"
 langchain-openai = ">=0.3.0,<0.4.0"
 langchain-text-splitters = ">=0.3.0,<0.4.0"
 langchainhub = ">=0.1.20,<0.2.0"
-langgraph = ">=0.2.76,<0.5"
+langgraph = ">=0.3.21,<0.6"
 langsmith = ">=0.3.1,<0.4.0"
 litellm = ">=1.35.20,<2.0.0"
 numpy = ">=2.2.3,<3.0.0"
@@ -1767,14 +1767,14 @@ test = ["objgraph", "psutil"]
 
 [[package]]
 name = "groq"
-version = "0.26.0"
+version = "0.30.0"
 description = "The official Python library for the groq API"
 optional = false
 python-versions = ">=3.8"
 groups = ["eval"]
 files = [
-    {file = "groq-0.26.0-py3-none-any.whl", hash = "sha256:4dc0900d506876ea39a9aa1985f12a51859bacf486fe939664248eff1f451af3"},
-    {file = "groq-0.26.0.tar.gz", hash = "sha256:1f1e50d26c6134f6fb580ea7002e8f9ff5c7c1685c9e0f50d71adecd039ae5d4"},
+    {file = "groq-0.30.0-py3-none-any.whl", hash = "sha256:6d9609a7778ba56432f45c1bac21b005f02c6c0aca9c1c094e65536f162c1e83"},
+    {file = "groq-0.30.0.tar.gz", hash = "sha256:919466e48fcbebef08fed3f71debb0f96b0ea8d2ec77842c384aa843019f6e2c"},
 ]
 
 [package.dependencies]
@@ -1784,6 +1784,9 @@ httpx = ">=0.23.0,<1"
 pydantic = ">=1.9.0,<3"
 sniffio = "*"
 typing-extensions = ">=4.10,<5"
+
+[package.extras]
+aiohttp = ["aiohttp", "httpx-aiohttp (>=0.1.6)"]
 
 [[package]]
 name = "grpc-google-iam-v1"
@@ -6448,4 +6451,4 @@ cffi = ["cffi (>=1.11)"]
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.12.0,<3.13.0"
-content-hash = "20135f5825106c1dbff8943734d47152666b7cbb5e59436328820595df0ff98d"
+content-hash = "d02d0aab9a3d665522a61d97a415669b44a4c87b7d5f24ab8f647212db66b791"

@@ -87,7 +87,7 @@ priority = "supplemental"
 optional = true
 
 [tool.poetry.group.eval.dependencies]
-cef = { version = "^0.4.1", source = "cef" }
+cef = { version = "^0.5.0", source = "cef" }
 typer = "^0.16.0"
 
 [tool.poetry.group.test]
