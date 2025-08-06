@@ -241,8 +241,12 @@ class TestPlannerComponent:
         # Verify return value
         assert entry_node == "planning"
 
+    @patch(
+        "duo_workflow_service.components.planner.component.current_model_metadata_context"
+    )
     def test_attach_creates_agent_with_correct_parameters(
         self,
+        mock_model_metadata_context,
         mock_agent,
         mock_create_model,
         planner_component,
@@ -252,6 +256,9 @@ class TestPlannerComponent:
     ):
         """Test that Agent is created with correct parameters."""
         mock_graph = Mock(spec=StateGraph)
+
+        mock_model_metadata = MagicMock()
+        mock_model_metadata_context.get.return_value = mock_model_metadata
 
         planner_component.attach(mock_graph, "exit_node", "next_node", None)
 
@@ -264,6 +271,7 @@ class TestPlannerComponent:
                 tools=planner_component.planner_toolset.bindable,
                 workflow_id="test-workflow-123",
                 http_client=planner_component.http_client,
+                model_metadata=mock_model_metadata,
                 prompt_template_inputs={
                     "executor_agent_tools": f"{mock_tool.name}: {mock_tool.description}",
                     "create_plan_tool_name": "test_tool",
