@@ -113,7 +113,7 @@ EXECUTOR_TOOLS = [
 ]
 
 CONTEXT_BUILDER_TOOLS = [
-    "get_previous_workflow_context",
+    "get_previous_session_context",
     "list_issues",
     "get_issue",
     "list_issue_notes",
@@ -148,7 +148,7 @@ CONTEXT_BUILDER_TOOLS = [
 ]
 
 PLANNER_TOOLS = [
-    "get_previous_workflow_context",
+    "get_previous_session_context",
     "get_plan",
     "add_new_task",
     "remove_task",

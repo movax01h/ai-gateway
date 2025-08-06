@@ -74,7 +74,7 @@ _READ_ONLY_GITLAB_TOOLS: list[Type[BaseTool]] = [
     tools.ListCommits,
     tools.GetCommitDiff,
     tools.GetCommitComments,
-    tools.GetWorkflowContext,
+    tools.GetSessionContext,
     tools.ListVulnerabilities,
     tools.CiLinter,
     tools.GetWorkItem,

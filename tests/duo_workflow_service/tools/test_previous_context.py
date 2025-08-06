@@ -4,8 +4,8 @@ from unittest.mock import AsyncMock
 import pytest
 
 from duo_workflow_service.tools.previous_context import (
-    GetWorkflowContext,
-    GetWorkflowContextInput,
+    GetSessionContext,
+    GetSessionContextInput,
 )
 
 
@@ -17,17 +17,17 @@ def gitlab_client_fixture():
 
 @pytest.fixture(name="get_last_checkpoint_tool")
 def get_last_checkpoint_tool_fixture(gitlab_client):
-    return GetWorkflowContext(
+    return GetSessionContext(
         metadata={"gitlab_client": gitlab_client, "gitlab_host": "gitlab.example.com"}
     )
 
 
-class TestGetWorkflowContext:
+class TestGetSessionContext:
     def test_format_display_message(self, get_last_checkpoint_tool):
-        args = GetWorkflowContextInput(previous_workflow_id=123)
+        args = GetSessionContextInput(previous_session_id=123)
         result = get_last_checkpoint_tool.format_display_message(args)
 
-        assert result == "Get context for workflow 123"
+        assert result == "Get context for session 123"
 
     @pytest.mark.asyncio
     async def test_arun_success(self, get_last_checkpoint_tool, gitlab_client):
@@ -57,7 +57,7 @@ class TestGetWorkflowContext:
         }
         gitlab_client.aget.return_value = [mock_checkpoint]
 
-        result = await get_last_checkpoint_tool._arun(previous_workflow_id=123)
+        result = await get_last_checkpoint_tool._arun(previous_session_id=123)
 
         gitlab_client.aget.assert_called_once_with(
             path="/api/v4/ai/duo_workflows/workflows/123/checkpoints?per_page=1",
@@ -82,12 +82,12 @@ class TestGetWorkflowContext:
     async def test_arun_empty_response(self, get_last_checkpoint_tool, gitlab_client):
         gitlab_client.aget.return_value = []
 
-        result = await get_last_checkpoint_tool._arun(previous_workflow_id=123)
+        result = await get_last_checkpoint_tool._arun(previous_session_id=123)
 
         # Verify the error message
         parsed_result = json.loads(result)
         assert "error" in parsed_result
-        assert parsed_result["error"] == "Unable to find checkpoint for this workflow"
+        assert parsed_result["error"] == "Unable to find checkpoint for this session"
 
     @pytest.mark.asyncio
     async def test_arun_api_error(self, get_last_checkpoint_tool, gitlab_client):
@@ -96,7 +96,7 @@ class TestGetWorkflowContext:
             "status": 404,
         }
 
-        result = await get_last_checkpoint_tool._arun(previous_workflow_id=123)
+        result = await get_last_checkpoint_tool._arun(previous_session_id=123)
 
         # Verify the error message
         parsed_result = json.loads(result)
@@ -173,7 +173,7 @@ class TestGetWorkflowContext:
 
         with pytest.raises(
             ValueError,
-            match="Unable to parse context from last checkpoint for this workflow",
+            match="Unable to parse context from last checkpoint for this session",
         ):
             get_last_checkpoint_tool._format_checkpoint_context(bad_checkpoint)
 

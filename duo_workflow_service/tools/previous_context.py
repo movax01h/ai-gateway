@@ -7,32 +7,32 @@ from duo_workflow_service.entities.state import Context, WorkflowContext
 from duo_workflow_service.tools.duo_base_tool import DuoBaseTool
 
 
-class GetWorkflowContextInput(BaseModel):
-    previous_workflow_id: int = Field(
-        description="The ID of a previously-run workflow to get context for"
+class GetSessionContextInput(BaseModel):
+    previous_session_id: int = Field(
+        description="The ID of a previously-run session to get context for"
     )
 
 
-class GetWorkflowContext(DuoBaseTool):
-    name: str = "get_previous_workflow_context"
-    description: str = """Get context from a previously run workflow.
+class GetSessionContext(DuoBaseTool):
+    name: str = "get_previous_session_context"
+    description: str = """Get context from a previously run session.
 
-    This tool retrieves context from a previously run specified workflow.
-    Only use it when prompted by the user to reference a previously executed workflow.
-    Do not provide context for any other workflow unless explicitly asked.
+    This tool retrieves context from a previously run specified session.
+    Only use it when prompted by the user to reference a previously executed session.
+    Do not provide context for any other session unless explicitly asked.
 
     Args:
-        previous_workflow_id: The ID of a previously-run workflow to get context for
+        previous_session_id: The ID of a previously-run session to get context for
 
     Returns:
-        A JSON string containing context data from a previous workflow or an error message if the context could not be retrieved.
+        A JSON string containing context data from a previous session or an error message if the context could not be retrieved.
     """
-    args_schema: Type[BaseModel] = GetWorkflowContextInput  # type: ignore
+    args_schema: Type[BaseModel] = GetSessionContextInput  # type: ignore
 
-    async def _arun(self, previous_workflow_id: int, **_kwargs: Any) -> str:
+    async def _arun(self, previous_session_id: int, **_kwargs: Any) -> str:
         try:
             response = await self.gitlab_client.aget(
-                path=f"/api/v4/ai/duo_workflows/workflows/{previous_workflow_id}/checkpoints?per_page=1",
+                path=f"/api/v4/ai/duo_workflows/workflows/{previous_session_id}/checkpoints?per_page=1",
                 parse_json=True,
             )
 
@@ -45,21 +45,21 @@ class GetWorkflowContext(DuoBaseTool):
 
             if not response or len(response) == 0:
                 return json.dumps(
-                    {"error": "Unable to find checkpoint for this workflow"}
+                    {"error": "Unable to find checkpoint for this session"}
                 )
 
             return json.dumps({"context": self._format_checkpoint_context(response[0])})
         except Exception as e:
             return json.dumps({"error": str(e)})
 
-    def format_display_message(self, args: GetWorkflowContextInput) -> Optional[str]:
-        return f"Get context for workflow {args.previous_workflow_id}"
+    def format_display_message(self, args: GetSessionContextInput) -> Optional[str]:
+        return f"Get context for session {args.previous_session_id}"
 
     def _format_checkpoint_context(self, checkpoint: dict) -> str:
         workflow_id = checkpoint.get("metadata", {}).get("thread_id", None)
 
         if not workflow_id:
-            raise ValueError("Invalid checkpoint format. Valid workflow ID is required")
+            raise ValueError("Invalid checkpoint format. Valid session ID is required")
 
         if not checkpoint.get("checkpoint") or not checkpoint.get("checkpoint", {}).get(
             "channel_values"
@@ -84,7 +84,7 @@ class GetWorkflowContext(DuoBaseTool):
         handover_messages = channel_values.get("handover", [])
         if not isinstance(handover_messages, list):
             raise ValueError(
-                "Unable to parse context from last checkpoint for this workflow"
+                "Unable to parse context from last checkpoint for this session"
             )
 
         if (
