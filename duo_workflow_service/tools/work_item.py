@@ -406,7 +406,9 @@ class ListWorkItems(WorkItemBaseTool):
         except Exception as e:
             return json.dumps({"error": str(e)})
 
-    def format_display_message(self, args: ListWorkItemsInput) -> str:
+    def format_display_message(
+        self, args: ListWorkItemsInput, _tool_response: Any = None
+    ) -> str:
         if args.url:
             return f"List work items in {args.url}"
         if args.group_id:
@@ -479,7 +481,9 @@ class GetWorkItem(WorkItemBaseTool):
         except Exception as e:
             return json.dumps({"error": str(e)})
 
-    def format_display_message(self, args: WorkItemResourceInput) -> str:
+    def format_display_message(
+        self, args: WorkItemResourceInput, _tool_response: Any = None
+    ) -> str:
         if args.url:
             return f"Read work item {args.url}"
         if args.group_id:
@@ -559,7 +563,9 @@ class GetWorkItemNotes(WorkItemBaseTool):
         except Exception as e:
             return json.dumps({"error": str(e)})
 
-    def format_display_message(self, args: GetWorkItemNotesInput) -> str:
+    def format_display_message(
+        self, args: GetWorkItemNotesInput, _tool_response: Any = None
+    ) -> str:
         if args.url:
             return f"Read comments on work item {args.url}"
         if args.group_id:
@@ -658,7 +664,9 @@ class CreateWorkItem(WorkItemBaseTool):
         except Exception as e:
             return json.dumps({"error": str(e)})
 
-    def format_display_message(self, args: CreateWorkItemInput) -> str:
+    def format_display_message(
+        self, args: CreateWorkItemInput, _tool_response: Any = None
+    ) -> str:
         if args.url:
             return f"Create work item '{args.title}' in {args.url}"
         if args.group_id:

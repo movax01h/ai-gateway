@@ -54,7 +54,9 @@ class CiLinter(DuoBaseTool):
         except Exception as e:
             return json.dumps({"error": str(e)})
 
-    def format_display_message(self, args: CiLinterInput) -> str:
+    def format_display_message(
+        self, args: CiLinterInput, _tool_response: Any = None
+    ) -> str:
         message = f"Validate CI/CD YAML configuration in context of project: {args.project_id}"
         if args.ref:
             message += f" (ref: {args.ref})"

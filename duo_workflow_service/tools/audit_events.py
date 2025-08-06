@@ -205,7 +205,9 @@ class ListInstanceAuditEvents(BaseAuditEventsTool):
             api_path="/api/v4/audit_events", **kwargs
         )
 
-    def format_display_message(self, args: ListInstanceAuditEventsInput) -> str:
+    def format_display_message(
+        self, args: ListInstanceAuditEventsInput, _tool_response: Any = None
+    ) -> str:
         if args.entity_type and args.entity_id:
             return f"List instance audit events for {args.entity_type} {args.entity_id}"
         return "List instance audit events"
@@ -252,7 +254,9 @@ class ListGroupAuditEvents(BaseAuditEventsTool):
             api_path=f"/api/v4/groups/{group_identifier}/audit_events", **kwargs
         )
 
-    def format_display_message(self, args: ListGroupAuditEventsInput) -> str:
+    def format_display_message(
+        self, args: ListGroupAuditEventsInput, _tool_response: Any = None
+    ) -> str:
         if args.group_path:
             return f"List audit events for group {args.group_path}"
         return f"List audit events for group {args.group_id}"
@@ -299,7 +303,9 @@ class ListProjectAuditEvents(BaseAuditEventsTool):
             api_path=f"/api/v4/projects/{project_id}/audit_events", **kwargs
         )
 
-    def format_display_message(self, args: ListProjectAuditEventsInput) -> str:
+    def format_display_message(
+        self, args: ListProjectAuditEventsInput, _tool_response: Any = None
+    ) -> str:
         if args.url:
             return f"List audit events for {args.url}"
         return f"List audit events for project {args.project_id}"

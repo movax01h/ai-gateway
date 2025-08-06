@@ -1,4 +1,4 @@
-from typing import Optional, Type
+from typing import Any, Optional, Type
 
 from pydantic import BaseModel, Field
 
@@ -32,5 +32,7 @@ class Command(DuoBaseTool):
             ),
         )
 
-    def format_display_message(self, git_command_args: GitCommandInput) -> str:
+    def format_display_message(
+        self, git_command_args: GitCommandInput, _tool_response: Any = None
+    ) -> str:
         return f"Run git command: git {git_command_args.command} {git_command_args.args} in repository"

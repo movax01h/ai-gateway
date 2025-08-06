@@ -1,4 +1,4 @@
-from typing import Type
+from typing import Any, Type
 
 from pydantic import BaseModel, Field
 
@@ -19,5 +19,7 @@ class GetProject(DuoBaseTool):
             path=f"/api/v4/projects/{project_id}", parse_json=False
         )
 
-    def format_display_message(self, args: GetProjectInput) -> str:
+    def format_display_message(
+        self, args: GetProjectInput, _tool_response: Any = None
+    ) -> str:
         return f"Get project information for project {args.project_id}"

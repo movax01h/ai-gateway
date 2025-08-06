@@ -971,7 +971,9 @@ class MockGetIssue(BaseTool):
     def _run(self) -> str:
         return ""
 
-    def format_display_message(self, args: MockGetIssueInput) -> str:
+    def format_display_message(
+        self, args: MockGetIssueInput, _tool_response: Any = None
+    ) -> str:
         return f"Read issue #{args.issue_id} in project {args.project_id}"
 
 

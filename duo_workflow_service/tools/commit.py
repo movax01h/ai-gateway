@@ -5,6 +5,7 @@ from gitlab_cloud_connector import GitLabUnitPrimitive
 from pydantic import BaseModel, Field
 
 from duo_workflow_service.gitlab.url_parser import GitLabUrlParseError, GitLabUrlParser
+from duo_workflow_service.policies.diff_exclusion_policy import DiffExclusionPolicy
 from duo_workflow_service.tools.duo_base_tool import DuoBaseTool
 from duo_workflow_service.tools.gitlab_resource_input import ProjectResourceInput
 
@@ -183,7 +184,9 @@ class ListCommits(CommitBaseTool):
         except Exception as e:
             return json.dumps({"error": str(e)})
 
-    def format_display_message(self, args: ListCommitsInput) -> str:
+    def format_display_message(
+        self, args: ListCommitsInput, _tool_response: Any = None
+    ) -> str:
         if args.url:
             return f"List commits in {args.url}"
         return f"List commits in project {args.project_id}"
@@ -236,7 +239,9 @@ For example:
         except Exception as e:
             return json.dumps({"error": str(e)})
 
-    def format_display_message(self, args: GetCommitInput) -> str:
+    def format_display_message(
+        self, args: GetCommitInput, _tool_response: Any = None
+    ) -> str:
         if args.url:
             return f"Read commit {args.url}"
         return f"Read commit {args.commit_sha} in project {args.project_id}"
@@ -273,14 +278,38 @@ class GetCommitDiff(CommitBaseTool):
                 path=f"/api/v4/projects/{project_id}/repository/commits/{commit_sha}/diff",
                 parse_json=False,
             )
-            return json.dumps({"diff": response})
+
+            # Parse the response and apply diff exclusion policy
+            diff_data = json.loads(response)
+            diff_policy = DiffExclusionPolicy(self.project)
+            filtered_diff, excluded_files = diff_policy.filter_allowed_diffs(diff_data)
+
+            result: dict[str, Any] = {"diff": filtered_diff}
+
+            if len(excluded_files) > 0:
+                result["excluded_files"] = excluded_files
+                result["excluded_reason"] = (
+                    DiffExclusionPolicy.format_llm_exclusion_message(excluded_files)
+                )
+
+            return json.dumps(result)
+
         except Exception as e:
             return json.dumps({"error": str(e)})
 
-    def format_display_message(self, args: CommitResourceInput) -> str:
+    def format_display_message(
+        self, args: CommitResourceInput, tool_response: Any = None
+    ) -> str:
+        excluded_files_msg = ""
+        if tool_response:
+            excluded_files = json.loads(tool_response.content).get("excluded_files")
+            excluded_files_msg = DiffExclusionPolicy.format_user_exclusion_message(
+                excluded_files
+            )
+
         if args.url:
-            return f"Get diff for commit {args.url}"
-        return f"Get diff for commit {args.commit_sha} in project {args.project_id}"
+            return f"Get diff for commit {args.url}{excluded_files_msg}"
+        return f"Get diff for commit {args.commit_sha} in project {args.project_id}{excluded_files_msg}"
 
 
 class GetCommitComments(CommitBaseTool):
@@ -318,7 +347,9 @@ class GetCommitComments(CommitBaseTool):
         except Exception as e:
             return json.dumps({"error": str(e)})
 
-    def format_display_message(self, args: CommitResourceInput) -> str:
+    def format_display_message(
+        self, args: CommitResourceInput, _tool_response: Any = None
+    ) -> str:
         if args.url:
             return f"Get comments for commit {args.url}"
         return f"Get comments for commit {args.commit_sha} in project {args.project_id}"
@@ -461,7 +492,9 @@ class CreateCommit(DuoBaseTool):
         except Exception as e:
             return json.dumps({"error": str(e)})
 
-    def format_display_message(self, args: CreateCommitInput) -> str:
+    def format_display_message(
+        self, args: CreateCommitInput, _tool_response: Any = None
+    ) -> str:
         """Format a user-friendly message describing the action being performed."""
         action_types = [action.action for action in args.actions]
         file_count = len(args.actions)

@@ -73,7 +73,9 @@ class GitLabSearchBase(DuoBaseTool, ABC):
         except Exception as e:
             return json.dumps({"error": str(e)})
 
-    def format_display_message(self, args: BaseSearchInput) -> str:
+    def format_display_message(
+        self, args: BaseSearchInput, _tool_response: Any = None
+    ) -> str:
         return self.format_gitlab_search(self.name, args)
 
     def format_gitlab_search(self, tool_name, args: BaseSearchInput) -> str:

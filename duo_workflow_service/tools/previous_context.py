@@ -52,7 +52,9 @@ class GetSessionContext(DuoBaseTool):
         except Exception as e:
             return json.dumps({"error": str(e)})
 
-    def format_display_message(self, args: GetSessionContextInput) -> Optional[str]:
+    def format_display_message(
+        self, args: GetSessionContextInput, _tool_response: Any = None
+    ) -> Optional[str]:
         return f"Get context for session {args.previous_session_id}"
 
     def _format_checkpoint_context(self, checkpoint: dict) -> str:

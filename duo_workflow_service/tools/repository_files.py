@@ -1,5 +1,5 @@
 import json
-from typing import List, Optional, Tuple, Type
+from typing import Any, List, Optional, Tuple, Type
 from urllib.parse import quote
 
 from pydantic import BaseModel, Field
@@ -144,7 +144,9 @@ class GetRepositoryFile(RepositoryFileBaseTool):
         except Exception as e:
             return json.dumps({"error": str(e)})
 
-    def format_display_message(self, args: RepositoryFileResourceInput) -> str:
+    def format_display_message(
+        self, args: RepositoryFileResourceInput, _tool_response: Any = None
+    ) -> str:
         # Check file exclusion policy for display message if project is available
         policy = FileExclusionPolicy(self.project)
         if args.file_path and not policy.is_allowed(args.file_path):
@@ -290,7 +292,9 @@ class ListRepositoryTree(DuoBaseTool):
         except Exception as e:
             return json.dumps({"error": str(e)})
 
-    def format_display_message(self, args: RepositoryTreeResourceInput) -> str:
+    def format_display_message(
+        self, args: RepositoryTreeResourceInput, _tool_response: Any = None
+    ) -> str:
         path_str = f" in path '{args.path}'" if args.path else ""
         ref_str = f" at ref '{args.ref}'" if args.ref else ""
         recursive_str = " recursively" if args.recursive else ""

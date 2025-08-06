@@ -1,4 +1,4 @@
-from typing import Optional, Type
+from typing import Any, Optional, Type
 
 from pydantic import BaseModel, Field
 
@@ -73,7 +73,9 @@ class Grep(DuoBaseTool):
 
         return result
 
-    def format_display_message(self, args: GrepInput) -> str:
+    def format_display_message(
+        self, args: GrepInput, _tool_response: Any = None
+    ) -> str:
         if not (search_dir := args.search_directory):
             search_dir = "directory"
         message = f"Search for '{args.pattern}' in files in '{search_dir}'"

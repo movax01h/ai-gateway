@@ -120,7 +120,9 @@ class ListVulnerabilities(DuoBaseTool):
         except Exception as e:
             return json.dumps({"error": str(e)})
 
-    def format_display_message(self, args: ListVulnerabilitiesInput) -> str:
+    def format_display_message(
+        self, args: ListVulnerabilitiesInput, _tool_response: Any = None
+    ) -> str:
         return f"List vulnerabilities in project {args.project_full_path}"
 
 
@@ -228,5 +230,7 @@ mutation($vulnerabilityId: VulnerabilityID!, $comment: String, $dismissalReason:
             {"vulnerability": response["data"]["vulnerabilityDismiss"]["vulnerability"]}
         )
 
-    def format_display_message(self, args: DismissVulnerabilityInput) -> str:
+    def format_display_message(
+        self, args: DismissVulnerabilityInput, _tool_response: Any = None
+    ) -> str:
         return f"Dismiss vulnerability {args.vulnerability_id}"

@@ -175,12 +175,14 @@ class ToolsExecutor:
         status: ToolStatus,
         ui_chat_logs: List[UiChatLog],
         error_message: Optional[str] = None,
+        tool_response: Optional[Any] = None,
     ):
         chat_log = self._create_tool_ui_chat_log(
             tool_name=tool_info["name"],
             tool_args=tool_info["args"],
             status=status,
             error_message=error_message,
+            tool_response=tool_response,
         )
         if chat_log:
             ui_chat_logs.append(chat_log)
@@ -210,6 +212,7 @@ class ToolsExecutor:
                 tool_info={"name": tool_name, "args": tool_args},
                 status=ToolStatus.SUCCESS,
                 ui_chat_logs=chat_logs,
+                tool_response=tool_response,
             )
 
             return {
@@ -361,8 +364,11 @@ class ToolsExecutor:
         tool_args: Dict[str, Any],
         status: ToolStatus = ToolStatus.SUCCESS,
         error_message: Optional[str] = None,
+        tool_response: Optional[Any] = None,
     ) -> Optional[UiChatLog]:
-        display_message = self.get_tool_display_message(tool_name, tool_args)
+        display_message = self.get_tool_display_message(
+            tool_name, tool_args, tool_response
+        )
 
         if not display_message:
             return None
@@ -387,7 +393,7 @@ class ToolsExecutor:
         )
 
     def get_tool_display_message(
-        self, tool_name: str, args: Dict[str, Any]
+        self, tool_name: str, args: Dict[str, Any], tool_response: Any = None
     ) -> Optional[str]:
         if tool_name in _HIDDEN_TOOLS:
             return None
@@ -397,7 +403,9 @@ class ToolsExecutor:
 
         if tool_name in self._toolset:
             tool = self._toolset[tool_name]
-            message = format_tool_display_message(tool, args) or message
+            message = (
+                format_tool_display_message(tool, args, tool_response or "") or message
+            )
 
         return message
 

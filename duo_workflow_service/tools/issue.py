@@ -149,7 +149,9 @@ For example:
         except Exception as e:
             return json.dumps({"error": str(e)})
 
-    def format_display_message(self, args: CreateIssueInput) -> str:
+    def format_display_message(
+        self, args: CreateIssueInput, _tool_response: Any = None
+    ) -> str:
         if args.url:
             return f"Create issue '{args.title}' in {args.url}"
         return f"Create issue '{args.title}' in project {args.project_id}"
@@ -271,7 +273,9 @@ class ListIssues(IssueBaseTool):
         except Exception as e:
             return json.dumps({"error": str(e)})
 
-    def format_display_message(self, args: ListIssuesInput) -> str:
+    def format_display_message(
+        self, args: ListIssuesInput, _tool_response: Any = None
+    ) -> str:
         if args.url:
             return f"List issues in {args.url}"
         return f"List issues in project {args.project_id}"
@@ -312,7 +316,9 @@ class GetIssue(IssueBaseTool):
         except Exception as e:
             return json.dumps({"error": str(e)})
 
-    def format_display_message(self, args: IssueResourceInput) -> str:
+    def format_display_message(
+        self, args: IssueResourceInput, _tool_response: Any = None
+    ) -> str:
         if args.url:
             return f"Read issue {args.url}"
         return f"Read issue #{args.issue_iid} in project {args.project_id}"
@@ -386,7 +392,9 @@ class UpdateIssue(IssueBaseTool):
         except Exception as e:
             return json.dumps({"error": str(e)})
 
-    def format_display_message(self, args: UpdateIssueInput) -> str:
+    def format_display_message(
+        self, args: UpdateIssueInput, _tool_response: Any = None
+    ) -> str:
         if args.url:
             return f"Update issue {args.url}"
         return f"Update issue #{args.issue_iid} in project {args.project_id}"
@@ -439,7 +447,9 @@ The body parameter is always required.
         except Exception as e:
             return json.dumps({"error": str(e)})
 
-    def format_display_message(self, args: CreateIssueNoteInput) -> str:
+    def format_display_message(
+        self, args: CreateIssueNoteInput, _tool_response: Any = None
+    ) -> str:
         if args.url:
             return f"Add comment to issue {args.url}"
         return f"Add comment to issue #{args.issue_iid} in project {args.project_id}"
@@ -499,7 +509,9 @@ class ListIssueNotes(IssueBaseTool):
         except Exception as e:
             return json.dumps({"error": str(e)})
 
-    def format_display_message(self, args: ListIssueNotesInput) -> str:
+    def format_display_message(
+        self, args: ListIssueNotesInput, _tool_response: Any = None
+    ) -> str:
         if args.url:
             return f"Read comments on issue {args.url}"
         return f"Read comments on issue #{args.issue_iid} in project {args.project_id}"
@@ -546,7 +558,9 @@ class GetIssueNote(IssueBaseTool):
         except Exception as e:
             return json.dumps({"error": str(e)})
 
-    def format_display_message(self, args: GetIssueNoteInput) -> str:
+    def format_display_message(
+        self, args: GetIssueNoteInput, _tool_response: Any = None
+    ) -> str:
         if args.url:
             return f"Read comment #{args.note_id} on issue {args.url}"
         return f"Read comment #{args.note_id} on issue #{args.issue_iid} in project {args.project_id}"

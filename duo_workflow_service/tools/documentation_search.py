@@ -2,7 +2,7 @@
 
 import json
 import os
-from typing import List, Type
+from typing import Any, List, Type
 
 from google.cloud import discoveryengine
 from pydantic import BaseModel, Field
@@ -77,5 +77,7 @@ class DocumentationSearch(DuoBaseTool):
         )
         return search_results
 
-    def format_display_message(self, args: SearchInput) -> str:
+    def format_display_message(
+        self, args: SearchInput, _tool_response: Any = None
+    ) -> str:
         return f"Searching GitLab documentation for: '{args.search}'"

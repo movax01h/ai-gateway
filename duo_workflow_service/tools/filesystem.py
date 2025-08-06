@@ -1,5 +1,5 @@
 from enum import IntEnum
-from typing import Type
+from typing import Any, Type
 
 import gitmatch
 from langchain.tools.base import ToolException
@@ -105,7 +105,9 @@ class ReadFile(DuoBaseTool):
             contract_pb2.Action(runReadFile=contract_pb2.ReadFile(filepath=file_path)),
         )
 
-    def format_display_message(self, args: ReadFileInput) -> str:
+    def format_display_message(
+        self, args: ReadFileInput, _tool_response: Any = None
+    ) -> str:
         msg = "Read file"
         if not FileExclusionPolicy.is_allowed_for_project(self.project, args.file_path):
             msg += FileExclusionPolicy.format_user_exclusion_message([args.file_path])
@@ -136,7 +138,9 @@ class ReadFiles(DuoBaseTool):
             ),
         )
 
-    def format_display_message(self, args: ReadFilesInput) -> str:
+    def format_display_message(
+        self, args: ReadFilesInput, _tool_response: Any = None
+    ) -> str:
         file_count = len(args.file_paths)
         return f"Read {file_count} file{'s' if file_count != 1 else ''}"
 
@@ -173,7 +177,9 @@ class WriteFile(DuoBaseTool):
             ),
         )
 
-    def format_display_message(self, args: WriteFileInput) -> str:
+    def format_display_message(
+        self, args: WriteFileInput, _tool_response: Any = None
+    ) -> str:
         msg = "Create file"
         if not FileExclusionPolicy.is_allowed_for_project(self.project, args.file_path):
             msg += FileExclusionPolicy.format_user_exclusion_message([args.file_path])
@@ -250,7 +256,9 @@ class FindFiles(DuoBaseTool):
             else _format_no_matches_message(name_pattern)
         )
 
-    def format_display_message(self, args: FindFilesInput) -> str:
+    def format_display_message(
+        self, args: FindFilesInput, _tool_response: Any = None
+    ) -> str:
         return f"Search files with pattern '{args.name_pattern}'"
 
 
@@ -283,7 +291,9 @@ class Mkdir(DuoBaseTool):
             ),
         )
 
-    def format_display_message(self, args: MkdirInput) -> str:
+    def format_display_message(
+        self, args: MkdirInput, _tool_response: Any = None
+    ) -> str:
         return f"Create directory '{args.directory_path}'"
 
 
@@ -390,7 +400,9 @@ Examples of batched file edits:
             ),
         )
 
-    def format_display_message(self, args: EditFileInput) -> str:
+    def format_display_message(
+        self, args: EditFileInput, _tool_response: Any = None
+    ) -> str:
         msg = "Edit file"
         if not FileExclusionPolicy.is_allowed_for_project(self.project, args.file_path):
             msg += FileExclusionPolicy.format_user_exclusion_message([args.file_path])

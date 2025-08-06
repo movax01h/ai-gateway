@@ -1,5 +1,5 @@
 import json
-from typing import Type
+from typing import Any, Type
 
 from pydantic import BaseModel
 
@@ -38,5 +38,7 @@ class GetCurrentUser(DuoBaseTool):
         except Exception as e:
             return json.dumps({"error": str(e)})
 
-    def format_display_message(self, args: GetCurrentUserInput) -> str:
+    def format_display_message(
+        self, args: GetCurrentUserInput, _tool_response: Any = None
+    ) -> str:
         return "Get current user information"

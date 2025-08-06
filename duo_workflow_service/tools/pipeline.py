@@ -102,7 +102,9 @@ class GetPipelineErrorsForMergeRequest(DuoBaseTool):
 
         return json.dumps({"merge_request": merge_request, "traces": traces})
 
-    def format_display_message(self, args: GetPipelineErrorsInput) -> str:
+    def format_display_message(
+        self, args: GetPipelineErrorsInput, _tool_response: Any = None
+    ) -> str:
         if args.url:
             return f"Get pipeline error logs for {args.url}"
         return f"Get pipeline error logs for merge request !{args.merge_request_iid} in project {args.project_id}"

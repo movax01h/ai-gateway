@@ -1,4 +1,4 @@
-from typing import Type
+from typing import Any, Type
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -33,6 +33,25 @@ class DummyToolWithArgs(DuoBaseTool):
 
     async def _arun(self, param1, param2, optional_param="default"):
         return f"{param1} {param2} {optional_param}"
+
+
+class DummyToolWithResponseHandling(DuoBaseTool):
+    name: str = "dummy_tool_with_response"
+    description: str = "A dummy tool that uses tool_response in display message"
+
+    class ArgsSchema(BaseModel):
+        action: str = Field(description="Action to perform")
+
+    args_schema: Type[BaseModel] = ArgsSchema  # type: ignore
+
+    def format_display_message(self, args: ArgsSchema, tool_response: str = "") -> str:
+        base_msg = f"Performing {args.action}"
+        if tool_response:
+            return f"{base_msg} - Result: {tool_response[:50]}..."
+        return base_msg
+
+    async def _arun(self, action):
+        return f"Completed {action}"
 
 
 def test_gitlab_client():
@@ -72,7 +91,7 @@ def test_format_display_message_inheritance():
     class CustomTool(DummyTool):
         name: str = "custom_tool"
 
-        def format_display_message(self, args):
+        def format_display_message(self, args, _tool_response: Any = None):
             return f"Overridden in child: {args}"
 
     tool = CustomTool(metadata={})
@@ -110,7 +129,7 @@ def test_format_tool_display_message_for_tool_without_args_schema():
     args = {"test": "value"}
 
     assert format_tool_display_message(mock_tool, args) == "Tool msg"
-    mock_tool.format_display_message.assert_called_once_with(args)
+    mock_tool.format_display_message.assert_called_once_with(args, None)
 
 
 class DummyArgsModel(BaseModel):
@@ -143,6 +162,25 @@ def test_format_tool_display_message_for_tool_with_pydantic_args_schema():
     assert passed_instance.test == "value"
 
 
+def test_format_tool_display_message_for_tool_with_pydantic_args_schema_and_tool_response():
+    mock_tool = MagicMock(spec=DuoBaseTool)
+    mock_tool.args_schema = DummyArgsModel
+    mock_tool.format_display_message.return_value = "Tool msg with response"
+    args = {"test": "value"}
+    tool_response = "Success: Data retrieved"
+
+    result = format_tool_display_message(mock_tool, args, tool_response)
+
+    assert result == "Tool msg with response"
+    mock_tool.format_display_message.assert_called_once()
+    call_args = mock_tool.format_display_message.call_args
+    passed_instance = call_args.args[0]
+    passed_tool_response = call_args.args[1]
+    assert isinstance(passed_instance, DummyArgsModel)
+    assert passed_instance.test == "value"
+    assert passed_tool_response == tool_response
+
+
 def test_format_tool_display_message_for_tool_with_args_schema_when_error():
     mock_tool = MagicMock(spec=DuoBaseTool)
     mock_tool.args_schema = ErrorArgsModel
@@ -157,6 +195,24 @@ def test_format_tool_display_message_for_tool_with_args_schema_when_error():
         result = format_tool_display_message(mock_tool, args)
         assert result == "Using MagicMock: test=value"
 
-        mock_parent_method.assert_called_once_with(mock_tool, args)
+        mock_parent_method.assert_called_once_with(mock_tool, args, None)
 
         mock_tool.format_display_message.assert_not_called()
+
+
+def test_format_tool_display_message_with_tool_that_uses_response():
+    """Test that tools can use tool_response parameter in their display messages."""
+    tool = DummyToolWithResponseHandling(metadata={})
+    args = {"action": "data_processing"}
+
+    # Test without tool_response
+    result = format_tool_display_message(tool, args)
+    assert result == "Performing data_processing"
+
+    # Test with tool_response
+    tool_response = "Successfully processed 100 records in 2.5 seconds"
+    result = format_tool_display_message(tool, args, tool_response)
+    assert (
+        result
+        == "Performing data_processing - Result: Successfully processed 100 records in 2.5 seconds..."
+    )
