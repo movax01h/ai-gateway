@@ -254,41 +254,37 @@ class FindFiles(DuoBaseTool):
         return f"Search files with pattern '{args.name_pattern}'"
 
 
-# class MkdirInput(BaseModel):
-#     directory_path: str = Field(
-#         description="The directory path to create. Must be within the current working directory tree."
-#     )
+class MkdirInput(BaseModel):
+    directory_path: str = Field(
+        description="The directory path to create. Must be within the current working directory tree."
+    )
 
-# class Mkdir(DuoBaseTool):
-#     name: str = "mkdir"
-#     description: str = """Create a new directory using the mkdir command.
-#     The directory creation is restricted to the current working directory tree."""
-#     args_schema: Type[BaseModel] = MkdirInput  # type: ignore
-#
-#     async def _arun(self, directory_path: str) -> str:
-#         # Check path security before proceeding
-#         validate_duo_context_exclusions(directory_path)
-#
-#         if ".." in directory_path:
-#             return "Creating directories above the current directory is not allowed"
-#
-#         if not directory_path.startswith("./") and directory_path != ".":
-#             directory_path = f"./{directory_path}"
-#
-#         run_command = RunCommand(
-#             name="run_command",
-#             description="Run a shell command",
-#             metadata=self.metadata,
-#         )
-#
-#         return await run_command._arun(
-#             "mkdir",
-#             arguments=[directory_path],
-#             flags=["-p"],  # -p flag creates parent directories as needed
-#         )
-#
-#     def format_display_message(self, args: MkdirInput) -> str:
-#         return f"Create directory '{args.directory_path}'"
+
+class Mkdir(DuoBaseTool):
+    name: str = "mkdir"
+    description: str = """Create a new directory using the mkdir command.
+    The directory creation is restricted to the current working directory tree."""
+
+    args_schema: Type[BaseModel] = MkdirInput  # type: ignore
+
+    async def _arun(self, directory_path: str) -> str:
+        if ".." in directory_path:
+            return "Creating directories above the current directory is not allowed"
+
+        if not directory_path.startswith("./") and directory_path != ".":
+            directory_path = f"./{directory_path}"
+
+        return await _execute_action(
+            self.metadata,  # type: ignore
+            contract_pb2.Action(
+                mkdir=contract_pb2.Mkdir(
+                    directory_path=directory_path,
+                )
+            ),
+        )
+
+    def format_display_message(self, args: MkdirInput) -> str:
+        return f"Create directory '{args.directory_path}'"
 
 
 class EditFileInput(BaseModel):
