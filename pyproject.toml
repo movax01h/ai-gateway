@@ -21,6 +21,7 @@ index_docs = "ai_gateway.scripts.index_docs_as_sqlite:build_indexed_docs"
 troubleshoot = "ai_gateway.scripts.troubleshoot_selfhosted_installation:troubleshoot"
 compute-tps = "ai_gateway.scripts.tps_test:compute_tps"
 duo-workflow-service = "duo_workflow_service.server:run"
+apply-security = "duo_workflow_service.security.prompt_security:run_from_args"
 
 [tool.poetry.dependencies]
 fastapi = "^0.115.2"
