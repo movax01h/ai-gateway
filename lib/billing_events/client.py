@@ -79,6 +79,7 @@ class BillingEventsClient:
             quantity=quantity,
             metadata=metadata,
             subject=internal_context.global_user_id,  # TODO : We need to pass non-masked userID from GitLab instance
+            global_user_id=internal_context.global_user_id,
             seat_ids=["TODO"],  # TODO : We need to pass seatIDs from GitLab instance
             realm=internal_context.realm,
             timestamp=datetime.now().isoformat(),

@@ -23,6 +23,7 @@ def test_billing_event_context_required_fields():
     assert context.project_id is None
     assert context.namespace_id is None
     assert context.subject is None
+    assert context.global_user_id is None
     assert context.root_namespace_id is None
     assert context.correlation_id is None
     assert context.seat_ids is None
@@ -43,6 +44,7 @@ def test_billing_event_context_all_fields():
         project_id=789,
         namespace_id=101,
         subject="user:123",
+        global_user_id="user-123",
         root_namespace_id=101,
         correlation_id="corr-123",
         seat_ids=["seat-1", "seat-2"],
@@ -60,6 +62,7 @@ def test_billing_event_context_all_fields():
     assert context.project_id == 789
     assert context.namespace_id == 101
     assert context.subject == "user:123"
+    assert context.global_user_id == "user-123"
     assert context.root_namespace_id == 101
     assert context.correlation_id == "corr-123"
     assert context.seat_ids == ["seat-1", "seat-2"]
