@@ -1,6 +1,17 @@
 # flake8: noqa: W605
 import re
+import sys
+from pathlib import Path
 from typing import Callable, Dict, List
+
+
+def run_from_args():
+
+    args = sys.argv[1:]
+    filename = args[0]
+    content = Path(filename).read_text()
+
+    return PromptSecurity.apply_security(content, "test-tool")
 
 
 class SecurityException(Exception):
