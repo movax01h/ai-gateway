@@ -183,6 +183,7 @@ _outbox = MagicMock(spec=asyncio.Queue)
                 "create_commit",
                 "dismiss_vulnerability",
                 "get_current_user",
+                "create_work_item",
             },
         ),
         (
@@ -335,6 +336,7 @@ def test_registry_initialization_initialises_tools_with_correct_attributes(
             metadata=tool_metadata
         ),
         "get_current_user": tools.GetCurrentUser(metadata=tool_metadata),
+        "create_work_item": tools.CreateWorkItem(metadata=tool_metadata),
     }
 
     assert registry._enabled_tools == expected_tools
