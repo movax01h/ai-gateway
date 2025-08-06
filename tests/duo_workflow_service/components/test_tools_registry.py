@@ -114,7 +114,7 @@ _outbox = MagicMock(spec=asyncio.Queue)
                 "get_repository_file",
                 "list_repository_tree",
                 "list_epic_notes",
-                "get_previous_workflow_context",
+                "get_previous_session_context",
                 "list_vulnerabilities",
                 "get_commit",
                 "list_commits",
@@ -171,7 +171,7 @@ _outbox = MagicMock(spec=asyncio.Queue)
                 "get_repository_file",
                 "list_repository_tree",
                 "list_epic_notes",
-                "get_previous_workflow_context",
+                "get_previous_session_context",
                 "list_vulnerabilities",
                 "get_commit",
                 "list_commits",
@@ -317,9 +317,7 @@ def test_registry_initialization_initialises_tools_with_correct_attributes(
         "get_repository_file": tools.GetRepositoryFile(metadata=tool_metadata),
         "list_repository_tree": tools.ListRepositoryTree(metadata=tool_metadata),
         "list_epic_notes": tools.ListEpicNotes(metadata=tool_metadata),
-        "get_previous_workflow_context": tools.GetWorkflowContext(
-            metadata=tool_metadata
-        ),
+        "get_previous_session_context": tools.GetSessionContext(metadata=tool_metadata),
         "list_vulnerabilities": tools.ListVulnerabilities(metadata=tool_metadata),
         "get_commit": tools.GetCommit(metadata=tool_metadata),
         "list_commits": tools.ListCommits(metadata=tool_metadata),
