@@ -202,6 +202,20 @@ AIGW_LOGGING__TO_FILE=../modelgateway_debug.log
 - To list virtualenvs, use `poetry env list`.
 - To remove virtualenv, use `poetry env remove [name of virtualenv]`.
 
+### Resolving Dependency Conflicts with Poetry
+
+```shell
+poetry install --sync
+```
+
+If you're experiencing unexpected package conflicts, import errors, or your development environment has accumulated extra packages
+over time, the `--sync` flag ensures your environment exactly matches the project's lock file. This command installs missing
+dependencies, removes any extraneous packages that aren't defined in poetry.lock, effectively resetting your environment to a clean
+state.
+
+This is particularly useful when switching between branches with different dependencies, after removing packages from
+`pyproject.toml`, or when your local environment has diverged from the project's intended state.
+
 ## Local development using GDK
 
 ### Prerequisites
