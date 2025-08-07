@@ -26,6 +26,7 @@ class BillingEventContext(BaseModel):
     project_id: Optional[int] = None
     namespace_id: Optional[int] = None
     subject: Optional[str] = None
+    global_user_id: Optional[str] = None
     root_namespace_id: Optional[int] = None
     correlation_id: Optional[str] = None
     seat_ids: Optional[List[str]] = None

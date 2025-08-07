@@ -20,6 +20,7 @@ BASE_BILLING_CONTEXT_SCHEMA: Dict[str, Any] = {
     "project_id": None,
     "namespace_id": None,
     "subject": None,
+    "global_user_id": None,
     "root_namespace_id": None,
     "correlation_id": None,
     "seat_ids": ["TODO"],
@@ -167,6 +168,7 @@ class TestBillingEventsClient:
             "project_id": kwargs.get("project_id"),
             "namespace_id": kwargs.get("namespace_id"),
             "subject": kwargs.get("global_user_id"),
+            "global_user_id": kwargs.get("global_user_id"),
             "correlation_id": "corr-123",
             "metadata": metadata or {},
         }
@@ -271,6 +273,7 @@ class TestBillingEventsClient:
         assert billing_data["realm"] == "project"
         assert billing_data["instance_id"] == "gitlab-instance-456"
         assert billing_data["subject"] == "user-456"
+        assert billing_data["global_user_id"] == "user-456"
         assert billing_data["correlation_id"] == "request-789"
         assert billing_data["metadata"] == {"workflow_type": "code_review"}
         assert billing_data["timestamp"] == "2023-12-01T10:00:00"
