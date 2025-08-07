@@ -1,5 +1,6 @@
 from typing import ClassVar, Self
 
+import structlog
 from anthropic import APIStatusError
 from langchain_core.messages import AIMessage, ToolMessage
 from pydantic import BaseModel, ConfigDict, Field
@@ -13,6 +14,7 @@ from duo_workflow_service.agent_platform.experimental.state import (
     get_vars_from_state,
 )
 from duo_workflow_service.errors.error_handler import ModelError, ModelErrorHandler
+from duo_workflow_service.llm_factory import AnthropicStopReason
 from duo_workflow_service.monitoring import duo_workflow_metrics
 from duo_workflow_service.token_counter.approximate_token_counter import (
     ApproximateTokenCounter,
@@ -21,6 +23,8 @@ from lib.internal_events import InternalEventAdditionalProperties, InternalEvent
 from lib.internal_events.event_enum import CategoryEnum, EventEnum, EventPropertyEnum
 
 __all__ = ["AgentNode", "AgentFinalOutput"]
+
+log = structlog.stdlib.get_logger("agent_node")
 
 
 class AgentFinalOutput(BaseModel):
@@ -91,16 +95,16 @@ class AgentNode:
                     completion: AIMessage = await self._prompt.ainvoke(
                         input={**variables, "history": history}
                     )
-
+                    stop_reason = completion.response_metadata.get("stop_reason")
+                    if stop_reason in AnthropicStopReason.abnormal_values():
+                        log.warning(
+                            f"LLM stopped abnormally with reason: {stop_reason}"
+                        )
                 self._track_tokens_data(completion, history)
                 duo_workflow_metrics.count_llm_response(
                     model=model_name,
                     request_type=request_type,
-                    stop_reason=(
-                        completion.response_metadata.get("stop_reason")
-                        if completion.response_metadata
-                        else None
-                    ),
+                    stop_reason=stop_reason,
                 )
 
                 if len(updates := self._final_answer_validate(completion)) > 0:
