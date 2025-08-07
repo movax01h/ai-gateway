@@ -36,6 +36,15 @@ models:
       max_tokens: 4_096
       max_retries: 1
 
+  - name: "Claude Opus 4.1 - Anthropic"
+    gitlab_identifier: "claude_opus_4_1_20250805"
+    provider: "anthropic"
+    provider_identifier: "claude-opus-4-1-20250805"
+    params:
+      temperature: 0.0
+      max_tokens: 4_096
+      max_retries: 1
+
   - name: "Claude Sonnet 4.0 - Anthropic"
     gitlab_identifier: "claude_sonnet_4_20250514"
     provider: "anthropic"
