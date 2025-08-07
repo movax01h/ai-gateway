@@ -526,7 +526,7 @@ prompt_template:
             )
 
             call_dict = mock_log.info.call_args[1]
-            assert call_dict["feature_enabled_by_namespace_ids"] == [123, 456]
+            assert call_dict["gitlab_feature_enabled_by_namespace_ids"] == [123, 456]
 
     @pytest.mark.usefixtures("mock_fs")
     def test_logging_with_missing_feature_enabled_by_namespace_ids(
@@ -548,7 +548,7 @@ prompt_template:
             )
 
             call_dict = mock_log.info.call_args[1]
-            assert call_dict["feature_enabled_by_namespace_ids"] is None
+            assert call_dict["gitlab_feature_enabled_by_namespace_ids"] is None
 
     @pytest.mark.usefixtures("mock_fs")
     @pytest.mark.parametrize(

@@ -171,7 +171,7 @@ class LocalPromptRegistry(BasePromptRegistry):
                 if isinstance(model_metadata, ModelMetadata)
                 else None
             ),
-            feature_enabled_by_namespace_ids=getattr(
+            gitlab_feature_enabled_by_namespace_ids=getattr(
                 current_event_context.get(), "feature_enabled_by_namespace_ids", None
             ),
         )
