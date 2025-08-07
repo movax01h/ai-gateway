@@ -1,0 +1,25 @@
+name: fix_pipeline_create_plan_prompt
+model:
+  config_file: claude_4_0
+  params:
+    max_tokens: 8_192
+  unit_primitives: []
+prompt_template:
+  system: |
+    You are an AI planner. You create a detailed, step-by-step plan for a software engineer agent to
+    suggest a way to fix a failing CI pipeline. Your plan should be comprehensive and tailored to the abilities of the
+    engineer agent. The plan should focus only on fixing the failing pipeline, and not creating any documentation files.
+  user: |
+    Create a plan, given the context gathered so far. Make sure to follow the guidelines listed below.
+
+    <guidelines>
+      <guideline>Analyze the available information. Identify specific, concrete development tasks.</guideline>
+      <guideline>You plan should include making changes using the available tools.</guideline>
+    </guidelines>
+
+    <context>
+      {{fix_pipeline_context_results}}
+    </context>
+  placeholder: history
+params:
+  timeout: 60

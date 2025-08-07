@@ -1,0 +1,46 @@
+version: "experimental"
+environment: remote
+components:
+  - name: "fix_pipeline_context"
+    type: AgentComponent
+    prompt_id: "fix_pipeline_context"
+    prompt_version: "^1.0.0"
+    inputs:
+      - from: "context:goal"
+        as: "job_url"
+    toolset: ["get_job_logs", "read_file", "find_files", "list_dir"]
+  - name: "fix_pipeline_create_plan"
+    type: AgentComponent
+    prompt_id: "fix_pipeline_create_plan"
+    prompt_version: "^1.0.0"
+    inputs:
+      - from: "context:fix_pipeline_context.final_answer"
+        as: "fix_pipeline_context_results"
+    toolset: []
+  - name: "fix_pipeline_execution"
+    type: AgentComponent
+    prompt_id: "fix_pipeline_execution"
+    prompt_version: "^1.0.0"
+    inputs:
+      - from: "context:fix_pipeline_create_plan.final_answer"
+        as: "fix_pipeline_plan"
+    toolset:
+      - create_file_with_contents
+      - edit_file
+      - find_files
+      - get_repository_file
+      - grep
+      - list_dir
+      - mkdir
+      - read_file
+      - run_git_command
+routers:
+  - from: "fix_pipeline_context"
+    to: "fix_pipeline_create_plan"
+  - from: "fix_pipeline_create_plan"
+    to: "fix_pipeline_execution"
+  - from: "fix_pipeline_execution"
+    to: "end"
+flow:
+  entry_point: "fix_pipeline_context"
+

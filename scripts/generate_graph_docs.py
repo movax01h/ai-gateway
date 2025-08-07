@@ -68,8 +68,6 @@ def main():
             goal = ""
             if graph_name == "issue_to_merge_request":
                 goal = "http://gitlab.com/project_name/-/issues/1"
-            elif graph_name == "fix_pipeline":
-                goal = "http://gitlab.com/project_name/-/jobs/1"
             graph = wrk._compile(goal, tools_reg, MemorySaver())
 
             diagram = graph.get_graph().draw_mermaid()

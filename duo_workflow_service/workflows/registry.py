@@ -7,7 +7,6 @@ from duo_workflow_service.agent_platform import experimental
 from duo_workflow_service.workflows import (
     chat,
     convert_to_gitlab_ci,
-    fix_pipeline,
     issue_to_merge_request,
     search_and_replace,
     software_development,
@@ -24,7 +23,6 @@ _WORKFLOWS: list[TypeWorkflow] = [
     convert_to_gitlab_ci.Workflow,
     chat.Workflow,
     issue_to_merge_request.Workflow,
-    fix_pipeline.Workflow,
 ]
 
 # Eg: {
