@@ -11,18 +11,6 @@ from duo_workflow_service.tools.merge_request import (
 )
 
 
-class PipelineException(Exception):
-    pass
-
-
-class PipelinesNotFoundError(PipelineException):
-    pass
-
-
-class PipelineMergeRequestNotFoundError(PipelineException):
-    pass
-
-
 class GetPipelineErrorsInput(ProjectResourceInput):
     merge_request_iid: Optional[int] = Field(
         default=None,
@@ -60,47 +48,63 @@ class GetPipelineErrorsForMergeRequest(DuoBaseTool):
         if validation_result.errors:
             return json.dumps({"error": "; ".join(validation_result.errors)})
 
-        merge_request = await self.gitlab_client.aget(
-            path=f"/api/v4/projects/{validation_result.project_id}/merge_requests/{validation_result.merge_request_iid}"
-        )
+        try:
+            merge_request = await self.gitlab_client.aget(
+                path=f"/api/v4/projects/{validation_result.project_id}/merge_requests/"
+                f"{validation_result.merge_request_iid}"
+            )
 
-        if isinstance(merge_request, dict) and merge_request.get("status") == 404:
-            raise PipelineMergeRequestNotFoundError("Merge request not found")
+            if isinstance(merge_request, dict) and merge_request.get("status") == 404:
+                return json.dumps(
+                    {
+                        "error": f"Merge request with iid {validation_result.merge_request_iid} not found"
+                    }
+                )
 
-        pipelines = await self.gitlab_client.aget(
-            path=f"/api/v4/projects/{validation_result.project_id}/merge_requests/"
-            f"{validation_result.merge_request_iid}/pipelines"
-        )
+            pipelines = await self.gitlab_client.aget(
+                path=f"/api/v4/projects/{validation_result.project_id}/merge_requests/"
+                f"{validation_result.merge_request_iid}/pipelines"
+            )
 
-        if not isinstance(pipelines, list) or len(pipelines) == 0:
-            raise PipelinesNotFoundError("No pipelines found")
+            if not isinstance(pipelines, list) or len(pipelines) == 0:
+                return json.dumps(
+                    {
+                        "error": f"No pipelines found for merge request iid {validation_result.merge_request_iid}"
+                    }
+                )
 
-        last_pipeline = pipelines[0]
-        last_pipeline_id = last_pipeline["id"]
+            last_pipeline = pipelines[0]
+            last_pipeline_id = last_pipeline["id"]
 
-        jobs = await self.gitlab_client.aget(
-            path=f"/api/v4/projects/{validation_result.project_id}/pipelines/{last_pipeline_id}/jobs"
-        )
+            jobs = await self.gitlab_client.aget(
+                path=f"/api/v4/projects/{validation_result.project_id}/pipelines/{last_pipeline_id}/jobs"
+            )
 
-        if not isinstance(jobs, list):
-            return json.dumps({"error": f"Failed to fetch jobs: {jobs}"})
+            if not isinstance(jobs, list):
+                return json.dumps(
+                    {
+                        "error": f"Failed to fetch jobs for pipeline {last_pipeline_id}: {jobs}"
+                    }
+                )
 
-        traces = "Failed Jobs:\n"
-        for job in jobs:
-            if job["status"] == "failed":
-                job_id = job["id"]
-                job_name = job["name"]
-                traces += f"Name: {job_name}\nJob ID: {job_id}\n"
-                try:
-                    trace = await self.gitlab_client.aget(
-                        path=f"/api/v4/projects/{validation_result.project_id}/jobs/{job_id}/trace",
-                        parse_json=False,
-                    )
-                    traces += f"Trace: {trace}\n"
-                except Exception as e:
-                    traces += f"Error fetching trace: {str(e)}\n"
+            traces = "Failed Jobs:\n"
+            for job in jobs:
+                if job["status"] == "failed":
+                    job_id = job["id"]
+                    job_name = job["name"]
+                    traces += f"Name: {job_name}\nJob ID: {job_id}\n"
+                    try:
+                        trace = await self.gitlab_client.aget(
+                            path=f"/api/v4/projects/{validation_result.project_id}/jobs/{job_id}/trace",
+                            parse_json=False,
+                        )
+                        traces += f"Trace: {trace}\n"
+                    except Exception as e:
+                        traces += f"Error fetching trace: {str(e)}\n"
 
-        return json.dumps({"merge_request": merge_request, "traces": traces})
+            return json.dumps({"merge_request": merge_request, "traces": traces})
+        except Exception as e:
+            return json.dumps({"error": str(e)})
 
     def format_display_message(
         self, args: GetPipelineErrorsInput, _tool_response: Any = None

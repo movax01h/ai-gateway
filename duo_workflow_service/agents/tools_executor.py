@@ -25,12 +25,7 @@ from duo_workflow_service.security.prompt_security import (
     PromptSecurity,
     SecurityException,
 )
-from duo_workflow_service.tools import (
-    PipelineException,
-    RunCommand,
-    Toolset,
-    format_tool_display_message,
-)
+from duo_workflow_service.tools import RunCommand, Toolset, format_tool_display_message
 from duo_workflow_service.tools.planner import PlannerTool
 from lib.internal_events import InternalEventAdditionalProperties, InternalEventsClient
 from lib.internal_events.event_enum import CategoryEnum, EventEnum, EventLabelEnum
@@ -227,9 +222,6 @@ class ToolsExecutor:
         except ValidationError as error:
             return self._handle_validation_error(tool_name, tool_args, error, chat_logs)
 
-        except PipelineException as error:
-            return self._handle_pipeline_error(tool_name, tool_args, error, chat_logs)
-
     def _handle_type_error(
         self,
         tool_context: Dict[str, Any],
@@ -302,36 +294,6 @@ class ToolsExecutor:
         return {
             "response": tool_response,
             "chat_logs": chat_logs,
-        }
-
-    def _handle_pipeline_error(
-        self,
-        tool_name: str,
-        tool_args: Dict[str, Any],
-        error: PipelineException,
-        chat_logs: List[UiChatLog],
-    ) -> Dict[str, Any]:
-        tool_response = f"Pipeline exception due to {error}"
-        self._track_internal_event(
-            event_name=EventEnum.WORKFLOW_TOOL_FAILURE,
-            tool_name=tool_name,
-            extra={
-                "error": str(error),
-                "error_type": type(error).__name__,
-            },
-        )
-
-        self._add_tool_ui_chat_log(
-            tool_info={"name": tool_name, "args": tool_args},
-            status=ToolStatus.FAILURE,
-            ui_chat_logs=chat_logs,
-            error_message=f"Pipeline error: {error}",
-        )
-
-        return {
-            "response": tool_response,
-            "chat_logs": chat_logs,
-            "status": WorkflowStatusEnum.ERROR,
         }
 
     def _track_internal_event(

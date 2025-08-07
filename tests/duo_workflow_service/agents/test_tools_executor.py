@@ -23,11 +23,7 @@ from duo_workflow_service.entities.state import (
     WorkflowState,
     WorkflowStatusEnum,
 )
-from duo_workflow_service.tools import (
-    PipelineMergeRequestNotFoundError,
-    RunCommand,
-    Toolset,
-)
+from duo_workflow_service.tools import RunCommand, Toolset
 from duo_workflow_service.tools.planner import (
     AddNewTask,
     AddNewTaskInput,
@@ -856,15 +852,6 @@ async def test_state_manipulation(
             False,
             "Failed: Using test_tool: invalid=data - Validation error",
             ToolInfo(name="test_tool", args={"invalid": "data"}),
-        ),
-        (
-            {"id": "3", "name": "test_tool", "args": {}},
-            PipelineMergeRequestNotFoundError("Merge request not found"),
-            None,
-            "Pipeline exception",
-            True,
-            "Failed: Using test_tool:  - Pipeline error: Merge request not found",
-            ToolInfo(name="test_tool", args={}),
         ),
     ],
 )
