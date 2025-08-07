@@ -211,7 +211,8 @@ class Workflow(AbstractWorkflow):
             executor_toolset=tools_registry.toolset(EXECUTOR_TOOLS),
             tools_registry=tools_registry,
             model_config=self._model_config,
-            goal=goal,
+            goal=f"Consider the following issue url: {goal}. Create an implementation plan to address the issue "
+            f"requirements.",
             project=self._project,  # type: ignore[arg-type]
             http_client=self._http_client,
         )
@@ -250,7 +251,7 @@ class Workflow(AbstractWorkflow):
             executor_toolset=tools_registry.toolset(EXECUTOR_TOOLS),
             tools_registry=tools_registry,
             model_config=self._model_config,
-            goal=goal,
+            goal=f"Consider the following issue url: {goal}. Implement changes to meet issue requirements.",
             project=self._project,  # type: ignore[arg-type]
             http_client=self._http_client,
             user=self._user,
@@ -332,7 +333,8 @@ class Workflow(AbstractWorkflow):
     ):
         context_builder_toolset = tools_registry.toolset(CONTEXT_BUILDER_TOOLS)
         context_builder = Agent(
-            goal=goal,
+            goal=f"Consider the following issue url: {goal}. Build context and identify development tasks from the "
+            f"issue requirements.",
             model=create_chat_model(
                 max_tokens=MAX_TOKENS_TO_SAMPLE,
                 config=self._model_config,
