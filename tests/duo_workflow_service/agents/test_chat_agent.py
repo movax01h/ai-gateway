@@ -11,8 +11,10 @@ from langchain_core.messages.ai import UsageMetadata
 from langchain_core.prompt_values import ChatPromptValue
 
 from ai_gateway.container import ContainerApplication
+from ai_gateway.models.agentic_mock import AgenticFakeModel
 from ai_gateway.prompts.registry import LocalPromptRegistry
 from duo_workflow_service.agents.chat_agent import ChatAgent, ChatAgentPromptTemplate
+from duo_workflow_service.components.tools_registry import ToolsRegistry
 from duo_workflow_service.entities import WorkflowStatusEnum
 from duo_workflow_service.entities.state import (
     ChatWorkflowState,
@@ -544,3 +546,39 @@ async def test_chat_agent_api_error_handling(chat_agent, input):
             result["ui_chat_log"][0]["content"]
             == "There was an error processing your request. Please try again or contact support if the issue persists."
         )
+
+
+@pytest.mark.asyncio
+async def test_agentic_fake_model_bypasses_tool_approval(prompt_config, input):
+    def agentic_model_factory(
+        *, model: str, **kwargs
+    ):  # pylint: disable=unused-argument
+        return AgenticFakeModel()
+
+    chat_agent = ChatAgent(model_factory=agentic_model_factory, config=prompt_config)
+
+    chat_agent.tools_registry = Mock(spec=ToolsRegistry)
+    chat_agent.tools_registry.approval_required.return_value = True
+
+    # Create an AI message with tool calls to simulate what would happen
+    ai_message_with_tools = AIMessage(
+        content="I need to use a tool",
+        tool_calls=[
+            {
+                "name": "test_tool",
+                "args": {"param": "value"},
+                "id": "call_123",
+                "type": "tool_call",
+            }
+        ],
+    )
+
+    # Mock the agent response to return our AI message with tools
+    with patch.object(
+        chat_agent.__class__.__bases__[0], "ainvoke", new_callable=AsyncMock
+    ) as mock_ainvoke:
+        mock_ainvoke.return_value = ai_message_with_tools
+
+        result = await chat_agent.run(input)
+
+        assert result["status"] == WorkflowStatusEnum.EXECUTION
