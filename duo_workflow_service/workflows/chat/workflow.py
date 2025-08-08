@@ -1,5 +1,4 @@
-# pylint: disable=direct-environment-variable-reference,invalid-name,attribute-defined-outside-init
-import os
+# pylint: disable=attribute-defined-outside-init
 from datetime import datetime, timezone
 from enum import StrEnum
 from typing import Any, List, override
@@ -25,11 +24,6 @@ from duo_workflow_service.entities.state import (
 from duo_workflow_service.tracking.errors import log_exception
 from duo_workflow_service.workflows.abstract_workflow import AbstractWorkflow
 from lib.feature_flags.context import FeatureFlag, is_feature_enabled
-
-MAX_TOKENS_TO_SAMPLE = 16384
-DEBUG = os.getenv("DEBUG")
-MAX_MESSAGE_LENGTH = 200
-RECURSION_LIMIT = 500
 
 
 class Routes(StrEnum):

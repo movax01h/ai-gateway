@@ -3,7 +3,7 @@ name: Chat Agent
 model:
   config_file: claude_4_0
   params:
-    max_tokens: 8_192
+    max_tokens: 16_384
 unit_primitives:
   - duo_chat
 prompt_template:
