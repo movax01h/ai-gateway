@@ -6,6 +6,8 @@ import pytest
 from duo_workflow_service.tools.security import (
     DismissVulnerability,
     DismissVulnerabilityInput,
+    LinkVulnerabilityToIssue,
+    LinkVulnerabilityToIssueInput,
     ListVulnerabilities,
     ListVulnerabilitiesInput,
 )
@@ -521,4 +523,212 @@ async def test_dismiss_vulnerability_valid_dismissal_reasons(
 )
 def test_dismiss_vulnerability_format_display_message(input_data, expected_message):
     tool = DismissVulnerability(metadata={})
+    assert tool.format_display_message(input_data) == expected_message
+
+
+@pytest.mark.asyncio
+async def test_link_vulnerability_to_issue(gitlab_client_mock, metadata):
+    gitlab_client_mock.apost = AsyncMock(
+        return_value={
+            "data": {
+                "vulnerabilityIssueLinkCreate": {
+                    "errors": [],
+                    "issueLinks": [
+                        {
+                            "id": "gid://gitlab/VulnerabilityIssueLink/1",
+                            "issue": {
+                                "id": "gid://gitlab/Issue/1",
+                                "title": "Security Issue #1",
+                                "name": "Security Issue #1",
+                            },
+                            "linkType": "RELATED",
+                        }
+                    ],
+                }
+            }
+        }
+    )
+
+    tool = LinkVulnerabilityToIssue(metadata=metadata)
+
+    input_data = {
+        "issue_id": "gid://gitlab/Issue/1",
+        "vulnerability_ids": [
+            "gid://gitlab/Vulnerability/23",
+            "gid://gitlab/Vulnerability/10",
+        ],
+    }
+
+    response = await tool.arun(input_data)
+
+    expected_response = json.dumps(
+        {
+            "issueLinks": [
+                {
+                    "id": "gid://gitlab/VulnerabilityIssueLink/1",
+                    "issue": {
+                        "id": "gid://gitlab/Issue/1",
+                        "title": "Security Issue #1",
+                        "name": "Security Issue #1",
+                    },
+                    "linkType": "RELATED",
+                }
+            ]
+        }
+    )
+    assert response == expected_response
+
+    # editorconfig-checker-disable
+    expected_mutation = """
+        mutation($vulnerabilityIds: [VulnerabilityID!]!, $issueId: IssueID!) {
+          vulnerabilityIssueLinkCreate(input: { issueId: $issueId, vulnerabilityIds: $vulnerabilityIds }) {
+            issueLinks {
+              id
+              issue {
+                id,
+                title,
+                name
+              }
+              linkType
+            }
+            errors
+          }
+        }
+        """
+    # editorconfig-checker-enable
+
+    gitlab_client_mock.apost.assert_called_once_with(
+        path="/api/graphql",
+        body=json.dumps(
+            {
+                "query": expected_mutation,
+                "variables": {
+                    "issueId": "gid://gitlab/Issue/1",
+                    "vulnerabilityIds": [
+                        "gid://gitlab/Vulnerability/23",
+                        "gid://gitlab/Vulnerability/10",
+                    ],
+                },
+            }
+        ),
+    )
+
+
+@pytest.mark.asyncio
+async def test_link_vulnerability_to_issue_with_numeric_ids(
+    gitlab_client_mock, metadata
+):
+    gitlab_client_mock.apost = AsyncMock(
+        return_value={
+            "data": {
+                "vulnerabilityIssueLinkCreate": {
+                    "errors": [],
+                    "issueLinks": [
+                        {
+                            "id": "gid://gitlab/VulnerabilityIssueLink/1",
+                            "issue": {
+                                "id": "gid://gitlab/Issue/1",
+                                "title": "Security Issue #1",
+                                "name": "Security Issue #1",
+                            },
+                            "linkType": "RELATED",
+                        }
+                    ],
+                }
+            }
+        }
+    )
+
+    tool = LinkVulnerabilityToIssue(metadata=metadata)
+
+    input_data = {
+        "issue_id": "1",
+        "vulnerability_ids": ["23", "gid://gitlab/Vulnerability/10"],
+    }
+
+    response = await tool.arun(input_data)
+
+    gitlab_client_mock.apost.assert_called_once()
+    call_args = gitlab_client_mock.apost.call_args
+    body = json.loads(call_args[1]["body"])
+    assert body["variables"]["issueId"] == "gid://gitlab/Issue/1"
+    assert body["variables"]["vulnerabilityIds"] == [
+        "gid://gitlab/Vulnerability/23",
+        "gid://gitlab/Vulnerability/10",
+    ]
+
+    response_data = json.loads(response)
+    assert "error" not in response_data
+    assert "issueLinks" in response_data
+
+
+@pytest.mark.asyncio
+async def test_link_vulnerability_to_issue_with_api_errors(
+    gitlab_client_mock, metadata
+):
+    gitlab_client_mock.apost = AsyncMock(
+        return_value={
+            "data": {
+                "vulnerabilityIssueLinkCreate": {
+                    "errors": ["Issue not found", "Vulnerability not found"],
+                    "issueLinks": None,
+                }
+            }
+        }
+    )
+
+    tool = LinkVulnerabilityToIssue(metadata=metadata)
+
+    input_data = {
+        "issue_id": "gid://gitlab/Issue/999",
+        "vulnerability_ids": ["gid://gitlab/Vulnerability/999"],
+    }
+
+    response = await tool.arun(input_data)
+
+    error_response = json.loads(response)
+    assert "error" in error_response
+    assert "Issue not found; Vulnerability not found" in error_response["error"]
+
+
+@pytest.mark.asyncio
+async def test_link_vulnerability_to_issue_exception(gitlab_client_mock, metadata):
+    gitlab_client_mock.apost = AsyncMock(side_effect=Exception("API Error"))
+
+    tool = LinkVulnerabilityToIssue(metadata=metadata)
+
+    input_data = {
+        "issue_id": "1",
+        "vulnerability_ids": ["23"],
+    }
+
+    with pytest.raises(Exception) as exc_info:
+        await tool.arun(input_data)
+
+    assert "API Error" in str(exc_info.value)
+
+
+@pytest.mark.parametrize(
+    "input_data,expected_message",
+    [
+        (
+            LinkVulnerabilityToIssueInput(
+                issue_id="gid://gitlab/Issue/1",
+                vulnerability_ids=[
+                    "gid://gitlab/Vulnerability/23",
+                    "gid://gitlab/Vulnerability/10",
+                ],
+            ),
+            "Link issue to vulnerability ['gid://gitlab/Vulnerability/23', 'gid://gitlab/Vulnerability/10']",
+        ),
+        (
+            LinkVulnerabilityToIssueInput(issue_id="1", vulnerability_ids=["23"]),
+            "Link issue to vulnerability ['23']",
+        ),
+    ],
+)
+def test_link_vulnerability_to_issue_format_display_message(
+    input_data, expected_message
+):
+    tool = LinkVulnerabilityToIssue(metadata={})
     assert tool.format_display_message(input_data) == expected_message
