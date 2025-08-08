@@ -207,6 +207,7 @@ class Config(BaseSettings):
     glgo_base_url: str = "http://auth.token.gitlab.com"
     cloud_connector_service_name: str = "gitlab-ai-gateway"
     mock_model_responses: bool = False
+    use_agentic_mock: bool = False
 
     logging: Annotated[ConfigLogging, Field(default_factory=ConfigLogging)] = (
         ConfigLogging()

@@ -21,6 +21,16 @@ def _litellm_factory(*args, **kwargs) -> Model:
     return ChatLiteLLM(*args, **kwargs)
 
 
+def _mock_selector(mock_model_responses: bool, use_agentic_mock: bool) -> str:
+    if mock_model_responses and use_agentic_mock:
+        return "agentic"
+
+    if mock_model_responses:
+        return "mocked"
+
+    return "original"
+
+
 class ContainerModels(containers.DeclarativeContainer):
     # We need to resolve the model based on the model name provided by the upstream container.
     # Hence, `ChatAnthropic` etc. are only partially applied here.
@@ -29,8 +39,9 @@ class ContainerModels(containers.DeclarativeContainer):
     integrations = providers.DependenciesContainer()
 
     _mock_selector = providers.Callable(
-        lambda mock_model_responses: "mocked" if mock_model_responses else "original",
+        _mock_selector,
         config.mock_model_responses,
+        config.use_agentic_mock,
     )
 
     http_async_client_anthropic = providers.Singleton(init_anthropic_client)
@@ -43,6 +54,7 @@ class ContainerModels(containers.DeclarativeContainer):
             betas=["extended-cache-ttl-2025-04-11"],
         ),
         mocked=providers.Factory(mock.FakeModel),
+        agentic=providers.Factory(mock.AgenticFakeModel),
     )
 
     lite_llm_chat_fn = providers.Factory(_litellm_factory)

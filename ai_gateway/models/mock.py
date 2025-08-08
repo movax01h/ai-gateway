@@ -9,6 +9,7 @@ from langchain_core.callbacks import CallbackManagerForLLMRun
 from langchain_core.language_models.chat_models import SimpleChatModel
 from langchain_core.messages import BaseMessage
 
+from ai_gateway.models.agentic_mock import AgenticFakeModel
 from ai_gateway.models.base import ModelMetadata
 from ai_gateway.models.base_chat import ChatModelBase, Message
 from ai_gateway.models.base_text import (
@@ -22,6 +23,8 @@ __all__ = [
     "AsyncStream",
     "LLM",
     "ChatModel",
+    "FakeModel",
+    "AgenticFakeModel",
 ]
 
 _T = TypeVar("_T")
