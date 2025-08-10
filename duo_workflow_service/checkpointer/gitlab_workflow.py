@@ -435,7 +435,8 @@ class GitLabWorkflow(BaseCheckpointSaver[Any], AbstractAsyncContextManager[Any])
                 f"/api/v4/ai/duo_workflows/workflows/{self._workflow_id}/checkpoints"
             )
             with duo_workflow_metrics.time_gitlab_response(
-                endpoint=endpoint, method="GET"
+                endpoint="/api/v4/ai/duo_workflows/workflows/:id/checkpoints",
+                method="GET",
             ):
                 gl_checkpoints = await self._client.aget(
                     path=endpoint,
@@ -447,7 +448,8 @@ class GitLabWorkflow(BaseCheckpointSaver[Any], AbstractAsyncContextManager[Any])
         else:
             endpoint = f"/api/v4/ai/duo_workflows/workflows/{self._workflow_id}/checkpoints?per_page=1"
             with duo_workflow_metrics.time_gitlab_response(
-                endpoint=endpoint, method="GET"
+                endpoint="/api/v4/ai/duo_workflows/workflows/:id/checkpoints?per_page=1",
+                method="GET",
             ):
                 gl_checkpoints = await self._client.aget(
                     path=endpoint,
@@ -474,7 +476,9 @@ class GitLabWorkflow(BaseCheckpointSaver[Any], AbstractAsyncContextManager[Any])
         limit: Optional[int] = None,
     ) -> AsyncIterator[CheckpointTuple]:
         endpoint = f"/api/v4/ai/duo_workflows/workflows/{self._workflow_id}/checkpoints"
-        with duo_workflow_metrics.time_gitlab_response(endpoint=endpoint, method="GET"):
+        with duo_workflow_metrics.time_gitlab_response(
+            endpoint="/api/v4/ai/duo_workflows/workflows/:id/checkpoints", method="GET"
+        ):
             gl_checkpoints = await self._client.aget(
                 path=endpoint,
                 object_hook=checkpoint_decoder,
@@ -510,7 +514,7 @@ class GitLabWorkflow(BaseCheckpointSaver[Any], AbstractAsyncContextManager[Any])
         # thread_ts and parent_ts have been renamed to checkpoint_id and parent_checkpoint_id , respectively
         endpoint = f"/api/v4/ai/duo_workflows/workflows/{self._workflow_id}/checkpoints"
         with duo_workflow_metrics.time_gitlab_response(
-            endpoint=endpoint, method="POST"
+            endpoint="/api/v4/ai/duo_workflows/workflows/:id/checkpoints", method="POST"
         ):
             response = await self._client.apost(
                 path=endpoint,
@@ -580,7 +584,8 @@ class GitLabWorkflow(BaseCheckpointSaver[Any], AbstractAsyncContextManager[Any])
             f"/api/v4/ai/duo_workflows/workflows/{workflow_id}/checkpoint_writes_batch"
         )
         with duo_workflow_metrics.time_gitlab_response(
-            endpoint=endpoint, method="POST"
+            endpoint="/api/v4/ai/duo_workflows/workflows/:id/checkpoint_writes_batch",
+            method="POST",
         ):
             result = await self._client.apost(
                 path=endpoint,
