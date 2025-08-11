@@ -84,6 +84,7 @@ invalid_authentication_token_type_error = {
 }
 
 
+@pytest.mark.asyncio
 @pytest.mark.parametrize(
     (
         "headers",
@@ -431,7 +432,7 @@ invalid_authentication_token_type_error = {
                 "X-Gitlab-Authentication-Type": "oidc",
                 "X-Gitlab-Global-User-Id": "1234",
                 "X-Gitlab-Instance-Id": "1234",
-                "X-GitLab-Realm": "self-managed",
+                "X-Gitlab-Realm": "self-managed",
             },
             None,
             200,
@@ -544,7 +545,7 @@ invalid_authentication_token_type_error = {
         ),
     ],
 )
-def test_failed_authorization_logging(
+async def test_failed_authorization_logging(
     mock_client, headers, data, expected_status_code, expected_response, log_keys
 ):
     with capture_logs() as cap_logs:
