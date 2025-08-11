@@ -1,5 +1,3 @@
-# pylint: disable=unused-import,unused-variable
-
 from unittest.mock import ANY, AsyncMock, Mock, patch
 
 import pytest

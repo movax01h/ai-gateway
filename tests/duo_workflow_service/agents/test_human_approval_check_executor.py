@@ -1,20 +1,16 @@
-# pylint: disable=unused-import,direct-environment-variable-reference
+# pylint: disable=direct-environment-variable-reference
 
 import os
-from datetime import datetime, timezone
-from unittest.mock import AsyncMock, MagicMock, call, patch
+from unittest.mock import AsyncMock, patch
 
 import pytest
-from langchain_core.language_models.chat_models import BaseChatModel
-from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
+from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 
 from duo_workflow_service.agents import HumanApprovalCheckExecutor
 from duo_workflow_service.entities import WorkflowEventType
 from duo_workflow_service.entities.state import (
     MessageTypeEnum,
     Plan,
-    ToolStatus,
-    UiChatLog,
     WorkflowState,
     WorkflowStatusEnum,
 )

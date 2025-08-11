@@ -1,11 +1,7 @@
 """Tests for the slash_commands.error_handler module."""
 
-# pylint: disable=unused-import
-
 from datetime import datetime, timezone
-from unittest.mock import MagicMock, patch
-
-import pytest
+from unittest.mock import patch
 
 from duo_workflow_service.entities.state import MessageTypeEnum, ToolStatus
 from duo_workflow_service.slash_commands.error_handler import (

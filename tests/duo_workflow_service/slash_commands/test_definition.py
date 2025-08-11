@@ -1,5 +1,3 @@
-# pylint: disable=unused-import
-
 from pathlib import Path
 from unittest.mock import MagicMock, mock_open, patch
 
