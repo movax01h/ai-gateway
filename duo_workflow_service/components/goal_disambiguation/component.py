@@ -4,7 +4,7 @@ import os
 from datetime import datetime, timezone
 from enum import StrEnum
 from functools import partial
-from typing import Annotated, Any, List, Literal, Union
+from typing import Annotated, Any, List, Literal, Union, cast
 
 from langchain_core.messages import (
     AIMessage,
@@ -16,7 +16,7 @@ from langchain_core.messages import (
 from langgraph.graph import END, StateGraph
 from langgraph.types import interrupt
 
-from duo_workflow_service.agents.agent import Agent
+from duo_workflow_service.agents import Agent, AgentV2
 from duo_workflow_service.agents.handover import HandoverAgent
 from duo_workflow_service.components.base import BaseComponent
 from duo_workflow_service.entities.event import WorkflowEvent, WorkflowEventType
@@ -32,6 +32,7 @@ from duo_workflow_service.tools.request_user_clarification import (
     RequestUserClarificationTool,
 )
 from duo_workflow_service.workflows.abstract_workflow import MAX_TOKENS_TO_SAMPLE
+from lib.feature_flags.context import FeatureFlag, is_feature_enabled
 
 from ...tools import HandoverTool
 from .prompts import (
@@ -74,29 +75,53 @@ class GoalDisambiguationComponent(BaseComponent):
         if not self.allow_agent_to_request_user:
             return component_exit_node
 
-        task_clarity_judge = Agent(
-            goal="N/A",  # "Not used, Agent always gets prepared messages from previous steps",
-            system_prompt="N/A",
-            name=_AGENT_NAME,
-            model=create_chat_model(
-                max_tokens=MAX_TOKENS_TO_SAMPLE,
-                config=self.model_config,
-            ),
-            toolset=self.tools_registry.toolset(
-                [RequestUserClarificationTool.tool_title, HandoverTool.tool_title]
-            ),
-            http_client=self.http_client,
-            workflow_id=self.workflow_id,
-            workflow_type=self.workflow_type,
+        toolset = self.tools_registry.toolset(
+            [RequestUserClarificationTool.tool_title, HandoverTool.tool_title]
         )
+
+        if is_feature_enabled(FeatureFlag.DUO_WORKFLOW_PROMPT_REGISTRY):
+            task_clarity_judge_v2: AgentV2 = cast(
+                AgentV2,
+                self.prompt_registry.get_on_behalf(
+                    self.user,
+                    "workflow/goal_disambiguation",
+                    "^1.0.0",
+                    tools=toolset.bindable,  # type: ignore[arg-type]
+                    workflow_id=self.workflow_id,
+                    http_client=self.http_client,
+                    prompt_template_inputs={
+                        "clarification_tool": RequestUserClarificationTool.tool_title,
+                    },
+                ),
+            )
+            graph.add_node("task_clarity_check", task_clarity_judge_v2.run)
+            entrypoint = "task_clarity_check"
+        else:
+            task_clarity_judge = Agent(
+                goal="N/A",  # "Not used, Agent always gets prepared messages from previous steps",
+                system_prompt="N/A",
+                name=_AGENT_NAME,
+                model=create_chat_model(
+                    max_tokens=MAX_TOKENS_TO_SAMPLE,
+                    config=self.model_config,
+                ),
+                toolset=self.tools_registry.toolset(
+                    [RequestUserClarificationTool.tool_title, HandoverTool.tool_title]
+                ),
+                http_client=self.http_client,
+                workflow_id=self.workflow_id,
+                workflow_type=self.workflow_type,
+            )
+            graph.add_node("task_clarity_build_prompt", self._build_prompt)
+            graph.add_edge("task_clarity_build_prompt", "task_clarity_check")
+            graph.add_node("task_clarity_check", task_clarity_judge.run)
+            entrypoint = "task_clarity_build_prompt"
+
         task_clarity_handover = HandoverAgent(
             new_status=WorkflowStatusEnum.PLANNING,
             handover_from=_AGENT_NAME,
             include_conversation_history=True,
         )
-        graph.add_node("task_clarity_build_prompt", self._build_prompt)
-        graph.add_edge("task_clarity_build_prompt", "task_clarity_check")
-        graph.add_node("task_clarity_check", task_clarity_judge.run)
         graph.add_conditional_edges(
             "task_clarity_check",
             self._clarification_required,
@@ -128,7 +153,7 @@ class GoalDisambiguationComponent(BaseComponent):
         graph.add_node("task_clarity_handover", task_clarity_handover.run)
         graph.add_edge("task_clarity_handover", component_exit_node)
 
-        return "task_clarity_build_prompt"
+        return entrypoint
 
     def _allowed_to_clarify(self, allow_agent_to_request_user: bool) -> bool:
         return (
@@ -266,10 +291,10 @@ class GoalDisambiguationComponent(BaseComponent):
     def _clarification_required(
         self, state: WorkflowState
     ) -> Literal[Routes.CLEAR, Routes.UNCLEAR, Routes.SKIP, Routes.STOP]:
-        last_message: AIMessage = state["conversation_history"][_AGENT_NAME][-1]  # type: ignore
         if state["status"] == WorkflowStatusEnum.CANCELLED:
             return Routes.STOP
 
+        last_message: AIMessage = state["conversation_history"][_AGENT_NAME][-1]  # type: ignore
         if last_message.tool_calls is None or len(last_message.tool_calls) == 0:
             return Routes.CLEAR
 

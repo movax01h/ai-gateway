@@ -24,6 +24,7 @@ class ContainerPrompts(containers.DeclarativeContainer):
             "workflow/executor": "duo_workflow_service.agents.AgentV2",
             "workflow/context_builder": "duo_workflow_service.agents.AgentV2",
             "workflow/planner": "duo_workflow_service.agents.AgentV2",
+            "workflow/goal_disambiguation": "duo_workflow_service.agents.AgentV2",
         },
         model_factories={
             ModelClassProvider.ANTHROPIC: providers.Factory(

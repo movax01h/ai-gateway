@@ -1,12 +1,15 @@
 import os
-from unittest.mock import MagicMock, call, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from gitlab_cloud_connector import CloudConnectorUser
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
+from langchain_core.prompt_values import ChatPromptValue
 from langchain_core.runnables import RunnableConfig
 from langgraph.graph import END, StateGraph
 from langgraph.graph.state import CompiledStateGraph
 
+from ai_gateway.models.mock import FakeModel
 from duo_workflow_service.agents.agent import Agent
 from duo_workflow_service.components import ToolsRegistry
 from duo_workflow_service.components.goal_disambiguation import (
@@ -32,6 +35,7 @@ from duo_workflow_service.tools.request_user_clarification import (
     RequestUserClarificationTool,
 )
 from lib.feature_flags import current_feature_flag_context
+from lib.feature_flags.context import FeatureFlag
 from lib.internal_events.event_enum import CategoryEnum
 
 
@@ -43,6 +47,19 @@ def mock_create_model_fixture():
         mock.return_value = mock
         mock.bind_tools.return_value = mock
         yield mock
+
+
+@pytest.fixture
+def mock_model_ainvoke(
+    duo_workflow_prompt_registry_enabled, mock_create_model, end_message
+):
+    if duo_workflow_prompt_registry_enabled:
+        with patch.object(FakeModel, "ainvoke") as mock:
+            mock.return_value = end_message
+            yield mock
+    else:
+        mock_create_model.ainvoke = AsyncMock(return_value=end_message)
+        yield mock_create_model.ainvoke
 
 
 @pytest.fixture(name="llm_judge_response_unclear")
@@ -64,11 +81,29 @@ def llm_judge_response_unclear_fixture() -> AIMessage:
     )
 
 
+@pytest.fixture(name="duo_workflow_prompt_registry_enabled")
+def duo_workflow_prompt_registry_enabled_fixture() -> bool:
+    return False
+
+
+@pytest.fixture(autouse=True)
+def stub_feature_flags(duo_workflow_prompt_registry_enabled: bool):
+    if duo_workflow_prompt_registry_enabled:
+        current_feature_flag_context.set({FeatureFlag.DUO_WORKFLOW_PROMPT_REGISTRY})
+
+    yield
+
+
 @pytest.fixture(name="mock_agent")
-def mock_agent_fixture(llm_judge_response_unclear: AIMessage):
-    with patch(
-        "duo_workflow_service.components.goal_disambiguation.component.Agent"
-    ) as mock:
+def mock_agent_fixture(
+    duo_workflow_prompt_registry_enabled: bool, llm_judge_response_unclear: AIMessage
+):
+    if duo_workflow_prompt_registry_enabled:
+        factory = "ai_gateway.prompts.registry.LocalPromptRegistry.get_on_behalf"
+    else:
+        factory = "duo_workflow_service.components.goal_disambiguation.component.Agent"
+
+    with patch(factory) as mock:
         mock_agent = MagicMock(spec=Agent)
         mock.return_value = mock_agent
         mock_agent.run.side_effect = [
@@ -96,6 +131,8 @@ def mock_interrupt_fixture():
         yield mock
 
 
+@pytest.mark.usefixtures("mock_duo_workflow_service_container")
+@pytest.mark.parametrize("duo_workflow_prompt_registry_enabled", [False, True])
 class TestGoalDisambiguationComponent:
     @pytest.fixture(name="graph_config")
     def graph_config_fixture(self) -> RunnableConfig:
@@ -130,6 +167,7 @@ class TestGoalDisambiguationComponent:
     def entry_point_fixture(
         self,
         component_env: dict[str, str],
+        user: CloudConnectorUser,
         goal: str,
         allow_agent_to_request_user: bool,
         graph_config: RunnableConfig,
@@ -139,6 +177,7 @@ class TestGoalDisambiguationComponent:
     ) -> str:
         with patch.dict(os.environ, component_env):
             component = GoalDisambiguationComponent(
+                user=user,
                 goal=goal,
                 workflow_id=graph_config["configurable"]["thread_id"],
                 allow_agent_to_request_user=allow_agent_to_request_user,
@@ -161,7 +200,7 @@ class TestGoalDisambiguationComponent:
         return graph.compile()
 
     @pytest.fixture(name="graph_input")
-    def graph_input_fixture(self) -> WorkflowState:
+    def graph_input_fixture(self, goal: str) -> WorkflowState:
         return WorkflowState(
             plan=Plan(steps=[]),
             status=WorkflowStatusEnum.NOT_STARTED,
@@ -170,7 +209,7 @@ class TestGoalDisambiguationComponent:
             handover=[],
             ui_chat_log=[],
             project=None,
-            goal=None,
+            goal=goal,
             additional_context=None,
         )
 
@@ -193,53 +232,59 @@ class TestGoalDisambiguationComponent:
         assert entry_point == END, "Then disambiguation component should be skipped"
 
     @pytest.mark.asyncio
-    @pytest.mark.usefixtures("mock_create_model")
-    async def test_component_prompt_construction(
+    async def test_messages_to_model(
         self,
+        mock_model_ainvoke: AsyncMock,
         graph_input: WorkflowState,
         graph_config: RunnableConfig,
-        mock_agent: MagicMock,
         goal: str,
         compiled_graph: CompiledStateGraph,
+        duo_workflow_prompt_registry_enabled: str,
     ):
         human_msg = HumanMessage(content="Please fix all the bugs in my code")
         ai_msg = AIMessage(content="Sure, will do")
         graph_input["handover"] = [human_msg, ai_msg]
 
-        expected_state = WorkflowState(
-            plan=Plan(steps=[]),
-            status=WorkflowStatusEnum.NOT_STARTED,
-            conversation_history={
-                _AGENT_NAME: [
-                    SystemMessage(content=SYS_PROMPT),
-                    HumanMessage(
-                        content=PROMPT.format(
-                            clarification_tool=RequestUserClarificationTool.tool_title,
-                            handover_tool=HandoverTool.tool_title,
-                        )
-                    ),
-                    HumanMessage(
-                        content=ASSIGNMENT_PROMPT.format(
-                            goal=goal,
-                            conversation_history=f"{human_msg.pretty_repr()}\n{ai_msg.pretty_repr()}",
-                        )
-                    ),
-                ]
-            },
-            ui_chat_log=[],
-            handover=[human_msg, ai_msg],
-            last_human_input=None,
-            project=None,
-            goal=None,
-            additional_context=None,
-        )
+        if duo_workflow_prompt_registry_enabled:
+            expected_messages = [
+                SystemMessage(content=SYS_PROMPT),
+                HumanMessage(
+                    content=PROMPT.format(
+                        clarification_tool=RequestUserClarificationTool.tool_title,
+                        handover_tool=HandoverTool.tool_title,
+                    )
+                    + "\n\n"
+                    + ASSIGNMENT_PROMPT.format(
+                        goal=goal,
+                        conversation_history=f"{human_msg.pretty_repr()}\n{ai_msg.pretty_repr()}",
+                    )
+                ),
+            ]
+        else:
+            expected_messages = [
+                SystemMessage(content=SYS_PROMPT),
+                HumanMessage(
+                    content=PROMPT.format(
+                        clarification_tool=RequestUserClarificationTool.tool_title,
+                        handover_tool=HandoverTool.tool_title,
+                    )
+                ),
+                HumanMessage(
+                    content=ASSIGNMENT_PROMPT.format(
+                        goal=goal,
+                        conversation_history=f"{human_msg.pretty_repr()}\n{ai_msg.pretty_repr()}",
+                    )
+                ),
+            ]
 
         await compiled_graph.ainvoke(input=graph_input, config=graph_config)
 
-        mock_agent.run.assert_has_calls(
-            [call(expected_state)],
-            any_order=True,
-        )
+        ainvoke_messages = mock_model_ainvoke.call_args.args[0]
+
+        if isinstance(ainvoke_messages, ChatPromptValue):
+            ainvoke_messages = ainvoke_messages.messages
+
+        assert ainvoke_messages == expected_messages
 
     @pytest.mark.asyncio
     @pytest.mark.usefixtures("mock_create_model")
