@@ -84,7 +84,7 @@ class RunToolNode(Generic[WorkflowStateT]):
             with duo_workflow_metrics.time_tool_call(tool_name=self._tool.name):
                 if output := await self._tool._arun(**tool_params):
                     try:
-                        secure_output = PromptSecurity.apply_security(
+                        secure_output = PromptSecurity.apply_security_to_tool_response(
                             response=output,
                             tool_name=self._tool.name,
                         )

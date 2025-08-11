@@ -2,7 +2,7 @@
 import re
 import sys
 from pathlib import Path
-from typing import Callable, Dict, List
+from typing import Any, Callable, Dict, List, Union
 
 
 def run_from_args():
@@ -11,63 +11,68 @@ def run_from_args():
     filename = args[0]
     content = Path(filename).read_text()
 
-    return PromptSecurity.apply_security(content, "test-tool")
+    return PromptSecurity.apply_security_to_tool_response(content, "test-tool")
 
 
 class SecurityException(Exception):
     """Custom exception raised when security validation fails."""
 
 
-def encode_dangerous_tags(response: str | dict | list) -> str | dict | list:
+def encode_dangerous_tags(
+    response: Union[str, Dict[str, Any], List[Any]],
+) -> Union[str, List[Union[str, Dict[str, Any]]]]:
     """Recursively encode dangerous HTML tags in the response.
 
     Args:
         response: The response data to encode
 
     Returns:
-        Response with encoded dangerous tags
+        Response with encoded dangerous tags, compatible with ToolMessage.content
     """
-    # Define dangerous tags to encode
-    # These tags are commonly used in prompt injection attacks to manipulate LLM behavior:
-    # - "goal": Used to override or redirect the primary task objective
-    # - "system": Used to inject system-level instructions or override system prompts
-    DANGEROUS_TAGS = {
-        "goal": "goal",
-        "system": "system",
-    }
 
-    if isinstance(response, dict):
-        return {k: encode_dangerous_tags(v) for k, v in response.items()}
-    elif isinstance(response, list):
-        return [encode_dangerous_tags(item) for item in response]
+    def _encode_recursive(data: Any) -> Any:
+        """Internal recursive function that doesn't change top-level structure."""
+        DANGEROUS_TAGS = {
+            "goal": "goal",
+            "system": "system",
+        }
 
-    # Process string responses
-    for tag_name, replacement in DANGEROUS_TAGS.items():
-        # Pattern 1: Regular HTML tags like <goal> or </goal>
-        response = re.sub(
-            rf"<\s*(/?)\s*{re.escape(tag_name)}\s*>",
-            f"&lt;\\1{replacement}&gt;",
-            response,
-            flags=re.IGNORECASE,
-        )
+        if isinstance(data, dict):
+            return {k: _encode_recursive(v) for k, v in data.items()}
+        elif isinstance(data, list):
+            return [_encode_recursive(item) for item in data]
 
-        # Pattern 2: Unicode-escaped tags like \u003cgoal\u003e
-        response = re.sub(
-            rf"\\u003c\s*(/?)\s*{re.escape(tag_name)}\s*\\u003e",
-            f"&lt;\\1{replacement}&gt;",
-            response,
-            flags=re.IGNORECASE,
-        )
+        for tag_name, replacement in DANGEROUS_TAGS.items():
+            data = re.sub(
+                rf"<\s*(/?)\s*{re.escape(tag_name)}\s*>",
+                f"&lt;\\1{replacement}&gt;",
+                data,
+                flags=re.IGNORECASE,
+            )
 
-        # Pattern 3: Mixed format with double backslashes
-        response = re.sub(
-            rf"\\\\u003c\s*(/?)\s*{re.escape(tag_name)}\s*\\\\u003e",
-            f"&lt;\\1{replacement}&gt;",
-            response,
-            flags=re.IGNORECASE,
-        )
+            data = re.sub(
+                rf"\\u003c\s*(/?)\s*{re.escape(tag_name)}\s*\\u003e",
+                f"&lt;\\1{replacement}&gt;",
+                data,
+                flags=re.IGNORECASE,
+            )
 
-    return response
+            data = re.sub(
+                rf"\\\\u003c\s*(/?)\s*{re.escape(tag_name)}\s*\\\\u003e",
+                f"&lt;\\1{replacement}&gt;",
+                data,
+                flags=re.IGNORECASE,
+            )
+
+        return data
+
+    processed = _encode_recursive(response)
+
+    if isinstance(processed, dict):
+        return [processed]
+
+    # Type assertion: processed is guaranteed to be str or list after security processing
+    return processed  # type: ignore[no-any-return]
 
 
 class PromptSecurity:
@@ -75,23 +80,32 @@ class PromptSecurity:
 
     # Default security functions to apply to ALL tools
     DEFAULT_SECURITY_FUNCTIONS: List[
-        Callable[[str | dict | list], str | dict | list]
+        Callable[
+            [Union[str, Dict[str, Any], List[Any]]],
+            Union[str, List[Union[str, Dict[str, Any]]]],
+        ]
     ] = [
         encode_dangerous_tags,
     ]
 
     # Tool-specific additional security functions
     TOOL_SPECIFIC_FUNCTIONS: Dict[
-        str, List[Callable[[str | dict | list], str | dict | list]]
+        str,
+        List[
+            Callable[
+                [Union[str, Dict[str, Any], List[Any]]],
+                Union[str, List[Union[str, Dict[str, Any]]]],
+            ]
+        ],
     ] = {
-        # 'file_read': [validate_no_script_tags],
-        # Add tools that need EXTRA security functions
+        # Example: 'file_read': [validate_no_script_tags],
+        # Add tools that need EXTRA security functions beyond the defaults
     }
 
     @staticmethod
-    def apply_security(
-        response: str | dict | list, tool_name: str
-    ) -> str | dict | list:
+    def apply_security_to_tool_response(
+        response: Union[str, Dict[str, Any], List[Any]], tool_name: str
+    ) -> Union[str, List[Union[str, Dict[str, Any]]]]:
         """Apply all configured security functions for a specific tool.
 
         Each security function should either:
@@ -99,21 +113,19 @@ class PromptSecurity:
         - Raise SecurityException if validation fails
 
         Args:
-            response: The response to secure
+            response: The response to secure (compatible with LangChain ToolCall/ToolMessage)
             tool_name: Name of the tool being used
 
         Returns:
-            Secured response (same type as input)
+            Secured response compatible with ToolMessage.content (str | list[str | dict])
 
         Raises:
             SecurityException: If any security validation fails
         """
-        # Get all applicable functions
         all_functions = list(PromptSecurity.DEFAULT_SECURITY_FUNCTIONS)
         if tool_name in PromptSecurity.TOOL_SPECIFIC_FUNCTIONS:
             all_functions.extend(PromptSecurity.TOOL_SPECIFIC_FUNCTIONS[tool_name])
 
-        # Apply each function in sequence
         secured_response = response
         for func in all_functions:
             try:
@@ -123,9 +135,9 @@ class PromptSecurity:
                 raise
 
             except Exception as e:
-                # Wrap other exceptions for better error context
                 raise SecurityException(
-                    f"Security function {func.__name__} failed: {str(e)}"
+                    f"Security function {func.__name__} failed for tool '{tool_name}': {str(e)}"
                 ) from e
 
-        return secured_response
+        # Type assertion: security functions guarantee proper return type
+        return secured_response  # type: ignore[return-value]

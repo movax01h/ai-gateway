@@ -22,7 +22,9 @@ def mock_prompt_security_fixture():
     with patch(
         "duo_workflow_service.agent_platform.experimental.components.agent.nodes.tool_node.PromptSecurity"
     ) as mock_security:
-        mock_security.apply_security.return_value = "Sanitized response"
+        mock_security.apply_security_to_tool_response.return_value = (
+            "Sanitized response"
+        )
         yield mock_security
 
 
@@ -106,7 +108,7 @@ class TestToolNode:
         mock_tool.arun.assert_called_once_with(mock_tool_call["args"])
 
         # Verify security sanitization was called
-        mock_prompt_security.apply_security.assert_called_once_with(
+        mock_prompt_security.apply_security_to_tool_response.assert_called_once_with(
             response="Tool execution result", tool_name=mock_tool.name
         )
 
@@ -182,7 +184,9 @@ class TestToolNode:
         result = await tool_node.run(flow_state_with_tool_calls)
 
         # Verify result structure
-        secutiry_harness_args = mock_prompt_security.apply_security.call_args
+        secutiry_harness_args = (
+            mock_prompt_security.apply_security_to_tool_response.call_args
+        )
         assert "Tool test_tool not found" in secutiry_harness_args[1]["response"]
         tool_messages = result[FlowStateKeys.CONVERSATION_HISTORY][component_name]
         assert len(tool_messages) == 1
@@ -216,7 +220,9 @@ class TestToolNode:
         result = await tool_node.run(flow_state_with_tool_calls)
 
         # Verify error message in result
-        secutiry_harness_args = mock_prompt_security.apply_security.call_args
+        secutiry_harness_args = (
+            mock_prompt_security.apply_security_to_tool_response.call_args
+        )
         assert secutiry_harness_args[1]["tool_name"] == mock_tool.name
         assert (
             "Tool test_tool execution failed due to wrong arguments"
@@ -275,7 +281,9 @@ class TestToolNode:
         result = await tool_node.run(flow_state_with_tool_calls)
 
         # Verify error message in result
-        secutiry_harness_args = mock_prompt_security.apply_security.call_args
+        secutiry_harness_args = (
+            mock_prompt_security.apply_security_to_tool_response.call_args
+        )
         assert secutiry_harness_args[1]["tool_name"] == mock_tool.name
         assert (
             "Tool test_tool raised validation error"
@@ -330,7 +338,9 @@ class TestToolNode:
         result = await tool_node.run(flow_state_with_tool_calls)
 
         # Verify error message in result
-        secutiry_harness_args = mock_prompt_security.apply_security.call_args
+        secutiry_harness_args = (
+            mock_prompt_security.apply_security_to_tool_response.call_args
+        )
         assert secutiry_harness_args[1]["tool_name"] == mock_tool.name
         assert (
             "Tool runtime exception due to Generic error"
@@ -440,7 +450,7 @@ class TestToolNodeSecurity:
         with patch(
             "duo_workflow_service.agent_platform.experimental.components.agent.nodes.tool_node.PromptSecurity"
         ) as mock_security:
-            mock_security.apply_security.side_effect = security_error
+            mock_security.apply_security_to_tool_response.side_effect = security_error
 
             with pytest.raises(SecurityException):
                 await tool_node.run(flow_state_with_tool_calls)
@@ -465,12 +475,14 @@ class TestToolNodeSecurity:
         with patch(
             "duo_workflow_service.agent_platform.experimental.components.agent.nodes.tool_node.PromptSecurity"
         ) as mock_security:
-            mock_security.apply_security.return_value = "Sanitized safe response"
+            mock_security.apply_security_to_tool_response.return_value = (
+                "Sanitized safe response"
+            )
 
             result = await tool_node.run(flow_state_with_tool_calls)
 
             # Verify sanitization was called
-            mock_security.apply_security.assert_called_once_with(
+            mock_security.apply_security_to_tool_response.assert_called_once_with(
                 response="Tool execution result", tool_name=mock_tool.name
             )
 
