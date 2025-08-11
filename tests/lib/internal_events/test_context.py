@@ -36,6 +36,7 @@ def test_event_context_custom_values():
 
 
 def test_current_event_context_default():
+    current_event_context.set(EventContext())
     assert isinstance(current_event_context, ContextVar)
     assert isinstance(current_event_context.get(), EventContext)
     assert current_event_context.get().environment == "development"

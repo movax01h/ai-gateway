@@ -129,15 +129,12 @@ class ToolNode:
             return err_format
 
     def _sanitize_response(
-        self, response: str | list | dict, tool_name: str
-    ) -> str | list:
+        self, response: str | dict | list, tool_name: str
+    ) -> str | list[str | dict]:
         try:
-            sanitized = PromptSecurity.apply_security(
+            return PromptSecurity.apply_security_to_tool_response(
                 response=response, tool_name=tool_name
             )
-            if not isinstance(sanitized, (list, str)):
-                raise ValueError("Sanitized response is neither string nor list")
-            return sanitized
         except SecurityException as e:
             self._logger.error(f"Security validation failed for tool {tool_name}: {e}")
             raise
