@@ -4,7 +4,7 @@ from unittest.mock import AsyncMock, patch
 import pytest
 from starlette.requests import Request
 
-from ai_gateway.api.middleware import DistributedTraceMiddleware
+from ai_gateway.api.middleware.distributed_trace import DistributedTraceMiddleware
 
 
 @pytest.fixture(name="distributed_trace_middleware_development")
@@ -43,7 +43,7 @@ async def test_middleware_distributed_trace_enabled_in_development(
     # pylint: disable=direct-environment-variable-reference
     with patch.dict(os.environ, {"LANGCHAIN_TRACING_V2": "true"}):
         with patch(
-            "ai_gateway.api.middleware.base.tracing_context"
+            "ai_gateway.api.middleware.distributed_trace.tracing_context"
         ) as mock_tracing_context:
             await distributed_trace_middleware_development(scope, receive, send)
 
@@ -76,7 +76,7 @@ async def test_middleware_distributed_trace_disabled_in_development_without_head
     # pylint: disable=direct-environment-variable-reference
     with patch.dict(os.environ, {"LANGCHAIN_TRACING_V2": "true"}):
         with patch(
-            "ai_gateway.api.middleware.base.tracing_context"
+            "ai_gateway.api.middleware.distributed_trace.tracing_context"
         ) as mock_tracing_context:
             await distributed_trace_middleware_development(scope, receive, send)
 
@@ -111,7 +111,7 @@ async def test_middleware_distributed_trace_disabled_in_non_development_environm
     # pylint: disable=direct-environment-variable-reference
     with patch.dict(os.environ, {"LANGCHAIN_TRACING_V2": "true"}):
         with patch(
-            "ai_gateway.api.middleware.base.tracing_context"
+            "ai_gateway.api.middleware.distributed_trace.tracing_context"
         ) as mock_tracing_context:
             await distributed_trace_middleware_test(scope, receive, send)
 

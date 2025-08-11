@@ -7,7 +7,6 @@ from typing import Optional
 import structlog
 from asgi_correlation_id.context import correlation_id
 from fastapi import status
-from langsmith.run_helpers import tracing_context
 from starlette.datastructures import MutableHeaders
 from starlette.middleware.base import Request
 from starlette_context import context as starlette_context
@@ -169,11 +168,10 @@ class AccessLogMiddleware:
             )
 
 
-class DistributedTraceMiddleware:
-    """Middleware for distributed tracing."""
-
-    def __init__(self, app, skip_endpoints, environment):
+class InternalEventMiddleware:
+    def __init__(self, app, skip_endpoints, enabled, environment):
         self.app = app
+        self.enabled = enabled
         self.environment = environment
         self.path_resolver = _PathResolver.from_optional_list(skip_endpoints)
 
@@ -192,8 +190,4 @@ class DistributedTraceMiddleware:
         # Langsmith::RunHelpers of GitLab-Rails/Sidekiq.
         # See https://docs.gitlab.com/ee/development/ai_features/duo_chat.html#tracing-with-langsmith
         # and https://docs.smith.langchain.com/how_to_guides/tracing/distributed_tracing
-        with tracing_context(
-            parent=request.headers.get("langsmith-trace"),
-            enabled=self.environment == "development",
-        ):
-            await self.app(scope, receive, send)
+        await self.app(scope, receive, send)
