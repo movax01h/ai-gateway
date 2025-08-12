@@ -44,7 +44,7 @@ Tests run in parallel by default for speed. If you need to debug a specific test
 individually. To run a single test file, use the following command:
 
 ```shell
-poetry run pytest {name of test file}
+poetry run pytest -vv -W default {name of test file}
 ```
 
 If you run into an error `command not found: pytest` try to run `make install-test-deps` first. This command will install `pytest` and will make your shell ready to run the tests.
