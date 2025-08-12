@@ -8,7 +8,10 @@ from langgraph.checkpoint.memory import BaseCheckpointSaver
 from langgraph.graph import END, StateGraph
 from langgraph.types import Command
 
-from ai_gateway.model_metadata import current_model_metadata_context
+from ai_gateway.model_metadata import (
+    ModelSelectionMetadata,
+    current_model_metadata_context,
+)
 from duo_workflow_service.agents.chat_agent import ChatAgent
 from duo_workflow_service.agents.tools_executor import ToolsExecutor
 from duo_workflow_service.checkpointer.gitlab_workflow import WorkflowStatusEventEnum
@@ -212,11 +215,21 @@ class Workflow(AbstractWorkflow):
         tools = self._get_tools()
         agents_toolset = tools_registry.toolset(tools)
 
+        prompt_version = "^1.0.0"
+        model_metadata = current_model_metadata_context.get()
+        if not model_metadata and is_feature_enabled(
+            FeatureFlag.DUO_AGENTIC_CHAT_OPENAI_GPT_5
+        ):
+            # temporary approach: model selection doesn't support feature flags
+            model_metadata = ModelSelectionMetadata(
+                name="gpt_5"
+            )  # it will force the prompt registry load the chat/agent/gpt_5 prompt
+
         self._agent: ChatAgent = self._prompt_registry.get_on_behalf(  # type: ignore[assignment]
             user=self._user,
             prompt_id="chat/agent",
-            prompt_version="^1.0.0",
-            model_metadata=current_model_metadata_context.get(),
+            prompt_version=prompt_version,
+            model_metadata=model_metadata,
             internal_event_category=__name__,
             tools=agents_toolset.bindable,  # type: ignore[arg-type]
         )

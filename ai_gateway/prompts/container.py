@@ -21,6 +21,7 @@ class ContainerPrompts(containers.DeclarativeContainer):
             "chat/react": chat.ReActAgent,
             "chat/react/vertex": chat.ReActAgent,
             "chat/agent": "duo_workflow_service.agents.chat_agent.ChatAgent",
+            "chat/agent/gpt_5": "duo_workflow_service.agents.chat_agent.ChatAgent",
             "workflow/executor": "duo_workflow_service.agents.AgentV2",
             "workflow/context_builder": "duo_workflow_service.agents.AgentV2",
             "workflow/planner": "duo_workflow_service.agents.AgentV2",
@@ -30,6 +31,7 @@ class ContainerPrompts(containers.DeclarativeContainer):
             ModelClassProvider.ANTHROPIC: providers.Factory(
                 models.anthropic_claude_chat_fn
             ),
+            ModelClassProvider.OPENAI: providers.Factory(models.openai_chat_fn),
             ModelClassProvider.LITE_LLM: providers.Factory(models.lite_llm_chat_fn),
             ModelClassProvider.AMAZON_Q: providers.Factory(models.amazon_q_chat_fn),
         },

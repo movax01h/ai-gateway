@@ -9,6 +9,7 @@ from pydantic import HttpUrl
 from ai_gateway.model_metadata import (
     AmazonQModelMetadata,
     ModelMetadata,
+    ModelSelectionMetadata,
     create_model_metadata,
 )
 from ai_gateway.model_selection import (
@@ -271,3 +272,13 @@ def test_create_model_metadata_with_none_data():
 def test_create_model_metadata_without_provider():
     result = create_model_metadata({"name": "test"})
     assert result is None
+
+
+def test_model_selection_metadata():
+    model_metadata = ModelSelectionMetadata(name="gpt_5")
+
+    params = model_metadata.to_params()
+
+    assert not params
+    assert model_metadata.name == "gpt_5"
+    assert model_metadata.provider == ""  # Empty string for backward compatibility

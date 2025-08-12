@@ -5,13 +5,23 @@ from unittest.mock import Mock
 
 import pytest
 from dependency_injector import containers, providers
+from dependency_injector.providers import Factory
 from pydantic import AnyUrl
 
 from ai_gateway.config import ConfigModelLimits
 from ai_gateway.model_metadata import ModelMetadata
+from ai_gateway.prompts.config import ChatOpenAIParams, ModelClassProvider
 from ai_gateway.prompts.registry import LocalPromptRegistry
 from duo_workflow_service import agents as workflow
 from duo_workflow_service.gitlab.http_client import GitlabHttpClient
+
+
+@pytest.fixture(autouse=True, scope="module")
+def patch_env():
+    mp = pytest.MonkeyPatch()
+    mp.setenv("OPENAI_API_KEY", "test-key")
+    yield
+    mp.undo()
 
 
 @pytest.fixture(name="config_values")
@@ -101,3 +111,35 @@ def test_container(mock_ai_gateway_container: containers.DeclarativeContainer):
             )
             assert isinstance(prompt, klass)
             assert prompt.model.disable_streaming
+
+
+def test_container_openai_model_factory_exists(
+    mock_ai_gateway_container: containers.DeclarativeContainer,
+):
+    from langchain_openai import ChatOpenAI  # pylint: disable=import-outside-toplevel
+
+    prompts = cast(providers.Container, mock_ai_gateway_container.pkg_prompts)
+    registry = cast(LocalPromptRegistry, prompts.prompt_registry())
+
+    # Test that the OpenAI provider is registered in the model_factory_mapping
+    assert ModelClassProvider.OPENAI in registry.model_factories
+
+    factory = registry.model_factories[ModelClassProvider.OPENAI]
+    assert isinstance(factory, Factory)
+
+    params = ChatOpenAIParams(
+        temperature=1,
+        max_tokens=1_028,
+        max_retries=1,
+        model_class_provider=ModelClassProvider.OPENAI,
+    )
+    model: ChatOpenAI = factory(
+        model="gpt-4",
+        **params.model_dump(exclude_none=True, exclude={"model_class_provider"}),
+    )
+
+    assert model.model_name == "gpt-4"
+    assert model.temperature == 1.0
+    assert model.max_tokens == 1_028
+    assert model.max_retries == 1
+    assert model.output_version == "responses/v1"

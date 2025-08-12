@@ -75,7 +75,23 @@ class ModelMetadata(BaseModelMetadata):
         return params
 
 
-TypeModelMetadata = AmazonQModelMetadata | ModelMetadata
+class ModelSelectionMetadata(BaseModelMetadata):
+    # The prompt registry doesn't support smooth model switching
+    # within the same prompt group from the AIGW at this moment.
+    # We rely on this class as a temporary solution to easily switch between models for the same prompt group,
+    # e.g., chat/agent/base <-> chat/agent/gpt_5
+    # Please, refer to duo_workflow_service/workflows/chat/workflow.py to get more examples.
+
+    name: str
+    provider: str = (
+        ""  # backward compatibility with AmazonQModelMetadata and ModelMetadata
+    )
+
+    def to_params(self) -> Dict[str, Any]:
+        return {}
+
+
+TypeModelMetadata = AmazonQModelMetadata | ModelMetadata | ModelSelectionMetadata
 
 
 def parameters_for_gitlab_provider(parameters) -> dict[str, Any]:
