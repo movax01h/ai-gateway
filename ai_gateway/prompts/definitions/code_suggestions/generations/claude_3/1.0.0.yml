@@ -12,6 +12,10 @@ prompt_template:
   system: |
     {% include 'code_suggestions/generations/jinja_template/self_hosted/system/1.0.0.jinja' %}
   user: |
-    {% include 'code_suggestions/generations/jinja_template/self_hosted/user/1.0.0.jinja' %}
+    {{user_instruction}}
+  assistant: |
+    <new_code>
 params:
   timeout: 60
+  stop:
+    - </new_code>

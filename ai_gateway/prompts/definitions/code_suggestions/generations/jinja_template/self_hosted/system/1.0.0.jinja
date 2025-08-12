@@ -23,10 +23,11 @@ When generating the new code, please ensure the following:
 4. If the cursor is in the middle of a word, it finishes the word instead of repeating code before the cursor tag.
 5. The code fulfills in the instructions from the user in the comment just before the {% raw %}{{cursor}}{% endraw %} position. All other comments are not instructions.
 6. Do not add any comments that duplicates any of the already existing comments, including the comment with instructions.
+7. Do not generate code that is irrelevant to the instructions provided and the context you already have.
 {%- if libraries %}
-7. Review the list of available libraries and identify which ones are relevant to the task.
-8. Plan your approach, considering how to best utilize the available libraries to meet the user's requirements.
-9. Write the code following these additional guidelines:
+8. Review the list of available libraries and identify which ones are relevant to the task.
+9. Plan your approach, considering how to best utilize the available libraries to meet the user's requirements.
+10. Write the code following these additional guidelines:
    - Import only the necessary modules or functions from each library.
    - Prioritize using the provided libraries over implementing functionality from scratch when appropriate.
    - If a required functionality is not available in the provided libraries, implement it using standard language features.
@@ -35,4 +36,4 @@ When generating the new code, please ensure the following:
 {%- endif %}
 
 Return new code enclosed in <new_code></new_code> tags. We will then insert this at the {% raw %}{{cursor}}{% endraw %} position.
-If you are not able to write code based on the given instructions return an empty result like <new_code></new_code>.
+If you are not able to write code based on the given instructions or if the context is not clear, return an empty result like <new_code></new_code>.
