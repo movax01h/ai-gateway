@@ -184,8 +184,21 @@ class AbstractWorkflow(ABC):
     def outbox_empty(self):
         return self._outbox.empty()
 
-    async def get_from_outbox(self):
-        item = await asyncio.wait_for(self._outbox.get(), self.OUTBOX_CHECK_INTERVAL)
+    async def get_from_outbox(self) -> contract_pb2.Action | None:
+        try:
+            self.log.debug("Waiting for getting action from outbox...")
+            # `outbox.put` could hung indefinitely if the queue is full and no tasks get an item from it.
+            # There are several cases when this could happen:
+            # - Connection between client and server is terminated during the workflow is running
+            # - Deadlock between workflow and client-server message loop
+            # TODO: Handle the `asyncio.TimeoutError` properly.
+            item = await asyncio.wait_for(
+                self._outbox.get(), self.OUTBOX_CHECK_INTERVAL
+            )
+        except TimeoutError as err:
+            self.log.debug("Timeout on getting action from outbox", err=err)
+            return None
+
         self._outbox.task_done()
         return item
 
@@ -267,7 +280,6 @@ class AbstractWorkflow(ABC):
                         await checkpoint_notifier.send_event(
                             type=type, state=state, stream=self._stream
                         )
-
         except BaseException as e:
             await self._handle_workflow_failure(e, compiled_graph, graph_config)
             raise TraceableException(e)

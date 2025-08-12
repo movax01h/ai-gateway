@@ -311,7 +311,8 @@ class TestFlow:
                 mock_log_exception_call[0][0]
             )
             assert mock_log_exception_call[1]["extra"] == {
-                "workflow_id": "duplicated-workflow-123"
+                "workflow_id": "duplicated-workflow-123",
+                "source": "duo_workflow_service.agent_platform.experimental.flows.base",
             }
 
     @pytest.mark.asyncio

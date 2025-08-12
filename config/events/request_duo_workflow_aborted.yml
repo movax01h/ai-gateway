@@ -1,0 +1,18 @@
+---
+description: Tracks aborted Duo Workflow executions
+internal_events: true
+action: request_duo_workflow_aborted
+product_group: duo_workflow
+additional_properties:
+  label:
+    description: Workflow event type label
+  property:
+    description: Workflow aborted reason
+  value:
+    description: Workflow Id that can be used to connect this event to others that happen when the workflow is completed.
+milestone: '18.3'
+introduced_by_url: https://gitlab.com/gitlab-org/modelops/applied-ml/code-suggestions/ai-assist/-/merge_requests/3093
+distributions:
+  - ee
+tiers:
+  - ultimate
