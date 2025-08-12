@@ -54,7 +54,7 @@ from duo_workflow_service.interceptors.monitoring_interceptor import (
     MonitoringInterceptor,
 )
 from duo_workflow_service.llm_factory import validate_llm_access
-from duo_workflow_service.monitoring import setup_monitoring
+from duo_workflow_service.monitoring import duo_workflow_metrics, setup_monitoring
 from duo_workflow_service.profiling import setup_profiling
 from duo_workflow_service.structured_logging import set_workflow_id, setup_logging
 from duo_workflow_service.tracking import MonitoringContext, current_monitoring_context
@@ -176,6 +176,10 @@ class DuoWorkflowService(contract_pb2_grpc.DuoWorkflowServicer):
         workflow_id = start_workflow_request.startRequest.workflowID
         set_workflow_id(workflow_id)
         log.info("Starting workflow %s", clean_start_request(start_workflow_request))
+        workflow_type = string_to_category_enum(workflow_definition)
+        duo_workflow_metrics.count_agent_platform_receive_start_counter(
+            flow_type=workflow_type
+        )
 
         goal = start_workflow_request.startRequest.goal
 
@@ -203,8 +207,6 @@ class DuoWorkflowService(contract_pb2_grpc.DuoWorkflowServicer):
         mcp_tools = []
         if start_workflow_request.startRequest.mcpTools:
             mcp_tools = list(start_workflow_request.startRequest.mcpTools)
-
-        workflow_type = string_to_category_enum(workflow_definition)
 
         # for testing purposes stub to
         # workflow_class: FlowFactory = resolve_workflow_class("prototype/experimental")

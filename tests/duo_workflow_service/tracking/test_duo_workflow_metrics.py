@@ -31,6 +31,7 @@ class TestDuoWorkflowMetrics(unittest.TestCase):
             "agent_platform_session_success_counter",
             "agent_platform_session_failure_counter",
             "agent_platform_tool_failure_counter",
+            "agent_platform_receive_start_counter",
         ]:
             mock_histogram = MagicMock()
             setattr(self.metrics, metric_name, mock_histogram)
@@ -265,6 +266,14 @@ class TestDuoWorkflowMetrics(unittest.TestCase):
             flow_type="test_flow_type",
             tool_name="test_tool",
             failure_reason="test_error",
+        )
+
+    def test_agent_platform_receive_start_counter(self):
+        self._assert_counter_called(
+            "agent_platform_receive_start_counter",
+            "count_agent_platform_receive_start_counter",
+            {"flow_type": "test_flow_type"},
+            flow_type="test_flow_type",
         )
 
 

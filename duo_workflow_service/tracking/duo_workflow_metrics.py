@@ -124,6 +124,13 @@ class DuoWorkflowMetrics:  # pylint: disable=too-many-instance-attributes
             registry=registry,
         )
 
+        self.agent_platform_receive_start_counter = Counter(
+            "agent_platform_receive_start_total",
+            "Count of receive start events in Duo Workflow",
+            ["flow_type"],
+            registry=registry,
+        )
+
     def count_llm_response(
         self, model="unknown", request_type="unknown", stop_reason="unknown"
     ):
@@ -197,6 +204,14 @@ class DuoWorkflowMetrics:  # pylint: disable=too-many-instance-attributes
             flow_type=flow_type,
             tool_name=tool_name,
             failure_reason=failure_reason,
+        ).inc()
+
+    def count_agent_platform_receive_start_counter(
+        self,
+        flow_type: str = "unknown",
+    ) -> None:
+        self.agent_platform_receive_start_counter.labels(
+            flow_type=flow_type,
         ).inc()
 
     def time_llm_request(self, model="unknown", request_type="unknown"):
