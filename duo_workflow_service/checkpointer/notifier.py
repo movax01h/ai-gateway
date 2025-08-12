@@ -18,6 +18,8 @@ from duo_workflow_service.entities.state import (
 )
 from duo_workflow_service.json_encoder.encoder import CustomEncoder
 
+TIMEOUT_OUTBOX_PUT = 60
+
 
 class UserInterface:
     def __init__(
@@ -71,7 +73,12 @@ class UserInterface:
             ),
         )
 
-        return await self.outbox.put(action)
+        # `outbox.put` could hung indefinitely if the queue is full and no tasks get an item from it.
+        # There are several cases when this could happen:
+        # - Connection between client and server is terminated while the workflow is running
+        # - Deadlock between workflow and client-server message loop
+        # TODO: Handle the `asyncio.TimeoutError` properly. https://gitlab.com/gitlab-org/gitlab/-/issues/560538
+        return await asyncio.wait_for(self.outbox.put(action), TIMEOUT_OUTBOX_PUT)
 
     def _append_chunk_to_ui_chat_log(self, message: BaseMessage) -> bool:
         """Append a message chunk to the UI chat log.

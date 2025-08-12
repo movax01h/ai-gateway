@@ -1,5 +1,6 @@
 # pylint: disable=super-init-not-called,direct-environment-variable-reference,no-else-return,broad-exception-raised,attribute-defined-outside-init
 
+import asyncio
 import base64
 import functools
 import json
@@ -380,8 +381,15 @@ class GitLabWorkflow(BaseCheckpointSaver[Any], AbstractAsyncContextManager[Any])
             value=self._workflow_id,
             error_type=type(exc_value).__name__,
         )
+
+        event = EventEnum.WORKFLOW_FINISH_FAILURE
+
+        if isinstance(exc_value, asyncio.exceptions.CancelledError):
+            # When this workflow task is cancelled by `workflow_task.cancel`, `CancelledError` is raised.
+            event = EventEnum.WORKFLOW_ABORTED
+
         self._track_internal_event(
-            event_name=EventEnum.WORKFLOW_FINISH_FAILURE,
+            event_name=event,
             additional_properties=properties,
         )
 

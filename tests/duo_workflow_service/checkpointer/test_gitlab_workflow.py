@@ -1,3 +1,4 @@
+import asyncio
 import json
 from typing import Any, Optional, Sequence, TypedDict
 from unittest.mock import AsyncMock, Mock, call, patch
@@ -676,6 +677,31 @@ async def test_workflow_context_manager_retry_success(
 
 @pytest.mark.asyncio
 @patch("duo_workflow_service.checkpointer.gitlab_workflow.duo_workflow_metrics")
+@pytest.mark.parametrize(
+    "exception,expected_event_name,expected_additional_properties",
+    [
+        (
+            ValueError("Test error"),
+            EventEnum.WORKFLOW_FINISH_FAILURE.value,
+            InternalEventAdditionalProperties(
+                label=EventLabelEnum.WORKFLOW_FINISH_LABEL.value,
+                property="ValueError('Test error')",
+                value="1234",
+                error_type="ValueError",
+            ),
+        ),
+        (
+            asyncio.exceptions.CancelledError("Task cancelled"),
+            EventEnum.WORKFLOW_ABORTED.value,
+            InternalEventAdditionalProperties(
+                label=EventLabelEnum.WORKFLOW_FINISH_LABEL.value,
+                property="CancelledError('Task cancelled')",
+                value="1234",
+                error_type="CancelledError",
+            ),
+        ),
+    ],
+)
 async def test_workflow_context_manager_error(
     mock_duo_workflow_metrics,
     gitlab_workflow,
@@ -683,6 +709,9 @@ async def test_workflow_context_manager_error(
     workflow_id,
     workflow_type,
     internal_event_client: Mock,
+    exception,
+    expected_event_name,
+    expected_additional_properties,
 ):
     # Create a workflow config with no checkpoint to trigger START
     workflow_config = {
@@ -712,9 +741,9 @@ async def test_workflow_context_manager_error(
     http_client.aget.side_effect = mock_aget
     http_client.apatch.return_value = GitLabHttpResponse(status_code=200, body={})
 
-    with pytest.raises(ValueError):
+    with pytest.raises(type(exception)):
         async with gitlab_workflow:
-            raise ValueError("Test error")
+            raise exception
 
     http_client.apatch.assert_called_with(
         path=f"/api/v4/ai/duo_workflows/workflows/{workflow_id}",
@@ -741,23 +770,19 @@ async def test_workflow_context_manager_error(
                 category=workflow_type,
             ),
             call(
-                event_name=EventEnum.WORKFLOW_FINISH_FAILURE.value,
-                additional_properties=InternalEventAdditionalProperties(
-                    label=EventLabelEnum.WORKFLOW_FINISH_LABEL.value,
-                    property="ValueError('Test error')",
-                    value="1234",
-                    error_type="ValueError",
-                ),
+                event_name=expected_event_name,
+                additional_properties=expected_additional_properties,
                 category=workflow_type,
             ),
         ]
     )
 
     # Verify the failure metric was called
-    mock_duo_workflow_metrics.count_agent_platform_session_failure.assert_called_once_with(
-        flow_type=workflow_type.value,
-        failure_reason="ValueError",
-    )
+    if isinstance(exception, ValueError):
+        mock_duo_workflow_metrics.count_agent_platform_session_failure.assert_called_once_with(
+            flow_type=workflow_type.value,
+            failure_reason="ValueError",
+        )
 
 
 @pytest.mark.asyncio

@@ -127,9 +127,10 @@ async def test_execute_workflow_when_nothing_in_outbox(
 
     def side_effect():
         mock_workflow.is_done = True
-        raise TimeoutError
 
-    mock_workflow.get_from_outbox = AsyncMock(side_effect=side_effect)
+    mock_workflow.get_from_outbox = AsyncMock(
+        side_effect=side_effect, return_value=None
+    )
 
     async def mock_request_iterator() -> AsyncIterable[contract_pb2.ClientEvent]:
         yield contract_pb2.ClientEvent(
@@ -189,7 +190,7 @@ async def test_workflow_is_cancelled_on_parent_task_cancellation(
         assert real_workflow_task.cancelled()
 
         mock_context.abort.assert_called_once_with(
-            grpc.StatusCode.INTERNAL, "Something went wrong"
+            grpc.StatusCode.ABORTED, "Operation was aborted by client"
         )
 
 

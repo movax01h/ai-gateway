@@ -130,6 +130,15 @@ async def test_get_from_outbox(workflow):
 
 
 @pytest.mark.asyncio
+async def test_get_from_outbox_wait_for(workflow):
+    assert workflow._outbox.empty()
+
+    item = await workflow.get_from_outbox()
+
+    assert item == None
+
+
+@pytest.mark.asyncio
 async def test_get_from_streaming_outbox(workflow):
     await workflow._streaming_outbox.put("test_item")
 

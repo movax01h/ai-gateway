@@ -68,6 +68,11 @@ from lib.internal_events.event_enum import CategoryEnum
 
 CONTAINER_APPLICATION_PACKAGES = ["duo_workflow_service"]
 
+
+class GRPCMessageReceiverEOFError(Exception):
+    """Error that is raised when the grpc message receiver reaches EOF of client messages."""
+
+
 log = structlog.stdlib.get_logger("server")
 
 catalog = data_model.load_catalog()
@@ -231,59 +236,49 @@ class DuoWorkflowService(contract_pb2_grpc.DuoWorkflowServicer):
 
         async def send_events():
             while not workflow.is_done:
-                try:
-                    streaming_action = workflow.get_from_streaming_outbox()
-                    if isinstance(streaming_action, contract_pb2.Action):
-                        yield streaming_action
+                streaming_action = workflow.get_from_streaming_outbox()
+                if isinstance(streaming_action, contract_pb2.Action):
+                    yield streaming_action
 
-                        if (
-                            invocation_metadata.get(
-                                "x-gitlab-unidirectional-streaming", ""
-                            )
-                            != "enabled"
-                        ):
-                            await next_non_heartbeat_event(request_iterator)
+                    if (
+                        invocation_metadata.get("x-gitlab-unidirectional-streaming", "")
+                        != "enabled"
+                    ):
+                        await next_non_heartbeat_event(request_iterator)
 
-                        if workflow.outbox_empty():
-                            continue
+                    if workflow.outbox_empty():
+                        continue
 
-                    action = await workflow.get_from_outbox()
+                action = await workflow.get_from_outbox()
 
-                    if isinstance(action, contract_pb2.Action):
-                        log.info(
-                            "Read action from the egress queue",
-                            requestID=action.requestID,
-                            action_class=action.WhichOneof("action"),
-                        )
+                if action is None:
+                    continue
 
-                    yield action
-
-                    event: contract_pb2.ClientEvent = await next_non_heartbeat_event(
-                        request_iterator
+                if isinstance(action, contract_pb2.Action):
+                    log.info(
+                        "Read action from the egress queue",
+                        requestID=action.requestID,
+                        action_class=action.WhichOneof("action"),
                     )
 
-                    workflow.add_to_inbox(event)
-                    if (
-                        isinstance(event, contract_pb2.ClientEvent)
-                        and event.actionResponse
-                    ):
-                        log.info(
-                            "Wrote ClientEvent into the ingres queue",
-                            requestID=event.actionResponse.requestID,
-                        )
-                except TimeoutError as err:
-                    log.debug("Timeout on reading from queue, trying again", err=err)
-
-        workflow_task = None
-        try:
-            workflow_task = asyncio.create_task(workflow.run(goal))
-            async for action in send_events():
                 yield action
 
-            await workflow_task
-        except BaseException as err:
-            log_exception(err, extra={"workflow_id": workflow_id})
+                event: contract_pb2.ClientEvent = await next_non_heartbeat_event(
+                    request_iterator
+                )
+
+                workflow.add_to_inbox(event)
+                if isinstance(event, contract_pb2.ClientEvent) and event.actionResponse:
+                    log.info(
+                        "Wrote ClientEvent into the ingres queue",
+                        requestID=event.actionResponse.requestID,
+                    )
+
+        async def cancel_workflow(
+            workflow_task: Optional[asyncio.Task], err: BaseException
+        ):
             if workflow_task and not workflow_task.done():
+                log.info("Canceling workflow...")
                 workflow_task.cancel(
                     f"Terminated workflow {workflow_id} execution due to an {type(err).__name__}: {err}"
                 )
@@ -296,9 +291,46 @@ class DuoWorkflowService(contract_pb2_grpc.DuoWorkflowServicer):
                     await asyncio.wait_for(
                         workflow_task, timeout=self.TASK_CANCELLATION_TIMEOUT
                     )
-                except (asyncio.TimeoutError, asyncio.CancelledError):
-                    pass
+                except (asyncio.TimeoutError, asyncio.CancelledError) as ex:
+                    log_exception(ex, extra={"source": __name__})
 
+        workflow_task = None
+        try:
+            workflow_task = asyncio.create_task(workflow.run(goal))
+            async for action in send_events():
+                yield action
+
+            await workflow_task
+        except (GRPCMessageReceiverEOFError, asyncio.CancelledError) as err:
+            #
+            # GRPCMessageReceiverEOFError:
+            #
+            # This exception could happen when gRPC connection is established from client directly
+            # and the client disposed the gRPC client.
+            # e.g. User selects gRPC connection type in node executor, and cancel the workflow.
+            #
+            # asyncio.CancelledError:
+            #
+            # This exception could happen when gRPC connection is established from gitlab-workhorse
+            # and the gitlab-workhorse disposed the gRPC client.
+            # e.g. User selects websocket connection type in node executor, and cancel the workflow.
+            # NOTE:
+            # This `ExecuteWorkflow` coroutinue task could be cancelled by grpc lib when the connection is terminated.
+            # This exception is unrelated to `asyncio.CancelledError` exceptions raised in workflow's coroutinue tasks.
+            log_exception(err, extra={"source": __name__})
+            await cancel_workflow(workflow_task, err)
+            await context.abort(
+                grpc.StatusCode.ABORTED, "Operation was aborted by client"
+            )
+        except BaseException as err:
+            log_exception(
+                err,
+                extra={
+                    "workflow_id": workflow_id,
+                    "source": __name__,
+                },
+            )
+            await cancel_workflow(workflow_task, err)
             await context.abort(grpc.StatusCode.INTERNAL, "Something went wrong")
         finally:
             await workflow.cleanup(workflow_id)
@@ -364,7 +396,13 @@ async def next_non_heartbeat_event(
 ) -> contract_pb2.ClientEvent:
     """Consumes the request iterator until a non-heartbeat event is found."""
     while True:
-        event = await anext(aiter(request_iterator))
+        try:
+            event = await anext(aiter(request_iterator))
+        except StopAsyncIteration as ex:
+            raise GRPCMessageReceiverEOFError(
+                "Client message reached EOF. The connection might be terminated abruptly."
+            ) from ex
+
         if not event.HasField("heartbeat"):
             return event
 

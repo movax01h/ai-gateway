@@ -220,4 +220,6 @@ class Flow(AbstractWorkflow):
     async def _handle_workflow_failure(
         self, error: BaseException, compiled_graph: Any, graph_config: Any
     ):
-        log_exception(error, extra={"workflow_id": self._workflow_id})
+        log_exception(
+            error, extra={"workflow_id": self._workflow_id, "source": __name__}
+        )

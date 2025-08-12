@@ -496,7 +496,11 @@ async def test_handle_workflow_failure(mock_log_exception, workflow_with_project
     )
 
     mock_log_exception.assert_called_once_with(
-        error, extra={"workflow_id": workflow_with_project._workflow_id}
+        error,
+        extra={
+            "workflow_id": workflow_with_project._workflow_id,
+            "source": "duo_workflow_service.workflows.chat.workflow",
+        },
     )
 
 

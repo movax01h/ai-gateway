@@ -7,6 +7,7 @@ class EventEnum(StrEnum):
     WORKFLOW_PAUSE = "pause_duo_workflow"
     WORKFLOW_RETRY = "retry_request_duo_workflow"
     WORKFLOW_MESSAGE = "message_duo_workflow"
+    WORKFLOW_ABORTED = "request_duo_workflow_aborted"
     TOKEN_PER_USER_PROMPT = "tokens_per_user_request_prompt"
     WORKFLOW_FINISH_SUCCESS = "request_duo_workflow_success"
     WORKFLOW_FINISH_FAILURE = "request_duo_workflow_failure"
