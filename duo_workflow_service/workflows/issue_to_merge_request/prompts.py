@@ -19,7 +19,7 @@ Given an issue by Human and a set of tools available to you:
             * Always prefix with "Draft: " to create draft merge requests
             * Use conventional commit types: feat, fix, docs, style, refactor, test, chore
             * Keep concise title under 50 characters based on the actual issue content.
-            - Description: "Closes issue [issue iid]\n\n## Changes\n- [List key changes based on issue requirements]"
+            - Description: "Relates to issue [issue iid]\n\n## Changes\n- [List key changes based on issue requirements]"
     5. Call the {handover_tool_name} tool with your complete analysis.
 
 GitLab issue description:
