@@ -38,7 +38,6 @@ class ContainerPrompts(containers.DeclarativeContainer):
             ModelClassProvider.LITE_LLM: providers.Factory(models.lite_llm_chat_fn),
             ModelClassProvider.AMAZON_Q: providers.Factory(models.amazon_q_chat_fn),
         },
-        default_prompts=config.default_prompts,
         internal_event_client=internal_event.client,
         model_limits=providers.Factory(ConfigModelLimits, config.model_engine_limits),
         custom_models_enabled=config.custom_models.enabled,
