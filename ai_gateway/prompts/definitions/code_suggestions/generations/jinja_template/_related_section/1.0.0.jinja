@@ -1,0 +1,19 @@
+{%- if related_files or related_snippets %}
+Here are some files and code snippets that could be related to the current code.
+The files provided in <related_files></related_files> tags.
+The code snippets provided in <related_snippets></related_snippets> tags.
+Please use existing functions from these files and code snippets if possible when suggesting new code.
+
+{%- if related_files %}
+<related_files>
+{{("\n").join(related_files)}}
+</related_files>
+{%- endif %}
+
+{%- if related_snippets %}
+<related_snippets>
+{{("\n").join(related_snippets)}}
+</related_snippets>
+{%- endif %}
+
+{%- endif %}
