@@ -73,6 +73,7 @@ sentry-sdk = "^2.17.0"
 websockets = "^15.0.1"
 langgraph-checkpoint = "2.0.26"
 gitmatch = "^0.2.1"
+langchain-openai = "^0.3.28"
 
 [[tool.poetry.source]]
 name = "gitlab_cloud_connector"

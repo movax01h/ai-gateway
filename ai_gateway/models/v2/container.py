@@ -1,4 +1,5 @@
 from dependency_injector import containers, providers
+from langchain_openai import ChatOpenAI
 from litellm.llms.custom_httpx.http_handler import AsyncHTTPHandler
 
 from ai_gateway.integrations.amazon_q.chat import ChatAmazonQ
@@ -56,6 +57,8 @@ class ContainerModels(containers.DeclarativeContainer):
         mocked=providers.Factory(mock.FakeModel),
         agentic=providers.Factory(mock.AgenticFakeModel),
     )
+
+    openai_chat_fn = providers.Factory(ChatOpenAI, output_version="responses/v1")
 
     lite_llm_chat_fn = providers.Factory(_litellm_factory)
     amazon_q_chat_fn = providers.Factory(
