@@ -669,6 +669,9 @@ async def test_workflow_context_manager_retry_success(
     mock_duo_workflow_metrics.count_agent_platform_session_success.assert_called_once_with(
         flow_type=workflow_type.value,
     )
+    mock_duo_workflow_metrics.count_agent_platform_session_retry.assert_called_once_with(
+        flow_type=workflow_type.value,
+    )
 
 
 @pytest.mark.asyncio

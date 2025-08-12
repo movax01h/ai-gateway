@@ -223,6 +223,12 @@ class GitLabWorkflow(BaseCheckpointSaver[Any], AbstractAsyncContextManager[Any])
                 flow_type=self._workflow_type.value,
             )
 
+        # For flow retry events
+        if event_name == EventEnum.WORKFLOW_RETRY:
+            duo_workflow_metrics.count_agent_platform_session_retry(
+                flow_type=self._workflow_type.value,
+            )
+
         # For session success events
         if event_name == EventEnum.WORKFLOW_FINISH_SUCCESS:
             duo_workflow_metrics.count_agent_platform_session_success(

@@ -103,6 +103,13 @@ class DuoWorkflowMetrics:  # pylint: disable=too-many-instance-attributes
             registry=registry,
         )
 
+        self.agent_platform_session_retry_counter = Counter(
+            "agent_platform_session_retry_total",
+            "Count of flow retry events in Duo Workflow",
+            ["flow_type"],
+            registry=registry,
+        )
+
         self.agent_platform_session_success_counter = Counter(
             "agent_platform_session_success_total",
             "Count of successful flow completions in Duo Workflow",
@@ -173,6 +180,14 @@ class DuoWorkflowMetrics:  # pylint: disable=too-many-instance-attributes
         flow_type: str = "unknown",
     ) -> None:
         self.agent_platform_session_start_counter.labels(
+            flow_type=flow_type,
+        ).inc()
+
+    def count_agent_platform_session_retry(
+        self,
+        flow_type: str = "unknown",
+    ) -> None:
+        self.agent_platform_session_retry_counter.labels(
             flow_type=flow_type,
         ).inc()
 
