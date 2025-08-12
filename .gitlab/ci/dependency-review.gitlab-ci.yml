@@ -1,0 +1,34 @@
+.ping-appsec-for-dependency-review:rules:
+  rules:
+    # Requiring $DEPENDENCY_REVIEW_PAT prevents the bot from running on forks or CE
+    # Without it the script would fail too
+    - if: "$DEPENDENCY_REVIEW_PAT == null"
+      when: never
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+      changes:
+        - poetry.lock
+        - "*/poetry.lock"
+      when: always
+    - when: never
+  allow_failure: true
+
+dependency_check:
+  stage: test
+  image: docker:20.10.23
+  services:
+    - docker:20.10.23-dind
+  extends: [".ping-appsec-for-dependency-review:rules"]
+  needs: []
+  variables:
+    GIT_CHECKOUT: "false"
+    DISABLE_MENTIONS: "false"
+    DISABLE_SCORING: "false"
+    DISABLE_COMMENTING: "false"
+    IMAGE_BRANCH: "master"
+    DEPENDENCY_REVIEW_BOT_CI_REG: "${CI_REGISTRY}/gitlab-com/gl-security/product-security/appsec/tooling/depscore/${IMAGE_BRANCH}"
+  before_script:
+    - apk add jq curl
+    - DEPENDENCY_REVIEW_BOT_UNAME=$(curl --header "PRIVATE-TOKEN:$DEPENDENCY_REVIEW_PAT" "https://gitlab.com/api/v4/user" | jq -r '.username')
+    - echo "$DEPENDENCY_REVIEW_PAT" | docker login --password-stdin -u "$DEPENDENCY_REVIEW_BOT_UNAME" -- "$DEPENDENCY_REVIEW_BOT_CI_REG"
+  script:
+    - docker run --interactive --rm "$DEPENDENCY_REVIEW_BOT_CI_REG:latest" -t "$DEPENDENCY_REVIEW_PAT" -p "$CI_PROJECT_ID" -m "$CI_MERGE_REQUEST_IID" -s "$DISABLE_SCORING" -a "$DISABLE_MENTIONS" -c "$DISABLE_COMMENTING"
