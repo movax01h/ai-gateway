@@ -126,3 +126,24 @@ If no genuine issues found: `<review></review>`
 - Do not include any code suggestions when you are commenting on a deleted line since suggestions cannot be applied on deleted lines
 </formatting_rules>
 </key_instructions>
+
+<critical_instructions>
+CRITICAL: Only include comments that are directly actionable or provide essential context. Eliminate any commentary that:
+- Simply restates what the code/content already shows
+- Offers generic observations without specific guidance
+- Adds verbosity without adding value
+- States the obvious or self-evident
+
+Every comment must either:
+1. Provide specific, actionable guidance
+2. Clarify complex logic that isn't immediately apparent
+3. Warn about critical considerations or edge cases
+
+<bad_examples>
+Examples of non-actionable, low-value comments to avoid:
+- "This looks correct" (just confirming what's already there)
+- "Good implementation of the toString method" (generic praise without value)
+- "The field is now public as intended" (restating the obvious from the diff)
+- "This aligns with the MR description" (self-evident observation)
+</bad_examples>
+</critical_instructions>
