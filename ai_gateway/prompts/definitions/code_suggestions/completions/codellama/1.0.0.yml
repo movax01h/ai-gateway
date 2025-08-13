@@ -1,12 +1,10 @@
 ---
 name: Codellama 13B-Code Code Completions
 model:
-  name: codellama_13b_code
   params:
     model_class_provider: litellm
     temperature: 0.95
     max_tokens: 128
-    max_retries: 1
 unit_primitives:
   - complete_code
 prompt_template:

@@ -1,10 +1,10 @@
 ---
 name: code_review_fetch_data
 model:
-  config_file: claude_4_0
   params:
+    model_class_provider: anthropic
     max_tokens: 8_192
-  unit_primitives: []
+unit_primitives: []
 prompt_template:
   system: |
     You are a data fetcher for code review. Your task is to execute tools to gather all necessary merge request data including custom review instructions.

@@ -9,7 +9,6 @@ from pydantic import HttpUrl
 from ai_gateway.model_metadata import (
     AmazonQModelMetadata,
     ModelMetadata,
-    ModelSelectionMetadata,
     create_model_metadata,
 )
 from ai_gateway.model_selection import (
@@ -17,6 +16,42 @@ from ai_gateway.model_selection import (
     ModelSelectionConfig,
     UnitPrimitiveConfig,
 )
+
+
+@pytest.fixture(autouse=True)
+def get_llm_definitions():
+    mock_models = {
+        "gitlab_model1": LLMDefinition(
+            gitlab_identifier="gitlab_model1",
+            name="gitlab_model",
+            family=["mixtral"],
+            params={
+                "model_class_provider": "provider",
+                "model": "model_family",
+            },
+        ),
+        "amazon_q": LLMDefinition(
+            gitlab_identifier="amazon_q",
+            name="amazon_q",
+            family=["amazon_q"],
+            params={"model": "amazon_q"},
+        ),
+    }
+
+    mock_definitions = {
+        "duo_chat": UnitPrimitiveConfig(
+            feature_setting="duo_chat",
+            unit_primitives=[GitLabUnitPrimitive.DUO_CHAT],
+            default_model="gitlab_model1",
+        )
+    }
+
+    with patch.multiple(
+        ModelSelectionConfig,
+        get_llm_definitions=mock.Mock(return_value=mock_models),
+        get_unit_primitive_config_map=mock.Mock(return_value=mock_definitions),
+    ) as mock_method:
+        yield mock_method
 
 
 def test_create_amazon_q_model_metadata():
@@ -40,7 +75,7 @@ def test_create_amazon_q_model_metadata():
 def test_create_regular_model_metadata():
     # Arrange
     data = {
-        "name": "gpt-4",
+        "name": "gitlab_model1",
         "provider": "openai",
         "endpoint": "https://api.openai.com/v1",
         "api_key": "test-key",
@@ -52,41 +87,14 @@ def test_create_regular_model_metadata():
 
     # Assert
     assert isinstance(result, ModelMetadata)
-    assert result.name == "gpt-4"
+    assert result.name == "gitlab_model1"
     assert result.provider == "openai"
     assert str(result.endpoint) == "https://api.openai.com/v1"
     assert result.api_key == "test-key"
     assert result.identifier == "openai/gpt-4"
 
 
-class TestCreateGitlabModelMetadata:
-    @pytest.fixture(autouse=True)
-    def get_llm_definitions(self):
-        mock_models = {
-            "gitlab_model1": LLMDefinition(
-                gitlab_identifier="gitlab_model1",
-                name="gitlab_model",
-                provider="custom_openai",
-                provider_identifier="mixtral_8x7b",
-                family="mixtral",
-            )
-        }
-
-        mock_definitions = {
-            "duo_chat": UnitPrimitiveConfig(
-                feature_setting="duo_chat",
-                unit_primitives=[GitLabUnitPrimitive.DUO_CHAT],
-                default_model="gitlab_model1",
-            )
-        }
-
-        with patch.multiple(
-            ModelSelectionConfig,
-            get_llm_definitions=mock.Mock(return_value=mock_models),
-            get_unit_primitive_config_map=mock.Mock(return_value=mock_definitions),
-        ) as mock_method:
-            yield mock_method
-
+class TestCreateModelMetadata:
     def test_create_gitlab_model_metadata_with_identifier(self):
         data = {
             "provider": "gitlab",
@@ -95,9 +103,10 @@ class TestCreateGitlabModelMetadata:
 
         result = create_model_metadata(data)
 
-        assert result.provider == "custom_openai"
-        assert result.identifier == "mixtral_8x7b"
-        assert result.name == "mixtral"
+        assert result.llm_definition_params == {
+            "model_class_provider": "provider",
+            "model": "model_family",
+        }
 
     def test_create_gitlab_model_metadata_with_feature_setting(self):
         data = {
@@ -107,9 +116,10 @@ class TestCreateGitlabModelMetadata:
 
         result = create_model_metadata(data)
 
-        assert result.provider == "custom_openai"
-        assert result.identifier == "mixtral_8x7b"
-        assert result.name == "mixtral"
+        assert result.llm_definition_params == {
+            "model_class_provider": "provider",
+            "model": "model_family",
+        }
 
     def test_required_parameters(self):
         data = {
@@ -146,35 +156,43 @@ def test_create_model_metadata_invalid_data():
 
 class TestModelMetadataToParams:
     def test_without_identifier(self):
-        model_metadata = ModelMetadata(
-            name="model_family",
-            provider="provider",
-            endpoint=HttpUrl("https://api.example.com"),
-            api_key="abcde",
-            identifier=None,
+        model_metadata = create_model_metadata(
+            {
+                "name": "gitlab_model1",
+                "provider": "provider",
+                "endpoint": HttpUrl("https://api.example.com"),
+                "api_key": "abcde",
+                "identifier": None,
+            }
         )
 
-        params = model_metadata.to_params()
+        assert model_metadata.llm_definition_params == {
+            "model_class_provider": "provider",
+            "model": "model_family",
+        }
 
-        assert params == {
+        assert model_metadata.to_params() == {
             "api_base": "https://api.example.com",
             "api_key": "abcde",
-            "model": "model_family",
-            "custom_llm_provider": "provider",
         }
 
     def test_with_identifier_no_provider(self):
-        model_metadata = ModelMetadata(
-            name="model_family",
-            provider="provider",
-            endpoint=HttpUrl("https://api.example.com"),
-            api_key="abcde",
-            identifier="model_identifier",
+        model_metadata = create_model_metadata(
+            {
+                "name": "gitlab_model1",
+                "provider": "provider",
+                "endpoint": HttpUrl("https://api.example.com"),
+                "api_key": "abcde",
+                "identifier": "model_identifier",
+            }
         )
 
-        params = model_metadata.to_params()
+        assert model_metadata.llm_definition_params == {
+            "model_class_provider": "provider",
+            "model": "model_family",
+        }
 
-        assert params == {
+        assert model_metadata.to_params() == {
             "api_base": "https://api.example.com",
             "api_key": "abcde",
             "model": "model_identifier",
@@ -182,17 +200,22 @@ class TestModelMetadataToParams:
         }
 
     def test_with_identifier_with_provider(self):
-        model_metadata = ModelMetadata(
-            name="model_family",
-            provider="provider",
-            endpoint=HttpUrl("https://api.example.com"),
-            api_key="abcde",
-            identifier="custom_provider/model/identifier",
+        model_metadata = create_model_metadata(
+            {
+                "name": "gitlab_model1",
+                "provider": "provider",
+                "endpoint": HttpUrl("https://api.example.com"),
+                "api_key": "abcde",
+                "identifier": "custom_provider/model/identifier",
+            }
         )
 
-        params = model_metadata.to_params()
+        assert model_metadata.llm_definition_params == {
+            "model_class_provider": "provider",
+            "model": "model_family",
+        }
 
-        assert params == {
+        assert model_metadata.to_params() == {
             "api_base": "https://api.example.com",
             "api_key": "abcde",
             "model": "model/identifier",
@@ -200,79 +223,25 @@ class TestModelMetadataToParams:
         }
 
     def test_with_identifier_with_bedrock_provider(self):
-        model_metadata = ModelMetadata(
-            name="model_family",
-            provider="provider",
-            endpoint=HttpUrl("https://api.example.com"),
-            api_key="abcde",
-            identifier="bedrock/model/identifier",
+        model_metadata = create_model_metadata(
+            {
+                "name": "gitlab_model1",
+                "provider": "provider",
+                "endpoint": HttpUrl("https://api.example.com"),
+                "api_key": "abcde",
+                "identifier": "bedrock/model/identifier",
+            }
         )
 
-        params = model_metadata.to_params()
+        assert model_metadata.llm_definition_params == {
+            "model_class_provider": "provider",
+            "model": "model_family",
+        }
 
-        assert params == {
+        assert model_metadata.to_params() == {
             "model": "model/identifier",
             "api_key": "abcde",
             "custom_llm_provider": "bedrock",
-        }
-
-    def test_without_api_key_uses_dummy_key_only_for_custom_openai(self):
-        model_metadata = ModelMetadata(
-            name="model_family",
-            provider="custom_openai",
-            endpoint=HttpUrl("https://api.example.com"),
-            api_key=None,
-            identifier=None,
-        )
-
-        params = model_metadata.to_params()
-
-        assert params == {
-            "api_base": "https://api.example.com",
-            "api_key": "dummy_key",
-            "model": "model_family",
-            "custom_llm_provider": "custom_openai",
-        }
-
-    def test_without_api_key_and_non_custom_openai_no_dummy_key(self):
-        model_metadata = ModelMetadata(
-            name="model_family",
-            provider="fireworks",
-            endpoint=HttpUrl("https://api.example.com"),
-            api_key=None,
-            identifier=None,
-        )
-
-        params = model_metadata.to_params()
-
-        assert params == {
-            "api_base": "https://api.example.com",
-            "model": "model_family",
-            "custom_llm_provider": "fireworks",
-        }
-        assert "api_key" not in params
-
-    def test_anthropic_provider(self):
-        model_metadata = ModelMetadata(
-            identifier="model_identifier", name="base", provider="anthropic"
-        )
-
-        params = model_metadata.to_params()
-
-        assert params == {
-            "model": "model_identifier",
-        }
-
-    def test_vertex_ai_provider(self):
-        model_metadata = ModelMetadata(
-            identifier="model_identifier", name="base", provider="vertex_ai"
-        )
-
-        params = model_metadata.to_params()
-
-        assert params == {
-            "custom_llm_provider": "vertex_ai",
-            "model": "model_identifier",
         }
 
 
@@ -284,13 +253,3 @@ def test_create_model_metadata_with_none_data():
 def test_create_model_metadata_without_provider():
     result = create_model_metadata({"name": "test"})
     assert result is None
-
-
-def test_model_selection_metadata():
-    model_metadata = ModelSelectionMetadata(name="gpt_5")
-
-    params = model_metadata.to_params()
-
-    assert not params
-    assert model_metadata.name == "gpt_5"
-    assert model_metadata.provider == ""  # Empty string for backward compatibility

@@ -1,6 +1,0 @@
-name: gpt-5-2025-08-07
-params:
-  temperature: 1  # this model always requires temperature to be 1
-  max_tokens: 4_096
-  max_retries: 1
-  model_class_provider: openai

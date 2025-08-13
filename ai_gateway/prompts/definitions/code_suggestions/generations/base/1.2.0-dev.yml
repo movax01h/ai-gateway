@@ -1,8 +1,8 @@
 ---
 name: Gemini 2.5 Flash Code Generations Agent
 model:
-  config_file: gemini_2_5_flash
   params:
+    model_class_provider: litellm
     temperature: 0.2
     max_tokens: 4096
 unit_primitives:

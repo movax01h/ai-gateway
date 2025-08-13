@@ -9,7 +9,7 @@ from langgraph.graph import END, StateGraph
 from langgraph.types import Command
 
 from ai_gateway.model_metadata import (
-    ModelSelectionMetadata,
+    create_model_metadata,
     current_model_metadata_context,
 )
 from duo_workflow_service.agents.chat_agent import ChatAgent
@@ -232,8 +232,11 @@ class Workflow(AbstractWorkflow):
             FeatureFlag.DUO_AGENTIC_CHAT_OPENAI_GPT_5
         ):
             # temporary approach: model selection doesn't support feature flags
-            model_metadata = ModelSelectionMetadata(
-                name="gpt_5"
+            model_metadata = create_model_metadata(
+                {
+                    "provider": "gitlab",
+                    "name": "gpt_5",
+                }
             )  # it will force the prompt registry load the chat/agent/gpt_5 prompt
 
         self._agent: ChatAgent = self._prompt_registry.get_on_behalf(  # type: ignore[assignment]

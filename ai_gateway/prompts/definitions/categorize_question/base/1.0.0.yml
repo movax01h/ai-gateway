@@ -1,8 +1,8 @@
 ---
 name: Claude 3.5 Categorize question
 model:
-  config_file: conversation_performant
   params:
+    model_class_provider: anthropic
     max_tokens: 500
 unit_primitives:
   - duo_chat

@@ -1,7 +1,6 @@
 ---
 name: Claude 3 ReAct Chat agent
 model:
-  config_file: conversation_claude_3_sonnet_v1
   params:
     model_class_provider: litellm
 unit_primitives:

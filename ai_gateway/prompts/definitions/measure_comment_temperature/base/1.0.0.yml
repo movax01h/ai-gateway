@@ -1,14 +1,8 @@
 ---
 name: Gemini 1.5 Flash Measure Comment Temperature
 model:
-  name: vertex_ai/gemini-1.5-flash-002
   params:
     model_class_provider: litellm
-    temperature: 0.0
-    max_tokens: 1000
-    max_retries: 1
-    top_p: 1
-    top_k: 1
 unit_primitives:
   - measure_comment_temperature
 prompt_template:

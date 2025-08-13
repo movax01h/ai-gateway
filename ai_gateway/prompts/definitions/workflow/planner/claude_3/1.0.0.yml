@@ -1,7 +1,6 @@
 ---
 name: planner
 model:
-  config_file: conversation_performant
   params:
     model_class_provider: litellm
     max_tokens: 4_096

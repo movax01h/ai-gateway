@@ -1,7 +1,8 @@
 ---
 name: Claude 3.7 Summarize Review
 model:
-  config_file: claude_3_7
+  params:
+    model_class_provider: anthropic
 unit_primitives:
   - summarize_review
 prompt_template:

@@ -1,7 +1,6 @@
 ---
 name: Claude 3 Summarize Comments agent
 model:
-  config_file: conversation_performant
   params:
     model_class_provider: litellm
     temperature: 0.1

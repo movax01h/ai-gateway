@@ -22,7 +22,12 @@ def middleware_test_client_fixture(model_metadata_context):
         request: Request,
     ):
         await request.body()
-        return model_metadata_context.get()
+        model_metadata = model_metadata_context.get()
+        return (
+            model_metadata.model_dump(exclude={"llm_definition_params", "family"})
+            if model_metadata
+            else None
+        )
 
     return TestClient(app)
 
@@ -30,7 +35,7 @@ def middleware_test_client_fixture(model_metadata_context):
 @pytest.mark.asyncio
 async def test_parses_model_params_into_context_var(middleware_test_client):
     model_params = {
-        "name": "test_model",
+        "name": "gpt",
         "provider": "custom_openai",
         "endpoint": "http://test_model.com/",
         "api_key": "test_api_key",
@@ -106,7 +111,7 @@ async def test_handles_large_request_body_with_model_metadata(middleware_test_cl
 async def test_handles_very_large_request_body(middleware_test_client):
     """Test with very large request body (>1MB) to ensure chunking is handled."""
     model_params = {
-        "name": "test_model",
+        "name": "gpt",
         "provider": "custom_openai",
         "endpoint": "http://test_model.com/",
         "api_key": "test_key",
@@ -145,7 +150,7 @@ async def test_handles_malformed_json_in_large_body(middleware_test_client):
 async def test_handles_unicode_in_large_body(middleware_test_client):
     """Test that unicode characters in large bodies are handled correctly."""
     model_params = {
-        "name": "test_model",
+        "name": "gpt",
         "provider": "custom_openai",
         "endpoint": "http://test_model.com/",
         "api_key": "test_key",
@@ -165,7 +170,7 @@ async def test_handles_unicode_in_large_body(middleware_test_client):
 async def test_model_metadata_at_end_of_large_body(middleware_test_client):
     """Test that model_metadata is found even when it appears at the end of a large body."""
     model_params = {
-        "name": "test_model",
+        "name": "gpt",
         "provider": "custom_openai",
         "endpoint": "http://test_model.com/",
         "api_key": "test_key",
@@ -221,7 +226,7 @@ async def test_null_model_metadata_in_large_body(middleware_test_client):
 async def test_multiple_model_metadata_fields_in_large_body(middleware_test_client):
     """Test that only the first model_metadata field is processed in large bodies."""
     model_params_1 = {
-        "name": "model_1",
+        "name": "gpt",
         "provider": "provider_1",
         "endpoint": "http://model1.com/",
         "api_key": "key_1",
@@ -229,7 +234,7 @@ async def test_multiple_model_metadata_fields_in_large_body(middleware_test_clie
     }
 
     model_params_2 = {
-        "name": "model_2",
+        "name": "mistral",
         "provider": "provider_2",
         "endpoint": "http://model2.com/",
         "api_key": "key_2",

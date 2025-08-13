@@ -1,7 +1,6 @@
 ---
 name: Amazon Q Generate Description
 model:
-  name: amazon_q
   params:
     model_class_provider: amazon_q
 unit_primitives:

@@ -101,11 +101,10 @@ class Prompt(RunnableBinding[Input, Output]):
         tool_choice: Optional[str] = None,
         **kwargs: Any,
     ):
-        model_override = None
         model_provider = config.model.params.model_class_provider
         model_kwargs = self._build_model_kwargs(config.params, model_metadata)
         model = self._build_model(
-            model_factory, config.model, disable_streaming, model_override
+            model_factory, config.model, model_metadata, disable_streaming
         )
 
         if tools and isinstance(model, BaseChatModel):
@@ -133,7 +132,7 @@ class Prompt(RunnableBinding[Input, Output]):
     def _build_model_kwargs(
         self,
         params: PromptParams | None,
-        model_metadata: Optional[TypeModelMetadata] | None,
+        model_metadata: Optional[TypeModelMetadata],
     ) -> Mapping[str, Any]:
         return {
             **(params.model_dump(exclude_none=True) if params else {}),
@@ -144,16 +143,18 @@ class Prompt(RunnableBinding[Input, Output]):
         self,
         model_factory: TypeModelFactory,
         config: ModelConfig,
+        model_metadata: Optional[TypeModelMetadata],
         disable_streaming: bool,
-        model_override: Optional[str] = None,
     ) -> Model:
-        return model_factory(
-            model=model_override or config.name,
-            disable_streaming=disable_streaming,
+        # The params in the prompt file have higher precedence than the ones in the model definition
+        model_factory_args = {
+            "disable_streaming": disable_streaming,
+            **(model_metadata.llm_definition_params if model_metadata else {}),
             **config.params.model_dump(
                 exclude={"model_class_provider"}, exclude_none=True, by_alias=True
             ),
-        )
+        }
+        return model_factory(**model_factory_args)
 
     @property
     def model_name(self) -> str:

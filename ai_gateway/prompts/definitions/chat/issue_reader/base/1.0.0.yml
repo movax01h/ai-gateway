@@ -1,8 +1,8 @@
 ---
 name: Issue identifier parser for Duo Chat
 model:
-  config_file: conversation_performant
   params:
+    model_class_provider: anthropic
     temperature: 0.1
     max_tokens: 2_048
 unit_primitives:

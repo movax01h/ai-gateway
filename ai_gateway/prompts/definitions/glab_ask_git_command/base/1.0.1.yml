@@ -1,7 +1,6 @@
 ---
 name: Claude Haiku 3.5 Glab Ask Git Command
 model:
-  name: claude-3-5-haiku-20241022
   params:
     model_class_provider: anthropic
 unit_primitives:

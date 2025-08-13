@@ -1,7 +1,6 @@
 ---
 name: Claude 3 Commit Reader agent
 model:
-  config_file: conversation_performant
   params:
     model_class_provider: litellm
     max_tokens: 2_048

@@ -9,7 +9,6 @@ __all__ = ["PromptConfig", "ModelConfig", "BaseModelConfig"]
 class BaseModelConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    name: str
     params: BaseModelParams
 
 

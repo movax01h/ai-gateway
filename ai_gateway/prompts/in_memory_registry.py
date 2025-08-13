@@ -37,8 +37,6 @@ class InMemoryPromptRegistry(BasePromptRegistry):
         self.internal_event_client = shared_registry.internal_event_client
         self.model_limits = shared_registry.model_limits
 
-        self.model_configs = shared_registry.model_configs
-
     def register_prompt(self, prompt_id: str, prompt_data: dict) -> None:
         """Register a prompt from flow yaml data.
 
@@ -54,13 +52,6 @@ class InMemoryPromptRegistry(BasePromptRegistry):
         if not raw_data:
             raise ValueError(f"Local prompt not found: {prompt_id}")
 
-        if "config_file" in raw_data["model"]:
-            model_config = raw_data["model"]["config_file"]
-            config_for_general_model = self.model_configs.get(model_config)
-            if config_for_general_model:
-                raw_data = self.shared_registry._patch_model_configuration(
-                    config_for_general_model, raw_data
-                )
         return raw_data
 
     def _get_in_memory_prompt(

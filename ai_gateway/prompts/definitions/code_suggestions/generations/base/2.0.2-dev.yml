@@ -1,8 +1,8 @@
 ---
 name: Claude 3.7 Vertex Code Generations Agent
 model:
-  config_file: claude_3_7_vertex
   params:
+    model_class_provider: litellm
     temperature: 0.2
     max_tokens: 2048
 unit_primitives:

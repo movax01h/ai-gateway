@@ -1,8 +1,8 @@
 ---
 name: Claude 3 Fix Code agent
 model:
-  config_file: conversation_claude_3_sonnet_v1
   params:
+    model_class_provider: anthropic
     max_tokens: 2_048
 unit_primitives:
   - fix_code

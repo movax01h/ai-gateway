@@ -28,15 +28,11 @@ def mock_model_config_fixture():
             "model1": LLMDefinition(
                 name="Model 1",
                 gitlab_identifier="model1",
-                provider="provider1",
-                provider_identifier="provider_id_1",
                 params={},
             ),
             "model2": LLMDefinition(
                 name="Model 2",
                 gitlab_identifier="model2",
-                provider="provider2",
-                provider_identifier="provider_id_2",
                 params={},
             ),
         }

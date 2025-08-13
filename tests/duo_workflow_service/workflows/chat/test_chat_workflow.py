@@ -5,7 +5,7 @@ from dependency_injector import containers
 from gitlab_cloud_connector import CloudConnectorUser, UserClaims, WrongUnitPrimitives
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 
-from ai_gateway.model_metadata import ModelMetadata, ModelSelectionMetadata
+from ai_gateway.model_metadata import ModelMetadata
 from contract import contract_pb2
 from duo_workflow_service.agents.chat_agent import ChatAgent
 from duo_workflow_service.checkpointer.gitlab_workflow import WorkflowStatusEventEnum
@@ -789,7 +789,7 @@ async def test_workflow_with_approval_object():
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
-    "feature_flags,model_metadata,expected_prompt_id,expected_prompt_version,expected_model_metadata",
+    "feature_flags,context_model_metadata,expected_prompt_id,expected_prompt_version,expected_model_metadata",
     [
         # Test case 1: Feature flag enabled, no model metadata - should use GPT-5
         (
@@ -797,7 +797,7 @@ async def test_workflow_with_approval_object():
             None,
             "chat/agent/gpt_5",
             "^1.0.0",
-            ModelSelectionMetadata(name="gpt_5"),
+            ModelMetadata(provider="gitlab", name="gpt_5"),
         ),
         # Test case 2: Feature flag disabled, no model metadata - should use default prompt
         (
@@ -810,10 +810,10 @@ async def test_workflow_with_approval_object():
         # Test case 3: Feature flag enabled, but model metadata already provided - should use provided metadata
         (
             [FeatureFlag.DUO_AGENTIC_CHAT_OPENAI_GPT_5],
-            ModelMetadata(name="existing_model", provider="test"),
+            ModelMetadata(name="llama3", provider="test"),
             "chat/agent",
             "^1.0.0",
-            ModelMetadata(name="existing_model", provider="test"),
+            ModelMetadata(name="llama3", provider="test"),
         ),
     ],
 )
@@ -825,7 +825,7 @@ async def test_workflow_model_selection(
     mock_get_tools,
     mock_model_metadata_context,
     feature_flags,
-    model_metadata,
+    context_model_metadata,
     expected_prompt_id,
     expected_prompt_version,
     expected_model_metadata,
@@ -834,7 +834,7 @@ async def test_workflow_model_selection(
     """Test that model selection works correctly with the GPT-5 feature flag."""
     # Setup
     current_feature_flag_context.set(set(feature_flags))
-    mock_model_metadata_context.get.return_value = model_metadata
+    mock_model_metadata_context.get.return_value = context_model_metadata
 
     mock_get_tools.return_value = ["list_issues", "get_issue"]
     mock_toolset.return_value.bindable = ["list_issues", "get_issue"]
@@ -857,9 +857,7 @@ async def test_workflow_model_selection(
         # For the GPT-5 case, we're expecting to see the prompt loaded from chat/agent/gpt_5
         if expected_prompt_id == "chat/agent/gpt_5":
             assert call_args.kwargs["prompt_id"] == "chat/agent"
-            assert isinstance(
-                call_args.kwargs["model_metadata"], ModelSelectionMetadata
-            )
+            assert call_args.kwargs["model_metadata"].provider == "gitlab"
             assert call_args.kwargs["model_metadata"].name == "gpt_5"
         else:
             assert call_args.kwargs["prompt_id"] == expected_prompt_id

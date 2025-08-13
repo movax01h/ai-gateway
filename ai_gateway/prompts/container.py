@@ -19,9 +19,7 @@ class ContainerPrompts(containers.DeclarativeContainer):
         LocalPromptRegistry.from_local_yaml,
         class_overrides={
             "chat/react": chat.ReActAgent,
-            "chat/react/vertex": chat.ReActAgent,
             "chat/agent": "duo_workflow_service.agents.chat_agent.ChatAgent",
-            "chat/agent/gpt_5": "duo_workflow_service.agents.chat_agent.ChatAgent",
             "workflow/convert_to_gitlab_ci": "duo_workflow_service.agents.Agent",
             "workflow/executor": "duo_workflow_service.agents.Agent",
             "workflow/context_builder": "duo_workflow_service.agents.Agent",

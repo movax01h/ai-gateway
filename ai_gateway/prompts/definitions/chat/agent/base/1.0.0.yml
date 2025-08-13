@@ -1,8 +1,8 @@
 ---
 name: Chat Agent
 model:
-  config_file: claude_4_0
   params:
+    model_class_provider: anthropic
     max_tokens: 16_384
 unit_primitives:
   - duo_chat

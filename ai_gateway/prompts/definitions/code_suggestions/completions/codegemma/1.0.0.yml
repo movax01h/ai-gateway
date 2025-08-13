@@ -1,12 +1,10 @@
 ---
 name: Codegemma Code Completions
 model:
-  name: codegemma
   params:
     model_class_provider: litellm
     temperature: 0.95
     max_tokens: 128
-    max_retries: 1
 unit_primitives:
   - complete_code
 prompt_template:

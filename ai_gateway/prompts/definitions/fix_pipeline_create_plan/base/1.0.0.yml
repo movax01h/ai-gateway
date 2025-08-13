@@ -1,9 +1,8 @@
 name: fix_pipeline_create_plan_prompt
 model:
-  config_file: claude_4_0
   params:
+    model_class_provider: anthropic
     max_tokens: 8_192
-  unit_primitives: []
 prompt_template:
   system: |
     You are an AI planner. You create a detailed, step-by-step plan for a software engineer agent to

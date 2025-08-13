@@ -359,12 +359,14 @@ def _resolve_prompt_code_generations(
     )
 
     if has_model_info:
-        model_metadata = ModelMetadata(
-            name=payload.model_name,
-            endpoint=payload.model_endpoint,
-            api_key=payload.model_api_key,
-            provider="custom_openai",
-            identifier=payload.model_identifier,
+        model_metadata = create_model_metadata(
+            {
+                "name": payload.model_name,
+                "endpoint": payload.model_endpoint,
+                "api_key": payload.model_api_key,
+                "provider": "custom_openai",
+                "identifier": payload.model_identifier,
+            }
         )
         prompt = prompt_registry.get_on_behalf(
             current_user,
@@ -431,12 +433,14 @@ def _resolve_code_completions_litellm(
     completions_litellm_factory: Factory[CodeCompletions],
 ) -> CodeCompletions:
     if payload.prompt_version == 2 and not payload.prompt:
-        model_metadata = ModelMetadata(
-            name=payload.model_name,
-            endpoint=payload.model_endpoint,
-            api_key=payload.model_api_key,
-            identifier=payload.model_identifier,
-            provider=payload.model_provider or "text-completion-openai",
+        model_metadata = create_model_metadata(
+            {
+                "name": payload.model_name,
+                "endpoint": payload.model_endpoint,
+                "api_key": payload.model_api_key,
+                "identifier": payload.model_identifier,
+                "provider": payload.model_provider or "text-completion-openai",
+            }
         )
 
         return _resolve_agent_code_completions(
