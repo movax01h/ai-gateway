@@ -10,6 +10,7 @@ from poetry.core.constraints.version import Version, parse_constraint
 
 from ai_gateway.config import ConfigModelLimits
 from ai_gateway.model_metadata import ModelMetadata, TypeModelMetadata
+from ai_gateway.models.litellm import KindLiteLlmModel
 from ai_gateway.prompts.base import BasePromptRegistry, Prompt
 from ai_gateway.prompts.config import BaseModelConfig, ModelClassProvider, PromptConfig
 from ai_gateway.prompts.typing import TypeModelFactory
@@ -61,6 +62,11 @@ class LocalPromptRegistry(BasePromptRegistry):
         model_metadata: Optional[TypeModelMetadata] = None,
     ) -> str:
         if model_metadata:
+            # Whenever "general" is used as the model family, we
+            # want to override the model family to use the "claude_3" prompts
+            if model_metadata.name == KindLiteLlmModel.GENERAL:
+                return f"{prompt_id}/{KindLiteLlmModel.CLAUDE_3}"
+
             return f"{prompt_id}/{model_metadata.name}"
 
         type = self.default_prompts.get(prompt_id, self.key_prompt_type_base)

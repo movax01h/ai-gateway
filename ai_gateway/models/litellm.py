@@ -71,6 +71,7 @@ class KindLiteLlmModel(StrEnum):
     GPT = "gpt"
     QWEN_2_5 = "qwen2p5-coder-7b"
     LLAMA3 = "llama3"
+    GENERAL = "general"
 
     def _chat_provider_prefix(self, provider):
         # Chat models hosted behind openai proxies should be prefixed with "openai/":
