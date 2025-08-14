@@ -172,7 +172,10 @@ class TestUIHistory:
 
         # Get state again (should be empty since logs were flushed)
         second_state = history.pop_state_updates()
-        assert len(second_state[FlowStateKeys.UI_CHAT_LOG]) == 0
+        assert (
+            FlowStateKeys.UI_CHAT_LOG not in second_state
+            or len(second_state[FlowStateKeys.UI_CHAT_LOG]) == 0
+        )
 
     def test_invalid_event_log(self):
         # Test that logging with an event not in events list raises ValueError

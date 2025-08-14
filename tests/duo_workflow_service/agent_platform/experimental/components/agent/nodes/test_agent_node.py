@@ -71,7 +71,7 @@ def agent_node_fixture(
     """Fixture for AgentNode instance."""
     return AgentNode(
         flow_id=flow_id,
-        flow_type=CategoryEnum.WORKFLOW_SOFTWARE_DEVELOPMENT.value,
+        flow_type=CategoryEnum.WORKFLOW_SOFTWARE_DEVELOPMENT,
         name="test_agent_node",
         prompt=mock_prompt,
         inputs=inputs,
@@ -230,7 +230,7 @@ class TestAgentNode:
 
             agent_node = AgentNode(
                 flow_id=flow_id,
-                flow_type=CategoryEnum.WORKFLOW_SOFTWARE_DEVELOPMENT.value,
+                flow_type=CategoryEnum.WORKFLOW_SOFTWARE_DEVELOPMENT,
                 name="test_agent_node",
                 prompt=mock_prompt,
                 inputs=inputs,
