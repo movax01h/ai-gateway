@@ -1,0 +1,18 @@
+---
+description: Tracks when a start request is received by the Duo Agent Platform
+internal_events: true
+action: receive_start_duo_workflow
+product_group: duo_workflow
+additional_properties:
+  label:
+    description: The type of workflow being started (flow_type)
+  property:
+    description: Hardcoded string workflow_id
+  value:
+    description: Workflow Id that can be used to connect this event to others that happen when the workflow is completed.
+milestone: '18.3'
+introduced_by_url: https://gitlab.com/gitlab-org/modelops/applied-ml/code-suggestions/ai-assist/-/merge_requests/3155
+distributions:
+  - ee
+tiers:
+  - ultimate

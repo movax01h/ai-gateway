@@ -64,7 +64,13 @@ from duo_workflow_service.workflows.abstract_workflow import AbstractWorkflow
 from duo_workflow_service.workflows.registry import FlowFactory, resolve_workflow_class
 from duo_workflow_service.workflows.type_definitions import AdditionalContext
 from lib.internal_events import InternalEventsClient
-from lib.internal_events.event_enum import CategoryEnum
+from lib.internal_events.context import InternalEventAdditionalProperties
+from lib.internal_events.event_enum import (
+    CategoryEnum,
+    EventEnum,
+    EventLabelEnum,
+    EventPropertyEnum,
+)
 
 CONTAINER_APPLICATION_PACKAGES = ["duo_workflow_service"]
 
@@ -184,6 +190,15 @@ class DuoWorkflowService(contract_pb2_grpc.DuoWorkflowServicer):
         workflow_type = string_to_category_enum(workflow_definition)
         duo_workflow_metrics.count_agent_platform_receive_start_counter(
             flow_type=workflow_type
+        )
+        internal_event_client.track_event(
+            event_name=EventEnum.RECEIVE_START_REQUEST.value,
+            additional_properties=InternalEventAdditionalProperties(
+                label=EventLabelEnum.WORKFLOW_RECEIVE_START_REQUEST_LABEL.value,
+                property=EventPropertyEnum.WORKFLOW_ID.value,
+                value=workflow_id,
+            ),
+            category=workflow_type.value,
         )
 
         goal = start_workflow_request.startRequest.goal

@@ -2,6 +2,7 @@ from enum import StrEnum
 
 
 class EventEnum(StrEnum):
+    RECEIVE_START_REQUEST = "receive_start_duo_workflow"
     WORKFLOW_START = "request_duo_workflow"
     WORKFLOW_RESUME = "resume_duo_workflow"
     WORKFLOW_PAUSE = "pause_duo_workflow"
@@ -17,6 +18,7 @@ class EventEnum(StrEnum):
 
 
 class EventLabelEnum(StrEnum):
+    WORKFLOW_RECEIVE_START_REQUEST_LABEL = "workflow_receive_start_event"
     WORKFLOW_FINISH_LABEL = "workflow_finish_event"
     WORKFLOW_START_LABEL = "workflow_start_event"
     WORKFLOW_TOOL_CALL_LABEL = "workflow_tool_call"
