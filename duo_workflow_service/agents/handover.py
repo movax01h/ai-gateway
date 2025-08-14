@@ -11,7 +11,6 @@ from duo_workflow_service.entities.state import (
     UiChatLog,
     WorkflowStatusEnum,
 )
-from lib.feature_flags.context import FeatureFlag, is_feature_enabled
 
 __all__ = ["HandoverAgent"]
 
@@ -48,15 +47,7 @@ class HandoverAgent:
             last_message = messages[-1]
             summary = self._extract_summary(last_message, ui_chat_logs)
 
-            if is_feature_enabled(FeatureFlag.DUO_WORKFLOW_USE_HANDOVER_SUMMARY):
-                handover_messages = self._get_summary_to_handover(summary)
-            else:
-                handover_messages = [
-                    *messages[:-1],
-                    self._get_last_message_or_summary_to_handover(
-                        summary, last_message
-                    ),
-                ]
+            handover_messages = self._get_summary_to_handover(summary)
 
         if self._new_status == WorkflowStatusEnum.COMPLETED:
             ui_chat_logs.append(
@@ -130,14 +121,3 @@ class HandoverAgent:
             return [summary]
 
         return []
-
-    def _get_last_message_or_summary_to_handover(
-        self, summary: Optional[BaseMessage], last_message: BaseMessage
-    ):
-        if summary is not None and summary.content != "":
-            return summary
-
-        if not isinstance(last_message, AIMessage):
-            return last_message
-
-        return AIMessage(id=last_message.id, content=last_message.content)
