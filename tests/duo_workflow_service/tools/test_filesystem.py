@@ -1,3 +1,4 @@
+import json
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -422,6 +423,74 @@ class TestReadFiles:
 
         message = tool.format_display_message(input_data)
         assert message == "Read 3 files"
+
+    def test_read_files_format_display_message_with_exclusions(self):
+        """Test ReadFiles format_display_message includes exclusion information."""
+        tool = ReadFiles(description="Read multiple files")
+
+        # Mock tool response with excluded files
+        mock_response = MagicMock()
+        mock_response.content = json.dumps(
+            {
+                "file1.py": {"content": "content"},
+                "file2.secret": {"error": "excluded due to policy"},
+                "config/private/secret.txt": {"error": "excluded due to policy"},
+            }
+        )
+
+        input_data = ReadFilesInput(
+            file_paths=["file1.py", "file2.secret", "config/private/secret.txt"]
+        )
+
+        message = tool.format_display_message(input_data, mock_response)
+
+        expected_excluded_msg = FileExclusionPolicy.format_user_exclusion_message(
+            ["file2.secret", "config/private/secret.txt"]
+        )
+        assert message == f"Read 1 file{expected_excluded_msg}"
+
+    @pytest.mark.asyncio
+    async def test_read_files_with_file_exclusion_policy(self, mock_project):
+        mock_outbox = MagicMock()
+        mock_outbox.put = AsyncMock()
+
+        mock_response = '{"allowed_file.py": {"content": "hi"}}'
+        mock_inbox = MagicMock()
+        mock_inbox.get = AsyncMock(
+            return_value=contract_pb2.ClientEvent(
+                actionResponse=contract_pb2.ActionResponse(response=mock_response)
+            )
+        )
+
+        tool = ReadFiles(description="Read multiple files")
+        tool.metadata = {
+            "outbox": mock_outbox,
+            "inbox": mock_inbox,
+            "project": mock_project,
+        }
+
+        file_paths = ["allowed_file.py", ".env", ".ssh/config"]
+
+        with patch.object(FileExclusionPolicy, "filter_allowed") as mock_filter_allowed:
+            mock_filter_allowed.return_value = (
+                ["allowed_file.py"],
+                [".env", ".ssh/config"],
+            )
+
+            response = await tool._arun(file_paths)
+
+            result_dict = json.loads(response)
+
+            assert "allowed_file.py" in result_dict
+            assert ".env" in result_dict
+            assert ".ssh/config" in result_dict
+            assert result_dict["allowed_file.py"]["content"] == "hi"
+            assert result_dict[".env"]["error"] == "excluded due to policy"
+            assert result_dict[".ssh/config"]["error"] == "excluded due to policy"
+
+            # Should only call the action with allowed files
+            action = mock_outbox.put.call_args[0][0]
+            assert set(action.runReadFiles.filepaths) == {"allowed_file.py"}
 
 
 class TestWriteFile:

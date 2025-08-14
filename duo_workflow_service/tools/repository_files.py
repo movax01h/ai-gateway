@@ -281,7 +281,7 @@ class ListRepositoryTree(DuoBaseTool):
                 for item in response
                 if isinstance(item.get("path"), str)
             ]
-            allowed_paths = policy.filter_allowed(file_paths)
+            allowed_paths, _excluded_paths = policy.filter_allowed(file_paths)
 
             # Filter the original response to only include allowed items
             filtered_response = [
