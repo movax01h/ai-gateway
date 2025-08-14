@@ -295,8 +295,6 @@ class TestGoalDisambiguationComponent:
         mock_agent: MagicMock,
         compiled_graph: CompiledStateGraph,
     ):
-        current_feature_flag_context.set({"duo_workflow_use_handover_summary"})
-
         mock_agent.run.side_effect = [
             {
                 "conversation_history": {
@@ -332,8 +330,6 @@ class TestGoalDisambiguationComponent:
         mock_agent: MagicMock,
         compiled_graph: CompiledStateGraph,
     ):
-        current_feature_flag_context.set({"duo_workflow_use_handover_summary"})
-
         mock_agent.run.side_effect = [
             {
                 "conversation_history": {"clarity_judge": [llm_judge_response_unclear]},

@@ -51,7 +51,6 @@ _MIN_CLARITY_GRADE = "CLEAR"
 class Routes(StrEnum):
     UNCLEAR = "unclear"
     CLEAR = "clear"
-    SKIP = "skip_further_clarification"
     CONTINUE = "continue"
     BACK = "back"
     STOP = "stop"
@@ -290,7 +289,7 @@ class GoalDisambiguationComponent(BaseComponent):
 
     def _clarification_required(
         self, state: WorkflowState
-    ) -> Literal[Routes.CLEAR, Routes.UNCLEAR, Routes.SKIP, Routes.STOP]:
+    ) -> Literal[Routes.CLEAR, Routes.UNCLEAR, Routes.STOP]:
         if state["status"] == WorkflowStatusEnum.CANCELLED:
             return Routes.STOP
 
@@ -321,18 +320,3 @@ class GoalDisambiguationComponent(BaseComponent):
             return Routes.BACK
 
         return Routes.CONTINUE
-
-    def _cancel_optional_tool_call(self, state: WorkflowState):
-        last_message = state["conversation_history"][_AGENT_NAME][-1]
-        messages: List[BaseMessage] = [
-            ToolMessage(
-                content=(
-                    "Task is specific enough, no further clarification is required."
-                ),
-                tool_call_id=tool_call.get("id"),
-            )
-            for tool_call in getattr(last_message, "tool_calls", [])
-            if tool_call.get("name") != "handover_tool"
-        ]
-
-        return {"conversation_history": {_AGENT_NAME: messages}}

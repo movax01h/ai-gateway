@@ -13,7 +13,6 @@ from duo_workflow_service.entities.state import (
     WorkflowState,
     WorkflowStatusEnum,
 )
-from lib.feature_flags import current_feature_flag_context
 
 
 class TestHandoverAgent:
@@ -296,7 +295,6 @@ class TestHandoverAgent:
             2025, 1, 1, 12, 0, tzinfo=timezone.utc
         )
         mock_datetime.timezone = timezone
-        current_feature_flag_context.set({"duo_workflow_use_handover_summary"})
 
         state = WorkflowState(
             plan=Plan(steps=[]),
