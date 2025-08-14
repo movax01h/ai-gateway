@@ -3,6 +3,10 @@ import json
 from duo_workflow_service.gitlab.http_client import GitlabHttpClient, GitLabHttpResponse
 
 
+class UnsupportedStatusEvent(Exception):
+    pass
+
+
 class GitLabStatusUpdater:
     def __init__(self, client: GitlabHttpClient):
         self._client = client
@@ -36,6 +40,11 @@ class GitLabStatusUpdater:
         if not isinstance(result, GitLabHttpResponse):
             raise Exception(
                 f"Unexpected response from client, status update might have failed. response: {result}"
+            )
+
+        if result.status_code == 400:
+            raise UnsupportedStatusEvent(
+                f"Session status cannot be updated due to bad status event: {status_event}"
             )
 
         if result.status_code != 200:
