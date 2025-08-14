@@ -5,15 +5,20 @@ import pytest
 from langgraph.graph import StateGraph
 from langgraph.types import Command
 
+from contract import contract_pb2
 from duo_workflow_service.agent_platform.experimental.components.base import (
     BaseComponent,
     EndComponent,
 )
-from duo_workflow_service.agent_platform.experimental.flows.base import Flow
+from duo_workflow_service.agent_platform.experimental.flows.base import (
+    Flow,
+    UserDecision,
+)
 from duo_workflow_service.agent_platform.experimental.flows.flow_config import (
     FlowConfig,
 )
 from duo_workflow_service.agent_platform.experimental.routers.router import Router
+from duo_workflow_service.agent_platform.experimental.state.base import FlowEventType
 from duo_workflow_service.checkpointer.gitlab_workflow import WorkflowStatusEventEnum
 from duo_workflow_service.entities.state import MessageTypeEnum, WorkflowStatusEnum
 from duo_workflow_service.workflows.type_definitions import AdditionalContext
@@ -148,6 +153,9 @@ class TestFlow:
                     "name": "agent",
                     "type": "AgentComponent",
                     "inputs": ["context:goal"],
+                    "prompt_id": "test/prompt",
+                    "prompt_version": "v1",
+                    "toolset": ["read_file"],
                 },
             ],
             routers=[{"from": "agent", "to": "end"}],
@@ -184,10 +192,9 @@ class TestFlow:
         "status_event,goal,expected_type",
         [
             (WorkflowStatusEventEnum.START, "test goal", dict),
-            (WorkflowStatusEventEnum.RESUME, "resume goal", Command),  # Command object
             ("unknown_event", "test goal", type(None)),
         ],
-        ids=["start_event", "resume_event", "unknown_event"],
+        ids=["start_event", "unknown_event"],
     )
     async def test_graph_input(
         self,
@@ -218,11 +225,74 @@ class TestFlow:
             assert input["ui_chat_log"][0]["message_type"] == MessageTypeEnum.TOOL
             assert input["ui_chat_log"][0]["content"] == "Starting Flow: " + goal
             assert "context" in input
-        elif expected_type == Command:
-            assert hasattr(input, "resume")
-            assert input.resume == goal
         else:
             assert input is None
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        "approval_decision,expected_event_type,expected_message",
+        [
+            (UserDecision.APPROVE, FlowEventType.APPROVE, None),
+            (UserDecision.REJECT, FlowEventType.REJECT, "test goal for rejection"),
+            (None, FlowEventType.RESPONSE, "test goal for response"),
+        ],
+        ids=["approve_decision", "reject_decision", "user_response"],
+    )
+    async def test_resume_command_with_approval_decision(
+        self,
+        mock_flow_metadata,
+        mock_invocation_metadata,
+        sample_flow_config,
+        mock_state_graph,
+        mock_checkpointer,
+        mock_tools_registry,  # pylint: disable=unused-argument
+        approval_decision,  # pylint: disable=unused-argument
+        expected_event_type,
+        expected_message,
+    ):
+        """Test _resume_command returns correct FlowEvent based on approval decision."""
+        # Create approval mock if decision is provided
+        approval = None
+        if approval_decision:
+            approval = Mock(spec=contract_pb2.Approval)
+            approval.WhichOneof.return_value = approval_decision
+
+            # Mock the rejection attribute for REJECT decision
+            if approval_decision == UserDecision.REJECT:
+                mock_rejection = Mock()
+                mock_rejection.message = expected_message
+                approval.rejection = mock_rejection
+
+        with (
+            self.mock_components(["AgentComponent"]),
+            patch("duo_workflow_service.agent_platform.experimental.flows.base.Router"),
+        ):
+            flow = Flow(
+                workflow_id=f"test-workflow-{approval_decision or 'no-approval'}",
+                workflow_metadata=mock_flow_metadata,
+                workflow_type=CategoryEnum.WORKFLOW_CHAT,
+                config=sample_flow_config,
+                invocation_metadata=mock_invocation_metadata,
+                approval=approval,
+            )
+
+            mock_checkpointer.initial_status_event = WorkflowStatusEventEnum.RESUME
+            goal = expected_message or "test goal"
+            await flow.run(goal)
+
+            kwargs = mock_state_graph.compile.return_value.astream.call_args[1]
+            input = kwargs.get("input")
+
+            assert isinstance(input, Command)
+            assert input.resume["event_type"] == expected_event_type
+
+            if expected_message:
+                assert input.resume["message"] == expected_message
+            else:
+                # For APPROVE events, message should not be present
+                assert (
+                    "message" not in input.resume or input.resume.get("message") is None
+                )
 
     @pytest.mark.asyncio
     async def test_graph_input_with_additional_context(
@@ -411,6 +481,7 @@ class TestFlow:
 
             # Run the workflow to trigger _compile
             goal = "Complex workflow test"
+            goal = "test goal with additional context"
             await flow.run(goal)
 
             # Assert all component classes were loaded (excluding EndComponent which is built-in)
@@ -493,3 +564,52 @@ class TestFlow:
 
             # Assert workflow completed
             assert flow.is_done
+
+    @pytest.mark.asyncio
+    async def test_resume_command_with_invalid_approval_decision(
+        self,
+        mock_flow_metadata,
+        mock_invocation_metadata,
+        sample_flow_config,
+        mock_state_graph,  # pylint: disable=unused-argument
+        mock_checkpointer,
+        mock_tools_registry,  # pylint: disable=unused-argument
+    ):
+        """Test _resume_command raises ValueError for invalid approval decision."""
+        # Create approval mock with invalid decision
+        approval = Mock(spec=contract_pb2.Approval)
+        approval.WhichOneof.return_value = "invalid_decision"
+
+        with (
+            self.mock_components(["AgentComponent"]),
+            patch("duo_workflow_service.agent_platform.experimental.flows.base.Router"),
+            patch(
+                "duo_workflow_service.agent_platform.experimental.flows.base.log_exception"
+            ) as mock_log_exception,
+        ):
+            flow = Flow(
+                workflow_id="test-workflow-invalid-approval",
+                workflow_metadata=mock_flow_metadata,
+                workflow_type=CategoryEnum.WORKFLOW_CHAT,
+                config=sample_flow_config,
+                invocation_metadata=mock_invocation_metadata,
+                approval=approval,
+            )
+
+            mock_checkpointer.initial_status_event = WorkflowStatusEventEnum.RESUME
+            goal = "test goal"
+
+            # The error should be logged via _handle_workflow_failure
+            await flow.run(goal)
+
+            # Verify that log_exception was called with the ValueError
+            mock_log_exception.assert_called_once()
+            mock_log_exception_call = mock_log_exception.call_args
+            assert isinstance(mock_log_exception_call[0][0], ValueError)
+            assert "Unexpected approval decision: invalid_decision" in str(
+                mock_log_exception_call[0][0]
+            )
+            assert mock_log_exception_call[1]["extra"] == {
+                "workflow_id": "test-workflow-invalid-approval",
+                "source": "duo_workflow_service.agent_platform.experimental.flows.base",
+            }

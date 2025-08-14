@@ -1,9 +1,11 @@
+from enum import StrEnum
 from typing import (
     Annotated,
     Any,
     ClassVar,
     Final,
     Literal,
+    NotRequired,
     Optional,
     Self,
     TypedDict,
@@ -23,6 +25,8 @@ from duo_workflow_service.entities.state import (
 )
 
 __all__ = [
+    "FlowEvent",
+    "FlowEventType",
     "FlowState",
     "FlowStateKeys",
     "merge_nested_dict",
@@ -32,6 +36,17 @@ __all__ = [
     "IOKeyTemplate",
     "get_vars_from_state",
 ]
+
+
+class FlowEventType(StrEnum):
+    RESPONSE = "response"
+    APPROVE = "approve"
+    REJECT = "reject"
+
+
+class FlowEvent(TypedDict):
+    event_type: FlowEventType
+    message: NotRequired[str]
 
 
 def merge_nested_dict(existing: dict[str, Any], new: dict[str, Any]) -> dict[str, Any]:
@@ -181,9 +196,37 @@ class IOKey(BaseModel):
                 current = current[key]
         return current
 
+    def to_nested_dict(self, value: Any) -> dict[str, Any]:
+        """Generate nested dictionary matching target and subkeys list, with value supplied as argument.
+
+        Args:
+            value: The value to be placed at the nested location
+
+        Returns:
+            A nested dictionary with the structure matching target and subkeys
+
+        Examples:
+            IOKey(target="context", subkeys=["project", "name"]).to_nested_dict("test")
+            # Returns: {"context": {"project": {"name": "test"}}}
+
+            IOKey(target="status").to_nested_dict("active")
+            # Returns: {"status": "active"}
+        """
+        if self.subkeys:
+            # Create nested structure: target -> subkeys -> value
+            keys = [self.target] + self.subkeys
+        else:
+            # Simple structure: target -> value
+            keys = [self.target]
+
+        return create_nested_dict(keys, value)
+
 
 class IOKeyTemplate(IOKey):
     COMPONENT_NAME_TEMPLATE: ClassVar[str] = "<name>"
+    SENDS_RESPONSE_TO_COMPONENT_NAME_TEMPLATE: ClassVar[str] = (
+        "<sends_response_to_component>"
+    )
 
     def to_iokey(self, replacements: dict[str, str]) -> IOKey:
         return IOKey(target=self.target, subkeys=self._resolved_subkeys(replacements))

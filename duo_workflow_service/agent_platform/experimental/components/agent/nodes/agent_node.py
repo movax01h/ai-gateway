@@ -177,5 +177,5 @@ class AgentNode:
         self._internal_event_client.track_event(
             event_name=EventEnum.TOKEN_PER_USER_PROMPT.value,
             additional_properties=additional_properties,
-            category=self._flow_type,
+            category=self._flow_type.value,
         )

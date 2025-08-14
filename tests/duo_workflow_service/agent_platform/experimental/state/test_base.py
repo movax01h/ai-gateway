@@ -1,3 +1,4 @@
+# pylint: disable=too-many-lines
 import pytest
 from langchain_core.messages import HumanMessage, SystemMessage
 from pydantic import ValidationError
@@ -623,6 +624,78 @@ class TestIOKey:
         io_key1 = IOKey(target="context", subkeys=["special-key", "nested_key"])
         result1 = io_key1.template_variable_from_state(state)
         assert result1["nested_key"] == "value"
+
+    @pytest.mark.parametrize(
+        "target,subkeys,value,expected_result",
+        [
+            # Simple target without subkeys
+            (
+                "status",
+                None,
+                WorkflowStatusEnum.PLANNING,
+                {"status": WorkflowStatusEnum.PLANNING},
+            ),
+            # Target with single subkey
+            (
+                "context",
+                ["project"],
+                {"name": "test-project", "version": "1.0.0"},
+                {"context": {"project": {"name": "test-project", "version": "1.0.0"}}},
+            ),
+            # Target with multiple subkeys
+            (
+                "context",
+                ["project", "config", "database"],
+                {"host": "localhost", "port": 5432},
+                {
+                    "context": {
+                        "project": {
+                            "config": {"database": {"host": "localhost", "port": 5432}}
+                        }
+                    }
+                },
+            ),
+            # Target with empty subkeys list
+            (
+                "context",
+                [],
+                {"key": "value"},
+                {"context": {"key": "value"}},
+            ),
+            # Complex nested object value
+            (
+                "context",
+                ["metadata"],
+                {
+                    "created_at": "2023-01-01",
+                    "tags": ["important", "urgent"],
+                    "config": {"retry": 3, "timeout": 30},
+                },
+                {
+                    "context": {
+                        "metadata": {
+                            "created_at": "2023-01-01",
+                            "tags": ["important", "urgent"],
+                            "config": {"retry": 3, "timeout": 30},
+                        }
+                    }
+                },
+            ),
+        ],
+        ids=[
+            "simple_target_no_subkeys",
+            "single_subkey",
+            "multiple_subkeys",
+            "empty_subkeys_list",
+            "complex_object_value",
+        ],
+    )
+    def test_iokey_to_nested_dict(self, target, subkeys, value, expected_result):
+        """Test generating nested dictionary from IOKey with various configurations."""
+        io_key = IOKey(target=target, subkeys=subkeys)
+        result = io_key.to_nested_dict(value)
+
+        assert result == expected_result
 
 
 class TestIOKeyModelValidations:

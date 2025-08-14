@@ -222,7 +222,9 @@ routers:
 
 This router uses the workflow status to determine the next step in processing, allowing for sophisticated error handling and partial result processing.
 
-## Existing components - AgentComponent
+## Component Types
+
+### AgentComponent
 
 The AgentComponent is the primary building block for AI-powered flows.
 An AgentComponent uses a Large Language Model (LLM) to process inputs and generate responses. It provides these capabilities:
@@ -311,7 +313,7 @@ The AgentComponent supports the following UI log events that can be specified in
 - **on_tool_execution_success**: Logged when a tool is successfully executed by the agent. This shows users what actions the agent took and their successful results.
 - **on_tool_execution_failed**: Logged when a tool execution fails. This provides error information and helps with debugging failed operations.
 
-### Complete AgentComponent Example
+#### Complete AgentComponent Example
 
 ```yaml
 components:
@@ -333,6 +335,268 @@ components:
     ui_role_as: "agent"
 ```
 
+### HumanInputComponent
+
+The HumanInputComponent enables human-in-the-loop interactions within flows by requesting and processing user input during workflow execution.
+This component allows workflows to pause execution, request user feedback or decisions, and then continue based on the user's response.
+
+The component provides these capabilities:
+
+- **Request user input**: Display optional prompts to guide user responses
+- **Interrupt workflow execution**: Cleanly pause the workflow until user input is received
+- **Process different response types**: Handle text responses, approval/rejection decisions
+- **Route responses**: Direct user input to specified target components in the conversation history
+- **Store approval decisions**: Capture user approval/rejection decisions in the flow context
+
+The HumanInputComponent consists of two internal nodes:
+
+- **RequestNode**: Transitions the workflow to `INPUT_REQUIRED` status and optionally displays prompts to the user
+- **FetchNode**: Waits for user input via interrupt() and processes the response based on event type
+
+#### Required Parameters
+
+- **name**: Unique identifier for this component instance
+- **type**: Must be `"HumanInputComponent"`
+- **sends_response_to**: Name of the target component that should receive the user's response in conversation history
+
+#### Optional Parameters
+
+- **prompt_id**: ID of the prompt template from the prompt registry to display to the user
+- **prompt_version**: Semantic version constraint for the prompt (e.g., `"^1.0.0"`)
+- **inputs**: List of input data sources for prompt rendering (default: empty list)
+- **ui_log_events**: UI logging configuration for displaying prompts
+
+#### Supported Event Types
+
+The HumanInputComponent processes different types of user events:
+
+- **RESPONSE**: Regular text input from the user that gets added to conversation history
+- **APPROVE**: User approval decision that gets stored in the context as `"approve"`
+- **REJECT**: User rejection decision that gets stored in the context as `"reject"`, optionally with a message added to conversation history
+
+#### Outputs
+
+Each HumanInputComponent automatically produces:
+
+- **conversation_history:{sends_response_to}**: User messages directed to the target component
+- **context:{component_name}.approval**: User approval decision (`"approve"` or `"reject"`)
+
+#### UI Log Events
+
+The HumanInputComponent supports the following UI log event:
+
+- **on_user_input_prompt**: Logged when displaying a prompt to request user input. This shows the prompt content in the UI to guide the user's response.
+
+#### Environment Support
+
+The HumanInputComponent is only supported in the `"ide"` environment, as it requires the interrupt mechanism for pausing workflow execution.
+
+#### Complete HumanInputComponent Example
+
+```yaml
+components:
+  - name: "user_approval"
+    type: HumanInputComponent
+    sends_response_to: "code_assistant"
+    prompt_id: "approval_request"
+    prompt_version: "^1.0.0"
+    inputs:
+      - from: "context:code_assistant.final_answer"
+        as: "proposed_changes"
+    ui_log_events:
+      - "on_user_input_prompt"
+
+  - name: "code_assistant"
+    type: AgentComponent
+    prompt_id: "code_review_helper"
+    prompt_version: "^1.0.0"
+    inputs:
+      - "context:goal"
+      - from: "context:user_approval.approval"
+        as: "user_decision"
+    toolset: ["read_file", "edit_file"]
+```
+
+#### Usage Patterns
+
+**Approval Workflow**: Use HumanInputComponent to request user approval before proceeding with actions:
+
+```yaml
+routers:
+  - from: "user_approval"
+    condition:
+      input: "context:user_approval.approval"
+      routes:
+        "approve": "execute_changes"
+        "reject": "revise_proposal"
+        "default_route": "manual_review"
+```
+
+**Interactive Chat**: Enable back-and-forth conversation between user and agent:
+
+```yaml
+routers:
+  - from: "user_input"
+    to: "chat_agent"
+  - from: "chat_agent"
+    to: "user_input"  # Loop back for continued interaction
+```
+
+**Conditional Input**: Request user input only when certain conditions are met:
+
+```yaml
+routers:
+  - from: "analyzer"
+    condition:
+      input: "context:analyzer.confidence"
+      routes:
+        "low": "user_clarification"
+        "high": "auto_processor"
+```
+
 ## Flow Examples
+
+### Human-in-the-Loop Code Review Flow
+
+This example demonstrates a flow that analyzes code, requests user approval, and takes action based on the user's decision:
+
+```yaml
+version: "experimental"
+environment: ide
+
+components:
+  - name: "code_analyzer"
+    type: AgentComponent
+    prompt_id: "code_analysis"
+    prompt_version: "^1.0.0"
+    inputs: ["context:goal"]
+    toolset: ["read_file", "list_dir", "find_files"]
+    ui_log_events: ["on_agent_final_answer", "on_tool_execution_success"]
+
+  - name: "approval_request"
+    type: HumanInputComponent
+    sends_response_to: "code_executor"
+    prompt_id: "approval_prompt"
+    prompt_version: "^1.0.0"
+    inputs:
+      - from: "context:code_analyzer.final_answer"
+        as: "analysis_results"
+    ui_log_events: ["on_user_input_prompt"]
+
+  - name: "code_executor"
+    type: AgentComponent
+    prompt_id: "code_execution"
+    prompt_version: "^1.0.0"
+    inputs:
+      - from: "context:code_analyzer.final_answer"
+        as: "analysis"
+      - from: "context:approval_request.approval"
+        as: "user_decision"
+    toolset: ["edit_file", "create_file_with_contents"]
+    ui_log_events: ["on_agent_final_answer", "on_tool_execution_success"]
+
+routers:
+  - from: "code_analyzer"
+    to: "approval_request"
+  - from: "approval_request"
+    condition:
+      input: "context:approval_request.approval"
+      routes:
+        "approve": "code_executor"
+        "reject": "end"
+        "default_route": "code_executor"
+  - from: "code_executor"
+    to: "end"
+
+flow:
+  entry_point: "code_analyzer"
+```
+
+### Interactive Chat Flow
+
+This example shows a continuous conversation loop between user and agent:
+
+```yaml
+version: "experimental"
+environment: ide
+
+components:
+  - name: "chat_agent"
+    type: AgentComponent
+    prompt_id: "chat_assistant"
+    prompt_version: "^1.0.0"
+    inputs: ["context:goal"]
+    toolset: ["read_file", "list_dir", "create_file_with_contents"]
+    ui_log_events: ["on_agent_final_answer", "on_tool_execution_success"]
+
+  - name: "user_input"
+    type: HumanInputComponent
+    sends_response_to: "chat_agent"
+    prompt_id: "continue_conversation"
+    prompt_version: "^1.0.0"
+    ui_log_events: ["on_user_input_prompt"]
+
+routers:
+  - from: "chat_agent"
+    to: "user_input"
+  - from: "user_input"
+    to: "chat_agent"
+
+flow:
+  entry_point: "chat_agent"
+```
+
+### Conditional User Input Flow
+
+This example demonstrates requesting user input only when the agent's confidence is low:
+
+```yaml
+version: "experimental"
+environment: ide
+
+components:
+  - name: "decision_maker"
+    type: AgentComponent
+    prompt_id: "decision_analysis"
+    prompt_version: "^1.0.0"
+    inputs: ["context:goal"]
+    toolset: ["read_file", "find_files"]
+    ui_log_events: ["on_agent_final_answer"]
+
+  - name: "user_clarification"
+    type: HumanInputComponent
+    sends_response_to: "final_processor"
+    prompt_id: "clarification_request"
+    prompt_version: "^1.0.0"
+    inputs:
+      - from: "context:decision_maker.final_answer"
+        as: "initial_analysis"
+    ui_log_events: ["on_user_input_prompt"]
+
+  - name: "final_processor"
+    type: AgentComponent
+    prompt_id: "final_processing"
+    prompt_version: "^1.0.0"
+    inputs:
+      - from: "context:decision_maker.final_answer"
+        as: "analysis"
+    toolset: ["edit_file", "create_file_with_contents"]
+    ui_log_events: ["on_agent_final_answer", "on_tool_execution_success"]
+
+routers:
+  - from: "decision_maker"
+    condition:
+      input: "context:decision_maker.final_answer"
+      routes:
+        "needs_clarification": "user_clarification"
+        "default_route": "final_processor"
+  - from: "user_clarification"
+    to: "final_processor"
+  - from: "final_processor"
+    to: "end"
+
+flow:
+  entry_point: "decision_maker"
+```
 
 More examples will be added as the framework matures and additional use cases are identified.

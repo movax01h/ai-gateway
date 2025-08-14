@@ -160,7 +160,7 @@ class ToolNode:
         self._internal_event_client.track_event(
             event_name=event_name.value,
             additional_properties=additional_properties,
-            category=self._flow_type,
+            category=self._flow_type.value,
         )
 
     def _format_type_error_response(self, tool: BaseTool, error: TypeError) -> str:
