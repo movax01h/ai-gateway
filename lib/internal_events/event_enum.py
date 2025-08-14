@@ -8,6 +8,7 @@ class EventEnum(StrEnum):
     WORKFLOW_RETRY = "retry_request_duo_workflow"
     WORKFLOW_MESSAGE = "message_duo_workflow"
     WORKFLOW_ABORTED = "request_duo_workflow_aborted"
+    WORKFLOW_REJECT = "reject_duo_agent_platform"
     TOKEN_PER_USER_PROMPT = "tokens_per_user_request_prompt"
     WORKFLOW_FINISH_SUCCESS = "request_duo_workflow_success"
     WORKFLOW_FINISH_FAILURE = "request_duo_workflow_failure"
@@ -22,6 +23,7 @@ class EventLabelEnum(StrEnum):
     WORKFLOW_RESUME_LABEL = "workflow_resume_event"
     WORKFLOW_PAUSE_LABEL = "workflow_pause_event"
     WORKFLOW_MESSAGE_LABEL = "workflow_message_event"
+    WORKFLOW_REJECT_LABEL = "workflow_reject_event"
 
 
 class EventPropertyEnum(StrEnum):

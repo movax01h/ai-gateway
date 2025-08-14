@@ -45,6 +45,7 @@ from duo_workflow_service.json_encoder.encoder import CustomEncoder
 from duo_workflow_service.monitoring import duo_workflow_metrics
 from duo_workflow_service.status_updater.gitlab_status_updater import (
     GitLabStatusUpdater,
+    UnsupportedStatusEvent,
 )
 from duo_workflow_service.tracking.errors import log_exception
 from lib.internal_events import InternalEventAdditionalProperties, InternalEventsClient
@@ -230,6 +231,18 @@ class GitLabWorkflow(BaseCheckpointSaver[Any], AbstractAsyncContextManager[Any])
                 flow_type=self._workflow_type.value,
             )
 
+        # For flow reject events
+        if event_name == EventEnum.WORKFLOW_REJECT:
+            duo_workflow_metrics.count_agent_platform_session_reject(
+                flow_type=self._workflow_type.value,
+            )
+
+        # For flow resume events
+        if event_name == EventEnum.WORKFLOW_RESUME:
+            duo_workflow_metrics.count_agent_platform_session_resume(
+                flow_type=self._workflow_type.value,
+            )
+
         # For session success events
         if event_name == EventEnum.WORKFLOW_FINISH_SUCCESS:
             duo_workflow_metrics.count_agent_platform_session_success(
@@ -251,7 +264,9 @@ class GitLabWorkflow(BaseCheckpointSaver[Any], AbstractAsyncContextManager[Any])
                 return MemorySaver()
 
             config: RunnableConfig = {"configurable": {}}
-            self.initial_status_event, event_property = await self._status_event(config)
+            self.initial_status_event, event_property = (
+                await self._get_initial_status_event(config)
+            )
             await self._update_workflow_status(self.initial_status_event)
 
             if self.initial_status_event == WorkflowStatusEventEnum.START:
@@ -277,6 +292,18 @@ class GitLabWorkflow(BaseCheckpointSaver[Any], AbstractAsyncContextManager[Any])
                 additional_properties=additional_properties,
             )
             return self
+        except UnsupportedStatusEvent as e:
+            reject_properties = InternalEventAdditionalProperties(
+                label=EventLabelEnum.WORKFLOW_REJECT_LABEL.value,
+                property=repr(e),
+                value=self._workflow_id,
+            )
+            self._logger.info(f"Additional properties: {reject_properties}")
+            self._track_internal_event(
+                event_name=EventEnum.WORKFLOW_REJECT,
+                additional_properties=reject_properties,
+            )
+            raise e
         except Exception as e:
             failure_properties = InternalEventAdditionalProperties(
                 label=EventLabelEnum.WORKFLOW_FINISH_LABEL.value,
@@ -303,7 +330,7 @@ class GitLabWorkflow(BaseCheckpointSaver[Any], AbstractAsyncContextManager[Any])
 
             raise
 
-    async def _status_event(
+    async def _get_initial_status_event(
         self, config: RunnableConfig  # pylint: disable=unused-argument
     ) -> tuple[WorkflowStatusEventEnum, EventPropertyEnum]:
         """Determine the workflow status event and event property.
@@ -340,12 +367,11 @@ class GitLabWorkflow(BaseCheckpointSaver[Any], AbstractAsyncContextManager[Any])
 
         if not checkpoint_tuple:
             return WorkflowStatusEventEnum.START, EventPropertyEnum.WORKFLOW_ID
-        else:
-            # existing workflows which were not interrupted are retried
-            return (
-                WorkflowStatusEventEnum.RETRY,
-                EventPropertyEnum.WORKFLOW_RESUME_BY_USER,
-            )
+
+        return (
+            WorkflowStatusEventEnum.RETRY,
+            EventPropertyEnum.WORKFLOW_RESUME_BY_USER,
+        )
 
     async def __aexit__(self, exc_type, exc_value, trcback):
         """Handle workflow completion and tracking in both success and failure scenarios.
@@ -665,7 +691,7 @@ class GitLabWorkflow(BaseCheckpointSaver[Any], AbstractAsyncContextManager[Any])
         For example, `drop` status event changes a workflow status from
         `created`, `running` or `paused` to `failed`.
         For workflow status `not started`, there is no status event
-        Resume, Retry and start workflow events are handled with  self._status_event method
+        Resume, Retry and start workflow events are handled with  self._get_initial_status_event method
         """
         status_event = None
         if _attribute_dirty("status", metadata):
