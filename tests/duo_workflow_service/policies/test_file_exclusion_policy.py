@@ -248,8 +248,9 @@ class TestFileExclusionPolicy:
         policy = FileExclusionPolicy(project)
         filenames = ["src/main.py", "config.json", "README.md", "test.log"]
 
-        result = policy.filter_allowed(filenames)
-        assert result == filenames
+        allowed_files, excluded_files = policy.filter_allowed(filenames)
+        assert allowed_files == filenames
+        assert excluded_files == []
 
     def test_filter_allowed_with_exclusions(self):
         """Test filter_allowed with various exclusion patterns."""
@@ -274,9 +275,16 @@ class TestFileExclusionPolicy:
             "logs/debug.log",
         ]
 
-        result = policy.filter_allowed(filenames)
-        expected = ["src/main.py", "config.json", "README.md"]
-        assert result == expected
+        allowed_files, excluded_files = policy.filter_allowed(filenames)
+        expected_allowed = ["src/main.py", "config.json", "README.md"]
+        expected_excluded = [
+            "app.log",
+            "secrets/api_key.txt",
+            "temp.tmp",
+            "logs/debug.log",
+        ]
+        assert allowed_files == expected_allowed
+        assert excluded_files == expected_excluded
 
     def test_filter_allowed_with_empty_list(self):
         """Test filter_allowed with empty filename list."""
@@ -291,8 +299,9 @@ class TestFileExclusionPolicy:
         )
 
         policy = FileExclusionPolicy(project)
-        result = policy.filter_allowed([])
-        assert result == []
+        allowed_files, excluded_files = policy.filter_allowed([])
+        assert allowed_files == []
+        assert excluded_files == []
 
     def test_filter_allowed_with_whitespace_filenames(self):
         """Test filter_allowed handles filenames with whitespace correctly."""
@@ -315,9 +324,11 @@ class TestFileExclusionPolicy:
             "config.json",
         ]
 
-        result = policy.filter_allowed(filenames)
-        expected = ["src/main.py", "config.json"]
-        assert result == expected
+        allowed_files, excluded_files = policy.filter_allowed(filenames)
+        expected_allowed = ["src/main.py", "config.json"]
+        expected_excluded = ["app.log"]
+        assert allowed_files == expected_allowed
+        assert excluded_files == expected_excluded
 
     def test_filter_allowed_all_files_excluded(self):
         """Test filter_allowed when all files are excluded."""
@@ -334,8 +345,38 @@ class TestFileExclusionPolicy:
         policy = FileExclusionPolicy(project)
         filenames = ["src/main.py", "config.json", "README.md"]
 
-        result = policy.filter_allowed(filenames)
-        assert result == []
+        allowed_files, excluded_files = policy.filter_allowed(filenames)
+        assert allowed_files == []
+        assert excluded_files == filenames
+
+    def test_filter_allowed_duplicate_filenames(self):
+        """Test filter_allowed with duplicate filenames in input."""
+        project = Project(
+            id=1,
+            name="test-project",
+            description="Test project",
+            http_url_to_repo="http://example.com/repo.git",
+            web_url="http://example.com/repo",
+            languages=[],
+            exclusion_rules=["**/*.log"],
+        )
+
+        policy = FileExclusionPolicy(project)
+        filenames = [
+            "src/main.py",
+            "app.log",
+            "src/main.py",  # Duplicate allowed file
+            "debug.log",
+            "app.log",  # Duplicate excluded file
+            "config.json",
+        ]
+
+        allowed_files, excluded_files = policy.filter_allowed(filenames)
+        expected_allowed = ["src/main.py", "src/main.py", "config.json"]
+        expected_excluded = ["app.log", "debug.log", "app.log"]
+
+        assert allowed_files == expected_allowed
+        assert excluded_files == expected_excluded
 
     def test_is_allowed_for_project_static_method(self):
         """Test the static is_allowed_for_project method."""
@@ -503,10 +544,11 @@ class TestFileExclusionPolicyFeatureFlag:
             "temp.tmp",
         ]
 
-        result = policy.filter_allowed(filenames)
+        allowed_files, excluded_files = policy.filter_allowed(filenames)
 
-        # All files should be returned when feature flag is disabled
-        assert result == filenames
+        # All files should be returned as allowed when feature flag is disabled
+        assert allowed_files == filenames
+        assert excluded_files == []
 
         # Verify the feature flag was checked
         mock_feature_flag.assert_called_with(FeatureFlag.USE_DUO_CONTEXT_EXCLUSION)
@@ -534,11 +576,13 @@ class TestFileExclusionPolicyFeatureFlag:
             "temp.tmp",
         ]
 
-        result = policy.filter_allowed(filenames)
+        allowed_files, excluded_files = policy.filter_allowed(filenames)
 
-        # Only files not matching exclusion rules should be returned
-        expected = ["src/main.py", "config.json"]
-        assert result == expected
+        # Only files not matching exclusion rules should be returned as allowed
+        expected_allowed = ["src/main.py", "config.json"]
+        expected_excluded = ["app.log", "secrets/api_key.txt", "temp.tmp"]
+        assert allowed_files == expected_allowed
+        assert excluded_files == expected_excluded
 
         # Verify the feature flag was checked
         mock_feature_flag.assert_called_with(FeatureFlag.USE_DUO_CONTEXT_EXCLUSION)

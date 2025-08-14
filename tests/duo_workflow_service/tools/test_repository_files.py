@@ -695,8 +695,16 @@ class TestFileExclusionPolicy:
         project = {"exclusion_rules": exclusion_rules}
         policy = FileExclusionPolicy(project)
 
-        result = policy.filter_allowed(filenames)
-        assert result == expected_allowed
+        allowed_files, excluded_files = policy.filter_allowed(filenames)
+        assert allowed_files == expected_allowed
+
+        # Verify that excluded files are correctly identified
+        expected_excluded = [
+            f.strip()
+            for f in filenames
+            if f.strip() and f.strip() not in expected_allowed
+        ]
+        assert excluded_files == expected_excluded
 
     def test_format_user_exclusion_message(self):
         """Test user-facing exclusion message formatting."""
