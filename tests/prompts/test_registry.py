@@ -21,6 +21,7 @@ from ai_gateway.model_metadata import (
     ModelMetadata,
     TypeModelMetadata,
 )
+from ai_gateway.models.litellm import KindLiteLlmModel
 from ai_gateway.prompts import LocalPromptRegistry, Prompt
 from ai_gateway.prompts.config import ModelClassProvider
 from ai_gateway.prompts.typing import Model, TypeModelFactory
@@ -184,6 +185,32 @@ prompt_template:
   user: Template2
 params:
   vertex_location: us-east1
+  timeout: 60
+  stop:
+    - Foo
+    - Bar
+""",
+    )
+    fs.create_file(
+        prompts_definitions_dir / "chat" / "react" / "claude_3" / "1.0.0.yml",
+        contents="""
+---
+name: Chat react claude_3 prompt
+model:
+  name: general
+  params:
+    model_class_provider: litellm
+    temperature: 0.1
+    top_p: 0.8
+    top_k: 40
+    max_tokens: 256
+    max_retries: 6
+unit_primitives:
+  - duo_chat
+prompt_template:
+  system: Template1
+  user: Template2
+params:
   timeout: 60
   stop:
     - Foo
@@ -784,6 +811,33 @@ prompt_template:
                     "api_key": "token",
                     "api_base": "http://localhost:4000",
                     "vertex_location": "us-east1",
+                },
+                {
+                    "temperature": 0.1,
+                    "top_p": 0.8,
+                    "top_k": 40,
+                    "max_tokens": 256,
+                    "max_retries": 6,
+                },
+                ChatLiteLLM,
+            ),
+            (
+                "chat/react",
+                "^1.0.0",
+                ModelMetadata(
+                    name=KindLiteLlmModel.GENERAL,
+                    provider="litellm",
+                ),
+                False,
+                "Chat react claude_3 prompt",  # Should map to claude_3 variant
+                MockPromptClass,
+                [("system", "Template1"), ("user", "Template2")],
+                "general",  # The model_metadata.name overrides the prompt file's model name
+                {
+                    "stop": ["Foo", "Bar"],
+                    "timeout": 60,
+                    "custom_llm_provider": "litellm",
+                    "model": "general",
                 },
                 {
                     "temperature": 0.1,
