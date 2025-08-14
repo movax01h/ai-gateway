@@ -10,8 +10,6 @@ from duo_workflow_service.tools.search import (
     GroupProjectSearch,
     IssueSearch,
     IssueSearchInput,
-    MergeRequestSearch,
-    MergeRequestSearchInput,
     MilestoneSearch,
     NoteSearch,
     RefSearchInput,
@@ -40,14 +38,6 @@ class TestSearch:
                 {"confidential": False, "state": "open"},
                 {"order_by": None, "sort": None},
                 [{"id": 1, "title": "found issue"}],
-            ),
-            (
-                MergeRequestSearch,
-                "merge_requests",
-                "groups",
-                {"state": "opened"},
-                {"order_by": "created_at", "sort": None},
-                [{"id": 1, "title": "found merge request"}],
             ),
             (
                 MilestoneSearch,
@@ -145,7 +135,6 @@ class TestSearch:
         "tool_class, scope, search_type, extra_params",
         [
             (IssueSearch, "issues", "projects", {"confidential": False}),
-            (MergeRequestSearch, "merge_requests", "groups", {}),
             (MilestoneSearch, "milestones", "projects", {}),
             (UserSearch, "users", "groups", {}),
             (WikiBlobSearch, "wiki_blobs", "projects", {}),
@@ -327,19 +316,6 @@ def test_issue_search_format_display_message():
     message = tool.format_display_message(input_data)
 
     expected_message = "Search for issues with term 'test search' in projects 123"
-    assert message == expected_message
-
-
-def test_merge_request_search_format_display_message():
-    tool = MergeRequestSearch(description="Merge request search description")
-
-    input_data = MergeRequestSearchInput(
-        id="123", search="test search", search_type="groups", state="opened"
-    )
-
-    message = tool.format_display_message(input_data)
-
-    expected_message = "Search for merge requests with term 'test search' in groups 123"
     assert message == expected_message
 
 
