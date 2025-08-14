@@ -28,7 +28,20 @@ from duo_workflow_service.server import (
     serve,
     string_to_category_enum,
 )
-from lib.internal_events.event_enum import CategoryEnum
+from lib.internal_events.context import InternalEventAdditionalProperties
+from lib.internal_events.event_enum import (
+    CategoryEnum,
+    EventEnum,
+    EventLabelEnum,
+    EventPropertyEnum,
+)
+
+
+def create_mock_internal_event_client():
+    """Helper function to create a mock internal event client for tests."""
+    mock_client = MagicMock()
+    mock_client.track_event = MagicMock()
+    return mock_client
 
 
 def test_configure_cache_disabled():
@@ -107,7 +120,11 @@ async def test_execute_workflow_when_no_events_ends(
     current_user.set(CloudConnectorUser(authenticated=True, is_debug=True))
     mock_context = MagicMock(spec=grpc.ServicerContext)
     servicer = DuoWorkflowService()
-    result = servicer.ExecuteWorkflow(mock_request_iterator(), mock_context)
+    result = servicer.ExecuteWorkflow(
+        mock_request_iterator(),
+        mock_context,
+        internal_event_client=create_mock_internal_event_client(),
+    )
     assert isinstance(result, AsyncIterable)
     with pytest.raises(StopAsyncIteration):
         await anext(result)
@@ -140,7 +157,11 @@ async def test_execute_workflow_when_nothing_in_outbox(
     current_user.set(CloudConnectorUser(authenticated=True, is_debug=True))
     mock_context = MagicMock(spec=grpc.ServicerContext)
     servicer = DuoWorkflowService()
-    result = servicer.ExecuteWorkflow(mock_request_iterator(), mock_context)
+    result = servicer.ExecuteWorkflow(
+        mock_request_iterator(),
+        mock_context,
+        internal_event_client=create_mock_internal_event_client(),
+    )
     assert isinstance(result, AsyncIterable)
     with pytest.raises(StopAsyncIteration):
         await anext(result)
@@ -181,7 +202,11 @@ async def test_workflow_is_cancelled_on_parent_task_cancellation(
 
     with patch("asyncio.create_task", side_effect=mock_create_task):
         servicer = DuoWorkflowService()
-        result = servicer.ExecuteWorkflow(mock_request_iterator(), mock_context)
+        result = servicer.ExecuteWorkflow(
+            mock_request_iterator(),
+            mock_context,
+            internal_event_client=create_mock_internal_event_client(),
+        )
 
         with pytest.raises(StopAsyncIteration):
             await anext(result)
@@ -245,7 +270,11 @@ async def test_execute_workflow(
         ("x-gitlab-unidirectional-streaming", unidirectional_streaming_enabled),
     ]
     servicer = DuoWorkflowService()
-    result = servicer.ExecuteWorkflow(mock_request_iterator(), mock_context)
+    result = servicer.ExecuteWorkflow(
+        mock_request_iterator(),
+        mock_context,
+        internal_event_client=create_mock_internal_event_client(),
+    )
     assert isinstance(result, AsyncIterable)
     assert (await anext(result)).WhichOneof("action") == "newCheckpoint"
     assert (await anext(result)).WhichOneof("action") != "newCheckpoint"
@@ -493,7 +522,11 @@ async def test_execute_workflow_missing_workflow_metadata(
     current_user.set(user)
     mock_context = MagicMock(spec=grpc.ServicerContext)
     servicer = DuoWorkflowService()
-    result = servicer.ExecuteWorkflow(mock_request_iterator(), mock_context)
+    result = servicer.ExecuteWorkflow(
+        mock_request_iterator(),
+        mock_context,
+        internal_event_client=create_mock_internal_event_client(),
+    )
     with pytest.raises(StopAsyncIteration):
         await anext(result)
 
@@ -544,7 +577,11 @@ async def test_execute_workflow_valid_workflow_metadata(
         ("x-gitlab-oauth-token", "123"),
     ]
     servicer = DuoWorkflowService()
-    result = servicer.ExecuteWorkflow(mock_request_iterator(), mock_context)
+    result = servicer.ExecuteWorkflow(
+        mock_request_iterator(),
+        mock_context,
+        internal_event_client=create_mock_internal_event_client(),
+    )
     assert isinstance(result, AsyncIterable)
     with pytest.raises(StopAsyncIteration):
         await anext(result)
@@ -620,3 +657,65 @@ async def test_next_non_heartbeat_event():
     result = await next_non_heartbeat_event(mock_request_iterator())
     assert result.actionResponse.response == "the response"
     assert not result.HasField("heartbeat")
+
+
+@pytest.mark.asyncio
+@patch("duo_workflow_service.server.duo_workflow_metrics")
+@patch("duo_workflow_service.server.AbstractWorkflow")
+@patch("duo_workflow_service.server.resolve_workflow_class")
+async def test_execute_workflow_tracks_receive_start_request_internal_event(
+    mock_resolve_workflow, mock_abstract_workflow_class, mock_duo_workflow_metrics
+):
+    """Test that both the receive_start_request internal event and Prometheus metric are tracked when ExecuteWorkflow is
+    called."""
+    # Setup mocks
+    mock_workflow = mock_abstract_workflow_class.return_value
+    mock_workflow.is_done = True
+    mock_workflow.run = AsyncMock()
+    mock_workflow.cleanup = AsyncMock()
+    mock_resolve_workflow.return_value = mock_abstract_workflow_class
+
+    async def mock_request_iterator() -> AsyncIterable[contract_pb2.ClientEvent]:
+        yield contract_pb2.ClientEvent(
+            startRequest=contract_pb2.StartWorkflowRequest(
+                workflowID="test-workflow-123",
+                workflowDefinition="software_development",
+            )
+        )
+
+    # Setup user and context
+    user = CloudConnectorUser(authenticated=True, is_debug=True)
+    current_user.set(user)
+    mock_context = MagicMock(spec=grpc.ServicerContext)
+    mock_context.invocation_metadata.return_value = []
+
+    # Setup servicer
+    servicer = DuoWorkflowService()
+
+    # Execute the test with mocked internal_event_client parameter
+    mock_internal_event_client = create_mock_internal_event_client()
+    result = servicer.ExecuteWorkflow(
+        mock_request_iterator(),
+        mock_context,
+        internal_event_client=mock_internal_event_client,
+    )
+
+    # Consume the async iterator to trigger the internal event tracking
+    with pytest.raises(StopAsyncIteration):
+        await anext(result)
+
+    # Verify the Prometheus metric was tracked
+    mock_duo_workflow_metrics.count_agent_platform_receive_start_counter.assert_called_once_with(
+        flow_type=CategoryEnum.WORKFLOW_SOFTWARE_DEVELOPMENT
+    )
+
+    # Verify the internal event was tracked
+    mock_internal_event_client.track_event.assert_called_with(
+        event_name=EventEnum.RECEIVE_START_REQUEST.value,
+        additional_properties=InternalEventAdditionalProperties(
+            label=EventLabelEnum.WORKFLOW_RECEIVE_START_REQUEST_LABEL.value,
+            property=EventPropertyEnum.WORKFLOW_ID.value,
+            value="test-workflow-123",
+        ),
+        category=CategoryEnum.WORKFLOW_SOFTWARE_DEVELOPMENT.value,
+    )
