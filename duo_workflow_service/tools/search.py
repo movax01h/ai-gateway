@@ -33,7 +33,11 @@ class GitLabSearchBase(DuoBaseTool, ABC):
         return f"""
         {unique_description}
 
-        Search Term Syntax:
+        Search Term Syntax (for code search only):
+        - filename: Search by filename: filename:*spec.rb
+        - path: Search by repository location (full or partial matches): path:spec/workers/
+        - extension: Search by file extension without . (exact matches only): extension:js
+        - blob: Search by Git object ID (exact matches only): blob:998707*
         - Use quotes for exact phrase matches: "exact phrase"
         - Use + to specify AND condition: term1+term2
         - Use | for OR condition: term1|term2
@@ -46,6 +50,11 @@ class GitLabSearchBase(DuoBaseTool, ABC):
         - Parentheses can be used for grouping: (term1+term2)|term3
 
         Examples:
+        - rails -filename:gemfile.lock: Returns rails in all files except the gemfile.lock file
+        - RSpec.describe Resolvers -*builder: Returns RSpec.describe Resolvers that does not start with builder
+        - bug | (display +banner): Returns bug or both display and banner
+        - helper -extension:yml -extension:js: Returns helper in all files except files with a .yml or .js extension
+        - helper path:lib/git: Returns helper in all files with a lib/git* path (for example, spec/lib/gitlab)
         - "hello world": Exact phrase match
         - hello+world: Contains both "hello" AND "world"
         - hello|world: Contains either "hello" OR "world"
@@ -210,66 +219,6 @@ class IssueSearch(GitLabSearchBase):
         }
         if confidential is not None:
             params["confidential"] = str(confidential).lower()
-        if order_by:
-            params["order_by"] = order_by
-        if sort:
-            params["sort"] = sort
-        if state:
-            params["state"] = state
-
-        return await self._perform_search(id, params, search_type)
-
-
-class MergeRequestSearchInput(BaseSearchInput):
-    state: Optional[str] = Field(description="Filter by state", default=None)
-
-
-class MergeRequestSearch(GitLabSearchBase):
-    name: str = "gitlab_merge_request_search"
-    unique_description: str = """
-    Search for merge requests in the specified GitLab project or group.
-
-    Parameters:
-    - id: The ID of the project or group. In GitLab, a namespace and group are used interchangeably,
-            so either a group_id or namespace_id can be used to fill this argument. (required)
-    - search_type: Whether to search in a project or a group (required)
-    - search: The search term (required)
-    - order_by: Sort results. Allowed value is created_at
-    - sort: Sort order. Allowed values are asc or desc
-    - state: Filter by state
-
-    An example tool_call is presented below
-    {
-        'id': 'toolu_01KqpqRQhTM2pxJrhtTscMWu',
-        'name': 'gitlab_merge_request_search',
-        'type': 'tool_use'
-        'input': {
-            'id': 123,
-            'search_type': 'groups',
-            'scope': 'merge_requests',
-            'search': 'Duo Workflow',
-        },
-    }
-    """
-    description: str = GitLabSearchBase._get_description(unique_description)
-    args_schema: Type[BaseModel] = MergeRequestSearchInput
-
-    unit_primitive: GitLabUnitPrimitive = GitLabUnitPrimitive.ASK_MERGE_REQUEST
-
-    async def _arun(
-        self,
-        *,
-        id: str,
-        search: str,
-        search_type: Literal["projects", "groups"],
-        order_by: Optional[str] = None,
-        sort: Optional[str] = None,
-        state: Optional[str] = None,
-    ) -> str:
-        params = {
-            "scope": "merge_requests",
-            "search": search,
-        }
         if order_by:
             params["order_by"] = order_by
         if sort:

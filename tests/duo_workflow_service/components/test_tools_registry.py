@@ -273,6 +273,7 @@ def test_registry_initialization_initialises_tools_with_correct_attributes(
         "update_issue": tools.UpdateIssue(metadata=tool_metadata),
         "get_job_logs": tools.GetLogsFromJob(metadata=tool_metadata),
         "get_merge_request": tools.GetMergeRequest(metadata=tool_metadata),
+        "gitlab_merge_request_search": tools.ListMergeRequest(metadata=tool_metadata),
         "list_merge_request_diffs": tools.ListMergeRequestDiffs(metadata=tool_metadata),
         "create_merge_request_note": tools.CreateMergeRequestNote(
             metadata=tool_metadata
@@ -290,7 +291,6 @@ def test_registry_initialization_initialises_tools_with_correct_attributes(
         "gitlab_documentation_search": tools.DocumentationSearch(
             metadata=tool_metadata
         ),
-        "gitlab_merge_request_search": tools.MergeRequestSearch(metadata=tool_metadata),
         "gitlab_milestone_search": tools.MilestoneSearch(metadata=tool_metadata),
         "gitlab__user_search": tools.UserSearch(metadata=tool_metadata),
         "gitlab_blob_search": tools.BlobSearch(metadata=tool_metadata),
