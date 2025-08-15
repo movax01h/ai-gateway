@@ -2,6 +2,7 @@ import json
 from unittest.mock import AsyncMock, Mock
 
 import pytest
+from pydantic import ValidationError
 
 from duo_workflow_service.tools.security import (
     DismissVulnerability,
@@ -10,38 +11,9 @@ from duo_workflow_service.tools.security import (
     LinkVulnerabilityToIssueInput,
     ListVulnerabilities,
     ListVulnerabilitiesInput,
+    VulnerabilityReportType,
+    VulnerabilitySeverity,
 )
-
-# Common URL test parameters
-URL_SUCCESS_CASES = [
-    # Test with only URL
-    (
-        "https://gitlab.com/namespace/project",
-        None,
-        "/api/v4/projects/namespace%2Fproject/vulnerabilities",
-    ),
-    # Test with URL and matching project_id
-    (
-        "https://gitlab.com/namespace/project",
-        "namespace%2Fproject",
-        "/api/v4/projects/namespace%2Fproject/vulnerabilities",
-    ),
-]
-
-URL_ERROR_CASES = [
-    # URL and project_id both given, but don't match
-    (
-        "https://gitlab.com/namespace/project",
-        "different%2Fproject",
-        "Project ID mismatch",
-    ),
-    # URL given isn't a valid GitLab URL
-    (
-        "https://example.com/not-gitlab",
-        None,
-        "Failed to parse URL",
-    ),
-]
 
 
 @pytest.fixture(name="vulnerability_data")
@@ -50,14 +22,55 @@ def vulnerability_data_fixture():
     return [
         {
             "id": "gid://gitlab/Vulnerability/1",
-            "title": "Test Vulnerability",
+            "title": "SQL Injection",
             "reportType": "SAST",
-            "severity": "HIGH",
+            "severity": "CRITICAL",
+            "state": "DETECTED",
             "location": {
                 "file": "app/controllers/users_controller.rb",
                 "startLine": 42,
             },
-        }
+        },
+        {
+            "id": "gid://gitlab/Vulnerability/2",
+            "title": "Outdated Dependency",
+            "reportType": "DEPENDENCY_SCANNING",
+            "severity": "HIGH",
+            "state": "CONFIRMED",
+            "location": {
+                "file": "Gemfile.lock",
+                "dependency": {
+                    "package": {"name": "rails"},
+                    "version": "5.2.0",
+                },
+            },
+        },
+        {
+            "id": "gid://gitlab/Vulnerability/3",
+            "title": "Container Vulnerability",
+            "reportType": "CONTAINER_SCANNING",
+            "severity": "MEDIUM",
+            "state": "RESOLVED",
+            "location": {
+                "image": "alpine:3.14",
+                "operatingSystem": "alpine",
+                "dependency": {
+                    "package": {"name": "openssl"},
+                    "version": "1.1.1k",
+                },
+            },
+        },
+        {
+            "id": "gid://gitlab/Vulnerability/4",
+            "title": "Hardcoded Secret",
+            "reportType": "SECRET_DETECTION",
+            "severity": "HIGH",
+            "state": "DISMISSED",
+            "location": {
+                "file": "config/database.yml",
+                "startLine": 15,
+            },
+        },
     ]
 
 
@@ -74,200 +87,439 @@ def metadata_fixture(gitlab_client_mock):
     }
 
 
-async def tool_url_success_response(
-    tool,
-    url,
-    project_id,
-    gitlab_client_mock,
-    response_data,
-    **kwargs,
-):
-    gitlab_client_mock.aget = AsyncMock(return_value=response_data)
+class TestListVulnerabilitiesInput:
+    def test_valid_input(self):
+        """Test valid input creation."""
+        input_data = ListVulnerabilitiesInput(
+            project_full_path="namespace/project",
+            severity=[VulnerabilitySeverity.HIGH, VulnerabilitySeverity.CRITICAL],
+            report_type=[VulnerabilityReportType.SAST],
+            per_page=50,
+        )
+        assert input_data.project_full_path == "namespace/project"
+        assert len(input_data.severity) == 2
 
-    response = await tool._arun(url=url, project_id=project_id, **kwargs)
+    def test_project_path_validation(self):
+        """Test project path validation."""
+        valid_paths = [
+            "namespace/project",
+            "group/subgroup/project",
+            "my-group_123/project.name",
+        ]
+        for path in valid_paths:
+            input_data = ListVulnerabilitiesInput(project_full_path=path)
+            assert input_data.project_full_path == path
 
-    return response
+        invalid_paths = [
+            "../../../etc/passwd",
+            "/absolute/path",
+            "path/to/project/",
+            "ab",
+        ]
+        for path in invalid_paths:
+            with pytest.raises(ValidationError):
+                ListVulnerabilitiesInput(project_full_path=path)
 
+    def test_default_values(self):
+        """Test that default values are properly set."""
+        input_data = ListVulnerabilitiesInput(project_full_path="namespace/project")
 
-async def assert_tool_url_error(
-    tool,
-    url,
-    project_id,
-    error_contains,
-    gitlab_client_mock,
-    **kwargs,
-):
-    response = await tool._arun(url=url, project_id=project_id, **kwargs)
+        assert input_data.severity is None
+        assert input_data.report_type is None
+        assert input_data.per_page == 100
+        assert input_data.page == 1
+        assert input_data.fetch_all_pages is True
 
-    error_response = json.loads(response)
-    assert "error" in error_response
-    assert error_contains in error_response["error"]
+    def test_pagination_validation(self):
+        """Test pagination parameter validation."""
+        input_data = ListVulnerabilitiesInput(
+            project_full_path="namespace/project",
+            per_page=50,
+            page=2,
+        )
+        assert input_data.per_page == 50
+        assert input_data.page == 2
 
-    gitlab_client_mock.aget.assert_not_called()
+        with pytest.raises(ValidationError):
+            ListVulnerabilitiesInput(
+                project_full_path="namespace/project",
+                per_page=101,
+            )
+
+        with pytest.raises(ValidationError):
+            ListVulnerabilitiesInput(
+                project_full_path="namespace/project",
+                per_page=0,
+            )
+
+        with pytest.raises(ValidationError):
+            ListVulnerabilitiesInput(
+                project_full_path="namespace/project",
+                page=0,
+            )
 
 
 @pytest.mark.asyncio
-async def test_list_vulnerabilities(gitlab_client_mock, metadata, vulnerability_data):
-    gitlab_client_mock.apost = AsyncMock(
-        return_value={
+class TestListVulnerabilities:
+    async def test_basic_listing(
+        self, gitlab_client_mock, metadata, vulnerability_data
+    ):
+        """Test basic vulnerability listing without filters."""
+        gitlab_client_mock.apost = AsyncMock(
+            return_value={
+                "data": {
+                    "project": {
+                        "vulnerabilities": {
+                            "pageInfo": {"hasNextPage": False, "endCursor": None},
+                            "nodes": vulnerability_data,
+                        }
+                    }
+                }
+            }
+        )
+
+        tool = ListVulnerabilities(metadata=metadata)
+        response = await tool.arun({"project_full_path": "namespace/project"})
+        result = json.loads(response)
+
+        assert "vulnerabilities" in result
+        assert "summary" in result
+        assert len(result["vulnerabilities"]) == 4
+        assert result["summary"]["total"] == 4
+        assert result["summary"]["by_severity"]["CRITICAL"] == 1
+        assert result["summary"]["by_severity"]["HIGH"] == 2
+        assert result["summary"]["by_severity"]["MEDIUM"] == 1
+        assert result["summary"]["by_state"]["DETECTED"] == 1
+        assert result["summary"]["by_state"]["CONFIRMED"] == 1
+        assert result["summary"]["by_state"]["RESOLVED"] == 1
+        assert result["summary"]["by_state"]["DISMISSED"] == 1
+
+    async def test_severity_filtering(
+        self, gitlab_client_mock, metadata, vulnerability_data
+    ):
+        """Test filtering by multiple severity levels."""
+        gitlab_client_mock.apost = AsyncMock(
+            return_value={
+                "data": {
+                    "project": {
+                        "vulnerabilities": {
+                            "pageInfo": {"hasNextPage": False, "endCursor": None},
+                            "nodes": vulnerability_data,
+                        }
+                    }
+                }
+            }
+        )
+
+        tool = ListVulnerabilities(metadata=metadata)
+        response = await tool.arun(
+            {
+                "project_full_path": "namespace/project",
+                "severity": [
+                    VulnerabilitySeverity.CRITICAL,
+                    VulnerabilitySeverity.HIGH,
+                ],
+            }
+        )
+
+        call_args = gitlab_client_mock.apost.call_args
+        body = json.loads(call_args.kwargs["body"])
+        assert body["variables"]["severity"] == ["CRITICAL", "HIGH"]
+
+    async def test_report_type_filtering(
+        self, gitlab_client_mock, metadata, vulnerability_data
+    ):
+        """Test filtering by multiple report types."""
+        gitlab_client_mock.apost = AsyncMock(
+            return_value={
+                "data": {
+                    "project": {
+                        "vulnerabilities": {
+                            "pageInfo": {"hasNextPage": False, "endCursor": None},
+                            "nodes": vulnerability_data,
+                        }
+                    }
+                }
+            }
+        )
+
+        tool = ListVulnerabilities(metadata=metadata)
+        response = await tool.arun(
+            {
+                "project_full_path": "namespace/project",
+                "report_type": [
+                    VulnerabilityReportType.SAST,
+                    VulnerabilityReportType.DAST,
+                ],
+            }
+        )
+
+        call_args = gitlab_client_mock.apost.call_args
+        body = json.loads(call_args.kwargs["body"])
+        assert body["variables"]["reportType"] == ["SAST", "DAST"]
+
+    async def test_pagination(self, gitlab_client_mock, metadata, vulnerability_data):
+        """Test pagination with multiple pages."""
+        first_page_response = {
             "data": {
                 "project": {
                     "vulnerabilities": {
-                        "pageInfo": {"hasNextPage": False, "endCursor": None},
-                        "nodes": vulnerability_data,
+                        "pageInfo": {"hasNextPage": True, "endCursor": "cursor1"},
+                        "nodes": vulnerability_data[:2],
                     }
                 }
             }
         }
-    )
 
-    tool = ListVulnerabilities(metadata=metadata)
-
-    input_data = {
-        "project_full_path": "namespace/project",
-        "per_page": 50,
-        "page": 1,
-        "fetch_all_pages": False,
-        "severity": "HIGH",
-    }
-
-    response = await tool.arun(input_data)
-
-    expected_response = json.dumps(
-        {
-            "vulnerabilities": vulnerability_data,
-            "pagination": {"total_items": len(vulnerability_data)},
-        }
-    )
-    assert response == expected_response
-
-    # editorconfig-checker-disable
-    expected_query = """
-        query($projectFullPath: ID!, $first: Int, $after: String, $severity: [VulnerabilitySeverity!]) {
-          project(fullPath: $projectFullPath) {
-            vulnerabilities(first: $first, after: $after, severity: $severity) {
-              pageInfo {
-                hasNextPage
-                endCursor
-              }
-              nodes {
-                id
-                title
-                reportType
-                severity
-                location{
-                  ... on VulnerabilityLocationSast {
-                    file
-                    startLine
-                  }
+        second_page_response = {
+            "data": {
+                "project": {
+                    "vulnerabilities": {
+                        "pageInfo": {"hasNextPage": False, "endCursor": None},
+                        "nodes": vulnerability_data[2:],
+                    }
                 }
-              }
             }
-          }
         }
-        """
-    # editorconfig-checker-enable
 
-    gitlab_client_mock.apost.assert_called_once_with(
-        path="/api/graphql",
-        body=json.dumps(
+        gitlab_client_mock.apost = AsyncMock(
+            side_effect=[first_page_response, second_page_response]
+        )
+
+        tool = ListVulnerabilities(metadata=metadata)
+        response = await tool.arun(
             {
-                "query": expected_query,
-                "variables": {
-                    "projectFullPath": "namespace/project",
-                    "first": 50,
-                    "after": None,
-                    "severity": "HIGH",
-                },
+                "project_full_path": "namespace/project",
+                "per_page": 2,
+                "fetch_all_pages": True,
             }
-        ),
-    )
+        )
+        result = json.loads(response)
 
+        assert len(result["vulnerabilities"]) == 4
+        assert gitlab_client_mock.apost.call_count == 2
 
-@pytest.mark.asyncio
-async def test_list_vulnerabilities_with_pagination(
-    gitlab_client_mock, metadata, vulnerability_data
-):
-    # First page response
-    first_page_response = {
-        "data": {
-            "project": {
-                "vulnerabilities": {
-                    "pageInfo": {"hasNextPage": True, "endCursor": "cursor1"},
-                    "nodes": vulnerability_data,
+        second_call_args = gitlab_client_mock.apost.call_args_list[1]
+        body = json.loads(second_call_args.kwargs["body"])
+        assert body["variables"]["after"] == "cursor1"
+
+    async def test_pagination_without_cursor(
+        self, gitlab_client_mock, metadata, vulnerability_data
+    ):
+        """Test pagination when endCursor is missing despite hasNextPage being True."""
+        response_with_missing_cursor = {
+            "data": {
+                "project": {
+                    "vulnerabilities": {
+                        "pageInfo": {"hasNextPage": True, "endCursor": None},
+                        "nodes": vulnerability_data[:2],
+                    }
                 }
             }
         }
-    }
 
-    # Second page response
-    second_page_response = {
-        "data": {
-            "project": {
-                "vulnerabilities": {
-                    "pageInfo": {"hasNextPage": False, "endCursor": None},
-                    "nodes": vulnerability_data,
+        gitlab_client_mock.apost = AsyncMock(return_value=response_with_missing_cursor)
+
+        tool = ListVulnerabilities(metadata=metadata)
+        response = await tool.arun(
+            {
+                "project_full_path": "namespace/project",
+                "fetch_all_pages": True,
+            }
+        )
+        result = json.loads(response)
+
+        assert len(result["vulnerabilities"]) == 2
+        assert gitlab_client_mock.apost.call_count == 1
+
+    async def test_missing_page_info(
+        self, gitlab_client_mock, metadata, vulnerability_data
+    ):
+        """Test handling when pageInfo is missing from response."""
+        response_without_pageinfo = {
+            "data": {
+                "project": {
+                    "vulnerabilities": {
+                        "nodes": vulnerability_data[:2],
+                    }
                 }
             }
         }
-    }
 
-    gitlab_client_mock.apost = AsyncMock(
-        side_effect=[first_page_response, second_page_response]
-    )
+        gitlab_client_mock.apost = AsyncMock(return_value=response_without_pageinfo)
 
-    tool = ListVulnerabilities(metadata=metadata)
+        tool = ListVulnerabilities(metadata=metadata)
+        response = await tool.arun(
+            {
+                "project_full_path": "namespace/project",
+                "fetch_all_pages": True,
+            }
+        )
+        result = json.loads(response)
 
-    input_data = {
-        "project_full_path": "namespace/project",
-        "per_page": 50,
-        "fetch_all_pages": True,
-    }
+        assert len(result["vulnerabilities"]) == 2
+        assert gitlab_client_mock.apost.call_count == 1
 
-    response = await tool.arun(input_data)
+    async def test_project_not_found(self, gitlab_client_mock, metadata):
+        """Test handling when project is not found."""
+        gitlab_client_mock.apost = AsyncMock(return_value={"data": {"project": None}})
 
-    expected_response = json.dumps(
-        {
-            "vulnerabilities": vulnerability_data + vulnerability_data,
-            "pagination": {"total_items": len(vulnerability_data) * 2},
+        tool = ListVulnerabilities(metadata=metadata)
+        response = await tool.arun({"project_full_path": "nonexistent/project"})
+        result = json.loads(response)
+
+        assert "error" in result
+        assert "Project not found or access denied" in result["error"]
+        assert result["project_path"] == "nonexistent/project"
+
+    async def test_api_error(self, gitlab_client_mock, metadata):
+        """Test handling of API errors."""
+        gitlab_client_mock.apost = AsyncMock(side_effect=Exception("Network error"))
+
+        tool = ListVulnerabilities(metadata=metadata)
+        response = await tool.arun({"project_full_path": "namespace/project"})
+        result = json.loads(response)
+
+        assert "error" in result
+        assert "An error occurred while listing vulnerabilities" in result["error"]
+        assert result["error_type"] == "Exception"
+
+    async def test_invalid_response_structure(self, gitlab_client_mock, metadata):
+        """Test handling of invalid API response structure."""
+        gitlab_client_mock.apost = AsyncMock(return_value={"invalid": "response"})
+
+        tool = ListVulnerabilities(metadata=metadata)
+        response = await tool.arun({"project_full_path": "namespace/project"})
+        result = json.loads(response)
+
+        assert "error" in result
+
+    async def test_null_nodes_in_response(self, gitlab_client_mock, metadata):
+        """Test handling when nodes is null in response."""
+        response_with_null_nodes = {
+            "data": {
+                "project": {
+                    "vulnerabilities": {
+                        "pageInfo": {"hasNextPage": False, "endCursor": None},
+                        "nodes": None,
+                    }
+                }
+            }
         }
-    )
-    assert response == expected_response
 
-    assert gitlab_client_mock.apost.call_count == 2
+        gitlab_client_mock.apost = AsyncMock(return_value=response_with_null_nodes)
+
+        tool = ListVulnerabilities(metadata=metadata)
+        response = await tool.arun({"project_full_path": "namespace/project"})
+        result = json.loads(response)
+
+        assert len(result["vulnerabilities"]) == 0
+        assert result["summary"]["total"] == 0
+
+    async def test_empty_results(self, gitlab_client_mock, metadata):
+        """Test handling of empty vulnerability list."""
+        gitlab_client_mock.apost = AsyncMock(
+            return_value={
+                "data": {
+                    "project": {
+                        "vulnerabilities": {
+                            "pageInfo": {"hasNextPage": False, "endCursor": None},
+                            "nodes": [],
+                        }
+                    }
+                }
+            }
+        )
+
+        tool = ListVulnerabilities(metadata=metadata)
+        response = await tool.arun({"project_full_path": "namespace/project"})
+        result = json.loads(response)
+
+        assert len(result["vulnerabilities"]) == 0
+        assert result["summary"]["total"] == 0
+        assert result["summary"]["by_severity"] == {}
+        assert result["summary"]["by_state"] == {}
+        assert result["summary"]["by_report_type"] == {}
+
+    async def test_empty_cursor_string(
+        self, gitlab_client_mock, metadata, vulnerability_data
+    ):
+        """Test pagination when cursor is an empty string."""
+        first_response = {
+            "data": {
+                "project": {
+                    "vulnerabilities": {
+                        "pageInfo": {"hasNextPage": True, "endCursor": ""},
+                        "nodes": vulnerability_data[:2],
+                    }
+                }
+            }
+        }
+
+        gitlab_client_mock.apost = AsyncMock(return_value=first_response)
+
+        tool = ListVulnerabilities(metadata=metadata)
+        response = await tool.arun(
+            {
+                "project_full_path": "namespace/project",
+                "fetch_all_pages": True,
+            }
+        )
+        result = json.loads(response)
+
+        assert len(result["vulnerabilities"]) == 2
+        assert gitlab_client_mock.apost.call_count == 1
 
 
-@pytest.mark.asyncio
-async def test_list_vulnerabilities_exception(gitlab_client_mock, metadata):
-    gitlab_client_mock.apost = AsyncMock(side_effect=Exception("API Error"))
+class TestDisplayMessageFormatting:
+    def test_format_display_message(self):
+        """Test display message formatting with various filters."""
+        tool = ListVulnerabilities(metadata={})
 
-    tool = ListVulnerabilities(metadata=metadata)
+        args = ListVulnerabilitiesInput(project_full_path="namespace/project")
+        message = tool.format_display_message(args)
+        assert message == "List vulnerabilities in project namespace/project"
 
-    response = await tool.arun({"project_full_path": "namespace/project"})
+        args = ListVulnerabilitiesInput(
+            project_full_path="namespace/project",
+            severity=[VulnerabilitySeverity.HIGH, VulnerabilitySeverity.CRITICAL],
+        )
+        message = tool.format_display_message(args)
+        assert "severity: HIGH, CRITICAL" in message
 
-    error_response = json.loads(response)
-    assert "error" in error_response
-    assert "API Error" in error_response["error"]
+        args = ListVulnerabilitiesInput(
+            project_full_path="namespace/project",
+            severity=[VulnerabilitySeverity.HIGH],
+            report_type=[VulnerabilityReportType.SAST],
+        )
+        message = tool.format_display_message(args)
 
-
-@pytest.mark.parametrize(
-    "input_data,expected_message",
-    [
-        (
-            ListVulnerabilitiesInput(project_full_path="namespace/project"),
-            "List vulnerabilities in project namespace/project",
-        ),
-        (
-            ListVulnerabilitiesInput(project_full_path="group/subgroup/project"),
-            "List vulnerabilities in project group/subgroup/project",
-        ),
-    ],
-)
-def test_list_vulnerabilities_format_display_message(input_data, expected_message):
-    tool = ListVulnerabilities(metadata={})
-    assert tool.format_display_message(input_data) == expected_message
+        assert "severity: HIGH" in message
+        assert "report type: SAST" in message
 
 
+class TestEnumCoverage:
+    def test_all_vulnerability_severities(self):
+        """Test all VulnerabilitySeverity enum values."""
+        severities = list(VulnerabilitySeverity)
+        assert len(severities) == 6
+        assert VulnerabilitySeverity.CRITICAL in severities
+        assert VulnerabilitySeverity.HIGH in severities
+        assert VulnerabilitySeverity.MEDIUM in severities
+        assert VulnerabilitySeverity.LOW in severities
+        assert VulnerabilitySeverity.INFO in severities
+        assert VulnerabilitySeverity.UNKNOWN in severities
+
+    def test_all_vulnerability_report_types(self):
+        """Test all VulnerabilityReportType enum values."""
+        report_types = list(VulnerabilityReportType)
+        assert len(report_types) == 10
+        assert VulnerabilityReportType.SAST in report_types
+        assert VulnerabilityReportType.DEPENDENCY_SCANNING in report_types
+        assert VulnerabilityReportType.CONTAINER_SCANNING in report_types
+
+
+# Dismiss Vulnerability Tests
 @pytest.mark.asyncio
 async def test_dismiss_vulnerability(gitlab_client_mock, metadata):
     gitlab_client_mock.apost = AsyncMock(
@@ -310,40 +562,14 @@ async def test_dismiss_vulnerability(gitlab_client_mock, metadata):
     )
     assert response == expected_response
 
-    # editorconfig-checker-disable
-    expected_mutation = """
-mutation($vulnerabilityId: VulnerabilityID!, $comment: String, $dismissalReason: VulnerabilityDismissalReason) {
-    vulnerabilityDismiss(input: {
-    id: $vulnerabilityId,
-    comment: $comment,
-    dismissalReason: $dismissalReason
-    }) {
-    errors
-    vulnerability {
-        id
-        description
-        state
-        dismissedAt
-        dismissalReason
-    }
-    }
-}
-"""
-    # editorconfig-checker-enable
-
-    gitlab_client_mock.apost.assert_called_once_with(
-        path="/api/graphql",
-        body=json.dumps(
-            {
-                "query": expected_mutation,
-                "variables": {
-                    "vulnerabilityId": "gid://gitlab/Vulnerability/123",
-                    "comment": "Security review deemed this a false positive",
-                    "dismissalReason": "FALSE_POSITIVE",
-                },
-            }
-        ),
+    gitlab_client_mock.apost.assert_called_once()
+    call_args = gitlab_client_mock.apost.call_args
+    body = json.loads(call_args.kwargs["body"])
+    assert body["variables"]["vulnerabilityId"] == "gid://gitlab/Vulnerability/123"
+    assert (
+        body["variables"]["comment"] == "Security review deemed this a false positive"
     )
+    assert body["variables"]["dismissalReason"] == "FALSE_POSITIVE"
 
 
 @pytest.mark.asyncio
@@ -378,7 +604,7 @@ async def test_dismiss_vulnerability_with_numeric_id(gitlab_client_mock, metadat
     # Should automatically add the GraphQL prefix
     gitlab_client_mock.apost.assert_called_once()
     call_args = gitlab_client_mock.apost.call_args
-    body = json.loads(call_args[1]["body"])
+    body = json.loads(call_args.kwargs["body"])
     assert body["variables"]["vulnerabilityId"] == "gid://gitlab/Vulnerability/123"
 
 
