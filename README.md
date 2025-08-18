@@ -183,6 +183,9 @@ The models will start echoing the given prompts, while allowing you to run a ful
 This can be useful for testing middleware, request/response interface contracts, logging, and other
 uses cases that do not require an AI model to execute.
 
+Agentic Chat can be mocked by setting the environment variables `AIGW_USE_AGENTIC_MOCK=true` and `AIGW_MOCK_MODEL_RESPONSES=true`. You can specify a sequence of responses to simulate a multi-step flow.
+See the [documentation](docs/workflows/agentic_mock.md) for details.
+
 ### Logging requests and responses during development
 
 AI Gateway workflow includes additional pre and post-processing steps. By default, the log level is `INFO` and
