@@ -3,16 +3,22 @@
 import json
 from datetime import datetime, timezone
 from enum import StrEnum
-from typing import Any
+from typing import Any, cast
 
 from langchain_core.messages import HumanMessage, SystemMessage
 from langgraph.checkpoint.memory import BaseCheckpointSaver
 from langgraph.graph import END, StateGraph
 
-from duo_workflow_service.agents import Agent, HandoverAgent, RunToolNode, ToolsExecutor
+from duo_workflow_service.agents import (
+    Agent,
+    AgentV2,
+    HandoverAgent,
+    RunToolNode,
+    ToolsExecutor,
+)
 from duo_workflow_service.components import ToolsRegistry
 from duo_workflow_service.entities import (
-    MAX_CONTEXT_TOKENS,
+    MAX_SINGLE_MESSAGE_TOKENS,
     MessageTypeEnum,
     Plan,
     ToolStatus,
@@ -35,6 +41,8 @@ from duo_workflow_service.workflows.convert_to_gitlab_ci.prompts import (
     CI_PIPELINES_MANAGER_SYSTEM_MESSAGE,
     CI_PIPELINES_MANAGER_USER_GUIDELINES,
 )
+from duo_workflow_service.workflows.type_definitions import AdditionalContext
+from lib.feature_flags.context import FeatureFlag, is_feature_enabled
 from lib.internal_events.event_enum import CategoryEnum
 
 AGENT_NAME = "ci_pipelines_manager_agent"
@@ -131,62 +139,6 @@ def _tools_execution_requested(state: WorkflowState) -> str:
     return Routes.END
 
 
-def _load_file_contents(file_contents: list[str], state: WorkflowState):
-    if (
-        not file_contents
-        or "Error running tool: unable to open file:" in file_contents[0]
-    ):
-        raise RuntimeError("Failed to load file contents, ensure that file is present")
-
-    logs: list[UiChatLog] = []
-
-    system_prompt = CI_PIPELINES_MANAGER_SYSTEM_MESSAGE
-    human_guidelines = CI_PIPELINES_MANAGER_USER_GUIDELINES
-
-    human_prompt = CI_PIPELINES_MANAGER_FILE_USER_MESSAGE.format(
-        file_content=file_contents[0],
-    )
-    messages = [
-        SystemMessage(content=system_prompt),
-        HumanMessage(content=human_guidelines),
-        HumanMessage(content=human_prompt),
-    ]
-
-    if ApproximateTokenCounter(AGENT_NAME).count_tokens(messages) > MAX_CONTEXT_TOKENS:
-        messages = []
-        logs.append(
-            UiChatLog(
-                message_type=MessageTypeEnum.TOOL,
-                message_sub_type=None,
-                content="File too large, skipping.",
-                timestamp=datetime.now(timezone.utc).isoformat(),
-                status=ToolStatus.FAILURE,
-                correlation_id=None,
-                tool_info=None,
-                additional_context=None,
-            )
-        )
-    else:
-        logs.append(
-            UiChatLog(
-                message_type=MessageTypeEnum.TOOL,
-                message_sub_type=None,
-                content="Loaded Jenkins file",
-                timestamp=datetime.now(timezone.utc).isoformat(),
-                status=ToolStatus.SUCCESS,
-                correlation_id=None,
-                tool_info=None,
-                additional_context=None,
-            )
-        )
-
-    return {
-        "conversation_history": {AGENT_NAME: messages},
-        "ui_chat_log": logs,
-        "status": WorkflowStatusEnum.EXECUTION,
-    }
-
-
 def _git_output(command_output: list[str], state: WorkflowState):
     logs: list[UiChatLog] = [
         UiChatLog(
@@ -234,22 +186,102 @@ class Workflow(AbstractWorkflow):
 
         return graph.compile(checkpointer=checkpointer)
 
+    def _load_file_contents(self, file_contents: list[str], state: WorkflowState):
+        content = file_contents[0]
+        if not file_contents or "Error running tool: unable to open file:" in content:
+            raise RuntimeError(
+                "Failed to load file contents, ensure that file is present"
+            )
+
+        if (
+            ApproximateTokenCounter(AGENT_NAME).count_string_content(content)
+            > MAX_SINGLE_MESSAGE_TOKENS
+        ):
+            return {
+                "ui_chat_log": [
+                    UiChatLog(
+                        message_type=MessageTypeEnum.TOOL,
+                        message_sub_type=None,
+                        content="File too large, skipping.",
+                        timestamp=datetime.now(timezone.utc).isoformat(),
+                        status=ToolStatus.FAILURE,
+                        correlation_id=None,
+                        tool_info=None,
+                        additional_context=None,
+                    )
+                ],
+                "status": WorkflowStatusEnum.EXECUTION,
+            }
+
+        conversation_history = {}
+
+        if not is_feature_enabled(FeatureFlag.DUO_WORKFLOW_PROMPT_REGISTRY):
+            # Only add the messages if we're not using the Prompt Registry, since otherwise that'll be handled by it
+            project_id = self._project["id"]  # type: ignore[index]
+            system_prompt = CI_PIPELINES_MANAGER_SYSTEM_MESSAGE
+            human_prompt = (
+                CI_PIPELINES_MANAGER_USER_GUIDELINES
+                + "\n"
+                + CI_PIPELINES_MANAGER_FILE_USER_MESSAGE.format(
+                    file_content=content,
+                )
+                + "\n"
+                + f"Note: The project_id for ci_linter validation is {project_id}."
+            )
+            conversation_history[AGENT_NAME] = [
+                SystemMessage(content=system_prompt),
+                HumanMessage(content=human_prompt),
+            ]
+
+        return {
+            "additional_context": [AdditionalContext(category="file", content=content)],
+            "conversation_history": conversation_history,
+            "ui_chat_log": [
+                UiChatLog(
+                    message_type=MessageTypeEnum.TOOL,
+                    message_sub_type=None,
+                    content="Loaded Jenkins file",
+                    timestamp=datetime.now(timezone.utc).isoformat(),
+                    status=ToolStatus.SUCCESS,
+                    correlation_id=None,
+                    tool_info=None,
+                    additional_context=None,
+                )
+            ],
+            "status": WorkflowStatusEnum.EXECUTION,
+        }
+
     def _setup_translator_nodes(self, tools_registry: ToolsRegistry):
+        translator_agent: Any
         translation_tools = ["create_file_with_contents", "read_file", "ci_linter"]
         agents_toolset = tools_registry.toolset(translation_tools)
-        translator_agent = Agent(
-            goal="N/A",
-            system_prompt="N/A",
-            name=AGENT_NAME,
-            model=create_chat_model(
-                max_tokens=MAX_TOKENS_TO_SAMPLE,
-                config=self._model_config,
-            ),
-            toolset=agents_toolset,
-            http_client=self._http_client,
-            workflow_id=self._workflow_id,
-            workflow_type=CategoryEnum.WORKFLOW_CONVERT_TO_GITLAB_CI,
-        )
+
+        if is_feature_enabled(FeatureFlag.DUO_WORKFLOW_PROMPT_REGISTRY):
+            translator_agent = cast(
+                AgentV2,
+                self._prompt_registry.get_on_behalf(
+                    self._user,
+                    "workflow/convert_to_gitlab_ci",
+                    "^1.0.0",
+                    tools=agents_toolset.bindable,  # type: ignore[arg-type]
+                    workflow_id=self._workflow_id,
+                    http_client=self._http_client,
+                ),
+            )
+        else:
+            translator_agent = Agent(
+                goal="N/A",
+                system_prompt="N/A",
+                name=AGENT_NAME,
+                model=create_chat_model(
+                    max_tokens=MAX_TOKENS_TO_SAMPLE,
+                    config=self._model_config,
+                ),
+                toolset=agents_toolset,
+                http_client=self._http_client,
+                workflow_id=self._workflow_id,
+                workflow_type=CategoryEnum.WORKFLOW_CONVERT_TO_GITLAB_CI,
+            )
 
         return {
             "agent": translator_agent,
@@ -274,26 +306,13 @@ class Workflow(AbstractWorkflow):
         self.log.info("Starting %s workflow graph compilation", self._workflow_type)
         graph.set_entry_point("load_files")
 
-        def _load_file_with_project(file_contents: list[str], state: WorkflowState):
-            result = _load_file_contents(file_contents, state)
-            # Inject project_id into the conversation
-            if result.get("conversation_history", {}).get(AGENT_NAME):
-                project_id = self._project["id"]  # type: ignore[index]
-                messages = result["conversation_history"][AGENT_NAME]
-                messages.append(
-                    HumanMessage(
-                        content=f"Note: The project_id for ci_linter validation is {project_id}."
-                    )
-                )
-            return result
-
         # Load jenkins file contents
         graph.add_node(
             "load_files",
             RunToolNode[WorkflowState](
                 tool=tools_registry.get("read_file"),  # type: ignore
                 input_parser=lambda _: [{"file_path": ci_config_file_path}],
-                output_parser=_load_file_with_project,  # type: ignore
+                output_parser=self._load_file_contents,  # type: ignore
             ).run,
         )
         # translator nodes
@@ -377,7 +396,7 @@ class Workflow(AbstractWorkflow):
             plan=Plan(steps=[]),
             handover=[],
             last_human_input=None,
-            project=None,
+            project=self._project,
             goal=goal,
             additional_context=None,
         )

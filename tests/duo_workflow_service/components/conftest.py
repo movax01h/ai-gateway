@@ -5,11 +5,6 @@ from langchain_core.messages import AIMessage
 from lib.internal_events.event_enum import CategoryEnum
 
 
-@pytest.fixture(name="config_values")
-def config_values_fixture():
-    return {"mock_model_responses": True}
-
-
 @pytest.fixture(name="graph_config")
 def graph_config_fixture():
     return {"configurable": {"thread_id": "test-workflow"}}

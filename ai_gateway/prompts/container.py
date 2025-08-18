@@ -22,6 +22,7 @@ class ContainerPrompts(containers.DeclarativeContainer):
             "chat/react/vertex": chat.ReActAgent,
             "chat/agent": "duo_workflow_service.agents.chat_agent.ChatAgent",
             "chat/agent/gpt_5": "duo_workflow_service.agents.chat_agent.ChatAgent",
+            "workflow/convert_to_gitlab_ci": "duo_workflow_service.agents.AgentV2",
             "workflow/executor": "duo_workflow_service.agents.AgentV2",
             "workflow/context_builder": "duo_workflow_service.agents.AgentV2",
             "workflow/planner": "duo_workflow_service.agents.AgentV2",

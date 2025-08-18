@@ -5,8 +5,12 @@ from uuid import uuid4
 import pytest
 from langgraph.checkpoint.base import CheckpointTuple
 
-from duo_workflow_service.components.tools_registry import ToolsRegistry
-from duo_workflow_service.entities import Plan, WorkflowStatusEnum
+from duo_workflow_service.components.tools_registry import (
+    _AGENT_PRIVILEGES,
+    ToolsRegistry,
+)
+from duo_workflow_service.entities import WorkflowStatusEnum
+from duo_workflow_service.gitlab.gitlab_api import Project
 
 
 @pytest.fixture(name="tool_approval_required")
@@ -48,50 +52,29 @@ def mock_checkpoint_notifier_fixture():
         yield mock
 
 
-@pytest.fixture(name="offline_mode")
-def offline_mode_fixture():
-    return False
-
-
-@pytest.fixture(name="mock_git_lab_workflow_instance")
-def mock_git_lab_workflow_instance_fixture(mock_gitlab_workflow, offline_mode):
-    mock = mock_gitlab_workflow.return_value
-    mock.__aenter__.return_value = mock
-    mock.__aexit__.return_value = None
-    mock._offline_mode = offline_mode
-    mock.aget_tuple = AsyncMock(return_value=None)
-    mock.alist = AsyncMock(return_value=[])
-    mock.aput = AsyncMock(
-        return_value={
-            "configurable": {"thread_id": "123", "checkpoint_id": "checkpoint1"}
-        }
-    )
-    mock.get_next_version = MagicMock(return_value=1)
-
-    return mock
+@pytest.fixture(name="agent_privileges_names")
+def agent_privileges_names_fixture() -> list[str]:
+    return list(_AGENT_PRIVILEGES.keys())
 
 
 @pytest.fixture(name="workflow_config")
-def workflow_config_fixture() -> dict[str, Any]:
-    return {"project_id": 1, "agent_privileges_names": []}
+def workflow_config_fixture(agent_privileges_names: list[str]) -> dict[str, Any]:
+    return {
+        "project_id": 1,
+        "agent_privileges_names": agent_privileges_names,
+        "first_checkpoint": None,
+        "workflow_status": "",
+    }
 
 
 @pytest.fixture(name="mock_fetch_workflow_and_container_data")
-def mock_fetch_workflow_and_container_data_fixture(workflow_config: dict[str, Any]):
+def mock_fetch_workflow_and_container_data_fixture(
+    project: Project, workflow_config: dict[str, Any]
+):
     with patch(
         "duo_workflow_service.workflows.abstract_workflow.fetch_workflow_and_container_data"
     ) as mock:
-        mock.return_value = (
-            {
-                "id": 1,
-                "name": "test-project",
-                "description": "This is a test project",
-                "http_url_to_repo": "https://example.com/project",
-                "web_url": "https://example.com/project",
-            },
-            None,
-            workflow_config,
-        )
+        mock.return_value = (project, None, workflow_config)
         yield mock
 
 
@@ -111,3 +94,8 @@ def checkpoint_tuple_fixture():
         metadata={"step": 0},
         parent_config={"configurable": {"thread_id": "123", "checkpoint_id": None}},
     )
+
+
+@pytest.fixture(name="scopes")
+def scopes_fixture():
+    return ["duo_workflow_execute_workflow"]

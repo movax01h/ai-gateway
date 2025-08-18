@@ -4,7 +4,7 @@ from typing import Any
 from unittest.mock import ANY, AsyncMock, MagicMock, Mock, call, patch
 
 import pytest
-from gitlab_cloud_connector import CloudConnectorUser, UserClaims
+from gitlab_cloud_connector import CloudConnectorUser
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 from langgraph.checkpoint.base import CheckpointTuple
 from langgraph.checkpoint.memory import MemorySaver
@@ -25,7 +25,6 @@ from duo_workflow_service.workflows.software_development.workflow import (
     PLANNER_TOOLS,
     Workflow,
 )
-from lib.feature_flags.context import current_feature_flag_context
 from lib.internal_events.event_enum import CategoryEnum
 
 
@@ -55,17 +54,6 @@ class MockComponent:
 @pytest.fixture(autouse=True)
 def prepare_container(mock_duo_workflow_service_container):
     pass
-
-
-@pytest.fixture(name="user")
-def user_fixture():
-    return CloudConnectorUser(
-        authenticated=True,
-        claims=UserClaims(
-            scopes=["duo_workflow_execute_workflow"],
-            issuer="gitlab-duo-workflow-service",
-        ),
-    )
 
 
 @pytest.fixture(name="workflow")
@@ -166,19 +154,6 @@ def agent_responses_fixture() -> list[dict[str, Any]]:
             },
         },
     ]
-
-
-@pytest.fixture(name="duo_workflow_prompt_registry_enabled")
-def duo_workflow_prompt_registry_enabled_fixture() -> bool:
-    return False
-
-
-@pytest.fixture(autouse=True)
-def stub_feature_flags(duo_workflow_prompt_registry_enabled: bool):
-    if duo_workflow_prompt_registry_enabled:
-        current_feature_flag_context.set({"duo_workflow_prompt_registry"})
-
-    yield
 
 
 @pytest.fixture(name="mock_agent")
