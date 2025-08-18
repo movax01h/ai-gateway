@@ -368,11 +368,6 @@ class TestUnauthorizedChatExecution:
         (
             [],
             {},
-            CHAT_READ_ONLY_TOOLS + CHAT_MUTATION_TOOLS + RUN_COMMAND_TOOLS,
-        ),
-        (
-            ["duo_workflow_web_chat_mutation_tools"],
-            {},
             CHAT_READ_ONLY_TOOLS
             + CHAT_MUTATION_TOOLS
             + RUN_COMMAND_TOOLS
