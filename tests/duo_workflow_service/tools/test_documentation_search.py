@@ -68,6 +68,7 @@ class TestDocumentationSearch:
         )
 
     @pytest.mark.asyncio
+    @pytest.mark.usefixtures("mock_gitlab_version")
     @patch(
         "duo_workflow_service.tools.documentation_search.discoveryengine.SearchServiceAsyncClient"
     )
@@ -85,15 +86,13 @@ class TestDocumentationSearch:
         mock_client_class,
         vertex_search_mock,
         discoveryengine_client_mock,
+        gl_version,
     ):
         mock_client_class.return_value = discoveryengine_client_mock
         mock_vertex_search_class.return_value = vertex_search_mock
 
         search_results = [{"id": 1, "title": "Test Documentation"}]
         vertex_search_mock.search_with_retry.return_value = search_results
-
-        # Set GitLab version in context
-        gitlab_version.set("17.5.2")
 
         tool = DocumentationSearch()
 
@@ -104,11 +103,9 @@ class TestDocumentationSearch:
 
         vertex_search_mock.search_with_retry.assert_called_once_with(
             query="test query",
-            gl_version="17.5.2",
+            gl_version=gl_version,
             page_size=4,
         )
-
-        gitlab_version.set(None)
 
     @pytest.mark.asyncio
     @patch(

@@ -24,7 +24,6 @@ from duo_workflow_service.workflows.type_definitions import (
     AdditionalContext,
     OsInformationContext,
 )
-from lib.feature_flags.context import current_feature_flag_context
 
 
 @pytest.fixture(name="approval_component")
@@ -97,19 +96,6 @@ def mock_model_ainvoke_fixture(
     else:
         mock_create_model.ainvoke = AsyncMock(return_value=end_message)
         yield mock_create_model.ainvoke
-
-
-@pytest.fixture(name="duo_workflow_prompt_registry_enabled")
-def duo_workflow_prompt_registry_enabled_fixture() -> bool:
-    return False
-
-
-@pytest.fixture(autouse=True)
-def stub_feature_flags(duo_workflow_prompt_registry_enabled: bool):
-    if duo_workflow_prompt_registry_enabled:
-        current_feature_flag_context.set({"duo_workflow_prompt_registry"})
-
-    yield
 
 
 @pytest.fixture(name="mock_agent")
