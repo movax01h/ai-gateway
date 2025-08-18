@@ -178,6 +178,11 @@ class Flow(AbstractWorkflow):
 
             if "toolset" in comp_params:
                 comp_params["toolset"] = tools_registry.toolset(comp_params["toolset"])
+            elif "tool_name" in comp_params:
+                # If a tool_name is specified without a toolset, create a toolset containing just that tool.
+                comp_params["toolset"] = tools_registry.toolset(
+                    [comp_params["tool_name"]]
+                )
 
             if comp_name in components:
                 raise ValueError(

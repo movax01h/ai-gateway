@@ -613,3 +613,76 @@ class TestFlow:
                 "workflow_id": "test-workflow-invalid-approval",
                 "source": "duo_workflow_service.agent_platform.experimental.flows.base",
             }
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        "toolset,tool_name,want_toolset",
+        [
+            (None, "read_file", ["read_file"]),
+            (["create_file_with_contents"], "read_file", ["create_file_with_contents"]),
+            (["create_file_with_contents"], None, ["create_file_with_contents"]),
+            (None, None, None),
+        ],
+        ids=[
+            "tool_name_without_toolset",
+            "tool_name_with_toolset",
+            "toolset_without_tool_name",
+            "no_toolset_or_tool_name",
+        ],
+    )
+    async def test_flow_config_tool_name(
+        self,
+        toolset,
+        tool_name,
+        want_toolset,
+        mock_flow_metadata,
+        mock_invocation_metadata,
+        mock_tools_registry,  # pylint: disable=unused-argument
+        mock_checkpointer,  # pylint: disable=unused-argument
+        mock_state_graph,  # pylint: disable=unused-argument
+    ):
+        """Test that tool_names can be used without explicit toolsets."""
+
+        # Build component config based on parameters
+        component_config = {
+            "name": "tool_call",
+            "type": "DeterministicStepComponent",
+            "inputs": ["context:goal"],
+        }
+
+        if toolset is not None:
+            component_config["toolset"] = toolset
+        if tool_name is not None:
+            component_config["tool_name"] = tool_name
+
+        config = FlowConfig(
+            flow={"entry_point": "tool_call"},
+            components=[component_config],
+            routers=[{"from": "tool_call", "to": "end"}],
+            environment="local",
+            version="experimental",
+        )
+
+        # Mock the toolset return value
+        mock_tools_registry.toolset.return_value = want_toolset or []
+
+        with (
+            self.mock_components(["DeterministicStepComponent"]),
+            patch("duo_workflow_service.agent_platform.experimental.flows.base.Router"),
+        ):
+            flow = Flow(
+                workflow_id="test-workflow-123",
+                workflow_metadata=mock_flow_metadata,
+                workflow_type=CategoryEnum.WORKFLOW_CHAT,
+                config=config,
+                invocation_metadata=mock_invocation_metadata,
+            )
+
+            await flow.run("test goal")
+
+            # Verify tools_registry.toolset was called with the expected arguments
+            if want_toolset is not None:
+                mock_tools_registry.toolset.assert_called_once_with(want_toolset)
+            else:
+                # When neither toolset nor tool_name is specified, toolset shouldn't be called
+                mock_tools_registry.toolset.assert_not_called()
