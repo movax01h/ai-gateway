@@ -130,7 +130,7 @@ class TestRouter:
 
     @patch(
         "duo_workflow_service.agent_platform.experimental.routers.base.IOKey.parse_key",
-        return_value=Mock(spec=IOKey, target="context", subkeys=["key"]),
+        return_value=Mock(spec=IOKey, target="context", subkeys=["key"], literal=False),
     )
     def test_router_route_with_input_returns_matching_component_entry_hook(
         self, mock_iokey
@@ -156,7 +156,7 @@ class TestRouter:
 
     @patch(
         "duo_workflow_service.agent_platform.experimental.routers.base.IOKey.parse_key",
-        return_value=Mock(spec=IOKey, target="context", subkeys=["key"]),
+        return_value=Mock(spec=IOKey, target="context", subkeys=["key"], literal=False),
     )
     def test_router_route_with_input_returns_default_route_when_no_match(
         self, mock_iokey
@@ -185,7 +185,7 @@ class TestRouter:
 
     @patch(
         "duo_workflow_service.agent_platform.experimental.routers.base.IOKey.parse_key",
-        return_value=Mock(spec=IOKey, target="context", subkeys=["key"]),
+        return_value=Mock(spec=IOKey, target="context", subkeys=["key"], literal=False),
     )
     def test_router_route_with_input_raises_keyerror_when_no_match_and_no_default(
         self, mock_iokey
@@ -212,7 +212,7 @@ class TestRouter:
 
     @patch(
         "duo_workflow_service.agent_platform.experimental.routers.base.IOKey.parse_key",
-        return_value=Mock(spec=IOKey, target="context", subkeys=["key"]),
+        return_value=Mock(spec=IOKey, target="context", subkeys=["key"], literal=False),
     )
     def test_router_route_with_empty_variables_returns_default_route(self, mock_iokey):
         """Test Router.route returns default route when value_from_state returns empty dict."""
@@ -239,7 +239,7 @@ class TestRouter:
 
     @patch(
         "duo_workflow_service.agent_platform.experimental.routers.base.IOKey.parse_key",
-        return_value=Mock(spec=IOKey, target="context", subkeys=["key"]),
+        return_value=Mock(spec=IOKey, target="context", subkeys=["key"], literal=False),
     )
     def test_router_route_with_integer_route_key(self, mock_iokey):
         """Test Router.route works with integer route keys."""
