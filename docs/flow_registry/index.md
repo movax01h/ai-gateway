@@ -124,9 +124,9 @@ Inputs use the format `target:path.to.data`:
 
 ```yaml
 inputs:
-  - "context:goal"                    # Access goal from context
-  - "context:previous_agent.result"   # Access result from previous component
-  - "status"                          # Access workflow status
+  - "context:goal"                        # Access goal from context
+  - "context:previous_agent.final_answer" # Access result from previous component
+  - "status"                              # Access workflow status
 ```
 
 Input paths must reference existing data in the flow state.
@@ -140,13 +140,13 @@ Input aliases provide cleaner data mapping and improved readability:
 inputs:
   - from: "context:source_data"
     as: "input_data"
-  - from: "context:analyzer.findings"
+  - from: "context:analyzer.final_answer"
     as: "analysis_results"
 ```
 
 The `as` keyword provides these benefits:
 
-- **Simplifying prompt templates**: Instead of referencing `{{findings}}` in your prompt, you use `{{analysis_results}}`
+- **Simplifying prompt templates**: Instead of referencing `{{context:analyzer.final_answer}}` in your prompt, you use `{{analysis_results}}`
 - **Making flows more readable**: Clear, descriptive names improve flow understanding
 - **Reducing coupling**: Components don't need to know internal structure of other components' outputs
 
