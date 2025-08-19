@@ -161,6 +161,10 @@ GET_VULNERABILITY_DETAILS_QUERY = """
     query GetVulnerabilityDetails($vulnerabilityId: VulnerabilityID!) {
         vulnerability(id: $vulnerabilityId) {
             id
+            project {
+                id
+                fullPath
+            }
             title
             state
             description

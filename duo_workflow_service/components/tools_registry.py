@@ -87,6 +87,7 @@ _READ_ONLY_GITLAB_TOOLS: list[Type[BaseTool]] = [
     tools.ListProjectAuditEvents,
     tools.GetCurrentUser,
     GetVulnerabilityDetails,
+    tools.ExtractLinesFromText,
 ]
 
 _RUN_MCP_TOOLS_PRIVILEGE = "run_mcp_tools"
@@ -101,6 +102,7 @@ _AGENT_PRIVILEGES: dict[str, list[Type[BaseTool]]] = {
         tools.FindFiles,
         tools.Grep,
         tools.Mkdir,
+        tools.ExtractLinesFromText,
     ],
     "use_git": [
         tools.git.Command,

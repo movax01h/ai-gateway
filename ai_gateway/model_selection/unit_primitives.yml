@@ -242,3 +242,31 @@ configurable_unit_primitives:
     default_model: "claude_sonnet_4_20250514"
     selectable_models:
       - "claude_sonnet_4_20250514"
+  - feature_setting: "sast_vulnerability_source_file_agent_prompt"
+    unit_primitives: []
+    default_model: "claude_sonnet_4_20250514"
+    selectable_models:
+      - "claude_sonnet_4_20250514"
+      - "claude_sonnet_3_7_20250219"
+      - "claude_3_5_sonnet_20240620"
+  - feature_setting: "sast_vulnerability_lines_agent_prompt"
+    unit_primitives: [ ]
+    default_model: "claude_sonnet_4_20250514"
+    selectable_models:
+      - "claude_sonnet_4_20250514"
+      - "claude_sonnet_3_7_20250219"
+      - "claude_3_5_sonnet_20240620"
+  - feature_setting: "sast_vulnerability_report_agent_prompt"
+    unit_primitives: [ ]
+    default_model: "claude_sonnet_4_20250514"
+    selectable_models:
+      - "claude_sonnet_4_20250514"
+      - "claude_sonnet_3_7_20250219"
+      - "claude_3_5_sonnet_20240620"
+  - feature_setting: "sast_fp_detection_agent_prompt"
+    unit_primitives: []
+    default_model: "claude_sonnet_4_20250514"
+    selectable_models:
+      - "claude_sonnet_4_20250514"
+      - "claude_sonnet_3_7_20250219"
+      - "claude_3_5_sonnet_20240620"
