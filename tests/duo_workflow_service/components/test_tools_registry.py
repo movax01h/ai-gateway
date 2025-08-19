@@ -20,6 +20,9 @@ from duo_workflow_service.gitlab.http_client import GitlabHttpClient
 from duo_workflow_service.tools.mcp_tools import (
     convert_mcp_tools_to_langchain_tool_classes,
 )
+from duo_workflow_service.tools.vulnerabilities.get_vulnerability_details import (
+    GetVulnerabilityDetails,
+)
 from duo_workflow_service.tools.work_item import (
     GetWorkItem,
     GetWorkItemNotes,
@@ -124,6 +127,7 @@ _outbox = MagicMock(spec=asyncio.Queue)
                 "list_group_audit_events",
                 "list_project_audit_events",
                 "get_current_user",
+                "get_vulnerability_details",
             },
         ),
         (
@@ -185,6 +189,7 @@ _outbox = MagicMock(spec=asyncio.Queue)
                 "get_current_user",
                 "create_work_item",
                 "link_vulnerability_to_issue",
+                "get_vulnerability_details",
             },
         ),
         (
@@ -339,6 +344,7 @@ def test_registry_initialization_initialises_tools_with_correct_attributes(
         "link_vulnerability_to_issue": tools.LinkVulnerabilityToIssue(
             metadata=tool_metadata
         ),
+        "get_vulnerability_details": GetVulnerabilityDetails(metadata=tool_metadata),
     }
 
     assert registry._enabled_tools == expected_tools
