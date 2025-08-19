@@ -85,8 +85,9 @@ configurable_unit_primitives:
   - feature_setting: "resolve_vulnerability"
     unit_primitives:
       - "resolve_vulnerability"
-    default_model: "claude_3_5_sonnet_20240620"
+    default_model: "claude_sonnet_4_20250514"
     selectable_models:
+      - "claude_sonnet_4_20250514"
       - "claude_sonnet_3_7_20250219"
       - "claude_3_5_sonnet_20240620"
   - feature_setting: "duo_chat_explain_vulnerability"
