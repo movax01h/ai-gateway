@@ -97,7 +97,9 @@ class ToolNode:
         self, tool_call_args: dict[str, Any], tool: BaseTool
     ) -> str:
         try:
-            with duo_workflow_metrics.time_tool_call(tool_name=tool.name):
+            with duo_workflow_metrics.time_tool_call(
+                tool_name=tool.name, flow_type=self._flow_type.value
+            ):
                 tool_call_result = await tool.arun(tool_call_args)
 
             self._track_internal_event(

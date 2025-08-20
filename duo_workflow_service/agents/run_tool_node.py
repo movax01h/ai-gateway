@@ -17,6 +17,7 @@ from duo_workflow_service.security.prompt_security import (
     PromptSecurity,
     SecurityException,
 )
+from lib.internal_events.event_enum import CategoryEnum
 
 WorkflowStateT_contra = TypeVar(
     "WorkflowStateT_contra",
@@ -55,6 +56,7 @@ class RunToolNode(Generic[WorkflowStateT]):
         tool: BaseTool,
         input_parser: InputParserProtocol[WorkflowStateT],
         output_parser: OutputParserProtocol[WorkflowStateT],
+        flow_type: CategoryEnum,
     ):
         """Initialize the RunToolNode.
 
@@ -67,6 +69,7 @@ class RunToolNode(Generic[WorkflowStateT]):
         self._input_parser = input_parser
         self._output_parser = output_parser
         self._logger = structlog.stdlib.get_logger("workflow")
+        self._flow_type = flow_type
 
     async def run(self, state: WorkflowStateT) -> dict[str, Any]:
         """Execute the tool with given state.
@@ -81,7 +84,9 @@ class RunToolNode(Generic[WorkflowStateT]):
         logs = []
 
         for tool_params in self._input_parser(state):
-            with duo_workflow_metrics.time_tool_call(tool_name=self._tool.name):
+            with duo_workflow_metrics.time_tool_call(
+                tool_name=self._tool.name, flow_type=self._flow_type.value
+            ):
                 if output := await self._tool._arun(**tool_params):
                     try:
                         secure_output = PromptSecurity.apply_security_to_tool_response(

@@ -50,7 +50,7 @@ class DuoWorkflowMetrics:  # pylint: disable=too-many-instance-attributes
         self.tool_call_duration = Histogram(
             "duo_workflow_tool_call_seconds",
             "Duration of tool calls in Duo Workflow",
-            ["tool_name"],
+            ["tool_name", "flow_type"],
             registry=registry,
         )
 
@@ -278,10 +278,11 @@ class DuoWorkflowMetrics:  # pylint: disable=too-many-instance-attributes
             ).observe(duration)
         )
 
-    def time_tool_call(self, tool_name="unknown"):
+    def time_tool_call(self, tool_name="unknown", flow_type="unknown"):
         return self._timer(
             lambda duration: self.tool_call_duration.labels(
-                tool_name=tool_name
+                tool_name=tool_name,
+                flow_type=flow_type,
             ).observe(duration)
         )
 

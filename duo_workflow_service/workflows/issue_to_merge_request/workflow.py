@@ -290,6 +290,7 @@ class Workflow(AbstractWorkflow):
                     },
                 ],
                 output_parser=_git_output,  # type: ignore
+                flow_type=self._workflow_type,
             ).run,
         )
         graph.add_edge("git_actions", END)

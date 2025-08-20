@@ -507,7 +507,8 @@ class TestToolNodeMonitoring:
 
         # Verify monitoring was called
         mock_tool_monitoring.time_tool_call.assert_called_once_with(
-            tool_name=mock_tool.name
+            tool_name=mock_tool.name,
+            flow_type=CategoryEnum.WORKFLOW_SOFTWARE_DEVELOPMENT.value,
         )
 
     @pytest.mark.asyncio
@@ -526,7 +527,8 @@ class TestToolNodeMonitoring:
 
         # Verify monitoring was still called despite error
         mock_tool_monitoring.time_tool_call.assert_called_once_with(
-            tool_name=mock_tool.name
+            tool_name=mock_tool.name,
+            flow_type=CategoryEnum.WORKFLOW_SOFTWARE_DEVELOPMENT.value,
         )
 
 

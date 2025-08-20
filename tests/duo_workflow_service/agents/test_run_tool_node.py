@@ -6,6 +6,7 @@ import pytest
 
 from duo_workflow_service.agents.run_tool_node import RunToolNode
 from duo_workflow_service.entities import MessageTypeEnum, ToolStatus
+from lib.internal_events.event_enum import CategoryEnum
 
 
 @pytest.mark.asyncio
@@ -20,7 +21,10 @@ async def test_run_tool_node_execution():
     output_parser = Mock(return_value={"updated_key": "updated_value"})
 
     node = RunToolNode(
-        tool=tool, input_parser=input_parser, output_parser=output_parser
+        tool=tool,
+        input_parser=input_parser,
+        output_parser=output_parser,
+        flow_type=CategoryEnum.WORKFLOW_SOFTWARE_DEVELOPMENT,
     )
 
     # Execute
@@ -52,7 +56,10 @@ async def test_run_tool_node_multiple_params():
     output_parser = Mock(return_value={"updated_key": "updated_value"})
 
     node = RunToolNode(
-        tool=tool, input_parser=input_parser, output_parser=output_parser
+        tool=tool,
+        input_parser=input_parser,
+        output_parser=output_parser,
+        flow_type=CategoryEnum.WORKFLOW_SOFTWARE_DEVELOPMENT,
     )
 
     # Execute
@@ -89,7 +96,10 @@ async def test_run_tool_node_security_layer():
     output_parser = Mock(return_value={"updated_key": "updated_value"})
 
     node = RunToolNode(
-        tool=tool, input_parser=input_parser, output_parser=output_parser
+        tool=tool,
+        input_parser=input_parser,
+        output_parser=output_parser,
+        flow_type=CategoryEnum.WORKFLOW_SOFTWARE_DEVELOPMENT,
     )
 
     # Execute
