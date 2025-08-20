@@ -1,3 +1,4 @@
+import base64
 import json
 from typing import Any, List, Optional, Tuple, Type
 from urllib.parse import quote
@@ -128,19 +129,14 @@ class GetRepositoryFile(RepositoryFileBaseTool):
             encoded_file_path = quote(file_path, safe="")
 
             response = await self.gitlab_client.aget(
-                path=f"/api/v4/projects/{project_id}/repository/files/{encoded_file_path}/raw",
+                path=f"/api/v4/projects/{project_id}/repository/files/{encoded_file_path}",
                 params={"ref": ref},
                 parse_json=False,
             )
 
-            if self._is_binary_string(response):
-                return json.dumps(
-                    {
-                        "error": f"Binary file detected: {file_path}. Only text files are supported."
-                    }
-                )
+            content = base64.b64decode(json.loads(response)["content"]).decode("utf-8")
 
-            return json.dumps({"content": response})
+            return json.dumps({"content": content})
         except Exception as e:
             return json.dumps({"error": str(e)})
 
@@ -155,47 +151,6 @@ class GetRepositoryFile(RepositoryFileBaseTool):
         if args.url:
             return f"Get repository file content from {args.url}"
         return f"Get repository file {args.file_path} from project {args.project_id} at ref {args.ref}"
-
-    def _is_binary_string(self, content):
-        """Detect if content is binary using Perl-inspired heuristic.
-
-        https://code.activestate.com/recipes/173220-test-if-a-file-or-string-is-text-or-binary/
-        Returns True if content appears to be binary, False if it's text.
-        """
-        # Empty content is considered text
-        if not content:
-            return False
-
-        try:
-            # Check for null bytes which are common in binary files
-            if b"\x00" in content.encode("utf-8"):
-                return True
-
-            text_chars = bytes(range(32, 127)) + b"\n\r\t\b"
-
-            if isinstance(content, str):
-                try:
-                    # If we can encode/decode as UTF-8, it's likely text
-                    content.encode("utf-8").decode("utf-8")
-                    return False
-                except UnicodeError:
-                    # Not valid UTF-8 text
-                    content_bytes = content.encode("latin-1")
-            else:
-                content_bytes = content
-
-            sample = content_bytes[:1024]
-            non_text_chars = sum(byte not in text_chars for byte in sample)
-
-            # If more than 30% non-text characters, consider it binary
-            if len(sample) > 0 and float(non_text_chars) / float(len(sample)) > 0.3:
-                return True
-
-            return False
-
-        except UnicodeError:
-            # If we can't encode to UTF-8, it's likely binary
-            return True
 
 
 class RepositoryTreeResourceInput(ProjectResourceInput):
