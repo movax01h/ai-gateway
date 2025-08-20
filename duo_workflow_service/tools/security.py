@@ -38,6 +38,13 @@ class VulnerabilityReportType(StrEnum):
     GENERIC = "GENERIC"
 
 
+__all__ = [
+    "ListVulnerabilities",
+    "DismissVulnerability",
+    "LinkVulnerabilityToIssue",
+]
+
+
 class ListVulnerabilitiesInput(BaseModel):
     """Input validation for list vulnerabilities operation."""
 

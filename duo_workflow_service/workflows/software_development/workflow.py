@@ -86,6 +86,7 @@ EXECUTOR_TOOLS = [
     "gitlab_merge_request_search",
     "run_command",
     "read_file",
+    "update_vulnerability_severity",
     "create_file_with_contents",
     "edit_file",
     "find_files",

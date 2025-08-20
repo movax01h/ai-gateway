@@ -138,6 +138,7 @@ _outbox = MagicMock(spec=asyncio.Queue)
                 "add_new_task",
                 "remove_task",
                 "update_task_description",
+                "update_vulnerability_severity",
                 "get_plan",
                 "set_task_status",
                 "create_issue",
@@ -269,6 +270,9 @@ def test_registry_initialization_initialises_tools_with_correct_attributes(
         "add_new_task": tools.AddNewTask(),
         "remove_task": tools.RemoveTask(),
         "update_task_description": tools.UpdateTaskDescription(),
+        "update_vulnerability_severity": tools.UpdateVulnerabilitySeverity(
+            metadata=tool_metadata
+        ),
         "get_plan": tools.GetPlan(),
         "set_task_status": tools.SetTaskStatus(),
         "run_command": tools.RunCommand(metadata=tool_metadata),

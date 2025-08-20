@@ -80,6 +80,7 @@ CHAT_READ_ONLY_TOOLS = [
 
 
 CHAT_GITLAB_MUTATION_TOOLS = [
+    "update_vulnerability_severity",
     "create_issue",
     "update_issue",
     "create_issue_note",
