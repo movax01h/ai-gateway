@@ -75,7 +75,7 @@ query GetProjectWorkItem($fullPath: ID!, $iid: String!) {
 """
 
 LIST_GROUP_WORK_ITEMS_QUERY = """
-query ListGroupWorkItems($fullPath: ID!, $state: IssuableState, $search: String, $authorUsername: String, $createdAfter: Time, $createdBefore: Time, $updatedAfter: Time, $updatedBefore: Time, $dueAfter: Time, $dueBefore: Time, $sort: WorkItemSort) {
+query ListGroupWorkItems($fullPath: ID!, $state: IssuableState, $search: String, $authorUsername: String, $createdAfter: Time, $createdBefore: Time, $updatedAfter: Time, $updatedBefore: Time, $dueAfter: Time, $dueBefore: Time, $sort: WorkItemSort, $first: Int, $after: String, $types: [IssueType!]) {
     namespace(fullPath: $fullPath) {
         workItems(
             state: $state
@@ -88,7 +88,14 @@ query ListGroupWorkItems($fullPath: ID!, $state: IssuableState, $search: String,
             dueAfter: $dueAfter
             dueBefore: $dueBefore
             sort: $sort
+            first: $first
+            after: $after
+            types: $types
         ) {
+            pageInfo {
+                hasNextPage
+                endCursor
+            }
             nodes {
                 id
                 iid
@@ -107,7 +114,7 @@ query ListGroupWorkItems($fullPath: ID!, $state: IssuableState, $search: String,
 """
 
 LIST_PROJECT_WORK_ITEMS_QUERY = """
-query ListProjectWorkItems($fullPath: ID!, $state: IssuableState, $search: String, $authorUsername: String, $createdAfter: Time, $createdBefore: Time, $updatedAfter: Time, $updatedBefore: Time, $dueAfter: Time, $dueBefore: Time, $sort: WorkItemSort) {
+query ListProjectWorkItems($fullPath: ID!, $state: IssuableState, $search: String, $authorUsername: String, $createdAfter: Time, $createdBefore: Time, $updatedAfter: Time, $updatedBefore: Time, $dueAfter: Time, $dueBefore: Time, $sort: WorkItemSort, $first: Int, $after: String, $types: [IssueType!]) {
     project(fullPath: $fullPath) {
         workItems(
             state: $state
@@ -120,7 +127,14 @@ query ListProjectWorkItems($fullPath: ID!, $state: IssuableState, $search: Strin
             dueAfter: $dueAfter
             dueBefore: $dueBefore
             sort: $sort
+            first: $first
+            after: $after
+            types: $types
         ) {
+            pageInfo {
+                hasNextPage
+                endCursor
+            }
             nodes {
                 id
                 iid
@@ -139,7 +153,7 @@ query ListProjectWorkItems($fullPath: ID!, $state: IssuableState, $search: Strin
 """
 
 GET_GROUP_WORK_ITEM_NOTES_QUERY = """
-query ListProjectWorkItems($fullPath: ID!, $state: IssuableState, $search: String, $authorUsername: String, $createdAfter: Time, $createdBefore: Time, $updatedAfter: Time, $updatedBefore: Time, $dueAfter: Time, $dueBefore: Time, $sort: WorkItemSort) {
+query GetGroupWorkItemNotes($fullPath: ID!, $state: IssuableState, $search: String, $authorUsername: String, $createdAfter: Time, $createdBefore: Time, $updatedAfter: Time, $updatedBefore: Time, $dueAfter: Time, $dueBefore: Time, $sort: WorkItemSort) {
     project(fullPath: $fullPath) {
         workItems(
             state: $state
