@@ -25,4 +25,5 @@ from .search_system import *
 from .security import *
 from .toolset import *
 from .user import *
+from .vulnerabilities.severity import *
 from .work_item import *

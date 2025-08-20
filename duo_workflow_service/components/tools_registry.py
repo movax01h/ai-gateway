@@ -107,6 +107,7 @@ _AGENT_PRIVILEGES: dict[str, list[Type[BaseTool]]] = {
         tools.git.Command,
     ],
     "read_write_gitlab": [
+        tools.UpdateVulnerabilitySeverity,
         tools.CreateIssue,
         tools.UpdateIssue,
         tools.CreateIssueNote,
