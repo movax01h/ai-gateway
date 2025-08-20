@@ -1,3 +1,4 @@
+import base64
 import json
 from unittest.mock import AsyncMock, Mock, patch
 
@@ -87,16 +88,28 @@ def tool_fixture(metadata):
                 "ref": "master",
                 "file_path": "README.md",
             },
-            "/api/v4/projects/gitlab-org/gitlab/repository/files/README.md/raw",
+            "/api/v4/projects/gitlab-org/gitlab/repository/files/README.md",
             "master",
-            "file content",
+            json.dumps(
+                {
+                    "content": base64.b64encode("file content".encode("utf-8")).decode(
+                        "utf-8"
+                    )
+                }
+            ),
             {"content": "file content"},
         ),
         (
             {"url": "https://gitlab.com/namespace/project/-/blob/master/README.md"},
-            "/api/v4/projects/namespace%2Fproject/repository/files/README.md/raw",
+            "/api/v4/projects/namespace%2Fproject/repository/files/README.md",
             "master",
-            "file content",
+            json.dumps(
+                {
+                    "content": base64.b64encode("file content".encode("utf-8")).decode(
+                        "utf-8"
+                    )
+                }
+            ),
             {"content": "file content"},
         ),
         (
@@ -105,9 +118,17 @@ def tool_fixture(metadata):
                 "ref": "master",
                 "file_path": "special_chars.py",
             },
-            "/api/v4/projects/gitlab-org/gitlab/repository/files/special_chars.py/raw",
+            "/api/v4/projects/gitlab-org/gitlab/repository/files/special_chars.py",
             "master",
-            "# -*- coding: utf-8 -*-\n\ndef λ_function():\n    return '你好，世界！'",
+            json.dumps(
+                {
+                    "content": base64.b64encode(
+                        "# -*- coding: utf-8 -*-\n\ndef λ_function():\n    return '你好，世界！'".encode(
+                            "utf-8"
+                        )
+                    ).decode("utf-8")
+                }
+            ),
             {
                 "content": "# -*- coding: utf-8 -*-\n\ndef λ_function():\n    return '你好，世界！'"
             },
@@ -118,9 +139,15 @@ def tool_fixture(metadata):
                 "ref": "master",
                 "file_path": "file/path/with/slashes",
             },
-            "/api/v4/projects/gitlab-org/gitlab/repository/files/file%2Fpath%2Fwith%2Fslashes/raw",
+            "/api/v4/projects/gitlab-org/gitlab/repository/files/file%2Fpath%2Fwith%2Fslashes",
             "master",
-            "file content",
+            json.dumps(
+                {
+                    "content": base64.b64encode("file content".encode("utf-8")).decode(
+                        "utf-8"
+                    )
+                }
+            ),
             {"content": "file content"},
         ),
     ],
@@ -178,11 +205,15 @@ async def test_get_file_success(
             },
             {
                 "mock_type": "binary_content",
-                "mock_value": b"\x89PNG\r\n\x1a\n\x00\x00\x00\x0dIHDR".decode(
-                    "latin-1"
+                "mock_value": json.dumps(
+                    {
+                        "content": base64.b64encode(
+                            b"\x89PNG\r\n\x1a\n\x00\x00\x00\x0dIHDR"
+                        ).decode("latin-1")
+                    }
                 ),
             },
-            "Binary file detected",
+            "'utf-8' codec can't decode byte 0x89 in position 0: invalid start byte",
         ),
         (
             {"url": "https://gitlab.com/namespace/project"},
@@ -250,25 +281,6 @@ def test_url_parser_repository_file(host):
     assert project_path == "namespace%2Fproject"
     assert ref == "master"
     assert file_path == "path/to/file.py"
-
-
-@pytest.mark.parametrize(
-    "content,expected_result",
-    [
-        ("", False),
-        ("Hello, world!", False),
-        ("def test_function():\n    return True", False),
-        ("Special chars: !@#$%^&*()_+-=[]{}|;':\",./<>?", False),
-        ("Unicode text: 你好，世界！", False),
-        ("Hello\x00World", True),
-        (b"\x89PNG\r\n\x1a\n\x00".decode("latin-1"), True),
-        ("".join(chr(i) for i in range(0, 31) if i not in (9, 10, 13)), True),
-        ("Text" + "".join(chr(i) for i in range(0, 31) if i not in (9, 10, 13)), True),
-    ],
-)
-def test_is_binary_string(binary_detection_tool, content, expected_result):
-    result = binary_detection_tool._is_binary_string(content)
-    assert result == expected_result
 
 
 # Test cases for successful tree listing
@@ -735,6 +747,16 @@ class TestFileExclusionPolicy:
 class TestGetRepositoryFileWithExclusion:
     """Test GetRepositoryFile tool with FileExclusionPolicy integration."""
 
+    @pytest.fixture
+    def mock_content(self):
+        return json.dumps(
+            {
+                "content": base64.b64encode("file content".encode("utf-8")).decode(
+                    "utf-8"
+                )
+            }
+        )
+
     @pytest.mark.asyncio
     async def test_get_file_blocked_by_policy(self, metadata_with_project):
         """Test that GetRepositoryFile blocks files matching exclusion rules."""
@@ -755,11 +777,11 @@ class TestGetRepositoryFileWithExclusion:
 
     @pytest.mark.asyncio
     async def test_get_file_allowed_by_policy(
-        self, metadata_with_project, gitlab_client_mock
+        self, metadata_with_project, gitlab_client_mock, mock_content
     ):
         """Test that GetRepositoryFile allows files not matching exclusion rules."""
         tool = GetRepositoryFile(metadata=metadata_with_project)
-        gitlab_client_mock.aget.return_value = "file content"
+        gitlab_client_mock.aget.return_value = mock_content
 
         input_params = {
             "project_id": "test/project",
@@ -776,11 +798,11 @@ class TestGetRepositoryFileWithExclusion:
 
     @pytest.mark.asyncio
     async def test_get_file_no_exclusion_rules(
-        self, metadata_no_exclusion_rules, gitlab_client_mock
+        self, metadata_no_exclusion_rules, gitlab_client_mock, mock_content
     ):
         """Test GetRepositoryFile with no exclusion rules."""
         tool = GetRepositoryFile(metadata=metadata_no_exclusion_rules)
-        gitlab_client_mock.aget.return_value = "file content"
+        gitlab_client_mock.aget.return_value = mock_content
 
         input_params = {
             "project_id": "test/project",
@@ -795,10 +817,12 @@ class TestGetRepositoryFileWithExclusion:
         assert response["content"] == "file content"
 
     @pytest.mark.asyncio
-    async def test_get_file_no_project(self, metadata, gitlab_client_mock):
+    async def test_get_file_no_project(
+        self, metadata, gitlab_client_mock, mock_content
+    ):
         """Test GetRepositoryFile with no project (no exclusion policy)."""
         tool = GetRepositoryFile(metadata=metadata)
-        gitlab_client_mock.aget.return_value = "file content"
+        gitlab_client_mock.aget.return_value = mock_content
 
         input_params = {
             "project_id": "test/project",
@@ -855,11 +879,16 @@ class TestGetRepositoryFileWithExclusion:
     )
     @pytest.mark.asyncio
     async def test_get_file_various_exclusion_patterns(
-        self, metadata_with_project, gitlab_client_mock, file_path, should_be_blocked
+        self,
+        metadata_with_project,
+        gitlab_client_mock,
+        file_path,
+        should_be_blocked,
+        mock_content,
     ):
         """Test GetRepositoryFile with various exclusion patterns."""
         tool = GetRepositoryFile(metadata=metadata_with_project)
-        gitlab_client_mock.aget.return_value = "file content"
+        gitlab_client_mock.aget.return_value = mock_content
 
         input_params = {
             "project_id": "test/project",
