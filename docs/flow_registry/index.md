@@ -238,7 +238,7 @@ The agent uses the prompt template from the prompt registry, processes the input
 
 ### Required Parameters
 
-- **name**: Unique identifier for this component instance
+- **name**: Unique identifier for this component instance. Must not contain `:` or `.` characters.
 - **type**: Must be `"AgentComponent"`
 - **prompt_id**: ID of the prompt template from the prompt registry
 - **prompt_version**: Semantic version constraint (e.g., `"^1.0.0"`)
@@ -355,7 +355,7 @@ The HumanInputComponent consists of two internal nodes:
 
 #### Required Parameters
 
-- **name**: Unique identifier for this component instance
+- **name**: Unique identifier for this component instance. Must not contain `:` or `.` characters.
 - **type**: Must be `"HumanInputComponent"`
 - **sends_response_to**: Name of the target component that should receive the user's response in conversation history
 
