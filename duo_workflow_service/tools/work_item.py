@@ -351,13 +351,34 @@ class ListWorkItemsInput(ParentResourceInput):
         default=None,
         description="Sort results by field and direction (e.g., 'CREATED_DESC', 'UPDATED_ASC').",
     )
+    first: Optional[int] = Field(
+        default=20,
+        description="Number of work items to return per page (max 100).",
+        le=100,
+        ge=1,
+    )
+    after: Optional[str] = Field(
+        default=None,
+        description="Cursor for pagination. Use endCursor from a previous response.",
+    )
+    types: Optional[List[str]] = Field(
+        default=None,
+        description=(
+            "Filter by work item types. Must be one of: "
+            + ", ".join(sorted(type.upper().replace(" ", "_") for type in ALL_TYPES))
+        ),
+    )
 
 
 class ListWorkItems(WorkItemBaseTool):
     name: str = "list_work_items"
-    description: str = f"""Get all work items of the requested group or project.
+    description: str = f"""List work items in a GitLab project or group.
+    By default, only returns the first 20 work items. Use 'after' parameter with the
+    endCursor from previous responses to fetch subsequent pages.
 
     {PARENT_IDENTIFICATION_DESCRIPTION}
+
+    This tool only supports the following types: ({', '.join(sorted(ALL_TYPES))})
 
     For example:
     - Given group_id 'namespace/group', the tool call would be:
@@ -375,6 +396,7 @@ class ListWorkItems(WorkItemBaseTool):
         url = kwargs.pop("url", None)
         group_id = kwargs.pop("group_id", None)
         project_id = kwargs.pop("project_id", None)
+        types = kwargs.pop("types", None)
 
         resolved = await self._validate_parent_url(url, group_id, project_id)
         if isinstance(resolved, str):
@@ -388,8 +410,50 @@ class ListWorkItems(WorkItemBaseTool):
 
         variables = {
             "fullPath": resolved.full_path,
-            **{k: v for k, v in kwargs.items() if v is not None},
+            "first": kwargs.get("first"),
+            "after": kwargs.get("after"),
         }
+
+        # Handle optional filters
+        for key in [
+            "state",
+            "search",
+            "authorUsername",
+            "createdAfter",
+            "createdBefore",
+            "updatedAfter",
+            "updatedBefore",
+            "dueAfter",
+            "dueBefore",
+            "sort",
+        ]:
+            arg_key = key[0].lower() + key[1:]  # match Pydantic input
+            value = kwargs.get(arg_key)
+            if value is not None:
+                variables[key] = value
+
+        warnings = []
+
+        if types:
+            normalized_input = [type.upper().replace(" ", "_") for type in types]
+            valid_types = [
+                type
+                for type in normalized_input
+                if type in {type.upper().replace(" ", "_") for type in ALL_TYPES}
+            ]
+            invalid_types = [
+                type
+                for type in normalized_input
+                if type not in {type.upper().replace(" ", "_") for type in ALL_TYPES}
+            ]
+
+            if valid_types:
+                variables["types"] = valid_types
+
+            if invalid_types:
+                warnings.append(
+                    f"Some types were invalid and skipped: {', '.join(invalid_types)}"
+                )
 
         try:
             response = await self.gitlab_client.graphql(query, variables)
@@ -398,11 +462,15 @@ class ListWorkItems(WorkItemBaseTool):
             if root_key not in response:
                 return json.dumps({"error": f"No {root_key} found in response"})
 
-            work_items = (
-                response.get(root_key, {}).get("workItems", {}).get("nodes", [])
-            )
+            work_items_data = response[root_key].get("workItems", {})
+            result = {
+                "work_items": work_items_data.get("nodes", []),
+                "page_info": work_items_data.get("pageInfo", {}),
+            }
+            if warnings:
+                result["warnings"] = warnings
+            return json.dumps(result)
 
-            return json.dumps({"work_items": work_items})
         except Exception as e:
             return json.dumps({"error": str(e)})
 

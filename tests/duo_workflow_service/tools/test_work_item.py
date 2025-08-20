@@ -252,7 +252,7 @@ async def test_list_work_items_with_group_id(
         author_username="test_user",
     )
 
-    expected_response = json.dumps({"work_items": work_items_list})
+    expected_response = json.dumps({"work_items": work_items_list, "page_info": {}})
     assert response == expected_response
 
     gitlab_client_mock.graphql.assert_called_once()
@@ -274,7 +274,7 @@ async def test_list_work_items_with_project_id(
         author_username="test_user",
     )
 
-    expected_response = json.dumps({"work_items": work_items_list})
+    expected_response = json.dumps({"work_items": work_items_list, "page_info": {}})
     assert response == expected_response
 
     gitlab_client_mock.graphql.assert_called_once()
@@ -295,7 +295,7 @@ async def test_list_work_items_with_group_url(
         url="https://gitlab.com/groups/namespace/group", state="opened"
     )
 
-    expected_response = json.dumps({"work_items": work_items_list})
+    expected_response = json.dumps({"work_items": work_items_list, "page_info": {}})
     assert response == expected_response
 
     gitlab_client_mock.graphql.assert_called_once()
@@ -314,7 +314,7 @@ async def test_list_work_items_with_project_url(
         url="https://gitlab.com/namespace/project", state="opened"
     )
 
-    expected_response = json.dumps({"work_items": work_items_list})
+    expected_response = json.dumps({"work_items": work_items_list, "page_info": {}})
     assert response == expected_response
 
     gitlab_client_mock.graphql.assert_called_once()
@@ -333,6 +333,152 @@ async def test_list_work_items_with_invalid_url(gitlab_client_mock, metadata):
         in response_json["error"]
     )
     gitlab_client_mock.graphql.assert_not_called()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "parent_type, parent_key, parent_id",
+    [
+        ("group", "namespace", "namespace/group"),
+        ("project", "project", "namespace/project"),
+    ],
+)
+async def test_list_work_items_with_filters(
+    gitlab_client_mock, metadata, work_items_list, parent_type, parent_key, parent_id
+):
+    graphql_response = {
+        parent_key: {
+            "workItems": {
+                "nodes": work_items_list,
+                "pageInfo": {"hasNextPage": False, "endCursor": None},
+            }
+        }
+    }
+    gitlab_client_mock.graphql = AsyncMock(return_value=graphql_response)
+
+    tool = ListWorkItems(description="list work items", metadata=metadata)
+
+    args = {
+        f"{parent_type}_id": parent_id,
+        "state": "opened",
+        "author_username": "johndoe",
+        "search": "bug",
+        "created_after": "2025-01-01T00:00:00Z",
+        "due_before": "2025-12-31T00:00:00Z",
+        "sort": "CREATED_DESC",
+    }
+
+    response = await tool._arun(**args)
+
+    response_json = json.loads(response)
+    assert response_json["work_items"] == work_items_list
+    assert response_json["page_info"] == {"hasNextPage": False, "endCursor": None}
+
+    expected_vars = {
+        "fullPath": parent_id,
+        "state": "opened",
+        "authorUsername": "johndoe",
+        "search": "bug",
+        "createdAfter": "2025-01-01T00:00:00Z",
+        "dueBefore": "2025-12-31T00:00:00Z",
+        "sort": "CREATED_DESC",
+    }
+
+    gql_vars = gitlab_client_mock.graphql.call_args[0][1]
+    # Only check variables that are present in both dictionaries
+    for key, expected_value in expected_vars.items():
+        if key in gql_vars:
+            assert (
+                gql_vars[key] == expected_value
+            ), f"Expected {key}={expected_value}, got {gql_vars[key]}"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "types_input,expected_types,warnings_expected",
+    [
+        (["Issue", "Epic"], ["ISSUE", "EPIC"], False),
+        (["Banana", "Task"], ["TASK"], True),
+        (["invalid1", "invalid2"], [], True),
+    ],
+)
+async def test_list_work_items_with_types_filtering(
+    gitlab_client_mock,
+    metadata,
+    work_items_list,
+    types_input,
+    expected_types,
+    warnings_expected,
+):
+    graphql_response = {
+        "project": {
+            "workItems": {
+                "nodes": work_items_list,
+                "pageInfo": {"hasNextPage": False, "endCursor": None},
+            }
+        }
+    }
+    gitlab_client_mock.graphql = AsyncMock(return_value=graphql_response)
+
+    tool = ListWorkItems(description="list work items", metadata=metadata)
+
+    args = {
+        "project_id": "namespace/project",
+        "types": types_input,
+    }
+
+    response = await tool._arun(**args)
+    response_json = json.loads(response)
+
+    assert response_json["work_items"] == work_items_list
+
+    gql_vars = gitlab_client_mock.graphql.call_args[0][1]
+    if expected_types:
+        assert gql_vars["types"] == expected_types
+    else:
+        assert "types" not in gql_vars
+
+    if warnings_expected:
+        assert "warnings" in response_json
+        assert "Some types were invalid" in response_json["warnings"][0]
+    else:
+        assert "warnings" not in response_json
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "parent_type, parent_key, parent_id",
+    [
+        ("group", "namespace", "namespace/group"),
+        ("project", "project", "namespace/project"),
+    ],
+)
+async def test_list_work_items_with_pagination(
+    gitlab_client_mock, metadata, work_items_list, parent_type, parent_key, parent_id
+):
+    graphql_response = {
+        parent_key: {
+            "workItems": {
+                "nodes": work_items_list,
+                "pageInfo": {"hasNextPage": True, "endCursor": "abc123=="},
+            }
+        }
+    }
+    gitlab_client_mock.graphql = AsyncMock(return_value=graphql_response)
+
+    tool = ListWorkItems(description="list work items", metadata=metadata)
+
+    args = {f"{parent_type}_id": parent_id, "first": 2, "after": "prev-cursor"}
+
+    response = await tool._arun(**args)
+
+    response_json = json.loads(response)
+    assert response_json["work_items"] == work_items_list
+    assert response_json["page_info"] == {"hasNextPage": True, "endCursor": "abc123=="}
+
+    gql_vars = gitlab_client_mock.graphql.call_args[0][1]
+    assert gql_vars["first"] == 2
+    assert gql_vars["after"] == "prev-cursor"
 
 
 @pytest.mark.asyncio
