@@ -1,8 +1,5 @@
-# pylint: disable=unused-import,unused-variable
-
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, Mock, call, patch
-from xml.etree import ElementTree
 
 import pytest
 from anthropic import APIStatusError

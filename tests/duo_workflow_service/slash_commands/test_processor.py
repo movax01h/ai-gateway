@@ -1,11 +1,8 @@
-# pylint: disable=unused-import
-
 from unittest.mock import MagicMock, patch
 
 import pytest
 
 from duo_workflow_service.slash_commands.error_handler import SlashCommandError
-from duo_workflow_service.slash_commands.goal_parser import parse
 from duo_workflow_service.slash_commands.processor import SlashCommandsProcessor
 from lib.result import Error, Ok
 
