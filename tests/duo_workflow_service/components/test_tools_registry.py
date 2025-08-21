@@ -187,6 +187,7 @@ _outbox = MagicMock(spec=asyncio.Queue)
                 "list_project_audit_events",
                 "create_commit",
                 "dismiss_vulnerability",
+                "confirm_vulnerability",
                 "get_current_user",
                 "create_work_item",
                 "link_vulnerability_to_issue",
@@ -336,6 +337,7 @@ def test_registry_initialization_initialises_tools_with_correct_attributes(
         "get_commit_comments": tools.GetCommitComments(metadata=tool_metadata),
         "create_commit": tools.CreateCommit(metadata=tool_metadata),
         "dismiss_vulnerability": tools.DismissVulnerability(metadata=tool_metadata),
+        "confirm_vulnerability": tools.ConfirmVulnerability(metadata=tool_metadata),
         "list_instance_audit_events": tools.ListInstanceAuditEvents(
             metadata=tool_metadata
         ),

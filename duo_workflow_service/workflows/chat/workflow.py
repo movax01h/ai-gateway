@@ -92,6 +92,7 @@ CHAT_GITLAB_MUTATION_TOOLS = [
     "update_epic",
     "create_commit",
     "dismiss_vulnerability",
+    "confirm_vulnerability",
     "create_work_item",
     "link_vulnerability_to_issue",
 ]
