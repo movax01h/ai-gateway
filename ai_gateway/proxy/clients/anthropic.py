@@ -13,6 +13,7 @@ class AnthropicProxyClient(BaseProxyClient):
     ALLOWED_UPSTREAM_PATHS = [
         "/v1/complete",
         "/v1/messages",
+        "/v1/messages?beta=true",
     ]
 
     ALLOWED_HEADERS_TO_UPSTREAM = [
