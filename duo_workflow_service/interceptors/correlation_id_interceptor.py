@@ -14,6 +14,7 @@ class CorrelationIdInterceptor(grpc.aio.ServerInterceptor):
     """Interceptor that handles correlation ID injection and propagation."""
 
     CORRELATION_ID_KEY = "x-request-id"
+    GITLAB_LABKIT_CORRELATION_ID_KEY = "x-gitlab-correlation-id"
     X_GITLAB_GLOBAL_USER_ID_HEADER = "x-gitlab-global-user-id"
 
     def __init__(self):
@@ -28,7 +29,11 @@ class CorrelationIdInterceptor(grpc.aio.ServerInterceptor):
         metadata = dict(handler_call_details.invocation_metadata)
 
         # Extract correlation ID from metadata or generate new one
-        request_id = metadata.get(self.CORRELATION_ID_KEY, str(uuid.uuid4()))
+        request_id = (
+            metadata.get(self.CORRELATION_ID_KEY)
+            or metadata.get(self.GITLAB_LABKIT_CORRELATION_ID_KEY)
+            or str(uuid.uuid4())
+        )
 
         # Set correlation ID in context
         correlation_id.set(request_id)
