@@ -74,6 +74,7 @@ websockets = "^15.0.1"
 langgraph-checkpoint = "2.0.26"
 gitmatch = "^0.2.1"
 langchain-openai = "^0.3.30"
+bleach = "^6.2.0"
 
 [[tool.poetry.source]]
 name = "gitlab_cloud_connector"
@@ -122,6 +123,10 @@ types-requests = "^2.31.0.20240406"
 codespell = "^2.4.1"
 docformatter = "^1.7.7"
 editorconfig-checker = "^3.2.1"
+
+
+[tool.poetry.group.dev.dependencies]
+types-bleach = "^6.2.0.20250809"
 
 [tool.codespell]
 skip = """

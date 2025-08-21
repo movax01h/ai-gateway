@@ -4,18 +4,18 @@ import sys
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Union
 
+from duo_workflow_service.security.exceptions import SecurityException
+from duo_workflow_service.security.markdown_content_security import (
+    strip_hidden_html_comments,
+)
+
 
 def run_from_args():
-
     args = sys.argv[1:]
     filename = args[0]
     content = Path(filename).read_text()
 
     return PromptSecurity.apply_security_to_tool_response(content, "test-tool")
-
-
-class SecurityException(Exception):
-    """Custom exception raised when security validation fails."""
 
 
 def encode_dangerous_tags(
@@ -86,6 +86,7 @@ class PromptSecurity:
         ]
     ] = [
         encode_dangerous_tags,
+        strip_hidden_html_comments,
     ]
 
     # Tool-specific additional security functions
