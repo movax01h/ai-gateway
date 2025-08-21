@@ -1,5 +1,7 @@
 syntax = "proto3";
 
+import "google/protobuf/struct.proto";
+
 option go_package = "gitlab.com/gitlab-org/modelops/applied-ml/code-suggestions/ai-assist/clients/gopb";
 option ruby_package = "DuoWorkflowService";
 
@@ -27,6 +29,8 @@ message StartWorkflowRequest {
     repeated McpTool mcpTools = 8;
     repeated AdditionalContext additional_context = 9;
     optional Approval approval = 10;
+    optional google.protobuf.Struct flowConfig = 11;
+    optional string flowConfigSchemaVersion = 12;
 }
 
 message ActionResponse {

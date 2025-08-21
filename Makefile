@@ -90,7 +90,8 @@ gen-proto-ruby:
 
 .PHONY: gen-proto-go
 gen-proto-go: gen-proto-go-install bin/protoc
-	bin/protoc --go_out=clients/gopb --go_opt=paths=source_relative \
+	bin/protoc -I tmp/protoc-${PROTOC_VERSION}/include -I ./ \
+		--go_out=clients/gopb --go_opt=paths=source_relative \
 		--go-grpc_out=clients/gopb --go-grpc_opt=paths=source_relative \
 		./contract/contract.proto
 
@@ -104,6 +105,7 @@ gen-proto-node: bin/protoc
 	(cd clients/node; npm install)
 	(cd clients/node; npm run before_generate)
 	bin/protoc --plugin=protoc-gen-ts_proto=./clients/node/node_modules/.bin/protoc-gen-ts_proto \
+		-I tmp/protoc-${PROTOC_VERSION}/include \
 		--proto_path=./contract \
 		--ts_proto_out=clients/node/src/grpc \
 		--ts_proto_opt=env=node,useAbortSignal=true,esModuleInterop=true,outputServices=grpc-js \
@@ -123,10 +125,18 @@ tmp/protoc-${PROTOC_VERSION}/bin/protoc:
 		echo "Error: Neither wget nor curl found"; exit 1; \
 		fi
 
-	unzip $(ZIP) "bin/protoc" -d tmp/protoc-${PROTOC_VERSION}
+	unzip $(ZIP) "bin/protoc" "include/*" -d tmp/protoc-${PROTOC_VERSION}
 
 bin/protoc: tmp/protoc-${PROTOC_VERSION}/bin/protoc
 	cp tmp/protoc-${PROTOC_VERSION}/bin/protoc bin/protoc
+
+
+.PHONY: clean-proto
+clean-proto:
+	@echo "Cleaning protoc installation and generated files..."
+	@rm -rf tmp/protoc-*
+	@rm -f bin/protoc
+	@echo "Protoc installation cleaned. Run 'make gen-proto' to regenerate."
 
 .PHONY: develop-local
 develop-local:

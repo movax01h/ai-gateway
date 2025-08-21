@@ -20,6 +20,7 @@ import {
   type ServiceError,
   type UntypedServiceImplementation,
 } from "@grpc/grpc-js";
+import { Struct } from "./google/protobuf/struct";
 
 export const protobufPackage = "";
 
@@ -39,6 +40,8 @@ export interface StartWorkflowRequest {
   mcpTools: McpTool[];
   additionalContext: AdditionalContext[];
   approval?: Approval | undefined;
+  flowConfig?: { [key: string]: any } | undefined;
+  flowConfigSchemaVersion?: string | undefined;
 }
 
 export interface ActionResponse {
@@ -301,6 +304,8 @@ function createBaseStartWorkflowRequest(): StartWorkflowRequest {
     mcpTools: [],
     additionalContext: [],
     approval: undefined,
+    flowConfig: undefined,
+    flowConfigSchemaVersion: undefined,
   };
 }
 
@@ -332,6 +337,12 @@ export const StartWorkflowRequest: MessageFns<StartWorkflowRequest> = {
     }
     if (message.approval !== undefined) {
       Approval.encode(message.approval, writer.uint32(82).fork()).join();
+    }
+    if (message.flowConfig !== undefined) {
+      Struct.encode(Struct.wrap(message.flowConfig), writer.uint32(90).fork()).join();
+    }
+    if (message.flowConfigSchemaVersion !== undefined) {
+      writer.uint32(98).string(message.flowConfigSchemaVersion);
     }
     return writer;
   },
@@ -415,6 +426,22 @@ export const StartWorkflowRequest: MessageFns<StartWorkflowRequest> = {
           message.approval = Approval.decode(reader, reader.uint32());
           continue;
         }
+        case 11: {
+          if (tag !== 90) {
+            break;
+          }
+
+          message.flowConfig = Struct.unwrap(Struct.decode(reader, reader.uint32()));
+          continue;
+        }
+        case 12: {
+          if (tag !== 98) {
+            break;
+          }
+
+          message.flowConfigSchemaVersion = reader.string();
+          continue;
+        }
       }
       if ((tag & 7) === 4 || tag === 0) {
         break;
@@ -439,6 +466,10 @@ export const StartWorkflowRequest: MessageFns<StartWorkflowRequest> = {
         ? object.additionalContext.map((e: any) => AdditionalContext.fromJSON(e))
         : [],
       approval: isSet(object.approval) ? Approval.fromJSON(object.approval) : undefined,
+      flowConfig: isObject(object.flowConfig) ? object.flowConfig : undefined,
+      flowConfigSchemaVersion: isSet(object.flowConfigSchemaVersion)
+        ? globalThis.String(object.flowConfigSchemaVersion)
+        : undefined,
     };
   },
 
@@ -471,6 +502,12 @@ export const StartWorkflowRequest: MessageFns<StartWorkflowRequest> = {
     if (message.approval !== undefined) {
       obj.approval = Approval.toJSON(message.approval);
     }
+    if (message.flowConfig !== undefined) {
+      obj.flowConfig = message.flowConfig;
+    }
+    if (message.flowConfigSchemaVersion !== undefined) {
+      obj.flowConfigSchemaVersion = message.flowConfigSchemaVersion;
+    }
     return obj;
   },
 
@@ -490,6 +527,8 @@ export const StartWorkflowRequest: MessageFns<StartWorkflowRequest> = {
     message.approval = (object.approval !== undefined && object.approval !== null)
       ? Approval.fromPartial(object.approval)
       : undefined;
+    message.flowConfig = object.flowConfig ?? undefined;
+    message.flowConfigSchemaVersion = object.flowConfigSchemaVersion ?? undefined;
     return message;
   },
 };
