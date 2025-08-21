@@ -5,6 +5,8 @@ import pytest
 from pydantic import ValidationError
 
 from duo_workflow_service.tools.security import (
+    ConfirmVulnerability,
+    ConfirmVulnerabilityInput,
     DismissVulnerability,
     DismissVulnerabilityInput,
     LinkVulnerabilityToIssue,
@@ -957,4 +959,305 @@ def test_link_vulnerability_to_issue_format_display_message(
     input_data, expected_message
 ):
     tool = LinkVulnerabilityToIssue(metadata={})
+    assert tool.format_display_message(input_data) == expected_message
+
+
+@pytest.mark.asyncio
+async def test_confirm_vulnerability(gitlab_client_mock, metadata):
+    gitlab_client_mock.apost = AsyncMock(
+        return_value={
+            "data": {
+                "vulnerabilityConfirm": {
+                    "vulnerability": {
+                        "id": "gid://gitlab/Vulnerability/123",
+                        "state": "CONFIRMED",
+                        "title": "Test Vulnerability",
+                        "severity": "HIGH",
+                        "reportType": "SAST",
+                    },
+                    "errors": [],
+                }
+            }
+        }
+    )
+
+    tool = ConfirmVulnerability(metadata=metadata)
+
+    input_data = {
+        "vulnerability_id": "gid://gitlab/Vulnerability/123",
+        "comment": "Verified as a real security issue",
+    }
+
+    response = await tool.arun(input_data)
+
+    expected_response = json.dumps(
+        {
+            "vulnerability": {
+                "id": "gid://gitlab/Vulnerability/123",
+                "state": "CONFIRMED",
+                "title": "Test Vulnerability",
+                "severity": "HIGH",
+                "reportType": "SAST",
+            },
+            "success": True,
+            "message": "Vulnerability confirmed successfully",
+        }
+    )
+    assert response == expected_response
+
+    # editorconfig-checker-disable
+    expected_mutation = """
+mutation($vulnerabilityId: VulnerabilityID!, $comment: String) {
+    vulnerabilityConfirm(input: { id: $vulnerabilityId, comment: $comment }) {
+    vulnerability {
+        id
+        state
+        title
+        severity
+        reportType
+    }
+    errors
+    }
+}
+"""
+    # editorconfig-checker-enable
+
+    gitlab_client_mock.apost.assert_called_once_with(
+        path="/api/graphql",
+        body=json.dumps(
+            {
+                "query": expected_mutation,
+                "variables": {
+                    "vulnerabilityId": "gid://gitlab/Vulnerability/123",
+                    "comment": "Verified as a real security issue",
+                },
+            }
+        ),
+    )
+
+
+@pytest.mark.asyncio
+async def test_confirm_vulnerability_without_comment(gitlab_client_mock, metadata):
+    gitlab_client_mock.apost = AsyncMock(
+        return_value={
+            "data": {
+                "vulnerabilityConfirm": {
+                    "vulnerability": {
+                        "id": "gid://gitlab/Vulnerability/123",
+                        "state": "CONFIRMED",
+                        "title": "Test Vulnerability",
+                        "severity": "HIGH",
+                        "reportType": "SAST",
+                    },
+                    "errors": [],
+                }
+            }
+        }
+    )
+
+    tool = ConfirmVulnerability(metadata=metadata)
+
+    input_data = {
+        "vulnerability_id": "gid://gitlab/Vulnerability/123",
+    }
+
+    response = await tool.arun(input_data)
+
+    expected_response = json.dumps(
+        {
+            "vulnerability": {
+                "id": "gid://gitlab/Vulnerability/123",
+                "state": "CONFIRMED",
+                "title": "Test Vulnerability",
+                "severity": "HIGH",
+                "reportType": "SAST",
+            },
+            "success": True,
+            "message": "Vulnerability confirmed successfully",
+        }
+    )
+    assert response == expected_response
+
+    # editorconfig-checker-disable
+    expected_mutation = """
+mutation($vulnerabilityId: VulnerabilityID!, $comment: String) {
+    vulnerabilityConfirm(input: { id: $vulnerabilityId, comment: $comment }) {
+    vulnerability {
+        id
+        state
+        title
+        severity
+        reportType
+    }
+    errors
+    }
+}
+"""
+    # editorconfig-checker-enable
+
+    gitlab_client_mock.apost.assert_called_once_with(
+        path="/api/graphql",
+        body=json.dumps(
+            {
+                "query": expected_mutation,
+                "variables": {
+                    "vulnerabilityId": "gid://gitlab/Vulnerability/123",
+                    "comment": None,
+                },
+            }
+        ),
+    )
+
+
+@pytest.mark.asyncio
+async def test_confirm_vulnerability_with_numeric_id(gitlab_client_mock, metadata):
+    gitlab_client_mock.apost = AsyncMock(
+        return_value={
+            "data": {
+                "vulnerabilityConfirm": {
+                    "vulnerability": {
+                        "id": "gid://gitlab/Vulnerability/123",
+                        "state": "CONFIRMED",
+                        "title": "Test Vulnerability",
+                        "severity": "HIGH",
+                        "reportType": "SAST",
+                    },
+                    "errors": [],
+                }
+            }
+        }
+    )
+
+    tool = ConfirmVulnerability(metadata=metadata)
+
+    input_data = {
+        "vulnerability_id": "123",  # Numeric ID
+        "comment": "Verified as a real security issue",
+    }
+
+    response = await tool.arun(input_data)
+
+    expected_response = json.dumps(
+        {
+            "vulnerability": {
+                "id": "gid://gitlab/Vulnerability/123",
+                "state": "CONFIRMED",
+                "title": "Test Vulnerability",
+                "severity": "HIGH",
+                "reportType": "SAST",
+            },
+            "success": True,
+            "message": "Vulnerability confirmed successfully",
+        }
+    )
+    assert response == expected_response
+
+    # editorconfig-checker-disable
+    expected_mutation = """
+mutation($vulnerabilityId: VulnerabilityID!, $comment: String) {
+    vulnerabilityConfirm(input: { id: $vulnerabilityId, comment: $comment }) {
+    vulnerability {
+        id
+        state
+        title
+        severity
+        reportType
+    }
+    errors
+    }
+}
+"""
+    # editorconfig-checker-enable
+
+    gitlab_client_mock.apost.assert_called_once_with(
+        path="/api/graphql",
+        body=json.dumps(
+            {
+                "query": expected_mutation,
+                "variables": {
+                    "vulnerabilityId": "gid://gitlab/Vulnerability/123",
+                    "comment": "Verified as a real security issue",
+                },
+            }
+        ),
+    )
+
+
+@pytest.mark.asyncio
+async def test_confirm_vulnerability_with_graphql_errors(gitlab_client_mock, metadata):
+    gitlab_client_mock.apost = AsyncMock(
+        return_value={
+            "data": {
+                "vulnerabilityConfirm": {
+                    "vulnerability": None,
+                    "errors": ["Vulnerability not found"],
+                }
+            }
+        }
+    )
+
+    tool = ConfirmVulnerability(metadata=metadata)
+
+    response = await tool.arun({"vulnerability_id": "gid://gitlab/Vulnerability/999"})
+
+    error_response = json.loads(response)
+    assert "error" in error_response
+    assert "GraphQL errors: ['Vulnerability not found']" in error_response["error"]
+
+
+@pytest.mark.asyncio
+async def test_confirm_vulnerability_exception(gitlab_client_mock, metadata):
+    gitlab_client_mock.apost = AsyncMock(side_effect=Exception("API Error"))
+
+    tool = ConfirmVulnerability(metadata=metadata)
+
+    response = await tool.arun({"vulnerability_id": "gid://gitlab/Vulnerability/123"})
+
+    error_response = json.loads(response)
+    assert "error" in error_response
+    assert "API Error" in error_response["error"]
+
+
+@pytest.mark.asyncio
+async def test_confirm_vulnerability_with_long_comment_error(
+    gitlab_client_mock, metadata
+):
+    """Test case 4: with comment with more than 50000 characters, the agent should throw error about too long comment"""
+    tool = ConfirmVulnerability(metadata=metadata)
+
+    # Create a comment with more than 50,000 characters
+    long_comment = "a" * 50001
+
+    input_data = {
+        "vulnerability_id": "123",
+        "comment": long_comment,
+    }
+
+    response = await tool.arun(input_data)
+
+    error_response = json.loads(response)
+    assert "error" in error_response
+    assert "Comment must be 50,000 characters or less" in error_response["error"]
+
+    # Verify that no API call was made due to validation error
+    gitlab_client_mock.apost.assert_not_called()
+
+
+@pytest.mark.parametrize(
+    "input_data,expected_message",
+    [
+        (
+            ConfirmVulnerabilityInput(vulnerability_id="123"),
+            "Confirm vulnerability 123",
+        ),
+        (
+            ConfirmVulnerabilityInput(
+                vulnerability_id="gid://gitlab/Vulnerability/456"
+            ),
+            "Confirm vulnerability gid://gitlab/Vulnerability/456",
+        ),
+    ],
+)
+def test_confirm_vulnerability_format_display_message(input_data, expected_message):
+    tool = ConfirmVulnerability(metadata={})
     assert tool.format_display_message(input_data) == expected_message

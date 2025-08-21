@@ -42,6 +42,7 @@ __all__ = [
     "ListVulnerabilities",
     "DismissVulnerability",
     "LinkVulnerabilityToIssue",
+    "ConfirmVulnerability",
 ]
 
 
@@ -491,3 +492,86 @@ class LinkVulnerabilityToIssue(DuoBaseTool):
         self, args: LinkVulnerabilityToIssueInput, _tool_response: Any = None
     ) -> str:
         return f"Link issue to vulnerability {args.vulnerability_ids}"
+
+
+class ConfirmVulnerabilityInput(BaseModel):
+    vulnerability_id: str = Field(
+        description="The ID of the vulnerability to be confirmed "
+        "(e.g., either digit ids like '123' or gid like 'gid://gitlab/Vulnerability/123')",
+    )
+    comment: Optional[str] = Field(
+        default=None,
+        description="Comment explaining why the vulnerability was confirmed (maximum 50,000 characters)",
+    )
+
+
+class ConfirmVulnerability(DuoBaseTool):
+    name: str = "confirm_vulnerability"
+    description: str = """Confirm a security vulnerability in a GitLab project.
+
+This tool marks a vulnerability as confirmed, changing its state to CONFIRMED.
+This is typically done when a security team has verified that the vulnerability is a real issue
+that needs to be addressed.
+"""
+    args_schema: Type[BaseModel] = ConfirmVulnerabilityInput
+
+    async def _arun(self, **kwargs: Any) -> str:
+        vulnerability_id = kwargs.pop("vulnerability_id")
+        comment = kwargs.pop("comment", None)
+
+        # Validate comment length
+        if comment is not None and len(comment) > 50000:
+            return json.dumps({"error": "Comment must be 50,000 characters or less"})
+
+        # Build GraphQL mutation
+        mutation = """
+mutation($vulnerabilityId: VulnerabilityID!, $comment: String) {
+    vulnerabilityConfirm(input: { id: $vulnerabilityId, comment: $comment }) {
+    vulnerability {
+        id
+        state
+        title
+        severity
+        reportType
+    }
+    errors
+    }
+}
+"""
+
+        try:
+            # Ensure vulnerability_id has proper GraphQL format
+            if not vulnerability_id.startswith("gid://gitlab/Vulnerability/"):
+                vulnerability_id = f"gid://gitlab/Vulnerability/{vulnerability_id}"
+
+            variables = {
+                "vulnerabilityId": vulnerability_id,
+                "comment": comment,
+            }
+
+            response = await self.gitlab_client.apost(
+                path="/api/graphql",
+                body=json.dumps({"query": mutation, "variables": variables}),
+            )
+
+            mutation_result = response["data"]["vulnerabilityConfirm"]
+
+            if mutation_result["errors"]:
+                return json.dumps(
+                    {"error": f"GraphQL errors: {mutation_result['errors']}"}
+                )
+
+            return json.dumps(
+                {
+                    "vulnerability": mutation_result["vulnerability"],
+                    "success": True,
+                    "message": "Vulnerability confirmed successfully",
+                }
+            )
+        except Exception as e:
+            return json.dumps({"error": str(e)})
+
+    def format_display_message(
+        self, args: ConfirmVulnerabilityInput, _tool_response: Any = None
+    ) -> str | None:
+        return f"Confirm vulnerability {args.vulnerability_id}"
