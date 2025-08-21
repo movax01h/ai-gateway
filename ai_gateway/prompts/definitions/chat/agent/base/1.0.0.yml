@@ -8,7 +8,7 @@ unit_primitives:
   - duo_chat
 prompt_template:
   system_static: |
-    {% include 'chat/agent/partials/system_static/1.0.0.jinja' %}
+    {% include 'chat/agent/partials/system_static/claude_3/1.0.0.jinja' %}
   system_dynamic: |
     {% include 'chat/agent/partials/system_dynamic/1.0.0.jinja' %}
   user: |
