@@ -660,6 +660,14 @@ async def test_next_non_heartbeat_event():
 
 
 @pytest.mark.asyncio
+async def test_next_non_heartbeat_event_client_streaming_closed():
+    mock_iterator = AsyncMock()
+    mock_iterator.__next__.side_effect = StopAsyncIteration
+    result = await next_non_heartbeat_event(mock_iterator)
+    assert result is None
+
+
+@pytest.mark.asyncio
 @patch("duo_workflow_service.server.duo_workflow_metrics")
 @patch("duo_workflow_service.server.AbstractWorkflow")
 @patch("duo_workflow_service.server.resolve_workflow_class")

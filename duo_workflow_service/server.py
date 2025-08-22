@@ -75,10 +75,6 @@ from lib.internal_events.event_enum import (
 CONTAINER_APPLICATION_PACKAGES = ["duo_workflow_service"]
 
 
-class GRPCMessageReceiverEOFError(Exception):
-    """Error that is raised when the grpc message receiver reaches EOF of client messages."""
-
-
 log = structlog.stdlib.get_logger("server")
 
 catalog = data_model.load_catalog()
@@ -278,9 +274,12 @@ class DuoWorkflowService(contract_pb2_grpc.DuoWorkflowServicer):
 
                 yield action
 
-                event: contract_pb2.ClientEvent = await next_non_heartbeat_event(
+                event: contract_pb2.ClientEvent | None = await next_non_heartbeat_event(
                     request_iterator
                 )
+
+                if event is None:
+                    break
 
                 workflow.add_to_inbox(event)
                 if isinstance(event, contract_pb2.ClientEvent) and event.actionResponse:
@@ -316,16 +315,7 @@ class DuoWorkflowService(contract_pb2_grpc.DuoWorkflowServicer):
                 yield action
 
             await workflow_task
-        except (GRPCMessageReceiverEOFError, asyncio.CancelledError) as err:
-            #
-            # GRPCMessageReceiverEOFError:
-            #
-            # This exception could happen when gRPC connection is established from client directly
-            # and the client disposed the gRPC client.
-            # e.g. User selects gRPC connection type in node executor, and cancel the workflow.
-            #
-            # asyncio.CancelledError:
-            #
+        except asyncio.CancelledError as err:
             # This exception could happen when gRPC connection is established from gitlab-workhorse
             # and the gitlab-workhorse disposed the gRPC client.
             # e.g. User selects websocket connection type in node executor, and cancel the workflow.
@@ -408,15 +398,14 @@ class DuoWorkflowService(contract_pb2_grpc.DuoWorkflowServicer):
 
 async def next_non_heartbeat_event(
     request_iterator: AsyncIterable[contract_pb2.ClientEvent],
-) -> contract_pb2.ClientEvent:
+) -> contract_pb2.ClientEvent | None:
     """Consumes the request iterator until a non-heartbeat event is found."""
     while True:
         try:
             event = await anext(aiter(request_iterator))
-        except StopAsyncIteration as ex:
-            raise GRPCMessageReceiverEOFError(
-                "Client message reached EOF. The connection might be terminated abruptly."
-            ) from ex
+        except StopAsyncIteration:
+            log.info("Client-side streaming has been closed.")
+            return None
 
         if not event.HasField("heartbeat"):
             return event
