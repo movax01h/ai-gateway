@@ -50,6 +50,9 @@ class BaseComponent(BaseModel, ABC):
     @model_validator(mode="after")
     def validate_base_fields(self) -> Self:
         for inp in self.inputs:
+            if inp.literal:
+                continue
+
             if inp.target not in self._allowed_input_targets:
                 raise ValueError(
                     f"The '{self.__class__.__name__}' component doesn't support the input target '{inp.target}'."

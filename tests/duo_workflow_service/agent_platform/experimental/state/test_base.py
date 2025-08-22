@@ -188,7 +188,7 @@ class TestIOKey:
         assert io_key.subkeys == ["project", "config", "database", "host"]
         assert io_key.alias == "db_host"
 
-    def test_iokey_parse_key_advanced_syntax_epty_alias(self):
+    def test_iokey_parse_key_advanced_syntax_empty_alias(self):
         """Test parsing key with deep nesting."""
         io_key = IOKey.parse_key(
             {"from": "context:project.config.database.host", "as": ""}
@@ -991,6 +991,199 @@ class TestIOKeyTemplate:
         assert isinstance(io_key, IOKey)
         assert io_key.target == "context"
         assert io_key.subkeys == ["component1", "config"]
+
+
+class TestIOKeyLiteralField:
+    """Test IOKey literal field functionality."""
+
+    def test_iokey_literal_basic_usage(self):
+        """Test basic literal field usage."""
+        io_key = IOKey(target="hello_world", literal=True, alias="greeting")
+
+        assert io_key.target == "hello_world"
+        assert io_key.literal is True
+        assert io_key.alias == "greeting"
+        assert io_key.subkeys is None
+
+    def test_iokey_literal_requires_alias(self):
+        """Test that literal=True requires alias to be set."""
+        with pytest.raises(ValueError) as exc_info:
+            IOKey(target="hello_world", literal=True)
+
+        assert "Field 'as' is required when using 'literal: true'" in str(
+            exc_info.value
+        )
+
+    def test_iokey_literal_requires_non_empty_alias(self):
+        """Test that literal=True requires non-empty alias."""
+        with pytest.raises(ValueError) as exc_info:
+            IOKey(target="hello_world", literal=True, alias="")
+
+        assert "Field 'as' is required when using 'literal: true'" in str(
+            exc_info.value
+        )
+
+    def test_iokey_literal_bypasses_target_validation(self):
+        """Test that literal=True bypasses normal target validation."""
+        invalid_targets = [
+            "custom_value",
+            "any_string",
+            "123",
+            "special@chars",
+            "context:goal.blah.something",
+            "not_a_flow_state_key",
+        ]
+
+        for target in invalid_targets:
+            io_key = IOKey(target=target, literal=True, alias="test_alias")
+            assert io_key.target == target
+            assert io_key.literal is True
+            assert io_key.alias == "test_alias"
+
+    def test_iokey_literal_template_variable_from_state(self):
+        """Test template_variable_from_state with literal=True returns literal value."""
+        state: FlowState = {
+            "status": WorkflowStatusEnum.PLANNING,
+            "conversation_history": {},
+            "ui_chat_log": [],
+            "context": {},
+        }
+
+        io_key = IOKey(target="custom_literal_value", literal=True, alias="my_var")
+        result = io_key.template_variable_from_state(state)
+
+        assert result == {"my_var": "custom_literal_value"}
+
+    def test_iokey_literal_with_complex_string_values(self):
+        """Test literal field with various complex string values."""
+        complex_values = [
+            "http://example.com/api/v1",
+            '{"json": "object", "nested": {"key": "value"}}',
+            "Multi-line\nstring\nwith\nbreaks",
+            "String with spaces and special chars !@#$%^&*()",
+            "",
+            "unicode_test_🚀_🎉_مرحبا",
+        ]
+
+        for value in complex_values:
+            io_key = IOKey(target=value, literal=True, alias="test_value")
+            state: FlowState = {
+                "status": WorkflowStatusEnum.PLANNING,
+                "conversation_history": {},
+                "ui_chat_log": [],
+                "context": {},
+            }
+            result = io_key.template_variable_from_state(state)
+            assert result == {"test_value": value}
+
+    def test_iokey_parse_key_with_literal_dict_format(self):
+        """Test parsing keys with literal field using dict format."""
+        key_config = {"from": "context:project.name", "as": "my_alias", "literal": True}
+        io_key = IOKey.parse_key(key_config)
+
+        assert io_key.target == "context:project.name"
+        assert io_key.literal is True
+        assert io_key.alias == "my_alias"
+        assert io_key.subkeys is None
+
+    def test_iokey_parse_keys_mixed_literal_and_regular(self):
+        """Test parsing mixed literal and regular keys."""
+        keys = [
+            "context:project.name",
+            {"from": "literal_value", "as": "my_literal", "literal": True},
+            "status",
+        ]
+
+        io_keys = IOKey.parse_keys(keys)
+
+        assert len(io_keys) == 3
+
+        assert io_keys[0].target == "context"
+        assert io_keys[0].subkeys == ["project", "name"]
+        assert io_keys[0].literal is False
+        assert io_keys[0].alias is None
+
+        assert io_keys[1].target == "literal_value"
+        assert io_keys[1].literal is True
+        assert io_keys[1].alias == "my_literal"
+        assert io_keys[1].subkeys is None
+
+        assert io_keys[2].target == "status"
+        assert io_keys[2].subkeys is None
+        assert io_keys[2].literal is False
+        assert io_keys[2].alias is None
+
+    @pytest.mark.parametrize(
+        "target_value,alias_value,expected_result",
+        [
+            ("hello", "greeting", {"greeting": "hello"}),
+            ("123", "number", {"number": "123"}),
+            ("special@chars#$%", "special", {"special": "special@chars#$%"}),
+            ("path/to/file.txt", "filepath", {"filepath": "path/to/file.txt"}),
+            (
+                "https://api.example.com/v1",
+                "api_url",
+                {"api_url": "https://api.example.com/v1"},
+            ),
+            ("SELECT * FROM table", "query", {"query": "SELECT * FROM table"}),
+            ('{"key": "value"}', "json_data", {"json_data": '{"key": "value"}'}),
+            ("Hello World Test", "phrase", {"phrase": "Hello World Test"}),
+            (" ", "space", {"space": " "}),
+            ("  whitespace  ", "ws", {"ws": "  whitespace  "}),
+        ],
+    )
+    def test_iokey_literal_parameterized_values(
+        self, target_value, alias_value, expected_result
+    ):
+        """Test literal field with various target and alias combinations."""
+        io_key = IOKey(target=target_value, literal=True, alias=alias_value)
+
+        state: FlowState = {
+            "status": WorkflowStatusEnum.PLANNING,
+            "conversation_history": {},
+            "ui_chat_log": [],
+            "context": {"some": "data"},  # This should be ignored for literal keys
+        }
+
+        result = io_key.template_variable_from_state(state)
+        assert result == expected_result
+
+    @pytest.mark.parametrize(
+        "complex_literal_value,alias",
+        [
+            ("SELECT id, name FROM users WHERE active = true", "sql_query"),
+            ("key1=value1;key2=value2;key3=value3", "config_string"),
+            ("/path/to/config/file.json", "config_path"),
+            ("--verbose --output /tmp/result.txt --format json", "cli_args"),
+            ("dGVzdCBzdHJpbmcgZm9yIGVuY29kaW5n", "encoded_data"),
+            ("550e8400-e29b-41d4-a716-446655440000", "uuid"),
+            ("v1.2.3-alpha.1+build.456", "version"),
+        ],
+        ids=[
+            "sql_query",
+            "config_string",
+            "file_path",
+            "cli_args",
+            "base64_like",
+            "uuid_like",
+            "version_string",
+        ],
+    )
+    def test_iokey_literal_complex_real_world_values(
+        self, complex_literal_value, alias
+    ):
+        """Test literal field with complex real-world string values."""
+        io_key = IOKey(target=complex_literal_value, literal=True, alias=alias)
+
+        state: FlowState = {
+            "status": WorkflowStatusEnum.PLANNING,
+            "conversation_history": {},
+            "ui_chat_log": [],
+            "context": {},
+        }
+
+        result = io_key.template_variable_from_state(state)
+        assert result == {alias: complex_literal_value}
 
 
 class TestIntegration:
