@@ -11,12 +11,11 @@ _DISALLOWED_OPERATORS = ["&&", "||", "|"]
 
 
 class RunCommandInput(BaseModel):
-    program: str = Field(description="The name of bash program to execute eg: 'echo'")
-    arguments: list[str] = Field(
-        description="The argv to pass into the bash program eg: ['/home']"
-    )
-    flags: list[str] = Field(
-        description="The flags to pass into the bash program eg: ['-l']"
+    program: str = Field(description="The name of bash program to execute eg: 'cp'")
+    args: Optional[str] = Field(
+        description="All arguments and flags for the bash program as a single string. "
+        "eg: '-v -p source.txt destination.txt'",
+        default=None,
     )
 
 
@@ -34,14 +33,9 @@ class RunCommand(DuoBaseTool):
     async def _arun(
         self,
         program: str,
-        arguments: Optional[list[str]] = None,
-        flags: Optional[list[str]] = None,
+        args: Optional[str] = None,
     ) -> str:
-        # handle mutable default arguments https://docs.python-guide.org/writing/gotchas/#mutable-default-arguments
-        if arguments is None:
-            arguments = []
-        if flags is None:
-            flags = []
+        args = args or ""
 
         for disallowed_operator in _DISALLOWED_OPERATORS:
             if disallowed_operator in program:
@@ -58,8 +52,8 @@ Instead of '{disallowed_operator}' please use {self.name} multiple times consecu
             contract_pb2.Action(
                 runCommand=contract_pb2.RunCommandAction(
                     program=program,
-                    arguments=arguments,
-                    flags=flags,
+                    arguments=args.split(),
+                    flags=[],
                 )
             ),
         )
@@ -67,8 +61,5 @@ Instead of '{disallowed_operator}' please use {self.name} multiple times consecu
     def format_display_message(
         self, args: RunCommandInput, _tool_response: Any = None
     ) -> str:
-        args_str = " ".join(args.arguments) if args.arguments else ""
-        flags_str = " ".join(args.flags) if args.flags else ""
-
-        command = f"{args.program} {flags_str} {args_str}".strip()
+        command = f"{args.program} {args.args}".strip()
         return f"Run command: {command}"
