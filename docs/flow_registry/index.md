@@ -600,3 +600,36 @@ flow:
 ```
 
 More examples will be added as the framework matures and additional use cases are identified.
+
+## Debugging Flows
+
+To run and debug your flow within your local GDK:
+
+- Set up a local [Agent Platform](https://gitlab.com/gitlab-org/gitlab-development-kit/-/blob/main/doc/howto/duo_agent_platform.md) to work with Remote Flows
+- Create flow, note the name and version (in the form `prototype/experimental`)
+- Run this `curl` command to start your flow:
+
+```shell
+export DEFINITION="prototype/experimental"
+export GOAL="create test.sh script that outputs done to stdout"
+export PROJECT_ID="19"
+
+curl -X POST \
+    -H "Authorization: Bearer $GDK_API_TOKEN" \
+    -H "Content-Type: application/json" \
+    -d "{
+        \"project_id\": \"$PROJECT_ID",
+        \"agent_privileges\": [1,2,3,4,5],
+        \"goal\": \"$GOAL\",
+        \"start_workflow\": true,
+        \"workflow_definition\": \"$DEFINITION\",
+        \"environment\": \"web\",
+        \"source_branch\": \"branch-name-to-run-in\"
+    }" \
+    http://gdk.test:3000/api/v4/ai/duo_workflows/workflows
+```
+
+- You can check your flow execution in your rails instance, under Pipelines
+- You can confirm the flow instance in your Rails DB: `Ai::DuoWorkflows::Workflow.last`
+- Examine Agent Platform logs with `gdk tail duo-workflow-service`
+- Trace your flow's execution in [Langsmith](https://docs.gitlab.com/development/ai_features/duo_chat/#use-tracing-with-langsmith)
