@@ -40,7 +40,6 @@ from lib.internal_events.event_enum import CategoryEnum
     autospec=True,
 )
 @patch("duo_workflow_service.workflows.abstract_workflow.UserInterface", autospec=True)
-@patch.dict(os.environ, {"DW_INTERNAL_EVENT__ENABLED": "true"})
 async def test_workflow_run(
     mock_checkpoint_notifier,
     mock_tools_approval_component,
@@ -211,7 +210,6 @@ async def test_workflow_run(
     "duo_workflow_service.workflows.issue_to_merge_request.workflow.PlannerComponent",
     autospec=True,
 )
-@patch.dict(os.environ, {"DW_INTERNAL_EVENT__ENABLED": "true"})
 async def test_workflow_run_when_exception(
     mock_planner_component,
     mock_executor_component,

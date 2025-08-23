@@ -1,6 +1,5 @@
 # pylint: disable=direct-environment-variable-reference,too-many-lines
 import asyncio
-import os
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Type, cast
@@ -215,7 +214,6 @@ class ToolTestCase:
         ),
     ],
 )
-@patch.dict(os.environ, {"DW_INTERNAL_EVENT__ENABLED": "true"})
 async def test_run(
     workflow_state, test_case: ToolTestCase, internal_event_client: Mock
 ):
@@ -856,7 +854,6 @@ async def test_state_manipulation(
     ],
 )
 @pytest.mark.usefixtures("mock_datetime")
-@patch.dict(os.environ, {"DW_INTERNAL_EVENT__ENABLED": "true"})
 @patch("duo_workflow_service.agents.tools_executor.duo_workflow_metrics")
 async def test_run_error_handling(
     mock_duo_workflow_metrics,
