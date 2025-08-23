@@ -24,7 +24,7 @@ duo-workflow-service = "duo_workflow_service.server:run"
 apply-security = "duo_workflow_service.security.prompt_security:run_from_args"
 
 [tool.poetry.dependencies]
-fastapi = "^0.115.2"
+fastapi = "^0.116.0"
 dependency-injector = "^4.41.0"
 uvicorn = { extras = ["standard"], version = "^0.35.0" }
 requests = "^2.32.3"
