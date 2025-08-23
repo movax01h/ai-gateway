@@ -386,6 +386,7 @@ class Workflow(AbstractWorkflow):
                 output_parser=lambda content, _: {
                     "config": SearchAndReplaceConfig(**yaml.safe_load(content[0]))
                 },
+                flow_type=self._workflow_type,
             ).run,
         )
 
@@ -398,6 +399,7 @@ class Workflow(AbstractWorkflow):
                 tool=tools_registry.get("find_files"),  # type: ignore
                 input_parser=_scan_directory_tree_input_parser,
                 output_parser=_scan_directory_tree_output_parser,
+                flow_type=self._workflow_type,
             ).run,
         )
         graph.add_conditional_edges(
@@ -415,6 +417,7 @@ class Workflow(AbstractWorkflow):
                 tool=tools_registry.get("grep"),  # type: ignore
                 input_parser=_detect_affected_components_input_parser,
                 output_parser=_detect_affected_components_output_parser,
+                flow_type=self._workflow_type,
             ).run,
         )
         graph.add_conditional_edges(
@@ -433,6 +436,7 @@ class Workflow(AbstractWorkflow):
                 tool=tools_registry.get("read_file"),  # type: ignore
                 input_parser=lambda state: [{"file_path": state["pending_files"][0]}],
                 output_parser=_append_affected_file,
+                flow_type=self._workflow_type,
             ).run,
         )
         graph.add_conditional_edges(

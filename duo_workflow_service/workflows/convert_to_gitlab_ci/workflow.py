@@ -313,6 +313,7 @@ class Workflow(AbstractWorkflow):
                 tool=tools_registry.get("read_file"),  # type: ignore
                 input_parser=lambda _: [{"file_path": ci_config_file_path}],
                 output_parser=self._load_file_contents,  # type: ignore
+                flow_type=self._workflow_type,
             ).run,
         )
         # translator nodes
@@ -344,6 +345,7 @@ class Workflow(AbstractWorkflow):
                     },
                 ],
                 output_parser=_git_output,  # type: ignore
+                flow_type=self._workflow_type,
             ).run,
         )
 

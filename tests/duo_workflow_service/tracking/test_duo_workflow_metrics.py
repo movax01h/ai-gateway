@@ -90,11 +90,11 @@ class TestDuoWorkflowMetrics(unittest.TestCase):
             labels_result_mock
         )
 
-        with self.metrics.time_tool_call(tool_name="test_tool"):
+        with self.metrics.time_tool_call(tool_name="test_tool", flow_type="test_flow"):
             pass
 
         cast(MagicMock, self.metrics.tool_call_duration.labels).assert_called_once_with(
-            tool_name="test_tool"
+            tool_name="test_tool", flow_type="test_flow"
         )
         observe_mock.assert_called_once()
 
