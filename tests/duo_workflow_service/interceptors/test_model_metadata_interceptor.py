@@ -38,7 +38,7 @@ async def test_model_metadata_interceptor_processing_scenarios(
 
     handler_call_details = MagicMock()
     handler_call_details.invocation_metadata = [
-        ("x-gitlab-self-hosted-models-metadata", metadata_value),
+        ("x-gitlab-agent-platform-model-metadata", metadata_value),
         ("other-header", "other-value"),
     ]
 
@@ -72,14 +72,14 @@ async def test_model_metadata_interceptor_processing_scenarios(
         ([("other-header", "other-value")], "no_metadata_header"),
         (
             [
-                ("x-gitlab-self-hosted-models-metadata", ""),
+                ("x-gitlab-agent-platform-model-metadata", ""),
                 ("other-header", "other-value"),
             ],
             "empty_metadata",
         ),
         (
             [
-                ("x-gitlab-self-hosted-models-metadata", "invalid-json{"),
+                ("x-gitlab-agent-platform-model-metadata", "invalid-json{"),
                 ("other-header", "other-value"),
             ],
             "invalid_json",

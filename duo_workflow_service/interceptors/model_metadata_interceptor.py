@@ -11,7 +11,7 @@ from ai_gateway.model_metadata import (
 class ModelMetadataInterceptor(grpc.aio.ServerInterceptor):
     """Interceptor that handles model metadata propagation."""
 
-    X_GITLAB_SELF_HOSTED_MODELS_METADATA = "x-gitlab-self-hosted-models-metadata"
+    X_GITLAB_AGENT_PLATFORM_MODEL_METADATA = "x-gitlab-agent-platform-model-metadata"
 
     async def intercept_service(
         self,
@@ -23,7 +23,7 @@ class ModelMetadataInterceptor(grpc.aio.ServerInterceptor):
 
         try:
             data = json.loads(
-                metadata.get(self.X_GITLAB_SELF_HOSTED_MODELS_METADATA, "")
+                metadata.get(self.X_GITLAB_AGENT_PLATFORM_MODEL_METADATA, "")
             )
             current_model_metadata_context.set(create_model_metadata(data))
         except json.JSONDecodeError:
