@@ -360,7 +360,7 @@ def test_registry_initialization_initialises_tools_with_correct_attributes(
 async def test_registry_configuration(gl_http_client, mcp_tools, project_mock):
     workflow_config = {
         "id": "test_workflow",
-        "agent_privileges_names": ["run_commands", "run_mcp_tools"],
+        "agent_privileges_names": ["run_commands", "use_git", "run_mcp_tools"],
         "gitlab_host": "gitlab.example.com",
     }
 
@@ -382,6 +382,7 @@ async def test_registry_configuration(gl_http_client, mcp_tools, project_mock):
         "get_plan",
         "set_task_status",
         "run_command",
+        "run_git_command",
         "handover_tool",
         "request_user_clarification_tool",
         "extra_tool",
