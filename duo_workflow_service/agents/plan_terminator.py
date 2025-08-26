@@ -1,16 +1,9 @@
-from datetime import datetime, timezone
 from typing import Any, Dict, Union
 
 import structlog
 from langgraph.types import StateSnapshot
 
-from duo_workflow_service.entities.state import (
-    MessageTypeEnum,
-    TaskStatus,
-    ToolStatus,
-    UiChatLog,
-    WorkflowState,
-)
+from duo_workflow_service.entities.state import TaskStatus, WorkflowState
 
 FINISHED_STATUSES = [TaskStatus.COMPLETED, TaskStatus.CANCELLED]
 
@@ -49,16 +42,4 @@ class PlanTerminatorAgent:
 
         return {
             "plan": {"steps": updated_steps},
-            "ui_chat_log": [
-                UiChatLog(
-                    message_type=MessageTypeEnum.WORKFLOW_END,
-                    message_sub_type=None,
-                    content=message,
-                    timestamp=datetime.now(timezone.utc).isoformat(),
-                    status=ToolStatus.FAILURE,
-                    correlation_id=None,
-                    tool_info=None,
-                    additional_context=None,
-                )
-            ],
         }

@@ -1,13 +1,10 @@
 from dataclasses import dataclass
-from datetime import datetime, timezone
 from typing import Any, Dict, List
-from unittest.mock import patch
 
 import pytest
 
 from duo_workflow_service.agents import PlanTerminatorAgent
 from duo_workflow_service.entities.state import (
-    MessageTypeEnum,
     Plan,
     Task,
     TaskStatus,
@@ -103,17 +100,11 @@ class TestPlanTerminatorAgent:
         ],
     )
     @pytest.mark.asyncio
-    @patch("duo_workflow_service.agents.plan_terminator.datetime")
     async def test_run_with_tasks(
         self,
-        mock_datetime,
-        mock_now: datetime,
         base_workflow_state: WorkflowState,
         test_case: PlanTerminatorTestCase,
     ):
-        mock_datetime.now.return_value = mock_now
-        mock_datetime.timezone = timezone
-
         workflow_state = base_workflow_state.copy()
         workflow_state["plan"] = Plan(steps=test_case.initial_steps)
 
@@ -132,15 +123,6 @@ class TestPlanTerminatorAgent:
             ):
                 assert resulting["description"] == original["description"]
                 assert resulting["id"] == original["id"]
-
-            assert "ui_chat_log" in result
-            assert len(result["ui_chat_log"]) == 1
-            chat_message = result["ui_chat_log"][0]
-            assert chat_message["message_type"] == MessageTypeEnum.WORKFLOW_END
-            assert chat_message["content"] == (
-                "Your request was valid but Workflow failed to complete it. Please try again."
-            )
-            assert chat_message["timestamp"] == "2025-01-01T12:00:00+00:00"
 
     @pytest.mark.parametrize(
         "input_state,description",

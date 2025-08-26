@@ -29,18 +29,7 @@ class TestHandoverAgent:
         ).run(workflow_state) == {
             "status": WorkflowStatusEnum.COMPLETED,
             "handover": [],
-            "ui_chat_log": [
-                {
-                    "content": "Workflow completed successfully",
-                    "correlation_id": None,
-                    "message_type": MessageTypeEnum.WORKFLOW_END,
-                    "message_sub_type": None,
-                    "status": ToolStatus.SUCCESS,
-                    "timestamp": "2025-01-01T12:00:00+00:00",
-                    "tool_info": None,
-                    "additional_context": None,
-                },
-            ],
+            "ui_chat_log": [],
         }
 
     # pylint: disable=too-many-positional-arguments
@@ -65,18 +54,7 @@ class TestHandoverAgent:
                 ],
                 True,
                 [],
-                [
-                    {
-                        "content": "Workflow completed successfully",
-                        "correlation_id": None,
-                        "message_type": MessageTypeEnum.WORKFLOW_END,
-                        "message_sub_type": None,
-                        "status": ToolStatus.SUCCESS,
-                        "timestamp": "2025-01-01T12:00:00+00:00",
-                        "tool_info": None,
-                        "additional_context": None,
-                    },
-                ],
+                [],
             ),
             (
                 "test_agent",
@@ -88,18 +66,7 @@ class TestHandoverAgent:
                 ],
                 False,
                 [],
-                [
-                    {
-                        "content": "Workflow completed successfully",
-                        "correlation_id": None,
-                        "message_type": MessageTypeEnum.WORKFLOW_END,
-                        "message_sub_type": None,
-                        "status": ToolStatus.SUCCESS,
-                        "timestamp": "2025-01-01T12:00:00+00:00",
-                        "tool_info": None,
-                        "additional_context": None,
-                    },
-                ],
+                [],
             ),
             (
                 "test_agent",
@@ -144,16 +111,6 @@ class TestHandoverAgent:
                         "tool_info": None,
                         "additional_context": None,
                     },
-                    {
-                        "content": "Workflow completed successfully",
-                        "correlation_id": None,
-                        "message_type": MessageTypeEnum.WORKFLOW_END,
-                        "message_sub_type": None,
-                        "status": ToolStatus.SUCCESS,
-                        "timestamp": "2025-01-01T12:00:00+00:00",
-                        "tool_info": None,
-                        "additional_context": None,
-                    },
                 ],
             ),
             (
@@ -184,16 +141,6 @@ class TestHandoverAgent:
                         "tool_info": None,
                         "additional_context": None,
                     },
-                    {
-                        "content": "Workflow completed successfully",
-                        "correlation_id": None,
-                        "message_type": MessageTypeEnum.WORKFLOW_END,
-                        "message_sub_type": None,
-                        "status": ToolStatus.SUCCESS,
-                        "timestamp": "2025-01-01T12:00:00+00:00",
-                        "tool_info": None,
-                        "additional_context": None,
-                    },
                 ],
             ),
             (
@@ -206,18 +153,7 @@ class TestHandoverAgent:
                 ],
                 True,
                 [],
-                [
-                    {
-                        "content": "Workflow completed successfully",
-                        "correlation_id": None,
-                        "message_type": MessageTypeEnum.WORKFLOW_END,
-                        "message_sub_type": None,
-                        "status": ToolStatus.SUCCESS,
-                        "timestamp": "2025-01-01T12:00:00+00:00",
-                        "tool_info": None,
-                        "additional_context": None,
-                    },
-                ],
+                [],
             ),
             (
                 "test_agent",
@@ -236,18 +172,7 @@ class TestHandoverAgent:
                 ],
                 True,
                 [],
-                [
-                    {
-                        "content": "Workflow completed successfully",
-                        "correlation_id": None,
-                        "message_type": MessageTypeEnum.WORKFLOW_END,
-                        "message_sub_type": None,
-                        "status": ToolStatus.SUCCESS,
-                        "timestamp": "2025-01-01T12:00:00+00:00",
-                        "tool_info": None,
-                        "additional_context": None,
-                    },
-                ],
+                [],
             ),
             (
                 "test_agent",
@@ -266,18 +191,7 @@ class TestHandoverAgent:
                 ],
                 True,
                 [],
-                [
-                    {
-                        "content": "Workflow completed successfully",
-                        "message_sub_type": None,
-                        "correlation_id": None,
-                        "message_type": MessageTypeEnum.WORKFLOW_END,
-                        "status": ToolStatus.SUCCESS,
-                        "timestamp": "2025-01-01T12:00:00+00:00",
-                        "tool_info": None,
-                        "additional_context": None,
-                    },
-                ],
+                [],
             ),
         ],
     )
