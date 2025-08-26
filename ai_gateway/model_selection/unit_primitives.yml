@@ -63,8 +63,9 @@ configurable_unit_primitives:
   - feature_setting: "generate_commit_message"
     unit_primitives:
       - "generate_commit_message"
-    default_model: "claude_sonnet_3_7_20250219"
+    default_model: "claude_sonnet_4_20250514"
     selectable_models:
+      - "claude_sonnet_4_20250514"
       - "claude_sonnet_3_7_20250219"
       - "claude_3_5_sonnet_20240620"
   - feature_setting: "summarize_new_merge_request"
@@ -78,8 +79,9 @@ configurable_unit_primitives:
   - feature_setting: "summarize_review"
     unit_primitives:
       - "summarize_review"
-    default_model: "claude_sonnet_3_7_20250219"
+    default_model: "claude_sonnet_4_20250514"
     selectable_models:
+      - "claude_sonnet_4_20250514"
       - "claude_sonnet_3_7_20250219"
       - "claude_3_5_sonnet_20240620"
   - feature_setting: "resolve_vulnerability"
@@ -126,7 +128,7 @@ configurable_unit_primitives:
   - feature_setting: "review_merge_request"
     unit_primitives:
       - "review_merge_request"
-    default_model: "claude_sonnet_3_7_20250219"
+    default_model: "claude_sonnet_4_20250514"
     selectable_models:
       - "claude_3_5_sonnet_20240620"
       - "claude_sonnet_3_7_20250219"
