@@ -164,6 +164,19 @@ The `as` keyword provides these benefits:
 - **Making flows more readable**: Clear, descriptive names improve flow understanding
 - **Reducing coupling**: Components don't need to know internal structure of other components' outputs
 
+### Input Literals
+
+Input literals can be used to explicitly state values for inputs, by adding `literal: true`. When using input literals, the `as` keyword is required:
+
+```yaml
+inputs:
+    - from: "file.txt"
+      as: "file_path"
+      literal: true
+```
+
+This will set the value of the input variable `file_path` to be `file.txt`, rather than interpreting the input source as a path.
+
 ### Output
 
 Output management handles the automatic production and storage of component results.
