@@ -1,11 +1,8 @@
 import asyncio
-from typing import Type
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from gitlab_cloud_connector import CloudConnectorUser
-from langchain.tools import BaseTool
-from pydantic import BaseModel
 
 from ai_gateway.code_suggestions.language_server import LanguageServerVersion
 from duo_workflow_service import tools
@@ -224,7 +221,7 @@ _outbox = MagicMock(spec=asyncio.Queue)
                 "list_dir",
                 "find_files",
                 "grep",
-                # "mkdir",
+                "mkdir",
                 "handover_tool",
                 "request_user_clarification_tool",
             },
@@ -314,7 +311,7 @@ def test_registry_initialization_initialises_tools_with_correct_attributes(
         "edit_file": tools.EditFile(metadata=tool_metadata),
         "find_files": tools.FindFiles(metadata=tool_metadata),
         "grep": tools.Grep(metadata=tool_metadata),
-        # "mkdir": tools.Mkdir(metadata=tool_metadata),
+        "mkdir": tools.Mkdir(metadata=tool_metadata),
         "run_git_command": tools.git.Command(metadata=tool_metadata),
         "handover_tool": tools.HandoverTool,
         "request_user_clarification_tool": tools.RequestUserClarificationTool,
@@ -498,7 +495,7 @@ def test_preapproved_tools_initialization(tool_metadata):
         "list_dir",
         "find_files",
         "grep",
-        # "mkdir",
+        "mkdir",
     }
 
     assert registry._preapproved_tool_names == default_tools.union(read_write_tools)
@@ -555,7 +552,7 @@ async def test_registry_configuration_with_preapproved_tools(
         "list_dir",
         "find_files",
         "grep",
-        # "mkdir",
+        "mkdir",
     }
     expected_preapproved = always_enabled_tools.union(read_write_tools)
 

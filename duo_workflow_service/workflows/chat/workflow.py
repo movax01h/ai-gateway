@@ -101,7 +101,7 @@ CHAT_GITLAB_MUTATION_TOOLS = [
 CHAT_MUTATION_TOOLS = [
     "create_file_with_contents",
     "edit_file",
-    # "mkdir",
+    "mkdir",
 ]
 
 RUN_COMMAND_TOOLS = ["run_command"]
