@@ -1,9 +1,16 @@
 import time
+from contextvars import ContextVar
+from enum import StrEnum
+from typing import Optional
 
 import structlog
 from prometheus_client import REGISTRY, Counter, Histogram
 
 from duo_workflow_service.llm_factory import AnthropicStopReason
+
+session_type_context: ContextVar[Optional[str]] = ContextVar(
+    "session_type", default="unknown"
+)
 
 log = structlog.stdlib.get_logger("monitoring")
 
@@ -27,6 +34,12 @@ WORKFLOW_TIME_SCALE_BUCKETS = [
 LLM_TIME_SCALE_BUCKETS = [0.25, 0.5, 1, 2, 4, 7, 10, 20, 30, 60]
 
 ANTHROPIC_STOP_REASONS = AnthropicStopReason.values()
+
+
+class SessionTypeEnum(StrEnum):
+    START = "start"
+    RESUME = "resume"
+    RETRY = "retry"
 
 
 class DuoWorkflowMetrics:  # pylint: disable=too-many-instance-attributes
@@ -134,7 +147,7 @@ class DuoWorkflowMetrics:  # pylint: disable=too-many-instance-attributes
         self.agent_platform_session_failure_counter = Counter(
             "agent_platform_session_failure_total",
             "Count of failed flows in Duo Workflow",
-            ["flow_type", "failure_reason"],
+            ["flow_type", "failure_reason", "session_type"],
             registry=registry,
         )
 
@@ -152,10 +165,10 @@ class DuoWorkflowMetrics:  # pylint: disable=too-many-instance-attributes
             registry=registry,
         )
 
-        self.agent_platform_reject_counter = Counter(
-            "agent_platform_reject_total",
-            "Count of reject events in Duo Agent Platform",
-            ["flow_type"],
+        self.agent_platform_session_abort_counter = Counter(
+            "agent_platform_session_abort_total",
+            "Count of aborted sessions in Duo Agent Platform",
+            ["flow_type", "session_type"],
             registry=registry,
         )
 
@@ -244,6 +257,16 @@ class DuoWorkflowMetrics:  # pylint: disable=too-many-instance-attributes
         self.agent_platform_session_failure_counter.labels(
             flow_type=flow_type,
             failure_reason=failure_reason,
+            session_type=session_type_context.get(),
+        ).inc()
+
+    def count_agent_platform_session_abort(
+        self,
+        flow_type: str = "unknown",
+    ) -> None:
+        self.agent_platform_session_abort_counter.labels(
+            flow_type=flow_type,
+            session_type=session_type_context.get(),
         ).inc()
 
     def count_agent_platform_tool_failure(
@@ -263,11 +286,6 @@ class DuoWorkflowMetrics:  # pylint: disable=too-many-instance-attributes
         flow_type: str = "unknown",
     ) -> None:
         self.agent_platform_receive_start_counter.labels(
-            flow_type=flow_type,
-        ).inc()
-
-    def count_agent_platform_reject(self, flow_type: str = "unknown") -> None:
-        self.agent_platform_reject_counter.labels(
             flow_type=flow_type,
         ).inc()
 

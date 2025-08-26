@@ -1,5 +1,6 @@
 import asyncio
 import json
+from asyncio import CancelledError
 from typing import Any, Optional, Sequence, TypedDict
 from unittest.mock import AsyncMock, Mock, call, patch
 
@@ -776,6 +777,11 @@ async def test_workflow_context_manager_error(
         mock_duo_workflow_metrics.count_agent_platform_session_failure.assert_called_once_with(
             flow_type=workflow_type.value,
             failure_reason="ValueError",
+        )
+
+    if isinstance(exception, CancelledError):
+        mock_duo_workflow_metrics.count_agent_platform_session_abort.assert_called_once_with(
+            flow_type=workflow_type.value,
         )
 
 
