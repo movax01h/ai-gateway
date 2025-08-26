@@ -49,20 +49,6 @@ class HandoverAgent:
 
             handover_messages = self._get_summary_to_handover(summary)
 
-        if self._new_status == WorkflowStatusEnum.COMPLETED:
-            ui_chat_logs.append(
-                UiChatLog(
-                    message_type=MessageTypeEnum.WORKFLOW_END,
-                    message_sub_type=None,
-                    content="Workflow completed successfully",
-                    timestamp=datetime.now(timezone.utc).isoformat(),
-                    status=ToolStatus.SUCCESS,
-                    correlation_id=None,
-                    tool_info=None,
-                    additional_context=None,
-                )
-            )
-
         return {
             "status": self._new_status,
             "handover": handover_messages,
