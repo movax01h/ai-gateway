@@ -15,6 +15,7 @@ from duo_workflow_service.gitlab.gitlab_api import Project
 from duo_workflow_service.gitlab.http_client import GitlabHttpClient
 from duo_workflow_service.interceptors.gitlab_version_interceptor import gitlab_version
 from lib.feature_flags.context import current_feature_flag_context
+from lib.internal_events.event_enum import CategoryEnum
 
 
 @pytest.fixture(name="config_values")
@@ -136,3 +137,8 @@ def mock_gitlab_version_fixture(gl_version: str):
     gitlab_version.set(gl_version)
     yield
     gitlab_version.set(None)
+
+
+@pytest.fixture(name="workflow_type")
+def workflow_type_fixture() -> CategoryEnum:
+    return CategoryEnum.WORKFLOW_SOFTWARE_DEVELOPMENT

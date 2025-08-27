@@ -2,8 +2,6 @@ import pytest
 from gitlab_cloud_connector import CloudConnectorUser, UserClaims
 from langchain_core.messages import AIMessage
 
-from lib.internal_events.event_enum import CategoryEnum
-
 
 @pytest.fixture(name="graph_config")
 def graph_config_fixture():
@@ -22,11 +20,6 @@ def end_message_fixture():
             }
         ],
     )
-
-
-@pytest.fixture(name="workflow_type")
-def workflow_type_fixture() -> CategoryEnum:
-    return CategoryEnum.WORKFLOW_SOFTWARE_DEVELOPMENT
 
 
 @pytest.fixture(name="user")

@@ -83,11 +83,6 @@ def workflow_id_fixture():
     return "1234"
 
 
-@pytest.fixture(name="workflow_type")
-def workflow_type_fixture():
-    return CategoryEnum.WORKFLOW_SOFTWARE_DEVELOPMENT
-
-
 @pytest.fixture(autouse=True)
 def prepare_container(mock_duo_workflow_service_container):
     pass

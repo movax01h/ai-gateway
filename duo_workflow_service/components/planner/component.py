@@ -83,6 +83,7 @@ class PlannerComponent(BaseComponent):
                     "^1.0.0",
                     tools=planner_toolset.bindable,  # type: ignore[arg-type]
                     workflow_id=self.workflow_id,
+                    workflow_type=self.workflow_type,
                     http_client=self.http_client,
                     model_metadata=current_model_metadata_context.get(),
                     prompt_template_inputs={

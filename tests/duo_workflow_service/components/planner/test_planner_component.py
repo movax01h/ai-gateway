@@ -256,6 +256,7 @@ class TestPlannerComponent:
                 "^1.0.0",
                 tools=planner_component.planner_toolset.bindable,
                 workflow_id="test-workflow-123",
+                workflow_type=workflow_type,
                 http_client=planner_component.http_client,
                 model_metadata=mock_model_metadata,
                 prompt_template_inputs={

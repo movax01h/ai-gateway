@@ -266,6 +266,7 @@ class TestExecutorComponent:
                 "^2.0.0",
                 tools=executor_component.executor_toolset.bindable,
                 workflow_id="test-workflow-123",
+                workflow_type=workflow_type,
                 http_client=executor_component.http_client,
                 model_metadata=mock_model_metadata,
             )

@@ -14,6 +14,7 @@ from ai_gateway.prompts.config import ChatOpenAIParams, ModelClassProvider
 from ai_gateway.prompts.registry import LocalPromptRegistry
 from duo_workflow_service import agents as workflow
 from duo_workflow_service.gitlab.http_client import GitlabHttpClient
+from lib.internal_events.event_enum import CategoryEnum
 
 
 @pytest.fixture(autouse=True, scope="module")
@@ -51,6 +52,7 @@ def _kwargs_for_class(klass):
         case workflow.AgentV2:
             return {
                 "workflow_id": "123",
+                "workflow_type": CategoryEnum.WORKFLOW_SOFTWARE_DEVELOPMENT,
                 "http_client": Mock(spec=GitlabHttpClient),
             }
 

@@ -87,6 +87,7 @@ class GoalDisambiguationComponent(BaseComponent):
                     "^1.0.0",
                     tools=toolset.bindable,  # type: ignore[arg-type]
                     workflow_id=self.workflow_id,
+                    workflow_type=self.workflow_type,
                     http_client=self.http_client,
                     prompt_template_inputs={
                         "clarification_tool": RequestUserClarificationTool.tool_title,

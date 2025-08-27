@@ -46,9 +46,15 @@ def mock_checkpointer_fixture():
     return Mock()
 
 
+@pytest.fixture(name="workflow_type")
+def workflow_type_fixture() -> CategoryEnum:
+    return CategoryEnum.WORKFLOW_CONVERT_TO_GITLAB_CI
+
+
 @pytest.fixture(name="workflow")
 def workflow_fixture(
     mock_duo_workflow_service_container: Mock,
+    workflow_type: CategoryEnum,
     user: CloudConnectorUser,
     gl_http_client: GitlabHttpClient,
     project: Project,
@@ -60,7 +66,7 @@ def workflow_fixture(
         workflow = Workflow(
             workflow_id="test_id",
             workflow_metadata={},
-            workflow_type=CategoryEnum.WORKFLOW_CONVERT_TO_GITLAB_CI,
+            workflow_type=workflow_type,
             user=user,
         )
         workflow._project = project
@@ -216,6 +222,7 @@ async def test_workflow_compilation(
     mock_chat_client,
     mock_tools_registry,
     mock_checkpointer,
+    workflow_type,
     workflow,
     duo_workflow_prompt_registry_enabled,
 ):
@@ -235,6 +242,7 @@ async def test_workflow_compilation(
             "^1.0.0",
             tools=mock_tools_registry.toolset.return_value.bindable,
             workflow_id=workflow._workflow_id,
+            workflow_type=workflow_type,
             http_client=workflow._http_client,
         )
     else:
