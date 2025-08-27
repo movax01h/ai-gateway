@@ -110,7 +110,7 @@ def test_default_with_search_and_replace_config():
     }
 
 
-def test_default_with_approval_state():
+def test_default_with_approval_state_rejection():
     encoder = CustomEncoder()
     o = ApprovalStateRejection(message="Cancel this tool")
 

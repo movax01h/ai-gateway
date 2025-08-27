@@ -109,6 +109,7 @@ class AbstractWorkflow(ABC):
             ContainerApplication.internal_event.client
         ],
         language_server_version: Optional[LanguageServerVersion] = None,
+        preapproved_tools: Optional[list[str]] = [],
     ):
         self._outbox = asyncio.Queue(maxsize=QUEUE_MAX_SIZE)
         self._inbox = asyncio.Queue(maxsize=QUEUE_MAX_SIZE)
@@ -134,6 +135,7 @@ class AbstractWorkflow(ABC):
         self._workflow_config = empty_workflow_config()
         self._internal_event_client = internal_event_client
         self._language_server_version = language_server_version
+        self._preapproved_tools = preapproved_tools
 
     async def run(self, goal: str) -> None:
         with duo_workflow_metrics.time_workflow(

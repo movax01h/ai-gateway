@@ -42,6 +42,7 @@ export interface StartWorkflowRequest {
   approval?: Approval | undefined;
   flowConfig?: { [key: string]: any } | undefined;
   flowConfigSchemaVersion?: string | undefined;
+  preapprovedTools: string[];
 }
 
 export interface ActionResponse {
@@ -306,6 +307,7 @@ function createBaseStartWorkflowRequest(): StartWorkflowRequest {
     approval: undefined,
     flowConfig: undefined,
     flowConfigSchemaVersion: undefined,
+    preapprovedTools: [],
   };
 }
 
@@ -343,6 +345,9 @@ export const StartWorkflowRequest: MessageFns<StartWorkflowRequest> = {
     }
     if (message.flowConfigSchemaVersion !== undefined) {
       writer.uint32(98).string(message.flowConfigSchemaVersion);
+    }
+    for (const v of message.preapprovedTools) {
+      writer.uint32(106).string(v!);
     }
     return writer;
   },
@@ -442,6 +447,14 @@ export const StartWorkflowRequest: MessageFns<StartWorkflowRequest> = {
           message.flowConfigSchemaVersion = reader.string();
           continue;
         }
+        case 13: {
+          if (tag !== 106) {
+            break;
+          }
+
+          message.preapprovedTools.push(reader.string());
+          continue;
+        }
       }
       if ((tag & 7) === 4 || tag === 0) {
         break;
@@ -470,6 +483,9 @@ export const StartWorkflowRequest: MessageFns<StartWorkflowRequest> = {
       flowConfigSchemaVersion: isSet(object.flowConfigSchemaVersion)
         ? globalThis.String(object.flowConfigSchemaVersion)
         : undefined,
+      preapprovedTools: globalThis.Array.isArray(object?.preapprovedTools)
+        ? object.preapprovedTools.map((e: any) => globalThis.String(e))
+        : [],
     };
   },
 
@@ -508,6 +524,9 @@ export const StartWorkflowRequest: MessageFns<StartWorkflowRequest> = {
     if (message.flowConfigSchemaVersion !== undefined) {
       obj.flowConfigSchemaVersion = message.flowConfigSchemaVersion;
     }
+    if (message.preapprovedTools?.length) {
+      obj.preapprovedTools = message.preapprovedTools;
+    }
     return obj;
   },
 
@@ -529,6 +548,7 @@ export const StartWorkflowRequest: MessageFns<StartWorkflowRequest> = {
       : undefined;
     message.flowConfig = object.flowConfig ?? undefined;
     message.flowConfigSchemaVersion = object.flowConfigSchemaVersion ?? undefined;
+    message.preapprovedTools = object.preapprovedTools?.map((e) => e) || [];
     return message;
   },
 };

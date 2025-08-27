@@ -1,5 +1,4 @@
-from datetime import datetime
-from unittest.mock import AsyncMock, MagicMock, Mock, patch
+from unittest.mock import MagicMock, Mock, patch
 
 import pytest
 from dependency_injector import containers
@@ -238,6 +237,7 @@ def test_are_tools_called_with_various_content(
         "project": None,
         "namespace": None,
         "approval": None,
+        "preapproved_tools": None,
     }
     assert workflow._are_tools_called(state) == expected_result
 
@@ -271,6 +271,7 @@ def test_are_tools_called_with_tool_use(workflow_with_project):
         "project": None,
         "namespace": None,
         "approval": None,
+        "preapproved_tools": None,
     }
     assert workflow._are_tools_called(state) == Routes.TOOL_USE
 
@@ -667,6 +668,38 @@ async def test_agent_run_with_tool_approval_required(workflow_with_project):
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("tool_approval_required", [True])
+@pytest.mark.usefixtures("mock_fetch_workflow_and_container_data")
+async def test_agent_run_with_preapproved_tools(workflow_with_project):
+    """Test agent run method when executed with preapproved tools."""
+
+    state = ChatWorkflowState(
+        plan={"steps": []},
+        status=WorkflowStatusEnum.EXECUTION,
+        conversation_history={"test_prompt": [HumanMessage(content="Create a file")]},
+        ui_chat_log=[],
+        last_human_input=None,
+        project=None,
+        approval=None,
+        preapproved_tools=["create_file_with_contents"],
+    )
+
+    ai_message = AIMessage(content="I'll create the file for you")
+    ai_message.tool_calls = [
+        {
+            "id": "toolu_approval_id",
+            "args": {"path": "/test/file.txt", "content": "Test content"},
+            "name": "create_file_with_contents",
+        }
+    ]
+
+    with patch("ai_gateway.prompts.base.Prompt.ainvoke", return_value=ai_message):
+        result = await workflow_with_project._agent.run(state)
+
+    assert result["status"] == WorkflowStatusEnum.EXECUTION
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize(
     ("cancel_tool_message", "expected_tool_message"),
     [
@@ -738,16 +771,20 @@ async def test_agent_run_with_cancel_tool_message(
 async def test_workflow_with_approval_object():
     """Test creating a workflow with an approval object."""
     approval = contract_pb2.Approval(approval=contract_pb2.Approval.Approved())
+    start_request = contract_pb2.StartWorkflowRequest()
+    start_request.preapproved_tools.extend(["get_issue", "read_file"])
 
     workflow = Workflow(
         workflow_id="test-id",
         workflow_metadata={},
         workflow_type=CategoryEnum.WORKFLOW_CHAT,
         approval=approval,
+        preapproved_tools=list(start_request.preapproved_tools),
     )
 
     assert workflow._approval is not None
     assert workflow._approval.WhichOneof("user_decision") == "approval"
+    assert workflow._preapproved_tools == list(start_request.preapproved_tools)
 
 
 @pytest.mark.asyncio

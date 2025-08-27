@@ -1,5 +1,5 @@
 from datetime import datetime, timezone
-from typing import Any, Dict, Optional, Union
+from typing import Any, Dict, List, Optional, Union
 
 import structlog
 from langchain_core.messages import (
@@ -137,13 +137,18 @@ class ChatAgent(Prompt[ChatWorkflowState, BaseMessage]):
     def _build_prompt_template(cls, config: PromptConfig) -> Runnable:
         return ChatAgentPromptTemplate(config.prompt_template)
 
-    def _get_approvals(self, message: AIMessage) -> tuple[bool, list[UiChatLog]]:
+    def _get_approvals(
+        self, message: AIMessage, preapproved_tools: List[str]
+    ) -> tuple[bool, list[UiChatLog]]:
         approval_required = False
         approval_messages = []
 
         for call in message.tool_calls:
-            if self.tools_registry and self.tools_registry.approval_required(
-                call["name"]
+            if (
+                self.tools_registry
+                and self.tools_registry.approval_required(call["name"])
+                and call["name"] not in preapproved_tools
+                and not getattr(self.model, "_is_agentic_mock_model", False)
             ):
                 approval_required = True
                 approval_messages.append(
@@ -245,12 +250,11 @@ class ChatAgent(Prompt[ChatWorkflowState, BaseMessage]):
                 result["status"] = WorkflowStatusEnum.INPUT_REQUIRED
                 return result
 
-            tools_need_approval, approval_messages = self._get_approvals(agent_response)
-            if (
-                len(agent_response.tool_calls) > 0
-                and tools_need_approval
-                and not getattr(self.model, "_is_agentic_mock_model", False)
-            ):
+            preapproved_tools = input.get("preapproved_tools") or []
+            tools_need_approval, approval_messages = self._get_approvals(
+                agent_response, preapproved_tools
+            )
+            if len(agent_response.tool_calls) > 0 and tools_need_approval:
                 result["status"] = WorkflowStatusEnum.TOOL_CALL_APPROVAL_REQUIRED
                 result["ui_chat_log"] = approval_messages
 

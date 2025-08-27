@@ -352,6 +352,7 @@ class ChatWorkflowState(TypedDict):
     project: Project | None
     namespace: Namespace | None
     approval: ApprovalStateRejection | None
+    preapproved_tools: list[str] | None
 
 
 DuoWorkflowStateType = Union[

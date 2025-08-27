@@ -540,6 +540,7 @@ async def test_execute_workflow_missing_workflow_metadata(
         mcp_tools=[],
         approval=contract_pb2.Approval(),
         language_server_version=None,
+        preapproved_tools=[],
     )
 
 
@@ -558,6 +559,7 @@ async def test_execute_workflow_valid_workflow_metadata(
         contract_pb2.McpTool(name="get_issue", description="Tool to get issue")
     ]
     approval = contract_pb2.Approval(approval=contract_pb2.Approval.Approved())
+    preapproved_tools = ["get_issue"]
 
     async def mock_request_iterator() -> AsyncIterable[contract_pb2.ClientEvent]:
         yield contract_pb2.ClientEvent(
@@ -566,6 +568,7 @@ async def test_execute_workflow_valid_workflow_metadata(
                 workflowMetadata=json.dumps({"key": "value"}),
                 mcpTools=mcp_tools,
                 approval=approval,
+                preapproved_tools=preapproved_tools,
             )
         )
 
@@ -596,6 +599,7 @@ async def test_execute_workflow_valid_workflow_metadata(
         mcp_tools=mcp_tools,
         approval=approval,
         language_server_version=None,
+        preapproved_tools=preapproved_tools,
     )
 
 
