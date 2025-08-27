@@ -136,6 +136,7 @@ class AbstractWorkflow(ABC):
         self._internal_event_client = internal_event_client
         self._language_server_version = language_server_version
         self._preapproved_tools = preapproved_tools
+        self._session_url: Optional[str] = None
 
     async def run(self, goal: str) -> None:
         with duo_workflow_metrics.time_workflow(
@@ -224,6 +225,9 @@ class AbstractWorkflow(ABC):
                     workflow_id=self._workflow_id,
                 )
             )
+
+            if self._project and self._project.get("web_url"):
+                self._session_url = f"{self._project['web_url']}/-/automate/agent-sessions/{self._workflow_id}"
 
             if self._namespace and self._support_namespace_level_workflow() is False:
                 raise NotImplementedError(

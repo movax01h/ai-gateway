@@ -349,6 +349,8 @@ class Workflow(AbstractWorkflow):
                 current_branch=self._workflow_metadata["git_branch"],
                 default_branch=self._project["default_branch"],  # type: ignore[index]
                 project_id=self._project["id"],  # type: ignore[index]
+                workflow_id=self._workflow_id,
+                session_url=self._session_url,
             ),
             toolset=context_builder_toolset,
             workflow_id=self._workflow_id,
