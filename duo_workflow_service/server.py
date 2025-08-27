@@ -316,17 +316,11 @@ class DuoWorkflowService(contract_pb2_grpc.DuoWorkflowServicer):
 
             await workflow_task
         except asyncio.CancelledError as err:
-            # This exception could happen when gRPC connection is established from gitlab-workhorse
-            # and the gitlab-workhorse disposed the gRPC client.
-            # e.g. User selects websocket connection type in node executor, and cancel the workflow.
-            # NOTE:
-            # This `ExecuteWorkflow` coroutinue task could be cancelled by grpc lib when the connection is terminated.
-            # This exception is unrelated to `asyncio.CancelledError` exceptions raised in workflow's coroutinue tasks.
+            # This exception is raised when RPC is cancelled by the client.
             log_exception(err, extra={"source": __name__})
             await cancel_workflow(workflow_task, err)
-            await context.abort(
-                grpc.StatusCode.ABORTED, "Operation was aborted by client"
-            )
+            # Task cancellation must be reraised to the grpc server side so that the rpc task can be shutdown properly.
+            raise
         except BaseException as err:
             log_exception(
                 err,

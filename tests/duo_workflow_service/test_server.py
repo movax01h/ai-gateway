@@ -208,15 +208,11 @@ async def test_workflow_is_cancelled_on_parent_task_cancellation(
             internal_event_client=create_mock_internal_event_client(),
         )
 
-        with pytest.raises(StopAsyncIteration):
+        with pytest.raises(asyncio.CancelledError):
             await anext(result)
 
         assert real_workflow_task is not None
         assert real_workflow_task.cancelled()
-
-        mock_context.abort.assert_called_once_with(
-            grpc.StatusCode.ABORTED, "Operation was aborted by client"
-        )
 
 
 @pytest.mark.asyncio
