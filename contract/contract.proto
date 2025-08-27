@@ -31,6 +31,7 @@ message StartWorkflowRequest {
     optional Approval approval = 10;
     optional google.protobuf.Struct flowConfig = 11;
     optional string flowConfigSchemaVersion = 12;
+    repeated string preapproved_tools = 13;
 }
 
 message ActionResponse {
