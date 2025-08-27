@@ -24,6 +24,7 @@ from duo_workflow_service.gitlab.http_client import GitlabHttpClient
 from duo_workflow_service.llm_factory import AnthropicStopReason
 from duo_workflow_service.monitoring import duo_workflow_metrics
 from duo_workflow_service.tools.handover import HandoverTool
+from lib.internal_events.event_enum import CategoryEnum
 
 log = structlog.stdlib.get_logger("agent_v2")
 
@@ -65,6 +66,7 @@ class AgentPromptTemplate(Runnable[dict, PromptValue]):
 class Agent(Prompt):
     check_events: bool = True
     workflow_id: str
+    workflow_type: CategoryEnum
     http_client: GitlabHttpClient
     prompt_template_inputs: dict = {}
 
@@ -188,3 +190,11 @@ class Agent(Prompt):
             tool_info=None,
             additional_context=None,
         )
+
+    @property
+    def internal_event_extra(self) -> dict[str, Any]:
+        return {
+            "agent_name": self.name,
+            "workflow_id": self.workflow_id,
+            "workflow_type": self.workflow_type.value,
+        }

@@ -265,6 +265,7 @@ class Workflow(AbstractWorkflow):
                     "^1.0.0",
                     tools=agents_toolset.bindable,  # type: ignore[arg-type]
                     workflow_id=self._workflow_id,
+                    workflow_type=CategoryEnum.WORKFLOW_CONVERT_TO_GITLAB_CI,
                     http_client=self._http_client,
                 ),
             )
