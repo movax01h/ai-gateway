@@ -8,6 +8,8 @@ from duo_workflow_service.gitlab.gitlab_api import Project
 from duo_workflow_service.gitlab.http_client import GitlabHttpClient
 from duo_workflow_service.gitlab.url_parser import GitLabUrlParseError, GitLabUrlParser
 
+DESCRIPTION_CHARACTER_LIMIT = 1_048_576
+
 
 class ProjectURLValidationResult(NamedTuple):
     project_id: Optional[str]
