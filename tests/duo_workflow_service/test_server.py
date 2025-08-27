@@ -14,6 +14,7 @@ from gitlab_cloud_connector import (
     GitLabUnitPrimitive,
     UserClaims,
 )
+from google.protobuf import struct_pb2
 from langchain.globals import get_llm_cache
 from langchain_community.cache import SQLiteCache
 
@@ -35,6 +36,16 @@ from lib.internal_events.event_enum import (
     EventLabelEnum,
     EventPropertyEnum,
 )
+
+
+@pytest.fixture
+def simple_flow_config():
+    return {
+        "version": "1.0",
+        "environment": "test",
+        "components": [{"name": "test_agent", "type": "AgentComponent"}],
+        "flow": {"entry_point": "test_agent"},
+    }
 
 
 def create_mock_internal_event_client():
@@ -661,6 +672,62 @@ async def test_next_non_heartbeat_event_client_streaming_closed():
     mock_iterator.__next__.side_effect = StopAsyncIteration
     result = await next_non_heartbeat_event(mock_iterator)
     assert result is None
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "flow_config_name,flow_config_schema_version",
+    [("simple_flow_config", "experimental")],
+)
+@patch("duo_workflow_service.server.AbstractWorkflow")
+@patch("duo_workflow_service.server.resolve_workflow_class")
+async def test_execute_workflow_with_flow_config_schema_version_parameterized(
+    mock_resolve_workflow,
+    mock_abstract_workflow_class,
+    request,
+    flow_config_name,
+    flow_config_schema_version,
+):
+    # Setup mocks
+    mock_workflow = mock_abstract_workflow_class.return_value
+    mock_workflow.is_done = True
+    mock_workflow.run = AsyncMock()
+    mock_workflow.cleanup = AsyncMock()
+    mock_resolve_workflow.return_value = mock_abstract_workflow_class
+
+    flow_config = request.getfixturevalue(flow_config_name)
+    flow_config_struct = struct_pb2.Struct()
+    flow_config_struct.update(flow_config)
+
+    async def mock_request_iterator() -> AsyncIterable[contract_pb2.ClientEvent]:
+        yield contract_pb2.ClientEvent(
+            startRequest=contract_pb2.StartWorkflowRequest(
+                workflowID="test-workflow-123",
+                workflowDefinition="test",
+                flowConfig=flow_config,
+                flowConfigSchemaVersion=flow_config_schema_version,
+            )
+        )
+
+    # Setup user and context
+    user = CloudConnectorUser(authenticated=True, is_debug=True)
+    current_user.set(user)
+    mock_context = MagicMock(spec=grpc.ServicerContext)
+    mock_context.invocation_metadata.return_value = []
+
+    servicer = DuoWorkflowService()
+    result = servicer.ExecuteWorkflow(
+        mock_request_iterator(),
+        mock_context,
+        internal_event_client=create_mock_internal_event_client(),
+    )
+
+    with pytest.raises(StopAsyncIteration):
+        await anext(result)
+
+    mock_resolve_workflow.assert_called_once_with(
+        "test", flow_config, flow_config_schema_version
+    )
 
 
 @pytest.mark.asyncio
