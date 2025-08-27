@@ -2,10 +2,46 @@ from functools import partial
 from unittest.mock import Mock, patch
 
 import pytest
+from google.protobuf import struct_pb2
 
 from duo_workflow_service.workflows.abstract_workflow import AbstractWorkflow
 from duo_workflow_service.workflows.registry import resolve_workflow_class
 from duo_workflow_service.workflows.software_development import Workflow
+
+
+@pytest.fixture
+def simple_flow_config():
+    mock_flow_config_cls = Mock()
+    mock_config_instance = Mock()
+    mock_flow_config_cls.return_value = mock_config_instance
+
+    # Create mock flow class
+    mock_flow_cls = Mock()
+
+    struct = struct_pb2.Struct()
+    struct.update(
+        {
+            "version": "1.0",
+            "environment": "test",
+            "components": [{"name": "test_agent", "type": "AgentComponent"}],
+            "flow": {"entry_point": "test_agent"},
+        }
+    )
+
+    expected_dict = {
+        "version": "experimental",
+        "environment": "test",
+        "components": [{"name": "test_agent", "type": "AgentComponent"}],
+        "flow": {"entry_point": "test_agent"},
+    }
+
+    return {
+        "flow_config_cls": mock_flow_config_cls,
+        "flow_cls": mock_flow_cls,
+        "struct": struct,
+        "config_instance": mock_config_instance,
+        "expected_dict": expected_dict,
+    }
 
 
 def test_registry_resolve():
@@ -59,3 +95,35 @@ def test_registry_resolve_flow_config_error():
     ):
         with pytest.raises(ValueError, match="Unknown Flow"):
             resolve_workflow_class("nonexistent/experimental")
+
+
+def test_resolve_workflow_class_with_flow_config(simple_flow_config):
+    """Test resolving workflow class with flow config protobuf."""
+    mocks = simple_flow_config
+
+    with (
+        patch(
+            "duo_workflow_service.workflows.registry._FLOW_BY_VERSIONS",
+            {"experimental": (mocks["flow_config_cls"], mocks["flow_cls"])},
+        ),
+        patch(
+            "duo_workflow_service.workflows.registry.MessageToDict",
+            return_value=mocks["expected_dict"],
+        ),
+    ):
+        result = resolve_workflow_class(
+            workflow_definition=None,
+            flow_config=mocks["struct"],
+            flow_config_schema_version="experimental",
+        )
+
+        assert isinstance(result, partial)
+        assert result.func == mocks["flow_cls"]
+        assert result.keywords == {"config": mocks["config_instance"]}
+
+        mocks["flow_config_cls"].assert_called_once_with(
+            version="experimental",
+            environment="test",
+            components=[{"name": "test_agent", "type": "AgentComponent"}],
+            flow={"entry_point": "test_agent"},
+        )

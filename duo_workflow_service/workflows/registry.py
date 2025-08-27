@@ -1,9 +1,15 @@
 import inspect
 from functools import partial
 from pathlib import Path
-from typing import Callable, Optional, TypeAlias
+from typing import Any, Callable, Dict, Optional, Type, TypeAlias, TypeVar
+
+from google.protobuf import struct_pb2
+from google.protobuf.json_format import MessageToDict
 
 from duo_workflow_service.agent_platform import experimental
+from duo_workflow_service.agent_platform.experimental.flows.flow_config import (
+    FlowConfig,
+)
 from duo_workflow_service.workflows import (
     chat,
     convert_to_gitlab_ci,
@@ -37,14 +43,64 @@ _WORKFLOWS_LOOKUP = {
 
 FlowFactory: TypeAlias = Callable[..., AbstractWorkflow]
 
+FlowConfigT = TypeVar("FlowConfigT", bound=FlowConfig)
+
 _FLOW_BY_VERSIONS = {
     "experimental": (experimental.flows.FlowConfig, experimental.flows.Flow),
 }
 
 
+def _convert_struct_to_flow_config(
+    struct: struct_pb2.Struct,
+    flow_config_schema_version: str,
+    flow_config_cls: Type[FlowConfigT],
+) -> FlowConfigT:
+    try:
+        _FLOW_BY_VERSIONS[flow_config_schema_version]
+    except KeyError:
+        raise ValueError(
+            f"Unsupported schema version: {flow_config_schema_version}. "
+            f"Supported versions: {list(_FLOW_BY_VERSIONS.keys())}"
+        ) from None
+    config_dict: Dict[str, Any] = MessageToDict(struct)
+    config_dict["version"] = flow_config_schema_version
+
+    return flow_config_cls(**config_dict)
+
+
 def resolve_workflow_class(
     workflow_definition: Optional[str],
+    flow_config: Optional[struct_pb2.Struct] = None,
+    flow_config_schema_version: Optional[str] = None,
 ) -> FlowFactory:
+    """Resolve a workflow class based on definition or FlowConfig protobuf.
+
+    Args:
+        workflow_definition: The workflow definition string (legacy approach)
+        flow_config: the protobuf Struct containing flow config data
+        flow_config_schema_version: version of the flow that's provided
+        by default it's "experimental"
+
+    Returns:
+        A FlowFactory callable that creates workflow instances
+
+    Raises:
+        ValueError: If workflow cannot be resolved or is invalid
+    """
+    if flow_config and flow_config_schema_version:
+        try:
+            flow_config_cls, flow_cls = _FLOW_BY_VERSIONS[flow_config_schema_version]
+            config = _convert_struct_to_flow_config(
+                struct=flow_config,
+                flow_config_schema_version=flow_config_schema_version,
+                flow_config_cls=flow_config_cls,
+            )
+            return partial(flow_cls, config=config)
+        except Exception as e:
+            raise ValueError(
+                f"Failed to create flow from FlowConfig protobuf: {e}"
+            ) from e
+
     if not workflow_definition:
         return software_development.Workflow  # for backwards compatibility
 
