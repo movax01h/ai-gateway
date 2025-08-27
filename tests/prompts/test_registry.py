@@ -254,11 +254,6 @@ def model_factories_fixture():
     }
 
 
-@pytest.fixture(name="default_prompts")
-def default_prompts_fixture():
-    return {}
-
-
 @pytest.fixture(name="custom_models_enabled")
 def custom_models_enabled_fixture():
     return True
@@ -272,7 +267,6 @@ def disable_streaming_fixture():
 @pytest.fixture(name="registry")
 def registry_fixture(
     model_factories: dict[ModelClassProvider, TypeModelFactory],
-    default_prompts: dict[str, str],
     internal_event_client: Mock,
     model_limits: ConfigModelLimits,
     custom_models_enabled: bool,
@@ -282,7 +276,6 @@ def registry_fixture(
     return LocalPromptRegistry.from_local_yaml(
         class_overrides={"chat/react": MockPromptClass},
         model_factories=model_factories,
-        default_prompts=default_prompts,
         internal_event_client=internal_event_client,
         model_limits=model_limits,
         custom_models_enabled=custom_models_enabled,
@@ -312,7 +305,6 @@ class TestLocalPromptRegistry:
                 override_key: override_class,
             },
             model_factories=model_factories,
-            default_prompts={},
             internal_event_client=internal_event_client,
             model_limits=model_limits,
             custom_models_enabled=False,
@@ -366,7 +358,6 @@ class TestLocalPromptRegistry:
                 override_key: override_class,
             },
             model_factories=model_factories,
-            default_prompts={},
             internal_event_client=internal_event_client,
             model_limits=model_limits,
             custom_models_enabled=False,
@@ -375,26 +366,6 @@ class TestLocalPromptRegistry:
 
         with pytest.raises(error_class, match=error_message):
             registry.get("chat/react", "^1.0.0")
-
-    @pytest.mark.usefixtures("mock_fs")
-    def test_default_prompts(
-        self,
-        model_factories: dict[ModelClassProvider, TypeModelFactory],
-        internal_event_client: Mock,
-        model_limits: ConfigModelLimits,
-    ):
-        registry = LocalPromptRegistry.from_local_yaml(
-            class_overrides={
-                "chat/react": MockPromptClass,
-            },
-            model_factories=model_factories,
-            default_prompts={"chat/react": "custom"},
-            internal_event_client=internal_event_client,
-            model_limits=model_limits,
-            custom_models_enabled=False,
-        )
-
-        assert registry.get("chat/react", "^1.0.0").name == "Chat react custom prompt"
 
     @pytest.mark.usefixtures("mock_fs")
     def test_get_prompt_config_no_compatible_versions(
@@ -442,7 +413,6 @@ prompt_template:
         registry = LocalPromptRegistry.from_local_yaml(
             class_overrides={},
             model_factories=model_factories,
-            default_prompts={},
             custom_models_enabled=True,
             internal_event_client=internal_event_client,
             model_limits=model_limits,
@@ -479,7 +449,6 @@ prompt_template:
         test_registry = LocalPromptRegistry.from_local_yaml(
             class_overrides={},
             model_factories={},
-            default_prompts={},
             internal_event_client=internal_event_client,
             model_limits=model_limits,
         )

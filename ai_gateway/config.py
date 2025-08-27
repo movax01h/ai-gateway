@@ -186,10 +186,6 @@ class ConfigModelLimits(RootModel):
         return self.root.get(engine, {}).get(name, None)
 
 
-class ConfigDefaultPrompts(RootModel):
-    root: dict[str, str] = {}
-
-
 class Config(BaseSettings):
     model_config = SettingsConfigDict(
         env_nested_delimiter="__",
@@ -258,9 +254,6 @@ class Config(BaseSettings):
     model_engine_limits: Annotated[
         ConfigModelLimits, Field(default_factory=ConfigModelLimits)
     ] = ConfigModelLimits()
-    default_prompts: Annotated[
-        ConfigDefaultPrompts, Field(default_factory=ConfigDefaultPrompts)
-    ] = ConfigDefaultPrompts()
     abuse_detection: Annotated[
         ConfigAbuseDetection, Field(default_factory=ConfigAbuseDetection)
     ] = ConfigAbuseDetection()

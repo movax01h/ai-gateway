@@ -76,8 +76,7 @@ registry = LocalPromptRegistry.from_local_yaml(
      model_factories={
           "anthropic": lambda model, **kwargs: ChatLiteLLM(model=model, **kwargs),  # Factory for Anthropic models
           "lite_llm": lambda model, **kwargs: ChatLiteLLM(model=model, **kwargs)  # Factory for LiteLLM models
-     },
-     default_prompts={}
+     }
 )
 
 # Example messages to be sent to the prompt

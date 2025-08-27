@@ -34,7 +34,6 @@ class LocalPromptRegistry(BasePromptRegistry):
         self,
         class_overrides: dict[str, Type[Prompt] | str],
         model_factories: dict[ModelClassProvider, TypeModelFactory],
-        default_prompts: dict[str, str],
         internal_event_client: InternalEventsClient,
         model_limits: ConfigModelLimits,
         custom_models_enabled: bool,
@@ -42,7 +41,6 @@ class LocalPromptRegistry(BasePromptRegistry):
     ):
         self.class_overrides = class_overrides
         self.model_factories = model_factories
-        self.default_prompts = default_prompts
         self.internal_event_client = internal_event_client
         self.model_limits = model_limits
         self.custom_models_enabled = custom_models_enabled
@@ -69,8 +67,7 @@ class LocalPromptRegistry(BasePromptRegistry):
 
             return f"{prompt_id}/{model_metadata.name}"
 
-        type = self.default_prompts.get(prompt_id, self.key_prompt_type_base)
-        return f"{prompt_id}/{type}"
+        return f"{prompt_id}/{self.key_prompt_type_base}"
 
     @cache  # pylint: disable=method-cache-max-size-none
     def _load_prompt_definition(
@@ -197,7 +194,6 @@ class LocalPromptRegistry(BasePromptRegistry):
         cls,
         class_overrides: dict[str, Type[Prompt] | str],
         model_factories: dict[ModelClassProvider, TypeModelFactory],
-        default_prompts: dict[str, str],
         internal_event_client: InternalEventsClient,
         model_limits: ConfigModelLimits,
         custom_models_enabled: bool = False,
@@ -212,14 +208,12 @@ class LocalPromptRegistry(BasePromptRegistry):
 
         log.info(
             "Initializing prompt registry with lazy loading",
-            default_prompts=default_prompts,
             custom_models_enabled=custom_models_enabled,
         )
 
         return cls(
             class_overrides,
             model_factories,
-            default_prompts,
             internal_event_client,
             model_limits,
             custom_models_enabled,
