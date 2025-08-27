@@ -248,7 +248,9 @@ class DuoWorkflowService(contract_pb2_grpc.DuoWorkflowServicer):
             },
             approval=start_workflow_request.startRequest.approval,
             language_server_version=language_server_version.get(),
-            preapproved_tools=start_workflow_request.startRequest.preapproved_tools,
+            preapproved_tools=list(
+                start_workflow_request.startRequest.preapproved_tools
+            ),
         )
 
         async def send_events():
