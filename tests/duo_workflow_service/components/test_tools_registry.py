@@ -187,6 +187,7 @@ _outbox = MagicMock(spec=asyncio.Queue)
                 "confirm_vulnerability",
                 "get_current_user",
                 "create_work_item",
+                "create_work_item_note",
                 "link_vulnerability_to_issue",
                 "get_vulnerability_details",
             },
@@ -344,6 +345,7 @@ def test_registry_initialization_initialises_tools_with_correct_attributes(
         ),
         "get_current_user": tools.GetCurrentUser(metadata=tool_metadata),
         "create_work_item": tools.CreateWorkItem(metadata=tool_metadata),
+        "create_work_item_note": tools.CreateWorkItemNote(metadata=tool_metadata),
         "link_vulnerability_to_issue": tools.LinkVulnerabilityToIssue(
             metadata=tool_metadata
         ),

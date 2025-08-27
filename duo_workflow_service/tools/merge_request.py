@@ -6,10 +6,11 @@ from gitlab_cloud_connector import GitLabUnitPrimitive
 from pydantic import BaseModel, Field
 
 from duo_workflow_service.policies.diff_exclusion_policy import DiffExclusionPolicy
-from duo_workflow_service.tools.duo_base_tool import DuoBaseTool
+from duo_workflow_service.tools.duo_base_tool import (
+    DESCRIPTION_CHARACTER_LIMIT,
+    DuoBaseTool,
+)
 from duo_workflow_service.tools.gitlab_resource_input import ProjectResourceInput
-
-DESCRIPTION_CHARACTER_LIMIT = 1_048_576
 
 # editorconfig-checker-disable
 PROJECT_IDENTIFICATION_DESCRIPTION = """To identify the project you must provide either:

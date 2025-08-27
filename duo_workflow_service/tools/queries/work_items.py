@@ -153,30 +153,24 @@ query ListProjectWorkItems($fullPath: ID!, $state: IssuableState, $search: Strin
 """
 
 GET_GROUP_WORK_ITEM_NOTES_QUERY = """
-query GetGroupWorkItemNotes($fullPath: ID!, $state: IssuableState, $search: String, $authorUsername: String, $createdAfter: Time, $createdBefore: Time, $updatedAfter: Time, $updatedBefore: Time, $dueAfter: Time, $dueBefore: Time, $sort: WorkItemSort) {
-    project(fullPath: $fullPath) {
-        workItems(
-            state: $state
-            search: $search
-            authorUsername: $authorUsername
-            createdAfter: $createdAfter
-            createdBefore: $createdBefore
-            updatedAfter: $updatedAfter
-            updatedBefore: $updatedBefore
-            dueAfter: $dueAfter
-            dueBefore: $dueBefore
-            sort: $sort
-        ) {
+query GetGroupWorkItemNotes($fullPath: ID!, $workItemIid: String!) {
+    namespace(fullPath: $fullPath) {
+        workItems(iid: $workItemIid) {
             nodes {
-                id
-                iid
-                title
-                state
-                createdAt
-                updatedAt
-                author {
-                    username
-                    name
+                widgets {
+                    ... on WorkItemWidgetNotes {
+                        notes {
+                            nodes {
+                                id
+                                body
+                                createdAt
+                                author {
+                                    username
+                                    name
+                                }
+                            }
+                        }
+                    }
                 }
             }
         }
@@ -263,6 +257,23 @@ query GetWorkItemType($fullPath: ID!) {
                 name
             }
         }
+    }
+}
+"""
+
+CREATE_NOTE_MUTATION = """
+mutation CreateNote($input: CreateNoteInput!) {
+    createNote(input: $input) {
+        note {
+            id
+            body
+            createdAt
+            author {
+                username
+                name
+            }
+        }
+        errors
     }
 }
 """

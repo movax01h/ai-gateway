@@ -6,8 +6,13 @@ from gitlab_cloud_connector import GitLabUnitPrimitive
 from pydantic import BaseModel, Field
 
 from duo_workflow_service.gitlab.url_parser import GitLabUrlParseError, GitLabUrlParser
-from duo_workflow_service.tools.duo_base_tool import DuoBaseTool
+from duo_workflow_service.security.quick_actions import validate_no_quick_actions
+from duo_workflow_service.tools.duo_base_tool import (
+    DESCRIPTION_CHARACTER_LIMIT,
+    DuoBaseTool,
+)
 from duo_workflow_service.tools.queries.work_items import (
+    CREATE_NOTE_MUTATION,
     CREATE_WORK_ITEM_MUTATION,
     GET_GROUP_WORK_ITEM_NOTES_QUERY,
     GET_GROUP_WORK_ITEM_QUERY,
@@ -43,6 +48,10 @@ WORK_ITEM_IDENTIFICATION_DESCRIPTION = """To identify a work item you must provi
     - https://gitlab.com/namespace/project/-/work_items/42
 """
 
+WORK_ITEM_QUICK_ACTION_NOTE = """You are NOT allowed to ever use a GitLab quick action in work item note body.
+Quick actions are text-based shortcuts for common GitLab actions. They are commands that are on their own line and
+start with a backslash. Examples include /merge, /approve, /close, etc."""
+
 
 class ResolvedParent(NamedTuple):
     type: Literal["group", "project"]
@@ -56,6 +65,21 @@ class ResolvedWorkItem(NamedTuple):
 
 class WorkItemBaseTool(DuoBaseTool):
     unit_primitive: GitLabUnitPrimitive = GitLabUnitPrimitive.ASK_WORK_ITEM
+
+    _GET_WORK_ITEM_QUERIES = {
+        "group": (GET_GROUP_WORK_ITEM_QUERY, "namespace"),
+        "project": (GET_PROJECT_WORK_ITEM_QUERY, "project"),
+    }
+
+    _GET_WORK_ITEM_NOTES_QUERIES = {
+        "group": (GET_GROUP_WORK_ITEM_NOTES_QUERY, "namespace"),
+        "project": (GET_PROJECT_WORK_ITEM_NOTES_QUERY, "project"),
+    }
+
+    _LIST_WORK_ITEMS_QUERIES = {
+        "group": (LIST_GROUP_WORK_ITEMS_QUERY, "namespace"),
+        "project": (LIST_PROJECT_WORK_ITEMS_QUERY, "project"),
+    }
 
     async def _validate_parent_url(
         self,
@@ -202,16 +226,18 @@ class WorkItemBaseTool(DuoBaseTool):
         type_id: str,
         input_kwargs: Dict[str, Any],
     ) -> str:
-        variables = {
+        query_variables = {
             "input": {
                 "namespacePath": namespace_path,
                 "workItemTypeId": type_id,
             }
         }
-        variables["input"].update(self._build_work_item_input_fields(input_kwargs))
+        query_variables["input"].update(
+            self._build_work_item_input_fields(input_kwargs)
+        )
 
         response = await self.gitlab_client.graphql(
-            CREATE_WORK_ITEM_MUTATION, variables
+            CREATE_WORK_ITEM_MUTATION, query_variables
         )
 
         if "errors" in response:
@@ -295,6 +321,29 @@ class WorkItemBaseTool(DuoBaseTool):
             }
 
         return input_data
+
+    async def _get_work_item_data(
+        self, resolved: ResolvedWorkItem
+    ) -> Union[dict, None]:
+        """Get work item data from resolved work item info.
+
+        Returns work item dict or None if not found.
+        """
+        query, root_key = self._GET_WORK_ITEM_QUERIES[resolved.parent.type]
+
+        query_variables = {
+            "fullPath": resolved.parent.full_path,
+            "iid": str(resolved.work_item_iid),
+        }
+
+        response = await self.gitlab_client.graphql(query, query_variables)
+
+        if not response.get(root_key):
+            return {"error": f"No {root_key} found in response"}
+
+        work_items = response.get(root_key, {}).get("workItems", {}).get("nodes", [])
+
+        return work_items[0] if work_items else None
 
 
 class ParentResourceInput(BaseModel):
@@ -402,13 +451,9 @@ class ListWorkItems(WorkItemBaseTool):
         if isinstance(resolved, str):
             return json.dumps({"error": resolved})
 
-        query = (
-            LIST_GROUP_WORK_ITEMS_QUERY
-            if resolved.type == "group"
-            else LIST_PROJECT_WORK_ITEMS_QUERY
-        )
+        query, root_key = self._LIST_WORK_ITEMS_QUERIES[resolved.type]
 
-        variables = {
+        query_variables = {
             "fullPath": resolved.full_path,
             "first": kwargs.get("first"),
             "after": kwargs.get("after"),
@@ -430,7 +475,7 @@ class ListWorkItems(WorkItemBaseTool):
             arg_key = key[0].lower() + key[1:]  # match Pydantic input
             value = kwargs.get(arg_key)
             if value is not None:
-                variables[key] = value
+                query_variables[key] = value
 
         warnings = []
 
@@ -448,7 +493,7 @@ class ListWorkItems(WorkItemBaseTool):
             ]
 
             if valid_types:
-                variables["types"] = valid_types
+                query_variables["types"] = valid_types
 
             if invalid_types:
                 warnings.append(
@@ -456,8 +501,7 @@ class ListWorkItems(WorkItemBaseTool):
                 )
 
         try:
-            response = await self.gitlab_client.graphql(query, variables)
-            root_key = "namespace" if resolved.type == "group" else "project"
+            response = await self.gitlab_client.graphql(query, query_variables)
 
             if root_key not in response:
                 return json.dumps({"error": f"No {root_key} found in response"})
@@ -521,29 +565,12 @@ class GetWorkItem(WorkItemBaseTool):
         if isinstance(resolved, str):
             return json.dumps({"error": resolved})
 
-        # Select the appropriate query based on parent type
-        query = (
-            GET_GROUP_WORK_ITEM_QUERY
-            if resolved.parent.type == "group"
-            else GET_PROJECT_WORK_ITEM_QUERY
-        )
-
-        variables = {
-            "fullPath": resolved.parent.full_path,
-            "iid": str(resolved.work_item_iid),
-        }
-
         try:
-            response = await self.gitlab_client.graphql(query, variables)
-            root_key = "namespace" if resolved.parent.type == "group" else "project"
+            if (work_item := await self._get_work_item_data(resolved)) is None:
+                return json.dumps({"error": "Work item not found"})
 
-            if root_key not in response:
-                return json.dumps({"error": f"No {root_key} found in response"})
-
-            work_items = (
-                response.get(root_key, {}).get("workItems", {}).get("nodes", [])
-            )
-            work_item = work_items[0] if work_items else None
+            if work_item.get("error"):
+                return json.dumps(work_item)
 
             return json.dumps({"work_item": work_item})
         except Exception as e:
@@ -602,20 +629,15 @@ class GetWorkItemNotes(WorkItemBaseTool):
         if isinstance(resolved, str):
             return json.dumps({"error": resolved})
 
-        query = (
-            GET_GROUP_WORK_ITEM_NOTES_QUERY
-            if resolved.parent.type == "group"
-            else GET_PROJECT_WORK_ITEM_NOTES_QUERY
-        )
+        query, root_key = self._GET_WORK_ITEM_NOTES_QUERIES[resolved.parent.type]
 
-        variables = {
+        query_variables = {
             "fullPath": resolved.parent.full_path,
             "workItemIid": str(resolved.work_item_iid),
         }
 
         try:
-            response = await self.gitlab_client.graphql(query, variables)
-            root_key = "namespace" if resolved.parent.type == "group" else "project"
+            response = await self.gitlab_client.graphql(query, query_variables)
             nodes = response.get(root_key, {}).get("workItems", {}).get("nodes", [])
 
             if not nodes:
@@ -648,7 +670,8 @@ class CreateWorkItemInput(ParentResourceInput):
         description="Work item type. One of: 'Issue', 'Epic', 'Task', 'Objective', 'Key Result'."
     )
     description: Optional[str] = Field(
-        default=None, description="The description of the work item."
+        default=None,
+        description=f"The description of the work item. Limited to {DESCRIPTION_CHARACTER_LIMIT} characters.",
     )
     assignee_ids: Optional[List[int]] = Field(
         default=None, description="IDs of users to assign"
@@ -740,3 +763,134 @@ class CreateWorkItem(WorkItemBaseTool):
         if args.group_id:
             return f"Create work item '{args.title}' in group {args.group_id}"
         return f"Create work item '{args.title}' in project {args.project_id}"
+
+
+class CreateWorkItemNoteInput(WorkItemResourceInput):
+    body: str = Field(
+        description=f"The content of the note. Limited to {DESCRIPTION_CHARACTER_LIMIT} characters.",
+        max_length=1_048_576,
+    )
+    internal: Optional[bool] = Field(
+        default=None, description="Internal flag for a note. Default is false."
+    )
+    discussion_id: Optional[str] = Field(
+        default=None, description="Global ID of the discussion the note is in reply to."
+    )
+
+
+class CreateWorkItemNote(WorkItemBaseTool):
+    name: str = "create_work_item_note"
+    description: str = f"""Create a new note (comment) on a GitLab work item.
+
+    {WORK_ITEM_QUICK_ACTION_NOTE}
+
+    {WORK_ITEM_IDENTIFICATION_DESCRIPTION}
+
+    For example:
+    - Given group_id 'namespace/group', work_item_iid 42, and body "This is a comment", the tool call would be:
+        create_work_item_note(group_id='namespace/group', work_item_iid=42, body="This is a comment")
+    - Given project_id 'namespace/project', work_item_iid 42, and body "This is a comment", the tool call would be:
+        create_work_item_note(project_id='namespace/project', work_item_iid=42, body="This is a comment")
+    - Given the URL https://gitlab.com/groups/namespace/group/-/work_items/42 and body "This is a comment", the tool call would be:
+        create_work_item_note(url="https://gitlab.com/groups/namespace/group/-/work_items/42", body="This is a comment")
+    - Given the URL https://gitlab.com/namespace/project/-/work_items/42 and body "This is a comment", the tool call would be:
+        create_work_item_note(url="https://gitlab.com/namespace/project/-/work_items/42", body="This is a comment")
+
+    The body parameter is always required.
+    """
+    args_schema: Type[BaseModel] = CreateWorkItemNoteInput
+
+    async def _arun(self, body: str, **kwargs: Any) -> str:
+        url = kwargs.pop("url", None)
+        group_id = kwargs.pop("group_id", None)
+        project_id = kwargs.pop("project_id", None)
+        work_item_iid = kwargs.pop("work_item_iid", None)
+        internal = kwargs.pop("internal", None)
+        discussion_id = kwargs.pop("discussion_id", None)
+
+        if err := validate_no_quick_actions(body, field="body"):
+            return json.dumps({"error": err})
+
+        resolved = await self._validate_work_item_url(
+            url, group_id, project_id, work_item_iid
+        )
+
+        if isinstance(resolved, str):
+            return json.dumps({"error": resolved})
+
+        try:
+            if "error" in (result := await self._get_work_item_id(resolved)):
+                return json.dumps(result)
+
+            note_input = {"noteableId": result["id"], "body": body}
+
+            if internal is not None:
+                note_input["internal"] = internal
+
+            if discussion_id is not None:
+                note_input["discussionId"] = discussion_id
+
+            note_response = await self.gitlab_client.graphql(
+                CREATE_NOTE_MUTATION, {"input": note_input}
+            )
+
+            return self._process_note_response(note_response)
+
+        except Exception as e:
+            return json.dumps({"error": str(e)})
+
+    async def _get_work_item_id(self, resolved: ResolvedWorkItem) -> dict:
+        """Get work item ID from resolved work item."""
+        try:
+            work_item = await self._get_work_item_data(resolved)
+            if isinstance(work_item, dict) and "error" in work_item:
+                return work_item
+
+            if not work_item:
+                return {"error": "Work item not found"}
+            if not work_item.get("id"):
+                return {"error": "Work item exists but has no ID field"}
+
+            return {"id": work_item["id"]}
+
+        except Exception as e:
+            return {"error": f"Failed to get work item ID: {str(e)}"}
+
+    def _process_note_response(self, note_response: dict) -> str:
+        """Process the GraphQL response from creating a note."""
+        # Top-level GraphQL errors (e.g., auth, syntax, variables)
+        if top_errors := note_response.get("errors"):
+            return json.dumps({"error": top_errors})
+
+        create_note = note_response.get("createNote", {})
+        created_note = create_note.get("note", {})
+        note_errors = create_note.get("errors", [])
+
+        # Application-level errors (mutation ran but failed validation)
+        if note_errors or not created_note.get("id"):
+            return json.dumps(
+                {
+                    "error": "Failed to create note",
+                    "details": {
+                        "graphql_errors": top_errors,
+                        "note_errors": note_errors,
+                    },
+                }
+            )
+
+        return json.dumps(
+            {
+                "status": "success",
+                "message": "Note created successfully.",
+                "note": created_note,
+            }
+        )
+
+    def format_display_message(
+        self, args: CreateWorkItemNoteInput, _tool_response: Any = None
+    ) -> str:
+        if args.url:
+            return f"Add comment to work item {args.url}"
+        if args.group_id:
+            return f"Add comment to work item #{args.work_item_iid} in group {args.group_id}"
+        return f"Add comment to work item #{args.work_item_iid} in project {args.project_id}"
