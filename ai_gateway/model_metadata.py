@@ -45,6 +45,9 @@ class ModelMetadata(BaseModelMetadata):
         if self.provider == "anthropic":
             return {"model": self.identifier}
 
+        if self.provider == "vertex_ai":
+            return {"custom_llm_provider": "vertex_ai", "model": self.identifier}
+
         if self.endpoint:
             params["api_base"] = str(self.endpoint).removesuffix("/")
 
