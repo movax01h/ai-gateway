@@ -395,6 +395,9 @@ class GitLabWorkflow(BaseCheckpointSaver[Any], AbstractAsyncContextManager[Any])
         # update status to DROP, track failure event,
         # and return False
         if exc_type:
+            log_exception(
+                exc_value, extra={"workflow_id": self._workflow_id, "source": __name__}
+            )
             await self._handle_workflow_exception(exc_value)
             await self._update_workflow_status_safely()
             return False
