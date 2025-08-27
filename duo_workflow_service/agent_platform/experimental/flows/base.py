@@ -112,6 +112,7 @@ class Flow(AbstractWorkflow):
             ui_chat_log=[initial_ui_chat_log],
             context={
                 "project_id": self._project.get("id"),  # type: ignore[union-attr]
+                "project_http_url_to_repo": self._project.get("http_url_to_repo"),  # type: ignore[union-attr]
                 "goal": goal,
                 "inputs": {
                     additional_context.category: additional_context.model_dump()
