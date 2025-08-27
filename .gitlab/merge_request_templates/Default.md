@@ -29,6 +29,10 @@ Example below:
 
 - [ ] Tests added for new functionality. If not, please raise an issue to follow up.
 - [ ] Documentation added/updated, if needed.
+- [ ] If this change requires executor implementation: verified that issues/MRs exist for
+  both [Go executor](https://gitlab.com/gitlab-org/duo-workflow/duo-workflow-executor)
+  and [Node executor](https://gitlab.com/gitlab-org/editor-extensions/gitlab-lsp) or confirmed that changes are
+  backward-compatible and don't break existing executor functionality.
 
 /label ~"group::ai framework"
 
