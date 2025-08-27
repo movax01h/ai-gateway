@@ -265,7 +265,6 @@ async def test_workflow_initialization(workflow):
     "duo_workflow_service.checkpointer.gitlab_workflow.GitLabStatusUpdater",
     autospec=True,
 )
-@patch.dict(os.environ, {"DW_INTERNAL_EVENT__ENABLED": "true"})
 @pytest.mark.parametrize("duo_workflow_prompt_registry_enabled", [False, True])
 async def test_workflow_run(
     mock_status_updater,
@@ -367,7 +366,6 @@ async def test_workflow_run(
 @pytest.mark.asyncio
 @pytest.mark.parametrize("duo_workflow_prompt_registry_enabled", [False, True])
 @pytest.mark.parametrize("offline_mode", [True])
-@patch.dict(os.environ, {"DW_INTERNAL_EVENT__ENABLED": "true"})
 async def test_workflow_run_with_memory_saver(
     mock_checkpoint_notifier,
     mock_executor_component,
@@ -418,7 +416,6 @@ async def test_workflow_run_with_memory_saver(
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("duo_workflow_prompt_registry_enabled", [False, True])
-@patch.dict(os.environ, {"DW_INTERNAL_EVENT__ENABLED": "true"})
 async def test_workflow_run_when_exception(
     mock_log_exception,
     mock_planner_component,
@@ -466,7 +463,6 @@ async def test_workflow_run_when_exception(
 )
 @pytest.mark.parametrize("duo_workflow_prompt_registry_enabled", [False, True])
 @pytest.mark.usefixtures("mock_chat_client")
-@patch.dict(os.environ, {"DW_INTERNAL_EVENT__ENABLED": "true"})
 async def test_workflow_run_with_error_state(
     mock_status_updater,
     mock_gitlab_workflow_aput,
@@ -599,7 +595,6 @@ def test_context_builder_tools(tools_registry, workflow):
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("duo_workflow_prompt_registry_enabled", [False, True])
-@patch.dict(os.environ, {"DW_INTERNAL_EVENT__ENABLED": "true"})
 async def test_workflow_run_with_setup_error(
     mock_executor_component,
     mock_planner_component,
@@ -625,7 +620,6 @@ async def test_workflow_run_with_setup_error(
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("duo_workflow_prompt_registry_enabled", [False, True])
-@patch.dict(os.environ, {"DW_INTERNAL_EVENT__ENABLED": "true"})
 async def test_workflow_run_with_missing_web_url(
     mock_fetch_workflow_and_container_data,
     mock_gitlab_workflow,
@@ -655,7 +649,6 @@ async def test_workflow_run_with_missing_web_url(
 @pytest.mark.asyncio
 @pytest.mark.parametrize("duo_workflow_prompt_registry_enabled", [False, True])
 @patch("duo_workflow_service.gitlab.gitlab_api.GitLabUrlParser", autospec=True)
-@patch.dict(os.environ, {"DW_INTERNAL_EVENT__ENABLED": "true"})
 async def test_workflow_run_with_invalid_web_url(
     mock_gitlab_url_parser,
     mock_fetch_workflow_and_container_data,
@@ -688,7 +681,6 @@ async def test_workflow_run_with_invalid_web_url(
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("duo_workflow_prompt_registry_enabled", [False, True])
-@patch.dict(os.environ, {"DW_INTERNAL_EVENT__ENABLED": "true"})
 async def test_workflow_run_with_retry(
     mock_log_exception,
     mock_executor_component,
@@ -772,7 +764,6 @@ async def test_workflow_run_with_retry(
 
 
 @pytest.mark.asyncio
-@patch.dict(os.environ, {"DW_INTERNAL_EVENT__ENABLED": "true"})
 @pytest.mark.parametrize("duo_workflow_prompt_registry_enabled", [False, True])
 @pytest.mark.parametrize(
     "agent_responses",
@@ -860,7 +851,6 @@ async def test_workflow_run_with_tool_approvals(
     "duo_workflow_service.workflows.software_development.workflow.PlanApprovalComponent",
     autospec=True,
 )
-@patch.dict(os.environ, {"DW_INTERNAL_EVENT__ENABLED": "true"})
 async def test_workflow_run_without_plan_approval_component(
     mock_plan_approval_component,
     mock_executor_component,
