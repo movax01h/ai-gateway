@@ -12,6 +12,12 @@ ENV AIGW_FASTAPI__DOCS_URL="/docs"
 ENV TRANSFORMERS_NO_ADVISORY_WARNINGS=1
 ENV HF_HUB_OFFLINE=true
 
+# Used to run the Duo Workflow Service.
+# For self-hosted Duo customers, it makes sense to
+# run this service by default, rather than having them to
+# specify one more environment variable during deployment.
+ENV ENABLE_DUO_WORKFLOW_SERVICE=true
+
 RUN poetry run index_docs -o "./tmp/docs.db" -v ${TAG##self-hosted-}
 
 CMD ["./scripts/run.sh"]
