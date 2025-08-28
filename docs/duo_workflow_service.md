@@ -13,17 +13,14 @@ infrastructure.
 
 ## Local development with GDK
 
-You
-should [set up GitLab Duo Workflow with the GitLab Development Kit (GDK)](https://gitlab.com/gitlab-org/gitlab-development-kit/-/blob/main/doc/howto/duo_workflow.md).
+You should [set up GitLab Duo Workflow with the GitLab Development Kit (GDK)](https://gitlab.com/gitlab-org/gitlab-development-kit/-/blob/main/doc/howto/duo_agent_platform.md).
 
-The GDK setup documentation also explains how ensure that all feature flags and
-settings enabled so that Duo Workflow works.
+The GDK setup documentation also explains how to ensure that all feature flags and
+settings are enabled so that Duo Workflow works.
 
 ## Local development without GDK
 
-If for some reason you
-cannot [set up Duo Workflow Service directly with GDK](https://gitlab.com/gitlab-org/gitlab-development-kit/-/blob/main/doc/howto/duo_workflow.md),
-you can manually set it up following these steps:
+You can also manually set up Duo Workflow by following these steps:
 
 1. Ensure you have met all prerequisites locally (this list may not be exhaustive, GDK setup script is)
    - [GitLab Ultimate cloud license](https://docs.gitlab.com/development/ai_features/ai_development_license)
