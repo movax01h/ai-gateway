@@ -77,6 +77,12 @@ include:
     ref: v1.80.3 # renovate:managed
     file: "kaniko.yml"
 
+  # Analyze commits to determine whether to cut a release
+  # see https://gitlab.com/gitlab-com/gl-infra/common-ci-tasks/-/blob/main/semantic-release.md
+  - project: "gitlab-com/gl-infra/common-ci-tasks"
+    ref: v2.89.0 # renovate:managed
+    file: "semantic-release.yml"
+
   - project: "gitlab-com/gl-infra/platform/runway/runwayctl"
     file: "ci-tasks/service-project/runway.yml"
     inputs:

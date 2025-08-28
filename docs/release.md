@@ -12,15 +12,15 @@ It's NOT necessary for GitLab-managed AI Gateway as currently Runway deploys the
 
 We follow the [Semantic Versioning guideline](https://semver.org/),
 which is rendered in [Conventional Commits](https://www.conventionalcommits.org/en) as an actual practice.
-To harness the practice, we use [semantic-release](https://github.com/semantic-release/semantic-release) and [commitlint](https://github.com/conventional-changelog/commitlint).
+To harness the practice, we use [semantic-release](https://github.com/semantic-release/semantic-release) via the [common-ci-tasks](https://gitlab.com/gitlab-com/gl-infra/common-ci-tasks) template and [commitlint](https://github.com/conventional-changelog/commitlint).
 
 In CI pipelines in AI Gateway:
 
 - On merge requests:
   - `lint:commit` job runs to validate the commits in the feature branch if they are following Conventional Commits.
-  - `publish-dryrun` job runs to make sure the commits are releasable via semantic-release.
+  - `semantic_release_check` job runs to make sure the commits are releasable via semantic-release.
 - On `main` branch:
-  - `publish` job can run manually to cut a new release and Git tag. This requires Maintainer+ access in AI Gateway project.
+  - `semantic_release_base` job runs automatically to cut a new release and Git tag when conventional commits are detected.
 - On Git tags:
   - `release-docker-image:tag` job runs to pushes a new Docker image.
 - On Git tags with format `gitlab-*`:
@@ -52,14 +52,21 @@ Stable branches will not be receiving updates from main branch. If a bug at a ve
 
 ## GitLab managed AI Gateway Release process
 
-1. Visit [the pipeline list on `main` branch](https://gitlab.com/gitlab-org/modelops/applied-ml/code-suggestions/ai-assist/-/pipelines?page=1&scope=all&ref=main).
-1. Select a pipeline that you want to publish.
-1. Play `publish` job. This requires Maintainer+ access in AI Gateway project. If you're seeking for a help, ping a maintainer from [the dashboard](https://gitlab-org.gitlab.io/gitlab-roulette/?currentProject=ai-gateway).
+Releases are now automated using the `semantic-release` job from [common-ci-tasks](https://gitlab.com/gitlab-com/gl-infra/common-ci-tasks). The release process works as follows:
 
-This job automatically calculates the next version based on [the commit messages](https://www.conventionalcommits.org/en), cut a new Git tag and create a release.
+1. When commits following [Conventional Commits](https://www.conventionalcommits.org/en) are pushed to the `main` branch, the `semantic_release_base` job automatically runs.
+1. This job calculates the next version based on the commit messages, creates a new Git tag, and publishes a release.
+1. No manual intervention is required - releases happen automatically when appropriate conventional commits are detected.
+
+The semantic release job uses the configuration defined in `.releaserc.json` and is managed through the common-ci-tasks template.
 
 ## Configure release workflow
 
-You can customize the release workflow via the configuration file `.releaserc.yml`. See [configuration page](https://github.com/semantic-release/semantic-release?tab=readme-ov-file#documentation).
+The release workflow is configured via the `.releaserc.json` file in the project root. This configuration:
+
+- Supports releases from the `main` branch and maintenance branches following the pattern `+([0-9])?(.{+([0-9]),x}).x`
+- Uses only the GitLab plugin for creating releases and tags
+
+The semantic-release job is provided by the [common-ci-tasks](https://gitlab.com/gitlab-com/gl-infra/common-ci-tasks) template.
 
 If you want to set up maintenance/backport releases, see [this recipe](https://github.com/semantic-release/semantic-release/blob/master/docs/recipes/release-workflow/maintenance-releases.md).
