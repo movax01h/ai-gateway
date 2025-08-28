@@ -263,6 +263,18 @@ class TestModelMetadataToParams:
             "model": "model_identifier",
         }
 
+    def test_vertex_ai_provider(self):
+        model_metadata = ModelMetadata(
+            identifier="model_identifier", name="base", provider="vertex_ai"
+        )
+
+        params = model_metadata.to_params()
+
+        assert params == {
+            "custom_llm_provider": "vertex_ai",
+            "model": "model_identifier",
+        }
+
 
 def test_create_model_metadata_with_none_data():
     result = create_model_metadata(None)
