@@ -6,6 +6,17 @@ This guide provides the practical knowledge developers need to build flows effec
 
 [[_TOC_]]
 
+## Development Plan
+
+Currently, we are in an ideation phase for Agent Flows. Please see [this epic](https://gitlab.com/groups/gitlab-org/-/epics/19001) for instructions on how to submit your ideas for new flows.
+
+The Flow Registry is currently in active development, but the high-level plan for rollout is:
+
+1. Add components required to replicate [existing flows](../workflows) using the Flow Registry. More information in [this epic](https://gitlab.com/groups/gitlab-org/duo-workflow/-/epics/1)
+1. Create an AI Catalog UI to allow internal teams to build and test their own Agent Flows
+
+In the meantime, it is possible to set up the Flow Registry locally, and create agent flows via YAML files. This guide will explain the details of how to do that. But note that it can be quite time-intensive to do this setup and once the Flow Registry is ready this setup will no longer be required for those building flows.
+
 ## Quick Start
 
 This section provides a step-by-step approach to creating your first flow.
@@ -913,7 +924,7 @@ curl -X POST \
     -H "Authorization: Bearer $GDK_API_TOKEN" \
     -H "Content-Type: application/json" \
     -d "{
-        \"project_id\": \"$PROJECT_ID",
+        \"project_id\": \"$PROJECT_ID\",
         \"agent_privileges\": [1,2,3,4,5],
         \"goal\": \"$GOAL\",
         \"start_workflow\": true,
