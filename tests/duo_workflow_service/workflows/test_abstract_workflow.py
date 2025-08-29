@@ -207,6 +207,10 @@ async def test_compile_and_run_graph(
 
     # Assertions
     assert workflow.is_done
+    assert (
+        workflow._session_url
+        == "https://example.com/project/-/automate/agent-sessions/id"
+    )
     mock_fetch_workflow.assert_called_once()
     mock_tools_registry.assert_called_once_with(
         outbox=workflow._outbox,
@@ -401,6 +405,7 @@ async def test_namespace_level_workflow(
 
     # Assertions
     assert workflow.is_done
+    assert workflow._session_url is None
     assert isinstance(exc_info.value.original_exception, Exception)
     assert (
         str(exc_info.value.original_exception)
