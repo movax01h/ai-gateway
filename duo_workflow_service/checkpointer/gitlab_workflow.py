@@ -377,7 +377,12 @@ class GitLabWorkflow(BaseCheckpointSaver[Any], AbstractAsyncContextManager[Any])
                 status, EventPropertyEnum.WORKFLOW_RESUME_BY_PLAN
             )
 
-        if not checkpoint_tuple:
+        if status == WorkflowStatusEnum.CREATED:
+            if checkpoint_tuple:
+                raise UnsupportedStatusEvent(
+                    f"Workflow with status 'created' should not have existing checkpoints. "
+                    f"Found checkpoint: {checkpoint_tuple}"
+                )
             return WorkflowStatusEventEnum.START, EventPropertyEnum.WORKFLOW_ID
 
         return (

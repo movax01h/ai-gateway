@@ -46,6 +46,7 @@ class Plan(TypedDict):
 
 
 class WorkflowStatusEnum(StrEnum):
+    CREATED = "created"
     NOT_STARTED = "Not Started"
     PLANNING = "Planning"
     EXECUTION = "Execution"
