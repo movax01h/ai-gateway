@@ -1,6 +1,6 @@
 import json
 from enum import IntEnum
-from typing import Any, Type
+from typing import Any, List, Type
 
 import gitmatch
 from langchain.tools.base import ToolException
@@ -95,6 +95,10 @@ class ReadFile(DuoBaseTool):
     """
     args_schema: Type[BaseModel] = ReadFileInput  # type: ignore
     handle_tool_error: bool = True
+    eval_prompts: List[str] = [
+        "I need to read the content of the `readme.md`",
+        "Let me check if class `DuoBaseTool` exists in `./tools/base.py`",
+    ]
 
     async def _arun(self, file_path: str) -> str:
         # Check file exclusion policy

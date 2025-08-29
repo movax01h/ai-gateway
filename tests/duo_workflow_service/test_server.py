@@ -3,7 +3,7 @@ import asyncio
 import json
 import os
 from datetime import datetime, timedelta, timezone
-from typing import AsyncIterable
+from typing import AsyncIterable, List, Optional
 from unittest.mock import AsyncMock, MagicMock, call, patch
 
 import grpc
@@ -15,6 +15,7 @@ from gitlab_cloud_connector import (
     UserClaims,
 )
 from google.protobuf import struct_pb2
+from google.protobuf.json_format import MessageToDict
 from langchain.globals import get_llm_cache
 from langchain_community.cache import SQLiteCache
 
@@ -29,6 +30,7 @@ from duo_workflow_service.server import (
     serve,
     string_to_category_enum,
 )
+from duo_workflow_service.tools.duo_base_tool import DuoBaseTool
 from lib.internal_events.context import InternalEventAdditionalProperties
 from lib.internal_events.event_enum import (
     CategoryEnum,
@@ -108,6 +110,93 @@ def test_run(custom_models_enabled, should_validate_llm):
         assert mock_loop.run_until_complete.call_count == 1
         actual_arg = mock_loop.run_until_complete.call_args[0][0]
         assert asyncio.iscoroutine(actual_arg)
+
+
+@pytest.mark.asyncio
+@patch("duo_workflow_service.server.tools_registry._DEFAULT_TOOLS")
+@patch("duo_workflow_service.server.tools_registry._READ_ONLY_GITLAB_TOOLS")
+@patch("duo_workflow_service.server.tools_registry._AGENT_PRIVILEGES")
+@patch("duo_workflow_service.server.convert_to_openai_tool")
+async def test_list_tools(
+    mock_convert_to_openai_tool,
+    mock_agent_privileges,
+    mock_readonly_tools,
+    mock_default_tools,
+):
+    ## avoid duplicated mock tool with the same tool name
+    _tool_class_cache = {}
+
+    def create_mock_tool(name: str, eval_prompts: Optional[List[str]] = None):
+        cache_key = name
+        if cache_key in _tool_class_cache:
+            return _tool_class_cache[cache_key]
+
+        class MockTool(DuoBaseTool):
+
+            def __init__(self):
+                super().__init__(
+                    name=name,
+                    description=f"{name} description",
+                    eval_prompts=eval_prompts,
+                )
+
+        _tool_class_cache[cache_key] = MockTool
+        return MockTool
+
+    def mock_convert_side_effect(tool):
+        tool_name = tool.name
+        return {
+            "type": "function",
+            "function": {
+                "name": tool_name,
+                "description": f"{tool_name} description",
+            },
+        }
+
+    mock_default_tools.__add__.return_value = [create_mock_tool(name="tool1")]
+    mock_readonly_tools.__add__.return_value = [
+        create_mock_tool(name="tool2", eval_prompts=["prompt2"])
+    ]
+    mock_agent_privileges.values.return_value = [
+        [
+            create_mock_tool(name="tool1"),
+            create_mock_tool(name="tool2", eval_prompts=["prompt2"]),
+        ],
+        [create_mock_tool(name="tool3")],
+    ]
+    mock_convert_to_openai_tool.side_effect = mock_convert_side_effect
+    mock_context = MagicMock(spec=grpc.ServicerContext)
+    service = DuoWorkflowService()
+    response = await service.ListTools(contract_pb2.ListToolsRequest(), mock_context)
+    assert isinstance(response, contract_pb2.ListToolsResponse)
+    assert len(response.tools) == 3
+    assert mock_convert_to_openai_tool.called
+
+    actual_sorted = sorted(
+        [MessageToDict(tool) for tool in response.tools],
+        key=lambda x: x.get("function", {}).get("name", ""),
+    )
+    expected_sorted = sorted(
+        [
+            {
+                "eval_prompts": None,
+                "type": "function",
+                "function": {"description": "tool1 description", "name": "tool1"},
+            },
+            {
+                "eval_prompts": ["prompt2"],
+                "type": "function",
+                "function": {"description": "tool2 description", "name": "tool2"},
+            },
+            {
+                "eval_prompts": None,
+                "type": "function",
+                "function": {"description": "tool3 description", "name": "tool3"},
+            },
+        ],
+        key=lambda x: x.get("function", {}).get("name", ""),
+    )
+    assert actual_sorted == expected_sorted
 
 
 @pytest.mark.asyncio

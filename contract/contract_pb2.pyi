@@ -196,6 +196,16 @@ class GenerateTokenResponse(_message.Message):
     expiresAt: int
     def __init__(self, token: _Optional[str] = ..., expiresAt: _Optional[int] = ...) -> None: ...
 
+class ListToolsRequest(_message.Message):
+    __slots__ = ()
+    def __init__(self) -> None: ...
+
+class ListToolsResponse(_message.Message):
+    __slots__ = ("tools",)
+    TOOLS_FIELD_NUMBER: _ClassVar[int]
+    tools: _containers.RepeatedCompositeFieldContainer[_struct_pb2.Struct]
+    def __init__(self, tools: _Optional[_Iterable[_Union[_struct_pb2.Struct, _Mapping]]] = ...) -> None: ...
+
 class NewCheckpoint(_message.Message):
     __slots__ = ("status", "checkpoint", "goal", "errors")
     STATUS_FIELD_NUMBER: _ClassVar[int]

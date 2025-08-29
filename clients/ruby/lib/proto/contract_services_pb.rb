@@ -16,6 +16,7 @@ module DuoWorkflowService
 
       rpc :ExecuteWorkflow, stream(::DuoWorkflowService::ClientEvent), stream(::DuoWorkflowService::Action)
       rpc :GenerateToken, ::DuoWorkflowService::GenerateTokenRequest, ::DuoWorkflowService::GenerateTokenResponse
+      rpc :ListTools, ::DuoWorkflowService::ListToolsRequest, ::DuoWorkflowService::ListToolsResponse
     end
 
     Stub = Service.rpc_stub_class

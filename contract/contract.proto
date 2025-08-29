@@ -8,6 +8,7 @@ option ruby_package = "DuoWorkflowService";
 service DuoWorkflow {
     rpc ExecuteWorkflow (stream ClientEvent) returns (stream Action);
     rpc GenerateToken (GenerateTokenRequest) returns (GenerateTokenResponse);
+    rpc ListTools (ListToolsRequest) returns (ListToolsResponse);
 }
 
 message ClientEvent {
@@ -125,6 +126,15 @@ message GenerateTokenResponse {
     string token = 1;
     int64 expiresAt = 2;
 }
+
+message ListToolsRequest {
+    // Intentionally empty
+}
+
+message ListToolsResponse {
+  repeated google.protobuf.Struct tools = 1;
+}
+
 
 message NewCheckpoint {
     string status = 1;

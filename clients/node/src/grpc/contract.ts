@@ -136,6 +136,14 @@ export interface GenerateTokenResponse {
   expiresAt: number;
 }
 
+/** Intentionally empty */
+export interface ListToolsRequest {
+}
+
+export interface ListToolsResponse {
+  tools: { [key: string]: any }[];
+}
+
 export interface NewCheckpoint {
   status: string;
   checkpoint: string;
@@ -2011,6 +2019,107 @@ export const GenerateTokenResponse: MessageFns<GenerateTokenResponse> = {
   },
 };
 
+function createBaseListToolsRequest(): ListToolsRequest {
+  return {};
+}
+
+export const ListToolsRequest: MessageFns<ListToolsRequest> = {
+  encode(_: ListToolsRequest, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
+    return writer;
+  },
+
+  decode(input: BinaryReader | Uint8Array, length?: number): ListToolsRequest {
+    const reader = input instanceof BinaryReader ? input : new BinaryReader(input);
+    const end = length === undefined ? reader.len : reader.pos + length;
+    const message = createBaseListToolsRequest();
+    while (reader.pos < end) {
+      const tag = reader.uint32();
+      switch (tag >>> 3) {
+      }
+      if ((tag & 7) === 4 || tag === 0) {
+        break;
+      }
+      reader.skip(tag & 7);
+    }
+    return message;
+  },
+
+  fromJSON(_: any): ListToolsRequest {
+    return {};
+  },
+
+  toJSON(_: ListToolsRequest): unknown {
+    const obj: any = {};
+    return obj;
+  },
+
+  create<I extends Exact<DeepPartial<ListToolsRequest>, I>>(base?: I): ListToolsRequest {
+    return ListToolsRequest.fromPartial(base ?? ({} as any));
+  },
+  fromPartial<I extends Exact<DeepPartial<ListToolsRequest>, I>>(_: I): ListToolsRequest {
+    const message = createBaseListToolsRequest();
+    return message;
+  },
+};
+
+function createBaseListToolsResponse(): ListToolsResponse {
+  return { tools: [] };
+}
+
+export const ListToolsResponse: MessageFns<ListToolsResponse> = {
+  encode(message: ListToolsResponse, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
+    for (const v of message.tools) {
+      Struct.encode(Struct.wrap(v!), writer.uint32(10).fork()).join();
+    }
+    return writer;
+  },
+
+  decode(input: BinaryReader | Uint8Array, length?: number): ListToolsResponse {
+    const reader = input instanceof BinaryReader ? input : new BinaryReader(input);
+    const end = length === undefined ? reader.len : reader.pos + length;
+    const message = createBaseListToolsResponse();
+    while (reader.pos < end) {
+      const tag = reader.uint32();
+      switch (tag >>> 3) {
+        case 1: {
+          if (tag !== 10) {
+            break;
+          }
+
+          message.tools.push(Struct.unwrap(Struct.decode(reader, reader.uint32())));
+          continue;
+        }
+      }
+      if ((tag & 7) === 4 || tag === 0) {
+        break;
+      }
+      reader.skip(tag & 7);
+    }
+    return message;
+  },
+
+  fromJSON(object: any): ListToolsResponse {
+    return { tools: globalThis.Array.isArray(object?.tools) ? [...object.tools] : [] };
+  },
+
+  toJSON(message: ListToolsResponse): unknown {
+    const obj: any = {};
+    if (message.tools?.length) {
+      obj.tools = message.tools;
+    }
+    return obj;
+  },
+
+  create<I extends Exact<DeepPartial<ListToolsResponse>, I>>(base?: I): ListToolsResponse {
+    return ListToolsResponse.fromPartial(base ?? ({} as any));
+  },
+  fromPartial<I extends Exact<DeepPartial<ListToolsResponse>, I>>(object: I): ListToolsResponse {
+    const message = createBaseListToolsResponse();
+    message.tools = object.tools?.map((e) => e) || [];
+    return message;
+  },
+};
+
 function createBaseNewCheckpoint(): NewCheckpoint {
   return { status: "", checkpoint: "", goal: "", errors: [] };
 }
@@ -2939,11 +3048,21 @@ export const DuoWorkflowService = {
       Buffer.from(GenerateTokenResponse.encode(value).finish()),
     responseDeserialize: (value: Buffer): GenerateTokenResponse => GenerateTokenResponse.decode(value),
   },
+  listTools: {
+    path: "/DuoWorkflow/ListTools",
+    requestStream: false,
+    responseStream: false,
+    requestSerialize: (value: ListToolsRequest): Buffer => Buffer.from(ListToolsRequest.encode(value).finish()),
+    requestDeserialize: (value: Buffer): ListToolsRequest => ListToolsRequest.decode(value),
+    responseSerialize: (value: ListToolsResponse): Buffer => Buffer.from(ListToolsResponse.encode(value).finish()),
+    responseDeserialize: (value: Buffer): ListToolsResponse => ListToolsResponse.decode(value),
+  },
 } as const;
 
 export interface DuoWorkflowServer extends UntypedServiceImplementation {
   executeWorkflow: handleBidiStreamingCall<ClientEvent, Action>;
   generateToken: handleUnaryCall<GenerateTokenRequest, GenerateTokenResponse>;
+  listTools: handleUnaryCall<ListToolsRequest, ListToolsResponse>;
 }
 
 export interface DuoWorkflowClient extends Client {
@@ -2964,6 +3083,21 @@ export interface DuoWorkflowClient extends Client {
     metadata: Metadata,
     options: Partial<CallOptions>,
     callback: (error: ServiceError | null, response: GenerateTokenResponse) => void,
+  ): ClientUnaryCall;
+  listTools(
+    request: ListToolsRequest,
+    callback: (error: ServiceError | null, response: ListToolsResponse) => void,
+  ): ClientUnaryCall;
+  listTools(
+    request: ListToolsRequest,
+    metadata: Metadata,
+    callback: (error: ServiceError | null, response: ListToolsResponse) => void,
+  ): ClientUnaryCall;
+  listTools(
+    request: ListToolsRequest,
+    metadata: Metadata,
+    options: Partial<CallOptions>,
+    callback: (error: ServiceError | null, response: ListToolsResponse) => void,
   ): ClientUnaryCall;
 }
 
