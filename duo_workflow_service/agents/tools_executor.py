@@ -1,4 +1,5 @@
 import copy
+import re
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
@@ -109,7 +110,8 @@ class ToolsExecutor:
             if tool_name in _COMMAND_OUTPUT_TOOLS:
                 if chat_logs and "tool_info" in chat_logs[0]:
                     chat_log = chat_logs[0]
-                    chat_log["tool_info"]["tool_response"] = result.get("response")
+                    cleaned_response = self._clean_run_command_response(response)
+                    chat_log["tool_info"]["tool_response"] = cleaned_response
                     chat_log["message_sub_type"] = "command_output"
                     ui_chat_logs.extend([chat_log])
             else:
@@ -393,3 +395,35 @@ class ToolsExecutor:
                 tool_name=tool_name,
                 failure_reason=failure_reason,
             )
+
+    def _clean_run_command_response(self, tool_response: Any) -> Any:
+        """Extract clean output from run_command tool errors."""
+        if not hasattr(tool_response, "content"):
+            return tool_response
+
+        content = tool_response.content
+
+        if not isinstance(content, str):
+            return tool_response
+
+        # Node.js pattern: "Error running tool: Process exited with code X. Output: Y"
+        nodejs_match = re.search(
+            r"Error running tool: Process exited with code \d+\. Output: (.*)$",
+            content,
+            re.DOTALL,
+        )
+        if nodejs_match:
+            tool_response.content = nodejs_match.group(1).strip()
+            return tool_response
+
+        # Go pattern: "Error running tool: exit status X. Result: Y"
+        go_match = re.search(
+            r"Error running tool: exit status \d+\. Result: (.*)$",
+            content,
+            re.DOTALL,
+        )
+        if go_match:
+            tool_response.content = go_match.group(1).strip()
+            return tool_response
+
+        return tool_response
