@@ -64,7 +64,7 @@ def fast_api_router_fixture():
 
 @pytest.fixture(name="auth_user")
 def auth_user_fixture(request):
-    claims = UserClaims(scopes=["complete_code"])
+    claims = UserClaims(scopes=["complete_code", "ai_gateway_model_provider_proxy"])
     return CloudConnectorUser(authenticated=True, claims=claims)
 
 
@@ -120,7 +120,10 @@ def test_user_access_token_success(
     assert decoded_token["iat"] <= current_time_posix
     assert decoded_token["jti"]
     assert decoded_token["gitlab_realm"] == gitlab_realm
-    assert decoded_token["scopes"] == ["complete_code"]
+    assert decoded_token["scopes"] == [
+        "complete_code",
+        "ai_gateway_model_provider_proxy",
+    ]
     assert decoded_token["gitlab_instance_id"] == "1234"
     assert parsed_response["expires_at"] == decoded_token["exp"]
 
@@ -223,7 +226,7 @@ class TestUnauthorizedIssuer:
         return CloudConnectorUser(
             authenticated=True,
             claims=UserClaims(
-                scopes=["complete_code"],
+                scopes=["complete_code", "ai_gateway_model_provider_proxy"],
                 issuer="gitlab-ai-gateway",
             ),
         )
@@ -240,10 +243,100 @@ class TestUnauthorizedIssuer:
             },
         )
         assert response.status_code == status.HTTP_403_FORBIDDEN
-        assert (
-            response.json()["detail"]
-            == "Unauthorized to create user access token for code suggestions"
+        assert response.json()["detail"] == "Unauthorized to create user access token"
+
+
+class TestCompleteCodePermission:
+    @pytest.fixture(name="auth_user")
+    def auth_user_fixture(self):
+        claims = UserClaims(scopes=["complete_code"])
+        return CloudConnectorUser(authenticated=True, claims=claims)
+
+    def test_user_access_token_with_complete_code(self, mock_client: TestClient):
+        headers = {
+            "X-Gitlab-Global-User-Id": GLOBAL_USER_ID,
+            "Authorization": "Bearer 12345",
+            "X-Gitlab-Authentication-Type": "oidc",
+            "X-GitLab-Instance-Id": "1234",
+            "X-Gitlab-Realm": "self-managed",
+        }
+
+        response = mock_client.post("/code/user_access_token", headers=headers)
+        assert response.status_code == status.HTTP_200_OK
+
+
+class TestDuoAgentPlatformPermission:
+    @pytest.fixture(name="auth_user")
+    def auth_user_fixture(self):
+        claims = UserClaims(scopes=["ai_gateway_model_provider_proxy"])
+        return CloudConnectorUser(authenticated=True, claims=claims)
+
+    def test_user_access_token_with_model_provider_proxy(self, mock_client: TestClient):
+        headers = {
+            "X-Gitlab-Global-User-Id": GLOBAL_USER_ID,
+            "Authorization": "Bearer 12345",
+            "X-Gitlab-Authentication-Type": "oidc",
+            "X-GitLab-Instance-Id": "1234",
+            "X-Gitlab-Realm": "self-managed",
+        }
+
+        response = mock_client.post("/code/user_access_token", headers=headers)
+        assert response.status_code == status.HTTP_200_OK
+
+
+class TestBothPermissions:
+    @pytest.fixture(name="auth_user")
+    def auth_user_fixture(self):
+        claims = UserClaims(scopes=["complete_code", "ai_gateway_model_provider_proxy"])
+        return CloudConnectorUser(authenticated=True, claims=claims)
+
+    def test_user_access_token_with_both_permissions(
+        self, mock_client: TestClient, mock_track_internal_event
+    ):
+        headers = {
+            "X-Gitlab-Global-User-Id": GLOBAL_USER_ID,
+            "Authorization": "Bearer 12345",
+            "X-Gitlab-Authentication-Type": "oidc",
+            "X-GitLab-Instance-Id": "1234",
+            "X-Gitlab-Realm": "self-managed",
+        }
+
+        response = mock_client.post("/code/user_access_token", headers=headers)
+        assert response.status_code == status.HTTP_200_OK
+
+        parsed_response = response.json()
+        decoded_token = jwt.decode(
+            parsed_response["token"],
+            TEST_PUBLIC_KEY,
+            audience="gitlab-ai-gateway",
+            algorithms=CompositeProvider.SUPPORTED_ALGORITHMS,
         )
+
+        # Order might vary, so we use set comparison
+        assert set(decoded_token["scopes"]) == {
+            "complete_code",
+            "ai_gateway_model_provider_proxy",
+        }
+
+
+class TestNoPermissions:
+    @pytest.fixture(name="auth_user")
+    def auth_user_fixture(self):
+        claims = UserClaims(scopes=["random"])
+        return CloudConnectorUser(authenticated=True, claims=claims)
+
+    def test_user_access_token_with_no_permissions(self, mock_client: TestClient):
+        headers = {
+            "X-Gitlab-Global-User-Id": GLOBAL_USER_ID,
+            "Authorization": "Bearer 12345",
+            "X-Gitlab-Authentication-Type": "oidc",
+            "X-GitLab-Instance-Id": "1234",
+            "X-Gitlab-Realm": "self-managed",
+        }
+
+        response = mock_client.post("/code/user_access_token", headers=headers)
+        assert response.status_code == status.HTTP_403_FORBIDDEN
+        assert response.json()["detail"] == "Unauthorized to create user access token"
 
 
 class TestUserAccessTokenJwtGenerationFailed:
