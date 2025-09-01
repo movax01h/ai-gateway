@@ -1118,3 +1118,70 @@ async def test_aput_writes_with_interrupt(gitlab_workflow, http_client):
             }
         ),
     )
+
+
+@pytest.mark.asyncio
+async def test_created_status_with_no_checkpoint_succeeds(
+    http_client,
+    workflow_id,
+    workflow_type,
+):
+    workflow_config = {
+        "first_checkpoint": None,
+        "workflow_status": WorkflowStatusEnum.CREATED,
+        "agent_privileges_names": ["read_repository"],
+        "pre_approved_agent_privileges_names": [],
+        "mcp_enabled": True,
+        "allow_agent_to_request_user": True,
+    }
+
+    gitlab_workflow = GitLabWorkflow(
+        http_client,
+        workflow_id,
+        workflow_type,
+        workflow_config,  # type: ignore[arg-type]
+    )
+
+    config: RunnableConfig = {"configurable": {}}
+
+    # This should succeed and return START event
+    status_event, event_property = await gitlab_workflow._get_initial_status_event(
+        config
+    )
+
+    assert status_event == WorkflowStatusEventEnum.START
+    assert event_property == EventPropertyEnum.WORKFLOW_ID
+
+
+@pytest.mark.asyncio
+async def test_created_status_with_existing_checkpoint_raises_error(
+    http_client,
+    workflow_id,
+    workflow_type,
+):
+    mock_checkpoint = {"checkpoint": "test_checkpoint_data"}
+    workflow_config = {
+        "first_checkpoint": mock_checkpoint,
+        "workflow_status": WorkflowStatusEnum.CREATED,
+        "agent_privileges_names": ["read_repository"],
+        "pre_approved_agent_privileges_names": [],
+        "mcp_enabled": True,
+        "allow_agent_to_request_user": True,
+    }
+
+    gitlab_workflow = GitLabWorkflow(
+        http_client,
+        workflow_id,
+        workflow_type,
+        workflow_config,  # type: ignore[arg-type]
+    )
+
+    config: RunnableConfig = {"configurable": {}}
+
+    with pytest.raises(UnsupportedStatusEvent) as exc_info:
+        await gitlab_workflow._get_initial_status_event(config)
+
+    assert "Workflow with status 'created' should not have existing checkpoints" in str(
+        exc_info.value
+    )
+    assert f"Found checkpoint: {mock_checkpoint}" in str(exc_info.value)
