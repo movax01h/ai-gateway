@@ -47,13 +47,22 @@ async def user_access_token(
         Optional[str], Header()
     ] = None,  # This is the value of X_GITLAB_INSTANCE_ID_HEADER
 ):
-    if not current_user.can(
+    unit_primitives = [
         GitLabUnitPrimitive.COMPLETE_CODE,
-        disallowed_issuers=[CloudConnectorConfig().service_name],
-    ):
+        GitLabUnitPrimitive.AI_GATEWAY_MODEL_PROVIDER_PROXY,
+    ]
+    scopes = [
+        unit_primitive
+        for unit_primitive in unit_primitives
+        if current_user.can(
+            unit_primitive, disallowed_issuers=[CloudConnectorConfig().service_name]
+        )
+    ]
+
+    if not scopes:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="Unauthorized to create user access token for code suggestions",
+            detail="Unauthorized to create user access token",
         )
 
     internal_event_client.track_event(
@@ -85,7 +94,7 @@ async def user_access_token(
             x_gitlab_realm,
             current_user,
             x_gitlab_instance_id,
-            scopes=[GitLabUnitPrimitive.COMPLETE_CODE],
+            scopes=scopes,
         )
     except Exception:
         raise HTTPException(
