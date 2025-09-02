@@ -131,6 +131,53 @@ PORT=50053 poetry run duo-workflow-service
   poetry run python -m duo_workflow_service.client
   ```
 
+## Export All Tool Specs
+
+This guide shows you how to export tool specifications in OpenAI format from your Duo Workflow service.
+
+### Prerequisites
+
+- Duo Workflow service must be running
+- `grpcurl` tool installed on your system
+
+### Step 1: Install grpcurl
+
+If you don't have `grpcurl` installed, install it using Homebrew:
+
+```shell
+brew install grpcurl
+```
+
+### Step 2: Export Tool Specs
+
+Run the following command to export all tool specifications:
+
+```shell
+grpcurl -plaintext -d '{}' gdk.test:50052 DuoWorkflow/ListTools | jq '.tools[] | {name: .function.name, description: .function.description}'
+```
+
+This command will:
+
+- Connect to the Duo Workflow service at `gdk.test:50052`, replace the host name and port according to your local dev setup
+- Call the `ListTools` method
+- Extract and format the tool name and description for each tool using `jq`. If you want the raw output, you can remove the part of `jq` command.
+
+### Expected Output
+
+The command will return a JSON object for each tool containing:
+
+- `name`: The function name
+- `description`: The function description
+
+Example output:
+
+```json
+{
+  "name": "read_file",
+  "description": "Read the contents of a file.\n\n    IMPORTANT:\n    - When a task requires reading multiple files, include batches of tool calls in a single response\n    - Do not make separate responses for each file - group related files together\n\n    "
+}
+```
+
 ## LLM Caching
 
 Real calls to LLMs tend to be slow and expensive. Often during development we
