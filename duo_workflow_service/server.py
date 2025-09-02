@@ -350,6 +350,7 @@ class DuoWorkflowService(contract_pb2_grpc.DuoWorkflowServicer):
     async def ListTools(
         self, request: contract_pb2.ListToolsRequest, context: grpc.ServicerContext
     ):
+        log.info("Listing all available tools")
         tool_classes = set(
             (
                 tools_registry._DEFAULT_TOOLS
