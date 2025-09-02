@@ -18,8 +18,8 @@ spec:
         AIGW_INSTRUMENTATOR__THREAD_MONITORING_ENABLED: "True"
         AIGW_INSTRUMENTATOR__THREAD_MONITORING_INTERVAL: "60"
         AIGW_CLOUD_CONNECTOR_SERVICE_NAME: "gitlab-ai-gateway"
-        AIGW_AMAZON_Q__REGION: "us-east-1"
-        AIGW_AMAZON_Q__ENDPOINT_URL: "https://us-east-1.prod.integration.qdev.ai.aws.dev"
+        AIGW_AMAZON_Q__REGION: "${region}"
+        AIGW_AMAZON_Q__ENDPOINT_URL: "https://${region}.prod.integration.qdev.ai.aws.dev"
       container_port: 8080
       protocol: http
       scalability:
