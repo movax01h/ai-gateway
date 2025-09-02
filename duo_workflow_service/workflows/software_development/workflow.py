@@ -89,6 +89,7 @@ EXECUTOR_TOOLS = [
     "read_file",
     "read_files",
     "update_vulnerability_severity",
+    "revert_to_detected_vulnerability",
     "create_file_with_contents",
     "edit_file",
     "find_files",

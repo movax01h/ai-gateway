@@ -13,6 +13,8 @@ from duo_workflow_service.tools.security import (
     LinkVulnerabilityToIssueInput,
     ListVulnerabilities,
     ListVulnerabilitiesInput,
+    RevertToDetectedVulnerability,
+    RevertToDetectedVulnerabilityInput,
     VulnerabilityReportType,
     VulnerabilitySeverity,
 )
@@ -1260,4 +1262,115 @@ async def test_confirm_vulnerability_with_long_comment_error(
 )
 def test_confirm_vulnerability_format_display_message(input_data, expected_message):
     tool = ConfirmVulnerability(metadata={})
+    assert tool.format_display_message(input_data) == expected_message
+
+
+@pytest.mark.asyncio
+async def test_revert_to_detected_vulnerability(gitlab_client_mock, metadata):
+    gitlab_client_mock.apost = AsyncMock(
+        return_value={
+            "data": {
+                "vulnerabilityRevertToDetected": {
+                    "errors": [],
+                    "vulnerability": {
+                        "id": "gid://gitlab/Vulnerability/123",
+                        "title": "SQL Injection",
+                        "state": "DETECTED",
+                        "severity": "HIGH",
+                    },
+                }
+            }
+        }
+    )
+
+    tool = RevertToDetectedVulnerability(metadata=metadata)
+
+    input_data = {
+        "vulnerability_id": "gid://gitlab/Vulnerability/123",
+        "comment": "Reverting for re-assessment",
+    }
+
+    response = await tool.arun(input_data)
+
+    expected_response = json.dumps(
+        {
+            "vulnerability": {
+                "id": "gid://gitlab/Vulnerability/123",
+                "title": "SQL Injection",
+                "state": "DETECTED",
+                "severity": "HIGH",
+            },
+            "status": "reverted_to_detected",
+        }
+    )
+    assert response == expected_response
+
+    # editorconfig-checker-disable
+    expected_mutation = """
+        mutation($vulnerabilityId: VulnerabilityID!, $comment: String) {
+          vulnerabilityRevertToDetected(input: {
+            id: $vulnerabilityId
+            comment: $comment
+          }) {
+            errors
+            vulnerability {
+              id
+              title
+              state
+              severity
+            }
+          }
+        }
+        """
+    # editorconfig-checker-enable
+
+    gitlab_client_mock.apost.assert_called_once_with(
+        path="/api/graphql",
+        body=json.dumps(
+            {
+                "query": expected_mutation,
+                "variables": {
+                    "vulnerabilityId": "gid://gitlab/Vulnerability/123",
+                    "comment": "Reverting for re-assessment",
+                },
+            }
+        ),
+    )
+
+
+@pytest.mark.asyncio
+async def test_revert_to_detected_vulnerability_exception(gitlab_client_mock, metadata):
+    gitlab_client_mock.apost = AsyncMock(side_effect=Exception("API Error"))
+
+    tool = RevertToDetectedVulnerability(metadata=metadata)
+
+    response = await tool.arun({"vulnerability_id": "gid://gitlab/Vulnerability/123"})
+
+    error_response = json.loads(response)
+    assert "error" in error_response
+    assert "API Error" in error_response["error"]
+
+
+@pytest.mark.parametrize(
+    "input_data,expected_message",
+    [
+        (
+            RevertToDetectedVulnerabilityInput(
+                vulnerability_id="gid://gitlab/Vulnerability/123"
+            ),
+            "Revert vulnerability gid://gitlab/Vulnerability/123 to detected state",
+        ),
+        (
+            RevertToDetectedVulnerabilityInput(
+                vulnerability_id="gid://gitlab/Vulnerability/456",
+                comment="Reverting for re-assessment after code changes",
+            ),
+            "Revert vulnerability gid://gitlab/Vulnerability/456 to detected state - Reason: Reverting for re-assessment after code changes",
+        ),
+    ],
+)
+def test_revert_to_detected_vulnerability_format_display_message(
+    input_data, expected_message
+):
+    tool = RevertToDetectedVulnerability(metadata={})
     assert tool.format_display_message(input_data) == expected_message
