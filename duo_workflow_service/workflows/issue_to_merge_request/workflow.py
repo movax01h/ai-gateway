@@ -36,6 +36,7 @@ from duo_workflow_service.workflows.abstract_workflow import (
 from duo_workflow_service.workflows.issue_to_merge_request.prompts import (
     BUILD_CONTEXT_SYSTEM_MESSAGE,
 )
+from lib.feature_flags.context import FeatureFlag, is_feature_enabled
 
 CONTEXT_BUILDER_TOOLS = [
     "list_issues",
@@ -335,28 +336,46 @@ class Workflow(AbstractWorkflow):
         tools_registry: ToolsRegistry,
     ):
         context_builder_toolset = tools_registry.toolset(CONTEXT_BUILDER_TOOLS)
-        context_builder = Agent(
-            goal=f"Consider the following issue url: {goal}. Build context and identify development tasks from the "
-            f"issue requirements.",
-            model=create_chat_model(
-                max_tokens=MAX_TOKENS_TO_SAMPLE,
-                config=self._model_config,
-            ),  # type: ignore
-            name="context_builder",
-            system_prompt=BUILD_CONTEXT_SYSTEM_MESSAGE.format(
-                handover_tool_name=HANDOVER_TOOL_NAME,
-                issue_url=goal,
-                current_branch=self._workflow_metadata["git_branch"],
-                default_branch=self._project["default_branch"],  # type: ignore[index]
-                project_id=self._project["id"],  # type: ignore[index]
+        if is_feature_enabled(FeatureFlag.DUO_WORKFLOW_PROMPT_REGISTRY):
+            context_builder = self._prompt_registry.get_on_behalf(
+                self._user,
+                "workflow/issue_to_merge_request",
+                "^1.0.0",
+                tools=context_builder_toolset.bindable,  # type: ignore[arg-type]
                 workflow_id=self._workflow_id,
-                session_url=self._session_url,
-            ),
-            toolset=context_builder_toolset,
-            workflow_id=self._workflow_id,
-            http_client=self._http_client,
-            workflow_type=self._workflow_type,
-        )
+                workflow_type=self._workflow_type,
+                http_client=self._http_client,
+                prompt_template_inputs={
+                    "issue_url": goal,
+                    "current_branch": self._workflow_metadata["git_branch"],
+                    "default_branch": self._project["default_branch"],  # type: ignore[index]
+                    "workflow_id": self._workflow_id,
+                    "session_url": self._session_url,
+                },
+            )
+        else:
+            context_builder = Agent(
+                goal=f"Consider the following issue url: {goal}. Build context and identify development tasks from the "
+                f"issue requirements.",
+                model=create_chat_model(
+                    max_tokens=MAX_TOKENS_TO_SAMPLE,
+                    config=self._model_config,
+                ),  # type: ignore
+                name="context_builder",
+                system_prompt=BUILD_CONTEXT_SYSTEM_MESSAGE.format(
+                    handover_tool_name=HANDOVER_TOOL_NAME,
+                    issue_url=goal,
+                    current_branch=self._workflow_metadata["git_branch"],
+                    default_branch=self._project["default_branch"],  # type: ignore[index]
+                    project_id=self._project["id"],  # type: ignore[index]
+                    workflow_id=self._workflow_id,
+                    session_url=self._session_url,
+                ),
+                toolset=context_builder_toolset,
+                workflow_id=self._workflow_id,
+                http_client=self._http_client,
+                workflow_type=self._workflow_type,
+            )
 
         return {
             "agent": context_builder,
