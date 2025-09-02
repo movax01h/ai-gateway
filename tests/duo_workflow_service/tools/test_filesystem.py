@@ -392,6 +392,88 @@ class TestReadFiles:
         assert action.runReadFiles.filepaths == file_paths
 
     @pytest.mark.asyncio
+    async def test_read_files_with_no_action_response(self):
+        mock_outbox = MagicMock()
+        mock_outbox.put = AsyncMock()
+
+        # Mock response with mixed success and error
+        mock_inbox = MagicMock()
+        mock_inbox.get = AsyncMock(
+            return_value=contract_pb2.ClientEvent(actionResponse=None)
+        )
+
+        metadata = {"outbox": mock_outbox, "inbox": mock_inbox}
+
+        tool = ReadFiles(description="Read multiple files")
+        tool.metadata = metadata
+        file_paths = ["file1.py", "nonexistent.py"]
+
+        response = await tool._arun(file_paths)
+
+        assert response == "Could not read files"
+
+        mock_outbox.put.assert_called_once()
+        action = mock_outbox.put.call_args[0][0]
+        assert action.runReadFiles.filepaths == file_paths
+
+    @pytest.mark.asyncio
+    async def test_read_files_with_none_response(self):
+        mock_outbox = MagicMock()
+        mock_outbox.put = AsyncMock()
+
+        # Mock response with mixed success and error
+        mock_inbox = MagicMock()
+        mock_inbox.get = AsyncMock(
+            return_value=contract_pb2.ClientEvent(
+                actionResponse=contract_pb2.ActionResponse(response=None)
+            )
+        )
+
+        metadata = {"outbox": mock_outbox, "inbox": mock_inbox}
+
+        tool = ReadFiles(description="Read multiple files")
+        tool.metadata = metadata
+        file_paths = ["file1.py", "nonexistent.py"]
+
+        response = await tool._arun(file_paths)
+
+        assert response == "Could not read files"
+
+        mock_outbox.put.assert_called_once()
+        action = mock_outbox.put.call_args[0][0]
+        assert action.runReadFiles.filepaths == file_paths
+
+    @pytest.mark.asyncio
+    async def test_read_files_with_error_response(self):
+        mock_outbox = MagicMock()
+        mock_outbox.put = AsyncMock()
+
+        # Mock response with mixed success and error
+        mock_plaintextResponse = {"error": "Error reading files"}
+        mock_inbox = MagicMock()
+        mock_inbox.get = AsyncMock(
+            return_value=contract_pb2.ClientEvent(
+                actionResponse=contract_pb2.ActionResponse(
+                    response=None, plainTextResponse=mock_plaintextResponse
+                )
+            )
+        )
+
+        metadata = {"outbox": mock_outbox, "inbox": mock_inbox}
+
+        tool = ReadFiles(description="Read multiple files")
+        tool.metadata = metadata
+        file_paths = ["file1.py", "nonexistent.py"]
+
+        response = await tool._arun(file_paths)
+
+        assert response == "Could not read files"
+
+        mock_outbox.put.assert_called_once()
+        action = mock_outbox.put.call_args[0][0]
+        assert action.runReadFiles.filepaths == file_paths
+
+    @pytest.mark.asyncio
     async def test_read_files_rejects_excluded_paths(self):
         tool = ReadFiles(description="Read multiple files")
 
