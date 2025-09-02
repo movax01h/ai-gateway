@@ -40,6 +40,7 @@ from duo_workflow_service.gitlab.gitlab_api import (
 )
 from duo_workflow_service.gitlab.http_client import GitlabHttpClient
 from duo_workflow_service.gitlab.http_client_factory import get_http_client
+from duo_workflow_service.gitlab.url_parser import SESSION_URL_PATH
 from duo_workflow_service.llm_factory import AnthropicConfig, VertexConfig
 from duo_workflow_service.monitoring import duo_workflow_metrics
 from duo_workflow_service.tools import convert_mcp_tools_to_langchain_tool_classes
@@ -227,7 +228,9 @@ class AbstractWorkflow(ABC):
             )
 
             if self._project and self._project.get("web_url"):
-                self._session_url = f"{self._project['web_url']}/-/automate/agent-sessions/{self._workflow_id}"
+                self._session_url = (
+                    f"{self._project['web_url']}{SESSION_URL_PATH}{self._workflow_id}"
+                )
 
             if self._namespace and self._support_namespace_level_workflow() is False:
                 raise NotImplementedError(

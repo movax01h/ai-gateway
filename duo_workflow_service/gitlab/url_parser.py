@@ -12,6 +12,8 @@ REPOSITORY_FILE_URL_REGEX = r"^(.+?)/-/blob/([^/]+)/(.+)$"
 COMMIT_URL_REGEX = r"^(.+?)/-/commit/([a-fA-F0-9]{5,40})"
 WORK_ITEM_URL_REGEX = r"^(?:groups/)?(?P<full_path>.+)/-/work_items/(?P<iid>\d+)$"
 
+SESSION_URL_PATH = "/-/automate/agent-sessions/"
+
 
 class ParsedWorkItemUrl(NamedTuple):
     parent_type: Literal["group", "project"]
