@@ -43,6 +43,7 @@ __all__ = [
     "DismissVulnerability",
     "LinkVulnerabilityToIssue",
     "ConfirmVulnerability",
+    "RevertToDetectedVulnerability",
 ]
 
 
@@ -575,3 +576,94 @@ mutation($vulnerabilityId: VulnerabilityID!, $comment: String) {
         self, args: ConfirmVulnerabilityInput, _tool_response: Any = None
     ) -> str | None:
         return f"Confirm vulnerability {args.vulnerability_id}"
+
+
+class RevertToDetectedVulnerabilityInput(BaseModel):
+    vulnerability_id: str = Field(
+        description="The ID of the vulnerability to revert to detected state (e.g., 'gid://gitlab/Vulnerability/123')",
+    )
+    comment: Optional[str] = Field(
+        default=None,
+        description="Optional comment explaining why the vulnerability was reverted to detected state.",
+    )
+
+
+class RevertToDetectedVulnerability(DuoBaseTool):
+    name: str = "revert_to_detected_vulnerability"
+    description: str = """Revert a vulnerability's state back to 'detected' status in GitLab using GraphQL.
+
+    The vulnerability is identified by its GitLab internal ID, which can be obtained from the
+    list_vulnerabilities tool. An optional comment can be provided to explain the reason for reverting.
+
+    For example:
+    - Revert a vulnerability without comment:
+        revert_to_detected_vulnerability(vulnerability_id="gid://gitlab/Vulnerability/123")
+    - Revert with explanation:
+        revert_to_detected_vulnerability(vulnerability_id="gid://gitlab/Vulnerability/123", comment="Reverting for re-assessment after code changes")
+    """
+    args_schema: Type[BaseModel] = RevertToDetectedVulnerabilityInput
+
+    async def _arun(self, **kwargs: Any) -> str:
+        vulnerability_id = kwargs.pop("vulnerability_id")
+        comment = kwargs.pop("comment", None)
+
+        # editorconfig-checker-disable
+        # Build GraphQL mutation
+
+        mutation = """
+        mutation($vulnerabilityId: VulnerabilityID!, $comment: String) {
+          vulnerabilityRevertToDetected(input: {
+            id: $vulnerabilityId
+            comment: $comment
+          }) {
+            errors
+            vulnerability {
+              id
+              title
+              state
+              severity
+            }
+          }
+        }
+        """
+        # editorconfig-checker-enable
+
+        variables = {
+            "vulnerabilityId": vulnerability_id,
+        }
+
+        if comment:
+            variables["comment"] = comment
+
+        try:
+            response = await self.gitlab_client.apost(
+                path="/api/graphql",
+                body=json.dumps({"query": mutation, "variables": variables}),
+            )
+
+            mutation_result = response["data"]["vulnerabilityRevertToDetected"]
+
+            if mutation_result["errors"]:
+                return json.dumps({"error": mutation_result["errors"]})
+
+            return json.dumps(
+                {
+                    "vulnerability": mutation_result["vulnerability"],
+                    "status": "reverted_to_detected",
+                }
+            )
+        except Exception as e:
+            return json.dumps({"error": str(e)})
+
+    def format_display_message(
+        self, args: RevertToDetectedVulnerabilityInput, _tool_response: Any = None
+    ) -> str:
+        base_message = f"Revert vulnerability {args.vulnerability_id} to detected state"
+
+        if args.comment:
+            display_comment = (
+                args.comment if len(args.comment) <= 100 else f"{args.comment[:97]}..."
+            )
+            return f"{base_message} - Reason: {display_comment}"
+
+        return base_message
