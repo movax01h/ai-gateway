@@ -4,6 +4,9 @@ import pytest
 from gitlab_cloud_connector import CloudConnectorUser, GitLabUnitPrimitive, UserClaims
 
 from ai_gateway.api.v1 import api_router
+from ai_gateway.api.v1.proxy.request import (
+    EXTENDED_FEATURE_CATEGORIES_FOR_PROXY_ENDPOINTS,
+)
 
 
 @pytest.fixture(name="fast_api_router", scope="class")
@@ -16,16 +19,17 @@ def auth_user_fixture():
     return CloudConnectorUser(
         authenticated=True,
         claims=UserClaims(
-            scopes=[
-                GitLabUnitPrimitive.EXPLAIN_VULNERABILITY,
-            ]
+            scopes=EXTENDED_FEATURE_CATEGORIES_FOR_PROXY_ENDPOINTS.keys()
         ),
     )
 
 
 class TestProxyAnthropic:
+    @pytest.mark.parametrize(
+        "unit_primitive", EXTENDED_FEATURE_CATEGORIES_FOR_PROXY_ENDPOINTS.keys()
+    )
     def test_successful_request(
-        self, mock_client, mock_track_internal_event, mock_detect_abuse
+        self, mock_client, mock_track_internal_event, mock_detect_abuse, unit_primitive
     ):
         with patch(
             "ai_gateway.proxy.clients.AnthropicProxyClient.proxy",
@@ -36,7 +40,7 @@ class TestProxyAnthropic:
                 headers={
                     "Authorization": "Bearer 12345",
                     "X-Gitlab-Authentication-Type": "oidc",
-                    "X-Gitlab-Unit-Primitive": GitLabUnitPrimitive.EXPLAIN_VULNERABILITY,
+                    "X-Gitlab-Unit-Primitive": unit_primitive,
                 },
                 json={
                     "model": "claude-3-5-haiku-20241022",
@@ -50,7 +54,7 @@ class TestProxyAnthropic:
         assert response.json() == {"response": "test"}
 
         mock_track_internal_event.assert_called_once_with(
-            "request_explain_vulnerability",
+            f"request_{unit_primitive}",
             category="ai_gateway.api.v1.proxy.anthropic",
         )
 
