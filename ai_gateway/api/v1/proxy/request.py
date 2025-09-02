@@ -3,13 +3,30 @@ import typing
 
 from fastapi import BackgroundTasks, HTTPException, Request, status
 from gitlab_cloud_connector import (
+    FEATURE_CATEGORIES_FOR_PROXY_ENDPOINTS,
     UNIT_PRIMITIVE_AND_DESCRIPTION_MAPPING,
+    GitLabFeatureCategory,
     GitLabUnitPrimitive,
 )
 
 from ai_gateway.abuse_detection import AbuseDetector
 from ai_gateway.api.auth_utils import StarletteUser
 from ai_gateway.api.feature_category import X_GITLAB_UNIT_PRIMITIVE
+
+# It's implemented here, because eventually we want to restrict this endpoint to
+# ai_gateway_model_provider_proxy unit primitive only, so we won't rely on
+# FEATURE_CATEGORIES_FOR_PROXY_ENDPOINTS const anymore.
+#
+# https://gitlab.com/gitlab-org/modelops/applied-ml/code-suggestions/ai-assist/-/issues/1420
+#
+# Currently, this endpoint is used by older self-managed instances, so we cannot just restrict
+# the list of unit primitives due to the backward compatibility promise.
+EXTENDED_FEATURE_CATEGORIES_FOR_PROXY_ENDPOINTS = {
+    **FEATURE_CATEGORIES_FOR_PROXY_ENDPOINTS,
+    **{
+        GitLabUnitPrimitive.AI_GATEWAY_MODEL_PROVIDER_PROXY: GitLabFeatureCategory.DUO_AGENT_PLATFORM
+    },
+}
 
 
 def authorize_with_unit_primitive_header():

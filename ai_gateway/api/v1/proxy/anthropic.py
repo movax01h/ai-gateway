@@ -2,11 +2,13 @@ from typing import Annotated
 
 import structlog
 from fastapi import APIRouter, BackgroundTasks, Depends, Request
-from gitlab_cloud_connector import FEATURE_CATEGORIES_FOR_PROXY_ENDPOINTS
 
 from ai_gateway.abuse_detection import AbuseDetector
 from ai_gateway.api.feature_category import X_GITLAB_UNIT_PRIMITIVE, feature_categories
-from ai_gateway.api.v1.proxy.request import authorize_with_unit_primitive_header
+from ai_gateway.api.v1.proxy.request import (
+    EXTENDED_FEATURE_CATEGORIES_FOR_PROXY_ENDPOINTS,
+    authorize_with_unit_primitive_header,
+)
 from ai_gateway.async_dependency_resolver import (
     get_abuse_detector,
     get_anthropic_proxy_client,
@@ -27,7 +29,7 @@ router = APIRouter()
 
 @router.post(f"/{KindModelProvider.ANTHROPIC.value}" + "/{path:path}")
 @authorize_with_unit_primitive_header()
-@feature_categories(FEATURE_CATEGORIES_FOR_PROXY_ENDPOINTS)
+@feature_categories(EXTENDED_FEATURE_CATEGORIES_FOR_PROXY_ENDPOINTS)
 async def anthropic(
     request: Request,
     background_tasks: BackgroundTasks,  # pylint: disable=unused-argument
