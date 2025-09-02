@@ -20,7 +20,7 @@ spec:
         AIGW_CLOUD_CONNECTOR_SERVICE_NAME: "gitlab-ai-gateway"
         AIGW_AMAZON_Q__REGION: "us-east-1"
         AIGW_AMAZON_Q__ENDPOINT_URL: "https://us-east-1.prod.integration.qdev.ai.aws.dev"
-      container_port: 5052
+      container_port: 8080
       protocol: http
       scalability:
         min_instances: 8
