@@ -63,8 +63,12 @@ class AuthenticationInterceptor(grpc.aio.ServerInterceptor):
         return grpc.unary_unary_rpc_method_handler(handler)
 
     def _oidc_auth_provider(self) -> AuthProvider:
-        gitlab_url: str = os.environ.get(
-            "DUO_WORKFLOW_AUTH__OIDC_GITLAB_URL", "https://gitlab.com"
+        # Reuse the AIGW_GITLAB_URL so that GitLab Self-Hosted Duo customers can
+        # use the same URL for both AIGW and Duo Workflow Service
+        gitlab_url: str = (
+            os.environ.get("DUO_WORKFLOW_AUTH__OIDC_GITLAB_URL")
+            or os.environ.get("AIGW_GITLAB_URL")
+            or "https://gitlab.com"
         )
         customer_portal_url: str = os.environ.get(
             "DUO_WORKFLOW_AUTH__OIDC_CUSTOMER_PORTAL_URL",
