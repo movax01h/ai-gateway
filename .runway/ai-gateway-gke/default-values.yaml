@@ -1,5 +1,5 @@
-apiVersion: runway/v1.0.0-beta
-kind: RunwayGKEService
+apiVersion: runway/v1
+kind: RunwayKubernetesService
 metadata:
   name: ai-gateway-gke
 spec:

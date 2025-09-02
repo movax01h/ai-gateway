@@ -1,5 +1,5 @@
 apiVersion: runway/v1
-kind: RunwayKubernetesDeployment
+kind: RunwayKubernetesService
 metadata:
   name: ai-gateway-eks
 spec:

@@ -25,6 +25,10 @@ spec:
     min_instances: 4
     max_instances: 8
     max_instance_request_concurrency: 200
+  # Pinning Gen2 architecture to mitigate SIGSEGV errors
+  # See https://gitlab.com/gitlab-org/modelops/applied-ml/code-suggestions/ai-assist/-/issues/1421 for more info.
+  # Ref: https://cloud.google.com/run/docs/about-execution-environments
+  execution_environment: EXECUTION_ENVIRONMENT_GEN2
   resources:
     startup_cpu_boost: true
     limits:

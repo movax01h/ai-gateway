@@ -1,3 +1,6 @@
+apiVersion: runway/v1
+kind: RunwayKubernetesDeployment
+
 ai-gateway-gke:
   metadata:
     labels:
