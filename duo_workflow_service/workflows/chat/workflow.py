@@ -241,7 +241,6 @@ class Workflow(AbstractWorkflow):
             model_metadata=model_metadata,
             internal_event_category=__name__,
             tools=agents_toolset.bindable,  # type: ignore[arg-type]
-            preapproved_tools=self._preapproved_tools,
         )
         self._agent.tools_registry = tools_registry
 
