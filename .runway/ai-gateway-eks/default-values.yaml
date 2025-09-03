@@ -8,7 +8,7 @@ spec:
       image: "registry.gitlab.com/gitlab-org/modelops/applied-ml/code-suggestions/ai-assist/model-gateway:{{ .AppVersion }}"
       command: ["/home/aigateway/app/scripts/run.sh"]
       environment:
-        AIGW_FASTAPI__API_PORT: "8080"
+        AIGW_FASTAPI__API_PORT: "5052"
         HOME: "/root"
         AIGW_FASTAPI__METRICS_HOST: "0.0.0.0"
         AIGW_FASTAPI__METRICS_PORT: "8082"
@@ -20,7 +20,7 @@ spec:
         AIGW_CLOUD_CONNECTOR_SERVICE_NAME: "gitlab-ai-gateway"
         AIGW_AMAZON_Q__REGION: "${region}"
         AIGW_AMAZON_Q__ENDPOINT_URL: "https://${region}.prod.integration.qdev.ai.aws.dev"
-      container_port: 8080
+      container_port: 5052
       protocol: http
       scalability:
         min_instances: 8
