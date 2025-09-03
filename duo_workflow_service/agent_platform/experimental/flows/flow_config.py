@@ -1,5 +1,5 @@
 from pathlib import Path
-from typing import Callable, ClassVar, Self
+from typing import Callable, ClassVar, Optional, Self
 
 import yaml
 from pydantic import BaseModel
@@ -32,6 +32,7 @@ class FlowConfig(BaseModel):
     routers: list[dict]
     environment: str
     version: str
+    prompts: Optional[list[dict]] = None
 
     @classmethod
     def from_yaml_config(cls, path: str) -> Self:

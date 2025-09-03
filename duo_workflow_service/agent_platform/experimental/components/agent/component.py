@@ -1,4 +1,4 @@
-from typing import Annotated, ClassVar, Literal
+from typing import Annotated, ClassVar, Literal, Optional
 
 from dependency_injector.wiring import Provide, inject
 from langchain_core.messages import AIMessage, BaseMessage
@@ -6,7 +6,7 @@ from langgraph.graph import StateGraph
 from pydantic import Field
 
 from ai_gateway.container import ContainerApplication
-from ai_gateway.prompts import LocalPromptRegistry
+from ai_gateway.prompts import InMemoryPromptRegistry, LocalPromptRegistry
 from duo_workflow_service.agent_platform.experimental.components.agent.nodes import (
     AgentFinalOutput,
     AgentNode,
@@ -62,10 +62,10 @@ class AgentComponent(BaseComponent):
     supported_environments: ClassVar[tuple[str, ...]] = ("platform",)
 
     prompt_id: str
-    prompt_version: str
+    prompt_version: Optional[str] = None
     toolset: Toolset
 
-    prompt_registry: LocalPromptRegistry = Provide[
+    prompt_registry: LocalPromptRegistry | InMemoryPromptRegistry = Provide[
         ContainerApplication.pkg_prompts.prompt_registry
     ]
     internal_event_client: InternalEventsClient = Provide[
