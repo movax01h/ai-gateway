@@ -22,12 +22,16 @@ from duo_workflow_service.components.executor.prompts import (
     HANDOVER_TOOL_NAME,
     OS_INFORMATION_COMPONENT,
     SET_TASK_STATUS_TOOL_NAME,
+    SHELL_INFORMATION_COMPONENT,
 )
 from duo_workflow_service.entities import WorkflowState, WorkflowStatusEnum
 from duo_workflow_service.gitlab.gitlab_api import Project
 from duo_workflow_service.llm_factory import create_chat_model
 from duo_workflow_service.workflows.abstract_workflow import MAX_TOKENS_TO_SAMPLE
-from duo_workflow_service.workflows.type_definitions import OsInformationContext
+from duo_workflow_service.workflows.type_definitions import (
+    OsInformationContext,
+    ShellInformationContext,
+)
 from lib.feature_flags.context import FeatureFlag, is_feature_enabled
 
 
@@ -151,8 +155,37 @@ class ExecutorComponent(BaseComponent):
 
         return "execution"
 
+    def _format_shell_information(self, context: ShellInformationContext) -> str:
+        variant_section = (
+            f"\n  <variant>{context.shell_variant}</variant>"
+            if context.shell_variant
+            else ""
+        )
+        environment_section = (
+            f"\n  <environment>{context.shell_environment}</environment>"
+            if context.shell_environment
+            else ""
+        )
+        ssh_session_section = (
+            f"\n  <ssh_session>{context.ssh_session}</ssh_session>"
+            if context.ssh_session is not None
+            else ""
+        )
+        cwd_section = f"\n  <cwd>{context.cwd}</cwd>" if context.cwd else ""
+
+        return SHELL_INFORMATION_COMPONENT.format(
+            name=context.shell_name,
+            type=context.shell_type,
+            variant_section=variant_section,
+            environment_section=environment_section,
+            ssh_session_section=ssh_session_section,
+            cwd_section=cwd_section,
+        )
+
     def _format_system_prompt(self) -> str:
         os_information = ""
+        shell_information = ""
+
         for context_type, context in self.agent_user_environment.items():
             if context_type == "os_information_context" and isinstance(
                 context, OsInformationContext
@@ -161,6 +194,12 @@ class ExecutorComponent(BaseComponent):
                     platform=context.platform,
                     architecture=context.architecture,
                 )
+
+            elif context_type == "shell_information_context" and isinstance(
+                context, ShellInformationContext
+            ):
+                shell_information = self._format_shell_information(context)
+
         # Temporary support for deprecated os_information message
         if not os_information:
             for additional_context in self.additional_context or []:
@@ -173,6 +212,8 @@ class ExecutorComponent(BaseComponent):
                         os_information=additional_context.content
                     )
 
+        environment_info = os_information + shell_information
+
         return EXECUTOR_SYSTEM_MESSAGE.format(
             set_task_status_tool_name=SET_TASK_STATUS_TOOL_NAME,
             handover_tool_name=HANDOVER_TOOL_NAME,
@@ -180,5 +221,5 @@ class ExecutorComponent(BaseComponent):
             project_id=self.project["id"],
             project_name=self.project["name"],
             project_url=self.project["http_url_to_repo"],
-            os_information=os_information,
+            environment_information=environment_info,
         )

@@ -8,6 +8,7 @@ from duo_workflow_service.components.base import _process_agent_user_environment
 from duo_workflow_service.workflows.type_definitions import (
     AdditionalContext,
     OsInformationContext,
+    ShellInformationContext,
 )
 
 
@@ -18,6 +19,18 @@ class TestProcessAgentUserEnvironment:
     def mock_os_information_context_data(self) -> Dict[str, Any]:
         """Valid data for OsInformationContext."""
         return {"platform": "Linux", "architecture": "x86_64"}
+
+    @pytest.fixture
+    def mock_shell_information_context_data(self) -> Dict[str, Any]:
+        """Valid data for ShellInformationContext."""
+        return {
+            "shell_name": "bash",
+            "shell_type": "unix",
+            "shell_variant": "5.1.8",
+            "shell_environment": "native",
+            "ssh_session": False,
+            "cwd": "/home/user/project",
+        }
 
     @pytest.fixture
     def create_additional_context(self):
@@ -190,3 +203,123 @@ class TestProcessAgentUserEnvironment:
         assert isinstance(result["os_information_context"], OsInformationContext)
         assert result["os_information_context"].platform == "Ubuntu"
         assert result["os_information_context"].architecture == "amd64"
+
+    def test_shell_information_context_validation(self, create_additional_context):
+        """Test various validation scenarios for ShellInformationContext."""
+        # Valid shell context with all fields
+        valid_shell_data = {
+            "shell_name": "bash",
+            "shell_type": "unix",
+            "shell_variant": "5.1.8",
+            "shell_environment": "native",
+            "ssh_session": False,
+            "cwd": "/home/user/project",
+        }
+        context = create_additional_context(
+            category="agent_user_environment", content=json.dumps(valid_shell_data)
+        )
+
+        result = _process_agent_user_environment([context])
+
+        assert "shell_information_context" in result
+        assert isinstance(result["shell_information_context"], ShellInformationContext)
+        assert result["shell_information_context"].shell_name == "bash"
+        assert result["shell_information_context"].shell_type == "unix"
+        assert result["shell_information_context"].shell_variant == "5.1.8"
+        assert result["shell_information_context"].shell_environment == "native"
+        assert result["shell_information_context"].ssh_session is False
+        assert result["shell_information_context"].cwd == "/home/user/project"
+
+    def test_shell_information_context_minimal(self, create_additional_context):
+        """Test ShellInformationContext with only required fields."""
+        minimal_shell_data = {"shell_name": "cmd", "shell_type": "windows"}
+        context = create_additional_context(
+            category="agent_user_environment", content=json.dumps(minimal_shell_data)
+        )
+
+        result = _process_agent_user_environment([context])
+
+        assert "shell_information_context" in result
+        assert isinstance(result["shell_information_context"], ShellInformationContext)
+        assert result["shell_information_context"].shell_name == "cmd"
+        assert result["shell_information_context"].shell_type == "windows"
+        assert result["shell_information_context"].shell_variant is None
+        assert result["shell_information_context"].shell_environment is None
+        assert result["shell_information_context"].ssh_session is None
+        assert result["shell_information_context"].cwd is None
+
+    def test_multiple_different_contexts(
+        self,
+        create_additional_context,
+        mock_os_information_context_data,
+        mock_shell_information_context_data,
+    ):
+        """Test processing multiple different context types."""
+        os_context = create_additional_context(
+            category="agent_user_environment",
+            content=json.dumps(mock_os_information_context_data),
+        )
+        shell_context = create_additional_context(
+            category="agent_user_environment",
+            content=json.dumps(mock_shell_information_context_data),
+        )
+
+        result = _process_agent_user_environment([os_context, shell_context])
+
+        assert "os_information_context" in result
+        assert "shell_information_context" in result
+        assert isinstance(result["os_information_context"], OsInformationContext)
+        assert isinstance(result["shell_information_context"], ShellInformationContext)
+        assert result["os_information_context"].platform == "Linux"
+        assert result["shell_information_context"].shell_name == "bash"
+
+    def test_with_real_shell_additional_context(self):
+        """Test with actual ShellInformationContext AdditionalContext instances."""
+        valid_shell_data = {
+            "shell_name": "zsh",
+            "shell_type": "unix",
+            "shell_variant": "5.8",
+            "shell_environment": "ssh",
+            "ssh_session": True,
+            "cwd": "/workspace/project",
+        }
+
+        context = AdditionalContext(
+            category="agent_user_environment", content=json.dumps(valid_shell_data)
+        )
+
+        result = _process_agent_user_environment([context])
+
+        assert "shell_information_context" in result
+        assert isinstance(result["shell_information_context"], ShellInformationContext)
+        assert result["shell_information_context"].shell_name == "zsh"
+        assert result["shell_information_context"].shell_type == "unix"
+        assert result["shell_information_context"].shell_variant == "5.8"
+        assert result["shell_information_context"].shell_environment == "ssh"
+        assert result["shell_information_context"].ssh_session is True
+        assert result["shell_information_context"].cwd == "/workspace/project"
+
+    def test_shell_information_context_with_cwd_only(self, create_additional_context):
+        """Test ShellInformationContext with cwd field."""
+        shell_data_with_cwd = {
+            "shell_name": "powershell",
+            "shell_type": "windows",
+            "cwd": "C:\\Users\\user\\Documents\\project",
+        }
+        context = create_additional_context(
+            category="agent_user_environment", content=json.dumps(shell_data_with_cwd)
+        )
+
+        result = _process_agent_user_environment([context])
+
+        assert "shell_information_context" in result
+        assert isinstance(result["shell_information_context"], ShellInformationContext)
+        assert result["shell_information_context"].shell_name == "powershell"
+        assert result["shell_information_context"].shell_type == "windows"
+        assert (
+            result["shell_information_context"].cwd
+            == "C:\\Users\\user\\Documents\\project"
+        )
+        assert result["shell_information_context"].shell_variant is None
+        assert result["shell_information_context"].shell_environment is None
+        assert result["shell_information_context"].ssh_session is None

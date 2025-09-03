@@ -204,6 +204,15 @@ export interface OsInformationContext {
   architecture: string;
 }
 
+export interface ShellInformationContext {
+  shellName: string;
+  shellType: string;
+  shellVariant?: string | undefined;
+  shellEnvironment?: string | undefined;
+  sshSession?: boolean | undefined;
+  cwd?: string | undefined;
+}
+
 function createBaseClientEvent(): ClientEvent {
   return { startRequest: undefined, actionResponse: undefined, heartbeat: undefined };
 }
@@ -3023,6 +3032,153 @@ export const OsInformationContext: MessageFns<OsInformationContext> = {
     const message = createBaseOsInformationContext();
     message.platform = object.platform ?? "";
     message.architecture = object.architecture ?? "";
+    return message;
+  },
+};
+
+function createBaseShellInformationContext(): ShellInformationContext {
+  return {
+    shellName: "",
+    shellType: "",
+    shellVariant: undefined,
+    shellEnvironment: undefined,
+    sshSession: undefined,
+    cwd: undefined,
+  };
+}
+
+export const ShellInformationContext: MessageFns<ShellInformationContext> = {
+  encode(message: ShellInformationContext, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
+    if (message.shellName !== "") {
+      writer.uint32(10).string(message.shellName);
+    }
+    if (message.shellType !== "") {
+      writer.uint32(18).string(message.shellType);
+    }
+    if (message.shellVariant !== undefined) {
+      writer.uint32(26).string(message.shellVariant);
+    }
+    if (message.shellEnvironment !== undefined) {
+      writer.uint32(34).string(message.shellEnvironment);
+    }
+    if (message.sshSession !== undefined) {
+      writer.uint32(40).bool(message.sshSession);
+    }
+    if (message.cwd !== undefined) {
+      writer.uint32(50).string(message.cwd);
+    }
+    return writer;
+  },
+
+  decode(input: BinaryReader | Uint8Array, length?: number): ShellInformationContext {
+    const reader = input instanceof BinaryReader ? input : new BinaryReader(input);
+    const end = length === undefined ? reader.len : reader.pos + length;
+    const message = createBaseShellInformationContext();
+    while (reader.pos < end) {
+      const tag = reader.uint32();
+      switch (tag >>> 3) {
+        case 1: {
+          if (tag !== 10) {
+            break;
+          }
+
+          message.shellName = reader.string();
+          continue;
+        }
+        case 2: {
+          if (tag !== 18) {
+            break;
+          }
+
+          message.shellType = reader.string();
+          continue;
+        }
+        case 3: {
+          if (tag !== 26) {
+            break;
+          }
+
+          message.shellVariant = reader.string();
+          continue;
+        }
+        case 4: {
+          if (tag !== 34) {
+            break;
+          }
+
+          message.shellEnvironment = reader.string();
+          continue;
+        }
+        case 5: {
+          if (tag !== 40) {
+            break;
+          }
+
+          message.sshSession = reader.bool();
+          continue;
+        }
+        case 6: {
+          if (tag !== 50) {
+            break;
+          }
+
+          message.cwd = reader.string();
+          continue;
+        }
+      }
+      if ((tag & 7) === 4 || tag === 0) {
+        break;
+      }
+      reader.skip(tag & 7);
+    }
+    return message;
+  },
+
+  fromJSON(object: any): ShellInformationContext {
+    return {
+      shellName: isSet(object.shellName) ? globalThis.String(object.shellName) : "",
+      shellType: isSet(object.shellType) ? globalThis.String(object.shellType) : "",
+      shellVariant: isSet(object.shellVariant) ? globalThis.String(object.shellVariant) : undefined,
+      shellEnvironment: isSet(object.shellEnvironment) ? globalThis.String(object.shellEnvironment) : undefined,
+      sshSession: isSet(object.sshSession) ? globalThis.Boolean(object.sshSession) : undefined,
+      cwd: isSet(object.cwd) ? globalThis.String(object.cwd) : undefined,
+    };
+  },
+
+  toJSON(message: ShellInformationContext): unknown {
+    const obj: any = {};
+    if (message.shellName !== "") {
+      obj.shellName = message.shellName;
+    }
+    if (message.shellType !== "") {
+      obj.shellType = message.shellType;
+    }
+    if (message.shellVariant !== undefined) {
+      obj.shellVariant = message.shellVariant;
+    }
+    if (message.shellEnvironment !== undefined) {
+      obj.shellEnvironment = message.shellEnvironment;
+    }
+    if (message.sshSession !== undefined) {
+      obj.sshSession = message.sshSession;
+    }
+    if (message.cwd !== undefined) {
+      obj.cwd = message.cwd;
+    }
+    return obj;
+  },
+
+  create<I extends Exact<DeepPartial<ShellInformationContext>, I>>(base?: I): ShellInformationContext {
+    return ShellInformationContext.fromPartial(base ?? ({} as any));
+  },
+  fromPartial<I extends Exact<DeepPartial<ShellInformationContext>, I>>(object: I): ShellInformationContext {
+    const message = createBaseShellInformationContext();
+    message.shellName = object.shellName ?? "";
+    message.shellType = object.shellType ?? "";
+    message.shellVariant = object.shellVariant ?? undefined;
+    message.shellEnvironment = object.shellEnvironment ?? undefined;
+    message.sshSession = object.sshSession ?? undefined;
+    message.cwd = object.cwd ?? undefined;
     return message;
   },
 };

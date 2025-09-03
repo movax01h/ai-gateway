@@ -13,16 +13,13 @@ from duo_workflow_service.llm_factory import AnthropicConfig, VertexConfig
 from duo_workflow_service.workflows.type_definitions import (
     AdditionalContext,
     OsInformationContext,
+    ShellInformationContext,
 )
 from lib.internal_events.event_enum import CategoryEnum
 
 _CONTEXT_REGISTRY: Dict[Type[BaseModel], str] = {
     OsInformationContext: "os_information_context",
-}
-
-_TYPE_SIGNATURES: Dict[frozenset, Type[BaseModel]] = {
-    frozenset(context_type.model_fields.keys()): context_type
-    for context_type in _CONTEXT_REGISTRY
+    ShellInformationContext: "shell_information_context",
 }
 
 
@@ -78,16 +75,27 @@ def _process_agent_user_environment(
         if not isinstance(data, dict):
             continue
 
-        # Check which type matches
-        data_fields = frozenset(data.keys())
+        data_fields = set(data.keys())
 
-        if data_fields in _TYPE_SIGNATURES:
-            context_type = _TYPE_SIGNATURES[data_fields]
-            field_name = _CONTEXT_REGISTRY[context_type]
-
+        for context_type, field_name in _CONTEXT_REGISTRY.items():
             try:
+                expected_fields = set(context_type.model_fields.keys())
+
+                if data_fields != expected_fields:
+                    required_fields = {
+                        name
+                        for name, field in context_type.model_fields.items()
+                        if field.is_required()
+                    }
+
+                    if not required_fields.issubset(
+                        data_fields
+                    ) or not data_fields.issubset(expected_fields):
+                        continue
+
                 instance = context_type.model_validate(data)
                 contexts[field_name] = instance
+                break
             except ValidationError:
                 continue
 

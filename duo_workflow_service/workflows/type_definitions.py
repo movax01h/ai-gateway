@@ -2,7 +2,7 @@ from typing import Optional
 
 from pydantic import BaseModel
 
-__all__ = ["AdditionalContext", "OsInformationContext"]
+__all__ = ["AdditionalContext", "OsInformationContext", "ShellInformationContext"]
 
 
 # Note: additionaL_context is an alias for injected_context
@@ -19,3 +19,14 @@ class AdditionalContext(BaseModel):
 class OsInformationContext(BaseModel):
     platform: str
     architecture: str
+
+
+class ShellInformationContext(BaseModel):
+    shell_name: str
+    shell_type: str  # 'unix' | 'windows' | 'hybrid'
+    shell_variant: Optional[str] = None
+    shell_environment: Optional[str] = (
+        None  # 'native' | 'wsl' | 'git-bash' | 'cygwin' | 'mingw' | 'ssh' | 'docker'
+    )
+    ssh_session: Optional[bool] = None
+    cwd: Optional[str] = None

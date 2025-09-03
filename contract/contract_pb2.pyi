@@ -299,3 +299,19 @@ class OsInformationContext(_message.Message):
     platform: str
     architecture: str
     def __init__(self, platform: _Optional[str] = ..., architecture: _Optional[str] = ...) -> None: ...
+
+class ShellInformationContext(_message.Message):
+    __slots__ = ("shell_name", "shell_type", "shell_variant", "shell_environment", "ssh_session", "cwd")
+    SHELL_NAME_FIELD_NUMBER: _ClassVar[int]
+    SHELL_TYPE_FIELD_NUMBER: _ClassVar[int]
+    SHELL_VARIANT_FIELD_NUMBER: _ClassVar[int]
+    SHELL_ENVIRONMENT_FIELD_NUMBER: _ClassVar[int]
+    SSH_SESSION_FIELD_NUMBER: _ClassVar[int]
+    CWD_FIELD_NUMBER: _ClassVar[int]
+    shell_name: str
+    shell_type: str
+    shell_variant: str
+    shell_environment: str
+    ssh_session: bool
+    cwd: str
+    def __init__(self, shell_name: _Optional[str] = ..., shell_type: _Optional[str] = ..., shell_variant: _Optional[str] = ..., shell_environment: _Optional[str] = ..., ssh_session: bool = ..., cwd: _Optional[str] = ...) -> None: ...
