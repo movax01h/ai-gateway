@@ -23,6 +23,7 @@ from duo_workflow_service.tools import DuoBaseTool
 from duo_workflow_service.workflows.type_definitions import (
     AdditionalContext,
     OsInformationContext,
+    ShellInformationContext,
 )
 
 
@@ -510,7 +511,7 @@ class TestExecutorComponent:
     @pytest.mark.parametrize(
         "agent_user_environment,additional_context,expected_substrings",
         [
-            # Happy case
+            # Happy case with OS information
             (
                 {
                     "os_information_context": OsInformationContext(
@@ -523,6 +524,107 @@ class TestExecutorComponent:
                     "<platform>foo</platform>",
                     "<architecture>bar</architecture>",
                     "</os_information>",
+                ),
+            ),
+            # Happy case with shell information
+            (
+                {
+                    "shell_information_context": ShellInformationContext(
+                        shell_name="bash",
+                        shell_type="unix",
+                        shell_variant="5.1.8",
+                        shell_environment="native",
+                        ssh_session=False,
+                    )
+                },
+                None,
+                (
+                    "<shell_information>",
+                    "<name>bash</name>",
+                    "<type>unix</type>",
+                    "<variant>5.1.8</variant>",
+                    "<environment>native</environment>",
+                    "<ssh_session>False</ssh_session>",
+                    "</shell_information>",
+                ),
+            ),
+            # Both OS and shell information
+            (
+                {
+                    "os_information_context": OsInformationContext(
+                        platform="Linux", architecture="x86_64"
+                    ),
+                    "shell_information_context": ShellInformationContext(
+                        shell_name="zsh", shell_type="unix"
+                    ),
+                },
+                None,
+                (
+                    "<os_information>",
+                    "<platform>Linux</platform>",
+                    "<architecture>x86_64</architecture>",
+                    "</os_information>",
+                    "<shell_information>",
+                    "<name>zsh</name>",
+                    "<type>unix</type>",
+                    "</shell_information>",
+                ),
+            ),
+            # Shell information with minimal fields
+            (
+                {
+                    "shell_information_context": ShellInformationContext(
+                        shell_name="cmd", shell_type="windows"
+                    )
+                },
+                None,
+                (
+                    "<shell_information>",
+                    "<name>cmd</name>",
+                    "<type>windows</type>",
+                    "</shell_information>",
+                ),
+            ),
+            # Shell information with cwd
+            (
+                {
+                    "shell_information_context": ShellInformationContext(
+                        shell_name="bash",
+                        shell_type="unix",
+                        cwd="/home/user/project",
+                    )
+                },
+                None,
+                (
+                    "<shell_information>",
+                    "<name>bash</name>",
+                    "<type>unix</type>",
+                    "<cwd>/home/user/project</cwd>",
+                    "</shell_information>",
+                ),
+            ),
+            # Shell information with all fields including cwd
+            (
+                {
+                    "shell_information_context": ShellInformationContext(
+                        shell_name="zsh",
+                        shell_type="unix",
+                        shell_variant="5.8",
+                        shell_environment="ssh",
+                        ssh_session=True,
+                        cwd="/workspace/my-project",
+                    )
+                },
+                None,
+                (
+                    "<shell_information>",
+                    "<name>zsh</name>",
+                    "<type>unix</type>",
+                    "<variant>5.8</variant>",
+                    "<environment>ssh</environment>",
+                    "<ssh_session>True</ssh_session>",
+                    "<cwd>/workspace/my-project</cwd>",
+                    "</shell_information>",
                 ),
             ),
             # We only use the old template if the new one is missing
@@ -596,11 +698,37 @@ class TestExecutorComponent:
             ),
             (
                 {"os_information_context": "some_context"},
-                {"agent_user_environment": {"shell_context": "some_other_context"}},
+                {
+                    "agent_user_environment": {
+                        "shell_information_context": "some_other_context"
+                    }
+                },
                 {
                     "agent_user_environment": {
                         "os_information_context": "some_context",
-                        "shell_context": "some_other_context",
+                        "shell_information_context": "some_other_context",
+                    }
+                },
+            ),
+            (
+                {"shell_information_context": "shell_context"},
+                {},
+                {
+                    "agent_user_environment": {
+                        "shell_information_context": "shell_context"
+                    }
+                },
+            ),
+            (
+                {
+                    "os_information_context": "os_context",
+                    "shell_information_context": "shell_context",
+                },
+                {},
+                {
+                    "agent_user_environment": {
+                        "os_information_context": "os_context",
+                        "shell_information_context": "shell_context",
                     }
                 },
             ),
