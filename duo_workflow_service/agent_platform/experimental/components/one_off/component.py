@@ -1,4 +1,4 @@
-from typing import Any, ClassVar
+from typing import Any, ClassVar, Optional
 
 from dependency_injector.wiring import Provide, inject
 from langchain_core.messages import HumanMessage
@@ -6,7 +6,7 @@ from langgraph.graph import StateGraph
 from pydantic import Field, model_validator
 
 from ai_gateway.container import ContainerApplication
-from ai_gateway.prompts import LocalPromptRegistry
+from ai_gateway.prompts import InMemoryPromptRegistry, LocalPromptRegistry
 from duo_workflow_service.agent_platform.experimental.components import (
     BaseComponent,
     RouterProtocol,
@@ -61,11 +61,11 @@ class OneOffComponent(BaseComponent):
     )
 
     prompt_id: str
-    prompt_version: str
+    prompt_version: Optional[str] = None
     toolset: Toolset
     max_correction_attempts: int = 3
 
-    prompt_registry: LocalPromptRegistry = Provide[
+    prompt_registry: LocalPromptRegistry | InMemoryPromptRegistry = Provide[
         ContainerApplication.pkg_prompts.prompt_registry
     ]
 

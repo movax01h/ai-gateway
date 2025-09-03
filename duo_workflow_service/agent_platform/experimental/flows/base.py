@@ -9,6 +9,7 @@ from langgraph.graph import StateGraph
 from langgraph.types import Command
 
 from ai_gateway.container import ContainerApplication
+from ai_gateway.prompts import InMemoryPromptRegistry
 from ai_gateway.prompts.registry import LocalPromptRegistry
 from contract import contract_pb2
 from duo_workflow_service.agent_platform.experimental.components.base import (
@@ -52,6 +53,7 @@ class UserDecision(StrEnum):
 
 class Flow(AbstractWorkflow):
     _config: FlowConfig
+    _flow_prompt_registry: InMemoryPromptRegistry | LocalPromptRegistry
 
     # pylint: disable=dangerous-default-value
     @inject
@@ -91,6 +93,15 @@ class Flow(AbstractWorkflow):
             **kwargs,
         )
         self._config = config
+
+        self._flow_prompt_registry = InMemoryPromptRegistry(prompt_registry)
+        if self._config.prompts:
+            for prompt_config in self._config.prompts:
+                prompt_id = prompt_config["prompt_id"]
+                self._flow_prompt_registry.register_prompt(
+                    prompt_id=prompt_id,
+                    prompt_data=prompt_config,
+                )
 
     # pylint: enable=dangerous-default-value
 
@@ -172,6 +183,7 @@ class Flow(AbstractWorkflow):
 
             comp_params.update(
                 {
+                    "prompt_registry": self._flow_prompt_registry,  # override DI
                     "flow_id": self._workflow_id,
                     "flow_type": self._workflow_type,
                 }
