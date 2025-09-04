@@ -7,6 +7,7 @@ from typing import Any, Callable, Dict, List, Union
 from duo_workflow_service.security.exceptions import SecurityException
 from duo_workflow_service.security.markdown_content_security import (
     strip_hidden_html_comments,
+    strip_mermaid_comments,
 )
 
 
@@ -87,6 +88,7 @@ class PromptSecurity:
     ] = [
         encode_dangerous_tags,
         strip_hidden_html_comments,
+        strip_mermaid_comments,
     ]
 
     # Tool-specific additional security functions
