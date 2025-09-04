@@ -96,13 +96,13 @@ include:
       runway_service_id: duo-workflow-svc
       image: "$CI_REGISTRY_IMAGE/model-gateway:${CI_COMMIT_SHORT_SHA}"
       runway_version: v3.96.0
-  - project: "gitlab-com/gl-infra/platform/runway/runwayctl"
-    file: "ci-tasks/service-project/runway.yml"
-    inputs:
-      runway_service_id: dws-loadtest
-      image: "$CI_REGISTRY_IMAGE/model-gateway:${CI_COMMIT_SHORT_SHA}"
-      runway_version: v3.96.0
-    when: manual
+  # - project: "gitlab-com/gl-infra/platform/runway/runwayctl"
+  #   file: "ci-tasks/service-project/runway.yml"
+  #   inputs:
+  #     runway_service_id: dws-loadtest
+  #     image: "$CI_REGISTRY_IMAGE/model-gateway:${CI_COMMIT_SHORT_SHA}"
+  #     runway_version: v3.96.0
+  #   when: manual
   - project: "gitlab-com/gl-infra/platform/runway/runwayctl"
     file: "ci-tasks/service-project/runway.yml"
     inputs:
