@@ -191,6 +191,7 @@ _outbox = MagicMock(spec=asyncio.Queue)
                 "link_vulnerability_to_issue",
                 "get_vulnerability_details",
                 "revert_to_detected_vulnerability",
+                "create_vulnerability_issue",
             },
         ),
         (
@@ -352,6 +353,9 @@ def test_registry_initialization_initialises_tools_with_correct_attributes(
         ),
         "get_vulnerability_details": GetVulnerabilityDetails(metadata=tool_metadata),
         "revert_to_detected_vulnerability": tools.RevertToDetectedVulnerability(
+            metadata=tool_metadata
+        ),
+        "create_vulnerability_issue": tools.CreateVulnerabilityIssue(
             metadata=tool_metadata
         ),
     }

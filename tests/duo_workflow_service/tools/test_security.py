@@ -7,6 +7,8 @@ from pydantic import ValidationError
 from duo_workflow_service.tools.security import (
     ConfirmVulnerability,
     ConfirmVulnerabilityInput,
+    CreateVulnerabilityIssue,
+    CreateVulnerabilityIssueInput,
     DismissVulnerability,
     DismissVulnerabilityInput,
     LinkVulnerabilityToIssue,
@@ -1374,3 +1376,287 @@ def test_revert_to_detected_vulnerability_format_display_message(
 ):
     tool = RevertToDetectedVulnerability(metadata={})
     assert tool.format_display_message(input_data) == expected_message
+
+
+@pytest.fixture
+def vulnerability_ids():
+    return [
+        "gid://gitlab/Vulnerability/542",
+        "gid://gitlab/Vulnerability/543",
+    ]
+
+
+@pytest.fixture
+def input_data(vulnerability_ids):
+    return {
+        "project_full_path": "gitlab-duo/test",
+        "vulnerability_ids": vulnerability_ids,
+    }
+
+
+@pytest.fixture
+def successful_project_response():
+    return {"data": {"project": {"id": "gid://gitlab/Project/1000000"}}}
+
+
+@pytest.fixture
+def successful_issue_response():
+    return {
+        "data": {
+            "vulnerabilitiesCreateIssue": {
+                "issue": {
+                    "id": "gid://gitlab/Issue/641",
+                    "title": "Investigate vulnerabilities",
+                    "name": "Investigate vulnerabilities",
+                },
+                "errors": [],
+            }
+        }
+    }
+
+
+@pytest.fixture
+def successful_mock_sequence(successful_project_response, successful_issue_response):
+    return [successful_project_response, successful_issue_response]
+
+
+@pytest.fixture
+def expected_response():
+    return json.dumps(
+        {
+            "issue": {
+                "id": "gid://gitlab/Issue/641",
+                "title": "Investigate vulnerabilities",
+                "name": "Investigate vulnerabilities",
+            }
+        }
+    )
+
+
+@pytest.mark.asyncio
+async def test_create_vulnerability_issue(
+    gitlab_client_mock,
+    metadata,
+    input_data,
+    successful_mock_sequence,
+    expected_response,
+):
+    gitlab_client_mock.apost = AsyncMock(side_effect=successful_mock_sequence)
+
+    tool = CreateVulnerabilityIssue(metadata=metadata)
+    response = await tool.arun(input_data)
+
+    assert response == expected_response
+    assert gitlab_client_mock.apost.call_count == 2
+
+    first_call = gitlab_client_mock.apost.call_args_list[0]
+    project_query_body = json.loads(first_call[1]["body"])
+    assert "project(fullPath: $projectFullPath)" in project_query_body["query"]
+    assert project_query_body["variables"]["projectFullPath"] == "gitlab-duo/test"
+
+    second_call = gitlab_client_mock.apost.call_args_list[1]
+    mutation_body = json.loads(second_call[1]["body"])
+    assert "vulnerabilitiesCreateIssue" in mutation_body["query"]
+    assert mutation_body["variables"]["projectId"] == "gid://gitlab/Project/1000000"
+    assert mutation_body["variables"]["vulnerabilityIds"] == [
+        "gid://gitlab/Vulnerability/542",
+        "gid://gitlab/Vulnerability/543",
+    ]
+
+
+@pytest.mark.asyncio
+async def test_create_vulnerability_issue_with_numeric_ids(
+    gitlab_client_mock, metadata, successful_mock_sequence
+):
+    input_data = {
+        "project_full_path": "gitlab-duo/test",
+        "vulnerability_ids": ["542", "gid://gitlab/Vulnerability/543"],
+    }
+
+    gitlab_client_mock.apost = AsyncMock(side_effect=successful_mock_sequence)
+
+    tool = CreateVulnerabilityIssue(metadata=metadata)
+    response = await tool.arun(input_data)
+
+    mutation_call = gitlab_client_mock.apost.call_args_list[1]
+    mutation_body = json.loads(mutation_call[1]["body"])
+    assert mutation_body["variables"]["vulnerabilityIds"] == [
+        "gid://gitlab/Vulnerability/542",
+        "gid://gitlab/Vulnerability/543",
+    ]
+
+    response_data = json.loads(response)
+    assert "error" not in response_data
+    assert "issue" in response_data
+
+
+@pytest.mark.asyncio
+async def test_create_vulnerability_issue_project_not_found(
+    gitlab_client_mock, metadata
+):
+    input_data = {
+        "project_full_path": "nonexistent/project",
+        "vulnerability_ids": ["gid://gitlab/Vulnerability/542"],
+    }
+
+    gitlab_client_mock.apost = AsyncMock(return_value={"data": {"project": None}})
+
+    tool = CreateVulnerabilityIssue(metadata=metadata)
+    response = await tool.arun(input_data)
+
+    error_response = json.loads(response)
+    assert "error" in error_response
+    assert "Project not found or access denied" in error_response["error"]
+    assert error_response["project_path"] == "nonexistent/project"
+    assert gitlab_client_mock.apost.call_count == 1
+
+
+@pytest.mark.asyncio
+async def test_create_vulnerability_issue_with_mutation_errors(
+    gitlab_client_mock, metadata, input_data, successful_project_response
+):
+    error_issue_response = {
+        "data": {
+            "vulnerabilitiesCreateIssue": {
+                "issue": None,
+                "errors": [
+                    "Vulnerability not found",
+                    "Insufficient permissions",
+                ],
+            }
+        }
+    }
+
+    gitlab_client_mock.apost = AsyncMock(
+        side_effect=[successful_project_response, error_issue_response]
+    )
+
+    tool = CreateVulnerabilityIssue(metadata=metadata)
+    test_input = {**input_data, "vulnerability_ids": ["gid://gitlab/Vulnerability/999"]}
+    response = await tool.arun(test_input)
+
+    error_response = json.loads(response)
+    assert "error" in error_response
+    assert (
+        "Vulnerability not found; Insufficient permissions" in error_response["error"]
+    )
+
+
+@pytest.mark.asyncio
+async def test_create_vulnerability_issue_exception(
+    gitlab_client_mock, metadata, input_data
+):
+    gitlab_client_mock.apost = AsyncMock(side_effect=Exception("API Error"))
+
+    tool = CreateVulnerabilityIssue(metadata=metadata)
+
+    with pytest.raises(Exception) as exc_info:
+        await tool.arun(input_data)
+
+    assert "API Error" in str(exc_info.value)
+
+
+@pytest.mark.asyncio
+async def test_create_vulnerability_issue_invalid_project_response(
+    gitlab_client_mock, metadata, input_data
+):
+    gitlab_client_mock.apost = AsyncMock(return_value=None)
+
+    tool = CreateVulnerabilityIssue(metadata=metadata)
+    response = await tool.arun(input_data)
+
+    error_response = json.loads(response)
+    assert "error" in error_response
+    assert "Invalid GraphQL response" in error_response["error"]
+    assert error_response["project_path"] == "gitlab-duo/test"
+
+
+@pytest.mark.asyncio
+async def test_create_vulnerability_issue_project_response_missing_data(
+    gitlab_client_mock, metadata, input_data
+):
+    gitlab_client_mock.apost = AsyncMock(return_value={"errors": ["Some error"]})
+
+    tool = CreateVulnerabilityIssue(metadata=metadata)
+    response = await tool.arun(input_data)
+
+    error_response = json.loads(response)
+    assert "error" in error_response
+    assert "Invalid GraphQL response" in error_response["error"]
+    assert error_response["project_path"] == "gitlab-duo/test"
+
+
+@pytest.mark.asyncio
+async def test_create_vulnerability_issue_invalid_mutation_response(
+    gitlab_client_mock, metadata, input_data, successful_project_response
+):
+    gitlab_client_mock.apost = AsyncMock(
+        side_effect=[successful_project_response, None]
+    )
+
+    tool = CreateVulnerabilityIssue(metadata=metadata)
+    response = await tool.arun(input_data)
+
+    error_response = json.loads(response)
+    assert "error" in error_response
+    assert "Invalid GraphQL response" in error_response["error"]
+
+
+@pytest.mark.asyncio
+async def test_create_vulnerability_issue_mutation_response_missing_data(
+    gitlab_client_mock, metadata, input_data, successful_project_response
+):
+    gitlab_client_mock.apost = AsyncMock(
+        side_effect=[successful_project_response, {"errors": ["Some mutation error"]}]
+    )
+
+    tool = CreateVulnerabilityIssue(metadata=metadata)
+    response = await tool.arun(input_data)
+
+    error_response = json.loads(response)
+    assert "error" in error_response
+    assert "Invalid GraphQL response" in error_response["error"]
+
+
+@pytest.mark.asyncio
+async def test_create_vulnerability_issue_mutation_response_missing_key(
+    gitlab_client_mock, metadata, input_data, successful_project_response
+):
+    gitlab_client_mock.apost = AsyncMock(
+        side_effect=[successful_project_response, {"data": {"someOtherField": "value"}}]
+    )
+
+    tool = CreateVulnerabilityIssue(metadata=metadata)
+    response = await tool.arun(input_data)
+
+    error_response = json.loads(response)
+    assert "error" in error_response
+    assert "Invalid GraphQL response" in error_response["error"]
+
+
+@pytest.mark.parametrize(
+    "test_input_data,expected_message",
+    [
+        (
+            CreateVulnerabilityIssueInput(
+                project_full_path="gitlab-duo/test",
+                vulnerability_ids=[
+                    "gid://gitlab/Vulnerability/542",
+                    "gid://gitlab/Vulnerability/543",
+                ],
+            ),
+            "Create issue for vulnerabilities in project gitlab-duo/test",
+        ),
+        (
+            CreateVulnerabilityIssueInput(
+                project_full_path="namespace/project", vulnerability_ids=["542"]
+            ),
+            "Create issue for vulnerabilities in project namespace/project",
+        ),
+    ],
+)
+def test_create_vulnerability_issue_format_display_message(
+    test_input_data, expected_message
+):
+    tool = CreateVulnerabilityIssue(metadata={})
+    assert tool.format_display_message(test_input_data) == expected_message

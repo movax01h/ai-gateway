@@ -44,6 +44,7 @@ __all__ = [
     "LinkVulnerabilityToIssue",
     "ConfirmVulnerability",
     "RevertToDetectedVulnerability",
+    "CreateVulnerabilityIssue",
 ]
 
 
@@ -403,6 +404,121 @@ mutation($vulnerabilityId: VulnerabilityID!, $comment: String, $dismissalReason:
         self, args: DismissVulnerabilityInput, _tool_response: Any = None
     ) -> str:
         return f"Dismiss vulnerability {args.vulnerability_id}"
+
+
+class CreateVulnerabilityIssueInput(BaseModel):
+    project_full_path: str = Field(
+        description="The full path of the GitLab project (e.g., 'namespace/project' or 'group/subgroup/project')",
+    )
+    vulnerability_ids: list[str] = Field(
+        description="Array of vulnerability IDs that will be linked to the created issue. Up to 100 can be provided."
+    )
+
+
+class CreateVulnerabilityIssue(DuoBaseTool):
+    name: str = "create_vulnerability_issue"
+    description: str = f"""Create a GitLab issue linked to security vulnerabilities in a GitLab project using GraphQL.
+
+    {PROJECT_IDENTIFICATION_DESCRIPTION}
+
+    The tool supports creating a GitLab issue linked to vulnerabilities by ID.
+    Up to 100 IDs of vulnerabilities can be provided.
+
+    For example:
+    - Create an issue for project ID 1 linked with vulnerabilities with ID 2 and 3:
+        create_vulnerability_issue(
+            project_full_path="namespace/project",
+            vulnerability_ids=["gid://gitlab/Vulnerability/2", "gid://gitlab/Vulnerability/3"]
+        )
+    """
+    args_schema: Type[BaseModel] = CreateVulnerabilityIssueInput
+
+    async def _arun(self, **kwargs: Any) -> str:
+        project_full_path = kwargs.pop("project_full_path")
+        vulnerability_ids = kwargs.pop("vulnerability_ids")
+
+        project_query = """
+        query($projectFullPath: ID!) {
+            project(fullPath: $projectFullPath) {
+                id
+            }
+        }
+        """
+
+        project_variables = {"projectFullPath": project_full_path}
+
+        project_response = await self.gitlab_client.apost(
+            path="/api/graphql",
+            body=json.dumps({"query": project_query, "variables": project_variables}),
+        )
+
+        if not project_response or "data" not in project_response:
+            return json.dumps(
+                {
+                    "error": "Invalid GraphQL response",
+                    "project_path": project_full_path,
+                }
+            )
+
+        project_data = project_response.get("data", {}).get("project")
+        if not project_data:
+            return json.dumps(
+                {
+                    "error": "Project not found or access denied",
+                    "project_path": project_full_path,
+                }
+            )
+
+        project_id = project_data["id"]
+
+        mutation = """
+        mutation($vulnerabilityIds: [VulnerabilityID!]!, $projectId: ProjectID!) {
+            vulnerabilitiesCreateIssue(input: { project: $projectId, vulnerabilityIds: $vulnerabilityIds }) {
+                issue {
+                    id,
+                    title,
+                    name
+                }
+                errors
+            }
+        }
+        """
+
+        vulnerability_ids = [
+            (
+                f"gid://gitlab/Vulnerability/{vid}"
+                if not str(vid).startswith("gid://gitlab/Vulnerability/")
+                else str(vid)
+            )
+            for vid in vulnerability_ids
+        ]
+
+        variables = {"projectId": project_id, "vulnerabilityIds": vulnerability_ids}
+
+        response = await self.gitlab_client.apost(
+            path="/api/graphql",
+            body=json.dumps({"query": mutation, "variables": variables}),
+        )
+
+        if (
+            not response
+            or "data" not in response
+            or "vulnerabilitiesCreateIssue" not in response["data"]
+        ):
+            return json.dumps({"error": "Invalid GraphQL response"})
+
+        errors = response["data"]["vulnerabilitiesCreateIssue"]["errors"]
+        if errors:
+            return json.dumps({"error": "; ".join(errors)})
+
+        return json.dumps(
+            {"issue": response["data"]["vulnerabilitiesCreateIssue"]["issue"]}
+        )
+
+    def format_display_message(
+        self, args: CreateVulnerabilityIssueInput, _tool_response: Any = None
+    ) -> str:
+        return f"Create issue for vulnerabilities in project {args.project_full_path}"
 
 
 class LinkVulnerabilityToIssueInput(BaseModel):

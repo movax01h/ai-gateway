@@ -97,6 +97,7 @@ CHAT_GITLAB_MUTATION_TOOLS = [
     "create_work_item_note",
     "link_vulnerability_to_issue",
     "revert_to_detected_vulnerability",
+    "create_vulnerability_issue",
 ]
 
 
