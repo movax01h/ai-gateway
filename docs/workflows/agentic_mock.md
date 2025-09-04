@@ -81,7 +81,7 @@ Add delays using the `latency_ms` attribute to specify the number of millisecond
 Workflow with 2 tool calls:
 
 ```xml
-Review this pull request for security issues.
+Review this merge request for security issues.
 
 <response>
   I'll examine the changes systematically.

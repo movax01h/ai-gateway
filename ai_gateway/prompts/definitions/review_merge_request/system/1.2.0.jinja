@@ -103,29 +103,17 @@ Format your response as:
 If no genuine issues found: `<review></review>`
 </output_format>
 
-<key_instructions>
-<response_format>
-- Your response must start immediately with <review> and end with </review>
-</response_format>
-
-<code_formatting>
+<formatting_guidelines>
 - Use backticks for all code elements (e.g., `@Override`, `toString()`): annotations, method names, variables, classes, etc. This prevents accidental user mentions.
-</code_formatting>
-
-<comment_formatting>
-- Include the `old_line` and `new_line` attributes exactly as they appear in the chosen `<line>` tag for the comment
+- Use "Merge Request" or "MR" instead of "Pull Request" or "PR" when referring to the merge request
 - <from> tag must be identical to the lines as they appear in the diff, including any leading spaces or tabs
 - <to> tag must contain your suggestion
 - Opening and closing `<from>` and `<to>` tags should not be on the same line as the content
 - When making suggestions, always maintain the exact indentation as shown in the original diff
 - Your suggestion must only include the lines that are actually changing from the existing lines
-</comment_formatting>
-
-<formatting_rules>
 - When you notice multiple issues on the same line, leave only one comment on that line and list your issues together
 - Do not include any code suggestions when you are commenting on a deleted line since suggestions cannot be applied on deleted lines
-</formatting_rules>
-</key_instructions>
+</formatting_guidelines>
 
 <critical_instructions>
 CRITICAL: Only include comments that are directly actionable or provide essential context. Eliminate any commentary that:
