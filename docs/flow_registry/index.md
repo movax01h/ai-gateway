@@ -8,14 +8,19 @@ This guide provides the practical knowledge developers need to build flows effec
 
 ## Development Plan
 
-Currently, we are in an ideation phase for Agent Flows. Please see [this epic](https://gitlab.com/groups/gitlab-org/-/epics/19001) for instructions on how to submit your ideas for new flows.
+Currently, we are in an ideation phase for Agent Flows. Please
+see [this epic](https://gitlab.com/groups/gitlab-org/-/epics/19001) for instructions on how to submit your ideas for new
+flows.
 
 The Flow Registry is currently in active development, but the high-level plan for rollout is:
 
-1. Add components required to replicate [existing flows](../workflows) using the Flow Registry. More information in [this epic](https://gitlab.com/groups/gitlab-org/duo-workflow/-/epics/1)
+1. Add components required to replicate [existing flows](../workflows) using the Flow Registry. More information
+   in [this epic](https://gitlab.com/groups/gitlab-org/duo-workflow/-/epics/1)
 1. Create an AI Catalog UI to allow internal teams to build and test their own Agent Flows
 
-In the meantime, it is possible to set up the Flow Registry locally, and create agent flows via YAML files. This guide will explain the details of how to do that. But note that it can be quite time-intensive to do this setup and once the Flow Registry is ready this setup will no longer be required for those building flows.
+In the meantime, it is possible to set up the Flow Registry locally, and create agent flows via YAML files. This guide
+will explain the details of how to do that. But note that it can be quite time-intensive to do this setup and once the
+Flow Registry is ready this setup will no longer be required for those building flows.
 
 ## Quick Start
 
@@ -62,7 +67,7 @@ requests.
       user: |
         Here is my task:
         {{goal}}
-      placeholder: history
+      placeholder: history  # See Message Placeholders section in AI Gateway Prompt Registry docs
    params:
       timeout: 30
    ```
@@ -177,7 +182,8 @@ The `as` keyword provides these benefits:
 
 ### Input Literals
 
-Input literals can be used to explicitly state values for inputs, by adding `literal: true`. When using input literals, the `as` keyword is required:
+Input literals can be used to explicitly state values for inputs, by adding `literal: true`. When using input literals,
+the `as` keyword is required:
 
 ```yaml
 inputs:
@@ -186,7 +192,8 @@ inputs:
       literal: true
 ```
 
-This will set the value of the input variable `file_path` to be `file.txt`, rather than interpreting the input source as a path.
+This will set the value of the input variable `file_path` to be `file.txt`, rather than interpreting the input source as
+a path.
 
 ### Output
 
@@ -317,6 +324,11 @@ Prompts define how the AI agent behaves and responds to inputs.
 Every AgentComponent requires a prompt that serves as the "instructions" for the AI agent, defining its personality,
 capabilities, and response patterns.
 Prompts include placeholders that get replaced with actual data from the flow state.
+
+**Important for Multi-turn Conversations:** If your AgentComponent needs access to conversation history (for context in multi-turn interactions), include `placeholder: history` in your prompt template. This automatically provides the component's conversation history to the AI model.
+
+For detailed information about prompt templates and placeholder configuration, see
+the [AI Gateway Prompt Registry Documentation](../aigw_prompt_registry.md#message-placeholders).
 
 ### Inputs
 
@@ -523,6 +535,8 @@ with built-in error handling and retry logic.
 Unlike the `AgentComponent` which can engage in multi-turn conversations and generate additional tool calls after seeing
 results,
 `OneOffComponent` is constrained to a single round of tool generation and execution.
+
+**Note:** If your OneOffComponent prompt needs access to conversation history from previous interactions, include `placeholder: history` in your prompt template.
 
 #### Key Features
 
@@ -911,7 +925,9 @@ More examples will be added as the framework matures and additional use cases ar
 
 To run and debug your flow within your local GDK:
 
-- Set up a local [Agent Platform](https://gitlab.com/gitlab-org/gitlab-development-kit/-/blob/main/doc/howto/duo_agent_platform.md) to work with Remote Flows
+- Set up a
+  local [Agent Platform](https://gitlab.com/gitlab-org/gitlab-development-kit/-/blob/main/doc/howto/duo_agent_platform.md)
+  to work with Remote Flows
 - Create flow, note the name and version (in the form `prototype/experimental`)
 - Run this `curl` command to start your flow:
 
@@ -938,4 +954,5 @@ curl -X POST \
 - You can check your flow execution in your rails instance, under Pipelines
 - You can confirm the flow instance in your Rails DB: `Ai::DuoWorkflows::Workflow.last`
 - Examine Agent Platform logs with `gdk tail duo-workflow-service`
-- Trace your flow's execution in [Langsmith](https://docs.gitlab.com/development/ai_features/duo_chat/#use-tracing-with-langsmith)
+- Trace your flow's execution
+  in [Langsmith](https://docs.gitlab.com/development/ai_features/duo_chat/#use-tracing-with-langsmith)
