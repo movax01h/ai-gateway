@@ -3,7 +3,6 @@ from typing import Annotated, List, Optional
 
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage
 
-from duo_workflow_service.agents.prompts import HANDOVER_TOOL_NAME
 from duo_workflow_service.entities.state import (
     DuoWorkflowStateType,
     MessageTypeEnum,
@@ -11,6 +10,7 @@ from duo_workflow_service.entities.state import (
     UiChatLog,
     WorkflowStatusEnum,
 )
+from duo_workflow_service.tools.handover import HandoverTool
 
 __all__ = ["HandoverAgent"]
 
@@ -76,7 +76,7 @@ class HandoverAgent:
         handover_calls = [
             tool_call
             for tool_call in last_message.tool_calls
-            if tool_call["name"] == HANDOVER_TOOL_NAME
+            if tool_call["name"] == HandoverTool.tool_title
         ]
 
         # make sure that there are no pending tool calls

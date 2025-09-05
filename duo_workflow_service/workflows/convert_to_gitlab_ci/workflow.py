@@ -3,19 +3,12 @@
 import json
 from datetime import datetime, timezone
 from enum import StrEnum
-from typing import Any, cast
+from typing import Any
 
-from langchain_core.messages import HumanMessage, SystemMessage
 from langgraph.checkpoint.memory import BaseCheckpointSaver
 from langgraph.graph import END, StateGraph
 
-from duo_workflow_service.agents import (
-    Agent,
-    AgentV2,
-    HandoverAgent,
-    RunToolNode,
-    ToolsExecutor,
-)
+from duo_workflow_service.agents import HandoverAgent, RunToolNode, ToolsExecutor
 from duo_workflow_service.components import ToolsRegistry
 from duo_workflow_service.entities import (
     MAX_SINGLE_MESSAGE_TOKENS,
@@ -26,23 +19,15 @@ from duo_workflow_service.entities import (
     WorkflowState,
     WorkflowStatusEnum,
 )
-from duo_workflow_service.llm_factory import create_chat_model
 from duo_workflow_service.token_counter.approximate_token_counter import (
     ApproximateTokenCounter,
 )
 from duo_workflow_service.tracking import log_exception
 from duo_workflow_service.workflows.abstract_workflow import (
-    MAX_TOKENS_TO_SAMPLE,
     RECURSION_LIMIT,
     AbstractWorkflow,
 )
-from duo_workflow_service.workflows.convert_to_gitlab_ci.prompts import (
-    CI_PIPELINES_MANAGER_FILE_USER_MESSAGE,
-    CI_PIPELINES_MANAGER_SYSTEM_MESSAGE,
-    CI_PIPELINES_MANAGER_USER_GUIDELINES,
-)
 from duo_workflow_service.workflows.type_definitions import AdditionalContext
-from lib.feature_flags.context import FeatureFlag, is_feature_enabled
 from lib.internal_events.event_enum import CategoryEnum
 
 AGENT_NAME = "ci_pipelines_manager_agent"
@@ -213,29 +198,8 @@ class Workflow(AbstractWorkflow):
                 "status": WorkflowStatusEnum.EXECUTION,
             }
 
-        conversation_history = {}
-
-        if not is_feature_enabled(FeatureFlag.DUO_WORKFLOW_PROMPT_REGISTRY):
-            # Only add the messages if we're not using the Prompt Registry, since otherwise that'll be handled by it
-            project_id = self._project["id"]  # type: ignore[index]
-            system_prompt = CI_PIPELINES_MANAGER_SYSTEM_MESSAGE
-            human_prompt = (
-                CI_PIPELINES_MANAGER_USER_GUIDELINES
-                + "\n"
-                + CI_PIPELINES_MANAGER_FILE_USER_MESSAGE.format(
-                    file_content=content,
-                )
-                + "\n"
-                + f"Note: The project_id for ci_linter validation is {project_id}."
-            )
-            conversation_history[AGENT_NAME] = [
-                SystemMessage(content=system_prompt),
-                HumanMessage(content=human_prompt),
-            ]
-
         return {
             "additional_context": [AdditionalContext(category="file", content=content)],
-            "conversation_history": conversation_history,
             "ui_chat_log": [
                 UiChatLog(
                     message_type=MessageTypeEnum.TOOL,
@@ -256,33 +220,15 @@ class Workflow(AbstractWorkflow):
         translation_tools = ["create_file_with_contents", "read_file", "ci_linter"]
         agents_toolset = tools_registry.toolset(translation_tools)
 
-        if is_feature_enabled(FeatureFlag.DUO_WORKFLOW_PROMPT_REGISTRY):
-            translator_agent = cast(
-                AgentV2,
-                self._prompt_registry.get_on_behalf(
-                    self._user,
-                    "workflow/convert_to_gitlab_ci",
-                    "^1.0.0",
-                    tools=agents_toolset.bindable,  # type: ignore[arg-type]
-                    workflow_id=self._workflow_id,
-                    workflow_type=CategoryEnum.WORKFLOW_CONVERT_TO_GITLAB_CI,
-                    http_client=self._http_client,
-                ),
-            )
-        else:
-            translator_agent = Agent(
-                goal="N/A",
-                system_prompt="N/A",
-                name=AGENT_NAME,
-                model=create_chat_model(
-                    max_tokens=MAX_TOKENS_TO_SAMPLE,
-                    config=self._model_config,
-                ),
-                toolset=agents_toolset,
-                http_client=self._http_client,
-                workflow_id=self._workflow_id,
-                workflow_type=CategoryEnum.WORKFLOW_CONVERT_TO_GITLAB_CI,
-            )
+        translator_agent = self._prompt_registry.get_on_behalf(
+            self._user,
+            "workflow/convert_to_gitlab_ci",
+            "^1.0.0",
+            tools=agents_toolset.bindable,  # type: ignore[arg-type]
+            workflow_id=self._workflow_id,
+            workflow_type=CategoryEnum.WORKFLOW_CONVERT_TO_GITLAB_CI,
+            http_client=self._http_client,
+        )
 
         return {
             "agent": translator_agent,

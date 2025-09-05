@@ -4,19 +4,12 @@ import os
 from datetime import datetime, timezone
 from enum import StrEnum
 from functools import partial
-from typing import Annotated, Any, List, Literal, Union, cast
+from typing import Annotated, Any, List, Literal, Union
 
-from langchain_core.messages import (
-    AIMessage,
-    BaseMessage,
-    HumanMessage,
-    SystemMessage,
-    ToolMessage,
-)
+from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, ToolMessage
 from langgraph.graph import END, StateGraph
 from langgraph.types import interrupt
 
-from duo_workflow_service.agents import Agent, AgentV2
 from duo_workflow_service.agents.handover import HandoverAgent
 from duo_workflow_service.components.base import BaseComponent
 from duo_workflow_service.entities.event import WorkflowEvent, WorkflowEventType
@@ -27,20 +20,11 @@ from duo_workflow_service.entities.state import (
     WorkflowState,
     WorkflowStatusEnum,
 )
-from duo_workflow_service.llm_factory import create_chat_model
 from duo_workflow_service.tools.request_user_clarification import (
     RequestUserClarificationTool,
 )
-from duo_workflow_service.workflows.abstract_workflow import MAX_TOKENS_TO_SAMPLE
-from lib.feature_flags.context import FeatureFlag, is_feature_enabled
 
 from ...tools import HandoverTool
-from .prompts import (
-    ASSIGNMENT_PROMPT,
-    CLARITY_JUDGE_RESPONSE_TEMPLATE,
-    PROMPT,
-    SYS_PROMPT,
-)
 
 _AGENT_NAME = "clarity_judge"
 
@@ -77,45 +61,20 @@ class GoalDisambiguationComponent(BaseComponent):
         toolset = self.tools_registry.toolset(
             [RequestUserClarificationTool.tool_title, HandoverTool.tool_title]
         )
-
-        if is_feature_enabled(FeatureFlag.DUO_WORKFLOW_PROMPT_REGISTRY):
-            task_clarity_judge_v2: AgentV2 = cast(
-                AgentV2,
-                self.prompt_registry.get_on_behalf(
-                    self.user,
-                    "workflow/goal_disambiguation",
-                    "^1.0.0",
-                    tools=toolset.bindable,  # type: ignore[arg-type]
-                    workflow_id=self.workflow_id,
-                    workflow_type=self.workflow_type,
-                    http_client=self.http_client,
-                    prompt_template_inputs={
-                        "clarification_tool": RequestUserClarificationTool.tool_title,
-                    },
-                ),
-            )
-            graph.add_node("task_clarity_check", task_clarity_judge_v2.run)
-            entrypoint = "task_clarity_check"
-        else:
-            task_clarity_judge = Agent(
-                goal="N/A",  # "Not used, Agent always gets prepared messages from previous steps",
-                system_prompt="N/A",
-                name=_AGENT_NAME,
-                model=create_chat_model(
-                    max_tokens=MAX_TOKENS_TO_SAMPLE,
-                    config=self.model_config,
-                ),
-                toolset=self.tools_registry.toolset(
-                    [RequestUserClarificationTool.tool_title, HandoverTool.tool_title]
-                ),
-                http_client=self.http_client,
-                workflow_id=self.workflow_id,
-                workflow_type=self.workflow_type,
-            )
-            graph.add_node("task_clarity_build_prompt", self._build_prompt)
-            graph.add_edge("task_clarity_build_prompt", "task_clarity_check")
-            graph.add_node("task_clarity_check", task_clarity_judge.run)
-            entrypoint = "task_clarity_build_prompt"
+        task_clarity_judge = self.prompt_registry.get_on_behalf(
+            self.user,
+            "workflow/goal_disambiguation",
+            "^1.0.0",
+            tools=toolset.bindable,  # type: ignore[arg-type]
+            workflow_id=self.workflow_id,
+            workflow_type=self.workflow_type,
+            http_client=self.http_client,
+            prompt_template_inputs={
+                "clarification_tool": RequestUserClarificationTool.tool_title,
+            },
+        )
+        graph.add_node("task_clarity_check", task_clarity_judge.run)
+        entrypoint = "task_clarity_check"
 
         task_clarity_handover = HandoverAgent(
             new_status=WorkflowStatusEnum.PLANNING,
@@ -164,34 +123,6 @@ class GoalDisambiguationComponent(BaseComponent):
             and allow_agent_to_request_user
         )
 
-    async def _build_prompt(
-        self, state: WorkflowState
-    ) -> dict[str, dict[str, list[BaseMessage]]]:
-        return {
-            "conversation_history": {
-                _AGENT_NAME: [
-                    SystemMessage(content=SYS_PROMPT),
-                    HumanMessage(
-                        content=PROMPT.format(
-                            clarification_tool=RequestUserClarificationTool.tool_title,
-                            handover_tool=HandoverTool.tool_title,
-                        )
-                    ),
-                    HumanMessage(
-                        content=ASSIGNMENT_PROMPT.format(
-                            goal=self.goal,
-                            conversation_history="\n".join(
-                                map(
-                                    lambda x: x.pretty_repr(),
-                                    state["handover"],
-                                )
-                            ),
-                        )
-                    ),
-                ]
-            }
-        }
-
     async def _ask_question(
         self, state: WorkflowState
     ) -> dict[str, Union[list[UiChatLog], WorkflowStatusEnum]]:
@@ -219,11 +150,11 @@ class GoalDisambiguationComponent(BaseComponent):
                 UiChatLog(
                     message_type=MessageTypeEnum.REQUEST,
                     message_sub_type=None,
-                    content=CLARITY_JUDGE_RESPONSE_TEMPLATE.format(
-                        response=response,
-                        message=tool_call.get("message", ""),
-                        recommendations=recommendations,
-                    ).strip(),
+                    content=f"""{response}{tool_call.get("message", "")}
+
+I'm ready to help with your project but I need a few key details:
+
+{recommendations}""".strip(),
                     timestamp=datetime.now(timezone.utc).isoformat(),
                     status=None,
                     correlation_id=None,

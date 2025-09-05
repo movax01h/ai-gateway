@@ -49,7 +49,7 @@ def config_values_fixture(assets_dir):
 
 def _kwargs_for_class(klass):
     match klass:
-        case workflow.AgentV2:
+        case workflow.Agent:
             return {
                 "workflow_id": "123",
                 "workflow_type": CategoryEnum.WORKFLOW_SOFTWARE_DEVELOPMENT,

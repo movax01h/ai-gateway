@@ -25,6 +25,7 @@ from duo_workflow_service.workflows.type_definitions import AdditionalContext
 from lib.internal_events.event_enum import CategoryEnum
 
 
+@pytest.mark.usefixtures("mock_duo_workflow_service_container")
 class TestFlow:
     """Test Flow class functionality."""
 

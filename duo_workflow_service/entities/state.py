@@ -305,39 +305,6 @@ class WorkflowState(TypedDict):
     additional_context: list[AdditionalContext] | None
 
 
-class ReplacementRule(BaseModel):
-    element: str
-    rules: str
-
-
-class SearchAndReplaceConfig(BaseModel):
-    file_types: list[str]
-    domain_speciality: str
-    assignment_description: str
-    replacement_rules: list[ReplacementRule]
-
-
-class SearchAndReplaceWorkflowState(TypedDict):
-    plan: Plan  # TODO remove not used once ToolExecutor is being refactored
-    handover: List[
-        BaseMessage
-    ]  # TODO remove not used once HandoverAgent is being refactored
-    status: WorkflowStatusEnum
-    # conversation_history always is going to look as follow, and is going to be rewritten in each graph cycle
-    # {
-    #    'replace_agent': [
-    #        SystemMessage(…),
-    #        HumanMessage(…),
-    #        AIMessage(…)
-    #     ]
-    # }
-    conversation_history: Dict[str, List[BaseMessage]]
-    ui_chat_log: Annotated[List[UiChatLog], _ui_chat_log_reducer]
-    config: Optional[SearchAndReplaceConfig]
-    directory: str
-    pending_files: List[str]
-
-
 class ApprovalStateRejection(BaseModel):
     message: Optional[str]
 
@@ -356,9 +323,7 @@ class ChatWorkflowState(TypedDict):
     preapproved_tools: list[str] | None
 
 
-DuoWorkflowStateType = Union[
-    WorkflowState, SearchAndReplaceWorkflowState, ChatWorkflowState
-]
+DuoWorkflowStateType = Union[WorkflowState, ChatWorkflowState]
 
 
 class WorkflowContext(TypedDict):

@@ -73,47 +73,6 @@ graph TD;
     classDef last fill:#bfb6fc
 ```
 
-## Graph: `search_and_replace`
-
-```mermaid
----
-config:
-  flowchart:
-    curve: linear
----
-graph TD;
-    __start__([<p>__start__</p>]):::first
-    load_config(load_config)
-    scan_directory_tree(scan_directory_tree)
-    detect_affected_components(detect_affected_components)
-    append_affected_file(append_affected_file)
-    request_patch(request_patch)
-    log_agent_response(log_agent_response)
-    apply_patch(apply_patch)
-    complete(complete)
-    __end__([<p>__end__</p>]):::last
-    __start__ --> load_config;
-    append_affected_file -. &nbsp;end&nbsp; .-> complete;
-    append_affected_file -. &nbsp;skip&nbsp; .-> detect_affected_components;
-    append_affected_file -. &nbsp;continue&nbsp; .-> request_patch;
-    apply_patch -. &nbsp;end&nbsp; .-> complete;
-    apply_patch -. &nbsp;continue&nbsp; .-> detect_affected_components;
-    detect_affected_components -. &nbsp;continue&nbsp; .-> append_affected_file;
-    detect_affected_components -. &nbsp;end&nbsp; .-> complete;
-    load_config --> scan_directory_tree;
-    log_agent_response -. &nbsp;continue&nbsp; .-> apply_patch;
-    log_agent_response -. &nbsp;end&nbsp; .-> complete;
-    log_agent_response -. &nbsp;skip&nbsp; .-> detect_affected_components;
-    request_patch --> log_agent_response;
-    scan_directory_tree -. &nbsp;end&nbsp; .-> complete;
-    scan_directory_tree -. &nbsp;continue&nbsp; .-> detect_affected_components;
-    complete --> __end__;
-    detect_affected_components -. &nbsp;skip&nbsp; .-> detect_affected_components;
-    classDef default fill:#f2f0ff,line-height:1.2
-    classDef first fill-opacity:0
-    classDef last fill:#bfb6fc
-```
-
 ## Graph: `convert_to_gitlab_ci`
 
 ```mermaid

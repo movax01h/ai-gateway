@@ -157,15 +157,8 @@ def agent_responses_fixture() -> list[dict[str, Any]]:
 
 
 @pytest.fixture(name="mock_agent")
-def mock_agent_fixture(
-    agent_responses: list[dict[str, Any]], duo_workflow_prompt_registry_enabled: bool
-):
-    if duo_workflow_prompt_registry_enabled:
-        factory = "ai_gateway.prompts.registry.LocalPromptRegistry.get_on_behalf"
-    else:
-        factory = "duo_workflow_service.workflows.software_development.workflow.Agent"
-
-    with patch(factory) as mock:
+def mock_agent_fixture(agent_responses: list[dict[str, Any]]):
+    with patch("ai_gateway.prompts.registry.LocalPromptRegistry.get_on_behalf") as mock:
         mock.return_value.run.side_effect = agent_responses
         yield mock
 
@@ -200,15 +193,6 @@ def mock_plan_supervisor_agent_fixture():
 def mock_tools_executor_fixture():
     with patch(
         "duo_workflow_service.workflows.software_development.workflow.ToolsExecutor"
-    ) as mock:
-        yield mock
-
-
-@pytest.fixture(name="mock_chat_client")
-def mock_chat_client_fixture():
-    with patch(
-        "duo_workflow_service.workflows.software_development.workflow.create_chat_model",
-        autospec=True,
     ) as mock:
         yield mock
 
@@ -265,7 +249,6 @@ async def test_workflow_initialization(workflow):
     "duo_workflow_service.checkpointer.gitlab_workflow.GitLabStatusUpdater",
     autospec=True,
 )
-@pytest.mark.parametrize("duo_workflow_prompt_registry_enabled", [False, True])
 async def test_workflow_run(
     mock_status_updater,
     mock_gitlab_workflow_aput,
@@ -275,7 +258,6 @@ async def test_workflow_run(
     mock_tools_approval_component,
     mock_planner_component,
     mock_executor_component,
-    mock_chat_client,
     mock_fetch_workflow_and_container_data,
     mock_tools_executor,
     mock_plan_supervisor_agent,
@@ -364,7 +346,6 @@ async def test_workflow_run(
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("duo_workflow_prompt_registry_enabled", [False, True])
 @pytest.mark.parametrize("offline_mode", [True])
 async def test_workflow_run_with_memory_saver(
     mock_checkpoint_notifier,
@@ -372,7 +353,6 @@ async def test_workflow_run_with_memory_saver(
     mock_planner_component,
     mock_goal_disambiguation_component,
     mock_gitlab_workflow,
-    mock_chat_client,
     mock_fetch_workflow_and_container_data,
     mock_tools_executor,
     mock_plan_supervisor_agent,
@@ -415,13 +395,11 @@ async def test_workflow_run_with_memory_saver(
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("duo_workflow_prompt_registry_enabled", [False, True])
 async def test_workflow_run_when_exception(
     mock_log_exception,
     mock_planner_component,
     mock_executor_component,
     mock_goal_disambiguation_component,
-    mock_chat_client,
     mock_fetch_workflow_and_container_data,
     mock_gitlab_workflow,
     mock_tools_executor,
@@ -461,8 +439,6 @@ async def test_workflow_run_when_exception(
     "duo_workflow_service.checkpointer.gitlab_workflow.GitLabStatusUpdater",
     autospec=True,
 )
-@pytest.mark.parametrize("duo_workflow_prompt_registry_enabled", [False, True])
-@pytest.mark.usefixtures("mock_chat_client")
 async def test_workflow_run_with_error_state(
     mock_status_updater,
     mock_gitlab_workflow_aput,
@@ -506,14 +482,12 @@ async def test_workflow_run_with_error_state(
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("duo_workflow_prompt_registry_enabled", [False, True])
 async def test_workflow_run_with_tools_registry(
     mock_log_exception,
     mock_executor_component,
     mock_planner_component,
     mock_goal_disambiguation_component,
     mock_gitlab_workflow,
-    mock_chat_client,
     mock_fetch_workflow_and_container_data,
     mock_tools_executor,
     mock_plan_supervisor_agent,
@@ -584,17 +558,14 @@ def assert_tools_in_tools_registry(tools_registry, tools):
 # calls made when the workflow is run.
 # The next test check that the tools defined in the agent setup methods in the workflow are actually in
 # the registry and match the list in the test.
-@pytest.mark.parametrize("duo_workflow_prompt_registry_enabled", [False, True])
-@pytest.mark.usefixtures("mock_chat_client")
 def test_context_builder_tools(tools_registry, workflow):
     """Test that all tools used by the context builder agent are available in the tools registry."""
-    agent_components = workflow._setup_context_builder("test goal", tools_registry)
+    agent_components = workflow._setup_context_builder(tools_registry)
     assert agent_components["toolset"] == tools_registry.toolset(CONTEXT_BUILDER_TOOLS)
     assert_tools_in_tools_registry(tools_registry, agent_components["toolset"])
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("duo_workflow_prompt_registry_enabled", [False, True])
 async def test_workflow_run_with_setup_error(
     mock_executor_component,
     mock_planner_component,
@@ -619,7 +590,6 @@ async def test_workflow_run_with_setup_error(
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("duo_workflow_prompt_registry_enabled", [False, True])
 async def test_workflow_run_with_missing_web_url(
     mock_fetch_workflow_and_container_data,
     mock_gitlab_workflow,
@@ -647,7 +617,6 @@ async def test_workflow_run_with_missing_web_url(
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("duo_workflow_prompt_registry_enabled", [False, True])
 @patch("duo_workflow_service.gitlab.gitlab_api.GitLabUrlParser", autospec=True)
 async def test_workflow_run_with_invalid_web_url(
     mock_gitlab_url_parser,
@@ -680,13 +649,11 @@ async def test_workflow_run_with_invalid_web_url(
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("duo_workflow_prompt_registry_enabled", [False, True])
 async def test_workflow_run_with_retry(
     mock_log_exception,
     mock_executor_component,
     mock_planner_component,
     mock_goal_disambiguation_component,
-    mock_chat_client,
     mock_fetch_workflow_and_container_data,
     mock_gitlab_workflow,
     mock_git_lab_workflow_instance,
@@ -764,7 +731,6 @@ async def test_workflow_run_with_retry(
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("duo_workflow_prompt_registry_enabled", [False, True])
 @pytest.mark.parametrize(
     "agent_responses",
     [
@@ -817,7 +783,6 @@ async def test_workflow_run_with_tool_approvals(
     mock_tools_approval_component,
     mock_gitlab_workflow,
     mock_git_lab_workflow_instance,
-    mock_chat_client,
     mock_fetch_workflow_and_container_data,
     mock_tools_executor,
     mock_planner_component,
@@ -843,7 +808,6 @@ async def test_workflow_run_with_tool_approvals(
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("duo_workflow_prompt_registry_enabled", [False, True])
 @pytest.mark.parametrize(
     "workflow_config", [{"project_id": 1, "allow_agent_to_request_user": False}]
 )
@@ -856,7 +820,6 @@ async def test_workflow_run_without_plan_approval_component(
     mock_executor_component,
     mock_tools_approval_component,
     mock_gitlab_workflow,
-    mock_chat_client,
     mock_fetch_workflow_and_container_data,
     mock_tools_executor,
     mock_planner_component,
@@ -904,7 +867,6 @@ async def test_workflow_run_without_plan_approval_component(
     assert workflow.is_done
 
 
-@pytest.mark.parametrize("duo_workflow_prompt_registry_enabled", [False, True])
 @pytest.mark.asyncio
 async def test_get_from_outbox(workflow):
     workflow._outbox.put_nowait("test_item")
@@ -912,7 +874,6 @@ async def test_get_from_outbox(workflow):
     assert item == "test_item"
 
 
-@pytest.mark.parametrize("duo_workflow_prompt_registry_enabled", [False, True])
 def test_add_to_inbox(workflow):
     event = contract_pb2.ClientEvent()
     workflow.add_to_inbox(event)
@@ -920,7 +881,6 @@ def test_add_to_inbox(workflow):
     assert workflow._inbox.get_nowait() == event
 
 
-@pytest.mark.parametrize("duo_workflow_prompt_registry_enabled", [False, True])
 @pytest.mark.asyncio
 async def test_workflow_cleanup(workflow):
     assert workflow._outbox.empty()
@@ -940,7 +900,6 @@ async def test_workflow_cleanup(workflow):
     assert workflow._inbox.qsize() == 0
 
 
-@pytest.mark.parametrize("duo_workflow_prompt_registry_enabled", [False, True])
 @pytest.mark.parametrize(
     "env_vars,expected_config_type,expected_model",
     [
@@ -968,10 +927,6 @@ def test_software_development_workflow_model_config(
     workflow,
 ):
     """Test that software development workflow uses correct model based on feature flags."""
-    from duo_workflow_service.interceptors.feature_flag_interceptor import (
-        current_feature_flag_context,
-    )
-
     with patch.dict(os.environ, env_vars, clear=True):
         config = workflow._get_model_config()
 
@@ -979,11 +934,10 @@ def test_software_development_workflow_model_config(
         assert config.model_name == expected_model
 
 
-@pytest.mark.parametrize("duo_workflow_prompt_registry_enabled", [True])
 @patch(
     "duo_workflow_service.workflows.software_development.workflow.current_model_metadata_context"
 )
-def test_context_builder_uses_model_metadata_when_prompt_registry_enabled(
+def test_context_builder_uses_model_metadata(
     mock_model_metadata_context,
     tools_registry,
     workflow,
@@ -996,7 +950,7 @@ def test_context_builder_uses_model_metadata_when_prompt_registry_enabled(
     with patch.object(
         workflow._prompt_registry, "get_on_behalf", return_value=mock_agent
     ) as mock_get_on_behalf:
-        workflow._setup_context_builder("test goal", tools_registry)
+        workflow._setup_context_builder(tools_registry)
 
         mock_get_on_behalf.assert_called_once()
         call_args = mock_get_on_behalf.call_args

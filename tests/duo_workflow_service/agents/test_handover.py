@@ -5,7 +5,6 @@ import pytest
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolCall
 
 from duo_workflow_service.agents import HandoverAgent
-from duo_workflow_service.agents.prompts import HANDOVER_TOOL_NAME
 from duo_workflow_service.entities.state import (
     MessageTypeEnum,
     Plan,
@@ -13,6 +12,7 @@ from duo_workflow_service.entities.state import (
     WorkflowState,
     WorkflowStatusEnum,
 )
+from duo_workflow_service.tools.handover import HandoverTool
 
 
 class TestHandoverAgent:
@@ -46,7 +46,7 @@ class TestHandoverAgent:
                         tool_calls=[
                             ToolCall(
                                 id="1",
-                                name=str(HANDOVER_TOOL_NAME),
+                                name=str(HandoverTool.tool_title),
                                 args={"summary": "This is summary"},
                             )
                         ],
@@ -88,7 +88,7 @@ class TestHandoverAgent:
                         tool_calls=[
                             ToolCall(
                                 id="2",
-                                name=str(HANDOVER_TOOL_NAME),
+                                name=str(HandoverTool.tool_title),
                                 args={"summary": "This is awesome summary"},
                             )
                         ],
@@ -122,7 +122,7 @@ class TestHandoverAgent:
                         tool_calls=[
                             ToolCall(
                                 id="1",
-                                name=str(HANDOVER_TOOL_NAME),
+                                name=str(HandoverTool.tool_title),
                                 args={"summary": "This is summary"},
                             )
                         ],
@@ -164,7 +164,7 @@ class TestHandoverAgent:
                         tool_calls=[
                             ToolCall(
                                 id="1",
-                                name=str(HANDOVER_TOOL_NAME),
+                                name=str(HandoverTool.tool_title),
                                 args={},  # Empty arguments
                             )
                         ],
@@ -183,7 +183,7 @@ class TestHandoverAgent:
                         tool_calls=[
                             ToolCall(
                                 id="1",
-                                name=str(HANDOVER_TOOL_NAME),
+                                name=str(HandoverTool.tool_title),
                                 args={"summary": ""},  # Empty summary value
                             )
                         ],

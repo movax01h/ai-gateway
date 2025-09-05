@@ -55,7 +55,7 @@ def main():
             wrk = Workflow(
                 "",
                 {"git_branch": "test-branch"},
-                workflow_type="",
+                workflow_type=graph_name,
                 user=CloudConnectorUser(True, is_debug=True),
             )
             wrk._project = {

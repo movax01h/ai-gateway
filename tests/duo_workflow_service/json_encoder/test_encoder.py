@@ -3,8 +3,6 @@ from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, Tool
 from duo_workflow_service.entities.state import (
     AdditionalContext,
     ApprovalStateRejection,
-    ReplacementRule,
-    SearchAndReplaceConfig,
 )
 from duo_workflow_service.json_encoder.encoder import CustomEncoder
 
@@ -74,39 +72,6 @@ def test_default_with_tool_message():
         "tool_call_id": "call id",
         "name": None,
         "id": None,
-    }
-
-
-def test_default_with_search_and_replace_config():
-    encoder = CustomEncoder()
-    o = SearchAndReplaceConfig(
-        file_types=["*.vue"],
-        domain_speciality="accessibility expert",
-        assignment_description="accessibility issues",
-        replacement_rules=[
-            ReplacementRule(element="gl-icon", rules="Add aria-label"),
-            ReplacementRule(element="gl-avatar", rules="Add alt text"),
-        ],
-    )
-
-    encoded_config = encoder.default(o)
-    assert encoded_config == {
-        "assignment_description": "accessibility issues",
-        "domain_speciality": "accessibility expert",
-        "file_types": [
-            "*.vue",
-        ],
-        "replacement_rules": [
-            {
-                "element": "gl-icon",
-                "rules": "Add aria-label",
-            },
-            {
-                "element": "gl-avatar",
-                "rules": "Add alt text",
-            },
-        ],
-        "type": "SearchAndReplaceConfig",
     }
 
 

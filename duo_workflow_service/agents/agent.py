@@ -1,21 +1,16 @@
 from datetime import datetime, timezone
-from typing import Any, List, Union
+from typing import Any, Sequence, cast
 
 import structlog
 from anthropic import APIStatusError
-from dependency_injector.wiring import Provide, inject
-from langchain_core.language_models.base import LanguageModelInput
-from langchain_core.language_models.chat_models import BaseChatModel
-from langchain_core.messages import (
-    AIMessage,
-    BaseMessage,
-    HumanMessage,
-    MessageLikeRepresentation,
-    SystemMessage,
-)
-from langchain_core.runnables import Runnable
+from langchain_core.messages import AIMessage, BaseMessage, HumanMessage
+from langchain_core.prompt_values import PromptValue
+from langchain_core.prompts import ChatPromptTemplate
+from langchain_core.prompts.chat import MessageLikeRepresentation
+from langchain_core.runnables import Runnable, RunnableConfig
 
-from ai_gateway.container import ContainerApplication
+from ai_gateway.prompts import Prompt
+from ai_gateway.prompts.config.base import PromptConfig
 from duo_workflow_service.entities.event import WorkflowEvent, WorkflowEventType
 from duo_workflow_service.entities.state import (
     DuoWorkflowStateType,
@@ -24,115 +19,109 @@ from duo_workflow_service.entities.state import (
     UiChatLog,
     WorkflowStatusEnum,
 )
-from duo_workflow_service.errors.error_handler import ModelErrorHandler
 from duo_workflow_service.gitlab.events import get_event
 from duo_workflow_service.gitlab.http_client import GitlabHttpClient
 from duo_workflow_service.llm_factory import AnthropicStopReason
 from duo_workflow_service.monitoring import duo_workflow_metrics
-from duo_workflow_service.structured_logging import _workflow_id
-from duo_workflow_service.token_counter.approximate_token_counter import (
-    ApproximateTokenCounter,
-)
-from duo_workflow_service.tools import Toolset
-from lib.internal_events import InternalEventAdditionalProperties, InternalEventsClient
-from lib.internal_events.event_enum import CategoryEnum, EventEnum, EventPropertyEnum
+from duo_workflow_service.tools.handover import HandoverTool
+from lib.internal_events.event_enum import CategoryEnum
 
-log = structlog.stdlib.get_logger("agent")
+log = structlog.stdlib.get_logger("agent_v2")
 
 
-class AgentProcessingError(Exception):
-    def __init__(self, message: str, original_exception: Exception):
-        self.message = message
-        self.original_exception = original_exception
-        super().__init__(message)
+class AgentPromptTemplate(Runnable[dict, PromptValue]):
+    messages: list[BaseMessage]
 
-
-class Agent:  # pylint: disable=too-many-instance-attributes
-    name: str
-
-    _model: Runnable[LanguageModelInput, BaseMessage]
-    _goal: str
-    _system_prompt: str
-    _workflow_id: str
-    _http_client: GitlabHttpClient
-    _toolset: Toolset
-    _check_events: bool
-    _internal_event_client: InternalEventsClient
-
-    @inject
     def __init__(
-        self,
-        *,
-        goal: str,
-        model: BaseChatModel,
-        name: str,
-        system_prompt: str,
-        toolset: Toolset,
-        workflow_id: str,
-        http_client: GitlabHttpClient,
-        workflow_type: CategoryEnum,
-        check_events: bool = True,
-        internal_event_client: InternalEventsClient = Provide[
-            ContainerApplication.internal_event.client
-        ],
+        self, agent_name: str, preamble_messages: Sequence[MessageLikeRepresentation]
     ):
-        self._model = model.bind_tools(toolset.bindable)
-        self._goal = goal
-        self._system_prompt = system_prompt
-        self.name = name
-        self._error_handler = ModelErrorHandler()
-        self._workflow_id = workflow_id
-        self._http_client = http_client
-        self._workflow_type = workflow_type
-        self._toolset = toolset
-        self._check_events = check_events
-        self._internal_event_client = internal_event_client
+        self.agent_name = agent_name
+        self.preamble_messages = preamble_messages
 
-    async def run(self, state: DuoWorkflowStateType) -> dict:
+    def invoke(
+        self,
+        input: dict,
+        config: RunnableConfig | None = None,
+        **kwargs: Any,
+    ) -> PromptValue:
+        if self.agent_name in input["conversation_history"]:
+            messages = input["conversation_history"][self.agent_name]
+        else:
+            if "handover" in input:
+                # Transform handover into an agent-readable representation
+                input["handover"] = "\n".join(
+                    map(lambda x: x.pretty_repr(), input["handover"])
+                )
+
+            messages = self.preamble_messages
+
+        prompt_value = ChatPromptTemplate.from_messages(
+            messages, template_format="jinja2"
+        ).invoke(input, config, **kwargs)
+        self.messages = prompt_value.to_messages()
+
+        return prompt_value
+
+
+class Agent(Prompt):
+    check_events: bool = True
+    workflow_id: str
+    workflow_type: CategoryEnum
+    http_client: GitlabHttpClient
+    prompt_template_inputs: dict = {}
+
+    @classmethod
+    def _build_prompt_template(
+        cls, config: PromptConfig
+    ) -> Runnable[dict, PromptValue]:
+        messages = cls._prompt_template_to_messages(config.prompt_template)
+
+        return AgentPromptTemplate(agent_name=config.name, preamble_messages=messages)
+
+    async def run(self, state: DuoWorkflowStateType) -> dict[str, Any]:
         with duo_workflow_metrics.time_compute(
             operation_type=f"{self.name}_processing"
         ):
+            updates: dict[str, Any] = {
+                "handover": [],
+            }
+
+            if self.check_events:
+                event: WorkflowEvent | None = await get_event(
+                    self.http_client, self.workflow_id, False
+                )
+
+                if event and event["event_type"] == WorkflowEventType.STOP:
+                    return {"status": WorkflowStatusEnum.CANCELLED}
+
             try:
-                updates: dict[str, Any] = {
-                    "handover": [],
-                }
-                model_completion: list[MessageLikeRepresentation]
-
-                if self._check_events:
-                    event: Union[WorkflowEvent, None] = await get_event(
-                        self._http_client, self._workflow_id, False
-                    )
-
-                    if event and event["event_type"] == WorkflowEventType.STOP:
-                        return {"status": WorkflowStatusEnum.CANCELLED}
+                input = self._prepare_input(state)
+                model_completion = await super().ainvoke(input)
+                stop_reason = model_completion.response_metadata.get("stop_reason")
+                if stop_reason in AnthropicStopReason.abnormal_values():
+                    log.warning(f"LLM stopped abnormally with reason: {stop_reason}")
 
                 if self.name in state["conversation_history"]:
-                    model_completion = await self._model_completion(
-                        state["conversation_history"][self.name]
-                    )
-                    updates["conversation_history"] = {self.name: model_completion}
+                    updates["conversation_history"] = {self.name: [model_completion]}
                 else:
-                    messages = self._conversation_preamble(state)
-                    model_completion = await self._model_completion(messages)
+                    messages = cast(AgentPromptTemplate, self.prompt_tpl).messages
                     updates["conversation_history"] = {
-                        self.name: [*messages, *model_completion]
+                        self.name: [*messages, model_completion]
                     }
 
                 return {
                     **updates,
                     **self._respond_to_human(state, model_completion),
                 }
-            except AgentProcessingError as e:
-                log.warning(f"Error processing agent: {e}")
+            except APIStatusError as error:
+                log.warning(f"Error processing agent: {error}")
+
+                error_message = HumanMessage(
+                    content=f"There was an error processing your request: {error}"
+                )
 
                 return {
-                    "conversation_history": {
-                        self.name: [
-                            HumanMessage(
-                                content=f"There was an error processing your request: {e.original_exception}"
-                            )
-                        ]
-                    },
+                    "conversation_history": {self.name: [error_message]},
                     "status": WorkflowStatusEnum.ERROR,
                     "ui_chat_log": [
                         UiChatLog(
@@ -149,8 +138,14 @@ class Agent:  # pylint: disable=too-many-instance-attributes
                     ],
                 }
 
+    def _prepare_input(self, state: DuoWorkflowStateType) -> dict:
+        inputs = cast(dict, state)
+        inputs["handover_tool_name"] = HandoverTool.tool_title
+
+        return {**inputs, **self.prompt_template_inputs}
+
     def _respond_to_human(self, state, model_completion) -> dict[str, Any]:
-        if not isinstance(model_completion[0], AIMessage):
+        if not isinstance(model_completion, AIMessage):
             return {}
 
         last_human_input = state.get("last_human_input")
@@ -158,7 +153,7 @@ class Agent:  # pylint: disable=too-many-instance-attributes
             isinstance(last_human_input, dict)
             and last_human_input.get("event_type") == WorkflowEventType.MESSAGE
         ):
-            content = self._parse_model_content(model_completion[0].content)
+            content = self._parse_model_content(model_completion.content)
             return {
                 "ui_chat_log": ([self._create_ui_chat_log(content)] if content else []),
                 "last_human_input": None,
@@ -166,79 +161,11 @@ class Agent:  # pylint: disable=too-many-instance-attributes
 
         return {}
 
-    async def _model_completion(
-        self, messages: list[BaseMessage]
-    ) -> list[MessageLikeRepresentation]:
-        while True:
-            try:
-                approximate_token_count = ApproximateTokenCounter(
-                    self.name
-                ).count_tokens(messages)
-
-                model_name_attrs = {
-                    "ChatAnthropicVertex": "model_name",
-                    "ChatAnthropic": "model",
-                }
-                model_name = getattr(
-                    self._model,
-                    model_name_attrs.get(self._model.get_name()) or "missing_attr",
-                    "unknown",
-                )
-                request_type = f"{self.name}_completion"
-                with duo_workflow_metrics.time_llm_request(
-                    model=model_name, request_type=request_type
-                ):
-                    response = await self._model.ainvoke(messages)
-
-                stop_reason = response.response_metadata.get("stop_reason")
-                if stop_reason in AnthropicStopReason.abnormal_values():
-                    log.warning(f"LLM stopped abnormally with reason: {stop_reason}")
-
-                self._track_tokens_data(response, approximate_token_count)
-                duo_workflow_metrics.count_llm_response(
-                    model=model_name,
-                    request_type=request_type,
-                    stop_reason=stop_reason,
-                )
-                return [response]
-            except APIStatusError as e:
-                error_message = str(e)
-                status_code = e.response.status_code
-                model_class = getattr(self._model, "bound", None)
-                duo_workflow_metrics.count_model_completion_errors(
-                    model=getattr(self._model, "model_name", "unknown"),
-                    provider=type(model_class).__name__ if model_class else "unknown",
-                    http_status=str(status_code),
-                    error_type=self._error_handler.get_error_type(status_code),
-                )
-
-                raise AgentProcessingError(
-                    f"Model completion failed: {error_message}", e
-                )
-
-    def _track_tokens_data(self, message, estimated):
-        usage_metadata = message.usage_metadata if message.usage_metadata else {}
-
-        additional_properties = InternalEventAdditionalProperties(
-            label=self.name,
-            property=EventPropertyEnum.WORKFLOW_ID.value,
-            value=_workflow_id.get(),
-            input_tokens=usage_metadata.get("input_tokens"),
-            output_tokens=usage_metadata.get("output_tokens"),
-            total_tokens=usage_metadata.get("total_tokens"),
-            estimated_input_tokens=estimated,
-        )
-        self._internal_event_client.track_event(
-            event_name=EventEnum.TOKEN_PER_USER_PROMPT.value,
-            additional_properties=additional_properties,
-            category=self._workflow_type.value,
-        )
-
-    def _parse_model_content(self, content: str | List) -> str | None:
+    def _parse_model_content(self, content: str | list) -> str | None:
         if isinstance(content, str):
             return content
 
-        if isinstance(content, List) and all(isinstance(item, str) for item in content):
+        if isinstance(content, list) and all(isinstance(item, str) for item in content):
             return "\n".join(content)
 
         return next(
@@ -262,23 +189,10 @@ class Agent:  # pylint: disable=too-many-instance-attributes
             additional_context=None,
         )
 
-    def _conversation_preamble(self, state: DuoWorkflowStateType) -> list[BaseMessage]:
-        conversation_preamble: list[BaseMessage] = [
-            SystemMessage(content=self._system_prompt)
-        ]
-
-        if state.get("handover"):  # type: ignore
-            conversation_preamble.extend(
-                [
-                    HumanMessage(
-                        content="The steps towards goal accomplished so far are as follow:"
-                    ),
-                    *state.get("handover"),  # type: ignore
-                ]
-            )
-
-        conversation_preamble.append(
-            HumanMessage(content=f"Your goal is: {self._goal}")
-        )
-
-        return conversation_preamble
+    @property
+    def internal_event_extra(self) -> dict[str, Any]:
+        return {
+            "agent_name": self.name,
+            "workflow_id": self.workflow_id,
+            "workflow_type": self.workflow_type.value,
+        }

@@ -7,11 +7,7 @@ import structlog
 from langchain.tools import BaseTool
 
 from duo_workflow_service.entities import MessageTypeEnum, ToolStatus, UiChatLog
-from duo_workflow_service.entities.state import (
-    SearchAndReplaceWorkflowState,
-    ToolInfo,
-    WorkflowState,
-)
+from duo_workflow_service.entities.state import ToolInfo, WorkflowState
 from duo_workflow_service.monitoring import duo_workflow_metrics
 from duo_workflow_service.security.prompt_security import (
     PromptSecurity,
@@ -21,8 +17,7 @@ from lib.internal_events.event_enum import CategoryEnum
 
 WorkflowStateT_contra = TypeVar(
     "WorkflowStateT_contra",
-    SearchAndReplaceWorkflowState,
-    WorkflowState,
+    bound=WorkflowState,
     contravariant=True,
 )
 
@@ -41,7 +36,7 @@ class OutputParserProtocol(Protocol[WorkflowStateT_contra]):
     ) -> dict[str, Any]: ...
 
 
-WorkflowStateT = TypeVar("WorkflowStateT", SearchAndReplaceWorkflowState, WorkflowState)
+WorkflowStateT = TypeVar("WorkflowStateT", bound=WorkflowState)
 
 
 class RunToolNode(Generic[WorkflowStateT]):
