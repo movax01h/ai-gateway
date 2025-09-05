@@ -1,30 +1,14 @@
-from unittest.mock import AsyncMock, MagicMock, Mock, call, patch
+from unittest.mock import MagicMock, Mock, call, patch
 
 import pytest
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
-from langchain_core.prompt_values import ChatPromptValue
 from langgraph.constants import END
 from langgraph.graph import StateGraph
-from langsmith.evaluation.evaluator import Category
 
-from ai_gateway.models.mock import FakeModel
 from duo_workflow_service.components import ToolsApprovalComponent, ToolsRegistry
 from duo_workflow_service.components.executor.component import ExecutorComponent, Routes
-from duo_workflow_service.components.executor.prompts import (
-    DEPRECATED_OS_INFORMATION_COMPONENT,
-    EXECUTOR_SYSTEM_MESSAGE,
-    GET_PLAN_TOOL_NAME,
-    HANDOVER_TOOL_NAME,
-    OS_INFORMATION_COMPONENT,
-    SET_TASK_STATUS_TOOL_NAME,
-)
 from duo_workflow_service.entities import Plan, WorkflowState, WorkflowStatusEnum
 from duo_workflow_service.tools import DuoBaseTool
-from duo_workflow_service.workflows.type_definitions import (
-    AdditionalContext,
-    OsInformationContext,
-    ShellInformationContext,
-)
 
 
 @pytest.fixture(name="approval_component")
@@ -76,40 +60,6 @@ def mock_tool_registry_fixture():
     return registry
 
 
-@pytest.fixture(name="mock_create_model")
-def mock_create_model_fixture():
-    with patch(
-        "duo_workflow_service.components.executor.component.create_chat_model"
-    ) as mock:
-        mock.return_value = mock
-        mock.bind_tools.return_value = mock
-        yield mock
-
-
-@pytest.fixture(name="mock_model_ainvoke")
-def mock_model_ainvoke_fixture(
-    duo_workflow_prompt_registry_enabled, mock_create_model, end_message
-):
-    if duo_workflow_prompt_registry_enabled:
-        with patch.object(FakeModel, "ainvoke") as mock:
-            mock.return_value = end_message
-            yield mock
-    else:
-        mock_create_model.ainvoke = AsyncMock(return_value=end_message)
-        yield mock_create_model.ainvoke
-
-
-@pytest.fixture(name="mock_agent")
-def mock_agent_fixture(duo_workflow_prompt_registry_enabled: bool):
-    if duo_workflow_prompt_registry_enabled:
-        factory = "ai_gateway.prompts.registry.LocalPromptRegistry.get_on_behalf"
-    else:
-        factory = "duo_workflow_service.components.executor.component.Agent"
-
-    with patch(factory) as mock:
-        yield mock
-
-
 @pytest.fixture(name="mock_tools_executor")
 def mock_tools_executor_fixture():
     with patch(
@@ -139,7 +89,6 @@ def mock_handover_agent_fixture():
 
 
 @pytest.mark.usefixtures("mock_container")
-@pytest.mark.parametrize("duo_workflow_prompt_registry_enabled", [False, True])
 class TestExecutorComponent:
     @pytest.fixture(name="goal")
     def goal_fixture(self) -> str:
@@ -195,7 +144,6 @@ class TestExecutorComponent:
         mock_supervisor_agent,
         mock_tools_executor,
         mock_agent,
-        mock_create_model,
         executor_component,
     ):
         """Test that attach method creates all necessary nodes and edges."""
@@ -244,10 +192,8 @@ class TestExecutorComponent:
         self,
         mock_model_metadata_context,
         mock_agent,
-        mock_create_model,
         executor_component,
         workflow_type,
-        duo_workflow_prompt_registry_enabled,
     ):
         """Test that Agent is created with correct parameters."""
         mock_graph = Mock(spec=StateGraph)
@@ -258,25 +204,20 @@ class TestExecutorComponent:
         executor_component.attach(mock_graph, "exit_node", "next_node", None)
 
         # Verify Agent was called with correct parameters
-        mock_agent.assert_called_once()
-
-        if duo_workflow_prompt_registry_enabled:
-            mock_agent.assert_called_once_with(
-                executor_component.user,
-                "workflow/executor",
-                "^2.0.0",
-                tools=executor_component.executor_toolset.bindable,
-                workflow_id="test-workflow-123",
-                workflow_type=workflow_type,
-                http_client=executor_component.http_client,
-                model_metadata=mock_model_metadata,
-            )
-        else:
-            call_args = mock_agent.call_args
-            assert call_args[1]["name"] == "executor"
-            assert call_args[1]["workflow_id"] == "test-workflow-123"
-            assert call_args[1]["toolset"] == executor_component.executor_toolset
-            assert call_args[1]["workflow_type"] == workflow_type
+        mock_agent.assert_called_once_with(
+            executor_component.user,
+            "workflow/executor",
+            "^2.0.0",
+            tools=executor_component.executor_toolset.bindable,
+            workflow_id="test-workflow-123",
+            workflow_type=workflow_type,
+            http_client=executor_component.http_client,
+            model_metadata=mock_model_metadata,
+            prompt_template_inputs={
+                "set_task_status_tool_name": "set_task_status",
+                "get_plan_tool_name": "get_plan",
+            },
+        )
 
     @pytest.mark.asyncio
     async def test_component_run_with_no_approval_component(
@@ -285,7 +226,6 @@ class TestExecutorComponent:
         mock_supervisor_agent,
         mock_tools_executor,
         mock_agent,
-        mock_create_model,
         graph_input,
         graph_config,
         mock_tool_registry,
@@ -379,7 +319,6 @@ class TestExecutorComponent:
         mock_supervisor_agent,
         mock_tools_executor,
         mock_agent,
-        mock_create_model,
         approval_component,
         executor_component,
         graph_input,
@@ -453,7 +392,6 @@ class TestExecutorComponent:
         mock_supervisor_agent,
         mock_tools_executor,
         mock_agent,
-        mock_create_model,
         executor_component,
         graph_input,
         graph_config,
@@ -509,181 +447,6 @@ class TestExecutorComponent:
         assert len(response["conversation_history"]["executor"]) == 4
 
     @pytest.mark.parametrize(
-        "agent_user_environment,additional_context,expected_substrings",
-        [
-            # Happy case with OS information
-            (
-                {
-                    "os_information_context": OsInformationContext(
-                        platform="foo", architecture="bar"
-                    )
-                },
-                None,
-                (
-                    "<os_information>",
-                    "<platform>foo</platform>",
-                    "<architecture>bar</architecture>",
-                    "</os_information>",
-                ),
-            ),
-            # Happy case with shell information
-            (
-                {
-                    "shell_information_context": ShellInformationContext(
-                        shell_name="bash",
-                        shell_type="unix",
-                        shell_variant="5.1.8",
-                        shell_environment="native",
-                        ssh_session=False,
-                    )
-                },
-                None,
-                (
-                    "<shell_information>",
-                    "<name>bash</name>",
-                    "<type>unix</type>",
-                    "<variant>5.1.8</variant>",
-                    "<environment>native</environment>",
-                    "<ssh_session>False</ssh_session>",
-                    "</shell_information>",
-                ),
-            ),
-            # Both OS and shell information
-            (
-                {
-                    "os_information_context": OsInformationContext(
-                        platform="Linux", architecture="x86_64"
-                    ),
-                    "shell_information_context": ShellInformationContext(
-                        shell_name="zsh", shell_type="unix"
-                    ),
-                },
-                None,
-                (
-                    "<os_information>",
-                    "<platform>Linux</platform>",
-                    "<architecture>x86_64</architecture>",
-                    "</os_information>",
-                    "<shell_information>",
-                    "<name>zsh</name>",
-                    "<type>unix</type>",
-                    "</shell_information>",
-                ),
-            ),
-            # Shell information with minimal fields
-            (
-                {
-                    "shell_information_context": ShellInformationContext(
-                        shell_name="cmd", shell_type="windows"
-                    )
-                },
-                None,
-                (
-                    "<shell_information>",
-                    "<name>cmd</name>",
-                    "<type>windows</type>",
-                    "</shell_information>",
-                ),
-            ),
-            # Shell information with cwd
-            (
-                {
-                    "shell_information_context": ShellInformationContext(
-                        shell_name="bash",
-                        shell_type="unix",
-                        cwd="/home/user/project",
-                    )
-                },
-                None,
-                (
-                    "<shell_information>",
-                    "<name>bash</name>",
-                    "<type>unix</type>",
-                    "<cwd>/home/user/project</cwd>",
-                    "</shell_information>",
-                ),
-            ),
-            # Shell information with all fields including cwd
-            (
-                {
-                    "shell_information_context": ShellInformationContext(
-                        shell_name="zsh",
-                        shell_type="unix",
-                        shell_variant="5.8",
-                        shell_environment="ssh",
-                        ssh_session=True,
-                        cwd="/workspace/my-project",
-                    )
-                },
-                None,
-                (
-                    "<shell_information>",
-                    "<name>zsh</name>",
-                    "<type>unix</type>",
-                    "<variant>5.8</variant>",
-                    "<environment>ssh</environment>",
-                    "<ssh_session>True</ssh_session>",
-                    "<cwd>/workspace/my-project</cwd>",
-                    "</shell_information>",
-                ),
-            ),
-            # We only use the old template if the new one is missing
-            (
-                {
-                    "os_information_context": OsInformationContext(
-                        platform="foo", architecture="bar"
-                    )
-                },
-                [
-                    AdditionalContext(
-                        category="os_information_context", content="old context format"
-                    )
-                ],
-                (
-                    "<os_information>",
-                    "<platform>foo</platform>",
-                    "<architecture>bar</architecture>",
-                    "</os_information>",
-                ),
-            ),
-            # We only use the old template if the new one is missing
-            (
-                {},
-                [
-                    AdditionalContext(
-                        category="os_information", content="old context format"
-                    )
-                ],
-                (
-                    "<os_information>",
-                    "old context format" "</os_information>",
-                ),
-            ),
-            # Assert no failure if there's no context
-            ({}, None, ()),
-        ],
-    )
-    def test_format_system_prompt(
-        self,
-        agent_user_environment,
-        additional_context,
-        expected_substrings,
-        executor_component,
-    ):
-        executor_component.agent_user_environment = agent_user_environment
-        executor_component.additional_context = additional_context
-        try:
-            prompt = executor_component._format_system_prompt()
-        except Exception:
-            assert False
-        for (
-            substring
-        ) in (
-            expected_substrings
-        ):  # use substrings to avoid formatting related flakiness
-            assert substring in prompt
-
-    @pytest.mark.parametrize(
         "agent_user_environment,existing_prompt_template_inputs,want",
         [
             (
@@ -737,7 +500,7 @@ class TestExecutorComponent:
     @patch(
         "duo_workflow_service.components.executor.component.current_model_metadata_context"
     )
-    def test_agentV2_prompt_template_inputs(
+    def test_agent_prompt_template_inputs(
         self,
         mock_model_metadata_context,
         agent_user_environment,
@@ -745,7 +508,6 @@ class TestExecutorComponent:
         want,
         mock_agent,
         executor_component,
-        duo_workflow_prompt_registry_enabled,
     ):
         mock_graph = Mock(spec=StateGraph)
         mock_agent.return_value.prompt_template_inputs = existing_prompt_template_inputs
@@ -753,11 +515,10 @@ class TestExecutorComponent:
         mock_model_metadata = MagicMock()
         mock_model_metadata_context.get.return_value = mock_model_metadata
 
-        if duo_workflow_prompt_registry_enabled:
-            executor_component.agent_user_environment = agent_user_environment
-            executor_component.attach(mock_graph, "exit_node", "next_node", None)
-            assert mock_agent.return_value.prompt_template_inputs == want
+        executor_component.agent_user_environment = agent_user_environment
+        executor_component.attach(mock_graph, "exit_node", "next_node", None)
+        assert mock_agent.return_value.prompt_template_inputs == want
 
-            mock_agent.assert_called_once()
-            call_args = mock_agent.call_args
-            assert call_args.kwargs["model_metadata"] == mock_model_metadata
+        mock_agent.assert_called_once()
+        call_args = mock_agent.call_args
+        assert call_args.kwargs["model_metadata"] == mock_model_metadata

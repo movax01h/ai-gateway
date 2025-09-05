@@ -14,7 +14,6 @@ from duo_workflow_service.entities.state import (
 from duo_workflow_service.gitlab.gitlab_api import Project
 from duo_workflow_service.gitlab.http_client import GitlabHttpClient
 from duo_workflow_service.interceptors.gitlab_version_interceptor import gitlab_version
-from lib.feature_flags.context import current_feature_flag_context
 from lib.internal_events.event_enum import CategoryEnum
 
 
@@ -113,19 +112,6 @@ def mock_git_lab_workflow_instance_fixture(mock_gitlab_workflow, offline_mode):
     return mock
 
 
-@pytest.fixture(name="duo_workflow_prompt_registry_enabled")
-def duo_workflow_prompt_registry_enabled_fixture() -> bool:
-    return False
-
-
-@pytest.fixture(autouse=True)
-def stub_feature_flags(duo_workflow_prompt_registry_enabled: bool):
-    if duo_workflow_prompt_registry_enabled:
-        current_feature_flag_context.set({"duo_workflow_prompt_registry"})
-
-    yield
-
-
 @pytest.fixture(name="gl_version")
 def gl_version_fixture() -> str:
     return "17.5.2"
@@ -142,3 +128,9 @@ def mock_gitlab_version_fixture(gl_version: str):
 @pytest.fixture(name="workflow_type")
 def workflow_type_fixture() -> CategoryEnum:
     return CategoryEnum.WORKFLOW_SOFTWARE_DEVELOPMENT
+
+
+@pytest.fixture(name="mock_agent")
+def mock_agent_fixture():
+    with patch("ai_gateway.prompts.registry.LocalPromptRegistry.get_on_behalf") as mock:
+        yield mock

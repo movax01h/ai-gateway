@@ -13,19 +13,13 @@ Build features, fix bugs, and refactor code with AI assistance.
 
 [View Software Development guide](./workflows/software_development.md)
 
-### 2. Search and Replace
-
-Make intelligent code changes across multiple files using pattern-based rules.
-
-[View Search and Replace guide](./workflows/search_and_replace.md)
-
-### 3. Convert to GitLab CI
+### 2. Convert to GitLab CI
 
 Automatically convert Jenkins pipelines to GitLab CI/CD configurations.
 
 [View Convert to GitLab CI guide](./workflows/convert_to_gitlab_ci.md)
 
-### 4. Chat
+### 3. Chat
 
 Get interactive help with coding, debugging, and GitLab project management.
 

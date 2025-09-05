@@ -1,21 +1,13 @@
 import re
-from unittest.mock import AsyncMock, MagicMock, Mock, call, patch
+from unittest.mock import MagicMock, Mock, call, patch
 
 import pytest
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
-from langchain_core.prompt_values import ChatPromptValue
 from langgraph.constants import END
 from langgraph.graph import StateGraph
 
-from ai_gateway.models.mock import FakeModel
 from duo_workflow_service.components import PlanApprovalComponent, ToolsRegistry
 from duo_workflow_service.components.planner.component import PlannerComponent, Routes
-from duo_workflow_service.components.planner.prompt import (
-    HANDOVER_TOOL_NAME,
-    PLANNER_GOAL,
-    PLANNER_INSTRUCTIONS,
-    PLANNER_PROMPT,
-)
 from duo_workflow_service.entities import Plan, Task, WorkflowState, WorkflowStatusEnum
 from duo_workflow_service.tools import DuoBaseTool
 
@@ -54,40 +46,6 @@ def mock_tool_registry_fixture(mock_tool):
     return registry
 
 
-@pytest.fixture(name="mock_create_model")
-def mock_create_model_fixture():
-    with patch(
-        "duo_workflow_service.components.planner.component.create_chat_model"
-    ) as mock:
-        mock.return_value = mock
-        mock.bind_tools.return_value = mock
-        yield mock
-
-
-@pytest.fixture(name="mock_model_ainvoke")
-def mock_model_ainvoke_fixture(
-    duo_workflow_prompt_registry_enabled, mock_create_model, end_message
-):
-    if duo_workflow_prompt_registry_enabled:
-        with patch.object(FakeModel, "ainvoke") as mock:
-            mock.return_value = end_message
-            yield mock
-    else:
-        mock_create_model.ainvoke = AsyncMock(return_value=end_message)
-        yield mock_create_model.ainvoke
-
-
-@pytest.fixture(name="mock_agent")
-def mock_agent_fixture(duo_workflow_prompt_registry_enabled):
-    if duo_workflow_prompt_registry_enabled:
-        factory = "ai_gateway.prompts.registry.LocalPromptRegistry.get_on_behalf"
-    else:
-        factory = "duo_workflow_service.components.planner.component.Agent"
-
-    with patch(factory) as mock:
-        yield mock
-
-
 @pytest.fixture(name="mock_tools_executor")
 def mock_tools_executor_fixture():
     with patch(
@@ -120,7 +78,6 @@ def mock_supervisor_agent_fixture():
 
 
 @pytest.mark.usefixtures("mock_duo_workflow_service_container")
-@pytest.mark.parametrize("duo_workflow_prompt_registry_enabled", [False, True])
 class TestPlannerComponent:
     @pytest.fixture(name="goal")
     def goal_fixture(self) -> str:
@@ -188,7 +145,6 @@ class TestPlannerComponent:
         mock_supervisor_agent,
         mock_tools_executor,
         mock_agent,
-        mock_create_model,
         planner_component,
         compiled_graph,
     ):
@@ -234,9 +190,7 @@ class TestPlannerComponent:
         self,
         mock_model_metadata_context,
         mock_agent,
-        mock_create_model,
         planner_component,
-        duo_workflow_prompt_registry_enabled,
         workflow_type,
         mock_tool,
     ):
@@ -249,33 +203,24 @@ class TestPlannerComponent:
         planner_component.attach(mock_graph, "exit_node", "next_node", None)
 
         # Verify Agent was called with correct parameters
-        if duo_workflow_prompt_registry_enabled:
-            mock_agent.assert_called_once_with(
-                planner_component.user,
-                "workflow/planner",
-                "^1.0.0",
-                tools=planner_component.planner_toolset.bindable,
-                workflow_id="test-workflow-123",
-                workflow_type=workflow_type,
-                http_client=planner_component.http_client,
-                model_metadata=mock_model_metadata,
-                prompt_template_inputs={
-                    "executor_agent_tools": f"{mock_tool.name}: {mock_tool.description}",
-                    "create_plan_tool_name": "test_tool",
-                    "get_plan_tool_name": "test_tool",
-                    "add_new_task_tool_name": "test_tool",
-                    "remove_task_tool_name": "test_tool",
-                    "update_task_description_tool_name": "test_tool",
-                },
-            )
-        else:
-            mock_agent.assert_called_once()
-
-            call_args = mock_agent.call_args
-            assert call_args[1]["name"] == "planner"
-            assert call_args[1]["workflow_id"] == "test-workflow-123"
-            assert call_args[1]["toolset"] == planner_component.planner_toolset
-            assert call_args[1]["workflow_type"] == workflow_type
+        mock_agent.assert_called_once_with(
+            planner_component.user,
+            "workflow/planner",
+            "^1.0.0",
+            tools=planner_component.planner_toolset.bindable,
+            workflow_id="test-workflow-123",
+            workflow_type=workflow_type,
+            http_client=planner_component.http_client,
+            model_metadata=mock_model_metadata,
+            prompt_template_inputs={
+                "executor_agent_tools": f"{mock_tool.name}: {mock_tool.description}",
+                "create_plan_tool_name": "test_tool",
+                "get_plan_tool_name": "test_tool",
+                "add_new_task_tool_name": "test_tool",
+                "remove_task_tool_name": "test_tool",
+                "update_task_description_tool_name": "test_tool",
+            },
+        )
 
     @pytest.mark.asyncio
     async def test_component_run_with_no_approval_component(
@@ -283,7 +228,6 @@ class TestPlannerComponent:
         mock_supervisor_agent,
         mock_tools_executor,
         mock_agent,
-        mock_create_model,
         planner_component,
         graph_input,
         graph_config,
@@ -355,7 +299,6 @@ class TestPlannerComponent:
         self,
         mock_tools_executor,
         mock_agent,
-        mock_create_model,
         approval_component,
         planner_component,
         graph_input,
@@ -411,54 +354,3 @@ class TestPlannerComponent:
         assert response["status"] == WorkflowStatusEnum.PLAN_APPROVAL_REQUIRED
         assert len(response["conversation_history"]["planner"]) == 4
         approval_component.attach.assert_called_once()
-
-    @pytest.mark.asyncio
-    async def test_messages_to_model(
-        self,
-        mock_model_ainvoke,
-        compiled_graph,
-        workflow_state,
-        graph_config,
-        project,
-        goal,
-        mock_tool,
-    ):
-        await compiled_graph.ainvoke(input=workflow_state, config=graph_config)
-
-        planner_instructions = PLANNER_INSTRUCTIONS.format(
-            create_plan_tool_name="test_tool",
-            add_new_task_tool_name="test_tool",
-            remove_task_tool_name="test_tool",
-            update_task_description_tool_name="test_tool",
-            get_plan_tool_name="test_tool",
-            handover_tool_name=HANDOVER_TOOL_NAME,
-            project_id=project["id"],
-            project_name=project["name"],
-            project_url=project["http_url_to_repo"],
-        )
-
-        expected_goal = PLANNER_GOAL.format(
-            handover_tool_name=HANDOVER_TOOL_NAME,
-            executor_agent_tools=f"{mock_tool.name}: {mock_tool.description}",
-            goal=goal,
-            create_plan_tool_name="test_tool",
-            get_plan_tool_name="test_tool",
-            add_new_task_tool_name="test_tool",
-            remove_task_tool_name="test_tool",
-            update_task_description_tool_name="test_tool",
-            planner_instructions=planner_instructions,
-        )
-
-        ainvoke_messages = mock_model_ainvoke.call_args.args[0]
-
-        if isinstance(ainvoke_messages, ChatPromptValue):
-            ainvoke_messages = ainvoke_messages.messages
-
-        assert ainvoke_messages[0] == SystemMessage(content=PLANNER_PROMPT)
-
-        # Check the content of the HumanMessage ignoring whitespaces, since they may differ between jinja and in-code
-        # templates
-        assert (
-            re.sub(r"\s+", " ", ainvoke_messages[1].content).strip()
-            == re.sub(r"\s+", " ", f"Your goal is: {expected_goal}").strip()
-        )

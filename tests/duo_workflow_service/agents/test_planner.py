@@ -2,8 +2,8 @@ import pytest
 from langchain_core.messages import HumanMessage
 
 from duo_workflow_service.agents import PlanSupervisorAgent
-from duo_workflow_service.agents.prompts import NEXT_STEP_PROMPT
 from duo_workflow_service.entities.state import Plan, WorkflowState, WorkflowStatusEnum
+from duo_workflow_service.tools.handover import HandoverTool
 
 
 class TestPlanSupervisorAgent:
@@ -29,6 +29,11 @@ class TestPlanSupervisorAgent:
 
         assert result == {
             "conversation_history": {
-                "executor": [HumanMessage(content=NEXT_STEP_PROMPT)]
+                "executor": [
+                    HumanMessage(
+                        content=f"What is the next task? Call the `{HandoverTool.tool_title}` tool if your task is "
+                        "complete"
+                    )
+                ]
             }
         }

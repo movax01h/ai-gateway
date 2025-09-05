@@ -3,7 +3,7 @@ import os
 from datetime import datetime, timezone
 from enum import StrEnum
 from functools import partial
-from typing import Annotated, cast
+from typing import Annotated
 
 # pylint disables are going to be fixed via
 # https://gitlab.com/gitlab-org/duo-workflow/duo-workflow-service/-/issues/78
@@ -20,16 +20,10 @@ from langgraph.graph import (  # pylint: disable=no-langgraph-langchain-imports
 
 from ai_gateway.model_metadata import current_model_metadata_context
 from duo_workflow_service.agents import (
-    Agent,
-    AgentV2,
     HandoverAgent,
     PlanSupervisorAgent,
     PlanTerminatorAgent,
     ToolsExecutor,
-)
-from duo_workflow_service.agents.prompts import (
-    BUILD_CONTEXT_SYSTEM_MESSAGE,
-    HANDOVER_TOOL_NAME,
 )
 from duo_workflow_service.components import (
     PlanApprovalComponent,
@@ -49,10 +43,9 @@ from duo_workflow_service.entities import (
     WorkflowState,
     WorkflowStatusEnum,
 )
-from duo_workflow_service.llm_factory import create_chat_model
+from duo_workflow_service.tools.handover import HandoverTool
 from duo_workflow_service.tracking.errors import log_exception
 from duo_workflow_service.workflows.abstract_workflow import AbstractWorkflow
-from lib.feature_flags.context import FeatureFlag, is_feature_enabled
 
 # Constants
 QUEUE_MAX_SIZE = 1
@@ -188,7 +181,7 @@ def _router(
 
     last_message = state["conversation_history"][routed_agent_name][-1]
     if isinstance(last_message, AIMessage) and len(last_message.tool_calls) > 0:
-        if last_message.tool_calls[0]["name"] == HANDOVER_TOOL_NAME:
+        if last_message.tool_calls[0]["name"] == HandoverTool.tool_title:
             return Routes.HANDOVER
         if any(
             tool_registry.approval_required(call["name"])
@@ -229,7 +222,7 @@ class Workflow(AbstractWorkflow):
         # Add nodes to the graph
         graph.set_entry_point("build_context")
 
-        last_node_name = self._add_context_builder_nodes(graph, goal, tools_registry)
+        last_node_name = self._add_context_builder_nodes(graph, tools_registry)
         disambiguation_component = GoalDisambiguationComponent(
             user=self._user,
             goal=goal,
@@ -360,46 +353,19 @@ class Workflow(AbstractWorkflow):
             additional_context=self._additional_context,
         )
 
-    def _setup_context_builder(
-        self,
-        goal: str,
-        tools_registry: ToolsRegistry,
-    ):
+    def _setup_context_builder(self, tools_registry: ToolsRegistry):
         context_builder_toolset = tools_registry.toolset(CONTEXT_BUILDER_TOOLS)
 
-        if is_feature_enabled(FeatureFlag.DUO_WORKFLOW_PROMPT_REGISTRY):
-            context_builder: AgentV2 = cast(
-                AgentV2,
-                self._prompt_registry.get_on_behalf(
-                    self._user,
-                    "workflow/context_builder",
-                    "^1.0.0",
-                    tools=context_builder_toolset.bindable,  # type: ignore[arg-type]
-                    workflow_id=self._workflow_id,
-                    workflow_type=self._workflow_type,
-                    http_client=self._http_client,
-                    model_metadata=current_model_metadata_context.get(),
-                ),
-            )
-        else:
-            context_builder = Agent(
-                goal=goal,
-                model=create_chat_model(
-                    max_tokens=MAX_TOKENS_TO_SAMPLE,
-                    config=self._model_config,
-                ),  # type: ignore
-                name="context_builder",
-                system_prompt=BUILD_CONTEXT_SYSTEM_MESSAGE.format(
-                    handover_tool_name=HANDOVER_TOOL_NAME,
-                    project_id=self._project["id"],  # type: ignore[index]
-                    project_name=self._project["name"],  # type: ignore[index]
-                    project_url=self._project["http_url_to_repo"],  # type: ignore[index]
-                ),
-                toolset=context_builder_toolset,
-                workflow_id=self._workflow_id,
-                http_client=self._http_client,
-                workflow_type=self._workflow_type,
-            )
+        context_builder = self._prompt_registry.get_on_behalf(
+            self._user,
+            "workflow/context_builder",
+            "^1.0.0",
+            tools=context_builder_toolset.bindable,  # type: ignore[arg-type]
+            workflow_id=self._workflow_id,
+            workflow_type=self._workflow_type,
+            http_client=self._http_client,
+            model_metadata=current_model_metadata_context.get(),
+        )
 
         return {
             "agent": context_builder,
@@ -419,9 +385,9 @@ class Workflow(AbstractWorkflow):
         }
 
     def _add_context_builder_nodes(
-        self, graph: StateGraph, goal: str, tools_registry: ToolsRegistry
+        self, graph: StateGraph, tools_registry: ToolsRegistry
     ) -> Annotated[str, "The name of the last handover node"]:
-        context_builder_components = self._setup_context_builder(goal, tools_registry)
+        context_builder_components = self._setup_context_builder(tools_registry)
 
         graph.add_node("build_context", context_builder_components["agent"].run)
         graph.add_node(

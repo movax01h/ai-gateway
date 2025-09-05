@@ -1,38 +1,21 @@
 from enum import StrEnum
 from functools import partial
-from typing import Any, Optional, cast
+from typing import Any, Optional
 
 from langchain_core.messages import AIMessage
 from langgraph.graph import StateGraph
 
 from ai_gateway.model_metadata import current_model_metadata_context
 from duo_workflow_service.agents import (
-    Agent,
-    AgentV2,
     HandoverAgent,
     PlanSupervisorAgent,
     ToolsExecutor,
 )
 from duo_workflow_service.components import ToolsApprovalComponent, ToolsRegistry
 from duo_workflow_service.components.base import BaseComponent
-from duo_workflow_service.components.executor.prompts import (
-    DEPRECATED_OS_INFORMATION_COMPONENT,
-    EXECUTOR_SYSTEM_MESSAGE,
-    GET_PLAN_TOOL_NAME,
-    HANDOVER_TOOL_NAME,
-    OS_INFORMATION_COMPONENT,
-    SET_TASK_STATUS_TOOL_NAME,
-    SHELL_INFORMATION_COMPONENT,
-)
 from duo_workflow_service.entities import WorkflowState, WorkflowStatusEnum
 from duo_workflow_service.gitlab.gitlab_api import Project
-from duo_workflow_service.llm_factory import create_chat_model
-from duo_workflow_service.workflows.abstract_workflow import MAX_TOKENS_TO_SAMPLE
-from duo_workflow_service.workflows.type_definitions import (
-    OsInformationContext,
-    ShellInformationContext,
-)
-from lib.feature_flags.context import FeatureFlag, is_feature_enabled
+from duo_workflow_service.tools.handover import HandoverTool
 
 
 class Routes(StrEnum):
@@ -52,7 +35,7 @@ def _router(
 
     last_message = state["conversation_history"]["executor"][-1]
     if isinstance(last_message, AIMessage) and len(last_message.tool_calls) > 0:
-        if last_message.tool_calls[0]["name"] == HANDOVER_TOOL_NAME:
+        if last_message.tool_calls[0]["name"] == HandoverTool.tool_title:
             return Routes.HANDOVER
         if any(
             tool_registry.approval_required(call["name"])
@@ -77,40 +60,24 @@ class ExecutorComponent(BaseComponent):
         next_node: str,
         approval_component: Optional[ToolsApprovalComponent],
     ):
-        if is_feature_enabled(FeatureFlag.DUO_WORKFLOW_PROMPT_REGISTRY):
-            agent_v2: AgentV2 = cast(
-                AgentV2,
-                self.prompt_registry.get_on_behalf(
-                    self.user,
-                    "workflow/executor",
-                    "^2.0.0",
-                    tools=self.executor_toolset.bindable,  # type: ignore[arg-type]
-                    workflow_id=self.workflow_id,
-                    workflow_type=self.workflow_type,
-                    http_client=self.http_client,
-                    model_metadata=current_model_metadata_context.get(),
-                ),
-            )
-            agent_v2.prompt_template_inputs.setdefault(
-                "agent_user_environment", {}
-            ).update(self.agent_user_environment)
-            graph.add_node("execution", agent_v2.run)
-        else:
-            base_model_executor = create_chat_model(
-                max_tokens=MAX_TOKENS_TO_SAMPLE,
-                config=self.model_config,
-            )
-            agent = Agent(
-                goal=self.goal,
-                model=base_model_executor,
-                name="executor",
-                system_prompt=self._format_system_prompt(),
-                toolset=self.executor_toolset,
-                workflow_id=self.workflow_id,
-                http_client=self.http_client,
-                workflow_type=self.workflow_type,
-            )
-            graph.add_node("execution", agent.run)
+        agent = self.prompt_registry.get_on_behalf(
+            self.user,
+            "workflow/executor",
+            "^2.0.0",
+            tools=self.executor_toolset.bindable,  # type: ignore[arg-type]
+            workflow_id=self.workflow_id,
+            workflow_type=self.workflow_type,
+            http_client=self.http_client,
+            model_metadata=current_model_metadata_context.get(),
+            prompt_template_inputs={
+                "set_task_status_tool_name": "set_task_status",
+                "get_plan_tool_name": "get_plan",
+            },
+        )
+        agent.prompt_template_inputs.setdefault("agent_user_environment", {}).update(
+            self.agent_user_environment
+        )
+        graph.add_node("execution", agent.run)
 
         tools_executor = ToolsExecutor(
             tools_agent_name="executor",
@@ -154,72 +121,3 @@ class ExecutorComponent(BaseComponent):
         graph.add_edge("execution_handover", next_node)
 
         return "execution"
-
-    def _format_shell_information(self, context: ShellInformationContext) -> str:
-        variant_section = (
-            f"\n  <variant>{context.shell_variant}</variant>"
-            if context.shell_variant
-            else ""
-        )
-        environment_section = (
-            f"\n  <environment>{context.shell_environment}</environment>"
-            if context.shell_environment
-            else ""
-        )
-        ssh_session_section = (
-            f"\n  <ssh_session>{context.ssh_session}</ssh_session>"
-            if context.ssh_session is not None
-            else ""
-        )
-        cwd_section = f"\n  <cwd>{context.cwd}</cwd>" if context.cwd else ""
-
-        return SHELL_INFORMATION_COMPONENT.format(
-            name=context.shell_name,
-            type=context.shell_type,
-            variant_section=variant_section,
-            environment_section=environment_section,
-            ssh_session_section=ssh_session_section,
-            cwd_section=cwd_section,
-        )
-
-    def _format_system_prompt(self) -> str:
-        os_information = ""
-        shell_information = ""
-
-        for context_type, context in self.agent_user_environment.items():
-            if context_type == "os_information_context" and isinstance(
-                context, OsInformationContext
-            ):
-                os_information = OS_INFORMATION_COMPONENT.format(
-                    platform=context.platform,
-                    architecture=context.architecture,
-                )
-
-            elif context_type == "shell_information_context" and isinstance(
-                context, ShellInformationContext
-            ):
-                shell_information = self._format_shell_information(context)
-
-        # Temporary support for deprecated os_information message
-        if not os_information:
-            for additional_context in self.additional_context or []:
-                # We only want to add os_information if it's not empty
-                if (
-                    additional_context.category == "os_information"
-                    and additional_context.content
-                ):
-                    os_information = DEPRECATED_OS_INFORMATION_COMPONENT.format(
-                        os_information=additional_context.content
-                    )
-
-        environment_info = os_information + shell_information
-
-        return EXECUTOR_SYSTEM_MESSAGE.format(
-            set_task_status_tool_name=SET_TASK_STATUS_TOOL_NAME,
-            handover_tool_name=HANDOVER_TOOL_NAME,
-            get_plan_tool_name=GET_PLAN_TOOL_NAME,
-            project_id=self.project["id"],
-            project_name=self.project["name"],
-            project_url=self.project["http_url_to_repo"],
-            environment_information=environment_info,
-        )
