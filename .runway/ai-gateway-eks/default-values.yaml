@@ -46,6 +46,7 @@ spec:
       readiness_probe:
         path: "/monitoring/ready"
         period_seconds: 30
+        timeout_seconds: 5
         failure_threshold: 2  # 60 seconds
       load_balancing:
         external_load_balancer:
