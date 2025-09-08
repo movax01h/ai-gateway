@@ -55,7 +55,7 @@ NOT_AVAILABLE_TEMPLATES = {
 
 CATEGORY_LABELS = {
   ai_gateway: '~"devops::ai-powered"',
-  duo_workflow_service: '~"group::duo workflow"',
+  duo_workflow_service: '~"group::agent foundations"',
   analytics_instrumentation: '~"group::analytics instrumentation"',
 }.freeze
 
