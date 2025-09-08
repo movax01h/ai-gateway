@@ -2,18 +2,17 @@
 
 ## What It Does
 
-This flow takes a URL for a failing GitLab CI/CD job URL as input and automatically resolves it by creating code changes and submitting a merge request.
+This flow takes a URL for Merge Request that has a failing GitLab CI/CD pipeline as input and automatically resolves it by creating code changes and submitting a merge request.
 
 ## When to Use
 
-- Fixing a failing pipeline job
-- Fixing a pipeline with multiple failing jobs (coming soon)
+Use this Flow when your Merge Request has a failing pipeline that needs to be fixed.
 
 ## How to Use
 
 > **Note:** This flow is currently in early development, and can only be triggered from an API call. It is run in remote execution, and it pushes the code and creates a merge request automatically.
 
-1. Navigate to a failing job in a merge request, and note the job URL, the branch for the MR, and the project ID
+1. Navigate to a merge request with a failing pipeline, and note the merge request URL, the branch for the MR, and the project ID
 1. Execute the following `curl` command in your terminal:
 
    ```shell
@@ -22,6 +21,7 @@ This flow takes a URL for a failing GitLab CI/CD job URL as input and automatica
           --header "Authorization: Bearer $GDK_API_TOKEN" \
           --data '{
               "goal": "FAILING_JOB_URL",
+              "project_id": "PROJECT_ID",
               "workflow_definition": "fix_pipeline/experimental",
               "agent_privileges": [1,2,3,5],
               "pre_approved_agent_privileges": [1,2,3,5],
