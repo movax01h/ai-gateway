@@ -9,6 +9,7 @@ import pytest
 from langchain.tools import BaseTool
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 from langchain_core.runnables import Runnable
+from langchain_core.tools import ToolException
 from langgraph.graph import StateGraph
 from langgraph.types import Command
 from pydantic import BaseModel, Field, ValidationError
@@ -850,6 +851,19 @@ async def test_state_manipulation(
             False,
             "Failed: Using test_tool: invalid=data - Validation error",
             ToolInfo(name="test_tool", args={"invalid": "data"}),
+        ),
+        (
+            {"id": "3", "name": "test_tool", "args": {"file_path": ".git/config"}},
+            ToolException(
+                "Access denied: Cannot access '.git/config' as it matches Duo Context Exclusion patterns. "
+                "Path '.git/config' matches excluded pattern: '.git'."
+            ),
+            None,  # tool_args_schema
+            "Tool test_tool raised ToolException: Access denied: Cannot access '.git/config' as it "
+            "matches Duo Context Exclusion patterns. Path '.git/config' matches excluded pattern: '.git'.",
+            False,  # expected_error
+            "Failed: Using test_tool: file_path=.git/config - ToolException",
+            ToolInfo(name="test_tool", args={"file_path": ".git/config"}),
         ),
     ],
 )
