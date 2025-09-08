@@ -30,6 +30,14 @@ def get_llm_definitions():
                 "model": "model_family",
             },
         ),
+        "gitlab_model2": LLMDefinition(
+            gitlab_identifier="gitlab_model2",
+            name="gitlab_model2",
+            params={
+                "model_class_provider": "provider2",
+                "model": "model_family2",
+            },
+        ),
         "amazon_q": LLMDefinition(
             gitlab_identifier="amazon_q",
             name="amazon_q",
@@ -119,6 +127,20 @@ class TestCreateModelMetadata:
         assert result.llm_definition_params == {
             "model_class_provider": "provider",
             "model": "model_family",
+        }
+
+    def test_create_gitlab_model_metadata_with_identifier_and_feature_setting(self):
+        data = {
+            "provider": "gitlab",
+            "identifier": "gitlab_model2",
+            "feature_setting": "duo_chat",
+        }
+
+        result = create_model_metadata(data)
+
+        assert result.llm_definition_params == {
+            "model_class_provider": "provider2",
+            "model": "model_family2",
         }
 
     def test_required_parameters(self):
