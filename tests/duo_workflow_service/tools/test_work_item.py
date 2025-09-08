@@ -13,9 +13,13 @@ from duo_workflow_service.tools.work_item import (
     GetWorkItemNotesInput,
     ListWorkItems,
     ListWorkItemsInput,
+    UpdateWorkItem,
+    UpdateWorkItemInput,
+    WorkItemResourceInput,
+)
+from duo_workflow_service.tools.work_items.base_tool import (
     ResolvedParent,
     ResolvedWorkItem,
-    WorkItemResourceInput,
 )
 
 
@@ -46,6 +50,7 @@ def work_item_data_fixture():
         "createdAt": "2025-04-29T11:35:36.000+02:00",
         "updatedAt": "2025-04-29T12:35:36.000+02:00",
         "author": {"username": "test_user", "name": "Test User"},
+        "workItemType": {"name": "Issue"},
     }
 
 
@@ -1225,6 +1230,24 @@ async def test_create_epic_in_project_error(
     )
 
 
+@pytest.mark.asyncio
+async def test_create_work_item_rejects_quick_actions_in_description(
+    gitlab_client_mock, metadata
+):
+    tool = CreateWorkItem(description="create work item", metadata=metadata)
+
+    response = await tool._arun(
+        group_id="namespace/group",
+        title="Blocked",
+        type_name="Issue",
+        description="/close",
+    )
+
+    resp = json.loads(response)
+    assert "error" in resp
+    gitlab_client_mock.graphql.assert_not_called()
+
+
 @pytest.mark.parametrize(
     "input_data,expected_message",
     [
@@ -1571,3 +1594,273 @@ async def test_create_work_item_note_rejects_quick_actions_in_body(
     assert "error" in response_json
     assert "Body contains GitLab quick actions" in response_json["error"]
     gitlab_client_mock.graphql.assert_not_called()
+
+
+@pytest.fixture
+def resolved_work_item(work_item_data):
+    return ResolvedWorkItem(
+        id="gid://gitlab/WorkItem/123",
+        full_data=work_item_data,
+        parent=ResolvedParent(type="project", full_path="namespace/project"),
+    )
+
+
+@pytest.fixture
+def update_response():
+    return {
+        "data": {
+            "workItemUpdate": {
+                "workItem": {
+                    "id": "gid://gitlab/WorkItem/123",
+                    "title": "Updated Title",
+                    "state": "opened",
+                }
+            }
+        }
+    }
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "update_kwargs, expected_fields",
+    [
+        (
+            {"title": "Updated Title"},
+            {"title": "Updated Title"},
+        ),
+        (
+            {"title": "Confidential Item", "confidential": True},
+            {"title": "Confidential Item", "confidential": True},
+        ),
+        (
+            {"state": "closed"},
+            {"stateEvent": "CLOSE"},
+        ),
+        (
+            {
+                "start_date": "2025-08-01",
+                "due_date": "2025-08-10",
+                "is_fixed": True,
+            },
+            {
+                "startAndDueDateWidget": {
+                    "startDate": "2025-08-01",
+                    "dueDate": "2025-08-10",
+                    "isFixed": True,
+                }
+            },
+        ),
+        (
+            {"health_status": "needsAttention"},
+            {"healthStatusWidget": {"healthStatus": "needsAttention"}},
+        ),
+        (
+            {"assignee_ids": [1, "gid://gitlab/User/2"]},
+            {
+                "assigneesWidget": {
+                    "assigneeIds": ["gid://gitlab/User/1", "gid://gitlab/User/2"]
+                }
+            },
+        ),
+        (
+            {"add_label_ids": [3], "remove_label_ids": ["gid://gitlab/Label/5"]},
+            {
+                "labelsWidget": {
+                    "addLabelIds": ["gid://gitlab/Label/3"],
+                    "removeLabelIds": ["gid://gitlab/Label/5"],
+                }
+            },
+        ),
+    ],
+)
+async def test_update_work_item_variants(
+    gitlab_client_mock,
+    metadata,
+    resolved_work_item,
+    update_response,
+    update_kwargs,
+    expected_fields,
+):
+    tool = UpdateWorkItem(description="update", metadata=metadata)
+    tool._resolve_work_item_data = AsyncMock(return_value=resolved_work_item)
+    gitlab_client_mock.graphql = AsyncMock(return_value=update_response)
+
+    result = await tool._arun(
+        project_id="namespace/project",
+        work_item_iid=42,
+        **update_kwargs,
+    )
+
+    expected_output = json.dumps(
+        {"updated_work_item": update_response["data"]["workItemUpdate"]["workItem"]}
+    )
+    assert result == expected_output
+
+    mutation, variables = gitlab_client_mock.graphql.call_args[0]
+    assert "workItemUpdate" in mutation
+
+    input_data = variables["input"]
+    for key, value in expected_fields.items():
+        assert input_data[key] == value
+
+
+@pytest.mark.asyncio
+async def test_update_work_item_with_group_id(
+    gitlab_client_mock, metadata, resolved_work_item, update_response
+):
+    tool = UpdateWorkItem(description="update", metadata=metadata)
+    tool._resolve_work_item_data = AsyncMock(return_value=resolved_work_item)
+    gitlab_client_mock.graphql = AsyncMock(return_value=update_response)
+
+    result = await tool._arun(
+        group_id="namespace/group",
+        work_item_iid=42,
+        title="Updated Title",
+    )
+
+    assert json.loads(result)["updated_work_item"]["title"] == "Updated Title"
+
+
+@pytest.mark.asyncio
+async def test_update_work_item_with_project_id(
+    gitlab_client_mock, metadata, resolved_work_item, update_response
+):
+    tool = UpdateWorkItem(description="update", metadata=metadata)
+    tool._resolve_work_item_data = AsyncMock(return_value=resolved_work_item)
+    gitlab_client_mock.graphql = AsyncMock(return_value=update_response)
+
+    result = await tool._arun(
+        project_id="namespace/project",
+        work_item_iid=42,
+        title="Updated Title",
+    )
+
+    assert json.loads(result)["updated_work_item"]["title"] == "Updated Title"
+
+
+@pytest.mark.asyncio
+async def test_update_work_item_with_url(
+    gitlab_client_mock, metadata, resolved_work_item, update_response
+):
+    tool = UpdateWorkItem(description="update", metadata=metadata)
+    tool._resolve_work_item_data = AsyncMock(return_value=resolved_work_item)
+    gitlab_client_mock.graphql = AsyncMock(return_value=update_response)
+
+    result = await tool._arun(
+        url="https://gitlab.com/namespace/project/-/work_items/42",
+        title="Updated Title",
+    )
+
+    assert json.loads(result)["updated_work_item"]["title"] == "Updated Title"
+
+
+@pytest.mark.asyncio
+async def test_update_work_item_graphql_error(
+    gitlab_client_mock, metadata, resolved_work_item
+):
+    graphql_response = {"errors": [{"message": "Invalid field"}]}
+    tool = UpdateWorkItem(description="update", metadata=metadata)
+    tool._resolve_work_item_data = AsyncMock(return_value=resolved_work_item)
+    gitlab_client_mock.graphql = AsyncMock(return_value=graphql_response)
+
+    result = await tool._arun(
+        project_id="namespace/project",
+        work_item_iid=42,
+        title="Trigger error",
+    )
+
+    assert json.loads(result)["error"] == graphql_response["errors"]
+
+
+@pytest.mark.asyncio
+async def test_update_work_item_validation_error(gitlab_client_mock, metadata):
+    tool = UpdateWorkItem(description="update", metadata=metadata)
+    tool._resolve_work_item_data = AsyncMock(return_value="Invalid reference")
+
+    result = await tool._arun(
+        project_id="namespace/project",
+        work_item_iid=42,
+        title="Bad",
+    )
+
+    assert json.loads(result)["error"] == "Invalid reference"
+    gitlab_client_mock.graphql.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_update_work_item_exception(
+    gitlab_client_mock, metadata, resolved_work_item
+):
+    gitlab_client_mock.graphql = AsyncMock(side_effect=Exception("Network error"))
+    tool = UpdateWorkItem(description="update", metadata=metadata)
+    tool._resolve_work_item_data = AsyncMock(return_value=resolved_work_item)
+
+    response = await tool._arun(
+        project_id="namespace/project",
+        work_item_iid=42,
+        title="Trigger exception",
+    )
+
+    expected = json.dumps({"error": "Network error"})
+    assert response == expected
+    gitlab_client_mock.graphql.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_update_work_item_invalid_work_item(gitlab_client_mock, metadata):
+    tool = UpdateWorkItem(description="update work item", metadata=metadata)
+    tool._resolve_work_item_data = AsyncMock(return_value="Work item not found")
+
+    response = await tool._arun(
+        project_id="namespace/project",
+        work_item_iid=999,
+        title="This update will fail",
+    )
+
+    expected_response = json.dumps({"error": "Work item not found"})
+    assert response == expected_response
+
+    gitlab_client_mock.graphql.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_update_work_item_rejects_quick_actions_in_description(
+    gitlab_client_mock, metadata, resolved_work_item
+):
+    tool = UpdateWorkItem(description="update work item", metadata=metadata)
+    tool._resolve_work_item_data = AsyncMock(return_value=resolved_work_item)
+
+    response = await tool._arun(
+        project_id="namespace/project",
+        work_item_iid=42,
+        description="/close",
+    )
+
+    resp = json.loads(response)
+    assert "error" in resp
+    gitlab_client_mock.graphql.assert_not_called()
+
+
+@pytest.mark.parametrize(
+    "input_data,expected_message",
+    [
+        (
+            UpdateWorkItemInput(group_id="namespace/group", work_item_iid=42),
+            "Update work item #42 in group namespace/group",
+        ),
+        (
+            UpdateWorkItemInput(project_id="namespace/project", work_item_iid=42),
+            "Update work item #42 in project namespace/project",
+        ),
+        (
+            UpdateWorkItemInput(
+                url="https://gitlab.com/namespace/project/-/work_items/42"
+            ),
+            "Update work item in https://gitlab.com/namespace/project/-/work_items/42",
+        ),
+    ],
+)
+def test_update_work_item_format_display_message(input_data, expected_message):
+    tool = UpdateWorkItem(description="update work item")
+    message = tool.format_display_message(input_data)
+    assert message == expected_message
