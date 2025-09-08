@@ -7,8 +7,8 @@ components:
     prompt_version: "^1.0.0"
     inputs:
       - from: "context:goal"
-        as: "job_url"
-    toolset: ["get_job_logs", "read_file", "find_files", "list_dir"]
+        as: "merge_request_url"
+    toolset: ["get_pipeline_errors", "list_merge_request_diffs", "read_file", "find_files", "list_dir"]
   - name: "fix_pipeline_create_plan"
     type: AgentComponent
     prompt_id: "fix_pipeline_create_plan"
