@@ -1,26 +1,17 @@
 import json
-import urllib
-from typing import Any, Dict, List, Literal, NamedTuple, Optional, Type, Union
+from enum import Enum
+from typing import Annotated, Any, List, Optional, Type, Union
 
-from gitlab_cloud_connector import GitLabUnitPrimitive
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, StringConstraints
 
-from duo_workflow_service.gitlab.url_parser import GitLabUrlParseError, GitLabUrlParser
 from duo_workflow_service.security.quick_actions import validate_no_quick_actions
-from duo_workflow_service.tools.duo_base_tool import (
-    DESCRIPTION_CHARACTER_LIMIT,
-    DuoBaseTool,
+from duo_workflow_service.tools.duo_base_tool import DESCRIPTION_CHARACTER_LIMIT
+from duo_workflow_service.tools.work_items.base_tool import (
+    ResolvedWorkItem,
+    WorkItemBaseTool,
 )
-from duo_workflow_service.tools.queries.work_items import (
+from duo_workflow_service.tools.work_items.queries.work_items import (
     CREATE_NOTE_MUTATION,
-    CREATE_WORK_ITEM_MUTATION,
-    GET_GROUP_WORK_ITEM_NOTES_QUERY,
-    GET_GROUP_WORK_ITEM_QUERY,
-    GET_PROJECT_WORK_ITEM_NOTES_QUERY,
-    GET_PROJECT_WORK_ITEM_QUERY,
-    GET_WORK_ITEM_TYPE_BY_NAME_QUERY,
-    LIST_GROUP_WORK_ITEMS_QUERY,
-    LIST_PROJECT_WORK_ITEMS_QUERY,
 )
 
 # Supported work item types in GitLab
@@ -48,302 +39,17 @@ WORK_ITEM_IDENTIFICATION_DESCRIPTION = """To identify a work item you must provi
     - https://gitlab.com/namespace/project/-/work_items/42
 """
 
-WORK_ITEM_QUICK_ACTION_NOTE = """You are NOT allowed to ever use a GitLab quick action in work item note body.
-Quick actions are text-based shortcuts for common GitLab actions. They are commands that are on their own line and
-start with a backslash. Examples include /merge, /approve, /close, etc."""
+WORK_ITEM_QUICK_ACTION_NOTE = """You are NOT allowed to ever use a GitLab quick action in work item description
+or work item note body. Quick actions are text-based shortcuts for common GitLab actions. They are commands that are
+on their own line and start with a backslash. Examples include /merge, /approve, /close, etc."""
+
+DateString = Annotated[str, StringConstraints(pattern=r"^\d{4}-\d{2}-\d{2}$")]
 
 
-class ResolvedParent(NamedTuple):
-    type: Literal["group", "project"]
-    full_path: str
-
-
-class ResolvedWorkItem(NamedTuple):
-    parent: ResolvedParent
-    work_item_iid: int
-
-
-class WorkItemBaseTool(DuoBaseTool):
-    unit_primitive: GitLabUnitPrimitive = GitLabUnitPrimitive.ASK_WORK_ITEM
-
-    _GET_WORK_ITEM_QUERIES = {
-        "group": (GET_GROUP_WORK_ITEM_QUERY, "namespace"),
-        "project": (GET_PROJECT_WORK_ITEM_QUERY, "project"),
-    }
-
-    _GET_WORK_ITEM_NOTES_QUERIES = {
-        "group": (GET_GROUP_WORK_ITEM_NOTES_QUERY, "namespace"),
-        "project": (GET_PROJECT_WORK_ITEM_NOTES_QUERY, "project"),
-    }
-
-    _LIST_WORK_ITEMS_QUERIES = {
-        "group": (LIST_GROUP_WORK_ITEMS_QUERY, "namespace"),
-        "project": (LIST_PROJECT_WORK_ITEMS_QUERY, "project"),
-    }
-
-    async def _validate_parent_url(
-        self,
-        url: Optional[str],
-        group_id: Optional[Union[int, str]],
-        project_id: Optional[Union[int, str]],
-    ) -> Union[ResolvedParent, str]:
-        """Resolve parent information (group or project) from URL or IDs."""
-        if url:
-            return self._parse_parent_work_item_url(url)
-        if group_id:
-            return await self._resolve_parent_path(
-                parent_type="group", identifier=group_id
-            )
-        if project_id:
-            return await self._resolve_parent_path(
-                parent_type="project", identifier=project_id
-            )
-
-        return "Must provide either URL, group_id, or project_id"
-
-    async def _validate_work_item_url(
-        self,
-        url: Optional[str],
-        group_id: Optional[Union[int, str]],
-        project_id: Optional[Union[int, str]],
-        work_item_iid: Optional[int],
-    ) -> Union[ResolvedWorkItem, str]:
-        """Resolve work item information from URL or IDs."""
-        if not work_item_iid and not url:
-            return "Must provide work_item_iid if no URL is given"
-
-        if url:
-            return self._parse_work_item_url(url)
-
-        parent = await self._validate_parent_url(
-            url=None, group_id=group_id, project_id=project_id
-        )
-        if isinstance(parent, str):
-            return parent
-
-        if not work_item_iid:
-            return "Must provide work_item_iid if no URL is given"
-
-        return ResolvedWorkItem(parent=parent, work_item_iid=work_item_iid)
-
-    async def _resolve_parent_path(
-        self,
-        parent_type: Literal["group", "project"],
-        identifier: Union[int, str],
-    ) -> Union[ResolvedParent, str]:
-        identifier_str = str(identifier)
-
-        if identifier_str.isdigit():
-            try:
-                endpoint = "projects" if parent_type == "project" else "groups"
-                data = await self.gitlab_client.aget(
-                    f"/api/v4/{endpoint}/{identifier_str}"
-                )
-                full_path = data.get(
-                    "path_with_namespace" if parent_type == "project" else "full_path"
-                )
-                if not full_path:
-                    return f"Could not resolve {parent_type} full path from ID '{identifier_str}'"
-            except Exception as e:
-                return f"Failed to resolve {parent_type} from ID '{identifier_str}': {str(e)}"
-        else:
-            full_path = identifier_str
-
-        return ResolvedParent(
-            type=parent_type,
-            full_path=self._decode_path(full_path),
-        )
-
-    @staticmethod
-    def _decode_path(path: str) -> str:
-        """Make sure the path is safe for GraphQL (i.e., decoded slashes)."""
-
-        return urllib.parse.unquote(path)
-
-    def _parse_parent_work_item_url(self, url: str) -> Union[ResolvedParent, str]:
-        """Parse parent work item (by group or project) from URL."""
-        try:
-            parent_type = GitLabUrlParser.detect_parent_type(url)
-
-            parser_map = {
-                "group": GitLabUrlParser.parse_group_url,
-                "project": GitLabUrlParser.parse_project_url,
-            }
-
-            parsed_url = parser_map.get(parent_type)
-            if not parsed_url:
-                return f"Unknown parent type: {parent_type}"
-
-            path = parsed_url(url, self.gitlab_host)
-            return ResolvedParent(type=parent_type, full_path=self._decode_path(path))
-        except GitLabUrlParseError as e:
-            return f"Failed to parse parent work item URL: {e}"
-
-    def _parse_work_item_url(self, url: str) -> Union[ResolvedWorkItem, str]:
-        """Parse work item from URL."""
-        if "/-/work_items/" not in url:
-            return "URL is not a work item URL"
-
-        try:
-            work_item = GitLabUrlParser.parse_work_item_url(url, self.gitlab_host)
-
-            return ResolvedWorkItem(
-                parent=ResolvedParent(
-                    type=work_item.parent_type,
-                    full_path=self._decode_path(work_item.full_path),
-                ),
-                work_item_iid=work_item.work_item_iid,
-            )
-        except GitLabUrlParseError as e:
-            return f"Failed to parse work item URL: {e}"
-
-    async def _resolve_work_item_type_id(
-        self, full_path: str, type_name: str
-    ) -> Union[str, dict]:
-        """Returns type ID or error dict."""
-        response = await self.gitlab_client.graphql(
-            GET_WORK_ITEM_TYPE_BY_NAME_QUERY, {"fullPath": full_path}
-        )
-
-        if "errors" in response:
-            return {"error": response["errors"]}
-
-        types = response.get("namespace", {}).get("workItemTypes", {}).get("nodes", [])
-        match = next((t for t in types if t["name"] == type_name), None)
-
-        if not match:
-            available = [t["name"] for t in types]
-            return {
-                "error": f"Work item type '{type_name}' not found.",
-                "available_types": available,
-            }
-
-        return match["id"]
-
-    async def _create_work_item_with_type_id(
-        self,
-        namespace_path: str,
-        type_id: str,
-        input_kwargs: Dict[str, Any],
-    ) -> str:
-        query_variables = {
-            "input": {
-                "namespacePath": namespace_path,
-                "workItemTypeId": type_id,
-            }
-        }
-        query_variables["input"].update(
-            self._build_work_item_input_fields(input_kwargs)
-        )
-
-        response = await self.gitlab_client.graphql(
-            CREATE_WORK_ITEM_MUTATION, query_variables
-        )
-
-        if "errors" in response:
-            return json.dumps({"error": response["errors"]})
-
-        created = response.get("workItemCreate", {}).get("workItem", {})
-        errors = response.get("workItemCreate", {}).get("errors", [])
-
-        if errors or not created.get("id"):
-            return json.dumps(
-                {
-                    "error": "Failed to create work item.",
-                    "details": {
-                        "graphql_errors": response.get("errors"),
-                        "work_item_errors": errors,
-                    },
-                }
-            )
-
-        return json.dumps(
-            {
-                "message": f"Work item '{created.get('title')}' created successfully.",
-                "work_item": created,
-            }
-        )
-
-    @staticmethod
-    def _build_work_item_input_fields(kwargs: Dict[str, Any]) -> Dict[str, Any]:
-        input_data = {}
-        type_name = kwargs.get("type_name")
-
-        if type_name in ["Issue", "Epic"]:
-            start_and_due = {}
-
-            for key in ["start_date", "due_date", "is_fixed"]:
-                value = kwargs.get(key)
-                if value is not None:
-                    graphql_key = "".join(
-                        part.capitalize() if i > 0 else part
-                        for i, part in enumerate(key.split("_"))
-                    )
-                    start_and_due[graphql_key] = value
-
-            if start_and_due:
-                input_data["startAndDueDateWidget"] = start_and_due
-
-        if kwargs.get("title") is not None:
-            input_data["title"] = kwargs["title"]
-
-        if kwargs.get("description") is not None:
-            input_data["descriptionWidget"] = {"description": kwargs["description"]}
-
-        if kwargs.get("health_status") is not None and type_name in ["Issue", "Epic"]:
-            input_data["healthStatusWidget"] = {"healthStatus": kwargs["health_status"]}
-
-        if kwargs.get("confidential") is not None:
-            input_data["confidential"] = kwargs["confidential"]
-
-        if kwargs.get("assignee_ids") is not None:
-            input_data["assigneesWidget"] = {
-                "assigneeIds": [
-                    (
-                        assignee
-                        if isinstance(assignee, str) and assignee.startswith("gid://")
-                        else f"gid://gitlab/User/{assignee}"
-                    )
-                    for assignee in kwargs["assignee_ids"]
-                ]
-            }
-
-        if kwargs.get("label_ids") is not None:
-            input_data["labelsWidget"] = {
-                "labelIds": [
-                    (
-                        label
-                        if isinstance(label, str) and label.startswith("gid://")
-                        else f"gid://gitlab/Label/{label}"
-                    )
-                    for label in kwargs["label_ids"]
-                ]
-            }
-
-        return input_data
-
-    async def _get_work_item_data(
-        self, resolved: ResolvedWorkItem
-    ) -> Union[dict, None]:
-        """Get work item data from resolved work item info.
-
-        Returns work item dict or None if not found.
-        """
-        query, root_key = self._GET_WORK_ITEM_QUERIES[resolved.parent.type]
-
-        query_variables = {
-            "fullPath": resolved.parent.full_path,
-            "iid": str(resolved.work_item_iid),
-        }
-
-        response = await self.gitlab_client.graphql(query, query_variables)
-
-        if not response.get(root_key):
-            return {"error": f"No {root_key} found in response"}
-
-        work_items = response.get(root_key, {}).get("workItems", {}).get("nodes", [])
-
-        return work_items[0] if work_items else None
+class HealthStatus(str, Enum):
+    ON_TRACK = "onTrack"
+    NEEDS_ATTENTION = "needsAttention"
+    AT_RISK = "atRisk"
 
 
 class ParentResourceInput(BaseModel):
@@ -665,7 +371,7 @@ class GetWorkItemNotes(WorkItemBaseTool):
 
 
 class CreateWorkItemInput(ParentResourceInput):
-    title: str = Field(description="Title of the work item")
+    title: str = Field(description="Title of the work item.")
     type_name: str = Field(
         description="Work item type. One of: 'Issue', 'Epic', 'Task', 'Objective', 'Key Result'."
     )
@@ -704,6 +410,8 @@ class CreateWorkItem(WorkItemBaseTool):
     name: str = "create_work_item"
     description: str = f"""Create a new work item in a GitLab group or project.
 
+    {WORK_ITEM_QUICK_ACTION_NOTE}
+
     {PARENT_IDENTIFICATION_DESCRIPTION}
 
     For example:
@@ -722,38 +430,7 @@ class CreateWorkItem(WorkItemBaseTool):
         if isinstance(resolved, str):
             return json.dumps({"error": resolved})
 
-        if type_name not in ALL_TYPES:
-            supported_types = ", ".join(sorted(ALL_TYPES))
-            return json.dumps(
-                {
-                    "error": f"Unknown work item type: '{type_name}'. "
-                    f"Supported types are: {supported_types}."
-                }
-            )
-
-        if resolved.type == "project" and type_name in GROUP_ONLY_TYPES:
-            return json.dumps(
-                {
-                    "error": f"Work item type '{type_name}' cannot be created in a project – only in groups."
-                }
-            )
-
-        try:
-            type_id_or_error = await self._resolve_work_item_type_id(
-                resolved.full_path, type_name
-            )
-            if isinstance(type_id_or_error, dict):
-                return json.dumps(type_id_or_error)
-
-            created = await self._create_work_item_with_type_id(
-                namespace_path=resolved.full_path,
-                type_id=type_id_or_error,
-                input_kwargs=kwargs,
-            )
-            return created
-
-        except Exception as e:
-            return json.dumps({"error": str(e)})
+        return await self._create_work_item(resolved, type_name, kwargs)
 
     def format_display_message(
         self, args: CreateWorkItemInput, _tool_response: Any = None
@@ -763,6 +440,85 @@ class CreateWorkItem(WorkItemBaseTool):
         if args.group_id:
             return f"Create work item '{args.title}' in group {args.group_id}"
         return f"Create work item '{args.title}' in project {args.project_id}"
+
+
+class UpdateWorkItemInput(WorkItemResourceInput):
+    title: Optional[str] = Field(default=None, description="Title of the work item")
+    description: Optional[str] = Field(
+        default=None, description="Description of the work item."
+    )
+    assignee_ids: Optional[List[int]] = Field(
+        default=None, description="IDs of users to assign."
+    )
+    confidential: Optional[bool] = Field(
+        default=None, description="Set to true to make the work item confidential."
+    )
+    start_date: Optional[DateString] = Field(
+        default=None,
+        description="The start date. Date time string in the format YYYY-MM-DD.",
+    )
+    due_date: Optional[DateString] = Field(
+        default=None,
+        description="The due date. Date time string in the format YYYY-MM-DD.",
+    )
+    is_fixed: Optional[bool] = Field(
+        default=None, description="Whether the start and due dates are fixed."
+    )
+    health_status: Optional[HealthStatus] = Field(
+        default=None,
+        description="Health status of the work item. Values: 'onTrack', 'needsAttention', 'atRisk'.",
+    )
+    state: Optional[str] = Field(
+        default=None,
+        description="The state of the work item. Use 'opened' or 'closed'.",
+    )
+    add_label_ids: Optional[List[str]] = Field(
+        default=None,
+        description="Label global IDs or numeric IDs to add to the work item.",
+    )
+    remove_label_ids: Optional[List[str]] = Field(
+        default=None,
+        description="Label global IDs or numeric IDs to remove from the work item.",
+    )
+
+
+class UpdateWorkItem(WorkItemBaseTool):
+    name: str = "update_work_item"
+    description: str = f"""Update an existing work item in a GitLab group or project.
+
+    {WORK_ITEM_QUICK_ACTION_NOTE}
+
+    {WORK_ITEM_IDENTIFICATION_DESCRIPTION}
+
+    For example:
+    - update_work_item(group_id='parent/child', work_item_iid=42, title="Updated title")
+    - update_work_item(project_id='namespace/project', work_item_iid=42, title="Updated title")
+    - update_work_item(url="https://gitlab.com/groups/namespace/group/-/work_items/42", title="Updated title")
+    - update_work_item(url="https://gitlab.com/namespace/project/-/work_items/42", title="Updated title")
+    """
+    args_schema: Type[BaseModel] = UpdateWorkItemInput
+
+    async def _arun(self, **kwargs: Any) -> str:
+        resolved = await self._resolve_work_item_data(
+            url=kwargs.get("url"),
+            group_id=kwargs.get("group_id"),
+            project_id=kwargs.get("project_id"),
+            work_item_iid=kwargs.get("work_item_iid"),
+        )
+
+        if isinstance(resolved, str):
+            return json.dumps({"error": resolved})
+
+        return await self._update_work_item(resolved, kwargs)
+
+    def format_display_message(
+        self, args: UpdateWorkItemInput, _tool_response: Any = None
+    ) -> str:
+        if args.url:
+            return f"Update work item in {args.url}"
+        if args.group_id:
+            return f"Update work item #{args.work_item_iid} in group {args.group_id}"
+        return f"Update work item #{args.work_item_iid} in project {args.project_id}"
 
 
 class CreateWorkItemNoteInput(WorkItemResourceInput):
