@@ -8,6 +8,7 @@ from dependency_injector.wiring import Provide, inject
 from langchain_core.messages import AIMessage, BaseMessage, ToolMessage
 from langchain_core.messages.tool import ToolCall
 from langchain_core.output_parsers.string import StrOutputParser
+from langchain_core.tools import ToolException
 from langgraph.types import Command
 from pydantic import ValidationError
 
@@ -228,6 +229,9 @@ class ToolsExecutor:
         except ValidationError as error:
             return self._handle_validation_error(tool_name, tool_args, error, chat_logs)
 
+        except ToolException as error:
+            return self._handle_tool_error(tool_name, tool_args, error, chat_logs)
+
     def _handle_type_error(
         self,
         tool_context: Dict[str, Any],
@@ -295,6 +299,35 @@ class ToolsExecutor:
             status=ToolStatus.FAILURE,
             ui_chat_logs=chat_logs,
             error_message="Validation error",
+        )
+
+        return {
+            "response": tool_response,
+            "chat_logs": chat_logs,
+        }
+
+    def _handle_tool_error(
+        self,
+        tool_name: str,
+        tool_args: Dict[str, Any],
+        error: ToolException,
+        chat_logs: List[UiChatLog],
+    ) -> Dict[str, Any]:
+        tool_response = f"Tool {tool_name} raised ToolException: {str(error)}"
+        self._track_internal_event(
+            event_name=EventEnum.WORKFLOW_TOOL_FAILURE,
+            tool_name=tool_name,
+            extra={
+                "error": str(error),
+                "error_type": type(error).__name__,
+            },
+        )
+
+        self._add_tool_ui_chat_log(
+            tool_info={"name": tool_name, "args": tool_args},
+            status=ToolStatus.FAILURE,
+            ui_chat_logs=chat_logs,
+            error_message="ToolException",
         )
 
         return {
