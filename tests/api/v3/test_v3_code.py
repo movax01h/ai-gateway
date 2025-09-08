@@ -703,6 +703,12 @@ class TestEditorContentGeneration:
                     endpoint=AnyUrl("http://localhost:4000"),
                     api_key="token",
                     identifier="provider/some-model",
+                    llm_definition_params={
+                        "model": "mistral",
+                        "temperature": 0.0,
+                        "max_tokens": 4096,
+                    },
+                    family=["mistral"],
                 ),
                 None,
             ),
@@ -1311,7 +1317,10 @@ class TestAmazonQIntegrationV3:
 
         data = {
             "prompt_components": [prompt_component],
-            "model_metadata": model_metadata and model_metadata.model_dump(mode="json"),
+            "model_metadata": model_metadata
+            and model_metadata.model_dump(
+                exclude={"llm_definition_params", "family"}, mode="json"
+            ),
         }
 
         current_feature_flag_context.set({"flag_a", "flag_b"})
@@ -1446,7 +1455,10 @@ class TestAmazonQIntegrationV3:
 
         data = {
             "prompt_components": [prompt_component],
-            "model_metadata": model_metadata and model_metadata.model_dump(mode="json"),
+            "model_metadata": model_metadata
+            and model_metadata.model_dump(
+                exclude={"llm_definition_params", "family"}, mode="json"
+            ),
         }
 
         current_feature_flag_context.set({"flag_a", "flag_b"})

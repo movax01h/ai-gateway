@@ -26,8 +26,8 @@ parameters and prompt templates that structure each request.
 AI Gateway Prompts are defined as `.yml` files located in `prompts/definitions/` and specify parameters for different
 LLMs. Each configuration file includes:
 
-- **Model Parameters:** Specify LLM provider and configurations, including model name (or config_file name) and
-  parameters such as `temperature`, `top_p`, `top_k`, `max_tokens`, and `stop`
+- **Model Parameters:** Specify LLM provider and configurations, including model name and parameters such as
+  `temperature`, `top_p`, `top_k`, `max_tokens`, and `stop`
 - **Prompt Templates:** Define prompt templates that
   support [Jinja expression](https://jinja.palletsprojects.com/en/stable/) for multiple roles such as `user` and
   `system`, plus optional `placeholder` for dynamic messages such as conversation history
@@ -35,10 +35,8 @@ LLMs. Each configuration file includes:
 
 #### AI Gateway Model Configuration
 
-AI Gateway allows for storing model name and parameters together and retrieving them without re-defining them in every
-definition file.
-AI Gateway Model Configs are defined as `.yml` files located in `prompts/model_configs/` and specify parameters for
-different models. Parameters from definition files take precedence over parameters from the model config file.
+AI Gateway allows for storing model parameters together and retrieving them without re-defining them in every definition
+file.
 
 Each configuration file includes:
 
@@ -116,8 +114,6 @@ Each prompt configuration file in `prompts/definitions/` requires the following 
 ```yaml
 name: <string>                    # Required. Unique identifier for the prompt
 model:
-    name: <string>                  # Optional. Model identifier (e.g. "claude-sonnet-4-20250514"). Either config_file or model identifier needs to be present
-    config_file: <string>           # Optional. Config identifier. Either config_file or model identifier needs to be present
     params:
         model_class_provider: litellm # Required. Provider interface
         temperature: <float>          # Optional. 0.0-1.0. Controls randomness (default: 0.7)

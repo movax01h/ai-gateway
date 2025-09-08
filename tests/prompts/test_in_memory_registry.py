@@ -36,9 +36,9 @@ class TestInMemoryPromptRegistry:
     def sample_prompt_data(self):
         return {
             "model": {
-                "name": "claude_4_0",
                 "params": {
                     "model_class_provider": ModelClassProvider.LITE_LLM,
+                    "model": "claude-sonnet-4-20250514",
                     "max_tokens": 1000,
                 },
             },
@@ -152,9 +152,9 @@ class TestInMemoryPromptRegistry:
         prompt_id = "invalid_model_prompt"
         invalid_prompt_data = {
             "model": {
-                "name": "claude_4_0",
                 "params": {
                     "model_class_provider": "invalid_provider",
+                    "model": "claude-sonnet-4-20250514",
                     "max_tokens": 1000,
                 },
             },
@@ -192,9 +192,9 @@ class TestInMemoryPromptRegistry:
         prompt_id = "missing_template_prompt"
         invalid_prompt_data = {
             "model": {
-                "name": "claude_4_0",
                 "params": {
                     "model_class_provider": ModelClassProvider.LITE_LLM,
+                    "model": "claude-sonnet-4-20250514",
                     "max_tokens": 1000,
                 },
             }

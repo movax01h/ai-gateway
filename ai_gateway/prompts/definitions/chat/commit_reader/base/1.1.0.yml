@@ -1,8 +1,8 @@
 ---
 name: Commit identifier parser for Duo Chat
 model:
-  config_file: claude_4_0
   params:
+    model_class_provider: anthropic
     max_tokens: 2_048
 unit_primitives:
   - ask_commit

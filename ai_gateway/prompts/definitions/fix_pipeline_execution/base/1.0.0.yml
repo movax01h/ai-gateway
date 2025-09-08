@@ -1,9 +1,8 @@
 name: fix_pipeline_execution
 model:
-  config_file: claude_4_0
   params:
+    model_class_provider: anthropic
     max_tokens: 8_192
-  unit_primitives: []
 prompt_template:
   system: |
     You are an experienced programmer tasked with fixing a failing GitLab CI/CD pipeline. A

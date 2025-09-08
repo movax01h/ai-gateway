@@ -1,12 +1,10 @@
 ---
 name: Codestral Write Tests agent
 model:
-  name: codestral
   params:
     model_class_provider: litellm
     temperature: 0.3
     max_tokens: 2_048
-    max_retries: 1
 unit_primitives:
   - write_tests
 prompt_template:

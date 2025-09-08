@@ -9,6 +9,9 @@ from ai_gateway.model_selection import ModelSelectionConfig
 
 
 class BaseModelMetadata(BaseModel):
+    llm_definition_params: dict[str, Any] = {}
+    family: list[str] = []
+
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self._user = None
@@ -27,7 +30,10 @@ class AmazonQModelMetadata(BaseModelMetadata):
     role_arn: Annotated[str, StringConstraints(max_length=255)]
 
     def to_params(self) -> Dict[str, Any]:
-        return {"role_arn": self.role_arn, "user": self._user}
+        return {
+            "role_arn": self.role_arn,
+            "user": self._user,
+        }
 
 
 class ModelMetadata(BaseModelMetadata):
@@ -38,25 +44,18 @@ class ModelMetadata(BaseModelMetadata):
     identifier: Optional[Annotated[str, StringConstraints(max_length=1000)]] = None
 
     def to_params(self) -> Dict[str, Any]:
+        """Retrieve model parameters for a given identifier.
+
+        This function also allows setting custom provider details based on the identifier, like fetching endpoints based
+        on AIGW location.
+        """
         params: Dict[str, str] = {}
-
-        # when additional parameters are passed (eg api_key),
-        # Anthropic under litellm will crash. The only parameter supported is 'model'
-        if self.provider == "anthropic":
-            return {"model": self.identifier}
-
-        if self.provider == "vertex_ai":
-            return {"custom_llm_provider": "vertex_ai", "model": self.identifier}
 
         if self.endpoint:
             params["api_base"] = str(self.endpoint).removesuffix("/")
 
-        params["model"] = self.name
-        params["custom_llm_provider"] = self.provider
-
         if self.identifier:
             provider, _, model_name = self.identifier.partition("/")
-
             if model_name:
                 params["custom_llm_provider"] = provider
                 params["model"] = model_name
@@ -72,66 +71,55 @@ class ModelMetadata(BaseModelMetadata):
         else:
             # Set a default dummy key to avoid LiteLLM errors
             # See https://gitlab.com/gitlab-org/gitlab/-/issues/520512
-            if params["custom_llm_provider"] == "custom_openai":
+            if params.get("custom_llm_provider", "") == "custom_openai":
                 params["api_key"] = "dummy_key"
 
         return params
 
 
-class ModelSelectionMetadata(BaseModelMetadata):
-    # The prompt registry doesn't support smooth model switching
-    # within the same prompt group from the AIGW at this moment.
-    # We rely on this class as a temporary solution to easily switch between models for the same prompt group,
-    # e.g., chat/agent/base <-> chat/agent/gpt_5
-    # Please, refer to duo_workflow_service/workflows/chat/workflow.py to get more examples.
-
-    name: str
-    provider: str = (
-        ""  # backward compatibility with AmazonQModelMetadata and ModelMetadata
-    )
-
-    def to_params(self) -> Dict[str, Any]:
-        return {}
+TypeModelMetadata = AmazonQModelMetadata | ModelMetadata
 
 
-TypeModelMetadata = AmazonQModelMetadata | ModelMetadata | ModelSelectionMetadata
-
-
-def parameters_for_gitlab_provider(parameters) -> dict[str, Any]:
-    """Retrieve model parameters for a given GitLab identifier.
-
-    This function also allows setting custom provider details based on the identifier, like fetching endpoints based on
-    AIGW location.
-    """
-
-    configs = ModelSelectionConfig()
-    if identifier := parameters.get("identifier"):
-        gitlab_model = configs.get_gitlab_model(identifier)
-    elif feature_setting := parameters.get("feature_setting"):
-        gitlab_model = configs.get_gitlab_model_for_feature(feature_setting)
-    else:
-        raise ValueError(
-            "Argument error: either identifier or feature_setting must be present."
-        )
-
-    return {
-        "provider": gitlab_model.provider,
-        "identifier": gitlab_model.provider_identifier,
-        "name": gitlab_model.family or "base",
-    }
-
-
-def create_model_metadata(data: Dict[str, Any]) -> Optional[TypeModelMetadata]:
+def create_model_metadata(data: dict[str, Any] | None) -> Optional[TypeModelMetadata]:
     if not data or "provider" not in data:
         return None
 
-    match data["provider"]:
-        case "amazon_q":
-            return AmazonQModelMetadata(**data)
-        case "gitlab":
-            return ModelMetadata(**parameters_for_gitlab_provider(data))
+    configs = ModelSelectionConfig()
 
-    return ModelMetadata(**data)
+    if data["provider"] == "amazon_q":
+        llm_definition = configs.get_model("amazon_q")
+        return AmazonQModelMetadata(
+            llm_definition_params=llm_definition.params.copy(),
+            family=llm_definition.family,
+            **data,
+        )
+
+    if name := data.get("name"):
+        llm_definition = configs.get_model(name)
+    else:
+        # When there's no name it means we're in presence of a GitLab-provider metadata, which may pass a
+        # "feature_setting" or "identifier" to deduce the model from them. These values are not expected in the rest
+        # of the code (and in the case of `identifier`, it has a different purpose that non-gitlab identifiers), so
+        # we pop them before any comparisons.
+        feature_setting = data.pop("feature_setting", None)
+        identifier = data.pop("identifier", None)
+
+        if feature_setting:
+            llm_definition = configs.get_model_for_feature(feature_setting)
+        elif identifier:
+            llm_definition = configs.get_model(identifier)
+        else:
+            raise ValueError(
+                "Argument error: either identifier or feature_setting must be present."
+            )
+
+        data["name"] = llm_definition.gitlab_identifier
+
+    return ModelMetadata(
+        llm_definition_params=llm_definition.params.copy(),
+        family=llm_definition.family,
+        **data,
+    )
 
 
 current_model_metadata_context: ContextVar[Optional[TypeModelMetadata]] = ContextVar(

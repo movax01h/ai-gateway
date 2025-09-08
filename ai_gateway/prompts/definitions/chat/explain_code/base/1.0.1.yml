@@ -1,8 +1,8 @@
 ---
 name: Claude 3 Explain Code agent
 model:
-  config_file: claude_3_7
   params:
+    model_class_provider: anthropic
     max_tokens: 2_048
 unit_primitives:
   - explain_code

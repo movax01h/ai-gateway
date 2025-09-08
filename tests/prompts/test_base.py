@@ -48,18 +48,45 @@ def mock_watch_fixture() -> Generator[mock.MagicMock, None, None]:
 
 
 class TestPrompt:
+    # editorconfig-checker-disable
     @pytest.fixture(autouse=True)
     def mock_fs(self, fs: FakeFilesystem):
-        prompts_definitions_dir = (
-            Path(__file__).parent.parent.parent
-            / "ai_gateway"
-            / "prompts"
-            / "definitions"
+        ai_gateway_dir = Path(__file__).parent.parent.parent / "ai_gateway"
+        model_selection_dir = ai_gateway_dir / "model_selection"
+        prompts_definitions_dir = ai_gateway_dir / "prompts" / "definitions"
+
+        fs.create_file(
+            model_selection_dir / "models.yml",
+            contents="""---
+models:
+  - name: Mistral
+    gitlab_identifier: mistral
+    params:
+        model: mistral
+  - name: Amazon Q
+    gitlab_identifier: amazon_q
+    params:
+        model: amazon_q
+""",
+        )
+        fs.create_file(
+            model_selection_dir / "unit_primitives.yml",
+            contents="""---
+configurable_unit_primitives:
+  - feature_setting: "duo_chat"
+    unit_primitives:
+      - "duo_chat"
+    default_model: "mistral"
+    selectable_models:
+      - "mistral"
+""",
         )
         fs.create_file(
             prompts_definitions_dir / "system.jinja",
             contents="Hi, I'm {{name}}",
         )
+
+    # editorconfig-checker-enable
 
     @pytest.fixture(name="prompt_template")
     def prompt_template_fixture(self, request: Any):
@@ -651,6 +678,7 @@ class TestPrompt:
     def test_bind_tools_with_tool_choice(
         self,
         prompt_config: PromptConfig,
+        model_metadata: TypeModelMetadata,
         model_factory: TypeModelFactory,
         model: FakeModel,
         tool_choice: str | None,
@@ -662,6 +690,7 @@ class TestPrompt:
             Prompt(
                 model_factory=model_factory,
                 config=prompt_config,
+                model_metadata=model_metadata,
                 tools=[mock.Mock(spec=BaseTool)],
                 tool_choice=tool_choice,
             )
@@ -761,7 +790,7 @@ class TestBaseRegistry:
         (
             "unit_primitives",
             "scopes",
-            "model_metadata",
+            "input_model_metadata",
             "tools",
             "success",
             "expected_internal_events",
@@ -851,7 +880,7 @@ class TestBaseRegistry:
         registry: BasePromptRegistry,
         user: StarletteUser,
         prompt: Prompt,
-        model_metadata: Optional[TypeModelMetadata],
+        input_model_metadata: Optional[TypeModelMetadata],
         tools: Optional[List[BaseTool]],
         success: bool,
         expected_internal_events,
@@ -859,14 +888,19 @@ class TestBaseRegistry:
         if success:
             assert (
                 registry.get_on_behalf(
-                    user, "test", None, model_metadata, "ai_gateway.prompts.base", tools
+                    user,
+                    "test",
+                    None,
+                    input_model_metadata,
+                    "ai_gateway.prompts.base",
+                    tools,
                 )
                 == prompt
             )
             assert prompt.internal_event_client == internal_event_client
 
-            if model_metadata:
-                assert model_metadata._user == user
+            if input_model_metadata:
+                assert input_model_metadata._user == user
 
             internal_event_client.track_event.assert_has_calls(expected_internal_events)
         else:

@@ -24,6 +24,7 @@ class ModelClassProvider(StrEnum):
 class BaseModelParams(BaseModel):
     model_config = ConfigDict(extra="forbid", protected_namespaces=())
 
+    model: str | None = None
     temperature: float | None = None
     top_p: float | None = None
     top_k: int | None = None

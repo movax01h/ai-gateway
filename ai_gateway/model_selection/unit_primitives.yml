@@ -185,3 +185,61 @@ configurable_unit_primitives:
       - "claude_3_5_sonnet_20240620"
       - "claude_sonnet_3_7_20250219"
       - "claude_sonnet_4_20250514"
+  - feature_setting: "categorize_question"
+    unit_primitives:
+      - "duo_chat"
+    default_model: "claude_3_5_sonnet_20241022"
+    selectable_models:
+      - "claude_3_5_sonnet_20241022"
+  - feature_setting: "generate_description"
+    unit_primitives:
+      - "generate_issue_description"
+    default_model: "claude_3_5_sonnet_20241022"
+    selectable_models:
+      - "claude_3_5_sonnet_20241022"
+  - feature_setting: "measure_comment_temperature"
+    unit_primitives:
+      - "measure_comment_temperature"
+    default_model: "gemini_2_0_flash_lite_vertex"
+    selectable_models:
+      - "gemini_2_0_flash_lite_vertex"
+  - feature_setting: "workflow"
+    unit_primitives:
+      - "duo_workflow_execute_workflow"
+    default_model: "claude_sonnet_4_20250514"
+    selectable_models:
+      - "claude_sonnet_4_20250514"
+  - feature_setting: model_configuration
+    unit_primitives:
+      - "complete_code"
+    default_model: "claude_3"
+    selectable_models:
+      - "claude_3"
+  - feature_setting: "fix_pipeline_context"
+    unit_primitives:
+      - "duo_workflow_execute_workflow"
+    default_model: "claude_sonnet_4_20250514"
+    selectable_models:
+      - "claude_sonnet_4_20250514"
+  - feature_setting: "fix_pipeline_create_plan"
+    unit_primitives:
+      - "duo_workflow_execute_workflow"
+    default_model: "claude_sonnet_4_20250514"
+    selectable_models:
+      - "claude_sonnet_4_20250514"
+  - feature_setting: "fix_pipeline_execution"
+    unit_primitives:
+      - "duo_workflow_execute_workflow"
+    default_model: "claude_sonnet_4_20250514"
+    selectable_models:
+      - "claude_sonnet_4_20250514"
+  - feature_setting: "code_review_format"
+    unit_primitives: []
+    default_model: "claude_sonnet_4_20250514"
+    selectable_models:
+      - "claude_sonnet_4_20250514"
+  - feature_setting: "code_review_fetch_data"
+    unit_primitives: []
+    default_model: "claude_sonnet_4_20250514"
+    selectable_models:
+      - "claude_sonnet_4_20250514"

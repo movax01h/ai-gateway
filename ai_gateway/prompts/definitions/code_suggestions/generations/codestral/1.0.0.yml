@@ -1,12 +1,10 @@
 ---
 name: Codestral 22B Code Generations
 model:
-  name: codestral
   params:
     model_class_provider: litellm
     temperature: 0.3
     max_tokens: 256
-    max_retries: 1
 unit_primitives:
   - generate_code
 prompt_template:

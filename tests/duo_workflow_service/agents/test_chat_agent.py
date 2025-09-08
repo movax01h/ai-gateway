@@ -53,8 +53,10 @@ def prompt_name_fixture():
 
 
 @pytest.fixture(name="chat_agent")
-def chat_agent_fixture(model_factory, prompt_config):
-    yield ChatAgent(model_factory=model_factory, config=prompt_config)
+def chat_agent_fixture(model_factory, prompt_config, model_metadata):
+    yield ChatAgent(
+        model_factory=model_factory, config=prompt_config, model_metadata=model_metadata
+    )
 
 
 @pytest.fixture(autouse=True)
@@ -725,13 +727,19 @@ The current date is {{ current_date }}.
 
 
 @pytest.mark.asyncio
-async def test_agentic_fake_model_bypasses_tool_approval(prompt_config, input):
+async def test_agentic_fake_model_bypasses_tool_approval(
+    prompt_config, model_metadata, input
+):
     def agentic_model_factory(
         *, model: str, **kwargs
     ):  # pylint: disable=unused-argument
         return AgenticFakeModel()
 
-    chat_agent = ChatAgent(model_factory=agentic_model_factory, config=prompt_config)
+    chat_agent = ChatAgent(
+        model_factory=agentic_model_factory,
+        config=prompt_config,
+        model_metadata=model_metadata,
+    )
 
     chat_agent.tools_registry = Mock(spec=ToolsRegistry)
     chat_agent.tools_registry.approval_required.return_value = True

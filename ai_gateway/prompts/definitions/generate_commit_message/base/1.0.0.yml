@@ -1,7 +1,8 @@
 ---
 name: Claude 3 Generate Commit Message
 model:
-  config_file: conversation_performant
+  params:
+    model_class_provider: anthropic
 unit_primitives:
   - generate_commit_message
 prompt_template:

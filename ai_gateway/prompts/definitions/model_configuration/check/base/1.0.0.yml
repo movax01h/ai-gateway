@@ -1,12 +1,9 @@
 ---
-name: DeepSeekCoder
+name: Model configuration check
 model:
-  name: deepseekcoder
   params:
     model_class_provider: litellm
-    temperature: 0.0
     max_tokens: 12
-    max_retries: 1
 unit_primitives:
   - complete_code
 prompt_template:

@@ -24,18 +24,15 @@ def mock_fs_fixture(fs: FakeFilesystem):
         contents=dedent(
             """
             models:
-              - model_identifier: model1
-                name: Model One
+              - name: Model One
                 gitlab_identifier: gitlab-model-1
-                provider: provider1
-                provider_identifier: provider-model-1
                 params:
+                  model: provider-model-1
                   param1: value1
-              - model_identifier: model2
-                name: Model Two
+              - name: Model Two
                 gitlab_identifier: gitlab-model-2
-                provider: provider2
-                provider_identifier: provider-model-2
+                params:
+                  model: provider-model-2
             """
         ),
     )
@@ -72,16 +69,12 @@ def test_load_llm_definitions(selection_config):
         "gitlab-model-1": LLMDefinition(
             name="Model One",
             gitlab_identifier="gitlab-model-1",
-            provider="provider1",
-            provider_identifier="provider-model-1",
-            params={"param1": "value1"},
+            params={"model": "provider-model-1", "param1": "value1"},
         ),
         "gitlab-model-2": LLMDefinition(
             name="Model Two",
             gitlab_identifier="gitlab-model-2",
-            provider="provider2",
-            provider_identifier="provider-model-2",
-            params={},
+            params={"model": "provider-model-2"},
         ),
     }
 
@@ -124,36 +117,30 @@ def test_is_singleton():
     assert config_instance_1 is config_instance_2
 
 
-def test_get_gitlab_model(selection_config):
-    assert selection_config.get_gitlab_model("gitlab-model-1") == LLMDefinition(
+def test_get_model(selection_config):
+    assert selection_config.get_model("gitlab-model-1") == LLMDefinition(
         name="Model One",
         gitlab_identifier="gitlab-model-1",
-        provider="provider1",
-        provider_identifier="provider-model-1",
-        params={"param1": "value1"},
+        params={"model": "provider-model-1", "param1": "value1"},
     )
 
 
-def test_get_gitlab_model_missing_key(selection_config):
+def test_get_model_missing_key(selection_config):
     with pytest.raises(ValueError):
-        selection_config.get_gitlab_model("non-existing-model")
+        selection_config.get_model("non-existing-model")
 
 
-def test_get_gitlab_model_for_feature(selection_config):
-    assert selection_config.get_gitlab_model_for_feature(
-        "test_config"
-    ) == LLMDefinition(
+def test_get_model_for_feature(selection_config):
+    assert selection_config.get_model_for_feature("test_config") == LLMDefinition(
         name="Model One",
         gitlab_identifier="gitlab-model-1",
-        provider="provider1",
-        provider_identifier="provider-model-1",
-        params={"param1": "value1"},
+        params={"model": "provider-model-1", "param1": "value1"},
     )
 
 
-def test_get_gitlab_model_for_feature_no_feature(selection_config):
+def test_get_model_for_feature_no_feature(selection_config):
     with pytest.raises(ValueError, match="Invalid feature setting: random-feature"):
-        selection_config.get_gitlab_model_for_feature("random-feature")
+        selection_config.get_model_for_feature("random-feature")
 
 
 @pytest.mark.usefixtures("mock_fs")
@@ -191,11 +178,10 @@ def test_validate_with_error(fs: FakeFilesystem):
         contents=dedent(
             """
             models:
-              - model_identifier: model1
-                name: Model One
+              - name: Model One
                 gitlab_identifier: model_1
-                provider: provider1
-                provider_identifier: provider-model-1
+                params:
+                  model: provider-model-1
             """
         ),
     )
@@ -222,21 +208,18 @@ def test_validate_default_model_not_in_selectable_models(fs: FakeFilesystem):
         contents=dedent(
             """
             models:
-              - model_identifier: model1
-                name: Model One
+              - name: Model One
                 gitlab_identifier: model_1
-                provider: provider1
-                provider_identifier: provider-model-1
-              - model_identifier: model2
-                name: Model Two
+                params:
+                  model: provider-model-1
+              - name: Model Two
                 gitlab_identifier: model_2
-                provider: provider2
-                provider_identifier: provider-model-2
-              - model_identifier: model3
-                name: Model Three
+                params:
+                  model: provider-model-2
+              - name: Model Three
                 gitlab_identifier: model_3
-                provider: provider3
-                provider_identifier: provider-model-3
+                params:
+                  model: provider-model-3
             """
         ),
     )

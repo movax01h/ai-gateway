@@ -1,12 +1,10 @@
 ---
 name: GPT Code Generations
 model:
-  name: gpt
   params:
     model_class_provider: litellm
     temperature: 1.0
     max_tokens: 512
-    max_retries: 1
 unit_primitives:
   - generate_code
 prompt_template:

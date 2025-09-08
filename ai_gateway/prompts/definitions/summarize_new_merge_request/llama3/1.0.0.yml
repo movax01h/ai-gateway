@@ -1,12 +1,10 @@
 ---
 name: Llama3 Summarize New Merge Request
 model:
-  name: llama3
   params:
     model_class_provider: litellm
     temperature: 0.1
     max_tokens: 2_000
-    max_retries: 1
 unit_primitives:
   - summarize_new_merge_request
 prompt_template:

@@ -1,6 +1,6 @@
 # pylint: disable=too-many-lines
 from pathlib import Path
-from typing import Sequence, Type, cast
+from typing import Any, Sequence, Type, cast
 from unittest.mock import Mock, patch
 
 import pytest
@@ -16,11 +16,7 @@ from ai_gateway.api.auth_utils import StarletteUser
 from ai_gateway.config import ConfigModelLimits
 from ai_gateway.integrations.amazon_q.chat import ChatAmazonQ
 from ai_gateway.integrations.amazon_q.client import AmazonQClientFactory
-from ai_gateway.model_metadata import (
-    AmazonQModelMetadata,
-    ModelMetadata,
-    TypeModelMetadata,
-)
+from ai_gateway.model_metadata import ModelMetadata, create_model_metadata
 from ai_gateway.models.litellm import KindLiteLlmModel
 from ai_gateway.prompts import LocalPromptRegistry, Prompt
 from ai_gateway.prompts.config import ModelClassProvider
@@ -51,8 +47,101 @@ def clear_prompt_cache():
 # editorconfig-checker-disable
 @pytest.fixture(name="mock_fs")
 def mock_fs_fixture(fs: FakeFilesystem):
-    prompts_definitions_dir = (
-        Path(__file__).parent.parent.parent / "ai_gateway" / "prompts" / "definitions"
+    ai_gateway_dir = Path(__file__).parent.parent.parent / "ai_gateway"
+    model_selection_dir = ai_gateway_dir / "model_selection"
+    prompts_definitions_dir = ai_gateway_dir / "prompts" / "definitions"
+
+    fs.create_file(
+        model_selection_dir / "models.yml",
+        contents="""---
+models:
+  - name: Test
+    gitlab_identifier: test
+    params:
+        model: claude-3-5-sonnet-20241022
+  - name: Haiku
+    gitlab_identifier: haiku
+    params:
+        model: claude-3-haiku-20240307
+  - name: Codestral
+    gitlab_identifier: codestral
+    params:
+        model: codestral
+  - name: Custom
+    gitlab_identifier: custom
+    family:
+        - custom
+    params:
+        model: custom
+  - name: General
+    gitlab_identifier: general
+    family:
+        - claude_3
+    params:
+        model: general
+  - name: Amazon Q
+    gitlab_identifier: amazon_q
+    family:
+        - amazon_q
+    params:
+        model: amazon_q
+  - name: Multi family
+    gitlab_identifier: multi_family
+    family:
+        - non_existing
+        - custom
+    params:
+        model: custom
+""",
+    )
+    fs.create_file(
+        model_selection_dir / "unit_primitives.yml",
+        contents="""---
+configurable_unit_primitives:
+  - feature_setting: "test"
+    unit_primitives:
+      - "duo_chat"
+    default_model: "test"
+    selectable_models:
+      - "test"
+  - feature_setting: "duo_chat"
+    unit_primitives:
+      - "duo_chat"
+    default_model: "haiku"
+    selectable_models:
+      - "haiku"
+  - feature_setting: "empty_prompt"
+    unit_primitives:
+      - "duo_chat"
+    default_model: "test"
+    selectable_models:
+      - "test"
+  - feature_setting: "no_up"
+    unit_primitives:
+      - "duo_chat"
+    default_model: "test"
+    selectable_models:
+      - "test"
+""",
+    )
+    fs.create_file(
+        prompts_definitions_dir / "test" / "base" / "0.0.1.yml",
+        contents="""
+---
+name: Test prompt 0.0.1
+model:
+  params:
+    model_class_provider: litellm
+    top_p: 0.1
+    top_k: 50
+    max_tokens: 256
+    max_retries: 10
+    custom_llm_provider: vllm
+unit_primitives:
+  - explain_code
+prompt_template:
+  system: Template1
+""",
     )
     fs.create_file(
         prompts_definitions_dir / "test" / "base" / "1.0.0.yml",
@@ -60,7 +149,6 @@ def mock_fs_fixture(fs: FakeFilesystem):
 ---
 name: Test prompt 1.0.0
 model:
-  name: claude-3-5-sonnet-20241022
   params:
     model_class_provider: litellm
     top_p: 0.1
@@ -80,7 +168,6 @@ prompt_template:
 ---
 name: Test prompt 1.0.1
 model:
-  config_file: conversation_quick
   params:
     model_class_provider: litellm
     top_p: 0.1
@@ -100,7 +187,6 @@ prompt_template:
 ---
 name: Test prompt 1.0.2-dev
 model:
-  config_file: conversation_quick
   params:
     model_class_provider: litellm
     top_p: 0.1
@@ -120,7 +206,6 @@ prompt_template:
 ---
 name: Chat react prompt
 model:
-  name: claude-3-haiku-20240307
   params:
     model_class_provider: anthropic
     temperature: 0.1
@@ -149,7 +234,6 @@ params:
 ---
 name: Amazon Q React prompt
 model:
-  name: amazon_q
   params:
     model_class_provider: amazon_q
 unit_primitives:
@@ -170,7 +254,6 @@ params:
 ---
 name: Chat react custom prompt
 model:
-  name: custom
   params:
     model_class_provider: litellm
     temperature: 0.1
@@ -197,7 +280,6 @@ params:
 ---
 name: Chat react claude_3 prompt
 model:
-  name: general
   params:
     model_class_provider: litellm
     temperature: 0.1
@@ -217,23 +299,19 @@ params:
     - Bar
 """,
     )
-    model_configs_dir = (
-        Path(__file__).parent.parent.parent / "ai_gateway" / "prompts" / "model_configs"
-    )
-    fs.create_file(
-        model_configs_dir / "conversation_quick.yml",
-        contents="""
----
-name: claude-3-5-sonnet-20241022
-params:
-  temperature: 0.9
-  max_tokens: 200
-  model_class_provider: test
-""",
-    )
+
+    with patch(
+        "ai_gateway.prompts.registry.LEGACY_MODEL_MAPPING", {"test": {"0.0.1": "haiku"}}
+    ):
+        yield
 
 
 # editorconfig-checker-enable
+
+
+@pytest.fixture(name="model_metadata")
+def model_metadata_fixture():
+    return ModelMetadata(provider="gitlab", name="test")
 
 
 @pytest.fixture(name="model_factories")
@@ -392,8 +470,8 @@ class TestLocalPromptRegistry:
 ---
 name: TestPrompt No UP
 model:
-    name: claude-3.5
     params:
+        model: test_model
         model_class_provider: litellm
 prompt_template:
     system: test
@@ -465,21 +543,21 @@ prompt_template:
         [
             (None, None),
             (
-                ModelMetadata(
-                    name="custom",
-                    endpoint=HttpUrl("http://localhost:4000/"),
-                    api_key="token",
-                    provider="custom_openai",
-                    identifier="custom_model_id",
-                ),
+                {
+                    "name": "custom",
+                    "endpoint": HttpUrl("http://localhost:4000/"),
+                    "api_key": "token",
+                    "provider": "custom_openai",
+                    "identifier": "custom_model_id",
+                },
                 "custom_model_id",
             ),
             (
-                AmazonQModelMetadata(
-                    name="amazon_q",
-                    provider="amazon_q",
-                    role_arn="role-arn",
-                ),
+                {
+                    "name": "amazon_q",
+                    "provider": "amazon_q",
+                    "role_arn": "role-arn",
+                },
                 None,
             ),
         ],
@@ -487,7 +565,7 @@ prompt_template:
     def test_logging_with_model_identifier(
         self,
         registry: LocalPromptRegistry,
-        model_metadata: TypeModelMetadata,
+        model_metadata: dict[str, Any] | None,
         expected_identifier: str,
     ):
         with patch("ai_gateway.prompts.registry.log") as mock_log:
@@ -495,7 +573,7 @@ prompt_template:
             registry.get(
                 "chat/react",
                 "^1.0.0",
-                model_metadata=model_metadata,
+                model_metadata=create_model_metadata(model_metadata),
             )
 
             call_dict = mock_log.info.call_args[1]
@@ -580,10 +658,15 @@ prompt_template:
             with patch.object(
                 registry,
                 "_get_prompt_config",
-                return_value=Mock(
-                    model=Mock(
-                        params=Mock(model_class_provider=ModelClassProvider.LITE_LLM)
-                    )
+                return_value=(
+                    "1.0.0",
+                    Mock(
+                        model=Mock(
+                            params=Mock(
+                                model_class_provider=ModelClassProvider.LITE_LLM
+                            )
+                        )
+                    ),
                 ),
             ):
                 _ = registry.get(
@@ -680,6 +763,25 @@ prompt_template:
                 ChatLiteLLM,
             ),
             (
+                "test",
+                "=0.0.1",
+                None,
+                True,
+                "Test prompt 0.0.1",
+                Prompt,
+                [("system", "Template1")],
+                "claude-3-haiku-20240307",
+                {},
+                {
+                    "top_p": 0.1,
+                    "top_k": 50,
+                    "max_tokens": 256,
+                    "max_retries": 10,
+                    "custom_llm_provider": "vllm",
+                },
+                ChatLiteLLM,
+            ),
+            (
                 "chat/react",
                 "^1.0.0",
                 None,
@@ -705,11 +807,11 @@ prompt_template:
             (
                 "chat/react",
                 "^1.0.0",
-                AmazonQModelMetadata(
-                    name="amazon_q",
-                    provider="amazon_q",
-                    role_arn="role-arn",
-                ),
+                {
+                    "name": "amazon_q",
+                    "provider": "amazon_q",
+                    "role_arn": "role-arn",
+                },
                 False,
                 "Amazon Q React prompt",
                 Prompt,
@@ -727,13 +829,13 @@ prompt_template:
             (
                 "chat/react",
                 "^1.0.0",
-                ModelMetadata(
-                    name="custom",
-                    endpoint=HttpUrl("http://localhost:4000/"),
-                    api_key="token",
-                    provider="custom_openai",
-                    identifier="anthropic/claude-3-haiku-20240307",
-                ),
+                {
+                    "name": "custom",
+                    "endpoint": HttpUrl("http://localhost:4000/"),
+                    "api_key": "token",
+                    "provider": "custom_openai",
+                    "identifier": "anthropic/claude-3-haiku-20240307",
+                },
                 True,
                 "Chat react custom prompt",
                 MockPromptClass,
@@ -760,13 +862,13 @@ prompt_template:
             (
                 "chat/react",
                 "^1.0.0",
-                ModelMetadata(
-                    name="custom",
-                    endpoint=HttpUrl("http://localhost:4000/"),
-                    api_key="token",
-                    provider="custom_openai",
-                    identifier="custom_openai/mistralai/Mistral-7B-Instruct-v0.3",
-                ),
+                {
+                    "name": "custom",
+                    "endpoint": HttpUrl("http://localhost:4000/"),
+                    "api_key": "token",
+                    "provider": "custom_openai",
+                    "identifier": "custom_openai/mistralai/Mistral-7B-Instruct-v0.3",
+                },
                 False,
                 "Chat react custom prompt",
                 MockPromptClass,
@@ -793,10 +895,43 @@ prompt_template:
             (
                 "chat/react",
                 "^1.0.0",
-                ModelMetadata(
-                    name=KindLiteLlmModel.GENERAL,
-                    provider="litellm",
-                ),
+                {
+                    "name": "multi_family",
+                    "endpoint": HttpUrl("http://localhost:4000/"),
+                    "api_key": "token",
+                    "provider": "custom_openai",
+                    "identifier": "custom_openai/mistralai/Mistral-7B-Instruct-v0.3",
+                },
+                False,
+                "Chat react custom prompt",
+                MockPromptClass,
+                [("system", "Template1"), ("user", "Template2")],
+                "custom",
+                {
+                    "stop": ["Foo", "Bar"],
+                    "timeout": 60,
+                    "model": "mistralai/Mistral-7B-Instruct-v0.3",
+                    "custom_llm_provider": "custom_openai",
+                    "api_key": "token",
+                    "api_base": "http://localhost:4000",
+                    "vertex_location": "us-east1",
+                },
+                {
+                    "temperature": 0.1,
+                    "top_p": 0.8,
+                    "top_k": 40,
+                    "max_tokens": 256,
+                    "max_retries": 6,
+                },
+                ChatLiteLLM,
+            ),
+            (
+                "chat/react",
+                "^1.0.0",
+                {
+                    "name": KindLiteLlmModel.GENERAL,
+                    "provider": "litellm",
+                },
                 False,
                 "Chat react claude_3 prompt",  # Should map to claude_3 variant
                 MockPromptClass,
@@ -805,8 +940,6 @@ prompt_template:
                 {
                     "stop": ["Foo", "Bar"],
                     "timeout": 60,
-                    "custom_llm_provider": "litellm",
-                    "model": "general",
                 },
                 {
                     "temperature": 0.1,
@@ -824,7 +957,7 @@ prompt_template:
         registry: LocalPromptRegistry,
         prompt_id: str,
         prompt_version: str,
-        model_metadata: ModelMetadata | None,
+        model_metadata: dict[str, Any] | None,
         disable_streaming: bool,
         expected_name: str,
         expected_class: Type[Prompt],
@@ -837,7 +970,7 @@ prompt_template:
         prompt = registry.get(
             prompt_id,
             prompt_version=prompt_version,
-            model_metadata=model_metadata,
+            model_metadata=create_model_metadata(model_metadata),
         )
 
         chain = cast(RunnableSequence, prompt.bound)
@@ -890,6 +1023,6 @@ prompt_template:
 
         assert (
             str(exc_info.value)
-            == "Failed to load prompt definition for 'empty_prompt/base': No version YAML files found for prompt id: "
-            "empty_prompt/base"
+            == "Failed to load prompt definition for 'empty_prompt': No version YAML files found for prompt id: "
+            "empty_prompt"
         )

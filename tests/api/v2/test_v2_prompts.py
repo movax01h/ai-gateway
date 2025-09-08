@@ -36,7 +36,7 @@ class TestPrompt:
             "prompt_class",
             "inputs",
             "prompt_version",
-            "model_metadata",
+            "input_model_metadata",
             "token_usage",
             "expected_get_args",
             "expected_status",
@@ -99,6 +99,12 @@ class TestPrompt:
                         provider="litellm",
                         endpoint=AnyUrl("http://localhost:4000"),
                         api_key="token",
+                        llm_definition_params={
+                            "model": "mistral",
+                            "temperature": 0.0,
+                            "max_tokens": 4096,
+                        },
+                        family=["mistral"],
                     ),
                     None,
                 ),
@@ -123,6 +129,8 @@ class TestPrompt:
                         name="amazon_q",
                         provider="amazon_q",
                         role_arn="role-arn",
+                        llm_definition_params={"model": "amazon_q"},
+                        family=["amazon_q"],
                     ),
                     None,
                 ),
@@ -175,7 +183,7 @@ class TestPrompt:
         mock_track_internal_event,
         inputs: dict[str, str],
         prompt_version: Optional[str],
-        model_metadata: Optional[TypeModelMetadata],
+        input_model_metadata: Optional[TypeModelMetadata],
         token_usage: TokenUsage | None,
         expected_get_args: dict,
         expected_status: int,
@@ -191,8 +199,10 @@ class TestPrompt:
             json={
                 "inputs": inputs,
                 "prompt_version": prompt_version,
-                "model_metadata": model_metadata
-                and model_metadata.model_dump(mode="json"),
+                "model_metadata": input_model_metadata
+                and input_model_metadata.model_dump(
+                    exclude={"llm_definition_params", "family"}, mode="json"
+                ),
             },
         )
 
@@ -305,7 +315,9 @@ class TestMisdirectedRequest:
             json={
                 "inputs": {"name": "John", "age": 20},
                 "model_metadata": model_metadata
-                and model_metadata.model_dump(mode="json"),
+                and model_metadata.model_dump(
+                    exclude={"llm_definition_params", "family"}, mode="json"
+                ),
             },
         )
         mock_registry_get.assert_called_with("test", "^1.0.0", model_metadata, None)

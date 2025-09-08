@@ -4,7 +4,7 @@ from typing import Any, Iterable, Optional
 
 import yaml
 from gitlab_cloud_connector import GitLabUnitPrimitive
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 
 BASE_PATH = Path(__file__).parent
 MODELS_CONFIG_PATH = BASE_PATH / "models.yml"
@@ -12,12 +12,12 @@ UNIT_PRIMITIVE_CONFIG_PATH = BASE_PATH / "unit_primitives.yml"
 
 
 class LLMDefinition(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     name: str
     gitlab_identifier: str
-    provider: str
-    provider_identifier: str
     params: dict[str, Any] = {}
-    family: Optional[str] = None
+    family: list[str] = []
 
 
 class UnitPrimitiveConfig(BaseModel):
@@ -71,7 +71,7 @@ class ModelSelectionConfig:
     def validate(self) -> None:
         unit_primitive_configs = self.get_unit_primitive_config()
         models = self.get_llm_definitions()
-        gitlab_models_ids = models.keys()
+        models_ids = models.keys()
 
         errors: set[str] = set()
         default_model_not_selectable_errors: list[str] = []
@@ -83,11 +83,7 @@ class ModelSelectionConfig:
                 unit_primitive_config.beta_models,
             )
 
-            errors.update(
-                gitlab_model_id
-                for gitlab_model_id in ids
-                if gitlab_model_id not in gitlab_models_ids
-            )
+            errors.update(model_id for model_id in ids if model_id not in models_ids)
 
             # Validate that the default model is also included in selectable_models
             if (
@@ -102,7 +98,7 @@ class ModelSelectionConfig:
         error_messages = []
         if errors:
             error_messages.append(
-                f"The following gitlab models ids are used but are not defined in models.yml: {', '.join(errors)}"
+                f"The following models ids are used but are not defined in models.yml: {', '.join(errors)}"
             )
 
         if default_model_not_selectable_errors:
@@ -121,16 +117,16 @@ class ModelSelectionConfig:
         self._llm_definitions = None
         self._unit_primitive_configs = None
 
-    def get_gitlab_model(self, gitlab_model_id: str) -> LLMDefinition:
-        if gitlab_model := self.get_llm_definitions().get(gitlab_model_id, None):
-            return gitlab_model
-        raise ValueError(f"Invalid model identifier: {gitlab_model_id}")
+    def get_model(self, model_id: str) -> LLMDefinition:
+        if model := self.get_llm_definitions().get(model_id, None):
+            return model
+        raise ValueError(f"Invalid model identifier: {model_id}")
 
-    def get_gitlab_model_for_feature(self, feature_setting_name: str) -> LLMDefinition:
+    def get_model_for_feature(self, feature_setting_name: str) -> LLMDefinition:
         if feature_setting := self.get_unit_primitive_config_map().get(
             feature_setting_name, None
         ):
-            return self.get_gitlab_model(feature_setting.default_model)
+            return self.get_model(feature_setting.default_model)
         raise ValueError(f"Invalid feature setting: {feature_setting_name}")
 
 

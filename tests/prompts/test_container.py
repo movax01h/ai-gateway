@@ -9,7 +9,7 @@ from dependency_injector.providers import Factory
 from pydantic import AnyUrl
 
 from ai_gateway.config import ConfigModelLimits
-from ai_gateway.model_metadata import ModelMetadata
+from ai_gateway.model_metadata import create_model_metadata
 from ai_gateway.prompts.config import ChatOpenAIParams, ModelClassProvider
 from ai_gateway.prompts.registry import LocalPromptRegistry
 from duo_workflow_service import agents as workflow
@@ -91,15 +91,22 @@ def test_container(mock_ai_gateway_container: containers.DeclarativeContainer):
         prompt_id = prompt_id_with_model_name.parent
         model_name = prompt_id_with_model_name.name
 
-        model_metadata = ModelMetadata(
-            name=str(model_name),
-            endpoint=AnyUrl("http://localhost:4000"),
-            provider="",
-        )
+        if model_name == "base":
+            # The base model is requested when no model metadata is passed
+            model_metadata = None
+        else:
+            model_metadata = create_model_metadata(
+                {
+                    "name": str(model_name),
+                    "endpoint": AnyUrl("http://localhost:4000"),
+                    "provider": "gitlab",
+                }
+            )
 
         # Load the prompt definition to get the class
         prompt_registered = registry._load_prompt_definition(
-            str(prompt_id_with_model_name)
+            str(prompt_id),
+            path,
         )
         klass = prompt_registered.klass
         kwargs = _kwargs_for_class(klass)

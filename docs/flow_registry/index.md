@@ -55,9 +55,9 @@ requests.
    ```yaml
    name: Your prompt name
    model:
-      config_file: claude_4_0
       params:
-         max_tokens: 8_192
+        model_class_provider: anthropic
+        max_tokens: 8_192
       unit_primitives: []
    prompt_template:
       system: |

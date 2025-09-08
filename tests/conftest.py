@@ -33,7 +33,8 @@ from ai_gateway.code_suggestions.processing.typing import (
 from ai_gateway.config import Config, ConfigModelLimits
 from ai_gateway.container import ContainerApplication
 from ai_gateway.model_metadata import TypeModelMetadata, current_model_metadata_context
-from ai_gateway.models.base import ModelMetadata, TokensConsumptionMetadata
+from ai_gateway.models.base import ModelMetadata as LegacyModelMetadata
+from ai_gateway.models.base import TokensConsumptionMetadata
 from ai_gateway.models.base_text import (
     TextGenModelBase,
     TextGenModelChunk,
@@ -317,7 +318,7 @@ def mock_completions_legacy_output_fixture(mock_completions_legacy_output_texts:
             ModelEngineOutput(
                 text=text,
                 score=0,
-                model=ModelMetadata(name="code-gecko", engine="vertex-ai"),
+                model=LegacyModelMetadata(name="code-gecko", engine="vertex-ai"),
                 lang_id=LanguageId.PYTHON,
                 metadata=MetadataPromptBuilder(
                     components={
@@ -358,7 +359,7 @@ def mock_suggestions_output_fixture(
     return CodeSuggestionsOutput(
         text=mock_suggestions_output_text,
         score=0,
-        model=ModelMetadata(
+        model=LegacyModelMetadata(
             name=mock_suggestions_model, engine=mock_suggestions_engine
         ),
         lang_id=LanguageId.PYTHON,
@@ -588,12 +589,12 @@ def model_factory_fixture(model: Model):
 
 @pytest.fixture(name="model_params")
 def model_params_fixture():
-    return ChatLiteLLMParams(model_class_provider="litellm")
+    return ChatLiteLLMParams(model="test_model", model_class_provider="litellm")
 
 
 @pytest.fixture(name="model_config")
 def model_config_fixture(model_params: TypeModelParams):
-    return ModelConfig(name="test_model", params=model_params)
+    return ModelConfig(params=model_params)
 
 
 @pytest.fixture(name="prompt_template")

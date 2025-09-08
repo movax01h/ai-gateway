@@ -1,12 +1,10 @@
 ---
 name: CodeGemma Generations
 model:
-  name: codegemma
   params:
     model_class_provider: litellm
     temperature: 0.95
     max_tokens: 512
-    max_retries: 1
 unit_primitives:
   - generate_code
 prompt_template:

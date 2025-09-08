@@ -1411,8 +1411,6 @@ class TestGitLabModelProvider:
         (
             "provider",
             "gitlab_identifier",
-            "provider_identifier",
-            "expected_provider",
             "expected_model_name",
             "expected_engine",
             "extra_kwargs",
@@ -1423,15 +1421,11 @@ class TestGitLabModelProvider:
                 "codestral_2501_fireworks",
                 "codestral-2501",
                 "fireworks_ai",
-                "codestral-2501",
-                "fireworks_ai",
                 {"temperature": 0.7, "max_output_tokens": 48},
             ),
             (
                 "gitlab",
                 "codestral_2501_vertex",
-                "codestral-2501",
-                "vertex-ai",
                 "codestral-2501",
                 "vertex-ai",
                 {
@@ -1445,8 +1439,6 @@ class TestGitLabModelProvider:
                 "claude_sonnet_3_7_20250219",
                 "claude-3-7-sonnet-20250219",
                 "anthropic",
-                "claude-3-7-sonnet-20250219",
-                "anthropic",
                 {},
             ),
         ],
@@ -1457,8 +1449,6 @@ class TestGitLabModelProvider:
         mock_track_internal_event: Mock,
         provider: str,
         gitlab_identifier: str,
-        provider_identifier: str,
-        expected_provider: str,
         expected_model_name: str,
         expected_engine: str,
         extra_kwargs: dict,
@@ -1468,9 +1458,7 @@ class TestGitLabModelProvider:
         test_model = LLMDefinition(
             name="Test Model",
             gitlab_identifier=gitlab_identifier,
-            provider=expected_provider,
-            provider_identifier=provider_identifier,
-            family="test-family",
+            family=["test-family"],
             params={"temperature": 0.0, "max_tokens": 4096},
         )
 
@@ -1498,8 +1486,8 @@ class TestGitLabModelProvider:
 
         with (
             patch(
-                "ai_gateway.model_selection.ModelSelectionConfig.get_gitlab_model"
-            ) as mock_get_gitlab_model,
+                "ai_gateway.model_selection.ModelSelectionConfig.get_model"
+            ) as mock_get_model,
             patch(
                 "ai_gateway.api.v2.code.completions._execute_code_completion"
             ) as mock_execute,
@@ -1509,7 +1497,7 @@ class TestGitLabModelProvider:
             ) as mock_build,
         ):
 
-            mock_get_gitlab_model.return_value = test_model
+            mock_get_model.return_value = test_model
             mock_execute.return_value = [mock_suggestion]
 
             response = mock_client.post(
@@ -1558,8 +1546,6 @@ class TestGitLabModelProvider:
         test_model = LLMDefinition(
             name="Test Model",
             gitlab_identifier="test-model-id",
-            provider="vertex-ai",
-            provider_identifier="test-provider-id",
             params={"temperature": 0.0, "max_tokens": 4096},
         )
 
@@ -1577,13 +1563,13 @@ class TestGitLabModelProvider:
 
         with (
             patch(
-                "ai_gateway.model_selection.ModelSelectionConfig.get_gitlab_model_for_feature"
-            ) as mock_get_gitlab_model,
+                "ai_gateway.model_selection.ModelSelectionConfig.get_model_for_feature"
+            ) as mock_get_model,
             patch(
                 "ai_gateway.api.v2.code.completions._execute_code_completion"
             ) as mock_execute,
         ):
-            mock_get_gitlab_model.return_value = test_model
+            mock_get_model.return_value = test_model
             mock_execute.return_value = [mock_suggestion]
 
             # Test case when model_identifier is empty
@@ -1609,9 +1595,9 @@ class TestGitLabModelProvider:
             )
 
             assert response.status_code == 200
-            assert mock_get_gitlab_model.called
+            assert mock_get_model.called
 
-            build_args, build_kwargs = mock_get_gitlab_model.call_args
+            build_args, build_kwargs = mock_get_model.call_args
             assert build_args[0] == "code_completions"
 
             body = response.json()
@@ -1627,9 +1613,7 @@ class TestGitLabModelProvider:
         test_model = LLMDefinition(
             name="Test Model",
             gitlab_identifier="test-model-id",
-            provider="vertex-ai",
-            provider_identifier="test-provider-id",
-            family="test-family",
+            family=["test-family"],
             params={"temperature": 0.0, "max_tokens": 4096},
         )
 
@@ -1647,13 +1631,13 @@ class TestGitLabModelProvider:
 
         with (
             patch(
-                "ai_gateway.model_selection.ModelSelectionConfig.get_gitlab_model_for_feature"
-            ) as mock_get_gitlab_model,
+                "ai_gateway.model_selection.ModelSelectionConfig.get_model_for_feature"
+            ) as mock_get_model,
             patch(
                 "ai_gateway.api.v2.code.completions._execute_code_completion"
             ) as mock_execute,
         ):
-            mock_get_gitlab_model.return_value = test_model
+            mock_get_model.return_value = test_model
             mock_execute.return_value = [mock_suggestion]
 
             response = mock_client.post(

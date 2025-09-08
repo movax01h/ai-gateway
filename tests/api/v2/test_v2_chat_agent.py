@@ -140,8 +140,8 @@ class TestReActAgentStream:
                     ],
                 ),
                 ModelMetadata(
-                    name="vertex",
-                    provider="claude-3-5-haiku-20241022",
+                    name="claude_3_5_haiku_20241022",
+                    provider="anthropic",
                     endpoint=AnyUrl("http://localhost:4000"),
                 ),
                 "thought\nFinal Answer: answer\n",
@@ -300,7 +300,9 @@ class TestReActAgentStream:
 
         json_params = agent_request.model_dump(mode="json")
         if model_metadata:
-            json_params["model_metadata"] = model_metadata.model_dump(mode="json")
+            json_params["model_metadata"] = model_metadata.model_dump(
+                exclude={"llm_definition_params", "family"}, mode="json"
+            )
 
         response = mock_client.post(
             "/chat/agent",
@@ -424,7 +426,10 @@ class TestReActAgentStream:
                 },
                 json={
                     "messages": [m.model_dump(mode="json") for m in messages],
-                    "model_metadata": model_metadata.model_dump(mode="json"),
+                    "model_metadata": model_metadata.model_dump(
+                        exclude={"llm_definition_params", "family"},
+                        mode="json",
+                    ),
                     "unavailable_resources": unavailable_resources,
                 },
             )
@@ -703,7 +708,9 @@ class TestReActAgentStream:
         json_params = agent_request.model_dump(mode="json")
 
         if model_metadata:
-            json_params["model_metadata"] = model_metadata.model_dump(mode="json")
+            json_params["model_metadata"] = model_metadata.model_dump(
+                exclude={"llm_definition_params", "family"}, mode="json"
+            )
 
         response = mock_client.post(
             "/chat/agent",

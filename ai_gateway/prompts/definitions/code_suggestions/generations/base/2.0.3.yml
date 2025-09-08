@@ -1,8 +1,8 @@
 ---
 name: Claude 3.7 Sonnet Code Generations Agent
 model:
-  config_file: claude_3_7
   params:
+    model_class_provider: anthropic
     temperature: 0.2
     max_tokens: 2048
 unit_primitives:
