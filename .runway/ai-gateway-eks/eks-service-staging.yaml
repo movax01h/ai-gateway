@@ -32,6 +32,9 @@ ai-gateway-eks:
         scalability:
           min_instances: 1
           max_instances: 4
+        ingress:
+          hosts:
+            - duo.aws.staging.gitlab.com
 
   workloadSecrets:
     - name: env-vars
