@@ -82,6 +82,8 @@ models:
 
   - name: "Claude Sonnet 3.7 - Vertex"
     gitlab_identifier: "claude_sonnet_3_7_20250219_vertex"
+    family:
+      - vertex
     params:
       model: "claude-3-7-sonnet@20250219"
       custom_llm_provider: "vertex_ai"

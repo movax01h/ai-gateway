@@ -177,6 +177,13 @@ LEGACY_MODEL_MAPPING = {
 }
 
 
+def feature_setting_for_prompt_id(prompt_id: str) -> str:
+    feature_setting = prompt_id.split("/", 1)[0]
+
+    # the folder for chat in the definitions doesn't match the feature_setting name
+    return "duo_chat" if feature_setting == "chat" else feature_setting
+
+
 class PromptRegistered(NamedTuple):
     klass: Type[Prompt]
     versions: dict[str, PromptConfig]
@@ -289,13 +296,11 @@ class LocalPromptRegistry(BasePromptRegistry):
                 {"provider": "gitlab", "identifier": identifier}
             )
 
-        feature_setting = prompt_id.split("/", 1)[0]
-        if feature_setting == "chat":
-            # the folder in the definitions doesn't match the feature_setting name
-            feature_setting = "duo_chat"
-
         return create_model_metadata(
-            {"provider": "gitlab", "feature_setting": feature_setting}
+            {
+                "provider": "gitlab",
+                "feature_setting": feature_setting_for_prompt_id(prompt_id),
+            }
         )
 
     def get(

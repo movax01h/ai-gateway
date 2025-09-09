@@ -1,24 +1,19 @@
 ---
-name: Claude 3 ReAct Chat agent
+name: Claude Code Completions
 model:
   params:
-    model_class_provider: litellm
-    temperature: 0.1
-    max_tokens: 8_192
+    model_class_provider: anthropic
+    max_tokens: 128
 unit_primitives:
-  - duo_chat
+  - complete_code
 prompt_template:
   system: |
-    {% include 'chat/react/system/1.0.0.jinja' %}
+    {% include 'code_suggestions/completions/system/1.0.0.jinja' %}
   user: |
-    {% include 'chat/react/user/1.0.0.jinja' %}
-  assistant: |
-    {% include 'chat/react/assistant/1.0.0.jinja' %}
+    {% include 'code_suggestions/completions/claude_3_user/1.0.0.jinja' %}
 params:
   # Overriding the `AIGW_GOOGLE_CLOUD_PLATFORM__PROJECT` config, since Claude models
   # is only available in a handful of regions. See
   # https://cloud.google.com/vertex-ai/generative-ai/docs/learn/locations#genai-partner-models
   vertex_location: us-east5
-  timeout: 30
-  stop:
-    - "Observation:"
+  timeout: 60
