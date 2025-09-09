@@ -104,10 +104,10 @@ def create_model_metadata(data: dict[str, Any] | None) -> Optional[TypeModelMeta
         feature_setting = data.pop("feature_setting", None)
         identifier = data.pop("identifier", None)
 
-        if feature_setting:
-            llm_definition = configs.get_model_for_feature(feature_setting)
-        elif identifier:
+        if identifier:
             llm_definition = configs.get_model(identifier)
+        elif feature_setting:
+            llm_definition = configs.get_model_for_feature(feature_setting)
         else:
             raise ValueError(
                 "Argument error: either identifier or feature_setting must be present."
