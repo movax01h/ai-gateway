@@ -199,6 +199,7 @@ _outbox = MagicMock(spec=asyncio.Queue)
                 "get_work_item",
                 "list_work_items",
                 "get_work_item_notes",
+                "post_duo_code_review",
             },
         ),
         (
@@ -369,6 +370,7 @@ def test_registry_initialization_initialises_tools_with_correct_attributes(
         "get_work_item": tools.GetWorkItem(metadata=tool_metadata),
         "list_work_items": tools.ListWorkItems(metadata=tool_metadata),
         "get_work_item_notes": tools.GetWorkItemNotes(metadata=tool_metadata),
+        "post_duo_code_review": tools.PostDuoCodeReview(metadata=tool_metadata),
     }
 
     assert registry._enabled_tools == expected_tools

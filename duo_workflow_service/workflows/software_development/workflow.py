@@ -110,6 +110,7 @@ EXECUTOR_TOOLS = [
     "get_work_item_notes",
     "create_work_item",
     "create_work_item_note",
+    "post_duo_code_review",
 ]
 
 CONTEXT_BUILDER_TOOLS = [

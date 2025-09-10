@@ -1,14 +1,14 @@
 version: "experimental"
 environment: remote
 components:
-  # Step 1: Fetch raw data from GitLab APIs
+  # Step 1: Fetch raw data via tools
   - name: "fetch_mr_data"
     type: AgentComponent
     prompt_id: "code_review_fetch_data"
     prompt_version: "^1.0.0"
     inputs:
       - from: "context:goal"
-        as: "mr_iid"
+        as: "merge_request_iid"
       - from: "context:project_id"
         as: "project_id"
     toolset:
@@ -33,7 +33,7 @@ components:
     ui_log_events:
       - "on_agent_final_answer"
 
-  # Step 3: Perform code review using existing prompt
+  # Step 3: Perform code review
   - name: "perform_code_review"
     type: AgentComponent
     prompt_id: "review_merge_request"
@@ -45,12 +45,29 @@ components:
         as: "current_date"
     toolset: []
 
+  # Step 4: Publish code review
+  - name: "publish_review"
+    type: DeterministicStepComponent
+    tool_name: "post_duo_code_review"
+    inputs:
+      - from: "context:perform_code_review.final_answer"
+        as: "review_output"
+      - from: "context:project_id"
+        as: "project_id"
+      - from: "context:goal"
+        as: "merge_request_iid"
+    ui_log_events:
+      - "on_tool_execution_success"
+      - "on_tool_execution_failed"
+
 routers:
   - from: "fetch_mr_data"
     to: "format_for_review"
   - from: "format_for_review"
     to: "perform_code_review"
   - from: "perform_code_review"
+    to: "publish_review"
+  - from: "publish_review"
     to: "end"
 
 flow:

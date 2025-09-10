@@ -15,6 +15,8 @@ from duo_workflow_service.tools.merge_request import (
     ListMergeRequestDiffs,
     ListMergeRequestInput,
     MergeRequestResourceInput,
+    PostDuoCodeReview,
+    PostDuoCodeReviewInput,
     UpdateMergeRequest,
     UpdateMergeRequestInput,
 )
@@ -1505,5 +1507,53 @@ async def test_list_merge_request_exception(gitlab_client_mock, metadata):
 )
 def test_list_merge_request_format_display_message(input_data, expected_message):
     tool = ListMergeRequest(description="List merge requests")
+    message = tool.format_display_message(input_data)
+    assert message == expected_message
+
+
+@pytest.mark.asyncio
+async def test_post_duo_code_review(gitlab_client_mock, metadata):
+    gitlab_client_mock.apost = AsyncMock(return_value={"status": "success"})
+    tool = PostDuoCodeReview(metadata=metadata)
+    response = await tool._arun(
+        project_id="123", merge_request_iid=45, review_output="<review>test</review>"
+    )
+    expected_response = json.dumps(
+        {"status": "success", "message": "Review posted to MR !45"}
+    )
+    assert response == expected_response
+    gitlab_client_mock.apost.assert_called_once_with(
+        path="/api/v4/projects/123/merge_requests/45/duo_code_review/post_review",
+        body=json.dumps({"review_output": "<review>test</review>"}),
+    )
+
+
+@pytest.mark.asyncio
+async def test_post_duo_code_review_exception(gitlab_client_mock, metadata):
+    error_message = "API error"
+    gitlab_client_mock.apost = AsyncMock(side_effect=Exception(error_message))
+    tool = PostDuoCodeReview(metadata=metadata)
+    response = await tool._arun(
+        project_id="123", merge_request_iid=45, review_output="<review>test</review>"
+    )
+    expected_response = json.dumps({"error": error_message})
+    assert response == expected_response
+
+
+@pytest.mark.parametrize(
+    "input_data,expected_message",
+    [
+        (
+            PostDuoCodeReviewInput(
+                project_id="42",
+                merge_request_iid=123,
+                review_output="<review>test</review>",
+            ),
+            "Post Duo Code Review to merge request !123 in project 42",
+        ),
+    ],
+)
+def test_post_duo_code_review_format_display_message(input_data, expected_message):
+    tool = PostDuoCodeReview(description="Post Duo Code Review")
     message = tool.format_display_message(input_data)
     assert message == expected_message
