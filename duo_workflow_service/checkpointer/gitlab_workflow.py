@@ -451,6 +451,7 @@ class GitLabWorkflow(BaseCheckpointSaver[Any], AbstractAsyncContextManager[Any])
             label = EventLabelEnum.WORKFLOW_PAUSE_LABEL.value
             prop = EventPropertyEnum.WORKFLOW_PAUSE_BY_PLAN_AWAIT_APPROVAL.value
         elif status in ("finished", "stopped"):
+            self.log_if_finished_due_to_stopped(status)
             event = EventEnum.WORKFLOW_FINISH_SUCCESS
             label = EventLabelEnum.WORKFLOW_FINISH_LABEL.value
             prop = STATUS_TO_EVENT_PROPERTY.get(
@@ -725,3 +726,7 @@ class GitLabWorkflow(BaseCheckpointSaver[Any], AbstractAsyncContextManager[Any])
                 status_event = CheckpointStatusToStatusEvent.get(checkpoint_status)
 
         return status_event
+
+    def log_if_finished_due_to_stopped(self, status: str):
+        if status == "stopped":
+            self._logger.warning("Marking session successful because it's stopped")
