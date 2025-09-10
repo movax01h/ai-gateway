@@ -349,6 +349,8 @@ class Workflow(AbstractWorkflow):
             model_metadata=model_metadata,
             internal_event_category=__name__,
             tools=agents_toolset.bindable,  # type: ignore[arg-type]
+            workflow_id=self._workflow_id,
+            workflow_type=self._workflow_type,
         )
         self._agent.tools_registry = tools_registry
         self._agent.prompt_runnable = prompt_runnable

@@ -31,6 +31,8 @@ from lib.internal_events.context import InternalEventAdditionalProperties
 
 __all__ = [
     "Prompt",
+    "Input",
+    "Output",
     "BasePromptRegistry",
     "jinja2_formatter",
 ]

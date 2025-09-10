@@ -4,7 +4,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from duo_workflow_service.components.tools_registry import ToolMetadata
+from duo_workflow_service.components.tools_registry import ToolMetadata, ToolsRegistry
 from duo_workflow_service.entities.state import (
     Plan,
     Task,
@@ -125,6 +125,11 @@ def mock_gitlab_version_fixture(gl_version: str):
     gitlab_version.set(None)
 
 
+@pytest.fixture(name="workflow_id")
+def workflow_id_fixture():
+    return "1234"
+
+
 @pytest.fixture(name="workflow_type")
 def workflow_type_fixture() -> CategoryEnum:
     return CategoryEnum.WORKFLOW_SOFTWARE_DEVELOPMENT
@@ -134,3 +139,17 @@ def workflow_type_fixture() -> CategoryEnum:
 def mock_agent_fixture():
     with patch("ai_gateway.prompts.registry.LocalPromptRegistry.get_on_behalf") as mock:
         yield mock
+
+
+@pytest.fixture(name="tool_approval_required")
+def tool_approval_required_fixture():
+    return False
+
+
+@pytest.fixture(name="mock_tools_registry")
+def mock_tools_registry_fixture(tool_approval_required):
+    mock = MagicMock(spec=ToolsRegistry)
+
+    mock.approval_required.return_value = tool_approval_required
+
+    return mock

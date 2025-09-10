@@ -59,6 +59,11 @@ def _kwargs_for_class(klass):
                 "workflow_type": CategoryEnum.WORKFLOW_SOFTWARE_DEVELOPMENT,
                 "http_client": Mock(spec=GitlabHttpClient),
             }
+        case workflow.ChatAgent:
+            return {
+                "workflow_id": "123",
+                "workflow_type": CategoryEnum.WORKFLOW_CHAT,
+            }
 
     return {}
 

@@ -6,7 +6,9 @@ from gitlab_cloud_connector import CloudConnectorUser, UserClaims, WrongUnitPrim
 from google.protobuf import struct_pb2
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 
-from ai_gateway.model_metadata import ModelMetadata
+from ai_gateway.model_metadata import ModelMetadata, TypeModelMetadata
+from ai_gateway.prompts.config.base import PromptConfig
+from ai_gateway.prompts.typing import TypeModelFactory
 from contract import contract_pb2
 from duo_workflow_service.agents.chat_agent import ChatAgent
 from duo_workflow_service.checkpointer.gitlab_workflow import WorkflowStatusEventEnum
@@ -33,9 +35,26 @@ from lib.feature_flags import FeatureFlag, current_feature_flag_context
 from lib.internal_events.event_enum import CategoryEnum
 
 
-@pytest.fixture(name="prompt_class")
-def prompt_class_fixture():
-    return ChatAgent
+@pytest.fixture(name="workflow_type")
+def workflow_type_fixture() -> CategoryEnum:
+    return CategoryEnum.WORKFLOW_CHAT
+
+
+@pytest.fixture(name="prompt")
+def prompt_fixture(
+    model_factory: TypeModelFactory,
+    prompt_config: PromptConfig,
+    model_metadata: TypeModelMetadata | None,
+    workflow_id: str,
+    workflow_type: CategoryEnum,
+):
+    return ChatAgent(
+        model_factory=model_factory,
+        config=prompt_config,  # type: ignore[arg-type] # mypy gets confused with `config` from `Runnable`
+        model_metadata=model_metadata,
+        workflow_id=workflow_id,
+        workflow_type=workflow_type,
+    )  # type: ignore[call-arg] # the args are modified in `Prompt.__init__`
 
 
 @pytest.fixture(name="config_values")
@@ -60,11 +79,13 @@ def workflow_with_project_fixture(
     prompt: ChatAgent,
     user: CloudConnectorUser,
     mock_tools_registry: Mock,
+    workflow_id: str,
+    workflow_type: CategoryEnum,
 ):
     workflow = Workflow(
-        workflow_id="test-id",
+        workflow_id=workflow_id,
         workflow_metadata={},
-        workflow_type=CategoryEnum.WORKFLOW_CHAT,
+        workflow_type=workflow_type,
         mcp_tools=[contract_pb2.McpTool(name="extra_tool", description="Extra tool")],
         user=user,
     )
@@ -289,6 +310,7 @@ def test_are_tools_called_with_tool_use(workflow_with_project):
 async def test_workflow_run(
     mock_model_metadata_context,
     mock_checkpoint_notifier,
+    mock_tools_registry,
     workflow_with_project,
 ):
     mock_model_metadata = MagicMock()
@@ -321,24 +343,22 @@ async def test_workflow_run(
 
         workflow = workflow_with_project
 
-        mock_agent = MagicMock()
         with patch.object(
-            workflow._prompt_registry, "get_on_behalf", return_value=mock_agent
+            workflow._prompt_registry, "get_on_behalf"
         ) as mock_get_on_behalf:
             await workflow.run("Test chat goal")
 
             assert workflow.is_done
 
-            mock_get_on_behalf.assert_called_once()
-            call_args = mock_get_on_behalf.call_args
-
-            assert call_args.kwargs["model_metadata"] == mock_model_metadata
-            assert call_args.kwargs["user"] == workflow._user
-            assert call_args.kwargs["prompt_id"] == "chat/agent"
-            assert call_args.kwargs["prompt_version"] == "^1.0.0"
-            assert (
-                call_args.kwargs["internal_event_category"]
-                == "duo_workflow_service.workflows.chat.workflow"
+            mock_get_on_behalf.assert_called_once_with(
+                user=workflow._user,
+                prompt_id="chat/agent",
+                prompt_version="^1.0.0",
+                model_metadata=mock_model_metadata,
+                internal_event_category="duo_workflow_service.workflows.chat.workflow",
+                tools=mock_tools_registry.toolset.return_value.bindable,
+                workflow_id=workflow._workflow_id,
+                workflow_type=workflow._workflow_type,
             )
 
         mock_user_interface_instance.send_event.assert_called_with(
@@ -976,6 +996,8 @@ async def test_compile_with_tools_override_and_flow_config(
             model_metadata=None,
             internal_event_category="duo_workflow_service.workflows.chat.workflow",
             tools=mock_agents_toolset.bindable,
+            workflow_id=workflow._workflow_id,
+            workflow_type=workflow._workflow_type,
         )
 
         mock_graph.add_node.assert_any_call("agent", mock_agent.run)
