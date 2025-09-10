@@ -1,24 +1,18 @@
 ---
-name: Claude 3 ReAct Chat agent
+name: Claude 4.0 Review Merge Request
 model:
   params:
     model_class_provider: litellm
-    temperature: 0.1
     max_tokens: 8_192
 unit_primitives:
-  - duo_chat
+  - review_merge_request
 prompt_template:
   system: |
-    {% include 'chat/react/system/1.0.0.jinja' %}
+    {% include 'review_merge_request/system/1.1.0.jinja' %}
   user: |
-    {% include 'chat/react/user/1.0.0.jinja' %}
-  assistant: |
-    {% include 'chat/react/assistant/1.0.0.jinja' %}
+    {% include 'review_merge_request/user/1.1.0.jinja' %}
 params:
   # Overriding the `AIGW_GOOGLE_CLOUD_PLATFORM__PROJECT` config, since Claude models
   # is only available in a handful of regions. See
   # https://cloud.google.com/vertex-ai/generative-ai/docs/learn/locations#genai-partner-models
   vertex_location: us-east5
-  timeout: 30
-  stop:
-    - "Observation:"

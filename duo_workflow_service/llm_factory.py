@@ -75,7 +75,7 @@ class VertexConfig(ModelConfig):
         # This is where we'll need to add support for multi-region access to Anthropic
         # on Vertex.
         # Supported locations:
-        # https://cloud.google.com/vertex-ai/generative-ai/docs/partner-models/use-claude#regions
+        # https://cloud.google.com/vertex-ai/generative-ai/docs/learn/locations#genai-partner-models
         location = os.environ.get("DUO_WORKFLOW__VERTEX_LOCATION")
         if not location or len(location) < 1:
             raise RuntimeError("DUO_WORKFLOW__VERTEX_LOCATION needs to be set")
