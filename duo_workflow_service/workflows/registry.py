@@ -66,6 +66,45 @@ def _convert_struct_to_flow_config(
     return flow_config_cls(**config_dict)
 
 
+def _flow_factory(
+    flow_cls: FlowFactory,
+    config: FlowConfigT,
+) -> FlowFactory:
+    if config.environment != "chat-partial":
+        return partial(flow_cls, config=config)
+
+    if len(config.components) != 1:
+        raise ValueError(
+            f"Chat-partial environment allows exactly one component, but received {len(config.components)}"
+        )
+
+    agent_component = config.components[0]
+
+    if agent_component["type"] != "AgentComponent":
+        raise ValueError(f"Invalid component type: {agent_component['type']}")
+
+    if config.prompts and len(config.prompts) > 1:
+        raise ValueError(
+            f"Chat-partial environment expects exactly one prompt in prompt configuration, "
+            f"but received {len(config.prompts)}"
+        )
+
+    prompt_version = agent_component.get("prompt_version")
+
+    if config.prompts and prompt_version:
+        raise ValueError(
+            "Chat-partial environment expects either inline or in repository prompt configuration, but received both"
+        )
+
+    return partial(
+        chat.Workflow,
+        tools_override=agent_component["toolset"],
+        prompt_template_id_override=agent_component["prompt_id"],
+        prompt_template_version_override=agent_component.get("prompt_version"),
+        prompt_template_override=config.prompts[0] if config.prompts else None,
+    )
+
+
 def resolve_workflow_class(
     workflow_definition: Optional[str],
     flow_config: Optional[struct_pb2.Struct] = None,
@@ -93,7 +132,7 @@ def resolve_workflow_class(
                 flow_config_schema_version=flow_config_schema_version,
                 flow_config_cls=flow_config_cls,
             )
-            return partial(flow_cls, config=config)
+            return _flow_factory(flow_cls, config)
         except Exception as e:
             raise ValueError(
                 f"Failed to create flow from FlowConfig protobuf: {e}"

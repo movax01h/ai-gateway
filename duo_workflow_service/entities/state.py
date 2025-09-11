@@ -317,6 +317,7 @@ class ChatWorkflowState(TypedDict):
     ]
     ui_chat_log: Annotated[List[UiChatLog], _ui_chat_log_reducer]
     last_human_input: Union[WorkflowEvent, None]
+    goal: str | None
     project: Project | None
     namespace: Namespace | None
     approval: ApprovalStateRejection | None

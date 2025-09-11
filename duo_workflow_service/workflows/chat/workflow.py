@@ -1,17 +1,23 @@
 # pylint: disable=attribute-defined-outside-init
 from datetime import datetime, timezone
 from enum import StrEnum
-from typing import Any, List, override
+from typing import Any, Dict, List, Optional, Union, override
 
+from dependency_injector.wiring import Provide, inject
+from gitlab_cloud_connector import CloudConnectorUser
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage
 from langgraph.checkpoint.memory import BaseCheckpointSaver
 from langgraph.graph import END, StateGraph
 from langgraph.types import Command
 
+from ai_gateway.container import ContainerApplication
 from ai_gateway.model_metadata import (
     create_model_metadata,
     current_model_metadata_context,
 )
+from ai_gateway.prompts import InMemoryPromptRegistry, Prompt
+from ai_gateway.prompts.registry import LocalPromptRegistry
+from contract import contract_pb2
 from duo_workflow_service.agents.chat_agent import ChatAgent
 from duo_workflow_service.agents.tools_executor import ToolsExecutor
 from duo_workflow_service.checkpointer.gitlab_workflow import WorkflowStatusEventEnum
@@ -25,8 +31,14 @@ from duo_workflow_service.entities.state import (
     WorkflowStatusEnum,
 )
 from duo_workflow_service.tracking.errors import log_exception
-from duo_workflow_service.workflows.abstract_workflow import AbstractWorkflow
+from duo_workflow_service.workflows.abstract_workflow import (
+    AbstractWorkflow,
+    InvocationMetadata,
+)
+from duo_workflow_service.workflows.type_definitions import AdditionalContext
 from lib.feature_flags.context import FeatureFlag, is_feature_enabled
+from lib.internal_events.client import InternalEventsClient
+from lib.internal_events.event_enum import CategoryEnum
 
 
 class Routes(StrEnum):
@@ -116,6 +128,76 @@ GIT_TOOLS = ["run_git_command"]
 class Workflow(AbstractWorkflow):
     _stream: bool = True
     _agent: ChatAgent
+    _tools_override: list[str]
+    # flow config inline prompts are loaded into PromptRegistry as part of
+    # https://gitlab.com/gitlab-org/gitlab/-/issues/559994
+    # which means that both with inline and in repository prompts DW Service
+    # shall use PromptRegistry to fetch prompt data based on prompt_id and
+    # optionally prompt_version (only present for in repository  prompts)
+    _prompt_id: str
+    _prompt_version: str
+    _prompt_template_override: str
+    _use_agent_override: bool = False
+
+    # pylint: disable=dangerous-default-value
+    @inject
+    def __init__(
+        self,
+        workflow_id: str,
+        workflow_metadata: Dict[str, Any],
+        workflow_type: CategoryEnum,
+        invocation_metadata: InvocationMetadata = {
+            "base_url": "",
+            "gitlab_token": "",
+        },
+        mcp_tools: list[contract_pb2.McpTool] = [],
+        user: Optional[CloudConnectorUser] = None,
+        additional_context: Optional[list[AdditionalContext]] = None,
+        approval: Optional[contract_pb2.Approval] = None,
+        prompt_registry: LocalPromptRegistry = Provide[
+            ContainerApplication.pkg_prompts.prompt_registry
+        ],
+        internal_event_client: InternalEventsClient = Provide[
+            ContainerApplication.internal_event.client
+        ],
+        **kwargs,
+    ):
+        self._tools_override = kwargs.pop("tools_override", None)
+
+        self._prompt_id = "chat/agent"
+        self._prompt_version = "^1.0.0"
+        active_prompt_registry: Union[LocalPromptRegistry, InMemoryPromptRegistry] = (
+            prompt_registry
+        )
+        if "prompt_template_id_override" in kwargs:
+            self._use_agent_override = True
+            self._flow_config_prompt_id = kwargs.pop("prompt_template_id_override")
+            self._flow_config_prompt_version = kwargs.pop(
+                "prompt_template_version_override", None
+            )
+            memory_prompt_registry: InMemoryPromptRegistry = InMemoryPromptRegistry(
+                prompt_registry
+            )
+            if "prompt_template_override" in kwargs:
+                prompt_template = kwargs.pop("prompt_template_override")
+                memory_prompt_registry.register_prompt(
+                    prompt_id=prompt_template["prompt_id"], prompt_data=prompt_template
+                )
+            active_prompt_registry = memory_prompt_registry
+
+        super().__init__(
+            workflow_id=workflow_id,
+            workflow_metadata=workflow_metadata,
+            workflow_type=workflow_type,
+            invocation_metadata=invocation_metadata,
+            mcp_tools=mcp_tools,
+            user=user,
+            additional_context=additional_context,
+            approval=approval,
+            prompt_registry=active_prompt_registry,  # type: ignore[arg-type]
+            internal_event_client=internal_event_client,
+            **kwargs,
+        )
 
     def _are_tools_called(self, state: ChatWorkflowState) -> Routes:
         if state["status"] in [WorkflowStatusEnum.CANCELLED, WorkflowStatusEnum.ERROR]:
@@ -143,21 +225,23 @@ class Workflow(AbstractWorkflow):
             additional_context=self._additional_context,
         )
 
+        conversation_history: List[BaseMessage] = []
+
+        if not self._use_agent_override:
+            conversation_history.append(
+                HumanMessage(
+                    content=goal,
+                    additional_kwargs={"additional_context": self._additional_context},
+                ),
+            )
+
         return ChatWorkflowState(
             plan={"steps": []},
             status=WorkflowStatusEnum.NOT_STARTED,
-            conversation_history={
-                self._agent.name: [
-                    HumanMessage(
-                        content=goal,
-                        additional_kwargs={
-                            "additional_context": self._additional_context
-                        },
-                    ),
-                ]
-            },
+            conversation_history={self._agent.name: conversation_history},
             ui_chat_log=[initial_ui_chat_log],
             last_human_input=None,
+            goal=goal,
             project=self._project,
             namespace=self._namespace,
             approval=None,
@@ -226,10 +310,14 @@ class Workflow(AbstractWorkflow):
 
         self._goal = goal
         graph = StateGraph(ChatWorkflowState)
-        tools = self._get_tools()
+
+        if self._tools_override is not None:
+            tools = self._tools_override
+        else:
+            tools = self._get_tools()
+
         agents_toolset = tools_registry.toolset(tools)
 
-        prompt_version = "^1.0.0"
         model_metadata = current_model_metadata_context.get()
         if not model_metadata and is_feature_enabled(
             FeatureFlag.DUO_AGENTIC_CHAT_OPENAI_GPT_5
@@ -242,15 +330,28 @@ class Workflow(AbstractWorkflow):
                 }
             )  # it will force the prompt registry load the chat/agent/gpt_5 prompt
 
+        prompt_runnable: Optional[Prompt] = None
+        if self._use_agent_override:
+            prompt_runnable = self._prompt_registry.get(  # type: ignore[assignment]
+                user=self._user,
+                prompt_id=self._flow_config_prompt_id,
+                prompt_version=self._flow_config_prompt_version,
+                model_metadata=model_metadata,
+                internal_event_category=__name__,
+                tools=agents_toolset.bindable,  # type: ignore[arg-type]
+                preapproved_tools=self._preapproved_tools,
+            )
+
         self._agent: ChatAgent = self._prompt_registry.get_on_behalf(  # type: ignore[assignment]
             user=self._user,
-            prompt_id="chat/agent",
-            prompt_version=prompt_version,
+            prompt_id=self._prompt_id,
+            prompt_version=self._prompt_version,
             model_metadata=model_metadata,
             internal_event_category=__name__,
             tools=agents_toolset.bindable,  # type: ignore[arg-type]
         )
         self._agent.tools_registry = tools_registry
+        self._agent.prompt_runnable = prompt_runnable
 
         tools_runner = ToolsExecutor(
             tools_agent_name=self._agent.name,

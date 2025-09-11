@@ -132,6 +132,7 @@ class ChatAgentPromptTemplate(Runnable[ChatWorkflowState, PromptValue]):
 
 class ChatAgent(Prompt[ChatWorkflowState, BaseMessage]):
     tools_registry: Optional[ToolsRegistry] = None
+    prompt_runnable: Prompt | None = None
 
     @classmethod
     def _build_prompt_template(cls, config: PromptConfig) -> Runnable:
@@ -166,34 +167,136 @@ class ChatAgent(Prompt[ChatWorkflowState, BaseMessage]):
 
         return approval_required, approval_messages
 
+    def _handle_approval_rejection(
+        self, input: ChatWorkflowState, approval_state: ApprovalStateRejection
+    ) -> list[BaseMessage]:
+        last_message = input["conversation_history"][self.name][-1]
+
+        # An empty text box for tool cancellation results in a 'null' message. Converting to None
+        # todo: remove this line once we have fixed the frontend to return None instead of 'null'
+        # https://gitlab.com/gitlab-org/modelops/applied-ml/code-suggestions/ai-assist/-/issues/1259
+        normalized_message = (
+            None if approval_state.message == "null" else approval_state.message
+        )
+
+        tool_message = (
+            f"Tool is cancelled temporarily as user has a comment. Comment: {normalized_message}"
+            if normalized_message
+            else "Tool is cancelled by user. Don't run the command and stop tool execution in progress."
+        )
+
+        messages: list[BaseMessage] = [
+            ToolMessage(
+                content=tool_message,
+                tool_call_id=tool_call.get("id"),
+            )
+            for tool_call in getattr(last_message, "tool_calls", [])
+        ]
+
+        # update history
+        input["conversation_history"][self.name].extend(messages)
+        return messages
+
+    async def _get_agent_response(self, input: ChatWorkflowState) -> BaseMessage:
+        is_anthropic_model = self.model_provider == ModelClassProvider.ANTHROPIC
+
+        if self.prompt_runnable:
+            conversation_history = input["conversation_history"].get(self.name, [])
+            variables = {
+                "goal": input["goal"],
+                "project": input["project"],
+                "namespace": input["namespace"],
+                "current_date": datetime.now().strftime("%Y-%m-%d"),
+                "current_time": datetime.now().strftime("%H:%M:%S"),
+                "current_timezone": datetime.now().astimezone().tzname(),
+            }
+
+            return await self.prompt_runnable.ainvoke(
+                input={**variables, "history": conversation_history}
+            )
+
+        return await super().ainvoke(
+            input=input,
+            agent_name=self.name,
+            is_anthropic_model=is_anthropic_model,
+        )
+
+    def _build_response(
+        self, agent_response: BaseMessage, input: ChatWorkflowState
+    ) -> Dict[str, Any]:
+        if not isinstance(agent_response, AIMessage) or not agent_response.tool_calls:
+            return self._build_text_response(agent_response)
+
+        return self._build_tool_response(agent_response, input)
+
+    def _build_text_response(self, agent_response: BaseMessage) -> Dict[str, Any]:
+        ui_chat_log = UiChatLog(
+            message_type=MessageTypeEnum.AGENT,
+            message_sub_type=None,
+            content=StrOutputParser().invoke(agent_response) or "",
+            timestamp=datetime.now(timezone.utc).isoformat(),
+            status=ToolStatus.SUCCESS,
+            correlation_id=None,
+            tool_info=None,
+            additional_context=None,
+        )
+
+        return {
+            "conversation_history": {self.name: [agent_response]},
+            "status": WorkflowStatusEnum.INPUT_REQUIRED,
+            "ui_chat_log": [ui_chat_log],
+        }
+
+    def _build_tool_response(
+        self, agent_response: AIMessage, input: ChatWorkflowState
+    ) -> Dict[str, Any]:
+        result: Dict[str, Any] = {
+            "conversation_history": {self.name: [agent_response]},
+            "status": WorkflowStatusEnum.EXECUTION,
+        }
+
+        preapproved_tools = input.get("preapproved_tools") or []
+        tools_need_approval, approval_messages = self._get_approvals(
+            agent_response, preapproved_tools
+        )
+
+        if len(agent_response.tool_calls) > 0 and tools_need_approval:
+            result["status"] = WorkflowStatusEnum.TOOL_CALL_APPROVAL_REQUIRED
+            result["ui_chat_log"] = approval_messages
+
+        return result
+
+    def _create_error_response(self, error: Exception) -> Dict[str, Any]:
+        error_message = HumanMessage(
+            content=f"There was an error processing your request: {error}"
+        )
+
+        ui_chat_log = UiChatLog(
+            message_type=MessageTypeEnum.AGENT,
+            message_sub_type=None,
+            content=(
+                "There was an error processing your request. Please try again or contact support if "
+                "the issue persists."
+            ),
+            timestamp=datetime.now(timezone.utc).isoformat(),
+            status=ToolStatus.FAILURE,
+            correlation_id=None,
+            tool_info=None,
+            additional_context=None,
+        )
+
+        return {
+            "conversation_history": {self.name: [error_message]},
+            "status": WorkflowStatusEnum.INPUT_REQUIRED,
+            "ui_chat_log": [ui_chat_log],
+        }
+
     async def run(self, input: ChatWorkflowState) -> Dict[str, Any]:
-        new_messages = []
         approval_state = input.get("approval", None)
 
+        # Handle approval rejection
         if isinstance(approval_state, ApprovalStateRejection):
-            last_message = input["conversation_history"][self.name][-1]
-
-            # An empty text box for tool cancellation results in a 'null' message. Converting to None
-            # todo: remove this line once we have fixed the frontend to return None instead of 'null'
-            # https://gitlab.com/gitlab-org/modelops/applied-ml/code-suggestions/ai-assist/-/issues/1259
-            if approval_state.message == "null":
-                approval_state.message = None
-
-            if approval_state.message:
-                tool_message = f"Tool is cancelled temporarily as user has a comment. Comment: {approval_state.message}"
-            else:
-                tool_message = "Tool is cancelled by user. Don't run the command and stop tool execution in progress."
-
-            messages: list[BaseMessage] = [
-                ToolMessage(
-                    content=tool_message,
-                    tool_call_id=tool_call.get("id"),
-                )
-                for tool_call in getattr(last_message, "tool_calls", [])
-            ]
-            new_messages.extend(messages)
-            # update history
-            input["conversation_history"][self.name].extend(messages)
+            self._handle_approval_rejection(input, approval_state)
 
         try:
             with GitLabServiceContext(
@@ -201,88 +304,22 @@ class ChatAgent(Prompt[ChatWorkflowState, BaseMessage]):
                 project=input.get("project"),
                 namespace=input.get("namespace"),
             ):
-                # Check if this is an Anthropic model for prompt caching
-                is_anthropic_model = self.model_provider == ModelClassProvider.ANTHROPIC
-                agent_response = await super().ainvoke(
-                    input=input,
-                    agent_name=self.name,
-                    is_anthropic_model=is_anthropic_model,
-                )
+                agent_response = await self._get_agent_response(input)
 
+            # Check for abnormal stop reasons
             stop_reason = agent_response.response_metadata.get("stop_reason")
             if stop_reason in AnthropicStopReason.abnormal_values():
                 log.warning(f"LLM stopped abnormally with reason: {stop_reason}")
 
-            new_messages.append(agent_response)
-
+            # Track tokens for AI messages
             if isinstance(agent_response, AIMessage):
                 self._track_tokens_data(agent_response)
 
-            if (
-                isinstance(agent_response, AIMessage)
-                and len(agent_response.tool_calls) > 0
-            ):
-                status = WorkflowStatusEnum.EXECUTION
-            else:
-                status = WorkflowStatusEnum.INPUT_REQUIRED
+            return self._build_response(agent_response, input)
 
-            result: dict[str, Any] = {
-                "conversation_history": {self.name: [agent_response]},
-                "status": status,
-            }
-
-            if (
-                not isinstance(agent_response, AIMessage)
-                or len(agent_response.tool_calls) == 0
-            ):
-                result["ui_chat_log"] = [
-                    UiChatLog(  # type: ignore[list-item]
-                        message_type=MessageTypeEnum.AGENT,
-                        message_sub_type=None,
-                        content=StrOutputParser().invoke(agent_response) or "",
-                        timestamp=datetime.now(timezone.utc).isoformat(),
-                        status=ToolStatus.SUCCESS,
-                        correlation_id=None,
-                        tool_info=None,
-                        additional_context=None,
-                    )
-                ]
-                result["status"] = WorkflowStatusEnum.INPUT_REQUIRED
-                return result
-
-            preapproved_tools = input.get("preapproved_tools") or []
-            tools_need_approval, approval_messages = self._get_approvals(
-                agent_response, preapproved_tools
-            )
-            if len(agent_response.tool_calls) > 0 and tools_need_approval:
-                result["status"] = WorkflowStatusEnum.TOOL_CALL_APPROVAL_REQUIRED
-                result["ui_chat_log"] = approval_messages
-
-            return result
         except Exception as error:
             log.warning(f"Error processing chat agent: {error}")
-
-            error_message = HumanMessage(
-                content=f"There was an error processing your request: {error}"
-            )
-
-            return {
-                "conversation_history": {self.name: [error_message]},
-                "status": WorkflowStatusEnum.INPUT_REQUIRED,
-                "ui_chat_log": [
-                    UiChatLog(
-                        message_type=MessageTypeEnum.AGENT,
-                        message_sub_type=None,
-                        content="There was an error processing your request. Please try again or contact support if "
-                        "the issue persists.",
-                        timestamp=datetime.now(timezone.utc).isoformat(),
-                        status=ToolStatus.FAILURE,
-                        correlation_id=None,
-                        tool_info=None,
-                        additional_context=None,
-                    )
-                ],
-            }
+            return self._create_error_response(error)
 
     def _track_tokens_data(self, message: AIMessage):
         if not self.internal_event_client:
