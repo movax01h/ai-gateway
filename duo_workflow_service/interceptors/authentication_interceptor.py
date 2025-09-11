@@ -2,7 +2,7 @@
 
 import contextvars
 import os
-from typing import Callable
+from typing import Callable, Dict
 
 import grpc
 import structlog
@@ -13,7 +13,10 @@ from gitlab_cloud_connector import (
     LocalAuthProvider,
     authenticate,
 )
+from gitlab_cloud_connector.auth import AUTH_HEADER, PREFIX_BEARER_HEADER
 from grpc.aio import ServicerContext
+
+from ai_gateway.auth.glgo import cloud_connector_token_context_var
 
 current_user: contextvars.ContextVar = contextvars.ContextVar("current_user")
 
@@ -42,6 +45,10 @@ class AuthenticationInterceptor(grpc.aio.ServerInterceptor):
 
         cloud_connector_user, cloud_connector_error = authenticate(
             metadata, self._oidc_auth_provider()
+        )
+
+        cloud_connector_token_context_var.set(
+            self._extract_cloud_connector_token(metadata)
         )
 
         if cloud_connector_error:
@@ -94,3 +101,14 @@ class AuthenticationInterceptor(grpc.aio.ServerInterceptor):
             ],
             structlog,
         )
+
+    def _extract_cloud_connector_token(self, headers: Dict[str, str]) -> str:
+        auth_header = headers.get(AUTH_HEADER.lower())
+        if not auth_header:
+            return ""
+
+        bearer, _, token = auth_header.partition(" ")
+        if bearer.lower() != PREFIX_BEARER_HEADER:
+            return ""
+
+        return token

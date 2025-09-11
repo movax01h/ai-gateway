@@ -2,10 +2,17 @@ import json
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from gitlab_cloud_connector import CloudConnectorUser, UserClaims
 
+from duo_workflow_service.interceptors.authentication_interceptor import current_user
 from duo_workflow_service.interceptors.model_metadata_interceptor import (
     ModelMetadataInterceptor,
 )
+
+
+@pytest.fixture(name="mock_user")
+def mock_user_fixture():
+    return CloudConnectorUser(True, claims=UserClaims(gitlab_realm="test-realm"))
 
 
 @pytest.mark.asyncio
@@ -31,9 +38,10 @@ from duo_workflow_service.interceptors.model_metadata_interceptor import (
     ],
 )
 async def test_model_metadata_interceptor_processing_scenarios(
-    metadata_value, expected_data, test_case
+    metadata_value, expected_data, test_case, mock_user
 ):
     """Test that the interceptor processes model metadata correctly for valid scenarios."""
+    current_user.set(mock_user)
     interceptor = ModelMetadataInterceptor()
 
     handler_call_details = MagicMock()
