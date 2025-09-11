@@ -700,6 +700,32 @@ async def test_agent_run_with_preapproved_tools(workflow_with_project):
 
 
 @pytest.mark.asyncio
+async def test_agent_resume_with_updated_preapproved_tools(workflow_with_project):
+    """Test that preapproved_tools are updated in state when resuming."""
+    # Set up workflow with new preapproved tools (simulating a new startRequest)
+    workflow_with_project._preapproved_tools = [
+        "tool_1",
+        "tool_2",
+        "tool_3",
+    ]
+
+    # Resume the workflow
+    result = await workflow_with_project.get_graph_input(
+        "", WorkflowStatusEventEnum.RESUME
+    )
+
+    # Verify the state update includes the new preapproved_tools
+    assert result.goto == "agent"
+    assert result.update["status"] == WorkflowStatusEnum.EXECUTION
+    assert "preapproved_tools" in result.update
+    assert result.update["preapproved_tools"] == [
+        "tool_1",
+        "tool_2",
+        "tool_3",
+    ]
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize(
     ("cancel_tool_message", "expected_tool_message"),
     [

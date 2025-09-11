@@ -171,7 +171,10 @@ class Workflow(AbstractWorkflow):
             case WorkflowStatusEventEnum.START:
                 return self.get_workflow_state(goal)
             case _:
-                state_update: dict[str, Any] = {"status": WorkflowStatusEnum.EXECUTION}
+                state_update: dict[str, Any] = {
+                    "status": WorkflowStatusEnum.EXECUTION,
+                    "preapproved_tools": self._preapproved_tools,
+                }
                 next_step = "agent"
 
                 match self._approval and self._approval.WhichOneof("user_decision"):
