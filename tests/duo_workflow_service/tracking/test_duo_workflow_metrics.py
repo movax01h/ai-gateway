@@ -7,7 +7,6 @@ from duo_workflow_service.tracking.duo_workflow_metrics import (
     DuoWorkflowMetrics,
     SessionTypeEnum,
 )
-from lib.internal_events import InternalEventAdditionalProperties, InternalEventsClient
 
 
 class TestDuoWorkflowMetrics(unittest.TestCase):
@@ -28,7 +27,6 @@ class TestDuoWorkflowMetrics(unittest.TestCase):
             "network_latency",
             "llm_response_counter",
             "checkpoint_counter",
-            "model_completion_error_counter",
             "agent_platform_session_start_counter",
             "agent_platform_session_success_counter",
             "agent_platform_session_failure_counter",
@@ -194,12 +192,18 @@ class TestDuoWorkflowMetrics(unittest.TestCase):
             "count_llm_response",
             {
                 "model": "test_model",
+                "provider": "test_provider",
                 "request_type": "test_request",
                 "stop_reason": "other",
+                "status_code": "200",
+                "error_type": "none",
             },
             model="test_model",
+            provider="test_provider",
             request_type="test_request",
             stop_reason="test_reason",
+            status_code="200",
+            error_type="none",
         )
 
     def test_checkpoint_counter(self):
@@ -216,19 +220,23 @@ class TestDuoWorkflowMetrics(unittest.TestCase):
             method="POST",
         )
 
-    def test_model_error_counter(self):
+    def test_llm_response_counter_with_error(self):
         self._assert_counter_called(
-            "model_completion_error_counter",
-            "count_model_completion_errors",
+            "llm_response_counter",
+            "count_llm_response",
             {
                 "model": "test_model",
                 "provider": "Anthropic",
-                "http_status": "500",
+                "request_type": "test_request",
+                "stop_reason": "error",
+                "status_code": "500",
                 "error_type": "test_reason",
             },
             model="test_model",
             provider="Anthropic",
-            http_status="500",
+            request_type="test_request",
+            stop_reason="error",
+            status_code="500",
             error_type="test_reason",
         )
 

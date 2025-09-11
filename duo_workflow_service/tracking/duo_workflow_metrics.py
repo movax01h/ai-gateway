@@ -90,8 +90,15 @@ class DuoWorkflowMetrics:  # pylint: disable=too-many-instance-attributes
 
         self.llm_response_counter = Counter(
             "duo_workflow_llm_response_total",
-            "Response count of LLM calls in Duo Workflow with stop reason",
-            ["model", "request_type", "stop_reason"],
+            "Response count of LLM calls in Duo Workflow with status code and error type",
+            [
+                "model",
+                "provider",
+                "request_type",
+                "stop_reason",
+                "status_code",
+                "error_type",
+            ],
             registry=registry,
         )
 
@@ -99,13 +106,6 @@ class DuoWorkflowMetrics:  # pylint: disable=too-many-instance-attributes
             "duo_workflow_checkpoint_total",
             "Count of checkpoint calls in Duo Workflow",
             ["endpoint", "status_code", "method"],
-            registry=registry,
-        )
-
-        self.model_completion_error_counter = Counter(
-            "duo_workflow_model_completion_errors_total",
-            "Model completion error count in Duo Workflow Service",
-            ["model", "provider", "http_status", "error_type"],
             registry=registry,
         )
 
@@ -173,14 +173,25 @@ class DuoWorkflowMetrics:  # pylint: disable=too-many-instance-attributes
         )
 
     def count_llm_response(
-        self, model="unknown", request_type="unknown", stop_reason="unknown"
+        self,
+        model="unknown",
+        provider="unknown",
+        request_type="unknown",
+        stop_reason="unknown",
+        status_code="unknown",
+        error_type="unknown",
     ):
         self.llm_response_counter.labels(
             model=model,
+            provider=provider,
             request_type=request_type,
             stop_reason=(
-                stop_reason if stop_reason in ANTHROPIC_STOP_REASONS else "other"
+                stop_reason
+                if stop_reason in ANTHROPIC_STOP_REASONS or stop_reason == "error"
+                else "other"
             ),
+            status_code=status_code,
+            error_type=error_type,
         ).inc()
 
     def count_checkpoints(
@@ -193,20 +204,6 @@ class DuoWorkflowMetrics:  # pylint: disable=too-many-instance-attributes
             endpoint=endpoint,
             status_code=status_code,
             method=method,
-        ).inc()
-
-    def count_model_completion_errors(
-        self,
-        model="unknown",
-        provider="unknown",
-        http_status="unknown",
-        error_type="unknown",
-    ):
-        self.model_completion_error_counter.labels(
-            model=model,
-            provider=provider,
-            http_status=http_status,
-            error_type=error_type,
         ).inc()
 
     def count_agent_platform_session_start(
@@ -289,10 +286,15 @@ class DuoWorkflowMetrics:  # pylint: disable=too-many-instance-attributes
             flow_type=flow_type,
         ).inc()
 
-    def time_llm_request(self, model="unknown", request_type="unknown"):
+    def time_llm_request(
+        self,
+        model="unknown",
+        request_type="unknown",
+    ):
         return self._timer(
             lambda duration: self.llm_request_duration.labels(
-                model=model, request_type=request_type
+                model=model,
+                request_type=request_type,
             ).observe(duration)
         )
 

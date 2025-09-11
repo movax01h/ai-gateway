@@ -40,6 +40,7 @@ def mock_prompt_fixture(mock_ai_message):
     mock_prompt = Mock(spec=Prompt)
     mock_prompt.model = Mock()
     mock_prompt.model.model_name = "claude-3-sonnet"
+    mock_prompt.model_provider = "anthropic"
     mock_prompt.ainvoke = AsyncMock(return_value=mock_ai_message)
 
     return mock_prompt
@@ -459,6 +460,9 @@ class TestAgentNodeMonitoring:
         )
         mock_monitoring.count_llm_response.assert_called_once_with(
             model="claude-3-sonnet",
+            provider="anthropic",
             request_type="test_component_completion",
             stop_reason="end_turn",
+            status_code="200",
+            error_type="none",
         )
