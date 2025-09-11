@@ -3,6 +3,7 @@ from unittest.mock import MagicMock, Mock, patch
 import pytest
 from dependency_injector import containers
 from gitlab_cloud_connector import CloudConnectorUser, UserClaims, WrongUnitPrimitives
+from google.protobuf import struct_pb2
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 
 from ai_gateway.model_metadata import ModelMetadata
@@ -234,6 +235,7 @@ def test_are_tools_called_with_various_content(
         "status": WorkflowStatusEnum.EXECUTION,
         "ui_chat_log": [],
         "last_human_input": None,
+        "goal": "test goal",
         "project": None,
         "namespace": None,
         "approval": None,
@@ -268,6 +270,7 @@ def test_are_tools_called_with_tool_use(workflow_with_project):
         "status": WorkflowStatusEnum.EXECUTION,
         "ui_chat_log": [],
         "last_human_input": None,
+        "goal": "test goal",
         "project": None,
         "namespace": None,
         "approval": None,
@@ -411,6 +414,7 @@ async def test_get_graph_input_start(workflow_with_project):
     )
 
     assert result["status"] == WorkflowStatusEnum.NOT_STARTED
+    assert result["goal"] == "Test goal"
     assert result["conversation_history"]["test_prompt"][0].content == "Test goal"
     assert result["ui_chat_log"][0]["message_type"] == MessageTypeEnum.USER
     assert "Test goal" in result["ui_chat_log"][0]["content"]
@@ -891,3 +895,125 @@ async def test_workflow_model_selection(
 
         assert call_args.kwargs["prompt_version"] == expected_prompt_version
         assert call_args.kwargs["user"] == workflow_with_project._user
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("mock_fetch_workflow_and_container_data")
+@patch("duo_workflow_service.workflows.chat.workflow.current_model_metadata_context")
+@patch.object(Workflow, "_get_tools")
+@patch("duo_workflow_service.components.tools_registry.ToolsRegistry.toolset")
+@patch("duo_workflow_service.workflows.chat.workflow.StateGraph")
+async def test_compile_with_tools_override_and_flow_config(
+    mock_state_graph,
+    mock_toolset,
+    mock_get_tools,
+    mock_model_metadata_context,
+    mock_duo_workflow_service_container,
+):
+    mock_model_metadata_context.get.return_value = None
+    mock_get_tools.return_value = ["default_tool1", "default_tool2"]
+
+    mock_agents_toolset = MagicMock()
+    mock_agents_toolset.bindable = ["tool1", "tool2"]
+    mock_toolset.return_value = mock_agents_toolset
+
+    tools_registry = MagicMock()
+    tools_registry.toolset.return_value = mock_agents_toolset
+    checkpointer = MagicMock()
+
+    user = CloudConnectorUser(
+        authenticated=True,
+        claims=UserClaims(
+            scopes=["duo_chat"],
+            issuer="gitlab-duo-workflow-service",
+        ),
+    )
+
+    workflow = Workflow(
+        workflow_id="test-id",
+        workflow_metadata={},
+        workflow_type=CategoryEnum.WORKFLOW_CHAT,
+        user=user,
+        tools_override=["tool1", "tool2"],
+        prompt_template_id_override="custom/prompt",
+        prompt_template_version_override="2.0.0",
+        prompt_template_override={"prompt_id": "custom/prompt", "content": "test"},
+    )
+
+    mock_prompt_runnable = MagicMock()
+    mock_agent = MagicMock()
+
+    mock_graph = MagicMock()
+    mock_state_graph.return_value = mock_graph
+
+    with (
+        patch.object(
+            workflow._prompt_registry, "get", return_value=mock_prompt_runnable
+        ) as mock_get,
+        patch.object(
+            workflow._prompt_registry, "get_on_behalf", return_value=mock_agent
+        ) as mock_get_on_behalf,
+    ):
+        workflow._compile("Test goal", tools_registry, checkpointer)
+
+        tools_registry.toolset.assert_called_once_with(["tool1", "tool2"])
+        mock_get_tools.assert_not_called()
+
+        mock_get.assert_called_once_with(
+            user=user,
+            prompt_id="custom/prompt",
+            prompt_version="2.0.0",
+            model_metadata=None,
+            internal_event_category="duo_workflow_service.workflows.chat.workflow",
+            tools=mock_agents_toolset.bindable,
+            preapproved_tools=[],
+        )
+
+        mock_get_on_behalf.assert_called_once_with(
+            user=user,
+            prompt_id="chat/agent",
+            prompt_version="^1.0.0",
+            model_metadata=None,
+            internal_event_category="duo_workflow_service.workflows.chat.workflow",
+            tools=mock_agents_toolset.bindable,
+        )
+
+        mock_graph.add_node.assert_any_call("agent", mock_agent.run)
+
+        assert mock_agent.tools_registry == tools_registry
+        assert mock_agent.prompt_runnable == mock_prompt_runnable
+
+
+@pytest.mark.asyncio
+@patch("duo_workflow_service.workflows.chat.workflow.current_model_metadata_context")
+@patch.object(Workflow, "_get_tools")
+@patch("duo_workflow_service.components.tools_registry.ToolsRegistry.toolset")
+async def test_compile_without_overrides(
+    mock_toolset, mock_get_tools, mock_model_metadata_context, workflow_with_project
+):
+    mock_model_metadata_context.get.return_value = None
+    mock_get_tools.return_value = ["default_tool1", "default_tool2"]
+
+    mock_agents_toolset = MagicMock()
+    mock_agents_toolset.bindable = ["default_tool1", "default_tool2"]
+    mock_toolset.return_value = mock_agents_toolset
+
+    tools_registry = MagicMock()
+    tools_registry.toolset.return_value = mock_agents_toolset
+    checkpointer = MagicMock()
+
+    mock_agent = MagicMock()
+
+    with patch.object(
+        workflow_with_project._prompt_registry, "get_on_behalf", return_value=mock_agent
+    ) as mock_get_on_behalf:
+        workflow_with_project._compile("Test goal", tools_registry, checkpointer)
+
+        # Verify _get_tools was called since no tools_override
+        mock_get_tools.assert_called_once()
+        tools_registry.toolset.assert_called_once_with(
+            ["default_tool1", "default_tool2"]
+        )
+
+        # Verify no prompt_runnable was created (no flow config)
+        assert workflow_with_project._agent.prompt_runnable is None

@@ -21,6 +21,7 @@ from langsmith import traceable, tracing_context
 from ai_gateway.code_suggestions.language_server import LanguageServerVersion
 from ai_gateway.container import ContainerApplication
 from ai_gateway.models import KindAnthropicModel
+from ai_gateway.prompts import InMemoryPromptRegistry
 from ai_gateway.prompts.registry import LocalPromptRegistry
 from contract import contract_pb2
 from duo_workflow_service.checkpointer.gitlab_workflow import (
@@ -86,7 +87,7 @@ class AbstractWorkflow(ABC):
     _additional_context: list[AdditionalContext] | None
     _mcp_tools: list[type[BaseTool]]
     _approval: Optional[contract_pb2.Approval]
-    _prompt_registry: LocalPromptRegistry
+    _prompt_registry: InMemoryPromptRegistry | LocalPromptRegistry
     _language_server_version: Optional[LanguageServerVersion]
 
     @inject

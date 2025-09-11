@@ -766,3 +766,55 @@ async def test_agentic_fake_model_bypasses_tool_approval(
         result = await chat_agent.run(input)
 
         assert result["status"] == WorkflowStatusEnum.EXECUTION
+
+
+class TestChatAgentPromptRunnable:
+    @pytest.fixture(name="input_with_goal")
+    def input_with_goal_fixture(self):
+        return {
+            "conversation_history": {"Chat Agent": [HumanMessage(content="hi")]},
+            "plan": {"steps": []},
+            "status": WorkflowStatusEnum.EXECUTION,
+            "ui_chat_log": [],
+            "last_human_input": None,
+            "goal": "Help me with my project",
+            "project": {
+                "id": 123,
+                "name": "test-project",
+                "web_url": "https://gitlab.com/test/project",
+                "languages": [{"name": "Python", "share": 0.8}],
+            },
+            "namespace": {
+                "id": 456,
+                "name": "test-org",
+                "description": "Test organization",
+                "web_url": "https://gitlab.com/test-org",
+            },
+            "approval": None,
+        }
+
+    @pytest.mark.asyncio
+    async def test_run_with_prompt_runnable_uses_custom_prompt(
+        self, chat_agent, input_with_goal
+    ):
+        mock_prompt_runnable = AsyncMock()
+        mock_prompt_runnable.ainvoke.return_value = AIMessage(
+            content="Custom prompt response"
+        )
+        chat_agent.prompt_runnable = mock_prompt_runnable
+
+        result = await chat_agent.run(input_with_goal)
+        mock_prompt_runnable.ainvoke.assert_called_once()
+        with patch.object(
+            chat_agent.__class__.__bases__[0], "ainvoke", new_callable=AsyncMock
+        ) as mock_ainvoke:
+            await chat_agent.run(input_with_goal)
+            mock_ainvoke.assert_not_called()
+
+        assert result["status"] == WorkflowStatusEnum.INPUT_REQUIRED
+        assert "conversation_history" in result
+        assert len(result["conversation_history"]["Chat Agent"]) == 1
+        assert (
+            result["conversation_history"]["Chat Agent"][0].content
+            == "Custom prompt response"
+        )
