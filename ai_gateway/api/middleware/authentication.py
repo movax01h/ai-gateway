@@ -26,6 +26,7 @@ from starlette_context import context as starlette_context
 from ai_gateway.api.auth_utils import StarletteUser
 from ai_gateway.api.middleware.base import _PathResolver
 from ai_gateway.api.timing import timing
+from ai_gateway.auth.glgo import cloud_connector_token_context_var
 
 log = logging.getLogger("codesuggestions")
 
@@ -109,6 +110,11 @@ class MiddlewareAuthentication(Middleware):
             # external`cloud_connector_auth` call and appeases type checker.
             assert auth_header
             _, _, cloud_connector_token = auth_header.partition(" ")
+
+            # Set cloud connector token context var so that we don't have to propagate it everywhere nor rely
+            # on StarletteUser and instead can make use of vanilla CloudConnectorUser
+            cloud_connector_token_context_var.set(cloud_connector_token)
+
             return AuthCredentials(cloud_connector_user.claims.scopes), StarletteUser(
                 cloud_connector_user,
                 cloud_connector_token,

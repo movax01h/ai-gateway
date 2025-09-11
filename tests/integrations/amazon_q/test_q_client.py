@@ -7,7 +7,7 @@ from fastapi import HTTPException
 from pydantic import BaseModel
 
 from ai_gateway.api.auth_utils import StarletteUser
-from ai_gateway.auth.glgo import GlgoAuthority
+from ai_gateway.auth.glgo import GlgoAuthority, cloud_connector_token_context_var
 from ai_gateway.integrations.amazon_q.client import AmazonQClient, AmazonQClientFactory
 from ai_gateway.integrations.amazon_q.errors import AWSException
 
@@ -58,6 +58,8 @@ class TestAmazonQClientFactory:
     def test_get_glgo_token(
         self, amazon_q_client_factory, mock_user, mock_glgo_authority
     ):
+
+        cloud_connector_token_context_var.set(mock_user.cloud_connector_token)
         mock_glgo_authority.token.return_value = "mock-token"
         token = amazon_q_client_factory._get_glgo_token(mock_user)
 
@@ -145,6 +147,7 @@ class TestAmazonQClientFactory:
     def test_get_client(
         self, amazon_q_client_factory, mock_user, mock_glgo_authority, mock_sts_client
     ):
+        cloud_connector_token_context_var.set(mock_user.cloud_connector_token)
         with patch(
             "ai_gateway.integrations.amazon_q.client.AmazonQClient"
         ) as mock_q_client_class:
