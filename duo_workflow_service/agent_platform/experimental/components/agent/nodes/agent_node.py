@@ -86,6 +86,7 @@ class AgentNode:
         variables = get_vars_from_state(self._inputs, state)
         model_name = getattr(self._prompt.model, "model_name", "unknown")
         request_type = f"{self._component_name}_completion"
+        model_provider = self._prompt.model_provider
 
         while True:
             try:
@@ -103,8 +104,12 @@ class AgentNode:
                 self._track_tokens_data(completion, history)
                 duo_workflow_metrics.count_llm_response(
                     model=model_name,
+                    provider=model_provider,
                     request_type=request_type,
                     stop_reason=stop_reason,
+                    # Hardcoded 200 status since model_completion only returns status codes for failures
+                    status_code="200",
+                    error_type="none",
                 )
 
                 if len(updates := self._final_answer_validate(completion)) > 0:
@@ -119,6 +124,14 @@ class AgentNode:
             except APIStatusError as e:
                 error_message = str(e)
                 status_code = e.response.status_code
+                duo_workflow_metrics.count_llm_response(
+                    model=model_name,
+                    provider=model_provider,
+                    request_type=request_type,
+                    stop_reason="error",
+                    status_code=e.response.status_code,
+                    error_type=self._error_handler.get_error_type(status_code),
+                )
                 model_error = ModelError(
                     error_type=self._error_handler.get_error_type(status_code),
                     status_code=status_code,

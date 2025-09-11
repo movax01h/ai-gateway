@@ -19,6 +19,7 @@ from duo_workflow_service.entities.state import (
     UiChatLog,
     WorkflowStatusEnum,
 )
+from duo_workflow_service.errors.error_handler import ERROR_TYPES, ModelErrorType
 from duo_workflow_service.gitlab.events import get_event
 from duo_workflow_service.gitlab.http_client import GitlabHttpClient
 from duo_workflow_service.llm_factory import AnthropicStopReason
@@ -86,6 +87,18 @@ class Agent(Prompt):
                 "handover": [],
             }
 
+            model_name_attrs = {
+                "ChatAnthropicVertex": "model_name",
+                "ChatAnthropic": "model",
+            }
+            model_name = getattr(
+                self.model,
+                model_name_attrs.get(self.model.get_name()) or "missing_attr",
+                "unknown",
+            )
+
+            request_type = f"{self.name}_completion"
+
             if self.check_events:
                 event: WorkflowEvent | None = await get_event(
                     self.http_client, self.workflow_id, False
@@ -96,10 +109,25 @@ class Agent(Prompt):
 
             try:
                 input = self._prepare_input(state)
-                model_completion = await super().ainvoke(input)
+
+                with duo_workflow_metrics.time_llm_request(
+                    model=model_name, request_type=request_type
+                ):
+                    model_completion = await super().ainvoke(input)
+
                 stop_reason = model_completion.response_metadata.get("stop_reason")
                 if stop_reason in AnthropicStopReason.abnormal_values():
                     log.warning(f"LLM stopped abnormally with reason: {stop_reason}")
+
+                duo_workflow_metrics.count_llm_response(
+                    model=model_name,
+                    provider=self.model_provider,
+                    request_type=request_type,
+                    stop_reason=stop_reason,
+                    # Hardcoded 200 status since model_completion only returns status codes for failures
+                    status_code="200",
+                    error_type="none",
+                )
 
                 if self.name in state["conversation_history"]:
                     updates["conversation_history"] = {self.name: [model_completion]}
@@ -118,6 +146,17 @@ class Agent(Prompt):
 
                 error_message = HumanMessage(
                     content=f"There was an error processing your request: {error}"
+                )
+
+                status_code = error.response.status_code
+
+                duo_workflow_metrics.count_llm_response(
+                    model=model_name,
+                    provider=self.model_provider,
+                    request_type=request_type,
+                    status_code=status_code,
+                    stop_reason="error",
+                    error_type=ERROR_TYPES.get(status_code, ModelErrorType.UNKNOWN),
                 )
 
                 return {
