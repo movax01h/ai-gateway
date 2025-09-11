@@ -262,7 +262,19 @@ class DuoWorkflowService(contract_pb2_grpc.DuoWorkflowServicer):
             while not workflow.is_done:
                 streaming_action = workflow.get_from_streaming_outbox()
                 if isinstance(streaming_action, contract_pb2.Action):
+                    log.info(
+                        "Sending an outgoing streaming action",
+                        requestID=streaming_action.requestID,
+                        action_class=streaming_action.WhichOneof("action"),
+                    )
+
                     yield streaming_action
+
+                    log.info(
+                        "Sent an outgoing streaming action",
+                        requestID=streaming_action.requestID,
+                        action_class=streaming_action.WhichOneof("action"),
+                    )
 
                     if (
                         invocation_metadata.get("x-gitlab-unidirectional-streaming", "")
@@ -278,14 +290,19 @@ class DuoWorkflowService(contract_pb2_grpc.DuoWorkflowServicer):
                 if action is None:
                     continue
 
-                if isinstance(action, contract_pb2.Action):
-                    log.info(
-                        "Read action from the egress queue",
-                        requestID=action.requestID,
-                        action_class=action.WhichOneof("action"),
-                    )
+                log.info(
+                    "Sending an outgoing action",
+                    requestID=action.requestID,
+                    action_class=action.WhichOneof("action"),
+                )
 
                 yield action
+
+                log.info(
+                    "Sent an outgoing action",
+                    requestID=action.requestID,
+                    action_class=action.WhichOneof("action"),
+                )
 
                 event: contract_pb2.ClientEvent | None = await next_non_heartbeat_event(
                     request_iterator
