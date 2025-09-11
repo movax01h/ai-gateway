@@ -14,7 +14,6 @@ from duo_workflow_service.tools.duo_base_tool import DuoBaseTool
 from duo_workflow_service.tools.vulnerabilities.get_vulnerability_details import (
     GetVulnerabilityDetails,
 )
-from lib.feature_flags import FeatureFlag, is_feature_enabled
 
 
 class ToolMetadata(TypedDict):
@@ -208,13 +207,6 @@ class ToolsRegistry:
 
         for privilege in enabled_tools:
             for tool_cls in tools_for_agent_privileges.get(privilege, []):
-                if tool_cls in [
-                    tools.GetWorkItem,
-                    tools.ListWorkItems,
-                    tools.GetWorkItemNotes,
-                ] and not is_feature_enabled(FeatureFlag.DUO_WORKFLOW_WORK_ITEM_TOOLS):
-                    continue
-
                 tool = tool_cls(metadata=tool_metadata)
 
                 # If user is passed, we check user permission to access this tool

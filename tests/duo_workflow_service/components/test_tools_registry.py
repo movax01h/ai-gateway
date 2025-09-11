@@ -125,6 +125,9 @@ _outbox = MagicMock(spec=asyncio.Queue)
                 "list_project_audit_events",
                 "get_current_user",
                 "get_vulnerability_details",
+                "get_work_item",
+                "list_work_items",
+                "get_work_item_notes",
             },
         ),
         (
@@ -193,6 +196,9 @@ _outbox = MagicMock(spec=asyncio.Queue)
                 "update_work_item",
                 "revert_to_detected_vulnerability",
                 "create_vulnerability_issue",
+                "get_work_item",
+                "list_work_items",
+                "get_work_item_notes",
             },
         ),
         (
@@ -360,6 +366,9 @@ def test_registry_initialization_initialises_tools_with_correct_attributes(
         "create_vulnerability_issue": tools.CreateVulnerabilityIssue(
             metadata=tool_metadata
         ),
+        "get_work_item": tools.GetWorkItem(metadata=tool_metadata),
+        "list_work_items": tools.ListWorkItems(metadata=tool_metadata),
+        "get_work_item_notes": tools.GetWorkItemNotes(metadata=tool_metadata),
     }
 
     assert registry._enabled_tools == expected_tools
@@ -703,133 +712,3 @@ def test_toolset_method(
             pre_approved=expected_preapproved, all_tools=expected_all_tools
         )
         assert toolset == mock_toolset
-
-
-@pytest.mark.parametrize(
-    "feature_flag_value, should_include_work_item_tools",
-    [
-        ("duo_workflow_work_item_tools", True),
-        ("", False),
-    ],
-)
-def test_work_item_tools_feature_flag(
-    feature_flag_value,
-    should_include_work_item_tools,
-    tool_metadata,
-):
-    current_feature_flag_context.set({feature_flag_value})
-
-    registry = ToolsRegistry(
-        enabled_tools=["read_only_gitlab"],
-        preapproved_tools=[],
-        tool_metadata=tool_metadata,
-    )
-
-    assert (
-        "get_work_item" in registry._enabled_tools
-    ) == should_include_work_item_tools
-    assert (
-        "list_work_items" in registry._enabled_tools
-    ) == should_include_work_item_tools
-    assert (
-        "get_work_item_notes" in registry._enabled_tools
-    ) == should_include_work_item_tools
-
-
-@pytest.mark.asyncio
-@pytest.mark.parametrize(
-    "lsp_version,feature_flags,ff_disabled_tools",
-    [
-        ("0.0.1", "", {}),
-        (
-            "0.0.1",
-            "duo_workflow_work_item_tools",
-            {GetWorkItem, ListWorkItems, GetWorkItemNotes},
-        ),
-        ("7.42.999", "", {}),
-        (
-            "7.42.999",
-            "duo_workflow_work_item_tools",
-            {GetWorkItem, ListWorkItems, GetWorkItemNotes},
-        ),
-    ],
-)
-async def test_registry_configuration_with_restricted_language_server_client(
-    gl_http_client, lsp_version, feature_flags, ff_disabled_tools, project_mock
-):
-    current_feature_flag_context.set(feature_flags)
-    workflow_config = {
-        "id": "test_workflow",
-        "agent_privileges_names": list(_AGENT_PRIVILEGES.keys()),
-        "pre_approved_agent_privileges_names": list(_AGENT_PRIVILEGES.keys()),
-        "gitlab_host": "gitlab.example.com",
-    }
-    registry = await ToolsRegistry.configure(
-        workflow_config=workflow_config,
-        gl_http_client=gl_http_client,
-        outbox=_outbox,
-        inbox=_inbox,
-        project=project_mock,
-        language_server_version=LanguageServerVersion.from_string(lsp_version),
-    )
-
-    expected_tools = [
-        *[tool_cls().name for tool_cls in _DEFAULT_TOOLS],
-        *[tool_cls.tool_title for tool_cls in NO_OP_TOOLS],
-        *[
-            tool_cls().name
-            for tool_cls in _AGENT_PRIVILEGES["read_only_gitlab"]
-            if tool_cls not in ff_disabled_tools
-        ],
-    ]
-    assert set(registry._enabled_tools.keys()).issubset(expected_tools)
-
-    ignored_tools = [
-        tool_cls().name
-        for privilege in _AGENT_PRIVILEGES.keys()
-        for tool_cls in _AGENT_PRIVILEGES[privilege]
-        if privilege != "read_only_gitlab"
-    ]
-    assert set(registry._enabled_tools.keys()).intersection(ignored_tools) == set()
-
-
-@pytest.mark.asyncio
-@pytest.mark.parametrize(
-    "lsp_version,feature_flags,ff_disabled_tools",
-    [
-        (None, "duo_workflow_work_item_tools", {}),
-        (None, "", {GetWorkItem, ListWorkItems, GetWorkItemNotes}),
-        ("7.43.0", "duo_workflow_work_item_tools", {}),
-        ("7.43.0", "", {GetWorkItem, ListWorkItems, GetWorkItemNotes}),
-        ("7.43.1", "duo_workflow_work_item_tools", {}),
-        ("7.43.1", "", {GetWorkItem, ListWorkItems, GetWorkItemNotes}),
-        ("8.0.0", "duo_workflow_work_item_tools", {}),
-        ("8.0.0", "", {GetWorkItem, ListWorkItems, GetWorkItemNotes}),
-    ],
-)
-async def test_registry_configuration_with_unrestricted_language_server_client(
-    gl_http_client, lsp_version, feature_flags, ff_disabled_tools, project_mock
-):
-    current_feature_flag_context.set(feature_flags)
-    workflow_config = {
-        "id": "test_workflow",
-        "agent_privileges_names": list(_AGENT_PRIVILEGES.keys()),
-        "pre_approved_agent_privileges_names": list(_AGENT_PRIVILEGES.keys()),
-        "gitlab_host": "gitlab.example.com",
-    }
-    registry = await ToolsRegistry.configure(
-        workflow_config=workflow_config,
-        gl_http_client=gl_http_client,
-        outbox=_outbox,
-        inbox=_inbox,
-        project=project_mock,
-        language_server_version=(
-            LanguageServerVersion.from_string(lsp_version) if lsp_version else None
-        ),
-    )
-
-    enabled_tools = set(registry._enabled_tools.keys())
-    for privilege in _AGENT_PRIVILEGES.keys():
-        for tool_cls in _AGENT_PRIVILEGES[privilege]:
-            if tool_cls not in ff_disabled_tools:
-                assert tool_cls().name in enabled_tools
