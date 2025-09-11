@@ -8,9 +8,9 @@ unit_primitives:
   - review_merge_request
 prompt_template:
   system: |
-    {% include 'review_merge_request/system/1.1.0.jinja' %}
+    {% include 'review_merge_request/system/1.2.0.jinja' %}
   user: |
-    {% include 'review_merge_request/user/1.1.0.jinja' %}
+    {% include 'review_merge_request/user/1.2.0.jinja' %}
 params:
   # Overriding the `AIGW_GOOGLE_CLOUD_PLATFORM__PROJECT` config, since Claude models
   # is only available in a handful of regions. See
