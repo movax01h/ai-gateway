@@ -167,6 +167,39 @@ class ChatAgent(Prompt[ChatWorkflowState, BaseMessage]):
 
         return approval_required, approval_messages
 
+    def _handle_wrong_messages_order_for_tool_execution(self, input: ChatWorkflowState):
+        # A special fix for the following use case:
+        #
+        # - A user is asked to approve/deny a tool execution
+        # - The user stops the chat instead and specifies a follow up message
+        #
+        # LLM returns an error because a tool call execution was followed by a human message instead of a tool result
+        #
+        # Expected to be refactored in:
+        # - https://gitlab.com/gitlab-org/modelops/applied-ml/code-suggestions/ai-assist/-/issues/1461
+        if len(input["conversation_history"][self.name]) > 1:
+            tool_call_message = input["conversation_history"][self.name][-2]
+            user_message = input["conversation_history"][self.name][-1]
+
+            if (
+                isinstance(tool_call_message, AIMessage)
+                and len(tool_call_message.tool_calls) > 0
+                and isinstance(user_message, HumanMessage)
+            ):
+                messages: list[BaseMessage] = [
+                    ToolMessage(
+                        content="Tool is cancelled and a user will provide a follow up message.",
+                        tool_call_id=tool_call.get("id"),
+                    )
+                    for tool_call in getattr(tool_call_message, "tool_calls", [])
+                ]
+
+                input["conversation_history"][self.name][-2:] = [
+                    tool_call_message,
+                    *messages,
+                    user_message,
+                ]
+
     def _handle_approval_rejection(
         self, input: ChatWorkflowState, approval_state: ApprovalStateRejection
     ) -> list[BaseMessage]:
@@ -293,6 +326,8 @@ class ChatAgent(Prompt[ChatWorkflowState, BaseMessage]):
 
     async def run(self, input: ChatWorkflowState) -> Dict[str, Any]:
         approval_state = input.get("approval", None)
+
+        self._handle_wrong_messages_order_for_tool_execution(input)
 
         # Handle approval rejection
         if isinstance(approval_state, ApprovalStateRejection):
