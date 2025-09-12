@@ -677,6 +677,32 @@ class TestChatAgentToolCallMessageOrdering:
                 or not original_history[1].tool_calls
             )
 
+    @pytest.mark.asyncio
+    async def test_handle_wrong_messages_order_missing_conversation_history_key(
+        self, chat_agent
+    ):
+        input_missing_agent_key = {
+            "conversation_history": {},  # Empty - no "Chat Agent" key
+            "plan": {"steps": []},
+            "status": WorkflowStatusEnum.EXECUTION,
+            "ui_chat_log": [],
+            "last_human_input": None,
+            "project": None,
+            "namespace": None,
+            "approval": None,
+        }
+
+        with patch.object(
+            chat_agent.__class__.__bases__[0], "ainvoke", new_callable=AsyncMock
+        ) as mock_ainvoke:
+            mock_ainvoke.return_value = AIMessage(content="Hello there!")
+
+            # This should not raise a KeyError
+            result = await chat_agent.run(input_missing_agent_key)
+
+            assert result["status"] == WorkflowStatusEnum.INPUT_REQUIRED
+            mock_ainvoke.assert_called_once()
+
 
 @pytest.mark.asyncio
 async def test_chat_agent_api_error_handling(chat_agent, input):
