@@ -6,7 +6,7 @@ import pytest
 from anthropic import APIStatusError
 from dependency_injector.wiring import Provide, inject
 from gitlab_cloud_connector import CloudConnectorUser
-from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
+from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
 from langchain_core.messages.ai import UsageMetadata
 from langchain_core.prompt_values import ChatPromptValue
 
@@ -547,6 +547,135 @@ Here is the project information for the current GitLab project the USER is worki
         # Verify it's the dynamic content by checking for date
         expected_date = mock_datetime.now().strftime("%Y-%m-%d")
         assert expected_date in dynamic_system_message.content
+
+
+class TestChatAgentToolCallMessageOrdering:
+    """Test the tool call message ordering fix."""
+
+    @pytest.mark.asyncio
+    async def test_tool_call_followed_by_human_message_inserts_tool_results(
+        self, chat_agent
+    ):
+        """Test that tool calls followed by human messages get tool results inserted."""
+        ai_message_with_tool_call = AIMessage(
+            content="I'll help you with that.",
+            tool_calls=[
+                {
+                    "name": "test_tool",
+                    "args": {"param": "value"},
+                    "id": "call_123",
+                    "type": "tool_call",
+                },
+                {
+                    "name": "another_tool",
+                    "args": {"param2": "value2"},
+                    "id": "call_456",
+                    "type": "tool_call",
+                },
+            ],
+        )
+
+        human_followup = HumanMessage(content="Actually, let me clarify something.")
+
+        input_with_tool_call_issue = {
+            "conversation_history": {
+                "Chat Agent": [
+                    HumanMessage(content="Can you help me?"),
+                    ai_message_with_tool_call,
+                    human_followup,
+                ]
+            },
+            "plan": {"steps": []},
+            "status": WorkflowStatusEnum.EXECUTION,
+            "ui_chat_log": [],
+            "last_human_input": None,
+            "project": None,
+            "namespace": None,
+            "approval": None,
+        }
+
+        with patch.object(
+            chat_agent.__class__.__bases__[0], "ainvoke", new_callable=AsyncMock
+        ) as mock_ainvoke:
+            mock_ainvoke.return_value = AIMessage(
+                content="I understand your clarification."
+            )
+
+            result = await chat_agent.run(input_with_tool_call_issue)
+
+            conversation_history = result["conversation_history"]["Chat Agent"]
+
+            assert len(conversation_history) == 1
+
+            mock_ainvoke.assert_called_once()
+            called_input = mock_ainvoke.call_args[1]["input"]
+
+            modified_history = called_input["conversation_history"]["Chat Agent"]
+
+            assert len(modified_history) == 5
+
+            assert isinstance(modified_history[0], HumanMessage)
+            assert modified_history[0].content == "Can you help me?"
+
+            assert isinstance(modified_history[1], AIMessage)
+            assert len(modified_history[1].tool_calls) == 2
+
+            assert isinstance(modified_history[2], ToolMessage)
+            assert (
+                modified_history[2].content
+                == "Tool is cancelled and a user will provide a follow up message."
+            )
+            assert modified_history[2].tool_call_id == "call_123"
+
+            assert isinstance(modified_history[3], ToolMessage)
+            assert (
+                modified_history[3].content
+                == "Tool is cancelled and a user will provide a follow up message."
+            )
+            assert modified_history[3].tool_call_id == "call_456"
+
+            assert isinstance(modified_history[4], HumanMessage)
+            assert modified_history[4].content == "Actually, let me clarify something."
+
+    @pytest.mark.asyncio
+    async def test_normal_conversation_flow_unchanged(self, chat_agent):
+        """Test that normal conversation flows are not affected by the fix."""
+        input_normal_flow = {
+            "conversation_history": {
+                "Chat Agent": [
+                    HumanMessage(content="Hello"),
+                    AIMessage(content="Hi there!"),
+                    HumanMessage(content="How are you?"),
+                ]
+            },
+            "plan": {"steps": []},
+            "status": WorkflowStatusEnum.EXECUTION,
+            "ui_chat_log": [],
+            "last_human_input": None,
+            "project": None,
+            "namespace": None,
+            "approval": None,
+        }
+
+        with patch.object(
+            chat_agent.__class__.__bases__[0], "ainvoke", new_callable=AsyncMock
+        ) as mock_ainvoke:
+            mock_ainvoke.return_value = AIMessage(content="I'm doing well!")
+
+            await chat_agent.run(input_normal_flow)
+
+            called_input = mock_ainvoke.call_args[1]["input"]
+            original_history = called_input["conversation_history"]["Chat Agent"]
+
+            assert len(original_history) == 3
+            assert isinstance(original_history[0], HumanMessage)
+            assert isinstance(original_history[1], AIMessage)
+            assert isinstance(original_history[2], HumanMessage)
+
+            assert (
+                not hasattr(original_history[1], "tool_calls")
+                or not original_history[1].tool_calls
+            )
 
 
 @pytest.mark.asyncio
