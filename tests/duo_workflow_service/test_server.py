@@ -179,17 +179,14 @@ async def test_list_tools(
     expected_sorted = sorted(
         [
             {
-                "eval_prompts": None,
                 "type": "function",
                 "function": {"description": "tool1 description", "name": "tool1"},
             },
             {
-                "eval_prompts": ["prompt2"],
                 "type": "function",
                 "function": {"description": "tool2 description", "name": "tool2"},
             },
             {
-                "eval_prompts": None,
                 "type": "function",
                 "function": {"description": "tool3 description", "name": "tool3"},
             },
