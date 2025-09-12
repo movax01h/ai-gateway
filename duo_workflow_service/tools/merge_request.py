@@ -616,3 +616,57 @@ For example:
         if args.url:
             return f"Update merge request {args.url}"
         return f"Update merge request !{args.merge_request_iid} in project {args.project_id}"
+
+
+class PostDuoCodeReviewInput(BaseModel):
+    """Input schema for posting Duo Code Review."""
+
+    project_id: str = Field(description="The project ID")
+    merge_request_iid: int = Field(description="The merge request IID")
+    review_output: str = Field(
+        description="The complete review output containing review comments in XML format"
+    )
+
+
+class PostDuoCodeReview(DuoBaseTool):
+    """Tool for posting Duo Code Review to a merge request."""
+
+    name: str = "post_duo_code_review"
+    description: str = """Post a Duo Code Review to a merge request.
+
+Example usage:
+post_duo_code_review(project_id="123", merge_request_iid=45, review_output="<review>...</review>")
+"""
+    args_schema: Type[BaseModel] = PostDuoCodeReviewInput
+    unit_primitive: GitLabUnitPrimitive = GitLabUnitPrimitive.ASK_MERGE_REQUEST
+
+    async def _arun(
+        self, project_id: str, merge_request_iid: int, review_output: str, **kwargs: Any
+    ) -> str:
+        """Execute the tool to post the code review."""
+        try:
+            request_body = {"review_output": review_output}
+
+            response = await self.gitlab_client.apost(
+                path=f"/api/v4/projects/{project_id}/merge_requests/{merge_request_iid}/duo_code_review/post_review",
+                body=json.dumps(request_body),
+            )
+
+            if isinstance(response, dict) and response.get("status") == "success":
+                return json.dumps(
+                    {
+                        "status": "success",
+                        "message": f"Review posted to MR !{merge_request_iid}",
+                    }
+                )
+
+            return json.dumps({"error": f"Failed to post review: {response}"})
+
+        except Exception as e:
+            return json.dumps({"error": str(e)})
+
+    def format_display_message(
+        self, args: PostDuoCodeReviewInput, _tool_response: Any = None
+    ) -> str:
+        """Format a user-friendly display message."""
+        return f"Post Duo Code Review to merge request !{args.merge_request_iid} in project {args.project_id}"
