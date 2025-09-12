@@ -309,6 +309,7 @@ class DuoWorkflowService(contract_pb2_grpc.DuoWorkflowServicer):
                 )
 
                 if event is None:
+                    log.info("Skipping ClientEvent None")
                     break
 
                 workflow.add_to_inbox(event)
@@ -447,12 +448,18 @@ async def next_non_heartbeat_event(
     """Consumes the request iterator until a non-heartbeat event is found."""
     while True:
         try:
+            log.info("Waiting for next ClientEvent")
             event = await anext(aiter(request_iterator))
+            log.info("Received next ClientEvent")
         except StopAsyncIteration:
             log.info("Client-side streaming has been closed.")
             return None
 
-        if not event.HasField("heartbeat"):
+        if event.HasField("heartbeat"):
+            log.info(
+                "Skipping heartbeat event", event_type=event.WhichOneof("response")
+            )
+        else:
             return event
 
 
