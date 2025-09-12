@@ -672,15 +672,10 @@ prompt_template:
             with patch.object(
                 registry,
                 "_get_prompt_config",
-                return_value=(
-                    "1.0.0",
-                    Mock(
-                        model=Mock(
-                            params=Mock(
-                                model_class_provider=ModelClassProvider.LITE_LLM
-                            )
-                        )
-                    ),
+                return_value=Mock(
+                    model=Mock(
+                        params=Mock(model_class_provider=ModelClassProvider.LITE_LLM)
+                    )
                 ),
             ):
                 _ = registry.get(
@@ -778,7 +773,7 @@ prompt_template:
             ),
             (
                 "test",
-                "=0.0.1",
+                "0.0.1",
                 None,
                 True,
                 "Test prompt 0.0.1",
