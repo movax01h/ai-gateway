@@ -133,6 +133,7 @@ message ListToolsRequest {
 
 message ListToolsResponse {
   repeated google.protobuf.Struct tools = 1;
+  repeated google.protobuf.Struct eval_dataset = 2;
 }
 
 

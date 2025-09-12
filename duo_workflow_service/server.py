@@ -360,12 +360,16 @@ class DuoWorkflowService(contract_pb2_grpc.DuoWorkflowServicer):
         )
         response = contract_pb2.ListToolsResponse()
         for tool_cls in tool_classes:
-            struct = Struct()
+            spec_struct = Struct()
             tool: DuoBaseTool = tool_cls()  # type: ignore[assignment]
-            tool_spec = convert_to_openai_tool(tool)
-            tool_spec["eval_prompts"] = tool.eval_prompts
-            struct.update(tool_spec)
-            response.tools.append(struct)
+            spec_struct.update(convert_to_openai_tool(tool))
+            response.tools.append(spec_struct)
+
+            for prompt in tool.eval_prompts or []:
+                struct = Struct()
+                struct.update({"prompt": prompt})
+                response.eval_dataset.append(struct)
+
         return response
 
     async def GenerateToken(
