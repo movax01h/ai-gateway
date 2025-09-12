@@ -349,7 +349,10 @@ async def test_workflow_context_manager_startup_error(
 
         if call_count == 1:
             # First call (START status) returns 400
-            return GitLabHttpResponse(status_code=400, body={})
+            return GitLabHttpResponse(
+                status_code=400,
+                body={"message": "Can not start workflow that has status failed"},
+            )
         else:
             # Second call (DROP status) succeeds
             return GitLabHttpResponse(status_code=200, body={})
@@ -362,7 +365,7 @@ async def test_workflow_context_manager_startup_error(
 
     assert (
         str(exc_info.value)
-        == "Session status cannot be updated due to bad status event: start"
+        == "Session status cannot be updated due to bad status event: start, error: {'message': 'Can not start workflow that has status failed'}"
     )
 
     # Verify that apatch was called once - with START (which failed)
@@ -380,7 +383,7 @@ async def test_workflow_context_manager_startup_error(
         event_name=EventEnum.WORKFLOW_REJECT.value,
         additional_properties=InternalEventAdditionalProperties(
             label=EventLabelEnum.WORKFLOW_REJECT_LABEL.value,
-            property="UnsupportedStatusEvent('Session status cannot be updated due to bad status event: start')",
+            property="UnsupportedStatusEvent(\"Session status cannot be updated due to bad status event: start, error: {'message': 'Can not start workflow that has status failed'}\")",
             value=workflow_id,
         ),
         category=workflow_type,
