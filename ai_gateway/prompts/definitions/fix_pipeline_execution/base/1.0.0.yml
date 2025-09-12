@@ -3,6 +3,7 @@ model:
   params:
     model_class_provider: anthropic
     max_tokens: 8_192
+    max_retries: 3
 prompt_template:
   system: |
     You are an experienced programmer tasked with fixing a failing GitLab CI/CD pipeline. A

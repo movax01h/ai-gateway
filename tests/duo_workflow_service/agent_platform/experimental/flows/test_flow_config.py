@@ -1,3 +1,4 @@
+import json
 from pathlib import Path
 from typing import Annotated
 from unittest.mock import patch
@@ -166,6 +167,220 @@ class TestFlowConfig:
             assert config.flow["entry_point"] == "test_agent"
 
 
+class TestValidateAdditionalContextSchema:
+    """Test validate_additional_context_schema field validator."""
+
+    def test_validate_additional_context_schema_none_input(self):
+        """Test that None input returns None."""
+        result = FlowConfig.validate_additional_context_schema(None)
+        assert result is None
+
+    @pytest.mark.parametrize(
+        "valid_schema_str",
+        [
+            # Basic valid schema with properties
+            '{"properties": {"name": {"type": "string"}}}',
+            # Schema with multiple properties
+            '{"properties": {"name": {"type": "string"}, "age": {"type": "integer"}}}',
+            # Schema with nested properties
+            '{"properties": {"user": {"type": "object", "properties": {"name": {"type": "string"}}}}}',
+            # Schema with additional fields beyond properties
+            '{"type": "object", "properties": {"name": {"type": "string"}}, "required": ["name"]}',
+            # Schema with empty properties
+            '{"properties": {}}',
+            # Complex schema with various types
+            '{"properties": {"items": {"type": "array", "items": {"type": "string"}}, "config": {"type": "object"}}}',
+        ],
+    )
+    def test_validate_additional_context_schema_valid_cases(self, valid_schema_str):
+        """Test validation passes for valid JSON schemas with properties field."""
+        result = FlowConfig.validate_additional_context_schema(valid_schema_str)
+        assert result == valid_schema_str
+
+    @pytest.mark.parametrize(
+        "invalid_json_str,expected_error_pattern",
+        [
+            # Malformed JSON - missing closing brace
+            (
+                '{"properties": {"name": {"type": "string"}',
+                "Invalid JSON in additional_context_schema",
+            ),
+            # Malformed JSON - invalid syntax
+            (
+                '{"properties": {"name": {"type": "string"}}',
+                "Invalid JSON in additional_context_schema",
+            ),
+            # Malformed JSON - trailing comma
+            (
+                '{"properties": {"name": {"type": "string"},}}',
+                "Invalid JSON in additional_context_schema",
+            ),
+            # Malformed JSON - unquoted keys
+            (
+                '{properties: {"name": {"type": "string"}}}',
+                "Invalid JSON in additional_context_schema",
+            ),
+            # Completely invalid JSON
+            ("not json at all", "Invalid JSON in additional_context_schema"),
+            # Empty string
+            ("", "Invalid JSON in additional_context_schema"),
+        ],
+    )
+    def test_validate_additional_context_schema_invalid_json(
+        self, invalid_json_str, expected_error_pattern
+    ):
+        """Test validation fails for malformed JSON strings."""
+        with pytest.raises(ValueError, match=expected_error_pattern):
+            FlowConfig.validate_additional_context_schema(invalid_json_str)
+
+    @pytest.mark.parametrize(
+        "non_dict_json_str,expected_type_name",
+        [
+            # Array instead of dict
+            ('["properties"]', "list"),
+            # String instead of dict
+            ('"properties"', "str"),
+            # Number instead of dict
+            ("42", "int"),
+            # Boolean instead of dict
+            ("true", "bool"),
+            # Null instead of dict
+            ("null", "NoneType"),
+        ],
+    )
+    def test_validate_additional_context_schema_non_dict_json(
+        self, non_dict_json_str, expected_type_name
+    ):
+        """Test validation fails when JSON is not a dictionary."""
+        with pytest.raises(
+            ValueError,
+            match=f"additional_context_schema must be a dict, found {expected_type_name}",
+        ):
+            FlowConfig.validate_additional_context_schema(non_dict_json_str)
+
+    @pytest.mark.parametrize(
+        "missing_properties_schema_str",
+        [
+            # Empty dict
+            "{}",
+            # Dict with other fields but no properties
+            '{"type": "object", "required": ["name"]}',
+            # Dict with similar field name but not properties
+            '{"property": {"name": {"type": "string"}}}',
+            # Dict with nested structure but no top-level properties
+            '{"schema": {"properties": {"name": {"type": "string"}}}}',
+        ],
+    )
+    def test_validate_additional_context_schema_missing_properties_field(
+        self, missing_properties_schema_str
+    ):
+        """Test validation fails when schema doesn't have a 'properties' field."""
+        with pytest.raises(
+            ValueError, match="additional_context_schema must have a 'properties' field"
+        ):
+            FlowConfig.validate_additional_context_schema(missing_properties_schema_str)
+
+    def test_validate_additional_context_schema_integration_with_flowconfig(self):
+        """Test that the validator works correctly when creating FlowConfig instances."""
+        # Test with valid additional_context_schema
+        config_data = {
+            "flow": {"entry_point": "agent"},
+            "components": [
+                {"name": "agent", "type": "AgentComponent", "inputs": ["context:goal"]}
+            ],
+            "routers": [{"from": "agent", "to": "end"}],
+            "environment": "remote",
+            "version": "experimental",
+            "additional_context_schema": '{"properties": {"user_input": {"type": "string"}}}',
+        }
+
+        config = FlowConfig(**config_data)
+        assert (
+            config.additional_context_schema
+            == '{"properties": {"user_input": {"type": "string"}}}'
+        )
+
+    def test_validate_additional_context_schema_integration_invalid_schema(self):
+        """Test that FlowConfig creation fails with invalid additional_context_schema."""
+        config_data = {
+            "flow": {"entry_point": "agent"},
+            "components": [
+                {"name": "agent", "type": "AgentComponent", "inputs": ["context:goal"]}
+            ],
+            "routers": [{"from": "agent", "to": "end"}],
+            "environment": "remote",
+            "version": "experimental",
+            "additional_context_schema": '{"no_properties_field": true}',
+        }
+
+        with pytest.raises(ValidationError) as exc_info:
+            FlowConfig(**config_data)
+
+        assert "additional_context_schema must have a 'properties' field" in str(
+            exc_info.value
+        )
+
+    def test_validate_additional_context_schema_integration_none_value(self):
+        """Test that FlowConfig works correctly with None additional_context_schema."""
+        config_data = {
+            "flow": {"entry_point": "agent"},
+            "components": [
+                {"name": "agent", "type": "AgentComponent", "inputs": ["context:goal"]}
+            ],
+            "routers": [{"from": "agent", "to": "end"}],
+            "environment": "remote",
+            "version": "experimental",
+            "additional_context_schema": None,
+        }
+
+        config = FlowConfig(**config_data)
+        assert config.additional_context_schema is None
+
+    def test_validate_additional_context_schema_edge_case_large_schema(self):
+        """Test validation with a large, complex schema."""
+        large_schema = {
+            "properties": {
+                f"field_{i}": {
+                    "type": "object",
+                    "properties": {
+                        "nested_field": {"type": "string"},
+                        "nested_array": {"type": "array", "items": {"type": "integer"}},
+                    },
+                }
+                for i in range(10)
+            }
+        }
+        large_schema_str = json.dumps(large_schema)
+
+        result = FlowConfig.validate_additional_context_schema(large_schema_str)
+        assert result == large_schema_str
+
+    def test_validate_additional_context_schema_edge_case_deeply_nested(self):
+        """Test validation with deeply nested schema structure."""
+        nested_schema = {
+            "properties": {
+                "level1": {
+                    "type": "object",
+                    "properties": {
+                        "level2": {
+                            "type": "object",
+                            "properties": {
+                                "level3": {
+                                    "type": "object",
+                                    "properties": {"deep_field": {"type": "string"}},
+                                }
+                            },
+                        }
+                    },
+                }
+            }
+        }
+        nested_schema_str = json.dumps(nested_schema)
+
+        result = FlowConfig.validate_additional_context_schema(nested_schema_str)
+        assert result == nested_schema_str
+
+
 class TestLoadComponentClass:
     """Test load_component_class function with ComponentRegistry."""
 
@@ -174,6 +389,7 @@ class TestLoadComponentClass:
 
         class TestComponent(BaseComponent):
             def attach(self, graph: StateGraph, router: RouterProtocol) -> None: ...
+
             def __entry_hook__(self) -> Annotated[str, "Components entry node name"]:
                 return "mock"
 
