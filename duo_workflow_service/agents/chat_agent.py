@@ -177,7 +177,10 @@ class ChatAgent(Prompt[ChatWorkflowState, BaseMessage]):
         #
         # Expected to be refactored in:
         # - https://gitlab.com/gitlab-org/modelops/applied-ml/code-suggestions/ai-assist/-/issues/1461
-        if len(input["conversation_history"][self.name]) > 1:
+        if (
+            self.name in input["conversation_history"]
+            and len(input["conversation_history"][self.name]) > 1
+        ):
             tool_call_message = input["conversation_history"][self.name][-2]
             user_message = input["conversation_history"][self.name][-1]
 
