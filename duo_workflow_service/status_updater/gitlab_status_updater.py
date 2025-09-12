@@ -44,7 +44,7 @@ class GitLabStatusUpdater:
 
         if result.status_code == 400:
             raise UnsupportedStatusEvent(
-                f"Session status cannot be updated due to bad status event: {status_event}"
+                f"Session status cannot be updated due to bad status event: {status_event}, error: {result.body}"
             )
 
         if result.status_code != 200:
