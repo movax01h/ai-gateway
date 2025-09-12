@@ -293,11 +293,12 @@ needed to complete its task.
 
 - **name**: Unique identifier for this component instance. Must not contain `:` or `.` characters.
 - **type**: Must be `"AgentComponent"`
-- **prompt_id**: ID of the prompt template from the prompt registry
-- **prompt_version**: Semantic version constraint (e.g., `"^1.0.0"`)
+- **prompt_id**: ID of the prompt template from either the prompt registry or locally defined prompts
 
 ### Optional Parameters
 
+- **prompt_version**: Semantic version constraint (e.g., `"^1.0.0"`). If omitted or `null`, uses locally defined prompt
+  from flow YAML.
 - **inputs**: List of input data sources (default: `["context:goal"]`)
 - **toolset**: List of tools available to the agent
 - **ui_log_events**: UI logging configuration
@@ -325,7 +326,80 @@ Every AgentComponent requires a prompt that serves as the "instructions" for the
 capabilities, and response patterns.
 Prompts include placeholders that get replaced with actual data from the flow state.
 
-**Important for Multi-turn Conversations:** If your AgentComponent needs access to conversation history (for context in multi-turn interactions), include `placeholder: history` in your prompt template. This automatically provides the component's conversation history to the AI model.
+**Important for Multi-turn Conversations:** If your AgentComponent needs access to conversation history (for context in
+multi-turn interactions), include `placeholder: history` in your prompt template. This automatically provides the
+component's conversation history to the AI model.
+
+#### Prompt Sources
+
+Flows can use prompts from two sources:
+
+1. **File-based Prompts**: Traditional prompts stored in the AI Gateway prompt registry at
+   `ai_gateway/prompts/definitions/`. Reference these using both `prompt_id` and `prompt_version` (e.g.,
+   `prompt_version: "^1.0.0"`).
+
+1. **Locally Defined Prompts**: Prompts defined directly within the flow YAML configuration. Reference these by setting
+   `prompt_version: null` or omitting the `prompt_version` field entirely.
+
+#### Locally Defined Prompts
+
+Flows can define prompts locally within their YAML configuration, eliminating the need for separate prompt definition
+files. This approach is particularly useful for flow-specific prompts or rapid prototyping.
+
+To define prompts locally, add a `prompts` section to your flow YAML:
+
+```yaml
+version: "experimental"
+environment: remote
+
+components:
+    - name: "code_analyzer"
+      type: AgentComponent
+      prompt_id: "my_local_prompt"
+      # prompt_version omitted - uses local prompt
+      ui_log_events: [ "on_agent_final_answer" ]
+      inputs: ["context:goal"]
+      toolset: ["read_file", "list_dir"]
+
+prompts:
+    - prompt_id: "my_local_prompt"
+      model:
+        params:
+            model_class_provider: anthropic
+            model: claude-sonnet-4-20250514
+            max_tokens: 8192
+      prompt_template:
+          system: "You are a helpful assistant specialized in code analysis"
+          user: "Task: {{goal}}"
+          placeholder: history  # Optional: include conversation history
+      params:
+          timeout: 30
+
+routers:
+    - from: "code_analyzer"
+      to: "end"
+
+flow:
+    entry_point: "code_analyzer"
+
+```
+
+**Routing Logic**: The system automatically routes between local and file-based prompts:
+
+- `prompt_version: null` or omitted → Use local prompt from flow YAML
+- `prompt_version: "^1.0.0"` → Use file-based prompt from prompt registry
+
+**Local Prompt Structure**:
+
+Mirrors the prompt structure of prompts taken from the prompt registry. More information about the structure can be
+found [here](../aigw_prompt_registry.md#ai-gateway-prompt-configuration-reference).
+
+**Benefits of Local Prompts**:
+
+- **Rapid Development**: No need to create separate prompt files
+- **Flow Coupling**: Prompts stay co-located with their usage
+- **Simplified Testing**: Easy to iterate on prompts during development
+- **Self-Contained**: Flows become more portable and self-documented
 
 For detailed information about prompt templates and placeholder configuration, see
 the [AI Gateway Prompt Registry Documentation](../aigw_prompt_registry.md#message-placeholders).
@@ -536,7 +610,8 @@ Unlike the `AgentComponent` which can engage in multi-turn conversations and gen
 results,
 `OneOffComponent` is constrained to a single round of tool generation and execution.
 
-**Note:** If your OneOffComponent prompt needs access to conversation history from previous interactions, include `placeholder: history` in your prompt template.
+**Note:** If your OneOffComponent prompt needs access to conversation history from previous interactions, include
+`placeholder: history` in your prompt template.
 
 #### Key Features
 
@@ -552,12 +627,13 @@ results,
 
 - **name**: Unique identifier for this component instance
 - **type**: Must be `"OneOffComponent"`
-- **prompt_id**: ID of the prompt template from the prompt registry
-- **prompt_version**: Semantic version constraint (e.g., `"^1.0.0"`)
+- **prompt_id**: ID of the prompt template from either the prompt registry or locally defined prompts
 - **toolset**: List of tools available to the component
 
 #### Optional Parameters
 
+- **prompt_version**: Semantic version constraint (e.g., `"^1.0.0"`). If omitted or `null`, uses locally defined prompt
+  from flow YAML.
 - **inputs**: List of input data sources (default: `["context:goal"]`)
 - **max_correction_attempts**: Maximum number of retry attempts for failed tool executions (default: 3)
 - **ui_log_events**: UI logging configuration for displaying tool execution progress
