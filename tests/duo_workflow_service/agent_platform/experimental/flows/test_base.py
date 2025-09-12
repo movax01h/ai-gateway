@@ -1,3 +1,4 @@
+import json
 from contextlib import contextmanager
 from unittest.mock import AsyncMock, MagicMock, Mock, patch
 
@@ -26,7 +27,7 @@ from lib.internal_events.event_enum import CategoryEnum
 
 
 @pytest.mark.usefixtures("mock_duo_workflow_service_container")
-class TestFlow:
+class TestFlow:  # pylint: disable=too-many-public-methods
     """Test Flow class functionality."""
 
     def mock_component(self, name: str):
@@ -331,7 +332,7 @@ class TestFlow:
             assert "inputs" in input["context"]
             assert (
                 input["context"]["inputs"][additional_context.category]
-                == additional_context.model_dump()
+                == additional_context.content
             )
 
     @pytest.mark.asyncio
@@ -687,3 +688,255 @@ class TestFlow:
             else:
                 # When neither toolset nor tool_name is specified, toolset shouldn't be called
                 mock_tools_registry.toolset.assert_not_called()
+
+    def test_process_additional_context_empty_list(self, flow_instance):
+        """Test _process_additional_context with empty list."""
+        result = flow_instance._process_additional_context([])
+        assert result == {}
+
+    def test_process_additional_context_non_agent_user_environment(self, flow_instance):
+        """Test _process_additional_context with non-agent_user_environment categories."""
+        additional_context = [
+            AdditionalContext(category="file", content="file content"),
+            AdditionalContext(category="snippet", content="code snippet"),
+            AdditionalContext(category="merge_request", content="MR data"),
+        ]
+
+        result = flow_instance._process_additional_context(additional_context)
+
+        expected = {
+            "file": "file content",
+            "snippet": "code snippet",
+            "merge_request": "MR data",
+        }
+        assert result == expected
+
+    def test_process_additional_context_agent_user_environment_valid_json(self):
+        """Test _process_additional_context with valid agent_user_environment JSON."""
+        # Create a flow with additional_context_schema
+        schema = {
+            "properties": {"os": {"type": "string"}, "shell": {"type": "string"}},
+            "required": ["os"],
+        }
+
+        config = FlowConfig(
+            flow={"entry_point": "agent"},
+            components=[{"name": "agent", "type": "AgentComponent"}],
+            routers=[{"from": "agent", "to": "end"}],
+            environment="local",
+            version="experimental",
+            additional_context_schema=json.dumps(schema),
+        )
+
+        with (
+            patch("duo_workflow_service.workflows.abstract_workflow.get_http_client"),
+            patch(
+                "duo_workflow_service.workflows.abstract_workflow.empty_workflow_config"
+            ),
+            patch(
+                "duo_workflow_service.workflows.abstract_workflow.fetch_workflow_and_container_data"
+            ) as mock_fetch,
+            patch("duo_workflow_service.workflows.abstract_workflow.UserInterface"),
+            patch(
+                "duo_workflow_service.gitlab.gitlab_api.GitLabUrlParser"
+            ) as mock_parser,
+        ):
+            mock_fetch.return_value = ({"id": 123}, None, {"config": "test"})
+            mock_parser.extract_host_from_url.return_value = "gitlab.com"
+
+            flow = Flow(
+                workflow_id="test-workflow-123",
+                workflow_metadata={"git_url": "https://gitlab.com/test/project"},
+                workflow_type=CategoryEnum.WORKFLOW_CHAT,
+                config=config,
+                invocation_metadata={"base_url": "", "gitlab_token": ""},
+            )
+
+        additional_context = [
+            AdditionalContext(
+                category="agent_user_environment",
+                content='{"os": "linux", "shell": "bash"}',
+            ),
+            AdditionalContext(category="file", content="file content"),
+        ]
+
+        result = flow._process_additional_context(additional_context)
+
+        expected = {
+            "agent_user_environment": {"os": "linux", "shell": "bash"},
+            "file": "file content",
+        }
+        assert result == expected
+
+    def test_process_additional_context_agent_user_environment_no_schema(
+        self, flow_instance
+    ):
+        """Test _process_additional_context raises error when agent_user_environment provided without schema."""
+        additional_context = [
+            AdditionalContext(
+                category="agent_user_environment", content='{"os": "linux"}'
+            )
+        ]
+
+        with pytest.raises(
+            ValueError,
+            match="agent_user_environment was provided, but no additional_context_schema specified",
+        ):
+            flow_instance._process_additional_context(additional_context)
+
+    def test_process_additional_context_agent_user_environment_invalid_json(self):
+        """Test _process_additional_context raises error for invalid JSON in agent_user_environment."""
+        schema = {"properties": {"os": {"type": "string"}}}
+
+        config = FlowConfig(
+            flow={"entry_point": "agent"},
+            components=[{"name": "agent", "type": "AgentComponent"}],
+            routers=[{"from": "agent", "to": "end"}],
+            environment="local",
+            version="experimental",
+            additional_context_schema=json.dumps(schema),
+        )
+
+        with (
+            patch("duo_workflow_service.workflows.abstract_workflow.get_http_client"),
+            patch(
+                "duo_workflow_service.workflows.abstract_workflow.empty_workflow_config"
+            ),
+            patch(
+                "duo_workflow_service.workflows.abstract_workflow.fetch_workflow_and_container_data"
+            ) as mock_fetch,
+            patch("duo_workflow_service.workflows.abstract_workflow.UserInterface"),
+            patch(
+                "duo_workflow_service.gitlab.gitlab_api.GitLabUrlParser"
+            ) as mock_parser,
+        ):
+            mock_fetch.return_value = ({"id": 123}, None, {"config": "test"})
+            mock_parser.extract_host_from_url.return_value = "gitlab.com"
+
+            flow = Flow(
+                workflow_id="test-workflow-123",
+                workflow_metadata={"git_url": "https://gitlab.com/test/project"},
+                workflow_type=CategoryEnum.WORKFLOW_CHAT,
+                config=config,
+                invocation_metadata={"base_url": "", "gitlab_token": ""},
+            )
+
+        additional_context = [
+            AdditionalContext(
+                category="agent_user_environment",
+                content='{"invalid": json}',  # Invalid JSON
+            )
+        ]
+
+        with pytest.raises(ValueError, match="Invalid JSON in Additional Context item"):
+            flow._process_additional_context(additional_context)
+
+    def test_process_additional_context_agent_user_environment_schema_validation_error(
+        self,
+    ):
+        """Test _process_additional_context raises error when JSON doesn't match schema."""
+        schema = {"properties": {"os": {"type": "string"}}, "required": ["os"]}
+
+        config = FlowConfig(
+            flow={"entry_point": "agent"},
+            components=[{"name": "agent", "type": "AgentComponent"}],
+            routers=[{"from": "agent", "to": "end"}],
+            environment="local",
+            version="experimental",
+            additional_context_schema=json.dumps(schema),
+        )
+
+        with (
+            patch("duo_workflow_service.workflows.abstract_workflow.get_http_client"),
+            patch(
+                "duo_workflow_service.workflows.abstract_workflow.empty_workflow_config"
+            ),
+            patch(
+                "duo_workflow_service.workflows.abstract_workflow.fetch_workflow_and_container_data"
+            ) as mock_fetch,
+            patch("duo_workflow_service.workflows.abstract_workflow.UserInterface"),
+            patch(
+                "duo_workflow_service.gitlab.gitlab_api.GitLabUrlParser"
+            ) as mock_parser,
+        ):
+            mock_fetch.return_value = ({"id": 123}, None, {"config": "test"})
+            mock_parser.extract_host_from_url.return_value = "gitlab.com"
+
+            flow = Flow(
+                workflow_id="test-workflow-123",
+                workflow_metadata={"git_url": "https://gitlab.com/test/project"},
+                workflow_type=CategoryEnum.WORKFLOW_CHAT,
+                config=config,
+                invocation_metadata={"base_url": "", "gitlab_token": ""},
+            )
+
+        additional_context = [
+            AdditionalContext(
+                category="agent_user_environment",
+                content='{"shell": "bash"}',  # Missing required "os" field
+            )
+        ]
+
+        with pytest.raises(
+            ValueError,
+            match="Additional Context item .* does not match specified schema",
+        ):
+            flow._process_additional_context(additional_context)
+
+    def test_process_additional_context_mixed_categories(self):
+        """Test _process_additional_context with mixed categories including agent_user_environment."""
+        schema = {
+            "properties": {"os": {"type": "string"}, "shell": {"type": "string"}},
+            "required": ["os"],
+        }
+
+        config = FlowConfig(
+            flow={"entry_point": "agent"},
+            components=[{"name": "agent", "type": "AgentComponent"}],
+            routers=[{"from": "agent", "to": "end"}],
+            environment="local",
+            version="experimental",
+            additional_context_schema=json.dumps(schema),
+        )
+
+        with (
+            patch("duo_workflow_service.workflows.abstract_workflow.get_http_client"),
+            patch(
+                "duo_workflow_service.workflows.abstract_workflow.empty_workflow_config"
+            ),
+            patch(
+                "duo_workflow_service.workflows.abstract_workflow.fetch_workflow_and_container_data"
+            ) as mock_fetch,
+            patch("duo_workflow_service.workflows.abstract_workflow.UserInterface"),
+            patch(
+                "duo_workflow_service.gitlab.gitlab_api.GitLabUrlParser"
+            ) as mock_parser,
+        ):
+            mock_fetch.return_value = ({"id": 123}, None, {"config": "test"})
+            mock_parser.extract_host_from_url.return_value = "gitlab.com"
+
+            flow = Flow(
+                workflow_id="test-workflow-123",
+                workflow_metadata={"git_url": "https://gitlab.com/test/project"},
+                workflow_type=CategoryEnum.WORKFLOW_CHAT,
+                config=config,
+                invocation_metadata={"base_url": "", "gitlab_token": ""},
+            )
+
+        additional_context = [
+            AdditionalContext(category="file", content="file content"),
+            AdditionalContext(
+                category="agent_user_environment",
+                content='{"os": "linux", "shell": "bash"}',
+            ),
+            AdditionalContext(category="snippet", content="code snippet"),
+        ]
+
+        result = flow._process_additional_context(additional_context)
+
+        expected = {
+            "file": "file content",
+            "agent_user_environment": {"os": "linux", "shell": "bash"},
+            "snippet": "code snippet",
+        }
+        assert result == expected

@@ -1,8 +1,9 @@
+import json
 from pathlib import Path
 from typing import Callable, ClassVar, Optional, Self
 
 import yaml
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
 
 from duo_workflow_service.agent_platform.experimental.components import (
     BaseComponent,
@@ -33,6 +34,35 @@ class FlowConfig(BaseModel):
     environment: str
     version: str
     prompts: Optional[list[dict]] = None
+    additional_context_schema: Optional[str] = None
+
+    @field_validator("additional_context_schema")
+    @classmethod
+    def validate_additional_context_schema(
+        cls, schema_str: Optional[str]
+    ) -> Optional[str]:
+        """Validate and parse the additional_context_schema JSON string."""
+        if schema_str is None:
+            return None
+
+        try:
+            schema = json.loads(schema_str)
+
+            if not isinstance(schema, dict):
+                raise ValueError(
+                    f"additional_context_schema must be a dict, found {type(schema).__name__}"
+                )
+
+            if "properties" not in schema:
+                raise ValueError(
+                    "additional_context_schema must have a 'properties' field"
+                )
+
+            return schema_str
+        except json.JSONDecodeError as e:
+            raise ValueError(f"Invalid JSON in additional_context_schema: {e}")
+        except Exception as e:
+            raise ValueError(f"Invalid schema format: {e}")
 
     @classmethod
     def from_yaml_config(cls, path: str) -> Self:
