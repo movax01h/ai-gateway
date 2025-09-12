@@ -754,7 +754,10 @@ async def test_next_non_heartbeat_event():
             actionResponse=contract_pb2.ActionResponse(response="the response")
         )
 
-    result = await next_non_heartbeat_event(mock_request_iterator())
+    with patch("duo_workflow_service.server.log") as mock_log:
+        result = await next_non_heartbeat_event(mock_request_iterator())
+        mock_log.info.assert_called()
+
     assert result.actionResponse.response == "the response"
     assert not result.HasField("heartbeat")
 
