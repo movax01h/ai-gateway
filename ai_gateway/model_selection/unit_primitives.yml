@@ -105,7 +105,7 @@ configurable_unit_primitives:
   - feature_setting: "resolve_vulnerability"
     unit_primitives:
       - "resolve_vulnerability"
-    default_model: "claude_sonnet_4_20250514"
+    default_model: "claude_sonnet_3_7_20250219"
     selectable_models:
       - "claude_sonnet_4_20250514"
       - "claude_sonnet_4_20250514_vertex"
