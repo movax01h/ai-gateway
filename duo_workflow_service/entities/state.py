@@ -83,6 +83,7 @@ class SlashCommandStatus(StrEnum):
 class ToolInfo(TypedDict):
     name: str
     args: dict[str, Any]
+    tool_response: NotRequired[Any]
 
 
 class UiChatLog(TypedDict):

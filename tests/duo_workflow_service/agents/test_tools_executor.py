@@ -1080,7 +1080,13 @@ async def test_multiple_tool_calls(workflow_state, graph):
             "content": "Using a: a1=1",
             "timestamp": "2025-01-01T12:00:00+00:00",
             "status": ToolStatus.SUCCESS,
-            "tool_info": {"name": "a", "args": {"a1": 1}},
+            "tool_info": {
+                "name": "a",
+                "args": {"a1": 1},
+                "tool_response": ToolMessage(
+                    content="tool a", name="a", tool_call_id="fake-call-1"
+                ),
+            },
             "correlation_id": None,
             "additional_context": None,
         },
@@ -1090,7 +1096,13 @@ async def test_multiple_tool_calls(workflow_state, graph):
             "content": "Using b: b1=1",
             "timestamp": "2025-01-01T12:00:00+00:00",
             "status": ToolStatus.SUCCESS,
-            "tool_info": {"name": "b", "args": {"b1": 1}},
+            "tool_info": {
+                "name": "b",
+                "args": {"b1": 1},
+                "tool_response": ToolMessage(
+                    content="tool b", name="b", tool_call_id="fake-call-1"
+                ),
+            },
             "correlation_id": None,
             "additional_context": None,
         },
