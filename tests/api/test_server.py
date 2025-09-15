@@ -162,6 +162,7 @@ def test_setup_router():
 
     assert any(route.path == "/v1/chat/{chat_invokable}" for route in app.routes)
     assert any(route.path == "/v2/code/completions" for route in app.routes)
+    assert any(route.path == "/v1/models/definitions" for route in app.routes)
     assert any(route.path == "/v3/code/completions" for route in app.routes)
     assert any(route.path == "/v4/code/suggestions" for route in app.routes)
     assert any(route.path == "/monitoring/healthz" for route in app.routes)
@@ -228,6 +229,9 @@ def test_middleware_authentication(fastapi_server_app: FastAPI, auth_enabled: bo
         assert response.status_code == 422
 
     response = client.get("/monitoring/healthz")
+    assert response.status_code == 200
+
+    response = client.get("/v1/models/definitions")
     assert response.status_code == 200
 
 
