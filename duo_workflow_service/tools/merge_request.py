@@ -645,10 +645,14 @@ post_duo_code_review(project_id="123", merge_request_iid=45, review_output="<rev
     ) -> str:
         """Execute the tool to post the code review."""
         try:
-            request_body = {"review_output": review_output}
+            request_body = {
+                "project_id": project_id,
+                "merge_request_iid": merge_request_iid,
+                "review_output": review_output,
+            }
 
             response = await self.gitlab_client.apost(
-                path=f"/api/v4/projects/{project_id}/merge_requests/{merge_request_iid}/duo_code_review/post_review",
+                path="/api/v4/ai/duo_workflows/code_review/add_comments",
                 body=json.dumps(request_body),
             )
 
