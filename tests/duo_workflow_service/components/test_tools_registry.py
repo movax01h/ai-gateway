@@ -300,9 +300,7 @@ def test_registry_initialization_initialises_tools_with_correct_attributes(
             metadata=tool_metadata
         ),
         "update_merge_request": tools.UpdateMergeRequest(metadata=tool_metadata),
-        "get_pipeline_errors": tools.GetPipelineErrorsForMergeRequest(
-            metadata=tool_metadata
-        ),
+        "get_pipeline_errors": tools.GetPipelineErrors(metadata=tool_metadata),
         "get_project": tools.GetProject(metadata=tool_metadata),
         "gitlab_group_project_search": tools.GroupProjectSearch(metadata=tool_metadata),
         "gitlab_issue_search": tools.IssueSearch(metadata=tool_metadata),

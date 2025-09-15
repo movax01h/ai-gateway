@@ -636,6 +636,79 @@ class TestGitLabUrlParser:
             GitLabUrlParser.parse_job_url(url, gitlab_host)
 
     @pytest.mark.parametrize(
+        "url, gitlab_host, expected_project_path, expected_pipeline_id",
+        [
+            # Test standard pipeline URL
+            (
+                "https://gitlab.com/namespace/project/-/pipelines/123",
+                "gitlab.com",
+                quote("namespace/project", safe=""),
+                123,
+            ),
+            # Test pipeline URL with custom GitLab instance
+            (
+                "https://gitlab.example.com/namespace/project/-/pipelines/123",
+                "gitlab.example.com",
+                quote("namespace/project", safe=""),
+                123,
+            ),
+            # Test pipeline URL with encoded characters in path
+            (
+                "https://gitlab.com/namespace/project-with-dashes/-/pipelines/123",
+                "gitlab.com",
+                quote("namespace/project-with-dashes", safe=""),
+                123,
+            ),
+            # Test pipeline URL with subgroups
+            (
+                "https://gitlab.com/group/subgroup/project/-/pipelines/123",
+                "gitlab.com",
+                quote("group/subgroup/project", safe=""),
+                123,
+            ),
+        ],
+    )
+    def test_parse_pipeline_url(
+        self, url, gitlab_host, expected_project_path, expected_pipeline_id
+    ):
+        project_path, pipeline_id = GitLabUrlParser.parse_pipeline_url(url, gitlab_host)
+        assert project_path == expected_project_path
+        assert pipeline_id == expected_pipeline_id
+
+    @pytest.mark.parametrize(
+        "url, gitlab_host, error_message",
+        [
+            # Test invalid URL (no pipeline ID)
+            (
+                "https://gitlab.com/namespace/project/-/pipelines",
+                "gitlab.com",
+                "Could not parse pipeline URL",
+            ),
+            # Test invalid URL (pipeline ID not a number)
+            (
+                "https://gitlab.com/namespace/project/-/pipelines/abc",
+                "gitlab.com",
+                "Could not parse pipeline URL",
+            ),
+            # Test invalid URL (not a pipeline URL)
+            (
+                "https://gitlab.com/namespace/project",
+                "gitlab.com",
+                "Could not parse pipeline URL",
+            ),
+            # Test URL with non-matching netloc
+            (
+                "https://gitlab.example.com/namespace/project/-/pipelines/123",
+                "gitlab.com",
+                "URL netloc 'gitlab.example.com' does not match gitlab_host 'gitlab.com'",
+            ),
+        ],
+    )
+    def test_parse_pipeline_url_error(self, url, gitlab_host, error_message):
+        with pytest.raises(GitLabUrlParseError, match=error_message):
+            GitLabUrlParser.parse_pipeline_url(url, gitlab_host)
+
+    @pytest.mark.parametrize(
         "url, gitlab_host, expected_project_path, expected_ref, expected_file_path",
         [
             (

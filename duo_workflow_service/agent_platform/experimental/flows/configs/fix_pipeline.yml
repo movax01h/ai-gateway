@@ -7,6 +7,8 @@ components:
     prompt_version: "^1.0.0"
     inputs:
       - from: "context:goal"
+        as: "pipeline_url"
+      - from: "context:inputs.agent_user_environment.merge_request_url"
         as: "merge_request_url"
     toolset: ["get_pipeline_errors", "list_merge_request_diffs", "read_file", "find_files", "list_dir"]
   - name: "fix_pipeline_create_plan"
@@ -55,17 +57,20 @@ components:
         literal: true
     tool_name: "run_git_command"
   - name: "fix_pipeline_git_push"
-    type: DeterministicStepComponent
+    type: OneOffComponent
+    prompt_id: "git_push_prompt"
+    max_correction_attempts: 3
     inputs:
+      - from: "context:goal"
+        as: "pipeline_url"
       - from: "context:project_http_url_to_repo"
         as: "repository_url"
-      - from: "push"
-        as: "command"
-        literal: true
-      - from: "-o merge_request.create -o merge_request.title='Draft: fix failing pipeline'"
-        as: "args"
-        literal: true
-    tool_name: "run_git_command"
+      - from: "context:inputs.agent_user_environment.merge_request_url"
+        as: "merge_request_url"
+      - from: "context:inputs.agent_user_environment.source_branch"
+        as: "source_branch"
+    toolset:
+      - "run_git_command"
 routers:
   - from: "fix_pipeline_context"
     to: "fix_pipeline_create_plan"
@@ -93,3 +98,24 @@ additional_context_schema: |
   }
 flow:
   entry_point: "fix_pipeline_context"
+prompts:
+  - prompt_id: "git_push_prompt"
+    model:
+      params:
+        model_class_provider: anthropic
+        model: claude-sonnet-4-20250514
+        max_tokens: 8192
+    prompt_template:
+      system: |
+        You are an assistant that runs a single git command, exactly according to specifications. Do not run additional
+        commands beyond those assigned to you by the user.
+      user: |
+        Use the `run_git_command` tool to run this git command specified in the git_command XML tags:
+        <git_command>
+          git push -o merge_request.create
+            -o merge_request.title='Draft: fix failing pipeline'
+            -o merge_request.target='{{source_branch}}'
+            -o merge_request.description='Fixes failing pipeline {{pipeline_url}} on {{merge_request_url}}'
+        </git_command>
+    params:
+      timeout: 30

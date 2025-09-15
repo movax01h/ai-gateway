@@ -2,34 +2,19 @@
 
 ## What It Does
 
-This flow takes a URL for Merge Request that has a failing GitLab CI/CD pipeline as input and automatically resolves it by creating code changes and submitting a merge request.
+This flow takes a URL for GitLab CI/CD pipeline that has failing jobs as input and automatically attempts to resolve it by creating code changes and submitting a merge request.
 
 ## When to Use
 
-Use this Flow when your Merge Request has a failing pipeline that needs to be fixed.
+Use this Flow when you have a failing pipeline that needs to be fixed.
 
 ## How to Use
 
-> **Note:** This flow is currently in early development, and can only be triggered from an API call. It is run in remote execution, and it pushes the code and creates a merge request automatically.
+note: This workflow is intended for remote execution as it pushes the code and creates a merge request automatically.
 
-1. Navigate to a merge request with a failing pipeline, and note the merge request URL, the branch for the MR, and the project ID
-1. Execute the following `curl` command in your terminal:
-
-   ```shell
-      curl --location "http://gdk.test:3000/api/v4/ai/duo_workflows/workflows" \
-          --header 'Content-Type: application/json' \
-          --header "Authorization: Bearer $GDK_API_TOKEN" \
-          --data '{
-              "goal": "FAILING_JOB_URL",
-              "project_id": "PROJECT_ID",
-              "workflow_definition": "fix_pipeline/experimental",
-              "agent_privileges": [1,2,3,5],
-              "pre_approved_agent_privileges": [1,2,3,5],
-              "start_workflow": true,
-              "source_branch": "MERGE_REQUEST_BRANCH"
-          }'
-   ```
-
+1. Navigate to a merge request with a failing pipeline.
+1. Click on the Pipelines tab of the Merge Request.
+1. Beside the failing pipeline you should see a Button for "Fix pipeline with Duo". Click that Button.
 1. Go to `Build > Pipelines` from the side menu bar. Checkout the most recent pipeline with a `workload` job for execution
    logs.
 1. Once the pipeline has successfully executed, go to Merge Requests from the side menu bar. You should see a draft merge
