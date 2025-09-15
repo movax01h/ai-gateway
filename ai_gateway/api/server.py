@@ -51,7 +51,12 @@ __all__ = [
     "create_fast_api_server",
 ]
 
-_SKIP_ENDPOINTS = ["/monitoring/healthz", "/monitoring/ready", "/metrics"]
+_SKIP_ENDPOINTS = [
+    "/monitoring/healthz",
+    "/monitoring/ready",
+    "/metrics",
+    "/v1/models/definitions",
+]
 CONTAINER_APPLICATION_MODULES = [
     "ai_gateway.api.v1.x_ray.libraries",
     "ai_gateway.api.v1.chat.agent",
