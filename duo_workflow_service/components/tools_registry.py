@@ -54,7 +54,7 @@ _READ_ONLY_GITLAB_TOOLS: list[Type[BaseTool]] = [
     tools.ListMergeRequest,
     tools.ListMergeRequestDiffs,
     tools.ListAllMergeRequestNotes,
-    tools.GetPipelineErrorsForMergeRequest,
+    tools.GetPipelineErrors,
     tools.GetProject,
     tools.DocumentationSearch,
     tools.GroupProjectSearch,

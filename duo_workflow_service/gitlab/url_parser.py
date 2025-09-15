@@ -8,6 +8,7 @@ GROUP_URL_REGEX = r"^(?:groups/)?(.+?)(?:/-/.*)?$"
 EPIC_URL_REGEX = r"^(?:groups/)?(.+?)/-/epics/(\d+)"
 MR_URL_REGEX = r"^(.+?)/-/merge_requests/(\d+)"
 JOB_URL_REGEX = r"^(.+?)/-/jobs/(\d+)"
+PIPELINE_URL_REGEX = r"^(.+?)/-/pipelines/(\d+)"
 REPOSITORY_FILE_URL_REGEX = r"^(.+?)/-/blob/([^/]+)/(.+)$"
 COMMIT_URL_REGEX = r"^(.+?)/-/commit/([a-fA-F0-9]{5,40})"
 WORK_ITEM_URL_REGEX = r"^(?:groups/)?(?P<full_path>.+)/-/work_items/(?P<iid>\d+)$"
@@ -293,6 +294,35 @@ class GitLabUrlParser:
         job_id = int(components[1])
 
         return encoded_path, job_id
+
+    @staticmethod
+    def parse_pipeline_url(url: str, gitlab_host: str) -> Tuple[str, int]:
+        """Extract project path and pipeline ID from a GitLab pipeline URL.
+
+        Example URL:
+        - https://gitlab.example.com/namespace/project/-/pipelines/42
+
+        Args:
+            url: The GitLab pipeline URL to parse
+            gitlab_host: Optional GitLab host to validate against
+
+        Returns:
+            A tuple containing the URL-encoded project path and the pipeline ID
+
+        Raises:
+            GitLabUrlParseError: If the URL cannot be parsed or if the netloc doesn't match gitlab_host
+        """
+        GitLabUrlParser._validate_url_netloc(url, gitlab_host)
+
+        components = GitLabUrlParser._extract_path_components(
+            url, PIPELINE_URL_REGEX, "Could not parse pipeline URL"
+        )
+
+        # URL-encode the project path for API calls
+        encoded_path = quote(components[0], safe="")
+        pipeline_id = int(components[1])
+
+        return encoded_path, pipeline_id
 
     @staticmethod
     def parse_repository_file_url(url: str, gitlab_host: str) -> Tuple[str, str, str]:

@@ -16,6 +16,12 @@ class ProjectURLValidationResult(NamedTuple):
     errors: List[str]
 
 
+class PipelineValidationResult(NamedTuple):
+    project_id: Optional[str]
+    pipeline_iid: Optional[int]
+    errors: List[str]
+
+
 class MergeRequestValidationResult(NamedTuple):
     project_id: Optional[str]
     merge_request_iid: Optional[int]
@@ -165,6 +171,39 @@ class DuoBaseTool(BaseTool):
             return MergeRequestValidationResult(
                 None if project_id is None else str(project_id),
                 merge_request_iid,
+                errors,
+            )
+
+    def _validate_pipeline_url(
+        self,
+        url: str,
+    ) -> PipelineValidationResult:
+        """Validate pipeline URL and extract project_id and pipeline_iid.
+
+        Args:
+            url: The GitLab URL to parse
+
+        Returns:
+            PipelineValidationResult containing:
+                - The validated project_id (or None if validation failed)
+                - The validated pipeline_iid (or None if validation failed)
+                - A list of error messages (empty if validation succeeded)
+        """
+        errors: List[str] = []
+
+        try:
+            # Parse URL and validate netloc against gitlab_host
+            url_project_id, url_pipeline_iid = GitLabUrlParser.parse_pipeline_url(
+                url, self.gitlab_host
+            )
+
+            # Use the IDs from the URL
+            return PipelineValidationResult(url_project_id, url_pipeline_iid, errors)
+        except GitLabUrlParseError as e:
+            errors.append(f"Failed to parse URL: {str(e)}")
+            return PipelineValidationResult(
+                None,
+                None,
                 errors,
             )
 
