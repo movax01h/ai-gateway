@@ -12,7 +12,8 @@ It takes a GitLab issue URL as input and automatically resolves it by creating c
 
 note: This workflow is intended for remote execution as it pushes the code and creates a merge request automatically.
 
-1. Enable the feature flag `ai_duo_agent_issue_to_mr` for your user.
+1. Verify that all setup [prerequisites](https://docs.gitlab.com/user/duo_agent_platform/flows/issue_to_mr/#prerequisites)
+   have been satisfied.
 1. Open a GitLab issue in your remote project repository.
 1. You should see a button `Generate MR with Duo` below issue description. Click the button, you should see a
    flash message Workflow started successfully.

@@ -1057,3 +1057,16 @@ curl -X POST \
 - Examine Agent Platform logs with `gdk tail duo-workflow-service`
 - Trace your flow's execution
   in [Langsmith](https://docs.gitlab.com/development/ai_features/duo_chat/#use-tracing-with-langsmith)
+- Alternatively, if you are running Duo Workflow Service individually using PyCharm run configuration,
+  you can use [debugging flow execution using AI Agents debugger plugin](#debugging-flow-execution-using-ai-agents-debugger-plugin)
+
+### Debugging flow execution using AI Agents Debugger plugin
+
+- Install [AI Agents Debugger](https://plugins.jetbrains.com/plugin/26921-ai-agents-debugger) plugin in PyCharm.
+- Setup PyCharm run configuration to run Duo Workflow server.
+- Run any flow that invokes Duo Workflow service server.
+- When the request reaches the server, the plugin analyzes the code execution and automatically attaches itself to the
+  LangGraph workflow and provides detailed insights into the LangGraph agent nodes, metadata, inputs, and outputs of
+  each node.
+- You can analyze time spent in each node's execution, system prompts, human input and AI response, tool calls and
+  output within the IDE.
