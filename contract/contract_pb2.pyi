@@ -208,6 +208,16 @@ class ListToolsResponse(_message.Message):
     eval_dataset: _containers.RepeatedCompositeFieldContainer[_struct_pb2.Struct]
     def __init__(self, tools: _Optional[_Iterable[_Union[_struct_pb2.Struct, _Mapping]]] = ..., eval_dataset: _Optional[_Iterable[_Union[_struct_pb2.Struct, _Mapping]]] = ...) -> None: ...
 
+class ListFlowsRequest(_message.Message):
+    __slots__ = ()
+    def __init__(self) -> None: ...
+
+class ListFlowsResponse(_message.Message):
+    __slots__ = ("configs",)
+    CONFIGS_FIELD_NUMBER: _ClassVar[int]
+    configs: _containers.RepeatedCompositeFieldContainer[_struct_pb2.Struct]
+    def __init__(self, configs: _Optional[_Iterable[_Union[_struct_pb2.Struct, _Mapping]]] = ...) -> None: ...
+
 class NewCheckpoint(_message.Message):
     __slots__ = ("status", "checkpoint", "goal", "errors")
     STATUS_FIELD_NUMBER: _ClassVar[int]

@@ -24,6 +24,7 @@ from langchain.globals import set_llm_cache
 from langchain_community.cache import SQLiteCache
 from langchain_core.utils.function_calling import convert_to_openai_tool
 
+import duo_workflow_service.workflows.registry as flow_registry
 from ai_gateway.config import Config
 from ai_gateway.container import ContainerApplication
 from contract import contract_pb2, contract_pb2_grpc
@@ -462,6 +463,20 @@ class DuoWorkflowService(contract_pb2_grpc.DuoWorkflowServicer):
                 struct = Struct()
                 struct.update({"prompt": prompt})
                 response.eval_dataset.append(struct)
+
+        return response
+
+    async def ListFlows(
+        self, request: contract_pb2.ListFlowsRequest, context: grpc.ServicerContext
+    ):
+        log.info("Listing all available flows")
+        response = contract_pb2.ListFlowsResponse()
+
+        configs = flow_registry.list_configs()
+        for config in configs:
+            spec_struct = Struct()
+            spec_struct.update(config)
+            response.configs.append(spec_struct)
 
         return response
 

@@ -10,6 +10,9 @@ from duo_workflow_service.agent_platform import experimental
 from duo_workflow_service.agent_platform.experimental.flows.flow_config import (
     FlowConfig,
 )
+from duo_workflow_service.agent_platform.experimental.flows.flow_config import (
+    list_configs as experimental_list_configs,
+)
 from duo_workflow_service.workflows import (
     chat,
     convert_to_gitlab_ci,
@@ -47,6 +50,10 @@ FlowConfigT = TypeVar("FlowConfigT", bound=FlowConfig)
 
 _FLOW_BY_VERSIONS = {
     "experimental": (experimental.flows.FlowConfig, experimental.flows.Flow),
+}
+
+_FLOW_CONFIGS_BY_VERSION = {
+    "experimental": experimental_list_configs,
 }
 
 
@@ -158,3 +165,11 @@ def resolve_workflow_class(
         return partial(flow_cls, config=config)  # dynamic flow type
     except Exception:
         raise ValueError(f"Unknown Flow: {workflow_definition}")
+
+
+def list_configs():
+    configs = []
+    for config_list in _FLOW_CONFIGS_BY_VERSION.values():
+        configs.extend(config_list())
+
+    return configs

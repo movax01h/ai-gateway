@@ -1,5 +1,6 @@
+import json
 from pathlib import Path
-from typing import Callable, ClassVar, Optional, Self
+from typing import Callable, ClassVar, List, Optional, Self
 
 import yaml
 from pydantic import BaseModel
@@ -9,7 +10,7 @@ from duo_workflow_service.agent_platform.experimental.components import (
     ComponentRegistry,
 )
 
-__all__ = ["FlowConfig", "load_component_class"]
+__all__ = ["FlowConfig", "load_component_class", "list_configs"]
 
 
 _PREFIX_BLOCLIST = (
@@ -23,6 +24,8 @@ _PREFIX_BLOCLIST = (
     "%uff0e%uff0e%u2215",
     "%uff0e%uff0e%u2216",
 )
+
+_DIRECTORY_PATH = Path(__file__).resolve().parent / "configs"
 
 INPUT_JSONSCHEMA_VERSION = "https://json-schema.org/draft/2020-12/schema#"
 
@@ -44,7 +47,7 @@ class FlowConfigMetadata(BaseModel):
 
 
 class FlowConfig(BaseModel):
-    DIRECTORY_PATH: ClassVar[Path] = Path(__file__).resolve().parent / "configs"
+    DIRECTORY_PATH: ClassVar[Path] = _DIRECTORY_PATH
     flow: FlowConfigMetadata
     components: list[dict]
     routers: list[dict]
@@ -145,3 +148,25 @@ def load_component_class(
 
     # pylint: disable-next=unsubscriptable-object
     return registry[cls_name]
+
+
+def list_configs() -> List[dict[str, str]]:
+    configs = []
+    for config_file in _DIRECTORY_PATH.glob("*.yml"):
+        try:
+            config = FlowConfig.from_yaml_config(config_file.stem)
+            with open(config_file, "r", encoding="utf-8") as f:
+                config_data = yaml.safe_load(f)
+            config_json = json.dumps(config_data, indent=2)
+            configs.append(
+                {
+                    "name": config_file.stem,
+                    "version": config.version,
+                    "environment": config.environment,
+                    "config": config_json,
+                }
+            )
+        except (yaml.YAMLError, IOError):
+            continue
+
+    return configs

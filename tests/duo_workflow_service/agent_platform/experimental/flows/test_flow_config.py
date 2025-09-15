@@ -1,3 +1,4 @@
+import json
 from pathlib import Path
 from typing import Annotated
 from unittest.mock import patch
@@ -13,6 +14,7 @@ from duo_workflow_service.agent_platform.experimental.components import (
 )
 from duo_workflow_service.agent_platform.experimental.flows.flow_config import (
     FlowConfig,
+    list_configs,
     load_component_class,
 )
 
@@ -388,3 +390,336 @@ class TestLoadComponentClass:
         """Test loading non-existent component class raises TypeError."""
         with pytest.raises(KeyError):
             load_component_class("NonExistentComponent")
+
+
+class TestListConfigs:
+    """Test list_configs function functionality."""
+
+    @pytest.fixture
+    def sample_config_data(self):
+        """Sample config data for testing."""
+        return {
+            "flow": {"entry_point": "test_agent"},
+            "components": [
+                {
+                    "name": "test_agent",
+                    "type": "AgentComponent",
+                    "inputs": ["context:goal"],
+                }
+            ],
+            "routers": [{"from": "test_agent", "to": "end"}],
+            "environment": "test",
+            "version": "1.0",
+        }
+
+    def test_list_configs_empty_directory(self, tmp_path):
+        """Test list_configs returns empty list when no config files exist."""
+        with (
+            patch(
+                "duo_workflow_service.agent_platform.experimental.flows.flow_config._DIRECTORY_PATH",
+                tmp_path,
+            ),
+            patch.object(FlowConfig, "DIRECTORY_PATH", Path(tmp_path)),
+        ):
+            result = list_configs()
+            assert not result
+
+    def test_list_configs_single_valid_config(self, tmp_path, sample_config_data):
+        """Test list_configs returns single config when one valid file exists."""
+        config_file = tmp_path / "test_config.yml"
+        with open(config_file, "w") as f:
+            yaml.dump(sample_config_data, f)
+
+        with (
+            patch(
+                "duo_workflow_service.agent_platform.experimental.flows.flow_config._DIRECTORY_PATH",
+                tmp_path,
+            ),
+            patch.object(FlowConfig, "DIRECTORY_PATH", Path(tmp_path)),
+        ):
+            result = list_configs()
+
+        assert len(result) == 1
+        assert result[0]["name"] == "test_config"
+        assert result[0]["version"] == "1.0"
+        assert result[0]["environment"] == "test"
+        assert "config" in result[0]
+        config_data = json.loads(result[0]["config"])
+        assert config_data["version"] == "1.0"
+        assert config_data["environment"] == "test"
+
+    @pytest.mark.parametrize(
+        "filename,expected_name",
+        [
+            ("simple.yml", "simple"),
+            ("complex-name.yml", "complex-name"),
+            ("config_123.yml", "config_123"),
+            ("test.config.yml", "test.config"),
+            ("nested_config_file.yml", "nested_config_file"),
+        ],
+    )
+    def test_list_configs_various_filenames(
+        self, tmp_path, sample_config_data, filename, expected_name
+    ):
+        """Test list_configs handles various valid filename patterns."""
+        config_file = tmp_path / filename
+        with open(config_file, "w") as f:
+            yaml.dump(sample_config_data, f)
+
+        with (
+            patch(
+                "duo_workflow_service.agent_platform.experimental.flows.flow_config._DIRECTORY_PATH",
+                tmp_path,
+            ),
+            patch.object(FlowConfig, "DIRECTORY_PATH", Path(tmp_path)),
+        ):
+            result = list_configs()
+
+        assert len(result) == 1
+        assert result[0]["name"] == expected_name
+
+    def test_list_configs_multiple_valid_configs(self, tmp_path):
+        """Test list_configs returns multiple configs when multiple valid files exist."""
+        configs_data = [
+            {
+                "flow": {"entry_point": "agent1"},
+                "components": [{"name": "agent1", "type": "AgentComponent"}],
+                "routers": [{"from": "agent1", "to": "end"}],
+                "environment": "dev",
+                "version": "1.0",
+            },
+            {
+                "flow": {"entry_point": "agent2"},
+                "components": [{"name": "agent2", "type": "AgentComponent"}],
+                "routers": [{"from": "agent2", "to": "end"}],
+                "environment": "prod",
+                "version": "2.0",
+            },
+            {
+                "flow": {"entry_point": "agent3"},
+                "components": [{"name": "agent3", "type": "AgentComponent"}],
+                "routers": [{"from": "agent3", "to": "end"}],
+                "environment": "staging",
+                "version": "1.5",
+            },
+        ]
+
+        for i, config_data in enumerate(configs_data):
+            config_file = tmp_path / f"config_{i}.yml"
+            with open(config_file, "w") as f:
+                yaml.dump(config_data, f)
+
+        with (
+            patch(
+                "duo_workflow_service.agent_platform.experimental.flows.flow_config._DIRECTORY_PATH",
+                tmp_path,
+            ),
+            patch.object(FlowConfig, "DIRECTORY_PATH", Path(tmp_path)),
+        ):
+            result = list_configs()
+
+        assert len(result) == 3
+        names = {config["name"] for config in result}
+        assert names == {"config_0", "config_1", "config_2"}
+
+        versions = {config["version"] for config in result}
+        assert versions == {"1.0", "2.0", "1.5"}
+
+        environments = {config["environment"] for config in result}
+        assert environments == {"dev", "prod", "staging"}
+
+    @pytest.mark.parametrize(
+        "invalid_content",
+        [
+            # Invalid YAML syntax
+            "invalid: yaml: content: [unclosed",
+            # Malformed YAML with unmatched brackets
+            "flow:\n  - entry_point: test\n    missing_bracket: [",
+            # Invalid YAML structure
+            "- invalid\n  - structure\n    - with: mixed types",
+        ],
+    )
+    def test_list_configs_skips_invalid_yaml_files(
+        self, tmp_path, sample_config_data, invalid_content
+    ):
+        """Test list_configs skips files with invalid YAML and continues processing."""
+        # Create one valid config
+        valid_config_file = tmp_path / "valid_config.yml"
+        with open(valid_config_file, "w") as f:
+            yaml.dump(sample_config_data, f)
+
+        # Create one invalid config
+        invalid_config_file = tmp_path / "invalid_config.yml"
+        with open(invalid_config_file, "w") as f:
+            f.write(invalid_content)
+
+        with (
+            patch(
+                "duo_workflow_service.agent_platform.experimental.flows.flow_config._DIRECTORY_PATH",
+                tmp_path,
+            ),
+            patch.object(FlowConfig, "DIRECTORY_PATH", Path(tmp_path)),
+        ):
+            result = list_configs()
+
+        # Should only return the valid config, skipping the invalid one
+        assert len(result) == 1
+        assert result[0]["name"] == "valid_config"
+
+    def test_list_configs_skips_files_with_io_errors(
+        self, tmp_path, sample_config_data
+    ):
+        """Test list_configs skips files that cause IO errors and continues processing."""
+        # Create one valid config
+        valid_config_file = tmp_path / "valid_config.yml"
+        with open(valid_config_file, "w") as f:
+            yaml.dump(sample_config_data, f)
+
+        # Create another valid config
+        another_config_file = tmp_path / "another_config.yml"
+        with open(another_config_file, "w") as f:
+            yaml.dump(sample_config_data, f)
+
+        # Mock IOError for one specific file
+        original_open = open
+
+        def mock_open(file, *args, **kwargs):
+            if str(file).endswith("another_config.yml") and "r" in args:
+                raise IOError("Mocked IO error")
+            return original_open(file, *args, **kwargs)
+
+        with (
+            patch(
+                "duo_workflow_service.agent_platform.experimental.flows.flow_config._DIRECTORY_PATH",
+                tmp_path,
+            ),
+            patch.object(FlowConfig, "DIRECTORY_PATH", Path(tmp_path)),
+        ):
+            with patch("builtins.open", side_effect=mock_open):
+                result = list_configs()
+
+        # Should only return the config that didn't have IO error
+        assert len(result) == 1
+        assert result[0]["name"] == "valid_config"
+
+    def test_list_configs_ignores_non_yml_files(self, tmp_path, sample_config_data):
+        """Test list_configs only processes .yml files, ignoring other file types."""
+        # Create valid YAML config
+        yml_config = tmp_path / "config.yml"
+        with open(yml_config, "w") as f:
+            yaml.dump(sample_config_data, f)
+
+        # Create files with other extensions
+        other_files = [
+            ("config.yaml", yaml.dump(sample_config_data, default_flow_style=False)),
+            ("config.json", json.dumps(sample_config_data)),
+            ("config.txt", "some text content"),
+            ("README.md", "# README"),
+            ("config.py", "config = {}"),
+        ]
+
+        for filename, content in other_files:
+            file_path = tmp_path / filename
+            with open(file_path, "w") as f:
+                f.write(content)
+
+        with (
+            patch(
+                "duo_workflow_service.agent_platform.experimental.flows.flow_config._DIRECTORY_PATH",
+                tmp_path,
+            ),
+            patch.object(FlowConfig, "DIRECTORY_PATH", Path(tmp_path)),
+        ):
+            result = list_configs()
+
+        # Should only return the .yml file
+        assert len(result) == 1
+        assert result[0]["name"] == "config"
+
+    def test_list_configs_json_serialization(self, tmp_path):
+        """Test that list_configs properly serializes complex config structures to JSON."""
+        complex_config = {
+            "flow": {"entry_point": "complex_agent"},
+            "components": [
+                {
+                    "name": "complex_agent",
+                    "type": "AgentComponent",
+                    "inputs": ["context:goal"],
+                    "nested_config": {
+                        "params": {"value": 42, "enabled": True},
+                        "list_param": [1, 2, "string", {"nested": "object"}],
+                    },
+                }
+            ],
+            "routers": [
+                {
+                    "from": "complex_agent",
+                    "to": "end",
+                    "conditions": ["param1", "param2"],
+                }
+            ],
+            "environment": "test",
+            "version": "1.0",
+        }
+
+        config_file = tmp_path / "complex_config.yml"
+        with open(config_file, "w") as f:
+            yaml.dump(complex_config, f)
+
+        with (
+            patch(
+                "duo_workflow_service.agent_platform.experimental.flows.flow_config._DIRECTORY_PATH",
+                tmp_path,
+            ),
+            patch.object(FlowConfig, "DIRECTORY_PATH", Path(tmp_path)),
+        ):
+            result = list_configs()
+
+        assert len(result) == 1
+        config_result = result[0]
+
+        # Verify that the config JSON is valid and contains expected data
+        parsed_config = json.loads(config_result["config"])
+        assert parsed_config["components"][0]["nested_config"]["params"]["value"] == 42
+        assert (
+            parsed_config["components"][0]["nested_config"]["params"]["enabled"] is True
+        )
+        assert parsed_config["components"][0]["nested_config"]["list_param"] == [
+            1,
+            2,
+            "string",
+            {"nested": "object"},
+        ]
+        assert parsed_config["routers"][0]["conditions"] == ["param1", "param2"]
+
+    def test_list_configs_handles_missing_optional_fields(self, tmp_path):
+        """Test list_configs works with configs that have only required fields."""
+        minimal_config = {
+            "flow": {"entry_point": "minimal_agent"},
+            "components": [{"name": "minimal_agent", "type": "AgentComponent"}],
+            "routers": [{"from": "minimal_agent", "to": "end"}],
+            "environment": "test",
+            "version": "1.0",
+        }
+
+        config_file = tmp_path / "minimal_config.yml"
+        with open(config_file, "w") as f:
+            yaml.dump(minimal_config, f)
+
+        with (
+            patch(
+                "duo_workflow_service.agent_platform.experimental.flows.flow_config._DIRECTORY_PATH",
+                tmp_path,
+            ),
+            patch.object(FlowConfig, "DIRECTORY_PATH", Path(tmp_path)),
+        ):
+            result = list_configs()
+
+        assert len(result) == 1
+        assert result[0]["name"] == "minimal_config"
+        assert result[0]["version"] == "1.0"
+        assert result[0]["environment"] == "test"
+
+        # Verify JSON config is valid
+        parsed_config = json.loads(result[0]["config"])
+        assert parsed_config == minimal_config
