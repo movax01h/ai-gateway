@@ -39,6 +39,8 @@ _WORKFLOWS_LOOKUP = {
     for workflow_cls in _WORKFLOWS
 }
 
+CHAT_AGENT_COMPONENT_ENVIRONMENT = "chat-partial"
+
 FlowFactory: TypeAlias = Callable[..., AbstractWorkflow]
 
 FlowConfigT = TypeVar("FlowConfigT", bound=FlowConfig)
@@ -70,7 +72,7 @@ def _flow_factory(
     flow_cls: FlowFactory,
     config: FlowConfigT,
 ) -> FlowFactory:
-    if config.environment != "chat-partial":
+    if config.environment != CHAT_AGENT_COMPONENT_ENVIRONMENT:
         return partial(flow_cls, config=config)
 
     if len(config.components) != 1:
