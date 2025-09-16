@@ -958,13 +958,12 @@ class TestChatAgentPromptRunnable:
         )
         chat_agent.prompt_runnable = mock_prompt_runnable
 
-        result = await chat_agent.run(input_with_goal)
-        mock_prompt_runnable.ainvoke.assert_called_once()
         with patch.object(
             chat_agent.__class__.__bases__[0], "ainvoke", new_callable=AsyncMock
         ) as mock_ainvoke:
-            await chat_agent.run(input_with_goal)
+            result = await chat_agent.run(input_with_goal)
             mock_ainvoke.assert_not_called()
+            mock_prompt_runnable.ainvoke.assert_called_once()
 
         assert result["status"] == WorkflowStatusEnum.INPUT_REQUIRED
         assert "conversation_history" in result
