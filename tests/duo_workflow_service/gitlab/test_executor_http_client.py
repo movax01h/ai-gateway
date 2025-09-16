@@ -5,7 +5,9 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from contract import contract_pb2
+from duo_workflow_service.executor.action import HTTPConnectionError
 from duo_workflow_service.gitlab.executor_http_client import ExecutorGitLabHttpClient
+from duo_workflow_service.gitlab.http_client import GitLabHttpResponse
 
 
 @pytest.fixture(name="mock_execute_action")
@@ -27,6 +29,20 @@ def monkeypatch_execute_action_fixture(monkeypatch, mock_execute_action):
         mock_execute_action,
     )
     return mock_execute_action
+
+
+@pytest.fixture(name="mock_execute_http_response")
+def mock_execute_http_response_fixture():
+    return AsyncMock()
+
+
+@pytest.fixture(name="monkeypatch_execute_http_response")
+def monkeypatch_execute_http_response_fixture(monkeypatch, mock_execute_http_response):
+    monkeypatch.setattr(
+        "duo_workflow_service.gitlab.executor_http_client._execute_action_and_get_http_response",
+        mock_execute_http_response,
+    )
+    return mock_execute_http_response
 
 
 @pytest.mark.asyncio
@@ -325,3 +341,41 @@ async def test_graphql_with_errors(client, monkeypatch_execute_action):
 
     assert "GraphQL errors" in str(excinfo.value)
     assert "Access denied" in str(excinfo.value)
+
+
+@pytest.mark.asyncio
+async def test_executor_gitlab_http_client_with_use_http_response_success(
+    client, monkeypatch_execute_http_response
+):
+    action_response = contract_pb2.ActionResponse()
+    action_response.httpResponse.statusCode = 200
+    action_response.httpResponse.body = '{"key": "value"}'
+
+    monkeypatch_execute_http_response.return_value = action_response
+
+    result = await client.aget("/api/v4/test", use_http_response=True, parse_json=True)
+
+    expected_response = GitLabHttpResponse(
+        status_code=200,
+        body={"key": "value"},
+    )
+
+    assert isinstance(result, GitLabHttpResponse)
+    assert result.status_code == expected_response.status_code
+    assert result.body == expected_response.body
+
+    monkeypatch_execute_http_response.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_executor_gitlab_http_client_with_use_http_response_http_connection_error(
+    client, monkeypatch_execute_http_response
+):
+    monkeypatch_execute_http_response.side_effect = HTTPConnectionError(
+        "Connection refused"
+    )
+
+    with pytest.raises(HTTPConnectionError, match="Connection refused"):
+        await client.aget("/api/v4/test", use_http_response=True)
+
+    monkeypatch_execute_http_response.assert_called_once()
