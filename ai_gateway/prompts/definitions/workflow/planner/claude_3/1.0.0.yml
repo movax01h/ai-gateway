@@ -11,5 +11,3 @@ prompt_template:
     {% include 'workflow/planner/system/1.0.0.jinja' %}
   user: |
     {% include 'workflow/planner/user/1.0.0.jinja' %}
-params:
-  timeout: 30
