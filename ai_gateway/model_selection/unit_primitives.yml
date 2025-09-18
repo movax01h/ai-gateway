@@ -242,6 +242,11 @@ configurable_unit_primitives:
     default_model: "claude_sonnet_4_20250514"
     selectable_models:
       - "claude_sonnet_4_20250514"
+  - feature_setting: "code_review_prescan"
+    unit_primitives: []
+    default_model: "claude_sonnet_4_20250514"
+    selectable_models:
+      - "claude_sonnet_4_20250514"
   - feature_setting: "sast_vulnerability_source_file_agent_prompt"
     unit_primitives: []
     default_model: "claude_sonnet_4_20250514"
