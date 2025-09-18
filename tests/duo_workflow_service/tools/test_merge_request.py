@@ -1523,8 +1523,14 @@ async def test_post_duo_code_review(gitlab_client_mock, metadata):
     )
     assert response == expected_response
     gitlab_client_mock.apost.assert_called_once_with(
-        path="/api/v4/projects/123/merge_requests/45/duo_code_review/post_review",
-        body=json.dumps({"review_output": "<review>test</review>"}),
+        path="/api/v4/ai/duo_workflows/code_review/add_comments",
+        body=json.dumps(
+            {
+                "project_id": "123",
+                "merge_request_iid": 45,
+                "review_output": "<review>test</review>",
+            }
+        ),
     )
 
 
