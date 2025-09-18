@@ -131,6 +131,8 @@ editorconfig-checker = "^3.2.1"
 
 [tool.poetry.group.dev.dependencies]
 types-bleach = "^6.2.0.20250809"
+yappi = "^1.6.10"
+snakeviz = "^2.2.2"
 
 [tool.codespell]
 skip = """

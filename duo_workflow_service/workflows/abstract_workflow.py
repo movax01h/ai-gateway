@@ -275,7 +275,12 @@ class AbstractWorkflow(ABC):
                         "" if checkpoint_tuple else WorkflowStatusEventEnum.START
                     )
 
-                compiled_graph = self._compile(goal, tools_registry, checkpointer)
+                # Compile is CPU-bound process hence we're using a thread to avoid interrupting the gRPC server.
+                # See https://gitlab.com/gitlab-org/modelops/applied-ml/code-suggestions/ai-assist/-/issues/1468
+                # for more info.
+                compiled_graph = await asyncio.to_thread(
+                    self._compile, goal, tools_registry, checkpointer
+                )
                 graph_input = await self.get_graph_input(goal, status_event)
 
                 async for type, state in compiled_graph.astream(
