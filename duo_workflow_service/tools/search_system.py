@@ -1,3 +1,4 @@
+import json
 from typing import Any, Optional, Type
 
 from pydantic import BaseModel, Field
@@ -80,3 +81,97 @@ class Grep(DuoBaseTool):
             search_dir = "directory"
         message = f"Search for '{args.pattern}' in files in '{search_dir}'"
         return message
+
+
+class ExtractLinesFromTextInput(BaseModel):
+    content: str = Field(description="The content string separated by '\\n' characters")
+    start_line: int = Field(description="The starting line number (1-indexed)")
+    end_line: Optional[int] = Field(
+        default=None,
+        description="The ending line number (1-indexed). If None, only returns the start_line",
+    )
+
+
+class ExtractLinesFromText(DuoBaseTool):
+    name: str = "extract_lines_from_text"
+    description: str = """Extract specific lines from a text content.
+
+    The tool extracts lines from a large string content that is separated by '\\n' characters.
+    It returns the exact block of lines starting from start_line and ending at end_line.
+
+    Line numbers are 1-indexed (first line is line 1).
+
+    For example:
+    - Get a single line (line 5):
+        extract_lines_from_text(
+            content="line1\\nline2\\nline3\\nline4\\nline5\\nline6",
+            start_line=5
+        )
+
+    - Get a range of lines (lines 3 to 5):
+        extract_lines_from_text(
+            content="line1\\nline2\\nline3\\nline4\\nline5\\nline6",
+            start_line=3,
+            end_line=5
+        )
+    """
+    args_schema: Type[BaseModel] = ExtractLinesFromTextInput
+
+    async def _arun(self, **kwargs: Any) -> str:
+        content = kwargs.pop("content")
+        start_line = kwargs.pop("start_line")
+        end_line = kwargs.pop("end_line", None)
+
+        try:
+            lines = content.split("\n")
+            total_lines = len(lines)
+
+            if start_line < 1 or start_line > total_lines:
+                return json.dumps(
+                    {
+                        "error": f"start_line {start_line} is out of range. Content has {total_lines} lines."
+                    }
+                )
+
+            # If end_line is not provided, just return the start_line
+            if end_line is None:
+                result_lines = [lines[start_line - 1]]
+            else:
+                if end_line < 1 or end_line > total_lines:
+                    return json.dumps(
+                        {
+                            "error": f"end_line {end_line} is out of range. Content has {total_lines} lines."
+                        }
+                    )
+
+                if end_line < start_line:
+                    return json.dumps(
+                        {
+                            "error": f"end_line {end_line} cannot be less than start_line {start_line}."
+                        }
+                    )
+
+                result_lines = lines[start_line - 1 : end_line]
+
+            result_lines = [line.rstrip() for line in result_lines]
+
+            extracted_snippet = "\n".join(result_lines)
+
+            return json.dumps(
+                {
+                    "lines": extracted_snippet,
+                    "start_line": start_line,
+                    "end_line": end_line if end_line else start_line,
+                    "total_lines_extracted": len(result_lines),
+                }
+            )
+
+        except Exception as e:
+            return json.dumps({"error": f"Failed to extract lines: {str(e)}"})
+
+    def format_display_message(
+        self, args: ExtractLinesFromTextInput, _tool_response: Any = None
+    ) -> str:
+        if args.end_line:
+            return f"Extract lines {args.start_line}-{args.end_line} from content"
+        return f"Extract line {args.start_line} from content"
