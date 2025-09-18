@@ -46,6 +46,20 @@ async def _execute_action_and_get_action_response(
             duration_s=duration,
         )
 
+        if event.actionResponse.httpResponse.error:
+            log.error(
+                f"Http response error: {event.actionResponse.httpResponse.error}",
+                requestID=event.actionResponse.requestID,
+                action_class=action_class,
+            )
+
+        if event.actionResponse.plainTextResponse.error:
+            log.error(
+                f"Plaintext response error: {event.actionResponse.plainTextResponse.error}",
+                requestID=event.actionResponse.requestID,
+                action_class=action_class,
+            )
+
         # Record all metrics in the separate function
         record_metrics(action_class, duration)
 
