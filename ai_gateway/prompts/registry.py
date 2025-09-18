@@ -346,7 +346,9 @@ class LocalPromptRegistry(BasePromptRegistry):
             prompt_name=config.name,
             prompt_version=prompt_version,
             model_identifier=(
-                model_metadata.identifier
+                # identifier works for custom models, name works for gitlab models
+                getattr(model_metadata, "identifier", None)
+                or getattr(model_metadata, "name", None)
                 if isinstance(model_metadata, ModelMetadata)
                 else None
             ),
