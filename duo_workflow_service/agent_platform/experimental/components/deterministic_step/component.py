@@ -1,51 +1,58 @@
-from datetime import datetime, timezone
 from typing import Any, ClassVar, Literal
 
-from dependency_injector.wiring import inject
+from dependency_injector.wiring import Provide, inject
 from langchain_core.tools import BaseTool
 from langgraph.graph import StateGraph
-from pydantic import BaseModel, Field
+from pydantic import Field, model_validator
 
+from ai_gateway.container import ContainerApplication
 from duo_workflow_service.agent_platform.experimental.components import (
     register_component,
-)
-from duo_workflow_service.agent_platform.experimental.components.agent.ui_log import (
-    UILogEventsAgent,
 )
 from duo_workflow_service.agent_platform.experimental.components.base import (
     BaseComponent,
     RouterProtocol,
 )
-from duo_workflow_service.agent_platform.experimental.state import (
-    FlowState,
-    IOKey,
-    IOKeyTemplate,
-    get_vars_from_state,
+from duo_workflow_service.agent_platform.experimental.components.deterministic_step.nodes import (
+    DeterministicStepNode,
 )
-from duo_workflow_service.entities import (
-    MessageTypeEnum,
-    ToolInfo,
-    ToolStatus,
-    UiChatLog,
+from duo_workflow_service.agent_platform.experimental.components.deterministic_step.ui_log import (
+    UILogEventsDeterministicStep,
+    UILogWriterDeterministicStep,
 )
-from duo_workflow_service.security.prompt_security import PromptSecurity
-from duo_workflow_service.tools import DuoBaseTool
+from duo_workflow_service.agent_platform.experimental.state import IOKey, IOKeyTemplate
+from duo_workflow_service.agent_platform.experimental.ui_log import UIHistory
 from duo_workflow_service.tools.toolset import Toolset
 
 __all__ = ["DeterministicStepComponent"]
 
+from lib.internal_events import InternalEventsClient
+
 
 @register_component(decorators=[inject])
 class DeterministicStepComponent(BaseComponent):
-    _tool_result_key: ClassVar[IOKeyTemplate] = IOKeyTemplate(
+    _tool_responses_key: ClassVar[IOKeyTemplate] = IOKeyTemplate(
         target="context",
-        subkeys=[IOKeyTemplate.COMPONENT_NAME_TEMPLATE, "tool_result"],
+        subkeys=[IOKeyTemplate.COMPONENT_NAME_TEMPLATE, "tool_responses"],
     )
-
+    _tool_error_key: ClassVar[IOKeyTemplate] = IOKeyTemplate(
+        target="context",
+        subkeys=[IOKeyTemplate.COMPONENT_NAME_TEMPLATE, "error"],
+    )
+    _execution_result_key: ClassVar[IOKeyTemplate] = IOKeyTemplate(
+        target="context",
+        subkeys=[IOKeyTemplate.COMPONENT_NAME_TEMPLATE, "execution_result"],
+    )
     _outputs: ClassVar[tuple[IOKeyTemplate, ...]] = (
         IOKeyTemplate(target="ui_chat_log"),
-        _tool_result_key,
+        _tool_responses_key,
+        _tool_error_key,
+        _execution_result_key,
     )
+
+    internal_event_client: InternalEventsClient = Provide[
+        ContainerApplication.internal_event.client
+    ]
 
     tool_name: str
     toolset: Toolset
@@ -55,98 +62,114 @@ class DeterministicStepComponent(BaseComponent):
         "conversation_history",
     )
 
-    ui_log_events: list[UILogEventsAgent] = Field(default_factory=list)
+    ui_log_events: list[UILogEventsDeterministicStep] = Field(default_factory=list)
     ui_role_as: Literal["tool"] = "tool"
+
+    validated_tool: BaseTool = Field(init=False)
+
+    @model_validator(mode="before")
+    @classmethod
+    def validate_tool_configuration(cls, data: Any) -> dict[str, Any]:
+        if isinstance(data, dict):
+            tool_name = data.get("tool_name")
+            toolset = data.get("toolset")
+
+            raw_inputs = data.get("inputs", [])
+            inputs = IOKey.parse_keys(raw_inputs)
+
+            if not tool_name:
+                raise ValueError("tool_name is required")
+
+            if not toolset:
+                raise ValueError("toolset is required")
+
+            if tool_name not in toolset:
+                available_tools = list(toolset.keys())
+                raise KeyError(
+                    f"Tool '{tool_name}' not found in toolset. "
+                    f"Available tools: {available_tools}"
+                )
+
+            tool = toolset[tool_name]
+
+            if tool.args_schema:
+                error = cls._validate_tool_arguments(tool, inputs)
+                if error:
+                    schema = tool.args_schema.model_json_schema()  # type: ignore[union-attr]
+                    raise ValueError(
+                        f"Tool '{tool_name}' configuration validation failed:\n"
+                        f"Error: {error}\n"
+                        f"Expected schema: {schema}"
+                    )
+
+            data["validated_tool"] = tool
+
+        return data
+
+    @classmethod
+    def _validate_tool_arguments(
+        cls, tool: BaseTool, inputs: list[IOKey]
+    ) -> str | None:
+        if not tool.args_schema:
+            return None
+
+        try:
+            # Get expected parameters from schema
+            schema = tool.args_schema.model_json_schema()  # type: ignore[union-attr]
+            expected_params = set(schema.get("properties", {}).keys())
+            required_params = set(schema.get("required", []))
+
+            # Extract configured parameter names
+            configured_params = set()
+            for input_key in inputs:
+                if input_key.alias:
+                    param_name = input_key.alias
+                elif input_key.subkeys:
+                    param_name = input_key.subkeys[-1]
+                else:
+                    param_name = str(input_key)
+                configured_params.add(param_name)
+
+            # Check for missing required parameters
+            missing_required = required_params - configured_params
+            if missing_required:
+                return f"Missing required parameters: {sorted(missing_required)}"
+
+            # Check for unknown parameters
+            unknown_params = configured_params - expected_params
+            if unknown_params:
+                return f"Unknown parameters: {sorted(unknown_params)}. Valid parameters are: {sorted(expected_params)}"
+
+            return None
+
+        except Exception as e:
+            return f"Validation error: {str(e)}"
 
     def __entry_hook__(self) -> str:
         return f"{self.name}#deterministic_step"
 
     def attach(self, graph: StateGraph, router: RouterProtocol) -> None:
-        graph.add_node(self.__entry_hook__(), self._execute_tool)
-        graph.add_conditional_edges(self.__entry_hook__(), router.route)
-
-    # Component outputs follow fixed pattern with dynamic naming
-    # Example: context:read_config.tool_result, context:scan_files.tool_result
-    def get_output_key(self) -> IOKey:
-        return self._tool_result_key.to_iokey(
-            {IOKeyTemplate.COMPONENT_NAME_TEMPLATE: self.name}
+        node = DeterministicStepNode(
+            name=self.__entry_hook__(),
+            tool_name=self.tool_name,
+            inputs=self.inputs,
+            flow_id=self.flow_id,
+            flow_type=self.flow_type,
+            internal_event_client=self.internal_event_client,
+            ui_history=UIHistory(
+                events=self.ui_log_events, writer_class=UILogWriterDeterministicStep
+            ),
+            tool_responses_key=self._tool_responses_key.to_iokey(
+                {IOKeyTemplate.COMPONENT_NAME_TEMPLATE: self.name}
+            ),
+            tool_error_key=self._tool_error_key.to_iokey(
+                {IOKeyTemplate.COMPONENT_NAME_TEMPLATE: self.name}
+            ),
+            execution_result_key=self._execution_result_key.to_iokey(
+                {IOKeyTemplate.COMPONENT_NAME_TEMPLATE: self.name}
+            ),
+            validated_tool=self.validated_tool,
         )
 
-    async def _execute_tool(self, state: FlowState) -> dict[str, Any]:
-        """Execute the appointed tool with extracted parameters from state.
-
-        Args:
-            state: Current flow state
-
-        Returns:
-            Dictionary with ui_chat_log and context updates
-        """
-        try:
-            # Extract tool parameters from component inputs
-            variables = get_vars_from_state(self.inputs, state)
-
-            # Get appointed tool from toolset
-            if self.tool_name not in self.toolset:
-                raise KeyError(f"Tool '{self.tool_name}' not found in toolset")
-
-            tool = self.toolset[self.tool_name]
-
-            tool_response = await tool._arun(**variables)
-
-            secure_result = PromptSecurity.apply_security_to_tool_response(
-                response=tool_response, tool_name=self.tool_name
-            )
-
-            success_log = UiChatLog(
-                message_type=MessageTypeEnum.TOOL,
-                content=self._format_message(tool, variables, tool_response),
-                timestamp=datetime.now(timezone.utc).isoformat(),
-                status=ToolStatus.SUCCESS,
-                tool_info=ToolInfo(name=tool.name, args=variables),
-                message_sub_type=tool.name,
-                correlation_id=None,
-                additional_context=None,
-            )
-
-            return {
-                "ui_chat_log": [success_log],
-                "context": {self.name: {"tool_result": secure_result}},
-            }
-
-        except Exception as e:
-            error_log = UiChatLog(
-                message_type=MessageTypeEnum.TOOL,
-                message_sub_type=None,
-                content=f"Tool {self.tool_name} execution failed: {str(e)}",
-                timestamp=datetime.now(timezone.utc).isoformat(),
-                status=ToolStatus.FAILURE,
-                correlation_id=None,
-                tool_info=ToolInfo(name=self.tool_name, args={}),
-                additional_context=None,
-            )
-
-            return {
-                "ui_chat_log": [error_log],
-                "context": {self.name: {"tool_result": None, "error": str(e)}},
-            }
-
-    @staticmethod
-    def _format_message(
-        tool: BaseTool, tool_call_args: dict[str, Any], tool_response: Any = None
-    ) -> str:
-        if not hasattr(tool, "format_display_message"):
-            args_str = ", ".join(f"{k}={str(v)}" for k, v in tool_call_args.items())
-            return f"Using {tool.name}: {args_str}"
-
-        try:
-            schema = getattr(tool, "args_schema", None)
-            if isinstance(schema, type) and issubclass(schema, BaseModel):
-                # type: ignore[arg-type]
-                parsed = schema(**tool_call_args)
-                return tool.format_display_message(parsed, tool_response)
-        except Exception:
-            return DuoBaseTool.format_display_message(
-                tool, tool_call_args, tool_response  # type: ignore[arg-type]
-            )  # type: ignore[return-value]
-
-        return tool.format_display_message(tool_call_args, tool_response)
+        graph.add_node(self.__entry_hook__(), node.run)
+        graph.add_conditional_edges(self.__entry_hook__(), router.route)
