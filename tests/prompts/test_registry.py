@@ -541,7 +541,7 @@ prompt_template:
     @pytest.mark.parametrize(
         ("model_metadata", "expected_identifier"),
         [
-            (None, None),
+            (None, "haiku"),
             (
                 {
                     "name": "custom",
@@ -559,6 +559,20 @@ prompt_template:
                     "role_arn": "role-arn",
                 },
                 None,
+            ),
+            (
+                {
+                    "provider": "gitlab",
+                    "identifier": "test",
+                },
+                "test",
+            ),
+            (
+                {
+                    "provider": "gitlab",
+                    "feature_setting": "duo_chat",
+                },
+                "haiku",
             ),
         ],
     )
