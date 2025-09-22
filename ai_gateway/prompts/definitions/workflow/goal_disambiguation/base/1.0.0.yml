@@ -3,7 +3,7 @@ name: clarity_judge
 model:
   params:
     model_class_provider: anthropic
-    max_tokens: 16_384
+    max_tokens: 32_768
 unit_primitives:
   - duo_workflow_execute_workflow
 prompt_template:

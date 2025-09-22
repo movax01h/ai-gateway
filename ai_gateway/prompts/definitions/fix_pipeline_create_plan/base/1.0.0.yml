@@ -2,7 +2,7 @@ name: fix_pipeline_create_plan_prompt
 model:
   params:
     model_class_provider: anthropic
-    max_tokens: 16_384
+    max_tokens: 32_768
     max_retries: 3
 prompt_template:
   system: |

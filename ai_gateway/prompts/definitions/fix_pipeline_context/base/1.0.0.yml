@@ -2,7 +2,7 @@ name: fix_pipeline_context_prompt
 model:
   params:
     model_class_provider: anthropic
-    max_tokens: 16_384
+    max_tokens: 32_768
 prompt_template:
   system: |
     You are an experienced GitLab user tasked with building comprehensive context around a failing GitLab CI/CD pipeline.
