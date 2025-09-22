@@ -18,6 +18,9 @@ from duo_workflow_service.tools.duo_base_tool import DuoBaseTool
 from duo_workflow_service.tools.vulnerabilities.get_vulnerability_details import (
     GetVulnerabilityDetails,
 )
+from duo_workflow_service.tools.vulnerabilities.post_sast_fp_analysis_to_gitlab import (
+    PostSastFpAnalysisToGitlab,
+)
 
 
 class ToolMetadata(TypedDict):
@@ -132,6 +135,7 @@ _AGENT_PRIVILEGES: dict[str, list[Type[BaseTool]]] = {
         tools.UpdateWorkItem,
         tools.RevertToDetectedVulnerability,
         tools.CreateVulnerabilityIssue,
+        PostSastFpAnalysisToGitlab,
         PostDuoCodeReview,
         *_READ_ONLY_GITLAB_TOOLS,
     ],
