@@ -75,7 +75,7 @@ class ToolsExecutor:
         state_updates = {}
         responses: list[dict[str, Any] | Command] = []
         ui_chat_logs: List[UiChatLog] = []
-        plan = state["plan"]
+        plan = state.get("plan", {"steps": []})
 
         self._create_ai_message_ui_chat_log(last_message, ui_chat_logs)
 
