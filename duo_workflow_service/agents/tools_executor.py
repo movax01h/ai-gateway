@@ -46,6 +46,9 @@ _COMMAND_OUTPUT_TOOLS = {
     "run_command": RunCommand,
 }
 
+# Display only first 4KB of a tool response on UI to avoid duplicating large responses twice in a checkpoint
+TOOL_RESPONSE_MAX_DISPLAY_MSG = 4 * 1024
+
 
 class ToolsExecutor:
     _tools_agent_name: str
@@ -388,7 +391,15 @@ class ToolsExecutor:
             tool_info=(
                 (
                     ToolInfo(
-                        name=tool_name, args=tool_args, tool_response=tool_response
+                        name=tool_name,
+                        args=tool_args,
+                        tool_response=ToolMessage(
+                            content=tool_response.content[
+                                :TOOL_RESPONSE_MAX_DISPLAY_MSG
+                            ],
+                            name=tool_response.name,
+                            tool_call_id=tool_response.tool_call_id,
+                        ),
                     )
                     if tool_response is not None
                     else ToolInfo(name=tool_name, args=tool_args)
