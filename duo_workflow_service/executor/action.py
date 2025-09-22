@@ -49,14 +49,14 @@ async def _execute_action_and_get_action_response(
 
         if event.actionResponse.httpResponse.error:
             log.error(
-                f"Http response error: {event.actionResponse.httpResponse.error}",
+                "Http response error",
                 requestID=event.actionResponse.requestID,
                 action_class=action_class,
             )
 
         if event.actionResponse.plainTextResponse.error:
             log.error(
-                f"Plaintext response error: {event.actionResponse.plainTextResponse.error}",
+                "Plaintext response error",
                 requestID=event.actionResponse.requestID,
                 action_class=action_class,
             )
