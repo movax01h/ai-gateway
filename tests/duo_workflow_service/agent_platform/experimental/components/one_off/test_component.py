@@ -1,15 +1,18 @@
 """Test suite for OneOffComponent class."""
 
-from unittest.mock import Mock, patch
+from unittest.mock import ANY, Mock, patch
 
 import pytest
-from langchain_core.messages import HumanMessage
+from langchain_core.messages import AIMessage, ToolMessage
+from langgraph.graph import END, StateGraph
 
-from duo_workflow_service.agent_platform.experimental.components import RoutingError
 from duo_workflow_service.agent_platform.experimental.components.one_off.component import (
     OneOffComponent,
 )
-from duo_workflow_service.agent_platform.experimental.state import FlowStateKeys
+from duo_workflow_service.agent_platform.experimental.state import (
+    FlowState,
+    FlowStateKeys,
+)
 from duo_workflow_service.agent_platform.experimental.ui_log import UIHistory
 
 
@@ -257,7 +260,6 @@ class TestOneOffComponentAttachEdges:
 
         expected_llm_node = f"{component_name}#llm"
         expected_tools_node = f"{component_name}#tools"
-        expected_exit_node = f"{component_name}#exit"
 
         # Verify nodes were added
         mock_state_graph.add_node.assert_any_call(
@@ -267,89 +269,354 @@ class TestOneOffComponentAttachEdges:
             expected_tools_node, mock_tool_node_cls.return_value.run
         )
 
-        # Verify exit node was added (dynamically created)
-        exit_node_calls = [
-            call
-            for call in mock_state_graph.add_node.call_args_list
-            if call[0][0] == expected_exit_node
-        ]
-        assert len(exit_node_calls) == 1
-
         # Verify edges were added
         mock_state_graph.add_edge.assert_called_once_with(
             expected_llm_node, expected_tools_node
         )
 
         # Verify conditional edges were added
-        mock_state_graph.add_conditional_edges.assert_any_call(
-            expected_tools_node,
-            one_off_component._tools_router,
-            {
-                "retry": expected_llm_node,
-                "exit": expected_exit_node,
-            },
-        )
-
-        mock_state_graph.add_conditional_edges.assert_any_call(
-            expected_exit_node, mock_router.route
-        )
+        mock_state_graph.add_conditional_edges.assert_any_call(expected_tools_node, ANY)
 
 
 class TestOneOffComponentToolsRouter:
-    """Test suite for OneOffComponent tools routing logic."""
+    """Test suite for OneOffComponent execution flow and routing behavior."""
 
-    def test_tools_router_with_success_message(
-        self, one_off_component, base_flow_state, component_name
+    def test_successful_tool_execution_flow(
+        self,
+        component_name,
+        flow_id,
+        flow_type,
+        prompt_id,
+        prompt_version,
+        mock_toolset,
+        mock_prompt_registry,
+        mock_internal_event_client,
+        ui_log_events,
+        max_correction_attempts,
+        mock_router,
+        mock_agent_node_cls,
+        mock_tool_node_cls,
+        base_flow_state,
     ):
-        """Test tools router with success message routes to exit."""
-        # Create state with success message
-        success_message = HumanMessage(content="Tool execution completed successfully")
-        state_with_success = base_flow_state.copy()
-        state_with_success[FlowStateKeys.CONVERSATION_HISTORY] = {
-            component_name: [success_message]
+        """Test execution flow when tool execution is successful."""
+        # Mock agent node to produce tool calls
+        graph = StateGraph(FlowState)
+        mock_agent_node = mock_agent_node_cls.return_value
+        mock_agent_node.run.return_value = {
+            **base_flow_state,
+            FlowStateKeys.CONVERSATION_HISTORY: {
+                component_name: [AIMessage(content="I need to call a tool")]
+            },
         }
 
-        result = one_off_component._tools_router(state_with_success)
-        assert result == "exit"
-
-    def test_tools_router_with_retry_message(
-        self, one_off_component, base_flow_state, component_name
-    ):
-        """Test tools router with retry message routes to retry."""
-        # Create state with retry message
-        retry_message = HumanMessage(content="Error occurred. 2 attempts remaining")
-        state_with_retry = base_flow_state.copy()
-        state_with_retry[FlowStateKeys.CONVERSATION_HISTORY] = {
-            component_name: [retry_message]
+        # Mock tool node to simulate successful completion
+        mock_tool_node = mock_tool_node_cls.return_value
+        mock_tool_node.run.return_value = {
+            **base_flow_state,
+            FlowStateKeys.CONVERSATION_HISTORY: {
+                component_name: [
+                    ToolMessage(
+                        content="Tool execution completed successfully",
+                        tool_call_id="123",
+                    ),
+                ]
+            },
         }
 
-        result = one_off_component._tools_router(state_with_retry)
-        assert result == "retry"
+        # Mock router to return END (exit)
+        mock_router.route.return_value = END
 
-    def test_tools_router_with_max_attempts_reached(
-        self, one_off_component, base_flow_state, component_name
-    ):
-        """Test tools router with max attempts message routes to exit."""
-        # Create state with max attempts message
-        max_attempts_message = HumanMessage(
-            content="Error occurred. 0 attempts remaining"
+        component = OneOffComponent(
+            name=component_name,
+            flow_id=flow_id,
+            flow_type=flow_type,
+            inputs=["context:user_input", "context:task_description"],
+            prompt_id=prompt_id,
+            prompt_version=prompt_version,
+            toolset=mock_toolset,
+            prompt_registry=mock_prompt_registry,
+            internal_event_client=mock_internal_event_client,
+            ui_log_events=ui_log_events,
+            max_correction_attempts=max_correction_attempts,
         )
-        state_with_max_attempts = base_flow_state.copy()
-        state_with_max_attempts[FlowStateKeys.CONVERSATION_HISTORY] = {
-            component_name: [max_attempts_message]
+
+        component.attach(graph, mock_router)
+        graph.set_entry_point(component.__entry_hook__())
+        compiled_graph = graph.compile()
+
+        # Execute the graph
+        result = compiled_graph.invoke(base_flow_state)
+
+        # Verify both nodes were called
+        mock_agent_node.run.assert_called_once()
+        mock_tool_node.run.assert_called_once()
+
+        # Verify outgoing router was called
+        mock_router.route.assert_called_once()
+
+        # Verify final state contains success message
+        final_conversation = result[FlowStateKeys.CONVERSATION_HISTORY][component_name]
+        assert any(
+            "completed successfully" in msg.content for msg in final_conversation
+        )
+
+    def test_tool_execution_retry_flow(
+        self,
+        component_name,
+        flow_id,
+        flow_type,
+        prompt_id,
+        prompt_version,
+        mock_toolset,
+        mock_prompt_registry,
+        mock_internal_event_client,
+        ui_log_events,
+        max_correction_attempts,
+        mock_router,
+        mock_agent_node_cls,
+        mock_tool_node_cls,
+        base_flow_state,
+    ):
+        """Test execution flow when tool execution needs retry."""
+        # Mock agent node to produce tool calls (called twice due to retry)
+        graph = StateGraph(FlowState)
+        mock_agent_node = mock_agent_node_cls.return_value
+        mock_agent_node.run.side_effect = [
+            # First call - initial attempt
+            {
+                **base_flow_state,
+                FlowStateKeys.CONVERSATION_HISTORY: {
+                    component_name: [AIMessage(content="I need to call a tool")]
+                },
+            },
+            # Second call - retry attempt
+            {
+                **base_flow_state,
+                FlowStateKeys.CONVERSATION_HISTORY: {
+                    component_name: [
+                        AIMessage(content="Retrying with corrected approach"),
+                    ]
+                },
+            },
+        ]
+
+        # Mock tool node to simulate error then success
+        mock_tool_node = mock_tool_node_cls.return_value
+        mock_tool_node.run.side_effect = [
+            # First call - error with retry
+            {
+                **base_flow_state,
+                FlowStateKeys.CONVERSATION_HISTORY: {
+                    component_name: [
+                        ToolMessage(
+                            content="Error occurred. 2 attempts remaining",
+                            tool_call_id="123",
+                        ),
+                    ]
+                },
+            },
+            # Second call - success
+            {
+                **base_flow_state,
+                FlowStateKeys.CONVERSATION_HISTORY: {
+                    component_name: [
+                        ToolMessage(
+                            content="Tool execution completed successfully",
+                            tool_call_id="123",
+                        ),
+                    ]
+                },
+            },
+        ]
+
+        # Mock router to return END after success
+        mock_router.route.return_value = END
+
+        component = OneOffComponent(
+            name=component_name,
+            flow_id=flow_id,
+            flow_type=flow_type,
+            inputs=["context:user_input", "context:task_description"],
+            prompt_id=prompt_id,
+            prompt_version=prompt_version,
+            toolset=mock_toolset,
+            prompt_registry=mock_prompt_registry,
+            internal_event_client=mock_internal_event_client,
+            ui_log_events=ui_log_events,
+            max_correction_attempts=max_correction_attempts,
+        )
+
+        component.attach(graph, mock_router)
+        graph.set_entry_point(component.__entry_hook__())
+        compiled_graph = graph.compile()
+
+        # Execute the graph
+        result = compiled_graph.invoke(base_flow_state)
+
+        # Verify both nodes were called multiple times (retry logic)
+        assert mock_agent_node.run.call_count == 2
+        assert mock_tool_node.run.call_count == 2
+
+        # Verify final state contains success message
+        final_conversation = result[FlowStateKeys.CONVERSATION_HISTORY][component_name]
+        assert any(
+            "completed successfully" in msg.content for msg in final_conversation
+        )
+
+    def test_max_attempts_reached_flow(
+        self,
+        component_name,
+        flow_id,
+        flow_type,
+        prompt_id,
+        prompt_version,
+        mock_toolset,
+        mock_prompt_registry,
+        mock_internal_event_client,
+        ui_log_events,
+        max_correction_attempts,
+        mock_router,
+        mock_agent_node_cls,
+        mock_tool_node_cls,
+        base_flow_state,
+    ):
+        """Test execution flow when max attempts are reached."""
+        # Mock agent node
+        graph = StateGraph(FlowState)
+        mock_agent_node = mock_agent_node_cls.return_value
+        mock_agent_node.run.return_value = {
+            **base_flow_state,
+            FlowStateKeys.CONVERSATION_HISTORY: {
+                component_name: [AIMessage(content="I need to call a tool")]
+            },
         }
 
-        result = one_off_component._tools_router(state_with_max_attempts)
-        assert result == "exit"
+        # Mock tool node to simulate max attempts reached
+        mock_tool_node = mock_tool_node_cls.return_value
+        mock_tool_node.run.return_value = {
+            **base_flow_state,
+            FlowStateKeys.CONVERSATION_HISTORY: {
+                component_name: [
+                    ToolMessage(
+                        content="Error occurred. 0 attempts remaining",
+                        tool_call_id="123",
+                    ),
+                ]
+            },
+        }
 
-    def test_tools_router_with_empty_conversation_history(
-        self, one_off_component, base_flow_state, component_name
+        # Mock router to return END (exit due to max attempts)
+        mock_router.route.return_value = END
+
+        component = OneOffComponent(
+            name=component_name,
+            flow_id=flow_id,
+            flow_type=flow_type,
+            inputs=["context:user_input", "context:task_description"],
+            prompt_id=prompt_id,
+            prompt_version=prompt_version,
+            toolset=mock_toolset,
+            prompt_registry=mock_prompt_registry,
+            internal_event_client=mock_internal_event_client,
+            ui_log_events=ui_log_events,
+            max_correction_attempts=max_correction_attempts,
+        )
+
+        component.attach(graph, mock_router)
+        graph.set_entry_point(component.__entry_hook__())
+        compiled_graph = graph.compile()
+
+        # Execute the graph
+        result = compiled_graph.invoke(base_flow_state)
+
+        # Verify execution occurred
+        mock_agent_node.run.assert_called_once()
+        mock_tool_node.run.assert_called_once()
+
+        # Verify final state contains max attempts message
+        final_conversation = result[FlowStateKeys.CONVERSATION_HISTORY][component_name]
+        assert any("0 attempts remaining" in msg.content for msg in final_conversation)
+
+    def test_component_state_management_through_execution(
+        self,
+        component_name,
+        flow_id,
+        flow_type,
+        prompt_id,
+        prompt_version,
+        mock_toolset,
+        mock_prompt_registry,
+        mock_internal_event_client,
+        ui_log_events,
+        max_correction_attempts,
+        mock_router,
+        mock_agent_node_cls,
+        mock_tool_node_cls,
+        base_flow_state,
     ):
-        """Test tools router with empty conversation history raises error."""
-        state_empty_history = base_flow_state.copy()
-        state_empty_history[FlowStateKeys.CONVERSATION_HISTORY] = {component_name: []}
+        """Test that component properly manages state through execution."""
+        # Mock agent node to update state
+        graph = StateGraph(FlowState)
+        mock_agent_node = mock_agent_node_cls.return_value
+        mock_agent_node.run.return_value = {
+            **base_flow_state,
+            FlowStateKeys.CONVERSATION_HISTORY: {
+                component_name: [AIMessage(content="Agent response")]
+            },
+            "context": {component_name: {"tool_calls": ["call_1", "call_2"]}},
+        }
 
-        with pytest.raises(RoutingError) as exc_info:
-            one_off_component._tools_router(state_empty_history)
+        # Mock tool node to update state further
+        mock_tool_node = mock_tool_node_cls.return_value
+        mock_tool_node.run.return_value = {
+            **base_flow_state,
+            FlowStateKeys.CONVERSATION_HISTORY: {
+                component_name: [
+                    ToolMessage(
+                        content="Tool execution completed successfully",
+                        tool_call_id="123",
+                    ),
+                ]
+            },
+            "context": {
+                component_name: {
+                    "tool_calls": ["call_1", "call_2"],
+                    "tool_responses": ["response_1", "response_2"],
+                    "execution_result": "success",
+                }
+            },
+        }
 
-        assert "No conversation history found for component" in str(exc_info.value)
+        # Mock router to return END
+        mock_router.route.return_value = END
+
+        component = OneOffComponent(
+            name=component_name,
+            flow_id=flow_id,
+            flow_type=flow_type,
+            inputs=["context:user_input", "context:task_description"],
+            prompt_id=prompt_id,
+            prompt_version=prompt_version,
+            toolset=mock_toolset,
+            prompt_registry=mock_prompt_registry,
+            internal_event_client=mock_internal_event_client,
+            ui_log_events=ui_log_events,
+            max_correction_attempts=max_correction_attempts,
+        )
+
+        component.attach(graph, mock_router)
+        graph.set_entry_point(component.__entry_hook__())
+        compiled_graph = graph.compile()
+
+        # Execute the graph
+        result = compiled_graph.invoke(base_flow_state)
+
+        # Verify final state contains all expected context data
+        assert "context" in result
+        assert component_name in result["context"]
+        context = result["context"][component_name]
+
+        assert "tool_calls" in context
+        assert "tool_responses" in context
+        assert "execution_result" in context
+        assert context["execution_result"] == "success"

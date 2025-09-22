@@ -1,3 +1,4 @@
+from functools import partial
 from typing import Any, ClassVar, Optional
 
 from dependency_injector.wiring import Provide, inject
@@ -24,6 +25,7 @@ from duo_workflow_service.agent_platform.experimental.components.one_off.ui_log 
     UILogWriterOneOffTools,
 )
 from duo_workflow_service.agent_platform.experimental.state import (
+    FlowState,
     FlowStateKeys,
     IOKeyTemplate,
 )
@@ -141,21 +143,10 @@ class OneOffComponent(BaseComponent):
 
         # Connect tools node with conditional routing for error correction
         graph.add_conditional_edges(
-            f"{self.name}#tools",
-            self._tools_router,
-            {
-                "retry": self.__entry_hook__(),  # Return to LLM for correction
-                "exit": f"{self.name}#exit",  # Exit component (success or max attempts)
-            },
+            f"{self.name}#tools", partial(self._tools_router, router)
         )
 
-        async def exit_component(state):
-            return state  # Pass through state unchanged
-
-        graph.add_node(f"{self.name}#exit", exit_component)
-        graph.add_conditional_edges(f"{self.name}#exit", router.route)
-
-    def _tools_router(self, state) -> str:
+    def _tools_router(self, outgoing_router: RouterProtocol, state: FlowState) -> str:
         """Route based on tool execution results and correction attempts."""
         conversation = state.get(FlowStateKeys.CONVERSATION_HISTORY, {}).get(
             self.name, []
@@ -170,14 +161,14 @@ class OneOffComponent(BaseComponent):
         last_message = conversation[-1]
 
         if not last_message:
-            return "exit"
+            return outgoing_router.route(state)
 
         # Check if it's a success message
         if (
             isinstance(last_message, HumanMessage)
             and "completed successfully" in last_message.content
         ):
-            return "exit"  # Success - exit component
+            return outgoing_router.route(state)  # Success - exit component
 
         # Check if it's an error feedback message
         if (
@@ -186,8 +177,10 @@ class OneOffComponent(BaseComponent):
         ):
             # Parse remaining attempts from the message
             if "0 attempts remaining" in last_message.content:
-                return "exit"  # Max attempts reached - exit component
-            return "retry"  # Error with attempts remaining - retry
+                return outgoing_router.route(
+                    state
+                )  # Max attempts reached - exit component
+            return self.__entry_hook__()  # Error with attempts remaining - retry
 
         # If we can't parse then raise error
         raise RoutingError(
