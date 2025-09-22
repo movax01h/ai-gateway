@@ -1107,3 +1107,25 @@ async def test_multiple_tool_calls(workflow_state, graph):
             "additional_context": None,
         },
     ]
+
+
+@pytest.mark.asyncio
+async def test_run_with_missing_plan_key(tools_executor):
+    state_without_plan = {
+        "conversation_history": {
+            "planner": [
+                AIMessage(
+                    content=[{"type": "text", "text": "test"}],
+                    tool_calls=[
+                        {"id": "1", "name": "test_tool", "args": {"param": "value"}}
+                    ],
+                )
+            ]
+        },
+        "status": WorkflowStatusEnum.EXECUTION,
+    }
+
+    result = await tools_executor.run(state_without_plan)
+
+    assert result is not None
+    assert isinstance(result, list)
