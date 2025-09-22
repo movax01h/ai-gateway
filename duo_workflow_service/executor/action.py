@@ -6,6 +6,7 @@ import structlog
 from prometheus_client import Histogram
 
 from contract import contract_pb2
+from contract.contract_pb2 import HttpResponse, PlainTextResponse
 
 ACTION_LATENCY = Histogram(
     name="executor_actions_duration_seconds",
@@ -60,11 +61,49 @@ async def _execute_action_and_get_action_response(
                 action_class=action_class,
             )
 
+        if not event.actionResponse.response:
+            response_type = event.actionResponse.WhichOneof("response_type")
+            if response_type == "plainTextResponse":
+                log.info(
+                    "Legacy response empty, setting it from plaintext response",
+                    requestID=event.actionResponse.requestID,
+                    action_class=action_class,
+                )
+                event.actionResponse.response = _get_action_response_from_plaintext(
+                    event.actionResponse.plainTextResponse
+                )
+            elif response_type == "httpResponse":
+                log.info(
+                    "Legacy response empty, setting it from http response",
+                    requestID=event.actionResponse.requestID,
+                    action_class=action_class,
+                )
+                event.actionResponse.response = _get_action_response_from_http(
+                    event.actionResponse.httpResponse
+                )
+
         # Record all metrics in the separate function
         record_metrics(action_class, duration)
 
     inbox.task_done()
     return event.actionResponse
+
+
+def _get_action_response_from_plaintext(plaintext_response: PlainTextResponse):
+    if plaintext_response.error:
+        return f"Error running tool: {plaintext_response.error}"
+
+    return plaintext_response.response
+
+
+def _get_action_response_from_http(http_response: HttpResponse):
+    if http_response.error:
+        return f"Error: {http_response.error}"
+
+    if http_response.statusCode < 200 or http_response.statusCode >= 300:
+        return f"Error: unexpected status code: {http_response.statusCode}"
+
+    return http_response.body
 
 
 class HTTPConnectionError(Exception):
