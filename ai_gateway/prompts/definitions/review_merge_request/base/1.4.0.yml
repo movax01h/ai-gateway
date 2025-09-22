@@ -11,5 +11,10 @@ prompt_template:
     {% include 'review_merge_request/system/1.2.0.jinja' %}
   user: |
     {{formatted_mr_input}}
+
+    <codebase_context>
+    {{codebase_context}}
+    </codebase_context>
+  placeholder: history
 params:
   timeout: 60
