@@ -1049,7 +1049,7 @@ async def test_run_command_output(workflow_state, tools_executor):
     "all_tools",
     [
         {
-            "a": mock_tool(name="a", content="tool a"),
+            "a": mock_tool(name="a", content="a" * 10000),
             "b": mock_tool(name="b", content="tool b"),
         }
     ],
@@ -1069,7 +1069,7 @@ async def test_multiple_tool_calls(workflow_state, graph):
     result = await graph.ainvoke(workflow_state)
 
     assert result["conversation_history"]["planner"][-2:] == [
-        HumanMessage(content="tool a"),
+        HumanMessage(content="a" * 10000),
         HumanMessage(content="tool b"),
     ]
 
@@ -1084,7 +1084,7 @@ async def test_multiple_tool_calls(workflow_state, graph):
                 "name": "a",
                 "args": {"a1": 1},
                 "tool_response": ToolMessage(
-                    content="tool a", name="a", tool_call_id="fake-call-1"
+                    content="a" * 4096, name="a", tool_call_id="fake-call-1"
                 ),
             },
             "correlation_id": None,
