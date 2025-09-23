@@ -656,7 +656,10 @@ post_duo_code_review(project_id="123", merge_request_iid=45, review_output="<rev
                 body=json.dumps(request_body),
             )
 
-            if isinstance(response, dict) and response.get("status") == "success":
+            if (
+                isinstance(response, dict)
+                and response.get("message") == "Comments added successfully"
+            ):
                 return json.dumps(
                     {
                         "status": "success",
