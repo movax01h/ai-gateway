@@ -1540,7 +1540,7 @@ async def test_post_duo_code_review_exception(gitlab_client_mock, metadata):
     gitlab_client_mock.apost = AsyncMock(side_effect=Exception(error_message))
     tool = PostDuoCodeReview(metadata=metadata)
     response = await tool._arun(
-        project_id="123", merge_request_iid=45, review_output="<review>test</review>"
+        project_id=123, merge_request_iid=45, review_output="<review>test</review>"
     )
     expected_response = json.dumps({"error": error_message})
     assert response == expected_response
@@ -1551,7 +1551,7 @@ async def test_post_duo_code_review_exception(gitlab_client_mock, metadata):
     [
         (
             PostDuoCodeReviewInput(
-                project_id="42",
+                project_id=42,
                 merge_request_iid=123,
                 review_output="<review>test</review>",
             ),
