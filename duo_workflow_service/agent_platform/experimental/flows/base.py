@@ -139,27 +139,34 @@ class Flow(AbstractWorkflow):
     ) -> Dict:
         processed_additional_context = {}
 
+        jsonschemas_by_category = self._config.input_json_schemas_by_category()
         for item in additional_context:
-            if item.category != "agent_user_environment":
+            if (
+                item.category == "os_information"
+            ):  # This category is passed in from the executor
                 processed_additional_context[item.category] = item.content
                 continue
 
-            if not self._config.additional_context_schema:
+            if item.category not in jsonschemas_by_category.keys():
                 raise ValueError(
-                    "agent_user_environment was provided, but no additional_context_schema specified"
+                    f"input schema was not provided for the category '{item.category}'."
                 )
             try:
-                content_json = json.loads(item.content)  # type: ignore[arg-type]
-                jsonschema.validate(
-                    content_json, json.loads(self._config.additional_context_schema)
-                )
-                processed_additional_context[item.category] = content_json
-            except jsonschema.ValidationError:
+                schema = jsonschemas_by_category.get(item.category)
+                if not item.content:
+                    raise ValueError(
+                        f"content must be specified for input '{item.category}'."
+                    )
+
+                content_object = json.loads(item.content)
+                jsonschema.validate(content_object, schema)
+                processed_additional_context[item.category] = content_object
+            except jsonschema.ValidationError as e:
                 raise ValueError(
-                    f"Additional Context item {item.content} does not match specified schema"
+                    f"input '{item.category}' does not match specified schema: {e}"
                 )
             except json.JSONDecodeError as e:
-                raise ValueError(f"Invalid JSON in Additional Context item, {e}")
+                raise ValueError(f"Invalid JSON in input item, {e}")
 
         return processed_additional_context
 
@@ -293,7 +300,7 @@ class Flow(AbstractWorkflow):
         components = self._build_components(tools_registry, graph)
         self._build_routers(components, graph)
 
-        entry_component = components[self._config.flow["entry_point"]]
+        entry_component = components[self._config.flow.entry_point]
         graph.set_entry_point(entry_component.__entry_hook__())
 
         return graph.compile(checkpointer=checkpointer)
