@@ -98,7 +98,7 @@ def create_chat_model(
                 model_name=config.model_name,
                 **kwargs,
                 max_retries=config.max_retries,
-                betas=["extended-cache-ttl-2025-04-11"],
+                betas=["extended-cache-ttl-2025-04-11", "context-1m-2025-08-07"],
             )
         raise RuntimeError("ANTHROPIC_API_KEY needs to be set for Anthropic provider")
 

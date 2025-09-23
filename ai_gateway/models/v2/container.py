@@ -52,7 +52,7 @@ class ContainerModels(containers.DeclarativeContainer):
         original=providers.Factory(
             ChatAnthropic,
             async_client=http_async_client_anthropic,
-            betas=["extended-cache-ttl-2025-04-11"],
+            betas=["extended-cache-ttl-2025-04-11", "context-1m-2025-08-07"],
         ),
         mocked=providers.Factory(mock.FakeModel),
         agentic=providers.Factory(mock.AgenticFakeModel),
