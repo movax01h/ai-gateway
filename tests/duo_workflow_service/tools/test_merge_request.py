@@ -1513,7 +1513,9 @@ def test_list_merge_request_format_display_message(input_data, expected_message)
 
 @pytest.mark.asyncio
 async def test_post_duo_code_review(gitlab_client_mock, metadata):
-    gitlab_client_mock.apost = AsyncMock(return_value={"status": "success"})
+    gitlab_client_mock.apost = AsyncMock(
+        return_value={"message": "Comments added successfully"}
+    )
     tool = PostDuoCodeReview(metadata=metadata)
     response = await tool._arun(
         project_id="123", merge_request_iid=45, review_output="<review>test</review>"
