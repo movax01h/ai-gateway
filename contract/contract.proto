@@ -38,7 +38,7 @@ message StartWorkflowRequest {
 
 message ActionResponse {
     string requestID = 1;
-    string response = 2;
+    optional string response = 2;
     oneof response_type {
         PlainTextResponse plainTextResponse = 3;
         HttpResponse httpResponse = 4;
