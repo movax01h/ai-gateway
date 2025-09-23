@@ -621,7 +621,7 @@ For example:
 class PostDuoCodeReviewInput(BaseModel):
     """Input schema for posting Duo Code Review."""
 
-    project_id: str = Field(description="The project ID")
+    project_id: int = Field(description="The project ID")
     merge_request_iid: int = Field(description="The merge request IID")
     review_output: str = Field(
         description="The complete review output containing review comments in XML format"
@@ -641,7 +641,7 @@ post_duo_code_review(project_id="123", merge_request_iid=45, review_output="<rev
     unit_primitive: GitLabUnitPrimitive = GitLabUnitPrimitive.ASK_MERGE_REQUEST
 
     async def _arun(
-        self, project_id: str, merge_request_iid: int, review_output: str, **kwargs: Any
+        self, project_id: int, merge_request_iid: int, review_output: str, **kwargs: Any
     ) -> str:
         """Execute the tool to post the code review."""
         try:
