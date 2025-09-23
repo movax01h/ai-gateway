@@ -145,6 +145,14 @@ export interface ListToolsResponse {
   evalDataset: { [key: string]: any }[];
 }
 
+/** Intentionally empty */
+export interface ListFlowsRequest {
+}
+
+export interface ListFlowsResponse {
+  configs: { [key: string]: any }[];
+}
+
 export interface NewCheckpoint {
   status: string;
   checkpoint: string;
@@ -2148,6 +2156,107 @@ export const ListToolsResponse: MessageFns<ListToolsResponse> = {
   },
 };
 
+function createBaseListFlowsRequest(): ListFlowsRequest {
+  return {};
+}
+
+export const ListFlowsRequest: MessageFns<ListFlowsRequest> = {
+  encode(_: ListFlowsRequest, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
+    return writer;
+  },
+
+  decode(input: BinaryReader | Uint8Array, length?: number): ListFlowsRequest {
+    const reader = input instanceof BinaryReader ? input : new BinaryReader(input);
+    const end = length === undefined ? reader.len : reader.pos + length;
+    const message = createBaseListFlowsRequest();
+    while (reader.pos < end) {
+      const tag = reader.uint32();
+      switch (tag >>> 3) {
+      }
+      if ((tag & 7) === 4 || tag === 0) {
+        break;
+      }
+      reader.skip(tag & 7);
+    }
+    return message;
+  },
+
+  fromJSON(_: any): ListFlowsRequest {
+    return {};
+  },
+
+  toJSON(_: ListFlowsRequest): unknown {
+    const obj: any = {};
+    return obj;
+  },
+
+  create<I extends Exact<DeepPartial<ListFlowsRequest>, I>>(base?: I): ListFlowsRequest {
+    return ListFlowsRequest.fromPartial(base ?? ({} as any));
+  },
+  fromPartial<I extends Exact<DeepPartial<ListFlowsRequest>, I>>(_: I): ListFlowsRequest {
+    const message = createBaseListFlowsRequest();
+    return message;
+  },
+};
+
+function createBaseListFlowsResponse(): ListFlowsResponse {
+  return { configs: [] };
+}
+
+export const ListFlowsResponse: MessageFns<ListFlowsResponse> = {
+  encode(message: ListFlowsResponse, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
+    for (const v of message.configs) {
+      Struct.encode(Struct.wrap(v!), writer.uint32(10).fork()).join();
+    }
+    return writer;
+  },
+
+  decode(input: BinaryReader | Uint8Array, length?: number): ListFlowsResponse {
+    const reader = input instanceof BinaryReader ? input : new BinaryReader(input);
+    const end = length === undefined ? reader.len : reader.pos + length;
+    const message = createBaseListFlowsResponse();
+    while (reader.pos < end) {
+      const tag = reader.uint32();
+      switch (tag >>> 3) {
+        case 1: {
+          if (tag !== 10) {
+            break;
+          }
+
+          message.configs.push(Struct.unwrap(Struct.decode(reader, reader.uint32())));
+          continue;
+        }
+      }
+      if ((tag & 7) === 4 || tag === 0) {
+        break;
+      }
+      reader.skip(tag & 7);
+    }
+    return message;
+  },
+
+  fromJSON(object: any): ListFlowsResponse {
+    return { configs: globalThis.Array.isArray(object?.configs) ? [...object.configs] : [] };
+  },
+
+  toJSON(message: ListFlowsResponse): unknown {
+    const obj: any = {};
+    if (message.configs?.length) {
+      obj.configs = message.configs;
+    }
+    return obj;
+  },
+
+  create<I extends Exact<DeepPartial<ListFlowsResponse>, I>>(base?: I): ListFlowsResponse {
+    return ListFlowsResponse.fromPartial(base ?? ({} as any));
+  },
+  fromPartial<I extends Exact<DeepPartial<ListFlowsResponse>, I>>(object: I): ListFlowsResponse {
+    const message = createBaseListFlowsResponse();
+    message.configs = object.configs?.map((e) => e) || [];
+    return message;
+  },
+};
+
 function createBaseNewCheckpoint(): NewCheckpoint {
   return { status: "", checkpoint: "", goal: "", errors: [] };
 }
@@ -3232,12 +3341,22 @@ export const DuoWorkflowService = {
     responseSerialize: (value: ListToolsResponse): Buffer => Buffer.from(ListToolsResponse.encode(value).finish()),
     responseDeserialize: (value: Buffer): ListToolsResponse => ListToolsResponse.decode(value),
   },
+  listFlows: {
+    path: "/DuoWorkflow/ListFlows",
+    requestStream: false,
+    responseStream: false,
+    requestSerialize: (value: ListFlowsRequest): Buffer => Buffer.from(ListFlowsRequest.encode(value).finish()),
+    requestDeserialize: (value: Buffer): ListFlowsRequest => ListFlowsRequest.decode(value),
+    responseSerialize: (value: ListFlowsResponse): Buffer => Buffer.from(ListFlowsResponse.encode(value).finish()),
+    responseDeserialize: (value: Buffer): ListFlowsResponse => ListFlowsResponse.decode(value),
+  },
 } as const;
 
 export interface DuoWorkflowServer extends UntypedServiceImplementation {
   executeWorkflow: handleBidiStreamingCall<ClientEvent, Action>;
   generateToken: handleUnaryCall<GenerateTokenRequest, GenerateTokenResponse>;
   listTools: handleUnaryCall<ListToolsRequest, ListToolsResponse>;
+  listFlows: handleUnaryCall<ListFlowsRequest, ListFlowsResponse>;
 }
 
 export interface DuoWorkflowClient extends Client {
@@ -3273,6 +3392,21 @@ export interface DuoWorkflowClient extends Client {
     metadata: Metadata,
     options: Partial<CallOptions>,
     callback: (error: ServiceError | null, response: ListToolsResponse) => void,
+  ): ClientUnaryCall;
+  listFlows(
+    request: ListFlowsRequest,
+    callback: (error: ServiceError | null, response: ListFlowsResponse) => void,
+  ): ClientUnaryCall;
+  listFlows(
+    request: ListFlowsRequest,
+    metadata: Metadata,
+    callback: (error: ServiceError | null, response: ListFlowsResponse) => void,
+  ): ClientUnaryCall;
+  listFlows(
+    request: ListFlowsRequest,
+    metadata: Metadata,
+    options: Partial<CallOptions>,
+    callback: (error: ServiceError | null, response: ListFlowsResponse) => void,
   ): ClientUnaryCall;
 }
 

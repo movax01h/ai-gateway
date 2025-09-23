@@ -197,6 +197,30 @@ async def test_list_tools(
 
 
 @pytest.mark.asyncio
+@patch("duo_workflow_service.server.flow_registry.list_configs")
+async def test_list_flows(mock_list_configs):
+    mock_list_configs.return_value = [
+        {"name": "flow1", "description": "First flow config"},
+        {"name": "flow2", "description": "Second flow config"},
+    ]
+
+    mock_context = MagicMock(spec=grpc.ServicerContext)
+    service = DuoWorkflowService()
+    response = await service.ListFlows(contract_pb2.ListFlowsRequest(), mock_context)
+
+    assert isinstance(response, contract_pb2.ListFlowsResponse)
+    assert len(response.configs) == 2
+    mock_list_configs.assert_called_once()
+
+    configs_dict = [MessageToDict(config) for config in response.configs]
+    expected_configs = [
+        {"name": "flow1", "description": "First flow config"},
+        {"name": "flow2", "description": "Second flow config"},
+    ]
+    assert configs_dict == expected_configs
+
+
+@pytest.mark.asyncio
 @patch("duo_workflow_service.server.AbstractWorkflow")
 @patch("duo_workflow_service.server.resolve_workflow_class")
 async def test_execute_workflow_when_no_events_ends(

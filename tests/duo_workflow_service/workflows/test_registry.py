@@ -8,6 +8,7 @@ from duo_workflow_service.workflows import chat
 from duo_workflow_service.workflows.abstract_workflow import AbstractWorkflow
 from duo_workflow_service.workflows.registry import (
     CHAT_AGENT_COMPONENT_ENVIRONMENT,
+    list_configs,
     resolve_workflow_class,
 )
 from duo_workflow_service.workflows.software_development import Workflow
@@ -380,3 +381,32 @@ def test_resolve_workflow_class_with_chat_flow_config_both_prompts_and_version()
                 flow_config=struct,
                 flow_config_schema_version="experimental",
             )
+
+
+def test_list_configs():
+    """Test list_configs function returns aggregated configs from all versions."""
+    mock_experimental_configs = [
+        {
+            "name": "config1",
+            "version": "experimental",
+            "environment": "test",
+            "config": '{"flow": {"entry_point": "agent"}}',
+        },
+        {
+            "name": "config2",
+            "version": "experimental",
+            "environment": "prod",
+            "config": '{"flow": {"entry_point": "router"}}',
+        },
+    ]
+
+    with patch(
+        "duo_workflow_service.workflows.registry._FLOW_CONFIGS_BY_VERSION",
+        {"experimental": lambda: mock_experimental_configs},
+    ):
+        result = list_configs()
+
+        assert result == mock_experimental_configs
+        assert len(result) == 2
+        assert result[0]["name"] == "config1"
+        assert result[1]["name"] == "config2"

@@ -9,6 +9,7 @@ service DuoWorkflow {
     rpc ExecuteWorkflow (stream ClientEvent) returns (stream Action);
     rpc GenerateToken (GenerateTokenRequest) returns (GenerateTokenResponse);
     rpc ListTools (ListToolsRequest) returns (ListToolsResponse);
+    rpc ListFlows (ListFlowsRequest) returns (ListFlowsResponse);
 }
 
 message ClientEvent {
@@ -135,6 +136,16 @@ message ListToolsResponse {
   repeated google.protobuf.Struct tools = 1;
   repeated google.protobuf.Struct eval_dataset = 2;
 }
+
+
+message ListFlowsRequest {
+    // Intentionally empty
+}
+
+message ListFlowsResponse {
+  repeated google.protobuf.Struct configs = 1;
+}
+
 
 
 message NewCheckpoint {

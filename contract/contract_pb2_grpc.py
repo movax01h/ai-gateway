@@ -49,6 +49,11 @@ class DuoWorkflowStub(object):
                 request_serializer=contract_dot_contract__pb2.ListToolsRequest.SerializeToString,
                 response_deserializer=contract_dot_contract__pb2.ListToolsResponse.FromString,
                 _registered_method=True)
+        self.ListFlows = channel.unary_unary(
+                '/DuoWorkflow/ListFlows',
+                request_serializer=contract_dot_contract__pb2.ListFlowsRequest.SerializeToString,
+                response_deserializer=contract_dot_contract__pb2.ListFlowsResponse.FromString,
+                _registered_method=True)
 
 
 class DuoWorkflowServicer(object):
@@ -72,6 +77,12 @@ class DuoWorkflowServicer(object):
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
 
+    def ListFlows(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
 
 def add_DuoWorkflowServicer_to_server(servicer, server):
     rpc_method_handlers = {
@@ -89,6 +100,11 @@ def add_DuoWorkflowServicer_to_server(servicer, server):
                     servicer.ListTools,
                     request_deserializer=contract_dot_contract__pb2.ListToolsRequest.FromString,
                     response_serializer=contract_dot_contract__pb2.ListToolsResponse.SerializeToString,
+            ),
+            'ListFlows': grpc.unary_unary_rpc_method_handler(
+                    servicer.ListFlows,
+                    request_deserializer=contract_dot_contract__pb2.ListFlowsRequest.FromString,
+                    response_serializer=contract_dot_contract__pb2.ListFlowsResponse.SerializeToString,
             ),
     }
     generic_handler = grpc.method_handlers_generic_handler(
@@ -172,6 +188,33 @@ class DuoWorkflow(object):
             '/DuoWorkflow/ListTools',
             contract_dot_contract__pb2.ListToolsRequest.SerializeToString,
             contract_dot_contract__pb2.ListToolsResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def ListFlows(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/DuoWorkflow/ListFlows',
+            contract_dot_contract__pb2.ListFlowsRequest.SerializeToString,
+            contract_dot_contract__pb2.ListFlowsResponse.FromString,
             options,
             channel_credentials,
             insecure,
