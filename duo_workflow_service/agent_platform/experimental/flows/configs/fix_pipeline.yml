@@ -11,6 +11,10 @@ components:
       - from: "context:inputs.agent_user_environment.merge_request_url"
         as: "merge_request_url"
     toolset: ["get_pipeline_errors", "list_merge_request_diffs", "read_file", "find_files", "list_dir"]
+    ui_log_events:
+      - "on_agent_final_answer"
+      - "on_tool_execution_success"
+      - "on_tool_execution_failed"
   - name: "fix_pipeline_create_plan"
     type: AgentComponent
     prompt_id: "fix_pipeline_create_plan"
@@ -19,6 +23,8 @@ components:
       - from: "context:fix_pipeline_context.final_answer"
         as: "fix_pipeline_context_results"
     toolset: []
+    ui_log_events:
+      - "on_agent_final_answer"
   - name: "fix_pipeline_execution"
     type: AgentComponent
     prompt_id: "fix_pipeline_execution"
@@ -32,6 +38,10 @@ components:
       - find_files
       - mkdir
       - read_file
+    ui_log_events:
+      - "on_agent_final_answer"
+      - "on_tool_execution_success"
+      - "on_tool_execution_failed"
   - name: "fix_pipeline_git_add"
     type: DeterministicStepComponent
     inputs:
@@ -44,6 +54,9 @@ components:
         as: "args"
         literal: true
     tool_name: "run_git_command"
+    ui_log_events:
+      - "on_tool_execution_success"
+      - "on_tool_execution_failed"
   - name: "fix_pipeline_git_commit"
     type: DeterministicStepComponent
     inputs:
@@ -56,6 +69,9 @@ components:
         as: "args"
         literal: true
     tool_name: "run_git_command"
+    ui_log_events:
+      - "on_tool_execution_success"
+      - "on_tool_execution_failed"
   - name: "fix_pipeline_git_push"
     type: OneOffComponent
     prompt_id: "git_push_prompt"
@@ -71,6 +87,10 @@ components:
         as: "source_branch"
     toolset:
       - "run_git_command"
+    ui_log_events:
+      - "on_tool_call_input"
+      - "on_tool_execution_success"
+      - "on_tool_execution_failed"
 routers:
   - from: "fix_pipeline_context"
     to: "fix_pipeline_create_plan"
