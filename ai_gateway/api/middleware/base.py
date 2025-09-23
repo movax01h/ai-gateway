@@ -24,6 +24,7 @@ from .headers import (
     X_GITLAB_MODEL_GATEWAY_REQUEST_SENT_AT,
     X_GITLAB_REALM_HEADER,
     X_GITLAB_SAAS_DUO_PRO_NAMESPACE_IDS_HEADER,
+    X_GITLAB_TEAM_MEMBER_HEADER,
     X_GITLAB_VERSION_HEADER,
 )
 
@@ -158,7 +159,11 @@ class AccessLogMiddleware:
                     X_GITLAB_FEATURE_ENABLEMENT_TYPE_HEADER
                 ),
                 "gitlab_realm": request.headers.get(X_GITLAB_REALM_HEADER),
+                "is_gitlab_team_member": request.headers.get(
+                    X_GITLAB_TEAM_MEMBER_HEADER
+                ),
             }
+
             fields.update(starlette_context.data)
 
             # Recreate the Uvicorn access log format, but add all parameters as structured information
