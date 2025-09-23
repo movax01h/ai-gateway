@@ -76,6 +76,7 @@ expected_log_keys = [
     "gitlab_feature_enabled_by_namespace_ids",
     "gitlab_feature_enablement_type",
     "gitlab_language_server_version",
+    "is_gitlab_team_member",
     "duration_request",
 ]
 
