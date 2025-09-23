@@ -197,27 +197,38 @@ a path.
 
 ### Additional Context
 
-Additional Context can be passed to the Flow, but these fields must be defined in the YAML file in [jsonschema](https://python-jsonschema.readthedocs.io/) format:
+Additional Context can be passed to the Flow (in additional to the `goal`), but the schema for these fields must be defined in the `flow` section of the YAML file:
 
 ```yaml
-additional_context_schema: |
-  {
-    "properties": {
-      "merge_request_url": {
-        "type": "string"
-      },
-      "source_branch": {
-        "type": "string"
-      }
-    },
-    "additionalProperties": false
-  }
+flow:
+  entry_point: "first_component_name"
+  inputs:
+    - category: merge_request_info
+      input_schema:
+        url:
+          type: string
+          format: uri
+          description: GitLab Merge Request URL
+        source_branch:
+          type: string
+          description: Merge Request Source Branch
+    - category: pipeline_info
+      input_schema:
+        url:
+          type: string
+          format: uri
+          description: GitLab Pipeline URL
 ```
 
-When making the call to the Service API, this schema is currently only applied to the `agent_user_environment` Category (to pass Unit Primitive checks). For example, the schema would be applied to the `Content` field below:
+The `format` and `description` fields are optional in the definitions. Allowed `type` and `format` fields can be found in the [jsonschema](https://json-schema.org/docs) docs.
+
+When making the call to the Service API, these additional context parameters are passed in as serialized JSON in the `Content` fields:
 
 ```json
-"additional_context": [{"Category": "agent_user_environment", "Content": "{'merge_request_url': 'www.example.com', 'source_branch': 'testbranch'}"}]
+"additional_context": [
+    {"Category": "merge_request_info", "Content": "{\"url\": \"www.example.com\", \"source_branch\": \"testbranch\"}"},
+    {"Category": "pipeline_info", "Content": "{\"url\": \"www.example.com\"}"}
+]
 ```
 
 ### Output

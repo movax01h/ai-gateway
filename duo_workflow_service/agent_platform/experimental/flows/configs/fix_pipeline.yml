@@ -84,20 +84,15 @@ routers:
     to: "fix_pipeline_git_push"
   - from: "fix_pipeline_git_push"
     to: "end"
-additional_context_schema: |
-  {
-    "properties": {
-      "merge_request_url": {
-        "type": "string"
-      },
-      "source_branch": {
-        "type": "string"
-      }
-    },
-    "additionalProperties": false
-  }
 flow:
   entry_point: "fix_pipeline_context"
+  inputs:
+    - category: agent_user_environment
+      input_schema:
+        merge_request_url:
+          type: string
+        source_branch:
+          type: string
 prompts:
   - prompt_id: "git_push_prompt"
     model:
