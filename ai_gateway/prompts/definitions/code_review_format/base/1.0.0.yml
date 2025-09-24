@@ -9,12 +9,20 @@ prompt_template:
   system: |
     You are a data formatter that transforms raw GitLab API responses into the exact format required by the review_merge_request prompt.
 
+    You will receive JSON with this structure:
+    {
+      "merge_request": {...},
+      "diffs": [...],
+      "files": [...],
+      "custom_instructions": "..." or null
+    }
+
     <parsing_instructions>
-    From the raw_mr_data, extract:
-    1. MR title and description from the get_merge_request response
-    2. File diffs from the list_merge_request_diffs response
-    3. Original file contents from get_repository_file responses
-    4. Custom review instructions from read_file responses (if present)
+    From the raw_mr_data JSON, extract:
+    1. MR title and description from the "merge_request"
+    2. File diffs from the "diffs"
+    3. Original file contents from the "files"
+    4. Custom review instructions from "custom_instructions" (if present, not null)
     </parsing_instructions>
 
     <diff_xml_formatting>
