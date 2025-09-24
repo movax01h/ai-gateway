@@ -21,6 +21,7 @@ from duo_workflow_service.gitlab.gitlab_api import Project
 from duo_workflow_service.gitlab.http_client import GitlabHttpClient
 from duo_workflow_service.workflows.convert_to_gitlab_ci import Workflow
 from duo_workflow_service.workflows.convert_to_gitlab_ci.workflow import Routes, _router
+from duo_workflow_service.workflows.type_definitions import AdditionalContext
 from lib.internal_events.event_enum import CategoryEnum
 
 
@@ -64,6 +65,18 @@ def workflow_fixture(
         )
         workflow._project = project
         return workflow
+
+
+@pytest.fixture(name="workflow_with_source_branch")
+def workflow_with_source_branch_fixture(workflow):
+    """Create a workflow instance with source branch in additional context."""
+    workflow._additional_context = [
+        AdditionalContext(
+            category="agent_user_environment",
+            content='{"source_branch": "feature-branch"}',
+        )
+    ]
+    return workflow
 
 
 @pytest.fixture(name="mock_agent_response")
@@ -119,6 +132,116 @@ def mock_log_exception_fixture():
 @pytest.fixture(name="anthropic_env")
 def setup_anthropic_env(monkeypatch):
     monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
+
+
+def test_get_source_branch_with_context(workflow_with_source_branch):
+    """Test get_source_branch returns correct branch when context is present."""
+    assert workflow_with_source_branch.get_source_branch() == "feature-branch"
+
+
+def test_get_source_branch_without_context(workflow):
+    """Test get_source_branch returns None when no additional context."""
+
+    assert workflow.get_source_branch() is None
+
+
+def test_get_source_branch_with_different_category(workflow):
+    """Test get_source_branch returns None when context has different category."""
+    workflow._additional_context = [
+        AdditionalContext(
+            category="other_category", content='{"source_branch": "main"}'
+        )
+    ]
+
+    assert workflow.get_source_branch() is None
+
+
+@pytest.mark.asyncio
+async def test_git_push_with_source_branch(
+    mock_run_tool_node_class,
+    mock_agent,
+    mock_tools_registry,
+    mock_checkpointer,
+    workflow_with_source_branch,
+):
+    """Test git push command with merge request target when source branch exists."""
+    push_command = _get_push_command(
+        mock_run_tool_node_class,
+        mock_tools_registry,
+        mock_checkpointer,
+        workflow_with_source_branch,
+    )
+
+    expected_args = (
+        "-o merge_request.create "
+        "-o merge_request.title='Duo Agent: Convert to GitLab CI' "
+        "-o merge_request.description='Created by Duo Agent, session: test_id' "
+        "-o merge_request.target=feature-branch"
+    )
+    assert push_command["command"] == "push"
+    assert push_command["args"].strip() == expected_args
+
+
+@pytest.mark.asyncio
+async def test_git_push_without_source_branch(
+    mock_run_tool_node_class,
+    mock_agent,
+    mock_tools_registry,
+    mock_checkpointer,
+    workflow,
+):
+    """Test git push command without merge request target when no source branch."""
+    push_command = _get_push_command(
+        mock_run_tool_node_class,
+        mock_tools_registry,
+        mock_checkpointer,
+        workflow,
+    )
+
+    expected_args = (
+        "-o merge_request.create "
+        "-o merge_request.title='Duo Agent: Convert to GitLab CI' "
+        "-o merge_request.description='Created by Duo Agent, session: test_id'"
+    )
+    assert push_command["command"] == "push"
+    assert push_command["args"].strip() == expected_args
+
+
+def _get_push_command(
+    mock_run_tool_node_class,
+    mock_tools_registry,
+    mock_checkpointer,
+    workflow,
+):
+    """Helper function to extract push command from workflow compilation."""
+    mock_node = Mock(run=Mock(return_value={}))
+    mock_run_tool_node_class.return_value = mock_node
+
+    workflow._compile(
+        goal="/test/path",
+        tools_registry=mock_tools_registry,
+        checkpointer=mock_checkpointer,
+    )
+
+    git_call = next(
+        (
+            call
+            for call in mock_run_tool_node_class.call_args_list
+            if "_git_output" in str(call.kwargs.get("output_parser", ""))
+        ),
+        None,
+    )
+
+    if git_call is None:
+        raise ValueError("No git call found in mock calls")
+
+    git_commands = git_call.kwargs["input_parser"](None)
+
+    push_cmd = next((cmd for cmd in git_commands if cmd["command"] == "push"), None)
+    if push_cmd is None:
+        raise ValueError("No push command found in git commands")
+
+    return push_cmd
 
 
 @pytest.mark.asyncio

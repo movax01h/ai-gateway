@@ -242,6 +242,19 @@ class Workflow(AbstractWorkflow):
             "start_node": "request_translation",
         }
 
+    def get_source_branch(self):
+        if not self._additional_context:
+            return None
+
+        for context in self._additional_context:
+            if context.category == "agent_user_environment" and context.content:
+                try:
+                    content_data = json.loads(context.content)
+                    return content_data.get("source_branch")
+                except (json.JSONDecodeError, TypeError):
+                    continue
+        return None
+
     def _setup_workflow_graph(
         self,
         graph: StateGraph,
@@ -269,6 +282,11 @@ class Workflow(AbstractWorkflow):
         )
         graph.add_node("execution_tools", translator_components["tools_executor"].run)
 
+        source_branch = self.get_source_branch()
+        merge_request_target = ""
+        if source_branch:
+            merge_request_target = f"-o merge_request.target={source_branch}"
+
         # deterministic git actions
         graph.add_node(
             "git_actions",
@@ -283,12 +301,15 @@ class Workflow(AbstractWorkflow):
                     {
                         "repository_url": (self._project["http_url_to_repo"]),  # type: ignore[index]
                         "command": "commit",
-                        "args": "-m 'Duo Workflow: Convert to GitLab CI'",
+                        "args": "-m 'Duo Agent: Convert to GitLab CI'",
                     },
                     {
                         "repository_url": (self._project["http_url_to_repo"]),  # type: ignore[index]
                         "command": "push",
-                        "args": "-o merge_request.create",
+                        "args": f"-o merge_request.create "
+                        f"-o merge_request.title='Duo Agent: Convert to GitLab CI' "
+                        f"-o merge_request.description='Created by Duo Agent, session: {self._workflow_id}' "
+                        f"{merge_request_target}",
                     },
                 ],
                 output_parser=_git_output,  # type: ignore
