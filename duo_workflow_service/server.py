@@ -83,6 +83,8 @@ from lib.internal_events.event_enum import (
 
 CONTAINER_APPLICATION_PACKAGES = ["duo_workflow_service"]
 
+MAX_MESSAGE_SIZE = 4 * 1024 * 1024
+
 
 log = structlog.stdlib.get_logger("server")
 
@@ -578,6 +580,14 @@ async def serve(port: int) -> None:
             ("grpc.http2.min_ping_interval_without_data_ms", 10 * 1000),
             ("grpc.keepalive_permit_without_calls", 1),
             ("grpc.so_reuseport", 0),
+            (
+                "grpc.max_receive_message_length",
+                MAX_MESSAGE_SIZE,
+            ),
+            (
+                "grpc.max_send_message_length",
+                MAX_MESSAGE_SIZE,
+            ),
         ]
 
         server = grpc.aio.server(
