@@ -311,6 +311,8 @@ async def test_workflow_is_cancelled_on_parent_task_cancellation(
         assert real_workflow_task is not None
         assert real_workflow_task.cancelled()
 
+        mock_context.set_code.assert_called_once_with(grpc.StatusCode.ABORTED)
+
 
 @pytest.mark.asyncio
 @patch("duo_workflow_service.server.AbstractWorkflow")
@@ -604,6 +606,7 @@ async def test_execute_workflow_missing_workflow_metadata(
     mock_workflow.is_done = True
     mock_workflow.run = AsyncMock()
     mock_workflow.cleanup = AsyncMock()
+    mock_workflow.last_error = ValueError("validation error")
     mock_resolve_workflow.return_value = mock_abstract_workflow_class
 
     async def mock_request_iterator() -> AsyncIterable[contract_pb2.ClientEvent]:
@@ -636,6 +639,9 @@ async def test_execute_workflow_missing_workflow_metadata(
         preapproved_tools=[],
     )
 
+    mock_context.set_code.assert_called_once_with(grpc.StatusCode.INTERNAL)
+    mock_context.set_details.assert_called_once_with("validation error")
+
 
 @pytest.mark.asyncio
 @patch("duo_workflow_service.server.AbstractWorkflow")
@@ -647,6 +653,7 @@ async def test_execute_workflow_valid_workflow_metadata(
     mock_workflow.is_done = True
     mock_workflow.run = AsyncMock()
     mock_workflow.cleanup = AsyncMock()
+    mock_workflow.last_error = None
     mock_resolve_workflow.return_value = mock_abstract_workflow_class
     mcp_tools = [
         contract_pb2.McpTool(name="get_issue", description="Tool to get issue")
@@ -694,6 +701,8 @@ async def test_execute_workflow_valid_workflow_metadata(
         language_server_version=None,
         preapproved_tools=preapproved_tools,
     )
+
+    mock_context.set_code.assert_called_once_with(grpc.StatusCode.OK)
 
 
 def test_clean_start_request():

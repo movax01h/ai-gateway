@@ -144,6 +144,7 @@ class DuoWorkflowService(contract_pb2_grpc.DuoWorkflowServicer):
 
     # pylint: disable=invalid-overridden-method
     # pylint: disable=too-many-statements
+    # pylint: disable=too-many-branches
     @inject
     async def ExecuteWorkflow(
         self,
@@ -375,11 +376,11 @@ class DuoWorkflowService(contract_pb2_grpc.DuoWorkflowServicer):
                         requestID=event.actionResponse.requestID,
                     )
 
-        async def cancel_workflow(
+        async def abort_workflow(
             workflow_task: Optional[asyncio.Task], err: BaseException
         ):
             if workflow_task and not workflow_task.done():
-                log.info("Canceling workflow...")
+                log.info("Aborting workflow...")
                 workflow_task.cancel(
                     f"Terminated workflow {workflow_id} execution due to an {type(err).__name__}: {err}"
                 )
@@ -402,10 +403,17 @@ class DuoWorkflowService(contract_pb2_grpc.DuoWorkflowServicer):
                 yield action
 
             await workflow_task
+
+            if workflow.last_error:
+                context.set_code(grpc.StatusCode.INTERNAL)
+                context.set_details(str(workflow.last_error))
+            else:
+                context.set_code(grpc.StatusCode.OK)
         except asyncio.CancelledError as err:
             # This exception is raised when RPC is cancelled by the client.
+            context.set_code(grpc.StatusCode.ABORTED)
             log_exception(err, extra={"source": __name__})
-            await cancel_workflow(workflow_task, err)
+            await abort_workflow(workflow_task, err)
             # Task cancellation must be reraised to the grpc server side so that the rpc task can be shutdown properly.
             raise
         except BaseException as err:
@@ -416,7 +424,7 @@ class DuoWorkflowService(contract_pb2_grpc.DuoWorkflowServicer):
                     "source": __name__,
                 },
             )
-            await cancel_workflow(workflow_task, err)
+            await abort_workflow(workflow_task, err)
             await context.abort(grpc.StatusCode.INTERNAL, "Something went wrong")
         finally:
             await workflow.cleanup(workflow_id)

@@ -82,6 +82,7 @@ class AbstractWorkflow(ABC):
     _http_client: GitlabHttpClient
     _workflow_metadata: dict[str, Any]
     is_done: bool = False
+    last_error: BaseException | None = None
     _workflow_type: CategoryEnum
     _stream: bool = False
     _additional_context: list[AdditionalContext] | None
@@ -296,6 +297,7 @@ class AbstractWorkflow(ABC):
                             type=type, state=state, stream=self._stream
                         )
         except BaseException as e:
+            self.last_error = e
             await self._handle_workflow_failure(e, compiled_graph, graph_config)
             raise TraceableException(e)
         finally:
