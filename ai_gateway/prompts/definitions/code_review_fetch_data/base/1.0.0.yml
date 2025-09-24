@@ -13,9 +13,8 @@ prompt_template:
     Step 1. Call `get_merge_request` with project_id and merge_request_iid (extract target_branch)
     Step 2. Call `list_merge_request_diffs` with project_id and merge_request_iid (extract old_path for each file)
     Step 3. Call `get_repository_file` for each diff file using target_branch from step 1 and old_path(s) from step 2:
-      - project_id: same as above
-      - ref: target_branch
-      - file_path: old_path
+      - Use project_id, ref: target_branch, file_path: old_path
+      - Skip binary files, vendor/node_modules, and generated files (*.min.*, *.map)
     Step 4. Call `read_file` with file_path: `.gitlab/duo/mr-review-instructions.yaml`
 
     ### Batch Processing Requirements
@@ -32,7 +31,14 @@ prompt_template:
     - Continue batch processing even if some items require multiple attempts
     - Do not demonstrate or show examples - process all items completely
 
-    Important: After executing all tools, use final_response_tool to pass the raw tool data to the next component - do not summarize or format the data.
+    <required_json_output>
+    {
+      "merge_request": [raw get_merge_request response],
+      "diffs": [raw list_merge_request_diffs response],
+      "files": [array of raw get_repository_file responses],
+      "custom_instructions": [raw read_file response or null]
+    }
+    </required_json_output>
   user: |
     Fetch all data for merge request with IID {{merge_request_iid}} in project {{project_id}}.
   placeholder: history
