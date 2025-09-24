@@ -20,7 +20,5 @@ additional_properties:
     description: Number of input tokens estimated by the approximate token counter.
 milestone: '17.6'
 introduced_by_url: https://gitlab.com/gitlab-org/duo-workflow/duo-workflow-service/-/merge_requests/153
-distributions:
-  - ee
 tiers:
   - ultimate

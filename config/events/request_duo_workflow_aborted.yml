@@ -12,7 +12,5 @@ additional_properties:
     description: Workflow Id that can be used to connect this event to others that happen when the workflow is completed.
 milestone: '18.3'
 introduced_by_url: https://gitlab.com/gitlab-org/modelops/applied-ml/code-suggestions/ai-assist/-/merge_requests/3093
-distributions:
-  - ee
 tiers:
   - ultimate
