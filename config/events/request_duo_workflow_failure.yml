@@ -12,7 +12,5 @@ additional_properties:
     description: Workflow Id that can be used to connect this event to others that happen when the workflow is completed.
 milestone: '17.6'
 introduced_by_url: https://gitlab.com/gitlab-org/duo-workflow/duo-workflow-service/-/merge_requests/153
-distributions:
-  - ee
 tiers:
   - ultimate
