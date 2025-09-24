@@ -186,8 +186,9 @@ class MonitoringInterceptor(ServerInterceptor):
                 "grpc_service_name": grpc_service_name,
                 "grpc_method_name": grpc_method_name,
                 "servicer_context_code": (
-                    servicer_context.code() or grpc.StatusCode.OK
+                    servicer_context.code() or grpc.StatusCode.UNKNOWN
                 ).name,
+                "servicer_context_details": servicer_context.details(),
                 "gitlab_host_name": invocation_metadata.get(
                     X_GITLAB_HOST_NAME_HEADER.lower()
                 ),
