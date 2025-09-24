@@ -38,3 +38,17 @@ class TestGetValidNamespaceIds:
     def test_none_input(self, input_ids, expected):
         result = get_valid_namespace_ids(input_ids)
         assert result == expected
+
+    @pytest.mark.parametrize(
+        "input_ids, expected",
+        [
+            (["1", "2", "2", "3", "1"], [1, 2, 3]),
+            (["5", "1", "2", "1", "3", "2", "5", "4"], [5, 1, 2, 3, 4]),
+            (["7", "7", "7", "7"], [7]),
+            (["1", "1"], [1]),
+        ],
+    )
+    def test_duplicate_removal(self, input_ids, expected):
+        """Test that duplicates are removed."""
+        result = get_valid_namespace_ids(input_ids)
+        assert result == expected

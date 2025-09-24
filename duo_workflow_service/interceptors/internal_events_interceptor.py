@@ -26,7 +26,8 @@ def convert_feature_enabled_string_to_list(
     if not enabled_features or enabled_features == "undefined":
         return None
 
-    return [int(feature.strip()) for feature in enabled_features.split(",")]
+    feature_list = [int(feature.strip()) for feature in enabled_features.split(",")]
+    return list(dict.fromkeys(feature_list))
 
 
 class InternalEventsInterceptor(grpc.aio.ServerInterceptor):

@@ -15,10 +15,12 @@ def get_valid_namespace_ids(ids: list[str]) -> list[int]:
 
     logger = structlog.get_logger()
 
+    deduplicated_ids = list(dict.fromkeys(ids))
+
     valid_ids = []
     invalid_ids = []
 
-    for str_id in ids:
+    for str_id in deduplicated_ids:
         try:
             valid_ids.append(int(str_id))
         except ValueError:

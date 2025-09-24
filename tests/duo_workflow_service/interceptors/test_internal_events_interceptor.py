@@ -50,6 +50,42 @@ def handler_call_details_with_empty_feature_fixture():
     return mock_details
 
 
+@pytest.fixture(name="handler_call_details_with_duplicate_namespace_ids")
+def handler_call_details_with_duplicate_namespace_ids_fixture():
+    mock_details = MagicMock()
+    mock_details.invocation_metadata = (
+        ("x-gitlab-realm", "test-realm"),
+        ("x-gitlab-instance-id", "test-instance-id"),
+        ("x-gitlab-global-user-id", "test-global-user-id"),
+        ("x-gitlab-host-name", "test-gitlab-host"),
+        ("x-gitlab-feature-enabled-by-namespace-ids", "1,2,2,3,1,4,3,5"),
+        ("x-gitlab-project-id", "1"),
+        ("x-gitlab-namespace-id", "2"),
+        ("x-gitlab-is-a-gitlab-member", "true"),
+    )
+    return mock_details
+
+
+@pytest.mark.asyncio
+async def test_interceptor_removes_duplicate_namespace_ids(
+    interceptor, mock_continuation, handler_call_details_with_duplicate_namespace_ids
+):
+    """Test that duplicate namespace IDs are removed while preserving order."""
+    await interceptor.intercept_service(
+        mock_continuation, handler_call_details_with_duplicate_namespace_ids
+    )
+    event_context = current_event_context.get()
+
+    assert event_context.feature_enabled_by_namespace_ids == [1, 2, 3, 4, 5]
+    assert event_context.realm == "test-realm"
+    assert event_context.instance_id == "test-instance-id"
+    assert event_context.global_user_id == "test-global-user-id"
+    assert event_context.host_name == "test-gitlab-host"
+    assert event_context.project_id == 1
+    assert event_context.namespace_id == 2
+    assert event_context.is_gitlab_team_member is True
+
+
 @pytest.fixture(name="handler_call_details_with_empty_project_and_namespace_id")
 def handler_call_details_with_empty_project_and_namespace_id_fixture():
     mock_details = MagicMock()
