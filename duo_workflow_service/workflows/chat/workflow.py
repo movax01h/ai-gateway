@@ -11,10 +11,7 @@ from langgraph.graph import END, StateGraph
 from langgraph.types import Command
 
 from ai_gateway.container import ContainerApplication
-from ai_gateway.model_metadata import (
-    create_model_metadata,
-    current_model_metadata_context,
-)
+from ai_gateway.model_metadata import current_model_metadata_context
 from ai_gateway.prompts import InMemoryPromptRegistry, Prompt
 from ai_gateway.prompts.registry import LocalPromptRegistry
 from contract import contract_pb2
@@ -36,7 +33,6 @@ from duo_workflow_service.workflows.abstract_workflow import (
     InvocationMetadata,
 )
 from duo_workflow_service.workflows.type_definitions import AdditionalContext
-from lib.feature_flags.context import FeatureFlag, is_feature_enabled
 from lib.internal_events.client import InternalEventsClient
 from lib.internal_events.event_enum import CategoryEnum
 
@@ -317,18 +313,7 @@ class Workflow(AbstractWorkflow):
             tools = self._get_tools()
 
         agents_toolset = tools_registry.toolset(tools)
-
         model_metadata = current_model_metadata_context.get()
-        if not model_metadata and is_feature_enabled(
-            FeatureFlag.DUO_AGENTIC_CHAT_OPENAI_GPT_5
-        ):
-            # temporary approach: model selection doesn't support feature flags
-            model_metadata = create_model_metadata(
-                {
-                    "provider": "gitlab",
-                    "name": "gpt_5",
-                }
-            )  # it will force the prompt registry load the chat/agent/gpt_5 prompt
 
         prompt_runnable: Optional[Prompt] = None
         if self._use_agent_override:
