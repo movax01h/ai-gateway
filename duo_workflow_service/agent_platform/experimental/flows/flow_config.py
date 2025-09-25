@@ -42,7 +42,7 @@ class FlowConfigInput(BaseModel):
 
 
 class FlowConfigMetadata(BaseModel):
-    entry_point: str
+    entry_point: Optional[str] = None
     inputs: Optional[list[FlowConfigInput]] = None
 
 

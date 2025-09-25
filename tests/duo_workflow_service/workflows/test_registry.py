@@ -4,6 +4,9 @@ from unittest.mock import Mock, patch
 import pytest
 from google.protobuf import struct_pb2
 
+from duo_workflow_service.agent_platform.experimental.flows.flow_config import (
+    FlowConfig,
+)
 from duo_workflow_service.workflows import chat
 from duo_workflow_service.workflows.abstract_workflow import AbstractWorkflow
 from duo_workflow_service.workflows.registry import (
@@ -46,6 +49,58 @@ def simple_flow_config():
         "struct": struct,
         "config_instance": mock_config_instance,
         "expected_dict": expected_dict,
+    }
+
+
+def build_chat_flow_config(
+    components=None, prompts=None, version=None, routers=None, flow=None
+):
+    mock_flow_cls = Mock()
+
+    if components is None:
+        components = [
+            {
+                "type": "AgentComponent",
+                "toolset": ["tool1", "tool2"],
+                "prompt_id": "custom/prompt",
+            }
+        ]
+    if prompts is None:
+        prompts = [{"prompt_id": "custom/prompt", "content": "test prompt"}]
+    if routers is None:
+        routers = []
+    if flow is None:
+        flow = {}
+
+    struct_data = {
+        "environment": CHAT_AGENT_COMPONENT_ENVIRONMENT,
+        "components": components,
+        "routers": routers,
+        "flow": flow,
+    }
+
+    expected_data = {
+        "version": "experimental",
+        "environment": CHAT_AGENT_COMPONENT_ENVIRONMENT,
+        "components": components,
+        "routers": routers,
+        "flow": flow,
+    }
+
+    if version:
+        struct_data["version"] = version
+    if prompts:
+        struct_data["prompts"] = prompts
+        expected_data["prompts"] = prompts
+
+    struct = struct_pb2.Struct()
+    struct.update(struct_data)
+
+    return {
+        "flow_config_cls": FlowConfig,
+        "flow_cls": mock_flow_cls,
+        "struct": struct,
+        "expected_dict": expected_data,
     }
 
 
@@ -134,66 +189,30 @@ def test_resolve_workflow_class_with_flow_config(simple_flow_config):
         )
 
 
-def test_resolve_workflow_class_with_chat_flow_config():
-    mock_flow_config_cls = Mock()
-    mock_config_instance = Mock()
-    mock_config_instance.environment = CHAT_AGENT_COMPONENT_ENVIRONMENT
-    mock_config_instance.components = [
-        {
-            "type": "AgentComponent",
-            "toolset": ["tool1", "tool2"],
-            "prompt_id": "custom/prompt",
-        }
-    ]
-    mock_config_instance.prompts = [
-        {"prompt_id": "custom/prompt", "content": "test prompt"}
-    ]
-    mock_flow_config_cls.return_value = mock_config_instance
-
-    mock_flow_cls = Mock()
-
-    struct = struct_pb2.Struct()
-    struct.update(
-        {
-            "version": "1.0",
-            "environment": CHAT_AGENT_COMPONENT_ENVIRONMENT,
-            "components": [
-                {
-                    "type": "AgentComponent",
-                    "toolset": ["tool1", "tool2"],
-                    "prompt_id": "custom/prompt",
-                }
-            ],
-            "prompts": [{"prompt_id": "custom/prompt", "content": "test prompt"}],
-        }
-    )
-
-    expected_dict = {
-        "version": "experimental",
-        "environment": CHAT_AGENT_COMPONENT_ENVIRONMENT,
-        "components": [
-            {
-                "type": "AgentComponent",
-                "toolset": ["tool1", "tool2"],
-                "prompt_id": "custom/prompt",
-            }
-        ],
-        "prompts": [{"prompt_id": "custom/prompt", "content": "test prompt"}],
-    }
+@pytest.mark.parametrize(
+    "config_params",
+    [
+        ({"version": "1.0"}),
+        ({}),
+    ],
+    ids=["basic", "no_entry_point"],
+)
+def test_resolve_workflow_class_with_chat_flow_config_success(config_params):
+    mocks = build_chat_flow_config(**config_params)
 
     with (
         patch(
             "duo_workflow_service.workflows.registry._FLOW_BY_VERSIONS",
-            {"experimental": (mock_flow_config_cls, mock_flow_cls)},
+            {"experimental": (mocks["flow_config_cls"], mocks["flow_cls"])},
         ),
         patch(
             "duo_workflow_service.workflows.registry.MessageToDict",
-            return_value=expected_dict,
+            return_value=mocks["expected_dict"],
         ),
     ):
         result = resolve_workflow_class(
             workflow_definition=None,
-            flow_config=struct,
+            flow_config=mocks["struct"],
             flow_config_schema_version="experimental",
         )
 
@@ -211,174 +230,62 @@ def test_resolve_workflow_class_with_chat_flow_config():
         }
         assert result.keywords == expected_kwargs
 
-        mock_flow_config_cls.assert_called_once_with(
-            version="experimental",
-            environment=CHAT_AGENT_COMPONENT_ENVIRONMENT,
-            components=[
-                {
-                    "type": "AgentComponent",
-                    "toolset": ["tool1", "tool2"],
-                    "prompt_id": "custom/prompt",
-                }
-            ],
-            prompts=[{"prompt_id": "custom/prompt", "content": "test prompt"}],
-        )
 
-
-def test_resolve_workflow_class_with_chat_flow_config_invalid_component_count():
-    mock_flow_config_cls = Mock()
-    mock_config_instance = Mock()
-    mock_config_instance.environment = CHAT_AGENT_COMPONENT_ENVIRONMENT
-    mock_config_instance.components = [
-        {"type": "AgentComponent"},
-        {"type": "AgentComponent"},
-    ]  # Too many components
-    mock_flow_config_cls.return_value = mock_config_instance
-
-    struct = struct_pb2.Struct()
-    struct.update(
-        {
-            "environment": CHAT_AGENT_COMPONENT_ENVIRONMENT,
-            "components": [{"type": "AgentComponent"}, {"type": "AgentComponent"}],
-        }
-    )
+@pytest.mark.parametrize(
+    "config_params,expected_error",
+    [
+        (
+            {"components": [{"type": "AgentComponent"}, {"type": "AgentComponent"}]},
+            "Chat-partial environment allows exactly one component, but received 2",
+        ),
+        (
+            {"components": [{"type": "InvalidComponent"}], "prompts": None},
+            "Invalid component type: InvalidComponent",
+        ),
+        (
+            {
+                "components": [{"type": "AgentComponent"}],
+                "prompts": [
+                    {"prompt_id": "prompt1", "content": "test prompt 1"},
+                    {"prompt_id": "prompt2", "content": "test prompt 2"},
+                ],
+            },
+            "Chat-partial environment expects exactly one prompt in prompt configuration, but received 2",
+        ),
+        (
+            {
+                "components": [{"type": "AgentComponent", "prompt_version": "v1.0"}],
+                "prompts": [{"prompt_id": "prompt1", "content": "test prompt"}],
+            },
+            "Chat-partial environment expects either inline or in repository prompt configuration, but received both",
+        ),
+    ],
+    ids=[
+        "multiple_components",
+        "invalid_component_type",
+        "multiple_prompts",
+        "both_prompts_and_version",
+    ],
+)
+def test_resolve_workflow_class_with_chat_flow_config_failure(
+    config_params, expected_error
+):
+    mocks = build_chat_flow_config(**config_params)
 
     with (
         patch(
             "duo_workflow_service.workflows.registry._FLOW_BY_VERSIONS",
-            {"experimental": (mock_flow_config_cls, Mock())},
+            {"experimental": (mocks["flow_config_cls"], mocks["flow_cls"])},
         ),
         patch(
             "duo_workflow_service.workflows.registry.MessageToDict",
-            return_value={
-                "version": "experimental",
-                "environment": CHAT_AGENT_COMPONENT_ENVIRONMENT,
-                "components": [{"type": "AgentComponent"}, {"type": "AgentComponent"}],
-            },
+            return_value=mocks["expected_dict"],
         ),
     ):
-        with pytest.raises(
-            ValueError,
-            match="Chat-partial environment allows exactly one component, but received 2",
-        ):
+        with pytest.raises(ValueError, match=expected_error):
             resolve_workflow_class(
                 workflow_definition=None,
-                flow_config=struct,
-                flow_config_schema_version="experimental",
-            )
-
-
-def test_resolve_workflow_class_with_chat_flow_config_invalid_component_type():
-    mock_flow_config_cls = Mock()
-    mock_config_instance = Mock()
-    mock_config_instance.environment = CHAT_AGENT_COMPONENT_ENVIRONMENT
-    mock_config_instance.components = [{"type": "InvalidComponent"}]
-    mock_flow_config_cls.return_value = mock_config_instance
-
-    struct = struct_pb2.Struct()
-    struct.update(
-        {
-            "environment": CHAT_AGENT_COMPONENT_ENVIRONMENT,
-            "components": [{"type": "InvalidComponent"}],
-        }
-    )
-
-    with (
-        patch(
-            "duo_workflow_service.workflows.registry._FLOW_BY_VERSIONS",
-            {"experimental": (mock_flow_config_cls, Mock())},
-        ),
-        patch(
-            "duo_workflow_service.workflows.registry.MessageToDict",
-            return_value={
-                "version": "experimental",
-                "environment": CHAT_AGENT_COMPONENT_ENVIRONMENT,
-                "components": [{"type": "InvalidComponent"}],
-            },
-        ),
-    ):
-        with pytest.raises(
-            ValueError, match="Invalid component type: InvalidComponent"
-        ):
-            resolve_workflow_class(
-                workflow_definition=None,
-                flow_config=struct,
-                flow_config_schema_version="experimental",
-            )
-
-
-def test_resolve_workflow_class_with_chat_flow_config_multiple_prompts():
-    mock_flow_config_cls = Mock()
-    mock_config_instance = Mock()
-    mock_config_instance.environment = CHAT_AGENT_COMPONENT_ENVIRONMENT
-    mock_config_instance.components = [{"type": "AgentComponent"}]
-    mock_config_instance.prompts = [
-        {"prompt_id": "prompt1", "content": "test prompt 1"},
-        {"prompt_id": "prompt2", "content": "test prompt 2"},
-    ]
-    mock_flow_config_cls.return_value = mock_config_instance
-
-    struct = struct_pb2.Struct()
-    struct.update(
-        {
-            "environment": CHAT_AGENT_COMPONENT_ENVIRONMENT,
-            "components": [{"type": "AgentComponent"}],
-            "prompts": [
-                {"prompt_id": "prompt1", "content": "test prompt 1"},
-                {"prompt_id": "prompt2", "content": "test prompt 2"},
-            ],
-        }
-    )
-
-    with (
-        patch(
-            "duo_workflow_service.workflows.registry._FLOW_BY_VERSIONS",
-            {"experimental": (mock_flow_config_cls, Mock())},
-        ),
-    ):
-        with pytest.raises(
-            ValueError,
-            match="Chat-partial environment expects exactly one prompt in prompt configuration, but received 2",
-        ):
-            resolve_workflow_class(
-                workflow_definition=None,
-                flow_config=struct,
-                flow_config_schema_version="experimental",
-            )
-
-
-def test_resolve_workflow_class_with_chat_flow_config_both_prompts_and_version():
-    mock_flow_config_cls = Mock()
-    mock_config_instance = Mock()
-    mock_config_instance.environment = CHAT_AGENT_COMPONENT_ENVIRONMENT
-    mock_config_instance.components = [
-        {"type": "AgentComponent", "prompt_version": "v1.0"}
-    ]
-    mock_config_instance.prompts = [{"prompt_id": "prompt1", "content": "test prompt"}]
-    mock_flow_config_cls.return_value = mock_config_instance
-
-    struct = struct_pb2.Struct()
-    struct.update(
-        {
-            "environment": CHAT_AGENT_COMPONENT_ENVIRONMENT,
-            "components": [{"type": "AgentComponent", "prompt_version": "v1.0"}],
-            "prompts": [{"prompt_id": "prompt1", "content": "test prompt"}],
-        }
-    )
-
-    with (
-        patch(
-            "duo_workflow_service.workflows.registry._FLOW_BY_VERSIONS",
-            {"experimental": (mock_flow_config_cls, Mock())},
-        ),
-    ):
-        with pytest.raises(
-            ValueError,
-            match="Chat-partial environment expects either inline or in repository prompt configuration, but received both",
-        ):
-            resolve_workflow_class(
-                workflow_definition=None,
-                flow_config=struct,
+                flow_config=mocks["struct"],
                 flow_config_schema_version="experimental",
             )
 
