@@ -47,7 +47,7 @@ export interface StartWorkflowRequest {
 
 export interface ActionResponse {
   requestID: string;
-  response: string;
+  response?: string | undefined;
   plainTextResponse?: PlainTextResponse | undefined;
   httpResponse?: HttpResponse | undefined;
 }
@@ -580,7 +580,7 @@ export const StartWorkflowRequest: MessageFns<StartWorkflowRequest> = {
 };
 
 function createBaseActionResponse(): ActionResponse {
-  return { requestID: "", response: "", plainTextResponse: undefined, httpResponse: undefined };
+  return { requestID: "", response: undefined, plainTextResponse: undefined, httpResponse: undefined };
 }
 
 export const ActionResponse: MessageFns<ActionResponse> = {
@@ -588,7 +588,7 @@ export const ActionResponse: MessageFns<ActionResponse> = {
     if (message.requestID !== "") {
       writer.uint32(10).string(message.requestID);
     }
-    if (message.response !== "") {
+    if (message.response !== undefined) {
       writer.uint32(18).string(message.response);
     }
     if (message.plainTextResponse !== undefined) {
@@ -651,7 +651,7 @@ export const ActionResponse: MessageFns<ActionResponse> = {
   fromJSON(object: any): ActionResponse {
     return {
       requestID: isSet(object.requestID) ? globalThis.String(object.requestID) : "",
-      response: isSet(object.response) ? globalThis.String(object.response) : "",
+      response: isSet(object.response) ? globalThis.String(object.response) : undefined,
       plainTextResponse: isSet(object.plainTextResponse)
         ? PlainTextResponse.fromJSON(object.plainTextResponse)
         : undefined,
@@ -664,7 +664,7 @@ export const ActionResponse: MessageFns<ActionResponse> = {
     if (message.requestID !== "") {
       obj.requestID = message.requestID;
     }
-    if (message.response !== "") {
+    if (message.response !== undefined) {
       obj.response = message.response;
     }
     if (message.plainTextResponse !== undefined) {
@@ -682,7 +682,7 @@ export const ActionResponse: MessageFns<ActionResponse> = {
   fromPartial<I extends Exact<DeepPartial<ActionResponse>, I>>(object: I): ActionResponse {
     const message = createBaseActionResponse();
     message.requestID = object.requestID ?? "";
-    message.response = object.response ?? "";
+    message.response = object.response ?? undefined;
     message.plainTextResponse = (object.plainTextResponse !== undefined && object.plainTextResponse !== null)
       ? PlainTextResponse.fromPartial(object.plainTextResponse)
       : undefined;
