@@ -58,6 +58,8 @@ class WorkflowStatusEnum(StrEnum):
     PLAN_APPROVAL_REQUIRED = "plan_approval_required"
     TOOL_CALL_APPROVAL_REQUIRED = "tool_call_approval_required"
     APPROVAL_ERROR = "approval_error"
+    FINISHED = "finished"
+    STOPPED = "stopped"
 
 
 class MessageTypeEnum(StrEnum):
