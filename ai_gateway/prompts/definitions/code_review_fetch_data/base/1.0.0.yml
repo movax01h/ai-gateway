@@ -31,16 +31,20 @@ prompt_template:
     - Continue batch processing even if some items require multiple attempts
     - Do not demonstrate or show examples - process all items completely
 
-    <required_json_output>
+    <required_output>
+    After executing all tools, output ONLY this JSON structure with no additional text:
+
     {
       "merge_request": [raw get_merge_request response],
       "diffs": [raw list_merge_request_diffs response],
       "files": [array of raw get_repository_file responses],
       "custom_instructions": [raw read_file response or null]
     }
-    </required_json_output>
+    </required_output>
   user: |
     Fetch all data for merge request with IID {{merge_request_iid}} in project {{project_id}}.
+
+    Execute the required tools and output the data in the exact JSON format specified in the required_output section.
   placeholder: history
 params:
   timeout: 60
