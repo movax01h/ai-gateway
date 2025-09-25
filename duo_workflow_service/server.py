@@ -344,6 +344,7 @@ class DuoWorkflowService(contract_pb2_grpc.DuoWorkflowServicer):
                     log.info(
                         "Sending an outgoing streaming action",
                         requestID=streaming_action.requestID,
+                        payload_size=streaming_action.ByteSize(),
                         action_class=streaming_action.WhichOneof("action"),
                     )
 
@@ -372,6 +373,7 @@ class DuoWorkflowService(contract_pb2_grpc.DuoWorkflowServicer):
                 log.info(
                     "Sending an outgoing action",
                     requestID=action.requestID,
+                    payload_size=action.ByteSize(),
                     action_class=action.WhichOneof("action"),
                 )
 
