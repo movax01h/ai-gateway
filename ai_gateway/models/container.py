@@ -15,7 +15,11 @@ from ai_gateway.models.vertex_text import (
     PalmCodeGeckoModel,
     PalmTextBisonModel,
 )
-from ai_gateway.proxy.clients import AnthropicProxyClient, VertexAIProxyClient
+from ai_gateway.proxy.clients import (
+    AnthropicProxyClient,
+    OpenAIProxyClient,
+    VertexAIProxyClient,
+)
 
 __all__ = [
     "ContainerModels",
@@ -60,6 +64,13 @@ def _init_vertex_ai_proxy_client(endpoint: str) -> httpx.AsyncClient:
     )
 
 
+def _init_openai_proxy_client() -> httpx.AsyncClient:
+    return httpx.AsyncClient(
+        base_url="https://api.openai.com/",
+        timeout=httpx.Timeout(timeout=60.0),
+    )
+
+
 class ContainerModels(containers.DeclarativeContainer):
     # We need to resolve the model based on the model name provided by the upstream container.
     # Hence, `VertexTextBaseModel.from_model_name` and `AnthropicModel.from_model_name` are only partially applied here.
@@ -93,6 +104,8 @@ class ContainerModels(containers.DeclarativeContainer):
         _init_vertex_ai_proxy_client,
         endpoint=config.vertex_text_model.endpoint,
     )
+
+    http_client_openai_proxy = providers.Singleton(_init_openai_proxy_client)
 
     vertex_text_bison = providers.Selector(
         _mock_selector,
@@ -203,6 +216,16 @@ class ContainerModels(containers.DeclarativeContainer):
             client=http_client_vertex_ai_proxy,
             project=config.vertex_text_model.project,
             location=config.vertex_text_model.location,
+            limits=providers.Factory(ConfigModelLimits, config.model_engine_limits),
+        ),
+        mocked=providers.Factory(mock.ProxyClient),
+    )
+
+    openai_proxy_client = providers.Selector(
+        _mock_selector,
+        original=providers.Factory(
+            OpenAIProxyClient,
+            client=http_client_openai_proxy,
             limits=providers.Factory(ConfigModelLimits, config.model_engine_limits),
         ),
         mocked=providers.Factory(mock.ProxyClient),

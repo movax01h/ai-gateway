@@ -123,6 +123,13 @@ async def get_vertex_ai_proxy_client(
     return vertex_ai_proxy_client
 
 
+@inject
+async def get_openai_proxy_client(
+    openai_proxy_client=Provide[ContainerApplication.pkg_models.openai_proxy_client],
+):
+    return openai_proxy_client
+
+
 async def get_internal_event_client():
     return get_container_application().internal_event.client()
 
