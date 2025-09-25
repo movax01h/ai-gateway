@@ -1,6 +1,6 @@
 from fastapi import APIRouter
 
-from ai_gateway.api.v1.proxy import anthropic, vertex_ai
+from ai_gateway.api.v1.proxy import anthropic, openai, vertex_ai
 
 __all__ = [
     "router",
@@ -8,5 +8,6 @@ __all__ = [
 
 
 router = APIRouter()
+router.include_router(openai.router)
 router.include_router(anthropic.router)
 router.include_router(vertex_ai.router)
