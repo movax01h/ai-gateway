@@ -76,6 +76,67 @@ def encode_dangerous_tags(
     return processed  # type: ignore[no-any-return]
 
 
+def strip_hidden_unicode_tags(
+    response: Union[str, Dict[str, Any], List[Any]],
+) -> Union[str, List[Union[str, Dict[str, Any]]]]:
+    """Remove hidden Unicode tag characters that can be used for steganographic attacks.
+
+    Strips Unicode Tag Characters (U+E0000-E007F) and Language Tag characters
+    (U+E0100-E01EF) that are invisible but can carry hidden malicious content.
+    These characters are often used in steganographic attacks to hide instructions
+    within seemingly innocent text.
+
+    Args:
+        response: The response data to process
+
+    Returns:
+        Response with hidden Unicode tag characters removed
+    """
+    from duo_workflow_service.security.markdown_content_security import (
+        _apply_recursively,
+    )
+
+    def _strip_unicode_tags(text: str) -> str:
+        if not text or not isinstance(text, str):
+            return text
+
+        # First handle JSON-escaped Unicode tag characters
+        # Unicode Tag Characters (U+E0000-E007F) get encoded as UTF-16 surrogates:
+        # U+E0000-E007F -> surrogate pairs starting with \udb40
+        # U+E0100-E01EF -> surrogate pairs starting with \udb40
+        import re
+
+        # Remove JSON-escaped Unicode tag characters (UTF-16 surrogate pairs)
+        # These appear as \\udb40\\udc?? in JSON output
+        text = re.sub(
+            r"\\udb40\\ud[c-f][0-9a-f][0-9a-f]", "", text, flags=re.IGNORECASE
+        )
+
+        # Also remove direct Unicode Tag Characters if they exist
+        # These ranges contain invisible characters that can be used for steganographic attacks
+        return "".join(
+            char
+            for char in text
+            if not (0xE0000 <= ord(char) <= 0xE007F or 0xE0100 <= ord(char) <= 0xE01EF)
+        )
+
+    return _apply_recursively(response, _strip_unicode_tags)
+
+
+def apply_security_unicode_only(
+    response: Union[str, Dict[str, Any], List[Any]],
+) -> Union[str, List[Union[str, Dict[str, Any]]]]:
+    """Dedicated function to test Unicode tag stripping only.
+
+    Args:
+        response: The response data to process
+
+    Returns:
+        Response with only Unicode tag stripping applied
+    """
+    return strip_hidden_unicode_tags(response)
+
+
 class PromptSecurity:
     """Security class with configurable security functions."""
 
@@ -88,6 +149,7 @@ class PromptSecurity:
     ] = [
         encode_dangerous_tags,
         strip_hidden_html_comments,
+        strip_hidden_unicode_tags,
         strip_mermaid_comments,
     ]
 
