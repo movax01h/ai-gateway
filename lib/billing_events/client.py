@@ -72,6 +72,16 @@ class BillingEventsClient:
         if metadata is None:
             metadata = {}
 
+        realm_mapping = {
+            "self-managed": "SM",
+            "saas": "SaaS",
+            "SaaS": "SaaS",
+            "SM": "SM",
+        }
+        mapped_realm = realm_mapping.get(
+            internal_context.realm or "", internal_context.realm
+        )
+
         billing_context = BillingEventContext(
             event_id=event_id,
             event_type=event_type,
@@ -81,7 +91,7 @@ class BillingEventsClient:
             subject=internal_context.global_user_id,  # TODO : We need to pass non-masked userID from GitLab instance
             global_user_id=internal_context.global_user_id,
             seat_ids=["TODO"],  # TODO : We need to pass seatIDs from GitLab instance
-            realm=internal_context.realm,
+            realm=mapped_realm,
             timestamp=datetime.now().isoformat(),
             instance_id=internal_context.instance_id,
             unique_instance_id="",  # TODO : We need to pass unique instance_id from the GitLab instance

@@ -25,6 +25,7 @@ from ai_gateway.model_metadata import TypeModelMetadata, current_model_metadata_
 from ai_gateway.prompts.config.base import ModelConfig, PromptConfig, PromptParams
 from ai_gateway.prompts.typing import Model, TypeModelFactory
 from ai_gateway.structured_logging import get_request_logger
+from duo_workflow_service.tracking.llm_usage_context import get_workflow_checkpointer
 from lib.internal_events.client import InternalEventsClient
 from lib.internal_events.context import InternalEventAdditionalProperties
 
@@ -242,11 +243,21 @@ class Prompt(RunnableBinding[Input, Output]):
         watcher: ModelRequestInstrumentator.WatchContainer,
         usage_metadata: dict[str, UsageMetadata],
     ) -> None:
-        if self.internal_event_client is None:
+        checkpointer = get_workflow_checkpointer()
+        if self.internal_event_client is None and checkpointer is None:
             return
 
         for model, usage in usage_metadata.items():
             watcher.register_token_usage(model, usage)
+            if checkpointer:
+                checkpointer.track_llm_operation(
+                    token_count=usage["total_tokens"],
+                    model_id=model,
+                    model_engine=self.model_engine,
+                    model_provider=self.model_provider,
+                    prompt_tokens=usage["input_tokens"],
+                    completion_tokens=usage["output_tokens"],
+                )
 
             for unit_primitive in self.unit_primitives:
                 # Access langchain usage_metadata for optional cache
@@ -272,17 +283,18 @@ class Prompt(RunnableBinding[Input, Output]):
                     **self.internal_event_extra,
                 )
 
-                self.internal_event_client.track_event(
-                    f"token_usage_{unit_primitive}",
-                    category=__name__,
-                    input_tokens=usage["input_tokens"],
-                    output_tokens=usage["output_tokens"],
-                    total_tokens=usage["total_tokens"],
-                    model_engine=self.model_engine,
-                    model_name=model,
-                    model_provider=self.model_provider,
-                    additional_properties=additional_properties,
-                )
+                if self.internal_event_client:
+                    self.internal_event_client.track_event(
+                        f"token_usage_{unit_primitive}",
+                        category=__name__,
+                        input_tokens=usage["input_tokens"],
+                        output_tokens=usage["output_tokens"],
+                        total_tokens=usage["total_tokens"],
+                        model_engine=self.model_engine,
+                        model_name=model,
+                        model_provider=self.model_provider,
+                        additional_properties=additional_properties,
+                    )
 
     # Subclasses can override this method to add steps at either side of the chain
     @staticmethod

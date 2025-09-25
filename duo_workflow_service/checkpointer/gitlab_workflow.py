@@ -52,6 +52,7 @@ from duo_workflow_service.tracking.duo_workflow_metrics import (
     session_type_context,
 )
 from duo_workflow_service.tracking.errors import log_exception
+from lib.billing_events import BillingEventsClient
 from lib.internal_events import InternalEventAdditionalProperties, InternalEventsClient
 from lib.internal_events.event_enum import (
     CategoryEnum,
@@ -74,6 +75,14 @@ def not_implemented_sync_method(func: T) -> T:
 
 
 NOOP_WORKFLOW_STATUSES = [WorkflowStatusEnum.APPROVAL_ERROR]
+
+BILLABLE_STATUSES = frozenset(
+    [
+        WorkflowStatusEnum.FINISHED,
+        WorkflowStatusEnum.STOPPED,
+        WorkflowStatusEnum.INPUT_REQUIRED,
+    ]
+)
 
 
 class WorkflowStatusEventEnum(StrEnum):
@@ -129,7 +138,9 @@ def _attribute_dirty(attribute: str, metadata: CheckpointMetadata) -> bool:
     )
 
 
-class GitLabWorkflow(BaseCheckpointSaver[Any], AbstractAsyncContextManager[Any]):
+class GitLabWorkflow(
+    BaseCheckpointSaver[Any], AbstractAsyncContextManager[Any]
+):  # pylint: disable=too-many-instance-attributes
     _client: GitlabHttpClient
     _logger: structlog.stdlib.BoundLogger
     _workflow_config: WorkflowConfig
@@ -144,6 +155,9 @@ class GitLabWorkflow(BaseCheckpointSaver[Any], AbstractAsyncContextManager[Any])
         internal_event_client: InternalEventsClient = Provide[
             ContainerApplication.internal_event.client
         ],
+        billing_event_client: BillingEventsClient = Provide[
+            ContainerApplication.billing_event.client
+        ],
     ):
         self._offline_mode = os.getenv("USE_MEMSAVER")
         self._client = client
@@ -153,6 +167,8 @@ class GitLabWorkflow(BaseCheckpointSaver[Any], AbstractAsyncContextManager[Any])
         self._workflow_type = workflow_type
         self._workflow_config = workflow_config
         self._internal_event_client = internal_event_client
+        self._billing_event_client = billing_event_client
+        self._llm_operations: list[dict[str, Any]] = []
 
     @not_implemented_sync_method
     def get_tuple(self, config: RunnableConfig) -> Optional[CheckpointTuple]:
@@ -439,8 +455,55 @@ class GitLabWorkflow(BaseCheckpointSaver[Any], AbstractAsyncContextManager[Any])
             additional_properties=properties,
         )
 
+    def track_llm_operation(
+        self,
+        token_count: int,
+        model_id: str,
+        model_engine: str,
+        model_provider: str,
+        prompt_tokens: int,
+        completion_tokens: int,
+    ) -> None:
+        """Track LLM operation for billing metadata."""
+        operation = {
+            "token_count": token_count,
+            "model_id": model_id,
+            "model_engine": model_engine,
+            "model_provider": model_provider,
+            "prompt_tokens": prompt_tokens,
+            "completion_tokens": completion_tokens,
+        }
+        self._llm_operations.append(operation)
+
     async def _track_workflow_completion(self, status: str) -> None:
         """Track successful workflow completion based on status."""
+
+        # Track billing event for workflow completion
+        if status in BILLABLE_STATUSES:
+            try:
+                billing_metadata = {
+                    "workflow_id": self._workflow_id,
+                    "execution_environment": "duo_agent_platform",
+                    "llm_operations": self._llm_operations,
+                }
+                self._billing_event_client.track_billing_event(
+                    event_type="duo_agent_platform_workflow_completion",
+                    category=self.__class__.__name__,
+                    unit_of_measure="tokens",
+                    quantity=1,
+                    metadata=billing_metadata,
+                )
+                self._logger.info(
+                    "Successfully sent billing event for workflow %s", self._workflow_id
+                )
+            except Exception as e:
+                self._logger.error(
+                    f"Error sending billing event for workflow {self._workflow_id}: {e}"
+                )
+        else:
+            self._logger.info(
+                f"Billing Status '{status}' does not match billing event conditions"
+            )
 
         if status == WorkflowStatusEnum.INPUT_REQUIRED:
             event = EventEnum.WORKFLOW_PAUSE
