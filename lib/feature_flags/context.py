@@ -17,7 +17,6 @@ class FeatureFlag(StrEnum):
     )
     BATCH_DUO_WORKFLOW_PLANNER_TASKS = "batch_duo_workflow_planner_tasks"
     USE_DUO_CONTEXT_EXCLUSION = "use_duo_context_exclusion"
-    DUO_AGENTIC_CHAT_OPENAI_GPT_5 = "duo_agentic_chat_openai_gpt_5"
 
 
 def is_feature_enabled(feature_name: FeatureFlag | str) -> bool:

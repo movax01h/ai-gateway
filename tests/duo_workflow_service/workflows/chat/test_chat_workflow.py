@@ -3,10 +3,9 @@ from unittest.mock import MagicMock, Mock, patch
 import pytest
 from dependency_injector import containers
 from gitlab_cloud_connector import CloudConnectorUser, UserClaims, WrongUnitPrimitives
-from google.protobuf import struct_pb2
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 
-from ai_gateway.model_metadata import ModelMetadata, TypeModelMetadata
+from ai_gateway.model_metadata import TypeModelMetadata
 from ai_gateway.prompts.config.base import PromptConfig
 from ai_gateway.prompts.typing import TypeModelFactory
 from contract import contract_pb2
@@ -31,7 +30,7 @@ from duo_workflow_service.workflows.chat.workflow import (
     Workflow,
 )
 from duo_workflow_service.workflows.type_definitions import AdditionalContext
-from lib.feature_flags import FeatureFlag, current_feature_flag_context
+from lib.feature_flags import current_feature_flag_context
 from lib.internal_events.event_enum import CategoryEnum
 
 
@@ -835,86 +834,6 @@ async def test_workflow_with_approval_object():
     assert workflow._approval is not None
     assert workflow._approval.WhichOneof("user_decision") == "approval"
     assert workflow._preapproved_tools == list(start_request.preapproved_tools)
-
-
-@pytest.mark.asyncio
-@pytest.mark.parametrize(
-    "feature_flags,context_model_metadata,expected_prompt_id,expected_prompt_version,expected_model_metadata",
-    [
-        # Test case 1: Feature flag enabled, no model metadata - should use GPT-5
-        (
-            [FeatureFlag.DUO_AGENTIC_CHAT_OPENAI_GPT_5],
-            None,
-            "chat/agent/gpt_5",
-            "^1.0.0",
-            ModelMetadata(provider="gitlab", name="gpt_5"),
-        ),
-        # Test case 2: Feature flag disabled, no model metadata - should use default prompt
-        (
-            [],
-            None,
-            "chat/agent",
-            "^1.0.0",
-            None,
-        ),
-        # Test case 3: Feature flag enabled, but model metadata already provided - should use provided metadata
-        (
-            [FeatureFlag.DUO_AGENTIC_CHAT_OPENAI_GPT_5],
-            ModelMetadata(name="llama3", provider="test"),
-            "chat/agent",
-            "^1.0.0",
-            ModelMetadata(name="llama3", provider="test"),
-        ),
-    ],
-)
-@patch("duo_workflow_service.workflows.chat.workflow.current_model_metadata_context")
-@patch.object(Workflow, "_get_tools")
-@patch("duo_workflow_service.components.tools_registry.ToolsRegistry.toolset")
-async def test_workflow_model_selection(
-    mock_toolset,
-    mock_get_tools,
-    mock_model_metadata_context,
-    feature_flags,
-    context_model_metadata,
-    expected_prompt_id,
-    expected_prompt_version,
-    expected_model_metadata,
-    workflow_with_project,
-):
-    """Test that model selection works correctly with the GPT-5 feature flag."""
-    # Setup
-    current_feature_flag_context.set(set(feature_flags))
-    mock_model_metadata_context.get.return_value = context_model_metadata
-
-    mock_get_tools.return_value = ["list_issues", "get_issue"]
-    mock_toolset.return_value.bindable = ["list_issues", "get_issue"]
-
-    # Create tools registry and checkpointer mocks
-    tools_registry = MagicMock(spec=ToolsRegistry)
-    checkpointer = MagicMock()
-
-    # Setup the mock for get_on_behalf to verify what it's called with
-    mock_agent = MagicMock()
-    with patch.object(
-        workflow_with_project._prompt_registry, "get_on_behalf", return_value=mock_agent
-    ) as mock_get_on_behalf:
-        workflow_with_project._compile("Test goal", tools_registry, checkpointer)
-
-        mock_get_on_behalf.assert_called_once()
-        call_args = mock_get_on_behalf.call_args
-
-        # Check the prompt ID matches expectations
-        # For the GPT-5 case, we're expecting to see the prompt loaded from chat/agent/gpt_5
-        if expected_prompt_id == "chat/agent/gpt_5":
-            assert call_args.kwargs["prompt_id"] == "chat/agent"
-            assert call_args.kwargs["model_metadata"].provider == "gitlab"
-            assert call_args.kwargs["model_metadata"].name == "gpt_5"
-        else:
-            assert call_args.kwargs["prompt_id"] == expected_prompt_id
-            assert call_args.kwargs["model_metadata"] == expected_model_metadata
-
-        assert call_args.kwargs["prompt_version"] == expected_prompt_version
-        assert call_args.kwargs["user"] == workflow_with_project._user
 
 
 @pytest.mark.asyncio
