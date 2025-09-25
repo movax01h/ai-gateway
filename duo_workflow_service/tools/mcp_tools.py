@@ -2,10 +2,12 @@ import json
 from functools import partialmethod
 from typing import Any
 
+import structlog
 from langchain.tools import BaseTool
 
 from contract import contract_pb2
 from duo_workflow_service.executor.action import _execute_action
+from lib.internal_events.context import current_event_context
 
 
 class McpTool(BaseTool):
@@ -16,6 +18,56 @@ class McpTool(BaseTool):
 
     async def _arun(self, **arguments):
         metadata = self.metadata or {}
+        log = structlog.stdlib.get_logger("workflow")
+
+        # Get event context for enhanced logging
+        event_context = current_event_context.get()
+
+        # Build logging context with tool name and event context
+        log_context = {
+            "tool_name": self.name,
+            "mcp_tool_args_count": len(arguments),
+        }
+
+        # Add event context fields (safe attribute access pattern from MR 3364)
+        if event_context is not None:
+            log_context.update(
+                {
+                    "instance_id": (
+                        str(event_context.instance_id)
+                        if event_context.instance_id
+                        else "None"
+                    ),
+                    "host_name": (
+                        str(event_context.host_name)
+                        if event_context.host_name
+                        else "None"
+                    ),
+                    "realm": (
+                        str(event_context.realm) if event_context.realm else "None"
+                    ),
+                    "is_gitlab_team_member": (
+                        str(event_context.is_gitlab_team_member)
+                        if event_context.is_gitlab_team_member
+                        else "None"
+                    ),
+                    "global_user_id": (
+                        str(event_context.global_user_id)
+                        if event_context.global_user_id
+                        else "None"
+                    ),
+                    "correlation_id": (
+                        str(event_context.correlation_id)
+                        if event_context.correlation_id
+                        else "None"
+                    ),
+                }
+            )
+
+        log.info(
+            "Executing MCP tool",
+            extra=log_context,
+        )
 
         return await _execute_action(
             metadata,
