@@ -10,7 +10,7 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from gitlab_cloud_connector import CloudConnectorUser, GitLabUnitPrimitive, UserClaims
 from langchain_community.chat_models.fake import FakeListChatModel
-from langchain_core.messages import BaseMessage, ToolMessage
+from langchain_core.messages import BaseMessage
 from langchain_core.messages.ai import AIMessage, UsageMetadata
 from langchain_core.outputs import ChatGeneration, ChatGenerationChunk, ChatResult
 from starlette.middleware import Middleware
@@ -519,7 +519,7 @@ class FakeModel(FakeListChatModel):
         return {**super()._identifying_params, **{"model": self.model_name}}
 
     def _generate(self, *args, **kwargs) -> ChatResult:
-        if all(isinstance(response, ToolMessage) for response in self.responses):
+        if all(isinstance(response, BaseMessage) for response in self.responses):
             return ChatResult(
                 generations=[
                     ChatGeneration(message=response) for response in self.responses

@@ -1,4 +1,4 @@
-from datetime import datetime, timezone
+from datetime import datetime
 from typing import Any, Dict, List, Optional, Union
 
 import structlog
@@ -16,6 +16,7 @@ from langchain_core.runnables import Runnable, RunnableConfig
 from ai_gateway.prompts import Prompt, jinja2_formatter
 from ai_gateway.prompts.config.base import PromptConfig
 from ai_gateway.prompts.config.models import ModelClassProvider
+from duo_workflow_service.agents.base import BaseAgent
 from duo_workflow_service.components.tools_registry import ToolsRegistry
 from duo_workflow_service.entities.state import (
     ApprovalStateRejection,
@@ -33,9 +34,6 @@ from duo_workflow_service.gitlab.gitlab_instance_info_service import (
 from duo_workflow_service.gitlab.gitlab_service_context import GitLabServiceContext
 from duo_workflow_service.llm_factory import AnthropicStopReason
 from duo_workflow_service.slash_commands.goal_parser import parse as slash_command_parse
-from duo_workflow_service.structured_logging import _workflow_id
-from lib.internal_events import InternalEventAdditionalProperties
-from lib.internal_events.event_enum import CategoryEnum, EventEnum, EventPropertyEnum
 
 log = structlog.stdlib.get_logger("chat_agent")
 
@@ -130,7 +128,7 @@ class ChatAgentPromptTemplate(Runnable[ChatWorkflowState, PromptValue]):
         return ChatPromptValue(messages=messages)
 
 
-class ChatAgent(Prompt[ChatWorkflowState, BaseMessage]):
+class ChatAgent(BaseAgent[ChatWorkflowState, BaseMessage]):
     tools_registry: Optional[ToolsRegistry] = None
     prompt_runnable: Prompt | None = None
 
@@ -153,15 +151,11 @@ class ChatAgent(Prompt[ChatWorkflowState, BaseMessage]):
             ):
                 approval_required = True
                 approval_messages.append(
-                    UiChatLog(
+                    self._create_ui_chat_log(
                         message_type=MessageTypeEnum.REQUEST,
-                        message_sub_type=None,
                         content=f"Tool {call['name']} requires approval. Please confirm if you want to proceed.",
-                        timestamp=datetime.now(timezone.utc).isoformat(),
                         status=ToolStatus.SUCCESS,
-                        correlation_id=None,
                         tool_info=ToolInfo(name=call["name"], args=call["args"]),
-                        additional_context=None,
                     )
                 )
 
@@ -266,15 +260,9 @@ class ChatAgent(Prompt[ChatWorkflowState, BaseMessage]):
         return self._build_tool_response(agent_response, input)
 
     def _build_text_response(self, agent_response: BaseMessage) -> Dict[str, Any]:
-        ui_chat_log = UiChatLog(
-            message_type=MessageTypeEnum.AGENT,
-            message_sub_type=None,
+        ui_chat_log = self._create_ui_chat_log(
             content=StrOutputParser().invoke(agent_response) or "",
-            timestamp=datetime.now(timezone.utc).isoformat(),
             status=ToolStatus.SUCCESS,
-            correlation_id=None,
-            tool_info=None,
-            additional_context=None,
         )
 
         return {
@@ -307,18 +295,10 @@ class ChatAgent(Prompt[ChatWorkflowState, BaseMessage]):
             content=f"There was an error processing your request: {error}"
         )
 
-        ui_chat_log = UiChatLog(
-            message_type=MessageTypeEnum.AGENT,
-            message_sub_type=None,
-            content=(
-                "There was an error processing your request. Please try again or contact support if "
-                "the issue persists."
-            ),
-            timestamp=datetime.now(timezone.utc).isoformat(),
+        ui_chat_log = self._create_ui_chat_log(
+            content="There was an error processing your request. Please try again or contact support if the issue "
+            "persists.",
             status=ToolStatus.FAILURE,
-            correlation_id=None,
-            tool_info=None,
-            additional_context=None,
         )
 
         return {
@@ -349,32 +329,8 @@ class ChatAgent(Prompt[ChatWorkflowState, BaseMessage]):
             if stop_reason in AnthropicStopReason.abnormal_values():
                 log.warning(f"LLM stopped abnormally with reason: {stop_reason}")
 
-            # Track tokens for AI messages
-            if isinstance(agent_response, AIMessage):
-                self._track_tokens_data(agent_response)
-
             return self._build_response(agent_response, input)
 
         except Exception as error:
             log.warning(f"Error processing chat agent: {error}")
             return self._create_error_response(error)
-
-    def _track_tokens_data(self, message: AIMessage):
-        if not self.internal_event_client:
-            return
-
-        usage_metadata = message.usage_metadata if message.usage_metadata else {}  # type: ignore[typeddict-item]
-
-        additional_properties = InternalEventAdditionalProperties(
-            label=self.name,
-            property=EventPropertyEnum.WORKFLOW_ID.value,
-            value=_workflow_id.get(),
-            input_tokens=usage_metadata.get("input_tokens"),
-            output_tokens=usage_metadata.get("output_tokens"),
-            total_tokens=usage_metadata.get("total_tokens"),
-        )
-        self.internal_event_client.track_event(
-            event_name=EventEnum.TOKEN_PER_USER_PROMPT.value,
-            additional_properties=additional_properties,
-            category=CategoryEnum.WORKFLOW_CHAT.value,
-        )

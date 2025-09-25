@@ -80,11 +80,6 @@ def http_client_fixture():
     return AsyncMock()
 
 
-@pytest.fixture(name="workflow_id")
-def workflow_id_fixture():
-    return "1234"
-
-
 @pytest.fixture(name="billing_event_client")
 def billing_event_client_fixture():
     return MagicMock(spec=BillingEventsClient)

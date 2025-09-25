@@ -1,30 +1,13 @@
 from typing import Any
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, patch
 from uuid import uuid4
 
 import pytest
 from langgraph.checkpoint.base import CheckpointTuple
 
-from duo_workflow_service.components.tools_registry import (
-    _AGENT_PRIVILEGES,
-    ToolsRegistry,
-)
+from duo_workflow_service.components.tools_registry import _AGENT_PRIVILEGES
 from duo_workflow_service.entities import WorkflowStatusEnum
 from duo_workflow_service.gitlab.gitlab_api import Project
-
-
-@pytest.fixture(name="tool_approval_required")
-def tool_approval_required_fixture():
-    return False
-
-
-@pytest.fixture(name="mock_tools_registry")
-def mock_tools_registry_fixture(tool_approval_required):
-    mock = MagicMock(spec=ToolsRegistry)
-
-    mock.approval_required.return_value = tool_approval_required
-
-    return mock
 
 
 @pytest.fixture(name="mock_tools_registry_cls")

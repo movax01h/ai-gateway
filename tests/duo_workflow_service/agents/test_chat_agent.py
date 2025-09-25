@@ -1,20 +1,18 @@
 from datetime import datetime, timezone
 from typing import Any
-from unittest.mock import ANY, AsyncMock, Mock, call, patch
+from unittest.mock import ANY, AsyncMock, Mock, patch
 
 import pytest
 from anthropic import APIStatusError
 from dependency_injector.wiring import Provide, inject
 from gitlab_cloud_connector import CloudConnectorUser
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
-from langchain_core.messages.ai import UsageMetadata
 from langchain_core.prompt_values import ChatPromptValue
 
 from ai_gateway.container import ContainerApplication
 from ai_gateway.models.agentic_mock import AgenticFakeModel
 from ai_gateway.prompts.registry import LocalPromptRegistry
 from duo_workflow_service.agents.chat_agent import ChatAgent, ChatAgentPromptTemplate
-from duo_workflow_service.components.tools_registry import ToolsRegistry
 from duo_workflow_service.entities import WorkflowStatusEnum
 from duo_workflow_service.entities.state import (
     ChatWorkflowState,
@@ -25,8 +23,7 @@ from duo_workflow_service.entities.state import (
 from duo_workflow_service.gitlab.gitlab_api import Namespace, Project
 from duo_workflow_service.gitlab.gitlab_instance_info_service import GitLabInstanceInfo
 from duo_workflow_service.gitlab.gitlab_service_context import GitLabServiceContext
-from lib.internal_events import InternalEventAdditionalProperties
-from lib.internal_events.event_enum import CategoryEnum, EventEnum, EventPropertyEnum
+from lib.internal_events.event_enum import CategoryEnum
 
 
 @pytest.fixture(name="mock_datetime")
@@ -52,10 +49,21 @@ def prompt_name_fixture():
     return "Chat Agent"
 
 
+@pytest.fixture(name="workflow_type")
+def workflow_type_fixture() -> str:
+    return CategoryEnum.WORKFLOW_CHAT.value
+
+
 @pytest.fixture(name="chat_agent")
-def chat_agent_fixture(model_factory, prompt_config, model_metadata):
+def chat_agent_fixture(
+    model_factory, prompt_config, model_metadata, workflow_id, workflow_type
+):
     yield ChatAgent(
-        model_factory=model_factory, config=prompt_config, model_metadata=model_metadata
+        model_factory=model_factory,
+        config=prompt_config,
+        model_metadata=model_metadata,
+        workflow_id=workflow_id,
+        workflow_type=workflow_type,
     )
 
 
@@ -79,6 +87,14 @@ def input_fixture():
         "project": None,
         "namespace": None,
         "approval": None,
+    }
+
+
+def test_internal_event_extra(chat_agent: ChatAgent):
+    assert chat_agent.internal_event_extra == {
+        "agent_name": chat_agent.name,
+        "workflow_id": chat_agent.workflow_id,
+        "workflow_type": chat_agent.workflow_type.value,
     }
 
 
@@ -109,6 +125,8 @@ async def test_run(chat_agent, input):
 async def test_template_with_project(
     input,
     user: CloudConnectorUser,
+    workflow_id: str,
+    workflow_type: CategoryEnum,
     prompt_registry: LocalPromptRegistry = Provide[
         ContainerApplication.pkg_prompts.prompt_registry
     ],
@@ -131,6 +149,8 @@ async def test_template_with_project(
         model_metadata=None,
         internal_event_category=__name__,
         tools=None,
+        workflow_id=workflow_id,
+        workflow_type=workflow_type,
     )
 
     result: Any = await chat_agent.prompt_tpl.ainvoke(input, agent_name=chat_agent.name)
@@ -150,6 +170,8 @@ async def test_template_with_project(
 async def test_template_with_namespace(
     input,
     user: CloudConnectorUser,
+    workflow_id: str,
+    workflow_type: CategoryEnum,
     prompt_registry: LocalPromptRegistry = Provide[
         ContainerApplication.pkg_prompts.prompt_registry
     ],
@@ -167,6 +189,8 @@ async def test_template_with_namespace(
         model_metadata=None,
         internal_event_category=__name__,
         tools=None,
+        workflow_id=workflow_id,
+        workflow_type=workflow_type,
     )
 
     result: Any = await chat_agent.prompt_tpl.ainvoke(input, agent_name=chat_agent.name)
@@ -183,74 +207,6 @@ async def test_template_with_namespace(
         "<namespace_url>https://gitlab.com/gitlab-org</namespace_url>"
         in result.messages[1].content
     )
-
-
-class TestChatAgentTrackTokensData:
-    @pytest.fixture(name="unit_primitives")
-    def unit_primitives_fixture(self):
-        return ["duo_chat"]
-
-    @pytest.fixture(name="usage_metadata")
-    def usage_metadata_fixture(self):
-        return UsageMetadata(input_tokens=1, output_tokens=2, total_tokens=3)
-
-    @pytest.mark.asyncio
-    async def test_track_tokens_data(
-        self, chat_agent, input, internal_event_client: Mock
-    ):
-        chat_agent.internal_event_client = internal_event_client
-
-        if hasattr(chat_agent.model, "usage_metadata"):
-            chat_agent.model.usage_metadata = UsageMetadata(
-                input_tokens=1, output_tokens=2, total_tokens=3
-            )
-
-        await chat_agent.run(input)
-
-        assert internal_event_client.track_event.call_count == 2
-        # Get all calls and sort them by event type for consistent testing
-        calls = internal_event_client.track_event.call_args_list
-
-        # Find the base class token usage call
-        base_call = None
-        agent_call = None
-
-        for call_obj in calls:
-            args, kwargs = call_obj
-            if args and args[0] == "token_usage_duo_chat":
-                base_call = call_obj
-            elif (
-                "event_name" in kwargs
-                and kwargs["event_name"] == EventEnum.TOKEN_PER_USER_PROMPT.value
-            ):
-                agent_call = call_obj
-
-        # Verify base class call (from handle_usage_metadata)
-        assert base_call == call(
-            "token_usage_duo_chat",
-            category="ai_gateway.prompts.base",
-            input_tokens=1,
-            output_tokens=2,
-            total_tokens=3,
-            model_engine="litellm",
-            model_name="fake-model",
-            model_provider="litellm",
-            additional_properties=ANY,
-        )
-
-        # Verify agent-specific call (from _track_tokens_data)
-        assert agent_call == call(
-            event_name=EventEnum.TOKEN_PER_USER_PROMPT.value,
-            additional_properties=InternalEventAdditionalProperties(
-                label="Chat Agent",
-                property=EventPropertyEnum.WORKFLOW_ID.value,
-                value=ANY,
-                input_tokens=1,
-                output_tokens=2,
-                total_tokens=3,
-            ),
-            category=CategoryEnum.WORKFLOW_CHAT.value,
-        )
 
 
 class TestChatAgentPromptTemplate:
@@ -881,46 +837,82 @@ The current date is {{ current_date }}.
         )
 
 
-@pytest.mark.asyncio
-async def test_agentic_fake_model_bypasses_tool_approval(
-    prompt_config, model_metadata, input
-):
-    def agentic_model_factory(
-        *, model: str, **kwargs
-    ):  # pylint: disable=unused-argument
-        return AgenticFakeModel()
+class TestChatAgentWithToolApproval:
+    @pytest.fixture(name="tool_approval_required")
+    def tool_approval_required_fixture(self):
+        return True
 
-    chat_agent = ChatAgent(
-        model_factory=agentic_model_factory,
-        config=prompt_config,
-        model_metadata=model_metadata,
-    )
+    @pytest.fixture(name="model_response")
+    def model_response_fixture(self):
+        return [
+            AIMessage(
+                content="I need to use a tool",
+                tool_calls=[
+                    {
+                        "name": "test_tool",
+                        "args": {"param": "value"},
+                        "id": "call_123",
+                        "type": "tool_call",
+                    }
+                ],
+            ),
+        ]
 
-    chat_agent.tools_registry = Mock(spec=ToolsRegistry)
-    chat_agent.tools_registry.approval_required.return_value = True
-
-    # Create an AI message with tool calls to simulate what would happen
-    ai_message_with_tools = AIMessage(
-        content="I need to use a tool",
-        tool_calls=[
-            {
-                "name": "test_tool",
-                "args": {"param": "value"},
-                "id": "call_123",
-                "type": "tool_call",
-            }
-        ],
-    )
-
-    # Mock the agent response to return our AI message with tools
-    with patch.object(
-        chat_agent.__class__.__bases__[0], "ainvoke", new_callable=AsyncMock
-    ) as mock_ainvoke:
-        mock_ainvoke.return_value = ai_message_with_tools
+    @pytest.mark.asyncio
+    async def test_tool_approval(self, chat_agent, mock_tools_registry, input):
+        chat_agent.tools_registry = mock_tools_registry
 
         result = await chat_agent.run(input)
 
-        assert result["status"] == WorkflowStatusEnum.EXECUTION
+        assert result["status"] == WorkflowStatusEnum.TOOL_CALL_APPROVAL_REQUIRED
+        assert result["ui_chat_log"] == [
+            UiChatLog(
+                message_type=MessageTypeEnum.REQUEST,
+                message_sub_type=None,
+                content="Tool test_tool requires approval. Please confirm if you want to proceed.",
+                timestamp=ANY,
+                status=ToolStatus.SUCCESS,
+                correlation_id=None,
+                tool_info={"name": "test_tool", "args": {"param": "value"}},
+                additional_context=None,
+            )
+        ]
+
+    @pytest.mark.asyncio
+    async def test_agentic_fake_model_bypasses_tool_approval(
+        self,
+        prompt_config,
+        model_metadata,
+        input,
+        workflow_id,
+        workflow_type,
+        mock_tools_registry,
+        model_response,
+    ):
+        def agentic_model_factory(
+            *, model: str, **kwargs
+        ):  # pylint: disable=unused-argument
+            return AgenticFakeModel()
+
+        chat_agent = ChatAgent(
+            model_factory=agentic_model_factory,
+            config=prompt_config,
+            model_metadata=model_metadata,
+            workflow_id=workflow_id,
+            workflow_type=workflow_type,
+        )
+
+        chat_agent.tools_registry = mock_tools_registry
+
+        # Mock the agent response to return our AI message with tools
+        with patch.object(
+            chat_agent.__class__.__bases__[0], "ainvoke", new_callable=AsyncMock
+        ) as mock_ainvoke:
+            mock_ainvoke.return_value = model_response[0]
+
+            result = await chat_agent.run(input)
+
+            assert result["status"] == WorkflowStatusEnum.EXECUTION
 
 
 class TestChatAgentPromptRunnable:

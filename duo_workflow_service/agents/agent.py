@@ -9,8 +9,8 @@ from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.prompts.chat import MessageLikeRepresentation
 from langchain_core.runnables import Runnable, RunnableConfig
 
-from ai_gateway.prompts import Prompt
 from ai_gateway.prompts.config.base import PromptConfig
+from duo_workflow_service.agents.base import BaseAgent
 from duo_workflow_service.entities.event import WorkflowEvent, WorkflowEventType
 from duo_workflow_service.entities.state import (
     DuoWorkflowStateType,
@@ -25,7 +25,6 @@ from duo_workflow_service.gitlab.http_client import GitlabHttpClient
 from duo_workflow_service.llm_factory import AnthropicStopReason
 from duo_workflow_service.monitoring import duo_workflow_metrics
 from duo_workflow_service.tools.handover import HandoverTool
-from lib.internal_events.event_enum import CategoryEnum
 
 log = structlog.stdlib.get_logger("agent_v2")
 
@@ -64,10 +63,8 @@ class AgentPromptTemplate(Runnable[dict, PromptValue]):
         return prompt_value
 
 
-class Agent(Prompt):
+class Agent(BaseAgent):
     check_events: bool = True
-    workflow_id: str
-    workflow_type: CategoryEnum
     http_client: GitlabHttpClient
     prompt_template_inputs: dict = {}
 
@@ -215,23 +212,3 @@ class Agent(Prompt):
             ),
             None,
         )
-
-    def _create_ui_chat_log(self, content: str) -> UiChatLog:
-        return UiChatLog(
-            message_type=MessageTypeEnum.AGENT,
-            message_sub_type=None,
-            content=content,
-            timestamp=datetime.now(timezone.utc).isoformat(),
-            status=None,
-            correlation_id=None,
-            tool_info=None,
-            additional_context=None,
-        )
-
-    @property
-    def internal_event_extra(self) -> dict[str, Any]:
-        return {
-            "agent_name": self.name,
-            "workflow_id": self.workflow_id,
-            "workflow_type": self.workflow_type.value,
-        }
