@@ -1,5 +1,5 @@
 import json
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from langchain.tools import BaseTool
@@ -81,3 +81,92 @@ async def test_mcp_tool_format_display_message():
 
     message = tool.format_display_message(arguments)
     assert message == "Run MCP tool test_tool: {'key': 'value'}"
+
+
+@pytest.mark.asyncio
+@patch("duo_workflow_service.tools.mcp_tools.structlog")
+@patch("duo_workflow_service.tools.mcp_tools.current_event_context")
+@patch("duo_workflow_service.tools.mcp_tools._execute_action")
+async def test_mcp_tool_logging_with_event_context(
+    mock_execute_action, mock_current_event_context, mock_structlog
+):
+    """Test that MCP tool logs with event context when available."""
+    # Import here to avoid import-outside-toplevel warning
+    from lib.internal_events.context import (  # pylint: disable=import-outside-toplevel
+        EventContext,
+    )
+
+    # Setup mocks
+    mock_logger = MagicMock()
+    mock_structlog.stdlib.get_logger.return_value = mock_logger
+    mock_execute_action.return_value = "test result"
+
+    # Create test event context
+    test_event_context = EventContext(
+        instance_id="test-instance",
+        host_name="gitlab.example.com",
+        realm="saas",
+        is_gitlab_team_member=True,
+        global_user_id="user-123",
+        correlation_id="corr-456",
+    )
+    mock_current_event_context.get.return_value = test_event_context
+
+    # Create and run tool
+    tool = McpTool(name="test_tool", description="Test tool", metadata={})
+    arguments = {"arg1": "value1", "arg2": "value2"}
+
+    result = await tool._arun(**arguments)
+
+    # Verify logging was called with expected context
+    mock_logger.info.assert_called_once_with(
+        "Executing MCP tool",
+        extra={
+            "tool_name": "test_tool",
+            "mcp_tool_args_count": 2,
+            "instance_id": "test-instance",
+            "host_name": "gitlab.example.com",
+            "realm": "saas",
+            "is_gitlab_team_member": "True",
+            "global_user_id": "user-123",
+            "correlation_id": "corr-456",
+        },
+    )
+
+    # Verify action execution
+    mock_execute_action.assert_called_once()
+    assert result == "test result"
+
+
+@pytest.mark.asyncio
+@patch("duo_workflow_service.tools.mcp_tools.structlog")
+@patch("duo_workflow_service.tools.mcp_tools.current_event_context")
+@patch("duo_workflow_service.tools.mcp_tools._execute_action")
+async def test_mcp_tool_logging_without_event_context(
+    mock_execute_action, mock_current_event_context, mock_structlog
+):
+    """Test that MCP tool logs gracefully when event context is not available."""
+    # Setup mocks
+    mock_logger = MagicMock()
+    mock_structlog.stdlib.get_logger.return_value = mock_logger
+    mock_execute_action.return_value = "test result"
+    mock_current_event_context.get.return_value = None
+
+    # Create and run tool
+    tool = McpTool(name="test_tool", description="Test tool", metadata={})
+    arguments = {"arg1": "value1"}
+
+    result = await tool._arun(**arguments)
+
+    # Verify logging was called with basic context only
+    mock_logger.info.assert_called_once_with(
+        "Executing MCP tool",
+        extra={
+            "tool_name": "test_tool",
+            "mcp_tool_args_count": 1,
+        },
+    )
+
+    # Verify action execution
+    mock_execute_action.assert_called_once()
+    assert result == "test result"
