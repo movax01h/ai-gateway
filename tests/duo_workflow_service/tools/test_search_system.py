@@ -10,6 +10,9 @@ from duo_workflow_service.tools.search_system import (
     Grep,
     GrepInput,
 )
+from tests.duo_workflow_service.tools.conftest import (
+    create_mock_client_event_with_response,
+)
 
 
 class TestGrep:
@@ -95,9 +98,7 @@ class TestGrep:
 
         mock_inbox = MagicMock()
         mock_inbox.get = AsyncMock(
-            return_value=contract_pb2.ClientEvent(
-                actionResponse=contract_pb2.ActionResponse(response=mock_response)
-            )
+            return_value=create_mock_client_event_with_response(mock_response)
         )
 
         metadata = {"outbox": mock_outbox, "inbox": mock_inbox}

@@ -1,8 +1,8 @@
 from unittest.mock import AsyncMock
 
 import pytest
+from langchain_core.tools import ToolException
 
-from duo_workflow_service.executor.action import HTTPConnectionError
 from duo_workflow_service.gitlab.http_client import GitLabHttpResponse
 from duo_workflow_service.status_updater.gitlab_status_updater import (
     GitLabStatusUpdater,
@@ -65,7 +65,7 @@ async def test_update_workflow_status_when_response_error(gitlab_status_updater)
 @pytest.mark.asyncio
 async def test_update_workflow_status_http_connection_error(gitlab_status_updater):
     gitlab_status_updater._client.apatch = AsyncMock(
-        side_effect=HTTPConnectionError("Connection refused")
+        side_effect=ToolException("Connection refused")
     )
 
     with pytest.raises(Exception, match="Connection refused"):

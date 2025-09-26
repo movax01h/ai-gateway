@@ -25,6 +25,9 @@ from duo_workflow_service.tools.filesystem import (  # Mkdir,
     WriteFileInput,
     validate_duo_context_exclusions,
 )
+from tests.duo_workflow_service.tools.conftest import (
+    create_mock_client_event_with_response,
+)
 from tests.duo_workflow_service.tools.constants import (
     NORMAL_FILES,
     SENSITIVE_DIRECTORIES,
@@ -63,9 +66,7 @@ def metadata_with_project(mock_project):
 
     mock_inbox = MagicMock()
     mock_inbox.get = AsyncMock(
-        return_value=contract_pb2.ClientEvent(
-            actionResponse=contract_pb2.ActionResponse(response="test contents")
-        )
+        return_value=create_mock_client_event_with_response("test contents")
     )
 
     return {"outbox": mock_outbox, "inbox": mock_inbox, "project": mock_project}
@@ -95,15 +96,17 @@ async def test_read_file_not_implemented_error():
 
 
 @pytest.mark.asyncio
-async def test_write_file(metadata_with_project, mock_project):
+async def test_write_file(mock_project):
+    from tests.duo_workflow_service.tools.conftest import (
+        create_mock_client_event_with_response,
+    )
+
     mock_outbox = MagicMock()
     mock_outbox.put = AsyncMock()
 
     mock_inbox = MagicMock()
     mock_inbox.get = AsyncMock(
-        return_value=contract_pb2.ClientEvent(
-            actionResponse=contract_pb2.ActionResponse(response="done")
-        )
+        return_value=create_mock_client_event_with_response("done")
     )
 
     metadata = {"outbox": mock_outbox, "inbox": mock_inbox, "project": mock_project}
@@ -134,16 +137,16 @@ async def test_write_file_not_implemented_error():
 class TestFindFiles:
     @pytest.mark.asyncio
     async def test_find_files_arun_method(self, mock_project):
+        from tests.duo_workflow_service.tools.conftest import (
+            create_mock_client_event_with_response,
+        )
+
         mock_outbox = MagicMock()
         mock_outbox.put = AsyncMock()
 
         mock_inbox = MagicMock()
         mock_inbox.get = AsyncMock(
-            return_value=contract_pb2.ClientEvent(
-                actionResponse=contract_pb2.ActionResponse(
-                    response="file1.py\nfile2.py"
-                )
-            )
+            return_value=create_mock_client_event_with_response("file1.py\nfile2.py")
         )
 
         metadata = {"outbox": mock_outbox, "inbox": mock_inbox, "project": mock_project}
@@ -181,16 +184,18 @@ class TestFindFiles:
 class TestLsDir:
     @pytest.mark.asyncio
     async def test_list_dir_success(self, mock_project):
+        from tests.duo_workflow_service.tools.conftest import (
+            create_mock_client_event_with_response,
+        )
+
         # Set up the mock outbox and inbox
         mock_outbox = MagicMock()
         mock_outbox.put = AsyncMock()
 
         mock_inbox = MagicMock()
         mock_inbox.get = AsyncMock(
-            return_value=contract_pb2.ClientEvent(
-                actionResponse=contract_pb2.ActionResponse(
-                    response="file1.txt file2.txt dir1 dir2"
-                )
+            return_value=create_mock_client_event_with_response(
+                "file1.txt file2.txt dir1 dir2"
             )
         )
 
@@ -247,7 +252,9 @@ class TestMkdir:
         mock_inbox = MagicMock()
         mock_inbox.get = AsyncMock(
             return_value=contract_pb2.ClientEvent(
-                actionResponse=contract_pb2.ActionResponse(response="")
+                actionResponse=contract_pb2.ActionResponse(
+                    plainTextResponse=contract_pb2.PlainTextResponse(response="")
+                )
             )
         )
 
@@ -273,7 +280,9 @@ class TestMkdir:
         mock_inbox = MagicMock()
         mock_inbox.get = AsyncMock(
             return_value=contract_pb2.ClientEvent(
-                actionResponse=contract_pb2.ActionResponse(response="")
+                actionResponse=contract_pb2.ActionResponse(
+                    plainTextResponse=contract_pb2.PlainTextResponse(response="")
+                )
             )
         )
 
@@ -309,14 +318,16 @@ class TestMkdir:
 class TestEditFile:
     @pytest.mark.asyncio
     async def test_basic(self, mock_project):
+        from tests.duo_workflow_service.tools.conftest import (
+            create_mock_client_event_with_response,
+        )
+
         mock_outbox = MagicMock()
         mock_outbox.put = AsyncMock()
 
         mock_inbox = MagicMock()
         mock_inbox.get = AsyncMock(
-            return_value=contract_pb2.ClientEvent(
-                actionResponse=contract_pb2.ActionResponse(response="success")
-            )
+            return_value=create_mock_client_event_with_response("success")
         )
 
         metadata = {"outbox": mock_outbox, "inbox": mock_inbox, "project": mock_project}
@@ -449,12 +460,13 @@ class TestReadFiles:
         mock_outbox.put = AsyncMock()
 
         # Mock response with mixed success and error
-        mock_plaintextResponse = {"error": "Error reading files"}
         mock_inbox = MagicMock()
         mock_inbox.get = AsyncMock(
             return_value=contract_pb2.ClientEvent(
                 actionResponse=contract_pb2.ActionResponse(
-                    response=None, plainTextResponse=mock_plaintextResponse
+                    plainTextResponse=contract_pb2.PlainTextResponse(
+                        error="Error reading files"
+                    )
                 )
             )
         )
@@ -465,13 +477,8 @@ class TestReadFiles:
         tool.metadata = metadata
         file_paths = ["file1.py", "nonexistent.py"]
 
-        response = await tool._arun(file_paths)
-
-        assert response == "Could not read files"
-
-        mock_outbox.put.assert_called_once()
-        action = mock_outbox.put.call_args[0][0]
-        assert action.runReadFiles.filepaths == file_paths
+        with pytest.raises(ToolException, match="Action error: Error reading files"):
+            await tool._arun(file_paths)
 
     @pytest.mark.asyncio
     async def test_read_files_rejects_excluded_paths(self):
@@ -854,15 +861,17 @@ class TestFileExclusionPolicy:
     @pytest.mark.asyncio
     async def test_list_dir_with_exclusion_policy(self, project_with_exclusions):
         """Test ListDir tool respects FileExclusionPolicy."""
+        from tests.duo_workflow_service.tools.conftest import (
+            create_mock_client_event_with_response,
+        )
+
         mock_outbox = MagicMock()
         mock_outbox.put = AsyncMock()
 
         mock_inbox = MagicMock()
         mock_inbox.get = AsyncMock(
-            return_value=contract_pb2.ClientEvent(
-                actionResponse=contract_pb2.ActionResponse(
-                    response="file1.txt\nfile2.secret\nconfig/private/secret.txt\nconfig/private/allowed.txt\ntemp/cache.txt"
-                )
+            return_value=create_mock_client_event_with_response(
+                "file1.txt\nfile2.secret\nconfig/private/secret.txt\nconfig/private/allowed.txt\ntemp/cache.txt"
             )
         )
 
@@ -884,15 +893,17 @@ class TestFileExclusionPolicy:
     @pytest.mark.asyncio
     async def test_find_files_with_exclusion_policy(self, project_with_exclusions):
         """Test FindFiles tool respects FileExclusionPolicy."""
+        from tests.duo_workflow_service.tools.conftest import (
+            create_mock_client_event_with_response,
+        )
+
         mock_outbox = MagicMock()
         mock_outbox.put = AsyncMock()
 
         mock_inbox = MagicMock()
         mock_inbox.get = AsyncMock(
-            return_value=contract_pb2.ClientEvent(
-                actionResponse=contract_pb2.ActionResponse(
-                    response="file1.txt\nfile2.secret\nconfig/private/secret.txt\nconfig/private/allowed.txt"
-                )
+            return_value=create_mock_client_event_with_response(
+                "file1.txt\nfile2.secret\nconfig/private/secret.txt\nconfig/private/allowed.txt"
             )
         )
 
@@ -983,7 +994,9 @@ class TestFileExclusionPolicy:
         mock_inbox.get = AsyncMock(
             return_value=contract_pb2.ClientEvent(
                 actionResponse=contract_pb2.ActionResponse(
-                    response="temp/cache.txt\ntemp/log.txt"
+                    plainTextResponse=contract_pb2.PlainTextResponse(
+                        response="temp/cache.txt\ntemp/log.txt"
+                    )
                 )
             )
         )

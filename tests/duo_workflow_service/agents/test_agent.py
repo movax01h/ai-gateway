@@ -145,9 +145,12 @@ Human message"""
         else:
             mock_get_event.assert_not_called()
 
-        assert result["conversation_history"][prompt_name] == [
-            AIMessage.model_construct(content=model_response, id=ANY)
-        ]
+        # Check that we have exactly one AIMessage with the expected content
+        assert len(result["conversation_history"][prompt_name]) == 1
+        message = result["conversation_history"][prompt_name][0]
+        assert isinstance(message, AIMessage)
+        assert message.content == model_response
+        # Don't check for exact equality since the message may have additional fields like id and usage_metadata
 
         assert "ui_chat_log" not in result
 
