@@ -1,6 +1,13 @@
 from contextvars import ContextVar
 
-__all__ = ["enabled_instance_verbose_ai_logs", "current_verbose_ai_logs_context"]
+__all__ = [
+    "enabled_instance_verbose_ai_logs",
+    "current_verbose_ai_logs_context",
+    "VERBOSE_AI_LOGS_HEADER",
+]
+
+# Header key used for verbose AI logs in both HTTP and gRPC contexts
+VERBOSE_AI_LOGS_HEADER = "x-gitlab-enabled-instance-verbose-ai-logs"
 
 
 def enabled_instance_verbose_ai_logs() -> bool:

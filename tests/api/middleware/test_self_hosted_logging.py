@@ -11,9 +11,9 @@ from starlette_context import context
 from starlette_context.middleware import ContextMiddleware
 
 from ai_gateway.api.middleware.self_hosted_logging import (
-    HEADER_KEY,
     EnabledInstanceVerboseAiLogsHeaderPlugin,
 )
+from lib.verbose_ai_logs import VERBOSE_AI_LOGS_HEADER
 
 
 class TestEnabledInstanceVerboseAiLogsHeaderPlugin:
@@ -38,7 +38,7 @@ class TestEnabledInstanceVerboseAiLogsHeaderPlugin:
         )
 
     @pytest.mark.asyncio
-    @pytest.mark.parametrize("headers", [[(HEADER_KEY.encode(), b"true")]])
+    @pytest.mark.parametrize("headers", [[(VERBOSE_AI_LOGS_HEADER.encode(), b"true")]])
     async def test_process_request_with_header(self, mock_request, plugin):
         result = await plugin.process_request(mock_request)
         assert result
@@ -72,7 +72,7 @@ class TestEnabledInstanceVerboseAiLogsHeader:
         return TestClient(app)
 
     def test_enabled_instance_verbose_ai_logs_set(self, client):
-        response = client.get("/test", headers={HEADER_KEY: "true"})
+        response = client.get("/test", headers={VERBOSE_AI_LOGS_HEADER: "true"})
 
         assert response.json()["enabled-instance-verbose-ai-logs"]
 
