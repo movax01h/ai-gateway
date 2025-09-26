@@ -3,9 +3,9 @@ import json
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from langchain_core.tools import ToolException
 
 from contract import contract_pb2
-from duo_workflow_service.executor.action import HTTPConnectionError
 from duo_workflow_service.gitlab.executor_http_client import ExecutorGitLabHttpClient
 from duo_workflow_service.gitlab.http_client import GitLabHttpResponse
 
@@ -39,7 +39,7 @@ def mock_execute_http_response_fixture():
 @pytest.fixture(name="monkeypatch_execute_http_response")
 def monkeypatch_execute_http_response_fixture(monkeypatch, mock_execute_http_response):
     monkeypatch.setattr(
-        "duo_workflow_service.gitlab.executor_http_client._execute_action_and_get_http_response",
+        "duo_workflow_service.gitlab.executor_http_client._execute_action_and_get_action_response",
         mock_execute_http_response,
     )
     return mock_execute_http_response
@@ -371,11 +371,9 @@ async def test_executor_gitlab_http_client_with_use_http_response_success(
 async def test_executor_gitlab_http_client_with_use_http_response_http_connection_error(
     client, monkeypatch_execute_http_response
 ):
-    monkeypatch_execute_http_response.side_effect = HTTPConnectionError(
-        "Connection refused"
-    )
+    monkeypatch_execute_http_response.side_effect = ToolException("Connection refused")
 
-    with pytest.raises(HTTPConnectionError, match="Connection refused"):
+    with pytest.raises(ToolException, match="Connection refused"):
         await client.aget("/api/v4/test", use_http_response=True)
 
     monkeypatch_execute_http_response.assert_called_once()

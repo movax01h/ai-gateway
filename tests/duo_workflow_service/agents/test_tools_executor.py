@@ -14,6 +14,7 @@ from langgraph.graph import StateGraph
 from langgraph.types import Command
 from pydantic import BaseModel, Field, ValidationError
 
+from contract import contract_pb2
 from duo_workflow_service.agents import ToolsExecutor
 from duo_workflow_service.entities.state import (
     MessageTypeEnum,
@@ -109,6 +110,22 @@ def mock_datetime_fixture(mock_now: datetime):
         mock.now.return_value = mock_now
         mock.timezone = timezone
         yield mock
+
+
+@pytest.fixture(name="mock_action_response")
+def mock_action_response_fixture():
+    mock_action_response = contract_pb2.ActionResponse()
+    mock_action_response.requestID = "test-request-id"
+    mock_action_response.plainTextResponse.response = "/home output"
+    mock_action_response.plainTextResponse.error = ""  # No error
+    return mock_action_response
+
+
+@pytest.fixture(name="mock_client_event")
+def mock_client_event_fixture(mock_action_response):
+    mock_client_event = contract_pb2.ClientEvent()
+    mock_client_event.actionResponse.CopyFrom(mock_action_response)
+    return mock_client_event
 
 
 @dataclass
@@ -1016,7 +1033,11 @@ def test_get_tool_display_message_unknown_tool(tools_executor: ToolsExecutor):
         }
     ],
 )
-async def test_run_command_output(workflow_state, tools_executor):
+async def test_run_command_output(workflow_state, tools_executor, mock_client_event):
+    # Configure the inbox mock to return the mock ClientEvent
+    inbox_mock = tools_executor._toolset["run_command"].metadata["inbox"]
+    inbox_mock.get.return_value = mock_client_event
+
     workflow_state["conversation_history"]["planner"] = [
         AIMessage(
             content=[{"type": "text", "text": "testing"}],

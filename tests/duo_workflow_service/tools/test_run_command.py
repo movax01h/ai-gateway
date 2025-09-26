@@ -25,17 +25,13 @@ from duo_workflow_service.tools.command import RunCommand, RunCommandInput
     ],
 )
 async def test_run_command_success(
-    program: str, args: str, expected_action_args: List[str]
+    program: str, args: str, expected_action_args: List[str], mock_success_client_event
 ):
     mock_outbox = MagicMock()
     mock_outbox.put = AsyncMock()
 
     mock_inbox = MagicMock()
-    mock_inbox.get = AsyncMock(
-        return_value=contract_pb2.ClientEvent(
-            actionResponse=contract_pb2.ActionResponse(response="done")
-        )
-    )
+    mock_inbox.get = AsyncMock(return_value=mock_success_client_event)
 
     metadata = {"outbox": mock_outbox, "inbox": mock_inbox}
 
