@@ -178,6 +178,23 @@ models:
       temperature: 1.0  # this model always requires temperature to be 1
       max_tokens: 4_096
 
+  - name: "OpenAI GPT-5-Mini"
+    gitlab_identifier: "gpt_5_mini"
+    family:
+      - gpt_5
+    params:
+      model: gpt-5-mini-2025-08-07
+      max_tokens: 4_096
+
+  - name: "OpenAI GPT-5-Codex"
+    gitlab_identifier: "gpt_5_codex"
+    family:
+      - gpt_5
+    params:
+      model: gpt-5-codex
+      verbosity: "medium"
+      max_tokens: 4_096
+
   - name: Amazon Q
     gitlab_identifier: amazon_q
     family:
