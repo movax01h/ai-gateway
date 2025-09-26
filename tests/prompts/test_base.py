@@ -191,10 +191,10 @@ configurable_unit_primitives:
 
         assert response.content == model_response
 
-        mock_logger.info.assert_called_with(
-            "Performing LLM request",
-            prompt="System: Hi, I'm Duo\nHuman: What's up?",
+        expected_call = mock.call(
+            "Performing LLM request", prompt="System: Hi, I'm Duo\nHuman: What's up?"
         )
+        assert mock_logger.info.mock_calls[0] == expected_call
 
         mock_watch.assert_called_with(
             stream=False, unit_primitives=prompt.unit_primitives
@@ -228,10 +228,11 @@ configurable_unit_primitives:
 
         assert response.content == model_response
 
-        mock_logger.info.assert_called_with(
+        expected_call = mock.call(
             "Performing LLM request",
             prompt="System: Hi, I'm Duo\nHuman: What's up?\nAI: Fine, you?\nHuman: Good.",
         )
+        assert mock_logger.info.mock_calls[0] == expected_call
 
         mock_watch.assert_called_with(
             stream=False, unit_primitives=prompt.unit_primitives
@@ -258,10 +259,11 @@ configurable_unit_primitives:
             # Make sure we don't finish prematurely
             mock_watcher.afinish.assert_not_awaited()
 
-        mock_logger.info.assert_called_with(
+        expected_call = mock.call(
             "Performing LLM request",
             prompt="System: Hi, I'm Duo\nHuman: What's up?",
         )
+        assert mock_logger.info.mock_calls[0] == expected_call
 
         assert response == model_response
 
@@ -304,10 +306,11 @@ configurable_unit_primitives:
             # Make sure we don't finish prematurely
             mock_watcher.afinish.assert_not_awaited()
 
-        mock_logger.info.assert_called_with(
+        expected_call = mock.call(
             "Performing LLM request",
             prompt="System: Hi, I'm Duo\nHuman: What's up?\nAI: Fine, you?\nHuman: Good.",
         )
+        assert mock_logger.info.mock_calls[0] == expected_call
 
         assert response == model_response
 

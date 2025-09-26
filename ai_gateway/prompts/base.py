@@ -245,6 +245,10 @@ class Prompt(RunnableBinding[Input, Output]):
         watcher: ModelRequestInstrumentator.WatchContainer,
         usage_metadata: dict[str, UsageMetadata],
     ) -> None:
+
+        get_request_logger("prompt").info(
+            f"LLM call finished with token usage: {usage_metadata}"
+        )
         checkpointer = get_workflow_checkpointer()
         if self.internal_event_client is None and checkpointer is None:
             return
