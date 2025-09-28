@@ -13,4 +13,4 @@ prompt_template:
   user: |
     {% include 'chat/agent/partials/user/1.0.0.jinja' %}
 params:
-  timeout: 30
+  timeout: 60
