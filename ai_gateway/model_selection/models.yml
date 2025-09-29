@@ -55,6 +55,13 @@ models:
       temperature: 0.0
       max_tokens: 4_096
 
+  - name: "Claude Sonnet 4.5 - Anthropic"
+    gitlab_identifier: "claude_sonnet_4_5_20250929"
+    params:
+      model: "claude-sonnet-4-5-20250929"
+      temperature: 0.0
+      max_tokens: 4_096
+
   - name: "Claude Sonnet 4.0 - Anthropic"
     gitlab_identifier: "claude_sonnet_4_20250514"
     params:

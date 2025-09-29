@@ -184,6 +184,7 @@ configurable_unit_primitives:
     selectable_models:
       - "claude_sonnet_3_7_20250219"
       - "claude_sonnet_4_20250514"
+      - "claude_sonnet_4_5_20250929"
       - "gpt_5"
       - "gpt_5_mini"
       - "gpt_5_codex"

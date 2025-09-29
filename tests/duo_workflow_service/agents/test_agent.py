@@ -76,7 +76,9 @@ class TestAgent:
         assert result["conversation_history"][prompt_name] == [
             SystemMessage(content="You are AGI entity capable of anything"),
             HumanMessage(content=f"Your goal is: {goal}"),
-            AIMessage.model_construct(content=model_response, id=ANY),
+            AIMessage.model_construct(
+                content=model_response, id=ANY, usage_metadata=ANY
+            ),
         ]
 
     @pytest.mark.asyncio
@@ -106,7 +108,9 @@ Human message"""
             HumanMessage(
                 content=f"Handover: {expected_handover}.\nYour goal is: {goal}"
             ),
-            AIMessage.model_construct(content=model_response, id=ANY),
+            AIMessage.model_construct(
+                content=model_response, id=ANY, usage_metadata=ANY
+            ),
         ]
 
     @pytest.mark.asyncio
