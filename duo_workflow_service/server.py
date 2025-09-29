@@ -39,6 +39,9 @@ from duo_workflow_service.interceptors.authentication_interceptor import (
 from duo_workflow_service.interceptors.correlation_id_interceptor import (
     CorrelationIdInterceptor,
 )
+from duo_workflow_service.interceptors.enabled_instance_verbose_ai_logs_interceptor import (
+    EnabledInstanceVerboseAiLogsInterceptor,
+)
 from duo_workflow_service.interceptors.feature_flag_interceptor import (
     FeatureFlagInterceptor,
 )
@@ -605,6 +608,7 @@ async def serve(port: int) -> None:
                 CorrelationIdInterceptor(),
                 AuthenticationInterceptor(),
                 FeatureFlagInterceptor(),
+                EnabledInstanceVerboseAiLogsInterceptor(),
                 InternalEventsInterceptor(),
                 ModelMetadataInterceptor(),
                 MonitoringInterceptor(),
