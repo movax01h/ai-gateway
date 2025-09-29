@@ -1,5 +1,15 @@
 from enum import StrEnum
-from typing import Annotated, Any, Dict, List, NotRequired, Optional, TypedDict, Union
+from typing import (
+    Annotated,
+    Any,
+    Dict,
+    List,
+    NotRequired,
+    Optional,
+    Tuple,
+    TypedDict,
+    Union,
+)
 
 import structlog
 from langchain_core.messages import (
@@ -100,11 +110,17 @@ class UiChatLog(TypedDict):
 
 
 def _pretrim_large_messages(
-    messages: List[BaseMessage], token_counter
+    messages: List[BaseMessage], token_counter: ApproximateTokenCounter
 ) -> List[BaseMessage]:
     processed_messages = []
     for message in messages:
-        if token_counter.count_tokens([message]) > MAX_SINGLE_MESSAGE_TOKENS:
+        msg_token = token_counter.count_tokens([message])
+        if msg_token > MAX_SINGLE_MESSAGE_TOKENS:
+            logger.debug(
+                f"Message with role: {message.type} token size: {msg_token} "
+                f"exceeds the single message token limit: {MAX_SINGLE_MESSAGE_TOKENS}."
+                f"Replacing its content with a placeholder."
+            )
             message_copy = message.model_copy()
             message_copy.content = (
                 "Previous message was too large for context window and was omitted. Please respond "
@@ -153,6 +169,21 @@ def _plan_reducer(current: Plan, new: Optional[Plan]) -> Plan:
     return current
 
 
+def get_messages_profile(
+    messages: List[BaseMessage],
+    token_counter: ApproximateTokenCounter,
+    include_tool_tokens: bool = True,
+) -> Tuple[List[str], int]:
+
+    roles = [msg.type for msg in messages]
+    token_size = (
+        token_counter.count_tokens(messages, include_tool_tokens=include_tool_tokens)
+        if messages
+        else 0
+    )
+    return roles, token_size
+
+
 # reducers can be called multiple times by the LangGraph framework. One MUST assure
 # that fully new object is returned from reducer function. If mutation happens instead,
 # results might be broken !!!!!!
@@ -169,18 +200,51 @@ def _conversation_history_reducer(
             continue
 
         token_counter = ApproximateTokenCounter(agent_name)
+
+        current_msg_roles, current_msg_token = get_messages_profile(
+            messages=reduced.get(agent_name, []),
+            token_counter=token_counter,
+            include_tool_tokens=False,
+        )
+
+        new_msg_roles, new_msg_token = get_messages_profile(
+            messages=new_messages,
+            token_counter=token_counter,
+            include_tool_tokens=False,
+        )
+
+        logger.debug(
+            f"Starting trimming conversation history for {agent_name} with "
+            f"current messages roles: {current_msg_roles}, token size: {current_msg_token}; "
+            f"new messages roles: {new_msg_roles}, token size: {new_msg_token}; "
+            f"total token size including tool specs: {current_msg_token + new_msg_token + token_counter.tool_tokens}",
+            current_msg_tokens=current_msg_token,
+            new_msg_token=new_msg_token,
+            total_tokens_before_trimming=current_msg_token
+            + new_msg_token
+            + token_counter.tool_tokens,
+        )
+
         processed_messages = _pretrim_large_messages(new_messages, token_counter)
 
         if not processed_messages:
             continue
 
-        existing_messages = []
+        existing_messages = reduced.get(agent_name, [])
+        reduced[agent_name] = existing_messages + processed_messages
 
-        if agent_name in reduced:
-            existing_messages = reduced[agent_name]
-            reduced[agent_name] = reduced[agent_name] + processed_messages
-        else:
-            reduced[agent_name] = processed_messages
+        pretrimmed_msg_roles, pretrimmed_msg_token = get_messages_profile(
+            messages=reduced[agent_name],
+            token_counter=token_counter,
+            include_tool_tokens=False,
+        )
+
+        logger.debug(
+            f"Finished pretrim with messages roles: {pretrimmed_msg_roles}, message token: {pretrimmed_msg_token}, "
+            f"estimated token size including tool specs: {pretrimmed_msg_token + token_counter.tool_tokens}",
+            total_tokens_after_pretrimming=pretrimmed_msg_token
+            + token_counter.tool_tokens,
+        )
 
         try:
             trimmed_messages = trim_messages(
@@ -245,6 +309,19 @@ def _conversation_history_reducer(
 
             fallback_messages = system_messages + non_system_messages[-5:]
             reduced[agent_name] = _restore_message_consistency(fallback_messages)
+
+        posttrimmed_msg_roles, posttrimmed_msg_token = get_messages_profile(
+            messages=reduced[agent_name],
+            token_counter=token_counter,
+            include_tool_tokens=False,
+        )
+
+        logger.debug(
+            f"Finished posttrim with messages roles: {posttrimmed_msg_roles}, message token: {posttrimmed_msg_token}, "
+            f"estimated token size including tool specs: {posttrimmed_msg_token + token_counter.tool_tokens}",
+            total_tokens_after_posttrimming=posttrimmed_msg_token
+            + token_counter.tool_tokens,
+        )
 
     return reduced
 
