@@ -128,6 +128,7 @@ class Flow(AbstractWorkflow):
                 "project_http_url_to_repo": self._project.get("http_url_to_repo"),  # type: ignore[union-attr]
                 "goal": goal,
                 "current_date": datetime.now().strftime("%Y-%m-%d"),
+                "workflow_id": self._workflow_id,
                 "inputs": self._process_additional_context(
                     self._additional_context or []
                 ),
