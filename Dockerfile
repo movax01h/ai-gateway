@@ -45,7 +45,10 @@ RUN poetry install --compile --no-interaction --no-ansi --no-cache --only main
 ##
 FROM base-image AS final
 
-RUN apt-get update && apt-get install -y parallel
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    parallel \
+    curl \
+    && rm -rf /var/lib/apt/lists/*
 
 RUN useradd aigateway
 RUN chown -R aigateway:aigateway /home/aigateway/
