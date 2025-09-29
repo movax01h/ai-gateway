@@ -56,7 +56,9 @@ class ApproximateTokenCounter:
 
         return result
 
-    def count_tokens(self, prompt: List[BaseMessage]) -> int:
+    def count_tokens(
+        self, prompt: List[BaseMessage], include_tool_tokens: bool = True
+    ) -> int:
         result = 0
         for message in prompt:
             if isinstance(
@@ -69,5 +71,6 @@ class ApproximateTokenCounter:
                     message_dict = {}
                 token = self.count_tokens_in_dict(message_dict)
                 result += token
-
-        return result + self.tool_tokens
+        if include_tool_tokens:
+            result += self.tool_tokens
+        return result

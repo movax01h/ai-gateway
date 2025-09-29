@@ -19,6 +19,10 @@ from duo_workflow_service.entities.state import (
     _pretrim_large_messages,
     _restore_message_consistency,
     _ui_chat_log_reducer,
+    get_messages_profile,
+)
+from duo_workflow_service.token_counter.approximate_token_counter import (
+    ApproximateTokenCounter,
 )
 
 
@@ -816,3 +820,16 @@ def test_conversation_history_reducer_with_tool_messages(
 
     result = _conversation_history_reducer(current, new)
     assert result["agent_a"] == expected_result
+
+
+def test_get_messages_profile():
+    messages = []
+    token_counter = ApproximateTokenCounter(agent_name="context_builder")
+    roles, tokens = get_messages_profile(messages, token_counter=token_counter)
+    assert roles == []
+    assert tokens == 0
+
+    messages = [HumanMessage(content="Hi"), AIMessage(content="Hello")]
+    roles, tokens = get_messages_profile(messages, token_counter=token_counter)
+    assert roles == ["human", "ai"]
+    assert tokens == 4742
