@@ -21,7 +21,7 @@ class OpenAIProxyClient(BaseProxyClient):
         "user-agent",
     ]
 
-    ALLOWED_UPSTREAM_MODELS = ["gpt-5"]
+    ALLOWED_UPSTREAM_MODELS = ["gpt-5", "gpt-5-codex"]
 
     ALLOWED_HEADERS_TO_DOWNSTREAM = ["content-type"]
 
