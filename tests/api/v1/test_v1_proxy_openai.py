@@ -151,6 +151,37 @@ class TestProxyOpenAI:
             category="ai_gateway.api.v1.proxy.openai",
         )
 
+    @pytest.mark.parametrize(
+        "unit_primitive", EXTENDED_FEATURE_CATEGORIES_FOR_PROXY_ENDPOINTS.keys()
+    )
+    def test_successful_responses_request(
+        self, mock_client, mock_track_internal_event, mock_detect_abuse, unit_primitive
+    ):
+        with patch(
+            "ai_gateway.proxy.clients.OpenAIProxyClient.proxy",
+            return_value={"response": "responses test"},
+        ):
+            response = mock_client.post(
+                "/proxy/openai/v1/responses",
+                headers={
+                    "Authorization": "Bearer 12345",
+                    "X-Gitlab-Authentication-Type": "oidc",
+                    "X-Gitlab-Unit-Primitive": unit_primitive,
+                },
+                json={
+                    "model": "gpt-5-codex",
+                    "input": "Tell me a three sentence bedtime story about a unicorn.",
+                },
+            )
+
+        assert response.status_code == 200
+        assert response.json() == {"response": "responses test"}
+
+        mock_track_internal_event.assert_called_once_with(
+            f"request_{unit_primitive}",
+            category="ai_gateway.api.v1.proxy.openai",
+        )
+
     def test_streaming_request(
         self, mock_client, mock_track_internal_event, mock_detect_abuse
     ):

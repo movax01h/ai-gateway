@@ -55,6 +55,7 @@ def request_headers():
         ("http://0.0.0.0:5052/v1/proxy/openai/v1/completions", 200),
         ("http://0.0.0.0:5052/v1/proxy/openai/v1/embeddings", 200),
         ("http://0.0.0.0:5052/v1/proxy/openai/v1/models", 200),
+        ("http://0.0.0.0:5052/v1/proxy/openai/v1/responses", 200),
     ],
 )
 async def test_valid_proxy_requests(

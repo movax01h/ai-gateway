@@ -13,6 +13,7 @@ class OpenAIProxyClient(BaseProxyClient):
         "/v1/chat/completions",
         "/v1/embeddings",
         "/v1/models",
+        "/v1/responses",
     ]
 
     ALLOWED_HEADERS_TO_UPSTREAM = [
