@@ -238,6 +238,7 @@ _outbox = MagicMock(spec=asyncio.Queue)
                 "extract_lines_from_text",
                 "handover_tool",
                 "request_user_clarification_tool",
+                "run_tests",
             },
         ),
     ],
@@ -373,6 +374,7 @@ def test_registry_initialization_initialises_tools_with_correct_attributes(
         "get_work_item_notes": tools.GetWorkItemNotes(metadata=tool_metadata),
         "post_duo_code_review": tools.PostDuoCodeReview(metadata=tool_metadata),
         "extract_lines_from_text": tools.ExtractLinesFromText(metadata=tool_metadata),
+        "run_tests": tools.RunTests(metadata=tool_metadata),
     }
 
     assert registry._enabled_tools == expected_tools
@@ -523,6 +525,7 @@ def test_preapproved_tools_initialization(tool_metadata):
         "grep",
         "mkdir",
         "extract_lines_from_text",
+        "run_tests",
     }
 
     assert registry._preapproved_tool_names == default_tools.union(read_write_tools)
@@ -581,6 +584,7 @@ async def test_registry_configuration_with_preapproved_tools(
         "grep",
         "mkdir",
         "extract_lines_from_text",
+        "run_tests",
     }
     expected_preapproved = always_enabled_tools.union(read_write_tools)
 
