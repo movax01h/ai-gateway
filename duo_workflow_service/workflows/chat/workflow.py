@@ -80,9 +80,6 @@ CHAT_READ_ONLY_TOOLS = [
     "list_work_items",
     "list_vulnerabilities",
     "get_work_item_notes",
-    "list_instance_audit_events",
-    "list_group_audit_events",
-    "list_project_audit_events",
     "get_current_user",
     "get_vulnerability_details",
 ]
