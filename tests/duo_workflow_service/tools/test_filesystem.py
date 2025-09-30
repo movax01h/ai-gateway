@@ -627,7 +627,7 @@ def test_find_files_format_display_message():
     input_data = FindFilesInput(name_pattern="*.py")
 
     message = tool.format_display_message(input_data)
-    expected_message = "Search files with pattern '*.py'"
+    expected_message = "Search files with pattern `*.py`"
     assert message == expected_message
 
     # Test with tracked_only
@@ -635,7 +635,7 @@ def test_find_files_format_display_message():
         name_pattern="*.py",
     )
     message = tool.format_display_message(input_data)
-    expected_message = "Search files with pattern '*.py'"
+    expected_message = "Search files with pattern `*.py`"
     assert message == expected_message
 
     # Test with untracked_only
@@ -643,7 +643,7 @@ def test_find_files_format_display_message():
         name_pattern="*.py",
     )
     message = tool.format_display_message(input_data)
-    expected_message = "Search files with pattern '*.py'"
+    expected_message = "Search files with pattern `*.py`"
     assert message == expected_message
 
     # Test with modified
@@ -651,7 +651,7 @@ def test_find_files_format_display_message():
         name_pattern="*.py",
     )
     message = tool.format_display_message(input_data)
-    expected_message = "Search files with pattern '*.py'"
+    expected_message = "Search files with pattern `*.py`"
     assert message == expected_message
 
     # Test with deleted
@@ -659,7 +659,7 @@ def test_find_files_format_display_message():
         name_pattern="*.py",
     )
     message = tool.format_display_message(input_data)
-    expected_message = "Search files with pattern '*.py'"
+    expected_message = "Search files with pattern `*.py`"
     assert message == expected_message
 
 
@@ -670,7 +670,7 @@ def test_mkdir_format_display_message():
 
     message = tool.format_display_message(input_data)
 
-    expected_message = "Create directory './src/new_directory'"
+    expected_message = "Create directory `./src/new_directory`"
     assert message == expected_message
 
 
