@@ -498,7 +498,9 @@ class GitLabWorkflow(
                 )
             except Exception as e:
                 self._logger.error(
-                    f"Error sending billing event for workflow {self._workflow_id}: {e}"
+                    "Error sending billing event for workflow %s",
+                    self._workflow_id,
+                    error=str(e),
                 )
         else:
             self._logger.info(
