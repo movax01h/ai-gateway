@@ -17,3 +17,4 @@
     - ai_gateway/prompts/config/models.py
     - ai_gateway/prompts/registry.py
     - ai_gateway/searches/*.py
+    - ai_gateway/structured_logging.py
