@@ -1,0 +1,16 @@
+# This prompt is a copy of the base prompt, and was not designed specifically for GPT-5.
+# This can be removed once https://gitlab.com/gitlab-org/modelops/applied-ml/code-suggestions/ai-assist/-/issues/1523 is resolved,
+# so that we can use the base prompt for GPT-5 as well.
+---
+name: clarity_judge
+model:
+  params:
+    model_class_provider: openai
+    max_tokens: 32_768
+unit_primitives:
+  - duo_workflow_execute_workflow
+prompt_template:
+  system: |
+    {% include 'workflow/goal_disambiguation/system/1.0.0.jinja' %}
+  user: |
+    {% include 'workflow/goal_disambiguation/user/1.0.0.jinja' %}
