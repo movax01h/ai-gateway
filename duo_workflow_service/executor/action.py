@@ -128,8 +128,8 @@ async def _execute_action(metadata: Dict[str, Any], action: contract_pb2.Action)
         return actionResponse.httpResponse.body
     elif response_type == "plainTextResponse":
         return actionResponse.plainTextResponse.response
-    elif actionResponse.response:
-        log.warning("Executor returning only the legacy response")
-        return actionResponse.response
     else:
-        raise ValueError(f"Unexpected response type: {response_type}")
+        log.warning(
+            "Executor doesn't return expected response fields, falling back to legacy response"
+        )
+        return actionResponse.response
