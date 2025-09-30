@@ -9,6 +9,8 @@ from dependency_injector import containers
 from fastapi import status
 from fastapi.testclient import TestClient
 from gitlab_cloud_connector import CloudConnectorUser, UserClaims
+from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
+from langchain_core.prompt_values import ChatPromptValue
 from snowplow_tracker import Snowplow
 from starlette.datastructures import CommaSeparatedStrings
 from structlog.testing import capture_logs
@@ -18,6 +20,7 @@ from ai_gateway.api.v2 import api_router
 from ai_gateway.api.v2.code.completions import _track_code_suggestions_event
 from ai_gateway.model_selection import LLMDefinition
 from ai_gateway.models.base_chat import Message, Role
+from ai_gateway.models.mock import FakeModel
 from ai_gateway.tracking.container import ContainerTracking
 from ai_gateway.tracking.instrumentator import SnowplowInstrumentator
 from ai_gateway.tracking.snowplow import SnowplowEvent, SnowplowEventContext
@@ -42,12 +45,18 @@ def auth_user_fixture():
     )
 
 
+@pytest.fixture(name="mock_model_responses")
+def mock_model_responses_fixture():
+    return False
+
+
 @pytest.fixture(name="config_values")
-def config_values_fixture(assets_dir, gcp_location):
+def config_values_fixture(mock_model_responses, assets_dir, gcp_location) -> Dict:
     return {
         "custom_models": {
             "enabled": True,
         },
+        "mock_model_responses": mock_model_responses,
         "google_cloud_platform": {
             "location": gcp_location,
         },
@@ -92,6 +101,15 @@ def mock_post_processor_fixture():
     with patch("ai_gateway.code_suggestions.completions.PostProcessor.process") as mock:
         mock.return_value = "Post-processed completion response"
 
+        yield mock
+
+
+@pytest.fixture(name="mock_prompt_ainvoke")
+def mock_prompt_ainvoke_fixture():
+    """Mock Prompt.ainvoke to return test completions."""
+
+    with patch.object(FakeModel, "ainvoke") as mock:
+        mock.return_value = AIMessage(content="whatever")
         yield mock
 
 
@@ -420,8 +438,8 @@ class TestCodeCompletions:
                 "http://localhost:4000/",
                 "api-key",
                 None,
-                True,
                 False,
+                True,
                 False,
                 200,
                 [
@@ -441,8 +459,8 @@ class TestCodeCompletions:
                 "http://localhost:4000/",
                 "api-key",
                 "provider/codegemma_2b",
-                True,
                 False,
+                True,
                 False,
                 200,
                 [
@@ -504,8 +522,8 @@ class TestCodeCompletions:
                 "http://localhost:4000/",
                 "api-key",
                 None,
-                True,
                 False,
+                True,
                 False,
                 200,
                 [
@@ -525,8 +543,8 @@ class TestCodeCompletions:
                 "https://fireworks.endpoint",
                 "api-key",
                 None,
-                True,
                 False,
+                True,
                 False,
                 200,
                 [
@@ -557,8 +575,8 @@ class TestCodeCompletions:
                 "https://fireworks.endpoint",
                 "api-key",
                 None,
-                True,
                 False,
+                True,
                 False,
                 200,
                 [
@@ -578,8 +596,8 @@ class TestCodeCompletions:
                 "https://fireworks.endpoint",
                 "api-key",
                 None,
-                True,
                 False,
+                True,
                 False,
                 200,
                 [
@@ -610,8 +628,8 @@ class TestCodeCompletions:
                 "https://fireworks.endpoint",
                 "api-key",
                 None,
-                True,
                 False,
+                True,
                 False,
                 200,
                 [
@@ -694,8 +712,8 @@ class TestCodeCompletions:
                 "http://localhost:4000/",
                 "api-key",
                 None,
-                True,
                 False,
+                True,
                 False,
                 200,
                 [
@@ -715,8 +733,8 @@ class TestCodeCompletions:
                 "http://localhost:4000/",
                 "api-key",
                 None,
-                True,
                 False,
+                True,
                 False,
                 200,
                 [
@@ -787,22 +805,6 @@ class TestCodeCompletions:
         if want_status == 200:
             body = response.json()
             assert body["choices"] == want_choices
-
-        if model_provider == "fireworks_ai":
-            content = [c["content"] for c in context]
-            prefix = "\n".join(content + ["foo"])
-
-            mock_llm_text.assert_called_with(
-                prefix,
-                "\n",
-                False,
-                snowplow_event_context=ANY,
-                max_output_tokens=48,
-            )
-
-            mock_track_internal_event.assert_called_once_with(
-                "request_complete_code", category="ai_gateway.api.v2.code.completions"
-            )
 
         if model_provider in ("codestral", "litellm"):
             mock_track_internal_event.assert_called_with(
@@ -1156,12 +1158,13 @@ class TestCodeCompletions:
         assert result["model"]["name"] == "vertex_ai/codestral-2501"
         assert result["choices"][0]["text"] == "Post-processed completion response"
 
+    @pytest.mark.parametrize("mock_model_responses", [True])
     @pytest.mark.parametrize(
         "allow_llm_cache",
         ["true", "false"],
     )
     def test_fireworks_codestral_with_prompt(
-        self, allow_llm_cache: str, mock_litellm_acompletion: Mock, mock_client: Mock
+        self, allow_llm_cache: str, mock_prompt_ainvoke: Mock, mock_client: Mock
     ):
         params = {
             "project_path": "gitlab-org/gitlab-shell",
@@ -1179,15 +1182,18 @@ class TestCodeCompletions:
             "prompt_cache_max_len": 0,
         }
 
-        self._send_code_completions_request(mock_client, params, allow_llm_cache)
+        response = self._send_code_completions_request(
+            mock_client, params, allow_llm_cache
+        )
 
-        kwargs = mock_litellm_acompletion.call_args.kwargs
+        assert mock_prompt_ainvoke.called, "Should use prompt registry execution"
+        assert response.status_code == 200
 
-        if allow_llm_cache == "false":
-            assert "prompt_cache_max_len" in kwargs
-        else:
-            assert "prompt_cache_max_len" not in kwargs
+        body = response.json()
+        assert body["model"]["engine"] == "agent"
+        assert "Codestral" in body["model"]["name"]
 
+    @pytest.mark.parametrize("mock_model_responses", [True])
     @pytest.mark.parametrize(
         ("gcp_location", "model_details", "expected_model", "expected_content"),
         [
@@ -1212,6 +1218,7 @@ class TestCodeCompletions:
         model_details: Dict[str, str],
         expected_model: str,
         expected_content: str,
+        mock_prompt_ainvoke: Mock,
     ):
         params = {
             "prompt_version": 1,
@@ -1228,21 +1235,27 @@ class TestCodeCompletions:
 
         self._send_code_completions_request(mock_client, params)
 
-        mock_litellm_acompletion.assert_called_once_with(
-            messages=[{"content": expected_content, "role": "user"}],
-            max_tokens=48,
-            temperature=0.95,
-            top_p=0.95,
-            timeout=60,
+        mock_prompt_ainvoke.assert_called_once_with(
+            ChatPromptValue(
+                messages=[
+                    SystemMessage(
+                        content="As a python code completion assistant that generates only python syntax, your responsibility is to fill in the precise missing python code that seamlessly bridges a provided 'prefix' and 'suffix'.\n\n### Requirements:\n1. Complete the functionality with exact python code adhering to the given prefix and suffix.\n2. Provide only the missing code snippet essential for functionality, strictly conforming to python syntax.\n3. Exclude repetition, formatting, or explanatory text.\n\n- prefix: Code before the missing part.\n- suffix: Code continuing after the gap.\n\nCRITICAL INSTRUCTIONS:\n\n1. Output only the requested code.\n2. Exclusion of all non-code content.\n3. Concise and deployable code.\n4. Return an empty response if necessary.\n\nRespond exclusively with code—avoid adding any human-readable content intros, explanations, closings or instructions.",
+                        additional_kwargs={},
+                        response_metadata={},
+                    ),
+                    HumanMessage(
+                        content=expected_content,
+                        additional_kwargs={},
+                        response_metadata={},
+                    ),
+                ]
+            ),
+            {"tags": [], "metadata": {}, "callbacks": ANY, "configurable": {}},
             stop=ANY,
-            api_base="https://fireworks.endpoint",
-            api_key="mock_fireworks_key",
+            timeout=60.0,
             model=expected_model,
-            custom_llm_provider="text-completion-openai",
-            client=None,
-            prompt_cache_max_len=0,
-            logprobs=1,
-            stream=False,
+            api_key="mock_fireworks_key",
+            api_base="https://fireworks.endpoint",
         )
 
     @pytest.mark.asyncio
@@ -1321,12 +1334,13 @@ class TestCodeCompletions:
         assert result["model"]["name"] == "vertex_ai/codestral-2501"
         assert result["choices"][0]["text"] == "Post-processed completion response"
 
-    @pytest.mark.parametrize("gcp_location", ["asia-mock-location"])
+    @pytest.mark.parametrize(
+        "mock_model_responses,gcp_location", [(True, "asia-mock-location")]
+    )
     def test_disable_code_gecko_default_in_asia(
         self,
         mock_client: Mock,
-        mock_litellm_acompletion: Mock,
-        mock_post_processor: Mock,
+        mock_prompt_ainvoke: Mock,
     ):
         params = {
             "prompt_version": 1,
@@ -1340,51 +1354,33 @@ class TestCodeCompletions:
         }
         response = self._send_code_completions_request(mock_client, params)
 
-        mock_litellm_acompletion.assert_called_with(
-            messages=[
-                {
-                    "content": "<|fim_prefix|>foo<|fim_suffix|>\n<|fim_middle|>",
-                    "role": Role.USER,
-                }
-            ],
-            max_tokens=48,
-            temperature=0.95,
-            top_p=0.95,
-            stream=False,
-            timeout=60,
-            stop=[
-                "<|fim_prefix|>",
-                "<|fim_suffix|>",
-                "<|fim_middle|>",
-                "<|fim_pad|>",
-                "<|repo_name|>",
-                "<|file_sep|>",
-                "<|im_start|>",
-                "<|im_end|>",
-                "\n\n",
-            ],
-            api_base="https://fireworks.endpoint",
-            api_key="mock_fireworks_key",
+        mock_prompt_ainvoke.assert_called_once_with(
+            ChatPromptValue(
+                messages=[
+                    SystemMessage(
+                        content="As a python code completion assistant that generates only python syntax, your responsibility is to fill in the precise missing python code that seamlessly bridges a provided 'prefix' and 'suffix'.\n\n### Requirements:\n1. Complete the functionality with exact python code adhering to the given prefix and suffix.\n2. Provide only the missing code snippet essential for functionality, strictly conforming to python syntax.\n3. Exclude repetition, formatting, or explanatory text.\n\n- prefix: Code before the missing part.\n- suffix: Code continuing after the gap.\n\nCRITICAL INSTRUCTIONS:\n\n1. Output only the requested code.\n2. Exclusion of all non-code content.\n3. Concise and deployable code.\n4. Return an empty response if necessary.\n\nRespond exclusively with code—avoid adding any human-readable content intros, explanations, closings or instructions.",
+                        additional_kwargs={},
+                        response_metadata={},
+                    ),
+                    HumanMessage(
+                        content="<|fim_prefix|>foo<|fim_suffix|>\n<|fim_middle|>",
+                        additional_kwargs={},
+                        response_metadata={},
+                    ),
+                ]
+            ),
+            {"tags": [], "metadata": {}, "callbacks": ANY, "configurable": {}},
+            stop=ANY,
+            timeout=60.0,
             model="qwen2p5-coder-7b",
-            custom_llm_provider="text-completion-openai",
-            prompt_cache_max_len=0,
-            logprobs=1,
-            client=ANY,
-        )
-
-        mock_post_processor.assert_called_with(
-            "Test response",
-            score=999,
-            max_output_tokens_used=False,
-            model_name="text-completion-fireworks_ai/qwen2p5-coder-7b",
+            api_key="mock_fireworks_key",
+            api_base="https://fireworks.endpoint",
         )
 
         result = response.json()
-        assert result["model"]["engine"] == "fireworks_ai"
-        assert (
-            result["model"]["name"] == "text-completion-fireworks_ai/qwen2p5-coder-7b"
-        )
-        assert result["choices"][0]["text"] == "Post-processed completion response"
+        assert result["model"]["engine"] == "agent"
+        assert result["model"]["name"] == "Qwen2.5-Coder-7B Code Completions"
+        assert result["choices"][0]["text"] == "whatever"
 
     def _send_code_completions_request(
         self, mock_client, params, enable_prompt_cache="false"
@@ -2121,7 +2117,6 @@ class TestCodeGenerations:
 
         assert response.status_code == want_status
         assert mock_code_bison.called == want_vertex_called
-        assert mock_llm_chat.called == want_litellm_called
         assert mock_anthropic_chat.called == want_anthropic_chat_called
         assert mock_agent_model.called == bool(prompt_id)
 

@@ -1,0 +1,26 @@
+---
+name: Qwen2.5-Coder-7B Code Completions
+model:
+  params:
+    model_class_provider: litellm
+    temperature: 0.95
+    max_tokens: 48
+unit_primitives:
+  - complete_code
+prompt_template:
+  system: |
+    {% include 'code_suggestions/completions/codestral_system/1.0.0.jinja' %}
+  user: |
+    <|fim_prefix|>{{prefix}}<|fim_suffix|>{{suffix}}<|fim_middle|>
+params:
+  timeout: 60
+  stop:
+    - "<|fim_prefix|>"
+    - "<|fim_suffix|>"
+    - "<|fim_middle|>"
+    - "<|fim_pad|>"
+    - "<|repo_name|>"
+    - "<|file_sep|>"
+    - "<|im_start|>"
+    - "<|im_end|>"
+    - "\n\n"
