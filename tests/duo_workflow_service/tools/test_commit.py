@@ -1,3 +1,4 @@
+import base64
 import json
 from unittest.mock import AsyncMock, Mock, patch
 
@@ -57,6 +58,16 @@ def commit_data_fixture():
         "author_email": "test@example.com",
         "created_at": "2025-04-29T11:35:36.000+02:00",
         "message": "Test commit message",
+    }
+
+
+@pytest.fixture(name="file_content_response")
+def file_content_response_fixture():
+    """Fixture for mock file content used in edit tests."""
+    return {
+        "content": base64.b64encode(
+            b"# Title\n\nThis is a test file.\nWith multiple lines.\n"
+        ).decode()
     }
 
 
@@ -1085,6 +1096,140 @@ async def test_create_commit_exception(gitlab_client_mock, metadata):
     assert response == expected_response
 
 
+@pytest.mark.asyncio
+async def test_create_commit_with_partial_edit(
+    gitlab_client_mock, metadata, commit_data, file_content_response
+):
+    """Test CreateCommit._arun method with partial edit (old_str, new_str)."""
+    gitlab_client_mock.aget = AsyncMock(return_value=file_content_response)
+    gitlab_client_mock.apost = AsyncMock(return_value=commit_data)
+
+    tool = CreateCommit(metadata=metadata)
+
+    actions = [
+        CreateCommitAction(
+            action="update",
+            file_path="README.md",
+            old_str="# Title\n\nThis is a test file.\nWith multiple lines.\n",
+            new_str="# Title\n\nThis is an updated test file.\nWith multiple lines.\n",
+        ),
+    ]
+
+    response = await tool._arun(
+        project_id=24,
+        branch="main",
+        commit_message="Update with partial edit",
+        actions=actions,
+    )
+
+    expected_content = (
+        "# Title\n\nThis is an updated test file.\nWith multiple lines.\n"
+    )
+
+    expected_actions = [
+        {
+            "action": "update",
+            "file_path": "README.md",
+            "content": expected_content,
+        }
+    ]
+
+    expected_params = {
+        "branch": "main",
+        "commit_message": "Update with partial edit",
+        "actions": expected_actions,
+    }
+
+    expected_response = json.dumps(
+        {
+            "status": "success",
+            "data": expected_params,
+            "response": commit_data,
+        }
+    )
+
+    assert response == expected_response
+
+    gitlab_client_mock.aget.assert_called_once_with(
+        f"/api/v4/projects/24/repository/files/README.md", params={"ref": "main"}
+    )
+
+    gitlab_client_mock.apost.assert_called_once_with(
+        path="/api/v4/projects/24/repository/commits",
+        body=json.dumps(expected_params),
+    )
+
+
+@pytest.mark.asyncio
+async def test_create_commit_with_partial_edit_not_found(
+    gitlab_client_mock, metadata, file_content_response
+):
+    """Test error handling when old_str is not found in the file content."""
+    gitlab_client_mock.aget = AsyncMock(return_value=file_content_response)
+
+    tool = CreateCommit(metadata=metadata)
+
+    actions = [
+        CreateCommitAction(
+            action="update",
+            file_path="README.md",
+            old_str="This text does not exist in the file.",
+            new_str="This is a replacement text.",
+        ),
+    ]
+
+    response = await tool._arun(
+        project_id=24,
+        branch="main",
+        commit_message="Update with partial edit",
+        actions=actions,
+    )
+
+    expected_response = json.dumps({"error": "old_str not found in README.md"})
+    assert response == expected_response
+
+    gitlab_client_mock.aget.assert_called_once_with(
+        f"/api/v4/projects/24/repository/files/README.md", params={"ref": "main"}
+    )
+
+    gitlab_client_mock.apost.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_create_commit_with_partial_edit_error(gitlab_client_mock, metadata):
+    """Test error handling when fetching file content fails."""
+    gitlab_client_mock.aget = AsyncMock(side_effect=Exception("File not found"))
+
+    tool = CreateCommit(metadata=metadata)
+
+    actions = [
+        CreateCommitAction(
+            action="update",
+            file_path="README.md",
+            old_str="Some text",
+            new_str="Updated text",
+        ),
+    ]
+
+    response = await tool._arun(
+        project_id=24,
+        branch="main",
+        commit_message="Update with partial edit",
+        actions=actions,
+    )
+
+    expected_response = json.dumps(
+        {"error": "Error fetching file 'README.md': File not found"}
+    )
+    assert response == expected_response
+
+    gitlab_client_mock.aget.assert_called_once_with(
+        f"/api/v4/projects/24/repository/files/README.md", params={"ref": "main"}
+    )
+
+    gitlab_client_mock.apost.assert_not_called()
+
+
 @pytest.mark.parametrize(
     "input_data,expected_message",
     [
@@ -1141,6 +1286,22 @@ async def test_create_commit_exception(gitlab_client_mock, metadata):
                 ],
             ),
             "Create commit in https://gitlab.com/namespace/project with 1 file action (create)",
+        ),
+        (
+            CreateCommitInput(
+                project_id=24,
+                branch="main",
+                commit_message="Partial edit commit",
+                actions=[
+                    CreateCommitAction(
+                        action="update",
+                        file_path="README.md",
+                        old_str="Original content",
+                        new_str="Updated content",
+                    ),
+                ],
+            ),
+            "Create commit in project 24 with 1 file action (update)",
         ),
     ],
 )
