@@ -388,8 +388,17 @@ class UpdateIssue(IssueBaseTool):
             response = await self.gitlab_client.aput(
                 path=f"/api/v4/projects/{project_id}/issues/{issue_iid}",
                 body=json.dumps(data),
+                use_http_response=True,
             )
-            return json.dumps({"updated_issue": response})
+
+            if not response.is_success():
+                return json.dumps(
+                    {
+                        "error": f"Unexpected status code: {response.status_code} body: {response.body}"
+                    }
+                )
+
+            return json.dumps({"updated_issue": response.body})
         except Exception as e:
             return json.dumps({"error": str(e)})
 

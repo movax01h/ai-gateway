@@ -10,10 +10,14 @@ logger = logging.getLogger(__name__)
 
 
 class GitLabHttpResponse:
-    def __init__(self, status_code, body, headers=[]):
+    def __init__(self, status_code, body, headers={}):
         self.status_code = status_code
         self.body = body
         self.headers = headers
+
+    def is_success(self) -> bool:
+        """Check if the HTTP response indicates success (2xx status codes)."""
+        return 200 <= self.status_code < 300
 
 
 def checkpoint_decoder(json_object: dict):

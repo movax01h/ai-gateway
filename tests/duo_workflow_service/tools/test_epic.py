@@ -3,6 +3,7 @@ from unittest.mock import AsyncMock, Mock
 
 import pytest
 
+from duo_workflow_service.gitlab.http_client import GitLabHttpResponse
 from duo_workflow_service.tools.epic import (
     CreateEpic,
     EpicResourceInput,
@@ -460,7 +461,8 @@ OPTIONAL_LIST_EPICS_INPUTS = {
         ),
         (
             ListEpicsInput(
-                url="https://gitlab.com/groups/namespace/group", **OPTIONAL_LIST_EPICS_INPUTS  # type: ignore
+                url="https://gitlab.com/groups/namespace/group",
+                **OPTIONAL_LIST_EPICS_INPUTS,  # type: ignore
             ),
             "List epics in https://gitlab.com/groups/namespace/group",
         ),
@@ -808,21 +810,25 @@ async def test_create_epic_with_url_error(
 @pytest.mark.asyncio
 async def test_update_epic_success(gitlab_client_mock, metadata):
     gitlab_client_mock.aput = AsyncMock(
-        return_value={
-            "id": 1,
-            "iid": 5,
-            "group_id": 1,
-            "title": "Updated Test Epic",
-            "description": "This is an updated test epic",
-            "state": "closed",
-            "created_at": "2024-01-01T12:00:00Z",
-            "updated_at": "2024-01-02T12:00:00Z",
-            "labels": ["bug", "urgent"],
-            "start_date_fixed": "2024-02-01",
-            "due_date_fixed": "2024-12-31",
-            "confidential": True,
-            "parent_id": 10,
-        }
+        return_value=GitLabHttpResponse(
+            status_code=200,
+            body={
+                "id": 1,
+                "iid": 5,
+                "group_id": 1,
+                "title": "Updated Test Epic",
+                "description": "This is an updated test epic",
+                "state": "closed",
+                "created_at": "2024-01-01T12:00:00Z",
+                "updated_at": "2024-01-02T12:00:00Z",
+                "labels": ["bug", "urgent"],
+                "start_date_fixed": "2024-02-01",
+                "due_date_fixed": "2024-12-31",
+                "confidential": True,
+                "parent_id": 10,
+            },
+            headers={"content-type": "application/json"},
+        )
     )
 
     tool = UpdateEpic(description="update epic description", metadata=metadata)
@@ -843,7 +849,7 @@ async def test_update_epic_success(gitlab_client_mock, metadata):
     )
 
     expected_response = json.dumps(
-        {"updated_epic": gitlab_client_mock.aput.return_value}
+        {"updated_epic": gitlab_client_mock.aput.return_value.body}
     )
     assert response == expected_response
 
@@ -863,6 +869,7 @@ async def test_update_epic_success(gitlab_client_mock, metadata):
                 "due_date_is_fixed": True,
             }
         ),
+        use_http_response=True,
     )
 
 
@@ -878,7 +885,36 @@ async def test_update_epic_error(gitlab_client_mock, metadata):
     assert response == expected_response
 
     gitlab_client_mock.aput.assert_called_once_with(
-        path="/api/v4/groups/1/epics/999", body=json.dumps({"title": "Updated Epic"})
+        path="/api/v4/groups/1/epics/999",
+        body=json.dumps({"title": "Updated Epic"}),
+        use_http_response=True,
+    )
+
+
+@pytest.mark.asyncio
+async def test_update_epic_http_error_status_code(gitlab_client_mock, metadata):
+    """Test that HTTP error status codes are properly handled with detailed error messages."""
+    gitlab_client_mock.aput = AsyncMock(
+        return_value=GitLabHttpResponse(
+            status_code=404,
+            body={"message": "404 Epic Not Found"},
+            headers={"content-type": "application/json"},
+        )
+    )
+
+    tool = UpdateEpic(description="update epic description", metadata=metadata)
+
+    response = await tool._arun(group_id=1, epic_iid=999, title="Updated Epic")
+
+    response_json = json.loads(response)
+    assert "error" in response_json
+    assert "Unexpected status code: 404" in response_json["error"]
+    assert "body: {'message': '404 Epic Not Found'}" in response_json["error"]
+
+    gitlab_client_mock.aput.assert_called_once_with(
+        path="/api/v4/groups/1/epics/999",
+        body=json.dumps({"title": "Updated Epic"}),
+        use_http_response=True,
     )
 
 
@@ -947,7 +983,7 @@ def test_update_epic_format_display_message(input_data, expected_message):
 async def test_update_epic_with_url_success(
     url, group_id, epic_iid, expected_path, gitlab_client_mock, metadata
 ):
-    mock_response = {
+    update_data = {
         "id": 1,
         "iid": 123,
         "group_id": "namespace%2Fgroup",
@@ -962,6 +998,9 @@ async def test_update_epic_with_url_success(
         "confidential": True,
         "parent_id": 10,
     }
+    mock_response = GitLabHttpResponse(
+        status_code=200, body=update_data, headers={"content-type": "application/json"}
+    )
     gitlab_client_mock.aput = AsyncMock(return_value=mock_response)
 
     tool = UpdateEpic(description="update epic description", metadata=metadata)
@@ -982,7 +1021,7 @@ async def test_update_epic_with_url_success(
         due_date_is_fixed=True,
     )
 
-    expected_response = json.dumps({"updated_epic": mock_response})
+    expected_response = json.dumps({"updated_epic": update_data})
     assert response == expected_response
 
     gitlab_client_mock.aput.assert_called_once_with(
@@ -1001,6 +1040,7 @@ async def test_update_epic_with_url_success(
                 "due_date_is_fixed": True,
             }
         ),
+        use_http_response=True,
     )
 
 

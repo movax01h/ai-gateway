@@ -1,5 +1,6 @@
 import asyncio
 import json
+from typing import Any, Optional
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -47,7 +48,7 @@ def monkeypatch_execute_http_response_fixture(monkeypatch, mock_execute_http_res
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
-    "method, path, body, params, parse_json, mock_return_value, expected_result",
+    "method, path, body, params, parse_json, use_http_response, mock_return_value, expected_result",
     [
         (
             "GET",
@@ -55,6 +56,7 @@ def monkeypatch_execute_http_response_fixture(monkeypatch, mock_execute_http_res
             None,
             None,
             True,
+            False,
             '{"key": "value"}',
             {"key": "value"},
         ),
@@ -63,6 +65,7 @@ def monkeypatch_execute_http_response_fixture(monkeypatch, mock_execute_http_res
             "/api/v4/projects/1/jobs/102/trace",
             None,
             None,
+            False,
             False,
             "Non-JSON response",
             "Non-JSON response",
@@ -73,6 +76,7 @@ def monkeypatch_execute_http_response_fixture(monkeypatch, mock_execute_http_res
             None,
             {"per_page": 100},
             True,
+            False,
             '{"projects": []}',
             {"projects": []},
         ),
@@ -82,6 +86,7 @@ def monkeypatch_execute_http_response_fixture(monkeypatch, mock_execute_http_res
             '{ "test": 1 }',
             None,
             True,
+            False,
             '{"key": "value"}',
             {"key": "value"},
         ),
@@ -91,6 +96,7 @@ def monkeypatch_execute_http_response_fixture(monkeypatch, mock_execute_http_res
             '{ "test": 1 }',
             None,
             True,
+            False,
             '{"key": "value"}',
             {"key": "value"},
         ),
@@ -100,6 +106,7 @@ def monkeypatch_execute_http_response_fixture(monkeypatch, mock_execute_http_res
             '{ "test": 1 }',
             None,
             True,
+            False,
             '{"key": "value"}',
             {"key": "value"},
         ),
@@ -113,6 +120,7 @@ async def test_executor_gitlab_http_client(
     body,
     params,
     parse_json,
+    use_http_response,
     mock_return_value,
     expected_result,
 ):
@@ -126,13 +134,24 @@ async def test_executor_gitlab_http_client(
         expected_path = f"{path}?{query_string}"
 
     if method == "GET":
-        result = await client.aget(path, params=params, parse_json=parse_json)
+        result = await client.aget(
+            path,
+            params=params,
+            parse_json=parse_json,
+            use_http_response=use_http_response,
+        )
     elif method == "POST":
-        result = await client.apost(path, body, parse_json=parse_json)
+        result = await client.apost(
+            path, body, parse_json=parse_json, use_http_response=use_http_response
+        )
     elif method == "PUT":
-        result = await client.aput(path, body, parse_json=parse_json)
+        result = await client.aput(
+            path, body, parse_json=parse_json, use_http_response=use_http_response
+        )
     elif method == "PATCH":
-        result = await client.apatch(path, body, parse_json=parse_json)
+        result = await client.apatch(
+            path, body, parse_json=parse_json, use_http_response=use_http_response
+        )
     else:
         pytest.fail(f"Unexpected HTTP method: {method}")
         result = None
