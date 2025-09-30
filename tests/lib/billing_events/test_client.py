@@ -278,3 +278,20 @@ class TestBillingEventsClient:
         assert billing_data["metadata"] == {"workflow_type": "code_review"}
         assert billing_data["timestamp"] == "2023-12-01T10:00:00"
         assert billing_data["event_id"] == "12345678-1234-5678-9012-123456789012"
+
+    def test_track_billing_event_tracker_exception(self, client):
+        """Test that exceptions from snowplow_tracker.track are handled gracefully."""
+        current_event_context.set(EventContext())
+
+        with mock.patch.object(client.snowplow_tracker, "track") as mock_track:
+            mock_track.side_effect = Exception("Network error")
+
+            try:
+                client.track_billing_event(
+                    event_type="ai_completion",
+                    category=__name__,
+                    unit_of_measure="tokens",
+                    quantity=100.0,
+                )
+            except Exception as e:
+                pytest.fail(f"Failed to send billing event: {e}")
