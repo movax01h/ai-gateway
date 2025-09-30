@@ -116,7 +116,7 @@ def _pretrim_large_messages(
     for message in messages:
         msg_token = token_counter.count_tokens([message])
         if msg_token > MAX_SINGLE_MESSAGE_TOKENS:
-            logger.debug(
+            logger.info(
                 f"Message with role: {message.type} token size: {msg_token} "
                 f"exceeds the single message token limit: {MAX_SINGLE_MESSAGE_TOKENS}."
                 f"Replacing its content with a placeholder."
@@ -213,7 +213,7 @@ def _conversation_history_reducer(
             include_tool_tokens=False,
         )
 
-        logger.debug(
+        logger.info(
             f"Starting trimming conversation history for {agent_name} with "
             f"current messages roles: {current_msg_roles}, token size: {current_msg_token}; "
             f"new messages roles: {new_msg_roles}, token size: {new_msg_token}; "
@@ -239,7 +239,7 @@ def _conversation_history_reducer(
             include_tool_tokens=False,
         )
 
-        logger.debug(
+        logger.info(
             f"Finished pretrim with messages roles: {pretrimmed_msg_roles}, message token: {pretrimmed_msg_token}, "
             f"estimated token size including tool specs: {pretrimmed_msg_token + token_counter.tool_tokens}",
             total_tokens_after_pretrimming=pretrimmed_msg_token
@@ -316,7 +316,7 @@ def _conversation_history_reducer(
             include_tool_tokens=False,
         )
 
-        logger.debug(
+        logger.info(
             f"Finished posttrim with messages roles: {posttrimmed_msg_roles}, message token: {posttrimmed_msg_token}, "
             f"estimated token size including tool specs: {posttrimmed_msg_token + token_counter.tool_tokens}",
             total_tokens_after_posttrimming=posttrimmed_msg_token
