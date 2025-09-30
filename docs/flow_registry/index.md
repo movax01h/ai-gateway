@@ -633,6 +633,91 @@ routers:
               "high": "auto_processor"
 ```
 
+### DeterministicStepComponent
+
+The DeterministicStepComponent executes a **single tool** deterministically with predetermined arguments extracted from the flow state. This component provides a way to run one specific tool without AI involvement, using inputs to extract the necessary parameters and producing predictable outputs following fixed conventions.
+
+The component provides these capabilities:
+
+- **Execute a single tool deterministically**: Run one designated tool with parameters derived from inputs
+- **Extract parameters from state**: Use component inputs to gather the tool's execution arguments
+- **No AI involvement**: Direct tool execution without LLM processing
+- **Integration with existing toolsets**: Compatible with any registered tool in the toolset
+- **Chainable design**: Multiple DeterministicStepComponents can be chained to execute sequential tool operations
+
+Unlike AgentComponent or OneOffComponent which use AI to determine tool usage, DeterministicStepComponent executes exactly one pre-specified tool with arguments extracted directly from the flow state, making it ideal for predictable, repeatable operations. **To execute multiple tools, chain multiple DeterministicStepComponents together in your flow.**
+
+#### Required Parameters
+
+- **name**: Unique identifier for this component instance. Must not contain `:` or `.` characters.
+- **type**: Must be `"DeterministicStepComponent"`
+- **tool_name**: Name of the single tool to execute
+
+#### Optional Parameters
+
+- **toolset**: Toolset containing the tool to be executed. (If no toolset is specified, a new one is created with only the `tool_name`)
+- **inputs**: List of input data sources to extract tool parameters (default: empty list)
+- **ui_log_events**: UI logging configuration for displaying tool execution
+- **ui_role_as**: Display role in UI (default: `"tool"`)
+
+#### Outputs
+
+Each DeterministicStepComponent automatically produces:
+
+- **ui_chat_log**: UI logging information for tool execution events
+- **context:{component_name}.tool_responses**: Record of successful tool execution results
+- **context:{component_name}.error**: Record of any errors during the tool call
+- **context:{component_name}.execution_result**: Status of the execution ("success" or "failed")
+
+#### Complete DeterministicStepComponent Example
+
+##### Execute a single tool
+
+```yaml
+components:
+   - name: "read"
+     type: DeterministicStepComponent
+     inputs:
+       - from: "context:goal"
+         as: "file_path"
+     tool_name: "read_file"
+     ui_log_events:
+       - "on_tool_execution_success"
+       - "on_tool_execution_failed"
+```
+
+##### Chain multiple tools
+
+```yaml
+components:
+    - name: "read_config"
+      type: DeterministicStepComponent
+      inputs:
+          - from: "context:goal"
+            as: "config_path"
+      tool_name: "read_file"
+    - name: "backup_config"
+      type: DeterministicStepComponent
+      inputs:
+          - from: "context:read_config.tool_responses"
+            as: "contents"
+          - from: "config_backup.txt"
+            as: "file_path"
+            literal: true
+      tool_name: "create_file_with_contents"
+```
+
+#### Validation
+
+The DeterministicStepComponent performs automatic validation of tool arguments:
+
+- Validates that the specified tool exists in the provided toolset
+- Checks that all required tool parameters are configured in the inputs
+- Verifies that configured parameters match the tool's expected schema
+- Raises clear validation errors during component initialization if configuration is invalid
+
+This validation ensures that tool execution errors are caught at configuration time rather than runtime.
+
 ### OneOffComponent
 
 The `OneOffComponent` functionally sits in-between the `AgentComponent` and the `DeterministicStepComponent`.
