@@ -43,6 +43,10 @@ class LoggingConfig(BaseSettings):
 def setup_logging():
     logging_config = LoggingConfig()
 
+    # Initialize AI Gateway logging globals so can_log_request_data() works correctly
+    # when DWS uses AI Gateway's model factories through the prompt registry
+    _setup_ai_gateway_logging_globals()
+
     # Configure basic logging
     logging.basicConfig(format="%(message)s", level=logging_config.level)
 
@@ -119,3 +123,36 @@ def setup_logging():
         logger_factory=structlog.stdlib.LoggerFactory(),
         cache_logger_on_first_use=True,
     )
+
+
+def _setup_ai_gateway_logging_globals():
+    """Initialize only the AI Gateway logging globals needed by model factories in DWS.
+
+    This sets the global constants that can_log_request_data() depends on, without running AI Gateway's full logging
+    setup which would interfere with DWS logging.
+    """
+    # pylint: disable=import-outside-toplevel
+    import os
+
+    import ai_gateway.structured_logging as aigw_logging
+
+    # Read AI Gateway environment variables directly
+    enable_request_logging = (
+        os.getenv("AIGW_LOGGING__ENABLE_REQUEST_LOGGING", "false").lower() == "true"
+    )
+    custom_models_enabled = (
+        os.getenv("AIGW_CUSTOM_MODELS__ENABLED", "false").lower() == "true"
+    )
+    enable_litellm_logging = (
+        os.getenv("AIGW_LOGGING__ENABLE_LITELLM_LOGGING", "false").lower() == "true"
+    )
+
+    # Set only the global constants needed by can_log_request_data()
+    aigw_logging.ENABLE_REQUEST_LOGGING = enable_request_logging
+    aigw_logging.CUSTOM_MODELS_ENABLED = custom_models_enabled
+
+    # Optionally enable LiteLLM debugging if configured
+    if enable_litellm_logging:
+        import litellm
+
+        litellm._turn_on_debug()
