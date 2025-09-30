@@ -92,7 +92,8 @@ def test_run(custom_models_enabled, should_validate_llm):
         patch("asyncio.get_event_loop") as mock_get_loop,
         patch.dict(os.environ, {"AIGW_CUSTOM_MODELS__ENABLED": custom_models_enabled}),
     ):
-        mock_loop = MagicMock()
+        mock_loop = MagicMock(spec=asyncio.AbstractEventLoop)
+        mock_loop.run_until_complete = MagicMock()
         mock_get_loop.return_value = mock_loop
 
         run()
@@ -110,6 +111,9 @@ def test_run(custom_models_enabled, should_validate_llm):
         assert mock_loop.run_until_complete.call_count == 1
         actual_arg = mock_loop.run_until_complete.call_args[0][0]
         assert asyncio.iscoroutine(actual_arg)
+
+        # Clean up the coroutine to prevent the warning
+        actual_arg.close()
 
 
 @pytest.mark.asyncio
@@ -610,7 +614,11 @@ async def test_grpc_server():
         patch(
             "duo_workflow_service.server.reflection.enable_server_reflection"
         ) as mock_enable_reflection,
+        patch("duo_workflow_service.server.connection_pool") as mock_connection_pool,
     ):
+        mock_connection_pool.__aenter__ = AsyncMock(return_value=mock_connection_pool)
+        mock_connection_pool.__aexit__ = AsyncMock(return_value=None)
+
         await serve(50052)
 
     mock_server.add_insecure_port.assert_called_once_with("[::]:50052")
