@@ -96,13 +96,12 @@ include:
       runway_service_id: duo-workflow-svc
       image: "$CI_REGISTRY_IMAGE/model-gateway:${CI_COMMIT_SHORT_SHA}"
       runway_version: v4.1.1
-  # - project: "gitlab-com/gl-infra/platform/runway/runwayctl"
-  #   file: "ci-tasks/service-project/runway.yml"
-  #   inputs:
-  #     runway_service_id: dws-loadtest
-  #     image: "$CI_REGISTRY_IMAGE/model-gateway:${CI_COMMIT_SHORT_SHA}"
-  #     runway_version: v4.1.1
-  #   when: manual
+  - project: "gitlab-com/gl-infra/platform/runway/runwayctl"
+    file: "ci-tasks/service-project/runway.yml"
+    inputs:
+      runway_service_id: dws-loadtest
+      image: "$CI_REGISTRY_IMAGE/model-gateway:${CI_COMMIT_SHORT_SHA}"
+      runway_version: v4.1.1
   - project: "gitlab-com/gl-infra/platform/runway/runwayctl"
     file: "ci-tasks/service-project/runway.yml"
     inputs:
@@ -183,3 +182,14 @@ pages:
     - <<: *if-commit-message-pipeline-expedited
       when: never
     - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+
+# Override included jobs to enable manual deployment
+🛫 [dws-loadtest] Trigger runway deployment staging:
+  rules:
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+      when: manual
+
+🛫 [dws-loadtest] Trigger runway deployment production:
+  rules:
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+      when: manual
