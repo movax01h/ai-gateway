@@ -1,0 +1,13 @@
+---
+name: executor
+model:
+  params:
+    model_class_provider: litellm
+unit_primitives:
+  - duo_workflow_execute_workflow
+prompt_template:
+  system: |
+    {% include 'workflow/executor/system/1.0.0.jinja' %}
+  user: |
+    {% include 'workflow/user/1.0.0.jinja' %}
+
