@@ -344,12 +344,13 @@ class Prompt(RunnableBinding[Input, Output]):
 class BasePromptRegistry(ABC):
     internal_event_client: InternalEventsClient
     model_limits: ConfigModelLimits
+    _DEFAULT_VERSION: str | None = "^1.0.0"
 
     @abstractmethod
     def get(
         self,
         prompt_id: str,
-        prompt_version: str,
+        prompt_version: str | None,
         model_metadata: Optional[TypeModelMetadata] = None,
         tools: Optional[List[BaseTool]] = None,
         **kwargs: Any,
@@ -375,7 +376,11 @@ class BasePromptRegistry(ABC):
             model_metadata.add_user(user)
 
         prompt = self.get(
-            prompt_id, prompt_version or "^1.0.0", model_metadata, tools, **kwargs
+            prompt_id,
+            prompt_version or self._DEFAULT_VERSION,
+            model_metadata,
+            tools,
+            **kwargs,
         )
         prompt.internal_event_client = self.internal_event_client
         prompt.set_limits(self.model_limits)

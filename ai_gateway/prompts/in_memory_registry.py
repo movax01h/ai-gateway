@@ -29,6 +29,8 @@ class InMemoryPromptRegistry(BasePromptRegistry):
                 user: "Task: {{goal}}"
     """
 
+    _DEFAULT_VERSION = None
+
     def __init__(self, shared_registry: LocalPromptRegistry):
         # Shared singleton to avoid duplication
         self.shared_registry = shared_registry
