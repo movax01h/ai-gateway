@@ -2,6 +2,7 @@ from typing import Any, Dict
 from unittest import mock
 
 import pytest
+from gitlab_cloud_connector import CloudConnectorUser, UserClaims
 from snowplow_tracker import SelfDescribingJson, Snowplow
 
 from lib.billing_events.client import BillingEventsClient
@@ -76,6 +77,12 @@ class TestBillingEventsClient:
                 thread_count=2,
             )
 
+    @pytest.fixture(name="user")
+    def user_fixture(self):
+        return CloudConnectorUser(
+            authenticated=True, claims=UserClaims(gitlab_instance_uid="abc")
+        )
+
     @mock.patch("snowplow_tracker.Tracker.__init__")
     @mock.patch("snowplow_tracker.emitters.AsyncEmitter.__init__")
     def test_initialization(self, mock_emitter_init, mock_tracker_init):
@@ -144,6 +151,11 @@ class TestBillingEventsClient:
         category,
         kwargs,
     ):
+        user = CloudConnectorUser(
+            authenticated=True,
+            claims=UserClaims(gitlab_instance_uid="test-instance-uid"),
+        )
+
         event_context = EventContext(
             realm="user",
             instance_id="instance-123",
@@ -171,9 +183,11 @@ class TestBillingEventsClient:
             "global_user_id": kwargs.get("global_user_id"),
             "correlation_id": "corr-123",
             "metadata": metadata or {},
+            "unique_instance_id": "test-instance-uid",
         }
 
         client.track_billing_event(
+            user=user,
             event_type=event_type,
             unit_of_measure=unit_of_measure,
             quantity=quantity,
@@ -192,7 +206,7 @@ class TestBillingEventsClient:
         assert context.schema == client.BILLING_CONTEXT_SCHEMA
         assert context.data == expected_context_data
 
-    def test_track_billing_event_disabled_client(self):
+    def test_track_billing_event_disabled_client(self, user):
         client = BillingEventsClient(
             enabled=False,
             endpoint="https://billing.local",
@@ -206,6 +220,7 @@ class TestBillingEventsClient:
 
         try:
             client.track_billing_event(
+                user=user,
                 event_type="ai_completion",
                 category=__name__,
                 unit_of_measure="tokens",
@@ -214,9 +229,10 @@ class TestBillingEventsClient:
         except Exception as e:
             pytest.fail(f"Disabled client raised an unexpected exception: {e}")
 
-    def test_track_billing_event_negative_quantity(self, client):
+    def test_track_billing_event_negative_quantity(self, client, user):
         with mock.patch.object(client.snowplow_tracker, "track") as mock_track:
             client.track_billing_event(
+                user=user,
                 event_type="ai_completion",
                 category=__name__,
                 unit_of_measure="tokens",
@@ -224,10 +240,13 @@ class TestBillingEventsClient:
             )
             mock_track.assert_not_called()
 
-    def test_track_billing_event_with_empty_metadata(self, client, mock_dependencies):
+    def test_track_billing_event_with_empty_metadata(
+        self, client, user, mock_dependencies
+    ):
         current_event_context.set(EventContext())
 
         client.track_billing_event(
+            user=user,
             event_type="ai_completion",
             category=__name__,
             unit_of_measure="tokens",
@@ -242,7 +261,7 @@ class TestBillingEventsClient:
         assert context.data["metadata"] == {}
 
     def test_billing_event_context_creation_with_internal_context(
-        self, client, mock_dependencies
+        self, client, user, mock_dependencies
     ):
         internal_context = EventContext(
             environment="production",
@@ -257,6 +276,7 @@ class TestBillingEventsClient:
         current_event_context.set(internal_context)
 
         client.track_billing_event(
+            user=user,
             event_type="duo_workflow",
             category=__name__,
             unit_of_measure="executions",
@@ -281,6 +301,9 @@ class TestBillingEventsClient:
 
     def test_track_billing_event_tracker_exception(self, client):
         """Test that exceptions from snowplow_tracker.track are handled gracefully."""
+        user = CloudConnectorUser(
+            authenticated=True, claims=UserClaims(gitlab_instance_uid="abc")
+        )
         current_event_context.set(EventContext())
 
         with mock.patch.object(client.snowplow_tracker, "track") as mock_track:
@@ -288,6 +311,7 @@ class TestBillingEventsClient:
 
             try:
                 client.track_billing_event(
+                    user=user,
                     event_type="ai_completion",
                     category=__name__,
                     unit_of_measure="tokens",

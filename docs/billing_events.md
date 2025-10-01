@@ -22,6 +22,7 @@ async def ai_completion_feature(
 ):
 
    billable_client.track_billing_event(
+        user=user,
         event_type="billable_event_type",  # → action + event_type
         category=__name__,                 # → where event happened
         metadata={                         # → billable context metadata

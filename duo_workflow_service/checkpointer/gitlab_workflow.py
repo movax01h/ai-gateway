@@ -20,6 +20,7 @@ from typing import (
 
 import structlog
 from dependency_injector.wiring import Provide, inject
+from gitlab_cloud_connector import CloudConnectorUser
 from langchain_core.runnables import RunnableConfig
 from langgraph.checkpoint.base import (
     BaseCheckpointSaver,
@@ -41,6 +42,7 @@ from duo_workflow_service.gitlab.http_client import (
     GitLabHttpResponse,
     checkpoint_decoder,
 )
+from duo_workflow_service.interceptors.authentication_interceptor import current_user
 from duo_workflow_service.json_encoder.encoder import CustomEncoder
 from duo_workflow_service.monitoring import duo_workflow_metrics
 from duo_workflow_service.status_updater.gitlab_status_updater import (
@@ -481,12 +483,14 @@ class GitLabWorkflow(
         # Track billing event for workflow completion
         if status in BILLABLE_STATUSES:
             try:
+                user: CloudConnectorUser = current_user.get()
                 billing_metadata = {
                     "workflow_id": self._workflow_id,
                     "execution_environment": "duo_agent_platform",
                     "llm_operations": self._llm_operations,
                 }
                 self._billing_event_client.track_billing_event(
+                    user=user,
                     event_type="duo_agent_platform_workflow_completion",
                     category=self.__class__.__name__,
                     unit_of_measure="tokens",
