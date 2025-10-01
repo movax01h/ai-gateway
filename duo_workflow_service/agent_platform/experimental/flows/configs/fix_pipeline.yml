@@ -113,6 +113,14 @@ flow:
           type: string
         source_branch:
           type: string
+    - category: merge_request
+      input_schema:
+        url:
+          type: string
+    - category: pipeline
+      input_schema:
+        source_branch:
+          type: string
 prompts:
   - prompt_id: "git_push_prompt"
     model:
