@@ -36,27 +36,6 @@ class AmazonQModelMetadata(BaseModelMetadata):
         }
 
 
-class FireworksModelMetadata(BaseModelMetadata):
-    provider: Literal["fireworks_ai"]
-    name: Annotated[str, StringConstraints(max_length=255)]
-    endpoint: Optional[Annotated[AnyUrl, UrlConstraints(max_length=255)]] = None
-    api_key: Optional[Annotated[str, StringConstraints(max_length=2000)]] = None
-    model_identifier: str
-
-    def to_params(self) -> Dict[str, Any]:
-        params = {
-            "model": self.model_identifier,
-        }
-
-        if self.api_key:
-            params["api_key"] = self.api_key
-
-        if self.endpoint:
-            params["api_base"] = str(self.endpoint).removesuffix("/")
-
-        return params
-
-
 class ModelMetadata(BaseModelMetadata):
     name: Annotated[str, StringConstraints(max_length=255)]
     provider: Annotated[str, StringConstraints(max_length=255)]
@@ -70,7 +49,7 @@ class ModelMetadata(BaseModelMetadata):
         This function also allows setting custom provider details based on the identifier, like fetching endpoints based
         on AIGW location.
         """
-        params: Dict[str, Any] = {}
+        params: Dict[str, str] = {}
 
         if self.endpoint:
             params["api_base"] = str(self.endpoint).removesuffix("/")
@@ -98,7 +77,7 @@ class ModelMetadata(BaseModelMetadata):
         return params
 
 
-TypeModelMetadata = AmazonQModelMetadata | ModelMetadata | FireworksModelMetadata
+TypeModelMetadata = AmazonQModelMetadata | ModelMetadata
 
 
 def create_model_metadata(data: dict[str, Any] | None) -> Optional[TypeModelMetadata]:
@@ -113,37 +92,6 @@ def create_model_metadata(data: dict[str, Any] | None) -> Optional[TypeModelMeta
             llm_definition_params=llm_definition.params.copy(),
             family=llm_definition.family,
             **data,
-        )
-
-    if data["provider"] == "fireworks_ai":
-        provider_keys = data.get("provider_keys", {})
-        model_endpoints = data.get("model_endpoints", {})
-
-        region_config = model_endpoints.get("fireworks_current_region_endpoint", {})
-        model_config = region_config.get(data["name"], {})
-
-        model_identifier = model_config.get("identifier")
-        if not model_identifier:
-            raise ValueError(
-                f"Fireworks model identifier is missing for model {data['name']}."
-            )
-
-        fireworks_llm_definition = (
-            configs.get_model(data["name"]) if data.get("name") else None
-        )
-
-        return FireworksModelMetadata(
-            provider="fireworks_ai",
-            name=data["name"],
-            endpoint=model_config.get("endpoint"),
-            api_key=provider_keys.get("fireworks_api_key"),
-            model_identifier=model_identifier,
-            llm_definition_params=(
-                fireworks_llm_definition.params.copy()
-                if fireworks_llm_definition
-                else {}
-            ),
-            family=fireworks_llm_definition.family if fireworks_llm_definition else [],
         )
 
     if name := data.get("name"):
