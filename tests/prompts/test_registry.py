@@ -19,7 +19,7 @@ from ai_gateway.integrations.amazon_q.client import AmazonQClientFactory
 from ai_gateway.model_metadata import ModelMetadata, create_model_metadata
 from ai_gateway.models.litellm import KindLiteLlmModel
 from ai_gateway.prompts import LocalPromptRegistry, Prompt
-from ai_gateway.prompts.config import ModelClassProvider
+from ai_gateway.prompts.config import ModelClassProvider, PromptConfig
 from ai_gateway.prompts.typing import Model, TypeModelFactory
 
 
@@ -457,6 +457,16 @@ class TestLocalPromptRegistry:
         assert (
             str(exc_info.value) == "No prompt version found matching the query: 2.0.0"
         )
+
+    def test_get_prompt_config_with_none_version(
+        self,
+        registry: LocalPromptRegistry,
+    ):
+        versions: dict[str, PromptConfig] = {"1.0.0": Mock()}  # type: ignore[dict-item]
+        with pytest.raises(ValueError) as exc_info:
+            registry._get_prompt_config(versions, None)
+
+        assert str(exc_info.value) == "prompt_version cannot be None"
 
     @pytest.mark.usefixtures("mock_fs")
     def test_load_prompt_without_unit_primitive(

@@ -1,22 +1,10 @@
-from datetime import datetime
-from typing import Any, Dict, List, Optional, Union
+from datetime import datetime, timezone
+from typing import Any, Dict, List
 
 import structlog
-from langchain_core.messages import (
-    AIMessage,
-    BaseMessage,
-    HumanMessage,
-    SystemMessage,
-    ToolMessage,
-)
+from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, ToolMessage
 from langchain_core.output_parsers.string import StrOutputParser
-from langchain_core.prompt_values import ChatPromptValue, PromptValue
-from langchain_core.runnables import Runnable, RunnableConfig
 
-from ai_gateway.prompts import Prompt, jinja2_formatter
-from ai_gateway.prompts.config.base import PromptConfig
-from ai_gateway.prompts.config.models import ModelClassProvider
-from duo_workflow_service.agents.base import BaseAgent
 from duo_workflow_service.components.tools_registry import ToolsRegistry
 from duo_workflow_service.entities.state import (
     ApprovalStateRejection,
@@ -27,114 +15,20 @@ from duo_workflow_service.entities.state import (
     UiChatLog,
     WorkflowStatusEnum,
 )
-from duo_workflow_service.gitlab.gitlab_api import Namespace, Project
 from duo_workflow_service.gitlab.gitlab_instance_info_service import (
     GitLabInstanceInfoService,
 )
 from duo_workflow_service.gitlab.gitlab_service_context import GitLabServiceContext
 from duo_workflow_service.llm_factory import AnthropicStopReason
-from duo_workflow_service.slash_commands.goal_parser import parse as slash_command_parse
 
 log = structlog.stdlib.get_logger("chat_agent")
 
 
-class ChatAgentPromptTemplate(Runnable[ChatWorkflowState, PromptValue]):
-    def __init__(self, prompt_template: dict[str, str]):
-        self.prompt_template = prompt_template
-
-    def invoke(
-        self,
-        input: ChatWorkflowState,
-        config: Optional[RunnableConfig] = None,  # pylint: disable=unused-argument
-        **_kwargs: Any,
-    ) -> PromptValue:
-        messages: list[BaseMessage] = []
-        agent_name = _kwargs["agent_name"]
-        project: Project | None = input.get("project")
-        namespace: Namespace | None = input.get("namespace")
-
-        # Get GitLab instance info from context
-        gitlab_instance_info = GitLabServiceContext.get_current_instance_info()
-
-        # Handle system messages with static and dynamic parts
-        # Create separate system messages for static and dynamic parts
-        if "system_static" in self.prompt_template:
-            static_content_text = jinja2_formatter(
-                self.prompt_template["system_static"],
-                gitlab_instance_type=(
-                    gitlab_instance_info.instance_type
-                    if gitlab_instance_info
-                    else "Unknown"
-                ),
-                gitlab_instance_url=(
-                    gitlab_instance_info.instance_url
-                    if gitlab_instance_info
-                    else "Unknown"
-                ),
-                gitlab_instance_version=(
-                    gitlab_instance_info.instance_version
-                    if gitlab_instance_info
-                    else "Unknown"
-                ),
-            )
-            # Always cache static system prompt for Anthropic models
-            is_anthropic = _kwargs.get("is_anthropic_model", False)
-            if is_anthropic:
-                cached_static_content: list[Union[str, dict]] = [
-                    {
-                        "text": static_content_text,
-                        "type": "text",
-                        "cache_control": {"type": "ephemeral", "ttl": "1h"},
-                    }
-                ]
-                messages.append(SystemMessage(content=cached_static_content))
-            else:
-                messages.append(SystemMessage(content=static_content_text))
-
-        if "system_dynamic" in self.prompt_template:
-            dynamic_content = jinja2_formatter(
-                self.prompt_template["system_dynamic"],
-                current_date=datetime.now().strftime("%Y-%m-%d"),
-                current_time=datetime.now().strftime("%H:%M:%S"),
-                current_timezone=datetime.now().astimezone().tzname(),
-                project=project,
-                namespace=namespace,
-            )
-            messages.append(SystemMessage(content=dynamic_content))
-
-        for m in input["conversation_history"][agent_name]:
-            if isinstance(m, HumanMessage):
-                slash_command = None
-
-                if isinstance(m.content, str) and m.content.strip().startswith("/"):
-                    command_name, remaining_text = slash_command_parse(m.content)
-                    slash_command = {
-                        "name": command_name,
-                        "input": remaining_text,
-                    }
-
-                messages.append(
-                    HumanMessage(
-                        jinja2_formatter(
-                            self.prompt_template["user"],
-                            message=m,
-                            slash_command=slash_command,
-                        )
-                    )
-                )
-            else:
-                messages.append(m)  # AIMessage or ToolMessage
-
-        return ChatPromptValue(messages=messages)
-
-
-class ChatAgent(BaseAgent[ChatWorkflowState, BaseMessage]):
-    tools_registry: Optional[ToolsRegistry] = None
-    prompt_runnable: Prompt | None = None
-
-    @classmethod
-    def _build_prompt_template(cls, config: PromptConfig) -> Runnable:
-        return ChatAgentPromptTemplate(config.prompt_template)
+class ChatAgent:
+    def __init__(self, name: str, prompt_adapter, tools_registry: ToolsRegistry):
+        self.name = name
+        self.prompt_adapter = prompt_adapter
+        self.tools_registry = tools_registry
 
     def _get_approvals(
         self, message: AIMessage, preapproved_tools: List[str]
@@ -147,15 +41,21 @@ class ChatAgent(BaseAgent[ChatWorkflowState, BaseMessage]):
                 self.tools_registry
                 and self.tools_registry.approval_required(call["name"])
                 and call["name"] not in preapproved_tools
-                and not getattr(self.model, "_is_agentic_mock_model", False)
+                and not getattr(
+                    self.prompt_adapter.get_model(), "_is_agentic_mock_model", False
+                )
             ):
                 approval_required = True
                 approval_messages.append(
-                    self._create_ui_chat_log(
+                    UiChatLog(
                         message_type=MessageTypeEnum.REQUEST,
+                        message_sub_type=None,
                         content=f"Tool {call['name']} requires approval. Please confirm if you want to proceed.",
+                        timestamp=datetime.now(timezone.utc).isoformat(),
                         status=ToolStatus.SUCCESS,
+                        correlation_id=None,
                         tool_info=ToolInfo(name=call["name"], args=call["args"]),
+                        additional_context=None,
                     )
                 )
 
@@ -228,28 +128,7 @@ class ChatAgent(BaseAgent[ChatWorkflowState, BaseMessage]):
         return messages
 
     async def _get_agent_response(self, input: ChatWorkflowState) -> BaseMessage:
-        is_anthropic_model = self.model_provider == ModelClassProvider.ANTHROPIC
-
-        if self.prompt_runnable:
-            conversation_history = input["conversation_history"].get(self.name, [])
-            variables = {
-                "goal": input["goal"],
-                "project": input["project"],
-                "namespace": input["namespace"],
-                "current_date": datetime.now().strftime("%Y-%m-%d"),
-                "current_time": datetime.now().strftime("%H:%M:%S"),
-                "current_timezone": datetime.now().astimezone().tzname(),
-            }
-
-            return await self.prompt_runnable.ainvoke(
-                input={**variables, "history": conversation_history}
-            )
-
-        return await super().ainvoke(
-            input=input,
-            agent_name=self.name,
-            is_anthropic_model=is_anthropic_model,
-        )
+        return await self.prompt_adapter.get_response(input)
 
     def _build_response(
         self, agent_response: BaseMessage, input: ChatWorkflowState
@@ -260,9 +139,15 @@ class ChatAgent(BaseAgent[ChatWorkflowState, BaseMessage]):
         return self._build_tool_response(agent_response, input)
 
     def _build_text_response(self, agent_response: BaseMessage) -> Dict[str, Any]:
-        ui_chat_log = self._create_ui_chat_log(
+        ui_chat_log = UiChatLog(
+            message_type=MessageTypeEnum.AGENT,
+            message_sub_type=None,
             content=StrOutputParser().invoke(agent_response) or "",
+            timestamp=datetime.now(timezone.utc).isoformat(),
             status=ToolStatus.SUCCESS,
+            correlation_id=None,
+            tool_info=None,
+            additional_context=None,
         )
 
         return {
@@ -295,10 +180,18 @@ class ChatAgent(BaseAgent[ChatWorkflowState, BaseMessage]):
             content=f"There was an error processing your request: {error}"
         )
 
-        ui_chat_log = self._create_ui_chat_log(
-            content="There was an error processing your request. Please try again or contact support if the issue "
-            "persists.",
+        ui_chat_log = UiChatLog(
+            message_type=MessageTypeEnum.AGENT,
+            message_sub_type=None,
+            content=(
+                "There was an error processing your request. Please try again or contact support if "
+                "the issue persists."
+            ),
+            timestamp=datetime.now(timezone.utc).isoformat(),
             status=ToolStatus.FAILURE,
+            correlation_id=None,
+            tool_info=None,
+            additional_context=None,
         )
 
         return {

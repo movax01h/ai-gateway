@@ -12,10 +12,11 @@ from langgraph.types import Command
 
 from ai_gateway.container import ContainerApplication
 from ai_gateway.model_metadata import current_model_metadata_context
-from ai_gateway.prompts import InMemoryPromptRegistry, Prompt
+from ai_gateway.prompts import InMemoryPromptRegistry
 from ai_gateway.prompts.registry import LocalPromptRegistry
 from contract import contract_pb2
 from duo_workflow_service.agents.chat_agent import ChatAgent
+from duo_workflow_service.agents.chat_agent_factory import create_agent
 from duo_workflow_service.agents.tools_executor import ToolsExecutor
 from duo_workflow_service.checkpointer.gitlab_workflow import WorkflowStatusEventEnum
 from duo_workflow_service.components.tools_registry import ToolsRegistry
@@ -131,6 +132,8 @@ class Workflow(AbstractWorkflow):
     _prompt_version: str
     _prompt_template_override: str
     _use_agent_override: bool = False
+    _workflow_id: str
+    _workflow_type: CategoryEnum
 
     # pylint: disable=dangerous-default-value
     @inject
@@ -162,12 +165,12 @@ class Workflow(AbstractWorkflow):
         active_prompt_registry: Union[LocalPromptRegistry, InMemoryPromptRegistry] = (
             prompt_registry
         )
+        self._workflow_id = workflow_id
+        self._workflow_type = workflow_type
         if "prompt_template_id_override" in kwargs:
             self._use_agent_override = True
-            self._flow_config_prompt_id = kwargs.pop("prompt_template_id_override")
-            self._flow_config_prompt_version = kwargs.pop(
-                "prompt_template_version_override", None
-            )
+            self._prompt_id = kwargs.pop("prompt_template_id_override")
+            self._prompt_version = kwargs.pop("prompt_template_version_override", None)
             memory_prompt_registry: InMemoryPromptRegistry = InMemoryPromptRegistry(
                 prompt_registry
             )
@@ -312,30 +315,18 @@ class Workflow(AbstractWorkflow):
         agents_toolset = tools_registry.toolset(tools)
         model_metadata = current_model_metadata_context.get()
 
-        prompt_runnable: Optional[Prompt] = None
-        if self._use_agent_override:
-            prompt_runnable = self._prompt_registry.get(  # type: ignore[assignment]
-                user=self._user,
-                prompt_id=self._flow_config_prompt_id,
-                prompt_version=self._flow_config_prompt_version,
-                model_metadata=model_metadata,
-                internal_event_category=__name__,
-                tools=agents_toolset.bindable,  # type: ignore[arg-type]
-                preapproved_tools=self._preapproved_tools,
-            )
-
-        self._agent: ChatAgent = self._prompt_registry.get_on_behalf(  # type: ignore[assignment]
+        self._agent: ChatAgent = create_agent(
             user=self._user,
+            tools_registry=tools_registry,
             prompt_id=self._prompt_id,
             prompt_version=self._prompt_version,
             model_metadata=model_metadata,
             internal_event_category=__name__,
-            tools=agents_toolset.bindable,  # type: ignore[arg-type]
+            tools=agents_toolset,
+            prompt_registry=self._prompt_registry,
             workflow_id=self._workflow_id,
             workflow_type=self._workflow_type,
         )
-        self._agent.tools_registry = tools_registry
-        self._agent.prompt_runnable = prompt_runnable
 
         tools_runner = ToolsExecutor(
             tools_agent_name=self._agent.name,

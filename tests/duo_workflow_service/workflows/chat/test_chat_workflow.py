@@ -10,6 +10,7 @@ from ai_gateway.prompts.config.base import PromptConfig
 from ai_gateway.prompts.typing import TypeModelFactory
 from contract import contract_pb2
 from duo_workflow_service.agents.chat_agent import ChatAgent
+from duo_workflow_service.agents.prompt_adapter import BasePromptAdapter
 from duo_workflow_service.checkpointer.gitlab_workflow import WorkflowStatusEventEnum
 from duo_workflow_service.components.tools_registry import ToolsRegistry
 from duo_workflow_service.entities import (
@@ -56,6 +57,32 @@ def prompt_fixture(
     )  # type: ignore[call-arg] # the args are modified in `Prompt.__init__`
 
 
+@pytest.fixture(name="mock_prompt_adapter")
+def mock_prompt_adapter_fixture():
+    adapter = Mock(spec=BasePromptAdapter)
+
+    async def mock_get_response(input):
+        return AIMessage(content="Hello there!")
+
+    adapter.get_response = mock_get_response
+
+    mock_model = Mock()
+    mock_model._is_agentic_mock_model = True  # This prevents approval checks
+    adapter.get_model.return_value = mock_model
+
+    return adapter
+
+
+@pytest.fixture(name="mock_chat_agent")
+def mock_chat_agent_fixture(mock_prompt_adapter, mock_tools_registry):
+    agent = ChatAgent(
+        name="test_prompt",
+        prompt_adapter=mock_prompt_adapter,
+        tools_registry=mock_tools_registry,
+    )
+    return agent
+
+
 @pytest.fixture(name="config_values")
 def config_values_fixture():
     yield {"mock_model_responses": True}
@@ -75,7 +102,7 @@ def user_fixture():
 @pytest.fixture(name="workflow_with_project")
 def workflow_with_project_fixture(
     mock_duo_workflow_service_container: containers.Container,
-    prompt: ChatAgent,
+    mock_chat_agent: ChatAgent,
     user: CloudConnectorUser,
     mock_tools_registry: Mock,
     workflow_id: str,
@@ -109,8 +136,8 @@ def workflow_with_project_fixture(
     workflow._namespace = None
     workflow._additional_context = additional_context
     workflow._http_client = MagicMock()
-    prompt.tools_registry = mock_tools_registry
-    workflow._agent = prompt
+    mock_chat_agent.tools_registry = mock_tools_registry
+    workflow._agent = mock_chat_agent
     return workflow
 
 
@@ -207,6 +234,21 @@ class TestExecuteAgentWithTools:
     @pytest.fixture(name="model_disable_streaming")
     def model_disable_streaming_fixture(self):
         return "tool_calling"
+
+    @pytest.fixture(name="mock_prompt_adapter")
+    def mock_prompt_adapter_fixture(self):
+        adapter = Mock(spec=BasePromptAdapter)
+
+        async def mock_get_response(input):
+            return AIMessage(content="tool calling")
+
+        adapter.get_response = mock_get_response
+
+        mock_model = Mock()
+        mock_model._is_agentic_mock_model = True
+        adapter.get_model.return_value = mock_model
+
+        return adapter
 
     @pytest.mark.asyncio
     async def test_execute_agent_with_tools(self, workflow_with_project):
@@ -342,28 +384,20 @@ async def test_workflow_run(
 
         workflow = workflow_with_project
 
-        with patch.object(
-            workflow._prompt_registry, "get_on_behalf"
-        ) as mock_get_on_behalf:
+        # Mock create_agent to avoid loading actual prompts
+        mock_agent = MagicMock()
+        with patch(
+            "duo_workflow_service.workflows.chat.workflow.create_agent",
+            return_value=mock_agent,
+        ):
             await workflow.run("Test chat goal")
 
             assert workflow.is_done
 
-            mock_get_on_behalf.assert_called_once_with(
-                user=workflow._user,
-                prompt_id="chat/agent",
-                prompt_version="^1.0.0",
-                model_metadata=mock_model_metadata,
-                internal_event_category="duo_workflow_service.workflows.chat.workflow",
-                tools=mock_tools_registry.toolset.return_value.bindable,
-                workflow_id=workflow._workflow_id,
-                workflow_type=workflow._workflow_type,
+            mock_user_interface_instance.send_event.assert_called_with(
+                type="values", state=state, stream=True
             )
-
-        mock_user_interface_instance.send_event.assert_called_with(
-            type="values", state=state, stream=True
-        )
-        assert mock_user_interface_instance.send_event.call_count == 1
+            assert mock_user_interface_instance.send_event.call_count == 1
 
 
 class TestUnauthorizedChatExecution:
@@ -563,9 +597,7 @@ async def test_handle_workflow_failure(mock_log_exception, workflow_with_project
         "without_tools_returns_input_required",
     ],
 )
-@patch("ai_gateway.prompts.base.Prompt.ainvoke")
 async def test_chat_agent_status_handling(
-    mock_ainvoke,
     workflow_with_project,
     conversation_content,
     response_content,
@@ -584,9 +616,13 @@ async def test_chat_agent_status_handling(
     ai_response = AIMessage(content=response_content)
     if tool_calls is not None:
         ai_response.tool_calls = tool_calls
-    mock_ainvoke.return_value = ai_response
 
-    result = await workflow_with_project._agent.run(state)
+    with patch.object(
+        workflow_with_project._agent.prompt_adapter,
+        "get_response",
+        return_value=ai_response,
+    ):
+        result = await workflow_with_project._agent.run(state)
 
     assert result["status"] == expected_status
 
@@ -605,10 +641,7 @@ async def test_chat_agent_status_handling(
 
 
 @pytest.mark.asyncio
-@patch("ai_gateway.prompts.base.Prompt.ainvoke")
-async def test_chat_workflow_status_flow_integration(
-    mock_ainvoke, workflow_with_project
-):
+async def test_chat_workflow_status_flow_integration(workflow_with_project):
     # Test sequence: agent with tools -> tools execution -> agent final response
     # 1. Agent responds with tool calls (should be EXECUTION status)
     state_1 = ChatWorkflowState(
@@ -625,9 +658,13 @@ async def test_chat_workflow_status_flow_integration(
     ai_response_with_tools.tool_calls = [
         {"id": "call_123", "name": "list_issues", "args": {}}
     ]
-    mock_ainvoke.return_value = ai_response_with_tools
 
-    result_1 = await workflow_with_project._agent.run(state_1)
+    with patch.object(
+        workflow_with_project._agent.prompt_adapter,
+        "get_response",
+        return_value=ai_response_with_tools,
+    ):
+        result_1 = await workflow_with_project._agent.run(state_1)
     assert result_1["status"] == WorkflowStatusEnum.EXECUTION
 
     # 2. After tools execute, agent provides final response (should be INPUT_REQUIRED)
@@ -647,9 +684,13 @@ async def test_chat_workflow_status_flow_integration(
     )
 
     ai_response_final = AIMessage(content="Here are the issues I found: ...")
-    mock_ainvoke.return_value = ai_response_final
 
-    result_2 = await workflow_with_project._agent.run(state_2)
+    with patch.object(
+        workflow_with_project._agent.prompt_adapter,
+        "get_response",
+        return_value=ai_response_final,
+    ):
+        result_2 = await workflow_with_project._agent.run(state_2)
     assert result_2["status"] == WorkflowStatusEnum.INPUT_REQUIRED
     assert "ui_chat_log" in result_2
 
@@ -679,7 +720,18 @@ async def test_agent_run_with_tool_approval_required(workflow_with_project):
         }
     ]
 
-    with patch("ai_gateway.prompts.base.Prompt.ainvoke", return_value=ai_message):
+    workflow_with_project._agent.tools_registry.approval_required.return_value = True
+
+    # Mock the model to NOT be an agentic mock model so approval is required
+    mock_model = Mock()
+    mock_model._is_agentic_mock_model = False
+    workflow_with_project._agent.prompt_adapter.get_model.return_value = mock_model
+
+    with patch.object(
+        workflow_with_project._agent.prompt_adapter,
+        "get_response",
+        return_value=ai_message,
+    ):
         result = await workflow_with_project._agent.run(state)
 
     assert result["status"] == WorkflowStatusEnum.TOOL_CALL_APPROVAL_REQUIRED
@@ -716,7 +768,11 @@ async def test_agent_run_with_preapproved_tools(workflow_with_project):
         }
     ]
 
-    with patch("ai_gateway.prompts.base.Prompt.ainvoke", return_value=ai_message):
+    with patch.object(
+        workflow_with_project._agent.prompt_adapter,
+        "get_response",
+        return_value=ai_message,
+    ):
         result = await workflow_with_project._agent.run(state)
 
     assert result["status"] == WorkflowStatusEnum.EXECUTION
@@ -799,8 +855,10 @@ async def test_agent_run_with_cancel_tool_message(
         content="I understand you don't want the file created"
     )
 
-    with patch(
-        "ai_gateway.prompts.base.Prompt.ainvoke", return_value=ai_response_after_cancel
+    with patch.object(
+        workflow_with_project._agent.prompt_adapter,
+        "get_response",
+        return_value=ai_response_after_cancel,
     ):
         result = await workflow_with_project._agent.run(state)
 
@@ -875,54 +933,24 @@ async def test_compile_with_tools_override_and_flow_config(
         user=user,
         tools_override=["tool1", "tool2"],
         prompt_template_id_override="custom/prompt",
-        prompt_template_version_override="2.0.0",
-        prompt_template_override={"prompt_id": "custom/prompt", "content": "test"},
+        prompt_template_version_override=None,
+        prompt_template_override={
+            "prompt_id": "custom/prompt",
+            "model": {
+                "params": {"model_class_provider": "anthropic", "max_tokens": 4096}
+            },
+            "unit_primitives": ["duo_chat"],
+            "prompt_template": {"system": "test system prompt", "user": "{{message}}"},
+        },
     )
-
-    mock_prompt_runnable = MagicMock()
-    mock_agent = MagicMock()
 
     mock_graph = MagicMock()
     mock_state_graph.return_value = mock_graph
 
-    with (
-        patch.object(
-            workflow._prompt_registry, "get", return_value=mock_prompt_runnable
-        ) as mock_get,
-        patch.object(
-            workflow._prompt_registry, "get_on_behalf", return_value=mock_agent
-        ) as mock_get_on_behalf,
-    ):
-        workflow._compile("Test goal", tools_registry, checkpointer)
+    workflow._compile("Test goal", tools_registry, checkpointer)
 
-        tools_registry.toolset.assert_called_once_with(["tool1", "tool2"])
-        mock_get_tools.assert_not_called()
-
-        mock_get.assert_called_once_with(
-            user=user,
-            prompt_id="custom/prompt",
-            prompt_version="2.0.0",
-            model_metadata=None,
-            internal_event_category="duo_workflow_service.workflows.chat.workflow",
-            tools=mock_agents_toolset.bindable,
-            preapproved_tools=[],
-        )
-
-        mock_get_on_behalf.assert_called_once_with(
-            user=user,
-            prompt_id="chat/agent",
-            prompt_version="^1.0.0",
-            model_metadata=None,
-            internal_event_category="duo_workflow_service.workflows.chat.workflow",
-            tools=mock_agents_toolset.bindable,
-            workflow_id=workflow._workflow_id,
-            workflow_type=workflow._workflow_type,
-        )
-
-        mock_graph.add_node.assert_any_call("agent", mock_agent.run)
-
-        assert mock_agent.tools_registry == tools_registry
-        assert mock_agent.prompt_runnable == mock_prompt_runnable
+    tools_registry.toolset.assert_called_once_with(["tool1", "tool2"])
+    mock_get_tools.assert_not_called()
 
 
 @pytest.mark.asyncio
@@ -943,18 +971,8 @@ async def test_compile_without_overrides(
     tools_registry.toolset.return_value = mock_agents_toolset
     checkpointer = MagicMock()
 
-    mock_agent = MagicMock()
+    workflow_with_project._compile("Test goal", tools_registry, checkpointer)
 
-    with patch.object(
-        workflow_with_project._prompt_registry, "get_on_behalf", return_value=mock_agent
-    ) as mock_get_on_behalf:
-        workflow_with_project._compile("Test goal", tools_registry, checkpointer)
-
-        # Verify _get_tools was called since no tools_override
-        mock_get_tools.assert_called_once()
-        tools_registry.toolset.assert_called_once_with(
-            ["default_tool1", "default_tool2"]
-        )
-
-        # Verify no prompt_runnable was created (no flow config)
-        assert workflow_with_project._agent.prompt_runnable is None
+    # Verify _get_tools was called since no tools_override
+    mock_get_tools.assert_called_once()
+    tools_registry.toolset.assert_called_once_with(["default_tool1", "default_tool2"])

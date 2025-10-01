@@ -17,6 +17,7 @@ from ai_gateway.prompts.registry import (
     feature_setting_for_prompt_id,
 )
 from duo_workflow_service import agents as workflow
+from duo_workflow_service.agents import prompt_adapter
 from duo_workflow_service.gitlab.http_client import GitlabHttpClient
 from lib.internal_events.event_enum import CategoryEnum
 
@@ -60,6 +61,11 @@ def _kwargs_for_class(klass):
                 "http_client": Mock(spec=GitlabHttpClient),
             }
         case workflow.ChatAgent:
+            return {
+                "workflow_id": "123",
+                "workflow_type": CategoryEnum.WORKFLOW_CHAT,
+            }
+        case prompt_adapter.ChatPrompt:
             return {
                 "workflow_id": "123",
                 "workflow_type": CategoryEnum.WORKFLOW_CHAT,
