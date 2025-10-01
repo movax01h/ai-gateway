@@ -1,5 +1,7 @@
+import base64
 import json
 from typing import Any, List, NamedTuple, Optional, Type
+from urllib.parse import quote
 
 from gitlab_cloud_connector import GitLabUnitPrimitive
 from pydantic import BaseModel, Field
@@ -356,7 +358,12 @@ class GetCommitComments(CommitBaseTool):
 
 
 class CreateCommitAction(BaseModel):
-    """Model representing a single action to be performed in a commit."""
+    """Model representing a single action to be performed in a commit.
+
+    For 'update' actions:
+        - You can provide either 'content' (full file content),
+        OR ('old_str' and 'new_str') for a partial update (recommended for large files).
+    """
 
     action: str = Field(
         description="The action to perform: 'create', 'delete', 'move', or 'update'."
@@ -370,8 +377,20 @@ class CreateCommitAction(BaseModel):
     )
     content: Optional[str] = Field(
         default=None,
-        description="File content, required for 'create' and 'update' actions. For 'move' actions without content, "
-        "existing file content is preserved.",
+        description="File content, required for 'create' and 'update' actions. For 'update', you can also omit "
+        "'content' and supply 'old_str' and 'new_str' for a partial edit (recommended for large files). "
+        "For 'move' actions without content, existing file content is preserved.",
+    )
+    old_str: Optional[str] = Field(
+        default=None,
+        description="(Alternative to content) The exact block of text to replace in the file. "
+        "Please provide at least one line above and below the target code or heading, "
+        "to make the match unique across the file.",
+    )
+    new_str: Optional[str] = Field(
+        default=None,
+        description="(Alternative to content) The replacement block for the matched section. "
+        "Include the same lines above and below unchanged; only change the target line(s) in the middle.",
     )
     encoding: Optional[str] = Field(
         default=None, description="'text' or 'base64'. Default is 'text'."
@@ -391,8 +410,9 @@ class CreateCommitInput(ProjectResourceInput):
     )
     commit_message: str = Field(description="Commit message.")
     actions: List[CreateCommitAction] = Field(
-        description="JSON array of file actions. Each action requires 'action' and 'file_path'. For 'create' and "
-        "'update' actions, 'content' is also required."
+        description="JSON array of file actions. Each action requires 'action' and 'file_path'. "
+        "For 'create' and 'update' actions, you must provide either 'content' (full file) "
+        "or ('old_str' and 'new_str') for a partial update."
     )
     start_branch: Optional[str] = Field(
         default=None, description="Name of the branch to start the new branch from."
@@ -434,6 +454,18 @@ class CreateCommit(DuoBaseTool):
     - Updating a file requires 'action': 'update', 'file_path', and 'content'
     - Deleting a file requires 'action': 'delete' and 'file_path'
     - Moving a file requires 'action': 'move', 'file_path', and 'previous_path'
+
+    Partial edit (recommended for large files):
+    You can update a file by providing only the partial block to replace using `old_str`
+    (with at least one line above and below the target for uniqueness) and `new_str`
+    (same block, but with your intended change). This will perform a precise in-place edit on the backend.
+
+    Example:
+    - Updating a heading in a markdown file:
+        - 'action': 'update'
+        - 'file_path': 'README.md'
+        - 'old_str': "# Getting started\n\nTo make it easy for you to get started with GitLab..."
+        - 'new_str': "# Start\n\nTo make it easy for you to get started with GitLab..."
     """
     # editorconfig-checker-enable
 
@@ -457,9 +489,48 @@ class CreateCommit(DuoBaseTool):
         # Convert actions to dictionary format for API
         actions_data = []
         for action in actions:
-            if action.action in ["create", "update", "delete", "move"]:
+            if action.action not in {"create", "update", "delete", "move"}:
+                continue
+
+            if (
+                action.action == "update"
+                and not action.content
+                and action.old_str is not None
+                and action.new_str is not None
+            ):
+
+                old_str = action.old_str
+                new_str = action.new_str
+
+                encoded_file_path = quote(action.file_path, safe="")
+                try:
+                    file_info = await self.gitlab_client.aget(
+                        f"/api/v4/projects/{project_id}/repository/files/{encoded_file_path}",
+                        params={"ref": branch},
+                    )
+                    current_content = base64.b64decode(file_info["content"]).decode(
+                        "utf-8"
+                    )
+                except Exception as e:
+                    return json.dumps(
+                        {"error": f"Error fetching file '{action.file_path}': {str(e)}"}
+                    )
+
+                if old_str not in current_content:
+                    return json.dumps(
+                        {"error": f"old_str not found in {action.file_path}"}
+                    )
+
+                new_content = current_content.replace(old_str, new_str, 1)
                 action_dict = action.model_dump(exclude_none=True)
-                actions_data.append(action_dict)
+                action_dict["content"] = new_content
+
+            else:
+                action_dict = action.model_dump(exclude_none=True)
+
+            action_dict.pop("old_str", None)
+            action_dict.pop("new_str", None)
+            actions_data.append(action_dict)
 
         # Prepare request parameters
         params = {
