@@ -13,6 +13,7 @@ from gitlab_cloud_connector import (
 from ai_gateway.api.auth_utils import StarletteUser, get_current_user
 from ai_gateway.api.error_utils import capture_validation_errors
 from ai_gateway.api.feature_category import feature_category
+from ai_gateway.api.middleware.headers import X_GITLAB_MODEL_PROMPT_CACHE_ENABLED
 from ai_gateway.api.snowplow_context import get_snowplow_code_suggestion_context
 from ai_gateway.api.v2.code.model_provider_handlers import (
     AnthropicHandler,
@@ -161,8 +162,6 @@ async def completions(
         completions_litellm_vertex_codestral_factory,
         internal_event_client,
         region,
-        config.model_keys(),
-        config.model_endpoints(),
     )
 
     snowplow_event_context = None
@@ -429,27 +428,34 @@ def _resolve_code_completions_litellm(
     payload: SuggestionsRequest,
     current_user: StarletteUser,
     prompt_registry: BasePromptRegistry,
+    use_llm_prompt_caching: bool,
     completions_agent_factory: Factory[CodeCompletions],
-    model_keys: dict,
-    model_endpoints: dict,
+    completions_litellm_factory: Factory[CodeCompletions],
 ) -> CodeCompletions:
-    model_metadata = create_model_metadata(
-        {
-            "name": payload.model_name,
-            "endpoint": payload.model_endpoint,
-            "api_key": payload.model_api_key,
-            "identifier": payload.model_identifier,
-            "provider": payload.model_provider or "text-completion-openai",
-            "provider_keys": model_keys,
-            "model_endpoints": model_endpoints,
-        }
-    )
+    if payload.prompt_version == 2 and not payload.prompt:
+        model_metadata = create_model_metadata(
+            {
+                "name": payload.model_name,
+                "endpoint": payload.model_endpoint,
+                "api_key": payload.model_api_key,
+                "identifier": payload.model_identifier,
+                "provider": payload.model_provider or "text-completion-openai",
+            }
+        )
 
-    return _resolve_agent_code_completions(
-        model_metadata=model_metadata,
-        current_user=current_user,
-        prompt_registry=prompt_registry,
-        completions_agent_factory=completions_agent_factory,
+        return _resolve_agent_code_completions(
+            model_metadata=model_metadata,
+            current_user=current_user,
+            prompt_registry=prompt_registry,
+            completions_agent_factory=completions_agent_factory,
+        )
+
+    return completions_litellm_factory(
+        model__name=payload.model_name,
+        model__endpoint=payload.model_endpoint,
+        model__api_key=payload.model_api_key,
+        model__provider=payload.model_provider,
+        model__using_cache=use_llm_prompt_caching,
     )
 
 
@@ -520,18 +526,6 @@ def _get_provider_config(
     )
 
 
-def _resolve_gitlab_model_provider(model_metadata: ModelMetadata) -> KindModelProvider:
-    """Resolve GitLab model metadata to actual provider enum."""
-
-    resolved_provider = model_metadata.llm_definition_params.get(
-        "custom_llm_provider", "vertex_ai"
-    )
-    try:
-        return KindModelProvider(resolved_provider)
-    except ValueError:
-        return KindModelProvider.VERTEX_AI
-
-
 def _build_code_completions(
     request: Request,
     payload: CompletionsRequestWithVersion,
@@ -548,9 +542,12 @@ def _build_code_completions(
     completions_litellm_vertex_codestral_factory: Factory[CodeCompletions],
     internal_event_client: InternalEventsClient,
     region: str,
-    model_keys: dict,
-    model_endpoints: dict,
 ) -> tuple[CodeCompletions | CodeCompletionsLegacy, dict]:
+    # Default to use cache
+    use_llm_prompt_caching = (
+        request.headers.get(X_GITLAB_MODEL_PROMPT_CACHE_ENABLED, "true") == "true"
+    )
+
     unit_primitive = GitLabUnitPrimitive.COMPLETE_CODE
     tracking_event = f"request_{unit_primitive}"
 
@@ -560,31 +557,29 @@ def _build_code_completions(
                 "provider": KindModelProvider.GITLAB,
                 "identifier": payload.model_name,
                 "feature_setting": "code_completions",
-                "provider_keys": model_keys,
-                "model_endpoints": model_endpoints,
             }
         )
 
-        actual_provider = _resolve_gitlab_model_provider(model_metadata)
-        payload.model_provider = actual_provider
+        payload.model_name = model_metadata.identifier
+        payload.model_provider = model_metadata.provider
         kwargs = {}
 
-        if actual_provider == KindModelProvider.ANTHROPIC:
+        if model_metadata.provider == KindModelProvider.ANTHROPIC:
             AnthropicHandler(payload, request, kwargs).update_completion_params()
             code_completions = completions_anthropic_factory(
                 model__name=payload.model_name,
             )
-        elif actual_provider == KindModelProvider.FIREWORKS:
+        elif model_metadata.provider == KindModelProvider.FIREWORKS:
             FireworksHandler(payload, request, kwargs).update_completion_params()
             code_completions = _resolve_code_completions_litellm(
                 payload=payload,
                 current_user=current_user,
                 prompt_registry=prompt_registry,
+                use_llm_prompt_caching=use_llm_prompt_caching,
                 completions_agent_factory=completions_agent_factory,
-                model_keys=model_keys,
-                model_endpoints=model_endpoints,
+                completions_litellm_factory=completions_fireworks_factory,
             )
-        elif actual_provider == KindModelProvider.VERTEX_AI:
+        elif model_metadata.provider == KindModelProvider.VERTEX_AI:
             code_completions = _resolve_code_completions_vertex_codestral(
                 payload=payload,
                 completions_litellm_vertex_codestral_factory=completions_litellm_vertex_codestral_factory,
@@ -626,9 +621,9 @@ def _build_code_completions(
             payload=payload,
             current_user=current_user,
             prompt_registry=prompt_registry,
+            use_llm_prompt_caching=use_llm_prompt_caching,
             completions_agent_factory=completions_agent_factory,
-            model_keys=model_keys,
-            model_endpoints=model_endpoints,
+            completions_litellm_factory=config.factory,
         )
 
         _track_code_suggestions_event(tracking_event, internal_event_client)
