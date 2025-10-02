@@ -1,5 +1,15 @@
 from abc import ABC, abstractmethod
-from typing import Any, AsyncIterator, List, Mapping, Optional, Sequence, TypeVar, cast
+from typing import (
+    Any,
+    AsyncIterator,
+    List,
+    Mapping,
+    Optional,
+    Sequence,
+    TypeVar,
+    cast,
+    overload,
+)
 
 from gitlab_cloud_connector import (
     CloudConnectorUser,
@@ -356,6 +366,30 @@ class BasePromptRegistry(ABC):
         **kwargs: Any,
     ) -> Prompt:
         pass
+
+    @overload
+    def get_on_behalf(
+        self,
+        user: StarletteUser | CloudConnectorUser,
+        prompt_id: str,
+        prompt_version: str,
+        model_metadata: Optional[TypeModelMetadata] = None,
+        internal_event_category=__name__,
+        tools: Optional[List[BaseTool]] = None,
+        **kwargs: Any,
+    ) -> Prompt: ...
+
+    @overload
+    def get_on_behalf(
+        self,
+        user: StarletteUser | CloudConnectorUser,
+        prompt_id: str,
+        prompt_version: None = None,
+        model_metadata: Optional[TypeModelMetadata] = None,
+        internal_event_category=__name__,
+        tools: Optional[List[BaseTool]] = None,
+        **kwargs: Any,
+    ) -> Prompt: ...
 
     def get_on_behalf(
         self,

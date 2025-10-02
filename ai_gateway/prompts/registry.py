@@ -256,12 +256,10 @@ class LocalPromptRegistry(BasePromptRegistry):
         )
 
     def _get_prompt_config(
-        self, versions: dict[str, PromptConfig], prompt_version: str | None
+        self, versions: dict[str, PromptConfig], prompt_version: str
     ) -> tuple[str, PromptConfig]:
         # Parse constraint according to poetry rules. See
         # https://python-poetry.org/docs/dependency-specification/#version-constraints
-        if prompt_version is None:
-            raise ValueError("prompt_version cannot be None")
         constraint = parse_constraint(prompt_version)
         all_versions = [Version.parse(version) for version in versions.keys()]
 
@@ -305,6 +303,8 @@ class LocalPromptRegistry(BasePromptRegistry):
             }
         )
 
+    # prompt_version is never None when called on LocalPromptRegistry
+    # but it must be set to str | None to match the abstract signature
     def get(
         self,
         prompt_id: str,
@@ -326,11 +326,8 @@ class LocalPromptRegistry(BasePromptRegistry):
                 f"Failed to load prompt definition for '{prompt_id}': {e}"
             ) from e
 
-        version_to_use = (
-            prompt_version if prompt_version is not None else self._DEFAULT_VERSION
-        )
         resolved_prompt_version, config = self._get_prompt_config(
-            prompt_registered.versions, version_to_use
+            prompt_registered.versions, prompt_version  # type: ignore[arg-type]
         )
         if not model_metadata:
             model_metadata = self._default_model_metadata(

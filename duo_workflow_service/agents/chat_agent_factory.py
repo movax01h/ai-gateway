@@ -15,7 +15,7 @@ def create_agent(
     user: CloudConnectorUser,
     tools_registry: ToolsRegistry,
     prompt_id: str,
-    prompt_version: Optional[str],
+    prompt_version: str | None,
     model_metadata: Optional[TypeModelMetadata],
     internal_event_category: str,
     tools: Toolset,
@@ -26,7 +26,7 @@ def create_agent(
     prompt: Prompt = prompt_registry.get_on_behalf(
         user=user,
         prompt_id=prompt_id,
-        prompt_version=prompt_version,
+        prompt_version=prompt_version,  # type: ignore[arg-type]
         model_metadata=model_metadata,
         internal_event_category=internal_event_category,
         tools=tools.bindable,  # type: ignore[arg-type]

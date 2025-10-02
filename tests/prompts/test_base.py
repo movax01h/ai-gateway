@@ -976,6 +976,36 @@ class TestBaseRegistry:
 
         assert registry.get_on_behalf(user, "test", None) == prompt
 
+    @pytest.mark.parametrize(
+        ("unit_primitives", "scopes", "prompt_version"),
+        [
+            (
+                [GitLabUnitPrimitive.COMPLETE_CODE],
+                ["complete_code"],
+                "^1.0.0",
+            ),
+            (
+                [GitLabUnitPrimitive.COMPLETE_CODE],
+                ["complete_code"],
+                None,
+            ),
+        ],
+    )
+    def test_get_on_behalf_with_prompt_version(
+        self,
+        registry: BasePromptRegistry,
+        user: StarletteUser,
+        prompt: Prompt,
+        prompt_version: str | None,
+    ):
+        result = registry.get_on_behalf(
+            user,
+            "test",
+            prompt_version=prompt_version,
+        )
+
+        assert result == prompt
+
 
 class TestPromptCheckpointerIntegration:
     """Test integration between Prompt and workflow checkpointer for LLM tracking."""
