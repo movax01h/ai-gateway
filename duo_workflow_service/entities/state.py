@@ -319,6 +319,9 @@ def _conversation_history_reducer(
         logger.info(
             f"Finished posttrim with messages roles: {posttrimmed_msg_roles}, message token: {posttrimmed_msg_token}, "
             f"estimated token size including tool specs: {posttrimmed_msg_token + token_counter.tool_tokens}",
+            total_tokens_before_trimming=current_msg_token
+            + new_msg_token
+            + token_counter.tool_tokens,
             total_tokens_after_posttrimming=posttrimmed_msg_token
             + token_counter.tool_tokens,
         )
