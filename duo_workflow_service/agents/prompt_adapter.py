@@ -149,6 +149,31 @@ class CustomPromptAdapter(BasePromptAdapter):
         self._prompt = prompt
         self._agent_name = prompt.name
 
+    # Custom prompts don't have ChatAgentPromptTemplate's built-in handling, so we manually inject the
+    # system_dynamic to match the behavior that ChatPrompt/ChatAgentPromptTemplate provides automatically.
+    @staticmethod
+    def enrich_prompt_template(prompt_template: dict[str, Any]) -> dict[str, Any]:
+        if "prompt_template" not in prompt_template:
+            raise ValueError("prompt_template must contain 'prompt_template' key")
+
+        context_template = (
+            "{% include 'chat/agent/partials/system_dynamic/1.0.0.jinja' %}"
+        )
+
+        if "system" in prompt_template["prompt_template"]:
+            existing_system = prompt_template["prompt_template"]["system"]
+            if context_template not in existing_system:
+                prompt_template["prompt_template"]["system"] = (
+                    "<system_instructions>\n"
+                    + existing_system
+                    + "\n</system_instructions>\n"
+                    + context_template
+                )
+        else:
+            prompt_template["prompt_template"]["system"] = context_template
+
+        return prompt_template
+
     async def get_response(self, input: ChatWorkflowState) -> BaseMessage:
         conversation_history = input["conversation_history"].get(self._agent_name, [])
         variables = {
