@@ -390,6 +390,53 @@ class TestCustomPromptAdapter:
 
         assert result == mock_prompt.model
 
+    @pytest.mark.parametrize(
+        "initial_prompt_template,expected_system",
+        [
+            (
+                {
+                    "prompt_id": "custom/agent",
+                    "prompt_template": {
+                        "system": "You are a helpful assistant.",
+                        "user": "{{ message }}",
+                    },
+                },
+                "<system_instructions>\nYou are a helpful assistant.\n</system_instructions>\n"
+                "{% include 'chat/agent/partials/system_dynamic/1.0.0.jinja' %}",
+            ),
+            (
+                {
+                    "prompt_id": "custom/agent",
+                    "prompt_template": {"user": "{{ message }}"},
+                },
+                "{% include 'chat/agent/partials/system_dynamic/1.0.0.jinja' %}",
+            ),
+        ],
+        ids=[
+            "appends_to_existing_system",
+            "creates_system_when_missing",
+        ],
+    )
+    def test_enrich_prompt_template(self, initial_prompt_template, expected_system):
+        result = CustomPromptAdapter.enrich_prompt_template(initial_prompt_template)
+
+        assert "system" in result["prompt_template"]
+        assert result["prompt_template"]["system"] == expected_system
+
+        assert result["prompt_template"]["user"] == "{{ message }}"
+        assert result is initial_prompt_template
+
+    def test_enrich_prompt_template_raises_on_missing_prompt_template_key(self):
+        invalid_prompt_template = {
+            "prompt_id": "custom/agent",
+            "system": "You are a helpful assistant.",
+        }
+
+        with pytest.raises(
+            ValueError, match="prompt_template must contain 'prompt_template' key"
+        ):
+            CustomPromptAdapter.enrich_prompt_template(invalid_prompt_template)
+
 
 class TestCreateAdapter:
     @pytest.fixture(name="mock_prompt")

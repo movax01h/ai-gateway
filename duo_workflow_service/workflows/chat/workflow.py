@@ -17,6 +17,7 @@ from ai_gateway.prompts.registry import LocalPromptRegistry
 from contract import contract_pb2
 from duo_workflow_service.agents.chat_agent import ChatAgent
 from duo_workflow_service.agents.chat_agent_factory import create_agent
+from duo_workflow_service.agents.prompt_adapter import CustomPromptAdapter
 from duo_workflow_service.agents.tools_executor import ToolsExecutor
 from duo_workflow_service.checkpointer.gitlab_workflow import WorkflowStatusEventEnum
 from duo_workflow_service.components.tools_registry import ToolsRegistry
@@ -175,8 +176,12 @@ class Workflow(AbstractWorkflow):
             )
             if "prompt_template_override" in kwargs:
                 prompt_template = kwargs.pop("prompt_template_override")
+                enriched_prompt_tpl = CustomPromptAdapter.enrich_prompt_template(
+                    prompt_template
+                )
                 memory_prompt_registry.register_prompt(
-                    prompt_id=prompt_template["prompt_id"], prompt_data=prompt_template
+                    prompt_id=prompt_template["prompt_id"],
+                    prompt_data=enriched_prompt_tpl,
                 )
             active_prompt_registry = memory_prompt_registry
 
