@@ -3,6 +3,7 @@ import pytest
 from anthropic import Anthropic, AsyncAnthropic
 
 from ai_gateway.models.v2 import ChatAnthropic
+from lib.feature_flags import current_feature_flag_context
 
 
 class TestChatAnthropic:
@@ -73,16 +74,28 @@ class TestChatAnthropic:
         assert model._async_client.base_url == "http://anthropic.test"
 
     @pytest.mark.parametrize(
-        ("betas", "expected_header"),
+        ("betas", "enabled_feature_flags", "expected_header"),
         [
-            (["beta1"], "beta1"),
-            (["beta1", "beta2"], "beta1,beta2"),
-            (["extended-cache-ttl-2025-04-11"], "extended-cache-ttl-2025-04-11"),
-            ([], None),
-            (None, None),
+            (["beta1"], [], "beta1"),
+            (["beta1", "beta2"], [], "beta1,beta2"),
+            (["extended-cache-ttl-2025-04-11"], [], "extended-cache-ttl-2025-04-11"),
+            (
+                ["extended-cache-ttl-2025-04-11"],
+                ["duo_workflow_stream_during_tool_call_generation"],
+                "extended-cache-ttl-2025-04-11,fine-grained-tool-streaming-2025-05-14",
+            ),
+            (
+                None,
+                ["duo_workflow_stream_during_tool_call_generation"],
+                "fine-grained-tool-streaming-2025-05-14",
+            ),
+            ([], [], None),
+            (None, [], None),
         ],
     )
-    def test_betas_configuration(self, betas, expected_header):
+    def test_betas_configuration(self, betas, enabled_feature_flags, expected_header):
+        current_feature_flag_context.set(enabled_feature_flags)
+
         model = ChatAnthropic(
             async_client=AsyncAnthropic(),
             model="claude-3-5-sonnet-20241022",

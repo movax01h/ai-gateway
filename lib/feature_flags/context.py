@@ -17,6 +17,9 @@ class FeatureFlag(StrEnum):
     )
     BATCH_DUO_WORKFLOW_PLANNER_TASKS = "batch_duo_workflow_planner_tasks"
     USE_DUO_CONTEXT_EXCLUSION = "use_duo_context_exclusion"
+    STREAM_DURING_TOOL_CALL_GENERATION = (
+        "duo_workflow_stream_during_tool_call_generation"
+    )
 
 
 def is_feature_enabled(feature_name: FeatureFlag | str) -> bool:

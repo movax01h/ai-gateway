@@ -879,7 +879,7 @@ async def test_state_manipulation(
             "Tool test_tool raised ToolException: Access denied: Cannot access '.git/config' as it "
             "matches Duo Context Exclusion patterns. Path '.git/config' matches excluded pattern: '.git'.",
             False,  # expected_error
-            "Failed: Using test_tool: file_path=.git/config - ToolException",
+            "Failed: Using test_tool: file_path=.git/config - Tool call failed: ToolException",
             ToolInfo(name="test_tool", args={"file_path": ".git/config"}),
         ),
     ],
@@ -915,7 +915,11 @@ async def test_run_error_handling(
         internal_event_client=internal_event_client,
     )
     workflow_state["conversation_history"]["planner"] = [
-        AIMessage(content=[{"type": "text", "text": "test"}], tool_calls=[tool_call]),
+        AIMessage(
+            content=[{"type": "text", "text": "test"}],
+            tool_calls=[tool_call],
+            response_metadata={"stop_reason": "tool_call"},
+        ),
     ]
 
     result = await tools_executor.run(workflow_state)
@@ -968,6 +972,87 @@ async def test_run_error_handling(
     )
 
     tool.ainvoke.assert_called_once()
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("mock_datetime")
+@patch("duo_workflow_service.agents.tools_executor.duo_workflow_metrics")
+async def test_run_error_max_tokens(
+    mock_duo_workflow_metrics,
+    workflow_state,
+    internal_event_client: Mock,
+):
+    workflow_type = CategoryEnum.WORKFLOW_SOFTWARE_DEVELOPMENT
+
+    mock_toolset = MagicMock(spec=Toolset)
+
+    mock_toolset.__contains__ = MagicMock(return_value=True)
+    mock_toolset.__getitem__ = MagicMock(return_value=None)
+
+    tool_call = {
+        "id": "3",
+        "name": "read_file",
+        "args": {"file_path": "some-long-file-name-that-is-truncated-"},
+    }
+
+    tools_executor = ToolsExecutor(
+        tools_agent_name="planner",
+        toolset=mock_toolset,
+        workflow_id="123",
+        workflow_type=workflow_type,
+        internal_event_client=internal_event_client,
+    )
+    workflow_state["conversation_history"]["planner"] = [
+        AIMessage(
+            content=[{"type": "text", "text": "test"}],
+            tool_calls=[tool_call],
+            response_metadata={"stop_reason": "max_tokens"},
+        ),
+    ]
+
+    result = await tools_executor.run(workflow_state)
+
+    assert internal_event_client.track_event.call_count == 1
+    internal_event_client.track_event.assert_has_calls(
+        [
+            call(
+                event_name=EventEnum.WORKFLOW_TOOL_FAILURE.value,
+                additional_properties=InternalEventAdditionalProperties(
+                    label=EventLabelEnum.WORKFLOW_TOOL_CALL_LABEL.value,
+                    property="read_file",
+                    value="123",
+                    error="Max tokens reached for tool read_file. Try a simpler request or using a different tool.",
+                    error_type="IncompleteToolCallDueToMaxTokens",
+                ),
+                category=workflow_type.value,
+            ),
+        ]
+    )
+    assert len(result) == 2
+    assert result[0]["conversation_history"]["planner"][0].content.startswith(
+        "Tool read_file raised ToolException: Max tokens reached for tool read_file. "
+        "Try a simpler request or using a different tool."
+    )
+
+    ui_chat_logs = result[1].update["ui_chat_log"]
+    assert len(ui_chat_logs) == 2
+
+    tool_log = ui_chat_logs[1]
+    assert tool_log["timestamp"] == "2025-01-01T12:00:00+00:00"
+    assert tool_log["message_type"] == MessageTypeEnum.TOOL
+    assert tool_log["content"].startswith(
+        "Failed: Using read_file: file_path=some-long-file-name-that-is-truncated-"
+        " - Tool call failed: IncompleteToolCallDueToMaxTokens"
+    )
+    assert tool_log["tool_info"] == ToolInfo(
+        args={"file_path": "some-long-file-name-that-is-truncated-"}, name="read_file"
+    )
+
+    mock_duo_workflow_metrics.count_agent_platform_tool_failure.assert_called_once_with(
+        flow_type=workflow_type.value,
+        tool_name="read_file",
+        failure_reason="IncompleteToolCallDueToMaxTokens",
+    )
 
 
 class MockGetIssueInput(BaseModel):
