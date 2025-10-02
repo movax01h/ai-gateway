@@ -15,6 +15,6 @@ prompt_template:
   assistant: |
     <new_code>
 params:
-  vertex_location: us-east5
+  vertex_location: global
   stop:
     - </new_code>
