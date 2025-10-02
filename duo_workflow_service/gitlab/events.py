@@ -27,6 +27,7 @@ async def ack_event(
     await gitlab_client.aput(
         path=f"/api/v4/ai/duo_workflows/workflows/{workflow_id}/events/{event['id']}",
         body=json.dumps({"event_status": "delivered"}),
+        use_http_response=True,
     )
 
 

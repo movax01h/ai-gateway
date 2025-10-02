@@ -605,8 +605,17 @@ For example:
                 path=f"/api/v4/projects/{validation_result.project_id}/merge_requests/"
                 f"{validation_result.merge_request_iid}",
                 body=json.dumps(data),
+                use_http_response=True,
             )
-            return json.dumps({"updated_merge_request": response})
+
+            if not response.is_success():
+                return json.dumps(
+                    {
+                        "error": f"Unexpected status code: {response.status_code} body: {response.body}"
+                    }
+                )
+
+            return json.dumps({"updated_merge_request": response.body})
         except Exception as e:
             return json.dumps({"error": str(e)})
 

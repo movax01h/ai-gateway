@@ -3,6 +3,7 @@ from unittest.mock import AsyncMock, Mock
 
 import pytest
 
+from duo_workflow_service.gitlab.http_client import GitLabHttpResponse
 from duo_workflow_service.tools.issue import (
     CreateIssue,
     CreateIssueInput,
@@ -130,9 +131,15 @@ async def tool_url_success_response(
     response_data,
     **kwargs,
 ):
+    mock_response = GitLabHttpResponse(
+        status_code=200,
+        body=response_data,
+        headers={"content-type": "application/json"},
+    )
+
     gitlab_client_mock.aget = AsyncMock(return_value=response_data)
     gitlab_client_mock.apost = AsyncMock(return_value=response_data)
-    gitlab_client_mock.aput = AsyncMock(return_value=response_data)
+    gitlab_client_mock.aput = AsyncMock(return_value=mock_response)
 
     response = await tool._arun(
         url=url, project_id=project_id, issue_iid=issue_iid, **kwargs
@@ -844,14 +851,18 @@ async def test_get_issue_note_tool_validation_without_note_id(metadata, input_da
 @pytest.mark.asyncio
 async def test_update_issue(gitlab_client_mock, metadata):
     gitlab_client_mock.aput = AsyncMock(
-        return_value={
-            "id": 123,
-            "title": "Updated Test Issue",
-            "description": "This is an updated test issue",
-            "labels": ["bug", "critical"],
-            "assignee_ids": [15, 16],
-            "state": "closed",
-        }
+        return_value=GitLabHttpResponse(
+            status_code=200,
+            body={
+                "id": 123,
+                "title": "Updated Test Issue",
+                "description": "This is an updated test issue",
+                "labels": ["bug", "critical"],
+                "assignee_ids": [15, 16],
+                "state": "closed",
+            },
+            headers={"content-type": "application/json"},
+        )
     )
 
     tool = UpdateIssue(description="update issue description", metadata=metadata)
@@ -891,6 +902,34 @@ async def test_update_issue(gitlab_client_mock, metadata):
                 "state_event": "close",
             }
         ),
+        use_http_response=True,
+    )
+
+
+@pytest.mark.asyncio
+async def test_update_issue_http_error_status_code(gitlab_client_mock, metadata):
+    """Test that HTTP error status codes are properly handled with detailed error messages."""
+    gitlab_client_mock.aput = AsyncMock(
+        return_value=GitLabHttpResponse(
+            status_code=404,
+            body={"message": "404 Issue Not Found"},
+            headers={"content-type": "application/json"},
+        )
+    )
+
+    tool = UpdateIssue(description="update issue description", metadata=metadata)
+
+    response = await tool._arun(project_id=1, issue_iid=999, title="Updated Issue")
+
+    response_json = json.loads(response)
+    assert "error" in response_json
+    assert "Unexpected status code: 404" in response_json["error"]
+    assert "body: {'message': '404 Issue Not Found'}" in response_json["error"]
+
+    gitlab_client_mock.aput.assert_called_once_with(
+        path="/api/v4/projects/1/issues/999",
+        body=json.dumps({"title": "Updated Issue"}),
+        use_http_response=True,
     )
 
 
@@ -1138,6 +1177,10 @@ async def test_update_issue_with_url_success(
         "title": "Updated Test Issue",
         "description": "This is an updated test issue",
     }
+    mock_response = GitLabHttpResponse(
+        status_code=200, body=update_data, headers={"content-type": "application/json"}
+    )
+    gitlab_client_mock.aput = AsyncMock(return_value=mock_response)
 
     tool = UpdateIssue(description="update issue description", metadata=metadata)
 
@@ -1171,6 +1214,7 @@ async def test_update_issue_with_url_success(
                 "description": "This is an updated test issue",
             }
         ),
+        use_http_response=True,
     )
 
 

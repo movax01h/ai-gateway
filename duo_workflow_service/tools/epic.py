@@ -445,8 +445,17 @@ For example:
             response = await self.gitlab_client.aput(
                 path=f"/api/v4/groups/{validation_result.group_id}/epics/{validation_result.epic_iid}",
                 body=json.dumps(data),
+                use_http_response=True,
             )
-            return json.dumps({"updated_epic": response})
+
+            if not response.is_success():
+                return json.dumps(
+                    {
+                        "error": f"Unexpected status code: {response.status_code} body: {response.body}"
+                    }
+                )
+
+            return json.dumps({"updated_epic": response.body})
         except Exception as e:
             return json.dumps({"error": str(e)})
 

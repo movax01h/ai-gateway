@@ -4,6 +4,7 @@ from unittest.mock import AsyncMock, Mock, patch
 import pytest
 
 from duo_workflow_service.gitlab.gitlab_api import Project
+from duo_workflow_service.gitlab.http_client import GitLabHttpResponse
 from duo_workflow_service.tools.merge_request import (
     CreateMergeRequest,
     CreateMergeRequestInput,
@@ -122,9 +123,15 @@ async def tool_url_success_response(
     response_data,
     **kwargs,
 ):
+    mock_response = GitLabHttpResponse(
+        status_code=200,
+        body=response_data,
+        headers={"content-type": "application/json"},
+    )
+
     gitlab_client_mock.aget = AsyncMock(return_value=response_data)
     gitlab_client_mock.apost = AsyncMock(return_value=response_data)
-    gitlab_client_mock.aput = AsyncMock(return_value=response_data)
+    gitlab_client_mock.aput = AsyncMock(return_value=mock_response)
 
     response = await tool._arun(
         url=url, project_id=project_id, merge_request_iid=merge_request_iid, **kwargs
@@ -876,6 +883,11 @@ async def test_update_merge_request_with_url_success(
         "description": "This is an updated test merge request",
     }
 
+    mock_response = GitLabHttpResponse(
+        status_code=200, body=update_data, headers={"content-type": "application/json"}
+    )
+    gitlab_client_mock.aput = AsyncMock(return_value=mock_response)
+
     tool = UpdateMergeRequest(
         description="update merge request description", metadata=metadata
     )
@@ -910,6 +922,7 @@ async def test_update_merge_request_with_url_success(
                 "description": "This is an updated test merge request",
             }
         ),
+        use_http_response=True,
     )
 
 
@@ -939,7 +952,10 @@ async def test_update_merge_request_with_url_error(
 @pytest.mark.asyncio
 async def test_update_merge_request(gitlab_client_mock, metadata):
     update_data = {"id": 123, "title": "Updated MR", "description": "New description"}
-    gitlab_client_mock.aput = AsyncMock(return_value=update_data)
+    mock_response = GitLabHttpResponse(
+        status_code=200, body=update_data, headers={"content-type": "application/json"}
+    )
+    gitlab_client_mock.aput = AsyncMock(return_value=mock_response)
     tool = UpdateMergeRequest(metadata=metadata)
 
     response = await tool.arun(
@@ -964,6 +980,36 @@ async def test_update_merge_request(gitlab_client_mock, metadata):
                 "title": "Updated MR",
             }
         ),
+        use_http_response=True,
+    )
+
+
+@pytest.mark.asyncio
+async def test_update_merge_request_http_error_status_code(
+    gitlab_client_mock, metadata
+):
+    """Test that HTTP error status codes are properly handled with detailed error messages."""
+    gitlab_client_mock.aput = AsyncMock(
+        return_value=GitLabHttpResponse(
+            status_code=404,
+            body={"message": "404 Merge Request Not Found"},
+            headers={"content-type": "application/json"},
+        )
+    )
+
+    tool = UpdateMergeRequest(metadata=metadata)
+
+    response = await tool._arun(project_id=1, merge_request_iid=999, title="Updated MR")
+
+    response_json = json.loads(response)
+    assert "error" in response_json
+    assert "Unexpected status code: 404" in response_json["error"]
+    assert "body: {'message': '404 Merge Request Not Found'}" in response_json["error"]
+
+    gitlab_client_mock.aput.assert_called_once_with(
+        path="/api/v4/projects/1/merge_requests/999",
+        body=json.dumps({"title": "Updated MR"}),
+        use_http_response=True,
     )
 
 
