@@ -38,6 +38,7 @@ ai-gateway-eks:
     ingress:
       hosts:
         - duo.aws.staging.gitlab.com
+        - cloud.staging.gitlab.com
 
   workloadSecrets:
     - name: env-vars
