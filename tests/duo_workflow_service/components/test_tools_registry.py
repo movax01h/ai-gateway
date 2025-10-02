@@ -14,6 +14,10 @@ from duo_workflow_service.components.tools_registry import (
     ToolsRegistry,
 )
 from duo_workflow_service.gitlab.http_client import GitlabHttpClient
+from duo_workflow_service.tools.code_review import (
+    BuildReviewMergeRequestContext,
+    PostDuoCodeReview,
+)
 from duo_workflow_service.tools.mcp_tools import (
     convert_mcp_tools_to_langchain_tool_classes,
 )
@@ -129,6 +133,7 @@ _outbox = MagicMock(spec=asyncio.Queue)
                 "list_work_items",
                 "get_work_item_notes",
                 "extract_lines_from_text",
+                "build_review_merge_request_context",
             },
         ),
         (
@@ -202,6 +207,7 @@ _outbox = MagicMock(spec=asyncio.Queue)
                 "get_work_item_notes",
                 "post_duo_code_review",
                 "extract_lines_from_text",
+                "build_review_merge_request_context",
             },
         ),
         (
@@ -372,9 +378,12 @@ def test_registry_initialization_initialises_tools_with_correct_attributes(
         "get_work_item": tools.GetWorkItem(metadata=tool_metadata),
         "list_work_items": tools.ListWorkItems(metadata=tool_metadata),
         "get_work_item_notes": tools.GetWorkItemNotes(metadata=tool_metadata),
-        "post_duo_code_review": tools.PostDuoCodeReview(metadata=tool_metadata),
+        "post_duo_code_review": PostDuoCodeReview(metadata=tool_metadata),
         "extract_lines_from_text": tools.ExtractLinesFromText(metadata=tool_metadata),
         "run_tests": tools.RunTests(metadata=tool_metadata),
+        "build_review_merge_request_context": BuildReviewMergeRequestContext(
+            metadata=tool_metadata
+        ),
     }
 
     assert registry._enabled_tools == expected_tools

@@ -1,46 +1,28 @@
 version: "experimental"
 environment: remote
+
 components:
-  # Step 1: Fetch raw data via tools
-  - name: "fetch_mr_data"
-    type: AgentComponent
-    prompt_id: "code_review_fetch_data"
-    prompt_version: "^1.0.0"
+  # Step 1: Fetch and format all MR data
+  - name: "build_review_context"
+    type: DeterministicStepComponent
+    tool_name: "build_review_merge_request_context"
     inputs:
-      - from: "context:goal"
-        as: "merge_request_iid"
       - from: "context:project_id"
         as: "project_id"
-    toolset:
-      - "get_merge_request"
-      - "list_merge_request_diffs"
-      - "get_repository_file"
-      - "read_file"
+      - from: "context:goal"
+        as: "merge_request_iid"
     ui_log_events:
       - "on_tool_execution_success"
       - "on_tool_execution_failed"
-      - "on_agent_final_answer"
 
-  # Step 2: Format raw data into expected structure
-  - name: "format_for_review"
-    type: AgentComponent
-    prompt_id: "code_review_format"
-    prompt_version: "^1.0.0"
-    inputs:
-      - from: "context:fetch_mr_data.final_answer"
-        as: "raw_mr_data"
-    toolset: []
-    ui_log_events:
-      - "on_agent_final_answer"
-
-  # Step 3: Pre-scan codebase for context
+  # Step 2: Pre-scan codebase for additional context
   - name: "prescan_codebase"
     type: AgentComponent
     prompt_id: "code_review_prescan"
     prompt_version: "^1.0.0"
     inputs:
-      - from: "context:format_for_review.final_answer"
-        as: "formatted_mr_input"
+      - from: "context:build_review_context.tool_responses"
+        as: "mr_data"
       - from: "context:project_id"
         as: "project_id"
     toolset:
@@ -54,21 +36,21 @@ components:
       - "on_tool_execution_failed"
       - "on_agent_final_answer"
 
-  # Step 4: Perform code review with codebase context
+  # Step 3: Perform code review
   - name: "perform_code_review"
     type: AgentComponent
     prompt_id: "review_merge_request"
     prompt_version: "^1.4.0"
     inputs:
-      - from: "context:format_for_review.final_answer"
-        as: "formatted_mr_input"
+      - from: "context:build_review_context.tool_responses"
+        as: "mr_data"
       - from: "context:prescan_codebase.final_answer"
         as: "codebase_context"
       - from: "context:current_date"
         as: "current_date"
     toolset: []
 
-  # Step 5: Publish code review
+  # Step 4: Publish code review
   - name: "publish_review"
     type: DeterministicStepComponent
     tool_name: "post_duo_code_review"
@@ -84,9 +66,7 @@ components:
       - "on_tool_execution_failed"
 
 routers:
-  - from: "fetch_mr_data"
-    to: "format_for_review"
-  - from: "format_for_review"
+  - from: "build_review_context"
     to: "prescan_codebase"
   - from: "prescan_codebase"
     to: "perform_code_review"
@@ -96,4 +76,4 @@ routers:
     to: "end"
 
 flow:
-  entry_point: "fetch_mr_data"
+  entry_point: "build_review_context"

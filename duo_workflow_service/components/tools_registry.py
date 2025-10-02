@@ -10,6 +10,10 @@ from duo_workflow_service import tools
 from duo_workflow_service.gitlab.gitlab_api import Project, WorkflowConfig
 from duo_workflow_service.gitlab.http_client import GitlabHttpClient
 from duo_workflow_service.tools import Toolset, ToolType
+from duo_workflow_service.tools.code_review import (
+    BuildReviewMergeRequestContext,
+    PostDuoCodeReview,
+)
 from duo_workflow_service.tools.duo_base_tool import DuoBaseTool
 from duo_workflow_service.tools.vulnerabilities.get_vulnerability_details import (
     GetVulnerabilityDetails,
@@ -88,6 +92,7 @@ _READ_ONLY_GITLAB_TOOLS: list[Type[BaseTool]] = [
     tools.GetCurrentUser,
     GetVulnerabilityDetails,
     tools.ExtractLinesFromText,
+    BuildReviewMergeRequestContext,
 ]
 
 _RUN_MCP_TOOLS_PRIVILEGE = "run_mcp_tools"
@@ -127,7 +132,7 @@ _AGENT_PRIVILEGES: dict[str, list[Type[BaseTool]]] = {
         tools.UpdateWorkItem,
         tools.RevertToDetectedVulnerability,
         tools.CreateVulnerabilityIssue,
-        tools.PostDuoCodeReview,
+        PostDuoCodeReview,
         *_READ_ONLY_GITLAB_TOOLS,
     ],
     "read_only_gitlab": _READ_ONLY_GITLAB_TOOLS,

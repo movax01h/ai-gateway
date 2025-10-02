@@ -1,4 +1,3 @@
----
 name: Claude 4.0 Review Merge Request
 model:
   params:
@@ -8,13 +7,12 @@ unit_primitives:
   - review_merge_request
 prompt_template:
   system: |
-    {% include 'review_merge_request/system/1.2.0.jinja' %}
+    {% include 'review_merge_request/system/1.3.0.jinja' %}
   user: |
-    {{formatted_mr_input}}
+    {{mr_data}}
 
     <codebase_context>
     {{codebase_context}}
     </codebase_context>
-  placeholder: history
 params:
   timeout: 60
