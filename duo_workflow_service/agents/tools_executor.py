@@ -50,6 +50,10 @@ _COMMAND_OUTPUT_TOOLS = {
 TOOL_RESPONSE_MAX_DISPLAY_MSG = 4 * 1024
 
 
+class IncompleteToolCallDueToMaxTokens(ToolException):
+    """Raised when a tool call is incomplete, e.g., due to streaming ending due to max_tokens."""
+
+
 class ToolsExecutor:
     _tools_agent_name: str
     _toolset: Toolset
@@ -91,7 +95,12 @@ class ToolsExecutor:
                 )
                 continue
 
-            result = await self._execute_tool(tool_name, tool_call, plan)
+            result = await self._execute_tool(
+                tool_name,
+                tool_call,
+                plan,
+                last_message.response_metadata.get("stop_reason"),
+            )
             response = result.get("response")
             if response and hasattr(response, "content"):
                 try:
@@ -191,7 +200,11 @@ class ToolsExecutor:
             ui_chat_logs.append(chat_log)
 
     async def _execute_tool(
-        self, tool_name: str, tool_call: ToolCall, plan: Plan
+        self,
+        tool_name: str,
+        tool_call: ToolCall,
+        plan: Plan,
+        stop_reason: Optional[str] = None,
     ) -> Dict[str, Any]:
         tool_args = tool_call.get("args", {})
         tool = self._toolset[tool_name]
@@ -206,6 +219,12 @@ class ToolsExecutor:
             with duo_workflow_metrics.time_tool_call(
                 tool_name=tool_name, flow_type=self._workflow_type.value
             ):
+                if stop_reason == "max_tokens":
+                    raise IncompleteToolCallDueToMaxTokens(
+                        f"Max tokens reached for tool {tool_name}."
+                        " Try a simpler request or using a different tool."
+                    )
+
                 tool_response = await tool.ainvoke(tool_call)
 
             self._track_internal_event(
@@ -316,6 +335,10 @@ class ToolsExecutor:
         error: ToolException,
         chat_logs: List[UiChatLog],
     ) -> Dict[str, Any]:
+        error_type = type(error).__name__
+
+        self._logger.error(f"Tools executor raised error {error_type} {error}")
+
         tool_response = f"Tool {tool_name} raised ToolException: {str(error)}"
         self._track_internal_event(
             event_name=EventEnum.WORKFLOW_TOOL_FAILURE,
@@ -330,7 +353,7 @@ class ToolsExecutor:
             tool_info={"name": tool_name, "args": tool_args},
             status=ToolStatus.FAILURE,
             ui_chat_logs=chat_logs,
-            error_message="ToolException",
+            error_message=f"Tool call failed: {error_type}",
         )
 
         return {

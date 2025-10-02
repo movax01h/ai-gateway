@@ -18,6 +18,7 @@ from duo_workflow_service.entities.state import (
     WorkflowStatusEnum,
 )
 from duo_workflow_service.json_encoder.encoder import CustomEncoder
+from lib.feature_flags.context import FeatureFlag, is_feature_enabled
 
 TIMEOUT_OUTBOX_PUT = 60
 
@@ -54,7 +55,9 @@ class UserInterface:
             (message, _) = state
 
             has_content = self._append_chunk_to_ui_chat_log(message)
-            if has_content:
+            if has_content or is_feature_enabled(
+                FeatureFlag.STREAM_DURING_TOOL_CALL_GENERATION
+            ):
                 return await self._execute_action()
 
     async def _execute_action(self):
