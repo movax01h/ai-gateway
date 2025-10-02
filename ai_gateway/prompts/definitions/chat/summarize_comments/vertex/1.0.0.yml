@@ -13,5 +13,5 @@ prompt_template:
   user: |
     {% include 'chat/summarize_comments/user/1.0.0.jinja' %}
 params:
-  vertex_location: us-east5
+  vertex_location: global
   timeout: 60
