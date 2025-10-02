@@ -5,6 +5,7 @@ import pytest
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 from langchain_core.prompt_values import ChatPromptValue
 
+from ai_gateway.model_metadata import ModelMetadata
 from ai_gateway.prompts import Prompt
 from ai_gateway.prompts.config.models import ModelClassProvider
 from duo_workflow_service.agents.prompt_adapter import (
@@ -423,3 +424,215 @@ class TestCreateAdapter:
 
         assert isinstance(adapter, expected_adapter_type)
         assert getattr(adapter, expected_attribute) == mock_prompt
+
+
+class TestPromptAdapterFriendlyName:
+    """Test friendly_name functionality in prompt adapters."""
+
+    @pytest.fixture
+    def mock_gitlab_instance_info(self):
+        """Mock GitLab instance info."""
+        return GitLabInstanceInfo(
+            instance_type="gitlab-com",
+            instance_url="https://gitlab.com",
+            instance_version="17.0.0",
+        )
+
+    @pytest.fixture
+    def mock_model_metadata(self):
+        """Mock model metadata with friendly_name."""
+        return ModelMetadata(
+            name="claude_sonnet_4_5_20250929",
+            provider="gitlab",
+            friendly_name="Claude Sonnet 4.5 - Anthropic",
+        )
+
+    @pytest.fixture
+    def mock_prompt_template(self):
+        """Mock prompt template with model metadata injection."""
+        mock_prompt = Mock()
+        mock_prompt.text = "<model_info>\n<model_name>{{ model_friendly_name }}</model_name>\n</model_info>"
+        mock_user_prompt = Mock()
+        mock_user_prompt.text = "{{ message.content }}"
+        return {"system_static": mock_prompt, "user": mock_user_prompt}
+
+    @patch(
+        "duo_workflow_service.gitlab.gitlab_service_context.GitLabServiceContext.get_current_instance_info"
+    )
+    @patch("duo_workflow_service.agents.prompt_adapter.current_model_metadata_context")
+    def test_chat_agent_prompt_template_injects_friendly_name(
+        self,
+        mock_context,
+        mock_instance_info,
+        mock_gitlab_instance_info,
+        mock_model_metadata,
+        mock_prompt_template,
+    ):
+        """Test that ChatAgentPromptTemplate injects friendly_name into template."""
+        mock_context.get.return_value = mock_model_metadata
+        mock_instance_info.return_value = mock_gitlab_instance_info
+
+        adapter = ChatAgentPromptTemplate(prompt_template=mock_prompt_template)
+
+        input_data = {
+            "conversation_history": {"test_agent": [HumanMessage(content="Hello")]},
+            "project": Project(id=1, name="test"),
+            "namespace": Namespace(id=1, name="test"),
+            "plan": {"steps": []},
+            "status": "execution",
+            "ui_chat_log": [],
+            "last_human_input": None,
+            "goal": "Test goal",
+            "approval": None,
+        }
+
+        with patch(
+            "duo_workflow_service.agents.prompt_adapter.jinja2_formatter"
+        ) as mock_formatter:
+            mock_formatter.return_value = "Formatted prompt"
+
+            adapter.invoke(input_data, agent_name="test_agent")
+
+            call_args_list = mock_formatter.call_args_list
+
+            _, first_kwargs = call_args_list[0]
+            assert "model_friendly_name" in first_kwargs
+            assert (
+                first_kwargs["model_friendly_name"] == "Claude Sonnet 4.5 - Anthropic"
+            )
+
+    @patch(
+        "duo_workflow_service.gitlab.gitlab_service_context.GitLabServiceContext.get_current_instance_info"
+    )
+    @patch("duo_workflow_service.agents.prompt_adapter.current_model_metadata_context")
+    def test_chat_agent_prompt_template_fallback_when_no_model_metadata(
+        self,
+        mock_context,
+        mock_instance_info,
+        mock_gitlab_instance_info,
+        mock_prompt_template,
+    ):
+        """Test that ChatAgentPromptTemplate handles missing model metadata gracefully."""
+        mock_context.get.return_value = None
+        mock_instance_info.return_value = mock_gitlab_instance_info
+
+        adapter = ChatAgentPromptTemplate(prompt_template=mock_prompt_template)
+
+        input_data = {
+            "conversation_history": {"test_agent": [HumanMessage(content="Hello")]},
+            "project": Project(id=1, name="test"),
+            "namespace": Namespace(id=1, name="test"),
+            "plan": {"steps": []},
+            "status": "execution",
+            "ui_chat_log": [],
+            "last_human_input": None,
+            "goal": "Test goal",
+            "approval": None,
+        }
+
+        with patch(
+            "duo_workflow_service.agents.prompt_adapter.jinja2_formatter"
+        ) as mock_formatter:
+            mock_formatter.return_value = "Formatted prompt"
+
+            adapter.invoke(input_data, agent_name="test_agent")
+
+            call_args_list = mock_formatter.call_args_list
+
+            _, first_kwargs = call_args_list[0]
+            assert first_kwargs["model_friendly_name"] == "Unknown"
+
+    @patch(
+        "duo_workflow_service.gitlab.gitlab_service_context.GitLabServiceContext.get_current_instance_info"
+    )
+    @patch("duo_workflow_service.agents.prompt_adapter.current_model_metadata_context")
+    def test_chat_agent_prompt_template_fallback_when_no_friendly_name(
+        self,
+        mock_context,
+        mock_instance_info,
+        mock_gitlab_instance_info,
+        mock_prompt_template,
+    ):
+        """Test ChatAgentPromptTemplate when model metadata exists but has no friendly_name."""
+        metadata_no_friendly_name = ModelMetadata(
+            name="test_model",
+            provider="test_provider",
+            friendly_name=None,
+        )
+
+        # Setup mocks
+        mock_context.get.return_value = metadata_no_friendly_name
+        mock_instance_info.return_value = mock_gitlab_instance_info
+
+        adapter = ChatAgentPromptTemplate(prompt_template=mock_prompt_template)
+
+        input_data = {
+            "conversation_history": {"test_agent": [HumanMessage(content="Hello")]},
+            "project": Project(id=1, name="test"),
+            "namespace": Namespace(id=1, name="test"),
+            "plan": {"steps": []},
+            "status": "execution",
+            "ui_chat_log": [],
+            "last_human_input": None,
+            "goal": "Test goal",
+            "approval": None,
+        }
+
+        with patch(
+            "duo_workflow_service.agents.prompt_adapter.jinja2_formatter"
+        ) as mock_formatter:
+            mock_formatter.return_value = "Formatted prompt"
+
+            adapter.invoke(input_data, agent_name="test_agent")
+
+            call_args_list = mock_formatter.call_args_list
+
+            _, first_kwargs = call_args_list[0]
+            assert first_kwargs["model_friendly_name"] == "Unknown"
+
+    @patch(
+        "duo_workflow_service.gitlab.gitlab_service_context.GitLabServiceContext.get_current_instance_info"
+    )
+    @patch("duo_workflow_service.agents.prompt_adapter.current_model_metadata_context")
+    def test_chat_agent_prompt_template_with_self_hosted_model(
+        self,
+        mock_context,
+        mock_instance_info,
+        mock_gitlab_instance_info,
+        mock_prompt_template,
+    ):
+        """Test ChatAgentPromptTemplate with self-hosted model friendly_name."""
+        self_hosted_metadata = ModelMetadata(
+            name="llama3",
+            provider="custom_openai",
+            friendly_name="Llama3",
+        )
+
+        mock_context.get.return_value = self_hosted_metadata
+        mock_instance_info.return_value = mock_gitlab_instance_info
+
+        adapter = ChatAgentPromptTemplate(prompt_template=mock_prompt_template)
+
+        input_data = {
+            "conversation_history": {"test_agent": [HumanMessage(content="Hello")]},
+            "project": Project(id=1, name="test"),
+            "namespace": Namespace(id=1, name="test"),
+            "plan": {"steps": []},
+            "status": "execution",
+            "ui_chat_log": [],
+            "last_human_input": None,
+            "goal": "Test goal",
+            "approval": None,
+        }
+
+        with patch(
+            "duo_workflow_service.agents.prompt_adapter.jinja2_formatter"
+        ) as mock_formatter:
+            mock_formatter.return_value = "Formatted prompt"
+
+            adapter.invoke(input_data, agent_name="test_agent")
+
+            call_args_list = mock_formatter.call_args_list
+
+            _, first_kwargs = call_args_list[0]
+            assert first_kwargs["model_friendly_name"] == "Llama3"

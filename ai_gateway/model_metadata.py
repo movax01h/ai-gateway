@@ -28,6 +28,7 @@ class AmazonQModelMetadata(BaseModelMetadata):
     provider: Literal["amazon_q"]
     name: Literal["amazon_q"]
     role_arn: Annotated[str, StringConstraints(max_length=255)]
+    friendly_name: Optional[Annotated[str, StringConstraints(max_length=255)]] = None
 
     def to_params(self) -> Dict[str, Any]:
         return {
@@ -42,6 +43,7 @@ class ModelMetadata(BaseModelMetadata):
     endpoint: Optional[Annotated[AnyUrl, UrlConstraints(max_length=255)]] = None
     api_key: Optional[Annotated[str, StringConstraints(max_length=2000)]] = None
     identifier: Optional[Annotated[str, StringConstraints(max_length=1000)]] = None
+    friendly_name: Optional[Annotated[str, StringConstraints(max_length=255)]] = None
 
     def to_params(self) -> Dict[str, Any]:
         """Retrieve model parameters for a given identifier.
@@ -91,6 +93,7 @@ def create_model_metadata(data: dict[str, Any] | None) -> Optional[TypeModelMeta
         return AmazonQModelMetadata(
             llm_definition_params=llm_definition.params.copy(),
             family=llm_definition.family,
+            friendly_name=llm_definition.name,
             **data,
         )
 
@@ -118,6 +121,7 @@ def create_model_metadata(data: dict[str, Any] | None) -> Optional[TypeModelMeta
     return ModelMetadata(
         llm_definition_params=llm_definition.params.copy(),
         family=llm_definition.family,
+        friendly_name=llm_definition.name,
         **data,
     )
 

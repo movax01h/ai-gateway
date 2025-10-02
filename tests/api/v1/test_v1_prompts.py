@@ -77,6 +77,7 @@ class TestPrompt:
                             "max_tokens": 4096,
                         },
                         family=["mistral"],
+                        friendly_name="Mistral",
                     ),
                     None,
                 ),
@@ -102,6 +103,7 @@ class TestPrompt:
                         role_arn="role-arn",
                         llm_definition_params={"model": "amazon_q"},
                         family=["amazon_q"],
+                        friendly_name="Amazon Q",
                     ),
                     None,
                 ),
@@ -169,7 +171,8 @@ class TestPrompt:
                 "prompt_version": prompt_version,
                 "model_metadata": input_model_metadata
                 and input_model_metadata.model_dump(
-                    exclude={"llm_definition_params", "family"}, mode="json"
+                    exclude={"llm_definition_params", "family", "friendly_name"},
+                    mode="json",
                 ),
             },
         )
@@ -269,7 +272,8 @@ class TestMisdirectedRequest:
                 "inputs": {"name": "John", "age": 20},
                 "model_metadata": model_metadata
                 and model_metadata.model_dump(
-                    exclude={"llm_definition_params", "family"}, mode="json"
+                    exclude={"llm_definition_params", "family", "friendly_name"},
+                    mode="json",
                 ),
             },
         )
