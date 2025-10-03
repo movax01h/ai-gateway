@@ -321,22 +321,17 @@ class TestDefaultPromptAdapter:
     async def test_get_response(self, mock_prompt, sample_chat_workflow_state):
         adapter = DefaultPromptAdapter(mock_prompt)
 
-        mock_prompt_value = Mock()
-        mock_prompt_value.to_messages.return_value = [HumanMessage(content="test")]
-        mock_prompt.prompt_tpl.invoke.return_value = mock_prompt_value
-
         expected_response = AIMessage(content="Test response")
-        mock_prompt.model.ainvoke.return_value = expected_response
+        mock_prompt.ainvoke.return_value = expected_response
 
         result = await adapter.get_response(sample_chat_workflow_state)
 
         assert result == expected_response
-        mock_prompt.prompt_tpl.invoke.assert_called_once_with(
+        mock_prompt.ainvoke.assert_called_once_with(
             input=sample_chat_workflow_state,
             agent_name="test_agent",
             is_anthropic_model=True,
         )
-        mock_prompt.model.ainvoke.assert_called_once()
 
     def test_get_model(self, mock_prompt):
         adapter = DefaultPromptAdapter(mock_prompt)

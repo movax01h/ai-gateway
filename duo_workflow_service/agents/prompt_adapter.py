@@ -125,20 +125,17 @@ class BasePromptAdapter(ABC):
 class DefaultPromptAdapter(BasePromptAdapter):
     def __init__(self, base_prompt: Prompt):
         self._base_prompt = base_prompt
-        self._prompt_template = base_prompt.prompt_tpl
 
     async def get_response(self, input: ChatWorkflowState) -> BaseMessage:
         is_anthropic_model = (
             self._base_prompt.model_provider == ModelClassProvider.ANTHROPIC
         )
 
-        prompt_value = self._prompt_template.invoke(
+        return await self._base_prompt.ainvoke(
             input=input,
             agent_name=self._base_prompt.name,
             is_anthropic_model=is_anthropic_model,
         )
-
-        return await self._base_prompt.model.ainvoke(prompt_value.to_messages())
 
     def get_model(self):
         return self._base_prompt.model
