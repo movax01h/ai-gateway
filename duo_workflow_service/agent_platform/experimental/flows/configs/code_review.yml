@@ -21,11 +21,12 @@ components:
     prompt_id: "code_review_prescan"
     prompt_version: "^1.0.0"
     inputs:
-      - from: "context:build_review_context.tool_responses"
-        as: "mr_data"
       - from: "context:project_id"
         as: "project_id"
+      - from: "context:goal"
+        as: "merge_request_iid"
     toolset:
+      - "build_review_merge_request_context"
       - "list_repository_tree"
       - "get_repository_file"
       - "read_file"
