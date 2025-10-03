@@ -188,8 +188,10 @@ pages:
   rules:
     - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
       when: manual
+      allow_failure: true # so this job doesn't block the pipeline
 
 🛫 [dws-loadtest] Trigger runway deployment production:
   rules:
     - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
       when: manual
+      allow_failure: true # so this job doesn't block the pipeline
