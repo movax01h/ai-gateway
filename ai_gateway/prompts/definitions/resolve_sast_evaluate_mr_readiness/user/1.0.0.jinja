@@ -1,0 +1,66 @@
+Assess the vulnerability fix and output final results with quality metrics.
+
+<assessment_steps>
+1. **Extract Merge Request URL**
+  Search git_operations_result for the MR URL.
+  Common patterns:
+  - "remote: https://gitlab.com/.../merge_requests/123"
+  - "remote: View merge request for..."
+  - "To create a merge request for..."
+
+  If not found, construct fallback using the repository_url and workflow_id
+  provided in the input context:
+  [repository_url]/-/merge_requests/security%2Fsast-fix-<ID>-<WORKFLOW_ID>
+
+2. **Optional: Fetch MR Details**
+  Once you have the URL, you MAY use get_merge_request to retrieve
+  full merge request details for validation.
+
+  You MAY also use list_merge_request_diffs to review the actual
+  changes and verify they align with the fix_execution_result.
+
+3. **Calculate Readiness Score**
+  Parse fix_execution_result to find:
+  - execution_result.status (success/partial/failed)
+  - execution_result.verification flags
+  - execution_result.confidence_level
+
+  Base Score:
+  - status="success": Start at 70%
+  - status="partial": Start at 40%
+  - status="failed": Start at 10%
+
+  Adjustments:
+  - vulnerability_eliminated=true: +15%
+  - syntax_valid=true: +5%
+  - functionality_preserved=true: +10%
+
+  Quality modifiers:
+  - confidence_level="high": +10%
+  - confidence_level="medium": +5%
+  - confidence_level="low": -5%
+
+  Deductions for issues in notes:
+  - Critical gaps: -20%
+  - Minor concerns: -5%
+
+  If you reviewed the MR diffs:
+  - Changes are minimal and focused: +5%
+  - Changes include unnecessary modifications: -10%
+
+  Convert to decimal (e.g., 75% → "0.75")
+</assessment_steps>
+
+<output_requirements>
+Return ONLY this JSON structure:
+{
+  "merge_request_url": "<extracted_or_constructed_url>",
+  "readiness_detection_score": "<decimal_score_as_string>"
+}
+
+Example:
+{
+  "merge_request_url": "https://gitlab.com/org/project/-/merge_requests/123",
+  "readiness_detection_score": "0.75"
+}
+</output_requirements>
