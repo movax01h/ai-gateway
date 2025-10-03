@@ -59,7 +59,11 @@ class AgentComponent(BaseComponent):
         _final_answer_key,
     )
 
-    supported_environments: ClassVar[tuple[str, ...]] = ("platform",)
+    supported_environments: ClassVar[tuple[str, ...]] = (
+        "ambient",
+        "chat",
+        "chat-partial",
+    )
 
     prompt_id: str
     prompt_version: Optional[str] = None

@@ -35,3 +35,12 @@ class PromptConfig(BaseModel):
     unit_primitives: list[GitLabUnitPrimitive] = []
     prompt_template: dict[str, str]
     params: PromptParams | None = None
+
+
+class InMemoryPromptConfig(PromptConfig):
+    prompt_id: str
+
+    def to_prompt_config(self) -> PromptConfig:
+        params = self.model_dump()
+        params.pop("prompt_id")
+        return PromptConfig(**params)

@@ -155,7 +155,7 @@ class TestFlow:
                 },
             ],
             routers=[{"from": "agent", "to": "end"}],
-            environment="local",
+            environment="ambient",
             version="v1",
         )
 
@@ -347,7 +347,7 @@ class TestFlow:
                 {"name": "agent", "type": "AnotherComponent"},  # Duplicate name
             ],
             routers=[{"from": "agent", "to": "end"}],
-            environment="local",
+            environment="ambient",
             version="v1",
         )
 
@@ -393,7 +393,7 @@ class TestFlow:
         """Test Flow with complex configuration via run method to trigger _compile."""
         complex_config = FlowConfig(
             version="v1",
-            environment="remote",
+            environment="chat",
             components=[
                 {
                     "name": "agent",
@@ -655,7 +655,7 @@ class TestFlow:
             flow={"entry_point": "tool_call"},
             components=[component_config],
             routers=[{"from": "tool_call", "to": "end"}],
-            environment="local",
+            environment="chat-partial",
             version="v1",
         )
 
