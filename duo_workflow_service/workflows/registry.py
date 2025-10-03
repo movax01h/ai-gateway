@@ -1,15 +1,22 @@
 import inspect
 from functools import partial
 from pathlib import Path
-from typing import Any, Callable, Dict, Optional, Type, TypeAlias, TypeVar
+from typing import (
+    Any,
+    Callable,
+    Dict,
+    Optional,
+    Tuple,
+    Type,
+    TypeAlias,
+    Union,
+    overload,
+)
 
 from google.protobuf import struct_pb2
 from google.protobuf.json_format import MessageToDict
 
-from duo_workflow_service.agent_platform import experimental
-from duo_workflow_service.agent_platform.experimental.flows.flow_config import (
-    FlowConfig,
-)
+from duo_workflow_service.agent_platform import experimental, v1
 from duo_workflow_service.agent_platform.experimental.flows.flow_config import (
     list_configs as experimental_list_configs,
 )
@@ -46,22 +53,40 @@ CHAT_AGENT_COMPONENT_ENVIRONMENT = "chat-partial"
 
 FlowFactory: TypeAlias = Callable[..., AbstractWorkflow]
 
-FlowConfigT = TypeVar("FlowConfigT", bound=FlowConfig)
-
-_FLOW_BY_VERSIONS = {
+_FLOW_BY_VERSIONS: Dict[
+    str, Tuple[Type[Union[experimental.flows.FlowConfig, v1.flows.FlowConfig]], Any]
+] = {
     "experimental": (experimental.flows.FlowConfig, experimental.flows.Flow),
+    "v1": (v1.flows.FlowConfig, v1.flows.Flow),
 }
 
 _FLOW_CONFIGS_BY_VERSION = {
     "experimental": experimental_list_configs,
+    "v1": v1.list_configs,
 }
+
+
+@overload
+def _convert_struct_to_flow_config(
+    struct: struct_pb2.Struct,
+    flow_config_schema_version: str,
+    flow_config_cls: Type[experimental.flows.FlowConfig],
+) -> experimental.flows.FlowConfig: ...
+
+
+@overload
+def _convert_struct_to_flow_config(
+    struct: struct_pb2.Struct,
+    flow_config_schema_version: str,
+    flow_config_cls: Type[v1.flows.FlowConfig],
+) -> v1.flows.FlowConfig: ...
 
 
 def _convert_struct_to_flow_config(
     struct: struct_pb2.Struct,
     flow_config_schema_version: str,
-    flow_config_cls: Type[FlowConfigT],
-) -> FlowConfigT:
+    flow_config_cls: Type[Union[experimental.flows.FlowConfig, v1.flows.FlowConfig]],
+) -> Union[experimental.flows.FlowConfig, v1.flows.FlowConfig]:
     try:
         _FLOW_BY_VERSIONS[flow_config_schema_version]
     except KeyError:
@@ -70,14 +95,21 @@ def _convert_struct_to_flow_config(
             f"Supported versions: {list(_FLOW_BY_VERSIONS.keys())}"
         ) from None
     config_dict: Dict[str, Any] = MessageToDict(struct)
-    config_dict["version"] = flow_config_schema_version
+
+    if flow_config_schema_version != config_dict["version"]:
+        raise ValueError(
+            (
+                f"Schema version mismatch, declared version: {flow_config_schema_version},"
+                f"but received: {config_dict['version']}"
+            )
+        )
 
     return flow_config_cls(**config_dict)
 
 
 def _flow_factory(
     flow_cls: FlowFactory,
-    config: FlowConfigT,
+    config: Union[experimental.flows.FlowConfig, v1.flows.FlowConfig],
 ) -> FlowFactory:
     if config.environment != CHAT_AGENT_COMPONENT_ENVIRONMENT:
         return partial(flow_cls, config=config)
@@ -160,7 +192,6 @@ def resolve_workflow_class(
 
     try:
         flow_config_cls, flow_cls = _FLOW_BY_VERSIONS[flow_version]
-
         config = flow_config_cls.from_yaml_config(str(flow_config_path))
         return partial(flow_cls, config=config)  # dynamic flow type
     except Exception:

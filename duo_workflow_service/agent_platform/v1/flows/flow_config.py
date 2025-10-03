@@ -1,15 +1,17 @@
+import json
 from pathlib import Path
-from typing import Callable, ClassVar, Optional, Self
+from typing import Callable, ClassVar, List, Literal, Optional, Self
 
 import yaml
 from pydantic import BaseModel
 
+from ai_gateway.prompts.config.base import InMemoryPromptConfig
 from duo_workflow_service.agent_platform.v1.components import (
     BaseComponent,
     ComponentRegistry,
 )
 
-__all__ = ["FlowConfig", "load_component_class"]
+__all__ = ["FlowConfig", "load_component_class", "list_configs"]
 
 
 _PREFIX_BLOCLIST = (
@@ -30,9 +32,9 @@ class FlowConfig(BaseModel):
     flow: dict
     components: list[dict]
     routers: list[dict]
-    environment: str
-    version: str
-    prompts: Optional[list[dict]] = None
+    environment: Literal["ambient", "chat", "chat-partial"]
+    version: Literal["v1"]
+    prompts: Optional[list[InMemoryPromptConfig]] = None
 
     @classmethod
     def from_yaml_config(cls, path: str) -> Self:
@@ -101,3 +103,25 @@ def load_component_class(
 
     # pylint: disable-next=unsubscriptable-object
     return registry[cls_name]
+
+
+def list_configs() -> List[dict[str, str]]:
+    configs = []
+    for config_file in FlowConfig.DIRECTORY_PATH.glob("*.yml"):
+        try:
+            config = FlowConfig.from_yaml_config(config_file.stem)
+            with open(config_file, "r", encoding="utf-8") as f:
+                config_data = yaml.safe_load(f)
+            config_json = json.dumps(config_data, indent=2)
+            configs.append(
+                {
+                    "name": config_file.stem,
+                    "version": config.version,
+                    "environment": config.environment,
+                    "config": config_json,
+                }
+            )
+        except (yaml.YAMLError, IOError):
+            continue
+
+    return configs

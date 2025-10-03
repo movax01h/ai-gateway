@@ -4,6 +4,7 @@ from unittest.mock import Mock, patch
 import pytest
 from google.protobuf import struct_pb2
 
+from duo_workflow_service.agent_platform import experimental, v1
 from duo_workflow_service.agent_platform.experimental.flows.flow_config import (
     FlowConfig,
 )
@@ -118,22 +119,37 @@ def test_registry_resolve():
     assert resolved_class == Workflow
 
 
-def test_registry_resolve_experimental_flow():
-    """Test resolving experimental flow with config path."""
-    mock_config = Mock()
-    mock_flow_cls = Mock()
-    mock_flow_config_cls = Mock()
-    mock_flow_config_cls.from_yaml_config.return_value = mock_config
+@pytest.mark.parametrize("version", ["experimental", "v1"])
+def test_registry_flow_versions_return_correct_classes(version):
+    """Test that registry can resolve both experimental and v1 versions with correct flow classes."""
 
-    with patch(
-        "duo_workflow_service.workflows.registry._FLOW_BY_VERSIONS",
-        {"experimental": (mock_flow_config_cls, mock_flow_cls)},
-    ):
-        result = resolve_workflow_class("prototype/experimental")
+    # Create a minimal flow config for testing with all required fields
+    struct = struct_pb2.Struct()
+    struct.update(
+        {
+            "version": version,
+            "environment": "ambient",
+            "components": [{"name": "test_agent", "type": "AgentComponent"}],
+            "flow": {"entry_point": "test_agent"},
+            "routers": [
+                {"from": "test_agent", "to": "end"}
+            ],  # Add required routers field
+        }
+    )
 
-        # Should return a partial function
-        assert isinstance(result, partial)
-        mock_flow_config_cls.from_yaml_config.assert_called_once_with("prototype")
+    result = resolve_workflow_class(
+        workflow_definition=None,
+        flow_config=struct,
+        flow_config_schema_version=version,
+    )
+    # Should return a partial function
+    assert isinstance(result, partial)
+
+    # Verify the underlying flow class is from the correct version
+    if version == "experimental":
+        assert result.func == experimental.flows.Flow
+    elif version == "v1":
+        assert result.func == v1.flows.Flow
 
 
 def test_registry_resolve_unknown_flow_version():
@@ -306,14 +322,37 @@ def test_list_configs():
             "config": '{"flow": {"entry_point": "router"}}',
         },
     ]
+    mock_v1_configs = [
+        {
+            "name": "config3",
+            "version": "v1",
+            "environment": "chat",
+            "config": '{"flow": {"entry_point": "agent"}}',
+        },
+        {
+            "name": "config4",
+            "version": "v1",
+            "environment": "chat-partial",
+            "config": '{"flow": {"entry_point": "router"}}',
+        },
+    ]
 
     with patch(
         "duo_workflow_service.workflows.registry._FLOW_CONFIGS_BY_VERSION",
-        {"experimental": lambda: mock_experimental_configs},
+        {
+            "experimental": lambda: mock_experimental_configs,
+            "v1": lambda: mock_v1_configs,
+        },
     ):
         result = list_configs()
 
-        assert result == mock_experimental_configs
-        assert len(result) == 2
+        assert result == (mock_experimental_configs + mock_v1_configs)
+        assert len(result) == 4
         assert result[0]["name"] == "config1"
+        assert result[0]["version"] == "experimental"
         assert result[1]["name"] == "config2"
+        assert result[1]["version"] == "experimental"
+        assert result[2]["name"] == "config3"
+        assert result[2]["version"] == "v1"
+        assert result[3]["name"] == "config4"
+        assert result[3]["version"] == "v1"
