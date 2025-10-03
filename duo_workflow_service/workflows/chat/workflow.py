@@ -13,6 +13,7 @@ from langgraph.types import Command
 from ai_gateway.container import ContainerApplication
 from ai_gateway.model_metadata import current_model_metadata_context
 from ai_gateway.prompts import InMemoryPromptRegistry
+from ai_gateway.prompts.config.base import InMemoryPromptConfig
 from ai_gateway.prompts.registry import LocalPromptRegistry
 from contract import contract_pb2
 from duo_workflow_service.agents.chat_agent import ChatAgent
@@ -174,15 +175,7 @@ class Workflow(AbstractWorkflow):
             memory_prompt_registry: InMemoryPromptRegistry = InMemoryPromptRegistry(
                 prompt_registry
             )
-            if "prompt_template_override" in kwargs:
-                prompt_template = kwargs.pop("prompt_template_override")
-                enriched_prompt_tpl = CustomPromptAdapter.enrich_prompt_template(
-                    prompt_template
-                )
-                memory_prompt_registry.register_prompt(
-                    prompt_id=prompt_template["prompt_id"],
-                    prompt_data=enriched_prompt_tpl,
-                )
+            self._register_prompt_template_override(kwargs, memory_prompt_registry)
             active_prompt_registry = memory_prompt_registry
 
         super().__init__(
@@ -197,6 +190,24 @@ class Workflow(AbstractWorkflow):
             prompt_registry=active_prompt_registry,  # type: ignore[arg-type]
             internal_event_client=internal_event_client,
             **kwargs,
+        )
+
+    def _register_prompt_template_override(
+        self, kwargs: Dict[str, Any], prompt_registry: InMemoryPromptRegistry
+    ) -> None:
+        if "prompt_template_override" not in kwargs:
+            return
+
+        prompt_template = kwargs.pop("prompt_template_override")
+        if isinstance(prompt_template, InMemoryPromptConfig):
+            prompt_template = prompt_template.model_dump()
+
+        enriched_prompt_tpl = CustomPromptAdapter.enrich_prompt_template(
+            prompt_template
+        )
+        prompt_registry.register_prompt(
+            prompt_id=prompt_template["prompt_id"],
+            prompt_data=enriched_prompt_tpl,
         )
 
     def _are_tools_called(self, state: ChatWorkflowState) -> Routes:
