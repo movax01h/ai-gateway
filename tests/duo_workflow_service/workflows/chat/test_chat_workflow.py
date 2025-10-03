@@ -2,11 +2,21 @@ from unittest.mock import MagicMock, Mock, patch
 
 import pytest
 from dependency_injector import containers
-from gitlab_cloud_connector import CloudConnectorUser, UserClaims, WrongUnitPrimitives
+from gitlab_cloud_connector import (
+    CloudConnectorUser,
+    GitLabUnitPrimitive,
+    UserClaims,
+    WrongUnitPrimitives,
+)
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 
 from ai_gateway.model_metadata import TypeModelMetadata
-from ai_gateway.prompts.config.base import PromptConfig
+from ai_gateway.prompts.config.base import (
+    InMemoryPromptConfig,
+    ModelConfig,
+    PromptConfig,
+)
+from ai_gateway.prompts.config.models import ChatAnthropicParams, ModelClassProvider
 from ai_gateway.prompts.typing import TypeModelFactory
 from contract import contract_pb2
 from duo_workflow_service.agents.chat_agent import ChatAgent
@@ -896,6 +906,37 @@ async def test_workflow_with_approval_object():
 
 @pytest.mark.asyncio
 @pytest.mark.usefixtures("mock_fetch_workflow_and_container_data")
+@pytest.mark.parametrize(
+    "prompt_template_overrides",
+    [
+        {
+            "prompt_id": "custom/prompt",
+            "model": {
+                "params": {"model_class_provider": "anthropic", "max_tokens": 4096}
+            },
+            "unit_primitives": [GitLabUnitPrimitive.DUO_CHAT],
+            "prompt_template": {"system": "test system prompt", "user": "{{message}}"},
+        },
+        InMemoryPromptConfig(
+            name="custom/prompt",
+            prompt_id="custom/prompt",
+            model=ModelConfig(
+                params=ChatAnthropicParams(
+                    model_class_provider=ModelClassProvider.ANTHROPIC, max_tokens=4096
+                )
+            ),
+            unit_primitives=[GitLabUnitPrimitive.DUO_CHAT],
+            prompt_template={
+                "system": "test system prompt",
+                "user": "{{message}}",
+            },
+        ),
+    ],
+    ids=[
+        "Test experimental version",
+        "Test v1 version",
+    ],
+)
 @patch("duo_workflow_service.workflows.chat.workflow.current_model_metadata_context")
 @patch.object(Workflow, "_get_tools")
 @patch("duo_workflow_service.components.tools_registry.ToolsRegistry.toolset")
@@ -906,6 +947,7 @@ async def test_compile_with_tools_override_and_flow_config(
     mock_get_tools,
     mock_model_metadata_context,
     mock_duo_workflow_service_container,
+    prompt_template_overrides,
 ):
     mock_model_metadata_context.get.return_value = None
     mock_get_tools.return_value = ["default_tool1", "default_tool2"]
@@ -934,14 +976,7 @@ async def test_compile_with_tools_override_and_flow_config(
         tools_override=["tool1", "tool2"],
         prompt_template_id_override="custom/prompt",
         prompt_template_version_override=None,
-        prompt_template_override={
-            "prompt_id": "custom/prompt",
-            "model": {
-                "params": {"model_class_provider": "anthropic", "max_tokens": 4096}
-            },
-            "unit_primitives": ["duo_chat"],
-            "prompt_template": {"system": "test system prompt", "user": "{{message}}"},
-        },
+        prompt_template_override=prompt_template_overrides,
     )
 
     mock_graph = MagicMock()
