@@ -22,7 +22,7 @@ components:
     inputs:
       - from: "context:fix_pipeline_context.final_answer"
         as: "fix_pipeline_context_results"
-      - from: "context:inputs.agent_user_environment.source_branch"
+      - from: "context:inputs.pipeline.source_branch"
         as: "source_branch"
     toolset: []
     ui_log_events:
@@ -109,12 +109,6 @@ routers:
 flow:
   entry_point: "fix_pipeline_context"
   inputs:
-    - category: agent_user_environment
-      input_schema:
-        merge_request_url:
-          type: string
-        source_branch:
-          type: string
     - category: merge_request
       input_schema:
         url:
