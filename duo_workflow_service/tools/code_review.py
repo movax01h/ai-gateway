@@ -92,6 +92,10 @@ class BuildReviewMergeRequestContextInput(ProjectResourceInput):
         default=None,
         description="The internal ID of the project merge request. Required if URL is not provided.",
     )
+    only_diffs: bool = Field(
+        default=False,
+        description="If True, only include diffs without fetching original file contents. Useful for initial scanning.",
+    )
 
 
 class BuildReviewMergeRequestContext(DuoBaseTool):
@@ -101,11 +105,13 @@ class BuildReviewMergeRequestContext(DuoBaseTool):
     description: str = (
         "Build comprehensive merge request context for code review.\n"
         "Fetches MR details, AI-reviewable diffs, and original files content.\n"
+        "Set only_diffs=True to skip fetching original file contents for faster scanning.\n"
         "Identify merge request with either:\n"
         "- project_id and merge_request_iid\n"
         "- GitLab URL (https://gitlab.com/namespace/project/-/merge_requests/42)\n"
         "Examples:\n"
         "- build_review_merge_request_context(project_id=13, merge_request_iid=9)\n"
+        "- build_review_merge_request_context(project_id=13, merge_request_iid=9, only_diffs=True)\n"
         "- build_review_merge_request_context(url='https://gitlab.com/...')"
     )
     args_schema: Type[BaseModel] = BuildReviewMergeRequestContextInput
@@ -121,12 +127,15 @@ class BuildReviewMergeRequestContext(DuoBaseTool):
             return json.dumps({"error": "; ".join(validation_result.errors)})
 
         try:
-            context = await self._build_context(validation_result)
+            only_diffs = kwargs.get("only_diffs", False)
+            context = await self._build_context(validation_result, only_diffs)
             return self._format_output(context)
         except Exception as e:
             return json.dumps({"error": str(e)})
 
-    async def _build_context(self, validation_result) -> Dict[str, Any]:
+    async def _build_context(
+        self, validation_result, only_diffs: bool = False
+    ) -> Dict[str, Any]:
         """Build complete merge request context by fetching all necessary data."""
         # Fetch MR metadata
         mr_data = await self._fetch_mr_data(validation_result)
@@ -134,6 +143,13 @@ class BuildReviewMergeRequestContext(DuoBaseTool):
         # Fetch and process diffs
         diffs_data = await self._fetch_mr_diffs(validation_result)
         diffs_and_paths, modified_files = self._process_filtered_diffs(diffs_data)
+
+        # If only_diffs is True, skip fetching original files and custom instructions
+        if only_diffs:
+            return {
+                "mr_data": mr_data,
+                "diffs_and_paths": diffs_and_paths,
+            }
 
         # Get all diff file paths for instruction matching
         diff_file_paths = list(diffs_and_paths.keys())
@@ -193,6 +209,12 @@ class BuildReviewMergeRequestContext(DuoBaseTool):
 
             try:
                 content = await self._fetch_file_content(project_id, branch, file_path)
+
+                # Check line count and skip if too large
+                line_count = content.count("\n") + 1
+                if line_count > 10000:
+                    continue
+
                 files_content[file_path] = content
             except Exception:
                 # Skip files that can't be fetched
@@ -355,10 +377,10 @@ class BuildReviewMergeRequestContext(DuoBaseTool):
     def _format_output(self, context: dict) -> str:
         """Format output in the simple template structure."""
         custom_instructions_section = self._format_custom_instructions(
-            context["custom_instructions"]
+            context.get("custom_instructions", [])
         )
         diff_section = self._format_diffs(context["diffs_and_paths"])
-        files_section = self._format_original_files(context["files_content"])
+        files_section = self._format_original_files(context.get("files_content", {}))
 
         return f"""Here are the merge request details for you to review:
 
@@ -450,6 +472,9 @@ This formatting is only required for custom instruction comments. Regular review
                 f"Build review context for merge request !{args.merge_request_iid} "
                 f"in project {args.project_id}"
             )
+
+        if args.only_diffs:
+            base_msg += " (diffs only)"
 
         if tool_response:
             base_msg += self._format_exclusion_message(tool_response)

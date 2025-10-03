@@ -20,7 +20,6 @@ def gitlab_client_mock_fixture():
 
 @pytest.fixture(name="project_mock")
 def project_mock_fixture():
-    """Fixture for mock project with exclusion rules."""
     return Project(
         id=1,
         name="test-project",
@@ -190,6 +189,76 @@ async def test_build_review_context_basic_success(
     assert "generated.js" not in response
     assert "<original_files>" in response
     assert "</input>" in response
+
+
+@pytest.mark.asyncio
+@patch("duo_workflow_service.policies.file_exclusion_policy.is_feature_enabled")
+@patch("duo_workflow_service.policies.diff_exclusion_policy.is_feature_enabled")
+async def test_build_review_context_only_diffs(
+    mock_diff_feature_flag,
+    mock_file_feature_flag,
+    gitlab_client_mock,
+    metadata,
+    mr_data,
+    diffs_data,
+):
+    mock_diff_feature_flag.return_value = True
+    mock_file_feature_flag.return_value = True
+
+    gitlab_client_mock.aget = AsyncMock(
+        side_effect=[
+            json.dumps(mr_data),
+            json.dumps(diffs_data),
+        ]
+    )
+    tool = BuildReviewMergeRequestContext(metadata=metadata)
+    response = await tool._arun(
+        project_id="test%2Fproject", merge_request_iid=123, only_diffs=True
+    )
+
+    assert "Here are the merge request details for you to review:" in response
+    assert "<input>" in response
+    assert "<mr_title>" in response
+    assert "Implement calculator method" in response
+    assert "<git_diffs>" in response
+    assert "calculator.rb" in response
+    assert "<original_files>" not in response
+    assert "<custom_instructions>" not in response
+    assert gitlab_client_mock.aget.call_count == 2
+
+
+@pytest.mark.asyncio
+@patch("duo_workflow_service.policies.file_exclusion_policy.is_feature_enabled")
+@patch("duo_workflow_service.policies.diff_exclusion_policy.is_feature_enabled")
+async def test_build_review_context_skips_large_files(
+    mock_diff_feature_flag,
+    mock_file_feature_flag,
+    gitlab_client_mock,
+    metadata,
+    mr_data,
+    diffs_data,
+):
+    mock_diff_feature_flag.return_value = True
+    mock_file_feature_flag.return_value = True
+
+    large_file_content = "\n".join([f"line {i}" for i in range(10001)])
+    large_file_encoded = {
+        "content": base64.b64encode(large_file_content.encode("utf-8")).decode("utf-8")
+    }
+
+    gitlab_client_mock.aget = AsyncMock(
+        side_effect=[
+            json.dumps(mr_data),
+            json.dumps(diffs_data),
+            json.dumps(large_file_encoded),
+            Exception("Custom instructions not found"),
+        ]
+    )
+    tool = BuildReviewMergeRequestContext(metadata=metadata)
+    response = await tool._arun(project_id="test%2Fproject", merge_request_iid=123)
+
+    assert "<original_files>" not in response
+    assert "calculator.rb" in response
 
 
 @pytest.mark.asyncio
@@ -386,9 +455,22 @@ async def test_build_review_context_nested_vs_root_patterns(
         ),
         (
             BuildReviewMergeRequestContextInput(
+                project_id=42, merge_request_iid=123, only_diffs=True
+            ),
+            "Build review context for merge request !123 in project 42 (diffs only)",
+        ),
+        (
+            BuildReviewMergeRequestContextInput(
                 url="https://gitlab.com/namespace/project/-/merge_requests/42"
             ),
             "Build review context for merge request https://gitlab.com/namespace/project/-/merge_requests/42",
+        ),
+        (
+            BuildReviewMergeRequestContextInput(
+                url="https://gitlab.com/namespace/project/-/merge_requests/42",
+                only_diffs=True,
+            ),
+            "Build review context for merge request https://gitlab.com/namespace/project/-/merge_requests/42 (diffs only)",
         ),
     ],
 )
