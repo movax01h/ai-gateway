@@ -185,17 +185,28 @@ def resolve_workflow_class(
     if workflow_definition in _WORKFLOWS_LOOKUP:
         return _WORKFLOWS_LOOKUP[workflow_definition]
 
-    flow_version = Path(workflow_definition).name
-    flow_config_path = Path(workflow_definition).parent
+    flow_version, flow_config_path = parse_workflow_definition(workflow_definition)
+
     if flow_version not in _FLOW_BY_VERSIONS:
         raise ValueError(f"Unknown Flow version: {flow_version}")
 
     try:
         flow_config_cls, flow_cls = _FLOW_BY_VERSIONS[flow_version]
-        config = flow_config_cls.from_yaml_config(str(flow_config_path))
+
+        config = flow_config_cls.from_yaml_config(flow_config_path)
         return partial(flow_cls, config=config)  # dynamic flow type
     except Exception:
         raise ValueError(f"Unknown Flow: {workflow_definition}")
+
+
+def parse_workflow_definition(
+    workflow_definition: str,
+) -> Tuple[str, str]:
+    """Resolves a workflow definition string to its corresponding components."""
+    flow_version = Path(workflow_definition).name
+    flow_config_path = Path(workflow_definition).parent
+
+    return flow_version, str(flow_config_path)
 
 
 def list_configs():
