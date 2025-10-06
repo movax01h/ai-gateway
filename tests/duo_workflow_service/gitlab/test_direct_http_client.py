@@ -7,6 +7,7 @@ import pytest_asyncio
 
 from duo_workflow_service.gitlab.connection_pool import connection_pool
 from duo_workflow_service.gitlab.direct_http_client import DirectGitLabHttpClient
+from duo_workflow_service.gitlab.http_client import GitLabHttpResponse
 
 
 def setup_mock_response(data, status=200, content_type="application/json"):
@@ -91,7 +92,7 @@ async def client(mock_session):
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
-    "method, path, body, params, parse_json, response_data, expected_result",
+    "method, path, body, params, parse_json, use_http_response, response_data, expected_result",
     [
         (
             "GET",
@@ -99,6 +100,7 @@ async def client(mock_session):
             None,
             None,
             True,
+            False,
             {"key": "value"},
             {"key": "value"},
         ),
@@ -107,6 +109,7 @@ async def client(mock_session):
             "/api/v4/projects/1/jobs/102/trace",
             None,
             None,
+            False,
             False,
             "Non-JSON response",
             "Non-JSON response",
@@ -117,6 +120,7 @@ async def client(mock_session):
             None,
             {"per_page": 100},
             True,
+            False,
             {"projects": []},
             {"projects": []},
         ),
@@ -126,6 +130,7 @@ async def client(mock_session):
             '{ "test": 1 }',
             None,
             True,
+            False,
             {"key": "value"},
             {"key": "value"},
         ),
@@ -135,8 +140,9 @@ async def client(mock_session):
             '{ "test": 1 }',
             None,
             True,
+            True,
             {"key": "value"},
-            {"key": "value"},
+            GitLabHttpResponse(status_code=200, body={"key": "value"}),
         ),
         (
             "PATCH",
@@ -144,8 +150,9 @@ async def client(mock_session):
             '{ "test": 1 }',
             None,
             True,
+            True,
             {"key": "value"},
-            {"key": "value"},
+            GitLabHttpResponse(status_code=200, body={"key": "value"}),
         ),
     ],
 )
@@ -157,6 +164,7 @@ async def test_direct_gitlab_http_client(
     body,
     params,
     parse_json,
+    use_http_response,
     response_data,
     expected_result,
 ):
@@ -167,13 +175,24 @@ async def test_direct_gitlab_http_client(
 
     # Make the API call
     if method == "GET":
-        result = await client.aget(path, params=params, parse_json=parse_json)
+        result = await client.aget(
+            path,
+            params=params,
+            parse_json=parse_json,
+            use_http_response=use_http_response,
+        )
     elif method == "POST":
-        result = await client.apost(path, body, parse_json=parse_json)
+        result = await client.apost(
+            path, body, parse_json=parse_json, use_http_response=use_http_response
+        )
     elif method == "PUT":
-        result = await client.aput(path, body, parse_json=parse_json)
+        result = await client.aput(
+            path, body, parse_json=parse_json, use_http_response=use_http_response
+        )
     elif method == "PATCH":
-        result = await client.apatch(path, body, parse_json=parse_json)
+        result = await client.apatch(
+            path, body, parse_json=parse_json, use_http_response=use_http_response
+        )
     else:
         pytest.fail(f"Unexpected HTTP method: {method}")
         result = None
@@ -196,7 +215,15 @@ async def test_direct_gitlab_http_client(
     )
 
     # Check the result
-    assert result == expected_result
+    if use_http_response:
+        # When use_http_response=True, we expect a GitLabHttpResponse object
+        assert isinstance(result, GitLabHttpResponse)
+        assert isinstance(expected_result, GitLabHttpResponse)
+        assert result.status_code == expected_result.status_code
+        assert result.body == expected_result.body
+    else:
+        # When use_http_response=False, we expect the raw data
+        assert result == expected_result
 
 
 @pytest.mark.asyncio

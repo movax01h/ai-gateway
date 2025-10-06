@@ -1,7 +1,6 @@
 import asyncio
 import json
-from typing import Any, Optional
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock
 
 import pytest
 from langchain_core.tools import ToolException
@@ -96,9 +95,9 @@ def monkeypatch_execute_http_response_fixture(monkeypatch, mock_execute_http_res
             '{ "test": 1 }',
             None,
             True,
-            False,
+            True,
             '{"key": "value"}',
-            {"key": "value"},
+            GitLabHttpResponse(status_code=200, body={"key": "value"}),
         ),
         (
             "PATCH",
@@ -106,15 +105,16 @@ def monkeypatch_execute_http_response_fixture(monkeypatch, mock_execute_http_res
             '{ "test": 1 }',
             None,
             True,
-            False,
+            True,
             '{"key": "value"}',
-            {"key": "value"},
+            GitLabHttpResponse(status_code=200, body={"key": "value"}),
         ),
     ],
 )
 async def test_executor_gitlab_http_client(
     client,
     monkeypatch_execute_action,
+    monkeypatch_execute_http_response,
     method,
     path,
     body,
@@ -124,7 +124,16 @@ async def test_executor_gitlab_http_client(
     mock_return_value,
     expected_result,
 ):
-    monkeypatch_execute_action.return_value = mock_return_value
+    if use_http_response:
+        # When use_http_response=True, we need to mock _execute_action_and_get_action_response
+        # and return a proper ActionResponse object
+        action_response = contract_pb2.ActionResponse()
+        action_response.httpResponse.statusCode = 200
+        action_response.httpResponse.body = mock_return_value
+        monkeypatch_execute_http_response.return_value = action_response
+    else:
+        # When use_http_response=False, use the regular _execute_action mock
+        monkeypatch_execute_action.return_value = mock_return_value
 
     expected_path = path
     if params:
@@ -156,8 +165,14 @@ async def test_executor_gitlab_http_client(
         pytest.fail(f"Unexpected HTTP method: {method}")
         result = None
 
-    monkeypatch_execute_action.assert_called_once()
-    call_args = monkeypatch_execute_action.call_args[0]
+    if use_http_response:
+        # When use_http_response=True, check the _execute_action_and_get_action_response mock
+        monkeypatch_execute_http_response.assert_called_once()
+        call_args = monkeypatch_execute_http_response.call_args[0]
+    else:
+        # When use_http_response=False, check the _execute_action mock
+        monkeypatch_execute_action.assert_called_once()
+        call_args = monkeypatch_execute_action.call_args[0]
 
     assert "outbox" in call_args[0]
     assert "inbox" in call_args[0]
@@ -178,7 +193,15 @@ async def test_executor_gitlab_http_client(
     else:
         assert actual_body == body
 
-    assert result == expected_result
+    if use_http_response:
+        # When use_http_response=True, we expect a GitLabHttpResponse object
+        assert isinstance(result, GitLabHttpResponse)
+        assert isinstance(expected_result, GitLabHttpResponse)
+        assert result.status_code == expected_result.status_code
+        assert result.body == expected_result.body
+    else:
+        # When use_http_response=False, we expect the raw data
+        assert result == expected_result
 
 
 @pytest.mark.asyncio
