@@ -2,7 +2,7 @@ name: SAST FP detection Agent Prompt
 model:
   params:
     model_class_provider: anthropic
-    max_tokens: 8192
+    max_tokens: 32_768
 prompt_template:
   system: |
     You are an expert security analyst specializing in Static Application Security Testing (SAST) false positive detection.
