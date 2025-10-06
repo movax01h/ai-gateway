@@ -139,14 +139,18 @@ message ListToolsResponse {
 
 
 message ListFlowsRequest {
-    // Intentionally empty
+    optional ListFlowsRequestFilter filters = 1;
+}
+
+message ListFlowsRequestFilter {
+    repeated string name = 1;
+    repeated string environment = 2;
+    repeated string version = 3;
 }
 
 message ListFlowsResponse {
   repeated google.protobuf.Struct configs = 1;
 }
-
-
 
 message NewCheckpoint {
     string status = 1;

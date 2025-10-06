@@ -1,4 +1,4 @@
-# pylint: disable=direct-environment-variable-reference
+# pylint: disable=direct-environment-variable-reference,too-many-lines
 import asyncio
 import json
 import os
@@ -222,6 +222,107 @@ async def test_list_flows(mock_list_configs):
         {"name": "flow2", "description": "Second flow config"},
     ]
     assert configs_dict == expected_configs
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "filter_params,expected_count,validation_func",
+    [
+        # Explicit None filters
+        (None, 3, lambda configs: len(configs) == 3),  # Should return all configs
+        # Filter by name
+        (
+            {"name": ["flow1", "flow3"]},
+            2,
+            lambda configs: all(
+                config["name"] in ["flow1", "flow3"] for config in configs
+            ),
+        ),
+        # Filter by environment
+        (
+            {"environment": ["prod"]},
+            1,
+            lambda configs: all(config["environment"] == "prod" for config in configs),
+        ),
+        # Filter by version
+        (
+            {"version": ["v1"]},
+            2,
+            lambda configs: all(config["version"] == "v1" for config in configs),
+        ),
+        # Multiple filters (name and environment)
+        (
+            {"name": ["flow1"], "environment": ["prod"]},
+            1,
+            lambda configs: len(configs) == 1
+            and configs[0]["name"] == "flow1"
+            and configs[0]["environment"] == "prod",
+        ),
+        # Filter that matches no flows
+        (
+            {"environment": ["staging"]},
+            0,
+            lambda configs: True,  # No validation needed for empty result
+        ),
+        # Multiple values for same filter
+        (
+            {"environment": ["prod", "test"]},
+            2,
+            lambda configs: all(
+                config["environment"] in ["prod", "test"] for config in configs
+            ),
+        ),
+        # Complex multi-filter scenario
+        (
+            {"version": ["v1"], "environment": ["prod", "dev"]},
+            2,
+            lambda configs: all(
+                config["version"] == "v1" and config["environment"] in ["prod", "dev"]
+                for config in configs
+            ),
+        ),
+    ],
+)
+@patch("duo_workflow_service.server.flow_registry.list_configs")
+async def test_list_flows_with_filters(
+    mock_list_configs, filter_params, expected_count, validation_func
+):
+    mock_list_configs.return_value = [
+        {
+            "name": "flow1",
+            "version": "v1",
+            "environment": "prod",
+            "description": "First flow config",
+        },
+        {
+            "name": "flow2",
+            "version": "v2",
+            "environment": "test",
+            "description": "Second flow config",
+        },
+        {
+            "name": "flow3",
+            "version": "v1",
+            "environment": "dev",
+            "description": "Third flow config",
+        },
+    ]
+
+    mock_context = MagicMock(spec=grpc.ServicerContext)
+    service = DuoWorkflowService()
+
+    if filter_params is None:
+        request = contract_pb2.ListFlowsRequest(filters=None)
+    else:
+        filters = contract_pb2.ListFlowsRequestFilter(**filter_params)
+        request = contract_pb2.ListFlowsRequest(filters=filters)
+
+    response = await service.ListFlows(request, mock_context)
+
+    assert len(response.configs) == expected_count
+
+    configs_dict = [MessageToDict(config) for config in response.configs]
+    assert validation_func(configs_dict)
 
 
 @pytest.mark.asyncio
