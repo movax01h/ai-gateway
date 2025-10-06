@@ -1,10 +1,14 @@
 from typing import Any, Optional
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock
 
 import pytest
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
 
-from duo_workflow_service.gitlab.http_client import GitlabHttpClient, checkpoint_decoder
+from duo_workflow_service.gitlab.http_client import (
+    GitlabHttpClient,
+    GitLabHttpResponse,
+    checkpoint_decoder,
+)
 
 
 class MockGitLabHttpClient(GitlabHttpClient):
@@ -24,9 +28,18 @@ class MockGitLabHttpClient(GitlabHttpClient):
         params=None,
         object_hook=None,
     ):
-        return await self.mock_call(
+        result = await self.mock_call(
             path, method, parse_json, use_http_response, data, params, object_hook
         )
+
+        if use_http_response:
+            # When use_http_response=True, wrap the result in a GitLabHttpResponse
+            return GitLabHttpResponse(
+                status_code=200,
+                body=result,
+            )
+
+        return result
 
     async def graphql(
         self, query: str, variables: Optional[dict] = None, timeout: float = 10.0
@@ -80,7 +93,7 @@ def client_fixture():
             None,
             None,
             True,
-            True,
+            False,
             {"projects": []},
             {"projects": []},
         ),
@@ -90,7 +103,7 @@ def client_fixture():
             None,
             None,
             False,
-            True,
+            False,
             {"projects": []},
             {"projects": []},
         ),
@@ -110,9 +123,9 @@ def client_fixture():
             '{ "test": 1 }',
             None,
             True,
-            False,
+            True,
             {"key": "value"},
-            {"key": "value"},
+            GitLabHttpResponse(status_code=200, body={"key": "value"}),
         ),
         (
             "PATCH",
@@ -120,9 +133,9 @@ def client_fixture():
             '{ "test": 1 }',
             None,
             True,
-            False,
+            True,
             {"key": "value"},
-            {"key": "value"},
+            GitLabHttpResponse(status_code=200, body={"key": "value"}),
         ),
     ],
 )
@@ -174,7 +187,15 @@ async def test_gitlab_http_client_interface_methods(
         pytest.fail(f"Unexpected HTTP method: {method}")
         result = None
 
-    assert result == expected_result
+    if use_http_response:
+        # When use_http_response=True, we expect a GitLabHttpResponse object
+        assert isinstance(result, GitLabHttpResponse)
+        assert isinstance(expected_result, GitLabHttpResponse)
+        assert result.status_code == expected_result.status_code
+        assert result.body == expected_result.body
+    else:
+        # When use_http_response=False, we expect the raw data
+        assert result == expected_result
 
 
 @pytest.mark.asyncio
