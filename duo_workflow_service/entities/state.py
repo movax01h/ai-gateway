@@ -132,6 +132,45 @@ def _pretrim_large_messages(
     return processed_messages
 
 
+def _deduplicate_additional_context(messages: List[BaseMessage]) -> List[BaseMessage]:
+    """Remove duplicate <additional_context> tags, keeping only the first occurrence.
+
+    Deduplication is done based on identical content and not ids. If the content changes then the old content and the
+    new content will both be kept.
+    """
+
+    seen_contexts = set()
+    result = []
+
+    for message in messages:
+        contexts = message.additional_kwargs.get("additional_context") or []
+
+        new_contexts = []
+
+        for ctx in contexts:
+            content = None
+            if hasattr(ctx, "content"):
+                content = ctx.content
+            else:
+                # For some reason it's a dict sometimes
+                content = ctx.get("content", "")
+            if content not in seen_contexts:
+                new_contexts.append(ctx)
+                seen_contexts.add(content)
+
+        if new_contexts != contexts:
+            message_copy = message.model_copy()
+            message_copy.additional_kwargs = {
+                **message.additional_kwargs,
+                "additional_context": new_contexts,
+            }
+            message = message_copy
+
+        result.append(message)
+
+    return result
+
+
 def _plan_reducer(current: Plan, new: Optional[Plan]) -> Plan:
     if new is None:
         return current
@@ -246,9 +285,11 @@ def _conversation_history_reducer(
             + token_counter.tool_tokens,
         )
 
+        deduplicated_messages = _deduplicate_additional_context(reduced[agent_name])
+
         try:
             trimmed_messages = trim_messages(
-                reduced[agent_name],
+                deduplicated_messages,
                 max_tokens=MAX_CONTEXT_TOKENS,
                 strategy="last",
                 token_counter=token_counter.count_tokens,

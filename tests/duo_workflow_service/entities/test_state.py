@@ -16,6 +16,7 @@ from duo_workflow_service.entities.state import (
     MessageTypeEnum,
     UiChatLog,
     _conversation_history_reducer,
+    _deduplicate_additional_context,
     _pretrim_large_messages,
     _restore_message_consistency,
     _ui_chat_log_reducer,
@@ -24,6 +25,7 @@ from duo_workflow_service.entities.state import (
 from duo_workflow_service.token_counter.approximate_token_counter import (
     ApproximateTokenCounter,
 )
+from duo_workflow_service.workflows.type_definitions import AdditionalContext
 
 
 def test_conversation_history_reducer():
@@ -244,6 +246,60 @@ def test_pretrim_large_messages():
         result[1].content
         == "Previous message was too large for context window and was omitted. Please respond based on the visible context."
     )
+
+
+def test_deduplicate_additional_context():
+    messages = [
+        HumanMessage(
+            content="Message 1",
+            additional_kwargs={
+                "additional_context": [
+                    AdditionalContext(category="issue", content="Extra 1")
+                ]
+            },
+        ),
+        HumanMessage(
+            content="Message 2",
+            additional_kwargs={
+                "additional_context": [{"content": "Extra 2"}, {"content": "Extra 1"}]
+            },
+        ),
+        HumanMessage(
+            content="Message 3",
+            additional_kwargs={
+                "additional_context": [{"content": "Extra 2"}, {"content": "Extra 1"}]
+            },
+        ),
+        HumanMessage(
+            content="Message 4",
+            additional_kwargs={
+                "additional_context": [
+                    AdditionalContext(category="issue", content="Extra 1"),
+                    AdditionalContext(category="issue", content="Extra 2"),
+                    AdditionalContext(category="issue", content="Extra 3"),
+                ]
+            },
+        ),
+    ]
+
+    result = _deduplicate_additional_context(cast(List[BaseMessage], messages))
+
+    assert len(result) == 4
+
+    assert len(result[0].additional_kwargs["additional_context"]) == 1
+    assert result[0].additional_kwargs["additional_context"][0].content == "Extra 1"
+
+    assert len(result[1].additional_kwargs["additional_context"]) == 1
+    # Extra 2 was in a dict in the last item and we don't change the type
+    assert (
+        result[1].additional_kwargs["additional_context"][0].get("content") == "Extra 2"
+    )
+
+    # Everything in Message 3 was duplicated from above
+    assert len(result[2].additional_kwargs["additional_context"]) == 0
+
+    assert len(result[3].additional_kwargs["additional_context"]) == 1
+    assert result[3].additional_kwargs["additional_context"][0].content == "Extra 3"
 
 
 @patch("langchain_core.messages.trim_messages")
