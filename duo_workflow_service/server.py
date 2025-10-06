@@ -101,13 +101,19 @@ allowed_ijwt_scopes = {
 
 def string_to_category_enum(category_string: str) -> CategoryEnum:
     try:
+        if "/" in category_string:
+            _, flow_config_path = flow_registry.parse_workflow_definition(
+                category_string
+            )
+            category_string = flow_config_path
+
         return CategoryEnum(category_string)
     except ValueError:
         # Handle case when string doesn't match any enum value
         # We will return default workflow type
         # Since it isn't a blocker for workflow run
         log.warning(f"Unknown category string: {category_string}")
-        return CategoryEnum.WORKFLOW_SOFTWARE_DEVELOPMENT
+        return CategoryEnum.UNKNOWN
 
 
 def clean_start_request(start_workflow_request: contract_pb2.ClientEvent):

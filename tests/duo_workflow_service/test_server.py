@@ -20,6 +20,9 @@ from langchain.globals import get_llm_cache
 from langchain_community.cache import SQLiteCache
 
 from contract import contract_pb2
+from duo_workflow_service.agent_platform.experimental.flows.flow_config import (
+    list_configs,
+)
 from duo_workflow_service.interceptors.authentication_interceptor import current_user
 from duo_workflow_service.server import (
     DuoWorkflowService,
@@ -762,7 +765,7 @@ async def test_execute_workflow_missing_workflow_metadata(
     mock_abstract_workflow_class.assert_called_once_with(
         workflow_id="123",
         workflow_metadata={},
-        workflow_type=CategoryEnum.WORKFLOW_SOFTWARE_DEVELOPMENT,
+        workflow_type=CategoryEnum.UNKNOWN,
         user=user,
         additional_context=None,
         invocation_metadata={"base_url": "", "gitlab_token": ""},
@@ -825,7 +828,7 @@ async def test_execute_workflow_valid_workflow_metadata(
     mock_abstract_workflow_class.assert_called_once_with(
         workflow_id="123",
         workflow_metadata={"key": "value"},
-        workflow_type=CategoryEnum.WORKFLOW_SOFTWARE_DEVELOPMENT,
+        workflow_type=CategoryEnum.UNKNOWN,
         user=user,
         additional_context=None,
         invocation_metadata={"base_url": "http://test.url", "gitlab_token": "123"},
@@ -865,18 +868,22 @@ def test_clean_start_request():
 def test_string_to_category_enum():
     # Test a valid category string
     assert (
-        string_to_category_enum("WORKFLOW_SOFTWARE_DEVELOPMENT")
+        string_to_category_enum(CategoryEnum.WORKFLOW_SOFTWARE_DEVELOPMENT)
         == CategoryEnum.WORKFLOW_SOFTWARE_DEVELOPMENT
     )
 
     # Test an invalid category string
     with patch("duo_workflow_service.server.log") as mock_log:
-        assert (
-            string_to_category_enum("INVALID_CATEGORY")
-            == CategoryEnum.WORKFLOW_SOFTWARE_DEVELOPMENT
-        )
+        assert string_to_category_enum("INVALID_CATEGORY") == "unknown"
         mock_log.warning.assert_called_once_with(
             "Unknown category string: INVALID_CATEGORY"
+        )
+
+    # Test Flow Registry flows:
+    for config in list_configs():
+        assert (
+            string_to_category_enum(getattr(CategoryEnum, config["name"].upper()))
+            == config["name"]
         )
 
 
