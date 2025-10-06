@@ -209,8 +209,20 @@ class ListToolsResponse(_message.Message):
     def __init__(self, tools: _Optional[_Iterable[_Union[_struct_pb2.Struct, _Mapping]]] = ..., eval_dataset: _Optional[_Iterable[_Union[_struct_pb2.Struct, _Mapping]]] = ...) -> None: ...
 
 class ListFlowsRequest(_message.Message):
-    __slots__ = ()
-    def __init__(self) -> None: ...
+    __slots__ = ("filters",)
+    FILTERS_FIELD_NUMBER: _ClassVar[int]
+    filters: ListFlowsRequestFilter
+    def __init__(self, filters: _Optional[_Union[ListFlowsRequestFilter, _Mapping]] = ...) -> None: ...
+
+class ListFlowsRequestFilter(_message.Message):
+    __slots__ = ("name", "environment", "version")
+    NAME_FIELD_NUMBER: _ClassVar[int]
+    ENVIRONMENT_FIELD_NUMBER: _ClassVar[int]
+    VERSION_FIELD_NUMBER: _ClassVar[int]
+    name: _containers.RepeatedScalarFieldContainer[str]
+    environment: _containers.RepeatedScalarFieldContainer[str]
+    version: _containers.RepeatedScalarFieldContainer[str]
+    def __init__(self, name: _Optional[_Iterable[str]] = ..., environment: _Optional[_Iterable[str]] = ..., version: _Optional[_Iterable[str]] = ...) -> None: ...
 
 class ListFlowsResponse(_message.Message):
     __slots__ = ("configs",)

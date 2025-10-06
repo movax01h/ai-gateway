@@ -488,6 +488,35 @@ class DuoWorkflowService(contract_pb2_grpc.DuoWorkflowServicer):
         response = contract_pb2.ListFlowsResponse()
 
         configs = flow_registry.list_configs()
+
+        # Apply filters if provided
+        if request.filters:
+            filtered_configs = []
+            for config in configs:
+                # Filter by name if provided
+                if (
+                    request.filters.name
+                    and config.get("name") not in request.filters.name
+                ):
+                    continue
+
+                # Filter by environment if provided
+                if (
+                    request.filters.environment
+                    and config.get("environment") not in request.filters.environment
+                ):
+                    continue
+
+                # Filter by version if provided
+                if (
+                    request.filters.version
+                    and config.get("version") not in request.filters.version
+                ):
+                    continue
+
+                filtered_configs.append(config)
+            configs = filtered_configs
+
         for config in configs:
             spec_struct = Struct()
             spec_struct.update(config)

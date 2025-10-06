@@ -145,8 +145,14 @@ export interface ListToolsResponse {
   evalDataset: { [key: string]: any }[];
 }
 
-/** Intentionally empty */
 export interface ListFlowsRequest {
+  filters?: ListFlowsRequestFilter | undefined;
+}
+
+export interface ListFlowsRequestFilter {
+  name: string[];
+  environment: string[];
+  version: string[];
 }
 
 export interface ListFlowsResponse {
@@ -2157,11 +2163,14 @@ export const ListToolsResponse: MessageFns<ListToolsResponse> = {
 };
 
 function createBaseListFlowsRequest(): ListFlowsRequest {
-  return {};
+  return { filters: undefined };
 }
 
 export const ListFlowsRequest: MessageFns<ListFlowsRequest> = {
-  encode(_: ListFlowsRequest, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
+  encode(message: ListFlowsRequest, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
+    if (message.filters !== undefined) {
+      ListFlowsRequestFilter.encode(message.filters, writer.uint32(10).fork()).join();
+    }
     return writer;
   },
 
@@ -2172,6 +2181,14 @@ export const ListFlowsRequest: MessageFns<ListFlowsRequest> = {
     while (reader.pos < end) {
       const tag = reader.uint32();
       switch (tag >>> 3) {
+        case 1: {
+          if (tag !== 10) {
+            break;
+          }
+
+          message.filters = ListFlowsRequestFilter.decode(reader, reader.uint32());
+          continue;
+        }
       }
       if ((tag & 7) === 4 || tag === 0) {
         break;
@@ -2181,20 +2198,120 @@ export const ListFlowsRequest: MessageFns<ListFlowsRequest> = {
     return message;
   },
 
-  fromJSON(_: any): ListFlowsRequest {
-    return {};
+  fromJSON(object: any): ListFlowsRequest {
+    return { filters: isSet(object.filters) ? ListFlowsRequestFilter.fromJSON(object.filters) : undefined };
   },
 
-  toJSON(_: ListFlowsRequest): unknown {
+  toJSON(message: ListFlowsRequest): unknown {
     const obj: any = {};
+    if (message.filters !== undefined) {
+      obj.filters = ListFlowsRequestFilter.toJSON(message.filters);
+    }
     return obj;
   },
 
   create<I extends Exact<DeepPartial<ListFlowsRequest>, I>>(base?: I): ListFlowsRequest {
     return ListFlowsRequest.fromPartial(base ?? ({} as any));
   },
-  fromPartial<I extends Exact<DeepPartial<ListFlowsRequest>, I>>(_: I): ListFlowsRequest {
+  fromPartial<I extends Exact<DeepPartial<ListFlowsRequest>, I>>(object: I): ListFlowsRequest {
     const message = createBaseListFlowsRequest();
+    message.filters = (object.filters !== undefined && object.filters !== null)
+      ? ListFlowsRequestFilter.fromPartial(object.filters)
+      : undefined;
+    return message;
+  },
+};
+
+function createBaseListFlowsRequestFilter(): ListFlowsRequestFilter {
+  return { name: [], environment: [], version: [] };
+}
+
+export const ListFlowsRequestFilter: MessageFns<ListFlowsRequestFilter> = {
+  encode(message: ListFlowsRequestFilter, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
+    for (const v of message.name) {
+      writer.uint32(10).string(v!);
+    }
+    for (const v of message.environment) {
+      writer.uint32(18).string(v!);
+    }
+    for (const v of message.version) {
+      writer.uint32(26).string(v!);
+    }
+    return writer;
+  },
+
+  decode(input: BinaryReader | Uint8Array, length?: number): ListFlowsRequestFilter {
+    const reader = input instanceof BinaryReader ? input : new BinaryReader(input);
+    const end = length === undefined ? reader.len : reader.pos + length;
+    const message = createBaseListFlowsRequestFilter();
+    while (reader.pos < end) {
+      const tag = reader.uint32();
+      switch (tag >>> 3) {
+        case 1: {
+          if (tag !== 10) {
+            break;
+          }
+
+          message.name.push(reader.string());
+          continue;
+        }
+        case 2: {
+          if (tag !== 18) {
+            break;
+          }
+
+          message.environment.push(reader.string());
+          continue;
+        }
+        case 3: {
+          if (tag !== 26) {
+            break;
+          }
+
+          message.version.push(reader.string());
+          continue;
+        }
+      }
+      if ((tag & 7) === 4 || tag === 0) {
+        break;
+      }
+      reader.skip(tag & 7);
+    }
+    return message;
+  },
+
+  fromJSON(object: any): ListFlowsRequestFilter {
+    return {
+      name: globalThis.Array.isArray(object?.name) ? object.name.map((e: any) => globalThis.String(e)) : [],
+      environment: globalThis.Array.isArray(object?.environment)
+        ? object.environment.map((e: any) => globalThis.String(e))
+        : [],
+      version: globalThis.Array.isArray(object?.version) ? object.version.map((e: any) => globalThis.String(e)) : [],
+    };
+  },
+
+  toJSON(message: ListFlowsRequestFilter): unknown {
+    const obj: any = {};
+    if (message.name?.length) {
+      obj.name = message.name;
+    }
+    if (message.environment?.length) {
+      obj.environment = message.environment;
+    }
+    if (message.version?.length) {
+      obj.version = message.version;
+    }
+    return obj;
+  },
+
+  create<I extends Exact<DeepPartial<ListFlowsRequestFilter>, I>>(base?: I): ListFlowsRequestFilter {
+    return ListFlowsRequestFilter.fromPartial(base ?? ({} as any));
+  },
+  fromPartial<I extends Exact<DeepPartial<ListFlowsRequestFilter>, I>>(object: I): ListFlowsRequestFilter {
+    const message = createBaseListFlowsRequestFilter();
+    message.name = object.name?.map((e) => e) || [];
+    message.environment = object.environment?.map((e) => e) || [];
+    message.version = object.version?.map((e) => e) || [];
     return message;
   },
 };
