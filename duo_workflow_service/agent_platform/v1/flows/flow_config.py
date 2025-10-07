@@ -27,14 +27,58 @@ _PREFIX_BLOCLIST = (
 )
 
 
+INPUT_JSONSCHEMA_VERSION = "https://json-schema.org/draft/2020-12/schema#"
+
+
+class FlowConfigInputSchema(BaseModel):
+    type: str
+    format: Optional[str] = None
+    description: Optional[str] = None
+
+
+class FlowConfigInput(BaseModel):
+    category: str
+    input_schema: dict[str, FlowConfigInputSchema]
+
+
+class FlowConfigMetadata(BaseModel):
+    entry_point: str
+    inputs: Optional[list[FlowConfigInput]] = None
+
+
 class FlowConfig(BaseModel):
     DIRECTORY_PATH: ClassVar[Path] = Path(__file__).resolve().parent / "configs"
-    flow: dict
+    flow: FlowConfigMetadata
     components: list[dict]
     routers: list[dict]
     environment: Literal["ambient", "chat", "chat-partial"]
     version: Literal["v1"]
     prompts: Optional[list[InMemoryPromptConfig]] = None
+
+    def input_json_schemas_by_category(self):
+        json_schemas_by_category: dict[str, dict] = {}
+        if not self.flow.inputs:
+            return json_schemas_by_category
+
+        for item in self.flow.inputs:
+            schema = {
+                key: value.model_dump(exclude_none=True)
+                for key, value in item.input_schema.items()
+            }
+
+            # Create standard jsonschema structure,
+            # with all properties being required.
+            jsonschema = {
+                "$schema": INPUT_JSONSCHEMA_VERSION,
+                "additionalProperties": False,
+                "type": "object",
+                "properties": schema,
+                "required": list(schema.keys()),
+            }
+
+            json_schemas_by_category[item.category] = jsonschema
+
+        return json_schemas_by_category
 
     @classmethod
     def from_yaml_config(cls, path: str) -> Self:
