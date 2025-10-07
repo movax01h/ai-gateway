@@ -22,6 +22,8 @@ components:
     inputs:
       - from: "context:fix_pipeline_context.final_answer"
         as: "fix_pipeline_context_results"
+      - from: "context:inputs.pipeline.source_branch"
+        as: "source_branch"
     toolset: []
     ui_log_events:
       - "on_agent_final_answer"
@@ -107,12 +109,6 @@ routers:
 flow:
   entry_point: "fix_pipeline_context"
   inputs:
-    - category: agent_user_environment
-      input_schema:
-        merge_request_url:
-          type: string
-        source_branch:
-          type: string
     - category: merge_request
       input_schema:
         url:
@@ -139,8 +135,8 @@ prompts:
         <git_command>
           git push -o merge_request.create
             -o merge_request.title='Draft: fix failing pipeline'
-            -o merge_request.target='{{source_branch}}'
-            -o merge_request.description='Fixes failing pipeline {{pipeline_url}} on {{merge_request_url}}'
+            {% if source_branch %}-o merge_request.target='{{source_branch}}'{% endif %}
+            -o merge_request.description='Fixes failing pipeline {{pipeline_url}}{% if merge_request_url %} on {{merge_request_url}}{% endif %}'
         </git_command>
     params:
       timeout: 30

@@ -15,6 +15,12 @@ prompt_template:
     <guidelines>
       <guideline>Analyze the available information. Identify specific, concrete development tasks</guideline>
       <guideline>Your plan should include making changes using the available tools</guideline>
+
+      {% if not source_branch %}
+      <guideline>Focus on fixing pipeline failures based on error logs and CI/CD configuration</guideline>
+      <guideline>This failure occurred on the default branch, so focus on general pipeline fixes and CI/CD configuration improvements</guideline>
+      {% endif %}
+
       <guideline>Be specific and concise</guideline>
       <guideline>Output your plan in structured XML format</guideline>
     </guidelines>
