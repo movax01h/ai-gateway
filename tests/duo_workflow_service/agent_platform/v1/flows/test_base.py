@@ -11,7 +11,11 @@ from duo_workflow_service.agent_platform.v1.components.base import (
     EndComponent,
 )
 from duo_workflow_service.agent_platform.v1.flows.base import Flow, UserDecision
-from duo_workflow_service.agent_platform.v1.flows.flow_config import FlowConfig
+from duo_workflow_service.agent_platform.v1.flows.flow_config import (
+    FlowConfig,
+    FlowConfigInput,
+    FlowConfigMetadata,
+)
 from duo_workflow_service.agent_platform.v1.routers.router import Router
 from duo_workflow_service.agent_platform.v1.state.base import FlowEventType
 from duo_workflow_service.checkpointer.gitlab_workflow import WorkflowStatusEventEnum
@@ -21,7 +25,7 @@ from lib.internal_events.event_enum import CategoryEnum
 
 
 @pytest.mark.usefixtures("mock_duo_workflow_service_container")
-class TestFlow:
+class TestFlow:  # pylint: disable=too-many-public-methods
     """Test Flow class functionality."""
 
     def mock_component(self, name: str):
@@ -139,11 +143,29 @@ class TestFlow:
             "gitlab_token": "test-token",
         }
 
+    @pytest.fixture(name="sample_flow_config_metadata")
+    def sample_flow_config_metadata_fixture(self):
+        return FlowConfigMetadata(
+            entry_point="agent",
+            inputs=[
+                FlowConfigInput(
+                    category="file",
+                    input_schema={
+                        "contents": {"type": "string"},
+                        "file_name": {"type": "string"},
+                    },
+                ),
+                FlowConfigInput(
+                    category="snippet", input_schema={"snippet_str": {"type": "string"}}
+                ),
+            ],
+        )
+
     @pytest.fixture(name="sample_flow_config")
-    def sample_flow_config_fixture(self):
+    def sample_flow_config_fixture(self, sample_flow_config_metadata):
         """Fixture providing a sample flow configuration."""
         return FlowConfig(
-            flow={"entry_point": "agent"},
+            flow=sample_flow_config_metadata,
             components=[
                 {
                     "name": "agent",
@@ -306,7 +328,11 @@ class TestFlow:
             self.mock_components(["AgentComponent", "EndComponent"]),
             patch("duo_workflow_service.agent_platform.v1.flows.base.Router"),
         ):
-            additional_context = AdditionalContext(category="custom", content="test")
+            additional_context = AdditionalContext(
+                category="file",
+                content='{"contents": "hello", "file_name": "test.txt"}',
+            )
+
             flow = Flow(
                 workflow_id="test-workflow-123",
                 workflow_metadata=mock_flow_metadata,
@@ -324,10 +350,10 @@ class TestFlow:
 
             assert "context" in input
             assert "inputs" in input["context"]
-            assert (
-                input["context"]["inputs"][additional_context.category]
-                == additional_context.model_dump()
-            )
+            assert input["context"]["inputs"][additional_context.category] == {
+                "contents": "hello",
+                "file_name": "test.txt",
+            }
 
     @pytest.mark.asyncio
     async def test_flow_config_validation_duplicate_component_names(
@@ -682,3 +708,87 @@ class TestFlow:
             else:
                 # When neither toolset nor tool_name is specified, toolset shouldn't be called
                 mock_tools_registry.toolset.assert_not_called()
+
+    def test_process_additional_context_empty_list(self, flow_instance):
+        """Test _process_additional_context with empty list."""
+        result = flow_instance._process_additional_context([])
+        assert result == {}
+
+    def test_process_additional_context(self, flow_instance):
+        """Test _process_additional_context."""
+        additional_context = [
+            AdditionalContext(
+                category="file",
+                content='{"contents": "file content", "file_name": "test.txt"}',
+            ),
+            AdditionalContext(
+                category="snippet", content='{"snippet_str": "code snippet"}'
+            ),
+        ]
+
+        result = flow_instance._process_additional_context(additional_context)
+
+        expected = {
+            "file": {"contents": "file content", "file_name": "test.txt"},
+            "snippet": {"snippet_str": "code snippet"},
+        }
+        assert result == expected
+
+    def test_process_additional_context_missing_required_field(self, flow_instance):
+        """Test _process_additional_context with a missing schema field."""
+        additional_context = [
+            AdditionalContext(category="file", content='{"contents": "file content"}'),
+        ]
+
+        with pytest.raises(
+            ValueError,
+            match="input 'file' does not match specified schema: 'file_name' is a required property.*",
+        ):
+            flow_instance._process_additional_context(additional_context)
+
+    def test_process_additional_context_no_schema(self, flow_instance):
+        """Test _process_additional_context raises error when provided without schema."""
+        additional_context = [
+            AdditionalContext(
+                category="agent_user_environment", content='{"os": "linux"}'
+            )
+        ]
+
+        with pytest.raises(
+            ValueError,
+            match="input schema was not provided for the category 'agent_user_environment'",
+        ):
+            flow_instance._process_additional_context(additional_context)
+
+    def test_process_additional_context_invalid_json(self, flow_instance):
+        """Test _process_additional_context raises error for invalid JSON."""
+        additional_context = [
+            AdditionalContext(
+                category="file",
+                content='{"invalid": json}',
+            )
+        ]
+
+        with pytest.raises(ValueError, match="Invalid JSON in input item.*"):
+            flow_instance._process_additional_context(additional_context)
+
+    def test_process_additional_context_schema_validation_error(
+        self,
+        flow_instance,
+    ):
+        """Test _process_additional_context raises error when JSON doesn't match schema."""
+        additional_context = [
+            AdditionalContext(
+                category="file",
+                content='{"file_type": "file.txt"}',
+            )
+        ]
+
+        with pytest.raises(
+            ValueError,
+            match=(
+                r".*input 'file' does not match specified schema: "
+                r"Additional properties are not allowed \('file_type' was unexpected\).*"
+            ),
+        ):
+            flow_instance._process_additional_context(additional_context)
