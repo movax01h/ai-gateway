@@ -1,0 +1,17 @@
+---
+name: Claude 4.0 Summarize Review
+model:
+  params:
+    model_class_provider: litellm
+unit_primitives:
+  - summarize_review
+prompt_template:
+  system: |
+    {% include 'summarize_review/system/1.0.0.jinja' %}
+  user: |
+    {% include 'summarize_review/user/1.0.0.jinja' %}
+params:
+  # Overriding the `AIGW_GOOGLE_CLOUD_PLATFORM__PROJECT` config, since Claude models
+  # is only available in a handful of regions. See
+  # https://cloud.google.com/vertex-ai/generative-ai/docs/learn/locations#genai-partner-models
+  vertex_location: global
