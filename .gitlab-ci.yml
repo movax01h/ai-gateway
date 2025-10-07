@@ -22,6 +22,7 @@ stages:
 variables:
   PIP_CACHE_DIR: "$CI_PROJECT_DIR/.cache/pip"
   POETRY_CACHE_DIR: "$CI_PROJECT_DIR/.cache/poetry"
+  POETRY_VERSION: "2.2.1"
 
   DOCKER_VERSION: "20.10.23"
   DOCKER_TLS_CERTDIR: "/certs"
@@ -150,7 +151,7 @@ cache:
 
 .poetry:
   before_script:
-    - pip install poetry==2.0.1
+    - pip install poetry==${POETRY_VERSION}
     - poetry config virtualenvs.in-project true
     - poetry config cache-dir ${POETRY_CACHE_DIR}
     - poetry self add poetry-plugin-export
