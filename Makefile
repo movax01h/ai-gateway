@@ -20,10 +20,7 @@ LINT_WORKING_DIR ?= ${AI_GATEWAY_DIR} \
 
 MYPY_LINT_TODO_DIR ?= --exclude "ai_gateway/models/litellm.py" \
 	--exclude "ai_gateway/api/middleware/base.py" \
-	--exclude "ai_gateway/api/middleware/feature_flag.py" \
-	--exclude "ai_gateway/api/middleware/internal_event.py" \
 	--exclude "ai_gateway/api/v2/code/completions.py" \
-	--exclude "ai_gateway/api/v2/code/model_provider_handlers.py" \
 	--exclude "ai_gateway/api/v3/code/completions.py" \
 	--exclude "ai_gateway/code_suggestions/completions.py" \
 	--exclude "ai_gateway/code_suggestions/generations.py" \

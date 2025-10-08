@@ -62,13 +62,14 @@ class FireworksHandler(BaseModelProviderHandler):
 
 class LegacyHandler(BaseModelProviderHandler):
     def update_completion_params(self):
-        if self.payload.choices_count > 0:
-            self.completion_params.update(
-                {"candidate_count": self.payload.choices_count}
-            )
+        choices_count = self.payload.choices_count
+
+        if choices_count is not None and choices_count > 0:
+            self.completion_params.update({"candidate_count": choices_count})
 
         language_server_version = LanguageServerVersion.from_string(
             self.request.headers.get(X_GITLAB_LANGUAGE_SERVER_VERSION, None)
         )
+
         if language_server_version.supports_advanced_context() and self.payload.context:
             self._update_code_context()
