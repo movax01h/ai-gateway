@@ -1,5 +1,5 @@
-version: "experimental"
-environment: remote
+version: v1
+environment: ambient
 components:
   - name: "sast_vulnerability_details_component"
     type: DeterministicStepComponent
