@@ -6,6 +6,7 @@ from langchain_core.messages import BaseMessage, HumanMessage, SystemMessage
 from langchain_core.prompt_values import ChatPromptValue, PromptValue
 from langchain_core.runnables import Runnable, RunnableConfig
 
+from ai_gateway.model_metadata import current_model_metadata_context
 from ai_gateway.prompts import Prompt, jinja2_formatter
 from ai_gateway.prompts.config.base import PromptConfig
 from ai_gateway.prompts.config.models import ModelClassProvider
@@ -34,6 +35,8 @@ class ChatAgentPromptTemplate(Runnable[ChatWorkflowState, PromptValue]):
         # Get GitLab instance info from context
         gitlab_instance_info = GitLabServiceContext.get_current_instance_info()
 
+        model_metadata = current_model_metadata_context.get()
+
         # Handle system messages with static and dynamic parts
         # Create separate system messages for static and dynamic parts
         if "system_static" in self.prompt_template:
@@ -52,6 +55,11 @@ class ChatAgentPromptTemplate(Runnable[ChatWorkflowState, PromptValue]):
                 gitlab_instance_version=(
                     gitlab_instance_info.instance_version
                     if gitlab_instance_info
+                    else "Unknown"
+                ),
+                model_friendly_name=(
+                    model_metadata.friendly_name
+                    if model_metadata and model_metadata.friendly_name
                     else "Unknown"
                 ),
             )

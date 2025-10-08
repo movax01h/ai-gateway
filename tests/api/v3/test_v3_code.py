@@ -709,6 +709,7 @@ class TestEditorContentGeneration:
                         "max_tokens": 4096,
                     },
                     family=["mistral"],
+                    friendly_name="Mistral",
                 ),
                 None,
             ),
@@ -1319,7 +1320,8 @@ class TestAmazonQIntegrationV3:
             "prompt_components": [prompt_component],
             "model_metadata": model_metadata
             and model_metadata.model_dump(
-                exclude={"llm_definition_params", "family"}, mode="json"
+                exclude={"llm_definition_params", "family", "friendly_name"},
+                mode="json",
             ),
         }
 
@@ -1457,7 +1459,8 @@ class TestAmazonQIntegrationV3:
             "prompt_components": [prompt_component],
             "model_metadata": model_metadata
             and model_metadata.model_dump(
-                exclude={"llm_definition_params", "family"}, mode="json"
+                exclude={"llm_definition_params", "family", "friendly_name"},
+                mode="json",
             ),
         }
 

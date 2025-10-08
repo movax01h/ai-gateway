@@ -275,3 +275,198 @@ def test_create_model_metadata_with_none_data():
 def test_create_model_metadata_without_provider():
     result = create_model_metadata({"name": "test"})
     assert result is None
+
+
+class TestFriendlyName:
+    """Test friendly_name functionality in ModelMetadata."""
+
+    def test_model_metadata_has_friendly_name_field(self):
+        """Test that ModelMetadata includes friendly_name field."""
+        metadata = ModelMetadata(
+            name="test_model",
+            provider="test_provider",
+            friendly_name="Test Friendly Model",
+        )
+
+        assert metadata.friendly_name == "Test Friendly Model"
+
+    def test_create_model_metadata_with_friendly_name_from_models_yml(self):
+        """Test that create_model_metadata populates friendly_name from models.yml."""
+        data = {
+            "name": "gitlab_model1",
+            "provider": "provider",
+            "endpoint": "https://api.test.com/v1",
+            "api_key": "test-key",
+        }
+
+        with patch.object(ModelSelectionConfig, "get_model") as mock_get_model:
+            mock_definition = LLMDefinition(
+                gitlab_identifier="gitlab_model1",
+                name="GitLab Model One",  # This becomes friendly_name
+                family=["mixtral"],
+                params={
+                    "model_class_provider": "provider",
+                    "model": "model_family",
+                },
+            )
+            mock_get_model.return_value = mock_definition
+
+            result = create_model_metadata(data)
+
+            assert isinstance(result, ModelMetadata)
+            assert result.friendly_name == "GitLab Model One"
+
+    def test_create_model_metadata_with_real_model_friendly_name(self):
+        """Test friendly_name with real data using mock."""
+        data = {
+            "name": "claude_sonnet_4_5_20250929",
+            "provider": "gitlab",
+            "identifier": "anthropic/claude-sonnet-4-5-20250929",
+        }
+
+        # Mock the model selection config to simulate real models.yml lookup
+        with patch.object(ModelSelectionConfig, "get_model") as mock_get_model:
+            mock_definition = LLMDefinition(
+                gitlab_identifier="claude_sonnet_4_5_20250929",
+                name="Claude Sonnet 4.5 - Anthropic",
+                family=["claude_4"],
+                params={
+                    "model_class_provider": "anthropic",
+                    "model": "claude-sonnet-4-5-20250929",
+                },
+            )
+            mock_get_model.return_value = mock_definition
+
+            result = create_model_metadata(data)
+
+            assert isinstance(result, ModelMetadata)
+            assert result.name == "claude_sonnet_4_5_20250929"
+            assert result.friendly_name == "Claude Sonnet 4.5 - Anthropic"
+
+    def test_create_model_metadata_with_self_hosted_model_friendly_name(self):
+        """Test friendly_name with self-hosted model using mocked models.yml definitions."""
+        data = {
+            "name": "llama3",  # Maps to gitlab_identifier in models.yml
+            "provider": "custom_openai",
+            "endpoint": "http://custom-endpoint.com/v1",
+            "api_key": "custom-key",
+            "identifier": "custom_openai/Llama-3.1-70B-Instruct",
+        }
+
+        # Mock the model selection config to simulate llama3 lookup
+        with patch.object(ModelSelectionConfig, "get_model") as mock_get_model:
+            mock_definition = LLMDefinition(
+                gitlab_identifier="llama3",
+                name="Llama3",
+                family=["llama3"],
+                params={
+                    "model_class_provider": "custom_openai",
+                    "model": "llama3",
+                },
+            )
+            mock_get_model.return_value = mock_definition
+
+            result = create_model_metadata(data)
+
+            assert isinstance(result, ModelMetadata)
+            assert result.name == "llama3"
+            assert result.provider == "custom_openai"
+            assert result.friendly_name == "Llama3"
+
+    def test_create_model_metadata_with_gpt_model_friendly_name(self):
+        """Test friendly_name with GPT model using mock."""
+        data = {
+            "name": "gpt_5",
+            "provider": "gitlab",
+            "identifier": "openai/gpt-5-2025-08-07",
+        }
+
+        # Mock the model selection config to simulate gpt_5 lookup
+        with patch.object(ModelSelectionConfig, "get_model") as mock_get_model:
+            mock_definition = LLMDefinition(
+                gitlab_identifier="gpt_5",
+                name="OpenAI GPT-5",
+                family=["gpt_5"],
+                params={
+                    "model_class_provider": "openai",
+                    "model": "gpt-5-2025-08-07",
+                },
+            )
+            mock_get_model.return_value = mock_definition
+
+            result = create_model_metadata(data)
+
+            assert isinstance(result, ModelMetadata)
+            assert result.name == "gpt_5"
+            assert result.friendly_name == "OpenAI GPT-5"
+
+    def test_amazon_q_model_metadata_has_friendly_name_field(self):
+        """Test that AmazonQModelMetadata includes friendly_name field."""
+        metadata = AmazonQModelMetadata(
+            provider="amazon_q",
+            name="amazon_q",
+            role_arn="arn:aws:iam::123456789012:role/AmazonQRole",
+            friendly_name="Amazon Q Assistant",
+        )
+
+        assert metadata.friendly_name == "Amazon Q Assistant"
+
+    def test_create_amazon_q_model_metadata_with_friendly_name(self):
+        """Test that create_model_metadata populates friendly_name for AmazonQ."""
+        data = {
+            "provider": "amazon_q",
+            "name": "amazon_q",  # AmazonQ requires this literal value
+            "role_arn": "arn:aws:iam::123456789012:role/AmazonQRole",
+        }
+
+        with patch.object(ModelSelectionConfig, "get_model") as mock_get_model:
+            mock_definition = LLMDefinition(
+                gitlab_identifier="amazon_q",
+                name="Amazon Q",  # This becomes friendly_name
+                family=["amazon_q"],
+                params={
+                    "model_class_provider": "amazon_q",
+                    "model": "amazon_q",
+                },
+            )
+            mock_get_model.return_value = mock_definition
+
+            result = create_model_metadata(data)
+
+            assert isinstance(result, AmazonQModelMetadata)
+            assert result.friendly_name == "Amazon Q"
+            assert result.role_arn == "arn:aws:iam::123456789012:role/AmazonQRole"
+
+    def test_model_metadata_friendly_name_optional(self):
+        """Test that friendly_name can be None."""
+        metadata = ModelMetadata(
+            name="test_model",
+            provider="test_provider",
+            friendly_name=None,
+        )
+
+        assert metadata.friendly_name is None
+
+    def test_create_model_metadata_no_name_uses_identifier_for_friendly_name(self):
+        """Test that when no name is provided, identifier lookup works for friendly_name."""
+        data = {
+            "provider": "provider",
+            "identifier": "gitlab_model1",
+        }
+
+        with patch.object(ModelSelectionConfig, "get_model") as mock_get_model:
+            mock_definition = LLMDefinition(
+                gitlab_identifier="gitlab_model1",
+                name="GitLab Identifier Model",
+                family=["mixtral"],
+                params={
+                    "model_class_provider": "provider",
+                    "model": "model_family",
+                },
+            )
+            mock_get_model.return_value = mock_definition
+
+            result = create_model_metadata(data)
+
+            assert isinstance(result, ModelMetadata)
+            assert result.friendly_name == "GitLab Identifier Model"
