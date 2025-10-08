@@ -239,6 +239,12 @@ configurable_unit_primitives:
     default_model: "claude_sonnet_4_20250514"
     selectable_models:
       - "claude_sonnet_4_20250514"
+  - feature_setting: "fix_pipeline_push_changes"
+    unit_primitives:
+      - "duo_workflow_execute_workflow"
+    default_model: "claude_sonnet_4_20250514"
+    selectable_models:
+      - "claude_sonnet_4_20250514"
   - feature_setting: "code_review_prescan"
     unit_primitives: []
     default_model: "claude_sonnet_4_20250514"
