@@ -26,10 +26,9 @@ class FeatureFlagMiddleware:
             await self.app(scope, receive, send)
             return
 
-        enabled_feature_flags = request.headers.get(
-            X_GITLAB_ENABLED_FEATURE_FLAGS, ""
-        ).split(",")
-        enabled_feature_flags = set(enabled_feature_flags)
+        enabled_feature_flags = set(
+            request.headers.get(X_GITLAB_ENABLED_FEATURE_FLAGS, "").split(",")
+        )
 
         if self.disallowed_flags:
             # Remove feature flags that are not supported in the specific realm.
@@ -38,6 +37,8 @@ class FeatureFlagMiddleware:
             enabled_feature_flags = enabled_feature_flags.difference(disallowed_flags)
 
         current_feature_flag_context.set(enabled_feature_flags)
-        starlette_context["enabled_feature_flags"] = ",".join(enabled_feature_flags)
+        starlette_context["enabled_feature_flags"] = ",".join(
+            list(enabled_feature_flags)
+        )
 
         await self.app(scope, receive, send)

@@ -47,31 +47,12 @@ class InternalEventMiddleware:
             await self.app(scope, receive, send)
             return
 
-        # Fetching a list of namespaces that allow the user to use the tracked feature.
-        # This is relevant for requests coming from gitlab.com, and unrelated to self-managed or dedicated instances.
-        feature_enabled_by_namespace_ids = list(
-            CommaSeparatedStrings(
-                request.headers.get(
-                    X_GITLAB_FEATURE_ENABLED_BY_NAMESPACE_IDS_HEADER, ""
-                )
-            )
-        )
-        # Supporting the legacy header
-        # https://gitlab.com/gitlab-org/modelops/applied-ml/code-suggestions/ai-assist/-/issues/561.
-        if not feature_enabled_by_namespace_ids:
-            feature_enabled_by_namespace_ids = list(
-                CommaSeparatedStrings(
-                    request.headers.get(X_GITLAB_SAAS_DUO_PRO_NAMESPACE_IDS_HEADER, "")
-                )
-            )
+        # Get validated namespace IDs that enable feature access for the user
+        # This is relevant for requests from gitlab.com, not for self-managed/dedicated instances
+        feature_enabled_by_namespace_ids = self._extract_namespace_ids(request)
 
-        try:
-            feature_enabled_by_namespace_ids = get_valid_namespace_ids(
-                feature_enabled_by_namespace_ids
-            )
-        except Exception:
-            feature_enabled_by_namespace_ids = None
-
+        # EventContext uses Pydantic which coerces int and string to boolean type
+        # Reference: https://docs.pydantic.dev/latest/api/standard_library_types/#booleans
         context = EventContext(
             environment=self.environment,
             source="ai-gateway-python",
@@ -80,7 +61,7 @@ class InternalEventMiddleware:
             host_name=request.headers.get(X_GITLAB_HOST_NAME_HEADER),
             instance_version=request.headers.get(X_GITLAB_VERSION_HEADER),
             global_user_id=request.headers.get(X_GITLAB_GLOBAL_USER_ID_HEADER),
-            is_gitlab_team_member=request.headers.get(X_GITLAB_TEAM_MEMBER_HEADER),
+            is_gitlab_team_member=request.headers.get(X_GITLAB_TEAM_MEMBER_HEADER),  # type: ignore[arg-type]
             client_type=request.headers.get(X_GITLAB_CLIENT_TYPE),
             client_name=request.headers.get(X_GITLAB_CLIENT_NAME),
             client_version=request.headers.get(X_GITLAB_CLIENT_VERSION),
@@ -100,3 +81,35 @@ class InternalEventMiddleware:
         starlette_context["tracked_internal_events"] = list(
             tracked_internal_events.get()
         )
+
+    def _extract_namespace_ids(self, request: Request) -> list[int] | None:
+        """Extract and validate namespace IDs from request headers.
+
+        Args:
+            request: The HTTP request object
+
+        Returns:
+            A list of valid namespace IDs or None if an error occurred
+        """
+        # Try the primary header first
+        raw_namespace_ids = list(
+            CommaSeparatedStrings(
+                request.headers.get(
+                    X_GITLAB_FEATURE_ENABLED_BY_NAMESPACE_IDS_HEADER, ""
+                )
+            )
+        )
+
+        # Fall back to legacy header if primary is empty
+        # https://gitlab.com/gitlab-org/modelops/applied-ml/code-suggestions/ai-assist/-/issues/561
+        if not raw_namespace_ids:
+            raw_namespace_ids = list(
+                CommaSeparatedStrings(
+                    request.headers.get(X_GITLAB_SAAS_DUO_PRO_NAMESPACE_IDS_HEADER, "")
+                )
+            )
+
+        try:
+            return get_valid_namespace_ids(raw_namespace_ids)
+        except Exception:
+            return None
