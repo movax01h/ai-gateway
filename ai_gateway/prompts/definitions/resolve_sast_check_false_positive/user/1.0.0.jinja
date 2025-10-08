@@ -1,0 +1,95 @@
+Analyze the merge request to determine if it contains actual security fixes or if the vulnerability was a false positive.
+
+<analysis_steps>
+1. **Extract Merge Request URL**
+   Search git_operations_result for the MR URL.
+   Common patterns:
+   - "remote: https://gitlab.com/.../merge_requests/123"
+   - "remote: View merge request for..."
+   - Look for any URL containing "merge_requests"
+
+   If not found, construct using:
+   {{repository_url}}/-/merge_requests/security%2Fsast-fix-<ID>-{{workflow_id}}
+
+   Extract the vulnerability ID from the vulnerability_context.
+
+2. **Fetch and Analyze MR Diffs**
+   Use list_merge_request_diffs with the extracted URL to get the actual changes.
+
+   After receiving the diff results, reflect on what you've learned:
+   - Are the diffs complete and properly formatted?
+   - Do you have enough information to make a confident determination?
+   - Is anything unexpected or unclear that requires additional investigation?
+
+   Then examine the diffs carefully:
+   - Count the number of files changed
+   - Check if changes are meaningful (not just whitespace/comments)
+   - Verify if changes address the security vulnerability
+
+3. **Determine False Positive Status**
+   Consider it a false positive if:
+   - No diffs exist (empty MR)
+   - Only whitespace/comment changes exist
+   - No code changes that could address the reported vulnerability
+
+   Parse vulnerability_context to understand what vulnerability was reported
+   and verify whether the changes (if any) actually address it.
+
+4. **Mark False Positive MRs**
+   If determined to be a false positive (empty or trivial changes):
+
+   **Action A:** Add a comment using create_merge_request_note:
+   ```
+   **Potential False Positive Detected**
+
+   This merge request was created by the automated SAST vulnerability resolution workflow, but no code changes were necessary to address the reported vulnerability.
+
+   **Possible reasons:**
+   - The vulnerability was a false positive from the SAST scanner
+   - The code pattern flagged is not actually exploitable in this context
+   - The vulnerability was already fixed in a previous commit
+
+   **Recommendation:** Please review the original vulnerability report and close this MR if the finding was indeed a false positive.
+   ```
+
+   **Action B:** Update the MR title using update_merge_request:
+   Prepend "[Possible False Positive] " to the existing title
+
+   **Action C:** Add a label or update description if needed (optional)
+
+5. **Output Result**
+   Your final_answer MUST be a valid JSON object with this structure:
+   ```json
+   {
+     "is_false_positive": true,
+     "has_code_changes": false,
+     "merge_request_url": "https://gitlab.com/org/project/-/merge_requests/123",
+     "action_taken": "added_comment_and_updated_title",
+     "files_changed": 0,
+     "reasoning": "Brief explanation of why this was marked as false positive"
+   }
+   ```
+
+   If it's NOT a false positive:
+   ```json
+   {
+     "is_false_positive": false,
+     "has_code_changes": true,
+     "merge_request_url": "https://gitlab.com/org/project/-/merge_requests/123",
+     "action_taken": "no_action_needed",
+     "files_changed": 5,
+     "reasoning": "MR contains meaningful security fixes"
+   }
+   ```
+</analysis_steps>
+
+<critical_requirements>
+- ALWAYS fetch the MR diffs before making a determination
+- Be conservative: if uncertain, do NOT mark as false positive
+- Always include the merge_request_url in your response
+- Your final_answer will be parsed by automated security systems, so it MUST be:
+   - Valid JSON with no syntax errors
+   - NO additional text before the opening {
+   - NO additional text after the closing }
+   - NO explanatory comments or markdown formatting
+</critical_requirements>
