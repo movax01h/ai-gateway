@@ -4,6 +4,7 @@ import sys
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Union
 
+from duo_workflow_service.security.emoji_security import strip_emojis
 from duo_workflow_service.security.exceptions import SecurityException
 from duo_workflow_service.security.markdown_content_security import (
     strip_hidden_html_comments,
@@ -151,6 +152,7 @@ class PromptSecurity:
         strip_hidden_html_comments,
         strip_hidden_unicode_tags,
         strip_mermaid_comments,
+        strip_emojis,
     ]
 
     # Tool-specific additional security functions
