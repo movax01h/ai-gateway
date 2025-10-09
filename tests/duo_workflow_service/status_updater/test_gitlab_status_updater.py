@@ -21,11 +21,20 @@ def gitlab_status_updater_fixture(http_client):
 
 @pytest.mark.asyncio
 async def test_get_workflow_status(gitlab_status_updater):
-    gitlab_status_updater._client.aget = AsyncMock(
-        return_value={"id": 391, "status": "running"}
+    data = {"id": 391, "status": "running"}
+    mock_response = GitLabHttpResponse(
+        status_code=200,
+        body=data,
     )
+    gitlab_status_updater._client.aget = AsyncMock(return_value=mock_response)
 
     result = await gitlab_status_updater.get_workflow_status(workflow_id="391")
+
+    gitlab_status_updater._client.aget.assert_called_once_with(
+        path="/api/v4/ai/duo_workflows/workflows/391",
+        parse_json=True,
+        use_http_response=True,
+    )
 
     assert result is "running"
 
