@@ -397,7 +397,7 @@ class AbstractWorkflow(ABC):
         detects the deployment environment and returns the corresponding
         configuration with the appropriate model.
 
-        The method checks for the presence of DUO_WORKFLOW__VERTEX_PROJECT_ID
+        The method checks for the presence of AIGW_GOOGLE_CLOUD_PLATFORM__PROJECT
         environment variable to determine if running on Google Cloud Vertex AI.
 
         Returns:
@@ -410,7 +410,8 @@ class AbstractWorkflow(ABC):
             Subclasses can override this method to implement custom model selection
             logic or to use different model versions.
         """
-        _vertex_project_id = os.getenv("DUO_WORKFLOW__VERTEX_PROJECT_ID")
+        # Check for Vertex AI project configuration
+        _vertex_project_id = os.getenv("AIGW_GOOGLE_CLOUD_PLATFORM__PROJECT")
         if bool(_vertex_project_id and len(_vertex_project_id) > 1):
             return VertexConfig(
                 model_name=KindAnthropicModel.CLAUDE_SONNET_4_VERTEX.value

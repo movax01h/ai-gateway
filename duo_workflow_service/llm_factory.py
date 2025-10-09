@@ -65,9 +65,9 @@ class VertexConfig(ModelConfig):
 
     @staticmethod
     def _get_project_id() -> str:
-        project_id = os.environ.get("DUO_WORKFLOW__VERTEX_PROJECT_ID")
+        project_id = os.environ.get("AIGW_GOOGLE_CLOUD_PLATFORM__PROJECT")
         if not project_id or len(project_id) < 1:
-            raise RuntimeError("DUO_WORKFLOW__VERTEX_PROJECT_ID needs to be set")
+            raise RuntimeError("AIGW_GOOGLE_CLOUD_PLATFORM__PROJECT needs to be set")
         return project_id
 
     @staticmethod
