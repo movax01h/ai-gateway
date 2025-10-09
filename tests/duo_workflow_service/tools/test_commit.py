@@ -5,6 +5,7 @@ from unittest.mock import AsyncMock, Mock, patch
 import pytest
 
 from duo_workflow_service.gitlab.gitlab_api import Project
+from duo_workflow_service.gitlab.http_client import GitLabHttpResponse
 from duo_workflow_service.tools.commit import (
     CommitResourceInput,
     CreateCommit,
@@ -73,20 +74,24 @@ def file_content_response_fixture():
 
 @pytest.mark.asyncio
 async def test_get_commit(gitlab_client_mock, metadata):
-    gitlab_client_mock.aget = AsyncMock(
-        return_value={
-            "id": "c34bb66f7a5e3a45b5e2d70edd9be12d64855cd6",
-            "short_id": "c34bb66f",
-            "created_at": "2025-04-29T11:35:36.000+02:00",
-            "title": "Test Commit",
-            "message": "Test Commit message",
-            "author_name": "Author Name",
-            "author_email": "test@example.com",
-            "authored_date": "2025-04-29T11:35:36.000+02:00",
-            "committed_date": "2025-04-29T11:35:36.000+02:00",
-            "stats": {"additions": 591, "deletions": 4, "total": 595},
-        }
+    commit_data = {
+        "id": "c34bb66f7a5e3a45b5e2d70edd9be12d64855cd6",
+        "short_id": "c34bb66f",
+        "created_at": "2025-04-29T11:35:36.000+02:00",
+        "title": "Test Commit",
+        "message": "Test Commit message",
+        "author_name": "Author Name",
+        "author_email": "test@example.com",
+        "authored_date": "2025-04-29T11:35:36.000+02:00",
+        "committed_date": "2025-04-29T11:35:36.000+02:00",
+        "stats": {"additions": 591, "deletions": 4, "total": 595},
+    }
+
+    mock_response = GitLabHttpResponse(
+        status_code=200,
+        body=commit_data,
     )
+    gitlab_client_mock.aget = AsyncMock(return_value=mock_response)
 
     tool = GetCommit(description="get commit description", metadata=metadata)
 
@@ -94,28 +99,14 @@ async def test_get_commit(gitlab_client_mock, metadata):
         project_id=24, commit_sha="c34bb66f7a5e3a45b5e2d70edd9be12d64855cd6"
     )
 
-    expected_response = json.dumps(
-        {
-            "commit": {
-                "id": "c34bb66f7a5e3a45b5e2d70edd9be12d64855cd6",
-                "short_id": "c34bb66f",
-                "created_at": "2025-04-29T11:35:36.000+02:00",
-                "title": "Test Commit",
-                "message": "Test Commit message",
-                "author_name": "Author Name",
-                "author_email": "test@example.com",
-                "authored_date": "2025-04-29T11:35:36.000+02:00",
-                "committed_date": "2025-04-29T11:35:36.000+02:00",
-                "stats": {"additions": 591, "deletions": 4, "total": 595},
-            }
-        }
-    )
+    expected_response = json.dumps({"commit": commit_data})
     assert response == expected_response
 
     gitlab_client_mock.aget.assert_called_once_with(
         path="/api/v4/projects/24/repository/commits/c34bb66f7a5e3a45b5e2d70edd9be12d64855cd6",
         params={},
         parse_json=False,
+        use_http_response=True,
     )
 
 
@@ -134,6 +125,7 @@ async def test_get_commit_error(gitlab_client_mock, metadata):
         path="/api/v4/projects/24/repository/commits/nonexistent",
         params={},
         parse_json=False,
+        use_http_response=True,
     )
 
 
@@ -211,7 +203,7 @@ async def test_validate_commit_url_no_url_no_commit_sha(metadata):
 async def test_get_commit_with_url_success(
     url, project_id, commit_sha, expected_path, gitlab_client_mock, metadata
 ):
-    mock_response = {
+    mock_response_data = {
         "id": "c34bb66f7a5e3a45b5e2d70edd9be12d64855cd6",
         "short_id": "c34bb66f",
         "created_at": "2025-04-29T11:35:36.000+02:00",
@@ -222,17 +214,22 @@ async def test_get_commit_with_url_success(
         "authored_date": "2025-04-29T11:35:36.000+02:00",
         "committed_date": "2025-04-29T11:35:36.000+02:00",
     }
+
+    mock_response = GitLabHttpResponse(
+        status_code=200,
+        body=mock_response_data,
+    )
     gitlab_client_mock.aget = AsyncMock(return_value=mock_response)
 
     tool = GetCommit(description="get commit description", metadata=metadata)
 
     response = await tool._arun(url=url, project_id=project_id, commit_sha=commit_sha)
 
-    expected_response = json.dumps({"commit": mock_response})
+    expected_response = json.dumps({"commit": mock_response_data})
     assert response == expected_response
 
     gitlab_client_mock.aget.assert_called_once_with(
-        path=expected_path, params={}, parse_json=False
+        path=expected_path, params={}, parse_json=False, use_http_response=True
     )
 
 
@@ -407,7 +404,7 @@ async def test_list_commit(
     description,
     metadata,
 ):
-    mock_response = [
+    mock_response_data = [
         {
             "id": "6104942438c14ec7bd21c6cd5bd995272b3faff6",
             "short_id": "6104942",
@@ -424,6 +421,11 @@ async def test_list_commit(
             "web_url": "https://gitlab.example.com/project/-/commit/6104942438c14ec7bd21c6cd5bd995272b3faff6",
         }
     ]
+
+    mock_response = GitLabHttpResponse(
+        status_code=200,
+        body=mock_response_data,
+    )
     gitlab_client_mock.aget = AsyncMock(return_value=mock_response)
     tool = ListCommits(description=description, metadata=metadata)
     result = await tool._arun(**test_params)
@@ -431,10 +433,11 @@ async def test_list_commit(
         path=f"/api/v4/projects/{expected_project_id}/repository/commits",
         params=expected_params,
         parse_json=False,
+        use_http_response=True,
     )
     result_data = json.loads(result)
     assert "commits" in result_data
-    assert result_data["commits"] == mock_response
+    assert result_data["commits"] == mock_response_data
 
 
 @pytest.mark.asyncio
@@ -457,7 +460,12 @@ async def test_list_commits_success(gitlab_client_mock, metadata):
             "author_name": "Author Name 2",
         },
     ]
-    gitlab_client_mock.aget = AsyncMock(return_value=sample_commits)
+
+    mock_response = GitLabHttpResponse(
+        status_code=200,
+        body=sample_commits,
+    )
+    gitlab_client_mock.aget = AsyncMock(return_value=mock_response)
 
     tool = ListCommits(description="list commits description", metadata=metadata)
 
@@ -481,6 +489,7 @@ async def test_list_commits_success(gitlab_client_mock, metadata):
             "first_parent": True,
         },
         parse_json=False,
+        use_http_response=True,
     )
 
 
@@ -499,6 +508,7 @@ async def test_list_commits_error(gitlab_client_mock, metadata):
         path="/api/v4/projects/999/repository/commits",
         params={},
         parse_json=False,
+        use_http_response=True,
     )
 
 
@@ -535,7 +545,12 @@ async def test_get_commit_diff(gitlab_client_mock, metadata):
             "deleted_file": False,
         }
     ]
-    gitlab_client_mock.aget = AsyncMock(return_value=json.dumps(diff_data))
+
+    mock_response = GitLabHttpResponse(
+        status_code=200,
+        body=json.dumps(diff_data),
+    )
+    gitlab_client_mock.aget = AsyncMock(return_value=mock_response)
 
     tool = GetCommitDiff(description="Read commit diff", metadata=metadata)
 
@@ -549,6 +564,7 @@ async def test_get_commit_diff(gitlab_client_mock, metadata):
     gitlab_client_mock.aget.assert_called_once_with(
         path="/api/v4/projects/24/repository/commits/c34bb66f7a5e3a45b5e2d70edd9be12d64855cd6/diff",
         parse_json=False,
+        use_http_response=True,
     )
 
 
@@ -566,6 +582,7 @@ async def test_get_commit_diff_error(gitlab_client_mock, metadata):
     gitlab_client_mock.aget.assert_called_once_with(
         path="/api/v4/projects/24/repository/commits/nonexistent/diff",
         parse_json=False,
+        use_http_response=True,
     )
 
 
@@ -604,7 +621,12 @@ async def test_get_commit_diff_with_url_success(
             "deleted_file": False,
         }
     ]
-    gitlab_client_mock.aget = AsyncMock(return_value=json.dumps(diff_data))
+
+    mock_response = GitLabHttpResponse(
+        status_code=200,
+        body=json.dumps(diff_data),
+    )
+    gitlab_client_mock.aget = AsyncMock(return_value=mock_response)
 
     tool = GetCommitDiff(description="Read commit diff", metadata=metadata)
 
@@ -614,7 +636,7 @@ async def test_get_commit_diff_with_url_success(
     assert response == expected_response
 
     gitlab_client_mock.aget.assert_called_once_with(
-        path=expected_path, parse_json=False
+        path=expected_path, parse_json=False, use_http_response=True
     )
 
 
@@ -677,7 +699,12 @@ async def test_get_commit_comments(gitlab_client_mock, metadata):
             "parent_id": None,
         },
     ]
-    gitlab_client_mock.aget = AsyncMock(return_value=comments_data)
+
+    mock_response = GitLabHttpResponse(
+        status_code=200,
+        body=comments_data,
+    )
+    gitlab_client_mock.aget = AsyncMock(return_value=mock_response)
 
     tool = GetCommitComments(description="Read commit comments", metadata=metadata)
 
@@ -691,6 +718,7 @@ async def test_get_commit_comments(gitlab_client_mock, metadata):
     gitlab_client_mock.aget.assert_called_once_with(
         path="/api/v4/projects/24/repository/commits/c34bb66f7a5e3a45b5e2d70edd9be12d64855cd6/comments",
         parse_json=False,
+        use_http_response=True,
     )
 
 
@@ -708,6 +736,7 @@ async def test_get_commit_comments_error(gitlab_client_mock, metadata):
     gitlab_client_mock.aget.assert_called_once_with(
         path="/api/v4/projects/24/repository/commits/nonexistent/comments",
         parse_json=False,
+        use_http_response=True,
     )
 
 
@@ -741,7 +770,12 @@ async def test_get_commit_comments_with_url_success(
             "created_at": "2025-04-29T11:40:26.000+02:00",
         }
     ]
-    gitlab_client_mock.aget = AsyncMock(return_value=comments_data)
+
+    mock_response = GitLabHttpResponse(
+        status_code=200,
+        body=comments_data,
+    )
+    gitlab_client_mock.aget = AsyncMock(return_value=mock_response)
 
     tool = GetCommitComments(description="Read commit comments", metadata=metadata)
 
@@ -751,7 +785,7 @@ async def test_get_commit_comments_with_url_success(
     assert response == expected_response
 
     gitlab_client_mock.aget.assert_called_once_with(
-        path=expected_path, parse_json=False
+        path=expected_path, parse_json=False, use_http_response=True
     )
 
 
@@ -1101,7 +1135,11 @@ async def test_create_commit_with_partial_edit(
     gitlab_client_mock, metadata, commit_data, file_content_response
 ):
     """Test CreateCommit._arun method with partial edit (old_str, new_str)."""
-    gitlab_client_mock.aget = AsyncMock(return_value=file_content_response)
+    mock_file_response = GitLabHttpResponse(
+        status_code=200,
+        body=file_content_response,
+    )
+    gitlab_client_mock.aget = AsyncMock(return_value=mock_file_response)
     gitlab_client_mock.apost = AsyncMock(return_value=commit_data)
 
     tool = CreateCommit(metadata=metadata)
@@ -1151,7 +1189,9 @@ async def test_create_commit_with_partial_edit(
     assert response == expected_response
 
     gitlab_client_mock.aget.assert_called_once_with(
-        f"/api/v4/projects/24/repository/files/README.md", params={"ref": "main"}
+        f"/api/v4/projects/24/repository/files/README.md",
+        params={"ref": "main"},
+        use_http_response=True,
     )
 
     gitlab_client_mock.apost.assert_called_once_with(
@@ -1165,7 +1205,11 @@ async def test_create_commit_with_partial_edit_not_found(
     gitlab_client_mock, metadata, file_content_response
 ):
     """Test error handling when old_str is not found in the file content."""
-    gitlab_client_mock.aget = AsyncMock(return_value=file_content_response)
+    mock_file_response = GitLabHttpResponse(
+        status_code=200,
+        body=file_content_response,
+    )
+    gitlab_client_mock.aget = AsyncMock(return_value=mock_file_response)
 
     tool = CreateCommit(metadata=metadata)
 
@@ -1189,7 +1233,9 @@ async def test_create_commit_with_partial_edit_not_found(
     assert response == expected_response
 
     gitlab_client_mock.aget.assert_called_once_with(
-        f"/api/v4/projects/24/repository/files/README.md", params={"ref": "main"}
+        f"/api/v4/projects/24/repository/files/README.md",
+        params={"ref": "main"},
+        use_http_response=True,
     )
 
     gitlab_client_mock.apost.assert_not_called()
@@ -1224,7 +1270,9 @@ async def test_create_commit_with_partial_edit_error(gitlab_client_mock, metadat
     assert response == expected_response
 
     gitlab_client_mock.aget.assert_called_once_with(
-        f"/api/v4/projects/24/repository/files/README.md", params={"ref": "main"}
+        f"/api/v4/projects/24/repository/files/README.md",
+        params={"ref": "main"},
+        use_http_response=True,
     )
 
     gitlab_client_mock.apost.assert_not_called()
@@ -1347,7 +1395,11 @@ async def test_get_commit_diff_with_diff_exclusion_policy_enabled(
         },
     ]
 
-    gitlab_client_mock.aget = AsyncMock(return_value=json.dumps(diff_data))
+    mock_response = GitLabHttpResponse(
+        status_code=200,
+        body=json.dumps(diff_data),
+    )
+    gitlab_client_mock.aget = AsyncMock(return_value=mock_response)
 
     tool = GetCommitDiff(description="Read commit diff", metadata=metadata)
 
@@ -1389,6 +1441,7 @@ async def test_get_commit_diff_with_diff_exclusion_policy_enabled(
     gitlab_client_mock.aget.assert_called_once_with(
         path="/api/v4/projects/24/repository/commits/c34bb66f7a5e3a45b5e2d70edd9be12d64855cd6/diff",
         parse_json=False,
+        use_http_response=True,
     )
 
 
@@ -1416,7 +1469,11 @@ async def test_get_commit_diff_with_no_excluded_files(
         },
     ]
 
-    gitlab_client_mock.aget = AsyncMock(return_value=json.dumps(diff_data))
+    mock_response = GitLabHttpResponse(
+        status_code=200,
+        body=json.dumps(diff_data),
+    )
+    gitlab_client_mock.aget = AsyncMock(return_value=mock_response)
 
     tool = GetCommitDiff(description="Read commit diff", metadata=metadata)
 
@@ -1437,4 +1494,5 @@ async def test_get_commit_diff_with_no_excluded_files(
     gitlab_client_mock.aget.assert_called_once_with(
         path="/api/v4/projects/24/repository/commits/c34bb66f7a5e3a45b5e2d70edd9be12d64855cd6/diff",
         parse_json=False,
+        use_http_response=True,
     )

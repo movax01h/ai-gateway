@@ -3,6 +3,7 @@ from unittest.mock import AsyncMock, Mock
 
 import pytest
 
+from duo_workflow_service.gitlab.http_client import GitLabHttpResponse
 from duo_workflow_service.tools.audit_events import (
     ListGroupAuditEvents,
     ListGroupAuditEventsInput,
@@ -107,7 +108,11 @@ def metadata_fixture(gitlab_client_mock):
 async def test_list_instance_audit_events(
     gitlab_client_mock, metadata, instance_audit_event_data
 ):
-    gitlab_client_mock.aget = AsyncMock(return_value=instance_audit_event_data)
+    mock_response = GitLabHttpResponse(
+        status_code=200,
+        body=instance_audit_event_data,
+    )
+    gitlab_client_mock.aget = AsyncMock(return_value=mock_response)
     # Mock last_response.headers.get to return a valid integer string
     gitlab_client_mock.last_response = Mock()
     gitlab_client_mock.last_response.headers = {"X-Total-Pages": "1"}
@@ -135,6 +140,7 @@ async def test_list_instance_audit_events(
         path="/api/v4/audit_events",
         params={"per_page": 20, "page": 1},
         parse_json=True,
+        use_http_response=True,
     )
 
 
@@ -142,7 +148,11 @@ async def test_list_instance_audit_events(
 async def test_list_instance_audit_events_with_filters(
     gitlab_client_mock, metadata, instance_audit_event_data
 ):
-    gitlab_client_mock.aget = AsyncMock(return_value=instance_audit_event_data)
+    mock_response = GitLabHttpResponse(
+        status_code=200,
+        body=instance_audit_event_data,
+    )
+    gitlab_client_mock.aget = AsyncMock(return_value=mock_response)
     gitlab_client_mock.last_response = Mock()
     gitlab_client_mock.last_response.headers = {"X-Total-Pages": "1"}
 
@@ -181,6 +191,7 @@ async def test_list_instance_audit_events_with_filters(
             "page": 1,
         },
         parse_json=True,
+        use_http_response=True,
     )
 
 
@@ -214,7 +225,9 @@ async def test_list_instance_audit_events_pagination(
         }
     ]
 
-    gitlab_client_mock.aget = AsyncMock(side_effect=[page1_data, page2_data])
+    mock_response1 = GitLabHttpResponse(status_code=200, body=page1_data)
+    mock_response2 = GitLabHttpResponse(status_code=200, body=page2_data)
+    gitlab_client_mock.aget = AsyncMock(side_effect=[mock_response1, mock_response2])
     gitlab_client_mock.last_response = Mock()
     gitlab_client_mock.last_response.headers = {"X-Total-Pages": "2"}
 
@@ -242,7 +255,11 @@ async def test_list_instance_audit_events_exception(gitlab_client_mock, metadata
 async def test_list_instance_audit_events_api_error_response(
     gitlab_client_mock, metadata
 ):
-    gitlab_client_mock.aget = AsyncMock(return_value={"message": "401 Unauthorized"})
+    mock_response = GitLabHttpResponse(
+        status_code=401,
+        body={"message": "401 Unauthorized"},
+    )
+    gitlab_client_mock.aget = AsyncMock(return_value=mock_response)
 
     tool = ListInstanceAuditEvents(metadata=metadata)
 
@@ -257,7 +274,11 @@ async def test_list_instance_audit_events_api_error_response(
 async def test_list_instance_audit_events_api_error_key_response(
     gitlab_client_mock, metadata
 ):
-    gitlab_client_mock.aget = AsyncMock(return_value={"error": "Access denied"})
+    mock_response = GitLabHttpResponse(
+        status_code=403,
+        body={"error": "Access denied"},
+    )
+    gitlab_client_mock.aget = AsyncMock(return_value=mock_response)
 
     tool = ListInstanceAuditEvents(metadata=metadata)
 
@@ -295,7 +316,11 @@ def test_list_instance_audit_events_format_display_message(
 async def test_list_group_audit_events_with_id(
     gitlab_client_mock, metadata, group_audit_event_data
 ):
-    gitlab_client_mock.aget = AsyncMock(return_value=group_audit_event_data)
+    mock_response = GitLabHttpResponse(
+        status_code=200,
+        body=group_audit_event_data,
+    )
+    gitlab_client_mock.aget = AsyncMock(return_value=mock_response)
     gitlab_client_mock.last_response = Mock()
     gitlab_client_mock.last_response.headers = {"X-Total-Pages": "1"}
 
@@ -322,6 +347,7 @@ async def test_list_group_audit_events_with_id(
         path="/api/v4/groups/60/audit_events",
         params={"per_page": 20, "page": 1},
         parse_json=True,
+        use_http_response=True,
     )
 
 
@@ -329,7 +355,11 @@ async def test_list_group_audit_events_with_id(
 async def test_list_group_audit_events_with_path(
     gitlab_client_mock, metadata, group_audit_event_data
 ):
-    gitlab_client_mock.aget = AsyncMock(return_value=group_audit_event_data)
+    mock_response = GitLabHttpResponse(
+        status_code=200,
+        body=group_audit_event_data,
+    )
+    gitlab_client_mock.aget = AsyncMock(return_value=mock_response)
     gitlab_client_mock.last_response = Mock()
     gitlab_client_mock.last_response.headers = {"X-Total-Pages": "1"}
 
@@ -356,6 +386,7 @@ async def test_list_group_audit_events_with_path(
         path="/api/v4/groups/gitlab-org/gitlab/audit_events",
         params={"per_page": 20, "page": 1},
         parse_json=True,
+        use_http_response=True,
     )
 
 
@@ -374,7 +405,11 @@ async def test_list_group_audit_events_no_identifier(gitlab_client_mock, metadat
 async def test_list_group_audit_events_with_filters(
     gitlab_client_mock, metadata, group_audit_event_data
 ):
-    gitlab_client_mock.aget = AsyncMock(return_value=group_audit_event_data)
+    mock_response = GitLabHttpResponse(
+        status_code=200,
+        body=group_audit_event_data,
+    )
+    gitlab_client_mock.aget = AsyncMock(return_value=mock_response)
     gitlab_client_mock.last_response = Mock()
     gitlab_client_mock.last_response.headers = {"X-Total-Pages": "1"}
 
@@ -397,6 +432,7 @@ async def test_list_group_audit_events_with_filters(
             "page": 1,
         },
         parse_json=True,
+        use_http_response=True,
     )
 
 
@@ -412,7 +448,11 @@ async def test_list_group_audit_events_exception(gitlab_client_mock, metadata):
 
 @pytest.mark.asyncio
 async def test_list_group_audit_events_api_error_response(gitlab_client_mock, metadata):
-    gitlab_client_mock.aget = AsyncMock(return_value={"message": "403 Forbidden"})
+    mock_response = GitLabHttpResponse(
+        status_code=403,
+        body={"message": "403 Forbidden"},
+    )
+    gitlab_client_mock.aget = AsyncMock(return_value=mock_response)
 
     tool = ListGroupAuditEvents(metadata=metadata)
 
@@ -448,7 +488,11 @@ def test_list_group_audit_events_format_display_message(input_data, expected_mes
 async def test_list_project_audit_events(
     gitlab_client_mock, metadata, project_audit_event_data
 ):
-    gitlab_client_mock.aget = AsyncMock(return_value=project_audit_event_data)
+    mock_response = GitLabHttpResponse(
+        status_code=200,
+        body=project_audit_event_data,
+    )
+    gitlab_client_mock.aget = AsyncMock(return_value=mock_response)
     gitlab_client_mock.last_response = Mock()
     gitlab_client_mock.last_response.headers = {"X-Total-Pages": "1"}
 
@@ -475,6 +519,7 @@ async def test_list_project_audit_events(
         path="/api/v4/projects/7/audit_events",
         params={"per_page": 20, "page": 1},
         parse_json=True,
+        use_http_response=True,
     )
 
 
@@ -504,7 +549,11 @@ async def test_list_project_audit_events_with_url_success(
     metadata,
     project_audit_event_data,
 ):
-    gitlab_client_mock.aget = AsyncMock(return_value=project_audit_event_data)
+    mock_response = GitLabHttpResponse(
+        status_code=200,
+        body=project_audit_event_data,
+    )
+    gitlab_client_mock.aget = AsyncMock(return_value=mock_response)
     gitlab_client_mock.last_response = Mock()
     gitlab_client_mock.last_response.headers = {"X-Total-Pages": "1"}
 
@@ -529,6 +578,7 @@ async def test_list_project_audit_events_with_url_success(
         path=expected_path,
         params={"per_page": 20, "page": 1},
         parse_json=True,
+        use_http_response=True,
     )
 
 
@@ -568,7 +618,11 @@ async def test_list_project_audit_events_with_url_error(
 async def test_list_project_audit_events_with_filters(
     gitlab_client_mock, metadata, project_audit_event_data
 ):
-    gitlab_client_mock.aget = AsyncMock(return_value=project_audit_event_data)
+    mock_response = GitLabHttpResponse(
+        status_code=200,
+        body=project_audit_event_data,
+    )
+    gitlab_client_mock.aget = AsyncMock(return_value=mock_response)
     gitlab_client_mock.last_response = Mock()
     gitlab_client_mock.last_response.headers = {"X-Total-Pages": "1"}
 
@@ -591,6 +645,7 @@ async def test_list_project_audit_events_with_filters(
             "page": 1,
         },
         parse_json=True,
+        use_http_response=True,
     )
 
 
@@ -608,7 +663,11 @@ async def test_list_project_audit_events_exception(gitlab_client_mock, metadata)
 async def test_list_project_audit_events_api_error_response(
     gitlab_client_mock, metadata
 ):
-    gitlab_client_mock.aget = AsyncMock(return_value={"message": "404 Not Found"})
+    mock_response = GitLabHttpResponse(
+        status_code=404,
+        body={"message": "404 Not Found"},
+    )
+    gitlab_client_mock.aget = AsyncMock(return_value=mock_response)
 
     tool = ListProjectAuditEvents(metadata=metadata)
 

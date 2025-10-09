@@ -1,4 +1,5 @@
 import json
+import logging
 from typing import Any, List, Optional, Tuple, Type
 
 from gitlab_cloud_connector import GitLabUnitPrimitive
@@ -10,6 +11,8 @@ from duo_workflow_service.tools.duo_base_tool import (
     DuoBaseTool,
 )
 from duo_workflow_service.tools.gitlab_resource_input import ProjectResourceInput
+
+logger = logging.getLogger(__name__)
 
 # editorconfig-checker-disable
 PROJECT_IDENTIFICATION_DESCRIPTION = """To identify the project you must provide either:
@@ -269,8 +272,17 @@ class ListIssues(IssueBaseTool):
                 path=f"/api/v4/projects/{project_id}/issues",
                 params=params,
                 parse_json=False,
+                use_http_response=True,
             )
-            return json.dumps({"issues": response})
+
+            if not response.is_success():
+                logger.error(
+                    "API error - Status: %s, Body: %s",
+                    response.status_code,
+                    response.body,
+                )
+
+            return json.dumps({"issues": response.body})
         except Exception as e:
             return json.dumps({"error": str(e)})
 
@@ -312,8 +324,17 @@ class GetIssue(IssueBaseTool):
             response = await self.gitlab_client.aget(
                 path=f"/api/v4/projects/{project_id}/issues/{issue_iid}",
                 parse_json=False,
+                use_http_response=True,
             )
-            return json.dumps({"issue": response})
+
+            if not response.is_success():
+                logger.error(
+                    "API error - Status: %s, Body: %s",
+                    response.status_code,
+                    response.body,
+                )
+
+            return json.dumps({"issue": response.body})
         except Exception as e:
             return json.dumps({"error": str(e)})
 
@@ -514,8 +535,17 @@ class ListIssueNotes(IssueBaseTool):
                 path=f"/api/v4/projects/{project_id}/issues/{issue_iid}/notes",
                 params=params,
                 parse_json=False,
+                use_http_response=True,
             )
-            return json.dumps({"notes": response})
+
+            if not response.is_success():
+                logger.error(
+                    "API error - Status: %s, Body: %s",
+                    response.status_code,
+                    response.body,
+                )
+
+            return json.dumps({"notes": response.body})
         except Exception as e:
             return json.dumps({"error": str(e)})
 
@@ -563,8 +593,17 @@ class GetIssueNote(IssueBaseTool):
             response = await self.gitlab_client.aget(
                 path=f"/api/v4/projects/{project_id}/issues/{issue_iid}/notes/{note_id}",
                 parse_json=False,
+                use_http_response=True,
             )
-            return json.dumps({"note": response})
+
+            if not response.is_success():
+                logger.error(
+                    "API error - Status: %s, Body: %s",
+                    response.status_code,
+                    response.body,
+                )
+
+            return json.dumps({"note": response.body})
         except Exception as e:
             return json.dumps({"error": str(e)})
 

@@ -5,6 +5,7 @@ from unittest.mock import AsyncMock, Mock, patch
 import pytest
 
 from duo_workflow_service.gitlab.gitlab_api import Project
+from duo_workflow_service.gitlab.http_client import GitLabHttpResponse
 from duo_workflow_service.tools.code_review import (
     BuildReviewMergeRequestContext,
     BuildReviewMergeRequestContextInput,
@@ -168,9 +169,9 @@ async def test_build_review_context_basic_success(
     }
     gitlab_client_mock.aget = AsyncMock(
         side_effect=[
-            json.dumps(mr_data),
-            json.dumps(diffs_data),
-            json.dumps(original_file_content),
+            GitLabHttpResponse(status_code=200, body=json.dumps(mr_data)),
+            GitLabHttpResponse(status_code=200, body=json.dumps(diffs_data)),
+            GitLabHttpResponse(status_code=200, body=json.dumps(original_file_content)),
             Exception("Custom instructions not found"),
         ]
     )
@@ -207,8 +208,8 @@ async def test_build_review_context_only_diffs(
 
     gitlab_client_mock.aget = AsyncMock(
         side_effect=[
-            json.dumps(mr_data),
-            json.dumps(diffs_data),
+            GitLabHttpResponse(status_code=200, body=json.dumps(mr_data)),
+            GitLabHttpResponse(status_code=200, body=json.dumps(diffs_data)),
         ]
     )
     tool = BuildReviewMergeRequestContext(metadata=metadata)
@@ -248,9 +249,9 @@ async def test_build_review_context_skips_large_files(
 
     gitlab_client_mock.aget = AsyncMock(
         side_effect=[
-            json.dumps(mr_data),
-            json.dumps(diffs_data),
-            json.dumps(large_file_encoded),
+            GitLabHttpResponse(status_code=200, body=json.dumps(mr_data)),
+            GitLabHttpResponse(status_code=200, body=json.dumps(diffs_data)),
+            GitLabHttpResponse(status_code=200, body=json.dumps(large_file_encoded)),
             Exception("Custom instructions not found"),
         ]
     )
@@ -291,10 +292,12 @@ async def test_build_review_context_with_custom_instructions(
     }
     gitlab_client_mock.aget = AsyncMock(
         side_effect=[
-            json.dumps(mr_data),
-            json.dumps(diffs_data),
-            json.dumps(original_file_content),
-            json.dumps(custom_instructions_yaml),
+            GitLabHttpResponse(status_code=200, body=json.dumps(mr_data)),
+            GitLabHttpResponse(status_code=200, body=json.dumps(diffs_data)),
+            GitLabHttpResponse(status_code=200, body=json.dumps(original_file_content)),
+            GitLabHttpResponse(
+                status_code=200, body=json.dumps(custom_instructions_yaml)
+            ),
         ]
     )
     tool = BuildReviewMergeRequestContext(metadata=metadata)
@@ -324,9 +327,9 @@ async def test_build_review_context_with_url(
     }
     gitlab_client_mock.aget = AsyncMock(
         side_effect=[
-            json.dumps(mr_data),
-            json.dumps(diffs_data),
-            json.dumps(original_file_content),
+            GitLabHttpResponse(status_code=200, body=json.dumps(mr_data)),
+            GitLabHttpResponse(status_code=200, body=json.dumps(diffs_data)),
+            GitLabHttpResponse(status_code=200, body=json.dumps(original_file_content)),
             Exception("Custom instructions not found"),
         ]
     )
@@ -369,10 +372,12 @@ async def test_build_review_context_no_matching_custom_instructions(
     }
     gitlab_client_mock.aget = AsyncMock(
         side_effect=[
-            json.dumps(mr_data),
-            json.dumps(diffs_data),
-            json.dumps(original_file_content),
-            json.dumps(custom_instructions_yaml),
+            GitLabHttpResponse(status_code=200, body=json.dumps(mr_data)),
+            GitLabHttpResponse(status_code=200, body=json.dumps(diffs_data)),
+            GitLabHttpResponse(status_code=200, body=json.dumps(original_file_content)),
+            GitLabHttpResponse(
+                status_code=200, body=json.dumps(custom_instructions_yaml)
+            ),
         ]
     )
     tool = BuildReviewMergeRequestContext(metadata=metadata)
@@ -431,11 +436,13 @@ async def test_build_review_context_nested_vs_root_patterns(
     }
     gitlab_client_mock.aget = AsyncMock(
         side_effect=[
-            json.dumps(mr_data),
-            json.dumps(nested_diffs_data),
-            json.dumps(original_file_content),
-            json.dumps(original_file_content),
-            json.dumps(custom_instructions_yaml),
+            GitLabHttpResponse(status_code=200, body=json.dumps(mr_data)),
+            GitLabHttpResponse(status_code=200, body=json.dumps(nested_diffs_data)),
+            GitLabHttpResponse(status_code=200, body=json.dumps(original_file_content)),
+            GitLabHttpResponse(status_code=200, body=json.dumps(original_file_content)),
+            GitLabHttpResponse(
+                status_code=200, body=json.dumps(custom_instructions_yaml)
+            ),
         ]
     )
     tool = BuildReviewMergeRequestContext(metadata=metadata)
@@ -525,8 +532,8 @@ async def test_build_review_context_no_files_content(
 
     gitlab_client_mock.aget = AsyncMock(
         side_effect=[
-            json.dumps(mr_data),
-            json.dumps(new_files_diffs),
+            GitLabHttpResponse(status_code=200, body=json.dumps(mr_data)),
+            GitLabHttpResponse(status_code=200, body=json.dumps(new_files_diffs)),
             Exception("Custom instructions not found"),
         ]
     )
