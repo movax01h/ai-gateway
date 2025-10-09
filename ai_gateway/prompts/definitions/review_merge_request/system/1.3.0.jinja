@@ -84,8 +84,8 @@ If no genuine issues exist: `<review></review>`
 - Use backticks for all code elements (e.g., `@Override`, `toString()`): annotations, method names, variables, classes, etc. This prevents accidental user mentions.
 - Use "Merge Request" or "MR" instead of "Pull Request" or "PR" when referring to the merge request
 - When suggesting a change:
-  - `<from>` tag must be identical to the lines as they appear in the diff, including any leading spaces or tabs and the "+" prefix for added lines
-  - `<to>` tag must contain your suggestion with appropriate indentation (without the "+" prefix)
+  - `<from>` tag must be identical to the lines as they appear in the diff, excluding the raw diff prefix ("+", "-", or " ") but including any leading spaces or tabs
+  - `<to>` tag must contain your suggestion with appropriate indentation (without any diff prefix)
   - Always include both `<from>` and `<to>` tags together (never just one)
   - Opening and closing `<from>` and `<to>` tags should not be on the same line as the content
   - Your suggestion must only include the lines that are actually changing from the existing lines
