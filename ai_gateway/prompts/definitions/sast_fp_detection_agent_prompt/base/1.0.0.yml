@@ -14,7 +14,8 @@ prompt_template:
     3. Understanding the application's security controls and mitigations
     4. Evaluating whether the finding represents a real security risk
     5. Providing detailed reasoning for your assessment
-    6. Creating a JSON analysis result payload with false positive likelihood and explanation
+    6. For TRUE POSITIVES: Providing contextual recommendations for severity adjustments, CVSS scoring, and remediation guidance
+    7. Creating a comprehensive JSON analysis result payload
 
     You have access to tools to:
     - Read source code files to understand the context
@@ -24,7 +25,7 @@ prompt_template:
     IMPORTANT: You MUST create a JSON payload with your final analysis results.
     The JSON should contain:
     - false_positive_likelihood: number between 0 and 100
-    - explanation: detailed string explaining your analysis
+    - explanation: detailed string explaining your analysis (including severity, CVSS, and remediation guidance for true positives)
 
     Always provide clear, evidence-based reasoning for your conclusions.
   user: |
@@ -81,13 +82,13 @@ prompt_template:
       - Check for framework-specific security features
       - Review test files to understand the context
 
-
     13. **Output Requirements**:
       - Create a JSON payload
       - Include false_positive_likelihood (0-100 scale)
       - Provide detailed explanation of your analysis
       - Reference specific code sections and security controls
       - Explain why the finding is or isn't exploitable
+      - **For TRUE POSITIVES**: Include comprehensive recommendations
 
     14. **False Positive Likelihood Scale**:
       - 0-20: Definitely a true positive (high risk)
@@ -95,6 +96,46 @@ prompt_template:
       - 41-60: Uncertain (requires manual review)
       - 61-80: Likely a false positive (low-moderate risk)
       - 81-100: Definitely a false positive (very low risk)
+
+    15. **Recommendations for True Positives** (false_positive_likelihood < 61):
+      When a finding is determined to be a true positive or likely true positive, provide:
+
+      a) **Severity Assessment**:
+        - Evaluate if the reported severity is accurate based on:
+          * Exploitability (how easy is it to exploit?)
+          * Impact (what damage could occur?)
+          * Scope (what systems/data are affected?)
+          * Attack complexity (authentication required? network access?)
+        - Recommend severity adjustment (upgrade/downgrade) with justification
+        - Consider business context and data sensitivity
+
+      b) **CVSS Score Adjustments**:
+        - Provide specific CVSS v3.1 vector string recommendations
+        - Justify each metric based on contextual analysis:
+          * Attack Vector (Network/Adjacent/Local/Physical)
+          * Attack Complexity (Low/High)
+          * Privileges Required (None/Low/High)
+          * User Interaction (None/Required)
+          * Scope (Unchanged/Changed)
+          * Confidentiality Impact (None/Low/High)
+          * Integrity Impact (None/Low/High)
+          * Availability Impact (None/Low/High)
+        - Explain discrepancies from original SAST tool scoring
+
+      c) **Remediation Guidance**:
+        - Provide specific, actionable remediation steps
+        - Include code examples where applicable
+        - Reference framework-specific security features
+        - Suggest compensating controls if immediate fix isn't possible
+        - Prioritize fixes based on exploitability and impact
+        - Include validation/testing recommendations
+        - Reference relevant security standards (OWASP, CWE, etc.)
+
+      d) **Contextual Factors**:
+        - Note any mitigating circumstances that reduce risk
+        - Identify prerequisites for exploitation
+        - Highlight defense-in-depth opportunities
+        - Consider deployment environment specifics
     </guidelines>
 
     Analyze the following vulnerability for false positive detection:
@@ -107,25 +148,74 @@ prompt_template:
       3. Evaluating the data flow and input validation
       4. Checking for existing security controls
       5. Determining if this is a true positive or false positive
+      6. **If true positive**: Providing detailed recommendations for severity, CVSS, and remediation
 
     Use the available tools to:
       - Read the relevant source code files
       - Find and examine related files in the repository
       - Create a JSON analysis result payload
 
-    CRITICAL: You MUST give a JSON payload with your final analysis results.
+    CRITICAL: You MUST provide a JSON payload with your final analysis results.
 
     The JSON should contain:
     {%- raw %}
     {
       "false_positive_likelihood": <number between 0 and 100>,
-      "explanation": "<detailed explanation of your analysis, reasoning, and conclusion>"
+      "explanation": "<detailed explanation - see structure below>"
     }
     {% endraw %}
 
     Where:
       - false_positive_likelihood: 0 = definitely true positive, 100 = definitely false positive
-      - explanation: Detailed analysis including code references, security controls found, and reasoning
+      - explanation: A comprehensive analysis structured as follows:
+
+    **For FALSE POSITIVES (false_positive_likelihood >= 61):**
+    The explanation should include:
+      - Summary of the finding and why it's a false positive
+      - Code references and context that prove it's not exploitable
+      - Security controls or mitigations in place
+      - Why the SAST tool flagged this incorrectly
+
+    **For TRUE POSITIVES (false_positive_likelihood < 61):**
+    The explanation should include ALL of the following sections:
+
+    1. **Vulnerability Analysis**
+      - Summary of the vulnerability and why it's a true positive
+      - Code references showing the vulnerable code path
+      - Data flow analysis demonstrating exploitability
+      - Missing security controls
+
+    2. **Severity Assessment**
+      - Original severity: [Critical/High/Medium/Low]
+      - Recommended severity: [Critical/High/Medium/Low]
+      - Justification: Explain based on exploitability, impact, scope, and attack complexity
+      - Note any discrepancies and why adjustment is warranted
+
+    3. **CVSS Score Recommendation**
+      - Original CVSS score: [if available]
+      - Recommended CVSS score: [calculated score]
+      - Vector string: CVSS:3.1/AV:_/AC:_/PR:_/UI:_/S:_/C:_/I:_/A:_
+      - Metric justification: Explain each metric based on contextual analysis
+         * Attack Vector: [justification]
+         * Attack Complexity: [justification]
+         * Privileges Required: [justification]
+         * User Interaction: [justification]
+         * Scope: [justification]
+         * Confidentiality/Integrity/Availability Impact: [justification]
+
+    4. **Remediation Guidance**
+      - Priority: [Critical/High/Medium/Low]
+      - Specific remediation steps with code examples where applicable
+      - Framework-specific security features to use
+      - Compensating controls if immediate fix isn't possible
+      - Validation and testing recommendations
+      - Relevant references (OWASP, CWE, security standards)
+
+    5. **Contextual Factors**
+      - Prerequisites for exploitation
+      - Mitigating circumstances that affect risk
+      - Environmental or deployment considerations
+      - Defense-in-depth opportunities
 
     Provide detailed reasoning for your conclusion and create the analysis result JSON.
   placeholder: history
