@@ -1,6 +1,10 @@
 import json
 
+import structlog
+
 from duo_workflow_service.gitlab.http_client import GitlabHttpClient, GitLabHttpResponse
+
+logger = structlog.stdlib.get_logger(__name__)
 
 
 class UnsupportedStatusEvent(Exception):
@@ -13,12 +17,21 @@ class GitLabStatusUpdater:
         self.workflow_api_path = "/api/v4/ai/duo_workflows/workflows"
 
     async def get_workflow_status(self, workflow_id: str) -> str:
-        result = await self._client.aget(
+        response = await self._client.aget(
             path=f"{self.workflow_api_path}/{workflow_id}",
             parse_json=True,
+            use_http_response=True,
         )
 
-        return result.get("status")
+        if not response.is_success():
+            logger.error(
+                "Failed to get workflow status",
+                workflow_id=workflow_id,
+                status_code=response.status_code,
+                response_body=response.body,
+            )
+
+        return response.body.get("status")
 
     async def update_workflow_status(self, workflow_id: str, status_event: str) -> None:
         """Update the status of a workflow in GitLab.

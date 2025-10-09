@@ -61,7 +61,7 @@ def http_client_for_retry_fixture(http_client, workflow_id):
             ]
         elif path == f"/api/v4/ai/duo_workflows/workflows/{workflow_id}":
             # Return status for workflow completion
-            return {"status": "finished"}
+            return GitLabHttpResponse(status_code=200, body={"status": "finished"})
         else:
             raise ValueError(f"Unexpected path: {path}")
 
@@ -187,9 +187,13 @@ async def test_workflow_event_tracking_for_cancelled_workflow(
             path
             == f"/api/v4/ai/duo_workflows/workflows/{workflow_id}/checkpoints?per_page=1"
         ):
-            return []  # No checkpoints for a new workflow
+            return GitLabHttpResponse(
+                status_code=200, body=[]
+            )  # No checkpoints for a new workflow
         elif path == f"/api/v4/ai/duo_workflows/workflows/{workflow_id}":
-            return {"status": "stopped"}  # Workflow was cancelled
+            return GitLabHttpResponse(
+                status_code=200, body={"status": "stopped"}
+            )  # Workflow was cancelled
         raise ValueError(f"Unexpected path: {path}")
 
     async def mock_apatch(path, **kwargs):
@@ -274,9 +278,11 @@ async def test_workflow_context_manager_success(
             path
             == f"/api/v4/ai/duo_workflows/workflows/{workflow_id}/checkpoints?per_page=1"
         ):
-            return []  # No checkpoints for a new workflow
+            return GitLabHttpResponse(
+                status_code=200, body=[]
+            )  # No checkpoints for a new workflow
         elif path == f"/api/v4/ai/duo_workflows/workflows/{workflow_id}":
-            return {"status": "finished"}
+            return GitLabHttpResponse(status_code=200, body={"status": "finished"})
         raise ValueError(f"Unexpected path: {path}")
 
     async def mock_apatch(path, **kwargs):
@@ -449,9 +455,9 @@ async def test_workflow_context_manager_startup_error_with_status_update_failure
     # Set up aget to return empty checkpoints (for a new workflow)
     async def mock_aget(path, **kwargs):
         if "checkpoints" in path:
-            return []
+            return GitLabHttpResponse(status_code=200, body=[])
         else:
-            return {"status": "created"}
+            return GitLabHttpResponse(status_code=200, body={"status": "created"})
 
     http_client.aget.side_effect = mock_aget
 
@@ -737,9 +743,9 @@ async def test_workflow_context_manager_error(
     # Mock different responses for different API calls
     def mock_aget(path, **kwargs):
         if "checkpoints" in path:
-            return []
+            return GitLabHttpResponse(status_code=200, body=[])
         else:
-            return {"status": "running"}
+            return GitLabHttpResponse(status_code=200, body={"status": "running"})
 
     http_client.aget.side_effect = mock_aget
     http_client.apatch.return_value = GitLabHttpResponse(status_code=200, body={})
@@ -797,7 +803,11 @@ async def test_workflow_context_manager_error(
 async def test_aget_tuple(
     gitlab_workflow, http_client, config, workflow_id, checkpoint_data
 ):
-    http_client.aget.return_value = checkpoint_data
+    mock_response = GitLabHttpResponse(
+        status_code=200,
+        body=checkpoint_data,
+    )
+    http_client.aget.return_value = mock_response
 
     result = await gitlab_workflow.aget_tuple(config)
 
@@ -816,6 +826,7 @@ async def test_aget_tuple(
     http_client.aget.assert_called_once_with(
         path=f"/api/v4/ai/duo_workflows/workflows/{workflow_id}/checkpoints",
         object_hook=checkpoint_decoder,
+        use_http_response=True,
     )
 
 
@@ -825,7 +836,11 @@ async def test_aget_tuple_when_config_has_no_checkpoint_id_and_checkpoints_prese
 ):
     config: CustomRunnableConfig = {"configurable": {"thread_id": workflow_id}}
 
-    http_client.aget.return_value = checkpoint_data
+    mock_response = GitLabHttpResponse(
+        status_code=200,
+        body=checkpoint_data,
+    )
+    http_client.aget.return_value = mock_response
 
     result = await gitlab_workflow.aget_tuple(config)
     assert result is not None
@@ -836,12 +851,17 @@ async def test_aget_tuple_when_config_has_no_checkpoint_id_and_checkpoints_prese
     http_client.aget.assert_called_once_with(
         path=f"/api/v4/ai/duo_workflows/workflows/{workflow_id}/checkpoints?per_page=1",
         object_hook=checkpoint_decoder,
+        use_http_response=True,
     )
 
 
 @pytest.mark.asyncio
 async def test_aget_tuple_no_checkpoints(gitlab_workflow, http_client, config):
-    http_client.aget.return_value = []
+    mock_response = GitLabHttpResponse(
+        status_code=200,
+        body=[],
+    )
+    http_client.aget.return_value = mock_response
     result = await gitlab_workflow.aget_tuple(config)
     assert result is None
 
@@ -852,9 +872,11 @@ async def test_aget_tuple_when_server_returns_non_success_response(
 ):
     config: CustomRunnableConfig = {"configurable": {"thread_id": workflow_id}}
 
-    gitlab_workflow._client.aget = AsyncMock(
-        return_value={"status": 400, "reason": "Bad request"}
+    mock_response = GitLabHttpResponse(
+        status_code=400,
+        body={"status": 400, "reason": "Bad request"},
     )
+    gitlab_workflow._client.aget = AsyncMock(return_value=mock_response)
 
     with pytest.raises(Exception) as exc_info:
         await gitlab_workflow.aget_tuple(config)
@@ -867,6 +889,7 @@ async def test_aget_tuple_when_server_returns_non_success_response(
     gitlab_workflow._client.aget.assert_called_once_with(
         path=f"/api/v4/ai/duo_workflows/workflows/{workflow_id}/checkpoints?per_page=1",
         object_hook=checkpoint_decoder,
+        use_http_response=True,
     )
 
 
@@ -886,7 +909,11 @@ async def test_alist(gitlab_workflow, http_client):
             "metadata": {"timestamp": "2024-01-02"},
         },
     ]
-    http_client.aget.return_value = checkpoints
+    mock_response = GitLabHttpResponse(
+        status_code=200,
+        body=checkpoints,
+    )
+    http_client.aget.return_value = mock_response
 
     results: list[CheckpointTuple] = [
         checkpoint async for checkpoint in gitlab_workflow.alist(None)
