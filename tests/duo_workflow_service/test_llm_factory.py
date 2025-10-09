@@ -18,7 +18,7 @@ from duo_workflow_service.llm_factory import (
     [
         (
             {
-                "DUO_WORKFLOW__VERTEX_PROJECT_ID": "test-proj",
+                "AIGW_GOOGLE_CLOUD_PLATFORM__PROJECT": "test-proj",
                 "DUO_WORKFLOW__VERTEX_LOCATION": "test-loc",
             },
             does_not_raise(),
@@ -33,7 +33,7 @@ from duo_workflow_service.llm_factory import (
         ),
         (
             {
-                "DUO_WORKFLOW__VERTEX_PROJECT_ID": "test-proj",
+                "AIGW_GOOGLE_CLOUD_PLATFORM__PROJECT": "test-proj",
             },
             pytest.raises(
                 RuntimeError,
@@ -101,7 +101,7 @@ def test_validate_anthropic_variables(
     [
         (
             {
-                "DUO_WORKFLOW__VERTEX_PROJECT_ID": "test-proj",
+                "AIGW_GOOGLE_CLOUD_PLATFORM__PROJECT": "test-proj",
                 "DUO_WORKFLOW__VERTEX_LOCATION": "test-loc",
             },
             VertexConfig,
@@ -168,7 +168,7 @@ def test_clients_receive_max_retries_from_config(
     [
         (
             {
-                "DUO_WORKFLOW__VERTEX_PROJECT_ID": "test-proj",
+                "AIGW_GOOGLE_CLOUD_PLATFORM__PROJECT": "test-proj",
                 "DUO_WORKFLOW__VERTEX_LOCATION": "test-loc",
             },
             "vertex",
@@ -178,7 +178,7 @@ def test_clients_receive_max_retries_from_config(
         ),
         (
             {
-                "DUO_WORKFLOW__VERTEX_PROJECT_ID": "test-proj",
+                "AIGW_GOOGLE_CLOUD_PLATFORM__PROJECT": "test-proj",
                 "DUO_WORKFLOW__VERTEX_LOCATION": "test-loc",
             },
             "vertex",

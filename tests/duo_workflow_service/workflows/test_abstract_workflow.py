@@ -345,7 +345,7 @@ async def test_run_passes_correct_metadata_to_langsmith_extra(
 
 
 @pytest.mark.asyncio
-@patch.dict(os.environ, {"DUO_WORKFLOW__VERTEX_PROJECT_ID": ""})
+@patch.dict(os.environ, {"AIGW_GOOGLE_CLOUD_PLATFORM__PROJECT": ""})
 async def test_workflow_get_chat_model_without_vertex():
     """Test _get_model_config returns standard model when VERTEX_PROJECT_ID is not set."""
     workflow = Workflow(
@@ -362,7 +362,7 @@ async def test_workflow_get_chat_model_without_vertex():
 @patch.dict(
     os.environ,
     {
-        "DUO_WORKFLOW__VERTEX_PROJECT_ID": "123",
+        "AIGW_GOOGLE_CLOUD_PLATFORM__PROJECT": "123",
         "DUO_WORKFLOW__VERTEX_LOCATION": "us-central",
     },
 )

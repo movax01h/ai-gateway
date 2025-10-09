@@ -906,7 +906,7 @@ async def test_workflow_cleanup(workflow):
         # Vertex (falls back to parent's hardcoded model)
         (
             {
-                "DUO_WORKFLOW__VERTEX_PROJECT_ID": "test-project",
+                "AIGW_GOOGLE_CLOUD_PLATFORM__PROJECT": "test-project",
                 "DUO_WORKFLOW__VERTEX_LOCATION": "us-central1",
             },
             VertexConfig,
