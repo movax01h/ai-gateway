@@ -160,9 +160,15 @@ class Prompt(RunnableBinding[Input, Output]):
         disable_streaming: bool,
     ) -> Model:
         # The params in the prompt file have higher precedence than the ones in the model definition
+        llm_params = (
+            model_metadata.llm_definition_params if model_metadata else {}
+        ).copy()
+        # Exclude model_class_provider as it's used for factory selection, not model instantiation
+        llm_params.pop("model_class_provider", None)
+
         model_factory_args = {
             "disable_streaming": disable_streaming,
-            **(model_metadata.llm_definition_params if model_metadata else {}),
+            **llm_params,
             **config.params.model_dump(
                 exclude={"model_class_provider"}, exclude_none=True, by_alias=True
             ),

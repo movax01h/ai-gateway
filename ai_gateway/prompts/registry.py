@@ -334,7 +334,14 @@ class LocalPromptRegistry(BasePromptRegistry):
                 prompt_id, resolved_prompt_version
             )
 
-        model_class_provider = config.model.params.model_class_provider
+        model_class_provider = (
+            model_metadata.llm_definition_params.get(
+                "model_class_provider"
+            )  # From model definition in models.yml
+            if model_metadata and model_metadata.llm_definition_params
+            else None
+        ) or config.model.params.model_class_provider  # From prompt file
+
         model_factory = self.model_factories.get(model_class_provider, None)
 
         if not model_factory:
@@ -347,6 +354,7 @@ class LocalPromptRegistry(BasePromptRegistry):
             prompt_id=prompt_id,
             prompt_name=config.name,
             prompt_version=prompt_version,
+            model_class_provider=model_class_provider,
             model_identifier=(
                 # identifier works for custom models, name works for gitlab models
                 getattr(model_metadata, "identifier", None)

@@ -182,6 +182,7 @@ models:
       - gpt_5
     params:
       model: gpt-5-2025-08-07
+      model_class_provider: "openai"
       temperature: 1.0  # this model always requires temperature to be 1
       max_tokens: 4_096
 
@@ -191,6 +192,7 @@ models:
       - gpt_5
     params:
       model: gpt-5-mini-2025-08-07
+      model_class_provider: "openai"
       max_tokens: 4_096
 
   - name: "OpenAI GPT-5-Codex"
@@ -199,6 +201,7 @@ models:
       - gpt_5
     params:
       model: gpt-5-codex
+      model_class_provider: "openai"
       verbosity: "medium"
       max_tokens: 4_096
 
