@@ -54,6 +54,9 @@ class FlowConfig(BaseModel):
     environment: Literal["ambient", "chat", "chat-partial"]
     version: Literal["v1"]
     prompts: Optional[list[InMemoryPromptConfig]] = None
+    name: Optional[str] = None
+    description: Optional[str] = None
+    product_group: Optional[str] = None
 
     def input_json_schemas_by_category(self):
         json_schemas_by_category: dict[str, dict] = {}
