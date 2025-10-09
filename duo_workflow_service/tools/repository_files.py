@@ -131,10 +131,14 @@ class GetRepositoryFile(RepositoryFileBaseTool):
             response = await self.gitlab_client.aget(
                 path=f"/api/v4/projects/{project_id}/repository/files/{encoded_file_path}",
                 params={"ref": ref},
-                parse_json=False,
+                parse_json=True,
+                use_http_response=True,
             )
 
-            content = base64.b64decode(json.loads(response)["content"]).decode("utf-8")
+            if not response.is_success():
+                return json.dumps({"error": response.body})
+
+            content = base64.b64decode(response.body["content"]).decode("utf-8")
 
             return json.dumps({"content": content})
         except Exception as e:
@@ -225,7 +229,11 @@ class ListRepositoryTree(DuoBaseTool):
             response = await self.gitlab_client.aget(
                 path=f"/api/v4/projects/{project_id}/repository/tree",
                 params=params,
+                use_http_response=True,
             )
+
+            if not response.is_success():
+                return json.dumps(response.body)
 
             # Filter results based on file exclusion policy
             policy = FileExclusionPolicy(self.project)
@@ -233,14 +241,14 @@ class ListRepositoryTree(DuoBaseTool):
             # Extract file paths from the response objects
             file_paths: List[str] = [
                 item.get("path", "")
-                for item in response
+                for item in response.body
                 if isinstance(item.get("path"), str)
             ]
             allowed_paths, _excluded_paths = policy.filter_allowed(file_paths)
 
             # Filter the original response to only include allowed items
             filtered_response = [
-                item for item in response if item.get("path") in allowed_paths
+                item for item in response.body if item.get("path") in allowed_paths
             ]
 
             return json.dumps({"tree": filtered_response})

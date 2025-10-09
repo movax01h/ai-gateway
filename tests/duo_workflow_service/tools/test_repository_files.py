@@ -4,6 +4,7 @@ from unittest.mock import AsyncMock, Mock, patch
 
 import pytest
 
+from duo_workflow_service.gitlab.http_client import GitLabHttpResponse
 from duo_workflow_service.gitlab.url_parser import GitLabUrlParser
 from duo_workflow_service.policies.file_exclusion_policy import FileExclusionPolicy
 from duo_workflow_service.tools.repository_files import (
@@ -168,14 +169,22 @@ async def test_get_file_success(
     content,
     expected_result,
 ):
-    gitlab_client_mock.aget.return_value = content
+    # Parse the content to create a proper response
+    content_dict = json.loads(content)
+    mock_response = GitLabHttpResponse(
+        status_code=200,
+        body=content_dict,
+        headers={"content-type": "application/json"},
+    )
+    gitlab_client_mock.aget.return_value = mock_response
 
     result = await tool._arun(**input_params)
 
     gitlab_client_mock.aget.assert_called_once_with(
         path=expected_path,
         params={"ref": expected_ref},
-        parse_json=False,
+        parse_json=True,
+        use_http_response=True,
     )
 
     assert json.loads(result) == expected_result
@@ -242,7 +251,13 @@ async def test_get_file_errors(
     elif mock_setup["mock_type"] == "api_error":
         gitlab_client_mock.aget.side_effect = mock_setup["mock_value"]
     elif mock_setup["mock_type"] == "binary_content":
-        gitlab_client_mock.aget.return_value = mock_setup["mock_value"]
+        content_dict = json.loads(mock_setup["mock_value"])
+        mock_response = GitLabHttpResponse(
+            status_code=200,
+            body=content_dict,
+            headers={"content-type": "application/json"},
+        )
+        gitlab_client_mock.aget.return_value = mock_response
 
     result = await tool._arun(**input_params)
     error_response = json.loads(result)
@@ -397,13 +412,19 @@ async def test_list_repository_tree_success(
     mock_response,
     expected_result,
 ):
-    gitlab_client_mock.aget.return_value = mock_response
+    mock_http_response = GitLabHttpResponse(
+        status_code=200,
+        body=mock_response,
+        headers={"content-type": "application/json"},
+    )
+    gitlab_client_mock.aget.return_value = mock_http_response
 
     result = await tree_tool._arun(**input_params)
 
     gitlab_client_mock.aget.assert_called_once_with(
         path=expected_path,
         params=expected_params,
+        use_http_response=True,
     )
 
     assert json.loads(result) == expected_result
@@ -556,7 +577,12 @@ async def test_optional_parameters_handling(
     tree_tool, gitlab_client_mock, input_params, expected_params_subset
 ):
     """Test that None values are not included in API params."""
-    gitlab_client_mock.aget.return_value = []
+    mock_response = GitLabHttpResponse(
+        status_code=200,
+        body=[],
+        headers={"content-type": "application/json"},
+    )
+    gitlab_client_mock.aget.return_value = mock_response
 
     await tree_tool._arun(**input_params)
 
@@ -574,6 +600,7 @@ async def test_optional_parameters_handling(
 @pytest.mark.asyncio
 async def test_complex_tree_structure(tree_tool, gitlab_client_mock):
     """Test with a complex tree structure containing various file types."""
+
     complex_tree = [
         {
             "id": "a1b2c3d4",
@@ -605,7 +632,12 @@ async def test_complex_tree_structure(tree_tool, gitlab_client_mock):
         },
     ]
 
-    gitlab_client_mock.aget.return_value = complex_tree
+    mock_response = GitLabHttpResponse(
+        status_code=200,
+        body=complex_tree,
+        headers={"content-type": "application/json"},
+    )
+    gitlab_client_mock.aget.return_value = mock_response
 
     result = await tree_tool._arun(project_id="test/project")
 
@@ -749,12 +781,14 @@ class TestGetRepositoryFileWithExclusion:
 
     @pytest.fixture
     def mock_content(self):
-        return json.dumps(
-            {
+        return GitLabHttpResponse(
+            status_code=200,
+            body={
                 "content": base64.b64encode("file content".encode("utf-8")).decode(
                     "utf-8"
                 )
-            }
+            },
+            headers={"content-type": "application/json"},
         )
 
     @pytest.mark.asyncio
@@ -920,7 +954,7 @@ class TestListRepositoryTreeWithExclusion:
         tool = ListRepositoryTree(metadata=metadata_with_project)
 
         # Mock response with mixed allowed and excluded files
-        mock_response = [
+        mock_content = [
             {"id": "1", "name": "README.md", "type": "blob", "path": "README.md"},
             {"id": "2", "name": "debug.log", "type": "blob", "path": "debug.log"},
             {"id": "3", "name": "main.py", "type": "blob", "path": "src/main.py"},
@@ -938,6 +972,11 @@ class TestListRepositoryTreeWithExclusion:
                 "path": "secret_key.txt",
             },
         ]
+        mock_response = GitLabHttpResponse(
+            status_code=200,
+            body=mock_content,
+            headers={"content-type": "application/json"},
+        )
         gitlab_client_mock.aget.return_value = mock_response
 
         result = await tool._arun(project_id="test/project")
@@ -957,18 +996,23 @@ class TestListRepositoryTreeWithExclusion:
         """Test ListRepositoryTree with no exclusion rules."""
         tool = ListRepositoryTree(metadata=metadata_no_exclusion_rules)
 
-        mock_response = [
+        mock_content = [
             {"id": "1", "name": "README.md", "type": "blob", "path": "README.md"},
             {"id": "2", "name": "debug.log", "type": "blob", "path": "debug.log"},
             {"id": "3", "name": "main.py", "type": "blob", "path": "src/main.py"},
         ]
+        mock_response = GitLabHttpResponse(
+            status_code=200,
+            body=mock_content,
+            headers={"content-type": "application/json"},
+        )
         gitlab_client_mock.aget.return_value = mock_response
 
         result = await tool._arun(project_id="test/project")
         response = json.loads(result)
 
         # All files should be included
-        assert response["tree"] == mock_response
+        assert response["tree"] == mock_content
 
     @pytest.mark.asyncio
     async def test_list_tree_empty_response(
@@ -977,7 +1021,12 @@ class TestListRepositoryTreeWithExclusion:
         """Test ListRepositoryTree with empty API response."""
         tool = ListRepositoryTree(metadata=metadata_with_project)
 
-        gitlab_client_mock.aget.return_value = []
+        mock_response = GitLabHttpResponse(
+            status_code=200,
+            body=[],
+            headers={"content-type": "application/json"},
+        )
+        gitlab_client_mock.aget.return_value = mock_response
 
         result = await tool._arun(project_id="test/project")
         response = json.loads(result)
@@ -992,7 +1041,7 @@ class TestListRepositoryTreeWithExclusion:
         tool = ListRepositoryTree(metadata=metadata_with_project)
 
         # All files match exclusion patterns
-        mock_response = [
+        mock_content = [
             {"id": "1", "name": "debug.log", "type": "blob", "path": "debug.log"},
             {"id": "2", "name": "app.log", "type": "blob", "path": "app.log"},
             {
@@ -1009,6 +1058,11 @@ class TestListRepositoryTreeWithExclusion:
                 "path": "secret_config.json",
             },
         ]
+        mock_response = GitLabHttpResponse(
+            status_code=200,
+            body=mock_content,
+            headers={"content-type": "application/json"},
+        )
         gitlab_client_mock.aget.return_value = mock_response
 
         result = await tool._arun(project_id="test/project")
@@ -1042,7 +1096,7 @@ class TestListRepositoryTreeWithExclusion:
         }
         tool = ListRepositoryTree(metadata=metadata)
 
-        mock_response = [
+        mock_content = [
             {"id": "1", "name": "README.md", "type": "blob", "path": "README.md"},
             {"id": "2", "name": "main.py", "type": "blob", "path": "src/main.py"},
             {"id": "3", "name": "utils.py", "type": "blob", "path": "src/utils.py"},
@@ -1077,7 +1131,11 @@ class TestListRepositoryTreeWithExclusion:
             {"id": "12", "name": "bundle.js", "type": "blob", "path": "dist/bundle.js"},
             {"id": "13", "name": "temp.tmp", "type": "blob", "path": "temp.tmp"},
         ]
-
+        mock_response = GitLabHttpResponse(
+            status_code=200,
+            body=mock_content,
+            headers={"content-type": "application/json"},
+        )
         gitlab_client_mock.aget.return_value = mock_response
 
         result = await tool._arun(project_id="test/project")
@@ -1096,15 +1154,20 @@ class TestListRepositoryTreeWithExclusion:
         """Test ListRepositoryTree with no project (no exclusion policy)."""
         tool = ListRepositoryTree(metadata=metadata)
 
-        mock_response = [
+        mock_content = [
             {"id": "1", "name": "README.md", "type": "blob", "path": "README.md"},
             {"id": "2", "name": "debug.log", "type": "blob", "path": "debug.log"},
             {"id": "3", "name": "main.py", "type": "blob", "path": "src/main.py"},
         ]
+        mock_response = GitLabHttpResponse(
+            status_code=200,
+            body=mock_content,
+            headers={"content-type": "application/json"},
+        )
         gitlab_client_mock.aget.return_value = mock_response
 
         result = await tool._arun(project_id="test/project")
         response = json.loads(result)
 
         # All files should be included when no project
-        assert response["tree"] == mock_response
+        assert response["tree"] == mock_content
