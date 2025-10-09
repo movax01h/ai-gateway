@@ -493,7 +493,7 @@ class GitLabWorkflow(
                     user=user,
                     event_type="duo_agent_platform_workflow_completion",
                     category=self.__class__.__name__,
-                    unit_of_measure="tokens",
+                    unit_of_measure="request",
                     quantity=1,
                     metadata=billing_metadata,
                 )
