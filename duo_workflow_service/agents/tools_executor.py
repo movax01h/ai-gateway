@@ -245,8 +245,7 @@ class ToolsExecutor:
             }
 
         except TypeError as error:
-            tool_context = {"tool": tool, "name": tool_name, "args": tool_args}
-            return self._handle_type_error(tool_context, error, chat_logs)
+            return self._handle_type_error(tool, tool_name, tool_args, error, chat_logs)
 
         except ValidationError as error:
             return self._handle_validation_error(tool_name, tool_args, error, chat_logs)
@@ -256,17 +255,15 @@ class ToolsExecutor:
 
     def _handle_type_error(
         self,
-        tool_context: Dict[str, Any],
+        tool: Any,
+        tool_name: str,
+        tool_args: Dict[str, Any],
         error: TypeError,
         chat_logs: List[UiChatLog],
     ) -> Dict[str, Any]:
         # log the error itself to check if the TypeError is indeed
         # a schema error.
         self._logger.error(f"Tools executor raised TypeError {error}")
-
-        tool = tool_context["tool"]
-        tool_name = tool_context["name"]
-        tool_args = tool_context["args"]
 
         schema = (
             f"The schema is: {tool.args_schema.model_json_schema()}"
