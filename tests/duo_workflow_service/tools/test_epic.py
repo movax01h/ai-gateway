@@ -34,41 +34,32 @@ def metadata_fixture(gitlab_client_mock):
 
 @pytest.mark.asyncio
 async def test_get_epic(gitlab_client_mock, metadata):
-    gitlab_client_mock.aget = AsyncMock(
-        return_value={
-            "id": 1,
-            "iid": 5,
-            "group_id": 1,
-            "title": "Test Epic",
-            "description": "This is a test epic",
-            "state": "opened",
-            "created_at": "2024-01-01T12:00:00Z",
-            "updated_at": "2024-01-01T12:00:00Z",
-        }
+    epic_data = {
+        "id": 1,
+        "iid": 5,
+        "group_id": 1,
+        "title": "Test Epic",
+        "description": "This is a test epic",
+        "state": "opened",
+        "created_at": "2024-01-01T12:00:00Z",
+        "updated_at": "2024-01-01T12:00:00Z",
+    }
+
+    mock_response = GitLabHttpResponse(
+        status_code=200,
+        body=epic_data,
     )
+    gitlab_client_mock.aget = AsyncMock(return_value=mock_response)
 
     tool = GetEpic(description="get epic description", metadata=metadata)
 
     response = await tool._arun(group_id=1, epic_iid=5)
 
-    expected_response = json.dumps(
-        {
-            "epic": {
-                "id": 1,
-                "iid": 5,
-                "group_id": 1,
-                "title": "Test Epic",
-                "description": "This is a test epic",
-                "state": "opened",
-                "created_at": "2024-01-01T12:00:00Z",
-                "updated_at": "2024-01-01T12:00:00Z",
-            }
-        }
-    )
+    expected_response = json.dumps({"epic": epic_data})
     assert response == expected_response
 
     gitlab_client_mock.aget.assert_called_once_with(
-        path="/api/v4/groups/1/epics/5", parse_json=False
+        path="/api/v4/groups/1/epics/5", parse_json=False, use_http_response=True
     )
 
 
@@ -84,47 +75,40 @@ async def test_get_epic_error(gitlab_client_mock, metadata):
     assert response == expected_response
 
     gitlab_client_mock.aget.assert_called_once_with(
-        path="/api/v4/groups/1/epics/999", parse_json=False
+        path="/api/v4/groups/1/epics/999", parse_json=False, use_http_response=True
     )
 
 
 @pytest.mark.asyncio
 async def test_get_epic_with_string_group_id(gitlab_client_mock, metadata):
-    gitlab_client_mock.aget = AsyncMock(
-        return_value={
-            "id": 1,
-            "iid": 5,
-            "group_id": 1,
-            "title": "Test Epic",
-            "description": "This is a test epic",
-            "state": "opened",
-            "created_at": "2024-01-01T12:00:00Z",
-            "updated_at": "2024-01-01T12:00:00Z",
-        }
+    epic_data = {
+        "id": 1,
+        "iid": 5,
+        "group_id": 1,
+        "title": "Test Epic",
+        "description": "This is a test epic",
+        "state": "opened",
+        "created_at": "2024-01-01T12:00:00Z",
+        "updated_at": "2024-01-01T12:00:00Z",
+    }
+
+    mock_response = GitLabHttpResponse(
+        status_code=200,
+        body=epic_data,
     )
+    gitlab_client_mock.aget = AsyncMock(return_value=mock_response)
 
     tool = GetEpic(description="get epic description", metadata=metadata)
 
     response = await tool._arun(group_id="group%2Fsubgroup", epic_iid=5)
 
-    expected_response = json.dumps(
-        {
-            "epic": {
-                "id": 1,
-                "iid": 5,
-                "group_id": 1,
-                "title": "Test Epic",
-                "description": "This is a test epic",
-                "state": "opened",
-                "created_at": "2024-01-01T12:00:00Z",
-                "updated_at": "2024-01-01T12:00:00Z",
-            }
-        }
-    )
+    expected_response = json.dumps({"epic": epic_data})
     assert response == expected_response
 
     gitlab_client_mock.aget.assert_called_once_with(
-        path="/api/v4/groups/group%2Fsubgroup/epics/5", parse_json=False
+        path="/api/v4/groups/group%2Fsubgroup/epics/5",
+        parse_json=False,
+        use_http_response=True,
     )
 
 
@@ -140,7 +124,9 @@ async def test_get_epic_with_string_group_id_error(gitlab_client_mock, metadata)
     assert response == expected_response
 
     gitlab_client_mock.aget.assert_called_once_with(
-        path="/api/v4/groups/nonexistent%2Fgroup/epics/5", parse_json=False
+        path="/api/v4/groups/nonexistent%2Fgroup/epics/5",
+        parse_json=False,
+        use_http_response=True,
     )
 
 
@@ -188,7 +174,7 @@ def test_get_epic_format_display_message(input_data, expected_message):
 async def test_get_epic_with_url_success(
     url, group_id, epic_iid, expected_path, gitlab_client_mock, metadata
 ):
-    mock_response = {
+    mock_response_data = {
         "id": 1,
         "iid": 123,
         "group_id": "namespace%2Fgroup",
@@ -198,17 +184,22 @@ async def test_get_epic_with_url_success(
         "created_at": "2024-01-01T12:00:00Z",
         "updated_at": "2024-01-01T12:00:00Z",
     }
+
+    mock_response = GitLabHttpResponse(
+        status_code=200,
+        body=mock_response_data,
+    )
     gitlab_client_mock.aget = AsyncMock(return_value=mock_response)
 
     tool = GetEpic(description="get epic description", metadata=metadata)
 
     response = await tool._arun(url=url, group_id=group_id, epic_iid=epic_iid)
 
-    expected_response = json.dumps({"epic": mock_response})
+    expected_response = json.dumps({"epic": mock_response_data})
     assert response == expected_response
 
     gitlab_client_mock.aget.assert_called_once_with(
-        path=expected_path, parse_json=False
+        path=expected_path, parse_json=False, use_http_response=True
     )
 
 
@@ -270,44 +261,36 @@ async def test_validate_epic_url_no_url_no_epic_iid(metadata):
 
 @pytest.mark.asyncio
 async def test_list_epics_with_negate_parameter(gitlab_client_mock, metadata):
-    gitlab_client_mock.aget = AsyncMock(
-        return_value=[
-            {
-                "id": 1,
-                "iid": 5,
-                "group_id": 1,
-                "title": "Test Epic 1",
-                "description": "This is test epic 1",
-                "state": "opened",
-            },
-        ]
+    epics_data = [
+        {
+            "id": 1,
+            "iid": 5,
+            "group_id": 1,
+            "title": "Test Epic 1",
+            "description": "This is test epic 1",
+            "state": "opened",
+        },
+    ]
+
+    mock_response = GitLabHttpResponse(
+        status_code=200,
+        body=epics_data,
     )
+    gitlab_client_mock.aget = AsyncMock(return_value=mock_response)
     negate_params = {"author_id": 456, "labels": "wontfix"}
 
     tool = ListEpics(description="list epics description", metadata=metadata)
 
     response = await tool._arun(group_id=1, negate=negate_params)
 
-    expected_response = json.dumps(
-        {
-            "epics": [
-                {
-                    "id": 1,
-                    "iid": 5,
-                    "group_id": 1,
-                    "title": "Test Epic 1",
-                    "description": "This is test epic 1",
-                    "state": "opened",
-                },
-            ]
-        }
-    )
+    expected_response = json.dumps({"epics": epics_data})
     assert response == expected_response
 
     gitlab_client_mock.aget.assert_called_once_with(
         path="/api/v4/groups/1/epics",
         params={"not": negate_params},
         parse_json=False,
+        use_http_response=True,
     )
 
 
@@ -375,7 +358,12 @@ async def test_list_epics_success(gitlab_client_mock, metadata):
             "updated_at": "2024-01-02T12:00:00Z",
         },
     ]
-    gitlab_client_mock.aget = AsyncMock(return_value=sample_epics)
+
+    mock_response = GitLabHttpResponse(
+        status_code=200,
+        body=sample_epics,
+    )
+    gitlab_client_mock.aget = AsyncMock(return_value=mock_response)
 
     tool = ListEpics(description="list epics description", metadata=metadata)
 
@@ -411,6 +399,7 @@ async def test_list_epics_success(gitlab_client_mock, metadata):
             "my_reaction_emoji": "thumbsup",
         },
         parse_json=False,
+        use_http_response=True,
     )
 
 
@@ -429,6 +418,7 @@ async def test_list_epics_error(gitlab_client_mock, metadata):
         path="/api/v4/groups/999/epics",
         params={},
         parse_json=False,
+        use_http_response=True,
     )
 
 
@@ -495,7 +485,7 @@ def test_list_epic_format_display_message(input_data, expected_message):
 async def test_list_epics_with_url_success(
     url, group_id, expected_path, gitlab_client_mock, metadata
 ):
-    mock_response = [
+    mock_response_data = [
         {
             "id": 1,
             "iid": 5,
@@ -517,6 +507,11 @@ async def test_list_epics_with_url_success(
             "updated_at": "2024-01-02T12:00:00Z",
         },
     ]
+
+    mock_response = GitLabHttpResponse(
+        status_code=200,
+        body=mock_response_data,
+    )
     gitlab_client_mock.aget = AsyncMock(return_value=mock_response)
 
     tool = ListEpics(description="list epics description", metadata=metadata)
@@ -534,7 +529,7 @@ async def test_list_epics_with_url_success(
         my_reaction_emoji="thumbsup",
     )
 
-    expected_response = json.dumps({"epics": mock_response})
+    expected_response = json.dumps({"epics": mock_response_data})
     assert response == expected_response
 
     gitlab_client_mock.aget.assert_called_once_with(
@@ -550,6 +545,7 @@ async def test_list_epics_with_url_success(
             "my_reaction_emoji": "thumbsup",
         },
         parse_json=False,
+        use_http_response=True,
     )
 
 

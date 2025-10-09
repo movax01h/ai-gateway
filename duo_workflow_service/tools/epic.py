@@ -1,4 +1,5 @@
 import json
+import logging
 from typing import Any, List, NamedTuple, Optional, Type, Union
 
 from gitlab_cloud_connector import GitLabUnitPrimitive
@@ -10,6 +11,8 @@ from duo_workflow_service.tools.duo_base_tool import (
     DuoBaseTool,
 )
 from duo_workflow_service.tools.queries.epics import GET_EPIC_NOTES_QUERY
+
+logger = logging.getLogger(__name__)
 
 # editorconfig-checker-disable
 GROUP_IDENTIFICATION_DESCRIPTION = """To identify the group you must provide either:
@@ -345,8 +348,17 @@ class ListEpics(EpicBaseTool):
                 path=f"/api/v4/groups/{validation_result.group_id}/epics",
                 params=params,
                 parse_json=False,
+                use_http_response=True,
             )
-            return json.dumps({"epics": response})
+
+            if not response.is_success():
+                logger.error(
+                    "API error - Status: %s, Body: %s",
+                    response.status_code,
+                    response.body,
+                )
+
+            return json.dumps({"epics": response.body})
         except Exception as e:
             return json.dumps({"error": str(e)})
 
@@ -389,8 +401,17 @@ class GetEpic(EpicBaseTool):
             response = await self.gitlab_client.aget(
                 path=f"/api/v4/groups/{validation_result.group_id}/epics/{validation_result.epic_iid}",
                 parse_json=False,
+                use_http_response=True,
             )
-            return json.dumps({"epic": response})
+
+            if not response.is_success():
+                logger.error(
+                    "API error - Status: %s, Body: %s",
+                    response.status_code,
+                    response.body,
+                )
+
+            return json.dumps({"epic": response.body})
         except Exception as e:
             return json.dumps({"error": str(e)})
 

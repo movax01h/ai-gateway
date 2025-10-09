@@ -1,6 +1,7 @@
 import base64
 import fnmatch
 import json
+import logging
 from typing import Any, Dict, List, Optional, Type
 from urllib.parse import quote
 
@@ -11,6 +12,8 @@ from pydantic import BaseModel, Field
 from duo_workflow_service.policies.diff_exclusion_policy import DiffExclusionPolicy
 from duo_workflow_service.tools.duo_base_tool import DuoBaseTool
 from duo_workflow_service.tools.gitlab_resource_input import ProjectResourceInput
+
+logger = logging.getLogger(__name__)
 
 
 class PostDuoCodeReviewInput(BaseModel):
@@ -181,8 +184,16 @@ class BuildReviewMergeRequestContext(DuoBaseTool):
             f"/api/v4/projects/{validation_result.project_id}/"
             f"merge_requests/{validation_result.merge_request_iid}"
         )
-        response = await self.gitlab_client.aget(path, parse_json=False)
-        return json.loads(response)
+        response = await self.gitlab_client.aget(
+            path, parse_json=False, use_http_response=True
+        )
+
+        if not response.is_success():
+            logger.error(
+                "API error - Status: %s, Body: %s", response.status_code, response.body
+            )
+
+        return json.loads(response.body)
 
     async def _fetch_mr_diffs(self, validation_result) -> List[Dict[str, Any]]:
         """Fetch merge request diffs."""
@@ -190,8 +201,16 @@ class BuildReviewMergeRequestContext(DuoBaseTool):
             f"/api/v4/projects/{validation_result.project_id}/"
             f"merge_requests/{validation_result.merge_request_iid}/diffs"
         )
-        response = await self.gitlab_client.aget(path, parse_json=False)
-        return json.loads(response)
+        response = await self.gitlab_client.aget(
+            path, parse_json=False, use_http_response=True
+        )
+
+        if not response.is_success():
+            logger.error(
+                "API error - Status: %s, Body: %s", response.status_code, response.body
+            )
+
+        return json.loads(response.body)
 
     async def _fetch_original_files(
         self, project_id: int, branch: str, file_paths: List[str]
@@ -230,10 +249,15 @@ class BuildReviewMergeRequestContext(DuoBaseTool):
         path = f"/api/v4/projects/{project_id}/repository/files/{encoded_path}"
 
         response = await self.gitlab_client.aget(
-            path, params={"ref": branch}, parse_json=False
+            path, params={"ref": branch}, parse_json=False, use_http_response=True
         )
 
-        file_data = json.loads(response)
+        if not response.is_success():
+            logger.error(
+                "API error - Status: %s, Body: %s", response.status_code, response.body
+            )
+
+        file_data = json.loads(response.body)
         return base64.b64decode(file_data["content"]).decode("utf-8")
 
     def _process_filtered_diffs(

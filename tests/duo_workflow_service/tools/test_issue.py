@@ -110,11 +110,14 @@ def metadata_fixture(gitlab_client_mock):
 def issue_tool_setup_fixture():
     """Fixture that provides a mock GitLab client and metadata with standard issue data."""
     gitlab_client_mock = AsyncMock()
-    gitlab_client_mock.aget.return_value = {
-        "id": 1,
-        "title": "Test Issue",
-        "description": "This is a test issue",
-    }
+    gitlab_client_mock.aget.return_value = GitLabHttpResponse(
+        status_code=200,
+        body={
+            "id": 1,
+            "title": "Test Issue",
+            "description": "This is a test issue",
+        },
+    )
     metadata = {
         "gitlab_client": gitlab_client_mock,
     }
@@ -137,7 +140,7 @@ async def tool_url_success_response(
         headers={"content-type": "application/json"},
     )
 
-    gitlab_client_mock.aget = AsyncMock(return_value=response_data)
+    gitlab_client_mock.aget = AsyncMock(return_value=mock_response)
     gitlab_client_mock.apost = AsyncMock(return_value=response_data)
     gitlab_client_mock.aput = AsyncMock(return_value=mock_response)
 
@@ -374,7 +377,12 @@ async def test_list_issues(
     metadata,
     issues_list_data,
 ):
-    gitlab_client_mock.aget = AsyncMock(return_value=issues_list_data)
+    gitlab_client_mock.aget = AsyncMock(
+        return_value=GitLabHttpResponse(
+            status_code=200,
+            body=issues_list_data,
+        )
+    )
 
     tool = ListIssues(description="listed issue description", metadata=metadata)
 
@@ -394,7 +402,10 @@ async def test_list_issues(
     assert response == expected_response
 
     gitlab_client_mock.aget.assert_called_once_with(
-        path="/api/v4/projects/1/issues", params=expected_params, parse_json=False
+        path="/api/v4/projects/1/issues",
+        params=expected_params,
+        parse_json=False,
+        use_http_response=True,
     )
 
 
@@ -448,6 +459,7 @@ async def test_list_issues_with_url_success(
         path=expected_path,
         params={"state": "opened"},
         parse_json=False,
+        use_http_response=True,
     )
 
 
@@ -561,7 +573,7 @@ async def test_get_issue(issue_tool_setup):
     assert response == expected_response
 
     gitlab_client_mock.aget.assert_called_once_with(
-        path="/api/v4/projects/1/issues/123", parse_json=False
+        path="/api/v4/projects/1/issues/123", parse_json=False, use_http_response=True
     )
 
 
@@ -630,7 +642,7 @@ async def test_get_issue_with_url_success(
     assert response == expected_response
 
     gitlab_client_mock.aget.assert_called_once_with(
-        path=expected_path, parse_json=False
+        path=expected_path, parse_json=False, use_http_response=True
     )
 
 
@@ -1067,10 +1079,13 @@ async def test_list_issue_notes(
     sort, order_by, page, expected_params, gitlab_client_mock, metadata
 ):
     gitlab_client_mock.aget = AsyncMock(
-        return_value=[
-            {"id": 1, "body": "Note 1"},
-            {"id": 2, "body": "Note 2"},
-        ]
+        return_value=GitLabHttpResponse(
+            status_code=200,
+            body=[
+                {"id": 1, "body": "Note 1"},
+                {"id": 2, "body": "Note 2"},
+            ],
+        )
     )
 
     tool = ListIssueNotes(description="list issue notes description", metadata=metadata)
@@ -1088,6 +1103,7 @@ async def test_list_issue_notes(
         path="/api/v4/projects/1/issues/123/notes",
         params=expected_params,
         parse_json=False,
+        use_http_response=True,
     )
 
 
@@ -1120,7 +1136,10 @@ def test_list_issue_notes_format_display_message(input_data, expected_message):
 @pytest.mark.asyncio
 async def test_get_issue_note(issue_tool_setup, note_data):
     gitlab_client_mock, metadata = issue_tool_setup
-    gitlab_client_mock.aget.return_value = note_data
+    gitlab_client_mock.aget.return_value = GitLabHttpResponse(
+        status_code=200,
+        body=note_data,
+    )
 
     tool = GetIssueNote(description="get issue note description", metadata=metadata)
 
@@ -1139,7 +1158,9 @@ async def test_get_issue_note(issue_tool_setup, note_data):
     assert response == expected_response
 
     gitlab_client_mock.aget.assert_called_once_with(
-        path="/api/v4/projects/1/issues/123/notes/1", parse_json=False
+        path="/api/v4/projects/1/issues/123/notes/1",
+        parse_json=False,
+        use_http_response=True,
     )
 
 
@@ -1366,6 +1387,7 @@ async def test_list_issue_notes_with_url_success(
         path=expected_path,
         params={"sort": "asc"},
         parse_json=False,
+        use_http_response=True,
     )
 
 
@@ -1447,6 +1469,7 @@ async def test_get_issue_note_with_url_success(
     gitlab_client_mock.aget.assert_called_once_with(
         path=expected_path,
         parse_json=False,
+        use_http_response=True,
     )
 
 
