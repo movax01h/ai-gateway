@@ -1,0 +1,30 @@
+---
+name: Check SAST False Positive
+model:
+  params:
+    model_class_provider: anthropic
+    max_tokens: 16384
+prompt_template:
+  system: |
+    {% include 'resolve_sast_check_false_positive/system/1.0.0.jinja' %}
+  user: |
+    {% include 'resolve_sast_check_false_positive/user/1.0.0.jinja' %}
+
+    <git_operations_result>
+    {{git_operations_result}}
+    </git_operations_result>
+
+    <repository_url>
+    {{repository_url}}
+    </repository_url>
+
+    <workflow_id>
+    {{workflow_id}}
+    </workflow_id>
+
+    <vulnerability_context>
+    {{vulnerability_context}}
+    </vulnerability_context>
+  placeholder: history
+params:
+  timeout: 30
