@@ -1,3 +1,8 @@
+name: "Fix pipeline"
+description: |
+  Fix pipeline flow can be run for a failed CI jobs.
+  It opens a new MR with changes that address root cause of CI job failures.
+product_group: agent_foundations
 version: "v1"
 environment: ambient
 components:
