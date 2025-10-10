@@ -1277,8 +1277,6 @@ class TestCodeCompletions:
 
         assert (body["detail"]) == expected_error_message
 
-
-
     def _send_code_completions_request(
         self, mock_client, params, enable_prompt_cache="false"
     ):
