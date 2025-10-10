@@ -1,12 +1,18 @@
 from typing import Any, Dict
 from unittest import mock
+from unittest.mock import MagicMock
 
 import pytest
 from gitlab_cloud_connector import CloudConnectorUser, UserClaims
 from snowplow_tracker import SelfDescribingJson, Snowplow
 
 from lib.billing_events.client import BillingEventsClient
-from lib.internal_events.context import EventContext, current_event_context
+from lib.internal_events.client import InternalEventsClient
+from lib.internal_events.context import (
+    EventContext,
+    InternalEventAdditionalProperties,
+    current_event_context,
+)
 
 BASE_BILLING_CONTEXT_SCHEMA: Dict[str, Any] = {
     "event_id": None,
@@ -75,6 +81,7 @@ class TestBillingEventsClient:
                 namespace="gl",
                 batch_size=3,
                 thread_count=2,
+                internal_event_client=MagicMock(spec=InternalEventsClient),
             )
 
     @pytest.fixture(name="user")
@@ -96,6 +103,7 @@ class TestBillingEventsClient:
             namespace="gl",
             batch_size=3,
             thread_count=2,
+            internal_event_client=MagicMock(spec=InternalEventsClient),
         )
 
         mock_emitter_init.assert_called_once()
@@ -214,6 +222,7 @@ class TestBillingEventsClient:
             namespace="gl",
             batch_size=3,
             thread_count=2,
+            internal_event_client=MagicMock(spec=InternalEventsClient),
         )
 
         assert not hasattr(client, "snowplow_tracker")
@@ -319,3 +328,70 @@ class TestBillingEventsClient:
                 )
             except Exception as e:
                 pytest.fail(f"Failed to send billing event: {e}")
+
+    def test_internal_events_client_track_event_called_with_correct_parameters(
+        self, client, user, mock_dependencies  # pylint: disable=unused-argument
+    ):
+        """Test that internal_events_client.track_event is called with correct parameters."""
+        event_type = "ai_completion"
+        category = "test_category"
+
+        client.track_billing_event(
+            user=user,
+            event_type=event_type,
+            category=category,
+            unit_of_measure="tokens",
+            quantity=100.0,
+        )
+
+        client.internal_event_client.track_event.assert_called_once_with(
+            event_name="usage_billing_event",
+            category=category,
+            additional_properties=InternalEventAdditionalProperties(
+                property=event_type, label="12345678-1234-5678-9012-123456789012"
+            ),
+        )
+
+    def test_internal_events_client_not_called_when_billing_disabled(self, user):
+        """Test that internal_events_client.track_event is not called when billing is disabled."""
+        with (
+            mock.patch("snowplow_tracker.Tracker.__init__", return_value=None),
+            mock.patch(
+                "snowplow_tracker.emitters.AsyncEmitter.__init__", return_value=None
+            ),
+        ):
+            client = BillingEventsClient(
+                enabled=False,
+                endpoint="https://billing.local",
+                app_id="gitlab_ai_gateway",
+                namespace="gl",
+                batch_size=3,
+                thread_count=2,
+                internal_event_client=MagicMock(spec=InternalEventsClient),
+            )
+
+            client.track_billing_event(
+                user=user,
+                event_type="ai_completion",
+                category="test_category",
+                unit_of_measure="tokens",
+                quantity=100.0,
+            )
+
+            client.internal_event_client.track_event.assert_not_called()
+
+    def test_internal_events_client_not_called_on_tracker_exception(
+        self, client, user, mock_dependencies
+    ):
+        """Test that internal_events_client.track_event is not called when tracker raises exception."""
+        mock_dependencies["track"].side_effect = Exception("Network error")
+
+        client.track_billing_event(
+            user=user,
+            event_type="ai_completion",
+            category="test_category",
+            unit_of_measure="tokens",
+            quantity=100.0,
+        )
+
+        client.internal_event_client.track_event.assert_not_called()
