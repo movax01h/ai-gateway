@@ -90,6 +90,8 @@ message RunCommandAction {
 
 message ReadFile {
     string filepath = 1;
+    optional int64 limit = 2;
+    optional int64 offset = 3;
 }
 
 message ReadFiles {
