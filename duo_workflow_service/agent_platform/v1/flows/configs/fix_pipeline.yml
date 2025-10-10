@@ -39,12 +39,15 @@ components:
     inputs:
       - from: "context:fix_pipeline_create_plan.final_answer"
         as: "fix_pipeline_plan"
+      - from: "context:inputs.pipeline.source_branch"
+        as: "source_branch"
     toolset:
       - create_file_with_contents
       - edit_file
       - find_files
       - mkdir
       - read_file
+      - ci_linter
     ui_log_events:
       - "on_agent_final_answer"
       - "on_tool_execution_success"
