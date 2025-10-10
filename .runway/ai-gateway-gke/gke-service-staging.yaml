@@ -22,7 +22,10 @@ ai-gateway-gke:
       AIGW_GOOGLE_CLOUD_PLATFORM__PROJECT: "gitlab-ai-framework-stage"
       AIGW_VERTEX_SEARCH__FALLBACK_DATASTORE_VERSION: "17.0"
       AIGW_SNOWPLOW__ENABLED: "false"
-      AIGW_INTERNAL_EVENT__ENABLED: "false"
+      AIGW_INTERNAL_EVENT__ENABLED: "true"
+      AIGW_INTERNAL_EVENT__ENDPOINT: "https://snowplowstg.trx.gitlab.net"
+      AIGW_INTERNAL_EVENT__BATCH_SIZE: 1
+      AIGW_INTERNAL_EVENT__THREAD_COUNT: 1
       AIGW_BILLING_EVENT__ENABLED: "true"
       AIGW_BILLING_EVENT__ENDPOINT: "https://billing.stgsub.gitlab.net"
       AIGW_BILLING_EVENT__NAMESPACE: "gl"

@@ -7,7 +7,12 @@ from gitlab_cloud_connector import CloudConnectorUser
 from snowplow_tracker import AsyncEmitter, SelfDescribingJson, StructuredEvent, Tracker
 
 from lib.billing_events.context import BillingEventContext
-from lib.internal_events.context import EventContext, current_event_context
+from lib.internal_events.client import InternalEventsClient
+from lib.internal_events.context import (
+    EventContext,
+    InternalEventAdditionalProperties,
+    current_event_context,
+)
 
 __all__ = ["BillingEventsClient"]
 
@@ -25,9 +30,11 @@ class BillingEventsClient:
         namespace: str,
         batch_size: int,
         thread_count: int,
+        internal_event_client: InternalEventsClient,
     ) -> None:
         self._logger = structlog.stdlib.get_logger("billing_events_client")
         self.enabled = enabled
+        self.internal_event_client = internal_event_client
 
         self._logger.info(
             "Initializing BillingEventsClient",
@@ -140,6 +147,16 @@ class BillingEventsClient:
         try:
             self.snowplow_tracker.track(structured_event)
             self._logger.debug("Successfully called snowplow_tracker.track()")
+
+            additional_properties = InternalEventAdditionalProperties(
+                label=event_id,
+                property=event_type,
+            )
+            self.internal_event_client.track_event(
+                event_name="usage_billing_event",
+                additional_properties=additional_properties,
+                category=category,
+            )
         except Exception as e:
             self._logger.error(
                 "Failed to send billing event",

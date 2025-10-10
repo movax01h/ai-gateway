@@ -42,7 +42,9 @@ class ContainerApplication(containers.DeclarativeContainer):
     )
 
     billing_event = providers.Container(
-        ContainerBillingEvent, config=config.billing_event
+        ContainerBillingEvent,
+        config=config.billing_event,
+        internal_event=internal_event,
     )
 
     integrations = providers.Container(
