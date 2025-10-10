@@ -149,6 +149,107 @@ def test_post_duo_code_review_format_display_message(input_data, expected_messag
     assert message == expected_message
 
 
+def test_parse_and_format_diff(metadata):
+    """Test that raw diffs are correctly parsed into structured format."""
+    tool = BuildReviewMergeRequestContext(metadata=metadata)
+
+    raw_diff = """@@ -1,3 +1,4 @@ class Calculator
+def add(a, b)
+-  a + b
++  a - b
+end"""
+
+    result = tool._parse_and_format_diff(raw_diff)
+
+    # Check chunk header
+    assert "<chunk_header>@@ -1,3 +1,4 @@ class Calculator</chunk_header>" in result
+
+    # Check context line
+    assert (
+        '<line type="context" old_line="1" new_line="1">def add(a, b)</line>' in result
+    )
+
+    # Check deleted line
+    assert '<line type="deleted" old_line="2" new_line="">  a + b</line>' in result
+
+    # Check added line
+    assert '<line type="added" old_line="" new_line="2">  a - b</line>' in result
+
+    # Check context line
+    assert '<line type="context" old_line="3" new_line="3">end</line>' in result
+
+
+def test_parse_and_format_diff_with_special_characters(metadata):
+    """Test that special XML characters are properly escaped."""
+    tool = BuildReviewMergeRequestContext(metadata=metadata)
+
+    raw_diff = """@@ -1,1 +1,1 @@
+-if x < 5 && y > 3:
++if x < 10 && y > 5:"""
+
+    result = tool._parse_and_format_diff(raw_diff)
+
+    # Check that < > & are escaped
+    assert "&lt;" in result
+    assert "&gt;" in result
+    assert "&amp;" in result
+    assert '<line type="deleted"' in result
+    assert '<line type="added"' in result
+
+
+def test_parse_and_format_diff_with_empty_lines(metadata):
+    """Test that empty lines are properly handled."""
+    tool = BuildReviewMergeRequestContext(metadata=metadata)
+
+    raw_diff = """@@ -1,4 +1,4 @@
+class Calculator
+-
++  # New comment
+end"""
+
+    result = tool._parse_and_format_diff(raw_diff)
+
+    # Check that empty lines are included
+    assert (
+        '<line type="context" old_line="1" new_line="1">class Calculator</line>'
+        in result
+    )
+    assert '<line type="deleted" old_line="2" new_line=""></line>' in result
+    assert (
+        '<line type="added" old_line="" new_line="2">  # New comment</line>' in result
+    )
+
+
+def test_parse_and_format_diff_binary_file(metadata):
+    """Test that binary files return empty string."""
+    tool = BuildReviewMergeRequestContext(metadata=metadata)
+
+    raw_diff = "Binary files differ"
+
+    result = tool._parse_and_format_diff(raw_diff)
+
+    assert result == ""
+
+
+def test_parse_and_format_diff_no_newline_at_end(metadata):
+    """Test handling of 'No newline at end of file' marker."""
+    tool = BuildReviewMergeRequestContext(metadata=metadata)
+
+    raw_diff = """@@ -1,2 +1,2 @@
+line 1
+-line 2
+\\ No newline at end of file
++line 2"""
+
+    result = tool._parse_and_format_diff(raw_diff)
+
+    assert '<line type="context"' in result
+    assert '<line type="deleted"' in result
+    assert '<line type="nonewline"' in result
+    assert "No newline at end of file" in result
+    assert '<line type="added"' in result
+
+
 @pytest.mark.asyncio
 @patch("duo_workflow_service.policies.file_exclusion_policy.is_feature_enabled")
 @patch("duo_workflow_service.policies.diff_exclusion_policy.is_feature_enabled")
@@ -185,9 +286,19 @@ async def test_build_review_context_basic_success(
     assert "<mr_description>" in response
     assert "Add subtract method to calculator" in response
     assert "<git_diffs>" in response
-    assert "calculator.rb" in response
+
+    # Check new structured diff format
+    assert '<file_diff filename="calculator.rb">' in response
+    assert "<chunk_header>" in response
+    assert '<line type="context"' in response
+    assert '<line type="deleted"' in response
+    assert '<line type="added"' in response
+    assert "</file_diff>" in response
+
+    # Verify excluded files are not present
     assert "app.log" not in response
     assert "generated.js" not in response
+
     assert "<original_files>" in response
     assert "</input>" in response
 
@@ -222,7 +333,11 @@ async def test_build_review_context_only_diffs(
     assert "<mr_title>" in response
     assert "Implement calculator method" in response
     assert "<git_diffs>" in response
-    assert "calculator.rb" in response
+
+    # Check structured format
+    assert '<file_diff filename="calculator.rb">' in response
+    assert "<line type=" in response
+
     assert "<original_files>" not in response
     assert "<custom_instructions>" not in response
     assert gitlab_client_mock.aget.call_count == 2
@@ -259,7 +374,7 @@ async def test_build_review_context_skips_large_files(
     response = await tool._arun(project_id="test%2Fproject", merge_request_iid=123)
 
     assert "<original_files>" not in response
-    assert "calculator.rb" in response
+    assert '<file_diff filename="calculator.rb">' in response
 
 
 @pytest.mark.asyncio
@@ -340,6 +455,7 @@ async def test_build_review_context_with_url(
 
     assert "Implement calculator method" in response
     assert "<input>" in response
+    assert "<file_diff filename=" in response
 
 
 @pytest.mark.asyncio
@@ -541,4 +657,5 @@ async def test_build_review_context_no_files_content(
     response = await tool._arun(project_id="test%2Fproject", merge_request_iid=123)
 
     assert "<original_files>" not in response
-    assert "new_file.rb" in response
+    assert '<file_diff filename="new_file.rb">' in response
+    assert '<line type="added"' in response

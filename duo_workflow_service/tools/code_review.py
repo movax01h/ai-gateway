@@ -1,7 +1,9 @@
 import base64
 import fnmatch
+import html
 import json
 import logging
+import re
 from typing import Any, Dict, List, Optional, Type
 from urllib.parse import quote
 
@@ -420,7 +422,8 @@ class BuildReviewMergeRequestContext(DuoBaseTool):
 {custom_instructions_section}
 
 <git_diffs>
-{diff_section}</git_diffs>
+{diff_section}
+</git_diffs>
 
 {files_section}
 </input>"""
@@ -460,11 +463,87 @@ This formatting is only required for custom instruction comments. Regular review
 </custom_instructions>"""
 
     def _format_diffs(self, diffs_and_paths: Dict[str, str]) -> str:
-        """Format diffs section."""
-        return "\n".join(
-            f"<diff filename='{file_path}'>\n{diff_content}\n</diff>\n"
-            for file_path, diff_content in diffs_and_paths.items()
-        )
+        """Format diffs section with structured line format."""
+        formatted_diffs = []
+
+        for file_path, diff_content in diffs_and_paths.items():
+            formatted_lines = self._parse_and_format_diff(diff_content)
+            formatted_diffs.append(
+                f'<file_diff filename="{file_path}">\n{formatted_lines}\n</file_diff>'
+            )
+
+        return "\n\n".join(formatted_diffs)
+
+    def _parse_and_format_diff(self, raw_diff: str) -> str:
+        """Parse raw diff and format each line with type and line numbers."""
+        if not raw_diff.strip() or "Binary files" in raw_diff:
+            return ""
+
+        lines = []
+        line_old = 1
+        line_new = 1
+
+        for line in raw_diff.split("\n"):
+            if not line:
+                continue
+
+            if line.startswith("@@"):
+                # Parse chunk header
+                match = re.match(r"@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@", line)
+                if match:
+                    line_old = int(match.group(1))
+                    line_new = int(match.group(2))
+                    lines.append(f"<chunk_header>{html.escape(line)}</chunk_header>")
+                continue
+
+            # Skip file metadata lines
+            if (
+                line.startswith("+++")
+                or line.startswith("---")
+                or line.startswith("diff --git")
+            ):
+                continue
+
+            # Handle "No newline at end of file"
+            if line.startswith("\\"):
+                lines.append(
+                    f'<line type="nonewline" old_line="{line_old}" new_line="{line_new}">{html.escape(line)}</line>'
+                )
+                continue
+
+            # Determine line type and extract text without prefix
+            if line.startswith("+"):
+                line_type = "added"
+                text = html.escape(line[1:])
+                lines.append(
+                    f'<line type="{line_type}" old_line="" new_line="{line_new}">{text}</line>'
+                )
+                line_new += 1
+            elif line.startswith("-"):
+                line_type = "deleted"
+                text = html.escape(line[1:])
+                lines.append(
+                    f'<line type="{line_type}" old_line="{line_old}" new_line="">{text}</line>'
+                )
+                line_old += 1
+            elif line.startswith(" "):
+                line_type = "context"
+                text = html.escape(line[1:])
+                lines.append(
+                    f'<line type="{line_type}" old_line="{line_old}" new_line="{line_new}">{text}</line>'
+                )
+                line_old += 1
+                line_new += 1
+            else:
+                # Unexpected line format, treat as context
+                text = html.escape(line)
+                lines.append(
+                    f'<line type="context" old_line="{line_old}" new_line="{line_new}">{text}</line>'
+                )
+                line_old += 1
+                line_new += 1
+
+        return "\n".join(lines)
 
     def _format_original_files(self, files_content: Dict[str, str]) -> str:
         """Format original files section."""
