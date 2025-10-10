@@ -133,10 +133,14 @@ class RunCommandAction(_message.Message):
     def __init__(self, program: _Optional[str] = ..., arguments: _Optional[_Iterable[str]] = ..., flags: _Optional[_Iterable[str]] = ...) -> None: ...
 
 class ReadFile(_message.Message):
-    __slots__ = ("filepath",)
+    __slots__ = ("filepath", "limit", "offset")
     FILEPATH_FIELD_NUMBER: _ClassVar[int]
+    LIMIT_FIELD_NUMBER: _ClassVar[int]
+    OFFSET_FIELD_NUMBER: _ClassVar[int]
     filepath: str
-    def __init__(self, filepath: _Optional[str] = ...) -> None: ...
+    limit: int
+    offset: int
+    def __init__(self, filepath: _Optional[str] = ..., limit: _Optional[int] = ..., offset: _Optional[int] = ...) -> None: ...
 
 class ReadFiles(_message.Message):
     __slots__ = ("filepaths",)

@@ -98,6 +98,8 @@ export interface RunCommandAction {
 
 export interface ReadFile {
   filepath: string;
+  limit?: number | undefined;
+  offset?: number | undefined;
 }
 
 export interface ReadFiles {
@@ -1436,13 +1438,19 @@ export const RunCommandAction: MessageFns<RunCommandAction> = {
 };
 
 function createBaseReadFile(): ReadFile {
-  return { filepath: "" };
+  return { filepath: "", limit: undefined, offset: undefined };
 }
 
 export const ReadFile: MessageFns<ReadFile> = {
   encode(message: ReadFile, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
     if (message.filepath !== "") {
       writer.uint32(10).string(message.filepath);
+    }
+    if (message.limit !== undefined) {
+      writer.uint32(16).int64(message.limit);
+    }
+    if (message.offset !== undefined) {
+      writer.uint32(24).int64(message.offset);
     }
     return writer;
   },
@@ -1462,6 +1470,22 @@ export const ReadFile: MessageFns<ReadFile> = {
           message.filepath = reader.string();
           continue;
         }
+        case 2: {
+          if (tag !== 16) {
+            break;
+          }
+
+          message.limit = longToNumber(reader.int64());
+          continue;
+        }
+        case 3: {
+          if (tag !== 24) {
+            break;
+          }
+
+          message.offset = longToNumber(reader.int64());
+          continue;
+        }
       }
       if ((tag & 7) === 4 || tag === 0) {
         break;
@@ -1472,13 +1496,23 @@ export const ReadFile: MessageFns<ReadFile> = {
   },
 
   fromJSON(object: any): ReadFile {
-    return { filepath: isSet(object.filepath) ? globalThis.String(object.filepath) : "" };
+    return {
+      filepath: isSet(object.filepath) ? globalThis.String(object.filepath) : "",
+      limit: isSet(object.limit) ? globalThis.Number(object.limit) : undefined,
+      offset: isSet(object.offset) ? globalThis.Number(object.offset) : undefined,
+    };
   },
 
   toJSON(message: ReadFile): unknown {
     const obj: any = {};
     if (message.filepath !== "") {
       obj.filepath = message.filepath;
+    }
+    if (message.limit !== undefined) {
+      obj.limit = Math.round(message.limit);
+    }
+    if (message.offset !== undefined) {
+      obj.offset = Math.round(message.offset);
     }
     return obj;
   },
@@ -1489,6 +1523,8 @@ export const ReadFile: MessageFns<ReadFile> = {
   fromPartial<I extends Exact<DeepPartial<ReadFile>, I>>(object: I): ReadFile {
     const message = createBaseReadFile();
     message.filepath = object.filepath ?? "";
+    message.limit = object.limit ?? undefined;
+    message.offset = object.offset ?? undefined;
     return message;
   },
 };
