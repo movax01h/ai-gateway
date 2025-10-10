@@ -6,6 +6,7 @@ from typing import Any, Generic, Protocol, TypeVar
 import structlog
 from langchain.tools import BaseTool
 
+from duo_workflow_service.agents.tool_output_manager import truncate_tool_response
 from duo_workflow_service.entities import MessageTypeEnum, ToolStatus, UiChatLog
 from duo_workflow_service.entities.state import ToolInfo, WorkflowState
 from duo_workflow_service.monitoring import duo_workflow_metrics
@@ -83,6 +84,9 @@ class RunToolNode(Generic[WorkflowStateT]):
                 tool_name=self._tool.name, flow_type=self._flow_type.value
             ):
                 if output := await self._tool._arun(**tool_params):
+                    output = truncate_tool_response(
+                        tool_response=output, tool_name=self._tool.name
+                    )
                     try:
                         secure_output = PromptSecurity.apply_security_to_tool_response(
                             response=output,
