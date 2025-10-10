@@ -164,6 +164,9 @@ class CustomPromptAdapter(BasePromptAdapter):
         context_template = (
             "{% include 'chat/agent/partials/system_dynamic/1.0.0.jinja' %}"
         )
+        additional_context_template = (
+            "{% include 'chat/agent/partials/additional_context/1.0.0.jinja' %}"
+        )
 
         if "system" in prompt_template["prompt_template"]:
             existing_system = prompt_template["prompt_template"]["system"]
@@ -173,6 +176,8 @@ class CustomPromptAdapter(BasePromptAdapter):
                     + existing_system
                     + "\n</system_instructions>\n"
                     + context_template
+                    + "\n"
+                    + additional_context_template
                 )
         else:
             prompt_template["prompt_template"]["system"] = context_template
@@ -181,6 +186,13 @@ class CustomPromptAdapter(BasePromptAdapter):
 
     async def get_response(self, input: ChatWorkflowState) -> BaseMessage:
         conversation_history = input["conversation_history"].get(self._agent_name, [])
+        last_message = conversation_history[-1] if conversation_history else None
+        additional_context = (
+            last_message.additional_kwargs.get("additional_context")
+            if last_message and hasattr(last_message, "additional_kwargs")
+            else None
+        )
+
         variables = {
             "goal": input["goal"],
             "project": input["project"],
@@ -188,6 +200,7 @@ class CustomPromptAdapter(BasePromptAdapter):
             "current_date": datetime.now().strftime("%Y-%m-%d"),
             "current_time": datetime.now().strftime("%H:%M:%S"),
             "current_timezone": datetime.now().astimezone().tzname(),
+            "additional_context": additional_context,
         }
 
         return await self._prompt.ainvoke(

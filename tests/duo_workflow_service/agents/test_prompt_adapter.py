@@ -379,6 +379,35 @@ class TestCustomPromptAdapter:
         assert (
             call_args["current_timezone"] == mock_datetime.now().astimezone().tzname()
         )
+        assert call_args["additional_context"] is None
+
+    @pytest.mark.asyncio
+    async def test_get_response_with_additional_context(
+        self, mock_prompt, sample_chat_workflow_state
+    ):
+        adapter = CustomPromptAdapter(mock_prompt)
+
+        additional_context = [
+            {"category": "file", "id": "file1", "content": "test content"}
+        ]
+        sample_chat_workflow_state["conversation_history"]["test_agent"] = [
+            HumanMessage(
+                content="Hello",
+                additional_kwargs={"additional_context": additional_context},
+            )
+        ]
+
+        expected_response = AIMessage(content="Custom response")
+        mock_prompt.ainvoke.return_value = expected_response
+
+        result = await adapter.get_response(sample_chat_workflow_state)
+
+        assert result == expected_response
+
+        # Verify additional_context is passed to the prompt
+        mock_prompt.ainvoke.assert_called_once()
+        call_args = mock_prompt.ainvoke.call_args[1]["input"]
+        assert call_args["additional_context"] == additional_context
 
     def test_get_model(self, mock_prompt):
         adapter = CustomPromptAdapter(mock_prompt)
@@ -398,7 +427,8 @@ class TestCustomPromptAdapter:
                     },
                 },
                 "<system_instructions>\nYou are a helpful assistant.\n</system_instructions>\n"
-                "{% include 'chat/agent/partials/system_dynamic/1.0.0.jinja' %}",
+                "{% include 'chat/agent/partials/system_dynamic/1.0.0.jinja' %}\n"
+                "{% include 'chat/agent/partials/additional_context/1.0.0.jinja' %}",
             ),
             (
                 {
