@@ -132,7 +132,6 @@ class Workflow(AbstractWorkflow):
     _prompt_id: str
     _prompt_version: str
     _prompt_template_override: str
-    _use_agent_override: bool = False
     _workflow_id: str
     _workflow_type: CategoryEnum
 
@@ -169,7 +168,6 @@ class Workflow(AbstractWorkflow):
         self._workflow_id = workflow_id
         self._workflow_type = workflow_type
         if "prompt_template_id_override" in kwargs:
-            self._use_agent_override = True
             self._prompt_id = kwargs.pop("prompt_template_id_override")
             self._prompt_version = kwargs.pop("prompt_template_version_override", None)
             memory_prompt_registry: InMemoryPromptRegistry = InMemoryPromptRegistry(
