@@ -1,10 +1,13 @@
 import json
 from typing import Any, Optional, Type
 
+import structlog
 from pydantic import BaseModel, Field
 
 from duo_workflow_service.entities.state import Context, WorkflowContext
 from duo_workflow_service.tools.duo_base_tool import DuoBaseTool
+
+log = structlog.stdlib.get_logger("workflow")
 
 
 class GetSessionContextInput(BaseModel):
@@ -34,21 +37,26 @@ class GetSessionContext(DuoBaseTool):
             response = await self.gitlab_client.aget(
                 path=f"/api/v4/ai/duo_workflows/workflows/{previous_session_id}/checkpoints?per_page=1",
                 parse_json=True,
+                use_http_response=True,
             )
 
-            if (
-                isinstance(response, dict)
-                and "status" in response
-                and response["status"] != 200
-            ):
+            if not response.is_success():
+                log.error(
+                    "Failed to fetch checkpoints: status_code=%s, response=%s",
+                    response.status_code,
+                    response.body,
+                )
                 return json.dumps({"error": "API Error"})
 
-            if not response or len(response) == 0:
+            checkpoints = response.body
+            if not checkpoints or len(checkpoints) == 0:
                 return json.dumps(
                     {"error": "Unable to find checkpoint for this session"}
                 )
 
-            return json.dumps({"context": self._format_checkpoint_context(response[0])})
+            return json.dumps(
+                {"context": self._format_checkpoint_context(checkpoints[0])}
+            )
         except Exception as e:
             return json.dumps({"error": str(e)})
 

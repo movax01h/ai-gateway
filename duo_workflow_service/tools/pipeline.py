@@ -1,6 +1,7 @@
 import json
 from typing import Any, Optional, Type
 
+import structlog
 from gitlab_cloud_connector import GitLabUnitPrimitive
 from pydantic import BaseModel, Field
 
@@ -13,6 +14,8 @@ from duo_workflow_service.tools.gitlab_resource_input import ProjectResourceInpu
 from duo_workflow_service.tools.merge_request import (
     MERGE_REQUEST_IDENTIFICATION_DESCRIPTION,
 )
+
+log = structlog.stdlib.get_logger("workflow")
 
 
 class GetPipelineErrorsInput(ProjectResourceInput):
@@ -42,7 +45,7 @@ class GetPipelineErrors(DuoBaseTool):
     For example:
     - Given project_id 13 and merge_request_iid 9, the tool call would be:
         get_pipeline_errors(project_id=13, merge_request_iid=9)
-    - Given a merge request  URL https://gitlab.com/namespace/project/-/merge_requests/103, the tool call would be:
+    - Given a merge request URL https://gitlab.com/namespace/project/-/merge_requests/103, the tool call would be:
         get_pipeline_errors(url="https://gitlab.com/namespace/project/-/merge_requests/103")
     - Given a pipeline URL https://gitlab.com/namespace/project/-/pipelines/33, the tool call would be:
         get_pipeline_errors(url="https://gitlab.com/namespace/project/-/pipelines/33")
@@ -51,7 +54,7 @@ class GetPipelineErrors(DuoBaseTool):
 
     unit_primitive: GitLabUnitPrimitive = GitLabUnitPrimitive.ASK_MERGE_REQUEST
 
-    async def _arun(  # pylint: disable=too-many-return-statements
+    async def _arun(  # pylint: disable=too-many-return-statements,too-many-branches
         self, **kwargs: Any
     ) -> str:
         url = kwargs.get("url", None)
@@ -79,25 +82,42 @@ class GetPipelineErrors(DuoBaseTool):
                 if validation_result.errors:
                     return json.dumps({"error": "; ".join(validation_result.errors)})
 
-                merge_request = await self.gitlab_client.aget(
+                merge_request_response = await self.gitlab_client.aget(
                     path=f"/api/v4/projects/{validation_result.project_id}/merge_requests/"
-                    f"{validation_result.merge_request_iid}"
+                    f"{validation_result.merge_request_iid}",
+                    use_http_response=True,
                 )
 
-                if (
-                    isinstance(merge_request, dict)
-                    and merge_request.get("status") == 404
-                ):
+                if merge_request_response.status_code == 404:
                     return json.dumps(
                         {
                             "error": f"Merge request with iid {validation_result.merge_request_iid} not found"
                         }
                     )
 
-                pipelines = await self.gitlab_client.aget(
+                if not merge_request_response.is_success():
+                    log.error(
+                        "Failed to fetch merge request: status_code=%s, response=%s",
+                        merge_request_response.status_code,
+                        merge_request_response.body,
+                    )
+
+                merge_request = merge_request_response.body
+
+                pipelines_response = await self.gitlab_client.aget(
                     path=f"/api/v4/projects/{validation_result.project_id}/merge_requests/"
-                    f"{validation_result.merge_request_iid}/pipelines"
+                    f"{validation_result.merge_request_iid}/pipelines",
+                    use_http_response=True,
                 )
+
+                if not pipelines_response.is_success():
+                    log.error(
+                        "Failed to fetch pipelines: status_code=%s, response=%s",
+                        pipelines_response.status_code,
+                        pipelines_response.body,
+                    )
+
+                pipelines = pipelines_response.body
 
                 if not isinstance(pipelines, list) or len(pipelines) == 0:
                     return json.dumps(
@@ -109,10 +129,19 @@ class GetPipelineErrors(DuoBaseTool):
                 last_pipeline = pipelines[0]
                 pipeline_id = last_pipeline["id"]
 
-            jobs = await self.gitlab_client.aget(
-                path=f"/api/v4/projects/{validation_result.project_id}/pipelines/{pipeline_id}/jobs"
+            jobs_response = await self.gitlab_client.aget(
+                path=f"/api/v4/projects/{validation_result.project_id}/pipelines/{pipeline_id}/jobs",
+                use_http_response=True,
             )
 
+            if not jobs_response.is_success():
+                log.error(
+                    "Failed to fetch jobs: status_code=%s, response=%s",
+                    jobs_response.status_code,
+                    jobs_response.body,
+                )
+
+            jobs = jobs_response.body
             if not isinstance(jobs, list):
                 return json.dumps(
                     {

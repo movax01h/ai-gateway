@@ -1,11 +1,14 @@
 import json
 from typing import Any, List, NamedTuple, Optional, Type
 
+import structlog
 from pydantic import BaseModel, Field
 
 from duo_workflow_service.gitlab.url_parser import GitLabUrlParseError, GitLabUrlParser
 from duo_workflow_service.tools.duo_base_tool import DuoBaseTool
 from duo_workflow_service.tools.gitlab_resource_input import ProjectResourceInput
+
+log = structlog.stdlib.get_logger("workflow")
 
 
 class JobURLValidationResult(NamedTuple):
@@ -112,11 +115,20 @@ class GetLogsFromJob(DuoBaseTool):
             return json.dumps({"error": "; ".join(validation_result.errors)})
 
         try:
-            trace = await self.gitlab_client.aget(
+            response = await self.gitlab_client.aget(
                 path=f"/api/v4/projects/{validation_result.project_id}/jobs/{validation_result.job_id}/trace",
                 parse_json=False,
+                use_http_response=True,
             )
 
+            if not response.is_success():
+                log.error(
+                    "Failed to fetch job trace: status_code=%s, response=%s",
+                    response.status_code,
+                    response.body,
+                )
+
+            trace = response.body
             if not trace:
                 return "No job found"
 

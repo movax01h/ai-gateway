@@ -3,6 +3,7 @@ from unittest.mock import AsyncMock, Mock
 
 import pytest
 
+from duo_workflow_service.gitlab.http_client import GitLabHttpResponse
 from duo_workflow_service.tools.job import GetLogsFromJob, GetLogsFromJobInput
 
 
@@ -42,7 +43,11 @@ def metadata_fixture(gitlab_client_mock):
 async def test_get_job_logs_with_url_success(
     url, project_id, job_id, expected_path, gitlab_client_mock, metadata
 ):
-    gitlab_client_mock.aget = AsyncMock(return_value="Job 123 trace log")
+    mock_response = GitLabHttpResponse(
+        status_code=200,
+        body="Job 123 trace log",
+    )
+    gitlab_client_mock.aget = AsyncMock(return_value=mock_response)
 
     tool = GetLogsFromJob(metadata=metadata)
 
@@ -57,13 +62,17 @@ async def test_get_job_logs_with_url_success(
     assert response == expected_response
 
     gitlab_client_mock.aget.assert_called_once_with(
-        path=expected_path, parse_json=False
+        path=expected_path, parse_json=False, use_http_response=True
     )
 
 
 @pytest.mark.asyncio
 async def test_get_job_logs(gitlab_client_mock, metadata):
-    gitlab_client_mock.aget = AsyncMock(return_value="Job 1 trace log")
+    mock_response = GitLabHttpResponse(
+        status_code=200,
+        body="Job 1 trace log",
+    )
+    gitlab_client_mock.aget = AsyncMock(return_value=mock_response)
 
     tool = GetLogsFromJob(metadata=metadata)
 
@@ -78,13 +87,17 @@ async def test_get_job_logs(gitlab_client_mock, metadata):
     assert json.loads(response) == expected_response
 
     gitlab_client_mock.aget.assert_called_once_with(
-        path="/api/v4/projects/1/jobs/1/trace", parse_json=False
+        path="/api/v4/projects/1/jobs/1/trace", parse_json=False, use_http_response=True
     )
 
 
 @pytest.mark.asyncio
 async def test_get_job_logs_for_invalid_job(gitlab_client_mock, metadata):
-    gitlab_client_mock.aget = AsyncMock(return_value="No job found")
+    mock_response = GitLabHttpResponse(
+        status_code=200,
+        body="No job found",
+    )
+    gitlab_client_mock.aget = AsyncMock(return_value=mock_response)
 
     tool = GetLogsFromJob(metadata=metadata)
 
@@ -95,13 +108,19 @@ async def test_get_job_logs_for_invalid_job(gitlab_client_mock, metadata):
     assert json.loads(response) == expected_response
 
     gitlab_client_mock.aget.assert_called_once_with(
-        path="/api/v4/projects/1/jobs/123/trace", parse_json=False
+        path="/api/v4/projects/1/jobs/123/trace",
+        parse_json=False,
+        use_http_response=True,
     )
 
 
 @pytest.mark.asyncio
 async def test_get_job_logs_empty_trace(gitlab_client_mock, metadata):
-    gitlab_client_mock.aget = AsyncMock(return_value="")
+    mock_response = GitLabHttpResponse(
+        status_code=200,
+        body="",
+    )
+    gitlab_client_mock.aget = AsyncMock(return_value=mock_response)
 
     tool = GetLogsFromJob(metadata=metadata)
 
@@ -110,7 +129,9 @@ async def test_get_job_logs_empty_trace(gitlab_client_mock, metadata):
     assert response == "No job found"
 
     gitlab_client_mock.aget.assert_called_once_with(
-        path="/api/v4/projects/1/jobs/123/trace", parse_json=False
+        path="/api/v4/projects/1/jobs/123/trace",
+        parse_json=False,
+        use_http_response=True,
     )
 
 
@@ -227,5 +248,7 @@ async def test_get_job_logs_api_exception(gitlab_client_mock, metadata):
     assert "API error" in response_json["error"]
 
     gitlab_client_mock.aget.assert_called_once_with(
-        path="/api/v4/projects/1/jobs/123/trace", parse_json=False
+        path="/api/v4/projects/1/jobs/123/trace",
+        parse_json=False,
+        use_http_response=True,
     )
