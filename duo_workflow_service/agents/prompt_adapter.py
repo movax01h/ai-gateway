@@ -70,7 +70,7 @@ class ChatAgentPromptTemplate(Runnable[ChatWorkflowState, PromptValue]):
                     {
                         "text": static_content_text,
                         "type": "text",
-                        "cache_control": {"type": "ephemeral", "ttl": "1h"},
+                        "cache_control": {"type": "ephemeral", "ttl": "5m"},
                     }
                 ]
                 messages.append(SystemMessage(content=cached_static_content))

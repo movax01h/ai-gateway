@@ -261,7 +261,7 @@ class TestChatAgentPromptTemplate:
             assert content_block["type"] == "text"
             assert "GitLab Duo Chat" in content_block["text"]
             assert "<core_mission>" in content_block["text"]
-            assert content_block["cache_control"] == {"type": "ephemeral", "ttl": "1h"}
+            assert content_block["cache_control"] == {"type": "ephemeral", "ttl": "5m"}
 
             dynamic_system_message = messages[1]
             assert isinstance(dynamic_system_message, SystemMessage)
