@@ -497,6 +497,12 @@ async def test_get_graph_input(workflow_with_project, status):
     assert (
         result.update["conversation_history"]["test_prompt"][0].content == "New input"
     )
+    assert (
+        result.update["conversation_history"]["test_prompt"][0].additional_kwargs[
+            "additional_context"
+        ]
+        == workflow_with_project._additional_context
+    )
     assert result.update["ui_chat_log"][-1]["message_type"] == MessageTypeEnum.USER
     assert result.update["ui_chat_log"][-1]["content"] == "New input"
     assert len(result.update["ui_chat_log"][-1]["additional_context"]) == 1

@@ -238,13 +238,12 @@ class Workflow(AbstractWorkflow):
 
         conversation_history: List[BaseMessage] = []
 
-        if not self._use_agent_override:
-            conversation_history.append(
-                HumanMessage(
-                    content=goal,
-                    additional_kwargs={"additional_context": self._additional_context},
-                ),
-            )
+        conversation_history.append(
+            HumanMessage(
+                content=goal,
+                additional_kwargs={"additional_context": self._additional_context},
+            ),
+        )
 
         return ChatWorkflowState(
             plan={"steps": []},
