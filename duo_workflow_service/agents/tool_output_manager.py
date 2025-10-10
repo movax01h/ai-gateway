@@ -13,7 +13,7 @@ logger = structlog.get_logger("tools_executor")
 
 
 TOOL_RESPONSE_MAX_BYTES = 100 * 1024  # 100 KiB
-TOOL_RESPONSE_TRUNCATED_SIZE = 5 * 1024  # 5 KiB
+TOOL_RESPONSE_TRUNCATED_SIZE = 50 * 1024  # 50 KiB
 
 
 token_counter = ApproximateTokenCounter("planner")
