@@ -127,8 +127,8 @@ async def tool_url_success_response(
         headers={"content-type": "application/json"},
     )
 
-    gitlab_client_mock.aget = AsyncMock(return_value=response_data)
-    gitlab_client_mock.apost = AsyncMock(return_value=response_data)
+    gitlab_client_mock.aget = AsyncMock(return_value=mock_response)
+    gitlab_client_mock.apost = AsyncMock(return_value=mock_response)
     gitlab_client_mock.aput = AsyncMock(return_value=mock_response)
 
     response = await tool._arun(
@@ -162,9 +162,16 @@ async def assert_tool_url_error(
 
 @pytest.mark.asyncio
 async def test_create_merge_request(gitlab_client_mock, metadata):
-    gitlab_client_mock.apost = AsyncMock(
-        return_value='{"id": 1, "title": "New Feature", "source_branch": "feature", "target_branch": "main"}'
+    mock_response = GitLabHttpResponse(
+        status_code=200,
+        body={
+            "id": 1,
+            "title": "New Feature",
+            "source_branch": "feature",
+            "target_branch": "main",
+        },
     )
+    gitlab_client_mock.apost = AsyncMock(return_value=mock_response)
 
     tool = CreateMergeRequest(metadata=metadata)
 
@@ -196,14 +203,21 @@ async def test_create_merge_request(gitlab_client_mock, metadata):
     expected_response = json.dumps(
         {
             "status": "success",
-            "merge_request": '{"id": 1, "title": "New Feature", "source_branch": "feature", "target_branch": "main"}',
+            "merge_request": {
+                "id": 1,
+                "title": "New Feature",
+                "source_branch": "feature",
+                "target_branch": "main",
+            },
         }
     )
 
     assert response == expected_response
 
     gitlab_client_mock.apost.assert_called_once_with(
-        path="/api/v4/projects/1/merge_requests", body=json.dumps(expected_data)
+        path="/api/v4/projects/1/merge_requests",
+        body=json.dumps(expected_data),
+        use_http_response=True,
     )
 
 
@@ -274,6 +288,7 @@ async def test_create_merge_request_with_url_success(
                 "title": "Test Merge Request",
             }
         ),
+        use_http_response=True,
     )
 
 
@@ -319,9 +334,16 @@ async def test_create_merge_request_with_url_error(
 
 @pytest.mark.asyncio
 async def test_create_merge_request_minimal_params(gitlab_client_mock, metadata):
-    gitlab_client_mock.apost = AsyncMock(
-        return_value='{"id": 1, "title": "New Feature", "source_branch": "feature", "target_branch": "main"}'
+    mock_response = GitLabHttpResponse(
+        status_code=200,
+        body={
+            "id": 1,
+            "title": "New Feature",
+            "source_branch": "feature",
+            "target_branch": "main",
+        },
     )
+    gitlab_client_mock.apost = AsyncMock(return_value=mock_response)
 
     tool = CreateMergeRequest(metadata=metadata)
 
@@ -343,22 +365,31 @@ async def test_create_merge_request_minimal_params(gitlab_client_mock, metadata)
     expected_response = json.dumps(
         {
             "status": "success",
-            "merge_request": '{"id": 1, "title": "New Feature", "source_branch": "feature", "target_branch": "main"}',
+            "merge_request": {
+                "id": 1,
+                "title": "New Feature",
+                "source_branch": "feature",
+                "target_branch": "main",
+            },
         }
     )
 
     assert response == expected_response
 
     gitlab_client_mock.apost.assert_called_once_with(
-        path="/api/v4/projects/1/merge_requests", body=json.dumps(expected_data)
+        path="/api/v4/projects/1/merge_requests",
+        body=json.dumps(expected_data),
+        use_http_response=True,
     )
 
 
 @pytest.mark.asyncio
 async def test_create_merge_request_with_server_error(gitlab_client_mock, metadata):
-    gitlab_client_mock.apost = AsyncMock(
-        return_value={"status": 409, "message": "Duplicate request"}
+    mock_response = GitLabHttpResponse(
+        status_code=409,
+        body={"status": 409, "message": "Duplicate request"},
     )
+    gitlab_client_mock.apost = AsyncMock(return_value=mock_response)
 
     tool = CreateMergeRequest(metadata=metadata)
 
@@ -381,15 +412,24 @@ async def test_create_merge_request_with_server_error(gitlab_client_mock, metada
     assert response == expected_response
 
     gitlab_client_mock.apost.assert_called_once_with(
-        path="/api/v4/projects/1/merge_requests", body=json.dumps(expected_data)
+        path="/api/v4/projects/1/merge_requests",
+        body=json.dumps(expected_data),
+        use_http_response=True,
     )
 
 
 @pytest.mark.asyncio
 async def test_get_merge_request(gitlab_client_mock, metadata):
-    gitlab_client_mock.aget = AsyncMock(
-        return_value='{"id": 1, "title": "Test MR", "source_branch": "feature", "target_branch": "main"}'
+    mock_response = GitLabHttpResponse(
+        status_code=200,
+        body={
+            "id": 1,
+            "title": "Test MR",
+            "source_branch": "feature",
+            "target_branch": "main",
+        },
     )
+    gitlab_client_mock.aget = AsyncMock(return_value=mock_response)
 
     tool = GetMergeRequest(metadata=metadata)
 
@@ -397,13 +437,20 @@ async def test_get_merge_request(gitlab_client_mock, metadata):
 
     expected_response = json.dumps(
         {
-            "merge_request": '{"id": 1, "title": "Test MR", "source_branch": "feature", "target_branch": "main"}'
+            "merge_request": {
+                "id": 1,
+                "title": "Test MR",
+                "source_branch": "feature",
+                "target_branch": "main",
+            }
         }
     )
     assert response == expected_response
 
     gitlab_client_mock.aget.assert_called_once_with(
-        path="/api/v4/projects/1/merge_requests/123", parse_json=False
+        path="/api/v4/projects/1/merge_requests/123",
+        parse_json=False,
+        use_http_response=True,
     )
 
 
@@ -447,7 +494,7 @@ async def test_get_merge_request_with_url_success(
     assert response == expected_response
 
     gitlab_client_mock.aget.assert_called_once_with(
-        path=expected_path, parse_json=False
+        path=expected_path, parse_json=False, use_http_response=True
     )
 
 
@@ -510,7 +557,11 @@ async def test_get_merge_request_validation(kwargs, expected_error, metadata):
 
 @pytest.mark.asyncio
 async def test_list_merge_request_diffs(gitlab_client_mock, metadata):
-    gitlab_client_mock.aget = AsyncMock(return_value='{"diffs": []}')
+    mock_response = GitLabHttpResponse(
+        status_code=200,
+        body='{"diffs": []}',
+    )
+    gitlab_client_mock.aget = AsyncMock(return_value=mock_response)
 
     tool = ListMergeRequestDiffs(metadata=metadata)
 
@@ -520,7 +571,9 @@ async def test_list_merge_request_diffs(gitlab_client_mock, metadata):
     assert response == expected_response
 
     gitlab_client_mock.aget.assert_called_once_with(
-        path="/api/v4/projects/1/merge_requests/123/diffs", parse_json=False
+        path="/api/v4/projects/1/merge_requests/123/diffs",
+        parse_json=False,
+        use_http_response=True,
     )
 
 
@@ -563,7 +616,7 @@ async def test_list_merge_request_diffs_with_url_success(
     assert response == expected_response
 
     gitlab_client_mock.aget.assert_called_once_with(
-        path=expected_path, parse_json=False
+        path=expected_path, parse_json=False, use_http_response=True
     )
 
 
@@ -591,7 +644,11 @@ async def test_list_merge_request_diffs_with_url_error(
 
 @pytest.mark.asyncio
 async def test_create_merge_request_note(gitlab_client_mock, metadata):
-    gitlab_client_mock.apost = AsyncMock(return_value='{"id": 1, "body": "Test note"}')
+    mock_response = GitLabHttpResponse(
+        status_code=200,
+        body={"id": 1, "body": "Test note"},
+    )
+    gitlab_client_mock.apost = AsyncMock(return_value=mock_response)
 
     tool = CreateMergeRequestNote(metadata=metadata)
 
@@ -601,7 +658,7 @@ async def test_create_merge_request_note(gitlab_client_mock, metadata):
         {
             "status": "success",
             "body": "Test note",
-            "response": '{"id": 1, "body": "Test note"}',
+            "response": {"id": 1, "body": "Test note"},
         }
     )
     assert response == expected_response
@@ -609,6 +666,7 @@ async def test_create_merge_request_note(gitlab_client_mock, metadata):
     gitlab_client_mock.apost.assert_called_once_with(
         path="/api/v4/projects/1/merge_requests/123/notes",
         body='{"body": "Test note"}',
+        use_http_response=True,
     )
 
 
@@ -671,6 +729,7 @@ async def test_create_merge_request_note_with_url_success(
     gitlab_client_mock.apost.assert_called_once_with(
         path=expected_path,
         body=json.dumps({"body": "Test note"}),
+        use_http_response=True,
     )
 
 
@@ -754,9 +813,11 @@ They are commands that are on their own line and start with a backslash. Example
 async def test_create_merge_request_note_allows_regular_notes(
     note, gitlab_client_mock, metadata
 ):
-    gitlab_client_mock.apost = AsyncMock(
-        side_effect=['{"id": 1, "body": "' + note + '"}']
+    mock_response = GitLabHttpResponse(
+        status_code=200,
+        body={"id": 1, "body": note},
     )
+    gitlab_client_mock.apost = AsyncMock(return_value=mock_response)
 
     tool = CreateMergeRequestNote(metadata=metadata)
 
@@ -768,7 +829,7 @@ async def test_create_merge_request_note_allows_regular_notes(
         {
             "status": "success",
             "body": note,
-            "response": '{"id": 1, "body": "' + note + '"}',
+            "response": {"id": 1, "body": note},
         }
     )
 
@@ -776,26 +837,31 @@ async def test_create_merge_request_note_allows_regular_notes(
     gitlab_client_mock.apost.assert_called_once_with(
         path="/api/v4/projects/1/merge_requests/123/notes",
         body=json.dumps({"body": note}),
+        use_http_response=True,
     )
 
 
 @pytest.mark.asyncio
 async def test_list_all_merge_request_notes(gitlab_client_mock, metadata):
-    gitlab_client_mock.aget = AsyncMock(
-        return_value='[{"id": 1, "body": "Note 1"}, {"id": 2, "body": "Note 2"}]'
+    mock_response = GitLabHttpResponse(
+        status_code=200,
+        body=[{"id": 1, "body": "Note 1"}, {"id": 2, "body": "Note 2"}],
     )
+    gitlab_client_mock.aget = AsyncMock(return_value=mock_response)
 
     tool = ListAllMergeRequestNotes(metadata=metadata)
 
     response = await tool._arun(project_id=1, merge_request_iid=123)
 
     expected_response = json.dumps(
-        {"notes": '[{"id": 1, "body": "Note 1"}, {"id": 2, "body": "Note 2"}]'}
+        {"notes": [{"id": 1, "body": "Note 1"}, {"id": 2, "body": "Note 2"}]}
     )
     assert response == expected_response
 
     gitlab_client_mock.aget.assert_called_once_with(
-        path="/api/v4/projects/1/merge_requests/123/notes", parse_json=False
+        path="/api/v4/projects/1/merge_requests/123/notes",
+        parse_json=False,
+        use_http_response=True,
     )
 
 
@@ -821,7 +887,7 @@ async def test_list_all_merge_request_notes(gitlab_client_mock, metadata):
 async def test_list_all_merge_request_notes_with_url_success(
     url, project_id, merge_request_iid, expected_path, gitlab_client_mock, metadata
 ):
-    notes_data = '[{"id": 1, "body": "Note 1"}, {"id": 2, "body": "Note 2"}]'
+    notes_data = [{"id": 1, "body": "Note 1"}, {"id": 2, "body": "Note 2"}]
     tool = ListAllMergeRequestNotes(
         description="list merge request notes description", metadata=metadata
     )
@@ -836,12 +902,12 @@ async def test_list_all_merge_request_notes_with_url_success(
     )
 
     expected_response = json.dumps(
-        {"notes": '[{"id": 1, "body": "Note 1"}, {"id": 2, "body": "Note 2"}]'}
+        {"notes": [{"id": 1, "body": "Note 1"}, {"id": 2, "body": "Note 2"}]}
     )
     assert response == expected_response
 
     gitlab_client_mock.aget.assert_called_once_with(
-        path=expected_path, parse_json=False
+        path=expected_path, parse_json=False, use_http_response=True
     )
 
 
@@ -1299,7 +1365,11 @@ async def test_list_merge_request_diffs_with_diff_exclusion_policy_enabled(
         },
     ]
 
-    gitlab_client_mock.aget = AsyncMock(return_value=json.dumps(diff_data))
+    mock_response = GitLabHttpResponse(
+        status_code=200,
+        body=json.dumps(diff_data),
+    )
+    gitlab_client_mock.aget = AsyncMock(return_value=mock_response)
 
     tool = ListMergeRequestDiffs(metadata=metadata)
 
@@ -1337,7 +1407,9 @@ async def test_list_merge_request_diffs_with_diff_exclusion_policy_enabled(
         assert excluded_file in response_data["excluded_reason"]
 
     gitlab_client_mock.aget.assert_called_once_with(
-        path="/api/v4/projects/1/merge_requests/123/diffs", parse_json=False
+        path="/api/v4/projects/1/merge_requests/123/diffs",
+        parse_json=False,
+        use_http_response=True,
     )
 
 
@@ -1365,7 +1437,11 @@ async def test_list_merge_request_diffs_with_no_excluded_files(
         },
     ]
 
-    gitlab_client_mock.aget = AsyncMock(return_value=json.dumps(diff_data))
+    mock_response = GitLabHttpResponse(
+        status_code=200,
+        body=json.dumps(diff_data),
+    )
+    gitlab_client_mock.aget = AsyncMock(return_value=mock_response)
 
     tool = ListMergeRequestDiffs(metadata=metadata)
 
@@ -1382,15 +1458,19 @@ async def test_list_merge_request_diffs_with_no_excluded_files(
     assert "excluded_reason" not in response_data
 
     gitlab_client_mock.aget.assert_called_once_with(
-        path="/api/v4/projects/1/merge_requests/123/diffs", parse_json=False
+        path="/api/v4/projects/1/merge_requests/123/diffs",
+        parse_json=False,
+        use_http_response=True,
     )
 
 
 @pytest.mark.asyncio
 async def test_list_merge_request_basic(gitlab_client_mock, metadata):
-    gitlab_client_mock.aget = AsyncMock(
-        return_value=[{"id": 1, "title": "Test MR", "author": {"username": "testuser"}}]
+    mock_response = GitLabHttpResponse(
+        status_code=200,
+        body=[{"id": 1, "title": "Test MR", "author": {"username": "testuser"}}],
     )
+    gitlab_client_mock.aget = AsyncMock(return_value=mock_response)
 
     tool = ListMergeRequest(metadata=metadata)
 
@@ -1406,15 +1486,20 @@ async def test_list_merge_request_basic(gitlab_client_mock, metadata):
     assert response == expected_response
 
     gitlab_client_mock.aget.assert_called_once_with(
-        path="/api/v4/projects/1/merge_requests", params={}, parse_json=False
+        path="/api/v4/projects/1/merge_requests",
+        params={},
+        parse_json=False,
+        use_http_response=True,
     )
 
 
 @pytest.mark.asyncio
 async def test_list_merge_request_with_filters(gitlab_client_mock, metadata):
-    gitlab_client_mock.aget = AsyncMock(
-        return_value=[{"id": 1, "title": "Test MR", "author": {"username": "testuser"}}]
+    mock_response = GitLabHttpResponse(
+        status_code=200,
+        body=[{"id": 1, "title": "Test MR", "author": {"username": "testuser"}}],
     )
+    gitlab_client_mock.aget = AsyncMock(return_value=mock_response)
 
     tool = ListMergeRequest(metadata=metadata)
 
@@ -1445,6 +1530,7 @@ async def test_list_merge_request_with_filters(gitlab_client_mock, metadata):
         path="/api/v4/projects/1/merge_requests",
         params=expected_params,
         parse_json=False,
+        use_http_response=True,
     )
 
 
@@ -1467,18 +1553,22 @@ async def test_list_merge_request_with_filters(gitlab_client_mock, metadata):
 async def test_list_merge_request_with_url_success(
     url, project_id, expected_path, gitlab_client_mock, metadata
 ):
-    mock_response = [{"id": 1, "title": "Test MR"}]
+    mock_response_data = [{"id": 1, "title": "Test MR"}]
+    mock_response = GitLabHttpResponse(
+        status_code=200,
+        body=mock_response_data,
+    )
     gitlab_client_mock.aget = AsyncMock(return_value=mock_response)
 
     tool = ListMergeRequest(metadata=metadata)
 
     response = await tool._arun(url=url, project_id=project_id)
 
-    expected_response = json.dumps({"merge_requests": mock_response})
+    expected_response = json.dumps({"merge_requests": mock_response_data})
     assert response == expected_response
 
     gitlab_client_mock.aget.assert_called_once_with(
-        path=expected_path, params={}, parse_json=False
+        path=expected_path, params={}, parse_json=False, use_http_response=True
     )
 
 

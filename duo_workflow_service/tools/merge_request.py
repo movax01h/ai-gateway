@@ -2,6 +2,7 @@ import json
 import re
 from typing import Any, Optional, Type
 
+import structlog
 from gitlab_cloud_connector import GitLabUnitPrimitive
 from pydantic import BaseModel, Field
 
@@ -11,6 +12,8 @@ from duo_workflow_service.tools.duo_base_tool import (
     DuoBaseTool,
 )
 from duo_workflow_service.tools.gitlab_resource_input import ProjectResourceInput
+
+log = structlog.stdlib.get_logger("workflow")
 
 # editorconfig-checker-disable
 PROJECT_IDENTIFICATION_DESCRIPTION = """To identify the project you must provide either:
@@ -111,16 +114,18 @@ class CreateMergeRequest(DuoBaseTool):
             response = await self.gitlab_client.apost(
                 path=f"/api/v4/projects/{project_id}/merge_requests",
                 body=json.dumps(data),
+                use_http_response=True,
             )
 
-            if (
-                isinstance(response, dict)
-                and "status" in response
-                and response["status"] != 200
-            ):
+            if not response.is_success():
+                log.error(
+                    "Failed to create merge request: status_code=%s, response=%s",
+                    response.status_code,
+                    response.body,
+                )
                 return json.dumps({"error": "Failed to create merge request"})
 
-            return json.dumps({"status": "success", "merge_request": response})
+            return json.dumps({"status": "success", "merge_request": response.body})
         except Exception as e:
             return json.dumps({"error": str(e)})
 
@@ -168,8 +173,17 @@ class GetMergeRequest(DuoBaseTool):
                 path=f"/api/v4/projects/{validation_result.project_id}/merge_requests/"
                 f"{validation_result.merge_request_iid}",
                 parse_json=False,
+                use_http_response=True,
             )
-            return json.dumps({"merge_request": response})
+
+            if not response.is_success():
+                log.error(
+                    "Failed to fetch merge request: status_code=%s, response=%s",
+                    response.status_code,
+                    response.body,
+                )
+
+            return json.dumps({"merge_request": response.body})
         except Exception as e:
             return json.dumps({"error": str(e)})
 
@@ -216,10 +230,18 @@ class ListMergeRequestDiffs(DuoBaseTool):
                 path=f"/api/v4/projects/{validation_result.project_id}/merge_requests/"
                 f"{validation_result.merge_request_iid}/diffs",
                 parse_json=False,
+                use_http_response=True,
             )
 
+            if not response.is_success():
+                log.error(
+                    "Failed to fetch merge request diffs: status_code=%s, response=%s",
+                    response.status_code,
+                    response.body,
+                )
+
             # Parse the response and apply diff exclusion policy
-            diff_data = json.loads(response)
+            diff_data = json.loads(response.body)
             diff_policy = DiffExclusionPolicy(self.project)
             filtered_diff, excluded_files = diff_policy.filter_allowed_diffs(diff_data)
 
@@ -315,8 +337,19 @@ They are commands that are on their own line and start with a backslash. Example
                         "body": body,
                     },
                 ),
+                use_http_response=True,
             )
-            return json.dumps({"status": "success", "body": body, "response": response})
+
+            if not response.is_success():
+                log.error(
+                    "Failed to create merge request note: status_code=%s, response=%s",
+                    response.status_code,
+                    response.body,
+                )
+
+            return json.dumps(
+                {"status": "success", "body": body, "response": response.body}
+            )
         except Exception as e:
             return json.dumps({"error": str(e)})
 
@@ -361,8 +394,17 @@ class ListAllMergeRequestNotes(DuoBaseTool):
                 path=f"/api/v4/projects/{validation_result.project_id}/merge_requests/"
                 f"{validation_result.merge_request_iid}/notes",
                 parse_json=False,
+                use_http_response=True,
             )
-            return json.dumps({"notes": response})
+
+            if not response.is_success():
+                log.error(
+                    "Failed to fetch merge request notes: status_code=%s, response=%s",
+                    response.status_code,
+                    response.body,
+                )
+
+            return json.dumps({"notes": response.body})
         except Exception as e:
             return json.dumps({"error": str(e)})
 
@@ -531,8 +573,17 @@ class ListMergeRequest(DuoBaseTool):
                 path=f"/api/v4/projects/{project_id}/merge_requests",
                 params=params,
                 parse_json=False,
+                use_http_response=True,
             )
-            return json.dumps({"merge_requests": response})
+
+            if not response.is_success():
+                log.error(
+                    "Failed to list merge requests: status_code=%s, response=%s",
+                    response.status_code,
+                    response.body,
+                )
+
+            return json.dumps({"merge_requests": response.body})
         except Exception as e:
             return json.dumps({"error": str(e)})
 

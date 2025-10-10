@@ -3,6 +3,7 @@ from unittest.mock import AsyncMock
 
 import pytest
 
+from duo_workflow_service.gitlab.http_client import GitLabHttpResponse
 from duo_workflow_service.tools.previous_context import (
     GetSessionContext,
     GetSessionContextInput,
@@ -55,13 +56,18 @@ class TestGetSessionContext:
                 "thread_id": "123",
             },
         }
-        gitlab_client.aget.return_value = [mock_checkpoint]
+        mock_response = GitLabHttpResponse(
+            status_code=200,
+            body=[mock_checkpoint],
+        )
+        gitlab_client.aget.return_value = mock_response
 
         result = await get_last_checkpoint_tool._arun(previous_session_id=123)
 
         gitlab_client.aget.assert_called_once_with(
             path="/api/v4/ai/duo_workflows/workflows/123/checkpoints?per_page=1",
             parse_json=True,
+            use_http_response=True,
         )
 
         parsed_result = json.loads(result)
@@ -80,7 +86,11 @@ class TestGetSessionContext:
 
     @pytest.mark.asyncio
     async def test_arun_empty_response(self, get_last_checkpoint_tool, gitlab_client):
-        gitlab_client.aget.return_value = []
+        mock_response = GitLabHttpResponse(
+            status_code=200,
+            body=[],
+        )
+        gitlab_client.aget.return_value = mock_response
 
         result = await get_last_checkpoint_tool._arun(previous_session_id=123)
 
@@ -91,10 +101,11 @@ class TestGetSessionContext:
 
     @pytest.mark.asyncio
     async def test_arun_api_error(self, get_last_checkpoint_tool, gitlab_client):
-        gitlab_client.aget.return_value = {
-            "message": "unexpected status code: 404",
-            "status": 404,
-        }
+        mock_response = GitLabHttpResponse(
+            status_code=404,
+            body={"message": "unexpected status code: 404"},
+        )
+        gitlab_client.aget.return_value = mock_response
 
         result = await get_last_checkpoint_tool._arun(previous_session_id=123)
 
