@@ -70,6 +70,22 @@ components:
       - "on_agent_final_answer"
       - "on_tool_execution_success"
       - "on_tool_execution_failed"
+  - name: "sast_post_results_to_gitlab_component"
+    type: OneOffComponent
+    prompt_id: "sast_post_results_to_gitlab_agent_prompt"
+    prompt_version: "1.0.0"
+    inputs:
+      - from: "context:sast_vulnerability_details_component.tool_responses"
+        as: vulnerability_details_json
+      - from: "context:sast_fp_detection_agent.final_answer"
+        as: sast_fp_detection_analysis
+    toolset:
+      - "post_sast_fp_analysis_to_gitlab"
+    max_correction_attempts: 3
+    ui_log_events:
+      - "on_agent_final_answer"
+      - "on_tool_execution_success"
+      - "on_tool_execution_failed"
 routers:
   - from: "sast_vulnerability_details_component"
     to: "sast_vulnerability_source_file_component"
@@ -80,6 +96,8 @@ routers:
   - from: "sast_vulnerability_report_component"
     to: "sast_fp_detection_agent"
   - from: "sast_fp_detection_agent"
+    to: "sast_post_results_to_gitlab_component"
+  - from: "sast_post_results_to_gitlab_component"
     to: "end"
 flow:
   entry_point: "sast_vulnerability_details_component"
