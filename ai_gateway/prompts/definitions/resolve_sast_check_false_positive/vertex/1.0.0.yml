@@ -1,0 +1,34 @@
+---
+name: Check SAST False Positive
+model:
+  params:
+    model_class_provider: litellm
+    max_tokens: 16384
+prompt_template:
+  system: |
+    {% include 'resolve_sast_check_false_positive/system/1.0.0.jinja' %}
+  user: |
+    {% include 'resolve_sast_check_false_positive/user/1.0.0.jinja' %}
+
+    <git_operations_result>
+    {{git_operations_result}}
+    </git_operations_result>
+
+    <repository_url>
+    {{repository_url}}
+    </repository_url>
+
+    <workflow_id>
+    {{workflow_id}}
+    </workflow_id>
+
+    <vulnerability_context>
+    {{vulnerability_context}}
+    </vulnerability_context>
+  placeholder: history
+params:
+  # Overriding the `AIGW_GOOGLE_CLOUD_PLATFORM__PROJECT` config, since Claude models
+  # is only available in a handful of regions. See
+  # https://cloud.google.com/vertex-ai/generative-ai/docs/learn/locations#genai-partner-models
+  vertex_location: global
+  timeout: 30
