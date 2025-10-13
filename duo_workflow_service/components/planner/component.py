@@ -89,6 +89,9 @@ class PlannerComponent(BaseComponent):
                 ).name,  # type: ignore
             },
         )
+        planner.prompt_template_inputs.setdefault("agent_user_environment", {}).update(
+            self.agent_user_environment
+        )
         graph.add_node("planning", planner.run)
 
         tools_executor = ToolsExecutor(
