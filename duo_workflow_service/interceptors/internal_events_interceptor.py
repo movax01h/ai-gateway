@@ -7,6 +7,7 @@ from typing import List, Optional
 import grpc
 
 from duo_workflow_service.interceptors import (
+    X_GITLAB_DEPLOYMENT_TYPE,
     X_GITLAB_FEATURE_ENABLED_BY_NAMESPACE_IDS,
     X_GITLAB_FEATURE_ENABLEMENT_TYPE,
     X_GITLAB_GLOBAL_USER_ID_HEADER,
@@ -98,6 +99,7 @@ class InternalEventsInterceptor(grpc.aio.ServerInterceptor):
             ultimate_parent_namespace_id=metadata.get(X_GITLAB_ROOT_NAMESPACE_ID, None)
             or None,
             is_gitlab_team_member=is_gitlab_member,
+            deployment_type=metadata.get(X_GITLAB_DEPLOYMENT_TYPE),
             extra=extra,
         )
 

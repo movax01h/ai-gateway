@@ -32,6 +32,7 @@ BASE_BILLING_CONTEXT_SCHEMA: Dict[str, Any] = {
     "correlation_id": None,
     "seat_ids": ["TODO"],
     "metadata": {},
+    "deployment_type": None,
 }
 
 
@@ -174,6 +175,7 @@ class TestBillingEventsClient:
             global_user_id=kwargs.get("global_user_id"),
             user_id=kwargs.get("user_id"),
             correlation_id="corr-123",
+            deployment_type=".com",
         )
         current_event_context.set(event_context)
 
@@ -195,6 +197,7 @@ class TestBillingEventsClient:
             "correlation_id": "corr-123",
             "metadata": metadata or {},
             "unique_instance_id": "test-instance-uid",
+            "deployment_type": ".com",
         }
 
         client.track_billing_event(
@@ -286,6 +289,7 @@ class TestBillingEventsClient:
             global_user_id="global-user-456",
             user_id="user-456",
             correlation_id="request-789",
+            deployment_type=".com",
         )
         current_event_context.set(internal_context)
 
@@ -312,6 +316,7 @@ class TestBillingEventsClient:
         assert billing_data["metadata"] == {"workflow_type": "code_review"}
         assert billing_data["timestamp"] == "2023-12-01T10:00:00"
         assert billing_data["event_id"] == "12345678-1234-5678-9012-123456789012"
+        assert billing_data["deployment_type"] == ".com"
 
     def test_track_billing_event_tracker_exception(self, client):
         """Test that exceptions from snowplow_tracker.track are handled gracefully."""
