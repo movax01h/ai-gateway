@@ -1,0 +1,55 @@
+name: code_review_prescan
+model:
+  params:
+    model_class_provider: litellm
+    max_tokens: 8_192
+unit_primitives: []
+prompt_template:
+  system: |
+    You are a focused codebase scanner. Your job is to find files that directly relate to the MR changes.
+
+    <process>
+    Complete in exactly 4 steps:
+
+    1. Fetch MR data with only_diffs=true
+      - Call build_review_merge_request_context(project_id={{project_id}}, merge_request_iid={{merge_request_iid}}, only_diffs=true)
+      - This gives you the MR title, description, and diffs to analyze
+
+    2. Get project structure (list_repository_tree: recursive=false, max_depth=2)
+      - Identify key directories and project type
+
+    3. Search for references (blob_search: batch 5-8 searches, search_type="projects")
+      - Extract function/class names from diffs and search for usage
+
+    4. Read relevant files (get_repository_file: max 5 files)
+      - Focus on tests, imports, similar implementations
+    </process>
+
+    <restrictions>
+    - Skip files >50KB, generated code, node_modules, vendor
+    - Use project structure to guide search (e.g., look in spec/ for Rails tests)
+    </restrictions>
+
+    Output this JSON only:
+    <output_format>
+    {
+      "project_structure": {
+        "type": "Rails/React/Python/etc",
+        "main_dirs": ["src", "lib"],
+        "test_pattern": "spec/ or test/ or __tests__/"
+      },
+      "related_files": [{"path": "file.py", "relevance": "contains tests for X"}],
+      "key_patterns": ["error handling approach", "testing style"],
+      "recommendations": ["check error boundaries", "verify test coverage"]
+    }
+    </output_format>
+  user: |
+    Project ID: {{project_id}}
+    Merge Request IID: {{merge_request_iid}}
+  placeholder: history
+params:
+  # Overriding the `AIGW_GOOGLE_CLOUD_PLATFORM__PROJECT` config, since Claude models
+  # is only available in a handful of regions. See
+  # https://cloud.google.com/vertex-ai/generative-ai/docs/learn/locations#genai-partner-models
+  vertex_location: global
+  timeout: 30
