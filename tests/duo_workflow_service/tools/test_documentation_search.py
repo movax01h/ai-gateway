@@ -43,14 +43,31 @@ class TestDocumentationSearch:
         mock_client_class.return_value = discoveryengine_client_mock
         mock_vertex_search_class.return_value = vertex_search_mock
 
-        search_results = [{"id": 1, "title": "Test Documentation"}]
+        search_results = [
+            {
+                "id": "1",
+                "content": "Test content",
+                "metadata": {
+                    "md5sum": "hash123",
+                    "source_url": "http://example.com",
+                    "title": "Test Documentation",
+                },
+            }
+        ]
         vertex_search_mock.search_with_retry.return_value = search_results
 
         tool = DocumentationSearch()
-
         response = await tool._arun(search="test query")
 
-        expected_response = json.dumps({"search_results": search_results})
+        expected_processed_results = [
+            {
+                "relevant_snippets": ["Test content"],
+                "source_url": "http://example.com",
+                "source_title": "Test Documentation",
+            }
+        ]
+        expected_response = json.dumps({"search_results": expected_processed_results})
+
         assert response == expected_response
 
         # Verify VertexAISearch was instantiated correctly
@@ -91,14 +108,30 @@ class TestDocumentationSearch:
         mock_client_class.return_value = discoveryengine_client_mock
         mock_vertex_search_class.return_value = vertex_search_mock
 
-        search_results = [{"id": 1, "title": "Test Documentation"}]
+        search_results = [
+            {
+                "id": "1",
+                "content": "Test content",
+                "metadata": {
+                    "md5sum": "hash123",
+                    "source_url": "http://example.com",
+                    "title": "Test Documentation",
+                },
+            }
+        ]
         vertex_search_mock.search_with_retry.return_value = search_results
 
         tool = DocumentationSearch()
-
         response = await tool._arun(search="test query")
 
-        expected_response = json.dumps({"search_results": search_results})
+        expected_processed_results = [
+            {
+                "relevant_snippets": ["Test content"],
+                "source_url": "http://example.com",
+                "source_title": "Test Documentation",
+            }
+        ]
+        expected_response = json.dumps({"search_results": expected_processed_results})
         assert response == expected_response
 
         vertex_search_mock.search_with_retry.assert_called_once_with(
