@@ -1,6 +1,7 @@
 import os
 from typing import Annotated, Optional, Set, TypedDict
 
+import litellm
 from dotenv import find_dotenv
 from pydantic import BaseModel, Field, RootModel
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -290,3 +291,7 @@ class Config(BaseSettings):
                     continue
 
                 setattr(child, field, parent_value)
+
+
+def setup_litellm(config: Config):
+    litellm.vertex_project = config.google_cloud_platform.project

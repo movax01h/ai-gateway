@@ -762,3 +762,8 @@ def reset_context():
     yield
     current_feature_flag_context.set(set[str]())
     current_model_metadata_context.set(None)
+
+
+@pytest.fixture(name="vertex_project")
+def vertex_project_fixture():
+    return "vertex-project"
