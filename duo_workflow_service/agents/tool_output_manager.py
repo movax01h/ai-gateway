@@ -4,6 +4,7 @@ from typing import Any
 
 import structlog
 from langchain_core.messages import ToolMessage
+from langgraph.types import Command
 
 from duo_workflow_service.token_counter.approximate_token_counter import (
     ApproximateTokenCounter,
@@ -89,6 +90,11 @@ def truncate_tool_response(tool_response: Any, tool_name: str) -> Any:
         return obj if isinstance(obj, str) else json.dumps(obj)
 
     try:
+        # Skip the Command objects
+        if isinstance(tool_response, Command):
+            logger.info("Skip truncation for Command tool response")
+            return tool_response
+
         # Handle ToolMessage objects
         if isinstance(tool_response, ToolMessage):
             content_str = convert_to_str(tool_response.content)

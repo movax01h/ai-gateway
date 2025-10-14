@@ -119,7 +119,7 @@ def test_truncate_tool_response_exception(
         }
     )
     result = truncate_tool_response(tool_response, tool_name="test_tool")
-    mock_logger.error.assert_called_once_with(
-        "Abort tool response truncation due to unexpected error: Object of type Command is not JSON serializable"
+    mock_logger.info.assert_called_once_with(
+        "Skip truncation for Command tool response"
     )
     assert result == tool_response
