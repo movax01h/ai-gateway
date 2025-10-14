@@ -52,33 +52,12 @@ components:
       - "on_agent_final_answer"
       - "on_tool_execution_success"
       - "on_tool_execution_failed"
-  - name: "fix_pipeline_git_add"
-    type: DeterministicStepComponent
-    inputs:
-      - from: "context:project_http_url_to_repo"
-        as: "repository_url"
-      - from: "add"
-        as: "command"
-        literal: true
-      - from: "-A"
-        as: "args"
-        literal: true
-    tool_name: "run_git_command"
-    ui_log_events:
-      - "on_tool_execution_success"
-      - "on_tool_execution_failed"
   - name: "fix_pipeline_git_commit"
-    type: DeterministicStepComponent
-    inputs:
-      - from: "context:project_http_url_to_repo"
-        as: "repository_url"
-      - from: "commit"
-        as: "command"
-        literal: true
-      - from: "-m 'fix failing pipeline'"
-        as: "args"
-        literal: true
-    tool_name: "run_git_command"
+    type: AgentComponent
+    prompt_id: "commit_changes"
+    prompt_version: "^1.0.0"
+    toolset:
+      - "run_git_command"
     ui_log_events:
       - "on_tool_execution_success"
       - "on_tool_execution_failed"
@@ -108,8 +87,6 @@ routers:
   - from: "fix_pipeline_create_plan"
     to: "fix_pipeline_execution"
   - from: "fix_pipeline_execution"
-    to: "fix_pipeline_git_add"
-  - from: "fix_pipeline_git_add"
     to: "fix_pipeline_git_commit"
   - from: "fix_pipeline_git_commit"
     to: "fix_pipeline_git_push"
