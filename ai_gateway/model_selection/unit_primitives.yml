@@ -381,3 +381,9 @@ configurable_unit_primitives:
       - "claude_sonnet_4_5_20250929"
       - "claude_sonnet_3_7_20250219"
       - "claude_3_5_sonnet_20240620"
+  - feature_setting: "commit_changes"
+    unit_primitives: []
+    default_model: "claude_sonnet_4_20250514"
+    selectable_models:
+      - "claude_sonnet_3_7_20250219"
+      - "claude_sonnet_4_20250514"
