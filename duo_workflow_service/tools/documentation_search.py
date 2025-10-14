@@ -2,6 +2,7 @@
 
 import json
 import os
+from collections import defaultdict
 from typing import Any, List, Type
 
 from google.cloud import discoveryengine
@@ -29,23 +30,48 @@ def _get_env_var(var_name: str) -> str:
 
 class DocumentationSearch(DuoBaseTool):
     name: str = "gitlab_documentation_search"
-    description: str = """Find GitLab documentations,
-    useful for answering questions concerning GitLab and its features, e.g.:
-    projects, groups, issues, merge requests, epics, milestones, labels, CI/CD pipelines, git repositories, and more.
+    description: str = """Find GitLab documentation snippets relevant to the user's question.
+    This tool searches GitLab's official documentation and returns relevant snippets.
+
+    ## When to Use This Tool:
+
+    Use this tool when the user's question involves:**
+    - GitLab features, configurations, or workflows
+    - GitLab architecture, infrastructure, or technical implementation details
+    - GitLab.com platform capabilities or limitations
+    - Any technical aspect that might be documented in GitLab's official docs
+    - Questions about "how GitLab works" even if phrased as hypotheticals
+
+    Use this tool even when:
+    - The question seems to ask for advice or methodology (the docs may contain relevant technical context)
+    - The question mentions specific GitLab services (GitLab.com, GitLab CI, etc.)
+    - The question is exploratory ("how would X affect Y in GitLab?")
 
     Parameters:
-    - search: The search term (required)
+    - search: A concise search query optimized for documentation retrieval (required)
 
-    An example tool_call is presented below
-    {
-        'id': 'toolu_01KqpqRQhTM2pxJrhtTscMWu',
-        'name': 'gitlab_documentation_search',
-        'type': 'tool_use'
-        'input': {
-            'search': 'How do I set up a new project?',
-        },
-    }
+    ## Guidelines for Creating Effective Search Queries:
+
+    1. **Extract key concepts**: Focus on the core technical terms and feature names
+    - Good: "WebSocket connections limits"
+    - Poor: "How do I use WebSockets?"
+
+    2. **Use GitLab-specific terminology**: Prefer official GitLab terms
+    - Good: "merge request approval rules"
+    - Poor: "pull request reviews"
+
+    3. **For impact/estimation questions**: Search for related limits, performance, or architecture docs
+    - User asks about "impact of feature X" → Search: "feature X limits performance"
+    - User asks about "scaling concern Y" → Search: "Y scalability architecture"
+
+    4. **Be specific but concise**: Include relevant qualifiers without unnecessary words
+    - Good: "protected branches permissions"
+    - Poor: "How can I protect my branches and set up permissions?"
+
+    5. **For how-to questions**: Convert to feature names or action phrases
+    - User asks: "How do I set up CI/CD?" → Search: "CI/CD setup getting started"
     """
+
     args_schema: Type[BaseModel] = SearchInput
 
     async def _arun(self, search: str) -> str:
@@ -75,7 +101,29 @@ class DocumentationSearch(DuoBaseTool):
         search_results = await search.search_with_retry(
             query=query, gl_version=gl_version, page_size=DEFAULT_PAGE_SIZE
         )
-        return search_results
+
+        snippets_grouped = defaultdict(list)
+        pages = {}
+
+        # Restructure the output data to make the LLM focus on useful data only
+        for result in search_results:
+            md5 = result["metadata"]["md5sum"]
+
+            if md5 not in pages:
+                pages[md5] = {
+                    "source_url": result["metadata"]["source_url"],
+                    "source_title": result["metadata"]["title"],
+                }
+
+            snippets_grouped[md5].append(result["content"])
+
+        return [
+            {
+                "relevant_snippets": snippets,
+                **pages[md5],
+            }
+            for md5, snippets in snippets_grouped.items()
+        ]
 
     def format_display_message(
         self, args: SearchInput, _tool_response: Any = None
