@@ -5,6 +5,7 @@ LANGCHAIN_TRACING_V2: false
 SENTRY_ERROR_TRACKING_ENABLED: false
 DUO_WORKFLOW_CLOUD_CONNECTOR_SERVICE_NAME: "gitlab-duo-workflow-service"
 DUO_WORKFLOW_SERVICE_ENVIRONMENT: "production"
+DUO_WORKFLOW__VERTEX_LOCATION: "global"
 # https://github.com/grpc/grpc/blob/master/doc/trace_flags.md
 GRPC_TRACE: "http_keepalive"
 # https://github.com/grpc/grpc/blob/master/doc/environment_variables.md
@@ -18,3 +19,4 @@ ENABLE_DUO_WORKFLOW_SERVICE: "true"
 DUO_WORKFLOW_DIRECT_CONNECTION_BASE_URL: "https://gitlab.com"
 AIGW_GOOGLE_CLOUD_PLATFORM__PROJECT: "gitlab-ai-framework-prod"
 AIGW_VERTEX_SEARCH__FALLBACK_DATASTORE_VERSION: "17.0"
+AIGW_BILLING_EVENT__ENABLED: "false"

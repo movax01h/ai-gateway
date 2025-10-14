@@ -5,6 +5,7 @@ LANGCHAIN_TRACING_V2: false
 SENTRY_ERROR_TRACKING_ENABLED: false
 DUO_WORKFLOW_CLOUD_CONNECTOR_SERVICE_NAME: "gitlab-duo-workflow-service"
 DUO_WORKFLOW_SERVICE_ENVIRONMENT: "staging"
+DUO_WORKFLOW__VERTEX_LOCATION: "global"
 # https://github.com/grpc/grpc/blob/master/doc/trace_flags.md
 GRPC_TRACE: "http_keepalive"
 # https://github.com/grpc/grpc/blob/master/doc/environment_variables.md
@@ -21,3 +22,4 @@ AIGW_VERTEX_SEARCH__FALLBACK_DATASTORE_VERSION: "17.0"
 # Enable mocking of multiple LLM tool calls when using Agentic Chat
 AIGW_MOCK_MODEL_RESPONSES: "true"
 AIGW_USE_AGENTIC_MOCK: "true"
+AIGW_BILLING_EVENT__ENABLED: "false"
