@@ -3,12 +3,15 @@ import json
 from typing import Any, List, Optional, Tuple, Type
 from urllib.parse import quote
 
+import structlog
 from pydantic import BaseModel, Field
 
 from duo_workflow_service.gitlab.url_parser import GitLabUrlParseError, GitLabUrlParser
 from duo_workflow_service.policies.file_exclusion_policy import FileExclusionPolicy
 from duo_workflow_service.tools.duo_base_tool import DuoBaseTool
 from duo_workflow_service.tools.gitlab_resource_input import ProjectResourceInput
+
+log = structlog.stdlib.get_logger(__name__)
 
 
 class RepositoryFileResourceInput(ProjectResourceInput):
@@ -136,6 +139,11 @@ class GetRepositoryFile(RepositoryFileBaseTool):
             )
 
             if not response.is_success():
+                log.error(
+                    "Get repository file request failed with status %s: %s",
+                    response.status_code,
+                    response.body,
+                )
                 return json.dumps({"error": response.body})
 
             content = base64.b64decode(response.body["content"]).decode("utf-8")
@@ -233,6 +241,11 @@ class ListRepositoryTree(DuoBaseTool):
             )
 
             if not response.is_success():
+                log.error(
+                    "List repository tree request failed with status %s: %s",
+                    response.status_code,
+                    response.body,
+                )
                 return json.dumps(response.body)
 
             # Filter results based on file exclusion policy

@@ -81,8 +81,19 @@ class GitLabSearchBase(DuoBaseTool, ABC):
     async def _perform_search(self, id: str, params: dict, search_type: str) -> str:
         url = f"/api/v4/{search_type}/{id}/search"
         try:
-            response = await self.gitlab_client.aget(path=url, params=params)
-            return json.dumps({"search_results": response})
+            response = await self.gitlab_client.aget(
+                path=url, params=params, use_http_response=True
+            )
+
+            if not response.is_success():
+                log.error(
+                    "Search request failed with status %s: %s",
+                    response.status_code,
+                    response.body,
+                )
+                return json.dumps({"error": str(response.body)})
+
+            return json.dumps({"search_results": response.body})
         except Exception as e:
             return json.dumps({"error": str(e)})
 
