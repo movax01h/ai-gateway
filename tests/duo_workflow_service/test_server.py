@@ -7,6 +7,7 @@ from typing import AsyncIterable, List, Optional
 from unittest.mock import AsyncMock, MagicMock, call, patch
 
 import grpc
+import litellm
 import pytest
 from gitlab_cloud_connector import (
     CloudConnectorConfig,
@@ -19,6 +20,7 @@ from google.protobuf.json_format import MessageToDict
 from langchain.globals import get_llm_cache
 from langchain_community.cache import SQLiteCache
 
+from ai_gateway.config import Config, ConfigCustomModels, ConfigGoogleCloudPlatform
 from contract import contract_pb2
 from duo_workflow_service.agent_platform.experimental.flows.flow_config import (
     list_configs,
@@ -81,7 +83,7 @@ def test_configure_cache_enabled():
         ("false", True),
     ],
 )
-def test_run(custom_models_enabled, should_validate_llm):
+def test_run(custom_models_enabled, vertex_project, should_validate_llm):
     with (
         patch("duo_workflow_service.server.setup_profiling") as mock_setup_profiling,
         patch(
@@ -93,13 +95,17 @@ def test_run(custom_models_enabled, should_validate_llm):
             "duo_workflow_service.server.validate_llm_access"
         ) as mock_validate_llm_access,
         patch("asyncio.get_event_loop") as mock_get_loop,
-        patch.dict(os.environ, {"AIGW_CUSTOM_MODELS__ENABLED": custom_models_enabled}),
     ):
         mock_loop = MagicMock(spec=asyncio.AbstractEventLoop)
         mock_loop.run_until_complete = MagicMock()
         mock_get_loop.return_value = mock_loop
 
-        run()
+        config = Config(
+            google_cloud_platform=ConfigGoogleCloudPlatform(project=vertex_project),
+            custom_models=ConfigCustomModels(enabled=custom_models_enabled),
+        )
+
+        run(config)
 
         mock_setup_profiling.assert_called_once()
         mock_setup_error_tracking.assert_called_once()
@@ -114,6 +120,8 @@ def test_run(custom_models_enabled, should_validate_llm):
         assert mock_loop.run_until_complete.call_count == 1
         actual_arg = mock_loop.run_until_complete.call_args[0][0]
         assert asyncio.iscoroutine(actual_arg)
+
+        assert litellm.vertex_project == vertex_project
 
         # Clean up the coroutine to prevent the warning
         actual_arg.close()

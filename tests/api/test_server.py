@@ -62,11 +62,6 @@ def unused_port():
     return port
 
 
-@pytest.fixture(name="vertex_project")
-def vertex_project_fixture():
-    return "vertex-project"
-
-
 @pytest.fixture(name="config")
 def config_fixture(vertex_project: str):
     return Config(

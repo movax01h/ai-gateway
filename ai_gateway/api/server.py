@@ -3,7 +3,6 @@ import os
 from contextlib import asynccontextmanager
 from typing import Awaitable, Callable, cast
 
-import litellm
 import structlog
 from fastapi import APIRouter, FastAPI, Request, Response
 from fastapi.exception_handlers import http_exception_handler
@@ -39,7 +38,7 @@ from ai_gateway.api.v1 import api_router as http_api_router_v1
 from ai_gateway.api.v2 import api_router as http_api_router_v2
 from ai_gateway.api.v3 import api_router as http_api_router_v3
 from ai_gateway.api.v4 import api_router as http_api_router_v4
-from ai_gateway.config import Config
+from ai_gateway.config import Config, setup_litellm
 from ai_gateway.container import ContainerApplication
 from ai_gateway.instrumentators.threads import monitor_threads
 from ai_gateway.models import ModelAPIError
@@ -235,10 +234,6 @@ def setup_custom_exception_handlers(app: FastAPI):
     app.add_exception_handler(
         RequestValidationError, cast(ExceptionHandler, validation_exception_handler)
     )
-
-
-def setup_litellm(config: Config):
-    litellm.vertex_project = config.google_cloud_platform.project
 
 
 def setup_router(app: FastAPI):
