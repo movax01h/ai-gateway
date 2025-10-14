@@ -161,6 +161,7 @@ class TestSearch:
             gitlab_client_mock.aget.assert_called_once_with(
                 path=f"/api/v4/{search_type}/1/search",
                 params=expected_params,
+                use_http_response=True,
             )
 
     @pytest.mark.asyncio
@@ -222,6 +223,7 @@ class TestSearch:
             gitlab_client_mock.aget.assert_called_once_with(
                 path=f"/api/v4/{search_type}/1/search",
                 params=expected_params,
+                use_http_response=True,
             )
 
     @pytest.mark.asyncio
@@ -280,6 +282,7 @@ class TestSearch:
         gitlab_client_mock.aget.assert_called_once_with(
             path=f"/api/v4/groups/{search_params['id']}/search",
             params=expected_params,
+            use_http_response=True,
         )
 
     @pytest.mark.asyncio
@@ -307,6 +310,7 @@ class TestSearch:
         gitlab_client_mock.aget.assert_called_once_with(
             path="/api/v4/groups/789/search",
             params=expected_params,
+            use_http_response=True,
         )
 
 
@@ -435,7 +439,7 @@ class TestBlobSearchFileExclusion:
         return [
             {
                 "basename": "main",
-                "data": "def main():\n    print('hello')",
+                "data": "def main():\n print('hello')",
                 "path": "src/main.py",
                 "filename": "src/main.py",
                 "id": None,
@@ -605,7 +609,7 @@ class TestBlobSearchFileExclusion:
         results_with_missing_paths = [
             {
                 "basename": "main",
-                "data": "def main():\n    print('hello')",
+                "data": "def main():\n print('hello')",
                 "path": "src/main.py",
                 "filename": "src/main.py",
                 "id": None,

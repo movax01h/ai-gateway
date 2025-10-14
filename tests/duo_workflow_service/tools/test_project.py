@@ -2,14 +2,19 @@ from unittest.mock import AsyncMock
 
 import pytest
 
+from duo_workflow_service.gitlab.http_client import GitLabHttpResponse
 from duo_workflow_service.tools.project import GetProject, GetProjectInput
 
 
 @pytest.mark.asyncio
 async def test_get_project():
-
     gitlab_client_mock = AsyncMock()
-    gitlab_client_mock.aget.side_effect = ["{}"]
+    mock_response = GitLabHttpResponse(
+        status_code=200,
+        body="{}",
+    )
+    gitlab_client_mock.aget = AsyncMock(return_value=mock_response)
+
     metadata = {
         "gitlab_client": gitlab_client_mock,
     }
@@ -21,7 +26,7 @@ async def test_get_project():
     assert response == "{}"
 
     gitlab_client_mock.aget.assert_called_once_with(
-        path="/api/v4/projects/1", parse_json=False
+        path="/api/v4/projects/1", parse_json=False, use_http_response=True
     )
 
 

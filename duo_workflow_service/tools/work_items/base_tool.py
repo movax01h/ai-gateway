@@ -13,6 +13,7 @@ from typing import (
     Union,
 )
 
+import structlog
 from gitlab_cloud_connector import GitLabUnitPrimitive
 from pydantic import StringConstraints
 
@@ -30,6 +31,8 @@ from duo_workflow_service.tools.work_items.queries.work_items import (
     LIST_PROJECT_WORK_ITEMS_QUERY,
     UPDATE_WORK_ITEM_MUTATION,
 )
+
+log = structlog.stdlib.get_logger(__name__)
 
 # Supported work item types in GitLab
 GROUP_ONLY_TYPES = {"Epic", "Objective", "Key Result"}
@@ -133,9 +136,18 @@ class WorkItemBaseTool(DuoBaseTool):
             try:
                 endpoint = "projects" if parent_type == "project" else "groups"
                 data = await self.gitlab_client.aget(
-                    f"/api/v4/{endpoint}/{identifier_str}"
+                    f"/api/v4/{endpoint}/{identifier_str}", use_http_response=True
                 )
-                full_path = data.get(
+
+                if not data.is_success():
+                    log.error(
+                        "Resolve parent path request failed with status %s: %s",
+                        data.status_code,
+                        data.body,
+                    )
+                    return f"Failed to resolve {parent_type} from ID '{identifier_str}': {data.body}"
+
+                full_path = data.body.get(
                     "path_with_namespace" if parent_type == "project" else "full_path"
                 )
                 if not full_path:
