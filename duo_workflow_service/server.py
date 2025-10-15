@@ -29,6 +29,7 @@ from ai_gateway.config import Config, setup_litellm
 from ai_gateway.container import ContainerApplication
 from contract import contract_pb2, contract_pb2_grpc
 from duo_workflow_service.components import tools_registry
+from duo_workflow_service.executor.outbox import OutboxSignal
 from duo_workflow_service.gitlab.connection_pool import connection_pool
 from duo_workflow_service.interceptors.authentication_interceptor import (
     AuthenticationInterceptor,
@@ -71,7 +72,10 @@ from duo_workflow_service.tracking.errors import log_exception
 from duo_workflow_service.tracking.sentry_error_tracking import setup_error_tracking
 from duo_workflow_service.workflows.abstract_workflow import AbstractWorkflow
 from duo_workflow_service.workflows.registry import FlowFactory, resolve_workflow_class
-from duo_workflow_service.workflows.type_definitions import AdditionalContext
+from duo_workflow_service.workflows.type_definitions import (
+    AIO_CANCEL_STOP_WORKFLOW_REQUEST,
+    AdditionalContext,
+)
 from lib.internal_events import InternalEventsClient
 from lib.internal_events.context import (
     InternalEventAdditionalProperties,
@@ -87,7 +91,6 @@ from lib.internal_events.event_enum import (
 CONTAINER_APPLICATION_PACKAGES = ["duo_workflow_service"]
 
 MAX_MESSAGE_SIZE = 4 * 1024 * 1024
-
 
 log = structlog.stdlib.get_logger("server")
 
@@ -176,6 +179,7 @@ class DuoWorkflowService(contract_pb2_grpc.DuoWorkflowServicer):
     # pylint: disable=invalid-overridden-method
     # pylint: disable=too-many-statements
     # pylint: disable=too-many-branches
+    # pylint: disable=too-many-locals
     @inject
     async def ExecuteWorkflow(
         self,
@@ -346,68 +350,69 @@ class DuoWorkflowService(contract_pb2_grpc.DuoWorkflowServicer):
             ),
         )
 
-        async def send_events():
-            while not workflow.is_done:
-                streaming_action = workflow.get_from_streaming_outbox()
-                if isinstance(streaming_action, contract_pb2.Action):
-                    log.info(
-                        "Sending an outgoing streaming action",
-                        requestID=streaming_action.requestID,
-                        payload_size=streaming_action.ByteSize(),
-                        action_class=streaming_action.WhichOneof("action"),
+        workflow_task = asyncio.create_task(workflow.run(goal))
+
+        async def send_events() -> AsyncIterator[contract_pb2.Action]:
+            while True:
+                item: contract_pb2.Action | OutboxSignal = (
+                    await workflow.get_from_outbox()
+                )
+
+                if item == OutboxSignal.NO_MORE_OUTBOUND_REQUESTS:
+                    log.info("No more outbound requests. End send_events loop.")
+                    break
+
+                if not isinstance(item, contract_pb2.Action):
+                    raise RuntimeError(
+                        "Can not send an action that is not the Action type"
                     )
-
-                    yield streaming_action
-
-                    log.info(
-                        "Sent an outgoing streaming action",
-                        requestID=streaming_action.requestID,
-                        action_class=streaming_action.WhichOneof("action"),
-                    )
-
-                    if (
-                        invocation_metadata.get("x-gitlab-unidirectional-streaming", "")
-                        != "enabled"
-                    ):
-                        await next_non_heartbeat_event(request_iterator)
-
-                    if workflow.outbox_empty():
-                        continue
-
-                action = await workflow.get_from_outbox()
-
-                if action is None:
-                    continue
 
                 log.info(
                     "Sending an outgoing action",
-                    requestID=action.requestID,
-                    payload_size=action.ByteSize(),
-                    action_class=action.WhichOneof("action"),
+                    requestID=item.requestID,
+                    payload_size=item.ByteSize(),
+                    action_class=item.WhichOneof("action"),
                 )
 
-                yield action
+                yield item
 
                 log.info(
                     "Sent an outgoing action",
-                    requestID=action.requestID,
-                    action_class=action.WhichOneof("action"),
+                    requestID=item.requestID,
+                    action_class=item.WhichOneof("action"),
                 )
 
-                event: contract_pb2.ClientEvent | None = await next_non_heartbeat_event(
-                    request_iterator
-                )
+        async def receive_events():
+            while True:
+                event = await next_client_event(request_iterator)
 
                 if event is None:
                     log.info("Skipping ClientEvent None")
+                    workflow_task.cancel("Client-side streaming has been closed.")
                     break
 
-                workflow.add_to_inbox(event)
-                if isinstance(event, contract_pb2.ClientEvent) and event.actionResponse:
+                log.info(
+                    "Received a client event.",
+                    responseType=event.WhichOneof("response"),
+                    requestID=event.actionResponse.requestID,
+                )
+
+                if event.HasField("heartbeat"):
+                    continue
+
+                if event.HasField("actionResponse"):
+                    workflow.set_action_response(event)
+                    continue
+
+                if event.HasField("stopWorkflow"):
                     log.info(
-                        "Wrote ClientEvent into the ingres queue",
-                        requestID=event.actionResponse.requestID,
+                        "Stopping workflow...",
+                        reason=event.stopWorkflow.reason,
                     )
+                    workflow_task.cancel(AIO_CANCEL_STOP_WORKFLOW_REQUEST)
+                    continue
+
+        receive_events_task = asyncio.create_task(receive_events())
 
         async def abort_workflow(
             workflow_task: Optional[asyncio.Task], err: BaseException
@@ -429,22 +434,29 @@ class DuoWorkflowService(contract_pb2_grpc.DuoWorkflowServicer):
                 except (asyncio.TimeoutError, asyncio.CancelledError) as ex:
                     log_exception(ex, extra={"source": __name__})
 
-        workflow_task = None
         try:
-            workflow_task = asyncio.create_task(workflow.run(goal))
             async for action in send_events():
                 yield action
 
             await workflow_task
 
-            if workflow.last_error:
-                context.set_code(grpc.StatusCode.INTERNAL)
-                context.set_details(str(workflow.last_error))
-            else:
+            if workflow.successful_execution():
                 context.set_code(grpc.StatusCode.OK)
+                context.set_details(
+                    f"workflow execution success: {workflow.last_gitlab_status}"
+                )
+            elif workflow.last_error:
+                context.set_code(grpc.StatusCode.INTERNAL)
+                context.set_details(
+                    f"workflow execution failure: {type(workflow.last_error).__name__}: {workflow.last_error}"
+                )
+            else:
+                context.set_code(grpc.StatusCode.UNKNOWN)
+                context.set_details("RPC ended with unknown workflow state")
         except asyncio.CancelledError as err:
             # This exception is raised when RPC is cancelled by the client.
-            context.set_code(grpc.StatusCode.ABORTED)
+            context.set_code(grpc.StatusCode.CANCELLED)
+            context.set_details("RPC cancelled by client")
             log_exception(err, extra={"source": __name__})
             await abort_workflow(workflow_task, err)
             # Task cancellation must be reraised to the grpc server side so that the rpc task can be shutdown properly.
@@ -461,6 +473,7 @@ class DuoWorkflowService(contract_pb2_grpc.DuoWorkflowServicer):
             await context.abort(grpc.StatusCode.INTERNAL, "Something went wrong")
         finally:
             await workflow.cleanup(workflow_id)
+            receive_events_task.cancel()
 
     async def ListTools(
         self, request: contract_pb2.ListToolsRequest, context: grpc.ServicerContext
@@ -586,25 +599,23 @@ class DuoWorkflowService(contract_pb2_grpc.DuoWorkflowServicer):
     # pylint: enable=too-many-statements
 
 
-async def next_non_heartbeat_event(
+async def next_client_event(
     request_iterator: AsyncIterable[contract_pb2.ClientEvent],
 ) -> contract_pb2.ClientEvent | None:
-    """Consumes the request iterator until a non-heartbeat event is found."""
-    while True:
-        try:
-            log.info("Waiting for next ClientEvent")
-            event = await anext(aiter(request_iterator))
-            log.info("Received next ClientEvent")
-        except StopAsyncIteration:
-            log.info("Client-side streaming has been closed.")
-            return None
+    """Fetch a client event from gRPC stream.
 
-        if event.HasField("heartbeat"):
-            log.info(
-                "Skipping heartbeat event", event_type=event.WhichOneof("response")
-            )
-        else:
-            return event
+    Return:
+        contract_pb2.ClientEvent: A client event sent from the client via gRPC stream.
+    """
+
+    try:
+        log.info("Waiting for next ClientEvent")
+        event = await anext(aiter(request_iterator))
+    except StopAsyncIteration:
+        log.info("Client-side streaming has been closed.")
+        return None
+
+    return event
 
 
 async def serve(port: int) -> None:

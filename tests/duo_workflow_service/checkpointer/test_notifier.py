@@ -1,7 +1,7 @@
 import asyncio
 from json import dumps
 from typing import Any, Dict, List, Optional
-from unittest.mock import Mock, patch
+from unittest.mock import MagicMock, Mock, patch
 
 import pytest
 from langchain_core.messages import HumanMessage
@@ -11,13 +11,14 @@ from duo_workflow_service.checkpointer.gitlab_workflow import (
 )
 from duo_workflow_service.checkpointer.notifier import UserInterface
 from duo_workflow_service.entities.state import MessageTypeEnum, WorkflowStatusEnum
+from duo_workflow_service.executor.outbox import Outbox, OutboxSignal
 from duo_workflow_service.workflows.type_definitions import AdditionalContext
 from lib.feature_flags.context import current_feature_flag_context
 
 
 @pytest.fixture(name="outbox")
-def outbox_fixture():
-    return asyncio.Queue()
+def outbox_fixture() -> MagicMock:
+    return MagicMock(spec=Outbox())
 
 
 @pytest.fixture(name="checkpoint_notifier")
@@ -30,7 +31,6 @@ async def test_send_event_with_non_values_type(checkpoint_notifier):
     state = {"not_values_state": "state"}
     result = await checkpoint_notifier.send_event("not_values", state, False)
     assert result is None
-    assert checkpoint_notifier.outbox.empty()
 
 
 @pytest.mark.asyncio
@@ -54,8 +54,7 @@ async def test_send_event_with_values_type(checkpoint_notifier):
     assert checkpoint_notifier.ui_chat_log == ui_chat_log
     assert checkpoint_notifier.status == WorkflowStatusEnum.COMPLETED
     assert checkpoint_notifier.steps == ["step1", "step2"]
-    assert not checkpoint_notifier.outbox.empty()
-    action = await checkpoint_notifier.outbox.get()
+    action = checkpoint_notifier.outbox.put_action.call_args[0][0]
     assert action.newCheckpoint.goal == "test_goal"
     assert action.newCheckpoint.status == "FINISHED"
     expected_checkpoint = dumps(
@@ -90,7 +89,6 @@ async def test_send_event_with_missing_plan_steps(checkpoint_notifier):
         "plan": {},
     }
     await checkpoint_notifier.send_event("values", state, False)
-    action = await checkpoint_notifier.outbox.get()
     expected_checkpoint = dumps(
         {
             "channel_values": {
@@ -99,6 +97,7 @@ async def test_send_event_with_missing_plan_steps(checkpoint_notifier):
             }
         }
     )
+    action = checkpoint_notifier.outbox.put_action.call_args[0][0]
     assert action.newCheckpoint.checkpoint == expected_checkpoint
 
 
@@ -309,9 +308,8 @@ async def test_send_event_messages_stream(
         assert checkpoint_notifier.ui_chat_log == expected_messages
 
         if should_execute_action:
-            assert not checkpoint_notifier.outbox.empty()
-            action = await checkpoint_notifier.outbox.get()
+            action = checkpoint_notifier.outbox.put_action.call_args[0][0]
             assert action.newCheckpoint.goal == "test_goal"
             assert action.newCheckpoint.checkpoint is not None
         else:
-            assert checkpoint_notifier.outbox.empty()
+            checkpoint_notifier.outbox.put_action.assert_not_called()

@@ -9,6 +9,7 @@ from duo_workflow_service.executor.action import (
     _execute_action,
     _execute_action_and_get_action_response,
 )
+from duo_workflow_service.executor.outbox import Outbox
 from duo_workflow_service.gitlab.http_client import GitlabHttpClient, GitLabHttpResponse
 
 logger = logging.getLogger(__name__)
@@ -17,9 +18,8 @@ logger = logging.getLogger(__name__)
 class ExecutorGitLabHttpClient(GitlabHttpClient):
     """GitLab HTTP client implementation that uses the executor service."""
 
-    def __init__(self, outbox: asyncio.Queue, inbox: asyncio.Queue):
+    def __init__(self, outbox: Outbox):
         self.outbox = outbox
-        self.inbox = inbox
 
     async def _call(
         self,
@@ -37,7 +37,7 @@ class ExecutorGitLabHttpClient(GitlabHttpClient):
 
         if use_http_response:
             action_response = await _execute_action_and_get_action_response(
-                {"outbox": self.outbox, "inbox": self.inbox},
+                {"outbox": self.outbox},
                 contract_pb2.Action(
                     runHTTPRequest=contract_pb2.RunHTTPRequest(
                         path=path, method=method, body=data
@@ -59,7 +59,7 @@ class ExecutorGitLabHttpClient(GitlabHttpClient):
 
         # The following code will be removed once all tools use the new http response
         response = await _execute_action(
-            {"outbox": self.outbox, "inbox": self.inbox},
+            {"outbox": self.outbox},
             contract_pb2.Action(
                 runHTTPRequest=contract_pb2.RunHTTPRequest(
                     path=path, method=method, body=data
@@ -82,7 +82,7 @@ class ExecutorGitLabHttpClient(GitlabHttpClient):
         try:
             response = await asyncio.wait_for(
                 _execute_action(
-                    {"outbox": self.outbox, "inbox": self.inbox},
+                    {"outbox": self.outbox},
                     contract_pb2.Action(
                         runHTTPRequest=contract_pb2.RunHTTPRequest(
                             path="/api/graphql",

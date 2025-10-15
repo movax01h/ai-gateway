@@ -25,7 +25,9 @@ from duo_workflow_service.agent_platform.v1.flows.flow_config import (
 from duo_workflow_service.agent_platform.v1.routers import Router
 from duo_workflow_service.agent_platform.v1.state import FlowState
 from duo_workflow_service.agent_platform.v1.state.base import FlowEvent, FlowEventType
-from duo_workflow_service.checkpointer.gitlab_workflow import WorkflowStatusEventEnum
+from duo_workflow_service.checkpointer.gitlab_workflow_utils import (
+    WorkflowStatusEventEnum,
+)
 from duo_workflow_service.components.tools_registry import ToolsRegistry
 from duo_workflow_service.entities.state import (
     MessageTypeEnum,

@@ -2,7 +2,14 @@ from typing import Optional
 
 from pydantic import BaseModel
 
-__all__ = ["AdditionalContext", "OsInformationContext", "ShellInformationContext"]
+__all__ = [
+    "AdditionalContext",
+    "OsInformationContext",
+    "ShellInformationContext",
+    "AIO_CANCEL_STOP_WORKFLOW_REQUEST",
+]
+
+AIO_CANCEL_STOP_WORKFLOW_REQUEST = "AIO_CANCEL_STOP_WORKFLOW_REQUEST"
 
 
 # Note: additionaL_context is an alias for injected_context

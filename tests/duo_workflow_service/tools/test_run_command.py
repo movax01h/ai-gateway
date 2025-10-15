@@ -28,12 +28,11 @@ async def test_run_command_success(
     program: str, args: str, expected_action_args: List[str], mock_success_client_event
 ):
     mock_outbox = MagicMock()
-    mock_outbox.put = AsyncMock()
+    mock_outbox.put_action_and_wait_for_response = AsyncMock(
+        return_value=mock_success_client_event
+    )
 
-    mock_inbox = MagicMock()
-    mock_inbox.get = AsyncMock(return_value=mock_success_client_event)
-
-    metadata = {"outbox": mock_outbox, "inbox": mock_inbox}
+    metadata = {"outbox": mock_outbox}
 
     run_command = RunCommand(name="run_command", description="Run a shell command")
     run_command.metadata = metadata
@@ -42,8 +41,8 @@ async def test_run_command_success(
 
     assert response == "done"
 
-    mock_outbox.put.assert_called_once()
-    action = mock_outbox.put.call_args[0][0]
+    mock_outbox.put_action_and_wait_for_response.assert_called_once()
+    action = mock_outbox.put_action_and_wait_for_response.call_args[0][0]
     assert action.runCommand.program == program
     assert action.runCommand.arguments == expected_action_args
     assert action.runCommand.flags == []
