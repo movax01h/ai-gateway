@@ -1,10 +1,12 @@
 import json
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, Optional
 from unittest.mock import Mock
 
 import pytest
 
-from duo_workflow_service.components.base import _process_agent_user_environment
+from duo_workflow_service.entities.agent_user_environment import (
+    process_agent_user_environment,
+)
 from duo_workflow_service.workflows.type_definitions import (
     AdditionalContext,
     OsInformationContext,
@@ -132,7 +134,7 @@ class TestProcessAgentUserEnvironment:
     )
     def test_invalid_inputs(self, additional_contexts, expected_result):
         """Test various invalid input scenarios."""
-        result = _process_agent_user_environment(additional_contexts)
+        result = process_agent_user_environment(additional_contexts)
         assert result == expected_result
 
     @pytest.mark.parametrize(
@@ -159,7 +161,7 @@ class TestProcessAgentUserEnvironment:
             category="agent_user_environment", content=json.dumps(content_data)
         )
 
-        result = _process_agent_user_environment([context])
+        result = process_agent_user_environment([context])
 
         if should_validate:
             assert "os_information_context" in result
@@ -184,7 +186,7 @@ class TestProcessAgentUserEnvironment:
             ),
         )
 
-        result = _process_agent_user_environment([context1, context2])
+        result = process_agent_user_environment([context1, context2])
 
         assert "os_information_context" in result
         assert result["os_information_context"].platform == "Linux"
@@ -197,7 +199,7 @@ class TestProcessAgentUserEnvironment:
             category="agent_user_environment", content=json.dumps(valid_os_data)
         )
 
-        result = _process_agent_user_environment([context])
+        result = process_agent_user_environment([context])
 
         assert "os_information_context" in result
         assert isinstance(result["os_information_context"], OsInformationContext)
@@ -219,7 +221,7 @@ class TestProcessAgentUserEnvironment:
             category="agent_user_environment", content=json.dumps(valid_shell_data)
         )
 
-        result = _process_agent_user_environment([context])
+        result = process_agent_user_environment([context])
 
         assert "shell_information_context" in result
         assert isinstance(result["shell_information_context"], ShellInformationContext)
@@ -237,7 +239,7 @@ class TestProcessAgentUserEnvironment:
             category="agent_user_environment", content=json.dumps(minimal_shell_data)
         )
 
-        result = _process_agent_user_environment([context])
+        result = process_agent_user_environment([context])
 
         assert "shell_information_context" in result
         assert isinstance(result["shell_information_context"], ShellInformationContext)
@@ -264,7 +266,7 @@ class TestProcessAgentUserEnvironment:
             content=json.dumps(mock_shell_information_context_data),
         )
 
-        result = _process_agent_user_environment([os_context, shell_context])
+        result = process_agent_user_environment([os_context, shell_context])
 
         assert "os_information_context" in result
         assert "shell_information_context" in result
@@ -288,7 +290,7 @@ class TestProcessAgentUserEnvironment:
             category="agent_user_environment", content=json.dumps(valid_shell_data)
         )
 
-        result = _process_agent_user_environment([context])
+        result = process_agent_user_environment([context])
 
         assert "shell_information_context" in result
         assert isinstance(result["shell_information_context"], ShellInformationContext)
@@ -310,7 +312,7 @@ class TestProcessAgentUserEnvironment:
             category="agent_user_environment", content=json.dumps(shell_data_with_cwd)
         )
 
-        result = _process_agent_user_environment([context])
+        result = process_agent_user_environment([context])
 
         assert "shell_information_context" in result
         assert isinstance(result["shell_information_context"], ShellInformationContext)

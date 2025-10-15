@@ -219,6 +219,7 @@ class TestPlannerComponent:
                 "add_new_task_tool_name": "test_tool",
                 "remove_task_tool_name": "test_tool",
                 "update_task_description_tool_name": "test_tool",
+                "agent_user_environment": {},
             },
         )
 

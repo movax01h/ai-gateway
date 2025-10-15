@@ -1,29 +1,16 @@
-import json
-from typing import Dict, Type
-
 from dependency_injector.wiring import Provide, inject
 from gitlab_cloud_connector import CloudConnectorUser
-from pydantic import BaseModel, ValidationError
 
 from ai_gateway.container import ContainerApplication
 from ai_gateway.prompts.registry import LocalPromptRegistry
 from duo_workflow_service.components.tools_registry import ToolsRegistry
 from duo_workflow_service.gitlab.http_client import GitlabHttpClient
 from duo_workflow_service.llm_factory import AnthropicConfig, VertexConfig
-from duo_workflow_service.workflows.type_definitions import (
-    AdditionalContext,
-    OsInformationContext,
-    ShellInformationContext,
-)
+from duo_workflow_service.workflows.type_definitions import AdditionalContext
 from lib.internal_events.event_enum import CategoryEnum
 
-_CONTEXT_REGISTRY: Dict[Type[BaseModel], str] = {
-    OsInformationContext: "os_information_context",
-    ShellInformationContext: "shell_information_context",
-}
 
-
-class BaseComponent:  # pylint: disable=too-many-instance-attributes; there'll be less as we migrate to Prompt Registry
+class BaseComponent:
     @inject
     def __init__(
         self,
@@ -46,57 +33,5 @@ class BaseComponent:  # pylint: disable=too-many-instance-attributes; there'll b
         self.tools_registry = tools_registry
         self.http_client = http_client
         self.additional_context = additional_context
-        self.agent_user_environment = _process_agent_user_environment(
-            additional_context
-        )
         self.user = user
         self.prompt_registry = prompt_registry
-
-
-def _process_agent_user_environment(
-    additional_contexts: list[AdditionalContext] | None = None,
-) -> Dict[str, BaseModel]:
-    """Process and assign contexts to appropriate fields."""
-
-    if additional_contexts is None or len(additional_contexts) == 0:
-        return {}
-
-    contexts = {}
-
-    for context in additional_contexts:
-        if context.category != "agent_user_environment" or not context.content:
-            continue
-
-        try:
-            data = json.loads(context.content)
-        except json.JSONDecodeError:
-            continue
-
-        if not isinstance(data, dict):
-            continue
-
-        data_fields = set(data.keys())
-
-        for context_type, field_name in _CONTEXT_REGISTRY.items():
-            try:
-                expected_fields = set(context_type.model_fields.keys())
-
-                if data_fields != expected_fields:
-                    required_fields = {
-                        name
-                        for name, field in context_type.model_fields.items()
-                        if field.is_required()
-                    }
-
-                    if not required_fields.issubset(
-                        data_fields
-                    ) or not data_fields.issubset(expected_fields):
-                        continue
-
-                instance = context_type.model_validate(data)
-                contexts[field_name] = instance
-                break
-            except ValidationError:
-                continue
-
-    return contexts

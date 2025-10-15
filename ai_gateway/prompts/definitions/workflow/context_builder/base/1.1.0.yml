@@ -1,0 +1,13 @@
+---
+name: context_builder
+model:
+  params:
+    model_class_provider: anthropic
+    max_tokens: 32_768
+unit_primitives:
+  - duo_workflow_execute_workflow
+prompt_template:
+  system: |
+    {% include 'workflow/context_builder/system/1.1.0.jinja' %}
+  user: |
+    {% include 'workflow/user/1.0.0.jinja' %}

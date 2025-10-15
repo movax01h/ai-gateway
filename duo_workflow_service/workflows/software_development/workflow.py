@@ -43,6 +43,9 @@ from duo_workflow_service.entities import (
     WorkflowState,
     WorkflowStatusEnum,
 )
+from duo_workflow_service.entities.agent_user_environment import (
+    process_agent_user_environment,
+)
 from duo_workflow_service.tools.handover import HandoverTool
 from duo_workflow_service.tracking.errors import log_exception
 from duo_workflow_service.workflows.abstract_workflow import AbstractWorkflow
@@ -368,6 +371,10 @@ class Workflow(AbstractWorkflow):
             http_client=self._http_client,
             model_metadata=current_model_metadata_context.get(),
         )
+
+        context_builder.prompt_template_inputs.setdefault(
+            "agent_user_environment", {}
+        ).update(process_agent_user_environment(self._additional_context))
 
         return {
             "agent": context_builder,

@@ -14,6 +14,9 @@ from duo_workflow_service.agents import (
 from duo_workflow_service.components import ToolsApprovalComponent, ToolsRegistry
 from duo_workflow_service.components.base import BaseComponent
 from duo_workflow_service.entities import WorkflowState, WorkflowStatusEnum
+from duo_workflow_service.entities.agent_user_environment import (
+    process_agent_user_environment,
+)
 from duo_workflow_service.gitlab.gitlab_api import Project
 from duo_workflow_service.tools.handover import HandoverTool
 
@@ -72,11 +75,12 @@ class ExecutorComponent(BaseComponent):
             prompt_template_inputs={
                 "set_task_status_tool_name": "set_task_status",
                 "get_plan_tool_name": "get_plan",
+                "agent_user_environment": process_agent_user_environment(
+                    self.additional_context
+                ),
             },
         )
-        agent.prompt_template_inputs.setdefault("agent_user_environment", {}).update(
-            self.agent_user_environment
-        )
+
         graph.add_node("execution", agent.run)
 
         tools_executor = ToolsExecutor(

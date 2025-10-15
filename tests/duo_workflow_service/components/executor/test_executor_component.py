@@ -216,6 +216,7 @@ class TestExecutorComponent:
             prompt_template_inputs={
                 "set_task_status_tool_name": "set_task_status",
                 "get_plan_tool_name": "get_plan",
+                "agent_user_environment": {},
             },
         )
 
@@ -445,80 +446,3 @@ class TestExecutorComponent:
         assert response["status"] == WorkflowStatusEnum.ERROR
         assert len(response["handover"]) == 0
         assert len(response["conversation_history"]["executor"]) == 4
-
-    @pytest.mark.parametrize(
-        "agent_user_environment,existing_prompt_template_inputs,want",
-        [
-            (
-                {"os_information_context": "some_context"},
-                {},
-                {"agent_user_environment": {"os_information_context": "some_context"}},
-            ),
-            (
-                {},
-                {},
-                {"agent_user_environment": {}},
-            ),
-            (
-                {"os_information_context": "some_context"},
-                {
-                    "agent_user_environment": {
-                        "shell_information_context": "some_other_context"
-                    }
-                },
-                {
-                    "agent_user_environment": {
-                        "os_information_context": "some_context",
-                        "shell_information_context": "some_other_context",
-                    }
-                },
-            ),
-            (
-                {"shell_information_context": "shell_context"},
-                {},
-                {
-                    "agent_user_environment": {
-                        "shell_information_context": "shell_context"
-                    }
-                },
-            ),
-            (
-                {
-                    "os_information_context": "os_context",
-                    "shell_information_context": "shell_context",
-                },
-                {},
-                {
-                    "agent_user_environment": {
-                        "os_information_context": "os_context",
-                        "shell_information_context": "shell_context",
-                    }
-                },
-            ),
-        ],
-    )
-    @patch(
-        "duo_workflow_service.components.executor.component.current_model_metadata_context"
-    )
-    def test_agent_prompt_template_inputs(
-        self,
-        mock_model_metadata_context,
-        agent_user_environment,
-        existing_prompt_template_inputs,
-        want,
-        mock_agent,
-        executor_component,
-    ):
-        mock_graph = Mock(spec=StateGraph)
-        mock_agent.return_value.prompt_template_inputs = existing_prompt_template_inputs
-
-        mock_model_metadata = MagicMock()
-        mock_model_metadata_context.get.return_value = mock_model_metadata
-
-        executor_component.agent_user_environment = agent_user_environment
-        executor_component.attach(mock_graph, "exit_node", "next_node", None)
-        assert mock_agent.return_value.prompt_template_inputs == want
-
-        mock_agent.assert_called_once()
-        call_args = mock_agent.call_args
-        assert call_args.kwargs["model_metadata"] == mock_model_metadata
