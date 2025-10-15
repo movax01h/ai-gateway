@@ -38,7 +38,7 @@ class RunCommand(DuoBaseTool):
         args = args or ""
 
         for disallowed_operator in _DISALLOWED_OPERATORS:
-            if disallowed_operator in program:
+            if disallowed_operator in program or disallowed_operator in args:
                 # pylint: disable=line-too-long
                 return f"""'{disallowed_operator}' operators are not supported with {self.name} tool.
 Instead of '{disallowed_operator}' please use {self.name} multiple times consecutively to emulate '{disallowed_operator}' behaviour
