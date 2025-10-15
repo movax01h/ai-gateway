@@ -117,7 +117,7 @@ The generated datasets are compatible with LangSmith. To use a generated dataset
 The following sample datasets were generated using this tool:
 
 | Prompt Definition | Sample Dataset |
-| - | - |
+|:------------------|:---------------|
 | [categorize_question](https://gitlab.com/gitlab-org/modelops/applied-ml/code-suggestions/ai-assist/-/blob/4bb032d493065cf61bdb9f35ee4ef8004c145e78/ai_gateway/prompts/definitions/categorize_question) | [dataset.categorize_question-ai_gen_sample.1](https://smith.langchain.com/o/477de7ad-583e-47b6-a1c4-c4a0300e7aca/datasets/1f956241-b910-441d-9187-faf35c3a6a88?tab=2) |
 | [chat/build_reader](https://gitlab.com/gitlab-org/modelops/applied-ml/code-suggestions/ai-assist/-/tree/4bb032d493065cf61bdb9f35ee4ef8004c145e78/ai_gateway/prompts/definitions/chat/build_reader) | [duo_chat.build_reader-ai_gen_sample.1](https://smith.langchain.com/o/477de7ad-583e-47b6-a1c4-c4a0300e7aca/datasets/34e07a8e-ab2a-48d7-8804-9fa015c90083?tab=2) |
 | [chat/commit_reader](https://gitlab.com/gitlab-org/modelops/applied-ml/code-suggestions/ai-assist/-/tree/4bb032d493065cf61bdb9f35ee4ef8004c145e78/ai_gateway/prompts/definitions/chat/commit_reader) | [duo_chat.commit_reader-ai_gen_sample.1](https://smith.langchain.com/o/477de7ad-583e-47b6-a1c4-c4a0300e7aca/datasets/9db4403b-bd12-42ca-af87-a7b281536f47?tab=2) |
