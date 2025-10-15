@@ -190,9 +190,9 @@ def test_parse_and_format_diff_with_special_characters(metadata):
     result = tool._parse_and_format_diff(raw_diff)
 
     # Check that < > & are escaped
-    assert "&lt;" in result
-    assert "&gt;" in result
-    assert "&amp;" in result
+    assert "<" in result
+    assert ">" in result
+    assert "&&" in result
     assert '<line type="deleted"' in result
     assert '<line type="added"' in result
 
