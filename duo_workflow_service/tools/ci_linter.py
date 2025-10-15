@@ -50,6 +50,11 @@ class CiLinter(DuoBaseTool):
                 path=f"/api/v4/projects/{project_id}/ci/lint",
                 body=json.dumps(body),
             )
+
+            response = self._process_http_response(
+                identifier=f"/api/v4/projects/{project_id}/ci/lint", response=response
+            )
+
             return json.dumps(response)
         except Exception as e:
             return json.dumps({"error": str(e)})

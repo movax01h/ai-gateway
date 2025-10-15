@@ -63,7 +63,7 @@ class GitlabHttpClient(ABC):
         path: str,
         body: str,
         parse_json: bool = True,
-        use_http_response: bool = False,
+        use_http_response: bool = True,
     ) -> Any:
         return await self._call(
             path,
