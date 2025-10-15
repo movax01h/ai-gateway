@@ -168,6 +168,7 @@ GET_VULNERABILITY_DETAILS_QUERY = """
             title
             state
             description
+            reportType
             reachability
             cveEnrichment {
                 cve

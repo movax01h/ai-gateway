@@ -11,6 +11,18 @@ components:
     ui_log_events:
       - "on_tool_execution_success"
       - "on_tool_execution_failed"
+  - name: "validate_sast_vulnerability_component"
+    type: AgentComponent
+    prompt_id: "validate_sast_vulnerability_agent_prompt"
+    prompt_version: "1.0.0"
+    inputs:
+      - from: "context:sast_vulnerability_details_component.tool_responses"
+        as: vulnerability_details_json
+    toolset: []
+    ui_log_events:
+      - "on_tool_execution_success"
+      - "on_tool_execution_failed"
+      - "on_agent_final_answer"
   - name: "sast_vulnerability_source_file_component"
     type: OneOffComponent
     prompt_id: "sast_vulnerability_source_file_agent_prompt"
@@ -88,7 +100,13 @@ components:
       - "on_tool_execution_failed"
 routers:
   - from: "sast_vulnerability_details_component"
-    to: "sast_vulnerability_source_file_component"
+    to: "validate_sast_vulnerability_component"
+  - from: "validate_sast_vulnerability_component"
+    condition:
+      input: "context:validate_sast_vulnerability_component.final_answer"
+      routes:
+        "Valid SAST vulnerability": "sast_vulnerability_source_file_component"
+        "Not a valid SAST vulnerability": "end"
   - from: "sast_vulnerability_source_file_component"
     to: "sast_vulnerability_lines_component"
   - from: "sast_vulnerability_lines_component"
