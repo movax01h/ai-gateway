@@ -130,7 +130,7 @@ class BillingEventsClient:
             host_name=internal_context.host_name,
             project_id=internal_context.project_id,
             namespace_id=internal_context.namespace_id,
-            root_namespace_id=None,  # TODO : We need to pass ultimate_parent_namespace_id from the GitLab instance
+            root_namespace_id=internal_context.ultimate_parent_namespace_id,
             correlation_id=internal_context.correlation_id,
         )
 

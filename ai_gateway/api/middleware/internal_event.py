@@ -17,6 +17,7 @@ from ai_gateway.api.middleware.headers import (
     X_GITLAB_INSTANCE_ID_HEADER,
     X_GITLAB_INTERFACE,
     X_GITLAB_REALM_HEADER,
+    X_GITLAB_ROOT_NAMESPACE_ID,
     X_GITLAB_SAAS_DUO_PRO_NAMESPACE_IDS_HEADER,
     X_GITLAB_TEAM_MEMBER_HEADER,
     X_GITLAB_VERSION_HEADER,
@@ -72,6 +73,7 @@ class InternalEventMiddleware:
             ),
             context_generated_at=datetime.now().isoformat(),
             correlation_id=correlation_id.get(),
+            ultimate_parent_namespace_id=request.headers.get(X_GITLAB_ROOT_NAMESPACE_ID),  # type: ignore[arg-type]
         )
         current_event_context.set(context)
         tracked_internal_events.set(set())
