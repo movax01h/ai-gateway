@@ -170,6 +170,7 @@ class TestBillingEventsClient:
             host_name="gitlab.example.com",
             project_id=kwargs.get("project_id"),
             namespace_id=kwargs.get("namespace_id"),
+            root_namespace_id=kwargs.get("root_namespace_id"),
             global_user_id=kwargs.get("global_user_id"),
             correlation_id="corr-123",
         )
@@ -187,6 +188,7 @@ class TestBillingEventsClient:
             "host_name": "gitlab.example.com",
             "project_id": kwargs.get("project_id"),
             "namespace_id": kwargs.get("namespace_id"),
+            "root_namespace_id": kwargs.get("root_namespace_id"),
             "subject": kwargs.get("global_user_id"),
             "global_user_id": kwargs.get("global_user_id"),
             "correlation_id": "corr-123",
@@ -279,6 +281,7 @@ class TestBillingEventsClient:
             host_name="gitlab.company.com",
             project_id=789,
             namespace_id=101,
+            root_namespace_id=450,
             global_user_id="user-456",
             correlation_id="request-789",
         )

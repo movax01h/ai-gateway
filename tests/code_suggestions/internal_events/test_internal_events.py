@@ -33,6 +33,7 @@ BASE_CONTEXT_SCHEMA = {
     "model_name": None,
     "model_provider": None,
     "namespace_id": None,
+    "ultimate_parent_namespace_id": None,
     "output_tokens": None,
     "plan": None,
     "project_id": None,

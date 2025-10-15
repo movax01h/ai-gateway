@@ -35,6 +35,7 @@ class EventContext(BaseModel):
     feature_enabled_by_namespace_ids: Optional[List[int]] = None
     project_id: Optional[int] = None
     namespace_id: Optional[int] = None
+    ultimate_parent_namespace_id: Optional[int] = None
     plan: Optional[str] = None
     correlation_id: Optional[str] = None
     feature_enablement_type: Optional[str] = None

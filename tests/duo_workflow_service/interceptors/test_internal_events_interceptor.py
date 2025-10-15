@@ -29,6 +29,7 @@ def handler_call_details_fixture():
         ("x-gitlab-feature-enabled-by-namespace-ids", "1,2,3"),
         ("x-gitlab-project-id", "1"),
         ("x-gitlab-namespace-id", "2"),
+        ("x-gitlab-root-namespace-id", "3"),
         ("x-gitlab-is-a-gitlab-member", "true"),
     )
     return mock_details
@@ -45,6 +46,7 @@ def handler_call_details_with_empty_feature_fixture():
         ("x-gitlab-feature-enabled-by-namespace-ids", ""),
         ("x-gitlab-project-id", "1"),
         ("x-gitlab-namespace-id", "2"),
+        ("x-gitlab-root-namespace-id", "3"),
         ("x-gitlab-is-a-gitlab-member", "true"),
     )
     return mock_details
@@ -61,6 +63,7 @@ def handler_call_details_with_duplicate_namespace_ids_fixture():
         ("x-gitlab-feature-enabled-by-namespace-ids", "1,2,2,3,1,4,3,5"),
         ("x-gitlab-project-id", "1"),
         ("x-gitlab-namespace-id", "2"),
+        ("x-gitlab-root-namespace-id", "3"),
         ("x-gitlab-is-a-gitlab-member", "true"),
     )
     return mock_details
@@ -83,6 +86,7 @@ async def test_interceptor_removes_duplicate_namespace_ids(
     assert event_context.host_name == "test-gitlab-host"
     assert event_context.project_id == 1
     assert event_context.namespace_id == 2
+    assert event_context.ultimate_parent_namespace_id == 3
     assert event_context.is_gitlab_team_member is True
 
 
@@ -96,6 +100,7 @@ def handler_call_details_with_empty_project_and_namespace_id_fixture():
         ("x-gitlab-host-name", "test-gitlab-host"),
         ("x-gitlab-feature-enabled-by-namespace-ids", ""),
         ("x-gitlab-is-a-gitlab-member", "false"),
+        ("x-gitlab-root-namespace-id", "3"),
     )
     return mock_details
 
@@ -113,6 +118,7 @@ async def test_interceptor_with_internal_events_disabled(
     assert event_context.feature_enabled_by_namespace_ids == [1, 2, 3]
     assert event_context.project_id == 1
     assert event_context.namespace_id == 2
+    assert event_context.ultimate_parent_namespace_id == 3
     assert event_context.is_gitlab_team_member is True
 
 
@@ -131,6 +137,7 @@ async def test_interceptor_with_empty_feature_enabled_attribute(
     assert event_context.feature_enabled_by_namespace_ids is None
     assert event_context.project_id == 1
     assert event_context.namespace_id == 2
+    assert event_context.ultimate_parent_namespace_id == 3
     assert event_context.is_gitlab_team_member is True
 
 
@@ -151,6 +158,7 @@ async def test_interceptor_with_empty_project_and_namespace_ids(
     assert event_context.feature_enabled_by_namespace_ids is None
     assert event_context.project_id is None
     assert event_context.namespace_id is None
+    assert event_context.ultimate_parent_namespace_id == 3
 
 
 @pytest.mark.asyncio
