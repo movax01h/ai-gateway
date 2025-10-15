@@ -1,6 +1,5 @@
 import base64
 import fnmatch
-import html
 import json
 import logging
 import re
@@ -493,7 +492,7 @@ This formatting is only required for custom instruction comments. Regular review
                 if match:
                     line_old = int(match.group(1))
                     line_new = int(match.group(2))
-                    lines.append(f"<chunk_header>{html.escape(line)}</chunk_header>")
+                    lines.append(f"<chunk_header>{line}</chunk_header>")
                 continue
 
             # Skip file metadata lines
@@ -507,28 +506,28 @@ This formatting is only required for custom instruction comments. Regular review
             # Handle "No newline at end of file"
             if line.startswith("\\"):
                 lines.append(
-                    f'<line type="nonewline" old_line="{line_old}" new_line="{line_new}">{html.escape(line)}</line>'
+                    f'<line type="nonewline" old_line="{line_old}" new_line="{line_new}">{line}</line>'
                 )
                 continue
 
             # Determine line type and extract text without prefix
             if line.startswith("+"):
                 line_type = "added"
-                text = html.escape(line[1:])
+                text = line[1:]
                 lines.append(
                     f'<line type="{line_type}" old_line="" new_line="{line_new}">{text}</line>'
                 )
                 line_new += 1
             elif line.startswith("-"):
                 line_type = "deleted"
-                text = html.escape(line[1:])
+                text = line[1:]
                 lines.append(
                     f'<line type="{line_type}" old_line="{line_old}" new_line="">{text}</line>'
                 )
                 line_old += 1
             elif line.startswith(" "):
                 line_type = "context"
-                text = html.escape(line[1:])
+                text = line[1:]
                 lines.append(
                     f'<line type="{line_type}" old_line="{line_old}" new_line="{line_new}">{text}</line>'
                 )
@@ -536,7 +535,7 @@ This formatting is only required for custom instruction comments. Regular review
                 line_new += 1
             else:
                 # Unexpected line format, treat as context
-                text = html.escape(line)
+                text = line
                 lines.append(
                     f'<line type="context" old_line="{line_old}" new_line="{line_new}">{text}</line>'
                 )
