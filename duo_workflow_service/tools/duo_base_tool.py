@@ -5,7 +5,7 @@ from langchain.tools import BaseTool
 from pydantic import BaseModel
 
 from duo_workflow_service.gitlab.gitlab_api import Project
-from duo_workflow_service.gitlab.http_client import GitlabHttpClient
+from duo_workflow_service.gitlab.http_client import GitlabHttpClient, GitLabHttpResponse
 from duo_workflow_service.gitlab.url_parser import GitLabUrlParseError, GitLabUrlParser
 
 DESCRIPTION_CHARACTER_LIMIT = 1_048_576
@@ -220,3 +220,15 @@ class DuoBaseTool(BaseTool):
             args_str = str(args)
 
         return f"Using {self.name}: {args_str}"
+
+    @staticmethod
+    def _process_http_response(identifier: str, response: Any) -> Any:
+        if not isinstance(response, GitLabHttpResponse):
+            return response
+
+        if response.status_code >= 400:
+            raise ValueError(
+                f"Request failed ({identifier}): HTTP {response.status_code}: {str(response.body)[:300]}"
+            )
+
+        return response.body

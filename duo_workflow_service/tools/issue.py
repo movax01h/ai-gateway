@@ -145,10 +145,15 @@ For example:
         data = {"title": title, **{k: v for k, v in kwargs.items() if v is not None}}
 
         try:
-            response = await self.gitlab_client.apost(
+            response: object = await self.gitlab_client.apost(
                 path=f"/api/v4/projects/{project_id}/issues",
                 body=json.dumps(data),
             )
+
+            response = self._process_http_response(
+                identifier=f"/api/v4/projects/{project_id}/issues", response=response
+            )
+
             return json.dumps({"created_issue": response})
         except Exception as e:
             return json.dumps({"error": str(e)})
@@ -474,6 +479,12 @@ The body parameter is always required.
                     }
                 ),
             )
+
+            response = self._process_http_response(
+                identifier=f"/api/v4/projects/{project_id}/issues/{issue_iid}/notes",
+                response=response,
+            )
+
             return json.dumps({"status": "success", "body": body, "response": response})
         except Exception as e:
             return json.dumps({"error": str(e)})

@@ -136,6 +136,10 @@ class UpdateVulnerabilitySeverity(DuoBaseTool):
                 body=json.dumps({"query": mutation, "variables": variables}),
             )
 
+            response = self._process_http_response(
+                identifier="vulnerabilitiesSeverityOverride", response=response
+            )
+
             if "errors" in response:
                 return json.dumps({"error": f"GraphQL errors: {response['errors']}"})
 

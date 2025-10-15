@@ -221,6 +221,12 @@ class CreateEpic(EpicBaseTool):
                 path=f"/api/v4/groups/{validation_result.group_id}/epics",
                 body=json.dumps(data),
             )
+
+            response = self._process_http_response(
+                identifier=f"/api/v4/groups/{validation_result.group_id}/epics",
+                response=response,
+            )
+
             return json.dumps({"created_epic": response})
         except Exception as e:
             return json.dumps({"error": str(e)})

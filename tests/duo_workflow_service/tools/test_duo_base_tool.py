@@ -5,6 +5,7 @@ import pytest
 from langchain.tools import BaseTool
 from pydantic import BaseModel, Field
 
+from duo_workflow_service.gitlab.http_client import GitLabHttpResponse
 from duo_workflow_service.tools.duo_base_tool import (
     DuoBaseTool,
     format_tool_display_message,
@@ -216,3 +217,51 @@ def test_format_tool_display_message_with_tool_that_uses_response():
         result
         == "Performing data_processing - Result: Successfully processed 100 records in 2.5 seconds..."
     )
+
+
+@pytest.mark.parametrize(
+    "response,expected_result,should_raise",
+    [
+        ("string_response", "string_response", False),
+        ({"key": "value"}, {"key": "value"}, False),
+        (42, 42, False),
+        (None, None, False),
+        (GitLabHttpResponse(200, {"data": "success"}), {"data": "success"}, False),
+        (GitLabHttpResponse(201, "created"), "created", False),
+        (GitLabHttpResponse(399, [1, 2, 3]), [1, 2, 3], False),
+        (GitLabHttpResponse(400, {"error": "bad request"}), None, True),
+        (GitLabHttpResponse(404, "not found"), None, True),
+        (GitLabHttpResponse(500, {"error": "internal server error"}), None, True),
+    ],
+)
+def test_process_http_response(response, expected_result, should_raise):
+    tool = DummyTool()
+
+    if should_raise:
+        with pytest.raises(
+            ValueError, match=r"Request failed \(test_identifier\): HTTP \d+"
+        ):
+            tool._process_http_response("test_identifier", response)
+    else:
+        result = tool._process_http_response("test_identifier", response)
+        assert result == expected_result
+
+
+def test_process_http_response_error_message_truncation():
+    tool = DummyTool()
+
+    # Create a long error message (over 300 characters)
+    long_error_body = "A" * 400
+    response = GitLabHttpResponse(500, long_error_body)
+
+    with pytest.raises(ValueError) as exc_info:
+        tool._process_http_response("test_identifier", response)
+
+    error_message = str(exc_info.value)
+    # Verify the message contains the expected prefix and truncated body
+    expected_prefix = "Request failed (test_identifier): HTTP 500: "
+    truncated_body = "A" * 300  # Should be truncated to exactly 300 chars
+    expected_message = expected_prefix + truncated_body
+
+    assert error_message == expected_message
+    assert len(error_message) == len(expected_prefix) + 300
