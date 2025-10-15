@@ -1,4 +1,4 @@
-from typing import Optional, Union
+from typing import Optional, Type, Union
 
 from gitlab_cloud_connector import CloudConnectorUser
 
@@ -6,7 +6,10 @@ from ai_gateway.model_metadata import TypeModelMetadata
 from ai_gateway.prompts import InMemoryPromptRegistry, Prompt
 from ai_gateway.prompts.registry import LocalPromptRegistry
 from duo_workflow_service.agents.chat_agent import ChatAgent
-from duo_workflow_service.agents.prompt_adapter import BasePromptAdapter, create_adapter
+from duo_workflow_service.agents.prompt_adapter import (
+    BasePromptAdapter,
+    DefaultPromptAdapter,
+)
 from duo_workflow_service.components.tools_registry import Toolset, ToolsRegistry
 from lib.internal_events.event_enum import CategoryEnum
 
@@ -22,6 +25,7 @@ def create_agent(
     prompt_registry: Union[LocalPromptRegistry, InMemoryPromptRegistry],
     workflow_id: str,
     workflow_type: CategoryEnum,
+    adapter_cls: Type[BasePromptAdapter] = DefaultPromptAdapter,
 ) -> ChatAgent:
     prompt: Prompt = prompt_registry.get_on_behalf(
         user=user,
@@ -34,14 +38,8 @@ def create_agent(
         workflow_type=workflow_type,
     )
 
-    # If prompt_version is None, we're using a custom agent
-    use_custom_adapter = prompt_version is None
-    prompt_adapter: BasePromptAdapter = create_adapter(
-        prompt=prompt, use_custom_adapter=use_custom_adapter
-    )
-
     return ChatAgent(
         name=prompt.name,
-        prompt_adapter=prompt_adapter,
+        prompt_adapter=adapter_cls(prompt),
         tools_registry=tools_registry,
     )

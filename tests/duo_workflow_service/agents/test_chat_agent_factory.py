@@ -1,4 +1,4 @@
-from unittest.mock import Mock, patch
+from unittest.mock import Mock
 
 import pytest
 from gitlab_cloud_connector import CloudConnectorUser, UserClaims
@@ -98,48 +98,3 @@ class TestCreateAgent:
             workflow_id=workflow_id,
             workflow_type=CategoryEnum.WORKFLOW_CHAT,
         )
-
-    @pytest.mark.parametrize(
-        "prompt_version,expected_use_custom_adapter,registry_fixture",
-        [
-            (None, True, "mock_in_memory_prompt_registry"),
-            ("^1.0.0", False, "mock_local_prompt_registry"),
-        ],
-        ids=[
-            "uses_custom_adapter_when_prompt_version_is_none",
-            "uses_default_adapter_when_prompt_version_is_provided",
-        ],
-    )
-    def test_create_agent_adapter_selection(
-        self,
-        mock_user,
-        mock_tools_registry,
-        mock_toolset,
-        prompt_version,
-        expected_use_custom_adapter,
-        registry_fixture,
-        request,
-    ):
-        prompt_registry = request.getfixturevalue(registry_fixture)
-
-        with patch(
-            "duo_workflow_service.agents.chat_agent_factory.create_adapter"
-        ) as mock_create_adapter:
-            mock_create_adapter.return_value = Mock()
-
-            create_agent(
-                user=mock_user,
-                tools_registry=mock_tools_registry,
-                prompt_id="test/prompt",
-                prompt_version=prompt_version,
-                model_metadata=None,
-                internal_event_category="test_category",
-                tools=mock_toolset,
-                prompt_registry=prompt_registry,
-                workflow_id="workflow_test",
-                workflow_type=CategoryEnum.WORKFLOW_CHAT,
-            )
-
-            mock_create_adapter.assert_called_once()
-            call_args = mock_create_adapter.call_args
-            assert call_args[1]["use_custom_adapter"] is expected_use_custom_adapter

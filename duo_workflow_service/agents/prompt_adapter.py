@@ -121,6 +121,11 @@ class ChatPrompt(BaseAgent[ChatWorkflowState, BaseMessage]):
 
 
 class BasePromptAdapter(ABC):
+    prompt: Prompt
+
+    def __init__(self, prompt: Prompt):
+        self.prompt = prompt
+
     @abstractmethod
     async def get_response(self, input: ChatWorkflowState) -> BaseMessage:
         pass
@@ -131,27 +136,22 @@ class BasePromptAdapter(ABC):
 
 
 class DefaultPromptAdapter(BasePromptAdapter):
-    def __init__(self, base_prompt: Prompt):
-        self._base_prompt = base_prompt
-
     async def get_response(self, input: ChatWorkflowState) -> BaseMessage:
-        is_anthropic_model = (
-            self._base_prompt.model_provider == ModelClassProvider.ANTHROPIC
-        )
+        is_anthropic_model = self.prompt.model_provider == ModelClassProvider.ANTHROPIC
 
-        return await self._base_prompt.ainvoke(
+        return await self.prompt.ainvoke(
             input=input,
-            agent_name=self._base_prompt.name,
+            agent_name=self.prompt.name,
             is_anthropic_model=is_anthropic_model,
         )
 
     def get_model(self):
-        return self._base_prompt.model
+        return self.prompt.model
 
 
 class CustomPromptAdapter(BasePromptAdapter):
     def __init__(self, prompt: Prompt):
-        self._prompt = prompt
+        super().__init__(prompt)
         self._agent_name = prompt.name
 
     # Custom prompts don't have ChatAgentPromptTemplate's built-in handling, so we manually inject the
@@ -203,18 +203,9 @@ class CustomPromptAdapter(BasePromptAdapter):
             "additional_context": additional_context,
         }
 
-        return await self._prompt.ainvoke(
+        return await self.prompt.ainvoke(
             input={**variables, "history": conversation_history}
         )
 
     def get_model(self):
-        return self._prompt.model
-
-
-def create_adapter(
-    prompt: Prompt,
-    use_custom_adapter: bool = False,
-) -> BasePromptAdapter:
-    if use_custom_adapter:
-        return CustomPromptAdapter(prompt)
-    return DefaultPromptAdapter(prompt)
+        return self.prompt.model

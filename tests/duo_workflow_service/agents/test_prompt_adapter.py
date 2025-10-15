@@ -12,7 +12,6 @@ from duo_workflow_service.agents.prompt_adapter import (
     ChatAgentPromptTemplate,
     CustomPromptAdapter,
     DefaultPromptAdapter,
-    create_adapter,
 )
 from duo_workflow_service.entities.state import ChatWorkflowState
 from duo_workflow_service.gitlab.gitlab_api import Namespace, Project
@@ -462,40 +461,6 @@ class TestCustomPromptAdapter:
             ValueError, match="prompt_template must contain 'prompt_template' key"
         ):
             CustomPromptAdapter.enrich_prompt_template(invalid_prompt_template)
-
-
-class TestCreateAdapter:
-    @pytest.fixture(name="mock_prompt")
-    def mock_prompt_fixture(self):
-        prompt = Mock(spec=Prompt)
-        prompt.name = "test_agent"
-        prompt.prompt_tpl = Mock()
-        return prompt
-
-    @pytest.mark.parametrize(
-        "use_custom_adapter,expected_adapter_type,expected_attribute",
-        [
-            (False, DefaultPromptAdapter, "_base_prompt"),
-            (True, CustomPromptAdapter, "_prompt"),
-            (None, DefaultPromptAdapter, "_base_prompt"),  # default when not specified
-        ],
-        ids=[
-            "default_adapter",
-            "custom_adapter",
-            "default_when_not_specified",
-        ],
-    )
-    def test_create_adapter(
-        self, mock_prompt, use_custom_adapter, expected_adapter_type, expected_attribute
-    ):
-        kwargs = {"prompt": mock_prompt}
-        if use_custom_adapter is not None:
-            kwargs["use_custom_adapter"] = use_custom_adapter
-
-        adapter = create_adapter(**kwargs)
-
-        assert isinstance(adapter, expected_adapter_type)
-        assert getattr(adapter, expected_attribute) == mock_prompt
 
 
 class TestPromptAdapterFriendlyName:
