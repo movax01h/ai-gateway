@@ -6,12 +6,13 @@ import functools
 import json
 import os
 from contextlib import AbstractAsyncContextManager
-from enum import StrEnum
 from typing import (
     Any,
     AsyncIterator,
+    Callable,
     Dict,
     Iterator,
+    NoReturn,
     Optional,
     Sequence,
     Tuple,
@@ -34,6 +35,7 @@ from langgraph.checkpoint.memory import MemorySaver
 from ai_gateway.container import ContainerApplication
 from duo_workflow_service.checkpointer.gitlab_workflow_utils import (
     STATUS_TO_EVENT_PROPERTY,
+    WorkflowStatusEventEnum,
 )
 from duo_workflow_service.entities import WorkflowStatusEnum
 from duo_workflow_service.gitlab.gitlab_api import WorkflowConfig
@@ -54,6 +56,9 @@ from duo_workflow_service.tracking.duo_workflow_metrics import (
     session_type_context,
 )
 from duo_workflow_service.tracking.errors import log_exception
+from duo_workflow_service.workflows.type_definitions import (
+    AIO_CANCEL_STOP_WORKFLOW_REQUEST,
+)
 from lib.billing_events import BillingEventsClient
 from lib.internal_events import InternalEventAdditionalProperties, InternalEventsClient
 from lib.internal_events.event_enum import (
@@ -85,20 +90,6 @@ BILLABLE_STATUSES = frozenset(
         WorkflowStatusEnum.INPUT_REQUIRED,
     ]
 )
-
-
-class WorkflowStatusEventEnum(StrEnum):
-    START = "start"
-    FINISH = "finish"
-    DROP = "drop"
-    RESUME = "resume"
-    PAUSE = "pause"
-    STOP = "stop"
-    RETRY = "retry"
-    REQUIRE_INPUT = "require_input"
-    REQUIRE_PLAN_APPROVAL = "require_plan_approval"
-    REQUIRE_TOOL_CALL_APPROVAL = "require_tool_call_approval"
-
 
 # Maps current checkpoint status to the rails workflow state machine's event (if applicable)
 CheckpointStatusToStatusEvent = {
@@ -154,6 +145,9 @@ class GitLabWorkflow(
         workflow_id: str,
         workflow_type: CategoryEnum,
         workflow_config: WorkflowConfig,
+        gitlab_status_update_callback: (
+            Callable[[WorkflowStatusEventEnum], NoReturn] | None
+        ) = None,
         internal_event_client: InternalEventsClient = Provide[
             ContainerApplication.internal_event.client
         ],
@@ -164,7 +158,9 @@ class GitLabWorkflow(
         self._offline_mode = os.getenv("USE_MEMSAVER")
         self._client = client
         self._workflow_id = workflow_id
-        self._status_handler = GitLabStatusUpdater(client)
+        self._status_handler = GitLabStatusUpdater(
+            client, status_update_callback=gitlab_status_update_callback
+        )
         self._logger = structlog.stdlib.get_logger("workflow_checkpointer")
         self._workflow_type = workflow_type
         self._workflow_config = workflow_config
@@ -421,8 +417,20 @@ class GitLabWorkflow(
             log_exception(
                 exc_value, extra={"workflow_id": self._workflow_id, "source": __name__}
             )
-            await self._handle_workflow_exception(exc_value)
-            await self._update_workflow_status_safely()
+
+            event = EventEnum.WORKFLOW_FINISH_FAILURE
+            status = WorkflowStatusEventEnum.DROP
+
+            if isinstance(exc_value, asyncio.exceptions.CancelledError):
+                if AIO_CANCEL_STOP_WORKFLOW_REQUEST in str(exc_value):
+                    event = EventEnum.WORKFLOW_STOP
+                    status = WorkflowStatusEventEnum.STOP
+                else:
+                    # When this workflow task is cancelled by `workflow_task.cancel`, `CancelledError` is raised.
+                    event = EventEnum.WORKFLOW_ABORTED
+
+            await self._handle_workflow_exception(exc_value, event)
+            await self._update_workflow_status_safely(status)
             return False
 
         if not self._offline_mode:
@@ -437,7 +445,9 @@ class GitLabWorkflow(
         await self._track_workflow_completion(status)
         return True
 
-    async def _handle_workflow_exception(self, exc_value: Any) -> None:
+    async def _handle_workflow_exception(
+        self, exc_value: Any, event: EventEnum = EventEnum.WORKFLOW_FINISH_FAILURE
+    ) -> None:
         """Track workflow failure event."""
         properties = InternalEventAdditionalProperties(
             label=EventLabelEnum.WORKFLOW_FINISH_LABEL.value,
@@ -445,12 +455,6 @@ class GitLabWorkflow(
             value=self._workflow_id,
             error_type=type(exc_value).__name__,
         )
-
-        event = EventEnum.WORKFLOW_FINISH_FAILURE
-
-        if isinstance(exc_value, asyncio.exceptions.CancelledError):
-            # When this workflow task is cancelled by `workflow_task.cancel`, `CancelledError` is raised.
-            event = EventEnum.WORKFLOW_ABORTED
 
         self._track_internal_event(
             event_name=event,
@@ -537,14 +541,16 @@ class GitLabWorkflow(
             ),
         )
 
-    async def _update_workflow_status_safely(self):
+    async def _update_workflow_status_safely(
+        self, status: WorkflowStatusEventEnum = WorkflowStatusEventEnum.DROP
+    ):
         """Attempt to update workflow status to DROP, handling any exceptions.
 
         Returns:
             bool: False to indicate non-successful completion
         """
         try:
-            await self._update_workflow_status(WorkflowStatusEventEnum.DROP)
+            await self._update_workflow_status(status)
         except Exception as e:
             log_exception(e, extra={"workflow_id": self._workflow_id})
         return False

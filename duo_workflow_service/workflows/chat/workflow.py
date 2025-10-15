@@ -20,7 +20,9 @@ from duo_workflow_service.agents.chat_agent import ChatAgent
 from duo_workflow_service.agents.chat_agent_factory import create_agent
 from duo_workflow_service.agents.prompt_adapter import CustomPromptAdapter
 from duo_workflow_service.agents.tools_executor import ToolsExecutor
-from duo_workflow_service.checkpointer.gitlab_workflow import WorkflowStatusEventEnum
+from duo_workflow_service.checkpointer.gitlab_workflow_utils import (
+    WorkflowStatusEventEnum,
+)
 from duo_workflow_service.components.tools_registry import ToolsRegistry
 from duo_workflow_service.entities.state import (
     ApprovalStateRejection,

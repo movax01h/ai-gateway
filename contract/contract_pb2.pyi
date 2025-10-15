@@ -8,14 +8,16 @@ from typing import ClassVar as _ClassVar, Optional as _Optional, Union as _Union
 DESCRIPTOR: _descriptor.FileDescriptor
 
 class ClientEvent(_message.Message):
-    __slots__ = ("startRequest", "actionResponse", "heartbeat")
+    __slots__ = ("startRequest", "actionResponse", "heartbeat", "stopWorkflow")
     STARTREQUEST_FIELD_NUMBER: _ClassVar[int]
     ACTIONRESPONSE_FIELD_NUMBER: _ClassVar[int]
     HEARTBEAT_FIELD_NUMBER: _ClassVar[int]
+    STOPWORKFLOW_FIELD_NUMBER: _ClassVar[int]
     startRequest: StartWorkflowRequest
     actionResponse: ActionResponse
     heartbeat: HeartbeatRequest
-    def __init__(self, startRequest: _Optional[_Union[StartWorkflowRequest, _Mapping]] = ..., actionResponse: _Optional[_Union[ActionResponse, _Mapping]] = ..., heartbeat: _Optional[_Union[HeartbeatRequest, _Mapping]] = ...) -> None: ...
+    stopWorkflow: StopWorkflowRequest
+    def __init__(self, startRequest: _Optional[_Union[StartWorkflowRequest, _Mapping]] = ..., actionResponse: _Optional[_Union[ActionResponse, _Mapping]] = ..., heartbeat: _Optional[_Union[HeartbeatRequest, _Mapping]] = ..., stopWorkflow: _Optional[_Union[StopWorkflowRequest, _Mapping]] = ...) -> None: ...
 
 class StartWorkflowRequest(_message.Message):
     __slots__ = ("clientVersion", "workflowID", "workflowDefinition", "goal", "workflowMetadata", "clientCapabilities", "mcpTools", "additional_context", "approval", "flowConfig", "flowConfigSchemaVersion", "preapproved_tools")
@@ -62,6 +64,12 @@ class HeartbeatRequest(_message.Message):
     TIMESTAMP_FIELD_NUMBER: _ClassVar[int]
     timestamp: int
     def __init__(self, timestamp: _Optional[int] = ...) -> None: ...
+
+class StopWorkflowRequest(_message.Message):
+    __slots__ = ("reason",)
+    REASON_FIELD_NUMBER: _ClassVar[int]
+    reason: str
+    def __init__(self, reason: _Optional[str] = ...) -> None: ...
 
 class PlainTextResponse(_message.Message):
     __slots__ = ("response", "error")

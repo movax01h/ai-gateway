@@ -1,5 +1,5 @@
 import asyncio
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 import pytest
 from langchain_core.tools import ToolException
@@ -9,13 +9,13 @@ from duo_workflow_service.executor.action import (
     _execute_action,
     _execute_action_and_get_action_response,
 )
+from duo_workflow_service.executor.outbox import Outbox
 
 
 @pytest.fixture
 def metadata():
-    outbox = asyncio.Queue()
-    inbox = asyncio.Queue()
-    return {"outbox": outbox, "inbox": inbox}
+    outbox = Outbox()
+    return {"outbox": outbox}
 
 
 @pytest.mark.asyncio
@@ -32,7 +32,9 @@ async def test_execute_action_success_http_response(metadata):
     # Set up action type for logging
     action.runHTTPRequest.path = "https://example.com"
 
-    await metadata["inbox"].put(client_event)
+    metadata["outbox"].put_action_and_wait_for_response = AsyncMock(
+        return_value=client_event
+    )
 
     with patch(
         "duo_workflow_service.executor.action.structlog.stdlib.get_logger"
@@ -41,11 +43,7 @@ async def test_execute_action_success_http_response(metadata):
 
         response = await _execute_action(metadata, action)
 
-        put_action = await metadata["outbox"].get()
-        metadata["outbox"].task_done()
-        assert put_action == action
         assert response == '{"result": "success"}'
-        assert metadata["inbox"].empty()
 
         # Verify the log entry was created for the _execute_action call
         mock_logger.info.assert_any_call(
@@ -64,7 +62,9 @@ async def test_execute_action_success_plaintext_response(metadata):
     client_event.actionResponse.plainTextResponse.response = "plaintext success"
     client_event.actionResponse.plainTextResponse.error = ""
 
-    await metadata["inbox"].put(client_event)
+    metadata["outbox"].put_action_and_wait_for_response = AsyncMock(
+        return_value=client_event
+    )
 
     with patch(
         "duo_workflow_service.executor.action.structlog.stdlib.get_logger"
@@ -73,11 +73,7 @@ async def test_execute_action_success_plaintext_response(metadata):
 
         response = await _execute_action(metadata, action)
 
-        put_action = await metadata["outbox"].get()
-        metadata["outbox"].task_done()
-        assert put_action == action
         assert response == "plaintext success"
-        assert metadata["inbox"].empty()
 
         # Verify no log entry for the specific HTTP response message
         # Check that the HTTP-specific log message was not called
@@ -101,15 +97,12 @@ async def test__execute_action_and_get_action_response_http_error_raises_tool_ex
     # Set up HTTP response with error
     client_event.actionResponse.httpResponse.error = "Connection timeout"
 
-    await metadata["inbox"].put(client_event)
+    metadata["outbox"].put_action_and_wait_for_response = AsyncMock(
+        return_value=client_event
+    )
 
     with pytest.raises(ToolException, match="HTTP action error: Connection timeout"):
         await _execute_action_and_get_action_response(metadata, action)
-
-    put_action = await metadata["outbox"].get()
-    metadata["outbox"].task_done()
-    assert put_action == action
-    assert metadata["inbox"].empty()
 
 
 @pytest.mark.asyncio
@@ -123,15 +116,12 @@ async def test__execute_action_and_get_action_response_plaintext_error_raises_to
     # Set up plaintext response with error
     client_event.actionResponse.plainTextResponse.error = "File not found"
 
-    await metadata["inbox"].put(client_event)
+    metadata["outbox"].put_action_and_wait_for_response = AsyncMock(
+        return_value=client_event
+    )
 
     with pytest.raises(ToolException, match="Action error: File not found"):
         await _execute_action_and_get_action_response(metadata, action)
-
-    put_action = await metadata["outbox"].get()
-    metadata["outbox"].task_done()
-    assert put_action == action
-    assert metadata["inbox"].empty()
 
 
 @pytest.mark.asyncio
@@ -154,18 +144,15 @@ async def test__execute_action_and_get_action_response_missing_legacy_response_f
     client_event.actionResponse.httpResponse.body = '{"result": "ok"}'
     client_event.actionResponse.httpResponse.error = ""
 
-    await metadata["inbox"].put(client_event)
+    metadata["outbox"].put_action_and_wait_for_response = AsyncMock(
+        return_value=client_event
+    )
 
     response = await _execute_action_and_get_action_response(metadata, action)
 
-    put_action = await metadata["outbox"].get()
-    metadata["outbox"].task_done()
-
-    assert put_action == action
     assert response.response == '{"result": "ok"}'
     assert response.httpResponse.statusCode == 200
     assert response.httpResponse.body == '{"result": "ok"}'
-    assert metadata["inbox"].empty()
 
 
 @pytest.mark.asyncio
@@ -180,18 +167,15 @@ async def test__execute_action_and_get_action_response_missing_legacy_response_f
     client_event.actionResponse.httpResponse.body = ""
     client_event.actionResponse.httpResponse.error = ""
 
-    await metadata["inbox"].put(client_event)
+    metadata["outbox"].put_action_and_wait_for_response = AsyncMock(
+        return_value=client_event
+    )
 
     response = await _execute_action_and_get_action_response(metadata, action)
 
-    put_action = await metadata["outbox"].get()
-    metadata["outbox"].task_done()
-
-    assert put_action == action
     assert response.response == "Error: unexpected status code: 404"
     assert response.httpResponse.statusCode == 404
     assert response.httpResponse.body == ""
-    assert metadata["inbox"].empty()
 
 
 @pytest.mark.asyncio
@@ -206,16 +190,13 @@ async def test__execute_action_and_get_action_response_missing_legacy_response_f
     client_event.actionResponse.httpResponse.body = ""
     client_event.actionResponse.httpResponse.error = "Some HTTP error"
 
-    await metadata["inbox"].put(client_event)
+    metadata["outbox"].put_action_and_wait_for_response = AsyncMock(
+        return_value=client_event
+    )
 
     # This should now raise ToolException instead of returning a response
     with pytest.raises(ToolException, match="HTTP action error: Some HTTP error"):
         await _execute_action_and_get_action_response(metadata, action)
-
-    put_action = await metadata["outbox"].get()
-    metadata["outbox"].task_done()
-    assert put_action == action
-    assert metadata["inbox"].empty()
 
 
 @pytest.mark.asyncio
@@ -229,17 +210,14 @@ async def test__execute_action_and_get_action_response_missing_legacy_response_f
     client_event.actionResponse.plainTextResponse.response = "Response"
     client_event.actionResponse.plainTextResponse.error = ""
 
-    await metadata["inbox"].put(client_event)
+    metadata["outbox"].put_action_and_wait_for_response = AsyncMock(
+        return_value=client_event
+    )
 
     response = await _execute_action_and_get_action_response(metadata, action)
 
-    put_action = await metadata["outbox"].get()
-    metadata["outbox"].task_done()
-
-    assert put_action == action
     assert response.response == "Response"
     assert response.plainTextResponse.response == "Response"
-    assert metadata["inbox"].empty()
 
 
 @pytest.mark.asyncio
@@ -253,16 +231,13 @@ async def test__execute_action_and_get_action_response_missing_legacy_response_f
     client_event.actionResponse.plainTextResponse.response = ""
     client_event.actionResponse.plainTextResponse.error = "file not found"
 
-    await metadata["inbox"].put(client_event)
+    metadata["outbox"].put_action_and_wait_for_response = AsyncMock(
+        return_value=client_event
+    )
 
     # This should now raise ToolException instead of returning a response
     with pytest.raises(ToolException, match="Action error: file not found"):
         await _execute_action_and_get_action_response(metadata, action)
-
-    put_action = await metadata["outbox"].get()
-    metadata["outbox"].task_done()
-    assert put_action == action
-    assert metadata["inbox"].empty()
 
 
 @pytest.mark.asyncio
@@ -275,12 +250,10 @@ async def test_execute_action_only_legacy_response(metadata):
     client_event.actionResponse.response = "some legacy response"
     # Don't set either plainTextResponse or httpResponse, so WhichOneof("response_type") returns None
 
-    await metadata["inbox"].put(client_event)
+    metadata["outbox"].put_action_and_wait_for_response = AsyncMock(
+        return_value=client_event
+    )
 
     response = await _execute_action(metadata, action)
 
-    put_action = await metadata["outbox"].get()
-    metadata["outbox"].task_done()
-    assert put_action == action
-    assert metadata["inbox"].empty()
     assert response == "some legacy response"

@@ -6,6 +6,7 @@ import pytest
 from langchain_core.tools import ToolException
 
 from contract import contract_pb2
+from duo_workflow_service.executor.outbox import Outbox
 from duo_workflow_service.gitlab.executor_http_client import ExecutorGitLabHttpClient
 from duo_workflow_service.gitlab.http_client import GitLabHttpResponse
 
@@ -17,9 +18,8 @@ def mock_execute_action_fixture():
 
 @pytest.fixture(name="client")
 def client_fixture():
-    outbox = asyncio.Queue()
-    inbox = asyncio.Queue()
-    return ExecutorGitLabHttpClient(outbox, inbox)
+    outbox = Outbox()
+    return ExecutorGitLabHttpClient(outbox)
 
 
 @pytest.fixture(name="monkeypatch_execute_action")
@@ -175,9 +175,7 @@ async def test_executor_gitlab_http_client(
         call_args = monkeypatch_execute_action.call_args[0]
 
     assert "outbox" in call_args[0]
-    assert "inbox" in call_args[0]
     assert call_args[0]["outbox"] == client.outbox
-    assert call_args[0]["inbox"] == client.inbox
 
     assert isinstance(call_args[1], contract_pb2.Action)
     assert call_args[1].runHTTPRequest.path == expected_path
@@ -287,7 +285,6 @@ async def test_graphql_basic_query(client, monkeypatch_execute_action):
     call_args = monkeypatch_execute_action.call_args[0]
 
     assert call_args[0]["outbox"] == client.outbox
-    assert call_args[0]["inbox"] == client.inbox
 
     http_request = call_args[1].runHTTPRequest
     assert http_request.path == "/api/graphql"

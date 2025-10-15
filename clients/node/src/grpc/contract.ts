@@ -28,6 +28,7 @@ export interface ClientEvent {
   startRequest?: StartWorkflowRequest | undefined;
   actionResponse?: ActionResponse | undefined;
   heartbeat?: HeartbeatRequest | undefined;
+  stopWorkflow?: StopWorkflowRequest | undefined;
 }
 
 export interface StartWorkflowRequest {
@@ -54,6 +55,10 @@ export interface ActionResponse {
 
 export interface HeartbeatRequest {
   timestamp: number;
+}
+
+export interface StopWorkflowRequest {
+  reason: string;
 }
 
 export interface PlainTextResponse {
@@ -231,7 +236,7 @@ export interface ShellInformationContext {
 }
 
 function createBaseClientEvent(): ClientEvent {
-  return { startRequest: undefined, actionResponse: undefined, heartbeat: undefined };
+  return { startRequest: undefined, actionResponse: undefined, heartbeat: undefined, stopWorkflow: undefined };
 }
 
 export const ClientEvent: MessageFns<ClientEvent> = {
@@ -244,6 +249,9 @@ export const ClientEvent: MessageFns<ClientEvent> = {
     }
     if (message.heartbeat !== undefined) {
       HeartbeatRequest.encode(message.heartbeat, writer.uint32(26).fork()).join();
+    }
+    if (message.stopWorkflow !== undefined) {
+      StopWorkflowRequest.encode(message.stopWorkflow, writer.uint32(34).fork()).join();
     }
     return writer;
   },
@@ -279,6 +287,14 @@ export const ClientEvent: MessageFns<ClientEvent> = {
           message.heartbeat = HeartbeatRequest.decode(reader, reader.uint32());
           continue;
         }
+        case 4: {
+          if (tag !== 34) {
+            break;
+          }
+
+          message.stopWorkflow = StopWorkflowRequest.decode(reader, reader.uint32());
+          continue;
+        }
       }
       if ((tag & 7) === 4 || tag === 0) {
         break;
@@ -293,6 +309,7 @@ export const ClientEvent: MessageFns<ClientEvent> = {
       startRequest: isSet(object.startRequest) ? StartWorkflowRequest.fromJSON(object.startRequest) : undefined,
       actionResponse: isSet(object.actionResponse) ? ActionResponse.fromJSON(object.actionResponse) : undefined,
       heartbeat: isSet(object.heartbeat) ? HeartbeatRequest.fromJSON(object.heartbeat) : undefined,
+      stopWorkflow: isSet(object.stopWorkflow) ? StopWorkflowRequest.fromJSON(object.stopWorkflow) : undefined,
     };
   },
 
@@ -306,6 +323,9 @@ export const ClientEvent: MessageFns<ClientEvent> = {
     }
     if (message.heartbeat !== undefined) {
       obj.heartbeat = HeartbeatRequest.toJSON(message.heartbeat);
+    }
+    if (message.stopWorkflow !== undefined) {
+      obj.stopWorkflow = StopWorkflowRequest.toJSON(message.stopWorkflow);
     }
     return obj;
   },
@@ -323,6 +343,9 @@ export const ClientEvent: MessageFns<ClientEvent> = {
       : undefined;
     message.heartbeat = (object.heartbeat !== undefined && object.heartbeat !== null)
       ? HeartbeatRequest.fromPartial(object.heartbeat)
+      : undefined;
+    message.stopWorkflow = (object.stopWorkflow !== undefined && object.stopWorkflow !== null)
+      ? StopWorkflowRequest.fromPartial(object.stopWorkflow)
       : undefined;
     return message;
   },
@@ -755,6 +778,64 @@ export const HeartbeatRequest: MessageFns<HeartbeatRequest> = {
   fromPartial<I extends Exact<DeepPartial<HeartbeatRequest>, I>>(object: I): HeartbeatRequest {
     const message = createBaseHeartbeatRequest();
     message.timestamp = object.timestamp ?? 0;
+    return message;
+  },
+};
+
+function createBaseStopWorkflowRequest(): StopWorkflowRequest {
+  return { reason: "" };
+}
+
+export const StopWorkflowRequest: MessageFns<StopWorkflowRequest> = {
+  encode(message: StopWorkflowRequest, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
+    if (message.reason !== "") {
+      writer.uint32(10).string(message.reason);
+    }
+    return writer;
+  },
+
+  decode(input: BinaryReader | Uint8Array, length?: number): StopWorkflowRequest {
+    const reader = input instanceof BinaryReader ? input : new BinaryReader(input);
+    const end = length === undefined ? reader.len : reader.pos + length;
+    const message = createBaseStopWorkflowRequest();
+    while (reader.pos < end) {
+      const tag = reader.uint32();
+      switch (tag >>> 3) {
+        case 1: {
+          if (tag !== 10) {
+            break;
+          }
+
+          message.reason = reader.string();
+          continue;
+        }
+      }
+      if ((tag & 7) === 4 || tag === 0) {
+        break;
+      }
+      reader.skip(tag & 7);
+    }
+    return message;
+  },
+
+  fromJSON(object: any): StopWorkflowRequest {
+    return { reason: isSet(object.reason) ? globalThis.String(object.reason) : "" };
+  },
+
+  toJSON(message: StopWorkflowRequest): unknown {
+    const obj: any = {};
+    if (message.reason !== "") {
+      obj.reason = message.reason;
+    }
+    return obj;
+  },
+
+  create<I extends Exact<DeepPartial<StopWorkflowRequest>, I>>(base?: I): StopWorkflowRequest {
+    return StopWorkflowRequest.fromPartial(base ?? ({} as any));
+  },
+  fromPartial<I extends Exact<DeepPartial<StopWorkflowRequest>, I>>(object: I): StopWorkflowRequest {
+    const message = createBaseStopWorkflowRequest();
+    message.reason = object.reason ?? "";
     return message;
   },
 };

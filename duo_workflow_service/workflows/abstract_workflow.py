@@ -24,13 +24,15 @@ from ai_gateway.models import KindAnthropicModel
 from ai_gateway.prompts import InMemoryPromptRegistry
 from ai_gateway.prompts.registry import LocalPromptRegistry
 from contract import contract_pb2
-from duo_workflow_service.checkpointer.gitlab_workflow import (
-    GitLabWorkflow,
+from duo_workflow_service.checkpointer.gitlab_workflow import GitLabWorkflow
+from duo_workflow_service.checkpointer.gitlab_workflow_utils import (
+    SUCCESSFUL_WORKFLOW_EXECUTION_STATUSES,
     WorkflowStatusEventEnum,
 )
 from duo_workflow_service.checkpointer.notifier import UserInterface
 from duo_workflow_service.components import ToolsRegistry
 from duo_workflow_service.entities import DuoWorkflowStateType
+from duo_workflow_service.executor.outbox import Outbox, OutboxSignal
 from duo_workflow_service.gitlab.events import get_event
 from duo_workflow_service.gitlab.gitlab_api import (
     Namespace,
@@ -61,7 +63,6 @@ MAX_TOKENS_TO_SAMPLE = 8192
 RECURSION_LIMIT = 300
 DEBUG = os.getenv("DEBUG")
 MAX_MESSAGES_TO_DISPLAY = 5
-MAX_MESSAGE_LENGTH = 200
 
 
 class InvocationMetadata(TypedDict):
@@ -70,15 +71,12 @@ class InvocationMetadata(TypedDict):
 
 
 class AbstractWorkflow(ABC):
-    OUTBOX_CHECK_INTERVAL = 0.5
     """Abstract base class for workflow implementations.
 
     Provides a structure for creating workflow classes with common functionality.
     """
 
-    _outbox: asyncio.Queue
-    _inbox: asyncio.Queue
-    _streaming_outbox: asyncio.Queue
+    _outbox: Outbox
     _workflow_id: str
     _project: Project | None
     _namespace: Namespace | None
@@ -118,16 +116,13 @@ class AbstractWorkflow(ABC):
         language_server_version: Optional[LanguageServerVersion] = None,
         preapproved_tools: Optional[list[str]] = [],
     ):
-        self._outbox = asyncio.Queue(maxsize=QUEUE_MAX_SIZE)
-        self._inbox = asyncio.Queue(maxsize=QUEUE_MAX_SIZE)
-        self._streaming_outbox = asyncio.Queue(maxsize=STREAMING_QUEUE_MAX_SIZE)
+        self._outbox = Outbox()
         self._workflow_id = workflow_id
         self._workflow_metadata = workflow_metadata
         self._user = user
         self.log = structlog.stdlib.get_logger("workflow").bind(workflow_id=workflow_id)
         self._http_client = get_http_client(
             self._outbox,
-            self._inbox,
             invocation_metadata.get("base_url", ""),
             invocation_metadata.get("gitlab_token", ""),
         )
@@ -144,6 +139,7 @@ class AbstractWorkflow(ABC):
         self._language_server_version = language_server_version
         self._preapproved_tools = preapproved_tools
         self._session_url: Optional[str] = None
+        self._last_gitlab_status: WorkflowStatusEventEnum | None = None
 
     async def run(self, goal: str) -> None:
         with duo_workflow_metrics.time_workflow(
@@ -167,6 +163,8 @@ class AbstractWorkflow(ABC):
                     # Intentionally suppressing the exception here after it has been
                     # properly traced in Langsmith via the TraceableException
                     pass
+                finally:
+                    self._outbox.close()
 
     @abstractmethod
     async def _handle_workflow_failure(
@@ -183,37 +181,22 @@ class AbstractWorkflow(ABC):
     ) -> Any:
         pass
 
-    def get_from_streaming_outbox(self):
-        try:
-            item = self._streaming_outbox.get_nowait()
-            self._streaming_outbox.task_done()
-            return item
-        except asyncio.QueueEmpty:
-            return None
+    @property
+    def last_gitlab_status(self) -> WorkflowStatusEventEnum | None:
+        return self._last_gitlab_status
 
-    def outbox_empty(self):
-        return self._outbox.empty()
+    def successful_execution(self) -> bool:
+        """Return if the workflow task execution was successful."""
+        if self.last_error:
+            return False
 
-    async def get_from_outbox(self) -> contract_pb2.Action | None:
-        try:
-            self.log.debug("Waiting for getting action from outbox...")
-            # `outbox.put` could hung indefinitely if the queue is full and no tasks get an item from it.
-            # There are several cases when this could happen:
-            # - Connection between client and server is terminated during the workflow is running
-            # - Deadlock between workflow and client-server message loop
-            # TODO: Handle the `asyncio.TimeoutError` properly.
-            item = await asyncio.wait_for(
-                self._outbox.get(), self.OUTBOX_CHECK_INTERVAL
-            )
-        except TimeoutError as err:
-            self.log.debug("Timeout on getting action from outbox", err=err)
-            return None
+        return self._last_gitlab_status in SUCCESSFUL_WORKFLOW_EXECUTION_STATUSES
 
-        self._outbox.task_done()
-        return item
+    async def get_from_outbox(self) -> contract_pb2.Action | OutboxSignal:
+        return await self._outbox.get()
 
-    def add_to_inbox(self, event: contract_pb2.ClientEvent):
-        self._inbox.put_nowait(event)
+    def set_action_response(self, event: contract_pb2.ClientEvent):
+        self._outbox.set_action_response(event)
 
     def _recursion_limit(self):
         return RECURSION_LIMIT
@@ -251,7 +234,6 @@ class AbstractWorkflow(ABC):
 
             tools_registry = await ToolsRegistry.configure(
                 outbox=self._outbox,
-                inbox=self._inbox,
                 workflow_config=self._workflow_config,
                 gl_http_client=self._http_client,
                 project=self._project,
@@ -263,15 +245,17 @@ class AbstractWorkflow(ABC):
                 user=user_for_registry,
                 language_server_version=self._language_server_version,
             )
-            checkpoint_notifier = UserInterface(
-                outbox=self._streaming_outbox, goal=goal
-            )
+            checkpoint_notifier = UserInterface(outbox=self._outbox, goal=goal)
+
+            def on_gitlab_status_update(status: WorkflowStatusEventEnum):
+                self._last_gitlab_status = status
 
             async with GitLabWorkflow(
                 self._http_client,
                 self._workflow_id,
                 self._workflow_type,
                 self._workflow_config,
+                gitlab_status_update_callback=on_gitlab_status_update,
             ) as checkpointer:
                 set_workflow_checkpointer(checkpointer)
                 status_event = getattr(checkpointer, "initial_status_event", None)
@@ -307,8 +291,6 @@ class AbstractWorkflow(ABC):
             raise TraceableException(e)
         finally:
             clear_workflow_checkpointer()
-            # Wait until outbox is checked to gracefully stop a workflow
-            await asyncio.sleep(self.OUTBOX_CHECK_INTERVAL * 2)
             self.is_done = True
 
     async def get_graph_input(self, goal: str, status_event: str) -> Any:
@@ -331,9 +313,7 @@ class AbstractWorkflow(ABC):
         try:
             self.is_done = True
 
-            self._drain_queue(workflow_id, self._outbox, "outbox")
-            self._drain_queue(workflow_id, self._streaming_outbox, "streaming outbox")
-            self._drain_queue(workflow_id, self._inbox, "inbox")
+            self._outbox.check_empty()
 
             self.log.info("Workflow cleanup completed.")
         except BaseException as cleanup_err:
@@ -342,36 +322,6 @@ class AbstractWorkflow(ABC):
                 extra={
                     "workflow_id": workflow_id,
                     "context": "Workflow cleanup failed",
-                },
-            )
-            raise
-
-    def _drain_queue(self, workflow_id, queue, queue_name: str):
-        try:
-            while True:
-                try:
-                    msg = queue.get_nowait()
-                except asyncio.QueueEmpty:
-                    # Queue is empty, exit loop
-                    break
-
-                queue.task_done()
-                content = str(msg)
-
-                if len(content) > MAX_MESSAGE_LENGTH:
-                    content = f"{content[:MAX_MESSAGE_LENGTH]}..."
-
-                self.log.info(
-                    f"Drained {queue_name} message during cleanup",
-                    workflow_id=workflow_id,
-                    content=content,
-                )
-        except Exception as e:
-            log_exception(
-                e,
-                extra={
-                    "workflow_id": workflow_id,
-                    "context": f"Error draining {queue_name} queue",
                 },
             )
             raise
