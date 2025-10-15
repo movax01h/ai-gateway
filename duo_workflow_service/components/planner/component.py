@@ -15,6 +15,9 @@ from duo_workflow_service.components.human_approval.plan_approval import (
     PlanApprovalComponent,
 )
 from duo_workflow_service.entities import WorkflowState, WorkflowStatusEnum
+from duo_workflow_service.entities.agent_user_environment import (
+    process_agent_user_environment,
+)
 from duo_workflow_service.gitlab.gitlab_api import Project
 from duo_workflow_service.tools.handover import HandoverTool
 
@@ -87,11 +90,12 @@ class PlannerComponent(BaseComponent):
                 "update_task_description_tool_name": self.tools_registry.get(
                     "update_task_description"
                 ).name,  # type: ignore
+                "agent_user_environment": process_agent_user_environment(
+                    self.additional_context
+                ),
             },
         )
-        planner.prompt_template_inputs.setdefault("agent_user_environment", {}).update(
-            self.agent_user_environment
-        )
+
         graph.add_node("planning", planner.run)
 
         tools_executor = ToolsExecutor(
