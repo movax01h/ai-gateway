@@ -20,7 +20,11 @@ from ai_gateway.prompts.config.models import ChatAnthropicParams, ModelClassProv
 from ai_gateway.prompts.typing import TypeModelFactory
 from contract import contract_pb2
 from duo_workflow_service.agents.chat_agent import ChatAgent
-from duo_workflow_service.agents.prompt_adapter import BasePromptAdapter
+from duo_workflow_service.agents.prompt_adapter import (
+    BasePromptAdapter,
+    CustomPromptAdapter,
+    DefaultPromptAdapter,
+)
 from duo_workflow_service.checkpointer.gitlab_workflow import WorkflowStatusEventEnum
 from duo_workflow_service.components.tools_registry import ToolsRegistry
 from duo_workflow_service.entities import (
@@ -1017,3 +1021,36 @@ async def test_compile_without_overrides(
     # Verify _get_tools was called since no tools_override
     mock_get_tools.assert_called_once()
     tools_registry.toolset.assert_called_once_with(["default_tool1", "default_tool2"])
+
+
+@pytest.mark.parametrize(
+    ("use_custom_adapter", "expected_adapter_class"),
+    [(True, CustomPromptAdapter), (False, DefaultPromptAdapter)],
+    ids=[
+        "Workflow uses custom adapter",
+        "Workflow uses default adapter",
+    ],
+)
+@pytest.mark.asyncio
+@patch("duo_workflow_service.workflows.chat.workflow.create_agent")
+async def test_compile_uses_correct_adapter(
+    mock_create_agent,
+    user,
+    use_custom_adapter,
+    expected_adapter_class,
+):
+    workflow = Workflow(
+        workflow_id="test-id",
+        workflow_metadata={},
+        workflow_type=CategoryEnum.WORKFLOW_CHAT,
+        user=user,
+        use_custom_adapter=use_custom_adapter,
+    )
+    tools_registry = MagicMock()
+    checkpointer = MagicMock()
+
+    workflow._compile("Test goal", tools_registry, checkpointer)
+
+    args, kwargs = mock_create_agent.call_args
+
+    assert kwargs["adapter_cls"] == expected_adapter_class

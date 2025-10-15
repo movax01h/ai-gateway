@@ -243,6 +243,7 @@ def test_resolve_workflow_class_with_chat_flow_config_success(config_params):
                 "prompt_id": "custom/prompt",
                 "content": "test prompt",
             },
+            "use_custom_adapter": True,
         }
         assert result.keywords == expected_kwargs
 

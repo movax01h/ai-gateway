@@ -1,7 +1,7 @@
 # pylint: disable=attribute-defined-outside-init
 from datetime import datetime, timezone
 from enum import StrEnum
-from typing import Any, Dict, List, Optional, Union, override
+from typing import Any, Dict, List, Optional, Type, Union, override
 
 from dependency_injector.wiring import Provide, inject
 from gitlab_cloud_connector import CloudConnectorUser
@@ -18,7 +18,11 @@ from ai_gateway.prompts.registry import LocalPromptRegistry
 from contract import contract_pb2
 from duo_workflow_service.agents.chat_agent import ChatAgent
 from duo_workflow_service.agents.chat_agent_factory import create_agent
-from duo_workflow_service.agents.prompt_adapter import CustomPromptAdapter
+from duo_workflow_service.agents.prompt_adapter import (
+    BasePromptAdapter,
+    CustomPromptAdapter,
+    DefaultPromptAdapter,
+)
 from duo_workflow_service.agents.tools_executor import ToolsExecutor
 from duo_workflow_service.checkpointer.gitlab_workflow_utils import (
     WorkflowStatusEventEnum,
@@ -178,6 +182,8 @@ class Workflow(AbstractWorkflow):
             self._register_prompt_template_override(kwargs, memory_prompt_registry)
             active_prompt_registry = memory_prompt_registry
 
+        self._use_custom_adapter = kwargs.pop("use_custom_adapter", False)
+
         super().__init__(
             workflow_id=workflow_id,
             workflow_metadata=workflow_metadata,
@@ -329,6 +335,11 @@ class Workflow(AbstractWorkflow):
         agents_toolset = tools_registry.toolset(tools)
         model_metadata = current_model_metadata_context.get()
 
+        adapter_cls: Type[BasePromptAdapter] = DefaultPromptAdapter
+
+        if self._use_custom_adapter:
+            adapter_cls = CustomPromptAdapter
+
         self._agent: ChatAgent = create_agent(
             user=self._user,
             tools_registry=tools_registry,
@@ -340,6 +351,7 @@ class Workflow(AbstractWorkflow):
             prompt_registry=self._prompt_registry,
             workflow_id=self._workflow_id,
             workflow_type=self._workflow_type,
+            adapter_cls=adapter_cls,
         )
 
         tools_runner = ToolsExecutor(

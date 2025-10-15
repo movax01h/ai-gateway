@@ -137,13 +137,17 @@ def _flow_factory(
             "Chat-partial environment expects either inline or in repository prompt configuration, but received both"
         )
 
-    return partial(
-        chat.Workflow,
-        tools_override=agent_component["toolset"],
-        prompt_template_id_override=agent_component["prompt_id"],
-        prompt_template_version_override=agent_component.get("prompt_version"),
-        prompt_template_override=config.prompts[0] if config.prompts else None,
-    )
+    args = {
+        "tools_override": agent_component["toolset"],
+        "prompt_template_id_override": agent_component["prompt_id"],
+        "prompt_template_version_override": agent_component.get("prompt_version"),
+        "use_custom_adapter": True,
+    }
+
+    if prompt_template_override := (config.prompts[0] if config.prompts else None):
+        args["prompt_template_override"] = prompt_template_override
+
+    return partial(chat.Workflow, **args)
 
 
 def resolve_workflow_class(
@@ -194,7 +198,8 @@ def resolve_workflow_class(
         flow_config_cls, flow_cls = _FLOW_BY_VERSIONS[flow_version]
 
         config = flow_config_cls.from_yaml_config(flow_config_path)
-        return partial(flow_cls, config=config)  # dynamic flow type
+
+        return _flow_factory(flow_cls, config)
     except Exception:
         raise ValueError(f"Unknown Flow: {workflow_definition}")
 
