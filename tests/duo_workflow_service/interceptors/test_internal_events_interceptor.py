@@ -18,157 +18,189 @@ def interceptor_fixture():
     return InternalEventsInterceptor()
 
 
-@pytest.fixture(name="handler_call_details")
-def handler_call_details_fixture():
+def create_handler_call_details(metadata_dict):
+    """Helper function to create handler call details with given metadata."""
     mock_details = MagicMock()
-    mock_details.invocation_metadata = (
-        ("x-gitlab-realm", "test-realm"),
-        ("x-gitlab-instance-id", "test-instance-id"),
-        ("x-gitlab-global-user-id", "test-global-user-id"),
-        ("x-gitlab-host-name", "test-gitlab-host"),
-        ("x-gitlab-feature-enabled-by-namespace-ids", "1,2,3"),
-        ("x-gitlab-project-id", "1"),
-        ("x-gitlab-namespace-id", "2"),
-        ("x-gitlab-root-namespace-id", "3"),
-        ("x-gitlab-is-a-gitlab-member", "true"),
-    )
-    return mock_details
-
-
-@pytest.fixture(name="handler_call_details_with_empty_feature")
-def handler_call_details_with_empty_feature_fixture():
-    mock_details = MagicMock()
-    mock_details.invocation_metadata = (
-        ("x-gitlab-realm", "test-realm"),
-        ("x-gitlab-instance-id", "test-instance-id"),
-        ("x-gitlab-global-user-id", "test-global-user-id"),
-        ("x-gitlab-host-name", "test-gitlab-host"),
-        ("x-gitlab-feature-enabled-by-namespace-ids", ""),
-        ("x-gitlab-project-id", "1"),
-        ("x-gitlab-namespace-id", "2"),
-        ("x-gitlab-root-namespace-id", "3"),
-        ("x-gitlab-is-a-gitlab-member", "true"),
-    )
-    return mock_details
-
-
-@pytest.fixture(name="handler_call_details_with_duplicate_namespace_ids")
-def handler_call_details_with_duplicate_namespace_ids_fixture():
-    mock_details = MagicMock()
-    mock_details.invocation_metadata = (
-        ("x-gitlab-realm", "test-realm"),
-        ("x-gitlab-instance-id", "test-instance-id"),
-        ("x-gitlab-global-user-id", "test-global-user-id"),
-        ("x-gitlab-host-name", "test-gitlab-host"),
-        ("x-gitlab-feature-enabled-by-namespace-ids", "1,2,2,3,1,4,3,5"),
-        ("x-gitlab-project-id", "1"),
-        ("x-gitlab-namespace-id", "2"),
-        ("x-gitlab-root-namespace-id", "3"),
-        ("x-gitlab-is-a-gitlab-member", "true"),
-    )
+    mock_details.invocation_metadata = tuple(metadata_dict.items())
     return mock_details
 
 
 @pytest.mark.asyncio
-async def test_interceptor_removes_duplicate_namespace_ids(
-    interceptor, mock_continuation, handler_call_details_with_duplicate_namespace_ids
+@pytest.mark.parametrize(
+    "metadata,expected",
+    [
+        pytest.param(
+            {
+                "x-gitlab-realm": "test-realm",
+                "x-gitlab-instance-id": "test-instance-id",
+                "x-gitlab-global-user-id": "test-global-user-id",
+                "x-gitlab-host-name": "test-gitlab-host",
+                "x-gitlab-feature-enabled-by-namespace-ids": "1,2,3",
+                "x-gitlab-project-id": "1",
+                "x-gitlab-namespace-id": "2",
+                "x-gitlab-root-namespace-id": "3",
+                "x-gitlab-is-a-gitlab-member": "true",
+            },
+            {
+                "realm": "test-realm",
+                "instance_id": "test-instance-id",
+                "global_user_id": "test-global-user-id",
+                "host_name": "test-gitlab-host",
+                "feature_enabled_by_namespace_ids": [1, 2, 3],
+                "project_id": 1,
+                "namespace_id": 2,
+                "ultimate_parent_namespace_id": 3,
+                "is_gitlab_team_member": True,
+            },
+            id="standard_metadata",
+        ),
+        pytest.param(
+            {
+                "x-gitlab-realm": "test-realm",
+                "x-gitlab-instance-id": "test-instance-id",
+                "x-gitlab-global-user-id": "test-global-user-id",
+                "x-gitlab-host-name": "test-gitlab-host",
+                "x-gitlab-feature-enabled-by-namespace-ids": "1,2,3",
+                "x-gitlab-project-id": "1",
+                "x-gitlab-namespace-id": "2",
+                "x-gitlab-root-namespace-id": "",
+                "x-gitlab-is-a-gitlab-member": "true",
+            },
+            {
+                "realm": "test-realm",
+                "instance_id": "test-instance-id",
+                "global_user_id": "test-global-user-id",
+                "host_name": "test-gitlab-host",
+                "feature_enabled_by_namespace_ids": [1, 2, 3],
+                "project_id": 1,
+                "namespace_id": 2,
+                "ultimate_parent_namespace_id": None,
+                "is_gitlab_team_member": True,
+            },
+            id="missing_ultimate_parent_namespace_id",
+        ),
+        pytest.param(
+            {
+                "x-gitlab-realm": "test-realm",
+                "x-gitlab-instance-id": "test-instance-id",
+                "x-gitlab-global-user-id": "test-global-user-id",
+                "x-gitlab-host-name": "test-gitlab-host",
+                "x-gitlab-feature-enabled-by-namespace-ids": "1,2,3",
+                "x-gitlab-project-id": "1",
+                "x-gitlab-namespace-id": "2",
+                "x-gitlab-root-namespace-id": None,
+                "x-gitlab-is-a-gitlab-member": "true",
+            },
+            {
+                "realm": "test-realm",
+                "instance_id": "test-instance-id",
+                "global_user_id": "test-global-user-id",
+                "host_name": "test-gitlab-host",
+                "feature_enabled_by_namespace_ids": [1, 2, 3],
+                "project_id": 1,
+                "namespace_id": 2,
+                "ultimate_parent_namespace_id": None,
+                "is_gitlab_team_member": True,
+            },
+            id="none_ultimate_parent_namespace_id",
+        ),
+        pytest.param(
+            {
+                "x-gitlab-realm": "test-realm",
+                "x-gitlab-instance-id": "test-instance-id",
+                "x-gitlab-global-user-id": "test-global-user-id",
+                "x-gitlab-host-name": "test-gitlab-host",
+                "x-gitlab-feature-enabled-by-namespace-ids": "",
+                "x-gitlab-project-id": "1",
+                "x-gitlab-namespace-id": "2",
+                "x-gitlab-root-namespace-id": "3",
+                "x-gitlab-is-a-gitlab-member": "true",
+            },
+            {
+                "realm": "test-realm",
+                "instance_id": "test-instance-id",
+                "global_user_id": "test-global-user-id",
+                "host_name": "test-gitlab-host",
+                "feature_enabled_by_namespace_ids": None,
+                "project_id": 1,
+                "namespace_id": 2,
+                "ultimate_parent_namespace_id": 3,
+                "is_gitlab_team_member": True,
+            },
+            id="empty_feature_enabled",
+        ),
+        pytest.param(
+            {
+                "x-gitlab-realm": "test-realm",
+                "x-gitlab-instance-id": "test-instance-id",
+                "x-gitlab-global-user-id": "test-global-user-id",
+                "x-gitlab-host-name": "test-gitlab-host",
+                "x-gitlab-feature-enabled-by-namespace-ids": "1,2,2,3,1,4,3,5",
+                "x-gitlab-project-id": "1",
+                "x-gitlab-namespace-id": "2",
+                "x-gitlab-root-namespace-id": "3",
+                "x-gitlab-is-a-gitlab-member": "true",
+            },
+            {
+                "realm": "test-realm",
+                "instance_id": "test-instance-id",
+                "global_user_id": "test-global-user-id",
+                "host_name": "test-gitlab-host",
+                "feature_enabled_by_namespace_ids": [1, 2, 3, 4, 5],
+                "project_id": 1,
+                "namespace_id": 2,
+                "ultimate_parent_namespace_id": 3,
+                "is_gitlab_team_member": True,
+            },
+            id="duplicate_namespace_ids_removed",
+        ),
+        pytest.param(
+            {
+                "x-gitlab-realm": "test-realm",
+                "x-gitlab-instance-id": "test-instance-id",
+                "x-gitlab-global-user-id": "test-global-user-id",
+                "x-gitlab-host-name": "test-gitlab-host",
+                "x-gitlab-feature-enabled-by-namespace-ids": "",
+                "x-gitlab-is-a-gitlab-member": "false",
+                "x-gitlab-root-namespace-id": "3",
+            },
+            {
+                "realm": "test-realm",
+                "instance_id": "test-instance-id",
+                "global_user_id": "test-global-user-id",
+                "host_name": "test-gitlab-host",
+                "feature_enabled_by_namespace_ids": None,
+                "project_id": None,
+                "namespace_id": None,
+                "ultimate_parent_namespace_id": 3,
+                "is_gitlab_team_member": False,
+            },
+            id="empty_project_and_namespace_ids",
+        ),
+    ],
+)
+async def test_interceptor_metadata_handling(
+    interceptor, mock_continuation, metadata, expected
 ):
-    """Test that duplicate namespace IDs are removed while preserving order."""
-    await interceptor.intercept_service(
-        mock_continuation, handler_call_details_with_duplicate_namespace_ids
-    )
-    event_context = current_event_context.get()
+    """Test that the interceptor correctly processes various metadata configurations."""
+    handler_call_details = create_handler_call_details(metadata)
 
-    assert event_context.feature_enabled_by_namespace_ids == [1, 2, 3, 4, 5]
-    assert event_context.realm == "test-realm"
-    assert event_context.instance_id == "test-instance-id"
-    assert event_context.global_user_id == "test-global-user-id"
-    assert event_context.host_name == "test-gitlab-host"
-    assert event_context.project_id == 1
-    assert event_context.namespace_id == 2
-    assert event_context.ultimate_parent_namespace_id == 3
-    assert event_context.is_gitlab_team_member is True
-
-
-@pytest.fixture(name="handler_call_details_with_empty_project_and_namespace_id")
-def handler_call_details_with_empty_project_and_namespace_id_fixture():
-    mock_details = MagicMock()
-    mock_details.invocation_metadata = (
-        ("x-gitlab-realm", "test-realm"),
-        ("x-gitlab-instance-id", "test-instance-id"),
-        ("x-gitlab-global-user-id", "test-global-user-id"),
-        ("x-gitlab-host-name", "test-gitlab-host"),
-        ("x-gitlab-feature-enabled-by-namespace-ids", ""),
-        ("x-gitlab-is-a-gitlab-member", "false"),
-        ("x-gitlab-root-namespace-id", "3"),
-    )
-    return mock_details
-
-
-@pytest.mark.asyncio
-async def test_interceptor_with_internal_events_disabled(
-    interceptor, mock_continuation, handler_call_details
-):
     await interceptor.intercept_service(mock_continuation, handler_call_details)
+
     event_context = current_event_context.get()
-    assert event_context.realm == "test-realm"
-    assert event_context.instance_id == "test-instance-id"
-    assert event_context.global_user_id == "test-global-user-id"
-    assert event_context.host_name == "test-gitlab-host"
-    assert event_context.feature_enabled_by_namespace_ids == [1, 2, 3]
-    assert event_context.project_id == 1
-    assert event_context.namespace_id == 2
-    assert event_context.ultimate_parent_namespace_id == 3
-    assert event_context.is_gitlab_team_member is True
 
-
-@pytest.mark.asyncio
-async def test_interceptor_with_empty_feature_enabled_attribute(
-    interceptor, mock_continuation, handler_call_details_with_empty_feature
-):
-    await interceptor.intercept_service(
-        mock_continuation, handler_call_details_with_empty_feature
+    assert event_context.realm == expected["realm"]
+    assert event_context.instance_id == expected["instance_id"]
+    assert event_context.global_user_id == expected["global_user_id"]
+    assert event_context.host_name == expected["host_name"]
+    assert (
+        event_context.feature_enabled_by_namespace_ids
+        == expected["feature_enabled_by_namespace_ids"]
     )
-    event_context = current_event_context.get()
-    assert event_context.realm == "test-realm"
-    assert event_context.instance_id == "test-instance-id"
-    assert event_context.global_user_id == "test-global-user-id"
-    assert event_context.host_name == "test-gitlab-host"
-    assert event_context.feature_enabled_by_namespace_ids is None
-    assert event_context.project_id == 1
-    assert event_context.namespace_id == 2
-    assert event_context.ultimate_parent_namespace_id == 3
-    assert event_context.is_gitlab_team_member is True
-
-
-@pytest.mark.asyncio
-async def test_interceptor_with_empty_project_and_namespace_ids(
-    interceptor,
-    mock_continuation,
-    handler_call_details_with_empty_project_and_namespace_id,
-):
-    await interceptor.intercept_service(
-        mock_continuation, handler_call_details_with_empty_project_and_namespace_id
+    assert event_context.project_id == expected["project_id"]
+    assert event_context.namespace_id == expected["namespace_id"]
+    assert (
+        event_context.ultimate_parent_namespace_id
+        == expected["ultimate_parent_namespace_id"]
     )
-    event_context = current_event_context.get()
-    assert event_context.realm == "test-realm"
-    assert event_context.instance_id == "test-instance-id"
-    assert event_context.global_user_id == "test-global-user-id"
-    assert event_context.host_name == "test-gitlab-host"
-    assert event_context.feature_enabled_by_namespace_ids is None
-    assert event_context.project_id is None
-    assert event_context.namespace_id is None
-    assert event_context.ultimate_parent_namespace_id == 3
-
-
-@pytest.mark.asyncio
-async def test_interceptor_with_gitlab_member_false(
-    interceptor,
-    mock_continuation,
-    handler_call_details_with_empty_project_and_namespace_id,
-):
-    await interceptor.intercept_service(
-        mock_continuation, handler_call_details_with_empty_project_and_namespace_id
-    )
-    event_context = current_event_context.get()
-    assert event_context.is_gitlab_team_member is False
+    assert event_context.is_gitlab_team_member == expected["is_gitlab_team_member"]
