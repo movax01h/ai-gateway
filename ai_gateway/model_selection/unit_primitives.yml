@@ -12,6 +12,7 @@ configurable_unit_primitives:
       - "claude_sonnet_3_7_20250219_vertex"
       - "claude_sonnet_4_20250514_vertex"
       - "claude_sonnet_4_5_20250929"
+      - "claude_haiku_4_5_20251001"
   - feature_setting: "code_generations"
     unit_primitives:
       - "generate_code"
