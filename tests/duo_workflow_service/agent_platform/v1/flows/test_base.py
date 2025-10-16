@@ -749,14 +749,12 @@ class TestFlow:  # pylint: disable=too-many-public-methods
     def test_process_additional_context_no_schema(self, flow_instance):
         """Test _process_additional_context raises error when provided without schema."""
         additional_context = [
-            AdditionalContext(
-                category="agent_user_environment", content='{"os": "linux"}'
-            )
+            AdditionalContext(category="unknown_category", content='{"os": "linux"}')
         ]
 
         with pytest.raises(
             ValueError,
-            match="input schema was not provided for the category 'agent_user_environment'",
+            match="input schema was not provided for the category 'unknown_category'",
         ):
             flow_instance._process_additional_context(additional_context)
 
@@ -792,3 +790,25 @@ class TestFlow:  # pylint: disable=too-many-public-methods
             ),
         ):
             flow_instance._process_additional_context(additional_context)
+
+    def test_process_additional_context_executor_context_categories(
+        self, flow_instance
+    ):
+        """Test _process_additional_context with executor context categories."""
+        additional_context = [
+            AdditionalContext(category="os_information", content="Linux Ubuntu 20.04"),
+            AdditionalContext(category="shell_information", content="bash 5.0"),
+            AdditionalContext(
+                category="agent_user_environment",
+                content='{"user": "testuser", "home": "/home/testuser"}',
+            ),
+        ]
+
+        result = flow_instance._process_additional_context(additional_context)
+
+        expected = {
+            "os_information": "Linux Ubuntu 20.04",
+            "shell_information": "bash 5.0",
+            "agent_user_environment": '{"user": "testuser", "home": "/home/testuser"}',
+        }
+        assert result == expected
