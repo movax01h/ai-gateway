@@ -15,6 +15,7 @@ from ai_gateway.api.middleware.headers import (
     X_GITLAB_INSTANCE_ID_HEADER,
     X_GITLAB_INTERFACE,
     X_GITLAB_REALM_HEADER,
+    X_GITLAB_ROOT_NAMESPACE_ID,
     X_GITLAB_SAAS_DUO_PRO_NAMESPACE_IDS_HEADER,
     X_GITLAB_TEAM_MEMBER_HEADER,
     X_GITLAB_VERSION_HEADER,
@@ -114,6 +115,7 @@ async def test_middleware_set_context(internal_event_middleware):
                 (X_GITLAB_CLIENT_TYPE.lower().encode(), b"ide"),
                 (X_GITLAB_CLIENT_VERSION.lower().encode(), b"1.97.0"),
                 (X_GITLAB_INTERFACE.lower().encode(), b"duo_chat"),
+                (X_GITLAB_ROOT_NAMESPACE_ID.lower().encode(), b""),
             ],
         }
     )
