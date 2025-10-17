@@ -37,6 +37,7 @@ from duo_workflow_service.checkpointer.gitlab_workflow_utils import (
     STATUS_TO_EVENT_PROPERTY,
     WorkflowStatusEventEnum,
 )
+from duo_workflow_service.checkpointer.utils.serializer import CheckpointSerializer
 from duo_workflow_service.entities import WorkflowStatusEnum
 from duo_workflow_service.gitlab.gitlab_api import WorkflowConfig
 from duo_workflow_service.gitlab.http_client import (
@@ -167,6 +168,7 @@ class GitLabWorkflow(
         self._internal_event_client = internal_event_client
         self._billing_event_client = billing_event_client
         self._llm_operations: list[dict[str, Any]] = []
+        self.serde = CheckpointSerializer()
 
     @not_implemented_sync_method
     def get_tuple(self, config: RunnableConfig) -> Optional[CheckpointTuple]:
