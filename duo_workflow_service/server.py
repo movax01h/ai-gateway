@@ -92,6 +92,11 @@ CONTAINER_APPLICATION_PACKAGES = ["duo_workflow_service"]
 
 MAX_MESSAGE_SIZE = 4 * 1024 * 1024
 
+# Defines the limit for metadata/headers sent by the client:
+# https://github.com/grpc/grpc/blob/06f6f5d376a8c7abf067d060a28bf12afb664a7e/include/grpc/impl/channel_arg_names.h#L216C37-L216C59
+# Default is 8KB, we increase it to 24KB
+MAX_METADATA_SIZE = 24 * 1024
+
 log = structlog.stdlib.get_logger("server")
 
 catalog = data_model.load_catalog()
@@ -646,6 +651,10 @@ async def serve(port: int) -> None:
             (
                 "grpc.max_send_message_length",
                 MAX_MESSAGE_SIZE,
+            ),
+            (
+                "grpc.max_metadata_size",
+                MAX_METADATA_SIZE,
             ),
         ]
 
