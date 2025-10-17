@@ -6,6 +6,7 @@ from typing import Any, Dict, List, Optional, Type, Union, override
 from dependency_injector.wiring import Provide, inject
 from gitlab_cloud_connector import CloudConnectorUser
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage
+from langgraph.checkpoint.base import CheckpointTuple
 from langgraph.checkpoint.memory import BaseCheckpointSaver
 from langgraph.graph import END, StateGraph
 from langgraph.types import Command
@@ -264,7 +265,9 @@ class Workflow(AbstractWorkflow):
             preapproved_tools=self._preapproved_tools,
         )
 
-    async def get_graph_input(self, goal: str, status_event: str) -> Any:
+    async def get_graph_input(
+        self, goal: str, status_event: str, checkpoint_tuple: Optional[CheckpointTuple]
+    ) -> Any:
         new_chat_message = goal
 
         match status_event:

@@ -6,7 +6,7 @@ from typing import Any, Dict, Optional
 import jsonschema
 from dependency_injector.wiring import Provide, inject
 from gitlab_cloud_connector import CloudConnectorUser
-from langgraph.checkpoint.base import BaseCheckpointSaver
+from langgraph.checkpoint.base import BaseCheckpointSaver, CheckpointTuple
 from langgraph.graph import StateGraph
 from langgraph.types import Command
 
@@ -195,12 +195,20 @@ class Flow(AbstractWorkflow):
 
         return Command(resume=event)
 
-    async def get_graph_input(self, goal: str, status_event: str) -> Any:
+    async def get_graph_input(
+        self, goal: str, status_event: str, checkpoint_tuple: Optional[CheckpointTuple]
+    ) -> Any:
         match status_event:
             case WorkflowStatusEventEnum.START:
                 return self.get_workflow_state(goal)
             case WorkflowStatusEventEnum.RESUME:
                 return self._resume_command(goal)
+            case WorkflowStatusEventEnum.RETRY:
+                if checkpoint_tuple is None:
+                    return self.get_workflow_state(
+                        goal
+                    )  # no saved checkpoints from last run
+                return None  # retry from last checkpoint
             case _:
                 return None
 

@@ -14,6 +14,7 @@ from langchain_core.runnables import RunnableConfig
 # https://gitlab.com/gitlab-org/duo-workflow/duo-workflow-service/-/issues/78
 from langgraph.checkpoint.base import (  # pylint: disable=no-langgraph-langchain-imports
     BaseCheckpointSaver,
+    CheckpointTuple,
 )
 from langgraph.types import Command
 from langsmith import traceable, tracing_context
@@ -259,8 +260,8 @@ class AbstractWorkflow(ABC):
             ) as checkpointer:
                 set_workflow_checkpointer(checkpointer)
                 status_event = getattr(checkpointer, "initial_status_event", None)
+                checkpoint_tuple = await checkpointer.aget_tuple(graph_config)
                 if not status_event:
-                    checkpoint_tuple = await checkpointer.aget_tuple(graph_config)
                     status_event = (
                         "" if checkpoint_tuple else WorkflowStatusEventEnum.START
                     )
@@ -271,7 +272,9 @@ class AbstractWorkflow(ABC):
                 compiled_graph = await asyncio.to_thread(
                     self._compile, goal, tools_registry, checkpointer
                 )
-                graph_input = await self.get_graph_input(goal, status_event)
+                graph_input = await self.get_graph_input(
+                    goal, status_event, checkpoint_tuple
+                )
 
                 async for type, state in compiled_graph.astream(
                     input=graph_input,
@@ -293,7 +296,9 @@ class AbstractWorkflow(ABC):
             clear_workflow_checkpointer()
             self.is_done = True
 
-    async def get_graph_input(self, goal: str, status_event: str) -> Any:
+    async def get_graph_input(
+        self, goal: str, status_event: str, checkpoint_tuple: Optional[CheckpointTuple]
+    ) -> Any:
         match status_event:
             case WorkflowStatusEventEnum.START:
                 return self.get_workflow_state(goal)
@@ -302,6 +307,12 @@ class AbstractWorkflow(ABC):
                 if not event:
                     return None
                 return Command(resume=event)
+            case WorkflowStatusEventEnum.RETRY:
+                if checkpoint_tuple is None:
+                    return self.get_workflow_state(
+                        goal
+                    )  # no saved checkpoints from last run
+                return None  # retry from last checkpoint
             case _:
                 return None
 
