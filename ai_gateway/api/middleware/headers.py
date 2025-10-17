@@ -1,6 +1,7 @@
 X_GITLAB_REALM_HEADER = "X-Gitlab-Realm"
 X_GITLAB_INSTANCE_ID_HEADER = "X-Gitlab-Instance-Id"
 X_GITLAB_GLOBAL_USER_ID_HEADER = "X-Gitlab-Global-User-Id"
+X_GITLAB_USER_ID_HEADER = "x-gitlab-user-id"
 X_GITLAB_TEAM_MEMBER_HEADER = "X-Gitlab-Is-Team-Member"
 X_GITLAB_HOST_NAME_HEADER = "X-Gitlab-Host-Name"
 X_GITLAB_VERSION_HEADER = "X-Gitlab-Version"
