@@ -2,6 +2,7 @@ from datetime import datetime, timezone
 from typing import Any, Dict, List
 
 import structlog
+from anthropic import APIError
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, ToolMessage
 from langchain_core.output_parsers.string import StrOutputParser
 
@@ -180,13 +181,21 @@ class ChatAgent:
             content=f"There was an error processing your request: {error}"
         )
 
+        if isinstance(error, APIError):
+            ui_content = (
+                "There was an error connecting to the chosen LLM provider, please try again or contact support "
+                "if the issue persists."
+            )
+        else:
+            ui_content = (
+                "There was an error processing your request in the Duo Agent Platform, please try again or "
+                "contact support if the issue persists."
+            )
+
         ui_chat_log = UiChatLog(
             message_type=MessageTypeEnum.AGENT,
             message_sub_type=None,
-            content=(
-                "There was an error processing your request. Please try again or contact support if "
-                "the issue persists."
-            ),
+            content=ui_content,
             timestamp=datetime.now(timezone.utc).isoformat(),
             status=ToolStatus.FAILURE,
             correlation_id=None,
