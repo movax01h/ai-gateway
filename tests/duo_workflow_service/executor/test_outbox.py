@@ -23,11 +23,6 @@ class TestOutbox:
         [
             (contract_pb2.Action(), None, True),
             (contract_pb2.Action(), asyncio.Future(), True),
-            (
-                contract_pb2.Action(newCheckpoint=contract_pb2.NewCheckpoint()),
-                asyncio.Future(),
-                False,
-            ),
         ],
     )
     def test_put_action(
@@ -153,6 +148,37 @@ class TestOutbox:
             assert result.result() is response
 
         assert action.requestID not in outbox._action_response
+
+    @pytest.mark.asyncio
+    async def test_legacy_new_checkpoint_response(
+        self,
+        outbox: Outbox,
+    ):
+        """This test ensures that the outbox works even if the legacy clients still return a response to NewCheckpoint
+        action.
+
+        For the reference, this is the case in GoLang Duo Workflow Executor ver 0.0.51.
+        https://gitlab.com/gitlab-org/duo-workflow/duo-workflow-executor/-/blob/main/internal/services/runner/runner.go#L313
+        """
+        result: asyncio.Future = asyncio.Future()
+        new_checkpoint_action = contract_pb2.Action(
+            newCheckpoint=contract_pb2.NewCheckpoint()
+        )
+        outbox.put_action(
+            contract_pb2.Action(runCommand=contract_pb2.RunCommandAction()),
+            result=result,
+        )
+        outbox.put_action(new_checkpoint_action)
+
+        response = contract_pb2.ClientEvent(
+            actionResponse=contract_pb2.ActionResponse(
+                plainTextResponse=contract_pb2.PlainTextResponse(),
+                requestID=new_checkpoint_action.requestID,
+            )
+        )
+        outbox.set_action_response(response)
+
+        assert result.done() is False
 
     @pytest.mark.asyncio
     async def test_close(self, outbox: Outbox):

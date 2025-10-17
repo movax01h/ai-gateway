@@ -37,11 +37,8 @@ class Outbox:
         """Put an item into the outbox queue."""
 
         action.requestID = str(uuid4())
-
-        if action.WhichOneof("action") != "newCheckpoint":
-            self._action_response[action.requestID] = result
-            self._legacy_action_response[action.requestID] = action.WhichOneof("action")
-
+        self._action_response[action.requestID] = result
+        self._legacy_action_response[action.requestID] = action.WhichOneof("action")
         self._queue.put_nowait(action)
 
         return action.requestID
