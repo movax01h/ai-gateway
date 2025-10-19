@@ -457,7 +457,9 @@ class DuoWorkflowService(contract_pb2_grpc.DuoWorkflowServicer):
                 )
             else:
                 context.set_code(grpc.StatusCode.UNKNOWN)
-                context.set_details("RPC ended with unknown workflow state")
+                context.set_details(
+                    f"RPC ended with unknown workflow state: {workflow.last_gitlab_status}"
+                )
         except asyncio.CancelledError as err:
             # This exception is raised when RPC is cancelled by the client.
             context.set_code(grpc.StatusCode.CANCELLED)
