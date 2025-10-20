@@ -3,6 +3,7 @@ import unittest
 from typing import Any, cast
 from unittest.mock import MagicMock, patch
 
+from ai_gateway.code_suggestions import LanguageServerVersion
 from duo_workflow_service.tracking.duo_workflow_metrics import (
     DuoWorkflowMetrics,
     SessionTypeEnum,
@@ -79,7 +80,9 @@ class TestDuoWorkflowMetrics(unittest.TestCase):
 
         cast(
             MagicMock, self.metrics.llm_request_duration.labels
-        ).assert_called_once_with(model="test_model", request_type="test_request")
+        ).assert_called_once_with(
+            model="test_model", request_type="test_request", lsp_version="unknown"
+        )
         observe_mock.assert_called_once()
 
     def test_time_tool_call(self):
@@ -95,7 +98,7 @@ class TestDuoWorkflowMetrics(unittest.TestCase):
             pass
 
         cast(MagicMock, self.metrics.tool_call_duration.labels).assert_called_once_with(
-            tool_name="test_tool", flow_type="test_flow"
+            tool_name="test_tool", flow_type="test_flow", lsp_version="unknown"
         )
         observe_mock.assert_called_once()
 
@@ -197,6 +200,7 @@ class TestDuoWorkflowMetrics(unittest.TestCase):
                 "stop_reason": "other",
                 "status_code": "200",
                 "error_type": "none",
+                "lsp_version": "unknown",
             },
             model="test_model",
             provider="test_provider",
@@ -214,6 +218,7 @@ class TestDuoWorkflowMetrics(unittest.TestCase):
                 "endpoint": "test_endpoint",
                 "status_code": "test_status",
                 "method": "POST",
+                "lsp_version": "unknown",
             },
             endpoint="test_endpoint",
             status_code="test_status",
@@ -231,6 +236,7 @@ class TestDuoWorkflowMetrics(unittest.TestCase):
                 "stop_reason": "error",
                 "status_code": "500",
                 "error_type": "test_reason",
+                "lsp_version": "unknown",
             },
             model="test_model",
             provider="Anthropic",
@@ -244,7 +250,7 @@ class TestDuoWorkflowMetrics(unittest.TestCase):
         self._assert_counter_called(
             "agent_platform_session_start_counter",
             "count_agent_platform_session_start",
-            {"flow_type": "test_flow_type"},
+            {"flow_type": "test_flow_type", "lsp_version": "unknown"},
             flow_type="test_flow_type",
         )
 
@@ -252,7 +258,7 @@ class TestDuoWorkflowMetrics(unittest.TestCase):
         self._assert_counter_called(
             "agent_platform_session_success_counter",
             "count_agent_platform_session_success",
-            {"flow_type": "test_flow_type"},
+            {"flow_type": "test_flow_type", "lsp_version": "unknown"},
             flow_type="test_flow_type",
         )
 
@@ -266,6 +272,7 @@ class TestDuoWorkflowMetrics(unittest.TestCase):
                 "flow_type": "test_flow_type",
                 "failure_reason": "model_error",
                 "session_type": "start",
+                "lsp_version": "unknown",
             },
             flow_type="test_flow_type",
             failure_reason="model_error",
@@ -280,6 +287,7 @@ class TestDuoWorkflowMetrics(unittest.TestCase):
             {
                 "flow_type": "test_flow_type",
                 "session_type": "start",
+                "lsp_version": "unknown",
             },
             flow_type="test_flow_type",
         )
@@ -292,6 +300,28 @@ class TestDuoWorkflowMetrics(unittest.TestCase):
                 "flow_type": "test_flow_type",
                 "tool_name": "test_tool",
                 "failure_reason": "test_error",
+                "lsp_version": "unknown",
+            },
+            flow_type="test_flow_type",
+            tool_name="test_tool",
+            failure_reason="test_error",
+        )
+
+    @patch("duo_workflow_service.tracking.duo_workflow_metrics.language_server_version")
+    def test_agent_platform_tool_failure_counter_with_lsp_version(
+        self, mock_language_server_version
+    ):
+        mock_language_server_version.get.return_value = (
+            LanguageServerVersion.from_string("8.22.0")
+        )
+        self._assert_counter_called(
+            "agent_platform_tool_failure_counter",
+            "count_agent_platform_tool_failure",
+            {
+                "flow_type": "test_flow_type",
+                "tool_name": "test_tool",
+                "failure_reason": "test_error",
+                "lsp_version": "8.22.0",
             },
             flow_type="test_flow_type",
             tool_name="test_tool",
@@ -302,7 +332,7 @@ class TestDuoWorkflowMetrics(unittest.TestCase):
         self._assert_counter_called(
             "agent_platform_receive_start_counter",
             "count_agent_platform_receive_start_counter",
-            {"flow_type": "test_flow_type"},
+            {"flow_type": "test_flow_type", "lsp_version": "unknown"},
             flow_type="test_flow_type",
         )
 
