@@ -1,7 +1,8 @@
 import json
-from unittest.mock import AsyncMock, Mock
+from unittest.mock import AsyncMock, Mock, patch
 
 import pytest
+from packaging.version import InvalidVersion
 from pydantic import ValidationError
 
 from duo_workflow_service.tools.security import (
@@ -13,6 +14,8 @@ from duo_workflow_service.tools.security import (
     DismissVulnerabilityInput,
     LinkVulnerabilityToIssue,
     LinkVulnerabilityToIssueInput,
+    LinkVulnerabilityToMergeRequest,
+    LinkVulnerabilityToMergeRequestInput,
     ListVulnerabilities,
     ListVulnerabilitiesInput,
     RevertToDetectedVulnerability,
@@ -1660,3 +1663,369 @@ def test_create_vulnerability_issue_format_display_message(
 ):
     tool = CreateVulnerabilityIssue(metadata={})
     assert tool.format_display_message(test_input_data) == expected_message
+
+
+@pytest.mark.asyncio
+async def test_link_vulnerability_to_merge_request(gitlab_client_mock, metadata):
+    with patch(
+        "duo_workflow_service.tools.security.gitlab_version"
+    ) as mock_gitlab_version:
+        mock_gitlab_version.get.return_value = (
+            "18.5.0"  # Version 18.5 or above should work
+        )
+
+        gitlab_client_mock.apost = AsyncMock(
+            return_value={
+                "data": {
+                    "vulnerabilityLinkMergeRequest": {
+                        "vulnerability": {
+                            "id": "gid://gitlab/Vulnerability/123",
+                            "mergeRequests": {
+                                "nodes": [
+                                    {
+                                        "id": "gid://gitlab/MergeRequest/456",
+                                        "title": "Fix security vulnerability",
+                                    }
+                                ]
+                            },
+                        },
+                        "errors": [],
+                    }
+                }
+            }
+        )
+
+        tool = LinkVulnerabilityToMergeRequest(metadata=metadata)
+
+        test_input_data = {
+            "vulnerability_id": "gid://gitlab/Vulnerability/123",
+            "merge_request_id": "gid://gitlab/MergeRequest/456",
+        }
+
+        response = await tool.arun(test_input_data)
+
+        expected_response_data = json.dumps(
+            {
+                "vulnerability": {
+                    "id": "gid://gitlab/Vulnerability/123",
+                    "mergeRequests": {
+                        "nodes": [
+                            {
+                                "id": "gid://gitlab/MergeRequest/456",
+                                "title": "Fix security vulnerability",
+                            }
+                        ]
+                    },
+                }
+            }
+        )
+        assert response == expected_response_data
+
+        gitlab_client_mock.apost.assert_called_once()
+        call_args = gitlab_client_mock.apost.call_args
+        body = json.loads(call_args.kwargs["body"])
+        assert body["variables"]["vulnerabilityId"] == "gid://gitlab/Vulnerability/123"
+        assert body["variables"]["mergeRequestId"] == "gid://gitlab/MergeRequest/456"
+
+
+@pytest.mark.asyncio
+async def test_link_vulnerability_to_merge_request_with_numeric_ids(
+    gitlab_client_mock, metadata
+):
+    with patch(
+        "duo_workflow_service.tools.security.gitlab_version"
+    ) as mock_gitlab_version:
+        mock_gitlab_version.get.return_value = (
+            "18.5.0"  # Version 18.5 or above should work
+        )
+
+        gitlab_client_mock.apost = AsyncMock(
+            return_value={
+                "data": {
+                    "vulnerabilityLinkMergeRequest": {
+                        "vulnerability": {
+                            "id": "gid://gitlab/Vulnerability/123",
+                            "mergeRequests": {
+                                "nodes": [
+                                    {
+                                        "id": "gid://gitlab/MergeRequest/456",
+                                        "title": "Fix security vulnerability",
+                                    }
+                                ]
+                            },
+                        },
+                        "errors": [],
+                    }
+                }
+            }
+        )
+
+        tool = LinkVulnerabilityToMergeRequest(metadata=metadata)
+
+        test_input_data = {
+            "vulnerability_id": "123",  # Numeric ID without GraphQL prefix
+            "merge_request_id": "456",  # Numeric ID without GraphQL prefix
+        }
+
+        response = await tool.arun(test_input_data)
+
+        # Should automatically add the GraphQL prefixes
+        gitlab_client_mock.apost.assert_called_once()
+        call_args = gitlab_client_mock.apost.call_args
+        body = json.loads(call_args.kwargs["body"])
+        assert body["variables"]["vulnerabilityId"] == "gid://gitlab/Vulnerability/123"
+        assert body["variables"]["mergeRequestId"] == "gid://gitlab/MergeRequest/456"
+
+        response_data = json.loads(response)
+        assert "error" not in response_data
+        assert "vulnerability" in response_data
+
+
+@pytest.mark.asyncio
+async def test_link_vulnerability_to_merge_request_with_api_errors(
+    gitlab_client_mock, metadata
+):
+    with patch(
+        "duo_workflow_service.tools.security.gitlab_version"
+    ) as mock_gitlab_version:
+        mock_gitlab_version.get.return_value = (
+            "18.5.0"  # Version 18.5 or above should work
+        )
+
+        gitlab_client_mock.apost = AsyncMock(
+            return_value={
+                "data": {
+                    "vulnerabilityLinkMergeRequest": {
+                        "vulnerability": None,
+                        "errors": [
+                            "Vulnerability not found",
+                            "Merge request not found",
+                        ],
+                    }
+                }
+            }
+        )
+
+        tool = LinkVulnerabilityToMergeRequest(metadata=metadata)
+
+        test_input_data = {
+            "vulnerability_id": "gid://gitlab/Vulnerability/999",
+            "merge_request_id": "gid://gitlab/MergeRequest/999",
+        }
+
+        response = await tool.arun(test_input_data)
+
+        error_response = json.loads(response)
+        assert "error" in error_response
+        assert (
+            "Vulnerability not found; Merge request not found"
+            in error_response["error"]
+        )
+
+
+@pytest.mark.asyncio
+async def test_link_vulnerability_to_merge_request_unexpected_response_structure(
+    gitlab_client_mock, metadata
+):
+    """Test handling of unexpected response structure that causes KeyError."""
+    with patch(
+        "duo_workflow_service.tools.security.gitlab_version"
+    ) as mock_gitlab_version:
+        mock_gitlab_version.get.return_value = (
+            "18.5.0"  # Version 18.5 or above should work
+        )
+
+        gitlab_client_mock.apost = AsyncMock(
+            return_value={"data": {"unexpectedField": {"someData": "value"}}}
+        )
+        gitlab_client_mock._process_http_response = (
+            lambda identifier, response: response
+        )
+
+        tool = LinkVulnerabilityToMergeRequest(metadata=metadata)
+        test_input_data = {
+            "vulnerability_id": "gid://gitlab/Vulnerability/123",
+            "merge_request_id": "gid://gitlab/MergeRequest/456",
+        }
+
+        response = await tool.arun(test_input_data)
+        error_response = json.loads(response)
+        assert "error" in error_response
+        assert "Unexpected response structure" in error_response["error"]
+        assert "response" in error_response
+
+
+@pytest.mark.parametrize(
+    "input_data,expected_message",
+    [
+        (
+            LinkVulnerabilityToMergeRequestInput(
+                vulnerability_id="gid://gitlab/Vulnerability/123",
+                merge_request_id="gid://gitlab/MergeRequest/456",
+            ),
+            "Link vulnerability gid://gitlab/Vulnerability/123 to merge request gid://gitlab/MergeRequest/456",
+        ),
+        (
+            LinkVulnerabilityToMergeRequestInput(
+                vulnerability_id="123",
+                merge_request_id="456",
+            ),
+            "Link vulnerability 123 to merge request 456",
+        ),
+    ],
+)
+def test_link_vulnerability_to_merge_request_format_display_message(
+    input_data, expected_message
+):
+    tool = LinkVulnerabilityToMergeRequest(metadata={})
+    assert tool.format_display_message(input_data) == expected_message
+
+
+@pytest.mark.asyncio
+async def test_link_vulnerability_to_merge_request_version_18_5_works(
+    gitlab_client_mock, metadata
+):
+    """Test that the tool works normally when GitLab version is exactly 18.5."""
+    with patch(
+        "duo_workflow_service.tools.security.gitlab_version"
+    ) as mock_gitlab_version:
+        mock_gitlab_version.get.return_value = "18.5.0"
+
+        gitlab_client_mock.apost = AsyncMock(
+            return_value={
+                "data": {
+                    "vulnerabilityLinkMergeRequest": {
+                        "vulnerability": {
+                            "id": "gid://gitlab/Vulnerability/123",
+                            "mergeRequests": {
+                                "nodes": [
+                                    {
+                                        "id": "gid://gitlab/MergeRequest/456",
+                                        "title": "Fix security vulnerability",
+                                    }
+                                ]
+                            },
+                        },
+                        "errors": [],
+                    }
+                }
+            }
+        )
+
+        tool = LinkVulnerabilityToMergeRequest(metadata=metadata)
+        test_input = {
+            "vulnerability_id": "gid://gitlab/Vulnerability/123",
+            "merge_request_id": "gid://gitlab/MergeRequest/456",
+        }
+
+        response = await tool.arun(test_input)
+        response_data = json.loads(response)
+
+        # Should work normally for version 18.5
+        assert "error" not in response_data
+        assert "vulnerability" in response_data
+
+        # Verify that API call was made
+        gitlab_client_mock.apost.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_link_vulnerability_to_merge_request_version_18_6_works(
+    gitlab_client_mock, metadata
+):
+    """Test that the tool works normally when GitLab version is 18.6 or greater."""
+    with patch(
+        "duo_workflow_service.tools.security.gitlab_version"
+    ) as mock_gitlab_version:
+        mock_gitlab_version.get.return_value = "18.6.0"
+
+        gitlab_client_mock.apost = AsyncMock(
+            return_value={
+                "data": {
+                    "vulnerabilityLinkMergeRequest": {
+                        "vulnerability": {
+                            "id": "gid://gitlab/Vulnerability/123",
+                            "mergeRequests": {
+                                "nodes": [
+                                    {
+                                        "id": "gid://gitlab/MergeRequest/456",
+                                        "title": "Fix security vulnerability",
+                                    }
+                                ]
+                            },
+                        },
+                        "errors": [],
+                    }
+                }
+            }
+        )
+
+        tool = LinkVulnerabilityToMergeRequest(metadata=metadata)
+        test_input = {
+            "vulnerability_id": "gid://gitlab/Vulnerability/123",
+            "merge_request_id": "gid://gitlab/MergeRequest/456",
+        }
+
+        response = await tool.arun(test_input)
+        response_data = json.loads(response)
+
+        # Should work normally for version 18.6
+        assert "error" not in response_data
+        assert "vulnerability" in response_data
+
+        # Verify that API call was made
+        gitlab_client_mock.apost.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_link_vulnerability_to_merge_request_version_below_18_5_fails(
+    gitlab_client_mock, metadata
+):
+    """Test that the tool returns an error when GitLab version is below 18.5."""
+    with patch(
+        "duo_workflow_service.tools.security.gitlab_version"
+    ) as mock_gitlab_version:
+        mock_gitlab_version.get.return_value = "18.4.0"
+
+        tool = LinkVulnerabilityToMergeRequest(metadata=metadata)
+        test_input = {
+            "vulnerability_id": "gid://gitlab/Vulnerability/123",
+            "merge_request_id": "gid://gitlab/MergeRequest/456",
+        }
+
+        response = await tool.arun(test_input)
+        error_response = json.loads(response)
+
+        # Should return error for version below 18.5
+        assert "error" in error_response
+        assert error_response["error"] == "This tool is not available"
+
+        # Verify that no API call was made
+        gitlab_client_mock.apost.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_link_vulnerability_to_merge_request_invalid_version_fails(
+    gitlab_client_mock, metadata
+):
+    """Test that the tool returns error when GitLab version is invalid (uses fallback 18.2.0)."""
+    with patch(
+        "duo_workflow_service.tools.security.gitlab_version"
+    ) as mock_gitlab_version:
+        mock_gitlab_version.get.side_effect = InvalidVersion("invalid version")
+
+        tool = LinkVulnerabilityToMergeRequest(metadata=metadata)
+        test_input = {
+            "vulnerability_id": "gid://gitlab/Vulnerability/123",
+            "merge_request_id": "gid://gitlab/MergeRequest/456",
+        }
+
+        response = await tool.arun(test_input)
+        error_response = json.loads(response)
+
+        # Should return error with fallback version (18.2.0 < 18.5)
+        assert "error" in error_response
+        assert error_response["error"] == "This tool is not available"
+
+        # Verify that no API call was made
+        gitlab_client_mock.apost.assert_not_called()

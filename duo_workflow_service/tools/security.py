@@ -3,9 +3,12 @@ from collections import Counter
 from enum import StrEnum
 from typing import Any, Optional, Type
 
+from packaging.version import InvalidVersion, Version
 from pydantic import BaseModel, Field, field_validator
 
+from duo_workflow_service.interceptors.gitlab_version_interceptor import gitlab_version
 from duo_workflow_service.tools.duo_base_tool import DuoBaseTool
+from duo_workflow_service.tracking.errors import log_exception
 
 PROJECT_IDENTIFICATION_DESCRIPTION = """
 The project must be specified using its full path (e.g., 'namespace/project' or 'group/subgroup/project').
@@ -42,6 +45,7 @@ __all__ = [
     "ListVulnerabilities",
     "DismissVulnerability",
     "LinkVulnerabilityToIssue",
+    "LinkVulnerabilityToMergeRequest",
     "ConfirmVulnerability",
     "RevertToDetectedVulnerability",
     "CreateVulnerabilityIssue",
@@ -637,6 +641,125 @@ class LinkVulnerabilityToIssue(DuoBaseTool):
         self, args: LinkVulnerabilityToIssueInput, _tool_response: Any = None
     ) -> str:
         return f"Link issue to vulnerability {args.vulnerability_ids}"
+
+
+class LinkVulnerabilityToMergeRequestInput(BaseModel):
+    vulnerability_id: str = Field(
+        description="ID of the vulnerability to link to the merge request"
+    )
+    merge_request_id: str = Field(
+        description="ID of the merge request to link to the vulnerability"
+    )
+
+
+class LinkVulnerabilityToMergeRequest(DuoBaseTool):
+    name: str = "link_vulnerability_to_merge_request"
+    description: str = f"""Link a security vulnerability to a merge request in a GitLab project using GraphQL.
+
+    {PROJECT_IDENTIFICATION_DESCRIPTION}
+
+    The tool supports linking a vulnerability to a merge request by their respective IDs.
+    This creates a relationship between the vulnerability and the merge request that addresses it.
+    The Merge Request ID used is the global ID, not the IID.
+
+    The merge request ID given must include `gid://gitlab/MergeRequest/` in the prefix.
+    If the ID does not include `gid://gitlab/MergeRequest/` in the prefix:
+        - ASK THE USER WHAT THEY HAVE GIVEN YOU
+        - If they have given you the MR IID (which is what is shown in the UI), fetch the ID
+
+    For example:
+    - Link vulnerability with ID 123 to merge request with ID 456 (IID 245):
+        link_vulnerability_to_merge_request(
+            vulnerability_id="gid://gitlab/Vulnerability/123",
+            merge_request_id="gid://gitlab/MergeRequest/456"
+        )
+    """
+    args_schema: Type[BaseModel] = LinkVulnerabilityToMergeRequestInput
+
+    async def _arun(self, **kwargs: Any) -> str:
+        version_18_2 = Version("18.2.0")
+        version_18_5 = Version("18.5.0")
+
+        try:
+            gl_version = Version(gitlab_version.get())  # type: ignore[arg-type]
+        except (InvalidVersion, TypeError) as ex:
+            log_exception(ex)
+            gl_version = version_18_2
+
+        if gl_version < version_18_5:
+            return json.dumps({"error": "This tool is not available"})
+
+        vulnerability_id = kwargs.pop("vulnerability_id")
+        merge_request_id = kwargs.pop("merge_request_id")
+
+        # Ensure vulnerability_id has proper GraphQL format
+        if not vulnerability_id.startswith("gid://gitlab/Vulnerability/"):
+            vulnerability_id = f"gid://gitlab/Vulnerability/{vulnerability_id}"
+
+        # Ensure merge_request_id has proper GraphQL format
+        if not merge_request_id.startswith("gid://gitlab/MergeRequest/"):
+            merge_request_id = f"gid://gitlab/MergeRequest/{merge_request_id}"
+
+        # editorconfig-checker-disable
+        # Build GraphQL mutation
+        mutation = """
+        mutation($vulnerabilityId: VulnerabilityID!, $mergeRequestId: MergeRequestID!) {
+          vulnerabilityLinkMergeRequest(input: {
+            vulnerabilityId: $vulnerabilityId,
+            mergeRequestId: $mergeRequestId
+          }) {
+            vulnerability {
+              id
+              mergeRequests {
+                nodes {
+                  id
+                  title
+                }
+              }
+            }
+            errors
+          }
+        }
+        """
+        # editorconfig-checker-enable
+
+        variables = {
+            "vulnerabilityId": vulnerability_id,
+            "mergeRequestId": merge_request_id,
+        }
+
+        response = await self.gitlab_client.apost(
+            path="/api/graphql",
+            body=json.dumps({"query": mutation, "variables": variables}),
+            use_http_response=True,
+        )
+
+        response = self._process_http_response(identifier="mutation", response=response)
+
+        try:
+            errors = response["data"]["vulnerabilityLinkMergeRequest"]["errors"]
+            if errors:
+                return json.dumps({"error": "; ".join(errors)})
+
+            return json.dumps(
+                {
+                    "vulnerability": response["data"]["vulnerabilityLinkMergeRequest"][
+                        "vulnerability"
+                    ]
+                }
+            )
+        except KeyError as e:
+            return json.dumps(
+                {
+                    "error": f"Unexpected response structure: {str(e)}",
+                    "response": response,
+                }
+            )
+
+    def format_display_message(
+        self, args: LinkVulnerabilityToMergeRequestInput, _tool_response: Any = None
+    ) -> str:
+        return f"Link vulnerability {args.vulnerability_id} to merge request {args.merge_request_id}"
 
 
 class ConfirmVulnerabilityInput(BaseModel):
