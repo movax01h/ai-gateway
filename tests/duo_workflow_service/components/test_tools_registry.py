@@ -201,6 +201,7 @@ _outbox = MagicMock(spec=Outbox)
                 "create_work_item",
                 "create_work_item_note",
                 "link_vulnerability_to_issue",
+                "link_vulnerability_to_merge_request",
                 "get_vulnerability_details",
                 "update_work_item",
                 "revert_to_detected_vulnerability",
@@ -369,6 +370,9 @@ def test_registry_initialization_initialises_tools_with_correct_attributes(
         "create_work_item": tools.CreateWorkItem(metadata=tool_metadata),
         "create_work_item_note": tools.CreateWorkItemNote(metadata=tool_metadata),
         "link_vulnerability_to_issue": tools.LinkVulnerabilityToIssue(
+            metadata=tool_metadata
+        ),
+        "link_vulnerability_to_merge_request": tools.LinkVulnerabilityToMergeRequest(
             metadata=tool_metadata
         ),
         "get_vulnerability_details": GetVulnerabilityDetails(metadata=tool_metadata),
