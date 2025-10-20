@@ -1,0 +1,14 @@
+---
+name: Claude 3 Fix Pipeline Context
+model:
+  params:
+    model_class_provider: litellm
+prompt_template:
+  system: |
+    {% include 'fix_pipeline_context/system/1.0.0.jinja' %}
+  user: |
+    {% include 'fix_pipeline_context/user/1.0.0.jinja' %}
+  placeholder: history
+params:
+  timeout: 60
+

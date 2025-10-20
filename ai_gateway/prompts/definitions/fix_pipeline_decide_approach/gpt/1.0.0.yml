@@ -1,0 +1,14 @@
+---
+name: GPT fix_pipeline_decide_approach_prompt
+model:
+  params:
+    model_class_provider: litellm
+    max_retries: 3
+prompt_template:
+  system: |
+    {% include 'fix_pipeline_decide_approach/system/1.0.0.jinja' %}
+  user: |
+    {% include 'fix_pipeline_decide_approach/user/1.0.0.jinja' %}
+  placeholder: history
+params:
+  timeout: 60

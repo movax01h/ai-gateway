@@ -1,0 +1,14 @@
+---
+name: Claude 3 SAST Post Results to GitLab Agent Prompt
+model:
+  params:
+    model_class_provider: litellm
+prompt_template:
+  system: |
+    {% include 'sast_post_results_to_gitlab_agent_prompt/system/1.0.0.jinja' %}
+  user: |
+    {% include 'sast_post_results_to_gitlab_agent_prompt/user/1.0.0.jinja' %}
+  placeholder: history
+params:
+  timeout: 60
+
