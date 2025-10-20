@@ -10,6 +10,7 @@ configurable_unit_primitives:
       - "claude_3_5_sonnet_20240620"
       - "claude_sonnet_3_7_20250219"
       - "claude_sonnet_3_7_20250219_vertex"
+      - "claude_sonnet_4_20250514"
       - "claude_sonnet_4_20250514_vertex"
       - "claude_sonnet_4_5_20250929"
       - "claude_haiku_4_5_20251001"
