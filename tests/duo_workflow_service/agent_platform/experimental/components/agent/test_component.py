@@ -6,6 +6,7 @@ from unittest.mock import Mock, patch
 import pytest
 from langchain_core.messages import AIMessage
 
+from ai_gateway.model_metadata import ModelMetadata, current_model_metadata_context
 from duo_workflow_service.agent_platform.experimental.components.agent.component import (
     AgentComponent,
     RoutingError,
@@ -507,3 +508,61 @@ class TestAgentComponentAttachEdges:
             RoutingError, match=f"Tool calls not found for component {component_name}"
         ):
             router_function(state_with_no_tools)
+
+
+class TestAgentComponentModelMetadata:
+    """Test suite for AgentComponent model metadata handling."""
+
+    def test_attach_passes_model_metadata_from_context_to_prompt_registry(
+        self,
+        agent_component,
+        mock_state_graph,
+        mock_router,
+        mock_prompt_registry,
+        prompt_id,
+        prompt_version,
+        mock_agent_node_cls,
+        mock_tool_node_cls,
+        mock_final_response_node_cls,
+    ):
+        mock_model_metadata = ModelMetadata(
+            name="gpt_5",
+            provider="gitlab",
+            friendly_name="OpenAI GPT-5",
+        )
+
+        metadata_token = current_model_metadata_context.set(mock_model_metadata)
+
+        try:
+            agent_component.attach(mock_state_graph, mock_router)
+
+            mock_prompt_registry.get.assert_called_once()
+            call_kwargs = mock_prompt_registry.get.call_args[1]
+
+            assert "model_metadata" in call_kwargs
+            assert call_kwargs["model_metadata"] == mock_model_metadata
+        finally:
+            current_model_metadata_context.reset(metadata_token)
+
+    def test_attach_passes_none_when_no_model_metadata_in_context(
+        self,
+        agent_component,
+        mock_state_graph,
+        mock_router,
+        mock_prompt_registry,
+        mock_agent_node_cls,
+        mock_tool_node_cls,
+        mock_final_response_node_cls,
+    ):
+        metadata_token = current_model_metadata_context.set(None)
+
+        try:
+            agent_component.attach(mock_state_graph, mock_router)
+
+            mock_prompt_registry.get.assert_called_once()
+            call_kwargs = mock_prompt_registry.get.call_args[1]
+
+            assert "model_metadata" in call_kwargs
+            assert call_kwargs["model_metadata"] is None
+        finally:
+            current_model_metadata_context.reset(metadata_token)

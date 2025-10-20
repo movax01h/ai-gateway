@@ -5,6 +5,7 @@ from langgraph.graph import StateGraph
 from pydantic import Field
 
 from ai_gateway.container import ContainerApplication
+from ai_gateway.model_metadata import current_model_metadata_context
 from ai_gateway.prompts import LocalPromptRegistry
 from duo_workflow_service.agent_platform.experimental.components.base import (
     BaseComponent,
@@ -105,7 +106,11 @@ class HumanInputComponent(BaseComponent):
         # Prepare prompt if provided
         prompt = None
         if self.prompt_id and self.prompt_version:
-            prompt = self.prompt_registry.get(self.prompt_id, self.prompt_version)
+            prompt = self.prompt_registry.get(
+                self.prompt_id,
+                self.prompt_version,
+                model_metadata=current_model_metadata_context.get(),
+            )
 
         ui_history = None
         if self.ui_log_events:
