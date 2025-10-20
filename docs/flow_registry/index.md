@@ -42,6 +42,10 @@ Flow Registry is ready this setup will no longer be required for those building 
 
 For quick start guide please visit to _v1_ [documentation](v1.md#quick-start) page
 
+## Contribution Guidelines
+
+If you which to contribute to Flow Registry framework please familiarize yourself with [Contribution Guidelines](./contribution_guidelines.md).
+
 ## Key Framework Concepts
 
 A **Component** is a reusable building block that performs a specific task in your flow.
