@@ -2,6 +2,7 @@
 import asyncio
 import json
 import os
+import signal
 from datetime import datetime, timedelta, timezone
 from typing import AsyncIterable, List, Optional
 from unittest.mock import AsyncMock, MagicMock, call, patch
@@ -34,6 +35,7 @@ from duo_workflow_service.server import (
     next_client_event,
     run,
     serve,
+    setup_signal_handlers,
     string_to_category_enum,
 )
 from duo_workflow_service.tools.duo_base_tool import DuoBaseTool
@@ -726,7 +728,9 @@ async def test_generate_token_unauthorized_for_any_flow():
 
 
 @pytest.mark.asyncio
-async def test_grpc_server():
+@patch("duo_workflow_service.server.setup_signal_handlers")
+async def test_grpc_server(mock_setup_signal_handlers):
+    """Test that the gRPC server starts correctly and sets up signal handlers."""
     mock_server = AsyncMock()
     mock_server.add_insecure_port.return_value = None
     mock_server.start.return_value = None
@@ -755,6 +759,48 @@ async def test_grpc_server():
     mock_server.wait_for_termination.assert_called_once()
     mock_add_servicer.assert_called_once()
     mock_enable_reflection.assert_called_once()
+    mock_setup_signal_handlers.assert_called_once()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "signal_type,grace_period_env,expected_grace_period",
+    [
+        (signal.SIGTERM, "15", 15),
+        (signal.SIGTERM, None, None),
+        (signal.SIGINT, "20", 20),
+        (signal.SIGINT, None, None),
+    ],
+)
+async def test_signal_handler_calls_server_stop(
+    signal_type, grace_period_env, expected_grace_period
+):
+    """Test that signal handlers call server.stop() with the correct grace period."""
+    mock_server = AsyncMock()
+    mock_server.stop = AsyncMock()
+    loop = asyncio.get_running_loop()
+
+    env_dict = {}
+    if grace_period_env is not None:
+        env_dict["DUO_WORKFLOW_SHUTDOWN_GRACE_PERIOD_S"] = grace_period_env
+
+    with (
+        patch.dict(os.environ, env_dict, clear=True),
+        patch("duo_workflow_service.server.log") as mock_log,
+    ):
+        setup_signal_handlers(mock_server, loop)
+
+        os.kill(os.getpid(), signal_type)
+
+        # Give the event loop time to process the signal
+        await asyncio.sleep(0.1)
+
+        mock_server.stop.assert_called()
+        call_args = mock_server.stop.call_args
+        assert call_args[1]["grace"] == expected_grace_period
+
+        log_calls = [str(call) for call in mock_log.info.call_args_list]
+        assert any("graceful shutdown" in log_call.lower() for log_call in log_calls)
 
 
 @pytest.mark.asyncio
