@@ -1,5 +1,6 @@
 """Tests for the connection pool manager."""
 
+import ssl
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import aiohttp
@@ -56,9 +57,13 @@ async def test_set_options():
 
     mock_session = MagicMock(spec=aiohttp.ClientSession)
     mock_connector = MagicMock(spec=aiohttp.TCPConnector)
+
     with (
         patch("aiohttp.ClientSession") as mock_session_cls,
         patch("aiohttp.TCPConnector") as mock_connector_cls,
+        patch(
+            "duo_workflow_service.gitlab.connection_pool.os.getenv", return_value=None
+        ),
     ):
         mock_connector_cls.return_value = mock_connector
         mock_session_cls.return_value = mock_session
@@ -101,3 +106,119 @@ async def test_multiple_context_entries():
         # Session should be closed only once at the end
         mock_session.close.assert_awaited_once()
         assert connection_pool._session is None
+
+
+@pytest.mark.parametrize(
+    "env_setup,test_description",
+    [
+        (
+            lambda mp: mp.delenv("DUO_WORKFLOW_GITLAB_SSL_CA_FILE", raising=False),
+            "no CA file configured",
+        ),
+        (
+            lambda mp: mp.setenv("DUO_WORKFLOW_GITLAB_SSL_CA_FILE", ""),
+            "empty CA file variable",
+        ),
+        (
+            lambda mp: mp.setenv(
+                "DUO_WORKFLOW_GITLAB_SSL_CA_FILE", "/nonexistent/ca.crt"
+            ),
+            "nonexistent CA file path",
+        ),
+    ],
+    ids=["no_ca_file", "empty_ca_file", "nonexistent_ca_file"],
+)
+@pytest.mark.asyncio
+async def test_ssl_context_default_verification(
+    pool_manager, monkeypatch, env_setup, test_description
+):
+    """Test SSL behavior when falling back to default verification."""
+    env_setup(monkeypatch)
+
+    mock_session = AsyncMock(spec=aiohttp.ClientSession)
+    mock_connector = MagicMock(spec=aiohttp.TCPConnector)
+
+    with (
+        patch(
+            "aiohttp.TCPConnector", return_value=mock_connector
+        ) as mock_connector_cls,
+        patch("aiohttp.ClientSession", return_value=mock_session) as mock_session_cls,
+        patch("duo_workflow_service.gitlab.connection_pool.log") as mock_log,
+    ):
+        async with pool_manager:
+            mock_connector_cls.assert_called_once_with(limit=100)
+            mock_session_cls.assert_called_once_with(connector=mock_connector)
+            mock_log.info.assert_any_call(
+                "Using default SSL verification for HTTP connection pool"
+            )
+
+
+@pytest.mark.asyncio
+async def test_ssl_context_via_environment_valid_ca_file(pool_manager, monkeypatch):
+    """Test SSL behavior when valid CA file is configured."""
+    ca_file_path = "/path/to/ca.crt"
+    monkeypatch.setenv("DUO_WORKFLOW_GITLAB_SSL_CA_FILE", ca_file_path)
+
+    mock_session = AsyncMock(spec=aiohttp.ClientSession)
+    mock_connector = MagicMock(spec=aiohttp.TCPConnector)
+
+    with (
+        patch("os.path.exists", return_value=True),
+        patch("ssl.create_default_context") as mock_ssl_create,
+        patch(
+            "aiohttp.TCPConnector", return_value=mock_connector
+        ) as mock_connector_cls,
+        patch("aiohttp.ClientSession", return_value=mock_session) as mock_session_cls,
+        patch("duo_workflow_service.gitlab.connection_pool.log") as mock_log,
+    ):
+        mock_ssl_context = MagicMock(spec=ssl.SSLContext)
+        mock_ssl_create.return_value = mock_ssl_context
+
+        async with pool_manager:
+            mock_ssl_create.assert_called_once()
+            mock_ssl_context.load_verify_locations.assert_called_once_with(ca_file_path)
+
+            mock_connector_cls.assert_called_once_with(limit=100, ssl=mock_ssl_context)
+            mock_session_cls.assert_called_once_with(connector=mock_connector)
+
+            mock_log.info.assert_any_call("Loaded custom CA file", ca_file=ca_file_path)
+            mock_log.info.assert_any_call("SSL context created with custom CA")
+            mock_log.info.assert_any_call("Using custom SSL context with custom CA")
+
+
+@pytest.mark.asyncio
+async def test_ssl_context_via_environment_ca_file_load_error(
+    pool_manager, monkeypatch
+):
+    """Test SSL behavior when CA file loading fails."""
+    ca_file_path = "/path/to/ca.crt"
+    monkeypatch.setenv("DUO_WORKFLOW_GITLAB_SSL_CA_FILE", ca_file_path)
+
+    mock_session = AsyncMock(spec=aiohttp.ClientSession)
+    mock_connector = MagicMock(spec=aiohttp.TCPConnector)
+
+    with (
+        patch("os.path.exists", return_value=True),
+        patch("ssl.create_default_context") as mock_ssl_create,
+        patch(
+            "aiohttp.TCPConnector", return_value=mock_connector
+        ) as mock_connector_cls,
+        patch("aiohttp.ClientSession", return_value=mock_session) as mock_session_cls,
+        patch("duo_workflow_service.gitlab.connection_pool.log") as mock_log,
+    ):
+        mock_ssl_context = MagicMock(spec=ssl.SSLContext)
+        mock_ssl_context.load_verify_locations.side_effect = Exception("SSL load error")
+        mock_ssl_create.return_value = mock_ssl_context
+
+        async with pool_manager:
+            mock_ssl_create.assert_called_once()
+            mock_ssl_context.load_verify_locations.assert_called_once_with(ca_file_path)
+
+            mock_connector_cls.assert_called_once_with(limit=100)
+            mock_session_cls.assert_called_once_with(connector=mock_connector)
+
+            mock_log.error.assert_called_once_with(
+                "Failed to create SSL context with custom CA",
+                error="SSL load error",
+                ca_file=ca_file_path,
+            )
