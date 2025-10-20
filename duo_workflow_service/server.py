@@ -1,8 +1,10 @@
 # pylint: disable=direct-environment-variable-reference
 
 import asyncio
+import functools
 import json
 import os
+import signal
 from itertools import chain
 from typing import AsyncIterable, AsyncIterator, Optional
 
@@ -686,7 +688,29 @@ async def serve(port: int) -> None:
         log.info("Starting gRPC server on port %d", port)
         await server.start()
         log.info("Started server")
+
+        # Set up graceful shutdown
+        loop = asyncio.get_running_loop()
+        setup_signal_handlers(server, loop)
+
         await server.wait_for_termination()
+        log.info("Server shutdown complete")
+
+
+def setup_signal_handlers(
+    server: grpc.aio.Server, loop: asyncio.AbstractEventLoop
+) -> None:
+    """Set up signal handlers for graceful server shutdown."""
+
+    grace_period_env = os.environ.get("DUO_WORKFLOW_SHUTDOWN_GRACE_PERIOD_S")
+    grace_period = int(grace_period_env) if grace_period_env else None
+
+    def handle_shutdown(sig):
+        log.info(f"Received signal {sig}, initiating graceful shutdown")
+        asyncio.create_task(server.stop(grace=grace_period))
+
+    for sig in (signal.SIGTERM, signal.SIGINT):
+        loop.add_signal_handler(sig, functools.partial(handle_shutdown, sig))
 
 
 def configure_cache() -> None:
