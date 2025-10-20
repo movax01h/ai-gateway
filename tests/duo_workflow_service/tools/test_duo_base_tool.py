@@ -17,7 +17,7 @@ class DummyTool(DuoBaseTool):
     description: str = "A dummy tool for testing"
     args_schema: Type[BaseModel] = BaseModel  # type: ignore
 
-    async def _arun(self, *args, **kwargs):
+    async def _execute(self, *args, **kwargs):
         return "dummy result"
 
 
@@ -32,7 +32,7 @@ class DummyToolWithArgs(DuoBaseTool):
 
     args_schema: Type[BaseModel] = ArgsSchema  # type: ignore
 
-    async def _arun(self, param1, param2, optional_param="default"):
+    async def _execute(self, param1, param2, optional_param="default"):
         return f"{param1} {param2} {optional_param}"
 
 
@@ -51,7 +51,7 @@ class DummyToolWithResponseHandling(DuoBaseTool):
             return f"{base_msg} - Result: {tool_response[:50]}..."
         return base_msg
 
-    async def _arun(self, action):
+    async def _execute(self, action):
         return f"Completed {action}"
 
 

@@ -104,7 +104,7 @@ class GetLogsFromJob(DuoBaseTool):
                 None if project_id is None else str(project_id), job_id, errors
             )
 
-    async def _arun(self, **kwargs: Any) -> str:
+    async def _execute(self, **kwargs: Any) -> str:
         url = kwargs.get("url", None)
         project_id = kwargs.get("project_id", None)
         job_id = kwargs.get("job_id", None)

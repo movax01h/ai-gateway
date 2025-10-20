@@ -1,5 +1,5 @@
 import json
-from abc import ABC, abstractmethod
+from abc import abstractmethod
 from typing import Any, Literal, Optional, Type
 
 import structlog
@@ -26,7 +26,7 @@ class BaseSearchInput(BaseModel):
     )
 
 
-class GitLabSearchBase(DuoBaseTool, ABC):
+class GitLabSearchBase(DuoBaseTool):
     name: str = ""
     description: str = ""
     args_schema: Type[BaseModel] = BaseModel
@@ -75,7 +75,7 @@ class GitLabSearchBase(DuoBaseTool, ABC):
         # codespell:ignore-end
 
     @abstractmethod
-    async def _arun(self, *args: Any, **kwargs: Any) -> str:
+    async def _execute(self, *args: Any, **kwargs: Any) -> str:
         pass
 
     async def _perform_search(self, id: str, params: dict, search_type: str) -> str:
@@ -158,7 +158,7 @@ class GroupProjectSearch(GitLabSearchBase):
     description: str = GitLabSearchBase._get_description(unique_description)
     args_schema: Type[BaseModel] = BaseSearchInput
 
-    async def _arun(
+    async def _execute(
         self,
         id: str,
         search: str,
@@ -217,7 +217,7 @@ class IssueSearch(GitLabSearchBase):
 
     unit_primitive: GitLabUnitPrimitive = GitLabUnitPrimitive.ASK_ISSUE
 
-    async def _arun(
+    async def _execute(
         self,
         *,
         id: str,
@@ -273,7 +273,7 @@ class MilestoneSearch(GitLabSearchBase):
     description: str = GitLabSearchBase._get_description(unique_description)
     args_schema: Type[BaseModel] = BaseSearchInput
 
-    async def _arun(
+    async def _execute(
         self,
         *,
         id: str,
@@ -323,7 +323,7 @@ class UserSearch(GitLabSearchBase):
     description: str = GitLabSearchBase._get_description(unique_description)
     args_schema: Type[BaseModel] = BaseSearchInput
 
-    async def _arun(
+    async def _execute(
         self,
         *,
         id: str,
@@ -398,7 +398,7 @@ class BlobSearch(GitLabSearchBase):
 
         return filtered_results
 
-    async def _arun(
+    async def _execute(
         self,
         *,
         id: str,
@@ -472,7 +472,7 @@ class CommitSearch(GitLabSearchBase):
 
     unit_primitive: GitLabUnitPrimitive = GitLabUnitPrimitive.ASK_COMMIT
 
-    async def _arun(
+    async def _execute(
         self,
         *,
         id: str,
@@ -528,7 +528,7 @@ class WikiBlobSearch(GitLabSearchBase):
     description: str = GitLabSearchBase._get_description(unique_description)
     args_schema: Type[BaseModel] = RefSearchInput
 
-    async def _arun(
+    async def _execute(
         self,
         *,
         id: str,
@@ -581,7 +581,7 @@ class NoteSearch(GitLabSearchBase):
     description: str = GitLabSearchBase._get_description(unique_description)
     args_schema: Type[BaseModel] = BaseSearchInput
 
-    async def _arun(
+    async def _execute(
         self,
         *,
         id: str,

@@ -30,7 +30,7 @@ class RunCommand(DuoBaseTool):
     )
     args_schema: Type[BaseModel] = RunCommandInput  # type: ignore
 
-    async def _arun(
+    async def _execute(
         self,
         program: str,
         args: Optional[str] = None,

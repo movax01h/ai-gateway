@@ -16,10 +16,18 @@ from typing import (
 from google.protobuf import struct_pb2
 from google.protobuf.json_format import MessageToDict
 
-from duo_workflow_service.agent_platform import experimental, v1
+from duo_workflow_service.agent_platform.experimental.flows import (
+    Flow as ExperimentalFlow,
+)
+from duo_workflow_service.agent_platform.experimental.flows import (
+    FlowConfig as ExperimentalFlowConfig,
+)
 from duo_workflow_service.agent_platform.experimental.flows.flow_config import (
     list_configs as experimental_list_configs,
 )
+from duo_workflow_service.agent_platform.v1 import list_configs as v1_list_configs
+from duo_workflow_service.agent_platform.v1.flows import Flow as V1Flow
+from duo_workflow_service.agent_platform.v1.flows import FlowConfig as V1FlowConfig
 from duo_workflow_service.workflows import (
     chat,
     convert_to_gitlab_ci,
@@ -54,15 +62,15 @@ CHAT_AGENT_COMPONENT_ENVIRONMENT = "chat-partial"
 FlowFactory: TypeAlias = Callable[..., AbstractWorkflow]
 
 _FLOW_BY_VERSIONS: Dict[
-    str, Tuple[Type[Union[experimental.flows.FlowConfig, v1.flows.FlowConfig]], Any]
+    str, Tuple[Type[Union[ExperimentalFlowConfig, V1FlowConfig]], Any]
 ] = {
-    "experimental": (experimental.flows.FlowConfig, experimental.flows.Flow),
-    "v1": (v1.flows.FlowConfig, v1.flows.Flow),
+    "experimental": (ExperimentalFlowConfig, ExperimentalFlow),
+    "v1": (V1FlowConfig, V1Flow),
 }
 
 _FLOW_CONFIGS_BY_VERSION = {
     "experimental": experimental_list_configs,
-    "v1": v1.list_configs,
+    "v1": v1_list_configs,
 }
 
 
@@ -70,23 +78,23 @@ _FLOW_CONFIGS_BY_VERSION = {
 def _convert_struct_to_flow_config(
     struct: struct_pb2.Struct,
     flow_config_schema_version: str,
-    flow_config_cls: Type[experimental.flows.FlowConfig],
-) -> experimental.flows.FlowConfig: ...
+    flow_config_cls: Type[ExperimentalFlowConfig],
+) -> ExperimentalFlowConfig: ...
 
 
 @overload
 def _convert_struct_to_flow_config(
     struct: struct_pb2.Struct,
     flow_config_schema_version: str,
-    flow_config_cls: Type[v1.flows.FlowConfig],
-) -> v1.flows.FlowConfig: ...
+    flow_config_cls: Type[V1FlowConfig],
+) -> V1FlowConfig: ...
 
 
 def _convert_struct_to_flow_config(
     struct: struct_pb2.Struct,
     flow_config_schema_version: str,
-    flow_config_cls: Type[Union[experimental.flows.FlowConfig, v1.flows.FlowConfig]],
-) -> Union[experimental.flows.FlowConfig, v1.flows.FlowConfig]:
+    flow_config_cls: Type[Union[ExperimentalFlowConfig, V1FlowConfig]],
+) -> Union[ExperimentalFlowConfig, V1FlowConfig]:
     try:
         _FLOW_BY_VERSIONS[flow_config_schema_version]
     except KeyError:
@@ -109,7 +117,7 @@ def _convert_struct_to_flow_config(
 
 def _flow_factory(
     flow_cls: FlowFactory,
-    config: Union[experimental.flows.FlowConfig, v1.flows.FlowConfig],
+    config: Union[ExperimentalFlowConfig, V1FlowConfig],
 ) -> FlowFactory:
     if config.environment != CHAT_AGENT_COMPONENT_ENVIRONMENT:
         return partial(flow_cls, config=config)

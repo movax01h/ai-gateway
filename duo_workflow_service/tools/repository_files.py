@@ -101,7 +101,7 @@ class GetRepositoryFile(RepositoryFileBaseTool):
 
     args_schema: Type[BaseModel] = RepositoryFileResourceInput  # type: ignore
 
-    async def _arun(self, **kwargs) -> str:
+    async def _execute(self, **kwargs) -> str:
         url = kwargs.get("url")
         project_id = kwargs.get("project_id")
         ref = kwargs.get("ref")
@@ -214,7 +214,7 @@ class ListRepositoryTree(DuoBaseTool):
     """
     args_schema: Type[BaseModel] = RepositoryTreeResourceInput  # type: ignore
 
-    async def _arun(self, **kwargs) -> str:
+    async def _execute(self, **kwargs) -> str:
         url = kwargs.get("url")
         project_id = kwargs.get("project_id")
 

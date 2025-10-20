@@ -74,7 +74,7 @@ class DocumentationSearch(DuoBaseTool):
 
     args_schema: Type[BaseModel] = SearchInput
 
-    async def _arun(self, search: str) -> str:
+    async def _execute(self, search: str) -> str:
         try:
             results = await self._fetch_documentation(search)
             return json.dumps({"search_results": results})

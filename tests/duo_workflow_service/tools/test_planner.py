@@ -27,7 +27,7 @@ class Tool(PlannerTool):
     name: str = "test_tool"
     description: str = "A tool for testing"
 
-    def _run(*_args, **_kwargs):
+    async def _execute(self, *_args, **_kwargs):
         return "test"
 
 
@@ -67,9 +67,10 @@ def test_tools_agent_name():
     assert tool.tools_agent_name == "my_agent"
 
 
+@pytest.mark.asyncio
 @pytest.mark.parametrize("tool_class", [GetPlan])
-def test_get_plan(tool: GetPlan, plan_steps: list[Task]):
-    assert tool._run() == json.dumps(plan_steps)
+async def test_get_plan(tool: GetPlan, plan_steps: list[Task]):
+    assert await tool._arun() == json.dumps(plan_steps)
 
 
 def assert_update(
@@ -88,6 +89,7 @@ def assert_update(
     assert result["plan"].get("reset", False) == reset
 
 
+@pytest.mark.asyncio
 @pytest.mark.parametrize("tool_class", [SetTaskStatus])
 @pytest.mark.parametrize(
     "task_id, status, expected_steps",
@@ -108,10 +110,10 @@ def assert_update(
         ),
     ],
 )
-def test_set_task_status(
+async def test_set_task_status(
     tool: SetTaskStatus, task_id: str, status: str, expected_steps: list[Task]
 ):
-    result = tool._run(task_id=task_id, status=status, description="")
+    result = await tool._arun(task_id=task_id, status=status, description="")
 
     assert_update(
         tool=tool,
@@ -121,17 +123,19 @@ def test_set_task_status(
     )
 
 
+@pytest.mark.asyncio
 @pytest.mark.parametrize("tool_class", [SetTaskStatus])
-def test_set_task_status_missing_task(tool: SetTaskStatus):
-    result = tool._run(task_id="task-2", status="In Progress", description="")
+async def test_set_task_status_missing_task(tool: SetTaskStatus):
+    result = await tool._arun(task_id="task-2", status="In Progress", description="")
     assert result == "Task not found: task-2"
 
 
+@pytest.mark.asyncio
 @pytest.mark.parametrize("tool_class", [AddNewTask])
-def test_add_new_task(tool: AddNewTask):
+async def test_add_new_task(tool: AddNewTask):
     description = "Create new feature"
 
-    result = tool._run(description=description)
+    result = await tool._arun(description=description)
 
     assert_update(
         tool=tool,
@@ -158,9 +162,10 @@ def test_add_new_task_format_display_message():
     assert message == expected_message
 
 
+@pytest.mark.asyncio
 @pytest.mark.parametrize("tool_class", [RemoveTask])
-def test_remove_task(tool: RemoveTask):
-    result = tool._run(task_id="task-0", description="Task 1")
+async def test_remove_task(tool: RemoveTask):
+    result = await tool._arun(task_id="task-0", description="Task 1")
 
     assert_update(
         tool=tool,
@@ -188,12 +193,13 @@ def test_remove_task_format_display_message():
     assert message == expected_message
 
 
+@pytest.mark.asyncio
 @pytest.mark.parametrize("tool_class", [UpdateTaskDescription])
-def test_update_task_description(tool: UpdateTaskDescription):
+async def test_update_task_description(tool: UpdateTaskDescription):
     task_id = "task-1"
     new_description = "Update project documentation"
 
-    result = tool._run(task_id=task_id, new_description=new_description)
+    result = await tool._arun(task_id=task_id, new_description=new_description)
 
     assert_update(
         tool=tool,
@@ -272,10 +278,11 @@ def test_set_task_status_format_display_message(
     assert message == expected_result
 
 
+@pytest.mark.asyncio
 @pytest.mark.parametrize("tool_class", [CreatePlan])
-def test_create_plan(tool: CreatePlan):
+async def test_create_plan(tool: CreatePlan):
     tasks = ["Task 1", "Task 2", "Task 3"]
-    result = tool._run(tasks=tasks)
+    result = await tool._arun(tasks=tasks)
 
     assert_update(
         tool=tool,

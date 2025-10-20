@@ -133,7 +133,7 @@ For example:
 """
     args_schema: Type[BaseModel] = CreateIssueInput  # type: ignore
 
-    async def _arun(self, title: str, **kwargs: Any) -> str:
+    async def _execute(self, title: str, **kwargs: Any) -> str:
         url = kwargs.pop("url", None)
         project_id = kwargs.pop("project_id", None)
 
@@ -261,7 +261,7 @@ class ListIssues(IssueBaseTool):
     """
     args_schema: Type[BaseModel] = ListIssuesInput  # type: ignore
 
-    async def _arun(self, **kwargs: Any) -> str:
+    async def _execute(self, **kwargs: Any) -> str:
         url = kwargs.pop("url", None)
         project_id = kwargs.pop("project_id", None)
 
@@ -313,7 +313,7 @@ class GetIssue(IssueBaseTool):
     """
     args_schema: Type[BaseModel] = IssueResourceInput  # type: ignore
 
-    async def _arun(self, **kwargs: Any) -> str:
+    async def _execute(self, **kwargs: Any) -> str:
         url = kwargs.get("url")
         project_id = kwargs.get("project_id")
         issue_iid = kwargs.get("issue_iid")
@@ -396,7 +396,7 @@ class UpdateIssue(IssueBaseTool):
     """
     args_schema: Type[BaseModel] = UpdateIssueInput  # type: ignore
 
-    async def _arun(self, **kwargs: Any) -> str:
+    async def _execute(self, **kwargs: Any) -> str:
         url = kwargs.pop("url", None)
         project_id = kwargs.pop("project_id", None)
         issue_iid = kwargs.pop("issue_iid", None)
@@ -458,7 +458,7 @@ The body parameter is always required.
 """
     args_schema: Type[BaseModel] = CreateIssueNoteInput  # type: ignore
 
-    async def _arun(self, body: str, **kwargs: Any) -> str:
+    async def _execute(self, body: str, **kwargs: Any) -> str:
         url = kwargs.pop("url", None)
         project_id = kwargs.pop("project_id", None)
         issue_iid = kwargs.pop("issue_iid", None)
@@ -527,7 +527,7 @@ class ListIssueNotes(IssueBaseTool):
     """
     args_schema: Type[BaseModel] = ListIssueNotesInput  # type: ignore
 
-    async def _arun(self, **kwargs: Any) -> str:
+    async def _execute(self, **kwargs: Any) -> str:
         url = kwargs.pop("url", None)
         project_id = kwargs.pop("project_id", None)
         issue_iid = kwargs.pop("issue_iid", None)
@@ -588,7 +588,7 @@ class GetIssueNote(IssueBaseTool):
     """
     args_schema: Type[BaseModel] = GetIssueNoteInput  # type: ignore
 
-    async def _arun(self, note_id: int, **kwargs: Any) -> str:
+    async def _execute(self, note_id: int, **kwargs: Any) -> str:
         url = kwargs.pop("url", None)
         project_id = kwargs.pop("project_id", None)
         issue_iid = kwargs.pop("issue_iid", None)

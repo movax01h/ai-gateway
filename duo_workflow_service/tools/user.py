@@ -25,7 +25,7 @@ class GetCurrentUser(DuoBaseTool):
     """
     args_schema: Type[BaseModel] = GetCurrentUserInput
 
-    async def _arun(self) -> str:
+    async def _execute(self) -> str:
         try:
             response = await self.gitlab_client.aget(
                 path="/api/v4/user", parse_json=True, use_http_response=True

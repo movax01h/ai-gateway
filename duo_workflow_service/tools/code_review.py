@@ -39,7 +39,7 @@ class PostDuoCodeReview(DuoBaseTool):
     args_schema: Type[BaseModel] = PostDuoCodeReviewInput
     unit_primitive: GitLabUnitPrimitive = GitLabUnitPrimitive.ASK_MERGE_REQUEST
 
-    async def _arun(
+    async def _execute(
         self, project_id: int, merge_request_iid: int, review_output: str, **kwargs: Any
     ) -> str:
         """Execute the tool to post the code review."""
@@ -121,7 +121,7 @@ class BuildReviewMergeRequestContext(DuoBaseTool):
     args_schema: Type[BaseModel] = BuildReviewMergeRequestContextInput
     unit_primitive: GitLabUnitPrimitive = GitLabUnitPrimitive.ASK_MERGE_REQUEST
 
-    async def _arun(self, **kwargs: Any) -> str:
+    async def _execute(self, **kwargs: Any) -> str:
         """Execute the tool to build merge request context."""
         validation_result = self._validate_merge_request_url(
             kwargs.get("url"), kwargs.get("project_id"), kwargs.get("merge_request_iid")

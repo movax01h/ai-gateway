@@ -54,7 +54,7 @@ class GetPipelineErrors(DuoBaseTool):
 
     unit_primitive: GitLabUnitPrimitive = GitLabUnitPrimitive.ASK_MERGE_REQUEST
 
-    async def _arun(  # pylint: disable=too-many-return-statements,too-many-branches
+    async def _execute(  # pylint: disable=too-many-return-statements,too-many-branches
         self, **kwargs: Any
     ) -> str:
         url = kwargs.get("url", None)

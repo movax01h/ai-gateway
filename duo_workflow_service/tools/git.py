@@ -20,7 +20,7 @@ class Command(DuoBaseTool):
     description: str = """Runs a git command in the repository working directory."""
     args_schema: Type[BaseModel] = GitCommandInput  # type: ignore
 
-    async def _arun(
+    async def _execute(
         self, repository_url: str, command: str, args: Optional[str] = None
     ) -> str:
         return await _execute_action(

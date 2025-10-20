@@ -104,7 +104,7 @@ class ReadFile(DuoBaseTool):
         "Let me check if class `DuoBaseTool` exists in `./tools/base.py`",
     ]
 
-    async def _arun(self, file_path: str) -> str:
+    async def _execute(self, file_path: str) -> str:
         # Check file exclusion policy
         if not FileExclusionPolicy.is_allowed_for_project(self.project, file_path):
             return FileExclusionPolicy.format_llm_exclusion_message([file_path])
@@ -138,7 +138,7 @@ class ReadFiles(DuoBaseTool):
     args_schema: Type[BaseModel] = ReadFilesInput  # type: ignore
     handle_tool_error: bool = True
 
-    async def _arun(self, file_paths: list[str]) -> str:
+    async def _execute(self, file_paths: list[str]) -> str:
         policy = FileExclusionPolicy(self.project)
         file_paths, excluded_file_paths = policy.filter_allowed(file_paths)
         log = structlog.stdlib.get_logger("workflow")
@@ -226,7 +226,7 @@ class WriteFile(DuoBaseTool):
     args_schema: Type[BaseModel] = WriteFileInput  # type: ignore
     handle_tool_error: bool = True
 
-    async def _arun(self, file_path: str, contents: str) -> str:
+    async def _execute(self, file_path: str, contents: str) -> str:
         # Check file exclusion policy
         if not FileExclusionPolicy.is_allowed_for_project(self.project, file_path):
             return FileExclusionPolicy.format_llm_exclusion_message([file_path])
@@ -293,7 +293,7 @@ class FindFiles(DuoBaseTool):
     """
     args_schema: Type[BaseModel] = FindFilesInput  # type: ignore
 
-    async def _arun(
+    async def _execute(
         self,
         name_pattern: str,
     ) -> str:
@@ -341,7 +341,7 @@ class Mkdir(DuoBaseTool):
 
     args_schema: Type[BaseModel] = MkdirInput  # type: ignore
 
-    async def _arun(self, directory_path: str) -> str:
+    async def _execute(self, directory_path: str) -> str:
         if ".." in directory_path:
             return "Creating directories above the current directory is not allowed"
 
@@ -447,7 +447,7 @@ Examples of batched file edits:
     args_schema: Type[BaseModel] = EditFileInput  # type: ignore
     handle_tool_error: bool = True
 
-    async def _arun(self, file_path: str, old_str: str, new_str: str) -> str:
+    async def _execute(self, file_path: str, old_str: str, new_str: str) -> str:
         # Check file exclusion policy
         if not FileExclusionPolicy.is_allowed_for_project(self.project, file_path):
             return FileExclusionPolicy.format_llm_exclusion_message([file_path])
@@ -509,7 +509,7 @@ class ListDir(DuoBaseTool):
     """
     args_schema: Type[BaseModel] = ListDirInput  # type: ignore
 
-    async def _arun(self, directory: str) -> str:
+    async def _execute(self, directory: str) -> str:
         # Check file exclusion policy before executing action
         if not FileExclusionPolicy.is_allowed_for_project(self.project, directory):
             return FileExclusionPolicy.format_llm_exclusion_message([directory])
