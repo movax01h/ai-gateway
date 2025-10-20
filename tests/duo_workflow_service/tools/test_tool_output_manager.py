@@ -6,7 +6,7 @@ import pytest
 from langchain_core.messages import ToolMessage
 from langgraph.types import Command
 
-from duo_workflow_service.agents.tool_output_manager import (
+from duo_workflow_service.tools.tool_output_manager import (
     _add_truncation_instruction,
     truncate_tool_response,
 )
@@ -60,15 +60,15 @@ def test_add_truncation_instruction():
     ],
 )
 @patch(
-    "duo_workflow_service.agents.tool_output_manager.TOOL_RESPONSE_MAX_BYTES",
+    "duo_workflow_service.tools.tool_output_manager.TOOL_RESPONSE_MAX_BYTES",
     30,
 )
 @patch(
-    "duo_workflow_service.agents.tool_output_manager.TOOL_RESPONSE_TRUNCATED_SIZE",
+    "duo_workflow_service.tools.tool_output_manager.TOOL_RESPONSE_TRUNCATED_SIZE",
     10,
 )
-@patch("duo_workflow_service.agents.tool_output_manager.token_counter")
-@patch("duo_workflow_service.agents.tool_output_manager.logger")
+@patch("duo_workflow_service.tools.tool_output_manager.token_counter")
+@patch("duo_workflow_service.tools.tool_output_manager.logger")
 def test_truncate_tool_response(
     mock_logger: Mock,
     mock_token_counter: Mock,
@@ -106,7 +106,7 @@ def test_truncate_tool_response(
         assert result == response
 
 
-@patch("duo_workflow_service.agents.tool_output_manager.logger")
+@patch("duo_workflow_service.tools.tool_output_manager.logger")
 def test_truncate_tool_response_exception(
     mock_logger: Mock,
 ):

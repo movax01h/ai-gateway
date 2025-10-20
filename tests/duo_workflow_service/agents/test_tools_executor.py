@@ -1065,7 +1065,7 @@ class MockGetIssue(BaseTool):
     description: str = "Get a single issue in a GitLab project"
     args_schema: Type[BaseModel] = MockGetIssueInput
 
-    async def _arun(self) -> str:
+    async def _execute(self) -> str:
         return ""
 
     def _run(self) -> str:

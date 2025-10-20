@@ -158,6 +158,9 @@ async def test_list_tools(
                     eval_prompts=eval_prompts,
                 )
 
+            async def _execute(self, *args, **kwargs):
+                pass
+
         _tool_class_cache[cache_key] = MockTool
         return MockTool
 

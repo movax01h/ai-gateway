@@ -30,7 +30,7 @@ class RunTests(DuoBaseTool):
     """
     args_schema: Type[BaseModel] = RunTestsInput
 
-    async def _arun(self, command: str, **kwargs: Any) -> str:
+    async def _execute(self, command: str, **kwargs: Any) -> str:
         parts = command.split(maxsplit=1)
         program = parts[0]
         args = parts[1] if len(parts) > 1 else ""

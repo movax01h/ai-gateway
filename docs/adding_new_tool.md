@@ -53,7 +53,7 @@ implementation details, and best practices.
        """
        args_schema: Type[BaseModel] = YourToolInput  # type: ignore
 
-       async def _arun(self, param1: str, param2: int, optional_param: str = None) -> str:
+       async def _execute(self, param1: str, param2: int, optional_param: str = None) -> str:
            # Implement the tool logic here
 
            # If interacting with the executor:

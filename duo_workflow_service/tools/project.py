@@ -17,7 +17,7 @@ class GetProject(DuoBaseTool):
     description: str = """Fetch details about the project"""
     args_schema: Type[BaseModel] = GetProjectInput  # type: ignore
 
-    async def _arun(self, project_id: str) -> str:
+    async def _execute(self, project_id: str) -> str:
         response = await self.gitlab_client.aget(
             path=f"/api/v4/projects/{project_id}",
             parse_json=False,

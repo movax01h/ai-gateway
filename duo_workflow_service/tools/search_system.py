@@ -44,7 +44,7 @@ class Grep(DuoBaseTool):
     """
     args_schema: Type[BaseModel] = GrepInput  # type: ignore
 
-    async def _arun(
+    async def _execute(
         self,
         pattern: str,
         search_directory: str = ".",
@@ -117,7 +117,7 @@ class ExtractLinesFromText(DuoBaseTool):
     """
     args_schema: Type[BaseModel] = ExtractLinesFromTextInput
 
-    async def _arun(self, **kwargs: Any) -> str:
+    async def _execute(self, **kwargs: Any) -> str:
         content = kwargs.pop("content")
         start_line = kwargs.pop("start_line")
         end_line = kwargs.pop("end_line", None)

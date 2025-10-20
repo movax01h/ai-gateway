@@ -33,7 +33,7 @@ class PostSastFpAnalysisToGitlab(DuoBaseTool):
 """
     args_schema: Type[BaseModel] = PostSastFpAnalysisToGitlabInput
 
-    async def _arun(
+    async def _execute(
         self, vulnerability_id: int, false_positive_likelihood: float, explanation: str
     ) -> str:
         data = {

@@ -32,7 +32,7 @@ class GetSessionContext(DuoBaseTool):
     """
     args_schema: Type[BaseModel] = GetSessionContextInput  # type: ignore
 
-    async def _arun(self, previous_session_id: int, **_kwargs: Any) -> str:
+    async def _execute(self, previous_session_id: int, **_kwargs: Any) -> str:
         try:
             response = await self.gitlab_client.aget(
                 path=f"/api/v4/ai/duo_workflows/workflows/{previous_session_id}/checkpoints?per_page=1",

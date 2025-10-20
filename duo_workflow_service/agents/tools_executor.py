@@ -13,7 +13,6 @@ from langgraph.types import Command
 from pydantic import ValidationError
 
 from ai_gateway.container import ContainerApplication
-from duo_workflow_service.agents.tool_output_manager import truncate_tool_response
 from duo_workflow_service.entities import WorkflowStatusEnum
 from duo_workflow_service.entities.state import (
     DuoWorkflowStateType,
@@ -228,10 +227,6 @@ class ToolsExecutor:
 
                 tool_response = await tool.ainvoke(tool_call)
 
-                tool_response_truncated = truncate_tool_response(
-                    tool_response=tool_response, tool_name=tool_name
-                )
-
             self._track_internal_event(
                 event_name=EventEnum.WORKFLOW_TOOL_SUCCESS,
                 tool_name=tool_name,
@@ -241,11 +236,11 @@ class ToolsExecutor:
                 tool_info={"name": tool_name, "args": tool_args},
                 status=ToolStatus.SUCCESS,
                 ui_chat_logs=chat_logs,
-                tool_response=tool_response_truncated,
+                tool_response=tool_response,
             )
 
             return {
-                "response": tool_response_truncated,
+                "response": tool_response,
                 "chat_logs": chat_logs,
             }
 

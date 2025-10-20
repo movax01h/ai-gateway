@@ -94,7 +94,7 @@ class UpdateVulnerabilitySeverity(DuoBaseTool):
         if not valid_ids:
             raise ValueError("At least one valid vulnerability ID must be provided")
 
-    async def _arun(self, **kwargs: Any) -> str:
+    async def _execute(self, **kwargs: Any) -> str:
         vulnerability_ids = self.ensure_list(kwargs.pop("vulnerability_ids"))
         severity = kwargs.pop("severity")
         comment = kwargs.pop("comment")

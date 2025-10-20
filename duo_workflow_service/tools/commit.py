@@ -168,7 +168,7 @@ class ListCommits(CommitBaseTool):
     # editorconfig-checker-enable
     args_schema: Type[BaseModel] = ListCommitsInput  # type: ignore
 
-    async def _arun(self, **kwargs: Any) -> str:
+    async def _execute(self, **kwargs: Any) -> str:
         url = kwargs.pop("url", None)
         project_id = kwargs.pop("project_id", None)
 
@@ -228,7 +228,7 @@ For example:
 """
     args_schema: Type[BaseModel] = GetCommitInput  # type: ignore
 
-    async def _arun(self, **kwargs: Any) -> str:
+    async def _execute(self, **kwargs: Any) -> str:
         url = kwargs.get("url")
         project_id = kwargs.get("project_id")
         commit_sha = kwargs.get("commit_sha")
@@ -284,7 +284,7 @@ class GetCommitDiff(CommitBaseTool):
     """
     args_schema: Type[BaseModel] = CommitResourceInput  # type: ignore
 
-    async def _arun(self, **kwargs: Any) -> str:
+    async def _execute(self, **kwargs: Any) -> str:
         url = kwargs.get("url")
         project_id = kwargs.get("project_id")
         commit_sha = kwargs.get("commit_sha")
@@ -357,7 +357,7 @@ class GetCommitComments(CommitBaseTool):
     """
     args_schema: Type[BaseModel] = CommitResourceInput  # type: ignore
 
-    async def _arun(self, **kwargs: Any) -> str:
+    async def _execute(self, **kwargs: Any) -> str:
         url = kwargs.get("url")
         project_id = kwargs.get("project_id")
         commit_sha = kwargs.get("commit_sha")
@@ -509,7 +509,7 @@ class CreateCommit(DuoBaseTool):
 
     args_schema: Type[BaseModel] = CreateCommitInput  # type: ignore
 
-    async def _arun(
+    async def _execute(
         self,
         branch: str,
         commit_message: str,

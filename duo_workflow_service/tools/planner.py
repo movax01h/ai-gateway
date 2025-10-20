@@ -1,4 +1,5 @@
 import json
+from abc import abstractmethod
 from typing import Any, List, Optional, Type
 
 from langchain_core.messages import ToolMessage
@@ -66,6 +67,10 @@ class PlannerTool(DuoBaseTool):
     def tools_agent_name(self, tools_agent_name: str):
         self._tools_agent_name = tools_agent_name
 
+    @abstractmethod
+    async def _execute(self, *args, **kwargs):
+        """Planner tool doesn't need async execution."""
+
     def _command(self, steps: List[Task], tool_message: str, reset: bool = False):
         return LangGraphCommand(
             update={
@@ -95,7 +100,7 @@ class AddNewTask(PlannerTool):
 
     args_schema: Type[BaseModel] = AddNewTaskInput
 
-    def _run(self, description: str) -> LangGraphCommand:
+    async def _execute(self, description: str) -> LangGraphCommand:
         new_task = Task(
             id=f"task-{len(self.plan['steps'])}",
             description=description,
@@ -122,7 +127,7 @@ class RemoveTask(PlannerTool):
     This tool removes a task from the list of tasks."""
     args_schema: Type[BaseModel] = RemoveTaskInput
 
-    def _run(
+    async def _execute(
         self, task_id: str, description: str  # pylint: disable=unused-argument
     ) -> LangGraphCommand:
         steps: List[Task]
@@ -160,7 +165,9 @@ class UpdateTaskDescription(PlannerTool):
     This tool updates the description of a task but should never update the status of a task."""
     args_schema: Type[BaseModel] = UpdateTaskDescriptionInput
 
-    def _run(self, task_id: str, new_description: str) -> LangGraphCommand | str:
+    async def _execute(
+        self, task_id: str, new_description: str
+    ) -> LangGraphCommand | str:
         for step in self.plan["steps"]:
             if step["id"] == task_id:
                 if new_description:
@@ -183,7 +190,7 @@ class GetPlan(PlannerTool):
     description: str = """Fetch a list of tasks for a workflow.
     A plan consists of a list of tasks and the status of each task."""
 
-    def _run(self) -> str:
+    async def _execute(self) -> str:
         return json.dumps(self.plan["steps"])
 
 
@@ -202,7 +209,7 @@ class SetTaskStatus(PlannerTool):
     description: str = "Set the status of a single task in the plan"
     args_schema: Type[BaseModel] = SetTaskStatusInput
 
-    def _run(
+    async def _execute(
         self,
         task_id: str,
         status: str,
@@ -244,7 +251,7 @@ class CreatePlan(PlannerTool):
 
     args_schema: Type[BaseModel] = CreatePlanInput
 
-    def _run(self, tasks: List[str]) -> LangGraphCommand:
+    async def _execute(self, tasks: List[str]) -> LangGraphCommand:
         steps: List[Task] = []
         for i, task_description in enumerate(tasks):
             steps.append(

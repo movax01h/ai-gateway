@@ -31,7 +31,7 @@ class CiLinter(DuoBaseTool):
 
     args_schema: Type[BaseModel] = CiLinterInput
 
-    async def _arun(self, content: str, **kwargs: Any) -> str:
+    async def _execute(self, content: str, **kwargs: Any) -> str:
         url = kwargs.pop("url", None)
         ref = kwargs.pop("ref", "")
         project_id = kwargs.pop("project_id", None)

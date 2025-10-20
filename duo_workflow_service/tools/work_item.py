@@ -147,7 +147,7 @@ class ListWorkItems(WorkItemBaseTool):
     """
     args_schema: Type[BaseModel] = ListWorkItemsInput
 
-    async def _arun(self, **kwargs: Any) -> str:
+    async def _execute(self, **kwargs: Any) -> str:
         url = kwargs.pop("url", None)
         group_id = kwargs.pop("group_id", None)
         project_id = kwargs.pop("project_id", None)
@@ -260,7 +260,7 @@ class GetWorkItem(WorkItemBaseTool):
     """
     args_schema: Type[BaseModel] = WorkItemResourceInput
 
-    async def _arun(self, **kwargs: Any) -> str:
+    async def _execute(self, **kwargs: Any) -> str:
         resolved = await self._validate_work_item_url(
             url=kwargs.get("url"),
             group_id=kwargs.get("group_id"),
@@ -322,7 +322,7 @@ class GetWorkItemNotes(WorkItemBaseTool):
     """
     args_schema: Type[BaseModel] = GetWorkItemNotesInput
 
-    async def _arun(self, **kwargs: Any) -> str:
+    async def _execute(self, **kwargs: Any) -> str:
         url = kwargs.pop("url", None)
         group_id = kwargs.pop("group_id", None)
         project_id = kwargs.pop("project_id", None)
@@ -420,7 +420,7 @@ class CreateWorkItem(WorkItemBaseTool):
     """
     args_schema: Type[BaseModel] = CreateWorkItemInput
 
-    async def _arun(self, type_name: str, **kwargs: Any) -> str:
+    async def _execute(self, type_name: str, **kwargs: Any) -> str:
         kwargs["type_name"] = type_name
         url = kwargs.pop("url", None)
         group_id = kwargs.pop("group_id", None)
@@ -498,7 +498,7 @@ class UpdateWorkItem(WorkItemBaseTool):
     """
     args_schema: Type[BaseModel] = UpdateWorkItemInput
 
-    async def _arun(self, **kwargs: Any) -> str:
+    async def _execute(self, **kwargs: Any) -> str:
         resolved = await self._resolve_work_item_data(
             url=kwargs.get("url"),
             group_id=kwargs.get("group_id"),
@@ -556,7 +556,7 @@ class CreateWorkItemNote(WorkItemBaseTool):
     """
     args_schema: Type[BaseModel] = CreateWorkItemNoteInput
 
-    async def _arun(self, body: str, **kwargs: Any) -> str:
+    async def _execute(self, body: str, **kwargs: Any) -> str:
         url = kwargs.pop("url", None)
         group_id = kwargs.pop("group_id", None)
         project_id = kwargs.pop("project_id", None)

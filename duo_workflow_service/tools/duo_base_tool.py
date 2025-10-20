@@ -1,4 +1,5 @@
-from typing import Any, List, NamedTuple, Optional
+from abc import abstractmethod
+from typing import Any, List, NamedTuple, Optional, final
 
 from gitlab_cloud_connector import GitLabUnitPrimitive
 from langchain.tools import BaseTool
@@ -7,6 +8,7 @@ from pydantic import BaseModel
 from duo_workflow_service.gitlab.gitlab_api import Project
 from duo_workflow_service.gitlab.http_client import GitlabHttpClient, GitLabHttpResponse
 from duo_workflow_service.gitlab.url_parser import GitLabUrlParseError, GitLabUrlParser
+from duo_workflow_service.tools.tool_output_manager import truncate_tool_response
 
 DESCRIPTION_CHARACTER_LIMIT = 1_048_576
 
@@ -72,6 +74,33 @@ class DuoBaseTool(BaseTool):
 
     def _run(self, *args: Any, **kwargs: Any) -> Any:
         raise NotImplementedError("This tool can only be run asynchronously")
+
+    def __init_subclass__(cls, **kwargs):
+        super().__init_subclass__(**kwargs)
+        if "_arun" in cls.__dict__:
+            raise TypeError(
+                f"{cls.__name__} must not override _arun. "
+                f"Implement _execute instead."
+            )
+
+    @final
+    async def _arun(self, *args: Any, **kwargs: Any) -> Any:
+        """Wrapper that applies truncation to all tool results.
+
+        This method should NOT be overridden by subclasses.
+        """
+        tool_result = await self._execute(*args, **kwargs)
+        tool_response = truncate_tool_response(
+            tool_response=tool_result, tool_name=self.name
+        )
+        return tool_response
+
+    @abstractmethod
+    async def _execute(self, *args: Any, **kwargs: Any) -> Any:
+        """Subclasses MUST implement this method instead of _arun.
+
+        This is where the actual tool logic goes.
+        """
 
     def _validate_project_url(
         self, url: Optional[str], project_id: Optional[int | str]

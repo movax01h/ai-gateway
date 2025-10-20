@@ -205,7 +205,7 @@ class CreateEpic(EpicBaseTool):
 
     args_schema: Type[BaseModel] = WriteEpicInput
 
-    async def _arun(self, title: str, **kwargs: Any) -> str:
+    async def _execute(self, title: str, **kwargs: Any) -> str:
         url = kwargs.pop("url", None)
         group_id = kwargs.pop("group_id", None)
 
@@ -334,7 +334,7 @@ class ListEpics(EpicBaseTool):
 
     args_schema: Type[BaseModel] = ListEpicsInput
 
-    async def _arun(self, **kwargs: Any) -> str:
+    async def _execute(self, **kwargs: Any) -> str:
         url = kwargs.pop("url", None)
         group_id = kwargs.pop("group_id", None)
 
@@ -393,7 +393,7 @@ class GetEpic(EpicBaseTool):
 
     args_schema: Type[BaseModel] = EpicResourceInput
 
-    async def _arun(self, **kwargs: Any) -> str:
+    async def _execute(self, **kwargs: Any) -> str:
         url = kwargs.get("url")
         group_id = kwargs.get("group_id")
         epic_iid = kwargs.get("epic_iid")
@@ -456,7 +456,7 @@ For example:
 """
     args_schema: Type[BaseModel] = UpdateEpicInput  # type: ignore
 
-    async def _arun(self, **kwargs: Any) -> str:
+    async def _execute(self, **kwargs: Any) -> str:
         url = kwargs.pop("url", None)
         group_id = kwargs.pop("group_id", None)
         epic_iid = kwargs.pop("epic_iid", None)
@@ -526,7 +526,7 @@ class ListEpicNotes(EpicBaseTool):
     """
     args_schema: Type[BaseModel] = ListEpicNotesInput
 
-    async def _arun(self, **kwargs: Any) -> str:
+    async def _execute(self, **kwargs: Any) -> str:
         url = kwargs.pop("url", None)
         group_id = kwargs.pop("group_id", None)
         epic_iid = kwargs.pop("epic_iid", None)

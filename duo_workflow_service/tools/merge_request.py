@@ -81,7 +81,7 @@ class CreateMergeRequest(DuoBaseTool):
 
     unit_primitive: GitLabUnitPrimitive = GitLabUnitPrimitive.ASK_MERGE_REQUEST
 
-    async def _arun(
+    async def _execute(
         self,
         source_branch: str,
         target_branch: str,
@@ -156,7 +156,7 @@ class GetMergeRequest(DuoBaseTool):
 
     unit_primitive: GitLabUnitPrimitive = GitLabUnitPrimitive.ASK_MERGE_REQUEST
 
-    async def _arun(self, **kwargs: Any) -> str:
+    async def _execute(self, **kwargs: Any) -> str:
         url = kwargs.get("url")
         project_id = kwargs.get("project_id")
         merge_request_iid = kwargs.get("merge_request_iid")
@@ -213,7 +213,7 @@ class ListMergeRequestDiffs(DuoBaseTool):
 
     unit_primitive: GitLabUnitPrimitive = GitLabUnitPrimitive.ASK_MERGE_REQUEST
 
-    async def _arun(self, **kwargs: Any) -> str:
+    async def _execute(self, **kwargs: Any) -> str:
         url = kwargs.get("url")
         project_id = kwargs.get("project_id")
         merge_request_iid = kwargs.get("merge_request_iid")
@@ -307,7 +307,7 @@ The body parameter is always required.
         quick_action_pattern = r"(?m)^/[a-zA-Z]+"
         return bool(re.search(quick_action_pattern, body))
 
-    async def _arun(self, body: str, **kwargs: Any) -> str:
+    async def _execute(self, body: str, **kwargs: Any) -> str:
         url = kwargs.pop("url", None)
         project_id = kwargs.pop("project_id", None)
         merge_request_iid = kwargs.pop("merge_request_iid", None)
@@ -377,7 +377,7 @@ class ListAllMergeRequestNotes(DuoBaseTool):
 
     unit_primitive: GitLabUnitPrimitive = GitLabUnitPrimitive.ASK_MERGE_REQUEST
 
-    async def _arun(self, **kwargs: Any) -> str:
+    async def _execute(self, **kwargs: Any) -> str:
         url = kwargs.get("url")
         project_id = kwargs.get("project_id")
         merge_request_iid = kwargs.get("merge_request_iid")
@@ -539,7 +539,7 @@ class ListMergeRequest(DuoBaseTool):
 
     unit_primitive: GitLabUnitPrimitive = GitLabUnitPrimitive.ASK_MERGE_REQUEST
 
-    async def _arun(self, **kwargs: Any) -> str:
+    async def _execute(self, **kwargs: Any) -> str:
         url = kwargs.pop("url", None)
         project_id = kwargs.pop("project_id", None)
 
@@ -637,7 +637,7 @@ For example:
 
     unit_primitive: GitLabUnitPrimitive = GitLabUnitPrimitive.ASK_MERGE_REQUEST
 
-    async def _arun(self, **kwargs: Any) -> str:
+    async def _execute(self, **kwargs: Any) -> str:
         url = kwargs.pop("url", None)
         project_id = kwargs.pop("project_id", None)
         merge_request_iid = kwargs.pop("merge_request_iid", None)

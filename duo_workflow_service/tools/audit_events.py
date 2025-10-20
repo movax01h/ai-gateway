@@ -207,7 +207,7 @@ class ListInstanceAuditEvents(BaseAuditEventsTool):
     """
     args_schema: Type[BaseModel] = ListInstanceAuditEventsInput  # type: ignore
 
-    async def _arun(self, **kwargs: Any) -> str:
+    async def _execute(self, **kwargs: Any) -> str:
         # Validate entity_id requires entity_type
         if kwargs.get("entity_id") and not kwargs.get("entity_type"):
             return self._format_error("entity_id requires entity_type to be specified")
@@ -247,7 +247,7 @@ class ListGroupAuditEvents(BaseAuditEventsTool):
     """
     args_schema: Type[BaseModel] = ListGroupAuditEventsInput  # type: ignore
 
-    async def _arun(self, **kwargs: Any) -> str:
+    async def _execute(self, **kwargs: Any) -> str:
         group_id = kwargs.get("group_id")
         group_path = kwargs.get("group_path")
 
@@ -298,7 +298,7 @@ class ListProjectAuditEvents(BaseAuditEventsTool):
     """
     args_schema: Type[BaseModel] = ListProjectAuditEventsInput  # type: ignore
 
-    async def _arun(self, **kwargs: Any) -> str:
+    async def _execute(self, **kwargs: Any) -> str:
         url = kwargs.get("url")
         project_id = kwargs.get("project_id")
 
