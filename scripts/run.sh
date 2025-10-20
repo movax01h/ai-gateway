@@ -19,6 +19,13 @@ if [[ -n "${ENABLE_DUO_WORKFLOW_SERVICE}" ]]; then
   commands+=("poetry run duo-workflow-service")
 fi
 
-if [ ${#commands[@]} -gt 0 ]; then
-  printf "%s\n" "${commands[@]}" | parallel --will-cite --line-buffer --halt never
+if [ ${#commands[@]} -eq 1 ]; then
+    echo "Running single service with exec..."
+    exec ${commands[0]}
+elif [ ${#commands[@]} -gt 1 ]; then
+    echo "Running multiple services with parallel..."
+    printf "%s\n" "${commands[@]}" | parallel --will-cite --line-buffer --halt never
+else
+    echo "No services configured to run. Exiting."
+    exit 1
 fi
