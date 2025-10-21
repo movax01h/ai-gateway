@@ -39,6 +39,9 @@ from duo_workflow_service.server import (
     string_to_category_enum,
 )
 from duo_workflow_service.tools.duo_base_tool import DuoBaseTool
+from duo_workflow_service.workflows.type_definitions import (
+    AIO_CANCEL_STOP_WORKFLOW_REQUEST,
+)
 from lib.internal_events.context import InternalEventAdditionalProperties
 from lib.internal_events.event_enum import (
     CategoryEnum,
@@ -463,6 +466,76 @@ async def test_workflow_is_cancelled_on_parent_task_cancellation(
         assert real_workflow_task.cancelled()
 
         mock_context.set_code.assert_called_once_with(grpc.StatusCode.CANCELLED)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "workflow_error,successful_execution,expected_status,expected_detail_prefix",
+    [
+        (None, True, grpc.StatusCode.OK, "workflow execution success:"),
+        (
+            AIO_CANCEL_STOP_WORKFLOW_REQUEST,
+            False,
+            grpc.StatusCode.OK,
+            "workflow execution stopped:",
+        ),
+        (
+            ValueError("Some error"),
+            False,
+            grpc.StatusCode.INTERNAL,
+            "workflow execution failure: ValueError: Some error",
+        ),
+        (
+            None,
+            False,
+            grpc.StatusCode.UNKNOWN,
+            "RPC ended with unknown workflow state:",
+        ),
+    ],
+)
+@patch("duo_workflow_service.server.AbstractWorkflow")
+@patch("duo_workflow_service.server.resolve_workflow_class")
+async def test_execute_workflow_status_codes(
+    mock_resolve_workflow,
+    mock_abstract_workflow_class,
+    workflow_error,
+    successful_execution,
+    expected_status,
+    expected_detail_prefix,
+):
+    """Test that ExecuteWorkflow sets correct status codes for different workflow states."""
+    mock_workflow = mock_abstract_workflow_class.return_value
+    mock_workflow.is_done = True
+    mock_workflow.run = AsyncMock()
+    mock_workflow.cleanup = AsyncMock()
+    mock_workflow.successful_execution = MagicMock(return_value=successful_execution)
+    mock_workflow.last_error = workflow_error
+    mock_workflow.last_gitlab_status = "test_status"
+    mock_workflow.get_from_outbox = AsyncMock(
+        return_value=OutboxSignal.NO_MORE_OUTBOUND_REQUESTS
+    )
+    mock_resolve_workflow.return_value = mock_abstract_workflow_class
+
+    async def mock_request_iterator() -> AsyncIterable[contract_pb2.ClientEvent]:
+        yield contract_pb2.ClientEvent(
+            startRequest=contract_pb2.StartWorkflowRequest(goal="test")
+        )
+
+    current_user.set(CloudConnectorUser(authenticated=True, is_debug=True))
+    mock_context = MagicMock(spec=grpc.ServicerContext)
+    servicer = DuoWorkflowService()
+    result = servicer.ExecuteWorkflow(
+        mock_request_iterator(),
+        mock_context,
+        internal_event_client=create_mock_internal_event_client(),
+    )
+
+    with pytest.raises(StopAsyncIteration):
+        await anext(result)
+
+    mock_context.set_code.assert_called_once_with(expected_status)
+    actual_detail = mock_context.set_details.call_args[0][0]
+    assert actual_detail.startswith(expected_detail_prefix)
 
 
 @pytest.mark.asyncio

@@ -452,6 +452,11 @@ class DuoWorkflowService(contract_pb2_grpc.DuoWorkflowServicer):
                 context.set_details(
                     f"workflow execution success: {workflow.last_gitlab_status}"
                 )
+            elif str(workflow.last_error) == AIO_CANCEL_STOP_WORKFLOW_REQUEST:
+                context.set_code(grpc.StatusCode.OK)
+                context.set_details(
+                    f"workflow execution stopped: {workflow.last_gitlab_status}"
+                )
             elif workflow.last_error:
                 context.set_code(grpc.StatusCode.INTERNAL)
                 context.set_details(
@@ -471,13 +476,14 @@ class DuoWorkflowService(contract_pb2_grpc.DuoWorkflowServicer):
             # Task cancellation must be reraised to the grpc server side so that the rpc task can be shutdown properly.
             raise
         except BaseException as err:
-            log_exception(
-                err,
-                extra={
-                    "workflow_id": workflow_id,
-                    "source": __name__,
-                },
-            )
+            if str(err) != AIO_CANCEL_STOP_WORKFLOW_REQUEST:
+                log_exception(
+                    err,
+                    extra={
+                        "workflow_id": workflow_id,
+                        "source": __name__,
+                    },
+                )
             await abort_workflow(workflow_task, err)
             await context.abort(grpc.StatusCode.INTERNAL, "Something went wrong")
         finally:
