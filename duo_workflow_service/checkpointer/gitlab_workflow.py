@@ -416,22 +416,28 @@ class GitLabWorkflow(
         # update status to DROP, track failure event,
         # and return False
         if exc_type:
-            log_exception(
-                exc_value, extra={"workflow_id": self._workflow_id, "source": __name__}
-            )
+            stop_exception = str(exc_value) == AIO_CANCEL_STOP_WORKFLOW_REQUEST
+
+            if not stop_exception:
+                log_exception(
+                    exc_value,
+                    extra={"workflow_id": self._workflow_id, "source": __name__},
+                )
 
             event = EventEnum.WORKFLOW_FINISH_FAILURE
             status = WorkflowStatusEventEnum.DROP
 
             if isinstance(exc_value, asyncio.exceptions.CancelledError):
-                if AIO_CANCEL_STOP_WORKFLOW_REQUEST in str(exc_value):
+                if stop_exception:
                     event = EventEnum.WORKFLOW_STOP
                     status = WorkflowStatusEventEnum.STOP
                 else:
                     # When this workflow task is cancelled by `workflow_task.cancel`, `CancelledError` is raised.
                     event = EventEnum.WORKFLOW_ABORTED
 
-            await self._handle_workflow_exception(exc_value, event)
+            if not stop_exception:
+                await self._handle_workflow_exception(exc_value, event)
+
             await self._update_workflow_status_safely(status)
             return False
 

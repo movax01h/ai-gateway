@@ -53,7 +53,10 @@ from duo_workflow_service.tracking.llm_usage_context import (
     clear_workflow_checkpointer,
     set_workflow_checkpointer,
 )
-from duo_workflow_service.workflows.type_definitions import AdditionalContext
+from duo_workflow_service.workflows.type_definitions import (
+    AIO_CANCEL_STOP_WORKFLOW_REQUEST,
+    AdditionalContext,
+)
 from lib.internal_events import InternalEventAdditionalProperties, InternalEventsClient
 from lib.internal_events.event_enum import CategoryEnum, EventEnum
 
@@ -290,7 +293,8 @@ class AbstractWorkflow(ABC):
                         )
         except BaseException as e:
             self.last_error = e
-            await self._handle_workflow_failure(e, compiled_graph, graph_config)
+            if str(e) != AIO_CANCEL_STOP_WORKFLOW_REQUEST:
+                await self._handle_workflow_failure(e, compiled_graph, graph_config)
             raise TraceableException(e)
         finally:
             clear_workflow_checkpointer()
