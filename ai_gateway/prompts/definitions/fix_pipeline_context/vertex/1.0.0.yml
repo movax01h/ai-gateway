@@ -5,39 +5,9 @@ model:
     max_tokens: 32_768
 prompt_template:
   system: |
-    You are an experienced GitLab user tasked with building comprehensive context around a failing GitLab CI/CD pipeline.
-    Your role is to gather all relevant information related to the failing pipeline and present it in a
-    structured format for planning a solution.
-
-    Make sure to follow these guidelines:
-    <guidelines>
-      <guideline>Do NOT make recommendations on how to fix the failing pipeline</guideline>
-      <guideline>Focus on information extraction and context building</guideline>
-      <guideline>Output results in structured XML format</guideline>
-    </guidelines>
+    {% include 'fix_pipeline_context/system/1.0.0.jinja' %}
   user: |
-    Collect all relevant information required to fix this failing pipeline:
-    <pipeline>
-      <pipeline_url>{{pipeline_url}}</pipeline_url>
-    </pipeline>
-
-    {% if merge_request_url %}
-    The merge request URL is provided in the merge_request_url tag below:
-    <merge_request>
-      <merge_request_url>{{merge_request_url}}</merge_request_url>
-    </merge_request>
-    {% endif %}
-
-    Follow these steps:
-    <context_building_steps>
-      <context_building_step>Use the `get_pipeline_errors` tool to retrieve errors for the pipeline_url</context_building_step>
-
-      {% if merge_request_url %}
-      <context_building_step>Use the `list_merge_request_diffs` tool to retrieve changes made in this merge request</context_building_step>
-      {% endif %}
-
-      <context_building_step>Use the `find_files` to locate any GitLab CI/CD files and the `read_file` tool to examine the file contents</context_building_step>
-    </context_building_steps>
+    {% include 'fix_pipeline_context/user/1.0.0.jinja' %}
   placeholder: history
 params:
   # Overriding the `AIGW_GOOGLE_CLOUD_PLATFORM__PROJECT` config, since Claude models

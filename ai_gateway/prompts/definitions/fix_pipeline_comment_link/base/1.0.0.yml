@@ -1,0 +1,13 @@
+name: fix_pipeline_comment_link_prompt
+model:
+  params:
+    model_class_provider: anthropic
+    max_tokens: 32_768
+prompt_template:
+  system: |
+    {% include 'fix_pipeline_comment_link/system/1.0.0.jinja' %}
+  user: |
+    {% include 'fix_pipeline_comment_link/user/1.0.0.jinja' %}
+params:
+  timeout: 60
+

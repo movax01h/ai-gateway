@@ -1,0 +1,7 @@
+Use the `run_git_command` tool to run this git command specified in the git_command XML tags:
+<git_command>
+  git push -o merge_request.create
+    -o merge_request.title='Draft: fix failing pipeline'
+    {% if source_branch %}-o merge_request.target='{{source_branch}}'{% endif %}
+    -o merge_request.description='Fixes failing pipeline {{pipeline_url}}{% if merge_request_url %} on {{merge_request_url}}{% endif %}'
+</git_command>
