@@ -262,6 +262,6 @@ Human message"""
             assert result["ui_chat_log"][0]["status"] == ToolStatus.FAILURE
             assert (
                 result["ui_chat_log"][0]["content"]
-                == "There was an error processing your request. Please try again or contact support if the issue "
-                "persists."
+                == "There was an error connecting to the chosen LLM provider, please try again or contact "
+                "support if the issue persists."
             )
