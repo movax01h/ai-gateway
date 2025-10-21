@@ -152,7 +152,7 @@ class PromptSecurity:
         strip_hidden_html_comments,
         strip_hidden_unicode_tags,
         strip_mermaid_comments,
-        strip_emojis,
+        # strip_emojis,
     ]
 
     # Tool-specific additional security functions
