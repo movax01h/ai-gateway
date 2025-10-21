@@ -140,11 +140,6 @@ class Agent(BaseAgent):
                 }
             except APIStatusError as error:
                 log.warning(f"Error processing agent: {error}")
-
-                error_message = HumanMessage(
-                    content=f"There was an error processing your request: {error}"
-                )
-
                 status_code = error.response.status_code
 
                 duo_workflow_metrics.count_llm_response(
@@ -156,6 +151,10 @@ class Agent(BaseAgent):
                     error_type=ERROR_TYPES.get(status_code, ModelErrorType.UNKNOWN),
                 )
 
+                error_message = HumanMessage(
+                    content=f"There was an error processing your request: {error}"
+                )
+
                 return {
                     "conversation_history": {self.name: [error_message]},
                     "status": WorkflowStatusEnum.ERROR,
@@ -163,8 +162,10 @@ class Agent(BaseAgent):
                         UiChatLog(
                             message_type=MessageTypeEnum.AGENT,
                             message_sub_type=None,
-                            content="There was an error processing your request. "
-                            "Please try again or contact support if the issue persists.",
+                            content=(
+                                "There was an error connecting to the chosen LLM provider, please try again or contact "
+                                "support if the issue persists."
+                            ),
                             timestamp=datetime.now(timezone.utc).isoformat(),
                             status=ToolStatus.FAILURE,
                             correlation_id=None,
