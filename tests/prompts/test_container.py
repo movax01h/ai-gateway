@@ -13,7 +13,6 @@ from ai_gateway.model_metadata import create_model_metadata
 from ai_gateway.model_selection.model_selection_config import ModelSelectionConfig
 from ai_gateway.prompts.config import ChatOpenAIParams, ModelClassProvider
 from ai_gateway.prompts.registry import (
-    LEGACY_MODEL_MAPPING,
     LocalPromptRegistry,
     feature_setting_for_prompt_id,
 )
@@ -108,6 +107,18 @@ def test_container(mock_ai_gateway_container: containers.DeclarativeContainer):
         prompt_id = str(prompt_id_with_model_name.parent)
         model_name = prompt_id_with_model_name.name
 
+        if model_name == "base":
+            # The base model is requested when no model metadata is passed
+            model_metadata = None
+        else:
+            model_metadata = create_model_metadata(
+                {
+                    "name": str(model_name),
+                    "endpoint": AnyUrl("http://localhost:4000"),
+                    "provider": "gitlab",
+                }
+            )
+
         # Load the prompt definition to get the class
         prompt_registered = registry._load_prompt_definition(prompt_id, path)
         klass = prompt_registered.klass
@@ -115,27 +126,9 @@ def test_container(mock_ai_gateway_container: containers.DeclarativeContainer):
 
         # Check every existing version
         for version in versions:
-            if model_name == "base":
-                # Test that the legacy prompts where the version was tied to the model work with no model metadata
-                if LEGACY_MODEL_MAPPING.get(prompt_id, {}).get(version, None):
-                    model_metadata = None
-                else:
-                    # To be able to test `base` prompt versions that aren't tied to a specific model, we select an
-                    # arbitrary model identifier that we know will fetch the `base` prompt
-                    model_metadata = create_model_metadata(
-                        {"provider": "gitlab", "identifier": "claude_sonnet_4_20250514"}
-                    )
-            else:
-                model_metadata = create_model_metadata(
-                    {
-                        "name": str(model_name),
-                        "endpoint": AnyUrl("http://localhost:4000"),
-                        "provider": "gitlab",
-                    }
-                )
             prompt = registry.get(
                 prompt_id,
-                version,
+                f"={version}",
                 model_metadata=model_metadata,
                 **kwargs,
             )

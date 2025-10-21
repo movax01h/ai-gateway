@@ -257,7 +257,7 @@ class LocalPromptRegistry(BasePromptRegistry):
 
     def _get_prompt_config(
         self, versions: dict[str, PromptConfig], prompt_version: str
-    ) -> PromptConfig:
+    ) -> tuple[str, PromptConfig]:
         # Parse constraint according to poetry rules. See
         # https://python-poetry.org/docs/dependency-specification/#version-constraints
         constraint = parse_constraint(prompt_version)
@@ -280,25 +280,21 @@ class LocalPromptRegistry(BasePromptRegistry):
                 f"No prompt version found matching the query: {prompt_version}"
             )
         compatible_versions.sort(reverse=True)
+        resolved_version = str(compatible_versions[0])
 
-        return versions[str(compatible_versions[0])]
+        return resolved_version, versions[resolved_version]
 
     def _default_model_metadata(
-        self, prompt_id: str, prompt_version: str
+        self, prompt_id: str, resolved_prompt_version: str
     ) -> TypeModelMetadata | None:
         # For backwards compatibility with client code that doesn't send model_metadata and would've used the model from
         # the `base` prompt, create model metadata from know version mappings or the feature setting default
         if identifier := LEGACY_MODEL_MAPPING.get(prompt_id, {}).get(
-            prompt_version, None
+            resolved_prompt_version, None
         ):
-            model_metadata = create_model_metadata(
+            return create_model_metadata(
                 {"provider": "gitlab", "identifier": identifier}
             )
-            if model_metadata:
-                # For these legacy prompt version tied to a model, we always used the `base` prompt, so we override the
-                # `family` in case the current model from models.yml specifies a different value for this property
-                model_metadata.family = [self.key_prompt_type_base]
-            return model_metadata
 
         return create_model_metadata(
             {
@@ -319,9 +315,6 @@ class LocalPromptRegistry(BasePromptRegistry):
         **kwargs: Any,
     ) -> Prompt:
         try:
-            if not model_metadata:
-                model_metadata = self._default_model_metadata(prompt_id, prompt_version)  # type: ignore[arg-type]
-
             family = model_metadata.family if model_metadata else []
             prompt_path = self._resolve_id(prompt_id, family)
 
@@ -333,7 +326,14 @@ class LocalPromptRegistry(BasePromptRegistry):
                 f"Failed to load prompt definition for '{prompt_id}': {e}"
             ) from e
 
-        config = self._get_prompt_config(prompt_registered.versions, prompt_version)  # type: ignore[arg-type]
+        resolved_prompt_version, config = self._get_prompt_config(
+            prompt_registered.versions, prompt_version  # type: ignore[arg-type]
+        )
+        if not model_metadata:
+            model_metadata = self._default_model_metadata(
+                prompt_id, resolved_prompt_version
+            )
+
         model_class_provider = (
             model_metadata.llm_definition_params.get(
                 "model_class_provider"
