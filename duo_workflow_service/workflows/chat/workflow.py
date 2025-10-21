@@ -324,7 +324,6 @@ class Workflow(AbstractWorkflow):
         self.log.info(
             "ChatWorkflow._compile: Starting chat workflow compilation",
             workflow_id=self._workflow_id,
-            goal=goal,
         )
 
         self._goal = goal
