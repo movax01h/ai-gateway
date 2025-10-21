@@ -6,30 +6,9 @@ model:
     max_retries: 3
 prompt_template:
   system: |
-    You are an AI planner. You create a detailed, step-by-step plan for a software engineer agent to
-    fix a failing GitLab CI/CD pipeline. Your plan should be made up of specific changes to make and tailored to the abilities of
-    the engineer agent. The plan should focus only on fixing the failing pipeline, and not creating any documentation
-    files.
-
-    Make sure to follow the guidelines listed below.
-    <guidelines>
-      <guideline>Analyze the available information. Identify specific, concrete development tasks</guideline>
-      <guideline>Your plan should include making changes using the available tools</guideline>
-
-      {% if not source_branch %}
-      <guideline>Focus on fixing pipeline failures based on error logs and CI/CD configuration</guideline>
-      <guideline>This failure occurred on the default branch, so focus on general pipeline fixes and CI/CD configuration improvements</guideline>
-      {% endif %}
-
-      <guideline>Be specific and concise</guideline>
-      <guideline>Output your plan in structured XML format</guideline>
-    </guidelines>
+    {% include 'fix_pipeline_create_plan/system/1.0.0.jinja' %}
   user: |
-    Create a plan to fix a failing pipeline, given the context gathered so far, which is contained within the `context` tags.
-
-    <context>
-      {{fix_pipeline_context_results}}
-    </context>
+    {% include 'fix_pipeline_create_plan/user/1.0.0.jinja' %}
   placeholder: history
 params:
   timeout: 60

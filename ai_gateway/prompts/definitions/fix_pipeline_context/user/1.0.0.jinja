@@ -1,0 +1,22 @@
+Collect all relevant information required to fix this failing pipeline:
+<pipeline>
+  <pipeline_url>{{pipeline_url}}</pipeline_url>
+</pipeline>
+
+{% if merge_request_url %}
+The merge request URL is provided in the merge_request_url tag below:
+<merge_request>
+  <merge_request_url>{{merge_request_url}}</merge_request_url>
+</merge_request>
+{% endif %}
+
+Follow these steps:
+<context_building_steps>
+  <context_building_step>Use the `get_pipeline_errors` tool to retrieve errors for the pipeline_url</context_building_step>
+
+  {% if merge_request_url %}
+  <context_building_step>Use the `list_merge_request_diffs` tool to retrieve changes made in this merge request</context_building_step>
+  {% endif %}
+
+  <context_building_step>Use the `find_files` to locate any GitLab CI/CD files and the `read_file` tool to examine the file contents</context_building_step>
+</context_building_steps>

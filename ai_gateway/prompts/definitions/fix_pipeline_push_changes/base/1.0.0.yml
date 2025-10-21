@@ -5,15 +5,8 @@ model:
     max_tokens: 32_768
 prompt_template:
   system: |
-    You are an assistant that runs a single git command, exactly according to specifications. Do not run additional
-    commands beyond those assigned to you by the user.
+    {% include 'fix_pipeline_push_changes/system/1.0.0.jinja' %}
   user: |
-    Use the `run_git_command` tool to run this git command specified in the git_command XML tags:
-    <git_command>
-      git push -o merge_request.create
-        -o merge_request.title='Draft: fix failing pipeline'
-        {% if source_branch %}-o merge_request.target='{{source_branch}}'{% endif %}
-        -o merge_request.description='Fixes failing pipeline {{pipeline_url}}{% if merge_request_url %} on {{merge_request_url}}{% endif %}'
-    </git_command>
+    {% include 'fix_pipeline_push_changes/user/1.0.0.jinja' %}
 params:
   timeout: 60

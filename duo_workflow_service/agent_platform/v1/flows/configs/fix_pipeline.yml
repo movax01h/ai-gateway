@@ -20,6 +20,32 @@ components:
       - "on_agent_final_answer"
       - "on_tool_execution_success"
       - "on_tool_execution_failed"
+  - name: "fix_pipeline_decide_approach"
+    type: AgentComponent
+    prompt_id: "fix_pipeline_decide_approach"
+    prompt_version: "^1.0.0"
+    inputs:
+      - from: "context:fix_pipeline_context.final_answer"
+        as: "fix_pipeline_context_results"
+    toolset: []
+    ui_log_events:
+      - "on_agent_final_answer"
+  - name: "fix_pipeline_add_comment"
+    type: AgentComponent
+    prompt_id: "fix_pipeline_add_comment"
+    prompt_version: "^1.0.0"
+    inputs:
+      - from: "context:goal"
+        as: "pipeline_url"
+      - from: "context:inputs.merge_request.url"
+        as: "merge_request_url"
+      - from: "context:fix_pipeline_context.final_answer"
+        as: "fix_pipeline_context_results"
+    toolset: ["create_merge_request_note"]
+    ui_log_events:
+      - "on_agent_final_answer"
+      - "on_tool_execution_success"
+      - "on_tool_execution_failed"
   - name: "fix_pipeline_create_plan"
     type: AgentComponent
     prompt_id: "fix_pipeline_create_plan"
@@ -37,10 +63,14 @@ components:
     prompt_id: "fix_pipeline_execution"
     prompt_version: "^1.0.0"
     inputs:
+      - from: "context:fix_pipeline_context.final_answer"
+        as: "fix_pipeline_context_results"
       - from: "context:fix_pipeline_create_plan.final_answer"
         as: "fix_pipeline_plan"
       - from: "context:inputs.pipeline.source_branch"
         as: "source_branch"
+      - from: "context:project_id"
+        as: "project_id"
     toolset:
       - create_file_with_contents
       - edit_file
@@ -81,9 +111,33 @@ components:
       - "on_tool_call_input"
       - "on_tool_execution_success"
       - "on_tool_execution_failed"
+  - name: "fix_pipeline_comment_link"
+    type: OneOffComponent
+    prompt_id: "fix_pipeline_comment_link"
+    prompt_version: "^1.0.0"
+    max_correction_attempts: 3
+    inputs:
+      - from: "context:inputs.merge_request.url"
+        as: "merge_request_url"
+      - from: "context:fix_pipeline_git_push.tool_responses"
+        as: "git_push_response"
+    toolset: ["create_merge_request_note"]
+    ui_log_events:
+      - "on_agent_final_answer"
+      - "on_tool_execution_success"
+      - "on_tool_execution_failed"
 routers:
   - from: "fix_pipeline_context"
-    to: "fix_pipeline_create_plan"
+    to: "fix_pipeline_decide_approach"
+  - from: "fix_pipeline_decide_approach"
+    condition:
+      input: "context:fix_pipeline_decide_approach.final_answer"
+      routes:
+        "add_comment": "fix_pipeline_add_comment"
+        "create_fix": "fix_pipeline_create_plan"
+        "default_route": "fix_pipeline_add_comment"
+  - from: "fix_pipeline_add_comment"
+    to: "end"
   - from: "fix_pipeline_create_plan"
     to: "fix_pipeline_execution"
   - from: "fix_pipeline_execution"
@@ -91,6 +145,8 @@ routers:
   - from: "fix_pipeline_git_commit"
     to: "fix_pipeline_git_push"
   - from: "fix_pipeline_git_push"
+    to: "fix_pipeline_comment_link"
+  - from: "fix_pipeline_comment_link"
     to: "end"
 flow:
   entry_point: "fix_pipeline_context"

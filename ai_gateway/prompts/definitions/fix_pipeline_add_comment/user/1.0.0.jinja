@@ -1,0 +1,22 @@
+The failing pipeline URL is provided in the pipeline_url tag below:
+<pipeline>
+  <pipeline_url>{{pipeline_url}}</pipeline_url>
+</pipeline>
+
+Information about this failing pipeline is contained in the `context` tag below.
+<context>
+  {{fix_pipeline_context_results}}
+</context>
+
+{% if merge_request_url %}
+  The merge request URL is provided in the merge_request_url tag below:
+  <merge_request>
+    <merge_request_url>{{merge_request_url}}</merge_request_url>
+  </merge_request>
+
+  Use the `create_merge_request_note` tool with the `merge_request_url` to add a comment to the merge request
+  describing your recommendations to the user. Make sure to include a link to the `pipeline_url` in your comment.
+  Do not ask for any additional input from the user.
+{% else %}
+  Merge Request was not provided, so do not use any tools. Summarize your suggestions for this failing pipeline.
+{% endif %}

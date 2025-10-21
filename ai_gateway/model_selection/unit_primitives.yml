@@ -267,6 +267,30 @@ configurable_unit_primitives:
       - "claude_sonnet_4_20250514"
       - "claude_sonnet_4_20250514_vertex"
       - "claude_sonnet_4_5_20250929"
+  - feature_setting: "fix_pipeline_decide_approach"
+    unit_primitives:
+      - "duo_workflow_execute_workflow"
+    default_model: "claude_sonnet_4_20250514"
+    selectable_models:
+      - "claude_sonnet_4_20250514"
+      - "claude_sonnet_4_20250514_vertex"
+      - "claude_sonnet_4_5_20250929"
+  - feature_setting: "fix_pipeline_add_comment"
+    unit_primitives:
+      - "duo_workflow_execute_workflow"
+    default_model: "claude_sonnet_4_20250514"
+    selectable_models:
+      - "claude_sonnet_4_20250514"
+      - "claude_sonnet_4_20250514_vertex"
+      - "claude_sonnet_4_5_20250929"
+  - feature_setting: "fix_pipeline_comment_link"
+    unit_primitives:
+      - "duo_workflow_execute_workflow"
+    default_model: "claude_sonnet_4_20250514"
+    selectable_models:
+      - "claude_sonnet_4_20250514"
+      - "claude_sonnet_4_20250514_vertex"
+      - "claude_sonnet_4_5_20250929"
   - feature_setting: "code_review_prescan"
     unit_primitives: []
     default_model: "claude_sonnet_4_20250514"
