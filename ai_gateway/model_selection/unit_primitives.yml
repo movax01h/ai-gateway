@@ -393,3 +393,10 @@ configurable_unit_primitives:
       - "claude_sonnet_4_20250514"
       - "claude_sonnet_4_20250514_vertex"
       - "claude_sonnet_4_5_20250929"
+  - feature_setting: "link_vulnerability_to_mr"
+    unit_primitives: []
+    default_model: "claude_sonnet_4_20250514"
+    selectable_models:
+      - "claude_sonnet_3_7_20250219"
+      - "claude_sonnet_4_20250514"
+      - "claude_sonnet_4_5_20250929"
