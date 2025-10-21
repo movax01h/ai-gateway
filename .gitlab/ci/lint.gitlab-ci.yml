@@ -51,4 +51,6 @@ lint:commit:
     - echo "Verifying Merge request title formatting"
     - echo "$CI_MERGE_REQUEST_TITLE" | npx commitlint
   rules:
+    - if: '$CI_MERGE_REQUEST_DIFF_BASE_SHA && $CI_MERGE_REQUEST_DRAFT == "true"'
+      allow_failure: true
     - if: "$CI_MERGE_REQUEST_DIFF_BASE_SHA"
