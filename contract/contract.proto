@@ -150,7 +150,9 @@ message ListFlowsRequest {
 }
 
 message ListFlowsRequestFilter {
-    repeated string name = 1;
+    reserved 1;
+    reserved "name";
+    repeated string flow_identifier = 4;
     repeated string environment = 2;
     repeated string version = 3;
 }

@@ -440,7 +440,7 @@ class TestListConfigs:
             result = list_configs()
 
         assert len(result) == 1
-        assert result[0]["name"] == "test_config"
+        assert result[0]["flow_identifier"] == "test_config"
         assert result[0]["version"] == "1.0"
         assert result[0]["environment"] == "test"
         assert "config" in result[0]
@@ -476,7 +476,7 @@ class TestListConfigs:
             result = list_configs()
 
         assert len(result) == 1
-        assert result[0]["name"] == expected_name
+        assert result[0]["flow_identifier"] == expected_name
 
     def test_list_configs_multiple_valid_configs(self, tmp_path):
         """Test list_configs returns multiple configs when multiple valid files exist."""
@@ -519,7 +519,7 @@ class TestListConfigs:
             result = list_configs()
 
         assert len(result) == 3
-        names = {config["name"] for config in result}
+        names = {config["flow_identifier"] for config in result}
         assert names == {"config_0", "config_1", "config_2"}
 
         versions = {config["version"] for config in result}
@@ -564,7 +564,7 @@ class TestListConfigs:
 
         # Should only return the valid config, skipping the invalid one
         assert len(result) == 1
-        assert result[0]["name"] == "valid_config"
+        assert result[0]["flow_identifier"] == "valid_config"
 
     def test_list_configs_skips_files_with_io_errors(
         self, tmp_path, sample_config_data
@@ -600,7 +600,7 @@ class TestListConfigs:
 
         # Should only return the config that didn't have IO error
         assert len(result) == 1
-        assert result[0]["name"] == "valid_config"
+        assert result[0]["flow_identifier"] == "valid_config"
 
     def test_list_configs_ignores_non_yml_files(self, tmp_path, sample_config_data):
         """Test list_configs only processes .yml files, ignoring other file types."""
@@ -634,7 +634,7 @@ class TestListConfigs:
 
         # Should only return the .yml file
         assert len(result) == 1
-        assert result[0]["name"] == "config"
+        assert result[0]["flow_identifier"] == "config"
 
     def test_list_configs_json_serialization(self, tmp_path):
         """Test that list_configs properly serializes complex config structures to JSON."""
@@ -716,7 +716,7 @@ class TestListConfigs:
             result = list_configs()
 
         assert len(result) == 1
-        assert result[0]["name"] == "minimal_config"
+        assert result[0]["flow_identifier"] == "minimal_config"
         assert result[0]["version"] == "1.0"
         assert result[0]["environment"] == "test"
 

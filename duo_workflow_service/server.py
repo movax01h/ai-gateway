@@ -514,8 +514,9 @@ class DuoWorkflowService(contract_pb2_grpc.DuoWorkflowServicer):
             for config in configs:
                 # Filter by name if provided
                 if (
-                    request.filters.name
-                    and config.get("name") not in request.filters.name
+                    request.filters.flow_identifier
+                    and config.get("flow_identifier")
+                    not in request.filters.flow_identifier
                 ):
                     continue
 

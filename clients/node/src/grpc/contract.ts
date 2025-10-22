@@ -157,7 +157,7 @@ export interface ListFlowsRequest {
 }
 
 export interface ListFlowsRequestFilter {
-  name: string[];
+  flowIdentifier: string[];
   environment: string[];
   version: string[];
 }
@@ -2340,13 +2340,13 @@ export const ListFlowsRequest: MessageFns<ListFlowsRequest> = {
 };
 
 function createBaseListFlowsRequestFilter(): ListFlowsRequestFilter {
-  return { name: [], environment: [], version: [] };
+  return { flowIdentifier: [], environment: [], version: [] };
 }
 
 export const ListFlowsRequestFilter: MessageFns<ListFlowsRequestFilter> = {
   encode(message: ListFlowsRequestFilter, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
-    for (const v of message.name) {
-      writer.uint32(10).string(v!);
+    for (const v of message.flowIdentifier) {
+      writer.uint32(34).string(v!);
     }
     for (const v of message.environment) {
       writer.uint32(18).string(v!);
@@ -2364,12 +2364,12 @@ export const ListFlowsRequestFilter: MessageFns<ListFlowsRequestFilter> = {
     while (reader.pos < end) {
       const tag = reader.uint32();
       switch (tag >>> 3) {
-        case 1: {
-          if (tag !== 10) {
+        case 4: {
+          if (tag !== 34) {
             break;
           }
 
-          message.name.push(reader.string());
+          message.flowIdentifier.push(reader.string());
           continue;
         }
         case 2: {
@@ -2399,7 +2399,9 @@ export const ListFlowsRequestFilter: MessageFns<ListFlowsRequestFilter> = {
 
   fromJSON(object: any): ListFlowsRequestFilter {
     return {
-      name: globalThis.Array.isArray(object?.name) ? object.name.map((e: any) => globalThis.String(e)) : [],
+      flowIdentifier: globalThis.Array.isArray(object?.flowIdentifier)
+        ? object.flowIdentifier.map((e: any) => globalThis.String(e))
+        : [],
       environment: globalThis.Array.isArray(object?.environment)
         ? object.environment.map((e: any) => globalThis.String(e))
         : [],
@@ -2409,8 +2411,8 @@ export const ListFlowsRequestFilter: MessageFns<ListFlowsRequestFilter> = {
 
   toJSON(message: ListFlowsRequestFilter): unknown {
     const obj: any = {};
-    if (message.name?.length) {
-      obj.name = message.name;
+    if (message.flowIdentifier?.length) {
+      obj.flowIdentifier = message.flowIdentifier;
     }
     if (message.environment?.length) {
       obj.environment = message.environment;
@@ -2426,7 +2428,7 @@ export const ListFlowsRequestFilter: MessageFns<ListFlowsRequestFilter> = {
   },
   fromPartial<I extends Exact<DeepPartial<ListFlowsRequestFilter>, I>>(object: I): ListFlowsRequestFilter {
     const message = createBaseListFlowsRequestFilter();
-    message.name = object.name?.map((e) => e) || [];
+    message.flowIdentifier = object.flowIdentifier?.map((e) => e) || [];
     message.environment = object.environment?.map((e) => e) || [];
     message.version = object.version?.map((e) => e) || [];
     return message;
