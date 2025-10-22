@@ -300,7 +300,7 @@ configurable_unit_primitives:
       - "claude_sonnet_4_5_20250929"
   - feature_setting: "validate_sast_vulnerability_agent_prompt"
     unit_primitives: []
-    default_model: "claude_sonnet_4_20250514"
+    default_model: "claude_sonnet_4_5_20250929"
     selectable_models:
       - "claude_sonnet_3_7_20250219"
       - "claude_sonnet_4_20250514"
@@ -308,7 +308,7 @@ configurable_unit_primitives:
       - "claude_sonnet_4_5_20250929"
   - feature_setting: "sast_vulnerability_source_file_agent_prompt"
     unit_primitives: [ ]
-    default_model: "claude_sonnet_4_20250514"
+    default_model: "claude_sonnet_4_5_20250929"
     selectable_models:
       - "claude_sonnet_3_7_20250219"
       - "claude_sonnet_4_20250514"
@@ -316,7 +316,7 @@ configurable_unit_primitives:
       - "claude_sonnet_4_5_20250929"
   - feature_setting: "sast_vulnerability_lines_agent_prompt"
     unit_primitives: [ ]
-    default_model: "claude_sonnet_4_20250514"
+    default_model: "claude_sonnet_4_5_20250929"
     selectable_models:
       - "claude_sonnet_3_7_20250219"
       - "claude_sonnet_4_20250514"
@@ -324,7 +324,7 @@ configurable_unit_primitives:
       - "claude_sonnet_4_5_20250929"
   - feature_setting: "sast_vulnerability_report_agent_prompt"
     unit_primitives: [ ]
-    default_model: "claude_sonnet_4_20250514"
+    default_model: "claude_sonnet_4_5_20250929"
     selectable_models:
       - "claude_sonnet_3_7_20250219"
       - "claude_sonnet_4_20250514"
@@ -332,7 +332,7 @@ configurable_unit_primitives:
       - "claude_sonnet_4_5_20250929"
   - feature_setting: "sast_fp_detection_agent_prompt"
     unit_primitives: []
-    default_model: "claude_sonnet_4_20250514"
+    default_model: "claude_sonnet_4_5_20250929"
     selectable_models:
       - "claude_sonnet_3_7_20250219"
       - "claude_sonnet_4_20250514"
@@ -380,7 +380,7 @@ configurable_unit_primitives:
       - "claude_sonnet_4_5_20250929"
   - feature_setting: "sast_post_results_to_gitlab_agent_prompt"
     unit_primitives: []
-    default_model: "claude_sonnet_4_20250514"
+    default_model: "claude_sonnet_4_5_20250929"
     selectable_models:
       - "claude_sonnet_4_20250514"
       - "claude_sonnet_4_20250514_vertex"
