@@ -7,7 +7,7 @@ from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, System
 from langchain_core.output_parsers import BaseCumulativeTransformOutputParser
 from langchain_core.outputs import Generation
 from langchain_core.prompt_values import ChatPromptValue, PromptValue
-from langchain_core.runnables import Runnable, RunnableConfig
+from langchain_core.runnables import Runnable, RunnableBinding, RunnableConfig
 
 from ai_gateway.chat.agents.typing import (
     AgentError,
@@ -20,12 +20,13 @@ from ai_gateway.chat.agents.typing import (
 )
 from ai_gateway.models.base_chat import Role
 from ai_gateway.prompts import Prompt, jinja2_formatter
-from ai_gateway.prompts.config import ModelClassProvider, ModelConfig
+from ai_gateway.prompts.config import ModelClassProvider
 from ai_gateway.prompts.config.base import PromptConfig
 from ai_gateway.structured_logging import get_request_logger
 
 __all__ = [
     "ReActPlainTextParser",
+    "ReActPromptTemplate",
     "ReActAgent",
 ]
 
@@ -116,9 +117,9 @@ class ReActPlainTextParser(BaseCumulativeTransformOutputParser):
 
 
 class ReActPromptTemplate(Runnable[ReActAgentInputs, PromptValue]):
-    def __init__(self, prompt_template: dict[str, str], model_config: ModelConfig):
-        self.prompt_template = prompt_template
-        self.model_config = model_config
+    def __init__(self, config: PromptConfig):
+        self.prompt_template = config.prompt_template
+        self.model_config = config.model
 
     def invoke(
         self,
@@ -188,18 +189,11 @@ class ReActPromptTemplate(Runnable[ReActAgentInputs, PromptValue]):
         return ChatPromptValue(messages=messages)
 
 
-class ReActAgent(Prompt[ReActAgentInputs, TypeAgentEvent]):
+class ReActAgent(RunnableBinding[ReActAgentInputs, TypeAgentEvent]):
     RETRYABLE_ERRORS: list[str] = ["overloaded_error"]
 
-    @staticmethod
-    def _build_chain(
-        chain: Runnable[ReActAgentInputs, TypeAgentEvent],
-    ) -> Runnable[ReActAgentInputs, TypeAgentEvent]:
-        return chain | ReActPlainTextParser()
-
-    @classmethod
-    def _build_prompt_template(cls, config: PromptConfig) -> Runnable:
-        return ReActPromptTemplate(config.prompt_template, config.model)
+    def __init__(self, prompt: Prompt) -> None:
+        super().__init__(bound=prompt | ReActPlainTextParser())
 
     async def astream(
         self,

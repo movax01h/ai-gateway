@@ -33,7 +33,7 @@ from ai_gateway.config import ConfigModelLimits, ModelLimits
 from ai_gateway.instrumentators.model_requests import ModelRequestInstrumentator
 from ai_gateway.model_metadata import TypeModelMetadata, current_model_metadata_context
 from ai_gateway.prompts.config.base import ModelConfig, PromptConfig, PromptParams
-from ai_gateway.prompts.typing import Model, TypeModelFactory
+from ai_gateway.prompts.typing import Model, TypeModelFactory, TypePromptTemplateFactory
 from ai_gateway.structured_logging import get_request_logger
 from duo_workflow_service.tracking.llm_usage_context import get_workflow_checkpointer
 from lib.internal_events.client import InternalEventsClient
@@ -45,6 +45,7 @@ __all__ = [
     "Output",
     "BasePromptRegistry",
     "jinja2_formatter",
+    "prompt_template_to_messages",
 ]
 
 Input = TypeVar("Input")
@@ -80,6 +81,15 @@ def jinja2_formatter(template: str, /, **kwargs: Any) -> str:
 DEFAULT_FORMATTER_MAPPING["jinja2"] = jinja2_formatter
 
 
+def prompt_template_to_messages(
+    tpl: dict[str, str],
+) -> Sequence[MessageLikeRepresentation]:
+    return [
+        MessagesPlaceholder(content) if role == "placeholder" else (role, content)
+        for role, content in tpl.items()
+    ]
+
+
 class PromptLoggingHandler(BaseCallbackHandler):
     """Logs the full prompt that is sent to the LLM."""
 
@@ -109,6 +119,7 @@ class Prompt(RunnableBinding[Input, Output]):
         model_factory: TypeModelFactory,
         config: PromptConfig,
         model_metadata: Optional[TypeModelMetadata] = None,
+        prompt_template_factory: Optional[TypePromptTemplateFactory] = None,
         disable_streaming: bool = False,
         tools: Optional[List[BaseTool]] = None,
         tool_choice: Optional[str] = None,
@@ -123,13 +134,12 @@ class Prompt(RunnableBinding[Input, Output]):
         if tools and isinstance(model, BaseChatModel):
             model = model.bind_tools(tools, tool_choice=tool_choice)  # type: ignore[assignment]
 
-        prompt = self._build_prompt_template(config)
-        chain = self._build_chain(
-            cast(
-                Runnable[Input, Output],
-                prompt | model.bind(**model_kwargs),
-            )
+        prompt = (
+            prompt_template_factory(config)
+            if prompt_template_factory
+            else self._build_prompt_template(config)
         )
+        chain = cast(Runnable[Input, Output], prompt | model.bind(**model_kwargs))
 
         super().__init__(
             name=config.name,
@@ -318,11 +328,6 @@ class Prompt(RunnableBinding[Input, Output]):
                         additional_properties=additional_properties,
                     )
 
-    # Subclasses can override this method to add steps at either side of the chain
-    @staticmethod
-    def _build_chain(chain: Runnable[Input, Output]) -> Runnable[Input, Output]:
-        return chain
-
     @staticmethod
     def _add_logger_to_config(config):
         callback = PromptLoggingHandler()
@@ -334,22 +339,11 @@ class Prompt(RunnableBinding[Input, Output]):
 
         return config
 
-    # Assume that the prompt template keys map to roles. Subclasses can
-    # override this method to implement more complex logic.
-    @staticmethod
-    def _prompt_template_to_messages(
-        tpl: dict[str, str],
-    ) -> Sequence[MessageLikeRepresentation]:
-        return [
-            MessagesPlaceholder(content) if role == "placeholder" else (role, content)
-            for role, content in tpl.items()
-        ]
-
     @classmethod
     def _build_prompt_template(
         cls, config: PromptConfig
     ) -> Runnable[Input, PromptValue]:
-        messages = cls._prompt_template_to_messages(config.prompt_template)
+        messages = prompt_template_to_messages(config.prompt_template)
 
         return cast(
             Runnable[Input, PromptValue],

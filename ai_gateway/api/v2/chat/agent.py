@@ -26,10 +26,11 @@ from ai_gateway.chat.agents import (
     ReActAgentInputs,
     TypeAgentEvent,
 )
+from ai_gateway.chat.agents.react import ReActAgent
 from ai_gateway.chat.executor import GLAgentRemoteExecutor
 from ai_gateway.model_metadata import current_model_metadata_context
 from ai_gateway.models import Role
-from ai_gateway.prompts import BasePromptRegistry, Prompt
+from ai_gateway.prompts import BasePromptRegistry
 from ai_gateway.structured_logging import get_request_logger
 from lib.internal_events import InternalEventsClient
 
@@ -75,14 +76,12 @@ def authorize_additional_context(
 def get_agent(
     current_user: StarletteUser,
     prompt_registry: BasePromptRegistry,
-) -> Prompt:
+) -> ReActAgent:
     try:
         prompt = prompt_registry.get_on_behalf(
             current_user,
             "chat/react",
-            None,
-            current_model_metadata_context.get(),
-            __name__,
+            internal_event_category=__name__,
         )
     except WrongUnitPrimitives:
         raise HTTPException(
@@ -90,7 +89,7 @@ def get_agent(
             detail="Unauthorized to access duo chat",
         )
 
-    return prompt
+    return ReActAgent(prompt=prompt)
 
 
 def _build_scratchpad_from_request(
@@ -132,7 +131,7 @@ def _build_scratchpad_from_request(
 async def create_event_stream(
     current_user: StarletteUser,
     agent_request: AgentRequest,
-    agent: Prompt,
+    agent: ReActAgent,
     gl_agent_remote_executor_factory: providers.Factory[
         GLAgentRemoteExecutor[ReActAgentInputs, TypeAgentEvent]
     ],

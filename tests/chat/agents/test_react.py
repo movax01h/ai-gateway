@@ -12,6 +12,7 @@ from ai_gateway.chat.agents.react import (
     ReActAgent,
     ReActAgentInputs,
     ReActPlainTextParser,
+    ReActPromptTemplate,
 )
 from ai_gateway.chat.agents.typing import (
     AdditionalContext,
@@ -22,18 +23,13 @@ from ai_gateway.chat.agents.typing import (
 from ai_gateway.chat.context.current_page import Context, IssueContext
 from ai_gateway.chat.tools.gitlab import IssueReader, MergeRequestReader
 from ai_gateway.models.base_chat import Role
+from ai_gateway.prompts import Prompt
 from ai_gateway.prompts.config.models import (
     ChatAnthropicParams,
     ChatLiteLLMParams,
     ModelClassProvider,
-    TypeModelParams,
 )
 from lib.feature_flags.context import current_feature_flag_context
-
-
-@pytest.fixture(name="prompt_class")
-def prompt_class_fixture():
-    return ReActAgent
 
 
 @pytest.fixture(name="inputs")
@@ -53,6 +49,16 @@ def prompt_template_fixture():
         "user": "{% include 'chat/react/user/1.0.0.jinja' %}",
         "assistant": "{% include 'chat/react/assistant/1.0.0.jinja' %}",
     }
+
+
+@pytest.fixture(name="prompt_template_factory")
+def prompt_template_factory_fixture():
+    return ReActPromptTemplate
+
+
+@pytest.fixture(name="agent")
+def agent_fixture(prompt: Prompt):
+    return ReActAgent(prompt=prompt)
 
 
 @pytest.fixture(autouse=True)
@@ -321,10 +327,10 @@ class TestReActAgent:
         inputs: ReActAgentInputs,
         model_response: str,
         expected_actions: list[AgentToolAction | AgentFinalAnswer | AgentUnknownAction],
-        prompt: ReActAgent,
+        agent: ReActAgent,
     ):
         with capture_logs() as cap_logs, request_cycle_context({}):
-            actual_actions = [action async for action in prompt.astream(inputs)]
+            actual_actions = [action async for action in agent.astream(inputs)]
 
             if isinstance(expected_actions[0], AgentToolAction):
                 assert (
@@ -378,9 +384,8 @@ class TestReActAgent:
     )
     async def test_message_cache_control(
         self,
-        prompt: ReActAgent,
+        prompt: Prompt,
         inputs: ReActAgentInputs,
-        model_params: TypeModelParams,
         should_add_anthropic_cache: bool,
     ):
         prompt_value = prompt.prompt_tpl.invoke(inputs)
@@ -446,14 +451,13 @@ class TestReActAgent:
     async def test_stream_error(
         self,
         inputs: ReActAgentInputs,
-        model_error: Exception,
         error_message: str,
         expected_events: list[AgentError],
-        prompt: ReActAgent,
+        agent: ReActAgent,
     ):
         actual_events = []
         with pytest.raises(ValueError) as exc_info:
-            async for event in prompt.astream(inputs):
+            async for event in agent.astream(inputs):
                 actual_events.append(event)
 
         assert actual_events == expected_events
@@ -499,12 +503,12 @@ class TestReActAgent:
     async def test_stream_with_empty_assistant_content(
         self,
         inputs: ReActAgentInputs,
-        model_response: str,
         expected_actions: list[AgentFinalAnswer],
-        prompt: ReActAgent,
+        agent: ReActAgent,
+        prompt: Prompt,
     ):
         with capture_logs() as cap_logs, request_cycle_context({}):
-            actual_actions = [action async for action in prompt.astream(inputs)]
+            actual_actions = [action async for action in agent.astream(inputs)]
 
         prompt_value = prompt.prompt_tpl.invoke(inputs)
 
