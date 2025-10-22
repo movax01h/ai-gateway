@@ -160,7 +160,7 @@ def list_configs() -> List[dict[str, str]]:
             config_json = json.dumps(config_data, indent=2)
             configs.append(
                 {
-                    "name": config_file.stem,
+                    "flow_identifier": config_file.stem,
                     "version": config.version,
                     "environment": config.environment,
                     "config": config_json,

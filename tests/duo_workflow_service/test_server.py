@@ -250,12 +250,12 @@ async def test_list_flows(mock_list_configs):
     [
         # Explicit None filters
         (None, 3, lambda configs: len(configs) == 3),  # Should return all configs
-        # Filter by name
+        # Filter by flow_identifier
         (
-            {"name": ["flow1", "flow3"]},
+            {"flow_identifier": ["flow1", "flow3"]},
             2,
             lambda configs: all(
-                config["name"] in ["flow1", "flow3"] for config in configs
+                config["flow_identifier"] in ["flow1", "flow3"] for config in configs
             ),
         ),
         # Filter by environment
@@ -270,12 +270,12 @@ async def test_list_flows(mock_list_configs):
             2,
             lambda configs: all(config["version"] == "v1" for config in configs),
         ),
-        # Multiple filters (name and environment)
+        # Multiple filters (flow_identifier and environment)
         (
-            {"name": ["flow1"], "environment": ["prod"]},
+            {"flow_identifier": ["flow1"], "environment": ["prod"]},
             1,
             lambda configs: len(configs) == 1
-            and configs[0]["name"] == "flow1"
+            and configs[0]["flow_identifier"] == "flow1"
             and configs[0]["environment"] == "prod",
         ),
         # Filter that matches no flows
@@ -309,19 +309,19 @@ async def test_list_flows_with_filters(
 ):
     mock_list_configs.return_value = [
         {
-            "name": "flow1",
+            "flow_identifier": "flow1",
             "version": "v1",
             "environment": "prod",
             "description": "First flow config",
         },
         {
-            "name": "flow2",
+            "flow_identifier": "flow2",
             "version": "v2",
             "environment": "test",
             "description": "Second flow config",
         },
         {
-            "name": "flow3",
+            "flow_identifier": "flow3",
             "version": "v1",
             "environment": "dev",
             "description": "Third flow config",
@@ -1038,8 +1038,10 @@ def test_string_to_category_enum():
     # Test Flow Registry flows:
     for config in list_configs():
         assert (
-            string_to_category_enum(getattr(CategoryEnum, config["name"].upper()))
-            == config["name"]
+            string_to_category_enum(
+                getattr(CategoryEnum, config["flow_identifier"].upper())
+            )
+            == config["flow_identifier"]
         )
 
 
