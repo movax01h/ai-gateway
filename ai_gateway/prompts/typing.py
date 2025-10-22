@@ -1,7 +1,9 @@
 from typing import Any, Optional, Protocol, TypeAlias
 
 from langchain_core.language_models.chat_models import BaseChatModel
-from langchain_core.runnables import RunnableBinding
+from langchain_core.runnables import Runnable, RunnableBinding
+
+from ai_gateway.prompts.config.base import PromptConfig
 
 # NOTE: Do not change this to `BaseChatModel | RunnableBinding`. You'd think that's just equivalent, right? WRONG. If
 # you do that, you'll get `object has no attribute 'get'` when you use a `RummableBinding`. Why? I have no idea.
@@ -12,3 +14,7 @@ Model: TypeAlias = RunnableBinding | BaseChatModel
 
 class TypeModelFactory(Protocol):
     def __call__(self, *, model: str, **kwargs: Optional[Any]) -> Model: ...
+
+
+class TypePromptTemplateFactory(Protocol):
+    def __call__(self, config: PromptConfig) -> Runnable: ...

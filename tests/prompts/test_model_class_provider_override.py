@@ -84,6 +84,7 @@ def test_gpt5_with_base_anthropic_prompt_does_not_error():
     """Base prompt has anthropic provider, no gpt_5 prompt exists, but request with gpt_5 model should not error."""
     registry = LocalPromptRegistry.from_local_yaml(
         class_overrides={},
+        prompt_template_factories={},
         model_factories={
             ModelClassProvider.ANTHROPIC: lambda model, **kwargs: ChatAnthropic(
                 model=model, **kwargs

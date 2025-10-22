@@ -8,7 +8,7 @@ from langchain_anthropic import ChatAnthropic
 from langchain_community.chat_models import ChatLiteLLM
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.prompts.chat import MessageLikeRepresentation
-from langchain_core.runnables import RunnableBinding, RunnableSequence
+from langchain_core.runnables import Runnable, RunnableBinding, RunnableSequence
 from pydantic import BaseModel, HttpUrl
 from pyfakefs.fake_filesystem import FakeFilesystem
 
@@ -20,11 +20,20 @@ from ai_gateway.model_metadata import ModelMetadata, create_model_metadata
 from ai_gateway.models.litellm import KindLiteLlmModel
 from ai_gateway.prompts import LocalPromptRegistry, Prompt
 from ai_gateway.prompts.config import ModelClassProvider
-from ai_gateway.prompts.typing import Model, TypeModelFactory
+from ai_gateway.prompts.config.base import PromptConfig
+from ai_gateway.prompts.typing import Model, TypeModelFactory, TypePromptTemplateFactory
 
 
 class MockPromptClass(Prompt):
     pass
+
+
+class MockPromptTemplateClass(Runnable):
+    def __init__(self, config: PromptConfig):
+        pass
+
+    def invoke(self, *_args, **_kwargs):
+        pass
 
 
 # Clear the cache before and after each test
@@ -353,6 +362,7 @@ def registry_fixture(
     # Use from_local_yaml for lazy loading version
     return LocalPromptRegistry.from_local_yaml(
         class_overrides={"chat/react": MockPromptClass},
+        prompt_template_factories={},
         model_factories=model_factories,
         internal_event_client=internal_event_client,
         model_limits=model_limits,
@@ -364,10 +374,14 @@ def registry_fixture(
 class TestLocalPromptRegistry:
     @pytest.mark.usefixtures("mock_fs")
     @pytest.mark.parametrize(
-        ("override_key", "override_class"),
+        ("override_key", "override_class", "prompt_template_factory"),
         [
-            ("chat/react", MockPromptClass),
-            ("chat/react", "tests.prompts.test_registry.MockPromptClass"),
+            ("chat/react", MockPromptClass, MockPromptTemplateClass),
+            (
+                "chat/react",
+                "tests.prompts.test_registry.MockPromptClass",
+                "tests.prompts.test_registry.MockPromptTemplateClass",
+            ),
         ],
     )
     def test_from_local_yaml(
@@ -377,11 +391,13 @@ class TestLocalPromptRegistry:
         model_limits: ConfigModelLimits,
         override_key: str,
         override_class: str | Type[Prompt],
+        prompt_template_factory: str | TypePromptTemplateFactory,
     ):
         registry = LocalPromptRegistry.from_local_yaml(
             class_overrides={
                 override_key: override_class,
             },
+            prompt_template_factories={override_key: prompt_template_factory},
             model_factories=model_factories,
             internal_event_client=internal_event_client,
             model_limits=model_limits,
@@ -392,6 +408,7 @@ class TestLocalPromptRegistry:
         # Test behavior instead of checking internal state
         prompt_with_override = registry.get("chat/react", "^1.0.0")
         assert isinstance(prompt_with_override, MockPromptClass)
+        assert isinstance(prompt_with_override.prompt_tpl, MockPromptTemplateClass)
 
         prompt_without_override = registry.get("test", "^1.0.0")
         assert isinstance(prompt_without_override, Prompt)
@@ -435,6 +452,7 @@ class TestLocalPromptRegistry:
             class_overrides={
                 override_key: override_class,
             },
+            prompt_template_factories={},
             model_factories=model_factories,
             internal_event_client=internal_event_client,
             model_limits=model_limits,
@@ -490,6 +508,7 @@ prompt_template:
 
         registry = LocalPromptRegistry.from_local_yaml(
             class_overrides={},
+            prompt_template_factories={},
             model_factories=model_factories,
             custom_models_enabled=True,
             internal_event_client=internal_event_client,
@@ -526,6 +545,7 @@ prompt_template:
     ):
         test_registry = LocalPromptRegistry.from_local_yaml(
             class_overrides={},
+            prompt_template_factories={},
             model_factories={},
             internal_event_client=internal_event_client,
             model_limits=model_limits,
