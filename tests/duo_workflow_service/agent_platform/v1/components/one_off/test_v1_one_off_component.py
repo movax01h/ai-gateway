@@ -6,6 +6,7 @@ import pytest
 from langchain_core.messages import AIMessage, ToolMessage
 from langgraph.graph import END, StateGraph
 
+from ai_gateway.model_metadata import ModelMetadata, current_model_metadata_context
 from duo_workflow_service.agent_platform.v1.components.one_off.component import (
     OneOffComponent,
 )
@@ -617,3 +618,71 @@ class TestOneOffComponentToolsRouter:
         assert "tool_responses" in context
         assert "execution_result" in context
         assert context["execution_result"] == "success"
+
+
+class TestOneOffComponentModelMetadata:
+    """Test suite for OneOffComponent model metadata handling."""
+
+    def test_attach_passes_model_metadata_from_context_to_prompt_registry(
+        self,
+        one_off_component,
+        mock_state_graph,
+        mock_router,
+        mock_prompt_registry,
+        prompt_id,
+        prompt_version,
+    ):
+        mock_model_metadata = ModelMetadata(
+            name="gpt_5",
+            provider="gitlab",
+            friendly_name="OpenAI GPT-5",
+        )
+
+        metadata_token = current_model_metadata_context.set(mock_model_metadata)
+
+        try:
+            with (
+                patch(
+                    "duo_workflow_service.agent_platform.v1.components.one_off.component.AgentNode"
+                ),
+                patch(
+                    "duo_workflow_service.agent_platform.v1.components.one_off.component.ToolNodeWithErrorCorrection"
+                ),
+            ):
+                one_off_component.attach(mock_state_graph, mock_router)
+
+            mock_prompt_registry.get.assert_called_once()
+            call_kwargs = mock_prompt_registry.get.call_args[1]
+
+            assert "model_metadata" in call_kwargs
+            assert call_kwargs["model_metadata"] == mock_model_metadata
+        finally:
+            current_model_metadata_context.reset(metadata_token)
+
+    def test_attach_passes_none_when_no_model_metadata_in_context(
+        self,
+        one_off_component,
+        mock_state_graph,
+        mock_router,
+        mock_prompt_registry,
+    ):
+        metadata_token = current_model_metadata_context.set(None)
+
+        try:
+            with (
+                patch(
+                    "duo_workflow_service.agent_platform.v1.components.one_off.component.AgentNode"
+                ),
+                patch(
+                    "duo_workflow_service.agent_platform.v1.components.one_off.component.ToolNodeWithErrorCorrection"
+                ),
+            ):
+                one_off_component.attach(mock_state_graph, mock_router)
+
+            mock_prompt_registry.get.assert_called_once()
+            call_kwargs = mock_prompt_registry.get.call_args[1]
+
+            assert "model_metadata" in call_kwargs
+            assert call_kwargs["model_metadata"] is None
+        finally:
+            current_model_metadata_context.reset(metadata_token)
