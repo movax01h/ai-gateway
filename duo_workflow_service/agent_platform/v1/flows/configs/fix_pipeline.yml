@@ -86,6 +86,9 @@ components:
     type: AgentComponent
     prompt_id: "commit_changes"
     prompt_version: "^1.0.0"
+    inputs:
+      - from: "context:project_http_url_to_repo"
+        as: "repository_url"
     toolset:
       - "run_git_command"
     ui_log_events:
