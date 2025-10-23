@@ -60,7 +60,13 @@ class ContainerModels(containers.DeclarativeContainer):
 
     openai_chat_fn = providers.Factory(ChatOpenAI, output_version="responses/v1")
 
-    lite_llm_chat_fn = providers.Factory(_litellm_factory)
+    lite_llm_chat_fn = providers.Selector(
+        _mock_selector,
+        original=providers.Factory(_litellm_factory),
+        mocked=providers.Factory(mock.FakeModel),
+        agentic=providers.Factory(mock.AgenticFakeModel),
+    )
+
     amazon_q_chat_fn = providers.Factory(
         ChatAmazonQ,
         amazon_q_client_factory=integrations.amazon_q_client_factory,
