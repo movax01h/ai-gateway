@@ -17,7 +17,7 @@ def setup_error_tracking():
             environment=os.environ.get("DUO_WORKFLOW_SERVICE_ENVIRONMENT"),
             traces_sample_rate=1.0,
             before_send=remove_private_info_fields,
-            profiles_sample_rate=1.0,
+            profiles_sample_rate=0.0,
             integrations=[GRPCIntegration(), AsyncioIntegration()],
             max_value_length=30 * 1024,
         )
