@@ -1,10 +1,11 @@
 ---
-name: code_review_prescan
+name: Claude 3 code_review_prescan
 model:
   params:
-    model_class_provider: anthropic
+    model_class_provider: litellm
     max_tokens: 8_192
-unit_primitives: []
+unit_primitives:
+  - review_merge_request
 prompt_template:
   system: |
     {% include 'code_review_prescan/system/1.0.0.jinja' %}

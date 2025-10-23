@@ -1,0 +1,16 @@
+---
+name: Amazon Q Review Merge Request
+model:
+  params:
+    model_class_provider: amazon_q
+unit_primitives:
+  - amazon_q_integration
+prompt_template:
+  system: |
+    {% include 'review_merge_request/system/1.2.0.jinja' %}
+  user: |
+    {{mr_data}}
+
+    <codebase_context>
+    {{codebase_context}}
+    </codebase_context>
