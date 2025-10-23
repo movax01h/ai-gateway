@@ -195,6 +195,8 @@ CONTEXT_BUILDER_TOOLS = [
    - Consider whether the tool should
      require [human approval](https://handbook.gitlab.com/handbook/engineering/architecture/design-documents/duo_workflow/#how-agent-tool-set-is-being-defined-for-each-workflow-run)
      before execution
+   - Configure tool security functions if needed - see [Tool Security Override Guide](../duo_workflow_service/security/TOOL_OVERRIDE_GUIDE.md)
+     for instructions. **Note:** Customizing security functions requires AppSec approval before merging
 
 1. **Performance**:
    - Keep tools focused on a single responsibility

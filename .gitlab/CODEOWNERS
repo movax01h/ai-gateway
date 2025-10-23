@@ -10,5 +10,15 @@ clients/
 contract/
 lib/
 
+^[Security - AppSec Approval Required] @gitlab-org/maintainers/ai-gateway @gitlab-org/security/appsec
+# Security module - all changes require AppSec approval
+duo_workflow_service/security/
+
+# Prompt security configuration - requires AppSec approval for changes to:
+# - DEFAULT_SECURITY_FUNCTIONS list
+# - TOOL_SPECIFIC_FUNCTIONS dictionary
+# - TOOL_SECURITY_OVERRIDES dictionary
+duo_workflow_service/security/prompt_security.py
+
 ^[Infrastructure]
 * @gitlab-org/production-engineering @gitlab-org/scalability
