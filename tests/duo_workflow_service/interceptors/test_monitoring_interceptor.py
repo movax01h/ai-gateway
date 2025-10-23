@@ -73,6 +73,9 @@ async def test_interceptor_methods(
             "grpc_service": service_name,
             "grpc_method": method_name,
             "grpc_code": "OK",
+            "gitlab_version": "unknown",
+            "client_type": "unknown",
+            "lsp_version": "unknown",
         },
     )
 
@@ -162,8 +165,12 @@ async def test_streaming_interceptor_methods(
             "grpc_service": service_name,
             "grpc_method": method_name,
             "grpc_code": "OK",
+            "gitlab_version": "unknown",
+            "client_type": "unknown",
+            "lsp_version": "unknown",
         },
     )
+
     assert total_calls == 1.0
 
     assert len(cap_logs) == 1
@@ -203,6 +210,9 @@ async def test_interceptor_handles_exception():
             "grpc_service": "test.Service",
             "grpc_method": "ErrorMethod",
             "grpc_code": "UNKNOWN",
+            "gitlab_version": "unknown",
+            "client_type": "unknown",
+            "lsp_version": "unknown",
         },
     )
 
@@ -245,6 +255,9 @@ async def test_interceptor_stream_handles_exception():
             "grpc_service": "test.Service",
             "grpc_method": "StreamErrorMethod",
             "grpc_code": "UNKNOWN",
+            "gitlab_version": "unknown",
+            "client_type": "unknown",
+            "lsp_version": "unknown",
         },
     )
 
