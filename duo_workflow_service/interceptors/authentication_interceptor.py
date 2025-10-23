@@ -27,7 +27,7 @@ class AuthenticationError(Exception):
 
 class AuthenticationInterceptor(grpc.aio.ServerInterceptor):
     def __init__(self):
-        pass
+        self.oidc_auth_provider = self._init_oidc_auth_provider()
 
     async def intercept_service(
         self, continuation: Callable, handler_call_details: grpc.HandlerCallDetails
@@ -44,7 +44,7 @@ class AuthenticationInterceptor(grpc.aio.ServerInterceptor):
         metadata = dict(handler_call_details.invocation_metadata)
 
         cloud_connector_user, cloud_connector_error = authenticate(
-            metadata, self._oidc_auth_provider()
+            metadata, self.oidc_auth_provider
         )
 
         cloud_connector_token_context_var.set(
@@ -69,7 +69,7 @@ class AuthenticationInterceptor(grpc.aio.ServerInterceptor):
 
         return grpc.unary_unary_rpc_method_handler(handler)
 
-    def _oidc_auth_provider(self) -> AuthProvider:
+    def _init_oidc_auth_provider(self) -> AuthProvider:
         # Reuse the AIGW_GITLAB_URL so that GitLab Self-Hosted Duo customers can
         # use the same URL for both AIGW and Duo Workflow Service
         gitlab_url: str = (
