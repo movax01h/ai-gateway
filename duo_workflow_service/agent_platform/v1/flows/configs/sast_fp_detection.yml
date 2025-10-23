@@ -78,6 +78,7 @@ components:
       - "get_repository_file"
       - "list_repository_tree"
       - "find_files"
+      - "gitlab_blob_search"
     ui_log_events:
       - "on_agent_final_answer"
       - "on_tool_execution_success"

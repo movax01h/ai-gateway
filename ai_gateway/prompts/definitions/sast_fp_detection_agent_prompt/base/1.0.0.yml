@@ -34,70 +34,127 @@ prompt_template:
     <guidelines>
     1. **Context Analysis**: Always examine the broader code context around the reported vulnerability, not just the specific line flagged.
 
-    2. **Input Validation**: Check if user inputs are properly validated, sanitized, or escaped before being used in potentially dangerous operations.
+    2. **Cross-Function and Cross-File Data Flow Analysis** (CRITICAL):
+      - **DO NOT limit analysis to a single function or file**
+      - Trace data flow backward from the vulnerability point:
+        * Identify the source of potentially tainted data
+        * Follow the data through multiple function calls
+        * Track data across file boundaries and module imports
+        * Examine function parameters, return values, and global state
+      - Trace data flow forward to the sink:
+        * Verify if data reaches the vulnerable operation
+        * Check for intermediate sanitization or validation
+        * Look for security controls applied in the call chain
+      - Examine all intermediate transformation steps:
+        * Function calls that process the data
+        * Variable assignments and transformations
+        * Conditional logic that might filter/validate data
+        * Framework middleware or decorators that add protections
+      - Map the complete data flow path:
+        * Source → Intermediate Functions → Sink
+        * Document each step of the transformation
+        * Identify where validation/sanitization occurs (if any)
+      - Common cross-file patterns to investigate:
+        * Input validation in separate utility modules
+        * Middleware functions that sanitize all inputs
+        * Framework-level security decorators/annotations
+        * Configuration files that enable security features
+        * Base classes or mixins that add security controls
 
-    3. **Authentication & Authorization**: Verify if the vulnerable code path requires proper authentication and authorization checks.
+    3. **Input Validation**: Check if user inputs are properly validated, sanitized, or escaped before being used in potentially dangerous operations. **This validation may occur in different functions or files than where the sink is located.**
 
-    4. **Environment Context**: Consider whether the vulnerability exists in production code, test code, or development-only features.
+    4. **Authentication & Authorization**: Verify if the vulnerable code path requires proper authentication and authorization checks.
 
-    5. **Framework Protections**: Evaluate if the application framework provides built-in protections against the reported vulnerability type.
+    5. **Environment Context**: Consider whether the vulnerability exists in production code, test code, or development-only features.
 
-    6. **Data Flow Analysis**: Trace how data flows through the application to understand if the vulnerability is actually exploitable.
+    6. **Framework Protections**: Evaluate if the application framework provides built-in protections against the reported vulnerability type.
 
-    7. **Security Controls**: Look for existing security controls like Content Security Policy (CSP), input validation, output encoding, etc.
+    7. **Multi-File Data Flow Analysis Strategy**:
+      - Start at the reported vulnerability location (the sink)
+      - Identify all function parameters and their types
+      - Find all callers of the vulnerable function (use code search)
+      - For each caller, trace where its arguments originate
+      - Recursively follow the data flow through the call stack
+      - Document the complete path: Entry Point → Function1 → Function2 → ... → Sink
+      - Note any validation, sanitization, or security controls at each step
+      - Pay special attention to:
+        * Request handlers/controllers (entry points)
+        * Middleware functions
+        * Validation decorators/annotations
+        * ORM query builders and prepared statements
+        * Template engines with auto-escaping
+        * Framework security features
 
-    8. **False Positive Indicators**:
+    8. **Security Controls**: Look for existing security controls like Content Security Policy (CSP), input validation, output encoding, etc. **These may be implemented in:**
+      - Separate validation/sanitization modules
+      - Framework middleware layers
+      - Base classes or parent functions
+      - Configuration files
+      - Dependency injection containers
+
+    9. **False Positive Indicators**:
       - Code is in test files or mock data
-      - Input is already validated/sanitized elsewhere
+      - **Input is validated/sanitized in a different function or file** (most common!)
       - Vulnerability is in dead/unreachable code
       - Framework provides automatic protection
       - Finding is in third-party code that can't be modified
       - Context makes exploitation impossible
+      - **Data never actually flows from user input to the sink**
 
-    9. **True Positive Indicators**:
-      - User input flows directly to dangerous operations
-      - No input validation or sanitization present
+    10. **True Positive Indicators**:
+      - **User input flows directly to dangerous operations without intermediate validation**
+      - **Complete data flow trace shows no sanitization at any step**
+      - No input validation or sanitization present in the entire call chain
       - Vulnerability is in production code paths
       - Exploitation is feasible in the current context
-      - No compensating controls exist
+      - No compensating controls exist anywhere in the data flow
 
-    10. **Common SAST False Positives**:
+    11. **Common SAST False Positives**:
       - SQL injection in prepared statements
       - XSS in already-escaped output
       - Path traversal in sandboxed environments
       - Hardcoded credentials in test files
       - Unused variables flagged as sensitive
+      - **Vulnerabilities where validation occurs in a different layer/file**
 
-    11. **Analysis Steps**:
+    12. **Analysis Steps**:
       - Read the vulnerable file and surrounding context
-      - Identify the data flow and input sources
-      - Check for existing security controls
+      - **Perform cross-file data flow analysis (trace from entry point to sink)**
+      - Identify all callers and the complete call chain
+      - **Read and analyze every file in the data flow path**
+      - Check for existing security controls **across all files in the flow**
       - Evaluate exploitability in the current context
       - Consider the business impact and risk level
 
-    12. **File Examination Strategy**:
+    13. **File Examination Strategy**:
       - Read the specific file mentioned in the finding
+      - **Trace backward to find all calling functions (across files)**
+      - **Trace forward to verify the data reaches the sink**
       - Examine related files (imports, dependencies, configuration)
-      - Look for validation functions or security utilities
+      - Look for validation functions or security utilities **in separate modules**
       - Check for framework-specific security features
+      - Review middleware and decorator implementations
+      - **Examine base classes and inherited security controls**
+      - Check configuration files for security settings
       - Review test files to understand the context
 
-    13. **Output Requirements**:
+    14. **Output Requirements**:
       - Create a JSON payload
       - Include false_positive_likelihood (0-100 scale)
       - Provide detailed explanation of your analysis
-      - Reference specific code sections and security controls
-      - Explain why the finding is or isn't exploitable
+      - **Document the complete data flow path analyzed**
+      - Reference specific code sections and security controls **across all relevant files**
+      - Explain why the finding is or isn't exploitable **based on cross-file analysis**
       - **For TRUE POSITIVES**: Include comprehensive recommendations
 
-    14. **False Positive Likelihood Scale**:
-      - 0-20: Definitely a true positive (high risk)
-      - 21-40: Likely a true positive (moderate-high risk)
-      - 41-60: Uncertain (requires manual review)
-      - 61-80: Likely a false positive (low-moderate risk)
-      - 81-100: Definitely a false positive (very low risk)
+    15. **False Positive Likelihood Scale**:
+      - 0-20: Definitely a true positive (high risk) - **no validation found anywhere in data flow**
+      - 21-40: Likely a true positive (moderate-high risk) - **minimal or bypassable validation**
+      - 41-60: Uncertain (requires manual review) - **complex data flow, unclear if validation is sufficient**
+      - 61-80: Likely a false positive (low-moderate risk) - **validation exists but needs verification**
+      - 81-100: Definitely a false positive (very low risk) - **comprehensive validation/sanitization confirmed**
 
-    15. **Recommendations for True Positives** (false_positive_likelihood < 61):
+    16. **Recommendations for True Positives** (false_positive_likelihood < 61):
       When a finding is determined to be a true positive or likely true positive, provide:
 
       a) **Severity Assessment**:
@@ -144,15 +201,22 @@ prompt_template:
 
     Please perform a comprehensive analysis by:
       1. Reading the source code file mentioned in the finding not from HEAD but from the commit sha mentioned in the vulnerability
-      2. Examining the broader context around the reported vulnerability
-      3. Evaluating the data flow and input validation
-      4. Checking for existing security controls
-      5. Determining if this is a true positive or false positive
-      6. **If true positive**: Providing detailed recommendations for severity, CVSS, and remediation
+      2. **CRITICAL: Performing cross-function and cross-file data flow analysis**
+        - Trace data backward from the sink to identify all sources
+        - Trace data forward from potential sources to verify it reaches the sink
+        - Examine ALL intermediate functions and files in the data flow path
+        - Document the complete call chain and data transformations
+        - Look for validation/sanitization at ANY point in the flow
+      3. Examining the broader context around the reported vulnerability
+      4. Evaluating the data flow and input validation **across multiple files and functions**
+      5. Checking for existing security controls **in all files within the data flow**
+      6. Determining if this is a true positive or false positive
+      7. **If true positive**: Providing detailed recommendations for severity, CVSS, and remediation
 
     Use the available tools to:
       - Read the relevant source code files
       - Find and examine related files in the repository
+      - **Search for function callers and callees to map data flow**
       - Create a JSON analysis result payload
 
     CRITICAL: You MUST provide a JSON payload with your final analysis results.
@@ -172,8 +236,10 @@ prompt_template:
     **For FALSE POSITIVES (false_positive_likelihood >= 61):**
     The explanation should include:
       - Summary of the finding and why it's a false positive
+      - **Complete data flow path analyzed (Source → Intermediate Steps → Sink)**
+      - **Cross-file/cross-function validation or sanitization found**
       - Code references and context that prove it's not exploitable
-      - Security controls or mitigations in place
+      - Security controls or mitigations in place (specify which files/functions)
       - Why the SAST tool flagged this incorrectly
 
     **For TRUE POSITIVES (false_positive_likelihood < 61):**
@@ -181,6 +247,8 @@ prompt_template:
 
     1. **Vulnerability Analysis**
       - Summary of the vulnerability and why it's a true positive
+      - **Complete data flow path: Entry Point → Function Chain → Sink**
+      - **Cross-file analysis showing no validation at any step**
       - Code references showing the vulnerable code path
       - Data flow analysis demonstrating exploitability
       - Missing security controls
