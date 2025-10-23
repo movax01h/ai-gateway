@@ -6,6 +6,7 @@ from typing import Any, List, NamedTuple, Optional, Type, cast
 from urllib.parse import quote
 
 from gitlab_cloud_connector import GitLabUnitPrimitive
+from langchain_core.tools import ToolException
 from pydantic import BaseModel, Field
 
 from duo_workflow_service.gitlab.url_parser import GitLabUrlParseError, GitLabUrlParser
@@ -120,7 +121,7 @@ class CommitBaseTool(DuoBaseTool):
                 response.status_code,
                 response.body,
             )
-            raise RuntimeError(
+            raise ToolException(
                 f"GitLab API error while fetching {file_path}: {response.status_code}"
             )
 
@@ -156,7 +157,7 @@ class CommitBaseTool(DuoBaseTool):
                 )
 
                 if old_str not in current_content:
-                    raise ValueError(f"old_str not found in {action.file_path}")
+                    raise ToolException(f"old_str not found in {action.file_path}")
 
                 new_content = current_content.replace(old_str, new_str, 1)
                 action_dict = action.model_dump(exclude_none=True)

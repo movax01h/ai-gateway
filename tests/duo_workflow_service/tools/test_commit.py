@@ -4,6 +4,7 @@ from datetime import datetime
 from unittest.mock import AsyncMock, Mock, patch
 
 import pytest
+from langchain_core.tools import ToolException
 
 from duo_workflow_service.gitlab.gitlab_api import Project
 from duo_workflow_service.gitlab.http_client import GitLabHttpResponse
@@ -1212,7 +1213,7 @@ async def test_create_commit_with_partial_edit_not_found(
         ),
     ]
 
-    with pytest.raises(ValueError, match="old_str not found in README.md"):
+    with pytest.raises(ToolException, match="old_str not found in README.md"):
         await tool._arun(
             project_id=24,
             branch="main",
@@ -1667,7 +1668,7 @@ async def test_get_file_content_failure_logs_and_raises(gitlab_client_mock, meta
     gitlab_client_mock.aget = AsyncMock(return_value=mock_response)
 
     tool = TestCommitTool(name="test_tool", description="test", metadata=metadata)
-    with pytest.raises(RuntimeError) as exc_info:
+    with pytest.raises(ToolException) as exc_info:
         await tool._get_file_content(project_id="24", ref="main", file_path="README.md")
 
     assert "GitLab API error while fetching README.md" in str(exc_info.value)
