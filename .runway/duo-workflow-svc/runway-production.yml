@@ -22,9 +22,9 @@ spec:
   # network_policies:
   #   cloudflare: true
   scalability:
-    min_instances: 8
-    max_instances: 16
-    max_instance_request_concurrency: 100
+    min_instances: 16
+    max_instances: 32
+    max_instance_request_concurrency: 50
   # Pinning Gen2 architecture to mitigate SIGSEGV errors
   # See https://gitlab.com/gitlab-org/modelops/applied-ml/code-suggestions/ai-assist/-/issues/1421 for more info.
   # Ref: https://cloud.google.com/run/docs/about-execution-environments
