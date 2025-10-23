@@ -81,7 +81,11 @@ class TestDuoWorkflowMetrics(unittest.TestCase):
         cast(
             MagicMock, self.metrics.llm_request_duration.labels
         ).assert_called_once_with(
-            model="test_model", request_type="test_request", lsp_version="unknown"
+            model="test_model",
+            request_type="test_request",
+            lsp_version="unknown",
+            gitlab_version="unknown",
+            client_type="unknown",
         )
         observe_mock.assert_called_once()
 
@@ -98,7 +102,11 @@ class TestDuoWorkflowMetrics(unittest.TestCase):
             pass
 
         cast(MagicMock, self.metrics.tool_call_duration.labels).assert_called_once_with(
-            tool_name="test_tool", flow_type="test_flow", lsp_version="unknown"
+            tool_name="test_tool",
+            flow_type="test_flow",
+            lsp_version="unknown",
+            gitlab_version="unknown",
+            client_type="unknown",
         )
         observe_mock.assert_called_once()
 
@@ -201,6 +209,8 @@ class TestDuoWorkflowMetrics(unittest.TestCase):
                 "status_code": "200",
                 "error_type": "none",
                 "lsp_version": "unknown",
+                "gitlab_version": "unknown",
+                "client_type": "unknown",
             },
             model="test_model",
             provider="test_provider",
@@ -219,6 +229,8 @@ class TestDuoWorkflowMetrics(unittest.TestCase):
                 "status_code": "test_status",
                 "method": "POST",
                 "lsp_version": "unknown",
+                "gitlab_version": "unknown",
+                "client_type": "unknown",
             },
             endpoint="test_endpoint",
             status_code="test_status",
@@ -237,6 +249,8 @@ class TestDuoWorkflowMetrics(unittest.TestCase):
                 "status_code": "500",
                 "error_type": "test_reason",
                 "lsp_version": "unknown",
+                "gitlab_version": "unknown",
+                "client_type": "unknown",
             },
             model="test_model",
             provider="Anthropic",
@@ -250,7 +264,12 @@ class TestDuoWorkflowMetrics(unittest.TestCase):
         self._assert_counter_called(
             "agent_platform_session_start_counter",
             "count_agent_platform_session_start",
-            {"flow_type": "test_flow_type", "lsp_version": "unknown"},
+            {
+                "flow_type": "test_flow_type",
+                "lsp_version": "unknown",
+                "gitlab_version": "unknown",
+                "client_type": "unknown",
+            },
             flow_type="test_flow_type",
         )
 
@@ -258,7 +277,12 @@ class TestDuoWorkflowMetrics(unittest.TestCase):
         self._assert_counter_called(
             "agent_platform_session_success_counter",
             "count_agent_platform_session_success",
-            {"flow_type": "test_flow_type", "lsp_version": "unknown"},
+            {
+                "flow_type": "test_flow_type",
+                "lsp_version": "unknown",
+                "gitlab_version": "unknown",
+                "client_type": "unknown",
+            },
             flow_type="test_flow_type",
         )
 
@@ -273,6 +297,8 @@ class TestDuoWorkflowMetrics(unittest.TestCase):
                 "failure_reason": "model_error",
                 "session_type": "start",
                 "lsp_version": "unknown",
+                "gitlab_version": "unknown",
+                "client_type": "unknown",
             },
             flow_type="test_flow_type",
             failure_reason="model_error",
@@ -288,6 +314,8 @@ class TestDuoWorkflowMetrics(unittest.TestCase):
                 "flow_type": "test_flow_type",
                 "session_type": "start",
                 "lsp_version": "unknown",
+                "gitlab_version": "unknown",
+                "client_type": "unknown",
             },
             flow_type="test_flow_type",
         )
@@ -301,6 +329,8 @@ class TestDuoWorkflowMetrics(unittest.TestCase):
                 "tool_name": "test_tool",
                 "failure_reason": "test_error",
                 "lsp_version": "unknown",
+                "gitlab_version": "unknown",
+                "client_type": "unknown",
             },
             flow_type="test_flow_type",
             tool_name="test_tool",
@@ -322,6 +352,51 @@ class TestDuoWorkflowMetrics(unittest.TestCase):
                 "tool_name": "test_tool",
                 "failure_reason": "test_error",
                 "lsp_version": "8.22.0",
+                "gitlab_version": "unknown",
+                "client_type": "unknown",
+            },
+            flow_type="test_flow_type",
+            tool_name="test_tool",
+            failure_reason="test_error",
+        )
+
+    @patch("duo_workflow_service.tracking.duo_workflow_metrics.gitlab_version")
+    def test_agent_platform_tool_failure_counter_with_gitlab_version(
+        self, mock_gitlab_version
+    ):
+        mock_gitlab_version.get.return_value = "18.3.0"
+
+        self._assert_counter_called(
+            "agent_platform_tool_failure_counter",
+            "count_agent_platform_tool_failure",
+            {
+                "flow_type": "test_flow_type",
+                "tool_name": "test_tool",
+                "failure_reason": "test_error",
+                "lsp_version": "unknown",
+                "gitlab_version": "18.3.0",
+                "client_type": "unknown",
+            },
+            flow_type="test_flow_type",
+            tool_name="test_tool",
+            failure_reason="test_error",
+        )
+
+    @patch("duo_workflow_service.tracking.duo_workflow_metrics.client_type")
+    def test_agent_platform_tool_failure_counter_with_client_type(
+        self, mock_client_type
+    ):
+        mock_client_type.get.return_value = "node-grpc"
+        self._assert_counter_called(
+            "agent_platform_tool_failure_counter",
+            "count_agent_platform_tool_failure",
+            {
+                "flow_type": "test_flow_type",
+                "tool_name": "test_tool",
+                "failure_reason": "test_error",
+                "lsp_version": "unknown",
+                "gitlab_version": "unknown",
+                "client_type": "node-grpc",
             },
             flow_type="test_flow_type",
             tool_name="test_tool",
@@ -332,7 +407,12 @@ class TestDuoWorkflowMetrics(unittest.TestCase):
         self._assert_counter_called(
             "agent_platform_receive_start_counter",
             "count_agent_platform_receive_start_counter",
-            {"flow_type": "test_flow_type", "lsp_version": "unknown"},
+            {
+                "flow_type": "test_flow_type",
+                "lsp_version": "unknown",
+                "gitlab_version": "unknown",
+                "client_type": "unknown",
+            },
             flow_type="test_flow_type",
         )
 

@@ -18,6 +18,10 @@ from grpc.aio import ServerInterceptor
 from prometheus_client import REGISTRY, Counter
 
 from duo_workflow_service.tracking import MonitoringContext, current_monitoring_context
+from duo_workflow_service.tracking.duo_workflow_metrics import (
+    METADATA_LABELS,
+    build_metadata_labels,
+)
 
 log = structlog.stdlib.get_logger("grpc")
 
@@ -35,7 +39,7 @@ class MonitoringInterceptor(ServerInterceptor):
         self._requests_counter: Counter = Counter(
             "grpc_server_handled_total",
             "Total number of RPCs completed on the server, regardless of success or failure.",
-            ["grpc_type", "grpc_service", "grpc_method", "grpc_code"],
+            ["grpc_type", "grpc_service", "grpc_method", "grpc_code"] + METADATA_LABELS,
             registry=registry,
         )
 
@@ -247,4 +251,5 @@ class MonitoringInterceptor(ServerInterceptor):
             grpc_service=grpc_service_name,
             grpc_method=grpc_method_name,
             grpc_code=grpc_code.name,
+            **build_metadata_labels(),
         ).inc()
