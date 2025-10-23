@@ -50,21 +50,49 @@ async def test_run_command_success(
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
-    "program",
+    ("program", "args", "should_be_blocked", "expected_message_contains"),
     [
-        "git",
-        "ls && git",
-        "echo 1 || git",
-        "echo / | xargs rm -rf",
+        # Disallowed commands
+        ("git", "status", True, "git commands are not supported"),
+        ("git", "", True, "git commands are not supported"),
+        # Disallowed operators in program
+        ("echo && ls", "", True, "operators are not supported"),
+        ("echo || ls", "", True, "operators are not supported"),
+        ("cat | grep", "pattern", True, "operators are not supported"),
+        ("ls && git", "", True, "operators are not supported"),
+        ("echo 1 || git", "", True, "operators are not supported"),
+        ("echo / | xargs rm -rf", "", True, "operators are not supported"),
+        # Disallowed operators in args
+        ("echo", "foo && bar", True, "operators are not supported"),
+        ("echo", "foo || bar", True, "operators are not supported"),
+        ("echo", "foo | bar", True, "operators are not supported"),
+        # Operators without spaces (tight coupling)
+        ("cat|grep", "pattern", True, "operators are not supported"),
+        ("ls&&echo", "hello", True, "operators are not supported"),
+        ("cmd||fallback", "", True, "operators are not supported"),
+        # Allowed cases
+        ("echo", "hello world", False, None),
+        ("ls", "-la", False, None),
+        ("python", "script.py", False, None),
+        ("echo", None, False, None),
+        ("echo", "", False, None),
     ],
 )
 @mock.patch("duo_workflow_service.tools.command._execute_action")
-async def test_run_disallowed_command(execute_action_mock, program):
+async def test_run_command_validation(
+    execute_action_mock, program, args, should_be_blocked, expected_message_contains
+):
     run_command = RunCommand(name="run_command", description="Run a shell command")
 
-    await run_command._arun(program=program, args="")
+    result = await run_command._arun(program=program, args=args)
 
-    execute_action_mock.assert_not_called()
+    if should_be_blocked:
+        execute_action_mock.assert_not_called()
+        if expected_message_contains:
+            assert expected_message_contains in result
+        assert isinstance(result, str)
+    else:
+        execute_action_mock.assert_called_once()
 
 
 def test_run_command_format_display_message():
