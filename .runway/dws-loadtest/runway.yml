@@ -23,10 +23,10 @@ spec:
   #   cloudflare: true
   scalability:
     min_instances: 1
-    max_instances: 1
+    max_instances: 4
     max_instance_request_concurrency: 100
   resources:
     startup_cpu_boost: true
     limits:
-      cpu: 2000m
+      cpu: 1000m
       memory: 8G
