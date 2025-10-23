@@ -5,7 +5,6 @@ from typing import Union
 
 import structlog
 from langchain_core.messages import BaseMessage
-from langchain_core.output_parsers.string import StrOutputParser
 
 from contract import contract_pb2
 from duo_workflow_service.checkpointer.gitlab_workflow import (
@@ -18,7 +17,6 @@ from duo_workflow_service.entities.state import (
 )
 from duo_workflow_service.executor.outbox import Outbox
 from duo_workflow_service.json_encoder.encoder import CustomEncoder
-from lib.feature_flags.context import FeatureFlag, is_feature_enabled
 
 
 class UserInterface:
@@ -53,9 +51,7 @@ class UserInterface:
             (message, _) = state
 
             has_content = self._append_chunk_to_ui_chat_log(message)
-            if has_content or is_feature_enabled(
-                FeatureFlag.STREAM_DURING_TOOL_CALL_GENERATION
-            ):
+            if has_content:
                 return await self._execute_action()
 
     async def _execute_action(self):
@@ -96,10 +92,6 @@ class UserInterface:
             bool: True if content was successfully added to the chat log, False if
                 the message had no content to add.
         """
-        content = StrOutputParser().invoke(message) or ""
-        if not content:
-            return False
-
         if (
             not self.ui_chat_log
             or self.ui_chat_log[-1]["message_type"] != MessageTypeEnum.AGENT
@@ -119,6 +111,6 @@ class UserInterface:
         else:
             last_message = self.ui_chat_log[-1]
 
-        last_message["content"] = last_message["content"] + content
+        last_message["content"] = last_message["content"] + message.text()
 
         return True
