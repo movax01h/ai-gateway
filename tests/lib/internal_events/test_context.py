@@ -27,7 +27,8 @@ def test_event_context_custom_values():
         instance_id="123",
         host_name="example.com",
         instance_version="14.0.0",
-        global_user_id="user123",
+        global_user_id="globalUser123",
+        user_id="user123",
         namespace_id=1,
         project_id=2,
         ultimate_parent_namespace_id=3,
@@ -38,7 +39,8 @@ def test_event_context_custom_values():
     assert context.instance_id == "123"
     assert context.host_name == "example.com"
     assert context.instance_version == "14.0.0"
-    assert context.global_user_id == "user123"
+    assert context.global_user_id == "globalUser123"
+    assert context.user_id == "user123"
     assert context.namespace_id == 1
     assert context.project_id == 2
     assert context.ultimate_parent_namespace_id == 3

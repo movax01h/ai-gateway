@@ -20,6 +20,7 @@ from ai_gateway.api.middleware.headers import (
     X_GITLAB_ROOT_NAMESPACE_ID,
     X_GITLAB_SAAS_DUO_PRO_NAMESPACE_IDS_HEADER,
     X_GITLAB_TEAM_MEMBER_HEADER,
+    X_GITLAB_USER_ID_HEADER,
     X_GITLAB_VERSION_HEADER,
 )
 from ai_gateway.api.middleware_utils import get_valid_namespace_ids
@@ -62,6 +63,7 @@ class InternalEventMiddleware:
             host_name=request.headers.get(X_GITLAB_HOST_NAME_HEADER),
             instance_version=request.headers.get(X_GITLAB_VERSION_HEADER),
             global_user_id=request.headers.get(X_GITLAB_GLOBAL_USER_ID_HEADER),
+            user_id=request.headers.get(X_GITLAB_USER_ID_HEADER),
             is_gitlab_team_member=request.headers.get(X_GITLAB_TEAM_MEMBER_HEADER),  # type: ignore[arg-type]
             client_type=request.headers.get(X_GITLAB_CLIENT_TYPE),
             client_name=request.headers.get(X_GITLAB_CLIENT_NAME),

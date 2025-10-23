@@ -29,6 +29,7 @@ class EventContext(BaseModel):
     host_name: Optional[str] = None
     instance_version: Optional[str] = None
     global_user_id: Optional[str] = None
+    user_id: Optional[str] = None
     context_generated_at: Optional[str] = None
     extra: Dict[str, Any] = Field(default_factory=dict)
     is_gitlab_team_member: Optional[bool] = None

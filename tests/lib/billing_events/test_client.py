@@ -172,6 +172,7 @@ class TestBillingEventsClient:
             namespace_id=kwargs.get("namespace_id"),
             root_namespace_id=kwargs.get("root_namespace_id"),
             global_user_id=kwargs.get("global_user_id"),
+            user_id=kwargs.get("user_id"),
             correlation_id="corr-123",
         )
         current_event_context.set(event_context)
@@ -189,7 +190,7 @@ class TestBillingEventsClient:
             "project_id": kwargs.get("project_id"),
             "namespace_id": kwargs.get("namespace_id"),
             "root_namespace_id": kwargs.get("root_namespace_id"),
-            "subject": kwargs.get("global_user_id"),
+            "subject": kwargs.get("user_id"),
             "global_user_id": kwargs.get("global_user_id"),
             "correlation_id": "corr-123",
             "metadata": metadata or {},
@@ -282,7 +283,8 @@ class TestBillingEventsClient:
             project_id=789,
             namespace_id=101,
             root_namespace_id=450,
-            global_user_id="user-456",
+            global_user_id="global-user-456",
+            user_id="user-456",
             correlation_id="request-789",
         )
         current_event_context.set(internal_context)
@@ -305,7 +307,7 @@ class TestBillingEventsClient:
         assert billing_data["realm"] == "project"
         assert billing_data["instance_id"] == "gitlab-instance-456"
         assert billing_data["subject"] == "user-456"
-        assert billing_data["global_user_id"] == "user-456"
+        assert billing_data["global_user_id"] == "global-user-456"
         assert billing_data["correlation_id"] == "request-789"
         assert billing_data["metadata"] == {"workflow_type": "code_review"}
         assert billing_data["timestamp"] == "2023-12-01T10:00:00"

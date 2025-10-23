@@ -120,7 +120,7 @@ class BillingEventsClient:
             unit_of_measure=unit_of_measure,
             quantity=quantity,
             metadata=metadata,
-            subject=internal_context.global_user_id,  # TODO : We need to pass non-masked userID from GitLab instance
+            subject=internal_context.user_id,
             global_user_id=internal_context.global_user_id,
             seat_ids=["TODO"],  # TODO : We need to pass seatIDs from GitLab instance
             realm=mapped_realm,
