@@ -17,7 +17,6 @@ from ai_gateway.config import ConfigModelLimits
 from ai_gateway.integrations.amazon_q.chat import ChatAmazonQ
 from ai_gateway.integrations.amazon_q.client import AmazonQClientFactory
 from ai_gateway.model_metadata import ModelMetadata, create_model_metadata
-from ai_gateway.model_selection.model_selection_config import ModelSelectionConfig
 from ai_gateway.models.litellm import KindLiteLlmModel
 from ai_gateway.prompts import LocalPromptRegistry, Prompt
 from ai_gateway.prompts.config import ModelClassProvider
@@ -52,18 +51,6 @@ def clear_prompt_cache():
 
     if cache_clear is not None:
         cache_clear()
-
-
-@pytest.fixture(autouse=True)
-def reset_model_selection_config():
-    """Reset ModelSelectionConfig singleton before each test to ensure test isolation."""
-    # Reset the singleton before each test
-    ModelSelectionConfig._instance = None
-
-    yield
-
-    # Reset again after each test
-    ModelSelectionConfig._instance = None
 
 
 # editorconfig-checker-disable

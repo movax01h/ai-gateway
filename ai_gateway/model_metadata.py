@@ -86,7 +86,7 @@ def create_model_metadata(data: dict[str, Any] | None) -> Optional[TypeModelMeta
     if not data or "provider" not in data:
         return None
 
-    configs = ModelSelectionConfig.instance()
+    configs = ModelSelectionConfig()
 
     if data["provider"] == "amazon_q":
         llm_definition = configs.get_model("amazon_q")
