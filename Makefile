@@ -30,6 +30,8 @@ MYPY_LINT_TODO_DIR ?= --exclude "ai_gateway/models/litellm.py" \
 	--exclude "tests/code_suggestions/test_completions.py" \
 	--exclude "tests/code_suggestions/test_container.py"
 
+EDITORCONFIG_LINT_WORKING_DIR ?= ${ROOT_DIR}
+CODESPELL_LINT_WORKING_DIR ?= ${ROOT_DIR}
 COMPOSE_FILES := -f docker-compose.dev.yaml
 ifneq (,$(wildcard docker-compose.override.yaml))
 COMPOSE_FILES += -f docker-compose.override.yaml
@@ -228,7 +230,7 @@ endif
 .PHONY: check-codespell
 check-codespell: install-lint-deps
 	@echo "Running codespell check..."
-	@poetry run codespell
+	@poetry run codespell ${CODESPELL_LINT_WORKING_DIR}
 
 .PHONY: check-docformatter
 check-docformatter: install-lint-deps
@@ -238,7 +240,7 @@ check-docformatter: install-lint-deps
 .PHONY: check-editorconfig
 check-editorconfig: install-lint-deps
 	@echo "Running editorconfig check..."
-	@poetry run ec
+	@poetry run ec ${EDITORCONFIG_LINT_WORKING_DIR}
 
 .PHONY: install-test-deps
 install-test-deps:

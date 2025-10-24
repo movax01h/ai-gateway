@@ -27,7 +27,7 @@ indent_size = 4
 [*.jinja]
 indent_size = unset
 
-[{**/*.excalidraw,**/Gemfile.lock,**/go.mod,**/*.pyc,**/*.tmpl,contract/**,.venv/**,.mypy_cache/**,.pytest_cache/**,vendor/**}]
+[{**/*.excalidraw,**/Gemfile.lock,**/go.mod,**/*.pyc,**/*.tmpl,contract/**,.venv/**,.mypy_cache/**,.pytest_cache/**,.cache/**,vendor/**}]
 charset = unset
 end_of_line = unset
 indent_size = unset
