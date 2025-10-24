@@ -1,5 +1,6 @@
 from pathlib import Path
 from textwrap import dedent
+from unittest.mock import patch
 
 import pytest
 from gitlab_cloud_connector import GitLabUnitPrimitive
@@ -111,10 +112,56 @@ def test_get_unit_primitive_config_map(selection_config):
 
 @pytest.mark.usefixtures("mock_fs")
 def test_is_singleton():
-    config_instance_1 = ModelSelectionConfig()
-    config_instance_2 = ModelSelectionConfig()
+    # Reset the singleton for clean test
+    ModelSelectionConfig._instance = None
+
+    config_instance_1 = ModelSelectionConfig.instance()
+    config_instance_2 = ModelSelectionConfig.instance()
 
     assert config_instance_1 is config_instance_2
+
+
+@pytest.mark.usefixtures("mock_fs")
+def test_singleton_caches_yaml_loading():
+    """Test that YAML is only loaded once when using the module-level singleton.
+
+    This is a regression test for a bug where __init__ was resetting the cache to None on every instantiation, causing
+    YAML to be re-parsed on every request. Now we use a module-level singleton to ensure YAML is loaded only once.
+    """
+    # Reset the singleton for clean test
+    ModelSelectionConfig._instance = None
+
+    # Track how many times yaml.safe_load is called
+    original_safe_load = __import__("yaml").safe_load
+    call_count = 0
+
+    def counting_safe_load(*args, **kwargs):
+        nonlocal call_count  # Allow modifying outer scope variable
+        call_count += 1
+        return original_safe_load(*args, **kwargs)
+
+    with patch("yaml.safe_load", side_effect=counting_safe_load):
+        # First access - should load YAML (2 files: models.yml + unit_primitives.yml)
+        config = ModelSelectionConfig.instance()
+        llm_defs1 = config.get_llm_definitions()
+        unit_primitives1 = config.get_unit_primitive_config_map()
+
+        first_load_count = call_count
+        assert first_load_count == 2, "Should load 2 YAML files on first access"
+
+        # Second access - should NOT reload YAML (uses cached data)
+        llm_defs2 = config.get_llm_definitions()
+        unit_primitives2 = config.get_unit_primitive_config_map()
+
+        second_load_count = call_count
+
+        assert second_load_count == first_load_count, (
+            f"YAML was reloaded! Expected {first_load_count} calls, "
+            f"but got {second_load_count}. The cache was not preserved."
+        )
+
+        assert llm_defs2 is llm_defs1
+        assert unit_primitives2 is unit_primitives1
 
 
 def test_get_model(selection_config):
