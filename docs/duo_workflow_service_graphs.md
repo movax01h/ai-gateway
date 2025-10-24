@@ -4,6 +4,8 @@
 These diagrams show the LangGraph structure of each Workflow in the duo_workflow_service. Do not manually edit
 this file, instead update it by running `make duo-workflow-docs`.
 
+[[_TOC_]]
+
 ## Graph: `software_development`
 
 ```mermaid
@@ -183,4 +185,127 @@ graph TD;
     classDef default fill:#f2f0ff,line-height:1.2
     classDef first fill-opacity:0
     classDef last fill:#bfb6fc
+```
+
+## Graph: `code_review/v1` (Flow Registry)
+
+```mermaid
+
+---
+config:
+    flowchart:
+        curve: linear
+---
+graph TD;
+    __start__(__start__):::first;
+    __end__(__end__):::last;
+    __start__ --> build_review_context;
+    build_review_context(build_review_context<br>#91;DeterministicStepComponent#93;);
+    prescan_codebase(prescan_codebase<br>#91;AgentComponent#93;);
+    perform_code_review(perform_code_review<br>#91;AgentComponent#93;);
+    publish_review(publish_review<br>#91;DeterministicStepComponent#93;);
+    build_review_context --> prescan_codebase;
+    prescan_codebase --> perform_code_review;
+    perform_code_review --> publish_review;
+    publish_review --> __end__;
+    classDef default fill:#f2f0ff,line-height:1.2;
+    classDef first fill-opacity: 0;
+    classDef last fill:#bfb6fc;
+```
+
+## Graph: `fix_pipeline/v1` (Flow Registry)
+
+```mermaid
+
+---
+config:
+    flowchart:
+        curve: linear
+---
+graph TD;
+    __start__(__start__):::first;
+    __end__(__end__):::last;
+    __start__ --> fix_pipeline_context;
+    fix_pipeline_context(fix_pipeline_context<br>#91;AgentComponent#93;);
+    fix_pipeline_decide_approach(fix_pipeline_decide_approach<br>#91;AgentComponent#93;);
+    fix_pipeline_add_comment(fix_pipeline_add_comment<br>#91;AgentComponent#93;);
+    fix_pipeline_create_plan(fix_pipeline_create_plan<br>#91;AgentComponent#93;);
+    fix_pipeline_execution(fix_pipeline_execution<br>#91;AgentComponent#93;);
+    fix_pipeline_git_commit(fix_pipeline_git_commit<br>#91;AgentComponent#93;);
+    fix_pipeline_git_push(fix_pipeline_git_push<br>#91;OneOffComponent#93;);
+    fix_pipeline_comment_link(fix_pipeline_comment_link<br>#91;OneOffComponent#93;);
+    fix_pipeline_context --> fix_pipeline_decide_approach;
+    fix_pipeline_decide_approach -.->|add_comment| fix_pipeline_add_comment;
+    fix_pipeline_decide_approach -.->|create_fix| fix_pipeline_create_plan;
+    fix_pipeline_decide_approach -.->|default_route| fix_pipeline_add_comment;
+    fix_pipeline_add_comment --> __end__;
+    fix_pipeline_create_plan --> fix_pipeline_execution;
+    fix_pipeline_execution --> fix_pipeline_git_commit;
+    fix_pipeline_git_commit --> fix_pipeline_git_push;
+    fix_pipeline_git_push --> fix_pipeline_comment_link;
+    fix_pipeline_comment_link --> __end__;
+    classDef default fill:#f2f0ff,line-height:1.2;
+    classDef first fill-opacity: 0;
+    classDef last fill:#bfb6fc;
+```
+
+## Graph: `resolve_sast_vulnerability/v1` (Flow Registry)
+
+```mermaid
+
+---
+config:
+    flowchart:
+        curve: linear
+---
+graph TD;
+    __start__(__start__):::first;
+    __end__(__end__):::last;
+    __start__ --> gather_context;
+    gather_context(gather_context<br>#91;AgentComponent#93;);
+    execute_fix(execute_fix<br>#91;AgentComponent#93;);
+    commit_and_open_mr(commit_and_open_mr<br>#91;OneOffComponent#93;);
+    check_false_positive(check_false_positive<br>#91;AgentComponent#93;);
+    evaluate_merge_request(evaluate_merge_request<br>#91;AgentComponent#93;);
+    gather_context --> execute_fix;
+    execute_fix --> commit_and_open_mr;
+    commit_and_open_mr --> check_false_positive;
+    check_false_positive --> evaluate_merge_request;
+    evaluate_merge_request --> __end__;
+    classDef default fill:#f2f0ff,line-height:1.2;
+    classDef first fill-opacity: 0;
+    classDef last fill:#bfb6fc;
+```
+
+## Graph: `sast_fp_detection/v1` (Flow Registry)
+
+```mermaid
+
+---
+config:
+    flowchart:
+        curve: linear
+---
+graph TD;
+    __start__(__start__):::first;
+    __end__(__end__):::last;
+    __start__ --> sast_vulnerability_details_component;
+    sast_vulnerability_details_component(sast_vulnerability_details_component<br>#91;DeterministicStepComponent#93;);
+    validate_sast_vulnerability_component(validate_sast_vulnerability_component<br>#91;AgentComponent#93;);
+    sast_vulnerability_source_file_component(sast_vulnerability_source_file_component<br>#91;OneOffComponent#93;);
+    sast_vulnerability_lines_component(sast_vulnerability_lines_component<br>#91;OneOffComponent#93;);
+    sast_vulnerability_report_component(sast_vulnerability_report_component<br>#91;AgentComponent#93;);
+    sast_fp_detection_agent(sast_fp_detection_agent<br>#91;AgentComponent#93;);
+    sast_post_results_to_gitlab_component(sast_post_results_to_gitlab_component<br>#91;OneOffComponent#93;);
+    sast_vulnerability_details_component --> validate_sast_vulnerability_component;
+    validate_sast_vulnerability_component -.->|Valid SAST vulnerability| sast_vulnerability_source_file_component;
+    validate_sast_vulnerability_component -.->|Not a valid SAST vulnerability| __end__;
+    sast_vulnerability_source_file_component --> sast_vulnerability_lines_component;
+    sast_vulnerability_lines_component --> sast_vulnerability_report_component;
+    sast_vulnerability_report_component --> sast_fp_detection_agent;
+    sast_fp_detection_agent --> sast_post_results_to_gitlab_component;
+    sast_post_results_to_gitlab_component --> __end__;
+    classDef default fill:#f2f0ff,line-height:1.2;
+    classDef first fill-opacity: 0;
+    classDef last fill:#bfb6fc;
 ```
