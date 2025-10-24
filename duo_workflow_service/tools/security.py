@@ -100,16 +100,21 @@ class ListVulnerabilitiesInput(BaseModel):
 
 
 class ListVulnerabilities(DuoBaseTool):
-    """Tool for listing GitLab project vulnerabilities with filtering."""
+    """Tool for listing persisted project vulnerabilities."""
 
     name: str = "list_vulnerabilities"
-    description: str = f"""List security vulnerabilities in a GitLab project using GraphQL.
+    description: str = f"""List persisted vulnerabilities for an entire project from its main Vulnerability Report.
 
     {PROJECT_IDENTIFICATION_DESCRIPTION}
+
+    Use this tool to get an overview of the project's current security debt on its default branch.
+    This tool operates on the project level and does not require a pipeline ID.
 
     The tool supports filtering vulnerabilities by:
     - Severity levels (can specify multiple: CRITICAL, HIGH, MEDIUM, LOW, INFO, UNKNOWN)
     - Report type (SAST, DAST, DEPENDENCY_SCANNING, etc.)
+
+    **Do NOT use this tool to list security findings from a specific pipeline; to list security findings from a specific pipeline, use the 'list_security_findings' tool.**
 
     For example:
     - List all vulnerabilities in a project:
