@@ -258,6 +258,16 @@ class ToolsExecutor:
         except ToolException as error:
             return self._handle_tool_error(tool_name, tool_args, error, chat_logs)
 
+        except Exception as error:
+            # Convert any unexpected exception to ToolException to avoid blocking workflow
+            tool_exception = ToolException(
+                f"Unexpected error executing tool {tool_name}: {str(error)}"
+            )
+            tool_exception.__cause__ = error
+            return self._handle_tool_error(
+                tool_name, tool_args, tool_exception, chat_logs
+            )
+
     def _handle_type_error(
         self,
         tool: Any,
