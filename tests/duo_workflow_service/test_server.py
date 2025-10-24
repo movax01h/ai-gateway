@@ -472,7 +472,7 @@ async def test_workflow_is_cancelled_on_parent_task_cancellation(
 @pytest.mark.parametrize(
     "workflow_error,successful_execution,expected_status,expected_detail_prefix",
     [
-        (None, True, grpc.StatusCode.OK, "workflow execution success:"),
+        (None, True, grpc.StatusCode.OK, "workflow execution success"),
         (
             AIO_CANCEL_STOP_WORKFLOW_REQUEST,
             False,

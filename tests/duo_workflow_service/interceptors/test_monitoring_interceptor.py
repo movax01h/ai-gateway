@@ -1,13 +1,15 @@
-from unittest.mock import AsyncMock, MagicMock, Mock
+from unittest.mock import AsyncMock, MagicMock, Mock, patch
 
 import grpc
 import pytest
 from prometheus_client import CollectorRegistry
 from structlog.testing import capture_logs
 
+from ai_gateway.code_suggestions.language_server import LanguageServerVersion
 from duo_workflow_service.interceptors.monitoring_interceptor import (
     MonitoringInterceptor,
 )
+from duo_workflow_service.tracking import MonitoringContext
 
 
 @pytest.mark.asyncio
@@ -89,6 +91,15 @@ async def test_interceptor_methods(
 
 
 @pytest.mark.asyncio
+@patch(
+    "duo_workflow_service.interceptors.monitoring_interceptor.MonitoringContext",
+    return_value=MonitoringContext(
+        workflow_last_gitlab_status="running", workflow_stop_reason="stopped by client"
+    ),
+)
+@patch(
+    "duo_workflow_service.interceptors.monitoring_interceptor.language_server_version",
+)
 @pytest.mark.parametrize(
     (
         "service_name",
@@ -118,6 +129,8 @@ async def test_interceptor_methods(
     ],
 )
 async def test_streaming_interceptor_methods(
+    mock_language_server_version,
+    mock_monitoring_context,
     service_name,
     method_name,
     grpc_type,
@@ -131,6 +144,8 @@ async def test_streaming_interceptor_methods(
     handler_call_details = Mock()
     handler_call_details.method = f"/{service_name}/{method_name}"
     handler_call_details.invocation_metadata = {}
+
+    mock_language_server_version.get.return_value = LanguageServerVersion("0.0.1")
 
     async def _stream_generator(_req, _ctx):
         yield "Stream"
@@ -148,6 +163,7 @@ async def test_streaming_interceptor_methods(
     mock_context.code.return_value = grpc.StatusCode.OK
 
     result = await interceptor.intercept_service(continuation, handler_call_details)
+
     assert result is not None
 
     handler_func = getattr(result, handler_attr)
@@ -177,6 +193,9 @@ async def test_streaming_interceptor_methods(
     assert cap_logs[0]["event"] == f"Finished {method_name} RPC"
     assert cap_logs[0]["grpc_service_name"] == service_name
     assert cap_logs[0]["grpc_method_name"] == method_name
+    assert cap_logs[0]["workflow_last_gitlab_status"] == "running"
+    assert cap_logs[0]["workflow_stop_reason"] == "stopped by client"
+    assert cap_logs[0]["language_server_version"] == "0.0.1"
 
 
 @pytest.mark.asyncio
@@ -217,10 +236,10 @@ async def test_interceptor_handles_exception():
     )
 
     assert total_calls == 1.0
-    assert len(cap_logs) == 1
-    assert cap_logs[0]["event"] == f"Finished ErrorMethod RPC"
-    assert cap_logs[0]["exception_message"] == "Test Exception"
+    assert len(cap_logs) == 2
+    assert cap_logs[0]["event"] == f"Test Exception"
     assert cap_logs[0]["exception_class"] == "Exception"
+    assert cap_logs[1]["event"] == f"Finished ErrorMethod RPC"
 
 
 @pytest.mark.asyncio
@@ -262,7 +281,7 @@ async def test_interceptor_stream_handles_exception():
     )
 
     assert total_calls == 1.0
-    assert len(cap_logs) == 1
-    assert cap_logs[0]["event"] == f"Finished StreamErrorMethod RPC"
-    assert cap_logs[0]["exception_message"] == "Test Exception"
+    assert len(cap_logs) == 2
+    assert cap_logs[0]["event"] == f"Test Exception"
     assert cap_logs[0]["exception_class"] == "Exception"
+    assert cap_logs[1]["event"] == f"Finished StreamErrorMethod RPC"

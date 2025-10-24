@@ -1,14 +1,9 @@
-from contextvars import ContextVar
-from typing import Optional
-
 import grpc
 
 from ai_gateway.code_suggestions.language_server import LanguageServerVersion
 from duo_workflow_service.interceptors import X_GITLAB_LANGUAGE_SERVER_VERSION
-
-# Context variable to store language server version
-language_server_version: ContextVar[Optional[LanguageServerVersion]] = ContextVar(
-    "language_server_version", default=None
+from duo_workflow_service.tracking.language_server_context import (
+    language_server_version,
 )
 
 

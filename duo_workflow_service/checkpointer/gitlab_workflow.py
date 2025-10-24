@@ -326,7 +326,7 @@ class GitLabWorkflow(
                 property=repr(e),
                 value=self._workflow_id,
             )
-            self._logger.info(f"Additional properties: {reject_properties}")
+            log_exception(e, extra={"additional_properties": str(reject_properties)})
             self._track_internal_event(
                 event_name=EventEnum.WORKFLOW_REJECT,
                 additional_properties=reject_properties,
@@ -339,7 +339,7 @@ class GitLabWorkflow(
                 value=self._workflow_id,
                 error_type=type(e).__name__,
             )
-            self._logger.info(f"Additional properties: {failure_properties}")
+            log_exception(e, extra={"additional_properties": str(failure_properties)})
             self._track_internal_event(
                 event_name=EventEnum.WORKFLOW_FINISH_FAILURE,
                 additional_properties=failure_properties,
@@ -513,10 +513,11 @@ class GitLabWorkflow(
                     "Successfully sent billing event for workflow %s", self._workflow_id
                 )
             except Exception as e:
-                self._logger.error(
-                    "Error sending billing event for workflow %s",
-                    self._workflow_id,
-                    error=str(e),
+                log_exception(
+                    e,
+                    extra={
+                        "context": "Error sending billing event for workflow",
+                    },
                 )
         else:
             self._logger.info(
@@ -659,7 +660,7 @@ class GitLabWorkflow(
             try:
                 yield self._convert_gitlab_checkpoint_to_checkpoint_tuple(gl_checkpoint)
             except ValueError as e:
-                self._logger.info(f"Skipping malformed checkpoint: {e}")
+                log_exception(e, extra={"context": "Skipping malformed checkpoint"})
                 continue
 
     async def aput(

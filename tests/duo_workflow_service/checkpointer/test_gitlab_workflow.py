@@ -405,8 +405,8 @@ async def test_workflow_context_manager_startup_error(
         category=workflow_type,
     )
 
-    # The log_exception for status update shouldn't be called since the second status update succeeded
-    mock_log_exception.assert_not_called()
+    assert mock_log_exception.call_count == 1
+    assert isinstance(mock_log_exception.call_args[0][0], UnsupportedStatusEvent)
 
     # Verify the failure metric was called
     mock_duo_workflow_metrics.count_agent_platform_session_failure.assert_not_called()
@@ -498,12 +498,16 @@ async def test_workflow_context_manager_startup_error_with_status_update_failure
     )
 
     # Verify the status update error was logged
-    mock_log_exception.assert_called_once_with(
-        status_error,
-        extra={
-            "workflow_id": workflow_id,
-            "context": "Failed to update workflow status during startup error",
-        },
+    assert mock_log_exception.call_count == 2
+    assert isinstance(mock_log_exception.call_args_list[0][0][0], ValueError)
+    assert str(mock_log_exception.call_args_list[0][0][0]) == "Startup error simulated"
+    assert mock_log_exception.call_args_list[1][0][0] == status_error
+    assert (
+        mock_log_exception.call_args_list[1][1]["extra"]["workflow_id"] == workflow_id
+    )
+    assert (
+        mock_log_exception.call_args_list[1][1]["extra"]["context"]
+        == "Failed to update workflow status during startup error"
     )
 
     # Verify the failure metric was called

@@ -7,6 +7,7 @@ from pydantic import BaseModel
 
 from duo_workflow_service.gitlab.gitlab_api import Namespace, Project
 from duo_workflow_service.interceptors.gitlab_version_interceptor import gitlab_version
+from duo_workflow_service.tracking.errors import log_exception
 
 log = structlog.stdlib.get_logger(__name__)
 
@@ -138,8 +139,8 @@ class GitLabInstanceInfoService:
                 return f"{parsed.scheme}://{parsed.netloc}"
             else:
                 return "Unknown"
-        except Exception:
-            log.warning("Failed to parse web URL")
+        except Exception as e:
+            log_exception(e, extra={"context": "Failed to parse web URL"})
             return "Unknown"
 
     def _get_gitlab_version(self) -> str:
@@ -152,7 +153,7 @@ class GitLabInstanceInfoService:
             version = gitlab_version.get()
             return version if version else "Unknown"
         except Exception as e:
-            log.warning("Failed to get GitLab version: %s", e)
+            log_exception(e, extra={"context": "Failed to get GitLab version"})
             return "Unknown"
 
     def _create_fallback_info(self) -> GitLabInstanceInfo:

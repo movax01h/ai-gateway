@@ -3,6 +3,8 @@ from enum import Enum
 
 import structlog
 
+from duo_workflow_service.tracking.errors import log_exception
+
 logger = structlog.stdlib.get_logger("error_handler")
 
 
@@ -74,12 +76,14 @@ class ModelErrorHandler:
 
         retry_after = self._get_retry_after()
 
-        logger.warn(
-            "Anthropic API error occurred. Retrying.",
-            error=str(error),
-            attempt=self._retry_count + 1,
-            max_retries=self.max_retries,
-            retry_after=retry_after,
+        log_exception(
+            error,
+            extra={
+                "context": "Anthropic API error occurred. Retrying.",
+                "attempt": self._retry_count + 1,
+                "max_retries": self.max_retries,
+                "retry_after": retry_after,
+            },
         )
 
         self._retry_count += 1

@@ -29,6 +29,7 @@ from duo_workflow_service.security.prompt_security import (
 )
 from duo_workflow_service.tools import RunCommand, Toolset, format_tool_display_message
 from duo_workflow_service.tools.planner import PlannerTool
+from duo_workflow_service.tracking.errors import log_exception
 from lib.internal_events import InternalEventAdditionalProperties, InternalEventsClient
 from lib.internal_events.event_enum import CategoryEnum, EventEnum, EventLabelEnum
 
@@ -111,8 +112,12 @@ class ToolsExecutor:
                         )
                     )
                 except SecurityException as e:
-                    self._logger.error(
-                        f"Security validation failed for tool {tool_name}: {e}"
+                    log_exception(
+                        e,
+                        extra={
+                            "context": "Security validation failed for tool",
+                            "tool_name": tool_name,
+                        },
                     )
                     raise
 
@@ -263,7 +268,7 @@ class ToolsExecutor:
     ) -> Dict[str, Any]:
         # log the error itself to check if the TypeError is indeed
         # a schema error.
-        self._logger.error(f"Tools executor raised TypeError {error}")
+        log_exception(error, extra={"context": "Tools executor raised TypeError"})
 
         schema = (
             f"The schema is: {tool.args_schema.model_json_schema()}"
@@ -303,6 +308,7 @@ class ToolsExecutor:
         error: ValidationError,
         chat_logs: List[UiChatLog],
     ) -> Dict[str, Any]:
+        log_exception(error)
         tool_response = f"Tool {tool_name} raised validation error {error}"
         self._track_internal_event(
             event_name=EventEnum.WORKFLOW_TOOL_FAILURE,
@@ -334,7 +340,7 @@ class ToolsExecutor:
     ) -> Dict[str, Any]:
         error_type = type(error).__name__
 
-        self._logger.error(f"Tools executor raised error {error_type} {error}")
+        log_exception(error, extra={"context": "Tools executor raised error"})
 
         tool_response = f"Tool {tool_name} raised ToolException: {str(error)}"
         self._track_internal_event(

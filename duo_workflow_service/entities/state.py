@@ -27,6 +27,7 @@ from duo_workflow_service.gitlab.gitlab_api import Namespace, Project
 from duo_workflow_service.token_counter.approximate_token_counter import (
     ApproximateTokenCounter,
 )
+from duo_workflow_service.tracking.errors import log_exception
 from duo_workflow_service.workflows.type_definitions import AdditionalContext
 
 # max content tokens is 400K but adding a buffer of 10% just in case
@@ -334,10 +335,12 @@ def _conversation_history_reducer(
                 )
 
         except Exception as e:
-            logger.error(
-                f"Error during message trimming: {str(e)}",
-                agent_name=agent_name,
-                exc_info=True,
+            log_exception(
+                e,
+                extra={
+                    "context": "Error during message trimming",
+                    "agent_name": agent_name,
+                },
             )
             # Keep the system messages plus a few recent messages as fallback
             all_messages = current.get(agent_name, []) + processed_messages
