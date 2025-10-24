@@ -2,7 +2,7 @@ from abc import abstractmethod
 from typing import Any, List, NamedTuple, Optional, final
 
 from gitlab_cloud_connector import GitLabUnitPrimitive
-from langchain.tools import BaseTool
+from langchain_core.tools import BaseTool, ToolException
 from pydantic import BaseModel
 
 from duo_workflow_service.gitlab.gitlab_api import Project
@@ -256,7 +256,7 @@ class DuoBaseTool(BaseTool):
             return response
 
         if response.status_code >= 400:
-            raise ValueError(
+            raise ToolException(
                 f"Request failed ({identifier}): HTTP {response.status_code}: {str(response.body)[:300]}"
             )
 

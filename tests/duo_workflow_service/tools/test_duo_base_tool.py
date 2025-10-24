@@ -2,7 +2,7 @@ from typing import Any, Type
 from unittest.mock import MagicMock, patch
 
 import pytest
-from langchain.tools import BaseTool
+from langchain_core.tools import BaseTool, ToolException
 from pydantic import BaseModel, Field
 
 from duo_workflow_service.gitlab.http_client import GitLabHttpResponse
@@ -239,7 +239,7 @@ def test_process_http_response(response, expected_result, should_raise):
 
     if should_raise:
         with pytest.raises(
-            ValueError, match=r"Request failed \(test_identifier\): HTTP \d+"
+            ToolException, match=r"Request failed \(test_identifier\): HTTP \d+"
         ):
             tool._process_http_response("test_identifier", response)
     else:
@@ -254,7 +254,7 @@ def test_process_http_response_error_message_truncation():
     long_error_body = "A" * 400
     response = GitLabHttpResponse(500, long_error_body)
 
-    with pytest.raises(ValueError) as exc_info:
+    with pytest.raises(ToolException) as exc_info:
         tool._process_http_response("test_identifier", response)
 
     error_message = str(exc_info.value)
