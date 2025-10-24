@@ -13,6 +13,7 @@ from duo_workflow_service.security.prompt_security import (
     PromptSecurity,
     SecurityException,
 )
+from duo_workflow_service.tracking.errors import log_exception
 from lib.internal_events.event_enum import CategoryEnum
 
 WorkflowStateT_contra = TypeVar(
@@ -90,8 +91,12 @@ class RunToolNode(Generic[WorkflowStateT]):
                         )
                         output = secure_output
                     except SecurityException as e:
-                        self._logger.error(
-                            f"Security validation failed for tool {self._tool.name}: {e}"
+                        log_exception(
+                            e,
+                            extra={
+                                "context": "Security validation failed for tool",
+                                "tool_name": self._tool.name,
+                            },
                         )
                         raise
 

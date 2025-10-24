@@ -21,6 +21,7 @@ from duo_workflow_service.gitlab.gitlab_instance_info_service import (
 )
 from duo_workflow_service.gitlab.gitlab_service_context import GitLabServiceContext
 from duo_workflow_service.llm_factory import AnthropicStopReason
+from duo_workflow_service.tracking.errors import log_exception
 
 log = structlog.stdlib.get_logger("chat_agent")
 
@@ -234,5 +235,5 @@ class ChatAgent:
             return self._build_response(agent_response, input)
 
         except Exception as error:
-            log.warning(f"Error processing chat agent: {error}")
+            log_exception(error, extra={"context": "Error processing chat agent"})
             return self._create_error_response(error)

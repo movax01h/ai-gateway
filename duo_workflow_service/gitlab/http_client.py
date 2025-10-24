@@ -5,6 +5,8 @@ from typing import Any, Callable, Dict, Optional, Union
 
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
 
+from duo_workflow_service.tracking.errors import log_exception
+
 # Setup logger
 logger = logging.getLogger(__name__)
 
@@ -135,9 +137,13 @@ class GitlabHttpClient(ABC):
 
             return {}
         except json.JSONDecodeError as e:
-            logger.error(f"JSON decode error: {str(e)}. ")
-            logger.error(
-                f"Raw response type: {type(response)}, content: {repr(response)}"
+            log_exception(
+                e,
+                extra={
+                    "context": "JSON decode error",
+                    "response_type": type(response),
+                    "content": repr(response),
+                },
             )
             return {}
 

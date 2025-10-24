@@ -1,5 +1,4 @@
 import time
-import traceback
 from contextlib import contextmanager
 from datetime import datetime, timezone
 from enum import StrEnum
@@ -21,6 +20,10 @@ from duo_workflow_service.tracking import MonitoringContext, current_monitoring_
 from duo_workflow_service.tracking.duo_workflow_metrics import (
     METADATA_LABELS,
     build_metadata_labels,
+)
+from duo_workflow_service.tracking.errors import log_exception
+from duo_workflow_service.tracking.language_server_context import (
+    language_server_version,
 )
 
 log = structlog.stdlib.get_logger("grpc")
@@ -148,8 +151,6 @@ class MonitoringInterceptor(ServerInterceptor):
         servicer_context,
         invocation_metadata,
     ):
-        exception_fields = {}
-
         start_time_total = time.perf_counter()
         start_time_cpu = time.process_time()
         request_arrived_at = datetime.now(timezone.utc)
@@ -173,14 +174,16 @@ class MonitoringInterceptor(ServerInterceptor):
                 servicer_context,
             )
 
-            exception_fields["exception_message"] = str(e)
-            exception_fields["exception_class"] = type(e).__name__
-            exception_fields["exception_backtrace"] = traceback.format_exc()
+            log_exception(e)
 
             raise e
         finally:
             elapsed_time = time.perf_counter() - start_time_total
             cpu_time = time.process_time() - start_time_cpu
+            servicer_context_code = ""
+
+            if context_code := servicer_context.code():
+                servicer_context_code = context_code.name
 
             fields = {
                 "duration_s": elapsed_time,
@@ -189,9 +192,7 @@ class MonitoringInterceptor(ServerInterceptor):
                 "grpc_type": grpc_type,
                 "grpc_service_name": grpc_service_name,
                 "grpc_method_name": grpc_method_name,
-                "servicer_context_code": (
-                    servicer_context.code() or grpc.StatusCode.UNKNOWN
-                ).name,
+                "servicer_context_code": servicer_context_code,
                 "servicer_context_details": servicer_context.details(),
                 "gitlab_host_name": invocation_metadata.get(
                     X_GITLAB_HOST_NAME_HEADER.lower()
@@ -208,7 +209,11 @@ class MonitoringInterceptor(ServerInterceptor):
                 ),
                 "user_agent": invocation_metadata.get("user-agent"),
             }
-            fields.update(exception_fields)
+
+            lsp_version = language_server_version.get()
+
+            if lsp_version:
+                fields["language_server_version"] = str(lsp_version.version)
 
             context: MonitoringContext = current_monitoring_context.get()
             fields.update(context.model_dump())

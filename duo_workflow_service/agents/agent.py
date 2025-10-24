@@ -26,6 +26,7 @@ from duo_workflow_service.gitlab.http_client import GitlabHttpClient
 from duo_workflow_service.llm_factory import AnthropicStopReason
 from duo_workflow_service.monitoring import duo_workflow_metrics
 from duo_workflow_service.tools.handover import HandoverTool
+from duo_workflow_service.tracking.errors import log_exception
 
 log = structlog.stdlib.get_logger("agent_v2")
 
@@ -140,7 +141,8 @@ class Agent(BaseAgent):
                     **self._respond_to_human(state, model_completion),
                 }
             except APIStatusError as error:
-                log.warning(f"Error processing agent: {error}")
+                log_exception(error, extra={"context": "Error processing agent"})
+
                 status_code = error.response.status_code
 
                 duo_workflow_metrics.count_llm_response(

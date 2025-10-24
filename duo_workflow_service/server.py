@@ -419,6 +419,7 @@ class DuoWorkflowService(contract_pb2_grpc.DuoWorkflowServicer):
                         "Stopping workflow...",
                         reason=event.stopWorkflow.reason,
                     )
+                    monitoring_context.workflow_stop_reason = event.stopWorkflow.reason
                     workflow_task.cancel(AIO_CANCEL_STOP_WORKFLOW_REQUEST)
                     continue
 
@@ -452,9 +453,7 @@ class DuoWorkflowService(contract_pb2_grpc.DuoWorkflowServicer):
 
             if workflow.successful_execution():
                 context.set_code(grpc.StatusCode.OK)
-                context.set_details(
-                    f"workflow execution success: {workflow.last_gitlab_status}"
-                )
+                context.set_details("workflow execution success")
             elif str(workflow.last_error) == AIO_CANCEL_STOP_WORKFLOW_REQUEST:
                 context.set_code(grpc.StatusCode.OK)
                 context.set_details(
@@ -492,6 +491,7 @@ class DuoWorkflowService(contract_pb2_grpc.DuoWorkflowServicer):
         finally:
             await workflow.cleanup(workflow_id)
             receive_events_task.cancel()
+            monitoring_context.workflow_last_gitlab_status = workflow.last_gitlab_status
 
     async def ListTools(
         self, request: contract_pb2.ListToolsRequest, context: grpc.ServicerContext
