@@ -77,7 +77,7 @@ class ConfigInternalEvent(BaseModel):
 
 class ConfigBillingEvent(BaseModel):
     enabled: bool = False
-    app_id: str = "gitlab_ai_gateway"
+    app_id: str = "gitlab_ai_gateway-billing"
     namespace: str = "gl"
     endpoint: Optional[str] = None
     batch_size: Optional[int] = 1
