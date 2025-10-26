@@ -77,7 +77,7 @@ class TestBillingEventsClient:
             yield BillingEventsClient(
                 enabled=True,
                 endpoint="https://billing.local",
-                app_id="gitlab_ai_gateway",
+                app_id="gitlab_ai_gateway-billing",
                 namespace="gl",
                 batch_size=3,
                 thread_count=2,
@@ -99,7 +99,7 @@ class TestBillingEventsClient:
         BillingEventsClient(
             enabled=True,
             endpoint="https://billing.local",
-            app_id="gitlab_ai_gateway",
+            app_id="gitlab_ai_gateway-billing",
             namespace="gl",
             batch_size=3,
             thread_count=2,
@@ -115,7 +115,7 @@ class TestBillingEventsClient:
         assert emitter_args["endpoint"] == "https://billing.local"
 
         tracker_args = mock_tracker_init.call_args[1]
-        assert tracker_args["app_id"] == "gitlab_ai_gateway"
+        assert tracker_args["app_id"] == "gitlab_ai_gateway-billing"
         assert tracker_args["namespace"] == "gl"
         assert len(tracker_args["emitters"]) == 1
 
@@ -221,7 +221,7 @@ class TestBillingEventsClient:
         client = BillingEventsClient(
             enabled=False,
             endpoint="https://billing.local",
-            app_id="gitlab_ai_gateway",
+            app_id="gitlab_ai_gateway-billing",
             namespace="gl",
             batch_size=3,
             thread_count=2,
