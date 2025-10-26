@@ -33,6 +33,7 @@ from ai_gateway.code_suggestions.processing.typing import (
 from ai_gateway.config import Config, ConfigModelLimits
 from ai_gateway.container import ContainerApplication
 from ai_gateway.model_metadata import TypeModelMetadata, current_model_metadata_context
+from ai_gateway.model_selection.model_selection_config import ModelSelectionConfig
 from ai_gateway.models.base import ModelMetadata as LegacyModelMetadata
 from ai_gateway.models.base import TokensConsumptionMetadata
 from ai_gateway.models.base_text import (
@@ -767,9 +768,13 @@ def reset_context():
     # This fixture will reset the context before and after each test
     current_feature_flag_context.set(set[str]())
     current_model_metadata_context.set(None)
+    ModelSelectionConfig._instance = None
+
     yield
+
     current_feature_flag_context.set(set[str]())
     current_model_metadata_context.set(None)
+    ModelSelectionConfig._instance = None
 
 
 @pytest.fixture(name="vertex_project")

@@ -29,16 +29,22 @@ class UnitPrimitiveConfig(BaseModel):
 
 
 class ModelSelectionConfig:
-    __instance = None
-
-    def __new__(cls):
-        if cls.__instance is None:
-            cls.__instance = super(ModelSelectionConfig, cls).__new__(cls)
-        return cls.__instance
+    _instance: Optional["ModelSelectionConfig"] = None
 
     def __init__(self) -> None:
         self._llm_definitions: Optional[dict[str, LLMDefinition]] = None
         self._unit_primitive_configs: Optional[dict[str, UnitPrimitiveConfig]] = None
+
+    @classmethod
+    def instance(cls) -> "ModelSelectionConfig":
+        """Get the singleton instance of ModelSelectionConfig.
+
+        Returns:
+            The singleton ModelSelectionConfig instance.
+        """
+        if cls._instance is None:
+            cls._instance = cls()
+        return cls._instance
 
     def get_llm_definitions(self) -> dict[str, LLMDefinition]:
         if not self._llm_definitions:
@@ -131,4 +137,4 @@ class ModelSelectionConfig:
 
 
 def validate_model_selection_config():
-    ModelSelectionConfig().validate()
+    ModelSelectionConfig.instance().validate()
