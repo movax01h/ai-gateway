@@ -151,9 +151,11 @@ class Flow(AbstractWorkflow):
                 continue
 
             if item.category not in jsonschemas_by_category.keys():
-                raise ValueError(
-                    f"input schema was not provided for the category '{item.category}'."
+                self.log.warn(
+                    f"Unknown additional context envelope {item.category} has been skipped",
+                    additional_context_category=item.category,
                 )
+                continue
             try:
                 schema = jsonschemas_by_category.get(item.category)
                 if not item.content:
