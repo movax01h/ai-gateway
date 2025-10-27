@@ -126,7 +126,6 @@ CONTEXT_BUILDER_TOOLS = [
     "get_merge_request",
     "get_project",
     "get_pipeline_errors",
-    "run_read_only_git_command",
     "run_git_command",
     "list_all_merge_request_notes",
     "list_merge_request_diffs",
