@@ -212,6 +212,42 @@ async def test_create_issue(gitlab_client_mock, metadata, issue_data):
 
 
 @pytest.mark.asyncio
+async def test_create_issue_with_epic_id(gitlab_client_mock, metadata, issue_data):
+    gitlab_client_mock.apost = AsyncMock(return_value=issue_data)
+
+    tool = CreateIssue(description="created issue description", metadata=metadata)
+
+    response = await tool._arun(
+        project_id=1,
+        title="Test Issue",
+        description="This is a test issue",
+        epic_id=42,
+    )
+
+    expected_response = json.dumps(
+        {
+            "created_issue": {
+                "id": 1,
+                "title": "Test Issue",
+                "description": "This is a test issue",
+            }
+        }
+    )
+    assert response == expected_response
+
+    gitlab_client_mock.apost.assert_called_once_with(
+        path="/api/v4/projects/1/issues",
+        body=json.dumps(
+            {
+                "title": "Test Issue",
+                "description": "This is a test issue",
+                "epic_id": 42,
+            }
+        ),
+    )
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize(
     "url,project_id,issue_iid,expected_path",
     [
@@ -912,6 +948,56 @@ async def test_update_issue(gitlab_client_mock, metadata):
                 "labels": "bug,critical",
                 "assignee_ids": [15, 16],
                 "state_event": "close",
+            }
+        ),
+        use_http_response=True,
+    )
+
+
+@pytest.mark.asyncio
+async def test_update_issue_with_epic_id(gitlab_client_mock, metadata):
+    gitlab_client_mock.aput = AsyncMock(
+        return_value=GitLabHttpResponse(
+            status_code=200,
+            body={
+                "id": 123,
+                "title": "Updated Test Issue",
+                "description": "This is an updated test issue",
+                "epic_id": 42,
+            },
+            headers={"content-type": "application/json"},
+        )
+    )
+
+    tool = UpdateIssue(description="update issue description", metadata=metadata)
+
+    response = await tool._arun(
+        project_id=1,
+        issue_iid=123,
+        title="Updated Test Issue",
+        description="This is an updated test issue",
+        epic_id=42,
+    )
+
+    expected_response = json.dumps(
+        {
+            "updated_issue": {
+                "id": 123,
+                "title": "Updated Test Issue",
+                "description": "This is an updated test issue",
+                "epic_id": 42,
+            }
+        }
+    )
+    assert response == expected_response
+
+    gitlab_client_mock.aput.assert_called_once_with(
+        path="/api/v4/projects/1/issues/123",
+        body=json.dumps(
+            {
+                "title": "Updated Test Issue",
+                "description": "This is an updated test issue",
+                "epic_id": 42,
             }
         ),
         use_http_response=True,
