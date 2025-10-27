@@ -2,7 +2,7 @@ from datetime import datetime, timezone
 from typing import Any, Dict, List
 
 import structlog
-from anthropic import APIError
+from anthropic import APIStatusError
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, ToolMessage
 from langchain_core.output_parsers.string import StrOutputParser
 
@@ -182,7 +182,7 @@ class ChatAgent:
             content=f"There was an error processing your request: {error}"
         )
 
-        if isinstance(error, APIError):
+        if isinstance(error, APIStatusError) and 500 <= error.status_code < 600:
             ui_content = (
                 "There was an error connecting to the chosen LLM provider, please try again or contact support "
                 "if the issue persists."

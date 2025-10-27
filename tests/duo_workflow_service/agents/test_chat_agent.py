@@ -288,7 +288,35 @@ async def test_chat_agent_generic_error_handling(chat_agent, input):
 
 
 @pytest.mark.asyncio
-async def test_chat_agent_provider_error_handling(chat_agent, input):
+async def test_chat_agent_provider_4xx_error_handling(chat_agent, input):
+    chat_agent.prompt_adapter.get_response = AsyncMock(
+        side_effect=APIStatusError(
+            message="Test API error",
+            response=Mock(status_code=400),
+            body={"error": {"message": "Bad request"}},
+        )
+    )
+
+    result = await chat_agent.run(input)
+
+    # Verify error response structure
+    assert result["status"] == WorkflowStatusEnum.INPUT_REQUIRED
+    assert "conversation_history" in result
+    assert result["conversation_history"]["Chat Agent"][0].content.startswith(
+        "There was an error processing your request:"
+    )
+    assert len(result["ui_chat_log"]) == 1
+    assert result["ui_chat_log"][0]["message_type"] == MessageTypeEnum.AGENT
+    assert result["ui_chat_log"][0]["status"] == ToolStatus.FAILURE
+    # pylint: disable=line-too-long
+    assert (
+        result["ui_chat_log"][0]["content"]
+        == "There was an error processing your request in the Duo Agent Platform, please try again or contact support if the issue persists."
+    )
+
+
+@pytest.mark.asyncio
+async def test_chat_agent_provider_5xx_error_handling(chat_agent, input):
     """Test that ChatAgent properly handles APIStatusError exceptions."""
     # Mock the prompt adapter to raise an APIStatusError
     chat_agent.prompt_adapter.get_response = AsyncMock(
