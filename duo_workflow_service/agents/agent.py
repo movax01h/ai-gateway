@@ -145,6 +145,17 @@ class Agent(BaseAgent):
 
                 status_code = error.response.status_code
 
+                if 500 <= status_code < 600:
+                    ui_content = (
+                        "There was an error connecting to the chosen LLM provider, please try again or contact "
+                        "support if the issue persists."
+                    )
+                else:
+                    ui_content = (
+                        "There was an error processing your request in the Duo Agent Platform, please try again or "
+                        "contact support if the issue persists."
+                    )
+
                 duo_workflow_metrics.count_llm_response(
                     model=model_name,
                     provider=self.model_provider,
@@ -165,10 +176,7 @@ class Agent(BaseAgent):
                         UiChatLog(
                             message_type=MessageTypeEnum.AGENT,
                             message_sub_type=None,
-                            content=(
-                                "There was an error connecting to the chosen LLM provider, please try again or contact "
-                                "support if the issue persists."
-                            ),
+                            content=ui_content,
                             timestamp=datetime.now(timezone.utc).isoformat(),
                             status=ToolStatus.FAILURE,
                             correlation_id=None,

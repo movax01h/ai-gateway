@@ -233,7 +233,41 @@ Human message"""
             assert "status" not in result
 
     @pytest.mark.asyncio
-    async def test_run_with_api_error(
+    async def test_run_with_4xx_api_error(
+        self,
+        agent: Agent,
+        workflow_state: DuoWorkflowStateType,
+        prompt_name: str,
+    ):
+        # Mock the superclass ainvoke method to raise an APIStatusError
+        with patch.object(
+            agent.__class__.__bases__[0], "ainvoke", new_callable=AsyncMock
+        ) as mock_ainvoke:
+            mock_ainvoke.side_effect = APIStatusError(
+                message="Test API error",
+                response=Mock(status_code=400),
+                body={"error": {"message": "Bad request"}},
+            )
+
+            result = await agent.run(workflow_state)
+
+            # Verify error response structure
+            assert result["status"] == WorkflowStatusEnum.ERROR
+            assert "conversation_history" in result
+            assert result["conversation_history"][prompt_name][0].content.startswith(
+                "There was an error processing your request:"
+            )
+            assert len(result["ui_chat_log"]) == 1
+            assert result["ui_chat_log"][0]["message_type"] == MessageTypeEnum.AGENT
+            assert result["ui_chat_log"][0]["status"] == ToolStatus.FAILURE
+            assert (
+                result["ui_chat_log"][0]["content"]
+                == "There was an error processing your request in the Duo Agent Platform, please try again or "
+                "contact support if the issue persists."
+            )
+
+    @pytest.mark.asyncio
+    async def test_run_with_5xx_api_error(
         self,
         agent: Agent,
         workflow_state: DuoWorkflowStateType,
