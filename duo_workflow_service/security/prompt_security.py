@@ -184,6 +184,7 @@ class PromptSecurity:
         # Example: 'read_file': [encode_dangerous_tags],  # Only encode tags, skip unicode stripping
         # Example: 'code_review': [],  # No security functions for code review tools
         # Add tools that need COMPLETE REPLACEMENT of default security functions below
+        "read_file": [],  # No security functions for read_file tool
     }
 
     @staticmethod
