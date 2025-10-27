@@ -785,18 +785,18 @@ class TestFlow:  # pylint: disable=too-many-public-methods
             flow_instance._process_additional_context(additional_context)
 
     def test_process_additional_context_no_schema(self, flow_instance):
-        """Test _process_additional_context raises error when provided without schema."""
+        """Test _process_additional_context logs warning and skips unknown category."""
         additional_context = [
             AdditionalContext(
                 category="agent_user_environment", content='{"os": "linux"}'
             )
         ]
 
-        with pytest.raises(
-            ValueError,
-            match="input schema was not provided for the category 'agent_user_environment'",
-        ):
-            flow_instance._process_additional_context(additional_context)
+        # Unknown categories should be skipped with a warning, not raise an error
+        result = flow_instance._process_additional_context(additional_context)
+
+        # Should return empty dict since the unknown category was skipped
+        assert result == {}
 
     def test_process_additional_context_invalid_json(self, flow_instance):
         """Test _process_additional_context raises error for invalid JSON."""
