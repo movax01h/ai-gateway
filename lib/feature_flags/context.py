@@ -12,6 +12,7 @@ class FeatureFlag(StrEnum):
     STREAM_DURING_TOOL_CALL_GENERATION = (
         "duo_workflow_stream_during_tool_call_generation"
     )
+    COMPRESS_CHECKPOINT = "duo_workflow_compress_checkpoint"
 
 
 def is_feature_enabled(feature_name: FeatureFlag | str) -> bool:
