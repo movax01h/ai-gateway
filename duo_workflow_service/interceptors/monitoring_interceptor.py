@@ -165,7 +165,9 @@ class MonitoringInterceptor(ServerInterceptor):
                 grpc_method_name,
                 servicer_context.code(),
             )
-        except Exception as e:
+        except (
+            BaseException
+        ) as e:  # We handle all BaseException to ensure we include asyncio.CancelledError
             self._handle_error(
                 e,
                 grpc_type,
@@ -226,7 +228,7 @@ class MonitoringInterceptor(ServerInterceptor):
     # pylint: disable=too-many-positional-arguments
     def _handle_error(
         self,
-        e: Exception,  # pylint: disable=unused-argument
+        e: BaseException,  # pylint: disable=unused-argument
         grpc_type: GRPCMethodType,
         grpc_service_name: str,
         grpc_method_name: str,

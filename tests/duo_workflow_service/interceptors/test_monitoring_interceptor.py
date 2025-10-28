@@ -252,7 +252,7 @@ async def test_interceptor_stream_handles_exception():
     handler_call_details.invocation_metadata = {}
 
     mock_handler = Mock()
-    mock_handler.stream_stream = MagicMock(side_effect=Exception("Test Exception"))
+    mock_handler.stream_stream = MagicMock(side_effect=BaseException("Test Exception"))
     mock_handler.request_streaming = True
     mock_handler.response_streaming = True
 
@@ -260,7 +260,10 @@ async def test_interceptor_stream_handles_exception():
     mock_context = Mock()
     mock_context.code.return_value = grpc.StatusCode.OK
 
-    with pytest.raises(Exception, match="Test Exception"), capture_logs() as cap_logs:
+    with (
+        pytest.raises(BaseException, match="Test Exception"),
+        capture_logs() as cap_logs,
+    ):
         result = await interceptor.intercept_service(continuation, handler_call_details)
         assert result is not None
 
@@ -283,5 +286,5 @@ async def test_interceptor_stream_handles_exception():
     assert total_calls == 1.0
     assert len(cap_logs) == 2
     assert cap_logs[0]["event"] == f"Test Exception"
-    assert cap_logs[0]["exception_class"] == "Exception"
+    assert cap_logs[0]["exception_class"] == "BaseException"
     assert cap_logs[1]["event"] == f"Finished StreamErrorMethod RPC"
