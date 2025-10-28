@@ -17,7 +17,7 @@ implementation details, and best practices.
 
 ## Implementation Steps
 
-### 2. Create the Tool Class
+### 1. Create the Tool Class
 
 1. **Choose the Right Location**:
    - Create a new file in `duo_workflow_service/tools/` for a new category of tools
@@ -76,6 +76,29 @@ implementation details, and best practices.
            # Format a user-friendly message for the UI
            return f"Performing action with {args.param1}"
    ```
+
+### 2. ⚠️ Tool Response Truncation
+
+**All tools have automatic response truncation applied.**
+
+- **Max length**: Configured in [tool_output_manager](https://gitlab.com/gitlab-org/modelops/applied-ml/code-suggestions/ai-assist/-/blob/main/duo_workflow_service/tools/tool_output_manager.py)
+- **Behavior**: Only the **first N characters** of your tool's response are kept. Content beyond this limit is truncated and structured by [truncate_tool_response](https://gitlab.com/gitlab-org/modelops/applied-ml/code-suggestions/ai-assist/-/blob/main/duo_workflow_service/tools/duo_base_tool.py)
+- **Action required**: Structure your tool output to put the most important information **at the beginning**
+
+**Example:**
+
+- ✅ Good: Return summary first, then details
+- ✅ Good: Support pagination/chunking - allow retrieving results in multiple calls
+- ❌ Bad: Return logs/metadata first, then important results at the end
+- ❌ Bad: Return one massive output that gets truncated
+
+**Note:** The current limit is large enough for most use cases. If your tool response is being truncated:
+
+1. **First**, review and optimize your tool's output format (summarize, paginate, or restructure)
+
+1. **Only** raise a discussion about increasing the limit if no other implementation approach is feasible
+
+Adjusting your tool implementation is preferred over increasing the global limit.
 
 ### 3. Update Protocol Buffers (if needed)
 
