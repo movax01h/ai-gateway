@@ -100,6 +100,9 @@ async def test_interceptor_methods(
 @patch(
     "duo_workflow_service.interceptors.monitoring_interceptor.language_server_version",
 )
+@patch(
+    "duo_workflow_service.interceptors.monitoring_interceptor.client_type",
+)
 @pytest.mark.parametrize(
     (
         "service_name",
@@ -129,6 +132,7 @@ async def test_interceptor_methods(
     ],
 )
 async def test_streaming_interceptor_methods(
+    mock_client_type,
     mock_language_server_version,
     mock_monitoring_context,
     service_name,
@@ -146,6 +150,7 @@ async def test_streaming_interceptor_methods(
     handler_call_details.invocation_metadata = {}
 
     mock_language_server_version.get.return_value = LanguageServerVersion("0.0.1")
+    mock_client_type.get.return_value = "node-grpc"
 
     async def _stream_generator(_req, _ctx):
         yield "Stream"
@@ -196,6 +201,7 @@ async def test_streaming_interceptor_methods(
     assert cap_logs[0]["workflow_last_gitlab_status"] == "running"
     assert cap_logs[0]["workflow_stop_reason"] == "stopped by client"
     assert cap_logs[0]["language_server_version"] == "0.0.1"
+    assert cap_logs[0]["gitlab_client_type"] == "node-grpc"
 
 
 @pytest.mark.asyncio

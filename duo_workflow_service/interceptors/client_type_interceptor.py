@@ -1,12 +1,8 @@
-from contextvars import ContextVar
-from typing import Optional
-
 import grpc.aio
 
-X_GITLAB_CLIENT_TYPE_HEADER = "X-Gitlab-Client-Type"
+from duo_workflow_service.tracking.client_type_context import client_type
 
-# Context variable to store client type
-client_type: ContextVar[Optional[str]] = ContextVar("client_type", default=None)
+X_GITLAB_CLIENT_TYPE_HEADER = "X-Gitlab-Client-Type"
 
 
 class ClientTypeInterceptor(grpc.aio.ServerInterceptor):
