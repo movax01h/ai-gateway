@@ -17,6 +17,7 @@ from grpc.aio import ServerInterceptor
 from prometheus_client import REGISTRY, Counter
 
 from duo_workflow_service.tracking import MonitoringContext, current_monitoring_context
+from duo_workflow_service.tracking.client_type_context import client_type
 from duo_workflow_service.tracking.duo_workflow_metrics import (
     METADATA_LABELS,
     build_metadata_labels,
@@ -212,10 +213,11 @@ class MonitoringInterceptor(ServerInterceptor):
                 "user_agent": invocation_metadata.get("user-agent"),
             }
 
-            lsp_version = language_server_version.get()
-
-            if lsp_version:
+            if lsp_version := language_server_version.get():
                 fields["language_server_version"] = str(lsp_version.version)
+
+            if client_type_value := client_type.get():
+                fields["gitlab_client_type"] = client_type_value
 
             context: MonitoringContext = current_monitoring_context.get()
             fields.update(context.model_dump())
