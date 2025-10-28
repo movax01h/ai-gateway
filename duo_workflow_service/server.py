@@ -100,6 +100,8 @@ MAX_MESSAGE_SIZE = 4 * 1024 * 1024
 # Defines the limit for metadata/headers sent by the client:
 # https://github.com/grpc/grpc/blob/06f6f5d376a8c7abf067d060a28bf12afb664a7e/include/grpc/impl/channel_arg_names.h#L216C37-L216C59
 # Default is 8KB, we increase it to 24KB
+# Also used to increase the max header size of the HTTP client:
+# https://docs.aiohttp.org/en/stable/client_reference.html
 MAX_METADATA_SIZE = 24 * 1024
 
 log = structlog.stdlib.get_logger("server")
@@ -649,8 +651,10 @@ async def serve(port: int) -> None:
     https://github.com/grpc/grpc/blob/master/doc/keepalive.md
     """
     connection_pool.set_options(
-        pool_size=100,  # Adjust based on your needs
+        pool_size=100,
         timeout=aiohttp.ClientTimeout(total=30),
+        max_line_size=MAX_METADATA_SIZE,  # For entire header lines
+        max_field_size=MAX_METADATA_SIZE,  # For individual header values
     )
     async with connection_pool:
         server_options = [
