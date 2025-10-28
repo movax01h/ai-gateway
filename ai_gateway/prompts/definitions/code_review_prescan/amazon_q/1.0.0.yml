@@ -1,10 +1,10 @@
 ---
-name: code_review_prescan
+name: Amazon Q code_review_prescan
 model:
   params:
-    model_class_provider: anthropic
-    max_tokens: 8_192
-unit_primitives: []
+    model_class_provider: amazon_q
+unit_primitives:
+  - amazon_q_integration
 prompt_template:
   system: |
     {% include 'code_review_prescan/system/1.0.0.jinja' %}

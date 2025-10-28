@@ -40,7 +40,7 @@ components:
   - name: "perform_code_review"
     type: AgentComponent
     prompt_id: "review_merge_request"
-    prompt_version: "^1.4.0"
+    prompt_version: "^2.0.0"
     inputs:
       - from: "context:build_review_context.tool_responses"
         as: "mr_data"

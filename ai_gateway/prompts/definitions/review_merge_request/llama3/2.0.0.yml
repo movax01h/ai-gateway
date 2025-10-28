@@ -1,0 +1,20 @@
+---
+name: Llama3 Review Merge Request
+model:
+  params:
+    model_class_provider: litellm
+    temperature: 0.1
+    max_tokens: 2_000
+unit_primitives:
+  - review_merge_request
+prompt_template:
+  system: |
+    {% include 'review_merge_request/system/1.2.0.jinja' %}
+  user: |
+    {{mr_data}}
+
+    <codebase_context>
+    {{codebase_context}}
+    </codebase_context>
+params:
+  timeout: 60
