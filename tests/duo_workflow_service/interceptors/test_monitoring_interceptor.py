@@ -78,6 +78,7 @@ async def test_interceptor_methods(
             "gitlab_version": "unknown",
             "client_type": "unknown",
             "lsp_version": "unknown",
+            "flow_type": "unknown",
         },
     )
 
@@ -94,7 +95,9 @@ async def test_interceptor_methods(
 @patch(
     "duo_workflow_service.interceptors.monitoring_interceptor.MonitoringContext",
     return_value=MonitoringContext(
-        workflow_last_gitlab_status="running", workflow_stop_reason="stopped by client"
+        workflow_last_gitlab_status="running",
+        workflow_stop_reason="stopped by client",
+        workflow_definition="chat",
     ),
 )
 @patch(
@@ -189,6 +192,7 @@ async def test_streaming_interceptor_methods(
             "gitlab_version": "unknown",
             "client_type": "unknown",
             "lsp_version": "unknown",
+            "flow_type": "chat",
         },
     )
 
@@ -238,6 +242,7 @@ async def test_interceptor_handles_exception():
             "gitlab_version": "unknown",
             "client_type": "unknown",
             "lsp_version": "unknown",
+            "flow_type": "unknown",
         },
     )
 
@@ -286,6 +291,7 @@ async def test_interceptor_stream_handles_exception():
             "gitlab_version": "unknown",
             "client_type": "unknown",
             "lsp_version": "unknown",
+            "flow_type": "unknown",
         },
     )
 
