@@ -17,17 +17,15 @@ class ContainerPrompts(containers.DeclarativeContainer):
 
     prompt_registry = providers.Singleton(
         LocalPromptRegistry.from_local_yaml,
-        class_overrides={
-            "chat/agent": "duo_workflow_service.agents.prompt_adapter.ChatPrompt",
-            "workflow/convert_to_gitlab_ci": "duo_workflow_service.agents.Agent",
-            "workflow/executor": "duo_workflow_service.agents.Agent",
-            "workflow/context_builder": "duo_workflow_service.agents.Agent",
-            "workflow/planner": "duo_workflow_service.agents.Agent",
-            "workflow/goal_disambiguation": "duo_workflow_service.agents.Agent",
-            "workflow/issue_to_merge_request": "duo_workflow_service.agents.Agent",
-        },
         prompt_template_factories={
             "chat/react": chat.ReActPromptTemplate,
+            "chat/agent": "duo_workflow_service.agents.prompt_adapter.ChatAgentPromptTemplate",
+            "workflow/convert_to_gitlab_ci": "duo_workflow_service.agents.AgentPromptTemplate",
+            "workflow/executor": "duo_workflow_service.agents.AgentPromptTemplate",
+            "workflow/context_builder": "duo_workflow_service.agents.AgentPromptTemplate",
+            "workflow/planner": "duo_workflow_service.agents.AgentPromptTemplate",
+            "workflow/goal_disambiguation": "duo_workflow_service.agents.AgentPromptTemplate",
+            "workflow/issue_to_merge_request": "duo_workflow_service.agents.AgentPromptTemplate",
         },
         model_factories={
             ModelClassProvider.ANTHROPIC: providers.Factory(

@@ -10,6 +10,7 @@ from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, ToolMe
 from langgraph.graph import END, StateGraph
 from langgraph.types import interrupt
 
+from duo_workflow_service.agents.agent import build_agent
 from duo_workflow_service.agents.handover import HandoverAgent
 from duo_workflow_service.components.base import BaseComponent
 from duo_workflow_service.entities.event import WorkflowEvent, WorkflowEventType
@@ -61,7 +62,9 @@ class GoalDisambiguationComponent(BaseComponent):
         toolset = self.tools_registry.toolset(
             [RequestUserClarificationTool.tool_title, HandoverTool.tool_title]
         )
-        task_clarity_judge = self.prompt_registry.get_on_behalf(
+        task_clarity_judge = build_agent(
+            "clarity_judge",
+            self.prompt_registry,
             self.user,
             "workflow/goal_disambiguation",
             "^1.0.0",

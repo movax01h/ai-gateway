@@ -4,10 +4,8 @@ import pytest
 from anthropic import APIStatusError
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 
-from ai_gateway.model_metadata import TypeModelMetadata
-from ai_gateway.prompts.config.base import PromptConfig
-from ai_gateway.prompts.typing import TypeModelFactory
-from duo_workflow_service.agents.agent import Agent
+from ai_gateway.prompts.base import Prompt
+from duo_workflow_service.agents.agent import Agent, AgentPromptTemplate
 from duo_workflow_service.entities import WorkflowEventType
 from duo_workflow_service.entities.event import WorkflowEvent
 from duo_workflow_service.entities.state import (
@@ -19,6 +17,11 @@ from duo_workflow_service.entities.state import (
 )
 from duo_workflow_service.gitlab.http_client import GitlabHttpClient
 from lib.internal_events.event_enum import CategoryEnum
+
+
+@pytest.fixture(name="prompt_template_factory")
+def promtp_template_factory_fixture():
+    return AgentPromptTemplate
 
 
 @pytest.fixture(name="prompt_template")
@@ -36,17 +39,14 @@ def check_events_fixture() -> bool:
 
 @pytest.fixture(name="agent")
 def agent_fixture(
+    prompt: Prompt,
     gl_http_client: GitlabHttpClient,
-    model_factory: TypeModelFactory,
-    prompt_config: PromptConfig,
-    model_metadata: TypeModelMetadata | None,
     workflow_type: CategoryEnum,
     check_events: bool,
 ) -> Agent:
     return Agent(
-        model_factory=model_factory,
-        config=prompt_config,  # type: ignore[arg-type] # mypy gets confused with `config` from `Runnable`
-        model_metadata=model_metadata,
+        name=prompt.name,
+        prompt=prompt,
         workflow_id="test-workflow-123",
         workflow_type=workflow_type,
         http_client=gl_http_client,

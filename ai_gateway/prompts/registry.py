@@ -185,7 +185,6 @@ def feature_setting_for_prompt_id(prompt_id: str) -> str:
 
 
 class PromptRegistered(NamedTuple):
-    klass: Type[Prompt]
     versions: dict[str, PromptConfig]
 
 
@@ -194,7 +193,6 @@ class LocalPromptRegistry(BasePromptRegistry):
 
     def __init__(
         self,
-        class_overrides: dict[str, Type[Prompt] | str],
         prompt_template_factories: dict[str, TypePromptTemplateFactory | str],
         model_factories: dict[ModelClassProvider, TypeModelFactory],
         internal_event_client: InternalEventsClient,
@@ -202,7 +200,6 @@ class LocalPromptRegistry(BasePromptRegistry):
         custom_models_enabled: bool,
         disable_streaming: bool = False,
     ):
-        self.class_overrides = class_overrides
         self.prompt_template_factories = prompt_template_factories
         self.model_factories = model_factories
         self.internal_event_client = internal_event_client
@@ -242,23 +239,7 @@ class LocalPromptRegistry(BasePromptRegistry):
         if not versions:
             raise ValueError(f"No version YAML files found for prompt id: {prompt_id}")
 
-        class_override = self.class_overrides.get(prompt_id, Prompt)
-        klass = cast(
-            Type[Prompt],
-            (
-                self._resolve_string_class_name(class_override)
-                if isinstance(class_override, str)
-                else class_override
-            ),
-        )
-
-        if not issubclass(klass, Prompt):
-            raise ValueError(
-                f"The specified klass must be a subclass of Prompt: {klass}"
-            )
-
         return PromptRegistered(
-            klass=klass,
             versions=versions,
         )
 
@@ -386,7 +367,7 @@ class LocalPromptRegistry(BasePromptRegistry):
                 TypePromptTemplateFactory | None, prompt_template_override
             )
 
-        return prompt_registered.klass(
+        return Prompt(
             model_factory,
             config,
             model_metadata,
@@ -400,7 +381,6 @@ class LocalPromptRegistry(BasePromptRegistry):
     @classmethod
     def from_local_yaml(
         cls,
-        class_overrides: dict[str, Type[Prompt] | str],
         prompt_template_factories: dict[str, TypePromptTemplateFactory | str],
         model_factories: dict[ModelClassProvider, TypeModelFactory],
         internal_event_client: InternalEventsClient,
@@ -410,9 +390,7 @@ class LocalPromptRegistry(BasePromptRegistry):
     ) -> "LocalPromptRegistry":
         """Create a LocalPromptRegistry with lazy loading enabled.
 
-        Prompt definition files matching [usecase]/[type]/[version].yml are loaded
-        on-demand when requested. The base Prompt class is used if no matching
-        override is provided in `class_overrides`.
+        Prompt definition files matching [usecase]/[type]/[version].yml are loaded on-demand when requested.
         """
 
         log.info(
@@ -421,7 +399,6 @@ class LocalPromptRegistry(BasePromptRegistry):
         )
 
         return cls(
-            class_overrides,
             prompt_template_factories,
             model_factories,
             internal_event_client,

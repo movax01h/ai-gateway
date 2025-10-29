@@ -1,7 +1,6 @@
 import sys
 from pathlib import Path
 from typing import cast
-from unittest.mock import Mock
 
 import pytest
 from dependency_injector import containers, providers
@@ -11,16 +10,13 @@ from pydantic import AnyUrl
 from ai_gateway.config import ConfigModelLimits
 from ai_gateway.model_metadata import create_model_metadata
 from ai_gateway.model_selection.model_selection_config import ModelSelectionConfig
+from ai_gateway.prompts import Prompt
 from ai_gateway.prompts.config import ChatOpenAIParams, ModelClassProvider
 from ai_gateway.prompts.registry import (
     LEGACY_MODEL_MAPPING,
     LocalPromptRegistry,
     feature_setting_for_prompt_id,
 )
-from duo_workflow_service import agents as workflow
-from duo_workflow_service.agents import prompt_adapter
-from duo_workflow_service.gitlab.http_client import GitlabHttpClient
-from lib.internal_events.event_enum import CategoryEnum
 
 
 @pytest.fixture(autouse=True, scope="module")
@@ -51,28 +47,6 @@ def config_values_fixture(assets_dir):
             }
         },
     }
-
-
-def _kwargs_for_class(klass):
-    match klass:
-        case workflow.Agent:
-            return {
-                "workflow_id": "123",
-                "workflow_type": CategoryEnum.WORKFLOW_SOFTWARE_DEVELOPMENT,
-                "http_client": Mock(spec=GitlabHttpClient),
-            }
-        case workflow.ChatAgent:
-            return {
-                "workflow_id": "123",
-                "workflow_type": CategoryEnum.WORKFLOW_CHAT,
-            }
-        case prompt_adapter.ChatPrompt:
-            return {
-                "workflow_id": "123",
-                "workflow_type": CategoryEnum.WORKFLOW_CHAT,
-            }
-
-    return {}
 
 
 def test_container(mock_ai_gateway_container: containers.DeclarativeContainer):
@@ -108,11 +82,6 @@ def test_container(mock_ai_gateway_container: containers.DeclarativeContainer):
         prompt_id = str(prompt_id_with_model_name.parent)
         model_name = prompt_id_with_model_name.name
 
-        # Load the prompt definition to get the class
-        prompt_registered = registry._load_prompt_definition(prompt_id, path)
-        klass = prompt_registered.klass
-        kwargs = _kwargs_for_class(klass)
-
         # Check every existing version
         for version in versions:
             if model_name == "base":
@@ -137,9 +106,8 @@ def test_container(mock_ai_gateway_container: containers.DeclarativeContainer):
                 prompt_id,
                 version,
                 model_metadata=model_metadata,
-                **kwargs,
             )
-            assert isinstance(prompt, klass)
+            assert isinstance(prompt, Prompt)
             assert prompt.model.disable_streaming
 
         # Check that at least one version is available and loads for each selectable model
@@ -154,9 +122,8 @@ def test_container(mock_ai_gateway_container: containers.DeclarativeContainer):
                 prompt_id,
                 "*",  # Grab the latest version
                 model_metadata=model,
-                **kwargs,
             )
-            assert isinstance(prompt, klass)
+            assert isinstance(prompt, Prompt)
 
 
 def test_container_openai_model_factory_exists(

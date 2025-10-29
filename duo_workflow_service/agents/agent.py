@@ -1,15 +1,17 @@
 from datetime import datetime, timezone
-from typing import Any, Sequence, cast
+from typing import Any, cast
 
 import structlog
 from anthropic import APIStatusError
+from gitlab_cloud_connector import CloudConnectorUser
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage
 from langchain_core.prompt_values import PromptValue
 from langchain_core.prompts import ChatPromptTemplate
-from langchain_core.prompts.chat import MessageLikeRepresentation
 from langchain_core.runnables import Runnable, RunnableConfig
+from langchain_core.tools import BaseTool
 
-from ai_gateway.prompts import prompt_template_to_messages
+from ai_gateway.api.auth_utils import StarletteUser
+from ai_gateway.prompts import BasePromptRegistry, prompt_template_to_messages
 from ai_gateway.prompts.config.base import PromptConfig
 from duo_workflow_service.agents.base import BaseAgent
 from duo_workflow_service.entities.event import WorkflowEvent, WorkflowEventType
@@ -27,6 +29,7 @@ from duo_workflow_service.llm_factory import AnthropicStopReason
 from duo_workflow_service.monitoring import duo_workflow_metrics
 from duo_workflow_service.tools.handover import HandoverTool
 from duo_workflow_service.tracking.errors import log_exception
+from lib.internal_events.event_enum import CategoryEnum
 
 log = structlog.stdlib.get_logger("agent_v2")
 
@@ -34,11 +37,9 @@ log = structlog.stdlib.get_logger("agent_v2")
 class AgentPromptTemplate(Runnable[dict, PromptValue]):
     messages: list[BaseMessage]
 
-    def __init__(
-        self, agent_name: str, preamble_messages: Sequence[MessageLikeRepresentation]
-    ):
-        self.agent_name = agent_name
-        self.preamble_messages = preamble_messages
+    def __init__(self, config: PromptConfig):
+        self.agent_name = config.name
+        self.preamble_messages = prompt_template_to_messages(config.prompt_template)
 
     def invoke(
         self,
@@ -70,17 +71,9 @@ class Agent(BaseAgent):
     http_client: GitlabHttpClient
     prompt_template_inputs: dict = {}
 
-    @classmethod
-    def _build_prompt_template(
-        cls, config: PromptConfig
-    ) -> Runnable[dict, PromptValue]:
-        messages = prompt_template_to_messages(config.prompt_template)
-
-        return AgentPromptTemplate(agent_name=config.name, preamble_messages=messages)
-
     async def run(self, state: DuoWorkflowStateType) -> dict[str, Any]:
         with duo_workflow_metrics.time_compute(
-            operation_type=f"{self.name}_processing"
+            operation_type=f"{self.prompt.name}_processing"
         ):
             updates: dict[str, Any] = {
                 "handover": [],
@@ -91,12 +84,12 @@ class Agent(BaseAgent):
                 "ChatAnthropic": "model",
             }
             model_name = getattr(
-                self.model,
-                model_name_attrs.get(self.model.get_name()) or "missing_attr",
+                self.prompt.model,
+                model_name_attrs.get(self.prompt.model.get_name()) or "missing_attr",
                 "unknown",
             )
 
-            request_type = f"{self.name}_completion"
+            request_type = f"{self.prompt.name}_completion"
 
             if self.check_events:
                 event: WorkflowEvent | None = await get_event(
@@ -120,7 +113,7 @@ class Agent(BaseAgent):
 
                 duo_workflow_metrics.count_llm_response(
                     model=model_name,
-                    provider=self.model_provider,
+                    provider=self.prompt.model_provider,
                     request_type=request_type,
                     stop_reason=stop_reason,
                     # Hardcoded 200 status since model_completion only returns status codes for failures
@@ -128,12 +121,16 @@ class Agent(BaseAgent):
                     error_type="none",
                 )
 
-                if self.name in state["conversation_history"]:
-                    updates["conversation_history"] = {self.name: [model_completion]}
-                else:
-                    messages = cast(AgentPromptTemplate, self.prompt_tpl).messages
+                if self.prompt.name in state["conversation_history"]:
                     updates["conversation_history"] = {
-                        self.name: [*messages, model_completion]
+                        self.prompt.name: [model_completion]
+                    }
+                else:
+                    messages = cast(
+                        AgentPromptTemplate, self.prompt.prompt_tpl
+                    ).messages
+                    updates["conversation_history"] = {
+                        self.prompt.name: [*messages, model_completion]
                     }
 
                 return {
@@ -147,7 +144,7 @@ class Agent(BaseAgent):
 
                 duo_workflow_metrics.count_llm_response(
                     model=model_name,
-                    provider=self.model_provider,
+                    provider=self.prompt.model_provider,
                     request_type=request_type,
                     status_code=status_code,
                     stop_reason="error",
@@ -216,3 +213,25 @@ class Agent(BaseAgent):
             ),
             None,
         )
+
+
+def build_agent(
+    name: str,
+    prompt_registry: BasePromptRegistry,
+    user: StarletteUser | CloudConnectorUser,
+    prompt_id: str,
+    prompt_version: str,
+    tools: list[BaseTool],
+    workflow_id: str,
+    workflow_type: CategoryEnum,
+    **kwargs: Any,
+):
+    prompt = prompt_registry.get_on_behalf(user, prompt_id, prompt_version, tools=tools)
+
+    return Agent(
+        name=name,
+        workflow_id=workflow_id,
+        workflow_type=workflow_type,
+        prompt=prompt,
+        **kwargs,
+    )

@@ -47,22 +47,18 @@ def llm_judge_response_unclear_fixture() -> AIMessage:
     )
 
 
-@pytest.fixture(name="mock_agent")
-def mock_agent_fixture(llm_judge_response_unclear: AIMessage):
-    with patch("ai_gateway.prompts.registry.LocalPromptRegistry.get_on_behalf") as mock:
-        mock_agent = MagicMock(spec=Agent)
-        mock.return_value = mock_agent
-        mock_agent.run.side_effect = [
-            {
-                "conversation_history": {"clarity_judge": [llm_judge_response_unclear]},
+@pytest.fixture(name="agent_responses")
+def agent_responses_fixture(llm_judge_response_unclear: AIMessage):
+    return [
+        {
+            "conversation_history": {"clarity_judge": [llm_judge_response_unclear]},
+        },
+        {
+            "conversation_history": {
+                "clarity_judge": [AIMessage(content="All clear please proceed")]
             },
-            {
-                "conversation_history": {
-                    "clarity_judge": [AIMessage(content="All clear please proceed")]
-                },
-            },
-        ]
-        yield mock_agent
+        },
+    ]
 
 
 @pytest.fixture(name="mock_interrupt")
@@ -337,6 +333,9 @@ class TestGoalDisambiguationComponent:
         assert response["handover"] == graph_input["handover"]
 
     @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        "agent_responses", [[{"status": WorkflowStatusEnum.CANCELLED}]]
+    )
     async def test_component_run_with_agent_stop_response(
         self,
         mock_interrupt,
@@ -345,9 +344,6 @@ class TestGoalDisambiguationComponent:
         mock_agent: MagicMock,
         compiled_graph: CompiledStateGraph,
     ):
-
-        mock_agent.run.side_effect = [{"status": WorkflowStatusEnum.CANCELLED}]
-
         response = await compiled_graph.ainvoke(input=graph_input, config=graph_config)
 
         assert mock_agent.run.call_count == 1

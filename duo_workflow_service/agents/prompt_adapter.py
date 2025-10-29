@@ -10,7 +10,6 @@ from ai_gateway.model_metadata import current_model_metadata_context
 from ai_gateway.prompts import Prompt, jinja2_formatter
 from ai_gateway.prompts.config.base import PromptConfig
 from ai_gateway.prompts.config.models import ModelClassProvider
-from duo_workflow_service.agents.base import BaseAgent
 from duo_workflow_service.entities.state import ChatWorkflowState
 from duo_workflow_service.gitlab.gitlab_api import Namespace, Project
 from duo_workflow_service.gitlab.gitlab_service_context import GitLabServiceContext
@@ -18,8 +17,8 @@ from duo_workflow_service.slash_commands.goal_parser import parse as slash_comma
 
 
 class ChatAgentPromptTemplate(Runnable[ChatWorkflowState, PromptValue]):
-    def __init__(self, prompt_template: dict[str, str]):
-        self.prompt_template = prompt_template
+    def __init__(self, config: PromptConfig):
+        self.prompt_template = config.prompt_template
 
     def invoke(
         self,
@@ -114,12 +113,6 @@ class ChatAgentPromptTemplate(Runnable[ChatWorkflowState, PromptValue]):
         return ChatPromptValue(messages=messages)
 
 
-class ChatPrompt(BaseAgent[ChatWorkflowState, BaseMessage]):
-    @classmethod
-    def _build_prompt_template(cls, config: PromptConfig) -> Runnable:
-        return ChatAgentPromptTemplate(config.prompt_template)
-
-
 class BasePromptAdapter(ABC):
     prompt: Prompt
 
@@ -155,7 +148,7 @@ class CustomPromptAdapter(BasePromptAdapter):
         self._agent_name = prompt.name
 
     # Custom prompts don't have ChatAgentPromptTemplate's built-in handling, so we manually inject the
-    # system_dynamic to match the behavior that ChatPrompt/ChatAgentPromptTemplate provides automatically.
+    # system_dynamic to match the behavior that ChatAgentPromptTemplate provides automatically.
     @staticmethod
     def enrich_prompt_template(prompt_template: dict[str, Any]) -> dict[str, Any]:
         if "prompt_template" not in prompt_template:

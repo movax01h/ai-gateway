@@ -5,12 +5,12 @@ from typing import Any, Optional
 from langchain_core.messages import AIMessage
 from langgraph.graph import StateGraph
 
-from ai_gateway.model_metadata import current_model_metadata_context
 from duo_workflow_service.agents import (
     HandoverAgent,
     PlanSupervisorAgent,
     ToolsExecutor,
 )
+from duo_workflow_service.agents.agent import build_agent
 from duo_workflow_service.components import ToolsApprovalComponent, ToolsRegistry
 from duo_workflow_service.components.base import BaseComponent
 from duo_workflow_service.entities import WorkflowState, WorkflowStatusEnum
@@ -63,7 +63,9 @@ class ExecutorComponent(BaseComponent):
         next_node: str,
         approval_component: Optional[ToolsApprovalComponent],
     ):
-        agent = self.prompt_registry.get_on_behalf(
+        agent = build_agent(
+            "executor",
+            self.prompt_registry,
             self.user,
             "workflow/executor",
             "^2.0.0",
@@ -71,7 +73,6 @@ class ExecutorComponent(BaseComponent):
             workflow_id=self.workflow_id,
             workflow_type=self.workflow_type,
             http_client=self.http_client,
-            model_metadata=current_model_metadata_context.get(),
             prompt_template_inputs={
                 "set_task_status_tool_name": "set_task_status",
                 "get_plan_tool_name": "get_plan",

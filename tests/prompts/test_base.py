@@ -14,7 +14,7 @@ from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 from langchain_core.messages.ai import InputTokenDetails, UsageMetadata
 from langchain_core.prompt_values import ChatPromptValue
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
-from langchain_core.runnables import Runnable
+from langchain_core.runnables import Runnable, RunnableConfig
 from langchain_core.tools import BaseTool
 from litellm.exceptions import Timeout
 from pydantic import AnyUrl
@@ -177,9 +177,11 @@ configurable_unit_primitives:
 
     @pytest.mark.asyncio
     @mock.patch("ai_gateway.prompts.base.get_request_logger")
+    @pytest.mark.parametrize("runnable_config", [None, RunnableConfig(callbacks=None)])
     async def test_ainvoke(
         self,
         mock_get_logger: mock.Mock,
+        runnable_config: Optional[RunnableConfig],
         mock_watch: mock.Mock,
         prompt: Prompt,
         model_response: str,
@@ -187,7 +189,9 @@ configurable_unit_primitives:
         mock_logger = mock.MagicMock()
         mock_get_logger.return_value = mock_logger
 
-        response = await prompt.ainvoke({"name": "Duo", "content": "What's up?"})
+        response = await prompt.ainvoke(
+            {"name": "Duo", "content": "What's up?"}, runnable_config
+        )
 
         assert response.content == model_response
 
@@ -240,9 +244,11 @@ configurable_unit_primitives:
 
     @pytest.mark.asyncio
     @mock.patch("ai_gateway.prompts.base.get_request_logger")
+    @pytest.mark.parametrize("runnable_config", [None, RunnableConfig(callbacks=None)])
     async def test_astream(
         self,
         mock_get_logger: mock.Mock,
+        runnable_config: Optional[RunnableConfig],
         mock_watch: mock.Mock,
         prompt: Prompt,
         model_response: str,
@@ -253,7 +259,9 @@ configurable_unit_primitives:
         mock_logger = mock.MagicMock()
         mock_get_logger.return_value = mock_logger
 
-        async for c in prompt.astream({"name": "Duo", "content": "What's up?"}):
+        async for c in prompt.astream(
+            {"name": "Duo", "content": "What's up?"}, runnable_config
+        ):
             response += c.content
 
             # Make sure we don't finish prematurely
