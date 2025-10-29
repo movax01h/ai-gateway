@@ -17,6 +17,11 @@ Information about this failing pipeline is contained in the `context` tag below.
   Use the `create_merge_request_note` tool with the `merge_request_url` to add a comment to the merge request
   describing your recommendations to the user. Make sure to include a link to the `pipeline_url` in your comment.
   Do not ask for any additional input from the user.
+
+  Make sure to include the text within the merge_request_comment_header tags:
+  <merge_request_comment_header>
+    [Session {{ workflow_id }}]({{ session_url }})
+  </merge_request_comment_header>
 {% else %}
-  Merge Request was not provided, so do not use any tools. Summarize your suggestions for this failing pipeline.
+  Merge Request was not provided, call the `final_response` tool and summarize your suggestions for this failing pipeline.
 {% endif %}

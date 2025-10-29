@@ -53,6 +53,10 @@ components:
         as: "fix_pipeline_context_results"
       - from: "context:fix_pipeline_agents_dot_md.tool_responses"
         as: "agents_dot_md"
+      - from: "context:workflow_id"
+        as: "workflow_id"
+      - from: "context:session_url"
+        as: "session_url"
     toolset: ["create_merge_request_note"]
     ui_log_events:
       - "on_agent_final_answer"
@@ -128,6 +132,10 @@ components:
         as: "source_branch"
       - from: "context:fix_pipeline_agents_dot_md.tool_responses"
         as: "agents_dot_md"
+      - from: "context:workflow_id"
+        as: "workflow_id"
+      - from: "context:session_url"
+        as: "session_url"
     toolset:
       - "run_git_command"
     ui_log_events:
@@ -146,6 +154,10 @@ components:
         as: "git_push_response"
       - from: "context:fix_pipeline_agents_dot_md.tool_responses"
         as: "agents_dot_md"
+      - from: "context:workflow_id"
+        as: "workflow_id"
+      - from: "context:session_url"
+        as: "session_url"
     toolset: ["create_merge_request_note"]
     ui_log_events:
       - "on_agent_final_answer"
