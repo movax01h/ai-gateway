@@ -157,13 +157,6 @@ def agent_responses_fixture() -> list[dict[str, Any]]:
     ]
 
 
-@pytest.fixture(name="mock_agent")
-def mock_agent_fixture(agent_responses: list[dict[str, Any]]):
-    with patch("ai_gateway.prompts.registry.LocalPromptRegistry.get_on_behalf") as mock:
-        mock.return_value.run.side_effect = agent_responses
-        yield mock
-
-
 @pytest.fixture(name="mock_handover_agent")
 def mock_handover_agent_fixture():
     with patch(
@@ -327,8 +320,7 @@ async def test_workflow_run(
 
     assert mock_tools_approval_component.return_value.attach.call_count == 1
 
-    assert mock_agent.call_count == 1
-    assert mock_agent.return_value.run.call_count >= 3
+    assert mock_agent.run.call_count >= 3
 
     assert mock_tools_executor.call_count == 1
     assert mock_tools_executor.return_value.run.call_count >= 1
@@ -379,8 +371,7 @@ async def test_workflow_run_with_memory_saver(
 
     await workflow.run("test_goal")
 
-    assert mock_agent.call_count == 1
-    assert mock_agent.return_value.run.call_count == 3
+    assert mock_agent.run.call_count == 3
 
     assert mock_tools_executor.call_count == 1
     assert mock_tools_executor.return_value.run.call_count >= 1
@@ -475,8 +466,7 @@ async def test_workflow_run_with_error_state(
 
     await workflow.run("test_goal")
 
-    assert mock_agent.call_count == 1
-    assert mock_agent.return_value.run.call_count == 2
+    assert mock_agent.run.call_count == 2
 
     assert mock_tools_executor.call_count == 1
     assert mock_tools_executor.return_value.run.call_count == 1
@@ -806,7 +796,6 @@ async def test_workflow_run_with_tool_approvals(
 
     await workflow.run("test_goal")
 
-    assert mock_agent.call_count == 1
     assert mock_tools_approval_execution.call_count == 1
 
     assert workflow.is_done
@@ -854,7 +843,6 @@ async def test_workflow_run_without_plan_approval_component(
         instance.compile.return_value = compiled_graph
         await workflow.run("test_goal")
 
-    assert mock_agent.call_count == 1
     assert mock_planner_component.return_value.attach.call_count == 1
     assert mock_executor_component.return_value.attach.call_count == 1
 
@@ -919,27 +907,3 @@ def test_software_development_workflow_model_config(
 
         assert isinstance(config, expected_config_type)
         assert config.model_name == expected_model
-
-
-@patch(
-    "duo_workflow_service.workflows.software_development.workflow.current_model_metadata_context"
-)
-def test_context_builder_uses_model_metadata(
-    mock_model_metadata_context,
-    tools_registry,
-    workflow,
-):
-    """Test that model_metadata is passed to context builder when prompt registry is enabled."""
-    mock_model_metadata = MagicMock()
-    mock_model_metadata_context.get.return_value = mock_model_metadata
-
-    mock_agent = MagicMock()
-    with patch.object(
-        workflow._prompt_registry, "get_on_behalf", return_value=mock_agent
-    ) as mock_get_on_behalf:
-        workflow._setup_context_builder(tools_registry)
-
-        mock_get_on_behalf.assert_called_once()
-        call_args = mock_get_on_behalf.call_args
-
-        assert call_args.kwargs["model_metadata"] == mock_model_metadata

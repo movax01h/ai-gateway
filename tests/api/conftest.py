@@ -8,8 +8,6 @@ from langchain_core.callbacks import CallbackManagerForLLMRun
 from langchain_core.language_models.chat_models import SimpleChatModel
 from langchain_core.messages import BaseMessage
 
-from ai_gateway.prompts import Prompt
-
 
 class FakeModel(SimpleChatModel):
     expected_message: str
@@ -58,20 +56,15 @@ def compatible_versions_fixture():
 @pytest.fixture(name="mock_registry_get")
 def mock_registry_get_fixture(
     request,
-    prompt_class: type[Prompt],
     compatible_versions: list[str],
 ):
     with patch("ai_gateway.prompts.registry.LocalPromptRegistry.get") as mock:
-        if prompt_class and not compatible_versions:
-            mock.side_effect = ValueError("No prompt version found matching the query:")
-        elif (
-            prompt_class
-            and compatible_versions is not None
-            and len(compatible_versions) > 0
-        ):
-            mock.return_value = request.getfixturevalue("prompt")
-        else:
+        if compatible_versions is None:
             mock.side_effect = KeyError()
+        elif not compatible_versions:
+            mock.side_effect = ValueError("No prompt version found matching the query:")
+        else:
+            mock.return_value = request.getfixturevalue("prompt")
 
         yield mock
 

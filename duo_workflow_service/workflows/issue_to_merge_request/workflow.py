@@ -13,6 +13,7 @@ from duo_workflow_service.agents import (
     RunToolNode,
     ToolsExecutor,
 )
+from duo_workflow_service.agents.agent import build_agent
 from duo_workflow_service.components import ToolsApprovalComponent, ToolsRegistry
 from duo_workflow_service.components.executor import ExecutorComponent
 from duo_workflow_service.components.planner import PlannerComponent
@@ -327,7 +328,9 @@ class Workflow(AbstractWorkflow):
         tools_registry: ToolsRegistry,
     ):
         context_builder_toolset = tools_registry.toolset(CONTEXT_BUILDER_TOOLS)
-        context_builder = self._prompt_registry.get_on_behalf(
+        context_builder = build_agent(
+            "context_builder",
+            self._prompt_registry,
             self._user,
             "workflow/issue_to_merge_request",
             "^1.0.0",

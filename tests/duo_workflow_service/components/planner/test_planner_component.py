@@ -10,6 +10,7 @@ from duo_workflow_service.components import PlanApprovalComponent, ToolsRegistry
 from duo_workflow_service.components.planner.component import PlannerComponent, Routes
 from duo_workflow_service.entities import Plan, Task, WorkflowState, WorkflowStatusEnum
 from duo_workflow_service.tools import DuoBaseTool
+from lib.internal_events.event_enum import CategoryEnum
 
 
 @pytest.fixture(name="approval_component")
@@ -22,8 +23,14 @@ def approval_component_fixture(mock_toolset):
     return mock
 
 
+@pytest.fixture(name="mock_build_agent")
+def mock_build_agent():
+    with patch("duo_workflow_service.components.planner.component.build_agent") as mock:
+        yield mock
+
+
 @pytest.fixture(name="mock_tool")
-def mock_tool_fixture():
+def mock_tool_fixture() -> Mock:
     mock = MagicMock(DuoBaseTool)
     mock.args_schema = None
     mock.name = "test_tool"
@@ -109,7 +116,7 @@ class TestPlannerComponent:
         }
 
     @pytest.fixture(name="planner_component")
-    def planner_component_fixture(self, mock_dependencies):
+    def planner_component_fixture(self, mock_dependencies) -> PlannerComponent:
         return PlannerComponent(**mock_dependencies)
 
     @pytest.fixture(name="compiled_graph")
@@ -159,7 +166,7 @@ class TestPlannerComponent:
 
         # Verify nodes are added
         expected_calls = [
-            call("planning", mock_agent.return_value.run),
+            call("planning", mock_agent.run),
             call("update_plan", mock_tools_executor.return_value.run),
             call("planning_supervisor", mock_supervisor_agent.return_value.run),
         ]
@@ -183,27 +190,22 @@ class TestPlannerComponent:
         # Verify return value
         assert entry_node == "planning"
 
-    @patch(
-        "duo_workflow_service.components.planner.component.current_model_metadata_context"
-    )
     def test_attach_creates_agent_with_correct_parameters(
         self,
-        mock_model_metadata_context,
-        mock_agent,
-        planner_component,
-        workflow_type,
-        mock_tool,
+        mock_build_agent: Mock,
+        planner_component: PlannerComponent,
+        workflow_type: CategoryEnum,
+        mock_tool: Mock,
     ):
         """Test that Agent is created with correct parameters."""
         mock_graph = Mock(spec=StateGraph)
 
-        mock_model_metadata = MagicMock()
-        mock_model_metadata_context.get.return_value = mock_model_metadata
-
         planner_component.attach(mock_graph, "exit_node", "next_node", None)
 
         # Verify Agent was called with correct parameters
-        mock_agent.assert_called_once_with(
+        mock_build_agent.assert_called_once_with(
+            "planner",
+            planner_component.prompt_registry,
             planner_component.user,
             "workflow/planner",
             "^1.0.0",
@@ -211,7 +213,6 @@ class TestPlannerComponent:
             workflow_id="test-workflow-123",
             workflow_type=workflow_type,
             http_client=planner_component.http_client,
-            model_metadata=mock_model_metadata,
             prompt_template_inputs={
                 "executor_agent_tools": f"{mock_tool.name}: {mock_tool.description}",
                 "create_plan_tool_name": "test_tool",
@@ -224,6 +225,63 @@ class TestPlannerComponent:
         )
 
     @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        "agent_responses",
+        [
+            [
+                {
+                    "plan": Plan(steps=[]),
+                    "status": WorkflowStatusEnum.PLANNING,
+                    "conversation_history": {
+                        "planner": [
+                            SystemMessage(content="system message"),
+                            HumanMessage(content="human message"),
+                            AIMessage(
+                                content="Tool calls are present, route to update_plan",
+                                tool_calls=[
+                                    {
+                                        "id": "1",
+                                        "name": "create_plan",
+                                        "args": {"task-0": "test"},
+                                    }
+                                ],
+                            ),
+                        ],
+                    },
+                },
+                {
+                    "plan": Plan(steps=[MagicMock(spec=Task)]),
+                    "status": WorkflowStatusEnum.PLANNING,
+                    "conversation_history": {
+                        "planner": [
+                            AIMessage(
+                                content="No tool calls, route to planning supervisor",
+                            ),
+                        ],
+                    },
+                },
+                {
+                    "status": WorkflowStatusEnum.COMPLETED,
+                    "conversation_history": {
+                        "planner": [
+                            AIMessage(
+                                content="Done with the planning",
+                                tool_calls=[
+                                    {
+                                        "id": "1",
+                                        "name": "handover_tool",
+                                        "args": {
+                                            "summary": "created plan with x steps"
+                                        },
+                                    }
+                                ],
+                            ),
+                        ],
+                    },
+                },
+            ]
+        ],
+    )
     async def test_component_run_with_no_approval_component(
         self,
         mock_supervisor_agent,
@@ -235,67 +293,62 @@ class TestPlannerComponent:
         mock_tool_registry,
         compiled_graph,
     ):
-        mock_agent.return_value.run.side_effect = [
-            {
-                "plan": Plan(steps=[]),
-                "status": WorkflowStatusEnum.PLANNING,
-                "conversation_history": {
-                    "planner": [
-                        SystemMessage(content="system message"),
-                        HumanMessage(content="human message"),
-                        AIMessage(
-                            content="Tool calls are present, route to update_plan",
-                            tool_calls=[
-                                {
-                                    "id": "1",
-                                    "name": "create_plan",
-                                    "args": {"task-0": "test"},
-                                }
-                            ],
-                        ),
-                    ],
-                },
-            },
-            {
-                "plan": Plan(steps=[MagicMock(spec=Task)]),
-                "status": WorkflowStatusEnum.PLANNING,
-                "conversation_history": {
-                    "planner": [
-                        AIMessage(
-                            content="No tool calls, route to planning supervisor",
-                        ),
-                    ],
-                },
-            },
-            {
-                "status": WorkflowStatusEnum.COMPLETED,
-                "conversation_history": {
-                    "planner": [
-                        AIMessage(
-                            content="Done with the planning",
-                            tool_calls=[
-                                {
-                                    "id": "1",
-                                    "name": "handover_tool",
-                                    "args": {"summary": "created plan with x steps"},
-                                }
-                            ],
-                        ),
-                    ],
-                },
-            },
-        ]
-
         response = await compiled_graph.ainvoke(input=graph_input, config=graph_config)
 
         mock_supervisor_agent.return_value.run.assert_called_once()
         mock_tools_executor.return_value.run.assert_called_once()
-        assert mock_agent.return_value.run.call_count == 3
+        assert mock_agent.run.call_count == 3
 
         assert response["status"] == WorkflowStatusEnum.COMPLETED
         assert len(response["conversation_history"]["planner"]) == 6
 
     @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        "agent_responses",
+        [
+            [
+                {
+                    "plan": Plan(steps=[]),
+                    "status": WorkflowStatusEnum.PLANNING,
+                    "conversation_history": {
+                        "planner": [
+                            SystemMessage(content="system message"),
+                            HumanMessage(content="human message"),
+                            AIMessage(
+                                content="Tool calls are present, route to update_plan",
+                                tool_calls=[
+                                    {
+                                        "id": "1",
+                                        "name": "create_plan",
+                                        "args": {"task-0": "test"},
+                                    }
+                                ],
+                            ),
+                        ],
+                    },
+                },
+                {
+                    "status": WorkflowStatusEnum.PLAN_APPROVAL_REQUIRED,
+                    "conversation_history": {
+                        "planner": [
+                            AIMessage(
+                                content="Done with the planning, route to plan approval",
+                                tool_calls=[
+                                    {
+                                        "id": "1",
+                                        "name": "handover_tool",
+                                        "args": {
+                                            "summary": "created plan with x steps"
+                                        },
+                                    }
+                                ],
+                            ),
+                        ],
+                    },
+                },
+            ]
+        ],
+    )
     async def test_component_run_with_approval_component(
         self,
         mock_tools_executor,
@@ -307,50 +360,10 @@ class TestPlannerComponent:
         mock_tool_registry,
         compiled_graph,
     ):
-        mock_agent.return_value.run.side_effect = [
-            {
-                "plan": Plan(steps=[]),
-                "status": WorkflowStatusEnum.PLANNING,
-                "conversation_history": {
-                    "planner": [
-                        SystemMessage(content="system message"),
-                        HumanMessage(content="human message"),
-                        AIMessage(
-                            content="Tool calls are present, route to update_plan",
-                            tool_calls=[
-                                {
-                                    "id": "1",
-                                    "name": "create_plan",
-                                    "args": {"task-0": "test"},
-                                }
-                            ],
-                        ),
-                    ],
-                },
-            },
-            {
-                "status": WorkflowStatusEnum.PLAN_APPROVAL_REQUIRED,
-                "conversation_history": {
-                    "planner": [
-                        AIMessage(
-                            content="Done with the planning, route to plan approval",
-                            tool_calls=[
-                                {
-                                    "id": "1",
-                                    "name": "handover_tool",
-                                    "args": {"summary": "created plan with x steps"},
-                                }
-                            ],
-                        ),
-                    ],
-                },
-            },
-        ]
-
         response = await compiled_graph.ainvoke(input=graph_input, config=graph_config)
         mock_tools_executor.return_value.run.assert_called_once()
 
-        assert mock_agent.return_value.run.call_count == 2
+        assert mock_agent.run.call_count == 2
 
         assert response["status"] == WorkflowStatusEnum.PLAN_APPROVAL_REQUIRED
         assert len(response["conversation_history"]["planner"]) == 4

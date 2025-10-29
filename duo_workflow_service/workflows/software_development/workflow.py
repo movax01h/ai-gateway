@@ -18,13 +18,13 @@ from langgraph.graph import (  # pylint: disable=no-langgraph-langchain-imports
     StateGraph,
 )
 
-from ai_gateway.model_metadata import current_model_metadata_context
 from duo_workflow_service.agents import (
     HandoverAgent,
     PlanSupervisorAgent,
     PlanTerminatorAgent,
     ToolsExecutor,
 )
+from duo_workflow_service.agents.agent import build_agent
 from duo_workflow_service.components import (
     PlanApprovalComponent,
     ToolsApprovalComponent,
@@ -360,7 +360,9 @@ class Workflow(AbstractWorkflow):
     def _setup_context_builder(self, tools_registry: ToolsRegistry):
         context_builder_toolset = tools_registry.toolset(CONTEXT_BUILDER_TOOLS)
 
-        context_builder = self._prompt_registry.get_on_behalf(
+        context_builder = build_agent(
+            "context_builder",
+            self._prompt_registry,
             self._user,
             "workflow/context_builder",
             "^1.0.0",
@@ -368,7 +370,6 @@ class Workflow(AbstractWorkflow):
             workflow_id=self._workflow_id,
             workflow_type=self._workflow_type,
             http_client=self._http_client,
-            model_metadata=current_model_metadata_context.get(),
         )
 
         context_builder.prompt_template_inputs.setdefault(

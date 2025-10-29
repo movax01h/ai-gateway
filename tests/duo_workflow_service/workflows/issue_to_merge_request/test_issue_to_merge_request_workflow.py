@@ -99,13 +99,6 @@ def agent_responses_fixture() -> list[dict[str, Any]]:
     ]
 
 
-@pytest.fixture(name="mock_agent")
-def mock_agent_fixture(agent_responses: list[dict[str, Any]]):
-    with patch("ai_gateway.prompts.registry.LocalPromptRegistry.get_on_behalf") as mock:
-        mock.return_value.run.side_effect = agent_responses
-        yield mock
-
-
 @pytest.fixture(name="mock_run_tool_node_class")
 def mock_run_tool_node_class_fixture():
     with patch(
@@ -200,8 +193,7 @@ async def test_workflow_run(
         approval_component=mock_tools_approval,
     )
 
-    assert mock_agent.call_count == 1
-    assert mock_agent.return_value.run.call_count == 2
+    assert mock_agent.run.call_count == 2
 
     assert mock_tools_executor.call_count == 1
     assert mock_tools_executor.return_value.run.call_count >= 1

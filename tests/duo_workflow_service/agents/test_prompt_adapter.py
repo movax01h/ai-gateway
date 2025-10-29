@@ -59,11 +59,11 @@ def sample_chat_workflow_state_fixture():
     )
 
 
-@pytest.fixture(name="prompt_template_with_split_system")
-def prompt_template_with_split_system_fixture():
-    """Prompt template with both system_static and system_dynamic parts."""
-    return {
-        "system_static": """You are GitLab Duo Chat, an AI coding assistant.
+@pytest.mark.parametrize(
+    "prompt_template",
+    [
+        {
+            "system_static": """You are GitLab Duo Chat, an AI coding assistant.
 
 <gitlab_instance_info>
 <gitlab_instance_type>{{ gitlab_instance_type }}</gitlab_instance_type>
@@ -74,7 +74,7 @@ def prompt_template_with_split_system_fixture():
 <core_mission>
 Your primary role is collaborative programming.
 </core_mission>""",
-        "system_dynamic": """<context>
+            "system_dynamic": """<context>
 The current date is {{ current_date }}. The current time is {{ current_time }}. The user's timezone is
 {{ current_timezone }}.
 {%- if project %}
@@ -94,18 +94,18 @@ Here is the project information for the current GitLab project the USER is worki
 </namespace>
 {%- endif %}
 </context>""",
-        "user": "{{ message.content }}",
-    }
-
-
+            "user": "{{ message.content }}",
+        }
+    ],
+)
 class TestChatAgentPromptTemplate:
     def test_split_system_prompts_create_separate_messages(
         self,
-        prompt_template_with_split_system,
+        prompt_config,
         sample_chat_workflow_state,
         mock_datetime,
     ):
-        template = ChatAgentPromptTemplate(prompt_template_with_split_system)
+        template = ChatAgentPromptTemplate(prompt_config)
 
         mock_gitlab_info = GitLabInstanceInfo(
             instance_type="GitLab.com (SaaS)",
@@ -178,7 +178,7 @@ class TestChatAgentPromptTemplate:
         user_message = messages[2]
         assert isinstance(user_message, HumanMessage)
 
-    def test_conversation_history_processing(self, prompt_template_with_split_system):
+    def test_conversation_history_processing(self, prompt_config):
         state_with_history = ChatWorkflowState(
             plan={"steps": []},
             status="execution",
@@ -196,7 +196,7 @@ class TestChatAgentPromptTemplate:
             approval=None,
         )
 
-        template = ChatAgentPromptTemplate(prompt_template_with_split_system)
+        template = ChatAgentPromptTemplate(prompt_config)
 
         with patch.object(
             GitLabServiceContext, "get_current_instance_info", return_value=None
@@ -226,12 +226,12 @@ class TestChatAgentPromptTemplate:
     )
     def test_anthropic_cache_control(
         self,
-        prompt_template_with_split_system,
+        prompt_config,
         sample_chat_workflow_state,
         is_anthropic_model,
         expected_content_type,
     ):
-        template = ChatAgentPromptTemplate(prompt_template_with_split_system)
+        template = ChatAgentPromptTemplate(prompt_config)
 
         with patch.object(
             GitLabServiceContext, "get_current_instance_info", return_value=None
@@ -268,7 +268,7 @@ class TestChatAgentPromptTemplate:
         else:
             assert "GitLab Duo Chat" in static_system_message.content
 
-    def test_slash_command_parsing(self, prompt_template_with_split_system):
+    def test_slash_command_parsing(self, prompt_config):
         state_with_slash_command = ChatWorkflowState(
             plan={"steps": []},
             status="execution",
@@ -284,7 +284,7 @@ class TestChatAgentPromptTemplate:
             approval=None,
         )
 
-        template = ChatAgentPromptTemplate(prompt_template_with_split_system)
+        template = ChatAgentPromptTemplate(prompt_config)
 
         with patch.object(
             GitLabServiceContext, "get_current_instance_info", return_value=None
@@ -463,6 +463,15 @@ class TestCustomPromptAdapter:
             CustomPromptAdapter.enrich_prompt_template(invalid_prompt_template)
 
 
+@pytest.mark.parametrize(
+    "prompt_template",
+    [
+        {
+            "system_static": "<model_info>\n<model_name>{{ model_friendly_name }}</model_name>\n</model_info>",
+            "user": "{{ message.content }}",
+        }
+    ],
+)
 class TestPromptAdapterFriendlyName:
     """Test friendly_name functionality in prompt adapters."""
 
@@ -484,15 +493,6 @@ class TestPromptAdapterFriendlyName:
             friendly_name="Claude Sonnet 4.5 - Anthropic",
         )
 
-    @pytest.fixture
-    def mock_prompt_template(self):
-        """Mock prompt template with model metadata injection."""
-        mock_prompt = Mock()
-        mock_prompt.text = "<model_info>\n<model_name>{{ model_friendly_name }}</model_name>\n</model_info>"
-        mock_user_prompt = Mock()
-        mock_user_prompt.text = "{{ message.content }}"
-        return {"system_static": mock_prompt, "user": mock_user_prompt}
-
     @patch(
         "duo_workflow_service.gitlab.gitlab_service_context.GitLabServiceContext.get_current_instance_info"
     )
@@ -503,13 +503,13 @@ class TestPromptAdapterFriendlyName:
         mock_instance_info,
         mock_gitlab_instance_info,
         mock_model_metadata,
-        mock_prompt_template,
+        prompt_config,
     ):
         """Test that ChatAgentPromptTemplate injects friendly_name into template."""
         mock_context.get.return_value = mock_model_metadata
         mock_instance_info.return_value = mock_gitlab_instance_info
 
-        adapter = ChatAgentPromptTemplate(prompt_template=mock_prompt_template)
+        adapter = ChatAgentPromptTemplate(prompt_config)
 
         input_data = {
             "conversation_history": {"test_agent": [HumanMessage(content="Hello")]},
@@ -547,13 +547,13 @@ class TestPromptAdapterFriendlyName:
         mock_context,
         mock_instance_info,
         mock_gitlab_instance_info,
-        mock_prompt_template,
+        prompt_config,
     ):
         """Test that ChatAgentPromptTemplate handles missing model metadata gracefully."""
         mock_context.get.return_value = None
         mock_instance_info.return_value = mock_gitlab_instance_info
 
-        adapter = ChatAgentPromptTemplate(prompt_template=mock_prompt_template)
+        adapter = ChatAgentPromptTemplate(prompt_config)
 
         input_data = {
             "conversation_history": {"test_agent": [HumanMessage(content="Hello")]},
@@ -588,7 +588,7 @@ class TestPromptAdapterFriendlyName:
         mock_context,
         mock_instance_info,
         mock_gitlab_instance_info,
-        mock_prompt_template,
+        prompt_config,
     ):
         """Test ChatAgentPromptTemplate when model metadata exists but has no friendly_name."""
         metadata_no_friendly_name = ModelMetadata(
@@ -601,7 +601,7 @@ class TestPromptAdapterFriendlyName:
         mock_context.get.return_value = metadata_no_friendly_name
         mock_instance_info.return_value = mock_gitlab_instance_info
 
-        adapter = ChatAgentPromptTemplate(prompt_template=mock_prompt_template)
+        adapter = ChatAgentPromptTemplate(prompt_config)
 
         input_data = {
             "conversation_history": {"test_agent": [HumanMessage(content="Hello")]},
@@ -636,7 +636,7 @@ class TestPromptAdapterFriendlyName:
         mock_context,
         mock_instance_info,
         mock_gitlab_instance_info,
-        mock_prompt_template,
+        prompt_config,
     ):
         """Test ChatAgentPromptTemplate with self-hosted model friendly_name."""
         self_hosted_metadata = ModelMetadata(
@@ -648,7 +648,7 @@ class TestPromptAdapterFriendlyName:
         mock_context.get.return_value = self_hosted_metadata
         mock_instance_info.return_value = mock_gitlab_instance_info
 
-        adapter = ChatAgentPromptTemplate(prompt_template=mock_prompt_template)
+        adapter = ChatAgentPromptTemplate(prompt_config)
 
         input_data = {
             "conversation_history": {"test_agent": [HumanMessage(content="Hello")]},

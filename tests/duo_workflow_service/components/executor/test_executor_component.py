@@ -9,6 +9,15 @@ from duo_workflow_service.components import ToolsApprovalComponent, ToolsRegistr
 from duo_workflow_service.components.executor.component import ExecutorComponent, Routes
 from duo_workflow_service.entities import Plan, WorkflowState, WorkflowStatusEnum
 from duo_workflow_service.tools import DuoBaseTool
+from lib.internal_events.event_enum import CategoryEnum
+
+
+@pytest.fixture(name="mock_build_agent")
+def mock_build_agent():
+    with patch(
+        "duo_workflow_service.components.executor.component.build_agent"
+    ) as mock:
+        yield mock
 
 
 @pytest.fixture(name="approval_component")
@@ -157,7 +166,7 @@ class TestExecutorComponent:
 
         # Verify nodes are added
         expected_calls = [
-            call("execution", mock_agent.return_value.run),
+            call("execution", mock_agent.run),
             call("execution_tools", mock_tools_executor.return_value.run),
             call("execution_supervisor", mock_supervisor_agent.return_value.run),
             call("execution_handover", mock_handover_agent.return_value.run),
@@ -185,26 +194,21 @@ class TestExecutorComponent:
         # Verify return value
         assert entry_node == "execution"
 
-    @patch(
-        "duo_workflow_service.components.executor.component.current_model_metadata_context"
-    )
     def test_attach_creates_agent_with_correct_parameters(
         self,
-        mock_model_metadata_context,
-        mock_agent,
-        executor_component,
-        workflow_type,
+        mock_build_agent: Mock,
+        executor_component: ExecutorComponent,
+        workflow_type: CategoryEnum,
     ):
         """Test that Agent is created with correct parameters."""
         mock_graph = Mock(spec=StateGraph)
 
-        mock_model_metadata = MagicMock()
-        mock_model_metadata_context.get.return_value = mock_model_metadata
-
         executor_component.attach(mock_graph, "exit_node", "next_node", None)
 
         # Verify Agent was called with correct parameters
-        mock_agent.assert_called_once_with(
+        mock_build_agent.assert_called_once_with(
+            "executor",
+            executor_component.prompt_registry,
             executor_component.user,
             "workflow/executor",
             "^2.0.0",
@@ -212,7 +216,6 @@ class TestExecutorComponent:
             workflow_id="test-workflow-123",
             workflow_type=workflow_type,
             http_client=executor_component.http_client,
-            model_metadata=mock_model_metadata,
             prompt_template_inputs={
                 "set_task_status_tool_name": "set_task_status",
                 "get_plan_tool_name": "get_plan",
@@ -221,6 +224,62 @@ class TestExecutorComponent:
         )
 
     @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        "agent_responses",
+        [
+            [
+                {
+                    "plan": Plan(steps=[]),
+                    "status": WorkflowStatusEnum.EXECUTION,
+                    "conversation_history": {
+                        "executor": [
+                            SystemMessage(content="system message"),
+                            HumanMessage(content="human message"),
+                            AIMessage(
+                                content="Tool calls are present, route to executor tools execution",
+                                tool_calls=[
+                                    {
+                                        "id": "1",
+                                        "name": "test_tool",
+                                        "args": {"test": "test"},
+                                    }
+                                ],
+                            ),
+                        ],
+                    },
+                },
+                {
+                    "plan": Plan(steps=[]),
+                    "status": WorkflowStatusEnum.EXECUTION,
+                    "conversation_history": {
+                        "executor": [
+                            AIMessage(
+                                content="No tool calls, route to execution supervisor",
+                            ),
+                        ],
+                    },
+                },
+                {
+                    "plan": Plan(steps=[]),
+                    "status": WorkflowStatusEnum.EXECUTION,
+                    "conversation_history": {
+                        "executor": [
+                            AIMessage(
+                                content="Done with the execution, over to handover agent",
+                                tool_calls=[
+                                    {
+                                        "id": "1",
+                                        "name": "handover_tool",
+                                        "args": {"summary": "done"},
+                                    }
+                                ],
+                            ),
+                        ],
+                    },
+                },
+            ]
+        ],
+    )
     async def test_component_run_with_no_approval_component(
         self,
         mock_handover_agent,
@@ -234,57 +293,6 @@ class TestExecutorComponent:
     ):
         mock_tool_registry.approval_required.return_value = False
 
-        mock_agent.return_value.run.side_effect = [
-            {
-                "plan": Plan(steps=[]),
-                "status": WorkflowStatusEnum.EXECUTION,
-                "conversation_history": {
-                    "executor": [
-                        SystemMessage(content="system message"),
-                        HumanMessage(content="human message"),
-                        AIMessage(
-                            content="Tool calls are present, route to executor tools execution",
-                            tool_calls=[
-                                {
-                                    "id": "1",
-                                    "name": "test_tool",
-                                    "args": {"test": "test"},
-                                }
-                            ],
-                        ),
-                    ],
-                },
-            },
-            {
-                "plan": Plan(steps=[]),
-                "status": WorkflowStatusEnum.EXECUTION,
-                "conversation_history": {
-                    "executor": [
-                        AIMessage(
-                            content="No tool calls, route to execution supervisor",
-                        ),
-                    ],
-                },
-            },
-            {
-                "plan": Plan(steps=[]),
-                "status": WorkflowStatusEnum.EXECUTION,
-                "conversation_history": {
-                    "executor": [
-                        AIMessage(
-                            content="Done with the execution, over to handover agent",
-                            tool_calls=[
-                                {
-                                    "id": "1",
-                                    "name": "handover_tool",
-                                    "args": {"summary": "done"},
-                                }
-                            ],
-                        ),
-                    ],
-                },
-            },
-        ]
         mock_supervisor_agent.return_value.run.return_value = {
             "conversation_history": {
                 "executor": [
@@ -306,7 +314,7 @@ class TestExecutorComponent:
         mock_supervisor_agent.return_value.run.assert_called_once()
         mock_handover_agent.return_value.run.assert_called_once()
         mock_tools_executor.return_value.run.assert_called_once()
-        assert mock_agent.return_value.run.call_count == 3
+        assert mock_agent.run.call_count == 3
 
         assert response["status"] == WorkflowStatusEnum.COMPLETED
         assert len(response["handover"]) == 1
@@ -314,6 +322,51 @@ class TestExecutorComponent:
         assert len(response["conversation_history"]["executor"]) == 6
 
     @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        "agent_responses",
+        [
+            [
+                {
+                    "plan": Plan(steps=[]),
+                    "status": WorkflowStatusEnum.EXECUTION,
+                    "conversation_history": {
+                        "executor": [
+                            SystemMessage(content="system message"),
+                            HumanMessage(content="human message"),
+                            AIMessage(
+                                content="Tool calls are present, route to executor tools execution.",
+                                tool_calls=[
+                                    {
+                                        "id": "1",
+                                        "name": "test_tool",
+                                        "args": {"test": "test"},
+                                    }
+                                ],
+                            ),
+                        ],
+                    },
+                },
+                {
+                    "plan": Plan(steps=[]),
+                    "status": WorkflowStatusEnum.EXECUTION,
+                    "conversation_history": {
+                        "executor": [
+                            AIMessage(
+                                content="Done with the execution, over to handover agent",
+                                tool_calls=[
+                                    {
+                                        "id": "1",
+                                        "name": "handover_tool",
+                                        "args": {"summary": "done"},
+                                    }
+                                ],
+                            ),
+                        ],
+                    },
+                },
+            ]
+        ],
+    )
     async def test_component_run_with_approval_component(
         self,
         mock_handover_agent,
@@ -327,47 +380,6 @@ class TestExecutorComponent:
         mock_tool_registry,
         compiled_graph,
     ):
-        mock_agent.return_value.run.side_effect = [
-            {
-                "plan": Plan(steps=[]),
-                "status": WorkflowStatusEnum.EXECUTION,
-                "conversation_history": {
-                    "executor": [
-                        SystemMessage(content="system message"),
-                        HumanMessage(content="human message"),
-                        AIMessage(
-                            content="Tool calls are present, route to executor tools execution.",
-                            tool_calls=[
-                                {
-                                    "id": "1",
-                                    "name": "test_tool",
-                                    "args": {"test": "test"},
-                                }
-                            ],
-                        ),
-                    ],
-                },
-            },
-            {
-                "plan": Plan(steps=[]),
-                "status": WorkflowStatusEnum.EXECUTION,
-                "conversation_history": {
-                    "executor": [
-                        AIMessage(
-                            content="Done with the execution, over to handover agent",
-                            tool_calls=[
-                                {
-                                    "id": "1",
-                                    "name": "handover_tool",
-                                    "args": {"summary": "done"},
-                                }
-                            ],
-                        ),
-                    ],
-                },
-            },
-        ]
-
         mock_tools_executor.return_value.run.return_value = {
             "plan": Plan(steps=[]),
             "status": WorkflowStatusEnum.EXECUTION,
@@ -379,7 +391,7 @@ class TestExecutorComponent:
         mock_supervisor_agent.return_value.run.assert_not_called()
         mock_handover_agent.return_value.run.assert_called_once()
         mock_tools_executor.return_value.run.assert_called_once()
-        assert mock_agent.return_value.run.call_count == 2
+        assert mock_agent.run.call_count == 2
 
         assert response["status"] == WorkflowStatusEnum.COMPLETED
         assert len(response["handover"]) == 1
@@ -387,6 +399,41 @@ class TestExecutorComponent:
         assert len(response["conversation_history"]["executor"]) == 4
 
     @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        "agent_responses",
+        [
+            [
+                {
+                    "plan": Plan(steps=[]),
+                    "status": WorkflowStatusEnum.EXECUTION,
+                    "conversation_history": {
+                        "executor": [
+                            SystemMessage(content="system message"),
+                            HumanMessage(content="human message"),
+                            AIMessage(
+                                content="Tool calls are present, route to executor tools execution",
+                                tool_calls=[
+                                    {
+                                        "id": "1",
+                                        "name": "test_tool",
+                                        "args": {"test": "test"},
+                                    }
+                                ],
+                            ),
+                        ],
+                    },
+                },
+                {
+                    "status": WorkflowStatusEnum.ERROR,
+                    "conversation_history": {
+                        "executor": [
+                            AIMessage(content="Failed, exiting workflow"),
+                        ],
+                    },
+                },
+            ]
+        ],
+    )
     async def test_component_run_with_error(
         self,
         mock_handover_agent,
@@ -400,36 +447,6 @@ class TestExecutorComponent:
         compiled_graph,
     ):
         mock_tool_registry.approval_required.return_value = False
-        mock_agent.return_value.run.side_effect = [
-            {
-                "plan": Plan(steps=[]),
-                "status": WorkflowStatusEnum.EXECUTION,
-                "conversation_history": {
-                    "executor": [
-                        SystemMessage(content="system message"),
-                        HumanMessage(content="human message"),
-                        AIMessage(
-                            content="Tool calls are present, route to executor tools execution",
-                            tool_calls=[
-                                {
-                                    "id": "1",
-                                    "name": "test_tool",
-                                    "args": {"test": "test"},
-                                }
-                            ],
-                        ),
-                    ],
-                },
-            },
-            {
-                "status": WorkflowStatusEnum.ERROR,
-                "conversation_history": {
-                    "executor": [
-                        AIMessage(content="Failed, exiting workflow"),
-                    ],
-                },
-            },
-        ]
 
         mock_tools_executor.return_value.run.return_value = {
             "status": WorkflowStatusEnum.ERROR,
@@ -441,7 +458,7 @@ class TestExecutorComponent:
         mock_supervisor_agent.return_value.run.assert_not_called()
         mock_handover_agent.return_value.run.assert_not_called()
         mock_tools_executor.return_value.run.assert_called_once()
-        assert mock_agent.return_value.run.call_count == 2
+        assert mock_agent.run.call_count == 2
 
         assert response["status"] == WorkflowStatusEnum.ERROR
         assert len(response["handover"]) == 0

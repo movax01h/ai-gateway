@@ -345,13 +345,10 @@ async def test_chat_agent_provider_5xx_error_handling(chat_agent, input):
     )
 
 
-class TestChatAgentGitLabInstanceInfo:
-    """Test GitLab instance info integration with ChatAgent static prompt."""
-
-    @pytest.fixture(name="prompt_template_with_gitlab_info")
-    def prompt_template_with_gitlab_info_fixture(self):
-        """Prompt template that includes GitLab instance info in static system prompt."""
-        return {
+@pytest.mark.parametrize(
+    "prompt_template",
+    [
+        {
             "system_static": """You are GitLab Duo Chat, an AI coding assistant.
 
 <gitlab_instance_info>
@@ -382,6 +379,10 @@ The current date is {{ current_date }}.
 </context>""",
             "user": "{{ message.content }}",
         }
+    ],
+)
+class TestChatAgentGitLabInstanceInfo:
+    """Test GitLab instance info integration with ChatAgent static prompt."""
 
     @pytest.fixture(name="input_with_project")
     def input_with_project_fixture(self):
@@ -407,10 +408,10 @@ The current date is {{ current_date }}.
         )
 
     def test_static_prompt_contains_gitlab_instance_info(
-        self, prompt_template_with_gitlab_info, input_with_project
+        self, prompt_config, input_with_project
     ):
         """Test static prompt contains correct GitLab instance info from context."""
-        template = ChatAgentPromptTemplate(prompt_template_with_gitlab_info)
+        template = ChatAgentPromptTemplate(prompt_config)
 
         # Mock the GitLab instance info service
         mock_gitlab_service = Mock()
@@ -460,10 +461,10 @@ The current date is {{ current_date }}.
         )
 
     def test_static_prompt_without_gitlab_context(
-        self, prompt_template_with_gitlab_info, input_with_project
+        self, prompt_config, input_with_project
     ):
         """Test static prompt handles missing GitLab context gracefully."""
-        template = ChatAgentPromptTemplate(prompt_template_with_gitlab_info)
+        template = ChatAgentPromptTemplate(prompt_config)
 
         # Call template without GitLab context
         result = template.invoke(

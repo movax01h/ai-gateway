@@ -1,6 +1,8 @@
 from datetime import datetime, timezone
 from typing import Any
 
+from langchain_core.runnables import RunnableBinding
+
 from ai_gateway.prompts import Input, Output, Prompt
 from duo_workflow_service.entities.state import (
     MessageTypeEnum,
@@ -12,9 +14,16 @@ from duo_workflow_service.entities.state import (
 from lib.internal_events.event_enum import CategoryEnum
 
 
-class BaseAgent(Prompt[Input, Output]):
+class BaseAgent(RunnableBinding[Input, Output]):
+    name: str
+    prompt: Prompt
     workflow_id: str
     workflow_type: CategoryEnum
+
+    def __init__(self, prompt: Prompt, **kwargs) -> None:
+        super().__init__(
+            prompt=prompt, bound=prompt, **kwargs
+        )  # type: ignore[call-arg] # seems that mypy checks only against the immediate parent's init arguments
 
     def _create_ui_chat_log(
         self,
@@ -37,7 +46,7 @@ class BaseAgent(Prompt[Input, Output]):
     @property
     def internal_event_extra(self) -> dict[str, Any]:
         return {
-            "agent_name": self.name,
+            "agent_name": self.prompt.name,
             "workflow_id": self.workflow_id,
             "workflow_type": self.workflow_type.value,
         }

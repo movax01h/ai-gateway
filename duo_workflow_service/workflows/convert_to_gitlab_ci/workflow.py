@@ -9,6 +9,7 @@ from langgraph.checkpoint.memory import BaseCheckpointSaver
 from langgraph.graph import END, StateGraph
 
 from duo_workflow_service.agents import HandoverAgent, RunToolNode, ToolsExecutor
+from duo_workflow_service.agents.agent import build_agent
 from duo_workflow_service.components import ToolsRegistry
 from duo_workflow_service.entities import (
     MAX_SINGLE_MESSAGE_TOKENS,
@@ -220,7 +221,9 @@ class Workflow(AbstractWorkflow):
         translation_tools = ["create_file_with_contents", "read_file", "ci_linter"]
         agents_toolset = tools_registry.toolset(translation_tools)
 
-        translator_agent = self._prompt_registry.get_on_behalf(
+        translator_agent = build_agent(
+            AGENT_NAME,
+            self._prompt_registry,
             self._user,
             "workflow/convert_to_gitlab_ci",
             "^1.0.0",

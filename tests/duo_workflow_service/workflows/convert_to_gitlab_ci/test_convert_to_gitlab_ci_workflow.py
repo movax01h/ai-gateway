@@ -40,6 +40,14 @@ def mock_checkpointer_fixture():
     return Mock()
 
 
+@pytest.fixture(name="mock_build_agent")
+def mock_build_agent():
+    with patch(
+        "duo_workflow_service.workflows.convert_to_gitlab_ci.workflow.build_agent"
+    ) as mock:
+        yield mock
+
+
 @pytest.fixture(name="workflow_type")
 def workflow_type_fixture() -> CategoryEnum:
     return CategoryEnum.WORKFLOW_CONVERT_TO_GITLAB_CI
@@ -108,7 +116,7 @@ def mock_agent_response_fixture():
 
 @pytest.fixture(name="mock_agent")
 def mock_agent_fixture(mock_agent_response: dict[str, Any]):
-    with patch("ai_gateway.prompts.registry.LocalPromptRegistry.get_on_behalf") as mock:
+    with patch("duo_workflow_service.agents.agent.Agent") as mock:
         mock.return_value.run.return_value = mock_agent_response
         yield mock
 
@@ -305,7 +313,7 @@ async def test_workflow_initialization(workflow):
 
 @pytest.mark.asyncio
 async def test_workflow_compilation(
-    mock_agent,
+    mock_build_agent,
     mock_tools_registry,
     mock_checkpointer,
     workflow_type,
@@ -320,7 +328,9 @@ async def test_workflow_compilation(
     )
 
     assert compiled_graph is not None
-    mock_agent.assert_called_with(
+    mock_build_agent.assert_called_with(
+        "ci_pipelines_manager_agent",
+        workflow._prompt_registry,
         workflow._user,
         "workflow/convert_to_gitlab_ci",
         "^1.0.0",

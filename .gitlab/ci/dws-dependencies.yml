@@ -6,6 +6,7 @@
     - tests/duo_workflow_service/**/*
     - contract/**/*
     - pyproject.toml
+    - ai_gateway/api/auth_utils.py
     - ai_gateway/app.py
     - ai_gateway/auth/glgo.py
     - ai_gateway/code_suggestions/language_server.py

@@ -139,7 +139,13 @@ class Prompt(RunnableBinding[Input, Output]):
             if prompt_template_factory
             else self._build_prompt_template(config)
         )
-        chain = cast(Runnable[Input, Output], prompt | model.bind(**model_kwargs))
+        chain = cast(
+            Runnable[Input, Output],
+            prompt
+            | model.bind(**model_kwargs).with_config(
+                callbacks=[PromptLoggingHandler()]
+            ),
+        )
 
         super().__init__(
             name=config.name,
@@ -220,7 +226,7 @@ class Prompt(RunnableBinding[Input, Output]):
         ):
             result = await super().ainvoke(
                 input,
-                self._add_logger_to_config(config),
+                config,
                 **kwargs,
             )
 
@@ -250,7 +256,7 @@ class Prompt(RunnableBinding[Input, Output]):
 
             async for item in super().astream(
                 input,
-                self._add_logger_to_config(config),
+                config,
                 **kwargs,
             ):
                 if previous_item:
@@ -327,17 +333,6 @@ class Prompt(RunnableBinding[Input, Output]):
                         model_provider=self.model_provider,
                         additional_properties=additional_properties,
                     )
-
-    @staticmethod
-    def _add_logger_to_config(config):
-        callback = PromptLoggingHandler()
-
-        if not config:
-            return {"callbacks": [callback]}
-
-        config["callbacks"] = [*config.get("callbacks", []), callback]
-
-        return config
 
     @classmethod
     def _build_prompt_template(
