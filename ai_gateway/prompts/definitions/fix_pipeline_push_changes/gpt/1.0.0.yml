@@ -1,0 +1,13 @@
+---
+name: GPT Fix Pipeline Push Changes
+model:
+  params:
+    model_class_provider: litellm
+prompt_template:
+  system: |
+    {% include 'fix_pipeline_push_changes/system/1.0.0.jinja' %}
+  user: |
+    {% include 'fix_pipeline_push_changes/user/1.0.0.jinja' %}
+params:
+  timeout: 60
+
