@@ -40,6 +40,7 @@ BASE_CONTEXT_SCHEMA = {
     "realm": None,
     "source": "ai-gateway-python",
     "total_tokens": None,
+    "deployment_type": None,
 }
 
 

@@ -132,6 +132,7 @@ class BillingEventsClient:
             namespace_id=internal_context.namespace_id,
             root_namespace_id=internal_context.ultimate_parent_namespace_id,
             correlation_id=internal_context.correlation_id,
+            deployment_type=internal_context.deployment_type,
         )
 
         structured_event = StructuredEvent(

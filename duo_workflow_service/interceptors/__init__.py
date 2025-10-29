@@ -10,3 +10,4 @@ X_GITLAB_FEATURE_ENABLED_BY_NAMESPACE_IDS = "x-gitlab-feature-enabled-by-namespa
 X_GITLAB_FEATURE_ENABLEMENT_TYPE = "x-gitlab-feature-enablement-type"
 X_GITLAB_IS_A_GITLAB_MEMBER = "x-gitlab-is-a-gitlab-member"
 X_GITLAB_LANGUAGE_SERVER_VERSION = "x-gitlab-language-server-version"
+X_GITLAB_DEPLOYMENT_TYPE = "x-gitlab-deployment-type"

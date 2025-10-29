@@ -10,6 +10,7 @@ from ai_gateway.api.middleware.headers import (
     X_GITLAB_CLIENT_NAME,
     X_GITLAB_CLIENT_TYPE,
     X_GITLAB_CLIENT_VERSION,
+    X_GITLAB_DEPLOYMENT_TYPE,
     X_GITLAB_FEATURE_ENABLED_BY_NAMESPACE_IDS_HEADER,
     X_GITLAB_FEATURE_ENABLEMENT_TYPE_HEADER,
     X_GITLAB_GLOBAL_USER_ID_HEADER,
@@ -79,6 +80,7 @@ class InternalEventMiddleware:
                 X_GITLAB_ROOT_NAMESPACE_ID, None
             )
             or None,
+            deployment_type=request.headers.get(X_GITLAB_DEPLOYMENT_TYPE),
         )
         current_event_context.set(context)
         tracked_internal_events.set(set())
