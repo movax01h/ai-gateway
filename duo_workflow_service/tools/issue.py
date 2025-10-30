@@ -172,11 +172,10 @@ class ListIssuesInput(ProjectResourceInput):
         description="""Return issues assigned to the given user ID. It can't be used together with assignee_usernames.
 None returns unassigned issues. Any returns issues with an assignee.""",
     )
-    assignee_usernames: Optional[List[str]] = Field(
+    assignee_username: Optional[str] = Field(
         default=None,
         # pylint: disable=line-too-long
-        description="""Return issues assigned to the given username. This works like assignee_id but can't be used together with it. In GitLab CE,
-assignee_username can only have one value. If there's more than one, an error will be returned.""",
+        description="""Return issues assigned to the given username. This works like assignee_id but can't be used together with it.""",
     )
     author_id: Optional[int] = Field(
         default=None,
