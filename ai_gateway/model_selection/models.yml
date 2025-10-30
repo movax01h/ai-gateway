@@ -133,36 +133,6 @@ models:
       temperature: 0.0
       max_tokens: 4_096
 
-  - name: "Claude Sonnet 3.5 - Anthropic"
-    gitlab_identifier: "claude_3_5_sonnet_20240620"
-    params:
-      model: "claude-3-5-sonnet-20240620"
-      temperature: 0.0
-      max_tokens: 4_096
-
-  - name: "Claude Sonnet 3.5 20241022 - Anthropic"
-    gitlab_identifier: "claude_3_5_sonnet_20241022"
-    params:
-      model: "claude-3-5-sonnet-20241022"
-      temperature: 0.0
-      max_tokens: 4_096
-
-  - name: "Claude Sonnet 3.5 - Vertex"
-    gitlab_identifier: "claude_3_5_sonnet_20240620_vertex"
-    params:
-      model: "claude-3-5-sonnet@20240620"
-      custom_llm_provider: "vertex_ai"
-      temperature: 0.0
-      max_tokens: 4_096
-
-  - name: "Claude Sonnet 3.5 20241022 - Vertex"
-    gitlab_identifier: "claude_3_5_sonnet_20241022_vertex"
-    params:
-      model: "claude-3-5-sonnet@20241022"
-      custom_llm_provider: "vertex_ai"
-      temperature: 0.0
-      max_tokens: 4_096
-
   - name: "General"
     gitlab_identifier: "general" # For backwards compatibility with requests asking for [prompt_id]/general
     family:
