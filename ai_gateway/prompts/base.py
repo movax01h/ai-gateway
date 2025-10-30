@@ -35,7 +35,6 @@ from ai_gateway.model_metadata import TypeModelMetadata, current_model_metadata_
 from ai_gateway.prompts.config.base import ModelConfig, PromptConfig, PromptParams
 from ai_gateway.prompts.typing import Model, TypeModelFactory, TypePromptTemplateFactory
 from ai_gateway.structured_logging import get_request_logger
-from duo_workflow_service.tracking.llm_usage_context import get_workflow_checkpointer
 from lib.internal_events.client import InternalEventsClient
 from lib.internal_events.context import InternalEventAdditionalProperties
 
@@ -106,7 +105,7 @@ class PromptLoggingHandler(BaseCallbackHandler):
 
 class Prompt(RunnableBinding[Input, Output]):
     name: str
-    model_engine: str
+    llm_provider: str
     model_provider: str
     model: Model
     unit_primitives: list[GitLabUnitPrimitive]
@@ -149,7 +148,7 @@ class Prompt(RunnableBinding[Input, Output]):
 
         super().__init__(
             name=config.name,
-            model_engine=config.model.params.custom_llm_provider or model_provider,
+            llm_provider=config.model.params.custom_llm_provider or model_provider,
             model_provider=model_provider,
             model=model,
             unit_primitives=config.unit_primitives,
@@ -201,6 +200,8 @@ class Prompt(RunnableBinding[Input, Output]):
             model_engine=self.model._llm_type,
             model_name=self.model_name,
             limits=self.limits,
+            llm_provider=self.llm_provider,
+            model_provider=self.model_provider,
         )
 
     @property
@@ -281,21 +282,9 @@ class Prompt(RunnableBinding[Input, Output]):
         get_request_logger("prompt").info(
             f"LLM call finished with token usage: {usage_metadata}"
         )
-        checkpointer = get_workflow_checkpointer()
-        if self.internal_event_client is None and checkpointer is None:
-            return
 
         for model, usage in usage_metadata.items():
             watcher.register_token_usage(model, usage)
-            if checkpointer:
-                checkpointer.track_llm_operation(
-                    token_count=usage["total_tokens"],
-                    model_id=model,
-                    model_engine=self.model_engine,
-                    model_provider=self.model_provider,
-                    prompt_tokens=usage["input_tokens"],
-                    completion_tokens=usage["output_tokens"],
-                )
 
             for unit_primitive in self.unit_primitives:
                 # Access langchain usage_metadata for optional cache
@@ -328,7 +317,7 @@ class Prompt(RunnableBinding[Input, Output]):
                         input_tokens=usage["input_tokens"],
                         output_tokens=usage["output_tokens"],
                         total_tokens=usage["total_tokens"],
-                        model_engine=self.model_engine,
+                        model_engine=self.llm_provider,
                         model_name=model,
                         model_provider=self.model_provider,
                         additional_properties=additional_properties,

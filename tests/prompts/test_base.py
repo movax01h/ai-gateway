@@ -33,10 +33,6 @@ from ai_gateway.models.v2.anthropic_claude import ChatAnthropic
 from ai_gateway.prompts import BasePromptRegistry, Prompt
 from ai_gateway.prompts.config.base import PromptConfig, PromptParams
 from ai_gateway.prompts.typing import TypeModelFactory
-from duo_workflow_service.tracking.llm_usage_context import (
-    clear_workflow_checkpointer,
-    set_workflow_checkpointer,
-)
 from lib.internal_events.context import InternalEventAdditionalProperties
 from tests.conftest import FakeModel
 
@@ -118,7 +114,7 @@ configurable_unit_primitives:
             yield
 
     @pytest.mark.parametrize(
-        ("model_params", "expected_model_engine"),
+        ("model_params", "expected_llm_provider"),
         [
             ({"model_class_provider": "litellm"}, "litellm"),
             (
@@ -135,12 +131,12 @@ configurable_unit_primitives:
         prompt: Prompt,
         unit_primitives: list[GitLabUnitPrimitive],
         model_params: dict,
-        expected_model_engine: str,
+        expected_llm_provider: str,
     ):
         assert prompt.name == "test_prompt"
         assert prompt.unit_primitives == unit_primitives
         assert prompt.model_provider == model_params["model_class_provider"]
-        assert prompt.model_engine == expected_model_engine
+        assert prompt.llm_provider == expected_llm_provider
         assert isinstance(prompt.bound, Runnable)
 
     def test_build_prompt_template(self, prompt_config: PromptConfig):
@@ -734,7 +730,7 @@ def _assert_usage_metadata_handling(
             input_tokens=usage_metadata["input_tokens"],
             output_tokens=usage_metadata["output_tokens"],
             total_tokens=usage_metadata["total_tokens"],
-            model_engine=prompt.model_engine,
+            model_engine=prompt.llm_provider,
             model_name=prompt.model_name,
             model_provider=prompt.model_provider,
             additional_properties=additional_properties,
@@ -1013,144 +1009,3 @@ class TestBaseRegistry:
         )
 
         assert result == prompt
-
-
-class TestPromptCheckpointerIntegration:
-    """Test integration between Prompt and workflow checkpointer for LLM tracking."""
-
-    @pytest.mark.asyncio
-    @pytest.mark.parametrize("has_internal_event_client", [True, False])
-    async def test_prompt_calls_checkpointer_track_llm_operation_integration(
-        self, has_internal_event_client: bool
-    ):
-        """Test that Prompt.handle_usage_metadata calls checkpointer.track_llm_operation when available."""
-
-        clear_workflow_checkpointer()
-
-        try:
-            mock_checkpointer = Mock()
-            mock_checkpointer.track_llm_operation = Mock()
-
-            set_workflow_checkpointer(mock_checkpointer)
-
-            prompt = Mock(spec=Prompt)
-            prompt.model_engine = "test_engine"
-            prompt.model_provider = "test_provider"
-            prompt.unit_primitives = ["complete_code"]
-            prompt.internal_event_client = Mock() if has_internal_event_client else None
-            prompt.internal_event_extra = {}
-
-            mock_watcher = Mock(spec=ModelRequestInstrumentator.WatchContainer)
-
-            usage_metadata = {
-                "claude-3-sonnet": UsageMetadata(
-                    input_tokens=80,
-                    output_tokens=20,
-                    total_tokens=100,
-                )
-            }
-
-            Prompt.handle_usage_metadata(prompt, mock_watcher, usage_metadata)
-
-            mock_checkpointer.track_llm_operation.assert_called_once_with(
-                token_count=100,
-                model_id="claude-3-sonnet",
-                model_engine="test_engine",
-                model_provider="test_provider",
-                prompt_tokens=80,
-                completion_tokens=20,
-            )
-
-            mock_watcher.register_token_usage.assert_called_once_with(
-                "claude-3-sonnet", usage_metadata["claude-3-sonnet"]
-            )
-
-        finally:
-            clear_workflow_checkpointer()
-
-    @pytest.mark.asyncio
-    async def test_prompt_handle_usage_metadata_no_checkpointer_no_internal_client(
-        self,
-    ):
-        """Test early return when neither checkpointer nor internal event client available."""
-
-        clear_workflow_checkpointer()
-
-        try:
-            prompt = Mock(spec=Prompt)
-            prompt.internal_event_client = None
-
-            mock_watcher = Mock(spec=ModelRequestInstrumentator.WatchContainer)
-
-            usage_metadata = {
-                "claude-3-sonnet": UsageMetadata(
-                    input_tokens=80,
-                    output_tokens=20,
-                    total_tokens=100,
-                )
-            }
-
-            Prompt.handle_usage_metadata(prompt, mock_watcher, usage_metadata)
-
-            mock_watcher.register_token_usage.assert_not_called()
-
-        finally:
-            clear_workflow_checkpointer()
-
-    @pytest.mark.asyncio
-    async def test_prompt_handle_usage_metadata_multiple_models(self):
-        """Test that checkpointer tracks multiple models correctly."""
-
-        clear_workflow_checkpointer()
-
-        try:
-            mock_checkpointer = Mock()
-            mock_checkpointer.track_llm_operation = Mock()
-            set_workflow_checkpointer(mock_checkpointer)
-
-            prompt = Mock(spec=Prompt)
-            prompt.model_engine = "test_engine"
-            prompt.model_provider = "test_provider"
-            prompt.unit_primitives = ["complete_code"]
-            prompt.internal_event_client = None
-            prompt.internal_event_extra = {}
-
-            mock_watcher = Mock(spec=ModelRequestInstrumentator.WatchContainer)
-
-            usage_metadata = {
-                "claude-3-sonnet": UsageMetadata(
-                    input_tokens=80, output_tokens=20, total_tokens=100
-                ),
-                "gpt-4": UsageMetadata(
-                    input_tokens=120, output_tokens=30, total_tokens=150
-                ),
-            }
-
-            Prompt.handle_usage_metadata(prompt, mock_watcher, usage_metadata)
-
-            expected_calls = [
-                call(
-                    token_count=100,
-                    model_id="claude-3-sonnet",
-                    model_engine="test_engine",
-                    model_provider="test_provider",
-                    prompt_tokens=80,
-                    completion_tokens=20,
-                ),
-                call(
-                    token_count=150,
-                    model_id="gpt-4",
-                    model_engine="test_engine",
-                    model_provider="test_provider",
-                    prompt_tokens=120,
-                    completion_tokens=30,
-                ),
-            ]
-
-            mock_checkpointer.track_llm_operation.assert_has_calls(
-                expected_calls, any_order=True
-            )
-            assert mock_checkpointer.track_llm_operation.call_count == 2
-
-        finally:
-            clear_workflow_checkpointer()
