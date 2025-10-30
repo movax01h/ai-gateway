@@ -1018,6 +1018,86 @@ class TestGitLabUrlParser:
                 "org/my-project-with-dash",
                 55,
             ),
+            # Issues URL - project level
+            (
+                "https://gitlab.com/namespace/project/-/issues/42",
+                "gitlab.com",
+                "project",
+                "namespace/project",
+                42,
+            ),
+            # Issues URL - with subgroups
+            (
+                "https://gitlab.com/parent/subgroup/project/-/issues/99",
+                "gitlab.com",
+                "project",
+                "parent/subgroup/project",
+                99,
+            ),
+            # Issues URL - project with dashes
+            (
+                "https://gitlab.com/org/my-project-with-dash/-/issues/123",
+                "gitlab.com",
+                "project",
+                "org/my-project-with-dash",
+                123,
+            ),
+            # Epics URL - group level
+            (
+                "https://gitlab.com/groups/namespace/group/-/epics/42",
+                "gitlab.com",
+                "group",
+                "namespace/group",
+                42,
+            ),
+            # Epics URL - without explicit groups prefix
+            (
+                "https://gitlab.com/groups/namespace/group/-/epics/99",
+                "gitlab.com",
+                "group",
+                "namespace/group",
+                99,
+            ),
+            # Epics URL - with subgroups
+            (
+                "https://gitlab.com/groups/parent/subgroup/-/epics/123",
+                "gitlab.com",
+                "group",
+                "parent/subgroup",
+                123,
+            ),
+            # Epics URL - multiple nested subgroups
+            (
+                "https://gitlab.com/groups/parent/subgroup1/subgroup2/-/epics/7",
+                "gitlab.com",
+                "group",
+                "parent/subgroup1/subgroup2",
+                7,
+            ),
+            # Custom GitLab instance - work_items
+            (
+                "https://gitlab.example.com/namespace/project/-/work_items/42",
+                "gitlab.example.com",
+                "project",
+                "namespace/project",
+                42,
+            ),
+            # Custom GitLab instance - issues
+            (
+                "https://gitlab.example.com/namespace/project/-/issues/99",
+                "gitlab.example.com",
+                "project",
+                "namespace/project",
+                99,
+            ),
+            # Custom GitLab instance - epics
+            (
+                "https://gitlab.example.com/groups/namespace/group/-/epics/123",
+                "gitlab.example.com",
+                "group",
+                "namespace/group",
+                123,
+            ),
         ],
         ids=[
             "group_work_item",
@@ -1025,6 +1105,16 @@ class TestGitLabUrlParser:
             "subgroup_work_item",
             "nested_project_work_item",
             "project_with_dashes_work_item",
+            "project_issue",
+            "project_issue_with_subgroups",
+            "project_issue_with_dashes",
+            "group_epic",
+            "group_epic_without_groups_prefix",
+            "group_epic_with_subgroups",
+            "group_epic_nested_subgroups",
+            "custom_instance_work_item",
+            "custom_instance_issue",
+            "custom_instance_epic",
         ],
     )
     def test_parse_work_item_url_success(

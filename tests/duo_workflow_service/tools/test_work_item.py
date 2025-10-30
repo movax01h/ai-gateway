@@ -650,7 +650,10 @@ async def test_get_work_item_with_invalid_url(gitlab_client_mock, metadata):
 
     response_json = json.loads(response)
     assert "error" in response_json
-    assert "URL is not a work item URL" in response_json["error"]
+    assert (
+        "Failed to parse work item URL: Not a work item URL: https://gitlab.com/invalid-url"
+        in response_json["error"]
+    )
     gitlab_client_mock.graphql.assert_not_called()
 
 
@@ -901,7 +904,10 @@ async def test_get_work_item_notes_with_invalid_url(gitlab_client_mock, metadata
 
     response_json = json.loads(response)
     assert "error" in response_json
-    assert "URL is not a work item URL" in response_json["error"]
+    assert (
+        "Failed to parse work item URL: Not a work item URL: https://gitlab.com/invalid-url"
+        in response_json["error"]
+    )
     gitlab_client_mock.graphql.assert_not_called()
 
 
@@ -1490,7 +1496,7 @@ async def test_create_work_item_note_with_optional_parameters(
                 "body": "This comment won't be created",
             },
             [],
-            "URL is not a work item URL",
+            "Failed to parse work item URL: Not a work item URL: https://gitlab.com/invalid-url",
             None,
             0,
         ),

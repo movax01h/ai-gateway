@@ -189,9 +189,6 @@ class WorkItemBaseTool(DuoBaseTool):
 
     def _parse_work_item_url(self, url: str) -> Union[ResolvedWorkItem, str]:
         """Parse work item from URL."""
-        if "/-/work_items/" not in url:
-            return "URL is not a work item URL"
-
         try:
             work_item = GitLabUrlParser.parse_work_item_url(url, self.gitlab_host)
 
