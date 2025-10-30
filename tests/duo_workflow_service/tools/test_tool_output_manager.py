@@ -6,6 +6,7 @@ import pytest
 from langchain_core.messages import ToolMessage
 from langgraph.types import Command
 
+from duo_workflow_service.tools.duo_base_tool import TruncationConfig
 from duo_workflow_service.tools.tool_output_manager import (
     _add_truncation_instruction,
     truncate_tool_response,
@@ -21,6 +22,28 @@ def test_add_truncation_instruction():
     assert "70.1%" in notice
     assert notice.endswith("\n</instructions>\n</truncation_notice>\n")
     assert "random ted unique" in notice
+
+
+def test_truncate_tool_response_with_custom_config():
+    """Test truncation with custom config (1MB/800KB)."""
+    custom_config = TruncationConfig(
+        max_bytes=1 * 1024 * 1024, truncated_size=800 * 1024  # 1 MiB  # 800 KiB
+    )
+
+    # Response that would be truncated with default config but not with custom
+    medium_response = "x" * (200 * 1024)  # 200KB
+    result = truncate_tool_response(
+        medium_response, "build_review_merge_request_context", custom_config
+    )
+    assert result == medium_response  # Should NOT be truncated
+
+    # Response that exceeds even the custom limit
+    huge_response = "x" * (1 * 1024 * 1024 + 1000)  # Exceeds 1MB
+    result = truncate_tool_response(
+        huge_response, "build_review_merge_request_context", custom_config
+    )
+    assert len(result) < len(huge_response)
+    assert "<truncation_notice>" in result
 
 
 @pytest.mark.parametrize(
@@ -59,14 +82,6 @@ def test_add_truncation_instruction():
         ({"data": "B" * 30, "more_data": list(range(20))}, True),
     ],
 )
-@patch(
-    "duo_workflow_service.tools.tool_output_manager.TOOL_RESPONSE_MAX_BYTES",
-    30,
-)
-@patch(
-    "duo_workflow_service.tools.tool_output_manager.TOOL_RESPONSE_TRUNCATED_SIZE",
-    10,
-)
 @patch("duo_workflow_service.tools.tool_output_manager.token_counter")
 @patch("duo_workflow_service.tools.tool_output_manager.logger")
 def test_truncate_tool_response(
@@ -75,6 +90,8 @@ def test_truncate_tool_response(
     response: Any,
     should_truncated: bool,
 ):
+    test_config = TruncationConfig(max_bytes=30, truncated_size=10)
+
     if isinstance(response, ToolMessage):
         expected_json_str = (
             json.dumps(response.content)
@@ -88,7 +105,9 @@ def test_truncate_tool_response(
 
     mock_token_counter.count_string_content.return_value = 1
 
-    result = truncate_tool_response(response, tool_name="test_tool")
+    result = truncate_tool_response(
+        response, tool_name="test_tool", truncation_config=test_config
+    )
 
     if should_truncated:
         mock_logger.info.assert_called_once_with(
@@ -96,6 +115,8 @@ def test_truncate_tool_response(
             tool_name="test_tool",
             original_token_size=1,
             truncated_token_size=1,
+            max_bytes=30,
+            truncated_size=10,
         )
         result = result.content if isinstance(result, ToolMessage) else result
         assert expected_json_str[:10] in result
@@ -110,6 +131,8 @@ def test_truncate_tool_response(
 def test_truncate_tool_response_exception(
     mock_logger: Mock,
 ):
+    default_config = TruncationConfig()
+
     tool_response: Command = Command(
         update={
             "tool_response": ToolMessage(
@@ -118,7 +141,9 @@ def test_truncate_tool_response_exception(
             )
         }
     )
-    result = truncate_tool_response(tool_response, tool_name="test_tool")
+    result = truncate_tool_response(
+        tool_response, tool_name="test_tool", truncation_config=default_config
+    )
     mock_logger.info.assert_called_once_with(
         "Skip truncation for Command tool response"
     )

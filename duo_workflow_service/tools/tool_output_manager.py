@@ -5,6 +5,7 @@ from typing import Any
 import structlog
 from langchain_core.messages import ToolMessage
 from langgraph.types import Command
+from pydantic import BaseModel
 
 from duo_workflow_service.token_counter.approximate_token_counter import (
     ApproximateTokenCounter,
@@ -12,12 +13,14 @@ from duo_workflow_service.token_counter.approximate_token_counter import (
 
 logger = structlog.get_logger("tools_executor")
 
-
-TOOL_RESPONSE_MAX_BYTES = 100 * 1024  # 100 KiB
-TOOL_RESPONSE_TRUNCATED_SIZE = 50 * 1024  # 50 KiB
-
-
 token_counter = ApproximateTokenCounter("planner")
+
+
+class TruncationConfig(BaseModel):
+    """Configuration for tool output truncation limits."""
+
+    max_bytes: int = 100 * 1024  # 100 KiB
+    truncated_size: int = 50 * 1024  # 50 KiB
 
 
 def _add_truncation_instruction(
@@ -52,16 +55,20 @@ def _add_truncation_instruction(
     )
 
 
-def truncate_string(text: str, tool_name: str) -> str:
-    """Truncate string > TOOL_RESPONSE_MAX_BYTES to TOOL_RESPONSE_TRUNCATED_SIZE."""
+def truncate_string(
+    text: str, tool_name: str, truncation_config: TruncationConfig
+) -> str:
+    """Truncate string if it exceeds the configured byte limits."""
+
+    max_bytes = truncation_config.max_bytes
+    truncated_size = truncation_config.truncated_size
+
     encoded = text.encode("utf-8")
 
-    if len(encoded) <= TOOL_RESPONSE_MAX_BYTES:
+    if len(encoded) <= max_bytes:
         return text
 
-    truncated_text = encoded[:TOOL_RESPONSE_TRUNCATED_SIZE].decode(
-        "utf-8", errors="ignore"
-    )
+    truncated_text = encoded[:truncated_size].decode("utf-8", errors="ignore")
 
     # Log token size to be consistent
     original_token_size = token_counter.count_string_content(text)
@@ -72,6 +79,8 @@ def truncate_string(text: str, tool_name: str) -> str:
         tool_name=tool_name,
         original_token_size=original_token_size,
         truncated_token_size=truncated_token_size,
+        max_bytes=max_bytes,
+        truncated_size=truncated_size,
     )
 
     truncated_output = _add_truncation_instruction(
@@ -83,7 +92,9 @@ def truncate_string(text: str, tool_name: str) -> str:
     return truncated_output
 
 
-def truncate_tool_response(tool_response: Any, tool_name: str) -> Any:
+def truncate_tool_response(
+    tool_response: Any, tool_name: str, truncation_config: TruncationConfig
+) -> Any:
     """Truncate tool response if it exceeds token limit."""
 
     def convert_to_str(obj: Any) -> str:
@@ -98,8 +109,9 @@ def truncate_tool_response(tool_response: Any, tool_name: str) -> Any:
         # Handle ToolMessage objects
         if isinstance(tool_response, ToolMessage):
             content_str = convert_to_str(tool_response.content)
-            truncated_content = truncate_string(content_str, tool_name=tool_name)
-
+            truncated_content = truncate_string(
+                content_str, tool_name=tool_name, truncation_config=truncation_config
+            )
             if truncated_content != content_str:
                 new_response = tool_response.model_copy()
                 new_response.content = truncated_content
@@ -109,8 +121,9 @@ def truncate_tool_response(tool_response: Any, tool_name: str) -> Any:
 
         # Handle string and other types
         response_str = convert_to_str(tool_response)
-        truncated_str = truncate_string(response_str, tool_name=tool_name)
-
+        truncated_str = truncate_string(
+            response_str, tool_name=tool_name, truncation_config=truncation_config
+        )
         return truncated_str if truncated_str != response_str else tool_response
 
     except Exception as e:
