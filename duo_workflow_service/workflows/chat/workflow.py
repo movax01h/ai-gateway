@@ -56,10 +56,6 @@ class Routes(StrEnum):
 
 
 CHAT_READ_ONLY_TOOLS = [
-    "list_issues",
-    "get_issue",
-    "list_issue_notes",
-    "get_issue_note",
     "get_job_logs",
     "get_merge_request",
     "get_pipeline_errors",
@@ -77,16 +73,13 @@ CHAT_READ_ONLY_TOOLS = [
     "find_files",
     "grep",
     "list_repository_tree",
-    "get_epic",
-    "list_epics",
-    "list_epic_notes",
     "get_commit",
     "list_commits",
     "get_commit_diff",
     "get_work_item",
+    "get_work_item_notes",
     "list_work_items",
     "list_vulnerabilities",
-    "get_work_item_notes",
     "get_current_user",
     "get_vulnerability_details",
 ]
@@ -94,14 +87,9 @@ CHAT_READ_ONLY_TOOLS = [
 
 CHAT_GITLAB_MUTATION_TOOLS = [
     "update_vulnerability_severity",
-    "create_issue",
-    "update_issue",
-    "create_issue_note",
     "create_merge_request",
     "update_merge_request",
     "create_merge_request_note",
-    "create_epic",
-    "update_epic",
     "create_commit",
     "dismiss_vulnerability",
     "confirm_vulnerability",

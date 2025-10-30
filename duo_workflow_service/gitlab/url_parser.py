@@ -11,7 +11,9 @@ JOB_URL_REGEX = r"^(.+?)/-/jobs/(\d+)"
 PIPELINE_URL_REGEX = r"^(.+?)/-/pipelines/(\d+)"
 REPOSITORY_FILE_URL_REGEX = r"^(.+?)/-/blob/([^/]+)/(.+)$"
 COMMIT_URL_REGEX = r"^(.+?)/-/commit/([a-fA-F0-9]{5,40})"
-WORK_ITEM_URL_REGEX = r"^(?:groups/)?(?P<full_path>.+)/-/work_items/(?P<iid>\d+)$"
+WORK_ITEM_URL_REGEX = (
+    r"^(?:groups/)?(?P<full_path>.+)/-/(work_items|issues|epics)/(?P<iid>\d+)$"
+)
 
 SESSION_URL_PATH = "/-/automate/agent-sessions/"
 
@@ -409,8 +411,10 @@ class GitLabUrlParser:
             parsed_url = urlparse(url)
             path = parsed_url.path.strip("/")
 
-            # Check if it's a work item URL
-            if "/-/work_items/" not in path:
+            if not any(
+                pattern in path
+                for pattern in ["/-/work_items/", "/-/issues/", "/-/epics/"]
+            ):
                 raise GitLabUrlParseError(f"Not a work item URL: {url}")
 
             parent_type = GitLabUrlParser.detect_parent_type(url)
@@ -420,14 +424,14 @@ class GitLabUrlParser:
                 url, WORK_ITEM_URL_REGEX, "Could not parse work item URL"
             )
 
-            if len(components) < 2:
+            if len(components) < 3:
                 raise GitLabUrlParseError(f"Invalid work item URL format: {url}")
 
             full_path = components[0]
 
             # Validate work item IID
             try:
-                work_item_iid = int(components[1])
+                work_item_iid = int(components[2])
                 if work_item_iid < 1:
                     raise ValueError("Work item IID must be a positive integer")
             except ValueError as ve:
