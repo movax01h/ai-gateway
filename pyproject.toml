@@ -22,6 +22,7 @@ troubleshoot = "ai_gateway.scripts.troubleshoot_selfhosted_installation:troubles
 compute-tps = "ai_gateway.scripts.tps_test:compute_tps"
 duo-workflow-service = "duo_workflow_service.server:run_app"
 apply-security = "duo_workflow_service.security.prompt_security:run_from_args"
+fetch-foundational-agents = "duo_workflow_service.scripts.fetch_foundational_agents:fetch_agents"
 
 [tool.poetry.dependencies]
 fastapi = "^0.116.0"
