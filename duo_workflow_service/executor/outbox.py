@@ -167,8 +167,11 @@ class Outbox:
 
         future = self._action_response[request_id]
 
-        if future:
-            future.set_result(event)
+        if future and not future.cancelled():
+            try:
+                future.set_result(event)
+            except asyncio.InvalidStateError:
+                log.warning(f"Future for request {request_id} already in final state")
 
         del self._action_response[request_id]
         del self._legacy_action_response[request_id]

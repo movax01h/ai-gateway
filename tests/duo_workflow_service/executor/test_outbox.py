@@ -202,3 +202,63 @@ class TestOutbox:
         assert outbox._queue.empty()
         assert len(cap_logs) == 1
         assert cap_logs[0]["event"] == "Found unsent items in outbox"
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        ("future_state", "expected_log"),
+        [
+            ("cancelled", None),
+            ("completed", "already in final state"),
+        ],
+    )
+    async def test_set_action_response_with_invalid_future_state(
+        self, outbox: Outbox, future_state: str, expected_log: str
+    ):
+        """Test that setting a response on cancelled or completed future doesn't crash."""
+        action = contract_pb2.Action()
+        result: asyncio.Future[contract_pb2.ClientEvent] = asyncio.Future()
+
+        outbox.put_action(action, result=result)
+
+        if future_state == "cancelled":
+            result.cancel()
+        elif future_state == "completed":
+            result.set_result(contract_pb2.ClientEvent())
+
+        assert result.done()
+
+        response = contract_pb2.ClientEvent(
+            actionResponse=contract_pb2.ActionResponse(requestID=action.requestID)
+        )
+
+        with capture_logs() as cap_logs:
+            outbox.set_action_response(response)
+
+        assert result.done()
+
+        if expected_log:
+            assert any(expected_log in log.get("event", "") for log in cap_logs)
+
+        assert action.requestID not in outbox._action_response
+        assert action.requestID not in outbox._legacy_action_response
+
+    @pytest.mark.asyncio
+    async def test_put_action_and_wait_for_response_with_cancellation(self):
+        """Test that cancelling a waiting request properly propagates CancelledError."""
+        outbox = Outbox()
+        action = contract_pb2.Action()
+
+        task = asyncio.create_task(outbox.put_action_and_wait_for_response(action))
+        await asyncio.sleep(0.01)
+
+        task.cancel()
+
+        with pytest.raises(asyncio.CancelledError):
+            await task
+
+        response = contract_pb2.ClientEvent(
+            actionResponse=contract_pb2.ActionResponse(requestID=action.requestID)
+        )
+        outbox.set_action_response(response)
+
+        assert action.requestID not in outbox._action_response
