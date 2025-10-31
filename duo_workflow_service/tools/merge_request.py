@@ -63,6 +63,10 @@ class CreateMergeRequestInput(ProjectResourceInput):
         default=None,
         description="Flag indicating if the merge request should squash commits when merging",
     )
+    labels: Optional[str] = Field(
+        default=None,
+        description="Comma-separated label names for the merge request. For example: 'bug,feature,high-priority'",
+    )
 
 
 class CreateMergeRequest(DuoBaseTool):
@@ -107,6 +111,7 @@ class CreateMergeRequest(DuoBaseTool):
             "reviewer_ids",
             "remove_source_branch",
             "squash",
+            "labels",
         ]
         data.update({k: kwargs[k] for k in optional_params if k in kwargs})
 
@@ -461,6 +466,10 @@ class UpdateMergeRequestInput(MergeRequestResourceInput):
     )
     title: Optional[str] = Field(
         default=None, description="The title of the merge request."
+    )
+    labels: Optional[str] = Field(
+        default=None,
+        description="Comma-separated label names for the merge request. For example: 'bug,feature,high-priority'",
     )
 
 

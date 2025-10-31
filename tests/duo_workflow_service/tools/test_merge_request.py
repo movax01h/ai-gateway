@@ -185,6 +185,7 @@ async def test_create_merge_request(gitlab_client_mock, metadata):
         "reviewer_ids": [456],
         "remove_source_branch": True,
         "squash": True,
+        "labels": "bug,feature",
     }
 
     response = await tool.arun(input_data)
@@ -198,6 +199,7 @@ async def test_create_merge_request(gitlab_client_mock, metadata):
         "reviewer_ids": [456],
         "remove_source_branch": True,
         "squash": True,
+        "labels": "bug,feature",
     }
 
     expected_response = json.dumps(
@@ -329,6 +331,61 @@ async def test_create_merge_request_with_url_error(
         source_branch="feature",
         target_branch="main",
         title="Test Merge Request",
+    )
+
+
+@pytest.mark.asyncio
+async def test_create_merge_request_with_labels(gitlab_client_mock, metadata):
+    mock_response = GitLabHttpResponse(
+        status_code=200,
+        body={
+            "id": 1,
+            "title": "Bug Fix",
+            "source_branch": "bugfix",
+            "target_branch": "main",
+            "labels": ["bug", "urgent"],
+        },
+    )
+    gitlab_client_mock.apost = AsyncMock(return_value=mock_response)
+
+    tool = CreateMergeRequest(metadata=metadata)
+
+    input_data = {
+        "project_id": 1,
+        "source_branch": "bugfix",
+        "target_branch": "main",
+        "title": "Bug Fix",
+        "labels": "bug,urgent",
+    }
+
+    response = await tool.arun(input_data)
+
+    expected_data = {
+        "source_branch": "bugfix",
+        "target_branch": "main",
+        "title": "Bug Fix",
+        "labels": "bug,urgent",
+    }
+
+    expected_response = json.dumps(
+        {
+            "status": "success",
+            "merge_request": {
+                "id": 1,
+                "title": "Bug Fix",
+                "source_branch": "bugfix",
+                "target_branch": "main",
+                "labels": ["bug", "urgent"],
+            },
+        }
+    )
+
+    assert response == expected_response
+
+    gitlab_client_mock.apost.assert_called_once_with(
+        path="/api/v4/projects/1/merge_requests",
+        body=json.dumps(expected_data),
+        use_http_response=True,
     )
 
 
@@ -1042,6 +1099,43 @@ async def test_update_merge_request(gitlab_client_mock, metadata):
                 "description": "New description",
                 "remove_source_branch": True,
                 "title": "Updated MR",
+            }
+        ),
+        use_http_response=True,
+    )
+
+
+@pytest.mark.asyncio
+async def test_update_merge_request_with_labels(gitlab_client_mock, metadata):
+    update_data = {
+        "id": 123,
+        "title": "Bug Fix",
+        "labels": ["bug", "urgent", "high-priority"],
+    }
+    mock_response = GitLabHttpResponse(
+        status_code=200, body=update_data, headers={"content-type": "application/json"}
+    )
+    gitlab_client_mock.aput = AsyncMock(return_value=mock_response)
+    tool = UpdateMergeRequest(metadata=metadata)
+
+    response = await tool.arun(
+        {
+            "project_id": 1,
+            "merge_request_iid": 123,
+            "title": "Bug Fix",
+            "labels": "bug,urgent,high-priority",
+        }
+    )
+
+    expected_response = json.dumps({"updated_merge_request": update_data})
+    assert response == expected_response
+
+    gitlab_client_mock.aput.assert_called_once_with(
+        path="/api/v4/projects/1/merge_requests/123",
+        body=json.dumps(
+            {
+                "title": "Bug Fix",
+                "labels": "bug,urgent,high-priority",
             }
         ),
         use_http_response=True,
