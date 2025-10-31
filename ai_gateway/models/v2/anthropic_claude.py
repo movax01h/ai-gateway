@@ -7,8 +7,6 @@ from langchain_core.messages import BaseMessage
 from langchain_core.outputs import ChatResult
 from pydantic import model_validator
 
-from lib.feature_flags import FeatureFlag, is_feature_enabled
-
 __all__ = ["ChatAnthropic"]
 
 
@@ -43,13 +41,9 @@ class ChatAnthropic(_LChatAnthropic):
         """
         headers = dict(self.default_headers) if self.default_headers else {}
 
-        betas = self.betas or []
-        if is_feature_enabled(FeatureFlag.STREAM_DURING_TOOL_CALL_GENERATION):
-            betas.append("fine-grained-tool-streaming-2025-05-14")
-
         # Add beta header if beta features are specified
-        if betas and len(betas) > 0:
-            headers["anthropic-beta"] = ",".join(betas)
+        if self.betas:
+            headers["anthropic-beta"] = ",".join(self.betas)
 
         return headers or None
 
