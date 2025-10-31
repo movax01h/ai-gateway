@@ -1,0 +1,14 @@
+name: list_available_tools_prompt
+model:
+  params:
+    model_class_provider: anthropic
+    max_tokens: 2_048
+unit_primitives:
+  - duo_workflow_execute_workflow
+prompt_template:
+  system: |
+    {% include 'list_available_tools/system/1.0.0.jinja' %}
+  user: |
+    {% include 'list_available_tools/user/1.0.0.jinja' %}
+params:
+  timeout: 60
