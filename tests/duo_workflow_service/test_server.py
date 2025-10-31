@@ -421,10 +421,12 @@ async def test_execute_workflow_when_nothing_in_outbox(
 async def test_workflow_is_cancelled_on_parent_task_cancellation(
     mock_resolve_workflow, mock_abstract_workflow_class
 ):
+    """Test that workflow task is properly cancelled when parent task is cancelled."""
     mock_workflow = mock_abstract_workflow_class.return_value
     mock_workflow.is_done = False
     mock_workflow.run = AsyncMock()
     mock_workflow.cleanup = AsyncMock()
+    mock_workflow.last_gitlab_status = "running"
     mock_resolve_workflow.return_value = mock_abstract_workflow_class
 
     mock_workflow.get_from_outbox = AsyncMock(
@@ -536,6 +538,80 @@ async def test_execute_workflow_status_codes(
     mock_context.set_code.assert_called_once_with(expected_status)
     actual_detail = mock_context.set_details.call_args[0][0]
     assert actual_detail.startswith(expected_detail_prefix)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "cancel_error_message,expected_status,expected_detail_prefix,expected_log_count",
+    [
+        (
+            AIO_CANCEL_STOP_WORKFLOW_REQUEST,
+            grpc.StatusCode.OK,
+            "workflow execution stopped:",
+            1,  # Only called from abort_workflow
+        ),
+        (
+            "Some other cancellation",
+            grpc.StatusCode.CANCELLED,
+            "RPC cancelled by client",
+            2,  # Called from main handler AND abort_workflow
+        ),
+    ],
+)
+@patch("duo_workflow_service.server.AbstractWorkflow")
+@patch("duo_workflow_service.server.resolve_workflow_class")
+@patch("duo_workflow_service.server.log_exception")
+async def test_execute_workflow_cancellation_handling(
+    mock_log_exception,
+    mock_resolve_workflow,
+    mock_abstract_workflow_class,
+    cancel_error_message,
+    expected_status,
+    expected_detail_prefix,
+    expected_log_count,
+):
+    """Test that ExecuteWorkflow handles different CancelledError scenarios correctly."""
+    mock_workflow = mock_abstract_workflow_class.return_value
+    mock_workflow.is_done = False
+    mock_workflow.run = AsyncMock()
+    mock_workflow.cleanup = AsyncMock()
+    mock_workflow.last_gitlab_status = "retry"
+    mock_workflow.get_from_outbox = AsyncMock(
+        side_effect=asyncio.CancelledError(cancel_error_message)
+    )
+    mock_resolve_workflow.return_value = mock_abstract_workflow_class
+
+    async def mock_request_iterator() -> AsyncIterable[contract_pb2.ClientEvent]:
+        yield contract_pb2.ClientEvent(
+            startRequest=contract_pb2.StartWorkflowRequest(goal="test")
+        )
+
+    current_user.set(CloudConnectorUser(authenticated=True, is_debug=True))
+    mock_context = MagicMock(spec=grpc.ServicerContext)
+    servicer = DuoWorkflowService()
+    result = servicer.ExecuteWorkflow(
+        mock_request_iterator(),
+        mock_context,
+        internal_event_client=create_mock_internal_event_client(),
+    )
+
+    with pytest.raises(asyncio.CancelledError):
+        await anext(result)
+
+    # Verify status code and details
+    mock_context.set_code.assert_called_once_with(expected_status)
+    actual_detail = mock_context.set_details.call_args[0][0]
+    assert actual_detail.startswith(expected_detail_prefix)
+
+    # Verify logging behavior
+    assert mock_log_exception.call_count == expected_log_count
+
+    # For the main handler call (when expected_log_count == 2), verify the first call
+    if expected_log_count == 2:
+        # First call should be from the main exception handler
+        first_call_exception = mock_log_exception.call_args_list[0][0][0]
+        assert isinstance(first_call_exception, asyncio.CancelledError)
+        assert str(first_call_exception) == cancel_error_message
 
 
 @pytest.mark.asyncio
