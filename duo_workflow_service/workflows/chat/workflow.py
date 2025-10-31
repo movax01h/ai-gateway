@@ -1,7 +1,7 @@
 # pylint: disable=attribute-defined-outside-init
 from datetime import datetime, timezone
 from enum import StrEnum
-from typing import Any, Dict, List, Optional, Type, Union, override
+from typing import Any, Dict, List, Optional, override
 
 from dependency_injector.wiring import Provide, inject
 from gitlab_cloud_connector import CloudConnectorUser
@@ -12,18 +12,10 @@ from langgraph.graph import END, StateGraph
 from langgraph.types import Command
 
 from ai_gateway.container import ContainerApplication
-from ai_gateway.model_metadata import current_model_metadata_context
-from ai_gateway.prompts import InMemoryPromptRegistry
-from ai_gateway.prompts.config.base import InMemoryPromptConfig
 from ai_gateway.prompts.registry import LocalPromptRegistry
 from contract import contract_pb2
 from duo_workflow_service.agents.chat_agent import ChatAgent
 from duo_workflow_service.agents.chat_agent_factory import create_agent
-from duo_workflow_service.agents.prompt_adapter import (
-    BasePromptAdapter,
-    CustomPromptAdapter,
-    DefaultPromptAdapter,
-)
 from duo_workflow_service.agents.tools_executor import ToolsExecutor
 from duo_workflow_service.checkpointer.gitlab_workflow_utils import (
     WorkflowStatusEventEnum,
@@ -117,14 +109,6 @@ class Workflow(AbstractWorkflow):
     _stream: bool = True
     _agent: ChatAgent
     _tools_override: list[str]
-    # flow config inline prompts are loaded into PromptRegistry as part of
-    # https://gitlab.com/gitlab-org/gitlab/-/issues/559994
-    # which means that both with inline and in repository prompts DW Service
-    # shall use PromptRegistry to fetch prompt data based on prompt_id and
-    # optionally prompt_version (only present for in repository  prompts)
-    _prompt_id: str
-    _prompt_version: str
-    _prompt_template_override: str
     _workflow_id: str
     _workflow_type: CategoryEnum
 
@@ -143,6 +127,7 @@ class Workflow(AbstractWorkflow):
         user: Optional[CloudConnectorUser] = None,
         additional_context: Optional[list[AdditionalContext]] = None,
         approval: Optional[contract_pb2.Approval] = None,
+        system_template_override: str | None = None,
         prompt_registry: LocalPromptRegistry = Provide[
             ContainerApplication.pkg_prompts.prompt_registry
         ],
@@ -152,24 +137,9 @@ class Workflow(AbstractWorkflow):
         **kwargs,
     ):
         self._tools_override = kwargs.pop("tools_override", None)
-
-        self._prompt_id = "chat/agent"
-        self._prompt_version = "^1.0.0"
-        active_prompt_registry: Union[LocalPromptRegistry, InMemoryPromptRegistry] = (
-            prompt_registry
-        )
+        self.system_template_override = system_template_override
         self._workflow_id = workflow_id
         self._workflow_type = workflow_type
-        if "prompt_template_id_override" in kwargs:
-            self._prompt_id = kwargs.pop("prompt_template_id_override")
-            self._prompt_version = kwargs.pop("prompt_template_version_override", None)
-            memory_prompt_registry: InMemoryPromptRegistry = InMemoryPromptRegistry(
-                prompt_registry
-            )
-            self._register_prompt_template_override(kwargs, memory_prompt_registry)
-            active_prompt_registry = memory_prompt_registry
-
-        self._use_custom_adapter = kwargs.pop("use_custom_adapter", False)
 
         super().__init__(
             workflow_id=workflow_id,
@@ -180,27 +150,9 @@ class Workflow(AbstractWorkflow):
             user=user,
             additional_context=additional_context,
             approval=approval,
-            prompt_registry=active_prompt_registry,  # type: ignore[arg-type]
+            prompt_registry=prompt_registry,  # type: ignore[arg-type]
             internal_event_client=internal_event_client,
             **kwargs,
-        )
-
-    def _register_prompt_template_override(
-        self, kwargs: Dict[str, Any], prompt_registry: InMemoryPromptRegistry
-    ) -> None:
-        if "prompt_template_override" not in kwargs:
-            return
-
-        prompt_template = kwargs.pop("prompt_template_override")
-        if isinstance(prompt_template, InMemoryPromptConfig):
-            prompt_template = prompt_template.model_dump()
-
-        enriched_prompt_tpl = CustomPromptAdapter.enrich_prompt_template(
-            prompt_template
-        )
-        prompt_registry.register_prompt(
-            prompt_id=prompt_template["prompt_id"],
-            prompt_data=enriched_prompt_tpl,
         )
 
     def _are_tools_called(self, state: ChatWorkflowState) -> Routes:
@@ -321,25 +273,16 @@ class Workflow(AbstractWorkflow):
             tools = self._get_tools()
 
         agents_toolset = tools_registry.toolset(tools)
-        model_metadata = current_model_metadata_context.get()
-
-        adapter_cls: Type[BasePromptAdapter] = DefaultPromptAdapter
-
-        if self._use_custom_adapter:
-            adapter_cls = CustomPromptAdapter
 
         self._agent: ChatAgent = create_agent(
             user=self._user,
             tools_registry=tools_registry,
-            prompt_id=self._prompt_id,
-            prompt_version=self._prompt_version,
-            model_metadata=model_metadata,
             internal_event_category=__name__,
             tools=agents_toolset,
             prompt_registry=self._prompt_registry,
             workflow_id=self._workflow_id,
             workflow_type=self._workflow_type,
-            adapter_cls=adapter_cls,
+            system_template_override=self.system_template_override,
         )
 
         tools_runner = ToolsExecutor(

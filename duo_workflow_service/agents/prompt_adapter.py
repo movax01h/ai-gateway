@@ -41,6 +41,7 @@ class ChatAgentPromptTemplate(Runnable[ChatWorkflowState, PromptValue]):
         if "system_static" in self.prompt_template:
             static_content_text = jinja2_formatter(
                 self.prompt_template["system_static"],
+                system_template_override=_kwargs.get("system_template_override"),
                 gitlab_instance_type=(
                     gitlab_instance_info.instance_type
                     if gitlab_instance_info
@@ -120,7 +121,7 @@ class BasePromptAdapter(ABC):
         self.prompt = prompt
 
     @abstractmethod
-    async def get_response(self, input: ChatWorkflowState) -> BaseMessage:
+    async def get_response(self, input: ChatWorkflowState, **kwargs) -> BaseMessage:
         pass
 
     @abstractmethod
@@ -129,75 +130,14 @@ class BasePromptAdapter(ABC):
 
 
 class DefaultPromptAdapter(BasePromptAdapter):
-    async def get_response(self, input: ChatWorkflowState) -> BaseMessage:
+    async def get_response(self, input: ChatWorkflowState, **kwargs) -> BaseMessage:
         is_anthropic_model = self.prompt.model_provider == ModelClassProvider.ANTHROPIC
 
         return await self.prompt.ainvoke(
             input=input,
             agent_name=self.prompt.name,
             is_anthropic_model=is_anthropic_model,
-        )
-
-    def get_model(self):
-        return self.prompt.model
-
-
-class CustomPromptAdapter(BasePromptAdapter):
-    def __init__(self, prompt: Prompt):
-        super().__init__(prompt)
-        self._agent_name = prompt.name
-
-    # Custom prompts don't have ChatAgentPromptTemplate's built-in handling, so we manually inject the
-    # system_dynamic to match the behavior that ChatAgentPromptTemplate provides automatically.
-    @staticmethod
-    def enrich_prompt_template(prompt_template: dict[str, Any]) -> dict[str, Any]:
-        if "prompt_template" not in prompt_template:
-            raise ValueError("prompt_template must contain 'prompt_template' key")
-
-        context_template = (
-            "{% include 'chat/agent/partials/system_dynamic/1.0.0.jinja' %}"
-        )
-        additional_context_template = (
-            "{% include 'chat/agent/partials/additional_context/1.0.0.jinja' %}"
-        )
-
-        if "system" in prompt_template["prompt_template"]:
-            existing_system = prompt_template["prompt_template"]["system"]
-            if context_template not in existing_system:
-                prompt_template["prompt_template"]["system"] = (
-                    "<system_instructions>\n"
-                    + existing_system
-                    + "\n</system_instructions>\n"
-                    + context_template
-                    + "\n"
-                    + additional_context_template
-                )
-        else:
-            prompt_template["prompt_template"]["system"] = context_template
-
-        return prompt_template
-
-    async def get_response(self, input: ChatWorkflowState) -> BaseMessage:
-        conversation_history = input["conversation_history"].get(self._agent_name, [])
-        last_message = conversation_history[-1] if conversation_history else None
-        additional_context = (
-            last_message.additional_kwargs.get("additional_context")
-            if last_message and hasattr(last_message, "additional_kwargs")
-            else None
-        )
-
-        variables = {
-            "goal": input["goal"],
-            "project": input["project"],
-            "namespace": input["namespace"],
-            "current_date": datetime.now().strftime("%Y-%m-%d"),
-            "current_time": datetime.now().strftime("%H:%M:%S"),
-            "current_timezone": datetime.now().astimezone().tzname(),
-            "additional_context": additional_context,
-        }
-
-        return await self.prompt.ainvoke(
-            input={**variables, "history": conversation_history}
+            **kwargs,
         )
 
     def get_model(self):

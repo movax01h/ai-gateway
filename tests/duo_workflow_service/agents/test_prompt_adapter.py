@@ -10,7 +10,6 @@ from ai_gateway.prompts import Prompt
 from ai_gateway.prompts.config.models import ModelClassProvider
 from duo_workflow_service.agents.prompt_adapter import (
     ChatAgentPromptTemplate,
-    CustomPromptAdapter,
     DefaultPromptAdapter,
 )
 from duo_workflow_service.entities.state import ChatWorkflowState
@@ -338,129 +337,6 @@ class TestDefaultPromptAdapter:
         result = adapter.get_model()
 
         assert result == mock_prompt.model
-
-
-class TestCustomPromptAdapter:
-    @pytest.fixture(name="mock_prompt")
-    def mock_prompt_fixture(self):
-        prompt = Mock(spec=Prompt)
-        prompt.name = "test_agent"
-        prompt.model = AsyncMock()
-        prompt.ainvoke = AsyncMock()
-        return prompt
-
-    @pytest.mark.asyncio
-    async def test_get_response(
-        self, mock_prompt, sample_chat_workflow_state, mock_datetime
-    ):
-        adapter = CustomPromptAdapter(mock_prompt)
-
-        expected_response = AIMessage(content="Custom response")
-        mock_prompt.ainvoke.return_value = expected_response
-
-        result = await adapter.get_response(sample_chat_workflow_state)
-
-        assert result == expected_response
-
-        # Verify the call was made with correct variables
-        mock_prompt.ainvoke.assert_called_once()
-        call_args = mock_prompt.ainvoke.call_args[1]["input"]
-
-        assert call_args["goal"] == sample_chat_workflow_state["goal"]
-        assert call_args["project"] == sample_chat_workflow_state["project"]
-        assert call_args["namespace"] == sample_chat_workflow_state["namespace"]
-        assert (
-            call_args["history"]
-            == sample_chat_workflow_state["conversation_history"]["test_agent"]
-        )
-        assert call_args["current_date"] == mock_datetime.now().strftime("%Y-%m-%d")
-        assert call_args["current_time"] == mock_datetime.now().strftime("%H:%M:%S")
-        assert (
-            call_args["current_timezone"] == mock_datetime.now().astimezone().tzname()
-        )
-        assert call_args["additional_context"] is None
-
-    @pytest.mark.asyncio
-    async def test_get_response_with_additional_context(
-        self, mock_prompt, sample_chat_workflow_state
-    ):
-        adapter = CustomPromptAdapter(mock_prompt)
-
-        additional_context = [
-            {"category": "file", "id": "file1", "content": "test content"}
-        ]
-        sample_chat_workflow_state["conversation_history"]["test_agent"] = [
-            HumanMessage(
-                content="Hello",
-                additional_kwargs={"additional_context": additional_context},
-            )
-        ]
-
-        expected_response = AIMessage(content="Custom response")
-        mock_prompt.ainvoke.return_value = expected_response
-
-        result = await adapter.get_response(sample_chat_workflow_state)
-
-        assert result == expected_response
-
-        # Verify additional_context is passed to the prompt
-        mock_prompt.ainvoke.assert_called_once()
-        call_args = mock_prompt.ainvoke.call_args[1]["input"]
-        assert call_args["additional_context"] == additional_context
-
-    def test_get_model(self, mock_prompt):
-        adapter = CustomPromptAdapter(mock_prompt)
-        result = adapter.get_model()
-
-        assert result == mock_prompt.model
-
-    @pytest.mark.parametrize(
-        "initial_prompt_template,expected_system",
-        [
-            (
-                {
-                    "prompt_id": "custom/agent",
-                    "prompt_template": {
-                        "system": "You are a helpful assistant.",
-                        "user": "{{ message }}",
-                    },
-                },
-                "<system_instructions>\nYou are a helpful assistant.\n</system_instructions>\n"
-                "{% include 'chat/agent/partials/system_dynamic/1.0.0.jinja' %}\n"
-                "{% include 'chat/agent/partials/additional_context/1.0.0.jinja' %}",
-            ),
-            (
-                {
-                    "prompt_id": "custom/agent",
-                    "prompt_template": {"user": "{{ message }}"},
-                },
-                "{% include 'chat/agent/partials/system_dynamic/1.0.0.jinja' %}",
-            ),
-        ],
-        ids=[
-            "appends_to_existing_system",
-            "creates_system_when_missing",
-        ],
-    )
-    def test_enrich_prompt_template(self, initial_prompt_template, expected_system):
-        result = CustomPromptAdapter.enrich_prompt_template(initial_prompt_template)
-
-        assert "system" in result["prompt_template"]
-        assert result["prompt_template"]["system"] == expected_system
-
-        assert result["prompt_template"]["user"] == "{{ message }}"
-        assert result is initial_prompt_template
-
-    def test_enrich_prompt_template_raises_on_missing_prompt_template_key(self):
-        invalid_prompt_template = {
-            "prompt_id": "custom/agent",
-            "system": "You are a helpful assistant.",
-        }
-
-        with pytest.raises(
-            ValueError, match="prompt_template must contain 'prompt_template' key"
-        ):
-            CustomPromptAdapter.enrich_prompt_template(invalid_prompt_template)
 
 
 @pytest.mark.parametrize(

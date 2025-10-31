@@ -16,6 +16,7 @@ from typing import (
 from google.protobuf import struct_pb2
 from google.protobuf.json_format import MessageToDict
 
+from ai_gateway.prompts.config.base import InMemoryPromptConfig
 from duo_workflow_service.agent_platform.experimental.flows import (
     Flow as ExperimentalFlow,
 )
@@ -145,15 +146,15 @@ def _flow_factory(
             "Chat-partial environment expects either inline or in repository prompt configuration, but received both"
         )
 
-    args = {
-        "tools_override": agent_component["toolset"],
-        "prompt_template_id_override": agent_component["prompt_id"],
-        "prompt_template_version_override": agent_component.get("prompt_version"),
-        "use_custom_adapter": True,
-    }
+    args = {"tools_override": agent_component["toolset"]}
 
     if prompt_template_override := (config.prompts[0] if config.prompts else None):
-        args["prompt_template_override"] = prompt_template_override
+        if isinstance(prompt_template_override, InMemoryPromptConfig):
+            prompt_template = prompt_template_override.prompt_template
+        else:
+            prompt_template = prompt_template_override.get("prompt_template", {})
+
+        args["system_template_override"] = prompt_template.get("system")
 
     return partial(chat.Workflow, **args)
 

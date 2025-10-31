@@ -1,0 +1,20 @@
+---
+name: Chat Agent
+model:
+  params:
+    model_class_provider: litellm
+unit_primitives:
+  - duo_chat
+prompt_template:
+  system_static: |
+    {% if system_template_override %}
+    {{system_template_override}}
+    {% else %}
+    {% include 'chat/agent/partials/system_static/claude_3/1.0.0.jinja' %}
+    {% endif %}
+  system_dynamic: |
+    {% include 'chat/agent/partials/system_dynamic/1.0.0.jinja' %}
+  user: |
+    {% include 'chat/agent/partials/user/1.0.0.jinja' %}
+params:
+  timeout: 60
