@@ -68,7 +68,7 @@ class Outbox:
             log.error(
                 "Request ID not found.",
                 responseType=event.WhichOneof("response"),
-                requestID=event.actionResponse.requestID,
+                request_id=event.actionResponse.requestID,
                 awaiting_request_ids=self.awaiting_request_ids(),
             )
             self.legacy_set_action_response(event)
@@ -161,7 +161,7 @@ class Outbox:
     ):
         log.info(
             "Setting action response for request ID.",
-            requestID=request_id,
+            request_id=request_id,
             responseType=event.WhichOneof("response"),
         )
 
@@ -171,7 +171,9 @@ class Outbox:
             try:
                 future.set_result(event)
             except asyncio.InvalidStateError:
-                log.warning(f"Future for request {request_id} already in final state")
+                log.warning(
+                    "Future for request already in final state", request_id=request_id
+                )
 
         del self._action_response[request_id]
         del self._legacy_action_response[request_id]

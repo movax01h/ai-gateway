@@ -381,7 +381,7 @@ class DuoWorkflowService(contract_pb2_grpc.DuoWorkflowServicer):
 
                 log.info(
                     "Sending an outgoing action",
-                    requestID=item.requestID,
+                    request_id=item.requestID,
                     payload_size=item.ByteSize(),
                     action_class=item.WhichOneof("action"),
                 )
@@ -390,7 +390,7 @@ class DuoWorkflowService(contract_pb2_grpc.DuoWorkflowServicer):
 
                 log.info(
                     "Sent an outgoing action",
-                    requestID=item.requestID,
+                    request_id=item.requestID,
                     action_class=item.WhichOneof("action"),
                 )
 
@@ -406,7 +406,7 @@ class DuoWorkflowService(contract_pb2_grpc.DuoWorkflowServicer):
                 log.info(
                     "Received a client event.",
                     responseType=event.WhichOneof("response"),
-                    requestID=event.actionResponse.requestID,
+                    request_id=event.actionResponse.requestID,
                 )
 
                 if event.HasField("heartbeat"):
