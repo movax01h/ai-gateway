@@ -189,7 +189,7 @@ configurable_unit_primitives:
   - feature_setting: "duo_agent_platform"
     unit_primitives:
       - "duo_agent_platform"
-    default_model: "claude_sonnet_4_20250514_vertex"
+    default_model: "claude_sonnet_4_5_20250929_vertex"
     selectable_models:
       - "claude_sonnet_3_7_20250219"
       - "claude_sonnet_4_20250514"
