@@ -3,12 +3,15 @@ from typing import Any, List, NamedTuple, Optional, final
 
 from gitlab_cloud_connector import GitLabUnitPrimitive
 from langchain_core.tools import BaseTool, ToolException
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from duo_workflow_service.gitlab.gitlab_api import Project
 from duo_workflow_service.gitlab.http_client import GitlabHttpClient, GitLabHttpResponse
 from duo_workflow_service.gitlab.url_parser import GitLabUrlParseError, GitLabUrlParser
-from duo_workflow_service.tools.tool_output_manager import truncate_tool_response
+from duo_workflow_service.tools.tool_output_manager import (
+    TruncationConfig,
+    truncate_tool_response,
+)
 
 DESCRIPTION_CHARACTER_LIMIT = 1_048_576
 
@@ -54,6 +57,9 @@ class DuoBaseTool(BaseTool):
     unit_primitive: Optional[GitLabUnitPrimitive] = None
     eval_prompts: Optional[List[str]] = None
 
+    # Default truncation configuration - tools can override this class attribute
+    truncation_config: TruncationConfig = Field(default_factory=TruncationConfig)
+
     @property
     def gitlab_client(self) -> GitlabHttpClient:
         client = self.metadata.get("gitlab_client")  # type: ignore
@@ -91,7 +97,9 @@ class DuoBaseTool(BaseTool):
         """
         tool_result = await self._execute(*args, **kwargs)
         tool_response = truncate_tool_response(
-            tool_response=tool_result, tool_name=self.name
+            tool_response=tool_result,
+            tool_name=self.name,
+            truncation_config=self.truncation_config,
         )
         return tool_response
 

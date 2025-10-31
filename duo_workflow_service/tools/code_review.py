@@ -13,6 +13,7 @@ from pydantic import BaseModel, Field
 from duo_workflow_service.policies.diff_exclusion_policy import DiffExclusionPolicy
 from duo_workflow_service.tools.duo_base_tool import DuoBaseTool
 from duo_workflow_service.tools.gitlab_resource_input import ProjectResourceInput
+from duo_workflow_service.tools.tool_output_manager import TruncationConfig
 
 logger = logging.getLogger(__name__)
 
@@ -120,6 +121,12 @@ class BuildReviewMergeRequestContext(DuoBaseTool):
     )
     args_schema: Type[BaseModel] = BuildReviewMergeRequestContextInput
     unit_primitive: GitLabUnitPrimitive = GitLabUnitPrimitive.ASK_MERGE_REQUEST
+    truncation_config: TruncationConfig = Field(
+        default_factory=lambda: TruncationConfig(
+            max_bytes=1 * 1024 * 1024,  # 1 MiB (~262K tokens)
+            truncated_size=800 * 1024,  # 800 KiB (~200K tokens)
+        )
+    )
 
     async def _execute(self, **kwargs: Any) -> str:
         """Execute the tool to build merge request context."""
