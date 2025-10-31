@@ -225,15 +225,20 @@ class DuoWorkflowMetrics:  # pylint: disable=too-many-instance-attributes
         status_code="unknown",
         error_type="unknown",
     ):
+        if stop_reason in ANTHROPIC_STOP_REASONS or stop_reason == "error":
+            stop_reason_label = stop_reason
+        elif stop_reason == "unknown":
+            log.error("LLM response stop reason is missing")
+            stop_reason_label = "other"
+        else:
+            log.error(f"Unexpected LLM response stop reason: {stop_reason}")
+            stop_reason_label = "other"
+
         self.llm_response_counter.labels(
             model=model,
             provider=provider,
             request_type=request_type,
-            stop_reason=(
-                stop_reason
-                if stop_reason in ANTHROPIC_STOP_REASONS or stop_reason == "error"
-                else "other"
-            ),
+            stop_reason=stop_reason_label,
             status_code=status_code,
             error_type=error_type,
             **build_metadata_labels(),
