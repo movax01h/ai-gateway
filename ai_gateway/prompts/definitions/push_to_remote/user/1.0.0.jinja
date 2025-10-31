@@ -1,0 +1,30 @@
+GitLab Project details:
+<project>
+    repository_url: {{ repository_url }}
+    issue_url: {{ issue_url }}
+</project>
+
+<programming_agent_handover>
+  Here's a handover summary from the programming agent
+  {{ programming_agent_handover}}
+</programming_agent_handover>
+Prepare all the required `run_git_command` and `update_merge_request` tool calls.
+
+Use `run_git_command` tool to push the unstaged changes in current branch.
+    **Follow this exact sequence for pushing changes to remote:**
+        - Use `add` command with `-A` args to stage the local changes
+        - Use `commit` command with args `-m {commit_message}` to commit. For commit message:
+          * Create a concise and meaningful commit message under 50 characters based on the code changes.
+          * Use conventional commit types: feat, fix, docs, style, refactor, test, chore
+          * example commit message- "feat: Add user authentication", "fix: Resolve login timeout"
+        - Use `git push` to finally push changes to the remote repository
+
+<merge_request_details>
+  {{ merge_request_details }}
+</merge_request_details>
+Use merge request iid from merge_request_details to form a single `update_merge_request` tool call to update the merge request description and reviewer.
+- Assign user id {{ reviewer_id }} as the reviewer for the merge request
+- Create a merge request description based on the key changes
+- Description: "Relates to issue {{ issue_url }}
+## Changes
+- [List key changes based on programming agent handover]"

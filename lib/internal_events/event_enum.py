@@ -66,3 +66,4 @@ class CategoryEnum(StrEnum):
     SAST_FP_DETECTION = "sast_fp_detection"
     AI_CATALOG_AGENT = "ai_catalog_agent"
     UNKNOWN = "unknown"
+    DEVELOPER = "developer"

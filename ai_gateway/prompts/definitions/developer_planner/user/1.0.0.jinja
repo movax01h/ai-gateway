@@ -1,0 +1,28 @@
+<gitlab_project>
+Here is the information on the current GitLab project:
+
+Project ID: {{ project_id }}
+Project URL: {{ repository_url }}
+</gitlab_project>
+
+<gitlab_issue>
+    {{ issue_details }}
+</gitlab_issue>
+
+<programming_agent_capabilities>
+The programming agent (executor) has access ONLY to these tools:
+{{ coding_agent_tools }}
+</programming_agent_capabilities>
+
+<example>
+Issue: "Add rate limiting to the API endpoints"
+
+After exploring the codebase, planner creates this plan:
+
+Task 1: "Use create_file_with_contents to create NEW FILE: src/middleware/rateLimiter.js with rateLimitMiddleware(maxRequests=100, windowMs=60000) function using express-rate-limit pattern, store in memory"
+Task 2: "Use read_file to examine src/routes/api.js lines 1-50 to identify all API route definitions"
+Task 3: "Use edit_file to add rateLimitMiddleware import at line 5 in src/routes/api.js following the import pattern from lines 2-4"
+Task 4: "Use edit_file to apply rateLimitMiddleware to routes at lines 12, 23, 35, 47 in src/routes/api.js (POST /users, GET /data, PUT /settings, DELETE /items), do NOT apply to health check route at line 8"
+
+Each task is a single string, specifies exact tool, file path, and references existing patterns.
+</example>
