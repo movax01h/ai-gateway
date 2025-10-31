@@ -371,3 +371,43 @@ async def test_namespace_level_workflow(
         str(exc_info.value.original_exception)
         == "This workflow software_development does not support namespace-level workflow"
     )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("env_var_value", "extended_logging", "expected_tracing_enabled"),
+    [
+        ("false", True, False),  # Explicitly disabled
+        ("false", False, False),  # Explicitly disabled regardless of extended_logging
+        ("true", True, True),  # Explicitly enabled with extended_logging
+        ("true", False, False),  # Explicitly enabled but extended_logging is False
+        ("", True, True),  # Not set, follows extended_logging
+        ("", False, False),  # Not set, follows extended_logging
+    ],
+)
+@patch("duo_workflow_service.workflows.abstract_workflow.tracing_context")
+@patch.object(MockWorkflow, "_compile_and_run_graph")
+async def test_tracing_enabled_based_on_env_and_extended_logging(
+    mock_compile_and_run_graph,
+    mock_tracing_context,
+    env_var_value,
+    extended_logging,
+    expected_tracing_enabled,
+):
+    """Test that tracing is enabled/disabled based on LANGSMITH_TRACING_V2 and extended_logging."""
+    workflow_id = "test-workflow-id"
+    metadata = {
+        "extended_logging": extended_logging,
+        "git_url": "https://example.com",
+        "git_sha": "abc123",
+    }
+    workflow_type = CategoryEnum.WORKFLOW_SOFTWARE_DEVELOPMENT
+    workflow = MockWorkflow(workflow_id, metadata, workflow_type)
+
+    with patch.dict(os.environ, {"LANGSMITH_TRACING_V2": env_var_value}, clear=False):
+        await workflow.run("Test goal")
+
+    # Verify tracing_context was called with the expected enabled value
+    mock_tracing_context.assert_called_once()
+    call_kwargs = mock_tracing_context.call_args[1]
+    assert call_kwargs["enabled"] == expected_tracing_enabled

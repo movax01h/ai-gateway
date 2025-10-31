@@ -156,7 +156,11 @@ class AbstractWorkflow(ABC):
                 "workflow_type": self._workflow_type.value,
             }
 
-            with tracing_context(enabled=extended_logging):
+            # By default, tracing follows extended_logging. Only disable if LANGSMITH_TRACING_V2 is explicitly "false"
+            langsmith_tracing_v2_env = os.getenv("LANGSMITH_TRACING_V2", "").lower()
+            tracing_enabled = extended_logging and (langsmith_tracing_v2_env != "false")
+
+            with tracing_context(enabled=tracing_enabled):
                 try:
                     # pylint: disable=unexpected-keyword-arg
                     await self._compile_and_run_graph(

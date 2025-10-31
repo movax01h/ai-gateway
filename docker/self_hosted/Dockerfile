@@ -18,6 +18,10 @@ ENV HF_HUB_OFFLINE=true
 # specify one more environment variable during deployment.
 ENV ENABLE_DUO_WORKFLOW_SERVICE=true
 
+# Disable LangSmith tracing by default for self-hosted/air-gapped environments.
+# This prevents failed connection attempts to api.smith.langchain.com.
+ENV LANGSMITH_TRACING_V2=false
+
 RUN poetry run index_docs -o "./tmp/docs.db" -v ${TAG##self-hosted-}
 
 CMD ["./scripts/run.sh"]
