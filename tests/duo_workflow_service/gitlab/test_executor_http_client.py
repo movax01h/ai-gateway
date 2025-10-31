@@ -416,3 +416,148 @@ async def test_executor_gitlab_http_client_with_use_http_response_http_connectio
         await client.aget("/api/v4/test", use_http_response=True)
 
     monkeypatch_execute_http_response.assert_called_once()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "side_effects, expected_attempts, expected_sleep_calls, should_succeed, expected_result",
+    [
+        # Single retry - error then success
+        (
+            [
+                Exception("Temporary error"),
+                json.dumps({"data": {"currentUser": {"username": "test-user"}}}),
+            ],
+            2,
+            1,
+            True,
+            {"currentUser": {"username": "test-user"}},
+        ),
+        # Two retries - two timeouts then success
+        (
+            [
+                asyncio.TimeoutError("Request timed out"),
+                asyncio.TimeoutError("Request timed out"),
+                json.dumps({"data": {"project": {"name": "Test Project"}}}),
+            ],
+            3,
+            2,
+            True,
+            {"project": {"name": "Test Project"}},
+        ),
+        # Invalid JSON then success
+        (
+            [
+                "Not valid JSON",
+                json.dumps({"data": {"currentUser": {"username": "test-user"}}}),
+            ],
+            2,
+            1,
+            True,
+            {"currentUser": {"username": "test-user"}},
+        ),
+        # GraphQL error then success
+        (
+            [
+                json.dumps(
+                    {
+                        "errors": [{"message": "Service temporarily unavailable"}],
+                        "data": None,
+                    }
+                ),
+                json.dumps({"data": {"currentUser": {"username": "test-user"}}}),
+            ],
+            2,
+            1,
+            True,
+            {"currentUser": {"username": "test-user"}},
+        ),
+    ],
+)
+async def test_graphql_retry_succeeds(
+    client,
+    monkeypatch_execute_action,
+    monkeypatch,
+    side_effects,
+    expected_attempts,
+    expected_sleep_calls,
+    should_succeed,
+    expected_result,
+):
+    """Test that graphql retries on various errors and eventually succeeds."""
+    # Mock asyncio.sleep to avoid actual delays in tests
+    sleep_mock = AsyncMock()
+    monkeypatch.setattr("asyncio.sleep", sleep_mock)
+
+    monkeypatch_execute_action.side_effect = side_effects
+
+    query = """
+    query {
+        currentUser {
+            username
+        }
+    }
+    """
+
+    result = await client.graphql(query)
+
+    assert result == expected_result
+    assert monkeypatch_execute_action.call_count == expected_attempts
+    assert sleep_mock.call_count == expected_sleep_calls
+    if expected_sleep_calls > 0:
+        sleep_mock.assert_called_with(client.RETRY_DELAY_SECONDS)
+
+
+@pytest.mark.asyncio
+async def test_graphql_retry_exhausted_raises_exception(
+    client, monkeypatch_execute_action, monkeypatch
+):
+    """Test that graphql raises exception after exhausting all retries."""
+    # Mock asyncio.sleep to avoid actual delays in tests
+    sleep_mock = AsyncMock()
+    monkeypatch.setattr("asyncio.sleep", sleep_mock)
+
+    # All attempts fail
+    monkeypatch_execute_action.side_effect = Exception("Persistent error")
+
+    query = """
+    query {
+        currentUser {
+            username
+        }
+    }
+    """
+
+    with pytest.raises(Exception, match="Persistent error"):
+        await client.graphql(query)
+
+    assert monkeypatch_execute_action.call_count == client.MAX_RETRIES
+    assert sleep_mock.call_count == client.MAX_RETRIES - 1
+
+
+@pytest.mark.asyncio
+async def test_graphql_no_retry_on_immediate_success(
+    client, monkeypatch_execute_action, monkeypatch
+):
+    """Test that graphql does not retry when the first attempt succeeds."""
+    # Mock asyncio.sleep to verify it's not called
+    sleep_mock = AsyncMock()
+    monkeypatch.setattr("asyncio.sleep", sleep_mock)
+
+    success_response = json.dumps({"data": {"currentUser": {"username": "test-user"}}})
+
+    monkeypatch_execute_action.return_value = success_response
+
+    query = """
+    query {
+        currentUser {
+            username
+        }
+    }
+    """
+
+    result = await client.graphql(query)
+
+    assert result["currentUser"]["username"] == "test-user"
+    monkeypatch_execute_action.assert_called_once()
+    sleep_mock.assert_not_called()
