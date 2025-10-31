@@ -9,9 +9,6 @@ class FeatureFlag(StrEnum):
     # Definition: https://gitlab.com/gitlab-org/gitlab/-/blob/master/config/feature_flags/ops/expanded_ai_logging.yml
     EXPANDED_AI_LOGGING = "expanded_ai_logging"
     USE_DUO_CONTEXT_EXCLUSION = "use_duo_context_exclusion"
-    STREAM_DURING_TOOL_CALL_GENERATION = (
-        "duo_workflow_stream_during_tool_call_generation"
-    )
 
 
 def is_feature_enabled(feature_name: FeatureFlag | str) -> bool:

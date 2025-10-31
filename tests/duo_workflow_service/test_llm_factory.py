@@ -90,6 +90,7 @@ def test_validate_anthropic_variables(
             assert call_kwargs["betas"] == [
                 "extended-cache-ttl-2025-04-11",
                 "context-1m-2025-08-07",
+                "fine-grained-tool-streaming-2025-05-14",
             ]
         else:
             mock_vertex_client.assert_not_called()
@@ -159,6 +160,7 @@ def test_clients_receive_max_retries_from_config(
             assert call_kwargs["betas"] == [
                 "extended-cache-ttl-2025-04-11",
                 "context-1m-2025-08-07",
+                "fine-grained-tool-streaming-2025-05-14",
             ]
             mock_vertex_client.assert_not_called()
 
@@ -248,6 +250,7 @@ def test_new_chat_client_with_custom_model(
             assert call_kwargs["betas"] == [
                 "extended-cache-ttl-2025-04-11",
                 "context-1m-2025-08-07",
+                "fine-grained-tool-streaming-2025-05-14",
             ]
             mock_vertex_client.assert_not_called()
 
