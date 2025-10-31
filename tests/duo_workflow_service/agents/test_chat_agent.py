@@ -51,7 +51,7 @@ def workflow_type_fixture() -> str:
 
 
 @pytest.fixture(name="chat_agent")
-def chat_agent_fixture():
+def chat_agent_fixture(system_template_override: str):
     mock_prompt_adapter = Mock()
     mock_prompt_adapter.get_response.return_value = AIMessage(content="Hello there!")
     mock_prompt_adapter.get_model.return_value = Mock()
@@ -60,6 +60,7 @@ def chat_agent_fixture():
         name="Chat Agent",
         prompt_adapter=mock_prompt_adapter,
         tools_registry=mock_tools_registry,
+        system_template_override=system_template_override,
     )
 
 
@@ -117,7 +118,7 @@ class TestChatAgentToolCallMessageOrdering:
 
     @pytest.mark.asyncio
     async def test_tool_call_followed_by_human_message_inserts_tool_results(
-        self, chat_agent
+        self, chat_agent, system_template_override
     ):
         """Test that tool calls followed by human messages get tool results inserted."""
         ai_message_with_tool_call = AIMessage(
@@ -167,35 +168,59 @@ class TestChatAgentToolCallMessageOrdering:
 
         assert len(conversation_history) == 1
 
-        chat_agent.prompt_adapter.get_response.assert_called_once()
-        called_input = chat_agent.prompt_adapter.get_response.call_args[0][0]
-
-        modified_history = called_input["conversation_history"]["Chat Agent"]
-
-        assert len(modified_history) == 5
-
-        assert isinstance(modified_history[0], HumanMessage)
-        assert modified_history[0].content == "Can you help me?"
-
-        assert isinstance(modified_history[1], AIMessage)
-        assert len(modified_history[1].tool_calls) == 2
-
-        assert isinstance(modified_history[2], ToolMessage)
-        assert (
-            modified_history[2].content
-            == "Tool is cancelled and a user will provide a follow up message."
+        chat_agent.prompt_adapter.get_response.assert_called_once_with(
+            {
+                "conversation_history": {
+                    "Chat Agent": [
+                        HumanMessage(
+                            content="Can you help me?",
+                            additional_kwargs={},
+                            response_metadata={},
+                        ),
+                        AIMessage(
+                            content="I'll help you with that.",
+                            additional_kwargs={},
+                            response_metadata={},
+                            tool_calls=[
+                                {
+                                    "name": "test_tool",
+                                    "args": {"param": "value"},
+                                    "id": "call_123",
+                                    "type": "tool_call",
+                                },
+                                {
+                                    "name": "another_tool",
+                                    "args": {"param2": "value2"},
+                                    "id": "call_456",
+                                    "type": "tool_call",
+                                },
+                            ],
+                        ),
+                        ToolMessage(
+                            content="Tool is cancelled and a user will provide a follow up message.",
+                            tool_call_id="call_123",
+                        ),
+                        ToolMessage(
+                            content="Tool is cancelled and a user will provide a follow up message.",
+                            tool_call_id="call_456",
+                        ),
+                        HumanMessage(
+                            content="Actually, let me clarify something.",
+                            additional_kwargs={},
+                            response_metadata={},
+                        ),
+                    ]
+                },
+                "plan": {"steps": []},
+                "status": WorkflowStatusEnum.EXECUTION,
+                "ui_chat_log": [],
+                "last_human_input": None,
+                "project": None,
+                "namespace": None,
+                "approval": None,
+            },
+            system_template_override=system_template_override,
         )
-        assert modified_history[2].tool_call_id == "call_123"
-
-        assert isinstance(modified_history[3], ToolMessage)
-        assert (
-            modified_history[3].content
-            == "Tool is cancelled and a user will provide a follow up message."
-        )
-        assert modified_history[3].tool_call_id == "call_456"
-
-        assert isinstance(modified_history[4], HumanMessage)
-        assert modified_history[4].content == "Actually, let me clarify something."
 
     @pytest.mark.asyncio
     async def test_normal_conversation_flow_unchanged(self, chat_agent):
@@ -508,6 +533,7 @@ async def test_agentic_fake_model_bypasses_tool_approval(input):
         name="Chat Agent",
         prompt_adapter=mock_prompt_adapter,
         tools_registry=mock_tools_registry,
+        system_template_override=None,
     )
 
     # Create an AI message with tool calls to simulate what would happen

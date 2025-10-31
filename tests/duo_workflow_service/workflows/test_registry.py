@@ -237,13 +237,7 @@ def test_resolve_workflow_class_with_chat_flow_config_success(config_params):
 
         expected_kwargs = {
             "tools_override": ["tool1", "tool2"],
-            "prompt_template_id_override": "custom/prompt",
-            "prompt_template_version_override": None,
-            "prompt_template_override": {
-                "prompt_id": "custom/prompt",
-                "content": "test prompt",
-            },
-            "use_custom_adapter": True,
+            "system_template_override": None,
         }
         assert result.keywords == expected_kwargs
 

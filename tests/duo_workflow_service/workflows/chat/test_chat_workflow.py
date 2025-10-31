@@ -1,30 +1,16 @@
-from unittest.mock import MagicMock, Mock, patch
+from unittest.mock import ANY, MagicMock, Mock, patch
 
 import pytest
 from dependency_injector import containers
-from gitlab_cloud_connector import (
-    CloudConnectorUser,
-    GitLabUnitPrimitive,
-    UserClaims,
-    WrongUnitPrimitives,
-)
+from gitlab_cloud_connector import CloudConnectorUser, UserClaims, WrongUnitPrimitives
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 
 from ai_gateway.model_metadata import TypeModelMetadata
-from ai_gateway.prompts.config.base import (
-    InMemoryPromptConfig,
-    ModelConfig,
-    PromptConfig,
-)
-from ai_gateway.prompts.config.models import ChatAnthropicParams, ModelClassProvider
+from ai_gateway.prompts.config.base import PromptConfig
 from ai_gateway.prompts.typing import TypeModelFactory
 from contract import contract_pb2
 from duo_workflow_service.agents.chat_agent import ChatAgent
-from duo_workflow_service.agents.prompt_adapter import (
-    BasePromptAdapter,
-    CustomPromptAdapter,
-    DefaultPromptAdapter,
-)
+from duo_workflow_service.agents.prompt_adapter import BasePromptAdapter
 from duo_workflow_service.checkpointer.gitlab_workflow import WorkflowStatusEventEnum
 from duo_workflow_service.components.tools_registry import ToolsRegistry
 from duo_workflow_service.entities import (
@@ -68,6 +54,7 @@ def prompt_fixture(
         model_metadata=model_metadata,
         workflow_id=workflow_id,
         workflow_type=workflow_type,
+        system_template_override=None,
     )  # type: ignore[call-arg] # the args are modified in `Prompt.__init__`
 
 
@@ -75,7 +62,7 @@ def prompt_fixture(
 def mock_prompt_adapter_fixture():
     adapter = Mock(spec=BasePromptAdapter)
 
-    async def mock_get_response(input):
+    async def mock_get_response(_input, **_kwargs):
         return AIMessage(content="Hello there!")
 
     adapter.get_response = mock_get_response
@@ -93,6 +80,7 @@ def mock_chat_agent_fixture(mock_prompt_adapter, mock_tools_registry):
         name="test_prompt",
         prompt_adapter=mock_prompt_adapter,
         tools_registry=mock_tools_registry,
+        system_template_override=None,
     )
     return agent
 
@@ -121,6 +109,7 @@ def workflow_with_project_fixture(
     mock_tools_registry: Mock,
     workflow_id: str,
     workflow_type: CategoryEnum,
+    system_template_override: str,
 ):
     workflow = Workflow(
         workflow_id=workflow_id,
@@ -128,6 +117,7 @@ def workflow_with_project_fixture(
         workflow_type=workflow_type,
         mcp_tools=[contract_pb2.McpTool(name="extra_tool", description="Extra tool")],
         user=user,
+        system_template_override=system_template_override,
     )
     additional_context = [
         AdditionalContext(
@@ -253,7 +243,7 @@ class TestExecuteAgentWithTools:
     def mock_prompt_adapter_fixture(self):
         adapter = Mock(spec=BasePromptAdapter)
 
-        async def mock_get_response(input):
+        async def mock_get_response(_input, **_kwargs):
             return AIMessage(content="tool calling")
 
         adapter.get_response = mock_get_response
@@ -398,10 +388,21 @@ async def test_workflow_run(
         with patch(
             "duo_workflow_service.workflows.chat.workflow.create_agent",
             return_value=mock_agent,
-        ):
+        ) as mock_create_agent:
             await workflow.run("Test chat goal")
 
             assert workflow.is_done
+
+            mock_create_agent.assert_called_once_with(
+                user=workflow._user,
+                tools_registry=mock_tools_registry,
+                internal_event_category="duo_workflow_service.workflows.chat.workflow",
+                tools=ANY,  # Tool handling tested below
+                prompt_registry=workflow._prompt_registry,
+                workflow_id=workflow._workflow_id,
+                workflow_type=workflow._workflow_type,
+                system_template_override=workflow.system_template_override,
+            )
 
             mock_user_interface_instance.send_event.assert_called_with(
                 type="values", state=state, stream=True
@@ -911,37 +912,6 @@ async def test_workflow_with_approval_object():
 
 @pytest.mark.asyncio
 @pytest.mark.usefixtures("mock_fetch_workflow_and_container_data")
-@pytest.mark.parametrize(
-    "prompt_template_overrides",
-    [
-        {
-            "prompt_id": "custom/prompt",
-            "model": {
-                "params": {"model_class_provider": "anthropic", "max_tokens": 4096}
-            },
-            "unit_primitives": [GitLabUnitPrimitive.DUO_CHAT],
-            "prompt_template": {"system": "test system prompt", "user": "{{message}}"},
-        },
-        InMemoryPromptConfig(
-            name="custom/prompt",
-            prompt_id="custom/prompt",
-            model=ModelConfig(
-                params=ChatAnthropicParams(
-                    model_class_provider=ModelClassProvider.ANTHROPIC, max_tokens=4096
-                )
-            ),
-            unit_primitives=[GitLabUnitPrimitive.DUO_CHAT],
-            prompt_template={
-                "system": "test system prompt",
-                "user": "{{message}}",
-            },
-        ),
-    ],
-    ids=[
-        "Test experimental version",
-        "Test v1 version",
-    ],
-)
 @patch.object(Workflow, "_get_tools")
 @patch("duo_workflow_service.components.tools_registry.ToolsRegistry.toolset")
 @patch("duo_workflow_service.workflows.chat.workflow.StateGraph")
@@ -950,7 +920,6 @@ async def test_compile_with_tools_override_and_flow_config(
     mock_toolset,
     mock_get_tools,
     mock_duo_workflow_service_container,
-    prompt_template_overrides,
 ):
     mock_get_tools.return_value = ["default_tool1", "default_tool2"]
 
@@ -976,9 +945,6 @@ async def test_compile_with_tools_override_and_flow_config(
         workflow_type=CategoryEnum.WORKFLOW_CHAT,
         user=user,
         tools_override=["tool1", "tool2"],
-        prompt_template_id_override="custom/prompt",
-        prompt_template_version_override=None,
-        prompt_template_override=prompt_template_overrides,
     )
 
     mock_graph = MagicMock()
@@ -1011,36 +977,3 @@ async def test_compile_without_overrides(
     # Verify _get_tools was called since no tools_override
     mock_get_tools.assert_called_once()
     tools_registry.toolset.assert_called_once_with(["default_tool1", "default_tool2"])
-
-
-@pytest.mark.parametrize(
-    ("use_custom_adapter", "expected_adapter_class"),
-    [(True, CustomPromptAdapter), (False, DefaultPromptAdapter)],
-    ids=[
-        "Workflow uses custom adapter",
-        "Workflow uses default adapter",
-    ],
-)
-@pytest.mark.asyncio
-@patch("duo_workflow_service.workflows.chat.workflow.create_agent")
-async def test_compile_uses_correct_adapter(
-    mock_create_agent,
-    user,
-    use_custom_adapter,
-    expected_adapter_class,
-):
-    workflow = Workflow(
-        workflow_id="test-id",
-        workflow_metadata={},
-        workflow_type=CategoryEnum.WORKFLOW_CHAT,
-        user=user,
-        use_custom_adapter=use_custom_adapter,
-    )
-    tools_registry = MagicMock()
-    checkpointer = MagicMock()
-
-    workflow._compile("Test goal", tools_registry, checkpointer)
-
-    args, kwargs = mock_create_agent.call_args
-
-    assert kwargs["adapter_cls"] == expected_adapter_class

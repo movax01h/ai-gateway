@@ -159,3 +159,8 @@ def mock_tools_registry_fixture(tool_approval_required):
     mock.approval_required.return_value = tool_approval_required
 
     return mock
+
+
+@pytest.fixture(name="system_template_override")
+def system_template_override_fixture() -> str:
+    return "Test system template"

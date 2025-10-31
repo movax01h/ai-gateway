@@ -6,6 +6,7 @@ from anthropic import APIStatusError
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, ToolMessage
 from langchain_core.output_parsers.string import StrOutputParser
 
+from duo_workflow_service.agents.prompt_adapter import BasePromptAdapter
 from duo_workflow_service.components.tools_registry import ToolsRegistry
 from duo_workflow_service.entities.state import (
     ApprovalStateRejection,
@@ -27,10 +28,17 @@ log = structlog.stdlib.get_logger("chat_agent")
 
 
 class ChatAgent:
-    def __init__(self, name: str, prompt_adapter, tools_registry: ToolsRegistry):
+    def __init__(
+        self,
+        name: str,
+        prompt_adapter: BasePromptAdapter,
+        tools_registry: ToolsRegistry,
+        system_template_override: str | None,
+    ):
         self.name = name
         self.prompt_adapter = prompt_adapter
         self.tools_registry = tools_registry
+        self.system_template_override = system_template_override
 
     def _get_approvals(
         self, message: AIMessage, preapproved_tools: List[str]
@@ -130,7 +138,9 @@ class ChatAgent:
         return messages
 
     async def _get_agent_response(self, input: ChatWorkflowState) -> BaseMessage:
-        return await self.prompt_adapter.get_response(input)
+        return await self.prompt_adapter.get_response(
+            input, system_template_override=self.system_template_override
+        )
 
     def _build_response(
         self, agent_response: BaseMessage, input: ChatWorkflowState
