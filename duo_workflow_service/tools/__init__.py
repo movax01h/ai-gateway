@@ -22,6 +22,7 @@ from .previous_context import *
 from .project import *
 from .repository_files import *
 from .request_user_clarification import *
+from .run_glql_query import *
 from .search import *
 from .search_system import *
 from .security import *
