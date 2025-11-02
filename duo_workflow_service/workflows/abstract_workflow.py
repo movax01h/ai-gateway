@@ -203,6 +203,9 @@ class AbstractWorkflow(ABC):
     async def get_from_outbox(self) -> contract_pb2.Action | OutboxSignal:
         return await self._outbox.get()
 
+    def fail_outbox_action(self, request_id: str, message: str):
+        self._outbox.fail_action(request_id=request_id, message=message)
+
     def set_action_response(self, event: contract_pb2.ClientEvent):
         self._outbox.set_action_response(event)
 

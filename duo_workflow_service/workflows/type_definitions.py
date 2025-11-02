@@ -7,9 +7,11 @@ __all__ = [
     "OsInformationContext",
     "ShellInformationContext",
     "AIO_CANCEL_STOP_WORKFLOW_REQUEST",
+    "OUTGOING_MESSAGE_TOO_LARGE",
 ]
 
 AIO_CANCEL_STOP_WORKFLOW_REQUEST = "AIO_CANCEL_STOP_WORKFLOW_REQUEST"
+OUTGOING_MESSAGE_TOO_LARGE = "OUTGOING_MESSAGE_TOO_LARGE"
 
 
 # Note: additionaL_context is an alias for injected_context

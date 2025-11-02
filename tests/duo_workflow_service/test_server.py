@@ -41,6 +41,7 @@ from duo_workflow_service.server import (
 from duo_workflow_service.tools.duo_base_tool import DuoBaseTool
 from duo_workflow_service.workflows.type_definitions import (
     AIO_CANCEL_STOP_WORKFLOW_REQUEST,
+    OUTGOING_MESSAGE_TOO_LARGE,
 )
 from lib.internal_events.context import InternalEventAdditionalProperties
 from lib.internal_events.event_enum import (
@@ -382,6 +383,55 @@ async def test_execute_workflow_when_no_events_ends(
 @pytest.mark.asyncio
 @patch("duo_workflow_service.server.AbstractWorkflow")
 @patch("duo_workflow_service.server.resolve_workflow_class")
+async def test_execute_workflow_when_message_too_large_cancels_workflow(
+    mock_resolve_workflow,
+    mock_abstract_workflow_class,
+):
+    mock_resolve_workflow.return_value = mock_abstract_workflow_class
+    mock_workflow = mock_abstract_workflow_class.return_value
+    mock_workflow.is_done = True
+    mock_workflow.run = AsyncMock()
+    mock_workflow.cancel = AsyncMock()
+    mock_workflow.cleanup = AsyncMock()
+
+    request_id = "test-request-id"
+    mock_workflow.get_from_outbox = AsyncMock(
+        side_effect=[
+            contract_pb2.Action(
+                requestID=request_id,
+                runCommand=contract_pb2.RunCommandAction(program="a" * 5 * 1024 * 1024),
+            ),
+            # Calling cancel will always trigger an outbox close which queues
+            # this
+            OutboxSignal.NO_MORE_OUTBOUND_REQUESTS,
+        ]
+    )
+
+    async def mock_request_iterator() -> AsyncIterable[contract_pb2.ClientEvent]:
+        yield contract_pb2.ClientEvent(
+            startRequest=contract_pb2.StartWorkflowRequest(goal="test")
+        )
+
+    current_user.set(CloudConnectorUser(authenticated=True, is_debug=True))
+    mock_context = MagicMock(spec=grpc.ServicerContext)
+    servicer = DuoWorkflowService()
+    result = servicer.ExecuteWorkflow(
+        mock_request_iterator(),
+        mock_context,
+        internal_event_client=create_mock_internal_event_client(),
+    )
+    assert isinstance(result, AsyncIterable)
+    with pytest.raises(asyncio.CancelledError):
+        await anext(result)
+
+    mock_workflow.fail_outbox_action.assert_called_once_with(
+        request_id, OUTGOING_MESSAGE_TOO_LARGE
+    )
+
+
+@pytest.mark.asyncio
+@patch("duo_workflow_service.server.AbstractWorkflow")
+@patch("duo_workflow_service.server.resolve_workflow_class")
 async def test_execute_workflow_when_nothing_in_outbox(
     mock_resolve_workflow, mock_abstract_workflow_class
 ):
@@ -492,6 +542,12 @@ async def test_workflow_is_cancelled_on_parent_task_cancellation(
             False,
             grpc.StatusCode.UNKNOWN,
             "RPC ended with unknown workflow state:",
+        ),
+        (
+            OUTGOING_MESSAGE_TOO_LARGE,
+            False,
+            grpc.StatusCode.RESOURCE_EXHAUSTED,
+            "Outgoing message too large",
         ),
     ],
 )

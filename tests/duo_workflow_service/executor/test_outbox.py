@@ -262,3 +262,14 @@ class TestOutbox:
         outbox.set_action_response(response)
 
         assert action.requestID not in outbox._action_response
+
+    @pytest.mark.asyncio
+    async def test_fail_action(self, outbox: Outbox):
+        result: asyncio.Future[contract_pb2.ClientEvent] = asyncio.Future()
+        request_id = outbox.put_action(contract_pb2.Action(), result=result)
+        outbox.fail_action(request_id, "Something went wrong")
+        with pytest.raises(Exception) as excinfo:
+            await result
+        assert str(excinfo.value) == "Something went wrong"
+        assert request_id not in outbox._action_response
+        assert request_id not in outbox._legacy_action_response
