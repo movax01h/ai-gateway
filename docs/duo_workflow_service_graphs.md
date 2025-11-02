@@ -187,6 +187,36 @@ graph TD;
     classDef last fill:#bfb6fc
 ```
 
+## Graph: `developer/experimental` (Flow Registry)
+
+```mermaid
+
+---
+config:
+    flowchart:
+        curve: linear
+---
+graph TD;
+    __start__(__start__):::first;
+    __end__(__end__):::last;
+    __start__ --> issue_parser;
+    issue_parser(issue_parser<br>#91;DeterministicStepComponent#93;);
+    draft_merge_request_creator(draft_merge_request_creator<br>#91;OneOffComponent#93;);
+    tool_listing_agent(tool_listing_agent<br>#91;AgentComponent#93;);
+    planning_agent(planning_agent<br>#91;AgentComponent#93;);
+    programming_agent(programming_agent<br>#91;AgentComponent#93;);
+    git_actions(git_actions<br>#91;OneOffComponent#93;);
+    issue_parser --> draft_merge_request_creator;
+    draft_merge_request_creator --> tool_listing_agent;
+    tool_listing_agent --> planning_agent;
+    planning_agent --> programming_agent;
+    programming_agent --> git_actions;
+    git_actions --> __end__;
+    classDef default fill:#f2f0ff,line-height:1.2;
+    classDef first fill-opacity: 0;
+    classDef last fill:#bfb6fc;
+```
+
 ## Graph: `code_review/v1` (Flow Registry)
 
 ```mermaid
