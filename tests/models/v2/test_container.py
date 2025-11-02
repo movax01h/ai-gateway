@@ -17,6 +17,19 @@ from ai_gateway.models.v2.container import _litellm_factory, _mock_selector
             {
                 "model": "claude-3-sonnet@20240229",
                 "custom_llm_provider": "vertex_ai",
+                "model_kwargs": {
+                    "extra_headers": {
+                        "anthropic-beta": "fine-grained-tool-streaming-2025-05-14,context-1m-2025-08-07"
+                    },
+                },
+            },
+            True,
+        ),
+        (
+            {"model": "mistral-small-2503", "custom_llm_provider": "vertex_ai"},
+            {
+                "model": "mistral-small-2503",
+                "custom_llm_provider": "vertex_ai",
             },
             True,
         ),
