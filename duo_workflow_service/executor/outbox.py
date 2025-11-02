@@ -57,6 +57,25 @@ class Outbox:
 
         return await self._queue.get()
 
+    def fail_action(self, request_id: str, message: str):
+        """Fail an action by setting an exception on its future."""
+        log.error("Failing action", requestID=request_id, failure_reason=message)
+
+        future = self._action_response.get(request_id)
+        if future and not future.cancelled():
+            try:
+                future.set_exception(Exception(message))
+            except asyncio.InvalidStateError:
+                log.warning(
+                    "Future for request already in final state when failing",
+                    request_id=request_id,
+                )
+
+        if request_id in self._action_response:
+            del self._action_response[request_id]
+        if request_id in self._legacy_action_response:
+            del self._legacy_action_response[request_id]
+
     def set_action_response(self, event: contract_pb2.ClientEvent):
         """Set action response to the future object which is awaited by the caller."""
 

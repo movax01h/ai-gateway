@@ -123,6 +123,16 @@ async def test_get_from_outbox(workflow, mock_action):
 
 
 @pytest.mark.asyncio
+async def test_fail_outbox_action(workflow, mock_action):
+    workflow._outbox.put_action(mock_action)
+
+    item = await workflow.get_from_outbox()
+    workflow.fail_outbox_action(item.requestID, "Something went wrong")
+
+    assert item.requestID not in workflow._outbox._action_response
+
+
+@pytest.mark.asyncio
 async def test_set_action_response(workflow):
     request_id = workflow._outbox.put_action(contract_pb2.Action())
 

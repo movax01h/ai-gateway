@@ -79,6 +79,7 @@ from duo_workflow_service.workflows.abstract_workflow import AbstractWorkflow
 from duo_workflow_service.workflows.registry import FlowFactory, resolve_workflow_class
 from duo_workflow_service.workflows.type_definitions import (
     AIO_CANCEL_STOP_WORKFLOW_REQUEST,
+    OUTGOING_MESSAGE_TOO_LARGE,
     AdditionalContext,
 )
 from lib.internal_events import InternalEventsClient
@@ -379,10 +380,33 @@ class DuoWorkflowService(contract_pb2_grpc.DuoWorkflowServicer):
                         "Can not send an action that is not the Action type"
                     )
 
+                payload_size = item.ByteSize()
+
+                if payload_size > MAX_MESSAGE_SIZE:
+                    log.error(
+                        "Failed to send an outgoing action: Message size too large",
+                        request_id=item.requestID,
+                        payload_size=payload_size,
+                        action_class=item.WhichOneof("action"),
+                    )
+                    workflow_task.cancel(OUTGOING_MESSAGE_TOO_LARGE)
+
+                    # We also need to fail this action in the outbox otherwise
+                    # we can block the checkpointing thread in langgraph which
+                    # is waiting on a response from a checkpoint that is too
+                    # large.
+                    workflow.fail_outbox_action(
+                        item.requestID, OUTGOING_MESSAGE_TOO_LARGE
+                    )
+
+                    # Continue so we have a chance to cleanup. Some outgoing
+                    # status updates hopefully make it through
+                    continue
+
                 log.info(
                     "Sending an outgoing action",
                     request_id=item.requestID,
-                    payload_size=item.ByteSize(),
+                    payload_size=payload_size,
                     action_class=item.WhichOneof("action"),
                 )
 
@@ -461,6 +485,9 @@ class DuoWorkflowService(contract_pb2_grpc.DuoWorkflowServicer):
                 context.set_details(
                     f"workflow execution stopped: {workflow.last_gitlab_status}"
                 )
+            elif str(workflow.last_error) == OUTGOING_MESSAGE_TOO_LARGE:
+                context.set_code(grpc.StatusCode.RESOURCE_EXHAUSTED)
+                context.set_details("Outgoing message too large.")
             elif workflow.last_error:
                 context.set_code(grpc.StatusCode.INTERNAL)
                 context.set_details(
