@@ -19,6 +19,13 @@ def _litellm_factory(*args, **kwargs) -> Model:
     if kwargs.get("custom_llm_provider", "") == "vertex_ai":
         kwargs["client"] = AsyncHTTPHandler(event_hooks={"request": [log_request]})
 
+        if kwargs.get("model", "").lower().startswith("claude"):
+            kwargs["model_kwargs"] = kwargs.get("model_kwargs", {}) or {}
+            kwargs["model_kwargs"]["extra_headers"] = {
+                **kwargs["model_kwargs"].get("extra_headers", {}),
+                "anthropic-beta": "fine-grained-tool-streaming-2025-05-14,context-1m-2025-08-07",
+            }
+
     return ChatLiteLLM(*args, **kwargs)
 
 
