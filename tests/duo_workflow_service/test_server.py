@@ -607,6 +607,13 @@ async def test_execute_workflow_status_codes(
             1,  # Only called from abort_workflow
         ),
         (
+            # Tuple-style error from LangGraph cleanup
+            (AIO_CANCEL_STOP_WORKFLOW_REQUEST, "<Task cancelled>"),
+            grpc.StatusCode.OK,
+            "workflow execution stopped:",
+            1,  # Only called from abort_workflow
+        ),
+        (
             "Some other cancellation",
             grpc.StatusCode.CANCELLED,
             "RPC cancelled by client",
@@ -626,7 +633,13 @@ async def test_execute_workflow_cancellation_handling(
     expected_detail_prefix,
     expected_log_count,
 ):
-    """Test that ExecuteWorkflow handles different CancelledError scenarios correctly."""
+    """Test that ExecuteWorkflow handles different CancelledError scenarios correctly.
+
+    This test verifies that:
+    1. Simple string error messages are handled correctly
+    2. Tuple-style error messages (from LangGraph cleanup) are handled correctly
+    3. Unexpected cancellations are logged appropriately
+    """
     mock_workflow = mock_abstract_workflow_class.return_value
     mock_workflow.is_done = False
     mock_workflow.run = AsyncMock()
