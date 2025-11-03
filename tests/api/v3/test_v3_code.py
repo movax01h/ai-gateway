@@ -1,6 +1,6 @@
 from dataclasses import dataclass
 from typing import Optional
-from unittest.mock import Mock, patch
+from unittest.mock import AsyncMock, Mock, patch
 
 import pytest
 from dependency_injector import containers
@@ -75,11 +75,11 @@ def config_values_fixture(assets_dir):
 
 class TestEditorContentCompletion:
     @pytest.mark.parametrize(
-        ("mock_completions_legacy_output_texts", "expected_response"),
+        ("mock_suggestions_output_text", "expected_response"),
         [
             # non-empty suggestions from model
             (
-                ["def search", "println"],
+                "def search",
                 {
                     "choices": [
                         {
@@ -87,16 +87,11 @@ class TestEditorContentCompletion:
                             "index": 0,
                             "finish_reason": "length",
                         },
-                        {
-                            "text": "println",
-                            "index": 0,
-                            "finish_reason": "length",
-                        },
                     ],
                     "metadata": {
                         "model": {
-                            "engine": "vertex-ai",
-                            "name": "code-gecko",
+                            "engine": "anthropic",
+                            "name": "claude-3-haiku-20240307",
                             "lang": "python",
                         },
                         "enabled_feature_flags": ["flag_a", "flag_b"],
@@ -105,13 +100,13 @@ class TestEditorContentCompletion:
             ),
             # empty suggestions from model
             (
-                [""],
+                "",
                 {
                     "choices": [],
                     "metadata": {
                         "model": {
-                            "engine": "vertex-ai",
-                            "name": "code-gecko",
+                            "engine": "anthropic",
+                            "name": "claude-3-haiku-20240307",
                             "lang": "python",
                         },
                         "enabled_feature_flags": ["flag_a", "flag_b"],
@@ -123,8 +118,8 @@ class TestEditorContentCompletion:
     def test_successful_response(
         self,
         mock_client: TestClient,
-        mock_completions_legacy: Mock,
-        mock_completions_legacy_output_texts: str,
+        mock_completions: Mock,
+        mock_suggestions_output_text: str,
         expected_response: dict,
         route: str,
     ):
@@ -186,14 +181,13 @@ class TestEditorContentCompletion:
             suggestion_source="network",
             region="us-central1",
         )
-        mock_completions_legacy.assert_called_with(
+        mock_completions.assert_called_with(
             prefix=payload["content_above_cursor"],
             suffix=payload["content_below_cursor"],
             file_name=payload["file_name"],
             editor_lang=payload["language_identifier"],
             stream=False,
             code_context=None,
-            candidate_count=3,
             snowplow_event_context=expected_snowplow_event,
         )
 
@@ -206,7 +200,7 @@ class TestEditorContentCompletion:
                 {
                     "choices": [
                         {
-                            "text": "test completion",
+                            "text": "Test text completion response",
                             "index": 0,
                             "finish_reason": "length",
                         }
@@ -214,7 +208,7 @@ class TestEditorContentCompletion:
                 },
                 {
                     "engine": "vertex-ai",
-                    "name": "code-gecko@002",
+                    "name": "vertex_ai/codestral-2501",
                     "lang": "python",
                 },
             ),
@@ -243,7 +237,7 @@ class TestEditorContentCompletion:
                 {
                     "choices": [
                         {
-                            "text": "test completion",
+                            "text": "Test text completion response",
                             "index": 0,
                             "finish_reason": "length",
                         }
@@ -251,7 +245,7 @@ class TestEditorContentCompletion:
                 },
                 {
                     "engine": "vertex-ai",
-                    "name": "code-gecko@002",
+                    "name": "vertex_ai/codestral-2501",
                     "lang": "python",
                 },
             ),
@@ -266,9 +260,9 @@ class TestEditorContentCompletion:
     )
     def test_model_provider(
         self,
+        mock_litellm_acompletion: Mock,
         mock_client: TestClient,
         mock_anthropic_chat: Mock,
-        mock_code_gecko: Mock,
         model_provider: str,
         expected_code: int,
         expected_response: dict,
@@ -326,7 +320,11 @@ class TestEditorContentCompletion:
 
         assert body["metadata"]["model"] == expected_model
 
-        mock = mock_anthropic_chat if model_provider == "anthropic" else mock_code_gecko
+        mock = (
+            mock_anthropic_chat
+            if model_provider == "anthropic"
+            else mock_litellm_acompletion
+        )
 
         mock.assert_called_once()
 

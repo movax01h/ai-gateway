@@ -11,20 +11,11 @@ from ai_gateway.code_suggestions.base import (
     resolve_lang_id,
     resolve_lang_name,
 )
-from ai_gateway.code_suggestions.processing import (
-    ModelEngineCompletions,
-    ModelEngineOutput,
-    Prompt,
-    TokenStrategyBase,
-)
+from ai_gateway.code_suggestions.processing import Prompt, TokenStrategyBase
 from ai_gateway.code_suggestions.processing.post.completions import PostProcessor
 from ai_gateway.code_suggestions.processing.pre import PromptBuilderPrefixBased
 from ai_gateway.code_suggestions.processing.typing import MetadataExtraInfo
-from ai_gateway.instrumentators import (
-    KnownMetrics,
-    TextGenModelInstrumentator,
-    benchmark,
-)
+from ai_gateway.instrumentators import TextGenModelInstrumentator
 from ai_gateway.models import ChatModelBase, Message, ModelAPICallError, ModelAPIError
 from ai_gateway.models.agent_model import AgentModel
 from ai_gateway.models.amazon_q import AmazonQModel
@@ -34,87 +25,10 @@ from ai_gateway.models.base_text import (
     TextGenModelChunk,
     TextGenModelOutput,
 )
-from ai_gateway.tracking.instrumentator import SnowplowInstrumentator
-from ai_gateway.tracking.snowplow import SnowplowEvent, SnowplowEventContext
 
-__all__ = ["CodeCompletionsLegacy", "CodeCompletions"]
+__all__ = ["CodeCompletions"]
 
 log = structlog.stdlib.get_logger("codesuggestions")
-
-
-class CodeCompletionsLegacy:
-    def __init__(
-        self,
-        engine: ModelEngineCompletions,
-        post_processor: Factory[PostProcessor],
-        snowplow_instrumentator: SnowplowInstrumentator,
-    ):
-        self.engine = engine
-        self.post_processor = post_processor
-        self.instrumentator = snowplow_instrumentator
-
-    async def execute(
-        self,
-        prefix: str,
-        suffix: str,
-        file_name: str,
-        editor_lang: str,
-        snowplow_event_context: Optional[SnowplowEventContext] = None,
-        **kwargs: Any,
-    ) -> list[ModelEngineOutput]:
-        responses = await self.engine.generate(
-            prefix, suffix, file_name, editor_lang, **kwargs
-        )
-
-        self.instrumentator.watch(
-            SnowplowEvent(
-                context=snowplow_event_context,
-                action="tokens_per_user_request_prompt",
-                label="code_completion",
-                value=responses[0].tokens_consumption_metadata.input_tokens,
-            )
-        )
-
-        outputs = []
-        # Since all metadata objects are the same, take the first one
-        tokens_consumption_metadata = responses[0].tokens_consumption_metadata
-        total_output_tokens = tokens_consumption_metadata.output_tokens
-        for response in responses:
-            if not response.text:
-                outputs.append(response)
-                break
-
-            with benchmark(
-                metric_key=KnownMetrics.POST_PROCESSING_DURATION,
-                labels={
-                    "model_engine": self.engine.model.metadata.engine,
-                    "model_name": self.engine.model.metadata.name,
-                },
-            ):
-                processed_completion = await self.post_processor(
-                    prefix, suffix=suffix, lang_id=response.lang_id
-                ).process(response.text)
-
-            outputs.append(
-                ModelEngineOutput(
-                    text=processed_completion,
-                    score=response.score,
-                    model=response.model,
-                    lang_id=response.lang_id,
-                    metadata=response.metadata,
-                    tokens_consumption_metadata=response.tokens_consumption_metadata,
-                )
-            )
-
-        self.instrumentator.watch(
-            SnowplowEvent(
-                context=snowplow_event_context,
-                action="tokens_per_user_request_response",
-                label="code_completion",
-                value=total_output_tokens,
-            )
-        )
-        return outputs
 
 
 class CodeCompletions:
@@ -134,9 +48,6 @@ class CodeCompletions:
 
         self.post_processor = post_processor
 
-        # If you need the previous logic for building prompts using tree-sitter, refer to CodeCompletionsLegacy.
-        # In the future, we plan to completely drop CodeCompletionsLegacy and move its logic to CodeCompletions
-        # Ref: https://gitlab.com/gitlab-org/modelops/applied-ml/code-suggestions/ai-assist/-/issues/296
         self.prompt_builder = PromptBuilderPrefixBased(
             model.input_token_limit, tokenization_strategy
         )

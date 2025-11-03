@@ -30,7 +30,6 @@ from ai_gateway.api.v3.code.typing import (
 from ai_gateway.async_dependency_resolver import get_config, get_container_application
 from ai_gateway.code_suggestions import (
     CodeCompletions,
-    CodeCompletionsLegacy,
     CodeGenerations,
     CodeSuggestionsChunk,
     LanguageServerVersion,
@@ -157,14 +156,14 @@ async def code_completion(
     current_user: StarletteUser,
     stream_handler: StreamHandler,
     snowplow_event_context: SnowplowEventContext,
-    completions_legacy_factory: Factory[CodeCompletionsLegacy] = Provide[
-        ContainerApplication.code_suggestions.completions.vertex_legacy.provider
-    ],
     completions_anthropic_factory: Factory[CodeCompletions] = Provide[
         ContainerApplication.code_suggestions.completions.anthropic.provider
     ],
     completions_amazon_q_factory: Factory[CodeCompletions] = Provide[
         ContainerApplication.code_suggestions.completions.amazon_q_factory.provider
+    ],
+    completions_litellm_vertex_codestral_factory: Factory[CodeCompletions] = Provide[
+        ContainerApplication.code_suggestions.completions.litellm_vertex_codestral_factory.provider
     ],
     code_context: Optional[list[CodeContextPayload]] = None,
     model_metadata: TypeModelMetadata = None,
@@ -192,10 +191,7 @@ async def code_completion(
             model__role_arn=payload.role_arn or model_metadata.role_arn,
         )
     else:
-        engine = completions_legacy_factory()
-
-    if payload.choices_count > 0:
-        kwargs.update({"candidate_count": payload.choices_count})
+        engine = completions_litellm_vertex_codestral_factory()
 
     suggestions = await engine.execute(
         prefix=payload.content_above_cursor,

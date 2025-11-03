@@ -2,12 +2,8 @@ import anthropic
 from dependency_injector import containers, providers
 from transformers import PreTrainedTokenizerFast
 
-from ai_gateway.code_suggestions.completions import (
-    CodeCompletions,
-    CodeCompletionsLegacy,
-)
+from ai_gateway.code_suggestions.completions import CodeCompletions
 from ai_gateway.code_suggestions.generations import CodeGenerations
-from ai_gateway.code_suggestions.processing import ModelEngineCompletions
 from ai_gateway.code_suggestions.processing.post.completions import (
     PostProcessor as PostProcessorCompletions,
 )
@@ -116,27 +112,6 @@ class ContainerCodeCompletions(containers.DeclarativeContainer):
     snowplow_instrumentator = providers.Dependency(instance_of=SnowplowInstrumentator)
 
     config = providers.Configuration(strict=True)
-
-    vertex_legacy = providers.Factory(
-        CodeCompletionsLegacy,
-        engine=providers.Factory(
-            ModelEngineCompletions,
-            model=providers.Factory(
-                vertex_code_gecko, name=KindVertexTextModel.CODE_GECKO_002
-            ),
-            tokenization_strategy=providers.Factory(
-                TokenizerTokenStrategy, tokenizer=tokenizer
-            ),
-        ),
-        post_processor=providers.Factory(
-            PostProcessorCompletions,
-            overrides={
-                PostProcessorOperation.FIX_END_BLOCK_ERRORS: PostProcessorOperation.FIX_END_BLOCK_ERRORS_LEGACY,
-            },
-            exclude=config.excl_post_process,
-        ).provider,
-        snowplow_instrumentator=snowplow_instrumentator,
-    )
 
     anthropic = providers.Factory(
         CodeCompletions,
