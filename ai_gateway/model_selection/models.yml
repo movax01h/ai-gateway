@@ -250,16 +250,6 @@ models:
       temperature: 0.0
       max_tokens: 4_096
 
-  - name: Mistral Nemo
-    gitlab_identifier: mistral_nemo
-    family:
-      - mistral_nemo
-      - mistral
-    params:
-      model: mistral-nemo
-      temperature: 0.0
-      max_tokens: 4_096
-
   - name: Mixtral
     gitlab_identifier: mixtral
     family:
