@@ -32,7 +32,7 @@ from duo_workflow_service.checkpointer.gitlab_workflow_utils import (
 )
 from duo_workflow_service.checkpointer.notifier import UserInterface
 from duo_workflow_service.components import ToolsRegistry
-from duo_workflow_service.entities import DuoWorkflowStateType
+from duo_workflow_service.entities import DuoWorkflowStateType, WorkflowStatusEnum
 from duo_workflow_service.executor.outbox import Outbox, OutboxSignal
 from duo_workflow_service.gitlab.events import get_event
 from duo_workflow_service.gitlab.gitlab_api import (
@@ -297,7 +297,16 @@ class AbstractWorkflow(ABC):
                         )
         except BaseException as e:
             self.last_error = e
-            if str(e) != AIO_CANCEL_STOP_WORKFLOW_REQUEST:
+            if str(e) == AIO_CANCEL_STOP_WORKFLOW_REQUEST:
+                # when workflow is cancelled with AIO_CANCEL_STOP_WORKFLOW_REQUEST, a new checkpoint is not created and
+                # internal workflow state is not updated, thus the clients don't receive a newCheckpoint notification
+                # here we send a notification with stopped status for clients to react accordingly
+                await checkpoint_notifier.send_event(
+                    type="values",
+                    state={"status": WorkflowStatusEnum.CANCELLED, "ui_chat_log": []},
+                    stream=self._stream,
+                )
+            else:
                 await self._handle_workflow_failure(e, compiled_graph, graph_config)
             raise TraceableException(e)
         finally:
