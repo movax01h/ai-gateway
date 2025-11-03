@@ -2,8 +2,10 @@ name: push_to_remote_prompt
 model:
   params:
     model_class_provider: litellm
-    max_tokens: 32_768
+    max_tokens: 2048
     max_retries: 3
+unit_primitives:
+  - duo_workflow_execute_workflow
 prompt_template:
   system: |
     {% include 'push_to_remote/system/1.0.0.jinja' %}
@@ -12,4 +14,4 @@ prompt_template:
   placeholder: history
 params:
   vertex_location: global
-  timeout: 60
+  timeout: 30
