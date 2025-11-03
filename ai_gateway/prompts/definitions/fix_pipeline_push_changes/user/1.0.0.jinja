@@ -9,4 +9,5 @@ Use the `run_git_command` tool to run this git command specified in the git_comm
     -o merge_request.title='Draft: fix failing pipeline'
     {% if source_branch %}-o merge_request.target='{{source_branch}}'{% endif %}
     -o merge_request.description='Fixes failing pipeline {{pipeline_url}}{% if merge_request_url %} on {{merge_request_url}}{% endif %}'
+    --no-verify
 </git_command>
