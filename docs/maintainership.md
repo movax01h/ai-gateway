@@ -28,7 +28,7 @@ While there is no strict guideline on how to become a maintainer, we generally r
 
 ### Steps to become a maintainer
 
-1. **Create a merge request** to update your [team member entry](https://gitlab.com/gitlab-com/www-gitlab-com/blob/master/doc/team_database.md) and indicate your role as:
+1. **Create a merge request** to update your [team member entry](https://gitlab.com/gitlab-com/www-gitlab-com/blob/master/doc/team_database.md) and indicate your role as one or both of the following:
    - `maintainer ai-gateway`
    - `maintainer duo_workflow_service`
 1. **Assign the MR** to your manager and `@gitlab-org/maintainers/ai-gateway` for approval and merge.
