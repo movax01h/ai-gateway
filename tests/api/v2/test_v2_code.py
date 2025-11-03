@@ -1366,7 +1366,7 @@ class TestGitLabModelProvider:
         mock_suggestion.metadata = None
 
         def _mock_build_side_effect(*args, **kwargs):
-            internal_event_client = args[11]
+            internal_event_client = args[10]
 
             _track_code_suggestions_event(
                 "request_complete_code", internal_event_client

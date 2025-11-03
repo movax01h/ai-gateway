@@ -6,15 +6,12 @@ from fastapi import APIRouter, Depends, Request
 from fastapi_health import health
 from gitlab_cloud_connector import cloud_connector_ready
 
-from ai_gateway.async_dependency_resolver import (  # get_code_suggestions_completions_vertex_legacy_provider,
+from ai_gateway.async_dependency_resolver import (
     get_code_suggestions_completions_litellm_factory_provider,
     get_code_suggestions_generations_anthropic_chat_factory_provider,
     get_config,
 )
-from ai_gateway.code_suggestions import (  # CodeCompletionsLegacy,
-    CodeCompletions,
-    CodeGenerations,
-)
+from ai_gateway.code_suggestions import CodeCompletions, CodeGenerations
 from ai_gateway.code_suggestions.processing import MetadataPromptBuilder, Prompt
 from ai_gateway.code_suggestions.processing.typing import MetadataCodeContent
 from ai_gateway.models import (

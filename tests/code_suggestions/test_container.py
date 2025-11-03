@@ -1,9 +1,6 @@
 from dependency_injector import containers
 
-from ai_gateway.code_suggestions.completions import (
-    CodeCompletions,
-    CodeCompletionsLegacy,
-)
+from ai_gateway.code_suggestions.completions import CodeCompletions
 from ai_gateway.code_suggestions.generations import CodeGenerations
 from ai_gateway.models.anthropic import KindAnthropicModel
 from ai_gateway.models.litellm import KindLiteLlmModel
@@ -14,7 +11,6 @@ def test_container(mock_ai_gateway_container: containers.DeclarativeContainer):
     completions = code_suggestions.completions
     generations = code_suggestions.generations
 
-    assert isinstance(completions.vertex_legacy(), CodeCompletionsLegacy)
     assert isinstance(
         completions.anthropic(model__name=KindAnthropicModel.CLAUDE_3_5_SONNET),
         CodeCompletions,

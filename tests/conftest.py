@@ -24,18 +24,12 @@ from ai_gateway.api.middleware import (
 )
 from ai_gateway.api.server import CONTAINER_APPLICATION_MODULES
 from ai_gateway.code_suggestions.base import CodeSuggestionsChunk, CodeSuggestionsOutput
-from ai_gateway.code_suggestions.processing.base import ModelEngineOutput
-from ai_gateway.code_suggestions.processing.typing import (
-    LanguageId,
-    MetadataCodeContent,
-    MetadataPromptBuilder,
-)
+from ai_gateway.code_suggestions.processing.typing import LanguageId
 from ai_gateway.config import Config, ConfigModelLimits
 from ai_gateway.container import ContainerApplication
 from ai_gateway.model_metadata import TypeModelMetadata, current_model_metadata_context
 from ai_gateway.model_selection.model_selection_config import ModelSelectionConfig
 from ai_gateway.models.base import ModelMetadata as LegacyModelMetadata
-from ai_gateway.models.base import TokensConsumptionMetadata
 from ai_gateway.models.base_text import (
     TextGenModelBase,
     TextGenModelChunk,
@@ -236,14 +230,6 @@ def mock_code_bison_fixture(mock_output: TextGenModelOutput):
         yield mock
 
 
-@pytest.fixture(name="mock_code_gecko")
-def mock_code_gecko_fixture(mock_output: TextGenModelOutput):
-    with _mock_generate(
-        "ai_gateway.models.vertex_text.PalmCodeGeckoModel", mock_output
-    ) as mock:
-        yield mock
-
-
 @pytest.fixture(name="mock_anthropic")
 def mock_anthropic_fixture(mock_output: TextGenModelOutput):
     with _mock_generate(
@@ -306,34 +292,7 @@ def mock_amazon_q_model_fixture(mock_output: TextGenModelOutput):
         yield mock
 
 
-@pytest.fixture(name="mock_completions_legacy_output_texts")
-def mock_completions_legacy_output_texts_fixture():
-    return ["def search"]
-
-
-@pytest.fixture(name="mock_completions_legacy_output")
-def mock_completions_legacy_output_fixture(mock_completions_legacy_output_texts: str):
-    output = []
-    for text in mock_completions_legacy_output_texts:
-        output.append(
-            ModelEngineOutput(
-                text=text,
-                score=0,
-                model=LegacyModelMetadata(name="code-gecko", engine="vertex-ai"),
-                lang_id=LanguageId.PYTHON,
-                metadata=MetadataPromptBuilder(
-                    components={
-                        "prefix": MetadataCodeContent(length=10, length_tokens=2),
-                        "suffix": MetadataCodeContent(length=10, length_tokens=2),
-                    },
-                ),
-                tokens_consumption_metadata=TokensConsumptionMetadata(
-                    input_tokens=1, output_tokens=2
-                ),
-            )
-        )
-
-    return output
+# Legacy completions output fixtures removed as CodeCompletionsLegacy no longer exists
 
 
 @pytest.fixture(name="mock_suggestions_output_text")
@@ -366,17 +325,6 @@ def mock_suggestions_output_fixture(
         lang_id=LanguageId.PYTHON,
         metadata=CodeSuggestionsOutput.Metadata(),  # type: ignore[attr-defined]
     )
-
-
-@pytest.fixture(name="mock_completions_legacy")
-def mock_completions_legacy_fixture(
-    mock_completions_legacy_output: list[ModelEngineOutput],
-):
-    with patch(
-        "ai_gateway.code_suggestions.CodeCompletionsLegacy.execute",
-        return_value=mock_completions_legacy_output,
-    ) as mock:
-        yield mock
 
 
 @contextmanager
@@ -472,6 +420,38 @@ def mock_litellm_acompletion_streamed_fixture():
 
         mock_acompletion.return_value = streamed_response
 
+        yield mock_acompletion
+
+
+@pytest.fixture(name="mock_litellm_completion")
+def mock_litellm_completion_fixture():
+    with patch("litellm.completion") as mock_completion:
+        mock_completion.return_value = Mock(
+            choices=[
+                Mock(
+                    message=Mock(content="test completion"),
+                    text="test completion",
+                    logprobs=Mock(token_logprobs=[999]),
+                ),
+            ],
+            usage=Mock(completion_tokens=999),
+        )
+        yield mock_completion
+
+
+@pytest.fixture(name="mock_litellm_acompletion_for_vertex")
+def mock_litellm_acompletion_for_vertex_fixture():
+    with patch("litellm.acompletion") as mock_acompletion:
+        mock_acompletion.return_value = AsyncMock(
+            choices=[
+                AsyncMock(
+                    message=AsyncMock(content="test completion"),
+                    text="test completion",
+                    logprobs=AsyncMock(token_logprobs=[999]),
+                ),
+            ],
+            usage=AsyncMock(completion_tokens=999),
+        )
         yield mock_acompletion
 
 

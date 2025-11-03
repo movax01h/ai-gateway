@@ -41,10 +41,6 @@ async def get_x_ray_anthropic_claude():
     yield get_container_application().x_ray.anthropic_claude()
 
 
-async def get_code_suggestions_completions_vertex_legacy_provider():
-    yield get_container_application().code_suggestions.completions.vertex_legacy
-
-
 async def get_code_suggestions_completions_anthropic_provider():
     yield get_container_application().code_suggestions.completions.anthropic
 

@@ -34,7 +34,6 @@ from ai_gateway.async_dependency_resolver import (
     get_code_suggestions_completions_fireworks_factory_provider,
     get_code_suggestions_completions_litellm_factory_provider,
     get_code_suggestions_completions_litellm_vertex_codestral_factory_provider,
-    get_code_suggestions_completions_vertex_legacy_provider,
     get_code_suggestions_generations_agent_factory_provider,
     get_code_suggestions_generations_anthropic_chat_factory_provider,
     get_code_suggestions_generations_litellm_factory_provider,
@@ -46,7 +45,6 @@ from ai_gateway.async_dependency_resolver import (
 )
 from ai_gateway.code_suggestions import (
     CodeCompletions,
-    CodeCompletionsLegacy,
     CodeGenerations,
     CodeSuggestionsChunk,
 )
@@ -108,10 +106,6 @@ async def completions(
     current_user: Annotated[StarletteUser, Depends(get_current_user)],
     prompt_registry: Annotated[BasePromptRegistry, Depends(get_prompt_registry)],
     config: Annotated[Config, Depends(get_config)],
-    completions_legacy_factory: Annotated[
-        Factory[CodeCompletionsLegacy],
-        Depends(get_code_suggestions_completions_vertex_legacy_provider),
-    ],
     completions_anthropic_factory: Annotated[
         Factory[CodeCompletions],
         Depends(get_code_suggestions_completions_anthropic_provider),
@@ -153,7 +147,6 @@ async def completions(
         payload,
         current_user,
         prompt_registry,
-        completions_legacy_factory,
         completions_anthropic_factory,
         completions_litellm_factory,
         completions_fireworks_factory,
@@ -531,9 +524,6 @@ def _build_code_completions(
     payload: CompletionsRequestWithVersion,
     current_user: StarletteUser,
     prompt_registry: BasePromptRegistry,
-    completions_legacy_factory: Factory[  # pylint: disable=unused-argument
-        CodeCompletionsLegacy
-    ],
     completions_anthropic_factory: Factory[CodeCompletions],
     completions_litellm_factory: Factory[CodeCompletions],
     completions_fireworks_factory: Factory[CodeCompletions],
@@ -542,7 +532,7 @@ def _build_code_completions(
     completions_litellm_vertex_codestral_factory: Factory[CodeCompletions],
     internal_event_client: InternalEventsClient,
     region: str,
-) -> tuple[CodeCompletions | CodeCompletionsLegacy, dict]:
+) -> tuple[CodeCompletions, dict]:
     # Default to use cache
     use_llm_prompt_caching = (
         request.headers.get(X_GITLAB_MODEL_PROMPT_CACHE_ENABLED, "true") == "true"
@@ -745,7 +735,7 @@ async def _handle_stream(
 
 async def _execute_code_completion(
     payload: CompletionsRequestWithVersion,
-    code_completions: Factory[CodeCompletions | CodeCompletionsLegacy],
+    code_completions: Factory[CodeCompletions],
     snowplow_event_context: Optional[SnowplowEventContext] = None,
     **kwargs: dict,
 ) -> any:
