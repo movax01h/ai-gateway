@@ -6,6 +6,14 @@ product_group: agent_foundations
 version: "v1"
 environment: ambient
 components:
+  - name: "fix_pipeline_agents_dot_md"
+    type: DeterministicStepComponent
+    inputs:
+      - from: "AGENTS.md"
+        as: "file_path"
+        literal: true
+    tool_name: "read_file"
+    ui_log_events: [ ]
   - name: "fix_pipeline_context"
     type: AgentComponent
     prompt_id: "fix_pipeline_context"
@@ -15,6 +23,8 @@ components:
         as: "pipeline_url"
       - from: "context:inputs.merge_request.url"
         as: "merge_request_url"
+      - from: "context:fix_pipeline_agents_dot_md.tool_responses"
+        as: "agents_dot_md"
     toolset: ["get_pipeline_errors", "list_merge_request_diffs", "read_file", "find_files", "list_dir"]
     ui_log_events:
       - "on_agent_final_answer"
@@ -41,6 +51,8 @@ components:
         as: "merge_request_url"
       - from: "context:fix_pipeline_context.final_answer"
         as: "fix_pipeline_context_results"
+      - from: "context:fix_pipeline_agents_dot_md.tool_responses"
+        as: "agents_dot_md"
     toolset: ["create_merge_request_note"]
     ui_log_events:
       - "on_agent_final_answer"
@@ -55,6 +67,8 @@ components:
         as: "fix_pipeline_context_results"
       - from: "context:inputs.pipeline.source_branch"
         as: "source_branch"
+      - from: "context:fix_pipeline_agents_dot_md.tool_responses"
+        as: "agents_dot_md"
     toolset: []
     ui_log_events:
       - "on_agent_final_answer"
@@ -71,6 +85,8 @@ components:
         as: "source_branch"
       - from: "context:project_id"
         as: "project_id"
+      - from: "context:fix_pipeline_agents_dot_md.tool_responses"
+        as: "agents_dot_md"
     toolset:
       - create_file_with_contents
       - edit_file
@@ -89,6 +105,8 @@ components:
     inputs:
       - from: "context:project_http_url_to_repo"
         as: "repository_url"
+      - from: "context:fix_pipeline_agents_dot_md.tool_responses"
+        as: "agents_dot_md"
     toolset:
       - "run_git_command"
     ui_log_events:
@@ -108,6 +126,8 @@ components:
         as: "merge_request_url"
       - from: "context:inputs.pipeline.source_branch"
         as: "source_branch"
+      - from: "context:fix_pipeline_agents_dot_md.tool_responses"
+        as: "agents_dot_md"
     toolset:
       - "run_git_command"
     ui_log_events:
@@ -124,12 +144,16 @@ components:
         as: "merge_request_url"
       - from: "context:fix_pipeline_git_push.tool_responses"
         as: "git_push_response"
+      - from: "context:fix_pipeline_agents_dot_md.tool_responses"
+        as: "agents_dot_md"
     toolset: ["create_merge_request_note"]
     ui_log_events:
       - "on_agent_final_answer"
       - "on_tool_execution_success"
       - "on_tool_execution_failed"
 routers:
+  - from: "fix_pipeline_agents_dot_md"
+    to: "fix_pipeline_context"
   - from: "fix_pipeline_context"
     to: "fix_pipeline_decide_approach"
   - from: "fix_pipeline_decide_approach"
@@ -152,7 +176,7 @@ routers:
   - from: "fix_pipeline_comment_link"
     to: "end"
 flow:
-  entry_point: "fix_pipeline_context"
+  entry_point: "fix_pipeline_agents_dot_md"
   inputs:
     - category: merge_request
       input_schema:

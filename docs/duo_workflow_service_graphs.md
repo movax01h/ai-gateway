@@ -225,7 +225,8 @@ config:
 graph TD;
     __start__(__start__):::first;
     __end__(__end__):::last;
-    __start__ --> fix_pipeline_context;
+    __start__ --> fix_pipeline_agents_dot_md;
+    fix_pipeline_agents_dot_md(fix_pipeline_agents_dot_md<br>#91;DeterministicStepComponent#93;);
     fix_pipeline_context(fix_pipeline_context<br>#91;AgentComponent#93;);
     fix_pipeline_decide_approach(fix_pipeline_decide_approach<br>#91;AgentComponent#93;);
     fix_pipeline_add_comment(fix_pipeline_add_comment<br>#91;AgentComponent#93;);
@@ -234,6 +235,7 @@ graph TD;
     fix_pipeline_git_commit(fix_pipeline_git_commit<br>#91;AgentComponent#93;);
     fix_pipeline_git_push(fix_pipeline_git_push<br>#91;OneOffComponent#93;);
     fix_pipeline_comment_link(fix_pipeline_comment_link<br>#91;OneOffComponent#93;);
+    fix_pipeline_agents_dot_md --> fix_pipeline_context;
     fix_pipeline_context --> fix_pipeline_decide_approach;
     fix_pipeline_decide_approach -.->|add_comment| fix_pipeline_add_comment;
     fix_pipeline_decide_approach -.->|create_fix| fix_pipeline_create_plan;
