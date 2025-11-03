@@ -3,6 +3,7 @@ name: Chat Agent
 model:
   params:
     model_class_provider: litellm
+    max_tokens: 32_768
 unit_primitives:
   - duo_chat
 prompt_template:
