@@ -1,5 +1,6 @@
 import json
 from abc import abstractmethod
+from textwrap import dedent
 from typing import Any, Literal, Optional, Type
 
 import structlog
@@ -353,34 +354,22 @@ class RefSearchInput(BaseSearchInput):
 
 class BlobSearch(GitLabSearchBase):
     name: str = "gitlab_blob_search"
-    unique_description: str = """
-    Search for blobs in the specified GitLab group or project. In GitLab, a "blob" refers to a file's content in a specific version of the repository.
-    This can include source code files, text files, or any other file type stored in the repository.
+    description: str = dedent(
+        """
+        Search file content in remote GitLab projects.
 
-    Parameters:
-    - id: The ID of the project or group. In GitLab, a namespace and group are used interchangeably,
-            so either a group_id or namespace_id can be used to fill this argument. (required)
-    - search_type: Whether to search in a project or a group (required)
-    - search: The search term (required)
-    - ref: The name of a repository branch or tag to search on. Only applicable for projects search_type
-    - order_by: Sort results. Allowed value is created_at
-    - sort: Sort order. Allowed values are asc or desc
+        Syntax for `search` parameter: keyword [filename:pattern] [path:dir/] [extension:type]
+        - keyword: required, case-insensitive
+        - filters: optional, space-separated, support `-` prefix excludes, exact literal matching only
 
-    An example tool_call is presented below
-    {
-        'id': 'toolu_01KqpqRQhTM2pxJrhtTscMWu',
-        'name': 'gitlab_blob_search',
-        'type': 'tool_use'
-        'input': {
-            'id': 123,
-            'search_type': 'projects',
-            'scope': 'blobs',
-            'search': 'Duo Workflow',
-            'ref': 'main',
-        },
-    }
-    """
-    description: str = GitLabSearchBase._get_description(unique_description)
+        Valid examples:
+        - rails filename:gemfile.lock
+        - request filename:server -extension:rb path:src/core
+
+        Invalid examples (DO NOT USE):
+        - await run filename:*server* (WRONG - contains wildcards)
+        """
+    )
     args_schema: Type[BaseModel] = RefSearchInput
 
     def _filter_blob_results(self, results: list) -> list:
