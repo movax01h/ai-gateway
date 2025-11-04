@@ -147,48 +147,6 @@ class DuoWorkflowService(contract_pb2_grpc.DuoWorkflowServicer):
     # - Not delaying the server response for too long when handling errors
     TASK_CANCELLATION_TIMEOUT = 2.0
 
-    # These categories of additional context are gated by a Unit Primitive
-    # check. Other categories can be freely passed to flows as additional
-    # context.
-    UP_GATED_ADDITIONAL_CONTEXT_CATEGORIES = [
-        "file",
-        "snippet",
-        "merge_request",
-        "issue",
-        "dependency",
-        "local_git",
-        "terminal",
-        "repository",
-        "directory",
-    ]
-
-    async def authorize_additional_context(
-        self,
-        current_user: CloudConnectorUser,
-        client_event: contract_pb2.ClientEvent,
-        context: grpc.ServicerContext,
-        internal_event_client: InternalEventsClient,
-    ):
-        if client_event.startRequest.additional_context:
-            for additional_context in client_event.startRequest.additional_context:
-                if (
-                    additional_context.category
-                    in self.UP_GATED_ADDITIONAL_CONTEXT_CATEGORIES
-                ):
-                    unit_primitive = GitLabUnitPrimitive[
-                        f"include_{additional_context.category}_context".upper()
-                    ]
-                    if current_user.can(unit_primitive):
-                        internal_event_client.track_event(
-                            event_name=f"request_{unit_primitive}",
-                            category=__name__,
-                        )
-                    else:
-                        await context.abort(
-                            grpc.StatusCode.PERMISSION_DENIED,
-                            f"Unauthorized to access {unit_primitive}",
-                        )
-
     # pylint: disable=invalid-overridden-method
     # pylint: disable=too-many-statements
     # pylint: disable=too-many-branches
@@ -229,13 +187,6 @@ class DuoWorkflowService(contract_pb2_grpc.DuoWorkflowServicer):
                 )
 
         monitoring_context: MonitoringContext = current_monitoring_context.get()
-
-        await self.authorize_additional_context(
-            current_user=user,
-            client_event=start_workflow_request,
-            context=context,
-            internal_event_client=internal_event_client,
-        )
 
         workflow_id = start_workflow_request.startRequest.workflowID
         set_workflow_id(workflow_id)
