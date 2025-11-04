@@ -42,6 +42,7 @@ from duo_workflow_service.tools.duo_base_tool import DuoBaseTool
 from duo_workflow_service.workflows.type_definitions import (
     AIO_CANCEL_STOP_WORKFLOW_REQUEST,
     OUTGOING_MESSAGE_TOO_LARGE,
+    AdditionalContext,
 )
 from lib.internal_events.context import InternalEventAdditionalProperties
 from lib.internal_events.event_enum import (
@@ -1093,6 +1094,14 @@ async def test_execute_workflow_valid_workflow_metadata(
                 mcpTools=mcp_tools,
                 approval=approval,
                 preapproved_tools=preapproved_tools,
+                additional_context=[
+                    contract_pb2.AdditionalContext(
+                        category="merge_request",
+                        id="1",
+                        content="merge request data",
+                        metadata="{}",
+                    ),
+                ],
             )
         )
 
@@ -1118,7 +1127,14 @@ async def test_execute_workflow_valid_workflow_metadata(
         workflow_metadata={"key": "value"},
         workflow_type=CategoryEnum.UNKNOWN,
         user=user,
-        additional_context=None,
+        additional_context=[
+            AdditionalContext(
+                category="merge_request",
+                id="1",
+                content="merge request data",
+                metadata={},
+            ),
+        ],
         invocation_metadata={"base_url": "http://test.url", "gitlab_token": "123"},
         mcp_tools=mcp_tools,
         approval=approval,
