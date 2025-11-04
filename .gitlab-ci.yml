@@ -113,18 +113,18 @@ include:
   # Runway (Kubernetes)
   - project: "gitlab-com/gl-infra/platform/runway/runwayctl"
     file: "ci-tasks/service-project/helm-chart.yml"
-    ref: v4.10.1
+    ref: v4.10.2
     inputs:
       runway_service_id: ai-gateway-eks
-      runway_version: v4.10.1
+      runway_version: v4.10.2
       runtime: eks
       app_version: "${CI_COMMIT_SHORT_SHA}"
   - project: "gitlab-com/gl-infra/platform/runway/runwayctl"
     file: "ci-tasks/service-project/helm-chart.yml"
-    ref: v4.10.1
+    ref: v4.10.2
     inputs:
       runway_service_id: ai-gateway-gke
-      runway_version: v4.10.1
+      runway_version: v4.10.2
       runtime: gke
       app_version: "${CI_COMMIT_SHORT_SHA}"
 
