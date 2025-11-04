@@ -46,8 +46,3 @@ spec:
     period_seconds: 30
     timeout_seconds: 5
     failure_threshold: 2  # 60 seconds
-  load_balancing:
-    external_load_balancer:
-      enabled: true
-    internal_load_balancer:
-      enabled: false
