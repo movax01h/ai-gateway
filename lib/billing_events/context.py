@@ -34,6 +34,7 @@ class BillingEventContext(BaseModel):
     seat_ids: Optional[List[str]] = None
     metadata: Optional[Dict[str, Any]] = Field(default_factory=dict)
     deployment_type: Optional[str] = None
+    assignments: Optional[List[str]] = None
 
 
 class UsageQuotaEventContext(BaseModel):

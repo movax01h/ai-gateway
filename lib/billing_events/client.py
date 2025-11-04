@@ -119,6 +119,14 @@ class BillingEventsClient:
         )
         unique_instance_id = user.claims.gitlab_instance_uid if user.claims else None
 
+        # Pass the feature_enablement_type (if present) as a list. This could be expanded in the future.
+        # See https://gitlab.com/gitlab-org/architecture/usage-billing/design-doc/-/issues/20#note_2727864683
+        assignments = (
+            [internal_context.feature_enablement_type]
+            if internal_context.feature_enablement_type
+            else None
+        )
+
         billing_context = BillingEventContext(
             event_id=event_id,
             event_type=event_type,
@@ -138,6 +146,7 @@ class BillingEventsClient:
             root_namespace_id=internal_context.ultimate_parent_namespace_id,
             correlation_id=internal_context.correlation_id,
             deployment_type=internal_context.deployment_type,
+            assignments=assignments,
         )
 
         structured_event = StructuredEvent(

@@ -178,6 +178,7 @@ class TestBillingEventsClient:
             user_id=kwargs.get("user_id"),
             correlation_id="corr-123",
             deployment_type=".com",
+            feature_enablement_type="duo_pro",
         )
         current_event_context.set(event_context)
 
@@ -200,6 +201,7 @@ class TestBillingEventsClient:
             "metadata": metadata or {},
             "unique_instance_id": "test-instance-uid",
             "deployment_type": ".com",
+            "assignments": ["duo_pro"],
         }
 
         client.track_billing_event(
