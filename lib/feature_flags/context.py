@@ -9,6 +9,7 @@ class FeatureFlag(StrEnum):
     # Definition: https://gitlab.com/gitlab-org/gitlab/-/blob/master/config/feature_flags/ops/expanded_ai_logging.yml
     EXPANDED_AI_LOGGING = "expanded_ai_logging"
     USE_DUO_CONTEXT_EXCLUSION = "use_duo_context_exclusion"
+    DUO_USE_BILLING_ENDPOINT = "duo_use_billing_endpoint"
 
 
 def is_feature_enabled(feature_name: FeatureFlag | str) -> bool:
