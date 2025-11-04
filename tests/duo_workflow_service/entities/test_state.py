@@ -878,6 +878,41 @@ def test_conversation_history_reducer_with_tool_messages(
     assert result["agent_a"] == expected_result
 
 
+@patch("duo_workflow_service.entities.state.logger")
+def test_single_human_message_causes_unnecessary_fallback_and_leads_to_double_messages(
+    mock_logger,
+):
+    """Reproduces production bug: single human message triggers fallback, leading to ['human', 'human'] pattern."""
+
+    current_1: Dict[str, List[BaseMessage]] = {"agent_a": []}
+    new_1: Optional[Dict[str, List[BaseMessage]]] = {
+        "agent_a": [HumanMessage(content="first message")]
+    }
+    result_1 = _conversation_history_reducer(current_1, new_1)
+    assert len(result_1["agent_a"]) == 1
+
+    warning_calls = [
+        call
+        for call in mock_logger.warning.call_args_list
+        if "Trim resulted in empty messages/invalid messages" in str(call)
+    ]
+    fallback_triggered = len(warning_calls) > 0
+
+    current_2: Dict[str, List[BaseMessage]] = result_1
+    new_2: Optional[Dict[str, List[BaseMessage]]] = {
+        "agent_a": [HumanMessage(content="second message")]
+    }
+    result_2 = _conversation_history_reducer(current_2, new_2)
+
+    assert len(result_2["agent_a"]) == 2
+    assert [msg.type for msg in result_2["agent_a"]] == ["human", "human"]
+    assert result_2["agent_a"][0].content == "first message"
+    assert result_2["agent_a"][1].content == "second message"
+    assert (
+        not fallback_triggered
+    ), "Fallback should not trigger for valid single human message"
+
+
 def test_get_messages_profile():
     messages = []
     token_counter = ApproximateTokenCounter(agent_name="context_builder")
