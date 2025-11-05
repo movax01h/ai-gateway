@@ -835,8 +835,16 @@ async def test_state_manipulation(
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
-    "tool_call, tool_side_effect, tool_args_schema, expected_response, expected_error, expected_log_prefix, "
-    "expected_tool_info",
+    (
+        "tool_call",
+        "tool_side_effect",
+        "tool_args_schema",
+        "expected_response",
+        "expected_error",
+        "expected_log_prefix",
+        "expected_tool_info",
+        "expected_extra_log",
+    ),
     [
         (
             {"id": "1", "name": "test_tool", "args": {}},
@@ -849,6 +857,7 @@ async def test_state_manipulation(
             False,
             "Failed: Using test_tool:  - Invalid arguments",
             ToolInfo(name="test_tool", args={}),
+            {"context": "Tools executor raised TypeError"},
         ),
         (
             {"id": "2", "name": "test_tool", "args": {"invalid": "data"}},
@@ -868,6 +877,7 @@ async def test_state_manipulation(
             False,
             "Failed: Using test_tool: invalid=data - Validation error",
             ToolInfo(name="test_tool", args={"invalid": "data"}),
+            {"tool_call_fields": ["invalid"]},
         ),
         (
             {"id": "3", "name": "test_tool", "args": {"file_path": ".git/config"}},
@@ -881,13 +891,16 @@ async def test_state_manipulation(
             False,  # expected_error
             "Failed: Using test_tool: file_path=.git/config - Tool call failed: ToolException",
             ToolInfo(name="test_tool", args={"file_path": ".git/config"}),
+            {"context": "Tools executor raised error"},
         ),
     ],
 )
 @pytest.mark.usefixtures("mock_datetime")
+@patch("duo_workflow_service.agents.tools_executor.log_exception")
 @patch("duo_workflow_service.agents.tools_executor.duo_workflow_metrics")
 async def test_run_error_handling(
     mock_duo_workflow_metrics,
+    mock_log_exception,
     workflow_state,
     *,
     tool_call,
@@ -898,6 +911,7 @@ async def test_run_error_handling(
     expected_error,
     expected_log_prefix,
     expected_tool_info,
+    expected_extra_log,
 ):
     workflow_type = CategoryEnum.WORKFLOW_SOFTWARE_DEVELOPMENT
     tool = mock_tool(side_effect=tool_side_effect, args_schema=tool_args_schema)
@@ -969,6 +983,11 @@ async def test_run_error_handling(
         flow_type=workflow_type.value,
         tool_name=mock_tool().name,
         failure_reason=type(tool_side_effect).__name__,
+    )
+
+    mock_log_exception.assert_called_once_with(
+        tool_side_effect,
+        extra=expected_extra_log,
     )
 
     tool.ainvoke.assert_called_once()
