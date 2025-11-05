@@ -97,7 +97,7 @@ async def test_middleware_skip_path(internal_event_middleware):
 
 
 @pytest.mark.asyncio
-async def test_middleware_set_context(internal_event_middleware):
+async def test_middleware_set_context(internal_event_middleware, user):
     request = Request(
         {
             "type": "http",
@@ -117,6 +117,7 @@ async def test_middleware_set_context(internal_event_middleware):
                 (X_GITLAB_INTERFACE.lower().encode(), b"duo_chat"),
                 (X_GITLAB_ROOT_NAMESPACE_ID.lower().encode(), b""),
             ],
+            "user": user,
         }
     )
     scope = request.scope
@@ -139,6 +140,7 @@ async def test_middleware_set_context(internal_event_middleware):
             source="ai-gateway-python",
             realm="test-realm",
             instance_id="test-instance",
+            unique_instance_id="unique-instance-uid",
             host_name="test-host",
             instance_version="test-version",
             global_user_id="test-user",
@@ -210,6 +212,7 @@ async def test_middleware_set_context_feature_enabled_by_namespace_ids(
             "type": "http",
             "path": "/api/endpoint",
             "headers": headers,
+            "user": None,
         }
     )
     scope = request.scope
@@ -229,6 +232,7 @@ async def test_middleware_set_context_feature_enabled_by_namespace_ids(
             source="ai-gateway-python",
             realm=None,
             instance_id=None,
+            unique_instance_id=None,
             host_name=None,
             instance_version=None,
             global_user_id=None,
@@ -253,6 +257,7 @@ async def test_middleware_missing_headers(internal_event_middleware):
             "headers": [
                 (b"user-agent", b"TestAgent"),
             ],
+            "user": None,
         }
     )
     scope = request.scope
@@ -272,6 +277,7 @@ async def test_middleware_missing_headers(internal_event_middleware):
             source="ai-gateway-python",
             realm=None,
             instance_id=None,
+            unique_instance_id=None,
             host_name=None,
             instance_version=None,
             global_user_id=None,

@@ -53,6 +53,11 @@ class InternalEventMiddleware:
         # Get validated namespace IDs that enable feature access for the user
         # This is relevant for requests from gitlab.com, not for self-managed/dedicated instances
         feature_enabled_by_namespace_ids = self._extract_namespace_ids(request)
+        unique_instance_id = None
+
+        user = request.user
+        if hasattr(user, "claims") and user.claims:
+            unique_instance_id = user.claims.gitlab_instance_uid
 
         # EventContext uses Pydantic which coerces int and string to boolean type
         # Reference: https://docs.pydantic.dev/latest/api/standard_library_types/#booleans
@@ -61,6 +66,7 @@ class InternalEventMiddleware:
             source="ai-gateway-python",
             realm=request.headers.get(X_GITLAB_REALM_HEADER),
             instance_id=request.headers.get(X_GITLAB_INSTANCE_ID_HEADER),
+            unique_instance_id=unique_instance_id,
             host_name=request.headers.get(X_GITLAB_HOST_NAME_HEADER),
             instance_version=request.headers.get(X_GITLAB_VERSION_HEADER),
             global_user_id=request.headers.get(X_GITLAB_GLOBAL_USER_ID_HEADER),

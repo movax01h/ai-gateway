@@ -28,6 +28,7 @@ from ai_gateway.api.middleware import (
     InternalEventMiddleware,
     MiddlewareAuthentication,
     ModelConfigMiddleware,
+    UsageQuotaMiddleware,
 )
 from ai_gateway.api.middleware.self_hosted_logging import (
     EnabledInstanceVerboseAiLogsHeaderPlugin,
@@ -155,6 +156,13 @@ def create_fast_api_server(config: Config):
                 enabled=config.internal_event.enabled,
                 environment=config.environment,
             ),
+            Middleware(
+                UsageQuotaMiddleware,
+                enabled=config.billing_event.enabled,
+                skip_endpoints=_SKIP_ENDPOINTS,
+                environment=config.environment,
+                customersdot_url=config.customer_portal_url,
+            ),
             Middleware(ModelConfigMiddleware),
         ],
         extra={"config": config},
@@ -209,7 +217,8 @@ async def model_api_exception_handler(request: Request, exc: ModelAPIError) -> R
 
 
 async def validation_exception_handler(
-    request: Request, exc: RequestValidationError  # pylint: disable=unused-argument
+    request: Request,  # pylint: disable=unused-argument
+    exc: RequestValidationError,
 ) -> JSONResponse:
     if can_log_request_data():
         context["exception_message"] = str(exc)

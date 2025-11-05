@@ -1,6 +1,8 @@
-from typing import Any, Dict, List, Optional
+from typing import Any, ClassVar, Dict, List, Optional, Self
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
+
+from lib.internal_events.context import EventContext
 
 __all__ = [
     "BillingEventContext",
@@ -32,3 +34,37 @@ class BillingEventContext(BaseModel):
     seat_ids: Optional[List[str]] = None
     metadata: Optional[Dict[str, Any]] = Field(default_factory=dict)
     deployment_type: Optional[str] = None
+
+
+class UsageQuotaEventContext(BaseModel):
+    """Represents contextual metadata for usage quota events based on the GitLab billable usage context."""
+
+    model_config: ClassVar[ConfigDict] = ConfigDict(frozen=True)
+
+    environment: Optional[str] = None
+    source: Optional[str] = None
+    instance_id: Optional[str] = None
+    unique_instance_id: Optional[str] = None
+    instance_version: Optional[str] = None
+    host_name: Optional[str] = None
+    project_id: Optional[int] = None
+    namespace_id: Optional[int] = None
+    user_id: Optional[str] = None
+    global_user_id: Optional[str] = None
+    root_namespace_id: Optional[int] = None
+    correlation_id: Optional[str] = None
+    realm: Optional[str] = None
+    deployment_type: Optional[str] = None
+    feature_enablement_type: Optional[str] = None
+
+    @classmethod
+    def from_internal_event(cls, internal_event_context: EventContext) -> Self:
+        """Factory method to convert an internal `EventContext` object into a `UsageQuotaEventContext`.
+
+        Args:
+            internal_event_context (EventContext): An instance of the internal event context.
+
+        Returns:
+            UsageQuotaEventContext: A new instance populated with data from `internal_event_context`.
+        """
+        return cls.model_validate(internal_event_context.model_dump())
