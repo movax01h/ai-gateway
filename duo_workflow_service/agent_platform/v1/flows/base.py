@@ -130,6 +130,7 @@ class Flow(AbstractWorkflow):
                 "goal": goal,
                 "current_date": datetime.now().strftime("%Y-%m-%d"),
                 "workflow_id": self._workflow_id,
+                "session_url": self._session_url,
                 "inputs": self._process_additional_context(
                     self._additional_context or []
                 ),

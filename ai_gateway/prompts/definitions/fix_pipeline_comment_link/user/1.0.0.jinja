@@ -1,8 +1,8 @@
-{% if merge_request_url %}
-  The merge request you created is contained within the tool_response tag below. Extract the URL for the merge
-  request you created from this data:
-  <tool_response>{{git_push_response}}</tool_response>
+The merge request you created is contained within the tool_response tag below. Extract the URL for the merge
+request you created from this data:
+<tool_response>{{git_push_response}}</tool_response>
 
+{% if merge_request_url %}
   The user's merge request URL is provided in the merge_request_url tag below:
   <merge_request>
     <merge_request_url>{{merge_request_url}}</merge_request_url>
@@ -11,6 +11,11 @@
   Use the `create_merge_request_note` tool to add a comment to the `merge_request_url`, with a link to the merge
   request you created. If you were not able to extract the merge request from the `tool_response`, then take no
   action.
+
+  Make sure to include the text within the merge_request_comment_header tags at the end of your comment:
+  <merge_request_comment_header>
+    [Session {{ workflow_id }}]({{ session_url }})
+  </merge_request_comment_header>
 {% else %}
-  Take no action because no Merge Request has been provided.
+  Take no action because no Merge Request has been provided. Simply print out the URL for the merge request you created.
 {% endif %}
