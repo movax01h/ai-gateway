@@ -1,6 +1,7 @@
 import pytest
 
-from lib.billing_events.context import BillingEventContext
+from lib.billing_events.context import BillingEventContext, UsageQuotaEventContext
+from lib.internal_events.context import EventContext
 
 
 def test_billing_event_context_required_fields():
@@ -121,3 +122,10 @@ def test_billing_event_context_seat_ids_list():
     )
     assert context.seat_ids is not None
     assert len(context.seat_ids) == 3
+
+
+def test_usage_quota_event_context_from_internal_event():
+    event = EventContext(environment="prod", project_id=1234)
+    context = UsageQuotaEventContext.from_internal_event(event)
+    assert context.environment == "prod"
+    assert context.project_id == 1234

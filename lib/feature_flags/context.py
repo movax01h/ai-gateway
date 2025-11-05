@@ -10,6 +10,7 @@ class FeatureFlag(StrEnum):
     EXPANDED_AI_LOGGING = "expanded_ai_logging"
     USE_DUO_CONTEXT_EXCLUSION = "use_duo_context_exclusion"
     DUO_USE_BILLING_ENDPOINT = "duo_use_billing_endpoint"
+    USAGE_QUOTA_LEFT_CHECK = "usage_quota_left_check"
 
 
 def is_feature_enabled(feature_name: FeatureFlag | str) -> bool:

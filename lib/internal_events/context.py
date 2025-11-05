@@ -26,6 +26,7 @@ class EventContext(BaseModel):
     source: Optional[str] = "ai-gateway-python"
     realm: Optional[str] = None
     instance_id: Optional[str] = None
+    unique_instance_id: Optional[str] = None
     host_name: Optional[str] = None
     instance_version: Optional[str] = None
     global_user_id: Optional[str] = None

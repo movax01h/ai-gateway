@@ -659,7 +659,9 @@ def user_is_debug_fixture():
 def user_fixture(user_is_debug: bool, scopes: list[str]):
     return StarletteUser(
         CloudConnectorUser(
-            authenticated=True, is_debug=user_is_debug, claims=UserClaims(scopes=scopes)
+            authenticated=True,
+            is_debug=user_is_debug,
+            claims=UserClaims(scopes=scopes, gitlab_instance_uid="unique-instance-uid"),
         )
     )
 

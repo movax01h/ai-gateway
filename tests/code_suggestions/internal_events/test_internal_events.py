@@ -26,6 +26,7 @@ BASE_CONTEXT_SCHEMA = {
     "host_name": None,
     "input_tokens": None,
     "instance_id": None,
+    "unique_instance_id": None,
     "instance_version": None,
     "interface": None,
     "is_gitlab_team_member": None,

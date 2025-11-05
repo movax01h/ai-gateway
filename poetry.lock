@@ -6031,6 +6031,18 @@ files = [
 types-html5lib = "*"
 
 [[package]]
+name = "types-cachetools"
+version = "5.5.0.20240820"
+description = "Typing stubs for cachetools"
+optional = false
+python-versions = ">=3.8"
+groups = ["lint"]
+files = [
+    {file = "types-cachetools-5.5.0.20240820.tar.gz", hash = "sha256:b888ab5c1a48116f7799cd5004b18474cd82b5463acb5ffb2db2fc9c7b053bc0"},
+    {file = "types_cachetools-5.5.0.20240820-py3-none-any.whl", hash = "sha256:efb2ed8bf27a4b9d3ed70d33849f536362603a90b8090a328acf0cd42fda82e2"},
+]
+
+[[package]]
 name = "types-html5lib"
 version = "1.1.11.20250809"
 description = "Typing stubs for html5lib"
@@ -6984,4 +6996,4 @@ cffi = ["cffi (>=1.11)"]
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.12.0,<3.13.0"
-content-hash = "b910cfe7565c4dbdde8097d9d670265fa5e7f5436cb55653bb3d3d8ba548e86e"
+content-hash = "df0818f821860864594123283bf30deeac080de2986187ce5908d18f6d3f5682"
