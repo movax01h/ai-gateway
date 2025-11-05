@@ -19,8 +19,8 @@ token_counter = ApproximateTokenCounter("planner")
 class TruncationConfig(BaseModel):
     """Configuration for tool output truncation limits."""
 
-    max_bytes: int = 100 * 1024  # 100 KiB
-    truncated_size: int = 50 * 1024  # 50 KiB
+    max_bytes: int = 200 * 1024  # 200 KiB
+    truncated_size: int = 100 * 1024  # 100 KiB
 
 
 def _add_truncation_instruction(
