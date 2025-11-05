@@ -2,7 +2,7 @@
 
 ## What It Does
 
-This flow takes a URL for GitLab CI/CD pipeline that has failing jobs as input and automatically attempts to resolve it by creating code changes and submitting a merge request.
+This flow takes a URL for a GitLab CI/CD pipeline that has failing jobs as input and automatically attempts to resolve it by creating code changes and submitting a merge request.
 
 The flow supports two scenarios:
 
