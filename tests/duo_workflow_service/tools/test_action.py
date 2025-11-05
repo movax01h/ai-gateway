@@ -257,3 +257,28 @@ async def test_execute_action_only_legacy_response(metadata):
     response = await _execute_action(metadata, action)
 
     assert response == "some legacy response"
+
+
+@pytest.mark.asyncio
+async def test__execute_action_and_get_action_response_runcommand_error(
+    metadata,
+):
+    action = contract_pb2.Action()
+    client_event = contract_pb2.ClientEvent()
+
+    client_event.actionResponse.plainTextResponse.error = "Command failed"
+    client_event.actionResponse.plainTextResponse.response = (
+        "Additional error details from command output"
+    )
+
+    metadata["outbox"].put_action_and_wait_for_response = AsyncMock(
+        return_value=client_event
+    )
+
+    with pytest.raises(ToolException) as exc_info:
+        await _execute_action_and_get_action_response(metadata, action)
+
+    expected_text = (
+        "Action error: Command failed Additional error details from command output"
+    )
+    assert expected_text in str(exc_info.value)

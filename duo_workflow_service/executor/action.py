@@ -8,6 +8,10 @@ from prometheus_client import Histogram
 from contract import contract_pb2
 from contract.contract_pb2 import HttpResponse, PlainTextResponse
 from duo_workflow_service.executor.outbox import Outbox
+from duo_workflow_service.tools.tool_output_manager import (
+    TruncationConfig,
+    truncate_string,
+)
 
 ACTION_LATENCY = Histogram(
     name="executor_actions_duration_seconds",
@@ -65,9 +69,15 @@ async def _execute_action_and_get_action_response(
                 requestID=event.actionResponse.requestID,
                 action_class=action_class,
             )
-            raise ToolException(
-                f"Action error: {event.actionResponse.plainTextResponse.error}"
-            )
+            error = f"Action error: {event.actionResponse.plainTextResponse.error}"
+            # Some actions (e.g. RunCommand) can have important error information in the `response` field.
+            if event.actionResponse.plainTextResponse.response:
+                error = truncate_string(
+                    text=f"{error} {event.actionResponse.plainTextResponse.response}",
+                    tool_name=action_class,
+                    truncation_config=TruncationConfig(),
+                )
+            raise ToolException(error)
 
         if not event.actionResponse.response:
             response_type = event.actionResponse.WhichOneof("response_type")
