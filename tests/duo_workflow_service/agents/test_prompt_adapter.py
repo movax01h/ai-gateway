@@ -74,7 +74,7 @@ def sample_chat_workflow_state_fixture():
 Your primary role is collaborative programming.
 </core_mission>""",
             "system_dynamic": """<context>
-The current date is {{ current_date }}. The current time is {{ current_time }}. The user's timezone is
+The current date is {{ current_date }}. The user's timezone is
 {{ current_timezone }}.
 {%- if project %}
 Here is the project information for the current GitLab project the USER is working on:
@@ -149,13 +149,11 @@ class TestChatAgentPromptTemplate:
 
         # Second message should be dynamic system message
         expected_date = mock_datetime.now().strftime("%Y-%m-%d")
-        expected_time = mock_datetime.now().strftime("%H:%M:%S")
         expected_timezone = mock_datetime.now().astimezone().tzname()
 
         dynamic_system_message = messages[1]
         assert isinstance(dynamic_system_message, SystemMessage)
         assert expected_date in dynamic_system_message.content
-        assert expected_time in dynamic_system_message.content
         assert expected_timezone in dynamic_system_message.content
         assert "Test Project" in dynamic_system_message.content
         assert "<project_id>123</project_id>" in dynamic_system_message.content
