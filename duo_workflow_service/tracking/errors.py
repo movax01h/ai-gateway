@@ -30,4 +30,5 @@ def log_exception(ex: BaseException, extra: Optional[Dict] = None) -> None:
         exception_class=exception_class,
         additional_details=extra,
         exc_info=ex,
+        stack_info=True,
     )
