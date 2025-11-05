@@ -120,7 +120,6 @@ class TestChatAgentPromptTemplate:
             result = template.invoke(
                 sample_chat_workflow_state,
                 agent_name="test_agent",
-                is_anthropic_model=False,
             )
 
         assert isinstance(result, ChatPromptValue)
@@ -210,61 +209,6 @@ class TestChatAgentPromptTemplate:
         assert messages[3].content == "AI response"
         assert messages[4].content == "Second message"
 
-    @pytest.mark.parametrize(
-        "is_anthropic_model,expected_content_type",
-        [
-            (True, list),
-            (False, str),
-        ],
-        ids=[
-            "cache_control_enabled",
-            "cache_control_disabled",
-        ],
-    )
-    def test_anthropic_cache_control(
-        self,
-        prompt_config,
-        sample_chat_workflow_state,
-        is_anthropic_model,
-        expected_content_type,
-    ):
-        template = ChatAgentPromptTemplate(prompt_config)
-
-        with patch.object(
-            GitLabServiceContext, "get_current_instance_info", return_value=None
-        ):
-            result = template.invoke(
-                sample_chat_workflow_state,
-                agent_name="test_agent",
-                is_anthropic_model=is_anthropic_model,
-            )
-
-        assert isinstance(result, ChatPromptValue)
-        messages = result.messages
-
-        # Should have 2 system messages and 1 user message
-        assert len(messages) == 3
-
-        # Check the static system message
-        static_system_message = messages[0]
-        assert isinstance(static_system_message, SystemMessage)
-        assert isinstance(static_system_message.content, expected_content_type)
-
-        if is_anthropic_model:
-            assert len(static_system_message.content) == 1
-            content_block = static_system_message.content[0]
-            assert isinstance(content_block, dict)
-            assert content_block["type"] == "text"
-            assert "GitLab Duo Chat" in content_block["text"]
-            assert "<core_mission>" in content_block["text"]
-            assert content_block["cache_control"] == {"type": "ephemeral", "ttl": "5m"}
-
-            dynamic_system_message = messages[1]
-            assert isinstance(dynamic_system_message, SystemMessage)
-            assert isinstance(dynamic_system_message.content, str)
-        else:
-            assert "GitLab Duo Chat" in static_system_message.content
-
     def test_slash_command_parsing(self, prompt_config):
         state_with_slash_command = ChatWorkflowState(
             plan={"steps": []},
@@ -325,9 +269,7 @@ class TestDefaultPromptAdapter:
 
         assert result == expected_response
         mock_prompt.ainvoke.assert_called_once_with(
-            input=sample_chat_workflow_state,
-            agent_name="test_agent",
-            is_anthropic_model=True,
+            input=sample_chat_workflow_state, agent_name="test_agent"
         )
 
     def test_get_model(self, mock_prompt):

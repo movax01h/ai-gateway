@@ -1,6 +1,6 @@
 from abc import ABC, abstractmethod
 from datetime import datetime
-from typing import Any, Optional, Union
+from typing import Any, Optional
 
 from langchain_core.messages import BaseMessage, HumanMessage, SystemMessage
 from langchain_core.prompt_values import ChatPromptValue, PromptValue
@@ -9,7 +9,6 @@ from langchain_core.runnables import Runnable, RunnableConfig
 from ai_gateway.model_metadata import current_model_metadata_context
 from ai_gateway.prompts import Prompt, jinja2_formatter
 from ai_gateway.prompts.config.base import PromptConfig
-from ai_gateway.prompts.config.models import ModelClassProvider
 from duo_workflow_service.entities.state import ChatWorkflowState
 from duo_workflow_service.gitlab.gitlab_api import Namespace, Project
 from duo_workflow_service.gitlab.gitlab_service_context import GitLabServiceContext
@@ -63,19 +62,9 @@ class ChatAgentPromptTemplate(Runnable[ChatWorkflowState, PromptValue]):
                     else "Unknown"
                 ),
             )
-            # Always cache static system prompt for Anthropic models
-            is_anthropic = _kwargs.get("is_anthropic_model", False)
-            if is_anthropic:
-                cached_static_content: list[Union[str, dict]] = [
-                    {
-                        "text": static_content_text,
-                        "type": "text",
-                        "cache_control": {"type": "ephemeral", "ttl": "5m"},
-                    }
-                ]
-                messages.append(SystemMessage(content=cached_static_content))
-            else:
-                messages.append(SystemMessage(content=static_content_text))
+            # Always cache static system prompt for prompt caching supported models
+            system_msg = SystemMessage(content=static_content_text)
+            messages.append(system_msg)
 
         if "system_dynamic" in self.prompt_template:
             dynamic_content = jinja2_formatter(
@@ -130,12 +119,9 @@ class BasePromptAdapter(ABC):
 
 class DefaultPromptAdapter(BasePromptAdapter):
     async def get_response(self, input: ChatWorkflowState, **kwargs) -> BaseMessage:
-        is_anthropic_model = self.prompt.model_provider == ModelClassProvider.ANTHROPIC
-
         return await self.prompt.ainvoke(
             input=input,
             agent_name=self.prompt.name,
-            is_anthropic_model=is_anthropic_model,
             **kwargs,
         )
 

@@ -17,3 +17,7 @@ prompt_template:
     {% include 'chat/agent/partials/system_dynamic/1.0.0.jinja' %}
   user: |
     {% include 'chat/agent/partials/user/1.0.0.jinja' %}
+params:
+  cache_control_injection_points:
+    - location: "message" # Cache the first static system message.
+      index: 0

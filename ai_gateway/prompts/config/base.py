@@ -25,6 +25,7 @@ class PromptParams(BaseModel):
     # See https://gitlab.com/gitlab-org/modelops/applied-ml/code-suggestions/ai-assist/-/merge_requests/1035#note_2020952732 # pylint: disable=line-too-long
     timeout: float | None = None
     vertex_location: str | None = None
+    cache_control_injection_points: list[dict] | None = None
 
 
 class PromptConfig(BaseModel):

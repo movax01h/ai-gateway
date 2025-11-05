@@ -23,3 +23,6 @@ params:
   # https://cloud.google.com/vertex-ai/generative-ai/docs/learn/locations#genai-partner-models
   vertex_location: global
   timeout: 60
+  cache_control_injection_points:
+    - location: "message" # Cache the first static system message.
+      index: 0

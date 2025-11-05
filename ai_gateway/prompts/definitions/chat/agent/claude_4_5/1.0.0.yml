@@ -15,3 +15,6 @@ prompt_template:
     {% include 'chat/agent/partials/user/1.0.0.jinja' %}
 params:
   timeout: 60
+  cache_control_injection_points:
+    - location: "message" # Cache the first static system message.
+      index: 0

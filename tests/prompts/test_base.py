@@ -19,6 +19,7 @@ from langchain_core.tools import BaseTool
 from litellm.exceptions import Timeout
 from pydantic import AnyUrl
 from pyfakefs.fake_filesystem import FakeFilesystem
+from structlog.testing import capture_logs
 
 from ai_gateway.api.auth_utils import StarletteUser
 from ai_gateway.config import ConfigModelLimits
@@ -32,7 +33,12 @@ from ai_gateway.model_metadata import (
 from ai_gateway.models.v2.anthropic_claude import ChatAnthropic
 from ai_gateway.prompts import BasePromptRegistry, Prompt
 from ai_gateway.prompts.config.base import PromptConfig, PromptParams
-from ai_gateway.prompts.typing import TypeModelFactory
+from ai_gateway.prompts.config.models import (
+    ChatAnthropicParams,
+    ChatLiteLLMParams,
+    ModelClassProvider,
+)
+from ai_gateway.prompts.typing import TypeModelFactory, TypePromptTemplateFactory
 from lib.internal_events.context import InternalEventAdditionalProperties
 from tests.conftest import FakeModel
 
@@ -442,6 +448,7 @@ configurable_unit_primitives:
                 new_callable=PropertyMock,
                 return_value=internal_event_extra,
             ),
+            capture_logs() as cap_logs,
         ):
             await prompt.ainvoke({"name": "Duo", "content": "What's up?"})
 
@@ -450,6 +457,7 @@ configurable_unit_primitives:
             internal_event_client,
             prompt,
             usage_metadata,
+            cap_logs,
             expected_additional_properties,
         )
 
@@ -512,7 +520,10 @@ configurable_unit_primitives:
 
         prompt.internal_event_client = internal_event_client
 
-        with self._mock_usage_metadata(prompt.model_name, usage_metadata):
+        with (
+            self._mock_usage_metadata(prompt.model_name, usage_metadata),
+            capture_logs() as cap_logs,
+        ):
             # Consume stream
             async for _ in prompt.astream({"name": "Duo", "content": "What's up?"}):
                 pass
@@ -522,6 +533,7 @@ configurable_unit_primitives:
             internal_event_client,
             prompt,
             usage_metadata,
+            cap_logs,
             expected_additional_properties,
         )
 
@@ -584,7 +596,10 @@ configurable_unit_primitives:
 
         prompt.internal_event_client = internal_event_client
 
-        with self._mock_usage_metadata(prompt.model_name, usage_metadata):
+        with (
+            self._mock_usage_metadata(prompt.model_name, usage_metadata),
+            capture_logs() as cap_logs,
+        ):
             # Consume stream with cache control for Anthropic
             async for _ in prompt.astream(
                 {"name": "Duo", "content": "What's up?"},
@@ -597,6 +612,7 @@ configurable_unit_primitives:
             internal_event_client,
             prompt,
             usage_metadata,
+            cap_logs,
             expected_additional_properties,
         )
 
@@ -717,6 +733,7 @@ def _assert_usage_metadata_handling(
     internal_event_client: mock.Mock,
     prompt: Prompt,
     usage_metadata: UsageMetadata,
+    cap_logs,
     additional_properties: Optional[InternalEventAdditionalProperties] = None,
 ):
     mock_watcher.register_token_usage.assert_called_once_with(
@@ -735,6 +752,20 @@ def _assert_usage_metadata_handling(
             model_provider=prompt.model_provider,
             additional_properties=additional_properties,
         )
+
+    assert cap_logs[0]["model_engine"] == prompt.llm_provider
+    assert cap_logs[0]["model_name"] == prompt.model_name
+    assert cap_logs[0]["model_provider"] == prompt.model_provider
+    assert cap_logs[0]["input_tokens"] == usage_metadata["input_tokens"]
+    assert cap_logs[0]["output_tokens"] == usage_metadata["output_tokens"]
+    assert cap_logs[0]["total_tokens"] == usage_metadata["total_tokens"]
+    assert (
+        cap_logs[0]["cache_read"] == usage_metadata["input_token_details"]["cache_read"]
+    )
+    assert (
+        cap_logs[0]["cache_creation"]
+        == usage_metadata["input_token_details"]["cache_creation"]
+    )
 
 
 @pytest.mark.skipif(
@@ -780,6 +811,55 @@ class TestPromptTimeout:
             await prompt.ainvoke(
                 {"name": "Duo", "content": "Print pi with 400 decimals"}
             )
+
+
+class TestPromptCaching:
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        ("prompt_params", "model_params", "expected_to_use_converter"),
+        [
+            (
+                PromptParams(
+                    cache_control_injection_points=[{"location": "message", "index": 0}]
+                ),
+                ChatAnthropicParams(model_class_provider=ModelClassProvider.ANTHROPIC),
+                True,
+            ),
+            (
+                PromptParams(
+                    cache_control_injection_points=[{"location": "message", "index": 0}]
+                ),
+                ChatLiteLLMParams(
+                    model="test_model", model_class_provider=ModelClassProvider.LITE_LLM
+                ),
+                False,
+            ),
+            (
+                PromptParams(),
+                ChatAnthropicParams(model_class_provider=ModelClassProvider.ANTHROPIC),
+                False,
+            ),
+        ],
+    )
+    async def test_prompt_caching(
+        self,
+        model_factory: TypeModelFactory,
+        prompt_config: PromptConfig,
+        model_metadata: TypeModelMetadata | None,
+        prompt_template_factory: TypePromptTemplateFactory | None,
+        expected_to_use_converter: bool,
+    ):
+        with mock.patch(
+            "ai_gateway.prompts.base.CacheControlInjectionPointsConverter"
+        ) as mock_class:
+            Prompt(
+                model_factory, prompt_config, model_metadata, prompt_template_factory
+            )
+
+            if expected_to_use_converter:
+                mock_class.assert_called_once()
+            else:
+                mock_class.assert_not_called()
 
 
 @pytest.fixture(name="registry")
