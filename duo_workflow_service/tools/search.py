@@ -187,33 +187,7 @@ class IssueSearchInput(BaseSearchInput):
 
 class IssueSearch(GitLabSearchBase):
     name: str = "gitlab_issue_search"
-    unique_description: str = """
-    Search for issues in the specified GitLab project or group.
-
-    Parameters:
-    - id: The ID of the project or group. In GitLab, a namespace and group are used interchangeably,
-            so either a group_id or namespace_id can be used to fill this argument. (required)
-    - search_type: Whether to search in a project or a group (required)
-    - search: The search term (required)
-    - confidential: Filter by confidentiality
-    - order_by: Sort results. Allowed value is created_at
-    - sort: Sort order. Allowed values are asc or desc
-    - state: Filter by state
-
-    An example tool_call is presented below
-    {
-        'id': 'toolu_01KqpqRQhTM2pxJrhtTscMWu',
-        'name': 'gitlab_issue_search',
-        'type': 'tool_use'
-        'input': {
-            'id': 123,
-            'search_type': 'projects',
-            'scope': 'issues',
-            'search': 'Duo Workflow',
-        },
-    }
-    """
-    description: str = GitLabSearchBase._get_description(unique_description)
+    description: str = "Search issues by keyword in projects or groups."
     args_schema: Type[BaseModel] = IssueSearchInput
 
     unit_primitive: GitLabUnitPrimitive = GitLabUnitPrimitive.ASK_ISSUE
