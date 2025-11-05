@@ -33,6 +33,7 @@ from langgraph.checkpoint.base import (
 from langgraph.checkpoint.memory import MemorySaver
 
 from ai_gateway.container import ContainerApplication
+from ai_gateway.instrumentators.model_requests import get_llm_operations
 from duo_workflow_service.checkpointer.gitlab_workflow_utils import (
     STATUS_TO_EVENT_PROPERTY,
     WorkflowStatusEventEnum,
@@ -167,7 +168,6 @@ class GitLabWorkflow(
         self._workflow_config = workflow_config
         self._internal_event_client = internal_event_client
         self._billing_event_client = billing_event_client
-        self._llm_operations: list[dict[str, Any]] = []
         self.serde = CheckpointSerializer()
 
     @not_implemented_sync_method
@@ -469,26 +469,6 @@ class GitLabWorkflow(
             additional_properties=properties,
         )
 
-    def track_llm_operation(
-        self,
-        token_count: int,
-        model_id: str,
-        model_engine: str,
-        model_provider: str,
-        prompt_tokens: int,
-        completion_tokens: int,
-    ) -> None:
-        """Track LLM operation for billing metadata."""
-        operation = {
-            "token_count": token_count,
-            "model_id": model_id,
-            "model_engine": model_engine,
-            "model_provider": model_provider,
-            "prompt_tokens": prompt_tokens,
-            "completion_tokens": completion_tokens,
-        }
-        self._llm_operations.append(operation)
-
     async def _track_workflow_completion(self, status: str) -> None:
         """Track successful workflow completion based on status."""
 
@@ -499,7 +479,7 @@ class GitLabWorkflow(
                 billing_metadata = {
                     "workflow_id": self._workflow_id,
                     "execution_environment": "duo_agent_platform",
-                    "llm_operations": self._llm_operations,
+                    "llm_operations": get_llm_operations(),
                 }
                 self._billing_event_client.track_billing_event(
                     user=user,

@@ -15,6 +15,7 @@ from langgraph.checkpoint.base import (
 )
 from langgraph.checkpoint.memory import MemorySaver
 
+from ai_gateway.instrumentators.model_requests import llm_operations
 from duo_workflow_service.checkpointer.gitlab_workflow import (
     GitLabWorkflow,
     WorkflowStatusEventEnum,
@@ -31,12 +32,7 @@ from duo_workflow_service.status_updater.gitlab_status_updater import (
 )
 from lib.billing_events.client import BillingEventsClient
 from lib.internal_events import InternalEventAdditionalProperties
-from lib.internal_events.event_enum import (
-    CategoryEnum,
-    EventEnum,
-    EventLabelEnum,
-    EventPropertyEnum,
-)
+from lib.internal_events.event_enum import EventEnum, EventLabelEnum, EventPropertyEnum
 
 
 class CustomRunnableConfig(TypedDict):
@@ -1231,31 +1227,6 @@ async def test_created_status_with_existing_checkpoint_raises_error(
     assert f"Found checkpoint: {mock_checkpoint}" in str(exc_info.value)
 
 
-def test_track_llm_operation(gitlab_workflow):
-    """Test that track_llm_operation correctly stores operation data."""
-    assert gitlab_workflow._llm_operations == []
-
-    gitlab_workflow.track_llm_operation(
-        token_count=100,
-        model_id="claude-3-sonnet",
-        model_engine="anthropic",
-        model_provider="anthropic",
-        prompt_tokens=80,
-        completion_tokens=20,
-    )
-
-    assert gitlab_workflow._llm_operations == [
-        {
-            "token_count": 100,
-            "model_id": "claude-3-sonnet",
-            "model_engine": "anthropic",
-            "model_provider": "anthropic",
-            "prompt_tokens": 80,
-            "completion_tokens": 20,
-        }
-    ]
-
-
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
     "status",
@@ -1267,7 +1238,6 @@ def test_track_llm_operation(gitlab_workflow):
 )
 async def test_track_workflow_completion_with_billing_event(
     gitlab_workflow,
-    http_client,
     workflow_id,
     billing_event_client,
     mock_user,
@@ -1277,7 +1247,7 @@ async def test_track_workflow_completion_with_billing_event(
     current_user.set(mock_user)
     gitlab_workflow._billing_event_client = billing_event_client
 
-    gitlab_workflow._llm_operations = [
+    operations = [
         {
             "token_count": 100,
             "model_id": "claude-3-sonnet",
@@ -1295,6 +1265,7 @@ async def test_track_workflow_completion_with_billing_event(
             "completion_tokens": 30,
         },
     ]
+    llm_operations.set(operations)
 
     await gitlab_workflow._track_workflow_completion(status)
 
@@ -1307,7 +1278,7 @@ async def test_track_workflow_completion_with_billing_event(
         metadata={
             "workflow_id": workflow_id,
             "execution_environment": "duo_agent_platform",
-            "llm_operations": gitlab_workflow._llm_operations,
+            "llm_operations": operations,
         },
     )
 

@@ -49,10 +49,6 @@ from duo_workflow_service.llm_factory import AnthropicConfig, VertexConfig
 from duo_workflow_service.monitoring import duo_workflow_metrics
 from duo_workflow_service.tools import convert_mcp_tools_to_langchain_tool_classes
 from duo_workflow_service.tracking import log_exception
-from duo_workflow_service.tracking.llm_usage_context import (
-    clear_workflow_checkpointer,
-    set_workflow_checkpointer,
-)
 from duo_workflow_service.workflows.type_definitions import (
     AIO_CANCEL_STOP_WORKFLOW_REQUEST,
     AdditionalContext,
@@ -268,7 +264,6 @@ class AbstractWorkflow(ABC):
                 self._workflow_config,
                 gitlab_status_update_callback=on_gitlab_status_update,
             ) as checkpointer:
-                set_workflow_checkpointer(checkpointer)
                 status_event = getattr(checkpointer, "initial_status_event", None)
                 checkpoint_tuple = await checkpointer.aget_tuple(graph_config)
                 if not status_event:
@@ -304,7 +299,6 @@ class AbstractWorkflow(ABC):
                 await self._handle_workflow_failure(e, compiled_graph, graph_config)
             raise TraceableException(e)
         finally:
-            clear_workflow_checkpointer()
             self.is_done = True
 
     async def get_graph_input(

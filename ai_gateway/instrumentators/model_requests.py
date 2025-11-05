@@ -72,7 +72,11 @@ INFERENCE_OUTPUT_TOKENS = Counter(
 )
 
 type TokenUsage = dict[str, dict[str, int]]
+type LlmOperations = list[dict[str, str | int]]
 token_usage: ContextVar[TokenUsage | None] = ContextVar("token_usage", default=None)
+llm_operations: ContextVar[LlmOperations | None] = ContextVar(
+    "llm_operations", default=None
+)
 
 logger = structlog.get_logger()
 
@@ -95,15 +99,28 @@ def get_token_usage() -> TokenUsage | None:
     return current_usage
 
 
+def get_llm_operations() -> LlmOperations:
+    current_operations = llm_operations.get()
+
+    # Reset the operations so multiple requests don't return the same values
+    llm_operations.set(None)
+
+    return current_operations
+
+
 class ModelRequestInstrumentator:
     class WatchContainer:
         def __init__(
             self,
+            llm_provider: str,
+            model_provider: str,
             labels: dict[str, str],
             limits: Optional[ModelLimits],
             streaming: bool,
             unit_primitives: Optional[List[GitLabUnitPrimitive]] = None,
         ):
+            self.llm_provider = llm_provider
+            self.model_provider = model_provider
             self.labels = labels
             self.limits = limits
             self.error = False
@@ -142,6 +159,8 @@ class ModelRequestInstrumentator:
 
             _update_token_usage(model, usage)
 
+            self._update_llm_operations(model, usage)
+
             INFERENCE_INPUT_TOKENS.labels(**token_usage_labels).inc(
                 usage["input_tokens"]
             )
@@ -167,6 +186,22 @@ class ModelRequestInstrumentator:
         async def afinish(self):
             self.finish()
 
+        def _update_llm_operations(self, model: str, usage: UsageMetadata):
+            current_llm_operations = llm_operations.get() or []
+
+            current_llm_operations.append(
+                {
+                    "token_count": usage["total_tokens"],
+                    "model_id": model,
+                    "model_engine": self.llm_provider,
+                    "model_provider": self.model_provider,
+                    "prompt_tokens": usage["input_tokens"],
+                    "completion_tokens": usage["output_tokens"],
+                }
+            )
+
+            llm_operations.set(current_llm_operations)
+
         def _detail_labels(self) -> dict[str, str]:
             unit_primitive = (
                 self.unit_primitives[0].value
@@ -186,13 +221,19 @@ class ModelRequestInstrumentator:
         model_engine: str,
         model_name: str,
         limits: Optional[ModelLimits],
+        llm_provider: str = "",
+        model_provider: str = "",
     ):
         self.labels = {"model_engine": model_engine, "model_name": model_name}
         self.limits = limits
+        self.llm_provider = llm_provider
+        self.model_provider = model_provider
 
     @contextmanager
     def watch(self, stream=False, unit_primitives=None):
         watcher = ModelRequestInstrumentator.WatchContainer(
+            llm_provider=self.llm_provider,
+            model_provider=self.model_provider,
             labels=self.labels,
             limits=self.limits,
             streaming=stream,
