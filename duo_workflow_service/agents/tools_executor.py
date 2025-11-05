@@ -318,7 +318,7 @@ class ToolsExecutor:
         error: ValidationError,
         chat_logs: List[UiChatLog],
     ) -> Dict[str, Any]:
-        log_exception(error)
+        log_exception(error, extra={"tool_call_fields": list(tool_args.keys())})
         tool_response = f"Tool {tool_name} raised validation error {error}"
         self._track_internal_event(
             event_name=EventEnum.WORKFLOW_TOOL_FAILURE,
