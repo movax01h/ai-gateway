@@ -81,7 +81,6 @@ class ChatAgentPromptTemplate(Runnable[ChatWorkflowState, PromptValue]):
             dynamic_content = jinja2_formatter(
                 self.prompt_template["system_dynamic"],
                 current_date=datetime.now().strftime("%Y-%m-%d"),
-                current_time=datetime.now().strftime("%H:%M:%S"),
                 current_timezone=datetime.now().astimezone().tzname(),
                 project=project,
                 namespace=namespace,
