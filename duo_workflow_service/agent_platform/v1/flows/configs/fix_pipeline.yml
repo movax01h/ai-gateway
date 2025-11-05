@@ -78,6 +78,7 @@ components:
       - mkdir
       - read_file
       - ci_linter
+      - run_command
     ui_log_events:
       - "on_agent_final_answer"
       - "on_tool_execution_success"
