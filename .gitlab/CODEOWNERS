@@ -10,6 +10,9 @@ clients/
 contract/
 lib/
 
+^[Model Configuration] @gitlab-org/maintainers/ai-gateway
+ai_gateway/model_selection/models.yml @gitlab-org/fulfillment/utilization
+
 ^[Security - AppSec Approval Required] @gitlab-org/maintainers/ai-gateway @gitlab-org/security/appsec
 # Security module - all changes require AppSec approval
 duo_workflow_service/security/
