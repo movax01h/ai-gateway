@@ -1004,3 +1004,127 @@ prompt_template:
             == "Failed to load prompt definition for 'empty_prompt': No version YAML files found for prompt id: "
             "empty_prompt"
         )
+
+    @pytest.mark.parametrize(
+        ("tool_choice", "model_identifier", "expected_tool_choice"),
+        [
+            # Bedrock models: 'any' should be converted to 'required'
+            ("any", "bedrock/anthropic.claude-v2", "required"),
+            ("any", "bedrock/anthropic.claude-3-sonnet-20240229-v1:0", "required"),
+            ("any", "bedrock/meta.llama3-70b-instruct-v1:0", "required"),
+            # Azure models: 'any' should be converted to 'required'
+            ("any", "azure/gpt-4", "required"),
+            ("any", "azure/gpt-35-turbo", "required"),
+            ("any", "azure/claude-3-opus", "required"),
+            # Non-bedrock/azure models: 'any' should remain 'any'
+            ("any", "anthropic/claude-3-opus-20240229", "any"),
+            ("any", "openai/gpt-4", "any"),
+            ("any", "vertex_ai/claude-3-sonnet", "any"),
+            # Other tool_choice values should remain unchanged
+            ("auto", "bedrock/anthropic.claude-v2", "auto"),
+            ("required", "bedrock/anthropic.claude-v2", "required"),
+            ("none", "bedrock/anthropic.claude-v2", "none"),
+            (None, "bedrock/anthropic.claude-v2", None),
+            ("auto", "azure/gpt-4", "auto"),
+            # Edge cases
+            ("any", None, "any"),  # No model identifier
+            (
+                "any",
+                "vertex_ai/bedrock-model",
+                "any",
+            ),  # "bedrock" not in provider position
+            (
+                "any",
+                "vertex_ai/azure-model",
+                "any",
+            ),  # "azure" not in provider position
+        ],
+    )
+    def test_adjust_tool_choice_for_model(
+        self,
+        registry: LocalPromptRegistry,
+        tool_choice: str | None,
+        model_identifier: str | None,
+        expected_tool_choice: str | None,
+    ):
+        """Test that tool_choice is adjusted correctly based on model identifier."""
+        model_metadata = None
+        if model_identifier:
+            model_metadata = ModelMetadata(
+                provider="custom",
+                name="test_model",
+                identifier=model_identifier,
+            )
+
+        result = registry._adjust_tool_choice_for_model(tool_choice, model_metadata)
+        assert result == expected_tool_choice
+
+    def test_adjust_tool_choice_for_model_without_metadata(
+        self,
+        registry: LocalPromptRegistry,
+    ):
+        """Test that tool_choice remains unchanged when model_metadata is None."""
+        result = registry._adjust_tool_choice_for_model("any", None)
+        assert result == "any"
+
+    @pytest.mark.usefixtures("mock_fs")
+    def test_get_with_bedrock_model_adjusts_tool_choice(
+        self,
+        registry: LocalPromptRegistry,
+    ):
+        """Test that tool_choice is automatically adjusted when getting a prompt with a Bedrock model."""
+        from langchain_core.tools.base import (  # pylint: disable=import-outside-toplevel
+            BaseTool,
+        )
+
+        tools: list[BaseTool] = [Mock(spec=BaseTool)]
+        bedrock_metadata = ModelMetadata(
+            provider="custom",
+            name="bedrock_model",
+            identifier="bedrock/anthropic.claude-3-sonnet-20240229-v1:0",
+        )
+
+        with patch("ai_gateway.prompts.registry.Prompt") as prompt_class:
+            registry.get(
+                prompt_id="test",
+                prompt_version="^1.0.0",
+                model_metadata=bedrock_metadata,
+                tools=tools,
+                tool_choice="any",
+            )
+
+        kwargs = prompt_class.call_args.kwargs
+        # tool_choice should be converted from 'any' to 'required'
+        assert kwargs.get("tool_choice") == "required"
+        assert kwargs.get("tools") == tools
+
+    @pytest.mark.usefixtures("mock_fs")
+    def test_get_with_azure_model_adjusts_tool_choice(
+        self,
+        registry: LocalPromptRegistry,
+    ):
+        """Test that tool_choice is automatically adjusted when getting a prompt with an Azure model."""
+        from langchain_core.tools.base import (  # pylint: disable=import-outside-toplevel
+            BaseTool,
+        )
+
+        tools: list[BaseTool] = [Mock(spec=BaseTool)]
+        azure_metadata = ModelMetadata(
+            provider="custom",
+            name="azure_model",
+            identifier="azure/gpt-4",
+        )
+
+        with patch("ai_gateway.prompts.registry.Prompt") as prompt_class:
+            registry.get(
+                prompt_id="test",
+                prompt_version="^1.0.0",
+                model_metadata=azure_metadata,
+                tools=tools,
+                tool_choice="any",
+            )
+
+        kwargs = prompt_class.call_args.kwargs
+        # tool_choice should be converted from 'any' to 'required'
+        assert kwargs.get("tool_choice") == "required"
+        assert kwargs.get("tools") == tools
