@@ -1,5 +1,5 @@
 import time
-from typing import Any, Dict
+from typing import Any, Dict, Optional
 
 import structlog
 from langchain_core.tools import ToolException
@@ -17,6 +17,12 @@ ACTION_LATENCY = Histogram(
     documentation="Latency for all actions that go to the Executor.",
     labelnames=["action_class"],
 )
+
+
+class ToolExceptionWithResponse(ToolException):
+    def __init__(self, error, response: Optional[str] = None):
+        super().__init__(error)
+        self.response = response
 
 
 def record_metrics(action_class: str, duration: float):
@@ -71,11 +77,12 @@ async def _execute_action_and_get_action_response(
             error = f"Action error: {event.actionResponse.plainTextResponse.error}"
             # Some actions (e.g. RunCommand) can have important error information in the `response` field.
             if event.actionResponse.plainTextResponse.response:
-                error = truncate_string(
-                    text=f"{error} {event.actionResponse.plainTextResponse.response}",
+                response = truncate_string(
+                    text=event.actionResponse.plainTextResponse.response,
                     tool_name=action_class,
                     truncation_config=TruncationConfig(),
                 )
+                raise ToolExceptionWithResponse(error, response)
             raise ToolException(error)
 
         # Record all metrics in the separate function

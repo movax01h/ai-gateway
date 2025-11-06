@@ -58,17 +58,20 @@ class TestUILogWriterDeterministicStep:
     def test_log_error(self, ui_log_writer, mock_tool, mock_callback):
         """Test the error method."""
         error = "ERROR"
+        tool_call_args = {"param1": "value1", "param2": "value2"}
 
         ui_log_writer.error(
-            tool_name=mock_tool.name,
-            error=error,
+            tool=mock_tool,
+            tool_call_args=tool_call_args,
             event=UILogEventsDeterministicStep.ON_TOOL_EXECUTION_FAILED,
+            tool_response=error,
         )
 
         args = mock_callback.call_args[0][0]
         assert args.event == UILogEventsDeterministicStep.ON_TOOL_EXECUTION_FAILED
         assert (
-            f"Tool {mock_tool.name} execution failed: {error}" in args.record["content"]
+            args.record["content"]
+            == "An error occurred when executing the tool: Using test_tool: param1=value1, param2=value2"
         )
         assert args.record["message_type"] == MessageTypeEnum.TOOL
         assert args.record["status"] == ToolStatus.FAILURE

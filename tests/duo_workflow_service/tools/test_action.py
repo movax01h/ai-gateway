@@ -280,7 +280,5 @@ async def test__execute_action_and_get_action_response_runcommand_error(
     with pytest.raises(ToolException) as exc_info:
         await _execute_action_and_get_action_response(metadata, action)
 
-    expected_text = (
-        "Action error: Command failed Additional error details from command output"
-    )
+    expected_text = "Action error: Command failed"
     assert expected_text in str(exc_info.value)

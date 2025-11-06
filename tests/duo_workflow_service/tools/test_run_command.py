@@ -104,3 +104,19 @@ def test_run_command_format_display_message():
 
     expected_message = "Run command: ls -l -a /home"
     assert message == expected_message
+
+    # Format message with tool response
+    tool_response = "Exit status 0"
+    message = tool.format_display_message(input_data, _tool_response=tool_response)
+
+    expected_message = "Run command: ls -l -a /home Exit status 0"
+    assert message == expected_message
+
+    # Format message with long tool response
+    tool_response = "Exit status 0"
+    message = tool.format_display_message(
+        input_data, _tool_response=tool_response, max_len=10
+    )
+
+    expected_message = "Run command: ls -l -a /home Exit [...]"
+    assert message == expected_message

@@ -61,6 +61,7 @@ class DeterministicStepNode:
 
     async def run(self, state: FlowState) -> dict:
         response, err_format, status = None, None, None
+        tool_call_args = {}
 
         try:
             tool_call_args = get_vars_from_state(self._inputs, state)
@@ -78,7 +79,6 @@ class DeterministicStepNode:
 
         except Exception as e:
             status = TOOL_EXECUTION_STATUS_FAILED
-
             if isinstance(e, TypeError):
                 err_format = self._format_type_error_response(
                     tool=self._validated_tool, error=e
@@ -92,10 +92,12 @@ class DeterministicStepNode:
                     tool_name=self._tool_name, error=e
                 )
 
+            response = getattr(e, "response", None)
             self._ui_history.log.error(
-                tool_name=self._tool_name,
-                error=err_format,
+                tool=self._validated_tool,
+                tool_call_args=tool_call_args,
                 event=UILogEventsDeterministicStep.ON_TOOL_EXECUTION_FAILED,
+                tool_response=f"{str(e)} {response}" if response else str(e),
             )
 
         result = {

@@ -54,21 +54,25 @@ class UILogWriterDeterministicStep(BaseUILogWriter[UILogEventsDeterministicStep]
 
     def _log_error(
         self,
-        tool_name: str,
-        error: str,
-        correlation_id: Optional[str] = None,
-        additional_context: Optional[list] = None,
+        tool: BaseTool,
+        tool_call_args: dict[str, Any],
+        message: Optional[str] = None,
         **kwargs,
     ) -> UiChatLog:
+        if not message:
+            message = f"An error occurred when executing the tool: {
+                self._format_message(tool, tool_call_args, kwargs.get('tool_response'))
+            }"
+
         return UiChatLog(
             message_type=MessageTypeEnum.TOOL,
-            message_sub_type=None,
-            content=f"Tool {tool_name} execution failed: {error}",
+            content=message,
             timestamp=datetime.now(timezone.utc).isoformat(),
             status=ToolStatus.FAILURE,
-            correlation_id=correlation_id,
-            tool_info=ToolInfo(name=tool_name, args={}),
-            additional_context=additional_context,
+            correlation_id=kwargs.get("correlation_id"),
+            tool_info=ToolInfo(name=tool.name, args=tool_call_args),
+            additional_context=kwargs.get("additional_context", []),
+            message_sub_type=tool.name,
         )
 
     @staticmethod
