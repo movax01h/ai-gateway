@@ -44,7 +44,6 @@ FLOW_REGISTRY_CONFIG_DIRS = [
 def main():
     # Setup variables so we can see the full graphs:
     # pylint: disable=direct-environment-variable-reference
-    os.environ["FEATURE_GOAL_DISAMBIGUATION"] = "true"
     os.environ["WORKFLOW_INTERRUPT"] = "true"
 
     structlog.configure(
