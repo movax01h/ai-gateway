@@ -1,5 +1,6 @@
 from duo_workflow_service.security.markdown_content_security import (
     strip_hidden_html_comments,
+    strip_markdown_link_comments,
 )
 from duo_workflow_service.security.prompt_security import (
     PromptSecurity,
@@ -275,3 +276,194 @@ class TestMarkdownSecurityEdgeCases:
         dangerous_content = str(malicious_obj)
         assert "<system>" in dangerous_content
         assert "<goal>" in dangerous_content
+
+
+class TestMarkdownLinkComments:
+    """Test suite for Markdown link reference comment stripping security function."""
+
+    def test_unicode_escaped_angle_brackets(self):
+        """Test stripping comments with Unicode-escaped angle brackets."""
+        test_input = "Task description\\n\\n[comment]: \\u003c\\u003e (injected content for prompt manipulation)"
+        result = strip_markdown_link_comments(test_input)
+
+        assert "injected content" not in result
+        assert "prompt manipulation" not in result
+        assert "[comment]:" not in result
+        assert "Task description" in result
+
+    def test_standard_angle_bracket_format(self):
+        """Test stripping comments with standard <> syntax."""
+        test_input = (
+            "Content before\\n\\n[comment]: <> (embedded text)\\n\\nContent after"
+        )
+        result = strip_markdown_link_comments(test_input)
+
+        assert "embedded text" not in result
+        assert "[comment]:" not in result
+        assert "Content before" in result
+        assert "Content after" in result
+
+    def test_double_slash_format(self):
+        """Test stripping [//]: # style comment syntax."""
+        test_input = "Text before\\n[//]: # (comment content)\\nText after"
+        result = strip_markdown_link_comments(test_input)
+
+        assert "comment content" not in result
+        assert "[//]:" not in result
+        assert "Text before" in result
+        assert "Text after" in result
+
+    def test_json_encoded_input(self):
+        """Test with JSON-encoded string input."""
+        test_input = "Description text\\n\\n[comment]: \\u003c\\u003e (content within parentheses)"
+        result = strip_markdown_link_comments(test_input)
+
+        assert "content within parentheses" not in result
+        assert "[comment]:" not in result
+
+    def test_full_security_pipeline_integration(self):
+        """Test integration with complete security pipeline."""
+        test_input = (
+            "Task info\\n\\n[comment]: \\u003c\\u003e (additional instructions)"
+        )
+
+        result = PromptSecurity.apply_security_to_tool_response(test_input, "test_tool")
+
+        assert "additional instructions" not in result
+        assert "[comment]:" not in result or "&" in result
+
+    def test_tool_with_security_override(self):
+        """Test tool-specific security configuration override."""
+        test_input = "Task info\\n\\n[comment]: \\u003c\\u003e (embedded instructions)"
+
+        result = PromptSecurity.apply_security_to_tool_response(
+            test_input, "build_review_merge_request_context"
+        )
+
+        assert "embedded instructions" not in result
+        assert "[comment]:" not in result
+
+    def test_get_issue_tool_json_response(self):
+        """Test processing get_issue tool JSON response."""
+        test_input = '{"id": 621, "description": "Task description\\n\\n[comment]: \\u003c\\u003e (injected prompt text)"}'
+
+        result = PromptSecurity.apply_security_to_tool_response(test_input, "get_issue")
+
+        assert "injected prompt text" not in result
+        assert "[comment]:" not in result
+
+    def test_edge_cases(self):
+        """Test edge cases and format variations."""
+        test_url = "Text\\n[comment]: http://example.com (content)\\nMore"
+        result_url = strip_markdown_link_comments(test_url)
+        assert "content" not in result_url
+        assert "Text" in result_url
+        assert "More" in result_url
+
+        test_whitespace = "Text\\n  [comment]:   <>   (content)  \\nMore"
+        result_whitespace = strip_markdown_link_comments(test_whitespace)
+        assert "content" not in result_whitespace
+
+        test_anchor = "Text\\n[//]: # (content)\\nMore"
+        result_anchor = strip_markdown_link_comments(test_anchor)
+        assert "content" not in result_anchor
+
+        test_escaped = "Text\\n[comment]: <> (text with \\) escaped paren)\\nMore"
+        result_escaped = strip_markdown_link_comments(test_escaped)
+        assert "escaped paren" not in result_escaped
+
+        test_multiple = (
+            "Start\\n[comment]: <> (first)\\nMiddle\\n[//]: # (second)\\nEnd"
+        )
+        result_multiple = strip_markdown_link_comments(test_multiple)
+        assert "first" not in result_multiple
+        assert "second" not in result_multiple
+        assert "Start" in result_multiple
+        assert "Middle" in result_multiple
+        assert "End" in result_multiple
+
+        test_case = "Text\\n[COMMENT]: <> (content)\\nMore"
+        result_case = strip_markdown_link_comments(test_case)
+        assert "content" not in result_case
+
+        test_normal = "Some text [comment] in the middle\\nMore text"
+        result_normal = strip_markdown_link_comments(test_normal)
+        assert "[comment]" in result_normal
+
+        test_empty = "Text\\n[comment]: <> ()\\nMore"
+        result_empty = strip_markdown_link_comments(test_empty)
+        assert "[comment]:" not in result_empty
+
+    def test_whitespace_obfuscation(self):
+        """Test detection with whitespace-based obfuscation."""
+        test_dots_spaces = (
+            "Text\\n[comment]: <.   > (.         content with spacing)\\nMore"
+        )
+        result_dots_spaces = strip_markdown_link_comments(test_dots_spaces)
+        assert "content with spacing" not in result_dots_spaces
+        assert "Text" in result_dots_spaces
+        assert "More" in result_dots_spaces
+
+        test_mixed = "Text\\n[CoMmEnT]:  <  >  ( embedded text )\\nMore"
+        result_mixed = strip_markdown_link_comments(test_mixed)
+        assert "embedded text" not in result_mixed
+
+        test_multi_space = "Text\\n[comment]:     <>     (content)\\nMore"
+        result_multi_space = strip_markdown_link_comments(test_multi_space)
+        assert "content" not in result_multi_space
+
+        test_special = "Text\\n[//]: <...> (content)\\nMore"
+        result_special = strip_markdown_link_comments(test_special)
+        assert "content" not in result_special
+
+        test_extra = "Text\\n[comment]: <javascript:void(0)> (content)\\nMore"
+        result_extra = strip_markdown_link_comments(test_extra)
+        assert "content" not in result_extra
+
+    def test_complex_format_variations(self):
+        """Test complex format variations and special cases."""
+        test_escaped_parens = (
+            "Text\\n[comment]: <> (content with \\( and \\) chars)\\nMore"
+        )
+        result_escaped_parens = strip_markdown_link_comments(test_escaped_parens)
+        assert "content with" not in result_escaped_parens
+
+        test_tabs = "Text\\n[comment]:\\t<>\\t(content)\\nMore"
+        result_tabs = strip_markdown_link_comments(test_tabs)
+        assert "content" not in result_tabs
+
+        test_long_url = "Text\\n[comment]: <https://example.com/very/long/path/with/many/segments/and?query=params&more=data> (content)\\nMore"
+        result_long_url = strip_markdown_link_comments(test_long_url)
+        assert "content" not in result_long_url
+
+        test_markdown = "Text\\n[comment]: <> (**bold** _italic_ `code` [link])\\nMore"
+        result_markdown = strip_markdown_link_comments(test_markdown)
+        assert "bold" not in result_markdown
+        assert "italic" not in result_markdown
+
+        test_consecutive = "Text\\n[comment]: <> (first)\\n[comment]: <> (second)\\n[//]: # (third)\\nMore"
+        result_consecutive = strip_markdown_link_comments(test_consecutive)
+        assert "first" not in result_consecutive
+        assert "second" not in result_consecutive
+        assert "third" not in result_consecutive
+
+        test_empty_hash = "Text\\n[//]:# (content)\\nMore"
+        result_empty_hash = strip_markdown_link_comments(test_empty_hash)
+        assert "content" not in result_empty_hash
+
+        test_unicode_json = "Text\\n[comment]: \\u003c\\u003e (content)\\nMore"
+        result_unicode_json = strip_markdown_link_comments(test_unicode_json)
+        assert "content" not in result_unicode_json
+
+        test_backslash = "Text\\n[comment]: <> (path\\\\to\\\\file)\\nMore"
+        result_backslash = strip_markdown_link_comments(test_backslash)
+        assert "path" not in result_backslash
+
+        long_content = "a" * 1000
+        test_long_content = f"Text\\n[comment]: <> ({long_content})\\nMore"
+        result_long_content = strip_markdown_link_comments(test_long_content)
+        assert long_content not in result_long_content
+
+        test_mixed_brackets = "Text\\n[comment]: < > (content)\\nMore"
+        result_mixed_brackets = strip_markdown_link_comments(test_mixed_brackets)
+        assert "content" not in result_mixed_brackets

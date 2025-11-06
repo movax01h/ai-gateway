@@ -170,3 +170,74 @@ def strip_mermaid_comments(
         return text
 
     return _apply_recursively(response, _strip_mermaid_comments)
+
+
+def strip_markdown_link_comments(
+    response: Union[str, Dict[str, Any], List[Any]],
+) -> Union[str, List[Union[str, Dict[str, Any]]]]:
+    """Strip Markdown link reference definition comments to prevent prompt injection.
+
+    Removes Markdown comment patterns that use link reference definitions.
+    These are valid Markdown syntax that renders as non-visible content in rendered
+    views but can be exploited to inject additional instructions into LLM conversations.
+
+    Supported comment formats:
+        - [comment]: <> (injected text)
+        - [comment]: <url> (injected text)
+        - [comment]: # (injected text)
+        - [//]: <> (injected text)
+        - [//]: # (injected text)
+        - [COMMENT]: <> (case insensitive)
+
+    The function handles:
+        - Unicode-escaped angle brackets (\u003c\u003e -> <>)
+        - JSON-encoded newlines (\n as backslash-n)
+        - Extra whitespace variations
+        - Multiple comments in the same text
+        - Escaped characters within parentheses
+
+    Security considerations:
+        - Only strips comments at the beginning of lines (after \n or start of string)
+        - Preserves [comment] text that appears mid-line or in other contexts
+        - Handles both the opening/closing markers to prevent partial stripping
+
+    Args:
+        response: The response data to process (string, dict, or list)
+
+    Returns:
+        Response with Markdown link reference comments removed
+
+    Examples:
+        >>> text = "Task description\\n[comment]: <> (additional instructions)\\nMore text"
+        >>> strip_markdown_link_comments(text)
+        "Task description\\n\\nMore text"
+
+        >>> data = {"desc": "Content\\n[//]: # (injected prompt)\\nText"}
+        >>> strip_markdown_link_comments(data)
+        {"desc": "Content\\n\\nText"}
+    """
+
+    def _strip_link_comments(text: str) -> str:
+        if not text or not isinstance(text, str):
+            return text
+
+        has_comment_pattern = "[comment]:" in text.lower() or "[//]:" in text
+        if not has_comment_pattern:
+            return text
+
+        decoded_text = text
+        for _ in range(3):
+            prev_text = decoded_text
+            decoded_text = re.sub(r"\\+u003c", "<", decoded_text, flags=re.IGNORECASE)
+            decoded_text = re.sub(r"\\+u003e", ">", decoded_text, flags=re.IGNORECASE)
+            if decoded_text == prev_text:
+                break
+
+        pattern = (
+            r"(^|\\n)\s*\[(?://|comment)\]:\s*(?:<[^>]*>|#|\S*)\s*\((?:[^)\\]|\\.)*\)"
+        )
+        result = re.sub(pattern, r"\1", decoded_text, flags=re.IGNORECASE)
+
+        return result
+
+    return _apply_recursively(response, _strip_link_comments)
