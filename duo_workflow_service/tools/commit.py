@@ -131,9 +131,7 @@ class CommitBaseTool(DuoBaseTool):
         self,
         project_id: str,
         actions: List["CreateCommitAction"],
-        branch: str,
-        start_branch: Optional[str],
-        auto_branch: Optional[str],
+        ref_to_fetch: str,
     ) -> List[dict[str, Any]]:
         """Prepare list of action dicts for the commit API request."""
         actions_data: list[dict[str, Any]] = []
@@ -150,10 +148,9 @@ class CommitBaseTool(DuoBaseTool):
             ):
                 old_str = action.old_str
                 new_str = action.new_str
-                ref = (start_branch if auto_branch else branch) or "main"
 
                 current_content = await self._get_file_content(
-                    project_id, ref, action.file_path
+                    project_id, ref_to_fetch, action.file_path
                 )
 
                 if old_str not in current_content:
@@ -609,21 +606,30 @@ class CreateCommit(CommitBaseTool):
         start_branch = kwargs.get("start_branch")
         start_sha = kwargs.get("start_sha")
 
+        branch_exists = False
         if not branch:
             timestamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
             auto_branch = f"duo-edit-{timestamp}"
             branch = auto_branch
+        else:
+            encoded_branch = quote(branch, safe="")
+            branch_response = await self.gitlab_client.aget(
+                f"/api/v4/projects/{project_id}/repository/branches/{encoded_branch}",
+                use_http_response=True,
+            )
+            branch_exists = branch_response.is_success()
 
-            if not (start_branch or start_sha):
-                default_branch = await self._get_default_branch(project_id)
-                start_branch = default_branch or "main"
+        default_branch = None
+        if not branch_exists and not (start_branch or start_sha):
+            default_branch = await self._get_default_branch(project_id) or "main"
+
+        base_ref = start_branch or start_sha or default_branch or "main"
+        ref_to_fetch = branch if branch_exists else base_ref
 
         actions_data = await self._prepare_actions_data(
             project_id=project_id,
             actions=actions,
-            branch=branch,
-            start_branch=start_branch,
-            auto_branch=auto_branch,
+            ref_to_fetch=ref_to_fetch,
         )
 
         # Prepare request parameters
@@ -633,10 +639,16 @@ class CreateCommit(CommitBaseTool):
             "commit_message": commit_message,
             "actions": actions_data,
         }
-        if start_branch:
-            params["start_branch"] = start_branch
 
-        for param in ["start_sha", "start_project", "author_email", "author_name"]:
+        if not branch_exists:
+            if start_branch:
+                params["start_branch"] = start_branch
+            elif start_sha:
+                params["start_sha"] = start_sha
+            elif default_branch:
+                params["start_branch"] = default_branch
+
+        for param in ["start_project", "author_email", "author_name"]:
             if kwargs.get(param) is not None:
                 params[param] = kwargs[param]
 

@@ -32,6 +32,7 @@ def create_http_response(data, status_code=200):
 @pytest.fixture(name="gitlab_client_mock")
 def gitlab_client_mock_fixture():
     mock = Mock()
+    mock.aget = AsyncMock()
     return mock
 
 
@@ -1009,8 +1010,6 @@ async def test_create_commit_with_all_optional_params(
         "branch": "feature-branch",
         "commit_message": "Test commit message",
         "actions": actions_list,
-        "start_branch": "main",
-        "start_sha": "abcdef1234567890",
         "start_project": "namespace/another-project",
         "author_email": "author@example.com",
         "author_name": "Author Name",
@@ -1178,8 +1177,13 @@ async def test_create_commit_with_partial_edit(
 
     assert response == expected_response
 
-    gitlab_client_mock.aget.assert_called_once_with(
-        f"/api/v4/projects/24/repository/files/README.md",
+    assert gitlab_client_mock.aget.call_count == 2
+    gitlab_client_mock.aget.assert_any_call(
+        "/api/v4/projects/24/repository/branches/main",
+        use_http_response=True,
+    )
+    gitlab_client_mock.aget.assert_any_call(
+        "/api/v4/projects/24/repository/files/README.md",
         params={"ref": "main"},
         use_http_response=True,
     )
@@ -1221,7 +1225,12 @@ async def test_create_commit_with_partial_edit_not_found(
             actions=actions,
         )
 
-    gitlab_client_mock.aget.assert_called_once_with(
+    # Verify it fetched branch info and file content
+    gitlab_client_mock.aget.assert_any_call(
+        f"/api/v4/projects/24/repository/branches/main",
+        use_http_response=True,
+    )
+    gitlab_client_mock.aget.assert_any_call(
         f"/api/v4/projects/24/repository/files/README.md",
         params={"ref": "main"},
         use_http_response=True,
@@ -1232,11 +1241,16 @@ async def test_create_commit_with_partial_edit_not_found(
 
 @pytest.mark.asyncio
 async def test_create_commit_with_partial_edit_error(gitlab_client_mock, metadata):
-    """Test error handling when fetching file content fails."""
-    gitlab_client_mock.aget = AsyncMock(side_effect=Exception("File not found"))
+    """Test error handling when fetching file content fails after branch check."""
+    gitlab_client_mock.aget = AsyncMock(
+        side_effect=[
+            GitLabHttpResponse(status_code=200, body={}),
+            Exception("File not found"),
+        ]
+    )
+    gitlab_client_mock.apost = AsyncMock()
 
     tool = CreateCommit(metadata=metadata)
-
     actions = [
         CreateCommitAction(
             action="update",
@@ -1254,7 +1268,11 @@ async def test_create_commit_with_partial_edit_error(gitlab_client_mock, metadat
             actions=actions,
         )
 
-    gitlab_client_mock.aget.assert_called_once_with(
+    gitlab_client_mock.aget.assert_any_call(
+        f"/api/v4/projects/24/repository/branches/main",
+        use_http_response=True,
+    )
+    gitlab_client_mock.aget.assert_any_call(
         f"/api/v4/projects/24/repository/files/README.md",
         params={"ref": "main"},
         use_http_response=True,
@@ -1505,28 +1523,10 @@ async def test_get_commit_diff_with_no_excluded_files(
             "duo-edit-20250501-123045",
             "main",
         ),
-        (
-            {"branch": "feature-branch", "start_branch": None},
-            None,
-            "feature-branch",
-            None,
-        ),
-        (
-            {"branch": "feature-branch", "start_branch": "main"},
-            None,
-            "feature-branch",
-            "main",
-        ),
     ],
-    ids=[
-        "auto_from_default",
-        "auto_with_explicit_start",
-        "fallback_to_main",
-        "explicit_branch",
-        "explicit_with_start_branch",
-    ],
+    ids=["auto_from_default", "auto_with_explicit_start", "fallback_to_main"],
 )
-async def test_create_commit_branch_params(
+async def test_create_commit_branch_params_auto_branch(
     kwargs,
     project_info,
     expected_branch,
@@ -1535,6 +1535,7 @@ async def test_create_commit_branch_params(
     metadata,
     commit_data,
 ):
+    """Covers new branch creation logic (no branch param provided)."""
     gitlab_client_mock.aget = AsyncMock(return_value=project_info or {})
     gitlab_client_mock.apost = AsyncMock(return_value=create_http_response(commit_data))
 
@@ -1545,15 +1546,49 @@ async def test_create_commit_branch_params(
         actions = [
             CreateCommitAction(action="create", file_path="test.txt", content="Hello")
         ]
+        await tool._arun(
+            project_id=24, commit_message="Test", actions=actions, **kwargs
+        )
 
-        call_args = {
-            "project_id": 24,
-            "commit_message": "Test",
-            "actions": actions,
-            **{k: v for k, v in kwargs.items() if v is not None},
-        }
+    _, call_kwargs = gitlab_client_mock.apost.call_args
+    commit_params = json.loads(call_kwargs["body"])
 
-        await tool._arun(**call_args)
+    assert commit_params["branch"] == expected_branch
+    assert commit_params.get("start_branch") == expected_start_branch
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "kwargs, expected_branch, expected_start_branch",
+    [
+        ({"branch": "feature-branch", "start_branch": None}, "feature-branch", None),
+        ({"branch": "feature-branch", "start_branch": "main"}, "feature-branch", None),
+    ],
+    ids=["explicit_branch", "explicit_with_start_branch"],
+)
+async def test_create_commit_branch_params_explicit_branch(
+    kwargs,
+    expected_branch,
+    expected_start_branch,
+    gitlab_client_mock,
+    metadata,
+    commit_data,
+):
+    """Covers commit into an explicitly given branch (existing branch)."""
+    gitlab_client_mock.aget = AsyncMock(
+        return_value=GitLabHttpResponse(status_code=200, body={})
+    )
+    gitlab_client_mock.apost = AsyncMock(return_value=create_http_response(commit_data))
+
+    with patch("duo_workflow_service.tools.commit.datetime") as mock_datetime:
+        mock_datetime.now.return_value = datetime(2025, 5, 1, 12, 30, 45)
+        tool = CreateCommit(metadata=metadata)
+        actions = [
+            CreateCommitAction(action="create", file_path="test.txt", content="Hello")
+        ]
+        await tool._arun(
+            project_id=24, commit_message="Test", actions=actions, **kwargs
+        )
 
     _, call_kwargs = gitlab_client_mock.apost.call_args
     commit_params = json.loads(call_kwargs["body"])
@@ -1623,8 +1658,8 @@ async def test_partial_edit_explicit_branch_fetches_from_itself(
             branch="feature-branch",
         )
 
-    assert gitlab_client_mock.aget.call_count == 1
-    assert gitlab_client_mock.aget.call_args_list[0][1]["params"] == {
+    assert gitlab_client_mock.aget.call_count == 2
+    assert gitlab_client_mock.aget.call_args_list[1][1]["params"] == {
         "ref": "feature-branch"
     }
     gitlab_client_mock.apost.assert_called_once()
@@ -1678,3 +1713,63 @@ async def test_get_file_content_failure_logs_and_raises(gitlab_client_mock, meta
         params={"ref": "main"},
         use_http_response=True,
     )
+
+
+@pytest.mark.asyncio
+async def test_create_commit_nonexistent_branch_uses_default_branch(
+    gitlab_client_mock, metadata, commit_data
+):
+    """Test that when a specified branch doesn't exist, the tool uses the default branch as base."""
+    branch_not_found_response = GitLabHttpResponse(
+        status_code=404,
+        body={"message": "404 Branch Not Found"},
+    )
+
+    project_info_response = {"id": 24, "name": "test-project", "default_branch": "main"}
+
+    gitlab_client_mock.aget = AsyncMock(
+        side_effect=[
+            branch_not_found_response,
+            project_info_response,
+        ]
+    )
+    gitlab_client_mock.apost = AsyncMock(return_value=create_http_response(commit_data))
+
+    tool = CreateCommit(metadata=metadata)
+
+    actions = [
+        CreateCommitAction(
+            action="create",
+            file_path="test.txt",
+            content="This is a test file",
+        ),
+    ]
+
+    response = await tool._arun(
+        project_id=24,
+        branch="nonexistent-branch",
+        commit_message="Test commit on nonexistent branch",
+        actions=actions,
+    )
+
+    expected_response = json.dumps(
+        {"status": "success", "branch": "nonexistent-branch"}
+    )
+    assert response == expected_response
+
+    # Verify the API calls were made in the correct order
+    assert gitlab_client_mock.aget.call_count == 2
+    gitlab_client_mock.aget.assert_any_call(
+        "/api/v4/projects/24/repository/branches/nonexistent-branch",
+        use_http_response=True,
+    )
+    gitlab_client_mock.aget.assert_any_call("/api/v4/projects/24")
+
+    # Verify the commit was created with the correct parameters
+    gitlab_client_mock.apost.assert_called_once()
+    _, call_kwargs = gitlab_client_mock.apost.call_args
+    commit_params = json.loads(call_kwargs["body"])
+    assert commit_params["branch"] == "nonexistent-branch"
+    assert commit_params["start_branch"] == "main"
+    assert commit_params["commit_message"] == "Test commit on nonexistent branch"
+    assert len(commit_params["actions"]) == 1
