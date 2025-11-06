@@ -279,6 +279,11 @@ class Workflow(AbstractWorkflow):
                     },
                     {
                         "repository_url": self._project["http_url_to_repo"],  # type: ignore[index]
+                        "command": "fetch",
+                        "args": "--unshallow",
+                    },
+                    {
+                        "repository_url": self._project["http_url_to_repo"],  # type: ignore[index]
                         "command": "push",
                     },
                 ],
