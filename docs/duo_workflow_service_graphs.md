@@ -199,13 +199,15 @@ config:
 graph TD;
     __start__(__start__):::first;
     __end__(__end__):::last;
-    __start__ --> issue_parser;
+    __start__ --> agents_dot_md;
+    agents_dot_md(agents_dot_md<br>#91;DeterministicStepComponent#93;);
     issue_parser(issue_parser<br>#91;DeterministicStepComponent#93;);
     draft_merge_request_creator(draft_merge_request_creator<br>#91;OneOffComponent#93;);
     tool_listing_agent(tool_listing_agent<br>#91;AgentComponent#93;);
     planning_agent(planning_agent<br>#91;AgentComponent#93;);
     programming_agent(programming_agent<br>#91;AgentComponent#93;);
     git_actions(git_actions<br>#91;OneOffComponent#93;);
+    agents_dot_md --> issue_parser;
     issue_parser --> draft_merge_request_creator;
     draft_merge_request_creator --> tool_listing_agent;
     tool_listing_agent --> planning_agent;
