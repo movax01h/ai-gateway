@@ -6,7 +6,7 @@ from unittest.mock import AsyncMock, MagicMock, Mock, call, patch
 
 import pytest
 from gitlab_cloud_connector import CloudConnectorUser, UserClaims
-from langchain_core.messages import SystemMessage
+from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 from langchain_core.runnables import RunnableConfig
 from langgraph.checkpoint.base import (
     ChannelVersions,
@@ -20,6 +20,10 @@ from duo_workflow_service.checkpointer.gitlab_workflow import (
     GitLabWorkflow,
     WorkflowStatusEventEnum,
 )
+from duo_workflow_service.checkpointer.gitlab_workflow_utils import (
+    compress_checkpoint,
+    uncompress_checkpoint,
+)
 from duo_workflow_service.entities.state import WorkflowStatusEnum
 from duo_workflow_service.gitlab.http_client import (
     GitLabHttpResponse,
@@ -31,6 +35,7 @@ from duo_workflow_service.status_updater.gitlab_status_updater import (
     UnsupportedStatusEvent,
 )
 from lib.billing_events.client import BillingEventsClient
+from lib.feature_flags.context import FeatureFlag
 from lib.internal_events import InternalEventAdditionalProperties
 from lib.internal_events.event_enum import EventEnum, EventLabelEnum, EventPropertyEnum
 
@@ -122,25 +127,54 @@ def gitlab_workflow_fixture(
     )
 
 
-@pytest.fixture(name="checkpoint_data")
-def checkpoint_data_fixture():
-    return [
+@pytest.fixture(name="checkpoint_body")
+def checkpoint_body_fixture():
+    return """[
         {
             "thread_ts": "5678",
-            "parent_ts": None,
+            "parent_ts": null,
             "checkpoint": {
-                "id": "checkpoint_id",
+                "id": "5678",
                 "channel_values": {
                     "conversation_history": {
-                        "planner": SystemMessage(
-                            content="You are a planner. Could you create a detailed plan that the execution agent"
-                        )
+                        "planner": [
+                            {
+                                "type": "SystemMessage",
+                                "content": "You are a planner. Could you create a detailed plan that the execution agent"
+                            },
+                            {
+                                "type": "HumanMessage",
+                                "content": "Work"
+                            },
+                            {
+                                "type": "AIMessage",
+                                "content": "I did"
+                            }
+                        ]
                     }
-                },
+                }
             },
-            "metadata": {"timestamp": "2024-01-01"},
+            "metadata": {"timestamp": "2024-01-01"}
+        }
+    ]"""
+
+
+@pytest.fixture(name="checkpoint_data")
+def checkpoint_data_fixture(checkpoint_body):
+    return json.loads(checkpoint_body, object_hook=checkpoint_decoder)
+
+
+@pytest.fixture(name="compressed_checkpoint_data")
+def compressed_checkpoint_data_fixture(checkpoint_data):
+    compressed_checkpoint = compress_checkpoint(checkpoint_data[0]["checkpoint"])
+    compressed_data = [
+        {
+            **checkpoint_data[0],
+            "compressed_checkpoint": compressed_checkpoint,
         }
     ]
+    del compressed_data[0]["checkpoint"]
+    return compressed_data
 
 
 @pytest.fixture(name="checkpoint_metadata")
@@ -940,16 +974,16 @@ async def test_aput(
 
     http_client.apost.assert_called_once_with(
         path=f"/api/v4/ai/duo_workflows/workflows/{workflow_id}/checkpoints",
+        use_http_response=True,
         body=json.dumps(
             {
                 "thread_ts": checkpoint["id"],
                 "parent_ts": "parent-checkpoint",
-                "checkpoint": checkpoint,
                 "metadata": checkpoint_metadata,
+                "checkpoint": checkpoint,
             },
             cls=CustomEncoder,
         ),
-        use_http_response=True,
     )
 
     http_client.apatch.assert_called_once_with(
@@ -1294,3 +1328,156 @@ async def test_track_workflow_completion_with_non_billable_status(
     await gitlab_workflow._track_workflow_completion("some_other_status")
 
     billing_event_client.track_billing_event.assert_not_called()
+
+
+@pytest.fixture(autouse=True)
+def mock_compress_checkpoint_flag():
+    """Mock feature flag for COMPRESS_CHECKPOINT."""
+    with patch(
+        "duo_workflow_service.checkpointer.gitlab_workflow.is_feature_enabled"
+    ) as mock_flag:
+        mock_flag.return_value = False
+        yield mock_flag
+
+
+@pytest.mark.asyncio
+async def test_aget_tuple_with_compression_enabled(
+    gitlab_workflow,
+    http_client,
+    config,
+    workflow_id,
+    checkpoint_data,
+    compressed_checkpoint_data,
+    mock_compress_checkpoint_flag,
+):
+    """Test aget_tuple fetches and uncompresses checkpoint when compression is enabled."""
+    mock_compress_checkpoint_flag.return_value = True
+
+    mock_response = GitLabHttpResponse(
+        status_code=200,
+        body=compressed_checkpoint_data,
+    )
+    http_client.aget.return_value = mock_response
+
+    result = await gitlab_workflow.aget_tuple(config)
+    assert result is not None
+    assert result.checkpoint == checkpoint_data[0]["checkpoint"]
+
+    http_client.aget.assert_called_once()
+    call_path = http_client.aget.call_args[1]["path"]
+    assert "compressed=true" in call_path
+    assert f"/api/v4/ai/duo_workflows/workflows/{workflow_id}/checkpoints" in call_path
+
+    mock_compress_checkpoint_flag.assert_called_with(FeatureFlag.COMPRESS_CHECKPOINT)
+
+
+@pytest.mark.asyncio
+async def test_aget_tuple_per_page_with_compression_enabled(
+    gitlab_workflow,
+    http_client,
+    workflow_id,
+    checkpoint_data,
+    compressed_checkpoint_data,
+    mock_compress_checkpoint_flag,
+):
+    """Test aget_tuple with per_page query when compression is enabled."""
+    mock_compress_checkpoint_flag.return_value = True
+    config = {"configurable": {"thread_id": workflow_id}}
+
+    mock_response = GitLabHttpResponse(
+        status_code=200,
+        body=compressed_checkpoint_data,
+    )
+    http_client.aget.return_value = mock_response
+
+    result = await gitlab_workflow.aget_tuple(config)
+
+    assert result is not None
+    assert result.checkpoint == checkpoint_data[0]["checkpoint"]
+
+    call_path = http_client.aget.call_args[1]["path"]
+    assert "per_page=1" in call_path
+    assert "compressed=true" in call_path
+
+
+@pytest.mark.asyncio
+async def test_alist_with_compression_enabled(
+    gitlab_workflow,
+    http_client,
+    workflow_id,
+    mock_compress_checkpoint_flag,
+):
+    """Test alist fetches and uncompresses checkpoints when compression is enabled."""
+    mock_compress_checkpoint_flag.return_value = True
+
+    checkpoints = [
+        {
+            "thread_ts": "checkpoint-1",
+            "parent_ts": None,
+            "checkpoint": {"id": "checkpoint-1", "data": "test1"},
+            "metadata": {"timestamp": "2024-01-01"},
+        },
+        {
+            "thread_ts": "checkpoint-2",
+            "parent_ts": "checkpoint-1",
+            "checkpoint": {"id": "checkpoint-2", "data": "test2"},
+            "metadata": {"timestamp": "2024-01-02"},
+        },
+    ]
+
+    compressed_checkpoints = [
+        {
+            **{k: v for k, v in cp.items() if k != "checkpoint"},
+            "compressed_checkpoint": compress_checkpoint(cp["checkpoint"]),
+        }
+        for cp in checkpoints
+    ]
+
+    mock_response = GitLabHttpResponse(
+        status_code=200,
+        body=compressed_checkpoints,
+    )
+    http_client.aget.return_value = mock_response
+
+    results = [checkpoint async for checkpoint in gitlab_workflow.alist(None)]
+
+    assert len(results) == 2
+    assert results[0].checkpoint == checkpoints[0]["checkpoint"]
+    assert results[1].checkpoint == checkpoints[1]["checkpoint"]
+
+    call_path = http_client.aget.call_args[1]["path"]
+    assert "compressed=true" in call_path
+
+
+@pytest.mark.asyncio
+async def test_aput_with_compression_enabled(
+    gitlab_workflow,
+    http_client,
+    checkpoint_data,
+    checkpoint_metadata,
+    workflow_id,
+    mock_compress_checkpoint_flag,
+):
+    """Test aput compresses checkpoint when compression is enabled."""
+    mock_compress_checkpoint_flag.return_value = True
+
+    config = {"configurable": {"checkpoint_id": "parent-checkpoint"}}
+    checkpoint = checkpoint_data[0]["checkpoint"]
+    checkpoint["channel_values"]["status"] = WorkflowStatusEnum.COMPLETED
+
+    http_client.apatch.return_value = GitLabHttpResponse(status_code=200, body={})
+    http_client.apost.return_value = GitLabHttpResponse(status_code=200, body={})
+
+    result = await gitlab_workflow.aput(
+        config, checkpoint, checkpoint_metadata, ChannelVersions()
+    )
+
+    http_client.apost.assert_called_once()
+    post_call_body = json.loads(http_client.apost.call_args[1]["body"])
+
+    assert "compressed_checkpoint" in post_call_body
+    assert "checkpoint" not in post_call_body
+
+    assert post_call_body["compressed_checkpoint"] == compress_checkpoint(checkpoint)
+
+    mock_compress_checkpoint_flag.assert_called_with(FeatureFlag.COMPRESS_CHECKPOINT)
