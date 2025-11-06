@@ -3,11 +3,23 @@ Here is the git repository URL:
   {{repository_url}}
 </repository>
 
-Use the `run_git_command` tool to run this git command specified in the git_command XML tags:
-<git_command>
-  git push -o merge_request.create
-    -o merge_request.title='Draft: fix failing pipeline'
-    {% if source_branch %}-o merge_request.target='{{source_branch}}'{% endif %}
-    -o merge_request.description='Fixes [failing pipeline]({{pipeline_url}}){% if merge_request_url %} on {{merge_request_url}}{% endif %}<br><br>[Session {{ workflow_id }}]({{ session_url }})'
-    --no-verify
-</git_command>
+Follow these exact steps in order:
+<step number="1">
+  Use the `run_git_command` tool to run this git command specified in the git_command XML tags:
+  <git_command>
+    git fetch --unshallow
+  </git_command>
+</step>
+
+<step number="2">
+  Use the `run_git_command` tool to run this git command specified in the git_command XML tags:
+  <git_command>
+    git push -o merge_request.create
+      -o merge_request.title='Draft: fix failing pipeline'
+      {% if source_branch %}-o merge_request.target='{{source_branch}}'{% endif %}
+      -o merge_request.description='Fixes [failing pipeline]({{pipeline_url}}){% if merge_request_url %} on {{merge_request_url}}{% endif %}<br><br>[Session {{ workflow_id }}]({{ session_url }})'
+      --no-verify
+  </git_command>
+</step>
+
+Return the URL for the created Merge Request.

@@ -118,7 +118,7 @@ components:
       - "on_tool_execution_success"
       - "on_tool_execution_failed"
   - name: "fix_pipeline_git_push"
-    type: OneOffComponent
+    type: AgentComponent
     prompt_id: "fix_pipeline_push_changes"
     prompt_version: "^1.0.0"
     max_correction_attempts: 3
@@ -140,7 +140,7 @@ components:
     toolset:
       - "run_git_command"
     ui_log_events:
-      - "on_tool_call_input"
+      - "on_agent_final_answer"
       - "on_tool_execution_success"
       - "on_tool_execution_failed"
   - name: "fix_pipeline_comment_link"
@@ -151,7 +151,7 @@ components:
     inputs:
       - from: "context:inputs.merge_request.url"
         as: "merge_request_url"
-      - from: "context:fix_pipeline_git_push.tool_responses"
+      - from: "context:fix_pipeline_git_push.final_answer"
         as: "git_push_response"
       - from: "context:fix_pipeline_agents_dot_md.tool_responses"
         as: "agents_dot_md"
