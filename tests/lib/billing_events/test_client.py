@@ -7,6 +7,7 @@ from gitlab_cloud_connector import CloudConnectorUser, UserClaims
 from snowplow_tracker import SelfDescribingJson, Snowplow
 
 from lib.billing_events.client import BillingEventsClient
+from lib.feature_flags import FeatureFlag, current_feature_flag_context
 from lib.internal_events.client import InternalEventsClient
 from lib.internal_events.context import (
     EventContext,
@@ -165,6 +166,7 @@ class TestBillingEventsClient:
             claims=UserClaims(gitlab_instance_uid="test-instance-uid"),
         )
 
+        current_feature_flag_context.set({FeatureFlag.DUO_USE_BILLING_ENDPOINT})
         event_context = EventContext(
             realm="user",
             instance_id="instance-123",
@@ -255,9 +257,23 @@ class TestBillingEventsClient:
             )
             mock_track.assert_not_called()
 
+    def test_track_billing_event_feature_flag_disabled(self, client, user):
+        """Test that billing events are not tracked when feature flag is disabled."""
+        current_feature_flag_context.set(set())
+        with mock.patch.object(client.snowplow_tracker, "track") as mock_track:
+            client.track_billing_event(
+                user=user,
+                event_type="ai_completion",
+                category=__name__,
+                unit_of_measure="tokens",
+                quantity=100.0,
+            )
+            mock_track.assert_not_called()
+
     def test_track_billing_event_with_empty_metadata(
         self, client, user, mock_dependencies
     ):
+        current_feature_flag_context.set({FeatureFlag.DUO_USE_BILLING_ENDPOINT})
         current_event_context.set(EventContext())
 
         client.track_billing_event(
@@ -278,6 +294,7 @@ class TestBillingEventsClient:
     def test_billing_event_context_creation_with_internal_context(
         self, client, user, mock_dependencies
     ):
+        current_feature_flag_context.set({FeatureFlag.DUO_USE_BILLING_ENDPOINT})
         internal_context = EventContext(
             environment="production",
             realm="project",
@@ -343,6 +360,7 @@ class TestBillingEventsClient:
         self, client, user, mock_dependencies  # pylint: disable=unused-argument
     ):
         """Test that internal_events_client.track_event is called with correct parameters."""
+        current_feature_flag_context.set({FeatureFlag.DUO_USE_BILLING_ENDPOINT})
         event_type = "ai_completion"
         category = "test_category"
 
