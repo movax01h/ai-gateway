@@ -10,6 +10,7 @@ from duo_workflow_service.security.emoji_security import strip_emojis
 from duo_workflow_service.security.exceptions import SecurityException
 from duo_workflow_service.security.markdown_content_security import (
     strip_hidden_html_comments,
+    strip_markdown_link_comments,
     strip_mermaid_comments,
 )
 from duo_workflow_service.security.security_utils import (
@@ -159,6 +160,7 @@ class PromptSecurity:
     DEFAULT_SECURITY_FUNCTIONS: List[SecurityFunctionType] = [
         encode_dangerous_tags,
         strip_hidden_html_comments,
+        strip_markdown_link_comments,
         strip_hidden_unicode_tags,
         strip_mermaid_comments,
         # strip_emojis,
@@ -195,6 +197,7 @@ class PromptSecurity:
         "read_file": [],  # No security functions for read_file tool
         "build_review_merge_request_context": [
             encode_dangerous_tags,
+            strip_markdown_link_comments,
             strip_hidden_unicode_tags,
         ],
     }
