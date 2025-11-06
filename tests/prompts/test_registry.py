@@ -97,6 +97,21 @@ models:
         - custom
     params:
         model: custom
+  - name: Claude Sonnet 4.5
+    gitlab_identifier: claude_sonnet_4_5
+    family:
+        - claude_4_5
+        - claude_3
+    params:
+        model: claude-sonnet-4-5-20250929
+  - name: Claude Sonnet 4.5 Vertex
+    gitlab_identifier: claude_sonnet_4_5_vertex
+    family:
+        - claude_vertex_4_5
+        - vertex
+    params:
+        model: claude-sonnet-4-5@20250929
+        custom_llm_provider: vertex_ai
 """,
     )
     fs.create_file(
@@ -298,6 +313,57 @@ prompt_template:
   system: Template1
   user: Template2
 params:
+  timeout: 60
+  stop:
+    - Foo
+    - Bar
+""",
+    )
+    fs.create_file(
+        prompts_definitions_dir / "chat" / "react" / "claude_4_5" / "1.0.0.yml",
+        contents="""
+---
+name: Chat react claude_4_5 prompt
+model:
+  params:
+    model_class_provider: litellm
+    temperature: 0.2
+    top_p: 0.9
+    top_k: 50
+    max_tokens: 512
+    max_retries: 8
+unit_primitives:
+  - duo_chat
+prompt_template:
+  system: Claude 4.5 Template
+  user: Template2
+params:
+  timeout: 60
+  stop:
+    - Foo
+    - Bar
+""",
+    )
+    fs.create_file(
+        prompts_definitions_dir / "chat" / "react" / "claude_vertex_4_5" / "1.0.0.yml",
+        contents="""
+---
+name: Chat react claude_vertex_4_5 prompt
+model:
+  params:
+    model_class_provider: litellm
+    temperature: 0.2
+    top_p: 0.9
+    top_k: 50
+    max_tokens: 512
+    max_retries: 8
+unit_primitives:
+  - duo_chat
+prompt_template:
+  system: Claude Vertex 4.5 Template
+  user: Template2
+params:
+  vertex_location: global
   timeout: 60
   stop:
     - Foo
@@ -926,6 +992,55 @@ prompt_template:
                     "top_k": 40,
                     "max_tokens": 256,
                     "max_retries": 6,
+                },
+                ChatLiteLLM,
+            ),
+            (
+                "chat/react",
+                "^1.0.0",
+                {
+                    "name": "claude_sonnet_4_5",
+                    "provider": "gitlab",
+                },
+                False,
+                "Chat react claude_4_5 prompt",  # Should use claude_4_5 specific prompt
+                [("system", "Claude 4.5 Template"), ("user", "Template2")],
+                "claude-sonnet-4-5-20250929",
+                {
+                    "stop": ["Foo", "Bar"],
+                    "timeout": 60,
+                },
+                {
+                    "temperature": 0.2,
+                    "top_p": 0.9,
+                    "top_k": 50,
+                    "max_tokens": 512,
+                    "max_retries": 8,
+                },
+                ChatLiteLLM,
+            ),
+            (
+                "chat/react",
+                "^1.0.0",
+                {
+                    "name": "claude_sonnet_4_5_vertex",
+                    "provider": "gitlab",
+                },
+                False,
+                "Chat react claude_vertex_4_5 prompt",  # Should use claude_vertex_4_5 specific prompt
+                [("system", "Claude Vertex 4.5 Template"), ("user", "Template2")],
+                "claude-sonnet-4-5@20250929",
+                {
+                    "stop": ["Foo", "Bar"],
+                    "timeout": 60,
+                    "vertex_location": "global",
+                },
+                {
+                    "temperature": 0.2,
+                    "top_p": 0.9,
+                    "top_k": 50,
+                    "max_tokens": 512,
+                    "max_retries": 8,
                 },
                 ChatLiteLLM,
             ),

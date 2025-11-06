@@ -3,6 +3,7 @@ from pathlib import Path
 from typing import cast
 
 import pytest
+import yaml
 from dependency_injector import containers, providers
 from dependency_injector.providers import Factory
 from pydantic import AnyUrl
@@ -11,7 +12,7 @@ from ai_gateway.config import ConfigModelLimits
 from ai_gateway.model_metadata import create_model_metadata
 from ai_gateway.model_selection.model_selection_config import ModelSelectionConfig
 from ai_gateway.prompts import Prompt
-from ai_gateway.prompts.config import ChatOpenAIParams, ModelClassProvider
+from ai_gateway.prompts.config import ChatOpenAIParams, ModelClassProvider, PromptConfig
 from ai_gateway.prompts.registry import (
     LEGACY_MODEL_MAPPING,
     LocalPromptRegistry,
@@ -95,13 +96,19 @@ def test_container(mock_ai_gateway_container: containers.DeclarativeContainer):
                         {"provider": "gitlab", "identifier": "claude_sonnet_4_20250514"}
                     )
             else:
-                model_metadata = create_model_metadata(
-                    {
-                        "name": str(model_name),
-                        "endpoint": AnyUrl("http://localhost:4000"),
-                        "provider": "gitlab",
-                    }
-                )
+                # Skip directories that are prompt families (like claude_4_5) rather than model families
+                # Prompt families are resolved through the model's family field, not as standalone models
+                try:
+                    model_metadata = create_model_metadata(
+                        {
+                            "name": str(model_name),
+                            "endpoint": AnyUrl("http://localhost:4000"),
+                            "provider": "gitlab",
+                        }
+                    )
+                except ValueError:
+                    # This is a prompt family directory, not a model family directory - skip it
+                    continue
             prompt = registry.get(
                 prompt_id,
                 version,
@@ -156,3 +163,59 @@ def test_container_openai_model_factory_exists(
     assert model.max_tokens == 1_028
     assert model.max_retries == 1
     assert model.output_version == "responses/v1"
+
+
+def test_prompt_family_configs_are_valid():
+    """Test that all prompt family YAML files are valid PromptConfig objects.
+
+    Prompt families (like claude_4_5, claude_vertex_4_5) are directories that contain prompt definitions but aren't
+    directly instantiable as models. They're used by models that have them in their 'family' field. The main
+    test_container skips these because it can't create model_metadata for them, so we test them separately here by
+    directly validating their YAML files against the PromptConfig schema.
+    """
+    prompts_dir = Path(
+        sys.modules[LocalPromptRegistry.__module__].__file__ or ""
+    ).parent
+    prompts_definitions_dir = prompts_dir / "definitions"
+
+    # Known prompt family directories that should be validated
+    # These are directories that contain prompts but aren't standalone model identifiers
+    prompt_families_to_test = [
+        "claude_4_5",
+        "claude_vertex_4_5",
+        "gpt_5",
+    ]
+
+    validation_errors = []
+
+    for path in prompts_definitions_dir.glob("**"):
+        # Check if this is a prompt family directory we want to test
+        if path.name not in prompt_families_to_test:
+            continue
+
+        # Find all YAML version files in this directory
+        version_files = list(path.glob("*.yml"))
+
+        if not version_files:
+            continue
+
+        prompt_id_with_model_name = path.relative_to(prompts_definitions_dir)
+        prompt_id = str(prompt_id_with_model_name.parent)
+        model_name = prompt_id_with_model_name.name
+
+        # Validate each version file
+        for version_file in version_files:
+            try:
+                with open(version_file, "r") as fp:
+                    yaml_content = yaml.safe_load(fp)
+                    # This will raise ValidationError if the YAML doesn't match the schema
+                    PromptConfig(**yaml_content)
+            except Exception as e:
+                validation_errors.append(
+                    f"Validation failed for {prompt_id}/{model_name}/{version_file.stem}: {e}"
+                )
+
+    # Assert that there were no validation errors
+    if validation_errors:
+        error_message = "\n".join(validation_errors)
+        pytest.fail(f"Prompt family config validation errors:\n{error_message}")
