@@ -263,7 +263,7 @@ graph TD;
     fix_pipeline_create_plan(fix_pipeline_create_plan<br>#91;AgentComponent#93;);
     fix_pipeline_execution(fix_pipeline_execution<br>#91;AgentComponent#93;);
     fix_pipeline_git_commit(fix_pipeline_git_commit<br>#91;AgentComponent#93;);
-    fix_pipeline_git_push(fix_pipeline_git_push<br>#91;OneOffComponent#93;);
+    fix_pipeline_git_push(fix_pipeline_git_push<br>#91;AgentComponent#93;);
     fix_pipeline_comment_link(fix_pipeline_comment_link<br>#91;OneOffComponent#93;);
     fix_pipeline_agents_dot_md --> fix_pipeline_context;
     fix_pipeline_context --> fix_pipeline_decide_approach;
