@@ -295,6 +295,31 @@ class LocalPromptRegistry(BasePromptRegistry):
             }
         )
 
+    def _adjust_tool_choice_for_model(
+        self, tool_choice: Optional[str], model_metadata: Optional[TypeModelMetadata]
+    ) -> Optional[str]:
+        """Adjust tool_choice based on model-specific requirements.
+
+        Different model providers have different tool_choice requirements:
+        - Bedrock and Azure models don't support 'any' as a tool_choice value, so we convert it to 'required'.
+
+        Args:
+            tool_choice: The original tool_choice value
+            model_metadata: The model metadata
+
+        Returns:
+            The adjusted tool_choice value
+        """
+
+        model_identifier = getattr(model_metadata, "identifier", None)
+        if (
+            tool_choice == "any"
+            and model_identifier
+            and ("bedrock/" in model_identifier or "azure/" in model_identifier)
+        ):
+            return "required"
+        return tool_choice
+
     # prompt_version is never None when called on LocalPromptRegistry
     # but it must be set to str | None to match the abstract signature
     def get(
@@ -366,6 +391,9 @@ class LocalPromptRegistry(BasePromptRegistry):
             prompt_template_factory = cast(
                 TypePromptTemplateFactory | None, prompt_template_override
             )
+
+        # Adjust tool_choice for model-specific requirements
+        tool_choice = self._adjust_tool_choice_for_model(tool_choice, model_metadata)
 
         return Prompt(
             model_factory,
