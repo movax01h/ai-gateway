@@ -1,7 +1,6 @@
 from dependency_injector import containers, providers
 
 from lib.billing_events.client import BillingEventsClient
-from lib.feature_flags import FeatureFlag, is_feature_enabled
 
 __all__ = [
     "ContainerBillingEvent",
@@ -15,8 +14,7 @@ class ContainerBillingEvent(containers.DeclarativeContainer):
 
     client = providers.Singleton(
         BillingEventsClient,
-        enabled=config.enabled
-        and is_feature_enabled(FeatureFlag.DUO_USE_BILLING_ENDPOINT),
+        enabled=config.enabled,
         batch_size=config.batch_size,
         thread_count=config.thread_count,
         endpoint=config.endpoint,
