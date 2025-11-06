@@ -24,7 +24,6 @@ class ContainerPrompts(containers.DeclarativeContainer):
             "workflow/executor": "duo_workflow_service.agents.AgentPromptTemplate",
             "workflow/context_builder": "duo_workflow_service.agents.AgentPromptTemplate",
             "workflow/planner": "duo_workflow_service.agents.AgentPromptTemplate",
-            "workflow/goal_disambiguation": "duo_workflow_service.agents.AgentPromptTemplate",
             "workflow/issue_to_merge_request": "duo_workflow_service.agents.AgentPromptTemplate",
         },
         model_factories={

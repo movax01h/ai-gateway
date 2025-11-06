@@ -1,3 +1,4 @@
+# pylint: disable=file-naming-for-tests, unused-argument, redefined-outer-name, direct-environment-variable-reference
 import asyncio
 import os
 from typing import Any
@@ -220,16 +221,6 @@ def mock_tools_approval_component_fixture():
         yield mock
 
 
-@pytest.fixture(name="mock_goal_disambiguation_component")
-def mock_goal_disambiguation_component_fixture():
-    with patch(
-        "duo_workflow_service.workflows.software_development.workflow.GoalDisambiguationComponent",
-        autospec=True,
-    ) as mock:
-        mock.return_value.attach.return_value = "set_status_to_execution"
-        yield mock
-
-
 @pytest.fixture
 def mock_action():
     return contract_pb2.Action()
@@ -252,7 +243,6 @@ async def test_workflow_run(
     mock_gitlab_workflow_aput,
     mock_gitlab_workflow_aget_tuple,
     mock_checkpoint_notifier,
-    mock_goal_disambiguation_component,
     mock_tools_approval_component,
     mock_planner_component,
     mock_executor_component,
@@ -291,18 +281,6 @@ async def test_workflow_run(
 
     await workflow.run("test_goal")
 
-    mock_goal_disambiguation_component.assert_called_once_with(
-        user=workflow._user,
-        goal="test_goal",
-        model_config=workflow._model_config,
-        http_client=workflow._http_client,
-        workflow_id=workflow._workflow_id,
-        tools_registry=mock_tools_registry,
-        allow_agent_to_request_user=True,
-        workflow_type=workflow._workflow_type,
-    )
-
-    assert mock_goal_disambiguation_component.return_value.attach.call_count == 1
     assert mock_planner_component.return_value.attach.call_count == 1
     assert mock_executor_component.return_value.attach.call_count == 1
     assert (
@@ -348,7 +326,6 @@ async def test_workflow_run_with_memory_saver(
     mock_checkpoint_notifier,
     mock_executor_component,
     mock_planner_component,
-    mock_goal_disambiguation_component,
     mock_gitlab_workflow,
     mock_fetch_workflow_and_container_data,
     mock_tools_executor,
@@ -395,7 +372,6 @@ async def test_workflow_run_when_exception(
     mock_log_exception,
     mock_planner_component,
     mock_executor_component,
-    mock_goal_disambiguation_component,
     mock_fetch_workflow_and_container_data,
     mock_gitlab_workflow,
     mock_tools_executor,
@@ -443,7 +419,6 @@ async def test_workflow_run_with_error_state(
     mock_planner_component,
     mock_tools_approval_component,
     mock_executor_component,
-    mock_goal_disambiguation_component,
     mock_fetch_workflow_and_container_data,
     mock_tools_executor,
     mock_agent,
@@ -481,7 +456,6 @@ async def test_workflow_run_with_tools_registry(
     mock_log_exception,
     mock_executor_component,
     mock_planner_component,
-    mock_goal_disambiguation_component,
     mock_gitlab_workflow,
     mock_fetch_workflow_and_container_data,
     mock_tools_executor,
@@ -564,7 +538,6 @@ def test_context_builder_tools(tools_registry, workflow):
 async def test_workflow_run_with_setup_error(
     mock_executor_component,
     mock_planner_component,
-    mock_goal_disambiguation_component,
     mock_fetch_workflow_and_container_data,
     mock_gitlab_workflow,
     mock_git_lab_workflow_instance,
@@ -648,7 +621,6 @@ async def test_workflow_run_with_retry(
     mock_log_exception,
     mock_executor_component,
     mock_planner_component,
-    mock_goal_disambiguation_component,
     mock_fetch_workflow_and_container_data,
     mock_gitlab_workflow,
     mock_git_lab_workflow_instance,
@@ -781,7 +753,6 @@ async def test_workflow_run_with_tool_approvals(
     mock_fetch_workflow_and_container_data,
     mock_tools_executor,
     mock_planner_component,
-    mock_goal_disambiguation_component,
     mock_handover_agent,
     mock_agent,
     mock_tools_registry_cls,
@@ -817,7 +788,6 @@ async def test_workflow_run_without_plan_approval_component(
     mock_fetch_workflow_and_container_data,
     mock_tools_executor,
     mock_planner_component,
-    mock_goal_disambiguation_component,
     mock_handover_agent,
     mock_agent,
     mock_tools_registry_cls,
