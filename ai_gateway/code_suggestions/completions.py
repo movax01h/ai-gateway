@@ -2,6 +2,7 @@ from typing import Any, AsyncIterator, Optional, Union
 
 import structlog
 from dependency_injector.providers import Factory
+from gitlab_cloud_connector import CloudConnectorUser
 
 from ai_gateway.code_suggestions.base import (
     CodeSuggestionsChunk,
@@ -25,6 +26,7 @@ from ai_gateway.models.base_text import (
     TextGenModelChunk,
     TextGenModelOutput,
 )
+from lib.billing_events.client import BillingEventsClient
 
 __all__ = ["CodeCompletions"]
 
@@ -39,6 +41,7 @@ class CodeCompletions:
         model: TextGenModelBase,
         tokenization_strategy: TokenStrategyBase,
         post_processor: Optional[Factory[PostProcessor]] = None,
+        billing_event_client: Optional[BillingEventsClient] = None,
     ):
         self.model = model
 
@@ -47,10 +50,43 @@ class CodeCompletions:
         )
 
         self.post_processor = post_processor
+        self.billing_event_client = billing_event_client
+        self.tokenization_strategy = tokenization_strategy
 
         self.prompt_builder = PromptBuilderPrefixBased(
             model.input_token_limit, tokenization_strategy
         )
+
+    def _track_billing_event(
+        self, user: Optional[CloudConnectorUser], output_tokens: int
+    ) -> None:
+        """Track billing event for code completions."""
+        if self.billing_event_client and user:
+            try:
+                billing_metadata = {
+                    "execution_environment": "code_completions",
+                    "llm_operations": [
+                        {
+                            "model_id": self.model.metadata.identifier,
+                            "completion_tokens": output_tokens,
+                        }
+                    ],
+                }
+
+                self.billing_event_client.track_billing_event(
+                    user=user,
+                    event_type="code_completions",
+                    category=self.__class__.__name__,
+                    unit_of_measure="request",
+                    quantity=1,
+                    metadata=billing_metadata,
+                )
+            except Exception as e:
+                log.error(
+                    "Failed to track billing event for code suggestions",
+                    error=str(e),
+                    output_tokens=output_tokens,
+                )
 
     def _get_prompt(
         self,
@@ -84,6 +120,7 @@ class CodeCompletions:
         raw_prompt: Optional[str | list[Message]] = None,
         code_context: Optional[list] = None,
         stream: bool = False,
+        user: Optional[CloudConnectorUser] = None,
         **kwargs: Any,
     ) -> Union[CodeSuggestionsOutput, AsyncIterator[CodeSuggestionsChunk]]:
         lang_id = resolve_lang_id(file_name, editor_lang)
@@ -138,10 +175,10 @@ class CodeCompletions:
 
                 if res:
                     if isinstance(res, AsyncIterator):
-                        return self._handle_stream(res)
+                        return self._handle_stream(res, user)
 
                     return await self._handle_sync(
-                        prompt, res, lang_id, watch_container
+                        prompt, res, lang_id, watch_container, user
                     )
             except ModelAPICallError as ex:
                 watch_container.register_model_exception(str(ex), ex.code)
@@ -164,11 +201,23 @@ class CodeCompletions:
         )
 
     async def _handle_stream(
-        self, response: AsyncIterator[TextGenModelChunk]
+        self,
+        response: AsyncIterator[TextGenModelChunk],
+        user: Optional[CloudConnectorUser] = None,
     ) -> AsyncIterator[CodeSuggestionsChunk]:
-        async for chunk in response:
-            chunk_content = CodeSuggestionsChunk(text=chunk.text)
-            yield chunk_content
+        chunks = []
+        try:
+            async for chunk in response:
+                chunk_content = CodeSuggestionsChunk(text=chunk.text)
+                chunks.append(chunk.text)
+                yield chunk_content
+        finally:
+            # Track billing event for streaming response
+            if chunks:
+                estimated_tokens = sum(
+                    self.tokenization_strategy.estimate_length(chunks)
+                )
+                self._track_billing_event(user, estimated_tokens)
 
     async def _handle_sync(
         self,
@@ -176,6 +225,7 @@ class CodeCompletions:
         response: TextGenModelOutput,
         lang_id: Optional[LanguageId],
         watch_container: TextGenModelInstrumentator.WatchContainer,
+        user: Optional[CloudConnectorUser] = None,
     ) -> CodeSuggestionsOutput:
         watch_container.register_model_output_length(response.text)
         watch_container.register_model_score(response.score)
@@ -194,6 +244,8 @@ class CodeCompletions:
         )
 
         watch_container.register_model_post_processed_output_length(response_text)
+
+        self._track_billing_event(user, tokens_consumption_metadata.output_tokens)
 
         return CodeSuggestionsOutput(
             text=response_text,

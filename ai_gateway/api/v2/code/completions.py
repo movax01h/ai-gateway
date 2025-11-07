@@ -188,6 +188,7 @@ async def completions(
     suggestions = await _execute_code_completion(
         payload=payload,
         code_completions=code_completions,
+        current_user=current_user,
         snowplow_event_context=snowplow_event_context,
         **kwargs,
     )
@@ -735,7 +736,8 @@ async def _handle_stream(
 
 async def _execute_code_completion(
     payload: CompletionsRequestWithVersion,
-    code_completions: Factory[CodeCompletions],
+    code_completions: CodeCompletions,
+    current_user: StarletteUser,
     snowplow_event_context: Optional[SnowplowEventContext] = None,
     **kwargs: dict,
 ) -> any:
@@ -745,7 +747,8 @@ async def _execute_code_completion(
             suffix=payload.current_file.content_below_cursor,
             file_name=payload.current_file.file_name,
             editor_lang=payload.current_file.language_identifier,
-            stream=payload.stream,
+            stream=payload.stream or False,  # Ensure stream is bool, not None
+            user=current_user.cloud_connector_user,  # Pass the underlying CloudConnectorUser
             snowplow_event_context=snowplow_event_context,
             **kwargs,
         )

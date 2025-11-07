@@ -200,6 +200,7 @@ async def code_completion(
         editor_lang=payload.language_identifier,
         stream=payload.stream,
         code_context=code_context,
+        user=current_user.cloud_connector_user,
         snowplow_event_context=snowplow_event_context,
         **kwargs,
     )
@@ -324,6 +325,7 @@ async def code_generation(
         editor_lang=payload.language_identifier,
         model_provider=model_provider,
         stream=payload.stream,
+        user=current_user.cloud_connector_user,
         snowplow_event_context=snowplow_event_context,
         prompt_enhancer=payload.prompt_enhancer,
         suffix=payload.content_below_cursor,

@@ -1,6 +1,9 @@
 from pathlib import Path
 from typing import Any, AsyncIterator, Optional, Union
 
+import structlog
+from gitlab_cloud_connector import CloudConnectorUser
+
 from ai_gateway.code_suggestions.base import (
     CodeSuggestionsChunk,
     CodeSuggestionsOutput,
@@ -28,8 +31,11 @@ from ai_gateway.models.base_text import (
 )
 from ai_gateway.tracking.instrumentator import SnowplowInstrumentator
 from ai_gateway.tracking.snowplow import SnowplowEvent, SnowplowEventContext
+from lib.billing_events.client import BillingEventsClient
 
 __all__ = ["CodeGenerations"]
+
+log = structlog.stdlib.get_logger("codesuggestions")
 
 
 TPL_GENERATION_BASE = """
@@ -47,6 +53,7 @@ class CodeGenerations:
         model: TextGenModelBase,
         tokenization_strategy: TokenStrategyBase,
         snowplow_instrumentator: SnowplowInstrumentator,
+        billing_event_client: Optional[BillingEventsClient] = None,
     ):
         self.model = model
 
@@ -59,6 +66,7 @@ class CodeGenerations:
         )
         self.tokenization_strategy = tokenization_strategy
         self.snowplow_instrumentator = snowplow_instrumentator
+        self.billing_event_client = billing_event_client
 
     def _get_prompt(
         self, prefix: str, file_name: str, lang_id: Optional[LanguageId] = None
@@ -84,6 +92,37 @@ class CodeGenerations:
     def with_prompt_prepared(self, prompt: str | list[Message]):
         self.prompt = self.prompt_builder.wrap(prompt)
 
+    def _track_billing_event(
+        self, user: Optional[CloudConnectorUser], output_tokens: int
+    ) -> None:
+        """Track billing event for code generations."""
+        if self.billing_event_client and user:
+            try:
+                billing_metadata = {
+                    "execution_environment": "code_generations",
+                    "llm_operations": [
+                        {
+                            "model_id": self.model.metadata.identifier,
+                            "completion_tokens": output_tokens,
+                        }
+                    ],
+                }
+
+                self.billing_event_client.track_billing_event(
+                    user=user,
+                    event_type="code_generations",
+                    category=self.__class__.__name__,
+                    unit_of_measure="request",
+                    quantity=1,
+                    metadata=billing_metadata,
+                )
+            except Exception as e:
+                log.error(
+                    "Failed to track billing event for code generations",
+                    error=str(e),
+                    output_tokens=output_tokens,
+                )
+
     async def execute(
         self,
         prefix: str,
@@ -94,6 +133,7 @@ class CodeGenerations:
         snowplow_event_context: Optional[SnowplowEventContext] = None,
         prompt_enhancer: Optional[dict] = None,
         suffix: Optional[str] = None,
+        user: Optional[CloudConnectorUser] = None,
         **kwargs: Any,
     ) -> Union[CodeSuggestionsOutput, AsyncIterator[CodeSuggestionsChunk]]:
         lang_id = resolve_lang_id(file_name, editor_lang)
@@ -163,7 +203,10 @@ class CodeGenerations:
 
                 if res:
                     if isinstance(res, AsyncIterator):
-                        return self._handle_stream(res, snowplow_event_context)
+                        stream_result = self._handle_stream(
+                            res, snowplow_event_context, user
+                        )
+                        return stream_result
 
                     return await self._handle_sync(
                         response=res,
@@ -171,6 +214,7 @@ class CodeGenerations:
                         model_provider=model_provider,
                         prefix=prefix,
                         watch_container=watch_container,
+                        user=user,
                         snowplow_event_context=snowplow_event_context,
                     )
 
@@ -190,6 +234,7 @@ class CodeGenerations:
         self,
         response: AsyncIterator[TextGenModelChunk],
         snowplow_event_context: Optional[SnowplowEventContext] = None,
+        user: Optional[CloudConnectorUser] = None,
     ) -> AsyncIterator[CodeSuggestionsChunk]:
         chunks = []
         try:
@@ -198,12 +243,16 @@ class CodeGenerations:
                 chunks.append(chunk.text)
                 yield chunk_content
         finally:
+            # Track billing event for streaming response
+            output_tokens = sum(self.tokenization_strategy.estimate_length(chunks))
+            self._track_billing_event(user, output_tokens)
+
             self.snowplow_instrumentator.watch(
                 SnowplowEvent(
                     context=snowplow_event_context,
                     action="tokens_per_user_request_response",
                     label="code_generation",
-                    value=sum(self.tokenization_strategy.estimate_length(chunks)),
+                    value=output_tokens,
                 )
             )
 
@@ -215,6 +264,7 @@ class CodeGenerations:
         watch_container: TextGenModelInstrumentator.WatchContainer,
         model_provider: Optional[str] = None,
         snowplow_event_context: Optional[SnowplowEventContext] = None,
+        user: Optional[CloudConnectorUser] = None,
     ) -> CodeSuggestionsOutput:
         watch_container.register_model_output_length(response.text)
         if response.score is not None:
@@ -229,12 +279,15 @@ class CodeGenerations:
         )
         generation = await processor(prefix).process(response.text)
 
+        output_tokens = self.tokenization_strategy.estimate_length(response.text)[0]
+        self._track_billing_event(user, output_tokens)
+
         self.snowplow_instrumentator.watch(
             SnowplowEvent(
                 context=snowplow_event_context,
                 action="tokens_per_user_request_response",
                 label="code_generation",
-                value=self.tokenization_strategy.estimate_length(response.text)[0],
+                value=output_tokens,
             )
         )
 

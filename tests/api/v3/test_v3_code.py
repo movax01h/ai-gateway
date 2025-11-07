@@ -188,6 +188,7 @@ class TestEditorContentCompletion:
             editor_lang=payload["language_identifier"],
             stream=False,
             code_context=None,
+            user=mock_completions.call_args.kwargs["user"],
             snowplow_event_context=expected_snowplow_event,
         )
 
@@ -392,6 +393,7 @@ class TestEditorContentCompletionStream:
             editor_lang=payload["language_identifier"],
             stream=True,
             code_context=None,
+            user=mock_completions_stream.call_args.kwargs["user"],
             snowplow_event_context=expected_snowplow_event,
             raw_prompt=None,
         )
@@ -519,6 +521,7 @@ class TestEditorContentGeneration:
             editor_lang=payload["language_identifier"],
             model_provider=None,
             stream=False,
+            user=mock_generations.call_args.kwargs["user"],
             snowplow_event_context=expected_snowplow_event,
             prompt_enhancer=None,
             suffix="\n",
@@ -671,6 +674,7 @@ class TestEditorContentGeneration:
             editor_lang="python",
             model_provider="anthropic",
             stream=False,
+            user=mock_generations.call_args.kwargs["user"],
             snowplow_event_context=expected_snowplow_event,
             prompt_enhancer=prompt_enhancer,
             suffix="\n",
@@ -1367,6 +1371,7 @@ class TestAmazonQIntegrationV3:
             editor_lang=payload["language_identifier"],
             model_provider=KindModelProvider.AMAZON_Q,
             stream=False,
+            user=mock_generations.call_args.kwargs["user"],
             snowplow_event_context=expected_snowplow_event,
             prompt_enhancer=None,
             suffix="\n",

@@ -74,6 +74,7 @@ class ContainerApplication(containers.DeclarativeContainer):
         models=pkg_models,
         config=config.feature_flags,
         snowplow=snowplow,
+        billing_event=billing_event,
     )
     x_ray = providers.Container(
         ContainerXRay,
