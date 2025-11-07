@@ -8,6 +8,7 @@ from packaging.version import InvalidVersion, Version
 from prometheus_client import REGISTRY, Counter, Histogram
 
 from duo_workflow_service.interceptors.client_type_interceptor import client_type
+from duo_workflow_service.interceptors.gitlab_realm_interceptor import gitlab_realm
 from duo_workflow_service.interceptors.gitlab_version_interceptor import gitlab_version
 from duo_workflow_service.interceptors.language_server_version_interceptor import (
     language_server_version,
@@ -72,10 +73,19 @@ def _client_type_label():
     return "unknown"
 
 
+def _gitlab_realm_label():
+    gitlab_realm_value = gitlab_realm.get()
+    if gitlab_realm_value:
+        return str(gitlab_realm_value)
+
+    return "unknown"
+
+
 _METADATA_LABEL_GETTERS = {
     "lsp_version": _language_server_version_label,
     "gitlab_version": _gitlab_version_label,
     "client_type": _client_type_label,
+    "gitlab_realm": _gitlab_realm_label,
 }
 
 METADATA_LABELS = list(_METADATA_LABEL_GETTERS.keys())

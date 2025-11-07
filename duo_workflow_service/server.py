@@ -51,6 +51,9 @@ from duo_workflow_service.interceptors.enabled_instance_verbose_ai_logs_intercep
 from duo_workflow_service.interceptors.feature_flag_interceptor import (
     FeatureFlagInterceptor,
 )
+from duo_workflow_service.interceptors.gitlab_realm_interceptor import (
+    GitLabRealmInterceptor,
+)
 from duo_workflow_service.interceptors.gitlab_version_interceptor import (
     GitLabVersionInterceptor,
 )
@@ -669,6 +672,7 @@ async def serve(port: int) -> None:
                 EnabledInstanceVerboseAiLogsInterceptor(),
                 LanguageServerVersionInterceptor(),
                 GitLabVersionInterceptor(),
+                GitLabRealmInterceptor(),
                 ClientTypeInterceptor(),
                 InternalEventsInterceptor(),
                 ModelMetadataInterceptor(),

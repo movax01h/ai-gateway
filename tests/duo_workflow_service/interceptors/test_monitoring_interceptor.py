@@ -79,6 +79,7 @@ async def test_interceptor_methods(
             "client_type": "unknown",
             "lsp_version": "unknown",
             "flow_type": "unknown",
+            "gitlab_realm": "unknown",
         },
     )
 
@@ -192,6 +193,7 @@ async def test_streaming_interceptor_methods(
             "gitlab_version": "unknown",
             "client_type": "unknown",
             "lsp_version": "unknown",
+            "gitlab_realm": "unknown",
             "flow_type": "chat",
         },
     )
@@ -242,6 +244,7 @@ async def test_interceptor_handles_exception():
             "gitlab_version": "unknown",
             "client_type": "unknown",
             "lsp_version": "unknown",
+            "gitlab_realm": "unknown",
             "flow_type": "unknown",
         },
     )
@@ -291,6 +294,7 @@ async def test_interceptor_stream_handles_exception():
             "gitlab_version": "unknown",
             "client_type": "unknown",
             "lsp_version": "unknown",
+            "gitlab_realm": "unknown",
             "flow_type": "unknown",
         },
     )
