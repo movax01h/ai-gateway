@@ -3,6 +3,7 @@ from typing import Any, AsyncIterator, List
 from unittest.mock import AsyncMock, MagicMock, Mock, PropertyMock, call, patch
 
 import pytest
+from gitlab_cloud_connector import CloudConnectorUser
 from snowplow_tracker import Snowplow
 
 from ai_gateway.code_suggestions import CodeGenerations, ModelProvider
@@ -27,6 +28,7 @@ from ai_gateway.models.base_text import (
 from ai_gateway.safety_attributes import SafetyAttributes
 from ai_gateway.tracking.instrumentator import SnowplowInstrumentator
 from ai_gateway.tracking.snowplow import SnowplowEvent, SnowplowEventContext
+from lib.billing_events.client import BillingEventsClient
 
 
 class InstrumentorMock(Mock):
@@ -46,6 +48,14 @@ class TestCodeGeneration:
         """Ensure Snowplow cache is reset between tests."""
         yield
         Snowplow.reset()
+
+    @pytest.fixture(name="mock_user")
+    def mock_user_fixture(self):
+        return Mock(spec=CloudConnectorUser)
+
+    @pytest.fixture(name="mock_billing_client")
+    def mock_billing_client_fixture(self):
+        return Mock(spec=BillingEventsClient)
 
     @pytest.fixture(name="use_case", scope="class")
     def use_case_fixture(self):
@@ -411,3 +421,344 @@ class TestCodeGeneration:
             mock_generate.assert_called_once_with(
                 prefix, suffix, file_name, expected_lang, stream, **additional_kwargs
             )
+
+    @pytest.fixture(name="use_case_with_billing")
+    def use_case_with_billing_fixture(self, mock_billing_client):
+        model = Mock(spec=TextGenModelBase)
+        type(model).input_token_limit = PropertyMock(return_value=2_048)
+        model.metadata = Mock(
+            name="test-model", engine="test-engine", identifier="test-model-id"
+        )
+        model.metadata.name = "test-model"
+        model.metadata.engine = "test-engine"
+        model.metadata.identifier = "test-model-id"
+
+        tokenization_strategy_mock = Mock(spec=TokenStrategyBase)
+        tokenization_strategy_mock.estimate_length = Mock(return_value=[25, 30])
+
+        use_case = CodeGenerations(
+            model=model,
+            tokenization_strategy=tokenization_strategy_mock,
+            snowplow_instrumentator=Mock(spec=SnowplowInstrumentator),
+            billing_event_client=mock_billing_client,
+        )
+        use_case.instrumentator = InstrumentorMock(spec=TextGenModelInstrumentator)
+
+        prompt_builder_mock = Mock(spec=PromptBuilderBase)
+        prompt = Prompt(
+            prefix="prompt",
+            metadata=MetadataPromptBuilder(
+                components={
+                    "prompt": MetadataCodeContent(
+                        length=len("prompt"),
+                        length_tokens=1,
+                    ),
+                }
+            ),
+        )
+        prompt_builder_mock.build = Mock(return_value=prompt)
+        use_case.prompt_builder = prompt_builder_mock
+
+        return use_case
+
+    async def test_billing_event_tracked_on_successful_generation(
+        self, use_case_with_billing, mock_user, mock_billing_client
+    ):
+        """Test that billing event is tracked when code generation is successful."""
+        expected_output = "generated code"
+
+        use_case_with_billing.model.generate = AsyncMock(
+            return_value=TextGenModelOutput(
+                text=expected_output,
+                score=0.8,
+                safety_attributes=SafetyAttributes(),
+            )
+        )
+
+        with patch.object(PostProcessor, "process", return_value=expected_output):
+            await use_case_with_billing.execute(
+                prefix="def hello",
+                file_name="test.py",
+                editor_lang="python",
+                user=mock_user,
+            )
+
+        # Verify billing event was tracked with correct parameters
+        mock_billing_client.track_billing_event.assert_called_once_with(
+            user=mock_user,
+            event_type="code_generations",
+            category="CodeGenerations",
+            unit_of_measure="request",
+            quantity=1,
+            metadata={
+                "execution_environment": "code_generations",
+                "llm_operations": [
+                    {"model_id": "test-model-id", "completion_tokens": 25}
+                ],
+            },
+        )
+
+    async def test_no_billing_event_when_no_user_provided(
+        self, use_case_with_billing, mock_billing_client
+    ):
+        """Test that no billing event is tracked when user is not provided."""
+        use_case_with_billing.model.generate = AsyncMock(
+            return_value=TextGenModelOutput(
+                text="generated code",
+                score=0.8,
+                safety_attributes=SafetyAttributes(),
+            )
+        )
+
+        with patch.object(PostProcessor, "process", return_value="generated code"):
+            await use_case_with_billing.execute(
+                prefix="def hello",
+                file_name="test.py",
+                editor_lang="python",
+                # No user provided
+            )
+
+        mock_billing_client.track_billing_event.assert_not_called()
+
+    async def test_no_billing_event_when_no_billing_client(self, mock_user):
+        """Test that no billing event is tracked when billing client is not provided."""
+        model = Mock(spec=TextGenModelBase)
+        type(model).input_token_limit = PropertyMock(return_value=2_048)
+        model.metadata = Mock(name="test-model", engine="test-engine")
+        model.metadata.name = "test-model"
+        model.metadata.engine = "test-engine"
+
+        tokenization_strategy_mock = Mock(spec=TokenStrategyBase)
+        tokenization_strategy_mock.estimate_length = Mock(return_value=[25, 30])
+
+        use_case = CodeGenerations(
+            model=model,
+            tokenization_strategy=tokenization_strategy_mock,
+            snowplow_instrumentator=Mock(spec=SnowplowInstrumentator),
+            # No billing client provided
+        )
+        use_case.instrumentator = InstrumentorMock(spec=TextGenModelInstrumentator)
+
+        prompt_builder_mock = Mock(spec=PromptBuilderBase)
+        prompt = Prompt(
+            prefix="prompt",
+            metadata=MetadataPromptBuilder(
+                components={
+                    "prompt": MetadataCodeContent(
+                        length=len("prompt"),
+                        length_tokens=1,
+                    ),
+                }
+            ),
+        )
+        prompt_builder_mock.build = Mock(return_value=prompt)
+        use_case.prompt_builder = prompt_builder_mock
+
+        use_case.model.generate = AsyncMock(
+            return_value=TextGenModelOutput(
+                text="generated code",
+                score=0.8,
+                safety_attributes=SafetyAttributes(),
+            )
+        )
+
+        # This should not raise an exception
+        with patch.object(PostProcessor, "process", return_value="generated code"):
+            result = await use_case.execute(
+                prefix="def hello",
+                file_name="test.py",
+                editor_lang="python",
+                user=mock_user,
+            )
+
+        assert result.text == "generated code"
+
+    async def test_billing_event_exception_handling(
+        self, use_case_with_billing, mock_user, mock_billing_client
+    ):
+        """Test that billing event exceptions are handled gracefully."""
+        expected_output = "generated code"
+
+        use_case_with_billing.model.generate = AsyncMock(
+            return_value=TextGenModelOutput(
+                text=expected_output,
+                score=0.8,
+                safety_attributes=SafetyAttributes(),
+            )
+        )
+
+        # Make billing client raise an exception
+        mock_billing_client.track_billing_event.side_effect = Exception(
+            "Billing service unavailable"
+        )
+
+        # This should not raise an exception - billing errors should be handled gracefully
+        with patch.object(PostProcessor, "process", return_value=expected_output):
+            result = await use_case_with_billing.execute(
+                prefix="def hello",
+                file_name="test.py",
+                editor_lang="python",
+                user=mock_user,
+            )
+
+        # Verify the generation still works despite billing error
+        assert result.text == expected_output
+        mock_billing_client.track_billing_event.assert_called_once()
+
+    async def test_billing_event_exception_handling_streaming(
+        self, use_case_with_billing, mock_user, mock_billing_client
+    ):
+        """Test that billing event exceptions are handled gracefully for streaming."""
+
+        async def _stream_generator():
+            yield TextGenModelChunk(text="hello ")
+            yield TextGenModelChunk(text="world!")
+
+        use_case_with_billing.model.generate = AsyncMock(
+            side_effect=lambda *args, **kwargs: _stream_generator()
+        )
+
+        # Make billing client raise an exception
+        mock_billing_client.track_billing_event.side_effect = Exception(
+            "Billing service unavailable"
+        )
+
+        result = await use_case_with_billing.execute(
+            prefix="def hello",
+            file_name="test.py",
+            editor_lang="python",
+            stream=True,
+            user=mock_user,
+        )
+
+        # Consume the stream - this should not raise an exception
+        chunks = []
+        async for chunk in result:
+            chunks.append(chunk.text)
+
+        assert chunks == ["hello ", "world!"]
+        mock_billing_client.track_billing_event.assert_called_once()
+
+    async def test_billing_event_with_zero_tokens(
+        self, use_case_with_billing, mock_user, mock_billing_client
+    ):
+        """Test that billing event is tracked even when output tokens is zero."""
+        # Mock tokenization strategy to return 0 tokens
+        use_case_with_billing.tokenization_strategy.estimate_length = Mock(
+            return_value=[0, 0]
+        )
+
+        use_case_with_billing.model.generate = AsyncMock(
+            return_value=TextGenModelOutput(
+                text="",
+                score=0.0,
+                safety_attributes=SafetyAttributes(),
+            )
+        )
+
+        with patch.object(PostProcessor, "process", return_value=""):
+            await use_case_with_billing.execute(
+                prefix="def hello",
+                file_name="test.py",
+                editor_lang="python",
+                user=mock_user,
+            )
+
+        # Should still track billing event even with 0 tokens for consistency
+        mock_billing_client.track_billing_event.assert_called_once_with(
+            user=mock_user,
+            event_type="code_generations",
+            category="CodeGenerations",
+            unit_of_measure="request",
+            quantity=1,
+            metadata={
+                "execution_environment": "code_generations",
+                "llm_operations": [
+                    {"model_id": "test-model-id", "completion_tokens": 0}
+                ],
+            },
+        )
+
+    async def test_billing_event_with_anthropic_provider(
+        self, use_case_with_billing, mock_user, mock_billing_client
+    ):
+        """Test that billing event is tracked correctly with Anthropic provider."""
+        expected_output = "generated code"
+
+        use_case_with_billing.model.generate = AsyncMock(
+            return_value=TextGenModelOutput(
+                text=expected_output,
+                score=0.8,
+                safety_attributes=SafetyAttributes(),
+            )
+        )
+
+        with patch.object(
+            PostProcessorAnthropic, "process", return_value=expected_output
+        ):
+            await use_case_with_billing.execute(
+                prefix="def hello",
+                file_name="test.py",
+                editor_lang="python",
+                model_provider=ModelProvider.ANTHROPIC,
+                user=mock_user,
+            )
+
+        # Verify billing event was tracked
+        mock_billing_client.track_billing_event.assert_called_once_with(
+            user=mock_user,
+            event_type="code_generations",
+            category="CodeGenerations",
+            unit_of_measure="request",
+            quantity=1,
+            metadata={
+                "execution_environment": "code_generations",
+                "llm_operations": [
+                    {"model_id": "test-model-id", "completion_tokens": 25}
+                ],
+            },
+        )
+
+    async def test_billing_event_tracked_for_streaming(
+        self, use_case_with_billing, mock_user, mock_billing_client
+    ):
+        """Test that billing events are tracked for streaming responses."""
+
+        async def _stream_generator():
+            yield TextGenModelChunk(text="hello ")
+            yield TextGenModelChunk(text="world!")
+
+        use_case_with_billing.model.generate = AsyncMock(
+            side_effect=lambda *args, **kwargs: _stream_generator()
+        )
+
+        result = await use_case_with_billing.execute(
+            prefix="def hello",
+            file_name="test.py",
+            editor_lang="python",
+            stream=True,
+            user=mock_user,
+        )
+
+        # Consume the stream
+        chunks = []
+        async for chunk in result:
+            chunks.append(chunk.text)
+
+        assert chunks == ["hello ", "world!"]
+
+        # Billing events should now be tracked for streaming responses
+        # The billing event is tracked in the finally block of _handle_stream
+        mock_billing_client.track_billing_event.assert_called_once_with(
+            user=mock_user,
+            event_type="code_generations",
+            category="CodeGenerations",
+            unit_of_measure="request",
+            quantity=1,
+            metadata={
+                "execution_environment": "code_generations",
+                "llm_operations": [
+                    {"model_id": "test-model-id", "completion_tokens": 55}
+                ],
+            },
+        )

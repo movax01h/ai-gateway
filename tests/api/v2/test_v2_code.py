@@ -305,6 +305,7 @@ class TestCodeCompletions:
             editor_lang=current_file.get("language_identifier", None),
             stream=False,
             snowplow_event_context=ANY,
+            user=ANY,  # Added user parameter for billing event tracking
             **code_completions_kwargs,
         )
 
@@ -912,6 +913,7 @@ class TestCodeCompletions:
             "editor_lang": current_file.get("language_identifier", None),
             "stream": True,
             "snowplow_event_context": ANY,
+            "user": ANY,  # Added user parameter for billing event tracking
         }
 
         if context:
