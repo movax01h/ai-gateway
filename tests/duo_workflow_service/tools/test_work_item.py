@@ -20,6 +20,7 @@ from duo_workflow_service.tools.work_item import (
 from duo_workflow_service.tools.work_items.base_tool import (
     ResolvedParent,
     ResolvedWorkItem,
+    WorkItemBaseTool,
 )
 
 
@@ -1237,6 +1238,31 @@ async def test_create_epic_in_project_error(
 
 
 @pytest.mark.asyncio
+async def test_create_work_item_with_hierarchy_widget(
+    gitlab_client_mock, metadata, created_work_item_data, work_item_type_data
+):
+    gitlab_client_mock.graphql = AsyncMock()
+    gitlab_client_mock.graphql.side_effect = [
+        work_item_type_data,
+        {"workItemCreate": {"workItem": created_work_item_data, "errors": []}},
+    ]
+
+    tool = CreateWorkItem(description="create work item", metadata=metadata)
+
+    response = await tool._arun(
+        group_id="namespace/group",
+        title="Child Work Item",
+        type_name="Issue",
+        hierarchy_widget={"parent_id": "gid://gitlab/WorkItem/456"},
+    )
+
+    response_json = json.loads(response)
+    assert "work_item" in response_json
+    assert response_json["work_item"] == created_work_item_data
+    assert "message" in response_json
+
+
+@pytest.mark.asyncio
 async def test_create_work_item_rejects_quick_actions_in_description(
     gitlab_client_mock, metadata
 ):
@@ -1830,6 +1856,61 @@ async def test_update_work_item_invalid_work_item(gitlab_client_mock, metadata):
 
 
 @pytest.mark.asyncio
+async def test_update_work_item_with_hierarchy_widget(
+    gitlab_client_mock, metadata, resolved_work_item, update_response
+):
+    tool = UpdateWorkItem(description="update", metadata=metadata)
+    tool._resolve_work_item_data = AsyncMock(return_value=resolved_work_item)
+    gitlab_client_mock.graphql = AsyncMock(return_value=update_response)
+
+    result = await tool._arun(
+        project_id="namespace/project",
+        work_item_iid=42,
+        hierarchy_widget={"parent_id": "gid://gitlab/WorkItem/789"},
+    )
+
+    expected_output = json.dumps(
+        {"updated_work_item": update_response["data"]["workItemUpdate"]["workItem"]}
+    )
+    assert result == expected_output
+
+    mutation, variables = gitlab_client_mock.graphql.call_args[0]
+    assert "workItemUpdate" in mutation
+
+    input_data = variables["input"]
+    assert "hierarchyWidget" in input_data
+    assert input_data["hierarchyWidget"]["parentId"] == "gid://gitlab/WorkItem/789"
+
+
+@pytest.mark.asyncio
+async def test_update_work_item_with_invalid_hierarchy_widget(
+    gitlab_client_mock, metadata, resolved_work_item, update_response
+):
+    tool = UpdateWorkItem(description="update", metadata=metadata)
+    tool._resolve_work_item_data = AsyncMock(return_value=resolved_work_item)
+    gitlab_client_mock.graphql = AsyncMock(return_value=update_response)
+
+    result = await tool._arun(
+        project_id="namespace/project",
+        work_item_iid=42,
+        hierarchy_widget={"parent_id": "invalid_format"},  # Invalid GID format
+    )
+
+    response_json = json.loads(result)
+    assert "updated_work_item" in response_json
+    assert "warnings" in response_json
+    assert (
+        "Invalid parent_id format: invalid_format. Expected GitLab GID."
+        in response_json["warnings"]
+    )
+
+    # Verify hierarchy widget was not included in GraphQL input
+    mutation, variables = gitlab_client_mock.graphql.call_args[0]
+    input_data = variables["input"]
+    assert "hierarchyWidget" not in input_data
+
+
+@pytest.mark.asyncio
 async def test_update_work_item_rejects_quick_actions_in_description(
     gitlab_client_mock, metadata, resolved_work_item
 ):
@@ -1870,3 +1951,136 @@ def test_update_work_item_format_display_message(input_data, expected_message):
     tool = UpdateWorkItem(description="update work item")
     message = tool.format_display_message(input_data)
     assert message == expected_message
+
+
+class TestBuildWorkItemInputFields:
+    """Test the _build_work_item_input_fields static method integration with hierarchy widget."""
+
+    def test_build_work_item_input_fields_with_hierarchy_widget(self):
+        """Test that _build_work_item_input_fields includes hierarchy widget."""
+        kwargs = {
+            "title": "Test Work Item",
+            "type_name": "Issue",
+            "hierarchy_widget": {"parent_id": "gid://gitlab/WorkItem/123"},
+        }
+
+        input_data, warnings = WorkItemBaseTool._build_work_item_input_fields(kwargs)
+
+        assert input_data["title"] == "Test Work Item"
+        assert "hierarchyWidget" in input_data
+        assert input_data["hierarchyWidget"]["parentId"] == "gid://gitlab/WorkItem/123"
+        assert warnings == []
+
+    def test_build_work_item_input_fields_with_invalid_hierarchy_widget(self):
+        """Test that _build_work_item_input_fields handles invalid hierarchy widget."""
+        kwargs = {
+            "title": "Test Work Item",
+            "type_name": "Issue",
+            "hierarchy_widget": {"parent_id": "invalid_format"},
+        }
+
+        input_data, warnings = WorkItemBaseTool._build_work_item_input_fields(kwargs)
+
+        assert input_data["title"] == "Test Work Item"
+        assert "hierarchyWidget" not in input_data
+        assert (
+            "Invalid parent_id format: invalid_format. Expected GitLab GID." in warnings
+        )
+
+    def test_build_work_item_input_fields_without_hierarchy_widget(self):
+        """Test that _build_work_item_input_fields works without hierarchy widget."""
+        kwargs = {
+            "title": "Test Work Item",
+            "type_name": "Issue",
+        }
+
+        input_data, warnings = WorkItemBaseTool._build_work_item_input_fields(kwargs)
+
+        assert input_data["title"] == "Test Work Item"
+        assert "hierarchyWidget" not in input_data
+        assert warnings == []
+
+    def test_build_work_item_input_fields_with_multiple_widgets(self):
+        """Test that hierarchy widget works alongside other widgets."""
+        kwargs = {
+            "title": "Test Work Item",
+            "type_name": "Issue",
+            "assignee_ids": [123],
+            "label_ids": ["456"],
+            "hierarchy_widget": {"parent_id": "gid://gitlab/WorkItem/789"},
+        }
+
+        input_data, warnings = WorkItemBaseTool._build_work_item_input_fields(kwargs)
+
+        assert input_data["title"] == "Test Work Item"
+        assert "assigneesWidget" in input_data
+        assert "labelsWidget" in input_data
+        assert "hierarchyWidget" in input_data
+        assert input_data["hierarchyWidget"]["parentId"] == "gid://gitlab/WorkItem/789"
+        assert warnings == []
+
+
+class TestWorkItemInputValidation:
+    """Test Pydantic input validation for hierarchy_widget."""
+
+    def test_create_work_item_input_with_valid_hierarchy_widget(self):
+        """Test CreateWorkItemInput validation with valid hierarchy_widget."""
+        input_data = CreateWorkItemInput(
+            title="Test Item",
+            type_name="Issue",
+            group_id="test/group",
+            hierarchy_widget={"parent_id": "gid://gitlab/WorkItem/123"},
+        )
+
+        assert input_data.hierarchy_widget == {"parent_id": "gid://gitlab/WorkItem/123"}
+        assert input_data.title == "Test Item"
+        assert input_data.type_name == "Issue"
+
+    def test_create_work_item_input_without_hierarchy_widget(self):
+        """Test CreateWorkItemInput validation without hierarchy_widget."""
+        input_data = CreateWorkItemInput(
+            title="Test Item", type_name="Issue", group_id="test/group"
+        )
+
+        assert input_data.hierarchy_widget is None
+        assert input_data.title == "Test Item"
+
+    def test_update_work_item_input_with_valid_hierarchy_widget(self):
+        """Test UpdateWorkItemInput validation with valid hierarchy_widget."""
+        input_data = UpdateWorkItemInput(
+            group_id="test/group",
+            work_item_iid=42,
+            hierarchy_widget={"parent_id": "gid://gitlab/WorkItem/456"},
+        )
+
+        assert input_data.hierarchy_widget == {"parent_id": "gid://gitlab/WorkItem/456"}
+        assert input_data.work_item_iid == 42
+
+    def test_update_work_item_input_without_hierarchy_widget(self):
+        """Test UpdateWorkItemInput validation without hierarchy_widget."""
+        input_data = UpdateWorkItemInput(group_id="test/group", work_item_iid=42)
+
+        assert input_data.hierarchy_widget is None
+        assert input_data.work_item_iid == 42
+
+    def test_hierarchy_widget_with_wrong_key_type_validation(self):
+        """Test that Pydantic validates the hierarchy_widget structure."""
+        # This should work - correct key
+        input_data = CreateWorkItemInput(
+            title="Test Item",
+            type_name="Issue",
+            group_id="test/group",
+            hierarchy_widget={"parent_id": "gid://gitlab/WorkItem/123"},
+        )
+        assert input_data.hierarchy_widget == {"parent_id": "gid://gitlab/WorkItem/123"}
+
+    def test_hierarchy_widget_type_validation(self):
+        """Test that hierarchy_widget must be a dict with specific structure."""
+        # Test with valid structure
+        input_data = CreateWorkItemInput(
+            title="Test Item",
+            type_name="Issue",
+            group_id="test/group",
+            hierarchy_widget={"parent_id": "some_value"},
+        )
+        assert input_data.hierarchy_widget == {"parent_id": "some_value"}
