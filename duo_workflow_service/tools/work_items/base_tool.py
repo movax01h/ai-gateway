@@ -1,4 +1,5 @@
 import json
+import re
 import urllib
 from enum import Enum
 from typing import (
@@ -277,6 +278,11 @@ class WorkItemBaseTool(DuoBaseTool):
         if labels_widget:
             input_data["labelsWidget"] = labels_widget
 
+        hierarchy_widget = WorkItemBaseTool._build_hierarchy_widget(kwargs, warnings)
+
+        if hierarchy_widget:
+            input_data["hierarchyWidget"] = hierarchy_widget
+
         return input_data, warnings
 
     @staticmethod
@@ -321,6 +327,42 @@ class WorkItemBaseTool(DuoBaseTool):
                 )
 
         return widget
+
+    @staticmethod
+    def _build_hierarchy_widget(
+        kwargs: Dict[str, Any], warnings: List[str]
+    ) -> Optional[Dict[str, Any]]:
+        """Build hierarchy widget configuration for work item operations.
+
+        Args:
+            kwargs: Input parameters that may contain hierarchy_widget
+            warnings: List to collect validation warnings
+
+        Returns:
+            Dictionary with hierarchy widget configuration or None if not provided
+        """
+        hierarchy_widget = kwargs.get("hierarchy_widget")
+
+        if not hierarchy_widget:
+            return None
+
+        if not isinstance(hierarchy_widget, dict):
+            warnings.append("hierarchy_widget must be a dictionary")
+            return None
+
+        parent_id = hierarchy_widget.get("parent_id")
+        if not parent_id:
+            warnings.append("hierarchy_widget must contain 'parent_id' key")
+            return None
+
+        # Validate and normalize the parent_id to proper GitLab GID format
+        if not re.match(r"^gid://gitlab/WorkItem/\d+$", parent_id):
+            warnings.append(
+                f"Invalid parent_id format: {parent_id}. Expected GitLab GID."
+            )
+            return None
+
+        return {"parentId": parent_id}  # Note: GraphQL expects camelCase
 
     @staticmethod
     def _normalize_gids(ids: list[Any], gid_type: str) -> tuple[list[str], list[Any]]:

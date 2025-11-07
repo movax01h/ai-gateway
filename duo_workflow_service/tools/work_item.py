@@ -1,6 +1,6 @@
 import json
 from enum import Enum
-from typing import Annotated, Any, List, Optional, Type, Union
+from typing import Annotated, Any, Dict, List, Literal, Optional, Type, Union
 
 from pydantic import BaseModel, Field, StringConstraints
 
@@ -404,6 +404,11 @@ class CreateWorkItemInput(ParentResourceInput):
     state: Optional[str] = Field(
         default=None, description="Work item state. Use 'opened' or 'closed'."
     )
+    hierarchy_widget: Optional[Dict[Literal["parent_id"], str]] = Field(
+        default=None,
+        description="""Creates a parent–child relationship by setting parent_id. Must contain 'parent_id' with
+        work item global ID in the format: gid://gitlab/WorkItem/<id>""",
+    )
 
 
 class CreateWorkItem(WorkItemBaseTool):
@@ -479,6 +484,11 @@ class UpdateWorkItemInput(WorkItemResourceInput):
     remove_label_ids: Optional[List[str]] = Field(
         default=None,
         description="Label global IDs or numeric IDs to remove from the work item.",
+    )
+    hierarchy_widget: Optional[Dict[Literal["parent_id"], str]] = Field(
+        default=None,
+        description="""Hierarchy widget configuration. Must contain 'parent_id' with
+        work item global ID in the format: gid://gitlab/WorkItem/<id>""",
     )
 
 
