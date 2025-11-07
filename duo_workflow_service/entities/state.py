@@ -209,13 +209,29 @@ def _plan_reducer(current: Plan, new: Optional[Plan]) -> Plan:
     return current
 
 
+def get_messages_role(messages: List[BaseMessage]) -> List[str]:
+    # log the tool call id suffix 8 character to keep it concise
+    return [
+        (
+            f"{msg.type}-{[(call.get("id") or "")[-8:] for call in msg.tool_calls]}"
+            if isinstance(msg, AIMessage)
+            else (
+                f"{msg.type}-{msg.tool_call_id[-8:]}"
+                if isinstance(msg, ToolMessage)
+                else msg.type
+            )
+        )
+        for msg in messages
+    ]
+
+
 def get_messages_profile(
     messages: List[BaseMessage],
     token_counter: ApproximateTokenCounter,
     include_tool_tokens: bool = True,
 ) -> Tuple[List[str], int]:
 
-    roles = [msg.type for msg in messages]
+    roles = get_messages_role(messages=messages)
     token_size = (
         token_counter.count_tokens(messages, include_tool_tokens=include_tool_tokens)
         if messages
@@ -380,6 +396,9 @@ def _restore_message_consistency(messages: List[BaseMessage]) -> List[BaseMessag
     if not messages:
         return []
 
+    roles = get_messages_role(messages=messages)
+    logger.info(f"Message roles before restore: {roles}")
+
     # Identify all AIMessages with tool calls
     tool_call_indices = {}
     for i, msg in enumerate(messages):
@@ -408,6 +427,9 @@ def _restore_message_consistency(messages: List[BaseMessage]) -> List[BaseMessag
                     result.append(HumanMessage(content=msg.content))
         else:
             result.append(msg)
+
+    roles = get_messages_role(messages=result)
+    logger.info(f"Message roles after restore: {roles}")
 
     return result
 

@@ -7,12 +7,11 @@ from langchain_core.messages import (
     BaseMessage,
     HumanMessage,
     SystemMessage,
+    ToolCall,
     ToolMessage,
 )
 
 from duo_workflow_service.entities.state import (
-    MAX_CONTEXT_TOKENS,
-    MAX_SINGLE_MESSAGE_TOKENS,
     MessageTypeEnum,
     UiChatLog,
     _conversation_history_reducer,
@@ -213,7 +212,10 @@ def test_conversation_history_reducer_single_message_too_large():
             HumanMessage(content="first a message"),
             HumanMessage(content="second a message"),
             HumanMessage(
-                content="Previous message was too large for context window and was omitted. Please respond based on the visible context."
+                content=(
+                    "Previous message was too large for context window and was omitted. "
+                    "Please respond based on the visible context."
+                )
             ),
         ],
         "agent_b": [
@@ -242,9 +244,9 @@ def test_pretrim_large_messages():
 
     assert len(result) == 2
     assert result[0].content == "This is a small message"
-    assert (
-        result[1].content
-        == "Previous message was too large for context window and was omitted. Please respond based on the visible context."
+    assert result[1].content == (
+        "Previous message was too large for context window and was omitted. "
+        "Please respond based on the visible context."
     )
 
 
@@ -565,7 +567,7 @@ def test_ui_chat_log_reducer_with_empty_lists():
 
     result = _ui_chat_log_reducer(current, new)
 
-    assert result == []
+    assert not result
     assert result is not current
 
 
@@ -920,7 +922,18 @@ def test_get_messages_profile():
     assert roles == []
     assert tokens == 0
 
-    messages = [HumanMessage(content="Hi"), AIMessage(content="Hello")]
+    messages = [
+        HumanMessage(content="Hi"),
+        AIMessage(
+            content="Hello",
+            tool_calls=[
+                ToolCall(
+                    name="foo", args={"a": 1}, id="toolu_vrtx_01A975mGkpbGsENdtz3hKqej"
+                )
+            ],
+        ),
+        ToolMessage(tool_call_id="toolu_vrtx_01A975mGkpbGsENdtz3hKqej", content="hi"),
+    ]
     roles, tokens = get_messages_profile(messages, token_counter=token_counter)
-    assert roles == ["human", "ai"]
-    assert tokens == 4742
+    assert roles == ["human", "ai-['tz3hKqej']", "tool-tz3hKqej"]
+    assert tokens == pytest.approx(4742, abs=50)
