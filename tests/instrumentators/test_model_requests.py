@@ -17,7 +17,7 @@ def test_get_token_usage():
     usage = {"test_model": {"input_tokens": 10, "output_tokens": 20}}
     token_usage.set(usage)
     assert get_token_usage() == usage
-    assert token_usage.get() is None  # Ensure the usage is reset after being retrieved
+    assert token_usage.get() == {}  # Ensure the usage is reset after being retrieved
 
 
 def test_get_llm_operations():
@@ -34,7 +34,7 @@ def test_get_llm_operations():
     llm_operations.set(operations)
     assert get_llm_operations() == operations
     assert (
-        llm_operations.get() is None
+        llm_operations.get() == []
     )  # Ensure the operations are reset after being retrieved
 
 

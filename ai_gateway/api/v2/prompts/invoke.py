@@ -25,7 +25,8 @@ router = APIRouter()
 def _process_chunk(chunk: PromptChunk):
     return PromptResponse(
         content=chunk.content,
-        usage=get_token_usage(),
+        # If usage is empty (`{}`), return None to omit from response
+        usage=get_token_usage() or None,
     )
 
 
