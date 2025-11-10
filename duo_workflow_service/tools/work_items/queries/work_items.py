@@ -32,29 +32,56 @@ query GetGroupWorkItem($fullPath: ID!, $iid: String!) {
                 archived
                 widgets {
                     ... on WorkItemWidgetLinkedItems {
-                    type
-                    linkedItems {
-                        nodes {
-                        linkType
-                        workItemState
-                        workItem {
-                                id
-                                iid
-                            namespace {
-                                id
-                                fullPath
+                        type
+                        linkedItems {
+                            nodes {
+                            linkType
+                            workItemState
+                            workItem {
+                                    id
+                                    iid
+                                namespace {
+                                    id
+                                    fullPath
+                                }
+                                workItemType {
+                                    name
+                                }
+                                title
+                                state
+                                createdAt
+                                closedAt
+                                webUrl
                             }
-                            workItemType {
-                                name
-                            }
-                            title
-                            state
-                            createdAt
-                            closedAt
-                            webUrl
-                        }
                         }
                     }
+                    ... on WorkItemWidgetLabels {
+                        labels {
+                            nodes {
+                                id
+                                title
+                                description
+                            }
+                        }
+                    }
+                    ... on WorkItemWidgetMilestone {
+                        milestone {
+                            id
+                            title
+                            state
+                            expired
+                            upcoming
+                            startDate
+                            dueDate
+                        }
+                    }
+                    ... on WorkItemWidgetIteration {
+                        iteration {
+                            id
+                            title
+                            startDate
+                            dueDate
+                        }
                     }
                 }
             }
@@ -97,29 +124,56 @@ query GetProjectWorkItem($fullPath: ID!, $iid: String!) {
                 archived
                 widgets {
                     ... on WorkItemWidgetLinkedItems {
-                    type
-                    linkedItems {
-                        nodes {
-                        linkType
-                        workItemState
-                        workItem {
-                                id
-                                iid
-                            namespace {
-                                id
-                                fullPath
+                        type
+                        linkedItems {
+                            nodes {
+                            linkType
+                            workItemState
+                            workItem {
+                                    id
+                                    iid
+                                namespace {
+                                    id
+                                    fullPath
+                                }
+                                workItemType {
+                                    name
+                                }
+                                title
+                                state
+                                createdAt
+                                closedAt
+                                webUrl
                             }
-                            workItemType {
-                                name
-                            }
-                            title
-                            state
-                            createdAt
-                            closedAt
-                            webUrl
-                        }
                         }
                     }
+                    ... on WorkItemWidgetLabels {
+                        labels {
+                            nodes {
+                                id
+                                title
+                                description
+                            }
+                        }
+                    }
+                    ... on WorkItemWidgetMilestone {
+                        milestone {
+                            id
+                            title
+                            state
+                            expired
+                            upcoming
+                            startDate
+                            dueDate
+                        }
+                    }
+                    ... on WorkItemWidgetIteration {
+                        iteration {
+                            id
+                            title
+                            startDate
+                            dueDate
+                        }
                     }
                 }
             }
@@ -161,6 +215,14 @@ query ListGroupWorkItems($fullPath: ID!, $state: IssuableState, $search: String,
                     username
                     name
                 }
+                widgets {
+                    ... on WorkItemWidgetMilestone {
+                        milestone {
+                            id
+                            title
+                        }
+                    }
+                }
             }
         }
     }
@@ -199,6 +261,14 @@ query ListProjectWorkItems($fullPath: ID!, $state: IssuableState, $search: Strin
                 author {
                     username
                     name
+                }
+                widgets {
+                    ... on WorkItemWidgetMilestone {
+                        milestone {
+                            id
+                            title
+                        }
+                    }
                 }
             }
         }
