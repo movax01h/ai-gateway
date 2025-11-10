@@ -1,0 +1,26 @@
+{
+  "environment": {
+    "name": "load-test-agentic-chat",
+    "url": "http://34.75.189.207",
+    "user": "root",
+    "config": {
+      "latency": "0"
+    },
+    "storage_nodes": ["default"]
+  },
+  "gpt_data": {
+    "skip_check_version": "true",
+    "root_group": "gpt",
+    "large_projects": {
+      "group": "large_projects",
+      "project": "gitlabhq"
+    },
+    "many_groups_and_projects": {
+      "group": "n/a",
+      "subgroups": 0,
+      "subgroup_prefix": "n/a",
+      "projects": 0,
+      "project_prefix": "n/a"
+    }
+  }
+}
