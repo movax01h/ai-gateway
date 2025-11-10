@@ -8,7 +8,11 @@ from ai_gateway.api.auth_utils import StarletteUser, get_current_user
 from ai_gateway.api.feature_category import feature_category
 from ai_gateway.api.v1.prompts.invoke import PromptChunk, PromptRequest, _invoke
 from ai_gateway.async_dependency_resolver import get_prompt_registry
-from ai_gateway.instrumentators.model_requests import TokenUsage, get_token_usage
+from ai_gateway.instrumentators.model_requests import (
+    TokenUsage,
+    get_token_usage,
+    init_token_usage,
+)
 from ai_gateway.prompts.base import BasePromptRegistry
 
 
@@ -25,8 +29,7 @@ router = APIRouter()
 def _process_chunk(chunk: PromptChunk):
     return PromptResponse(
         content=chunk.content,
-        # If usage is empty (`{}`), return None to omit from response
-        usage=get_token_usage() or None,
+        usage=get_token_usage(),
     )
 
 
@@ -44,6 +47,8 @@ async def invoke(
     current_user: Annotated[StarletteUser, Depends(get_current_user)],
     prompt_registry: Annotated[BasePromptRegistry, Depends(get_prompt_registry)],
 ):
+    init_token_usage()
+
     return await _invoke(
         prompt_request=prompt_request,
         prompt_id=prompt_id,
