@@ -40,7 +40,7 @@ class ReActPlainTextParser(BaseCumulativeTransformOutputParser):
     re_thought: re.Pattern = re.compile(
         r"<message>Thought:\s*([\s\S]*?)\s*(?:Action|Final Answer):"
     )
-    re_action: re.Pattern = re.compile(r"Action:\s*([\s\S]*?)\s*Action", re.DOTALL)
+    re_action: re.Pattern = re.compile(r"Action:\s*([\s\S]*?)[\s-]*Action", re.DOTALL)
     re_action_input: re.Pattern = re.compile(r"Action Input:\s*([\s\S]*?)\s*</message>")
     re_final_answer: re.Pattern = re.compile(r"Final Answer:\s*([\s\S]*?)\s*</message>")
 

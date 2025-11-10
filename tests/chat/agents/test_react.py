@@ -80,6 +80,22 @@ class TestReActPlainTextParser:
                 ),
             ),
             (
+                "thought1\nAction: gitlab_documentation\n-Action Input: tool_input1\n",
+                AgentToolAction(
+                    thought="thought1",
+                    tool="gitlab_documentation",
+                    tool_input="tool_input1",
+                ),
+            ),
+            (
+                "thought1\nAction: gitlab_documentation\n- Action Input: tool_input1\n",
+                AgentToolAction(
+                    thought="thought1",
+                    tool="gitlab_documentation",
+                    tool_input="tool_input1",
+                ),
+            ),
+            (
                 "thought1\nFinal Answer: final answer\n",
                 AgentFinalAnswer(
                     text="final answer",
