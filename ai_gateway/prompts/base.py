@@ -11,6 +11,7 @@ from typing import (
     overload,
 )
 
+import structlog
 from gitlab_cloud_connector import (
     CloudConnectorUser,
     GitLabUnitPrimitive,
@@ -32,7 +33,9 @@ from ai_gateway.api.auth_utils import StarletteUser
 from ai_gateway.config import ConfigModelLimits, ModelLimits
 from ai_gateway.instrumentators.model_requests import ModelRequestInstrumentator
 from ai_gateway.model_metadata import TypeModelMetadata, current_model_metadata_context
+from ai_gateway.prompts.caching import CacheControlInjectionPointsConverter
 from ai_gateway.prompts.config.base import ModelConfig, PromptConfig, PromptParams
+from ai_gateway.prompts.config.models import ModelClassProvider, TypeModelParams
 from ai_gateway.prompts.typing import Model, TypeModelFactory, TypePromptTemplateFactory
 from ai_gateway.structured_logging import get_request_logger
 from lib.internal_events.client import InternalEventsClient
@@ -52,6 +55,8 @@ Output = TypeVar("Output")
 
 jinja_loader = PackageLoader("ai_gateway.prompts", "definitions")
 jinja_env = SandboxedEnvironment(loader=jinja_loader)
+
+log = structlog.stdlib.get_logger("prompts")
 
 
 def _get_jinja2_variables_from_template(template: str) -> set[str]:
@@ -125,7 +130,9 @@ class Prompt(RunnableBinding[Input, Output]):
         **kwargs: Any,
     ):
         model_provider = config.model.params.model_class_provider
-        model_kwargs = self._build_model_kwargs(config.params, model_metadata)
+        model_kwargs = self._build_model_kwargs(
+            config.params, model_metadata, config.model.params
+        )
         model = self._build_model(
             model_factory, config.model, model_metadata, disable_streaming
         )
@@ -138,6 +145,10 @@ class Prompt(RunnableBinding[Input, Output]):
             if prompt_template_factory
             else self._build_prompt_template(config)
         )
+        prompt = self._chain_cache_control_injection_points_converter(
+            prompt, config.params, config.model.params
+        )
+
         chain = cast(
             Runnable[Input, Output],
             prompt
@@ -157,13 +168,50 @@ class Prompt(RunnableBinding[Input, Output]):
             **kwargs,
         )  # type: ignore[call-arg]
 
+    def _chain_cache_control_injection_points_converter(
+        self,
+        prompt: Runnable,
+        params: PromptParams | None,
+        model_params: TypeModelParams,
+    ) -> Runnable:
+        """Convert `cache_control_injection_points` LiteLLM param for non-LiteLLM model clients.
+
+        https://docs.litellm.ai/docs/tutorials/prompt_caching
+        """
+
+        if (
+            not params
+            or not params.cache_control_injection_points
+            or not model_params.model_class_provider
+            or model_params.model_class_provider == ModelClassProvider.LITE_LLM
+        ):
+            return prompt
+
+        chain = prompt | CacheControlInjectionPointsConverter().bind(
+            model_class_provider=model_params.model_class_provider,
+            cache_control_injection_points=params.cache_control_injection_points,
+        )
+
+        return chain
+
     def _build_model_kwargs(
         self,
         params: PromptParams | None,
         model_metadata: Optional[TypeModelMetadata],
+        model_params: TypeModelParams,
     ) -> Mapping[str, Any]:
+        exclude_fields = set()
+
+        if model_params.model_class_provider is not ModelClassProvider.LITE_LLM:
+            # Exclude cache_control_injection_points from model_kwargs as it's not supported in the model client.
+            exclude_fields.add("cache_control_injection_points")
+
         return {
-            **(params.model_dump(exclude_none=True) if params else {}),
+            **(
+                params.model_dump(exclude_none=True, exclude=exclude_fields)
+                if params
+                else {}
+            ),
             **(model_metadata.to_params() if model_metadata else {}),
         }
 
@@ -278,35 +326,49 @@ class Prompt(RunnableBinding[Input, Output]):
         watcher: ModelRequestInstrumentator.WatchContainer,
         usage_metadata: dict[str, UsageMetadata],
     ) -> None:
-
-        get_request_logger("prompt").info(
-            f"LLM call finished with token usage: {usage_metadata}"
-        )
-
         for model, usage in usage_metadata.items():
             watcher.register_token_usage(model, usage)
 
+            # Access langchain usage_metadata for optional cache
+            # specific token details
+            input_token_details = usage.get("input_token_details", {})
+            cache_creation = input_token_details.get("cache_creation", 0)
+            cache_read = input_token_details.get("cache_read", 0)
+
+            # Optional event tracking for TTL prompt caching
+            ephemeral_5m_input_tokens = input_token_details.get(
+                "ephemeral_5m_input_tokens", 0
+            )
+            ephemeral_1h_input_tokens = input_token_details.get(
+                "ephemeral_1h_input_tokens", 0
+            )
+
+            token_usage_data = {
+                "model_engine": self.llm_provider,
+                "model_name": model,
+                "model_provider": self.model_provider,
+                "input_tokens": usage["input_tokens"],
+                "output_tokens": usage["output_tokens"],
+                "total_tokens": usage["total_tokens"],
+            }
+
+            token_cache_usage_data = {
+                "cache_read": cache_read,
+                "cache_creation": cache_creation,
+                "ephemeral_5m_input_tokens": ephemeral_5m_input_tokens,
+                "ephemeral_1h_input_tokens": ephemeral_1h_input_tokens,
+            }
+
+            log.info(
+                "LLM call finished with token usage",
+                **token_usage_data,
+                **token_cache_usage_data,
+            )
+
             for unit_primitive in self.unit_primitives:
-                # Access langchain usage_metadata for optional cache
-                # specific token details
-                input_token_details = usage.get("input_token_details", {})
-                cache_creation = input_token_details.get("cache_creation", 0)
-                cache_read = input_token_details.get("cache_read", 0)
-
-                # Optional event tracking for TTL prompt caching
-                ephemeral_5m_input_tokens = input_token_details.get(
-                    "ephemeral_5m_input_tokens", 0
-                )
-                ephemeral_1h_input_tokens = input_token_details.get(
-                    "ephemeral_1h_input_tokens", 0
-                )
-
                 additional_properties = InternalEventAdditionalProperties(
                     label="cache_details",
-                    cache_read=cache_read,
-                    cache_creation=cache_creation,
-                    ephemeral_5m_input_tokens=ephemeral_5m_input_tokens,
-                    ephemeral_1h_input_tokens=ephemeral_1h_input_tokens,
+                    **token_cache_usage_data,
                     **self.internal_event_extra,
                 )
 
@@ -314,13 +376,8 @@ class Prompt(RunnableBinding[Input, Output]):
                     self.internal_event_client.track_event(
                         f"token_usage_{unit_primitive}",
                         category=__name__,
-                        input_tokens=usage["input_tokens"],
-                        output_tokens=usage["output_tokens"],
-                        total_tokens=usage["total_tokens"],
-                        model_engine=self.llm_provider,
-                        model_name=model,
-                        model_provider=self.model_provider,
                         additional_properties=additional_properties,
+                        **token_usage_data,
                     )
 
     @classmethod
