@@ -1,5 +1,5 @@
 from datetime import datetime, timezone
-from typing import Annotated, List, Optional
+from typing import Annotated, Any, List, Optional
 
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage
 
@@ -46,14 +46,17 @@ class HandoverAgent:
             )
             last_message = messages[-1]
             summary = self._extract_summary(last_message, ui_chat_logs)
-
             handover_messages = self._get_summary_to_handover(summary)
 
-        return {
+        result: dict[str, Any] = {
             "status": self._new_status,
-            "handover": handover_messages,
             "ui_chat_log": ui_chat_logs,
         }
+
+        # Only overwrite handover field if there are messages
+        if handover_messages:
+            result["handover"] = handover_messages
+        return result
 
     def _replace_system_messages(
         self, messages: list[BaseMessage]

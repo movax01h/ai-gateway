@@ -75,9 +75,7 @@ class Agent(BaseAgent):
         with duo_workflow_metrics.time_compute(
             operation_type=f"{self.prompt.name}_processing"
         ):
-            updates: dict[str, Any] = {
-                "handover": [],
-            }
+            updates: dict[str, Any] = {}
 
             model_name_attrs = {
                 "ChatAnthropicVertex": "model_name",

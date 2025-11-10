@@ -28,7 +28,6 @@ class TestHandoverAgent:
             new_status=WorkflowStatusEnum.COMPLETED, handover_from="test_agent"
         ).run(workflow_state) == {
             "status": WorkflowStatusEnum.COMPLETED,
-            "handover": [],
             "ui_chat_log": [],
         }
 
@@ -235,10 +234,13 @@ class TestHandoverAgent:
             include_conversation_history=include_conversation_history,
         ).run(state)
 
-        assert overwrites == {
+        expected_result = {
             "status": WorkflowStatusEnum.COMPLETED,
-            "handover": expected_handover,
             "ui_chat_log": expected_ui_chat_log,
         }
+        if expected_handover:
+            expected_result["handover"] = expected_handover
+
+        assert overwrites == expected_result
 
     # pylint: enable=too-many-positional-arguments
