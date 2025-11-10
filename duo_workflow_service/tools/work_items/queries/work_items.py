@@ -30,6 +30,33 @@ query GetGroupWorkItem($fullPath: ID!, $iid: String!) {
                     name
                 }
                 archived
+                widgets {
+                    ... on WorkItemWidgetLinkedItems {
+                    type
+                    linkedItems {
+                        nodes {
+                        linkType
+                        workItemState
+                        workItem {
+                                id
+                                iid
+                            namespace {
+                                id
+                                fullPath
+                            }
+                            workItemType {
+                                name
+                            }
+                            title
+                            state
+                            createdAt
+                            closedAt
+                            webUrl
+                        }
+                        }
+                    }
+                    }
+                }
             }
         }
     }
@@ -68,6 +95,33 @@ query GetProjectWorkItem($fullPath: ID!, $iid: String!) {
                     name
                 }
                 archived
+                widgets {
+                    ... on WorkItemWidgetLinkedItems {
+                    type
+                    linkedItems {
+                        nodes {
+                        linkType
+                        workItemState
+                        workItem {
+                                id
+                                iid
+                            namespace {
+                                id
+                                fullPath
+                            }
+                            workItemType {
+                                name
+                            }
+                            title
+                            state
+                            createdAt
+                            closedAt
+                            webUrl
+                        }
+                        }
+                    }
+                    }
+                }
             }
         }
     }
