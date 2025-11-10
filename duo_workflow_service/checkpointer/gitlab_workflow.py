@@ -33,7 +33,10 @@ from langgraph.checkpoint.base import (
 from langgraph.checkpoint.memory import MemorySaver
 
 from ai_gateway.container import ContainerApplication
-from ai_gateway.instrumentators.model_requests import get_llm_operations
+from ai_gateway.instrumentators.model_requests import (
+    get_llm_operations,
+    init_llm_operations,
+)
 from duo_workflow_service.checkpointer.gitlab_workflow_utils import (
     STATUS_TO_EVENT_PROPERTY,
     WorkflowStatusEventEnum,
@@ -291,6 +294,8 @@ class GitLabWorkflow(
         try:
             if self._offline_mode:
                 return MemorySaver()
+
+            init_llm_operations()
 
             config: RunnableConfig = {"configurable": {}}
             self.initial_status_event, event_property = (

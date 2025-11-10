@@ -27,6 +27,7 @@ from ai_gateway.code_suggestions.base import CodeSuggestionsChunk, CodeSuggestio
 from ai_gateway.code_suggestions.processing.typing import LanguageId
 from ai_gateway.config import Config, ConfigModelLimits
 from ai_gateway.container import ContainerApplication
+from ai_gateway.instrumentators.model_requests import llm_operations, token_usage
 from ai_gateway.model_metadata import TypeModelMetadata, current_model_metadata_context
 from ai_gateway.model_selection.model_selection_config import ModelSelectionConfig
 from ai_gateway.models.base import ModelMetadata as LegacyModelMetadata
@@ -737,18 +738,22 @@ def disable_cached_logger():
     structlog.configure(cache_logger_on_first_use=False)
 
 
+def reset_context_vars():
+    current_feature_flag_context.set(set[str]())
+    current_model_metadata_context.set(None)
+    token_usage.set(None)
+    llm_operations.set(None)
+    ModelSelectionConfig._instance = None
+
+
 @pytest.fixture(autouse=True)
 def reset_context():
     # This fixture will reset the context before and after each test
-    current_feature_flag_context.set(set[str]())
-    current_model_metadata_context.set(None)
-    ModelSelectionConfig._instance = None
+    reset_context_vars()
 
     yield
 
-    current_feature_flag_context.set(set[str]())
-    current_model_metadata_context.set(None)
-    ModelSelectionConfig._instance = None
+    reset_context_vars()
 
 
 @pytest.fixture(name="vertex_project")

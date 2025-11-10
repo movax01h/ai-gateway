@@ -74,15 +74,28 @@ INFERENCE_OUTPUT_TOKENS = Counter(
 type TokenUsage = dict[str, dict[str, int]]
 type LlmOperations = list[dict[str, str | int]]
 
-# Note: We initialize the context vars with mutable values so children contexts can mutate them and propagate upwards
-token_usage: ContextVar[TokenUsage | None] = ContextVar("token_usage", default={})
-llm_operations: ContextVar[LlmOperations] = ContextVar("llm_operations", default=[])
+token_usage: ContextVar[TokenUsage | None] = ContextVar("token_usage", default=None)
+llm_operations: ContextVar[LlmOperations | None] = ContextVar(
+    "llm_operations", default=None
+)
 
 logger = structlog.get_logger()
 
 
+def init_token_usage() -> None:
+    token_usage.set({})
+
+
+def init_llm_operations() -> None:
+    llm_operations.set([])
+
+
 def _update_token_usage(model: str, usage: UsageMetadata) -> None:
     current_usage = token_usage.get()
+
+    if current_usage is None:
+        return
+
     current_usage.setdefault(model, {"input_tokens": 0, "output_tokens": 0})
     current_usage[model]["input_tokens"] += usage["input_tokens"]
     current_usage[model]["output_tokens"] += usage["output_tokens"]
@@ -94,16 +107,16 @@ def get_token_usage() -> TokenUsage | None:
     current_usage = token_usage.get()
 
     # Reset the usage so multiple requests don't return the same values
-    token_usage.set({})
+    token_usage.set(None)
 
     return current_usage
 
 
-def get_llm_operations() -> LlmOperations:
+def get_llm_operations() -> LlmOperations | None:
     current_operations = llm_operations.get()
 
     # Reset the operations so multiple requests don't return the same values
-    llm_operations.set([])
+    llm_operations.set(None)
 
     return current_operations
 
@@ -188,6 +201,9 @@ class ModelRequestInstrumentator:
 
         def _update_llm_operations(self, model: str, usage: UsageMetadata):
             current_llm_operations = llm_operations.get()
+
+            if current_llm_operations is None:
+                return
 
             current_llm_operations.append(
                 {

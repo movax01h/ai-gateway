@@ -1,3 +1,4 @@
+import contextvars
 from unittest import mock
 
 import pytest
@@ -8,16 +9,30 @@ from ai_gateway.instrumentators.model_requests import (
     ModelRequestInstrumentator,
     get_llm_operations,
     get_token_usage,
+    init_llm_operations,
+    init_token_usage,
     llm_operations,
     token_usage,
 )
+
+
+@pytest.fixture(name="container")
+def container_fixture() -> ModelRequestInstrumentator.WatchContainer:
+    return ModelRequestInstrumentator.WatchContainer(
+        llm_provider="test_llm_provider",
+        model_provider="test_provider",
+        labels={"model_engine": "test_engine", "model_name": "test_model"},
+        streaming=False,
+        limits=None,
+        unit_primitives=None,
+    )
 
 
 def test_get_token_usage():
     usage = {"test_model": {"input_tokens": 10, "output_tokens": 20}}
     token_usage.set(usage)
     assert get_token_usage() == usage
-    assert token_usage.get() == {}  # Ensure the usage is reset after being retrieved
+    assert token_usage.get() is None  # Ensure the usage is reset after being retrieved
 
 
 def test_get_llm_operations():
@@ -34,21 +49,15 @@ def test_get_llm_operations():
     llm_operations.set(operations)
     assert get_llm_operations() == operations
     assert (
-        llm_operations.get() == []
+        llm_operations.get() is None
     )  # Ensure the operations are reset after being retrieved
 
 
 class TestWatchContainer:
     @mock.patch("prometheus_client.Counter.labels")
-    def test_register_token_usage(self, mock_counters):
-        container = ModelRequestInstrumentator.WatchContainer(
-            llm_provider="test_llm_provider",
-            model_provider="test_provider",
-            labels={"model_engine": "test_engine", "model_name": "test_model"},
-            streaming=False,
-            limits=None,
-            unit_primitives=None,
-        )
+    def test_register_token_usage(self, mock_counters, container):
+        init_token_usage()
+        init_llm_operations()
 
         container.register_token_usage(
             "test_model", {"input_tokens": 10, "output_tokens": 15, "total_tokens": 25}
@@ -125,6 +134,46 @@ class TestWatchContainer:
             },
         ]
 
+    def test_register_token_usage_without_init(self, container):
+        container.register_token_usage(
+            "test_model", {"input_tokens": 10, "output_tokens": 15, "total_tokens": 25}
+        )
+
+        assert token_usage.get() is None
+        assert llm_operations.get() is None
+
+    def test_register_token_usage_in_different_contexts(self, container):
+        def run():
+            # Init counters
+            init_token_usage()
+            init_llm_operations()
+
+            # Register a single call
+            container.register_token_usage(
+                "test_model",
+                {"input_tokens": 10, "output_tokens": 15, "total_tokens": 25},
+            )
+
+            # Assert that only a single call (ours) is registered
+            assert token_usage.get() == {
+                "test_model": {"input_tokens": 10, "output_tokens": 15}
+            }
+            assert llm_operations.get() == [
+                {
+                    "token_count": 25,
+                    "model_id": "test_model",
+                    "model_engine": "test_llm_provider",
+                    "model_provider": "test_provider",
+                    "prompt_tokens": 10,
+                    "completion_tokens": 15,
+                }
+            ]
+
+            # Intentionally not calling `.set(None)` in the end to test that the value doesn't leak
+
+        contextvars.copy_context().run(run)
+        contextvars.copy_context().run(run)
+
     @mock.patch("prometheus_client.Gauge.labels")
     @mock.patch("prometheus_client.Counter.labels")
     @mock.patch("prometheus_client.Histogram.labels")
@@ -135,15 +184,8 @@ class TestWatchContainer:
         mock_histograms,
         mock_counters,
         mock_gauges,
+        container,
     ):
-        container = ModelRequestInstrumentator.WatchContainer(
-            llm_provider="test_llm_provider",
-            model_provider="test_provider",
-            labels={"model_engine": "test_engine", "model_name": "test_model"},
-            streaming=False,
-            limits=None,
-            unit_primitives=None,
-        )
         time_counter.side_effect = [1, 2]
 
         container.start()
