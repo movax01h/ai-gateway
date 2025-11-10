@@ -73,16 +73,16 @@ INFERENCE_OUTPUT_TOKENS = Counter(
 
 type TokenUsage = dict[str, dict[str, int]]
 type LlmOperations = list[dict[str, str | int]]
-token_usage: ContextVar[TokenUsage | None] = ContextVar("token_usage", default=None)
-llm_operations: ContextVar[LlmOperations | None] = ContextVar(
-    "llm_operations", default=None
-)
+
+# Note: We initialize the context vars with mutable values so children contexts can mutate them and propagate upwards
+token_usage: ContextVar[TokenUsage | None] = ContextVar("token_usage", default={})
+llm_operations: ContextVar[LlmOperations] = ContextVar("llm_operations", default=[])
 
 logger = structlog.get_logger()
 
 
 def _update_token_usage(model: str, usage: UsageMetadata) -> None:
-    current_usage = token_usage.get() or {}
+    current_usage = token_usage.get()
     current_usage.setdefault(model, {"input_tokens": 0, "output_tokens": 0})
     current_usage[model]["input_tokens"] += usage["input_tokens"]
     current_usage[model]["output_tokens"] += usage["output_tokens"]
@@ -94,7 +94,7 @@ def get_token_usage() -> TokenUsage | None:
     current_usage = token_usage.get()
 
     # Reset the usage so multiple requests don't return the same values
-    token_usage.set(None)
+    token_usage.set({})
 
     return current_usage
 
@@ -103,7 +103,7 @@ def get_llm_operations() -> LlmOperations:
     current_operations = llm_operations.get()
 
     # Reset the operations so multiple requests don't return the same values
-    llm_operations.set(None)
+    llm_operations.set([])
 
     return current_operations
 
@@ -187,7 +187,7 @@ class ModelRequestInstrumentator:
             self.finish()
 
         def _update_llm_operations(self, model: str, usage: UsageMetadata):
-            current_llm_operations = llm_operations.get() or []
+            current_llm_operations = llm_operations.get()
 
             current_llm_operations.append(
                 {
