@@ -50,9 +50,9 @@ class UsageQuotaEventContext(BaseModel):
     host_name: Optional[str] = None
     project_id: Optional[int] = None
     namespace_id: Optional[int] = None
+    root_namespace_id: Optional[int] = Field(alias="ultimate_parent_namespace_id")
     user_id: Optional[str] = None
     global_user_id: Optional[str] = None
-    root_namespace_id: Optional[int] = None
     correlation_id: Optional[str] = None
     realm: Optional[str] = None
     deployment_type: Optional[str] = None
@@ -68,4 +68,4 @@ class UsageQuotaEventContext(BaseModel):
         Returns:
             UsageQuotaEventContext: A new instance populated with data from `internal_event_context`.
         """
-        return cls.model_validate(internal_event_context.model_dump())
+        return cls.model_validate(internal_event_context.model_dump(), by_alias=True)
