@@ -130,7 +130,7 @@ configurable_unit_primitives:
     unit_primitives:
       - "generate_code"
       - "complete_code"
-    default_model: "claude_sonnet_3_7_20250219"
+    default_model: "claude_sonnet_4_20250514_vertex"
     selectable_models:
       - "claude_sonnet_3_7_20250219"
       - "claude_sonnet_3_7_20250219_vertex"
