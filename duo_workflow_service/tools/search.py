@@ -82,9 +82,7 @@ class GitLabSearchBase(DuoBaseTool):
     async def _perform_search(self, id: str, params: dict, search_type: str) -> str:
         url = f"/api/v4/{search_type}/{id}/search"
         try:
-            response = await self.gitlab_client.aget(
-                path=url, params=params, use_http_response=True
-            )
+            response = await self.gitlab_client.aget(path=url, params=params)
 
             if not response.is_success():
                 log.error(
@@ -385,7 +383,7 @@ class BlobSearch(GitLabSearchBase):
         url = f"/api/v4/{search_type}/{id}/search"
         try:
             response = await self.gitlab_client.aget(
-                path=url, params=params, use_http_response=True, parse_json=True
+                path=url, params=params, parse_json=True
             )
 
             if not response.is_success():

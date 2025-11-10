@@ -117,7 +117,6 @@ async def test_get_commit(gitlab_client_mock, metadata):
         path="/api/v4/projects/24/repository/commits/c34bb66f7a5e3a45b5e2d70edd9be12d64855cd6",
         params={},
         parse_json=False,
-        use_http_response=True,
     )
 
 
@@ -136,7 +135,6 @@ async def test_get_commit_error(gitlab_client_mock, metadata):
         path="/api/v4/projects/24/repository/commits/nonexistent",
         params={},
         parse_json=False,
-        use_http_response=True,
     )
 
 
@@ -240,7 +238,7 @@ async def test_get_commit_with_url_success(
     assert response == expected_response
 
     gitlab_client_mock.aget.assert_called_once_with(
-        path=expected_path, params={}, parse_json=False, use_http_response=True
+        path=expected_path, params={}, parse_json=False
     )
 
 
@@ -444,7 +442,6 @@ async def test_list_commit(
         path=f"/api/v4/projects/{expected_project_id}/repository/commits",
         params=expected_params,
         parse_json=False,
-        use_http_response=True,
     )
     result_data = json.loads(result)
     assert "commits" in result_data
@@ -500,7 +497,6 @@ async def test_list_commits_success(gitlab_client_mock, metadata):
             "first_parent": True,
         },
         parse_json=False,
-        use_http_response=True,
     )
 
 
@@ -519,7 +515,6 @@ async def test_list_commits_error(gitlab_client_mock, metadata):
         path="/api/v4/projects/999/repository/commits",
         params={},
         parse_json=False,
-        use_http_response=True,
     )
 
 
@@ -575,7 +570,6 @@ async def test_get_commit_diff(gitlab_client_mock, metadata):
     gitlab_client_mock.aget.assert_called_once_with(
         path="/api/v4/projects/24/repository/commits/c34bb66f7a5e3a45b5e2d70edd9be12d64855cd6/diff",
         parse_json=False,
-        use_http_response=True,
     )
 
 
@@ -593,7 +587,6 @@ async def test_get_commit_diff_error(gitlab_client_mock, metadata):
     gitlab_client_mock.aget.assert_called_once_with(
         path="/api/v4/projects/24/repository/commits/nonexistent/diff",
         parse_json=False,
-        use_http_response=True,
     )
 
 
@@ -647,7 +640,7 @@ async def test_get_commit_diff_with_url_success(
     assert response == expected_response
 
     gitlab_client_mock.aget.assert_called_once_with(
-        path=expected_path, parse_json=False, use_http_response=True
+        path=expected_path, parse_json=False
     )
 
 
@@ -729,7 +722,6 @@ async def test_get_commit_comments(gitlab_client_mock, metadata):
     gitlab_client_mock.aget.assert_called_once_with(
         path="/api/v4/projects/24/repository/commits/c34bb66f7a5e3a45b5e2d70edd9be12d64855cd6/comments",
         parse_json=False,
-        use_http_response=True,
     )
 
 
@@ -747,7 +739,6 @@ async def test_get_commit_comments_error(gitlab_client_mock, metadata):
     gitlab_client_mock.aget.assert_called_once_with(
         path="/api/v4/projects/24/repository/commits/nonexistent/comments",
         parse_json=False,
-        use_http_response=True,
     )
 
 
@@ -796,7 +787,7 @@ async def test_get_commit_comments_with_url_success(
     assert response == expected_response
 
     gitlab_client_mock.aget.assert_called_once_with(
-        path=expected_path, parse_json=False, use_http_response=True
+        path=expected_path, parse_json=False
     )
 
 
@@ -869,7 +860,6 @@ async def test_create_commit(gitlab_client_mock, metadata, commit_data):
     gitlab_client_mock.apost.assert_called_once_with(
         path="/api/v4/projects/24/repository/commits",
         body=json.dumps(expected_params),
-        use_http_response=True,
     )
 
 
@@ -926,7 +916,7 @@ async def test_create_commit_with_url_success(
     assert response == expected_response
 
     gitlab_client_mock.apost.assert_called_once_with(
-        path=expected_path, body=json.dumps(expected_params), use_http_response=True
+        path=expected_path, body=json.dumps(expected_params)
     )
 
 
@@ -1022,7 +1012,6 @@ async def test_create_commit_with_all_optional_params(
     gitlab_client_mock.apost.assert_called_once_with(
         path="/api/v4/projects/24/repository/commits",
         body=json.dumps(expected_params),
-        use_http_response=True,
     )
 
 
@@ -1086,7 +1075,6 @@ async def test_create_commit_with_multiple_action_types(
     gitlab_client_mock.apost.assert_called_once_with(
         path="/api/v4/projects/24/repository/commits",
         body=json.dumps(expected_params),
-        use_http_response=True,
     )
 
 
@@ -1121,7 +1109,6 @@ async def test_create_commit_exception(gitlab_client_mock, metadata):
             '"actions": [{"action": "create", "file_path": "test.txt", '
             '"content": "This is a test file"}]}'
         ),
-        use_http_response=True,
     )
 
 
@@ -1180,18 +1167,15 @@ async def test_create_commit_with_partial_edit(
     assert gitlab_client_mock.aget.call_count == 2
     gitlab_client_mock.aget.assert_any_call(
         "/api/v4/projects/24/repository/branches/main",
-        use_http_response=True,
     )
     gitlab_client_mock.aget.assert_any_call(
         "/api/v4/projects/24/repository/files/README.md",
         params={"ref": "main"},
-        use_http_response=True,
     )
 
     gitlab_client_mock.apost.assert_called_once_with(
         path="/api/v4/projects/24/repository/commits",
         body=json.dumps(expected_params),
-        use_http_response=True,
     )
 
 
@@ -1228,12 +1212,10 @@ async def test_create_commit_with_partial_edit_not_found(
     # Verify it fetched branch info and file content
     gitlab_client_mock.aget.assert_any_call(
         f"/api/v4/projects/24/repository/branches/main",
-        use_http_response=True,
     )
     gitlab_client_mock.aget.assert_any_call(
         f"/api/v4/projects/24/repository/files/README.md",
         params={"ref": "main"},
-        use_http_response=True,
     )
 
     gitlab_client_mock.apost.assert_not_called()
@@ -1270,12 +1252,10 @@ async def test_create_commit_with_partial_edit_error(gitlab_client_mock, metadat
 
     gitlab_client_mock.aget.assert_any_call(
         f"/api/v4/projects/24/repository/branches/main",
-        use_http_response=True,
     )
     gitlab_client_mock.aget.assert_any_call(
         f"/api/v4/projects/24/repository/files/README.md",
         params={"ref": "main"},
-        use_http_response=True,
     )
 
     gitlab_client_mock.apost.assert_not_called()
@@ -1444,7 +1424,6 @@ async def test_get_commit_diff_with_diff_exclusion_policy_enabled(
     gitlab_client_mock.aget.assert_called_once_with(
         path="/api/v4/projects/24/repository/commits/c34bb66f7a5e3a45b5e2d70edd9be12d64855cd6/diff",
         parse_json=False,
-        use_http_response=True,
     )
 
 
@@ -1497,7 +1476,6 @@ async def test_get_commit_diff_with_no_excluded_files(
     gitlab_client_mock.aget.assert_called_once_with(
         path="/api/v4/projects/24/repository/commits/c34bb66f7a5e3a45b5e2d70edd9be12d64855cd6/diff",
         parse_json=False,
-        use_http_response=True,
     )
 
 
@@ -1711,7 +1689,6 @@ async def test_get_file_content_failure_logs_and_raises(gitlab_client_mock, meta
     gitlab_client_mock.aget.assert_awaited_once_with(
         "/api/v4/projects/24/repository/files/README.md",
         params={"ref": "main"},
-        use_http_response=True,
     )
 
 
@@ -1761,7 +1738,6 @@ async def test_create_commit_nonexistent_branch_uses_default_branch(
     assert gitlab_client_mock.aget.call_count == 2
     gitlab_client_mock.aget.assert_any_call(
         "/api/v4/projects/24/repository/branches/nonexistent-branch",
-        use_http_response=True,
     )
     gitlab_client_mock.aget.assert_any_call("/api/v4/projects/24")
 

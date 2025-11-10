@@ -286,7 +286,6 @@ class ListIssues(IssueBaseTool):
                 path=f"/api/v4/projects/{project_id}/issues",
                 params=params,
                 parse_json=False,
-                use_http_response=True,
             )
 
             if not response.is_success():
@@ -338,7 +337,6 @@ class GetIssue(IssueBaseTool):
             response = await self.gitlab_client.aget(
                 path=f"/api/v4/projects/{project_id}/issues/{issue_iid}",
                 parse_json=False,
-                use_http_response=True,
             )
 
             if not response.is_success():
@@ -427,7 +425,6 @@ class UpdateIssue(IssueBaseTool):
             response = await self.gitlab_client.aput(
                 path=f"/api/v4/projects/{project_id}/issues/{issue_iid}",
                 body=json.dumps(data),
-                use_http_response=True,
             )
 
             if not response.is_success():
@@ -559,7 +556,6 @@ class ListIssueNotes(IssueBaseTool):
                 path=f"/api/v4/projects/{project_id}/issues/{issue_iid}/notes",
                 params=params,
                 parse_json=False,
-                use_http_response=True,
             )
 
             if not response.is_success():
@@ -617,7 +613,6 @@ class GetIssueNote(IssueBaseTool):
             response = await self.gitlab_client.aget(
                 path=f"/api/v4/projects/{project_id}/issues/{issue_iid}/notes/{note_id}",
                 parse_json=False,
-                use_http_response=True,
             )
 
             if not response.is_success():

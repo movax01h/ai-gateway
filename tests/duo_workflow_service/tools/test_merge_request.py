@@ -219,7 +219,6 @@ async def test_create_merge_request(gitlab_client_mock, metadata):
     gitlab_client_mock.apost.assert_called_once_with(
         path="/api/v4/projects/1/merge_requests",
         body=json.dumps(expected_data),
-        use_http_response=True,
     )
 
 
@@ -290,7 +289,6 @@ async def test_create_merge_request_with_url_success(
                 "title": "Test Merge Request",
             }
         ),
-        use_http_response=True,
     )
 
 
@@ -385,7 +383,6 @@ async def test_create_merge_request_with_labels(gitlab_client_mock, metadata):
     gitlab_client_mock.apost.assert_called_once_with(
         path="/api/v4/projects/1/merge_requests",
         body=json.dumps(expected_data),
-        use_http_response=True,
     )
 
 
@@ -436,7 +433,6 @@ async def test_create_merge_request_minimal_params(gitlab_client_mock, metadata)
     gitlab_client_mock.apost.assert_called_once_with(
         path="/api/v4/projects/1/merge_requests",
         body=json.dumps(expected_data),
-        use_http_response=True,
     )
 
 
@@ -471,7 +467,6 @@ async def test_create_merge_request_with_server_error(gitlab_client_mock, metada
     gitlab_client_mock.apost.assert_called_once_with(
         path="/api/v4/projects/1/merge_requests",
         body=json.dumps(expected_data),
-        use_http_response=True,
     )
 
 
@@ -507,7 +502,6 @@ async def test_get_merge_request(gitlab_client_mock, metadata):
     gitlab_client_mock.aget.assert_called_once_with(
         path="/api/v4/projects/1/merge_requests/123",
         parse_json=False,
-        use_http_response=True,
     )
 
 
@@ -551,7 +545,7 @@ async def test_get_merge_request_with_url_success(
     assert response == expected_response
 
     gitlab_client_mock.aget.assert_called_once_with(
-        path=expected_path, parse_json=False, use_http_response=True
+        path=expected_path, parse_json=False
     )
 
 
@@ -630,7 +624,6 @@ async def test_list_merge_request_diffs(gitlab_client_mock, metadata):
     gitlab_client_mock.aget.assert_called_once_with(
         path="/api/v4/projects/1/merge_requests/123/diffs",
         parse_json=False,
-        use_http_response=True,
     )
 
 
@@ -673,7 +666,7 @@ async def test_list_merge_request_diffs_with_url_success(
     assert response == expected_response
 
     gitlab_client_mock.aget.assert_called_once_with(
-        path=expected_path, parse_json=False, use_http_response=True
+        path=expected_path, parse_json=False
     )
 
 
@@ -723,7 +716,6 @@ async def test_create_merge_request_note(gitlab_client_mock, metadata):
     gitlab_client_mock.apost.assert_called_once_with(
         path="/api/v4/projects/1/merge_requests/123/notes",
         body='{"body": "Test note"}',
-        use_http_response=True,
     )
 
 
@@ -786,7 +778,6 @@ async def test_create_merge_request_note_with_url_success(
     gitlab_client_mock.apost.assert_called_once_with(
         path=expected_path,
         body=json.dumps({"body": "Test note"}),
-        use_http_response=True,
     )
 
 
@@ -894,7 +885,6 @@ async def test_create_merge_request_note_allows_regular_notes(
     gitlab_client_mock.apost.assert_called_once_with(
         path="/api/v4/projects/1/merge_requests/123/notes",
         body=json.dumps({"body": note}),
-        use_http_response=True,
     )
 
 
@@ -918,7 +908,6 @@ async def test_list_all_merge_request_notes(gitlab_client_mock, metadata):
     gitlab_client_mock.aget.assert_called_once_with(
         path="/api/v4/projects/1/merge_requests/123/notes",
         parse_json=False,
-        use_http_response=True,
     )
 
 
@@ -964,7 +953,7 @@ async def test_list_all_merge_request_notes_with_url_success(
     assert response == expected_response
 
     gitlab_client_mock.aget.assert_called_once_with(
-        path=expected_path, parse_json=False, use_http_response=True
+        path=expected_path, parse_json=False
     )
 
 
@@ -1043,7 +1032,6 @@ async def test_update_merge_request_with_url_success(
                 "description": "This is an updated test merge request",
             }
         ),
-        use_http_response=True,
     )
 
 
@@ -1101,7 +1089,6 @@ async def test_update_merge_request(gitlab_client_mock, metadata):
                 "title": "Updated MR",
             }
         ),
-        use_http_response=True,
     )
 
 
@@ -1138,7 +1125,6 @@ async def test_update_merge_request_with_labels(gitlab_client_mock, metadata):
                 "labels": "bug,urgent,high-priority",
             }
         ),
-        use_http_response=True,
     )
 
 
@@ -1167,7 +1153,6 @@ async def test_update_merge_request_http_error_status_code(
     gitlab_client_mock.aput.assert_called_once_with(
         path="/api/v4/projects/1/merge_requests/999",
         body=json.dumps({"title": "Updated MR"}),
-        use_http_response=True,
     )
 
 
@@ -1503,7 +1488,6 @@ async def test_list_merge_request_diffs_with_diff_exclusion_policy_enabled(
     gitlab_client_mock.aget.assert_called_once_with(
         path="/api/v4/projects/1/merge_requests/123/diffs",
         parse_json=False,
-        use_http_response=True,
     )
 
 
@@ -1554,7 +1538,6 @@ async def test_list_merge_request_diffs_with_no_excluded_files(
     gitlab_client_mock.aget.assert_called_once_with(
         path="/api/v4/projects/1/merge_requests/123/diffs",
         parse_json=False,
-        use_http_response=True,
     )
 
 
@@ -1583,7 +1566,6 @@ async def test_list_merge_request_basic(gitlab_client_mock, metadata):
         path="/api/v4/projects/1/merge_requests",
         params={},
         parse_json=False,
-        use_http_response=True,
     )
 
 
@@ -1624,7 +1606,6 @@ async def test_list_merge_request_with_filters(gitlab_client_mock, metadata):
         path="/api/v4/projects/1/merge_requests",
         params=expected_params,
         parse_json=False,
-        use_http_response=True,
     )
 
 
@@ -1662,7 +1643,7 @@ async def test_list_merge_request_with_url_success(
     assert response == expected_response
 
     gitlab_client_mock.aget.assert_called_once_with(
-        path=expected_path, params={}, parse_json=False, use_http_response=True
+        path=expected_path, params={}, parse_json=False
     )
 
 

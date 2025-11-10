@@ -119,7 +119,6 @@ class CreateMergeRequest(DuoBaseTool):
             response = await self.gitlab_client.apost(
                 path=f"/api/v4/projects/{project_id}/merge_requests",
                 body=json.dumps(data),
-                use_http_response=True,
             )
 
             if not response.is_success():
@@ -178,7 +177,6 @@ class GetMergeRequest(DuoBaseTool):
                 path=f"/api/v4/projects/{validation_result.project_id}/merge_requests/"
                 f"{validation_result.merge_request_iid}",
                 parse_json=False,
-                use_http_response=True,
             )
 
             if not response.is_success():
@@ -235,7 +233,6 @@ class ListMergeRequestDiffs(DuoBaseTool):
                 path=f"/api/v4/projects/{validation_result.project_id}/merge_requests/"
                 f"{validation_result.merge_request_iid}/diffs",
                 parse_json=False,
-                use_http_response=True,
             )
 
             if not response.is_success():
@@ -342,7 +339,6 @@ They are commands that are on their own line and start with a backslash. Example
                         "body": body,
                     },
                 ),
-                use_http_response=True,
             )
 
             if not response.is_success():
@@ -399,7 +395,6 @@ class ListAllMergeRequestNotes(DuoBaseTool):
                 path=f"/api/v4/projects/{validation_result.project_id}/merge_requests/"
                 f"{validation_result.merge_request_iid}/notes",
                 parse_json=False,
-                use_http_response=True,
             )
 
             if not response.is_success():
@@ -582,7 +577,6 @@ class ListMergeRequest(DuoBaseTool):
                 path=f"/api/v4/projects/{project_id}/merge_requests",
                 params=params,
                 parse_json=False,
-                use_http_response=True,
             )
 
             if not response.is_success():
@@ -665,7 +659,6 @@ For example:
                 path=f"/api/v4/projects/{validation_result.project_id}/merge_requests/"
                 f"{validation_result.merge_request_iid}",
                 body=json.dumps(data),
-                use_http_response=True,
             )
 
             if not response.is_success():

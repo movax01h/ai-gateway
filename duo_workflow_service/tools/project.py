@@ -21,7 +21,6 @@ class GetProject(DuoBaseTool):
         response = await self.gitlab_client.aget(
             path=f"/api/v4/projects/{project_id}",
             parse_json=False,
-            use_http_response=True,
         )
 
         if not response.is_success():

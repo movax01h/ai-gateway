@@ -354,7 +354,6 @@ class ListEpics(EpicBaseTool):
                 path=f"/api/v4/groups/{validation_result.group_id}/epics",
                 params=params,
                 parse_json=False,
-                use_http_response=True,
             )
 
             if not response.is_success():
@@ -407,7 +406,6 @@ class GetEpic(EpicBaseTool):
             response = await self.gitlab_client.aget(
                 path=f"/api/v4/groups/{validation_result.group_id}/epics/{validation_result.epic_iid}",
                 parse_json=False,
-                use_http_response=True,
             )
 
             if not response.is_success():
@@ -472,7 +470,6 @@ For example:
             response = await self.gitlab_client.aput(
                 path=f"/api/v4/groups/{validation_result.group_id}/epics/{validation_result.epic_iid}",
                 body=json.dumps(data),
-                use_http_response=True,
             )
 
             if not response.is_success():

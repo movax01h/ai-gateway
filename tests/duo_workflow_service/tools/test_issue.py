@@ -441,7 +441,6 @@ async def test_list_issues(
         path="/api/v4/projects/1/issues",
         params=expected_params,
         parse_json=False,
-        use_http_response=True,
     )
 
 
@@ -495,7 +494,6 @@ async def test_list_issues_with_url_success(
         path=expected_path,
         params={"state": "opened"},
         parse_json=False,
-        use_http_response=True,
     )
 
 
@@ -609,7 +607,7 @@ async def test_get_issue(issue_tool_setup):
     assert response == expected_response
 
     gitlab_client_mock.aget.assert_called_once_with(
-        path="/api/v4/projects/1/issues/123", parse_json=False, use_http_response=True
+        path="/api/v4/projects/1/issues/123", parse_json=False
     )
 
 
@@ -678,7 +676,7 @@ async def test_get_issue_with_url_success(
     assert response == expected_response
 
     gitlab_client_mock.aget.assert_called_once_with(
-        path=expected_path, parse_json=False, use_http_response=True
+        path=expected_path, parse_json=False
     )
 
 
@@ -950,7 +948,6 @@ async def test_update_issue(gitlab_client_mock, metadata):
                 "state_event": "close",
             }
         ),
-        use_http_response=True,
     )
 
 
@@ -1000,7 +997,6 @@ async def test_update_issue_with_epic_id(gitlab_client_mock, metadata):
                 "epic_id": 42,
             }
         ),
-        use_http_response=True,
     )
 
 
@@ -1027,7 +1023,6 @@ async def test_update_issue_http_error_status_code(gitlab_client_mock, metadata)
     gitlab_client_mock.aput.assert_called_once_with(
         path="/api/v4/projects/1/issues/999",
         body=json.dumps({"title": "Updated Issue"}),
-        use_http_response=True,
     )
 
 
@@ -1189,7 +1184,6 @@ async def test_list_issue_notes(
         path="/api/v4/projects/1/issues/123/notes",
         params=expected_params,
         parse_json=False,
-        use_http_response=True,
     )
 
 
@@ -1246,7 +1240,6 @@ async def test_get_issue_note(issue_tool_setup, note_data):
     gitlab_client_mock.aget.assert_called_once_with(
         path="/api/v4/projects/1/issues/123/notes/1",
         parse_json=False,
-        use_http_response=True,
     )
 
 
@@ -1321,7 +1314,6 @@ async def test_update_issue_with_url_success(
                 "description": "This is an updated test issue",
             }
         ),
-        use_http_response=True,
     )
 
 
@@ -1473,7 +1465,6 @@ async def test_list_issue_notes_with_url_success(
         path=expected_path,
         params={"sort": "asc"},
         parse_json=False,
-        use_http_response=True,
     )
 
 
@@ -1555,7 +1546,6 @@ async def test_get_issue_note_with_url_success(
     gitlab_client_mock.aget.assert_called_once_with(
         path=expected_path,
         parse_json=False,
-        use_http_response=True,
     )
 
 

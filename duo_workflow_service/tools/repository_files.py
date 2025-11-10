@@ -135,7 +135,6 @@ class GetRepositoryFile(RepositoryFileBaseTool):
                 path=f"/api/v4/projects/{project_id}/repository/files/{encoded_file_path}",
                 params={"ref": ref},
                 parse_json=True,
-                use_http_response=True,
             )
 
             if not response.is_success():
@@ -237,7 +236,6 @@ class ListRepositoryTree(DuoBaseTool):
             response = await self.gitlab_client.aget(
                 path=f"/api/v4/projects/{project_id}/repository/tree",
                 params=params,
-                use_http_response=True,
             )
 
             if not response.is_success():

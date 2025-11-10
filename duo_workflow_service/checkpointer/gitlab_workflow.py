@@ -579,7 +579,6 @@ class GitLabWorkflow(
                 response = await self._client.aget(
                     path=endpoint,
                     object_hook=checkpoint_decoder,
-                    use_http_response=True,
                 )
 
                 if not response.is_success():
@@ -611,7 +610,6 @@ class GitLabWorkflow(
                 response = await self._client.aget(
                     path=endpoint,
                     object_hook=checkpoint_decoder,
-                    use_http_response=True,
                 )
 
                 if not response.is_success():
@@ -653,7 +651,6 @@ class GitLabWorkflow(
             response = await self._client.aget(
                 path=endpoint,
                 object_hook=checkpoint_decoder,
-                use_http_response=True,
             )
 
             if not response.is_success():
@@ -718,7 +715,6 @@ class GitLabWorkflow(
         ):
             response = await self._client.apost(
                 path=endpoint,
-                use_http_response=True,
                 body=json.dumps(payload, cls=CustomEncoder),
             )
             duo_workflow_metrics.count_checkpoints(

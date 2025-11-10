@@ -92,7 +92,6 @@ class BaseAuditEventsTool(DuoBaseTool):
                 path=api_path,
                 params=params,
                 parse_json=True,
-                use_http_response=True,
             )
 
             if not response.is_success():

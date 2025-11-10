@@ -137,7 +137,7 @@ class WorkItemBaseTool(DuoBaseTool):
             try:
                 endpoint = "projects" if parent_type == "project" else "groups"
                 data = await self.gitlab_client.aget(
-                    f"/api/v4/{endpoint}/{identifier_str}", use_http_response=True
+                    f"/api/v4/{endpoint}/{identifier_str}"
                 )
 
                 if not data.is_success():

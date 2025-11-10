@@ -31,7 +31,6 @@ class GitLabStatusUpdater:
         response = await self._client.aget(
             path=f"{self.workflow_api_path}/{workflow_id}",
             parse_json=True,
-            use_http_response=True,
         )
 
         if not response.is_success():
@@ -61,7 +60,6 @@ class GitLabStatusUpdater:
             path=f"{self.workflow_api_path}/{workflow_id}",
             body=json.dumps({"status_event": status_event.value}),
             parse_json=True,
-            use_http_response=True,
         )
 
         if not isinstance(result, GitLabHttpResponse):

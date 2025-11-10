@@ -21,16 +21,13 @@ from duo_workflow_service.tools.search import (
 
 
 def create_mock_aget(response_data):
-    """Create a mock aget function that returns GitLabHttpResponse when use_http_response=True."""
+    """Create a mock aget function that returns GitLabHttpResponse."""
 
     async def mock_aget(*args, **kwargs):
-        if kwargs.get("use_http_response", False):
-            return GitLabHttpResponse(
-                status_code=200,
-                body=response_data,
-            )
-        else:
-            return response_data
+        return GitLabHttpResponse(
+            status_code=200,
+            body=response_data,
+        )
 
     return mock_aget
 
@@ -154,14 +151,12 @@ class TestSearch:
             gitlab_client_mock.aget.assert_called_once_with(
                 path=f"/api/v4/{search_type}/1/search",
                 params=expected_params,
-                use_http_response=True,
                 parse_json=True,
             )
         else:
             gitlab_client_mock.aget.assert_called_once_with(
                 path=f"/api/v4/{search_type}/1/search",
                 params=expected_params,
-                use_http_response=True,
             )
 
     @pytest.mark.asyncio
@@ -216,14 +211,12 @@ class TestSearch:
             gitlab_client_mock.aget.assert_called_once_with(
                 path=f"/api/v4/{search_type}/1/search",
                 params=expected_params,
-                use_http_response=True,
                 parse_json=True,
             )
         else:
             gitlab_client_mock.aget.assert_called_once_with(
                 path=f"/api/v4/{search_type}/1/search",
                 params=expected_params,
-                use_http_response=True,
             )
 
     @pytest.mark.asyncio
@@ -282,7 +275,6 @@ class TestSearch:
         gitlab_client_mock.aget.assert_called_once_with(
             path=f"/api/v4/groups/{search_params['id']}/search",
             params=expected_params,
-            use_http_response=True,
         )
 
     @pytest.mark.asyncio
@@ -310,7 +302,6 @@ class TestSearch:
         gitlab_client_mock.aget.assert_called_once_with(
             path="/api/v4/groups/789/search",
             params=expected_params,
-            use_http_response=True,
         )
 
 
@@ -693,6 +684,5 @@ class TestBlobSearchFileExclusion:
         gitlab_client_mock.aget.assert_called_once_with(
             path="/api/v4/projects/999/search",
             params={"scope": "blobs", "search": "test search", "ref": "main"},
-            use_http_response=True,
             parse_json=True,
         )

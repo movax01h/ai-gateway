@@ -45,7 +45,6 @@ class PostSastFpAnalysisToGitlab(DuoBaseTool):
             response = await self.gitlab_client.apost(
                 path=f"/api/v4/vulnerabilities/{vulnerability_id}/flags/ai_detection",
                 body=json.dumps(data),
-                use_http_response=True,
             )
 
             if not response.is_success():

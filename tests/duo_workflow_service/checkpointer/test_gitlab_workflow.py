@@ -239,7 +239,6 @@ async def test_workflow_event_tracking_for_cancelled_workflow(
         path=f"/api/v4/ai/duo_workflows/workflows/{workflow_id}",
         body=json.dumps({"status_event": WorkflowStatusEventEnum.START.value}),
         parse_json=True,
-        use_http_response=True,
     )
 
     mock_duo_workflow_metrics.count_agent_platform_session_start.assert_called_once_with(
@@ -328,7 +327,6 @@ async def test_workflow_context_manager_success(
         path=f"/api/v4/ai/duo_workflows/workflows/{workflow_id}",
         body=json.dumps({"status_event": WorkflowStatusEventEnum.START.value}),
         parse_json=True,
-        use_http_response=True,
     )
 
     mock_duo_workflow_metrics.count_agent_platform_session_start.assert_called_once_with(
@@ -683,7 +681,6 @@ async def test_workflow_context_manager_retry_success(
         path=f"/api/v4/ai/duo_workflows/workflows/{workflow_id}",
         body=json.dumps({"status_event": WorkflowStatusEventEnum.RETRY.value}),
         parse_json=True,
-        use_http_response=True,
     )
 
     assert internal_event_client.track_event.call_count == 2
@@ -792,7 +789,6 @@ async def test_workflow_context_manager_error(
         path=f"/api/v4/ai/duo_workflows/workflows/{workflow_id}",
         body=json.dumps({"status_event": WorkflowStatusEventEnum.DROP.value}),
         parse_json=True,
-        use_http_response=True,
     )
 
     mock_duo_workflow_metrics.count_agent_platform_session_start.assert_called_once_with(
@@ -860,7 +856,6 @@ async def test_aget_tuple(
     http_client.aget.assert_called_once_with(
         path=f"/api/v4/ai/duo_workflows/workflows/{workflow_id}/checkpoints",
         object_hook=checkpoint_decoder,
-        use_http_response=True,
     )
 
 
@@ -885,7 +880,6 @@ async def test_aget_tuple_when_config_has_no_checkpoint_id_and_checkpoints_prese
     http_client.aget.assert_called_once_with(
         path=f"/api/v4/ai/duo_workflows/workflows/{workflow_id}/checkpoints?per_page=1",
         object_hook=checkpoint_decoder,
-        use_http_response=True,
     )
 
 
@@ -923,7 +917,6 @@ async def test_aget_tuple_when_server_returns_non_success_response(
     gitlab_workflow._client.aget.assert_called_once_with(
         path=f"/api/v4/ai/duo_workflows/workflows/{workflow_id}/checkpoints?per_page=1",
         object_hook=checkpoint_decoder,
-        use_http_response=True,
     )
 
 
@@ -974,7 +967,6 @@ async def test_aput(
 
     http_client.apost.assert_called_once_with(
         path=f"/api/v4/ai/duo_workflows/workflows/{workflow_id}/checkpoints",
-        use_http_response=True,
         body=json.dumps(
             {
                 "thread_ts": checkpoint["id"],
@@ -990,7 +982,6 @@ async def test_aput(
         path=f"/api/v4/ai/duo_workflows/workflows/{workflow_id}",
         body=json.dumps({"status_event": WorkflowStatusEventEnum.FINISH.value}),
         parse_json=True,
-        use_http_response=True,
     )
 
     assert result == {
@@ -1123,7 +1114,6 @@ async def test_workflow_status_events(
         path=f"/api/v4/ai/duo_workflows/workflows/{workflow_id}",
         body=json.dumps({"status_event": expected_event.value}),
         parse_json=True,
-        use_http_response=True,
     )
     http_client.apatch.reset_mock()
 

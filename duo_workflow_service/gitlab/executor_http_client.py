@@ -29,7 +29,6 @@ class ExecutorGitLabHttpClient(GitlabHttpClient):
         path: str,
         method: str,
         parse_json: bool = True,
-        use_http_response: bool = False,
         data: Optional[str] = None,
         params: Optional[Dict[str, Any]] = None,
         object_hook: Union[Callable, None] = None,
@@ -38,28 +37,7 @@ class ExecutorGitLabHttpClient(GitlabHttpClient):
             query_string = urlencode(params)
             path = f"{path}?{query_string}"
 
-        if use_http_response:
-            action_response = await _execute_action_and_get_action_response(
-                {"outbox": self.outbox},
-                contract_pb2.Action(
-                    runHTTPRequest=contract_pb2.RunHTTPRequest(
-                        path=path, method=method, body=data
-                    )
-                ),
-            )
-            body = self._parse_response(
-                action_response.httpResponse.body,
-                parse_json=parse_json,
-                object_hook=object_hook,
-            )
-            return GitLabHttpResponse(
-                status_code=action_response.httpResponse.statusCode,
-                body=body,
-                headers=action_response.httpResponse.headers,
-            )
-
-        # The following code will be removed once all tools use the new http response
-        response = await _execute_action(
+        action_response = await _execute_action_and_get_action_response(
             {"outbox": self.outbox},
             contract_pb2.Action(
                 runHTTPRequest=contract_pb2.RunHTTPRequest(
@@ -67,8 +45,15 @@ class ExecutorGitLabHttpClient(GitlabHttpClient):
                 )
             ),
         )
-        return self._parse_response(
-            response, parse_json=parse_json, object_hook=object_hook
+        body = self._parse_response(
+            action_response.httpResponse.body,
+            parse_json=parse_json,
+            object_hook=object_hook,
+        )
+        return GitLabHttpResponse(
+            status_code=action_response.httpResponse.statusCode,
+            body=body,
+            headers=action_response.httpResponse.headers,
         )
 
     async def graphql(

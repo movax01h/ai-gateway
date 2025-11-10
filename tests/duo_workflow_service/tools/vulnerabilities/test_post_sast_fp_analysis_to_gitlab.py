@@ -63,7 +63,6 @@ async def test_post_sast_fp_analysis_success(
     gitlab_client_mock.apost.assert_called_once()
     call_args = gitlab_client_mock.apost.call_args
     assert call_args[1]["path"] == "/api/v4/vulnerabilities/567/flags/ai_detection"
-    assert call_args[1]["use_http_response"] is True
 
     body = json.loads(call_args[1]["body"])
     assert body["confidence_score"] == 85.0

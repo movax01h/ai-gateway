@@ -56,11 +56,9 @@ async def test_get_pipeline_errors(gitlab_client_mock, metadata):
     assert json.loads(response) == expected_response
 
     assert gitlab_client_mock.aget.call_args_list == [
-        call(path="/api/v4/projects/1/merge_requests/1", use_http_response=True),
-        call(
-            path="/api/v4/projects/1/merge_requests/1/pipelines", use_http_response=True
-        ),
-        call(path="/api/v4/projects/1/pipelines/10/jobs", use_http_response=True),
+        call(path="/api/v4/projects/1/merge_requests/1"),
+        call(path="/api/v4/projects/1/merge_requests/1/pipelines"),
+        call(path="/api/v4/projects/1/pipelines/10/jobs"),
         call(
             path="/api/v4/projects/1/jobs/102/trace",
             parse_json=False,
@@ -87,7 +85,7 @@ async def test_get_pipeline_errors_merge_request_not_found(
     assert "Merge request with iid 1 not found" in response_json["error"]
 
     gitlab_client_mock.aget.assert_called_once_with(
-        path="/api/v4/projects/1/merge_requests/1", use_http_response=True
+        path="/api/v4/projects/1/merge_requests/1"
     )
 
 
@@ -108,10 +106,8 @@ async def test_get_pipeline_errors_pipelines_not_found(gitlab_client_mock, metad
     assert "No pipelines found for merge request iid 1" in response_json["error"]
 
     assert gitlab_client_mock.aget.call_args_list == [
-        call(path="/api/v4/projects/1/merge_requests/1", use_http_response=True),
-        call(
-            path="/api/v4/projects/1/merge_requests/1/pipelines", use_http_response=True
-        ),
+        call(path="/api/v4/projects/1/merge_requests/1"),
+        call(path="/api/v4/projects/1/merge_requests/1/pipelines"),
     ]
 
 
@@ -170,15 +166,6 @@ async def test_get_pipeline_errors_with_url_success(
         }
     )
     assert response == expected_response
-
-    # Check that the first call uses use_http_response=True, but trace calls don't
-    assert len(gitlab_client_mock.aget.call_args_list) >= 4
-    # First three calls should use use_http_response=True
-    assert gitlab_client_mock.aget.call_args_list[0][1]["use_http_response"] == True
-    assert gitlab_client_mock.aget.call_args_list[1][1]["use_http_response"] == True
-    assert gitlab_client_mock.aget.call_args_list[2][1]["use_http_response"] == True
-    # Trace call should not use use_http_response=True
-    assert "use_http_response" not in gitlab_client_mock.aget.call_args_list[3][1]
 
 
 @pytest.mark.asyncio
@@ -308,11 +295,9 @@ async def test_get_pipeline_errors_jobs_error(gitlab_client_mock, metadata):
     assert "Failed to fetch jobs for pipeline 10" in response_json["error"]
 
     assert gitlab_client_mock.aget.call_args_list == [
-        call(path="/api/v4/projects/1/merge_requests/1", use_http_response=True),
-        call(
-            path="/api/v4/projects/1/merge_requests/1/pipelines", use_http_response=True
-        ),
-        call(path="/api/v4/projects/1/pipelines/10/jobs", use_http_response=True),
+        call(path="/api/v4/projects/1/merge_requests/1"),
+        call(path="/api/v4/projects/1/merge_requests/1/pipelines"),
+        call(path="/api/v4/projects/1/pipelines/10/jobs"),
     ]
 
 
@@ -350,11 +335,9 @@ async def test_get_pipeline_errors_trace_exception(gitlab_client_mock, metadata)
     assert "Error fetching trace: Trace error" in response_json["traces"]
 
     assert gitlab_client_mock.aget.call_args_list == [
-        call(path="/api/v4/projects/1/merge_requests/1", use_http_response=True),
-        call(
-            path="/api/v4/projects/1/merge_requests/1/pipelines", use_http_response=True
-        ),
-        call(path="/api/v4/projects/1/pipelines/10/jobs", use_http_response=True),
+        call(path="/api/v4/projects/1/merge_requests/1"),
+        call(path="/api/v4/projects/1/merge_requests/1/pipelines"),
+        call(path="/api/v4/projects/1/pipelines/10/jobs"),
         call(path="/api/v4/projects/1/jobs/102/trace", parse_json=False),
     ]
 
@@ -375,7 +358,7 @@ async def test_get_pipeline_errors_network_exception(gitlab_client_mock, metadat
     assert "Network connection error" in response_json["error"]
 
     gitlab_client_mock.aget.assert_called_once_with(
-        path="/api/v4/projects/1/merge_requests/1", use_http_response=True
+        path="/api/v4/projects/1/merge_requests/1"
     )
 
 
@@ -437,7 +420,6 @@ async def test_get_pipeline_errors_with_pipeline_url_success(
     assert gitlab_client_mock.aget.call_args_list == [
         call(
             path=f"/api/v4/projects/{expected_project_id}/pipelines/{expected_pipeline_id}/jobs",
-            use_http_response=True,
         ),
         call(
             path=f"/api/v4/projects/{expected_project_id}/jobs/102/trace",
@@ -479,7 +461,6 @@ async def test_get_pipeline_errors_with_pipeline_url_no_failed_jobs(
 
     gitlab_client_mock.aget.assert_called_once_with(
         path="/api/v4/projects/namespace%2Fproject/pipelines/123/jobs",
-        use_http_response=True,
     )
 
 
@@ -505,7 +486,6 @@ async def test_get_pipeline_errors_with_pipeline_url_jobs_not_found(
 
     gitlab_client_mock.aget.assert_called_once_with(
         path="/api/v4/projects/namespace%2Fproject/pipelines/123/jobs",
-        use_http_response=True,
     )
 
 
@@ -543,7 +523,6 @@ async def test_get_pipeline_errors_with_pipeline_url_trace_error(
     assert gitlab_client_mock.aget.call_args_list == [
         call(
             path="/api/v4/projects/namespace%2Fproject/pipelines/123/jobs",
-            use_http_response=True,
         ),
         call(
             path="/api/v4/projects/namespace%2Fproject/jobs/101/trace", parse_json=False
@@ -625,7 +604,6 @@ async def test_get_pipeline_errors_with_pipeline_url_and_conflicting_params(
     assert gitlab_client_mock.aget.call_args_list == [
         call(
             path="/api/v4/projects/namespace%2Fproject/pipelines/123/jobs",
-            use_http_response=True,
         ),
         call(
             path="/api/v4/projects/namespace%2Fproject/jobs/101/trace", parse_json=False

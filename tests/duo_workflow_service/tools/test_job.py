@@ -62,7 +62,7 @@ async def test_get_job_logs_with_url_success(
     assert response == expected_response
 
     gitlab_client_mock.aget.assert_called_once_with(
-        path=expected_path, parse_json=False, use_http_response=True
+        path=expected_path, parse_json=False
     )
 
 
@@ -87,7 +87,7 @@ async def test_get_job_logs(gitlab_client_mock, metadata):
     assert json.loads(response) == expected_response
 
     gitlab_client_mock.aget.assert_called_once_with(
-        path="/api/v4/projects/1/jobs/1/trace", parse_json=False, use_http_response=True
+        path="/api/v4/projects/1/jobs/1/trace", parse_json=False
     )
 
 
@@ -110,7 +110,6 @@ async def test_get_job_logs_for_invalid_job(gitlab_client_mock, metadata):
     gitlab_client_mock.aget.assert_called_once_with(
         path="/api/v4/projects/1/jobs/123/trace",
         parse_json=False,
-        use_http_response=True,
     )
 
 
@@ -131,7 +130,6 @@ async def test_get_job_logs_empty_trace(gitlab_client_mock, metadata):
     gitlab_client_mock.aget.assert_called_once_with(
         path="/api/v4/projects/1/jobs/123/trace",
         parse_json=False,
-        use_http_response=True,
     )
 
 
@@ -250,5 +248,4 @@ async def test_get_job_logs_api_exception(gitlab_client_mock, metadata):
     gitlab_client_mock.aget.assert_called_once_with(
         path="/api/v4/projects/1/jobs/123/trace",
         parse_json=False,
-        use_http_response=True,
     )

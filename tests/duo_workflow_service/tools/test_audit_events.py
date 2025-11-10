@@ -140,7 +140,6 @@ async def test_list_instance_audit_events(
         path="/api/v4/audit_events",
         params={"per_page": 20, "page": 1},
         parse_json=True,
-        use_http_response=True,
     )
 
 
@@ -191,7 +190,6 @@ async def test_list_instance_audit_events_with_filters(
             "page": 1,
         },
         parse_json=True,
-        use_http_response=True,
     )
 
 
@@ -347,7 +345,6 @@ async def test_list_group_audit_events_with_id(
         path="/api/v4/groups/60/audit_events",
         params={"per_page": 20, "page": 1},
         parse_json=True,
-        use_http_response=True,
     )
 
 
@@ -386,7 +383,6 @@ async def test_list_group_audit_events_with_path(
         path="/api/v4/groups/gitlab-org/gitlab/audit_events",
         params={"per_page": 20, "page": 1},
         parse_json=True,
-        use_http_response=True,
     )
 
 
@@ -432,7 +428,6 @@ async def test_list_group_audit_events_with_filters(
             "page": 1,
         },
         parse_json=True,
-        use_http_response=True,
     )
 
 
@@ -519,7 +514,6 @@ async def test_list_project_audit_events(
         path="/api/v4/projects/7/audit_events",
         params={"per_page": 20, "page": 1},
         parse_json=True,
-        use_http_response=True,
     )
 
 
@@ -578,7 +572,6 @@ async def test_list_project_audit_events_with_url_success(
         path=expected_path,
         params={"per_page": 20, "page": 1},
         parse_json=True,
-        use_http_response=True,
     )
 
 
@@ -645,7 +638,6 @@ async def test_list_project_audit_events_with_filters(
             "page": 1,
         },
         parse_json=True,
-        use_http_response=True,
     )
 
 
