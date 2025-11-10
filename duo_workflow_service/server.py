@@ -476,8 +476,9 @@ class DuoWorkflowService(contract_pb2_grpc.DuoWorkflowServicer):
                         "source": __name__,
                     },
                 )
+            context.set_code(grpc.StatusCode.INTERNAL)
+            context.set_details(f"Something went wrong: {type(err).__name__}: {err}")
             await abort_workflow(workflow_task, err)
-            await context.abort(grpc.StatusCode.INTERNAL, "Something went wrong")
         finally:
             await workflow.cleanup(workflow_id)
             receive_events_task.cancel()
