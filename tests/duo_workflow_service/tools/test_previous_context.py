@@ -67,7 +67,6 @@ class TestGetSessionContext:
         gitlab_client.aget.assert_called_once_with(
             path="/api/v4/ai/duo_workflows/workflows/123/checkpoints?per_page=1",
             parse_json=True,
-            use_http_response=True,
         )
 
         parsed_result = json.loads(result)

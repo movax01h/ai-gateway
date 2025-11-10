@@ -192,9 +192,7 @@ class BuildReviewMergeRequestContext(DuoBaseTool):
             f"/api/v4/projects/{validation_result.project_id}/"
             f"merge_requests/{validation_result.merge_request_iid}"
         )
-        response = await self.gitlab_client.aget(
-            path, parse_json=False, use_http_response=True
-        )
+        response = await self.gitlab_client.aget(path, parse_json=False)
 
         if not response.is_success():
             logger.error(
@@ -209,9 +207,7 @@ class BuildReviewMergeRequestContext(DuoBaseTool):
             f"/api/v4/projects/{validation_result.project_id}/"
             f"merge_requests/{validation_result.merge_request_iid}/diffs"
         )
-        response = await self.gitlab_client.aget(
-            path, parse_json=False, use_http_response=True
-        )
+        response = await self.gitlab_client.aget(path, parse_json=False)
 
         if not response.is_success():
             logger.error(
@@ -257,7 +253,7 @@ class BuildReviewMergeRequestContext(DuoBaseTool):
         path = f"/api/v4/projects/{project_id}/repository/files/{encoded_path}"
 
         response = await self.gitlab_client.aget(
-            path, params={"ref": branch}, parse_json=False, use_http_response=True
+            path, params={"ref": branch}, parse_json=False
         )
 
         if not response.is_success():

@@ -47,7 +47,7 @@ def monkeypatch_execute_http_response_fixture(monkeypatch, mock_execute_http_res
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
-    "method, path, body, params, parse_json, use_http_response, mock_return_value, expected_result",
+    "method, path, body, params, parse_json, mock_return_value, expected_body",
     [
         (
             "GET",
@@ -55,7 +55,6 @@ def monkeypatch_execute_http_response_fixture(monkeypatch, mock_execute_http_res
             None,
             None,
             True,
-            False,
             '{"key": "value"}',
             {"key": "value"},
         ),
@@ -64,7 +63,6 @@ def monkeypatch_execute_http_response_fixture(monkeypatch, mock_execute_http_res
             "/api/v4/projects/1/jobs/102/trace",
             None,
             None,
-            False,
             False,
             "Non-JSON response",
             "Non-JSON response",
@@ -75,7 +73,6 @@ def monkeypatch_execute_http_response_fixture(monkeypatch, mock_execute_http_res
             None,
             {"per_page": 100},
             True,
-            False,
             '{"projects": []}',
             {"projects": []},
         ),
@@ -85,7 +82,6 @@ def monkeypatch_execute_http_response_fixture(monkeypatch, mock_execute_http_res
             '{ "test": 1 }',
             None,
             True,
-            False,
             '{"key": "value"}',
             {"key": "value"},
         ),
@@ -95,9 +91,8 @@ def monkeypatch_execute_http_response_fixture(monkeypatch, mock_execute_http_res
             '{ "test": 1 }',
             None,
             True,
-            True,
             '{"key": "value"}',
-            GitLabHttpResponse(status_code=200, body={"key": "value"}),
+            {"key": "value"},
         ),
         (
             "PATCH",
@@ -105,35 +100,27 @@ def monkeypatch_execute_http_response_fixture(monkeypatch, mock_execute_http_res
             '{ "test": 1 }',
             None,
             True,
-            True,
             '{"key": "value"}',
-            GitLabHttpResponse(status_code=200, body={"key": "value"}),
+            {"key": "value"},
         ),
     ],
 )
 async def test_executor_gitlab_http_client(
     client,
-    monkeypatch_execute_action,
     monkeypatch_execute_http_response,
     method,
     path,
     body,
     params,
     parse_json,
-    use_http_response,
     mock_return_value,
-    expected_result,
+    expected_body,
 ):
-    if use_http_response:
-        # When use_http_response=True, we need to mock _execute_action_and_get_action_response
-        # and return a proper ActionResponse object
-        action_response = contract_pb2.ActionResponse()
-        action_response.httpResponse.statusCode = 200
-        action_response.httpResponse.body = mock_return_value
-        monkeypatch_execute_http_response.return_value = action_response
-    else:
-        # When use_http_response=False, use the regular _execute_action mock
-        monkeypatch_execute_action.return_value = mock_return_value
+    # ExecutorGitLabHttpClient always returns GitLabHttpResponse
+    action_response = contract_pb2.ActionResponse()
+    action_response.httpResponse.statusCode = 200
+    action_response.httpResponse.body = mock_return_value
+    monkeypatch_execute_http_response.return_value = action_response
 
     expected_path = path
     if params:
@@ -147,32 +134,20 @@ async def test_executor_gitlab_http_client(
             path,
             params=params,
             parse_json=parse_json,
-            use_http_response=use_http_response,
         )
     elif method == "POST":
-        result = await client.apost(
-            path, body, parse_json=parse_json, use_http_response=use_http_response
-        )
+        result = await client.apost(path, body, parse_json=parse_json)
     elif method == "PUT":
-        result = await client.aput(
-            path, body, parse_json=parse_json, use_http_response=use_http_response
-        )
+        result = await client.aput(path, body, parse_json=parse_json)
     elif method == "PATCH":
-        result = await client.apatch(
-            path, body, parse_json=parse_json, use_http_response=use_http_response
-        )
+        result = await client.apatch(path, body, parse_json=parse_json)
     else:
         pytest.fail(f"Unexpected HTTP method: {method}")
         result = None
 
-    if use_http_response:
-        # When use_http_response=True, check the _execute_action_and_get_action_response mock
-        monkeypatch_execute_http_response.assert_called_once()
-        call_args = monkeypatch_execute_http_response.call_args[0]
-    else:
-        # When use_http_response=False, check the _execute_action mock
-        monkeypatch_execute_action.assert_called_once()
-        call_args = monkeypatch_execute_action.call_args[0]
+    # Verify the action was called correctly
+    monkeypatch_execute_http_response.assert_called_once()
+    call_args = monkeypatch_execute_http_response.call_args[0]
 
     assert "outbox" in call_args[0]
     assert call_args[0]["outbox"] == client.outbox
@@ -191,41 +166,46 @@ async def test_executor_gitlab_http_client(
     else:
         assert actual_body == body
 
-    if use_http_response:
-        # When use_http_response=True, we expect a GitLabHttpResponse object
-        assert isinstance(result, GitLabHttpResponse)
-        assert isinstance(expected_result, GitLabHttpResponse)
-        assert result.status_code == expected_result.status_code
-        assert result.body == expected_result.body
-    else:
-        # When use_http_response=False, we expect the raw data
-        assert result == expected_result
+    # ExecutorGitLabHttpClient always returns GitLabHttpResponse
+    assert isinstance(result, GitLabHttpResponse)
+    assert result.status_code == 200
+    assert result.body == expected_body
 
 
 @pytest.mark.asyncio
 async def test_executor_gitlab_http_client_json_decode_error(
     client,
-    monkeypatch_execute_action,
+    monkeypatch_execute_http_response,
 ):
     # Setup non-JSON response
     invalid_json = "This is not valid JSON"
-    monkeypatch_execute_action.return_value = invalid_json
+
+    action_response = contract_pb2.ActionResponse()
+    action_response.httpResponse.statusCode = 200
+    action_response.httpResponse.body = invalid_json
+    monkeypatch_execute_http_response.return_value = action_response
 
     # Call with parse_json=True to trigger JSON decode error
     result = await client.aget("/api/v4/test", parse_json=True)
 
-    # Should return the raw string when JSON parsing fails
-    assert result == {}
+    # Should return empty dict when JSON parsing fails
+    assert isinstance(result, GitLabHttpResponse)
+    assert result.status_code == 200
+    assert result.body == {}
 
 
 @pytest.mark.asyncio
 async def test_executor_gitlab_http_client_with_object_hook(
     client,
-    monkeypatch_execute_action,
+    monkeypatch_execute_http_response,
 ):
     # Setup a JSON string that will be decoded
     json_str = '{"key": "value", "nested": {"id": 1}}'
-    monkeypatch_execute_action.return_value = json_str
+
+    action_response = contract_pb2.ActionResponse()
+    action_response.httpResponse.statusCode = 200
+    action_response.httpResponse.body = json_str
+    monkeypatch_execute_http_response.return_value = action_response
 
     # Create a simple object hook
     def custom_hook(obj):
@@ -237,8 +217,10 @@ async def test_executor_gitlab_http_client_with_object_hook(
     result = await client.aget("/api/v4/test", parse_json=True, object_hook=custom_hook)
 
     # Check that the hook was applied
-    assert result["key"] == "value"
-    assert result["nested"]["id"] == "ID-1"
+    assert isinstance(result, GitLabHttpResponse)
+    assert result.status_code == 200
+    assert result.body["key"] == "value"
+    assert result.body["nested"]["id"] == "ID-1"
 
 
 @pytest.mark.asyncio
@@ -383,7 +365,7 @@ async def test_graphql_with_errors(client, monkeypatch_execute_action):
 
 
 @pytest.mark.asyncio
-async def test_executor_gitlab_http_client_with_use_http_response_success(
+async def test_executor_gitlab_http_client_success(
     client, monkeypatch_execute_http_response
 ):
     action_response = contract_pb2.ActionResponse()
@@ -392,7 +374,7 @@ async def test_executor_gitlab_http_client_with_use_http_response_success(
 
     monkeypatch_execute_http_response.return_value = action_response
 
-    result = await client.aget("/api/v4/test", use_http_response=True, parse_json=True)
+    result = await client.aget("/api/v4/test", parse_json=True)
 
     expected_response = GitLabHttpResponse(
         status_code=200,
@@ -407,13 +389,13 @@ async def test_executor_gitlab_http_client_with_use_http_response_success(
 
 
 @pytest.mark.asyncio
-async def test_executor_gitlab_http_client_with_use_http_response_http_connection_error(
+async def test_executor_gitlab_http_client_http_connection_error(
     client, monkeypatch_execute_http_response
 ):
     monkeypatch_execute_http_response.side_effect = ToolException("Connection refused")
 
     with pytest.raises(ToolException, match="Connection refused"):
-        await client.aget("/api/v4/test", use_http_response=True)
+        await client.aget("/api/v4/test")
 
     monkeypatch_execute_http_response.assert_called_once()
 

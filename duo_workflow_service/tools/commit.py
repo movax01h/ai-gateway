@@ -112,7 +112,6 @@ class CommitBaseTool(DuoBaseTool):
         response = await self.gitlab_client.aget(
             f"/api/v4/projects/{project_id}/repository/files/{encoded_file_path}",
             params={"ref": ref},
-            use_http_response=True,
         )
 
         if not response.is_success():
@@ -253,7 +252,6 @@ class ListCommits(CommitBaseTool):
                 path=f"/api/v4/projects/{project_id}/repository/commits",
                 params=params,
                 parse_json=False,
-                use_http_response=True,
             )
 
             if not response.is_success():
@@ -317,7 +315,6 @@ For example:
                 path=f"/api/v4/projects/{validation_result.project_id}/repository/commits/{validation_result.commit_sha}",
                 params=params,
                 parse_json=False,
-                use_http_response=True,
             )
 
             if not response.is_success():
@@ -369,7 +366,6 @@ class GetCommitDiff(CommitBaseTool):
             response = await self.gitlab_client.aget(
                 path=f"/api/v4/projects/{project_id}/repository/commits/{commit_sha}/diff",
                 parse_json=False,
-                use_http_response=True,
             )
 
             if not response.is_success():
@@ -442,7 +438,6 @@ class GetCommitComments(CommitBaseTool):
             response = await self.gitlab_client.aget(
                 path=f"/api/v4/projects/{project_id}/repository/commits/{commit_sha}/comments",
                 parse_json=False,
-                use_http_response=True,
             )
 
             if not response.is_success():
@@ -615,7 +610,6 @@ class CreateCommit(CommitBaseTool):
             encoded_branch = quote(branch, safe="")
             branch_response = await self.gitlab_client.aget(
                 f"/api/v4/projects/{project_id}/repository/branches/{encoded_branch}",
-                use_http_response=True,
             )
             branch_exists = branch_response.is_success()
 
@@ -655,7 +649,6 @@ class CreateCommit(CommitBaseTool):
         response = await self.gitlab_client.apost(
             path=f"/api/v4/projects/{project_id}/repository/commits",
             body=json.dumps(params),
-            use_http_response=True,
         )
 
         self._process_http_response(

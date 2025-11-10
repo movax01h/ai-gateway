@@ -184,7 +184,6 @@ async def test_get_file_success(
         path=expected_path,
         params={"ref": expected_ref},
         parse_json=True,
-        use_http_response=True,
     )
 
     assert json.loads(result) == expected_result
@@ -424,7 +423,6 @@ async def test_list_repository_tree_success(
     gitlab_client_mock.aget.assert_called_once_with(
         path=expected_path,
         params=expected_params,
-        use_http_response=True,
     )
 
     assert json.loads(result) == expected_result

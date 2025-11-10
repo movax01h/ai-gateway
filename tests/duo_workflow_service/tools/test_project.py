@@ -26,7 +26,7 @@ async def test_get_project():
     assert response == "{}"
 
     gitlab_client_mock.aget.assert_called_once_with(
-        path="/api/v4/projects/1", parse_json=False, use_http_response=True
+        path="/api/v4/projects/1", parse_json=False
     )
 
 

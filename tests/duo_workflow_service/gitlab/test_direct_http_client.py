@@ -92,7 +92,7 @@ async def client(mock_session):
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
-    "method, path, body, params, parse_json, use_http_response, response_data, expected_result",
+    "method, path, body, params, parse_json, response_data, expected_result",
     [
         (
             "GET",
@@ -100,7 +100,6 @@ async def client(mock_session):
             None,
             None,
             True,
-            False,
             {"key": "value"},
             {"key": "value"},
         ),
@@ -109,7 +108,6 @@ async def client(mock_session):
             "/api/v4/projects/1/jobs/102/trace",
             None,
             None,
-            False,
             False,
             "Non-JSON response",
             "Non-JSON response",
@@ -120,7 +118,6 @@ async def client(mock_session):
             None,
             {"per_page": 100},
             True,
-            False,
             {"projects": []},
             {"projects": []},
         ),
@@ -130,7 +127,6 @@ async def client(mock_session):
             '{ "test": 1 }',
             None,
             True,
-            False,
             {"key": "value"},
             {"key": "value"},
         ),
@@ -140,9 +136,8 @@ async def client(mock_session):
             '{ "test": 1 }',
             None,
             True,
-            True,
             {"key": "value"},
-            GitLabHttpResponse(status_code=200, body={"key": "value"}),
+            {"key": "value"},
         ),
         (
             "PATCH",
@@ -150,9 +145,8 @@ async def client(mock_session):
             '{ "test": 1 }',
             None,
             True,
-            True,
             {"key": "value"},
-            GitLabHttpResponse(status_code=200, body={"key": "value"}),
+            {"key": "value"},
         ),
     ],
 )
@@ -164,7 +158,6 @@ async def test_direct_gitlab_http_client(
     body,
     params,
     parse_json,
-    use_http_response,
     response_data,
     expected_result,
 ):
@@ -179,20 +172,13 @@ async def test_direct_gitlab_http_client(
             path,
             params=params,
             parse_json=parse_json,
-            use_http_response=use_http_response,
         )
     elif method == "POST":
-        result = await client.apost(
-            path, body, parse_json=parse_json, use_http_response=use_http_response
-        )
+        result = await client.apost(path, body, parse_json=parse_json)
     elif method == "PUT":
-        result = await client.aput(
-            path, body, parse_json=parse_json, use_http_response=use_http_response
-        )
+        result = await client.aput(path, body, parse_json=parse_json)
     elif method == "PATCH":
-        result = await client.apatch(
-            path, body, parse_json=parse_json, use_http_response=use_http_response
-        )
+        result = await client.apatch(path, body, parse_json=parse_json)
     else:
         pytest.fail(f"Unexpected HTTP method: {method}")
         result = None
@@ -214,16 +200,10 @@ async def test_direct_gitlab_http_client(
         method, expected_url, headers=expected_headers, **expected_kwargs
     )
 
-    # Check the result
-    if use_http_response:
-        # When use_http_response=True, we expect a GitLabHttpResponse object
-        assert isinstance(result, GitLabHttpResponse)
-        assert isinstance(expected_result, GitLabHttpResponse)
-        assert result.status_code == expected_result.status_code
-        assert result.body == expected_result.body
-    else:
-        # When use_http_response=False, we expect the raw data
-        assert result == expected_result
+    # Check the result - DirectGitLabHttpClient always returns GitLabHttpResponse
+    assert isinstance(result, GitLabHttpResponse)
+    assert result.status_code == 200
+    assert result.body == expected_result
 
 
 @pytest.mark.asyncio
@@ -245,8 +225,9 @@ async def test_direct_gitlab_http_client_with_object_hook(client, mock_session):
     # Make the API call with the object hook
     result = await client.aget("test", parse_json=True, object_hook=custom_hook)
 
-    # Verify the object hook was applied
-    assert result["nested"]["id"] == "custom-1"
+    # Verify the object hook was applied - result is GitLabHttpResponse
+    assert isinstance(result, GitLabHttpResponse)
+    assert result.body["nested"]["id"] == "custom-1"
 
 
 @pytest.mark.asyncio
@@ -277,8 +258,9 @@ async def test_direct_gitlab_http_client_invalid_json(client, mock_session):
     # Make the request - it should return the raw text instead of raising an error
     result = await client.aget("test", parse_json=True)
 
-    # Verify we got back the raw text
-    assert result == {}
+    # Verify we got back an empty dict in the response body (invalid JSON returns {})
+    assert isinstance(result, GitLabHttpResponse)
+    assert result.body == {}
 
 
 @pytest.mark.asyncio

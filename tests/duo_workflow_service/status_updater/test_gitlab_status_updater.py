@@ -36,7 +36,6 @@ async def test_get_workflow_status(gitlab_status_updater):
     gitlab_status_updater._client.aget.assert_called_once_with(
         path="/api/v4/ai/duo_workflows/workflows/391",
         parse_json=True,
-        use_http_response=True,
     )
 
     assert result is "running"
@@ -89,5 +88,4 @@ async def test_update_workflow_status_http_connection_error(gitlab_status_update
         path="/api/v4/ai/duo_workflows/workflows/391",
         body='{"status_event": "start"}',
         parse_json=True,
-        use_http_response=True,
     )

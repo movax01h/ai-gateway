@@ -85,7 +85,6 @@ class GetPipelineErrors(DuoBaseTool):
                 merge_request_response = await self.gitlab_client.aget(
                     path=f"/api/v4/projects/{validation_result.project_id}/merge_requests/"
                     f"{validation_result.merge_request_iid}",
-                    use_http_response=True,
                 )
 
                 if merge_request_response.status_code == 404:
@@ -107,7 +106,6 @@ class GetPipelineErrors(DuoBaseTool):
                 pipelines_response = await self.gitlab_client.aget(
                     path=f"/api/v4/projects/{validation_result.project_id}/merge_requests/"
                     f"{validation_result.merge_request_iid}/pipelines",
-                    use_http_response=True,
                 )
 
                 if not pipelines_response.is_success():
@@ -131,7 +129,6 @@ class GetPipelineErrors(DuoBaseTool):
 
             jobs_response = await self.gitlab_client.aget(
                 path=f"/api/v4/projects/{validation_result.project_id}/pipelines/{pipeline_id}/jobs",
-                use_http_response=True,
             )
 
             if not jobs_response.is_success():

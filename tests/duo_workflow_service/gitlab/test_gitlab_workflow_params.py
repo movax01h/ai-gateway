@@ -33,7 +33,6 @@ async def test_fetch_workflow_config_success():
     gitlab_client.aget.assert_called_once_with(
         path="/api/v4/ai/duo_workflows/workflows/44",
         parse_json=True,
-        use_http_response=True,
     )
 
     assert workflow["id"] == workflow_id

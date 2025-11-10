@@ -28,7 +28,6 @@ async def test_get_events():
     gitlab_client.aget.assert_called_once_with(
         path="/api/v4/ai/duo_workflows/workflows/123/events",
         parse_json=True,
-        use_http_response=True,
     )
 
     # Check if the events are returned correctly
@@ -58,7 +57,6 @@ async def test_get_events_with_ack():
     gitlab_client.aput.assert_called_once_with(
         path="/api/v4/ai/duo_workflows/workflows/123/events/1",
         body='{"event_status": "delivered"}',
-        use_http_response=True,
     )
 
 

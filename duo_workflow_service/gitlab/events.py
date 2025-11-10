@@ -15,7 +15,6 @@ async def get_event(
     response = await gitlab_client.aget(
         path=f"/api/v4/ai/duo_workflows/workflows/{workflow_id}/events",
         parse_json=True,
-        use_http_response=True,
     )
 
     if not response.is_success():
@@ -43,7 +42,6 @@ async def ack_event(
     await gitlab_client.aput(
         path=f"/api/v4/ai/duo_workflows/workflows/{workflow_id}/events/{event['id']}",
         body=json.dumps({"event_status": "delivered"}),
-        use_http_response=True,
     )
 
 
@@ -53,7 +51,6 @@ async def post_event(
     response = await gitlab_client.apost(
         path=f"/api/v4/ai/duo_workflows/workflows/{workflow_id}/events",
         parse_json=True,
-        use_http_response=True,
         body=json.dumps(
             {
                 "event_type": event_type,

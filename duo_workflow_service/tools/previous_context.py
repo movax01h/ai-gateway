@@ -37,7 +37,6 @@ class GetSessionContext(DuoBaseTool):
             response = await self.gitlab_client.aget(
                 path=f"/api/v4/ai/duo_workflows/workflows/{previous_session_id}/checkpoints?per_page=1",
                 parse_json=True,
-                use_http_response=True,
             )
 
             if not response.is_success():

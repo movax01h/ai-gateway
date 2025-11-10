@@ -13,7 +13,6 @@ async def fetch_workflow_config(
     response = await client.aget(
         path=f"/api/v4/ai/duo_workflows/workflows/{workflow_id}",
         parse_json=True,
-        use_http_response=True,
     )
 
     if not response.is_success():

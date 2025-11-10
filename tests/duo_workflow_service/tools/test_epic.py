@@ -59,7 +59,7 @@ async def test_get_epic(gitlab_client_mock, metadata):
     assert response == expected_response
 
     gitlab_client_mock.aget.assert_called_once_with(
-        path="/api/v4/groups/1/epics/5", parse_json=False, use_http_response=True
+        path="/api/v4/groups/1/epics/5", parse_json=False
     )
 
 
@@ -75,7 +75,7 @@ async def test_get_epic_error(gitlab_client_mock, metadata):
     assert response == expected_response
 
     gitlab_client_mock.aget.assert_called_once_with(
-        path="/api/v4/groups/1/epics/999", parse_json=False, use_http_response=True
+        path="/api/v4/groups/1/epics/999", parse_json=False
     )
 
 
@@ -108,7 +108,6 @@ async def test_get_epic_with_string_group_id(gitlab_client_mock, metadata):
     gitlab_client_mock.aget.assert_called_once_with(
         path="/api/v4/groups/group%2Fsubgroup/epics/5",
         parse_json=False,
-        use_http_response=True,
     )
 
 
@@ -126,7 +125,6 @@ async def test_get_epic_with_string_group_id_error(gitlab_client_mock, metadata)
     gitlab_client_mock.aget.assert_called_once_with(
         path="/api/v4/groups/nonexistent%2Fgroup/epics/5",
         parse_json=False,
-        use_http_response=True,
     )
 
 
@@ -199,7 +197,7 @@ async def test_get_epic_with_url_success(
     assert response == expected_response
 
     gitlab_client_mock.aget.assert_called_once_with(
-        path=expected_path, parse_json=False, use_http_response=True
+        path=expected_path, parse_json=False
     )
 
 
@@ -290,7 +288,6 @@ async def test_list_epics_with_negate_parameter(gitlab_client_mock, metadata):
         path="/api/v4/groups/1/epics",
         params={"not": negate_params},
         parse_json=False,
-        use_http_response=True,
     )
 
 
@@ -399,7 +396,6 @@ async def test_list_epics_success(gitlab_client_mock, metadata):
             "my_reaction_emoji": "thumbsup",
         },
         parse_json=False,
-        use_http_response=True,
     )
 
 
@@ -418,7 +414,6 @@ async def test_list_epics_error(gitlab_client_mock, metadata):
         path="/api/v4/groups/999/epics",
         params={},
         parse_json=False,
-        use_http_response=True,
     )
 
 
@@ -545,7 +540,6 @@ async def test_list_epics_with_url_success(
             "my_reaction_emoji": "thumbsup",
         },
         parse_json=False,
-        use_http_response=True,
     )
 
 
@@ -865,7 +859,6 @@ async def test_update_epic_success(gitlab_client_mock, metadata):
                 "due_date_is_fixed": True,
             }
         ),
-        use_http_response=True,
     )
 
 
@@ -883,7 +876,6 @@ async def test_update_epic_error(gitlab_client_mock, metadata):
     gitlab_client_mock.aput.assert_called_once_with(
         path="/api/v4/groups/1/epics/999",
         body=json.dumps({"title": "Updated Epic"}),
-        use_http_response=True,
     )
 
 
@@ -910,7 +902,6 @@ async def test_update_epic_http_error_status_code(gitlab_client_mock, metadata):
     gitlab_client_mock.aput.assert_called_once_with(
         path="/api/v4/groups/1/epics/999",
         body=json.dumps({"title": "Updated Epic"}),
-        use_http_response=True,
     )
 
 
@@ -1036,7 +1027,6 @@ async def test_update_epic_with_url_success(
                 "due_date_is_fixed": True,
             }
         ),
-        use_http_response=True,
     )
 
 

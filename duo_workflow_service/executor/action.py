@@ -130,8 +130,8 @@ async def _execute_action(metadata: Dict[str, Any], action: contract_pb2.Action)
     # Return the appropriate response type based on action type
     response_type = actionResponse.WhichOneof("response_type")
     if response_type == "httpResponse":
-        log.info(
-            "HTTP response with use_http_response=False, returning body instead",
+        log.warning(
+            "HTTP response when plain text response expected, returning body",
             requestID=actionResponse.requestID,
             action_class=action.WhichOneof("action"),
         )

@@ -118,7 +118,6 @@ class GetLogsFromJob(DuoBaseTool):
             response = await self.gitlab_client.aget(
                 path=f"/api/v4/projects/{validation_result.project_id}/jobs/{validation_result.job_id}/trace",
                 parse_json=False,
-                use_http_response=True,
             )
 
             if not response.is_success():

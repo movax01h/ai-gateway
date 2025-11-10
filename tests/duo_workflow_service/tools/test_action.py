@@ -46,8 +46,8 @@ async def test_execute_action_success_http_response(metadata):
         assert response == '{"result": "success"}'
 
         # Verify the log entry was created for the _execute_action call
-        mock_logger.info.assert_any_call(
-            "HTTP response with use_http_response=False, returning body instead",
+        mock_logger.warning.assert_any_call(
+            "HTTP response when plain text response expected, returning body",
             requestID="test-request-123",
             action_class="runHTTPRequest",
         )
@@ -79,9 +79,9 @@ async def test_execute_action_success_plaintext_response(metadata):
         # Check that the HTTP-specific log message was not called
         http_log_calls = [
             call
-            for call in mock_logger.info.call_args_list
+            for call in mock_logger.warning.call_args_list
             if len(call[0]) > 0
-            and "HTTP response with use_http_response=False" in call[0][0]
+            and "HTTP response when plain text response expected" in call[0][0]
         ]
         assert len(http_log_calls) == 0
 

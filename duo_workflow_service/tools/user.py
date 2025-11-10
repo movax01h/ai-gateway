@@ -28,7 +28,7 @@ class GetCurrentUser(DuoBaseTool):
     async def _execute(self) -> str:
         try:
             response = await self.gitlab_client.aget(
-                path="/api/v4/user", parse_json=True, use_http_response=True
+                path="/api/v4/user", parse_json=True
             )
 
             if not response.is_success():

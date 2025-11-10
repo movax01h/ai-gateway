@@ -45,7 +45,7 @@ async def test_get_current_user_success():
     assert "email" not in user_data
 
     gitlab_client_mock.aget.assert_called_once_with(
-        path="/api/v4/user", parse_json=True, use_http_response=True
+        path="/api/v4/user", parse_json=True
     )
 
 
