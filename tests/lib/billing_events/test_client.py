@@ -425,3 +425,78 @@ class TestBillingEventsClient:
         )
 
         client.internal_event_client.track_event.assert_not_called()
+
+    def test_gitlab_team_member_subject_is_hashed(
+        self, client, user, mock_dependencies
+    ):
+        """Test that GitLab team member global_user_id is hashed to integer in subject field."""
+        current_feature_flag_context.set({FeatureFlag.DUO_USE_BILLING_ENDPOINT})
+        current_event_context.set(
+            EventContext(
+                user_id="12345",
+                global_user_id="global-user-abc-123",
+                is_gitlab_team_member=True,
+            )
+        )
+
+        client.track_billing_event(
+            user=user,
+            event_type="ai_completion",
+            category="test",
+            unit_of_measure="tokens",
+            quantity=100.0,
+        )
+
+        event_args = mock_dependencies["structured_event_init"].call_args[1]
+        subject = event_args["context"][0].data["subject"]
+
+        # Subject should be a string representation of a hashed integer derived from global_user_id
+        assert isinstance(subject, str)
+        assert subject.isdigit()
+        assert int(subject) > 0
+
+    def test_non_gitlab_team_member_subject_not_hashed(
+        self, client, user, mock_dependencies
+    ):
+        """Test that non-GitLab team member user_id is NOT hashed in subject field."""
+        current_feature_flag_context.set({FeatureFlag.DUO_USE_BILLING_ENDPOINT})
+        current_event_context.set(
+            EventContext(user_id="12345", is_gitlab_team_member=False)
+        )
+
+        client.track_billing_event(
+            user=user,
+            event_type="ai_completion",
+            category="test",
+            unit_of_measure="tokens",
+            quantity=100.0,
+        )
+
+        event_args = mock_dependencies["structured_event_init"].call_args[1]
+        subject = event_args["context"][0].data["subject"]
+
+        assert subject == "12345"
+
+    def test_gitlab_team_member_with_empty_global_user_id(
+        self, client, user, mock_dependencies
+    ):
+        """Test that empty global_user_id returns -1 in subject field."""
+        current_feature_flag_context.set({FeatureFlag.DUO_USE_BILLING_ENDPOINT})
+        current_event_context.set(
+            EventContext(
+                user_id="12345", global_user_id=None, is_gitlab_team_member=True
+            )
+        )
+
+        client.track_billing_event(
+            user=user,
+            event_type="ai_completion",
+            category="test",
+            unit_of_measure="tokens",
+            quantity=100.0,
+        )
+
+        event_args = mock_dependencies["structured_event_init"].call_args[1]
+        subject = event_args["context"][0].data["subject"]
+
+        assert subject == "-1"
