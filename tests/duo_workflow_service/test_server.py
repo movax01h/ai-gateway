@@ -491,7 +491,6 @@ async def test_workflow_is_cancelled_on_parent_task_cancellation(
 
     current_user.set(CloudConnectorUser(authenticated=True, is_debug=True))
     mock_context = MagicMock(spec=grpc.ServicerContext)
-    mock_context.abort = AsyncMock()
 
     real_workflow_task: asyncio.Task = None  # type: ignore
     original_create_task = asyncio.create_task
