@@ -33,7 +33,7 @@ export let options = {
 };
 
 // If Service Account PAT is used for GPT, AI tests require real user PAT which can be provided via AI_ACCESS_TOKEN
-export const access_token = __ENV.AI_ACCESS_TOKEN !== null && __ENV.AI_ACCESS_TOKEN !== undefined ? __ENV.AI_ACCESS_TOKEN : __ENV.ACCESS_TOKEN;
+export const access_token = __ENV.AI_ACCESS_TOKEN && __ENV.AI_ACCESS_TOKEN.trim() ? __ENV.AI_ACCESS_TOKEN : __ENV.ACCESS_TOKEN;
 
 export function setup() {
   console.log("");
