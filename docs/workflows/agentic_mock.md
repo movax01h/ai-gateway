@@ -76,6 +76,26 @@ Add delays using the `latency_ms` attribute to specify the number of millisecond
 </response>
 ```
 
+## Streaming simulation
+
+Simulate streaming responses (like real LLM behavior) using the `stream` attribute. This will cause the response to be yielded word-by-word as chunks:
+
+```xml
+<response stream='true' chunk_delay_ms='50'>
+  This response will be streamed word by word with 50ms delay between chunks
+</response>
+```
+
+Streaming attributes:
+- `stream='true'`: Enable streaming mode (splits response into word-level chunks)
+- `chunk_delay_ms`: Optional delay in milliseconds between each chunk (default: 0)
+
+This is useful for:
+- Testing streaming checkpoint behavior
+- Simulating realistic LLM response patterns
+- Load testing with streaming workflows
+- Debugging UI streaming updates
+
 ## Example workflows
 
 Workflow with 2 tool calls:

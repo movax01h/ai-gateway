@@ -1,8 +1,8 @@
 import time
 
 import pytest
-from langchain_core.messages import AIMessage, HumanMessage
-from langchain_core.outputs import ChatGeneration, ChatResult
+from langchain_core.messages import AIMessage, AIMessageChunk, HumanMessage
+from langchain_core.outputs import ChatGeneration, ChatGenerationChunk, ChatResult
 
 from ai_gateway.models.agentic_mock import AgenticFakeModel, ResponseHandler
 
@@ -82,6 +82,77 @@ class TestAgenticFakeModel:
 
         result = model.bind_tools("tool1", "tool2", param=True)
         assert result is model
+
+    @pytest.mark.asyncio
+    async def test_astream_with_streaming_enabled(self, model):
+        messages = [
+            HumanMessage(
+                content="<response stream='true' chunk_delay_ms='10'>Hello world test</response>"
+            )
+        ]
+
+        chunks = []
+        async for chunk in model._astream(messages):
+            assert isinstance(chunk, ChatGenerationChunk)
+            assert isinstance(chunk.message, AIMessageChunk)
+            chunks.append(chunk.message.content)
+
+        # Should have 3 chunks: "Hello", " world", " test"
+        assert len(chunks) == 3
+        assert chunks[0] == "Hello"
+        assert chunks[1] == " world"
+        assert chunks[2] == " test"
+
+    @pytest.mark.asyncio
+    async def test_astream_with_streaming_and_tool_calls(self, model):
+        messages = [
+            HumanMessage(
+                content='<response stream="true">Analyze this <tool_calls>[{"name": "search"}]</tool_calls></response>'
+            )
+        ]
+
+        chunks = []
+        async for chunk in model._astream(messages):
+            chunks.append(chunk)
+
+        # Should have text chunks + final chunk with tool calls
+        assert len(chunks) == 3  # "Analyze", " this", and tool call chunk
+
+        # Last chunk should have tool calls
+        assert chunks[-1].message.tool_calls
+        assert chunks[-1].message.tool_calls[0]["name"] == "search"
+
+    @pytest.mark.asyncio
+    async def test_astream_without_streaming(self, model):
+        messages = [
+            HumanMessage(content="<response>Complete response at once</response>")
+        ]
+
+        chunks = []
+        async for chunk in model._astream(messages):
+            chunks.append(chunk)
+
+        # Should have only 1 chunk with complete response
+        assert len(chunks) == 1
+        assert chunks[0].message.content == "Complete response at once"
+
+    def test_stream_with_streaming_enabled(self, model):
+        messages = [
+            HumanMessage(
+                content="<response stream='true'>Hello world</response>"
+            )
+        ]
+
+        chunks = []
+        for chunk in model._stream(messages):
+            assert isinstance(chunk, ChatGenerationChunk)
+            assert isinstance(chunk.message, AIMessageChunk)
+            chunks.append(chunk.message.content)
+
+        # Should have 2 chunks: "Hello", " world"
+        assert len(chunks) == 2
+        assert chunks[0] == "Hello"
+        assert chunks[1] == " world"
 
 
 class TestResponseHandler:
@@ -214,3 +285,31 @@ class TestResponseHandler:
         response = handler.get_next_response()
         assert response.content == "mock response (no response tag specified)"
         assert not response.tool_calls
+
+    def test_response_handler_streaming_attributes(self):
+        messages = [
+            HumanMessage(
+                content="""
+                <response stream='true' chunk_delay_ms='100'>Streaming response</response>
+                <response stream="false">Non-streaming response</response>
+                <response>Default response</response>
+            """
+            )
+        ]
+
+        handler = ResponseHandler(messages)
+
+        response1 = handler.get_next_response()
+        assert response1.content == "Streaming response"
+        assert response1.stream is True
+        assert response1.chunk_delay_ms == 100
+
+        response2 = handler.get_next_response()
+        assert response2.content == "Non-streaming response"
+        assert response2.stream is False
+        assert response2.chunk_delay_ms == 0
+
+        response3 = handler.get_next_response()
+        assert response3.content == "Default response"
+        assert response3.stream is False
+        assert response3.chunk_delay_ms == 0
