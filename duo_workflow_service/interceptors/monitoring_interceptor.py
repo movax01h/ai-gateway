@@ -26,6 +26,7 @@ from duo_workflow_service.tracking.errors import log_exception
 from duo_workflow_service.tracking.language_server_context import (
     language_server_version,
 )
+from lib.feature_flags import current_feature_flag_context
 
 log = structlog.stdlib.get_logger("grpc")
 
@@ -225,6 +226,9 @@ class MonitoringInterceptor(ServerInterceptor):
 
             if client_type_value := client_type.get():
                 fields["gitlab_client_type"] = client_type_value
+
+            if feature_flags := current_feature_flag_context.get():
+                fields["feature_flags"] = feature_flags
 
             context: MonitoringContext = current_monitoring_context.get()
             fields.update(context.model_dump())
