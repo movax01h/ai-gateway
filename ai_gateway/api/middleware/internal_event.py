@@ -2,7 +2,7 @@ from datetime import datetime
 
 from asgi_correlation_id.context import correlation_id
 from starlette.datastructures import CommaSeparatedStrings
-from starlette.middleware.base import Request
+from starlette.requests import Request
 from starlette_context import context as starlette_context
 
 from ai_gateway.api.middleware.base import _PathResolver
@@ -17,6 +17,7 @@ from ai_gateway.api.middleware.headers import (
     X_GITLAB_HOST_NAME_HEADER,
     X_GITLAB_INSTANCE_ID_HEADER,
     X_GITLAB_INTERFACE,
+    X_GITLAB_NAMESPACE_ID,
     X_GITLAB_REALM_HEADER,
     X_GITLAB_ROOT_NAMESPACE_ID,
     X_GITLAB_SAAS_DUO_PRO_NAMESPACE_IDS_HEADER,
@@ -59,6 +60,16 @@ class InternalEventMiddleware:
         if hasattr(user, "claims") and user.claims:
             unique_instance_id = user.claims.gitlab_instance_uid
 
+        namespace_id_str = request.headers.get(
+            X_GITLAB_NAMESPACE_ID,
+        )
+        namespace_id = int(namespace_id_str) if namespace_id_str else None
+
+        root_namespace_id_str = request.headers.get(X_GITLAB_ROOT_NAMESPACE_ID)
+        root_namespace_id = (
+            int(root_namespace_id_str) if root_namespace_id_str else None
+        )
+
         # EventContext uses Pydantic which coerces int and string to boolean type
         # Reference: https://docs.pydantic.dev/latest/api/standard_library_types/#booleans
         context = EventContext(
@@ -82,10 +93,8 @@ class InternalEventMiddleware:
             ),
             context_generated_at=datetime.now().isoformat(),
             correlation_id=correlation_id.get(),
-            ultimate_parent_namespace_id=request.headers.get(  # type: ignore[arg-type]
-                X_GITLAB_ROOT_NAMESPACE_ID, None
-            )
-            or None,
+            namespace_id=namespace_id,
+            ultimate_parent_namespace_id=root_namespace_id,
             deployment_type=request.headers.get(X_GITLAB_DEPLOYMENT_TYPE),
         )
         current_event_context.set(context)

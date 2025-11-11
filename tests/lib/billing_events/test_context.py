@@ -125,7 +125,14 @@ def test_billing_event_context_seat_ids_list():
 
 
 def test_usage_quota_event_context_from_internal_event():
-    event = EventContext(environment="prod", project_id=1234)
+    event = EventContext(
+        environment="prod",
+        project_id=1234,
+        ultimate_parent_namespace_id=1,
+        namespace_id=2,
+    )
     context = UsageQuotaEventContext.from_internal_event(event)
     assert context.environment == "prod"
     assert context.project_id == 1234
+    assert context.namespace_id == 2
+    assert context.root_namespace_id == 1

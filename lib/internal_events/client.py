@@ -64,7 +64,10 @@ class InternalEventsClient:
             additional_properties = InternalEventAdditionalProperties()
 
         context: EventContext = current_event_context.get()
-        new_context = {**context.model_dump(exclude={"user_id"}), **kwargs}
+        new_context = {
+            **context.model_dump(exclude={"user_id"}),
+            **kwargs,
+        }
         new_context["extra"] = additional_properties.extra
 
         structured_event = StructuredEvent(
