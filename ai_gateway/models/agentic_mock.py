@@ -257,10 +257,16 @@ class AgenticFakeModel(BaseChatModel):
         self,
         messages: list[BaseMessage],
         stop: Optional[list[str]] = None,
-        run_manager: Optional[Any] = None,
+        run_manager: Optional[CallbackManagerForLLMRun] = None,
         **kwargs,
     ) -> ChatResult:
-        return asyncio.run(self._generate_with_latency(messages))
+        result = asyncio.run(self._generate_with_latency(messages))
+
+        # Invoke callbacks for LangSmith tracing
+        if run_manager:
+            run_manager.on_llm_end(result)
+
+        return result
 
     def bind_tools(self, *_args: Any, **_kwargs: Any) -> Any:
         return self
@@ -272,7 +278,13 @@ class AgenticFakeModel(BaseChatModel):
         run_manager: Optional[AsyncCallbackManagerForLLMRun] = None,
         **kwargs: Any,
     ) -> ChatResult:
-        return await self._generate_with_latency(messages)
+        result = await self._generate_with_latency(messages)
+
+        # Invoke callbacks for LangSmith tracing
+        if run_manager:
+            await run_manager.on_llm_end(result)
+
+        return result
 
     def _stream(
         self,
@@ -301,7 +313,13 @@ class AgenticFakeModel(BaseChatModel):
                 chunk_text = word if i == 0 else f" {word}"
 
                 chunk = AIMessageChunk(content=chunk_text)
-                yield ChatGenerationChunk(message=chunk)
+                chunk_generation = ChatGenerationChunk(message=chunk)
+
+                # Invoke callbacks for LangSmith tracing
+                if run_manager:
+                    run_manager.on_llm_new_token(chunk_text)
+
+                yield chunk_generation
 
                 # Apply chunk delay if specified
                 if response.chunk_delay_ms > 0 and i < len(words) - 1:
@@ -321,7 +339,13 @@ class AgenticFakeModel(BaseChatModel):
                 content=response.content,
                 tool_calls=response.tool_calls if response.tool_calls else [],
             )
-            yield ChatGenerationChunk(message=ai_message)
+            chunk_generation = ChatGenerationChunk(message=ai_message)
+
+            # Invoke callbacks for LangSmith tracing
+            if run_manager:
+                run_manager.on_llm_new_token(response.content)
+
+            yield chunk_generation
 
     async def _astream(
         self,
@@ -349,7 +373,13 @@ class AgenticFakeModel(BaseChatModel):
                 chunk_text = word if i == 0 else f" {word}"
 
                 chunk = AIMessageChunk(content=chunk_text)
-                yield ChatGenerationChunk(message=chunk)
+                chunk_generation = ChatGenerationChunk(message=chunk)
+
+                # Invoke callbacks for LangSmith tracing
+                if run_manager:
+                    await run_manager.on_llm_new_token(chunk_text)
+
+                yield chunk_generation
 
                 # Apply chunk delay if specified
                 if response.chunk_delay_ms > 0 and i < len(words) - 1:
@@ -368,4 +398,10 @@ class AgenticFakeModel(BaseChatModel):
                 content=response.content,
                 tool_calls=response.tool_calls if response.tool_calls else [],
             )
-            yield ChatGenerationChunk(message=ai_message)
+            chunk_generation = ChatGenerationChunk(message=ai_message)
+
+            # Invoke callbacks for LangSmith tracing
+            if run_manager:
+                await run_manager.on_llm_new_token(response.content)
+
+            yield chunk_generation
