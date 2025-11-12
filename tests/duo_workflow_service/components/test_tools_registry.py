@@ -34,6 +34,7 @@ from duo_workflow_service.tools.vulnerabilities.get_vulnerability_details import
 from duo_workflow_service.tools.vulnerabilities.post_sast_fp_analysis_to_gitlab import (
     PostSastFpAnalysisToGitlab,
 )
+from duo_workflow_service.tools.wiki import GetWikiPage
 from duo_workflow_service.tools.work_item import (
     GetWorkItem,
     GetWorkItemNotes,
@@ -145,6 +146,7 @@ _outbox = MagicMock(spec=Outbox)
                 "build_review_merge_request_context",
                 "get_security_finding_details",
                 "list_security_findings",
+                "get_wiki_page",
             },
         ),
         (
@@ -223,6 +225,7 @@ _outbox = MagicMock(spec=Outbox)
                 "build_review_merge_request_context",
                 "get_security_finding_details",
                 "list_security_findings",
+                "get_wiki_page",
             },
         ),
         (
@@ -409,6 +412,7 @@ def test_registry_initialization_initialises_tools_with_correct_attributes(
             metadata=tool_metadata
         ),
         "list_security_findings": ListSecurityFindings(metadata=tool_metadata),
+        "get_wiki_page": GetWikiPage(metadata=tool_metadata),
     }
 
     assert registry._enabled_tools == expected_tools

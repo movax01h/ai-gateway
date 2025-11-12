@@ -103,6 +103,7 @@ _READ_ONLY_GITLAB_TOOLS: list[Type[BaseTool]] = [
     BuildReviewMergeRequestContext,
     GetSecurityFindingDetails,
     ListSecurityFindings,
+    tools.GetWikiPage,
 ]
 
 _RUN_MCP_TOOLS_PRIVILEGE = "run_mcp_tools"
