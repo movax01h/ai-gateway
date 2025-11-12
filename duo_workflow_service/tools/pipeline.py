@@ -95,11 +95,12 @@ class GetPipelineErrors(DuoBaseTool):
                     )
 
                 if not merge_request_response.is_success():
-                    log.error(
-                        "Failed to fetch merge request: status_code=%s, response=%s",
-                        merge_request_response.status_code,
-                        merge_request_response.body,
+                    error_str = (
+                        f"Failed to fetch merge request: status_code={merge_request_response.status_code}, "
+                        f"response={merge_request_response.body}"
                     )
+                    log.error(error_str)
+                    return json.dumps({"error": error_str})
 
                 merge_request = merge_request_response.body
 
@@ -109,11 +110,12 @@ class GetPipelineErrors(DuoBaseTool):
                 )
 
                 if not pipelines_response.is_success():
-                    log.error(
-                        "Failed to fetch pipelines: status_code=%s, response=%s",
-                        pipelines_response.status_code,
-                        pipelines_response.body,
+                    error_str = (
+                        f"Failed to fetch pipelines: status_code={pipelines_response.status_code}, "
+                        f"response={pipelines_response.body}"
                     )
+                    log.error(error_str)
+                    return json.dumps({"error": error_str})
 
                 pipelines = pipelines_response.body
 
@@ -127,39 +129,49 @@ class GetPipelineErrors(DuoBaseTool):
                 last_pipeline = pipelines[0]
                 pipeline_id = last_pipeline["id"]
 
-            jobs_response = await self.gitlab_client.aget(
-                path=f"/api/v4/projects/{validation_result.project_id}/pipelines/{pipeline_id}/jobs",
-            )
-
-            if not jobs_response.is_success():
-                log.error(
-                    "Failed to fetch jobs: status_code=%s, response=%s",
-                    jobs_response.status_code,
-                    jobs_response.body,
+            next_page = "1"
+            page_count = 0
+            max_pages = 20
+            traces = "Failed Jobs:\n<jobs>\n"
+            while next_page and page_count < max_pages:
+                page_count += 1
+                jobs_response = await self.gitlab_client.aget(
+                    path=f"/api/v4/projects/{validation_result.project_id}/pipelines/{pipeline_id}"
+                    f"/jobs?per_page=100&page={next_page}",
                 )
 
-            jobs = jobs_response.body
-            if not isinstance(jobs, list):
-                return json.dumps(
-                    {
-                        "error": f"Failed to fetch jobs for pipeline {pipeline_id}: {jobs}"
-                    }
-                )
+                if not jobs_response.is_success():
+                    error_str = (
+                        f"Failed to fetch jobs: status_code={jobs_response.status_code}, "
+                        f"response={jobs_response.body}"
+                    )
+                    log.error(error_str)
+                    return json.dumps({"error": error_str})
 
-            traces = "Failed Jobs:\n"
-            for job in jobs:
-                if job["status"] == "failed":
-                    job_id = job["id"]
-                    job_name = job["name"]
-                    traces += f"Name: {job_name}\nJob ID: {job_id}\n"
-                    try:
-                        trace = await self.gitlab_client.aget(
-                            path=f"/api/v4/projects/{validation_result.project_id}/jobs/{job_id}/trace",
-                            parse_json=False,
+                jobs = jobs_response.body
+                if not isinstance(jobs, list):
+                    return json.dumps(
+                        {
+                            "error": f"Failed to fetch jobs for pipeline {pipeline_id}: {jobs}"
+                        }
+                    )
+
+                for job in jobs:
+                    if job["status"] == "failed":
+                        job_name = job["name"]
+                        job_id = job["id"]
+                        job_trace = await self._get_log_for_job_id(
+                            validation_result.project_id, job_id  # type: ignore[arg-type]
                         )
-                        traces += f"Trace: {trace}\n"
-                    except Exception as e:
-                        traces += f"Error fetching trace: {str(e)}\n"
+                        traces += (
+                            f"<job>\n"
+                            f"  <job_name>{job_name}</job_name>\n"
+                            f"  <job_id>{job_id}</job_id>\n"
+                            f"  <job_trace>{job_trace}</job_trace>\n"
+                            f"</job>\n"
+                        )
+                next_page = jobs_response.headers.get("X-Next-Page", "")
+            traces += "</jobs>\n"
 
             if merge_request:
                 return json.dumps({"merge_request": merge_request, "traces": traces})
@@ -167,6 +179,24 @@ class GetPipelineErrors(DuoBaseTool):
             return json.dumps({"pipeline_id": pipeline_id, "traces": traces})
         except Exception as e:
             return json.dumps({"error": str(e)})
+
+    async def _get_log_for_job_id(self, project_id: str, job_id: str) -> str:
+        try:
+            trace_response = await self.gitlab_client.aget(
+                path=f"/api/v4/projects/{project_id}/jobs/{job_id}/trace",
+                parse_json=False,
+            )
+            if not trace_response.is_success():
+                error_str = (
+                    f"Failed to fetch job trace: status_code={trace_response.status_code}, "
+                    f"response={trace_response.body}"
+                )
+                log.error(error_str)
+                return f"Error fetching trace: {error_str}"
+
+            return trace_response.body
+        except Exception as e:
+            return f"Error fetching trace: {str(e)}"
 
     def format_display_message(
         self, args: GetPipelineErrorsInput, _tool_response: Any = None
