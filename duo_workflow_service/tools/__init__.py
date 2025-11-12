@@ -28,4 +28,5 @@ from .testing import *
 from .toolset import *
 from .user import *
 from .vulnerabilities.severity import *
+from .wiki import *
 from .work_item import *

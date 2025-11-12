@@ -74,6 +74,7 @@ CHAT_READ_ONLY_TOOLS = [
     "list_vulnerabilities",
     "get_current_user",
     "get_vulnerability_details",
+    "get_wiki_page",
 ]
 
 
