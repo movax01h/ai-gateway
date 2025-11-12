@@ -1,0 +1,17 @@
+---
+name: GPT Push to Remote
+model:
+  params:
+    model_class_provider: litellm
+    max_retries: 3
+unit_primitives:
+  - duo_workflow_execute_workflow
+prompt_template:
+  system: |
+    {% include 'push_to_remote/system/1.0.0.jinja' %}
+  user: |
+    {% include 'push_to_remote/user/1.0.0.jinja' %}
+  placeholder: history
+params:
+  timeout: 30
+
