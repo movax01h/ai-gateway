@@ -523,42 +523,63 @@ async def test_workflow_is_cancelled_on_parent_task_cancellation(
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
-    "workflow_error,successful_execution,expected_status,expected_detail_prefix",
+    "workflow_error,successful_execution,stop_reason,expected_status,expected_detail_prefix",
     [
-        (None, True, grpc.StatusCode.OK, "workflow execution success"),
+        (None, True, None, grpc.StatusCode.OK, "workflow execution success"),
         (
             AIO_CANCEL_STOP_WORKFLOW_REQUEST,
             False,
+            None,
+            grpc.StatusCode.OK,
+            "workflow execution stopped:",
+        ),
+        (
+            AIO_CANCEL_STOP_WORKFLOW_REQUEST,
+            False,
+            "WORKHORSE_SERVER_SHUTDOWN",
+            grpc.StatusCode.UNAVAILABLE,
+            "workflow execution interrupted:",
+        ),
+        (
+            AIO_CANCEL_STOP_WORKFLOW_REQUEST,
+            False,
+            "USER_CANCELLED",
             grpc.StatusCode.OK,
             "workflow execution stopped:",
         ),
         (
             ValueError("Some error"),
             False,
+            None,
             grpc.StatusCode.INTERNAL,
             "workflow execution failure: ValueError: Some error",
         ),
         (
             None,
             False,
+            None,
             grpc.StatusCode.UNKNOWN,
             "RPC ended with unknown workflow state:",
         ),
         (
             OUTGOING_MESSAGE_TOO_LARGE,
             False,
+            None,
             grpc.StatusCode.RESOURCE_EXHAUSTED,
             "Outgoing message too large",
         ),
     ],
 )
+@patch("duo_workflow_service.server.current_monitoring_context")
 @patch("duo_workflow_service.server.AbstractWorkflow")
 @patch("duo_workflow_service.server.resolve_workflow_class")
 async def test_execute_workflow_status_codes(
     mock_resolve_workflow,
     mock_abstract_workflow_class,
+    mock_current_monitoring_context,
     workflow_error,
     successful_execution,
+    stop_reason,
     expected_status,
     expected_detail_prefix,
 ):
@@ -574,6 +595,10 @@ async def test_execute_workflow_status_codes(
         return_value=OutboxSignal.NO_MORE_OUTBOUND_REQUESTS
     )
     mock_resolve_workflow.return_value = mock_abstract_workflow_class
+
+    mock_monitoring_context = MagicMock()
+    mock_monitoring_context.workflow_stop_reason = stop_reason
+    mock_current_monitoring_context.get.return_value = mock_monitoring_context
 
     async def mock_request_iterator() -> AsyncIterable[contract_pb2.ClientEvent]:
         yield contract_pb2.ClientEvent(

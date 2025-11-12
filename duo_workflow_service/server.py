@@ -435,10 +435,19 @@ class DuoWorkflowService(contract_pb2_grpc.DuoWorkflowServicer):
                 context.set_code(grpc.StatusCode.OK)
                 context.set_details("workflow execution success")
             elif AIO_CANCEL_STOP_WORKFLOW_REQUEST in str(workflow.last_error):
-                context.set_code(grpc.StatusCode.OK)
-                context.set_details(
-                    f"workflow execution stopped: {workflow.last_gitlab_status}"
-                )
+                if (
+                    monitoring_context.workflow_stop_reason
+                    == "WORKHORSE_SERVER_SHUTDOWN"
+                ):
+                    context.set_code(grpc.StatusCode.UNAVAILABLE)
+                    context.set_details(
+                        f"workflow execution interrupted: {workflow.last_gitlab_status}"
+                    )
+                else:
+                    context.set_code(grpc.StatusCode.OK)
+                    context.set_details(
+                        f"workflow execution stopped: {workflow.last_gitlab_status}"
+                    )
             elif str(workflow.last_error) == OUTGOING_MESSAGE_TOO_LARGE:
                 context.set_code(grpc.StatusCode.RESOURCE_EXHAUSTED)
                 context.set_details("Outgoing message too large.")
