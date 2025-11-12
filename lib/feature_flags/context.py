@@ -12,6 +12,7 @@ class FeatureFlag(StrEnum):
     DUO_USE_BILLING_ENDPOINT = "duo_use_billing_endpoint"
     USAGE_QUOTA_LEFT_CHECK = "usage_quota_left_check"
     COMPRESS_CHECKPOINT = "duo_workflow_compress_checkpoint"
+    AI_GATEWAY_ALLOW_CONVERSATION_CACHING = "ai_gateway_allow_conversation_caching"
 
 
 def is_feature_enabled(feature_name: FeatureFlag | str) -> bool:

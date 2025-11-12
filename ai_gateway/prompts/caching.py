@@ -1,4 +1,4 @@
-from typing import Any, Optional
+from typing import Any, MutableMapping, Optional
 
 import structlog
 from langchain_core.messages import BaseMessage
@@ -6,8 +6,44 @@ from langchain_core.prompt_values import PromptValue
 from langchain_core.runnables import Runnable, RunnableConfig
 
 from ai_gateway.prompts.config.models import ModelClassProvider
+from lib.feature_flags.context import FeatureFlag, is_feature_enabled
+from lib.prompts.caching import prompt_caching_enabled_in_current_request
 
 log = structlog.stdlib.get_logger("prompts")
+
+CACHE_CONTROL_INJECTION_POINTS_KEY = "cache_control_injection_points"
+# Custom field of `cache_control_injection_points` to filter out points when prompt caching is disabled in a request.
+REQUIRE_PROMPT_CACHING_ENABLED_IN_REQUEST = "require_prompt_caching_enabled_in_request"
+
+
+def filter_cache_control_injection_points(model_kwargs: MutableMapping[str, Any]):
+    if CACHE_CONTROL_INJECTION_POINTS_KEY not in model_kwargs:
+        return
+
+    def _check_valid_point(point: dict):
+        if REQUIRE_PROMPT_CACHING_ENABLED_IN_REQUEST not in point:
+            return True
+
+        required_value = point.pop(REQUIRE_PROMPT_CACHING_ENABLED_IN_REQUEST)
+
+        if not isinstance(required_value, str):
+            return False
+
+        if not is_feature_enabled(FeatureFlag.AI_GATEWAY_ALLOW_CONVERSATION_CACHING):
+            return False
+
+        return required_value == prompt_caching_enabled_in_current_request()
+
+    model_kwargs[CACHE_CONTROL_INJECTION_POINTS_KEY] = [
+        point
+        for point in model_kwargs[CACHE_CONTROL_INJECTION_POINTS_KEY]
+        if _check_valid_point(point)
+    ]
+
+    log.info(
+        "Injected cache control points",
+        cache_control_injection_points=model_kwargs[CACHE_CONTROL_INJECTION_POINTS_KEY],
+    )
 
 
 class CacheControlInjectionPointsConverter(Runnable[PromptValue, PromptValue]):

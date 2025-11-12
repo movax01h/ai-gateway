@@ -48,9 +48,9 @@ async def test_astream_with_stream_options():
                 "cache_read_input_tokens": 4,
             },
             UsageMetadata(
-                input_tokens=4,
+                input_tokens=1,
                 output_tokens=2,
-                total_tokens=6,
+                total_tokens=3,
                 input_token_details=InputTokenDetails(cache_creation=3, cache_read=4),
             ),
         ),

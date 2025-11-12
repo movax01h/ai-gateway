@@ -3,7 +3,7 @@ from typing import (
     Any,
     AsyncIterator,
     List,
-    Mapping,
+    MutableMapping,
     Optional,
     Sequence,
     TypeVar,
@@ -33,7 +33,11 @@ from ai_gateway.api.auth_utils import StarletteUser
 from ai_gateway.config import ConfigModelLimits, ModelLimits
 from ai_gateway.instrumentators.model_requests import ModelRequestInstrumentator
 from ai_gateway.model_metadata import TypeModelMetadata, current_model_metadata_context
-from ai_gateway.prompts.caching import CacheControlInjectionPointsConverter
+from ai_gateway.prompts.caching import (
+    CACHE_CONTROL_INJECTION_POINTS_KEY,
+    CacheControlInjectionPointsConverter,
+    filter_cache_control_injection_points,
+)
 from ai_gateway.prompts.config.base import ModelConfig, PromptConfig, PromptParams
 from ai_gateway.prompts.config.models import ModelClassProvider, TypeModelParams
 from ai_gateway.prompts.typing import Model, TypeModelFactory, TypePromptTemplateFactory
@@ -130,9 +134,7 @@ class Prompt(RunnableBinding[Input, Output]):
         **kwargs: Any,
     ):
         model_provider = config.model.params.model_class_provider
-        model_kwargs = self._build_model_kwargs(
-            config.params, model_metadata, config.model.params
-        )
+        model_kwargs = self._build_model_kwargs(config.params, model_metadata)
         model = self._build_model(
             model_factory, config.model, model_metadata, disable_streaming
         )
@@ -146,7 +148,7 @@ class Prompt(RunnableBinding[Input, Output]):
             else self._build_prompt_template(config)
         )
         prompt = self._chain_cache_control_injection_points_converter(
-            prompt, config.params, config.model.params
+            model_kwargs, prompt, config.model.params
         )
 
         chain = cast(
@@ -170,8 +172,8 @@ class Prompt(RunnableBinding[Input, Output]):
 
     def _chain_cache_control_injection_points_converter(
         self,
+        model_kwargs: MutableMapping[str, Any],
         prompt: Runnable,
-        params: PromptParams | None,
         model_params: TypeModelParams,
     ) -> Runnable:
         """Convert `cache_control_injection_points` LiteLLM param for non-LiteLLM model clients.
@@ -180,8 +182,7 @@ class Prompt(RunnableBinding[Input, Output]):
         """
 
         if (
-            not params
-            or not params.cache_control_injection_points
+            CACHE_CONTROL_INJECTION_POINTS_KEY not in model_kwargs
             or not model_params.model_class_provider
             or model_params.model_class_provider == ModelClassProvider.LITE_LLM
         ):
@@ -189,7 +190,9 @@ class Prompt(RunnableBinding[Input, Output]):
 
         chain = prompt | CacheControlInjectionPointsConverter().bind(
             model_class_provider=model_params.model_class_provider,
-            cache_control_injection_points=params.cache_control_injection_points,
+            cache_control_injection_points=model_kwargs.pop(
+                CACHE_CONTROL_INJECTION_POINTS_KEY
+            ),
         )
 
         return chain
@@ -198,22 +201,15 @@ class Prompt(RunnableBinding[Input, Output]):
         self,
         params: PromptParams | None,
         model_metadata: Optional[TypeModelMetadata],
-        model_params: TypeModelParams,
-    ) -> Mapping[str, Any]:
-        exclude_fields = set()
-
-        if model_params.model_class_provider is not ModelClassProvider.LITE_LLM:
-            # Exclude cache_control_injection_points from model_kwargs as it's not supported in the model client.
-            exclude_fields.add("cache_control_injection_points")
-
-        return {
-            **(
-                params.model_dump(exclude_none=True, exclude=exclude_fields)
-                if params
-                else {}
-            ),
+    ) -> MutableMapping[str, Any]:
+        model_kwargs = {
+            **(params.model_dump(exclude_none=True) if params else {}),
             **(model_metadata.to_params() if model_metadata else {}),
         }
+
+        filter_cache_control_injection_points(model_kwargs)
+
+        return model_kwargs
 
     def _build_model(
         self,
