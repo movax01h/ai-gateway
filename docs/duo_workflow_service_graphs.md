@@ -217,6 +217,25 @@ graph TD;
     classDef last fill:#bfb6fc;
 ```
 
+## Graph: `analytics_agent/v1` (Flow Registry)
+
+```mermaid
+
+---
+config:
+    flowchart:
+        curve: linear
+---
+graph TD;
+    __start__(__start__):::first;
+    __end__(__end__):::last;
+    __start__ --> analytics_agent;
+    analytics_agent(analytics_agent<br>#91;AgentComponent#93;);
+    classDef default fill:#f2f0ff,line-height:1.2;
+    classDef first fill-opacity: 0;
+    classDef last fill:#bfb6fc;
+```
+
 ## Graph: `code_review/v1` (Flow Registry)
 
 ```mermaid
