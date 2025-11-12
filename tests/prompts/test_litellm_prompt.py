@@ -84,7 +84,9 @@ async def test_astream(
     litellm.module_level_aclient = mock_http_handler
 
     with (
-        pytest.raises(litellm.InternalServerError, match="something went wrong"),
+        pytest.raises(
+            litellm.exceptions.MidStreamFallbackError, match="something went wrong"
+        ),
         patch(
             "google.auth.default",
             return_value=(

@@ -815,6 +815,8 @@ class TestPromptTimeout:
 
 class TestPromptCaching:
     @pytest.mark.asyncio
+    @mock.patch("ai_gateway.prompts.base.filter_cache_control_injection_points")
+    @mock.patch("ai_gateway.prompts.base.CacheControlInjectionPointsConverter")
     @pytest.mark.parametrize(
         ("prompt_params", "model_params", "expected_to_use_converter"),
         [
@@ -843,23 +845,22 @@ class TestPromptCaching:
     )
     async def test_prompt_caching(
         self,
+        mock_cache_control_injection_points_converter,
+        mock_filter_cache_control_injection_points,
         model_factory: TypeModelFactory,
         prompt_config: PromptConfig,
         model_metadata: TypeModelMetadata | None,
         prompt_template_factory: TypePromptTemplateFactory | None,
         expected_to_use_converter: bool,
     ):
-        with mock.patch(
-            "ai_gateway.prompts.base.CacheControlInjectionPointsConverter"
-        ) as mock_class:
-            Prompt(
-                model_factory, prompt_config, model_metadata, prompt_template_factory
-            )
+        Prompt(model_factory, prompt_config, model_metadata, prompt_template_factory)
 
-            if expected_to_use_converter:
-                mock_class.assert_called_once()
-            else:
-                mock_class.assert_not_called()
+        mock_filter_cache_control_injection_points.assert_called_once()
+
+        if expected_to_use_converter:
+            mock_cache_control_injection_points_converter.assert_called_once()
+        else:
+            mock_cache_control_injection_points_converter.assert_not_called()
 
 
 @pytest.fixture(name="registry")

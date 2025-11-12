@@ -13,7 +13,6 @@ from gitlab_cloud_connector import (
 from ai_gateway.api.auth_utils import StarletteUser, get_current_user
 from ai_gateway.api.error_utils import capture_validation_errors
 from ai_gateway.api.feature_category import feature_category
-from ai_gateway.api.middleware.headers import X_GITLAB_MODEL_PROMPT_CACHE_ENABLED
 from ai_gateway.api.snowplow_context import get_snowplow_code_suggestion_context
 from ai_gateway.api.v2.code.model_provider_handlers import (
     AnthropicHandler,
@@ -63,6 +62,7 @@ from ai_gateway.tracking.errors import log_exception
 from ai_gateway.tracking.instrumentator import SnowplowInstrumentator
 from lib.feature_flags.context import current_feature_flag_context
 from lib.internal_events import InternalEventsClient
+from lib.prompts.caching import X_GITLAB_MODEL_PROMPT_CACHE_ENABLED
 
 __all__ = [
     "router",

@@ -2,8 +2,120 @@ import pytest
 from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_core.prompt_values import ChatPromptValue
 
-from ai_gateway.prompts.caching import CacheControlInjectionPointsConverter
+from ai_gateway.prompts.caching import (
+    CACHE_CONTROL_INJECTION_POINTS_KEY,
+    REQUIRE_PROMPT_CACHING_ENABLED_IN_REQUEST,
+    CacheControlInjectionPointsConverter,
+    filter_cache_control_injection_points,
+)
 from ai_gateway.prompts.config.models import ModelClassProvider
+from lib.feature_flags.context import FeatureFlag, current_feature_flag_context
+from lib.prompts.caching import set_prompt_caching_enabled_to_current_request
+
+
+class TestFilterCacheControlInjectionPoints:
+    @pytest.mark.parametrize(
+        "model_kwargs,prompt_cache_enabled,feature_flag,expected_cache_control_injection_points",
+        [
+            (
+                {
+                    CACHE_CONTROL_INJECTION_POINTS_KEY: [
+                        {
+                            "location": "message",
+                            "index": 0,
+                        },
+                        {
+                            "location": "message",
+                            "index": -1,
+                            REQUIRE_PROMPT_CACHING_ENABLED_IN_REQUEST: "true",
+                        },
+                    ]
+                },
+                "true",
+                True,
+                [
+                    {
+                        "location": "message",
+                        "index": 0,
+                    },
+                    {
+                        "location": "message",
+                        "index": -1,
+                    },
+                ],
+            ),
+            (
+                {
+                    CACHE_CONTROL_INJECTION_POINTS_KEY: [
+                        {
+                            "location": "message",
+                            "index": 0,
+                        },
+                        {
+                            "location": "message",
+                            "index": -1,
+                            REQUIRE_PROMPT_CACHING_ENABLED_IN_REQUEST: "true",
+                        },
+                    ]
+                },
+                "false",
+                True,
+                [
+                    {
+                        "location": "message",
+                        "index": 0,
+                    },
+                ],
+            ),
+            (
+                {
+                    CACHE_CONTROL_INJECTION_POINTS_KEY: [
+                        {
+                            "location": "message",
+                            "index": 0,
+                        },
+                        {
+                            "location": "message",
+                            "index": -1,
+                            REQUIRE_PROMPT_CACHING_ENABLED_IN_REQUEST: "true",
+                        },
+                    ]
+                },
+                "true",
+                False,
+                [
+                    {
+                        "location": "message",
+                        "index": 0,
+                    },
+                ],
+            ),
+            ({"other_key": "other_value"}, "true", True, None),
+        ],
+    )
+    def test_filter(
+        self,
+        model_kwargs,
+        prompt_cache_enabled,
+        feature_flag,
+        expected_cache_control_injection_points,
+    ):
+        if feature_flag:
+            current_feature_flag_context.set(
+                {FeatureFlag.AI_GATEWAY_ALLOW_CONVERSATION_CACHING}
+            )
+
+        set_prompt_caching_enabled_to_current_request(prompt_cache_enabled)
+
+        filter_cache_control_injection_points(model_kwargs)
+
+        if expected_cache_control_injection_points is None:
+            assert len(model_kwargs) > 0
+        else:
+            assert (
+                model_kwargs[CACHE_CONTROL_INJECTION_POINTS_KEY]
+                == expected_cache_control_injection_points
+            )
 
 
 class TestCacheControlInjectionPointsConverter:

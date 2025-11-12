@@ -50,11 +50,6 @@ def _create_usage_metadata(token_usage: Mapping[str, Any]) -> UsageMetadata:
             cache_read=cache_read_input_tokens,
         )
 
-        # LiteLLM deducts the cached token count from the input tokens by default.
-        # To align the behavior with the other LangChain models (e.g. ChatAnthropic),
-        # modify `input_tokens` for representing the total input token including cached tokens.
-        input_tokens += cache_creation_input_tokens
-
     return UsageMetadata(
         input_tokens=input_tokens,
         output_tokens=output_tokens,

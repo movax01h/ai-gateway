@@ -54,6 +54,7 @@ from duo_workflow_service.server import CONTAINER_APPLICATION_PACKAGES
 from duo_workflow_service.workflows.type_definitions import AdditionalContext
 from lib.feature_flags.context import current_feature_flag_context
 from lib.internal_events.client import InternalEventsClient
+from lib.prompts.caching import current_prompt_cache_context
 
 pytest_plugins = ("pytest_asyncio",)
 
@@ -743,6 +744,7 @@ def reset_context_vars():
     current_model_metadata_context.set(None)
     token_usage.set(None)
     llm_operations.set(None)
+    current_prompt_cache_context.set(None)
     ModelSelectionConfig._instance = None
 
 
