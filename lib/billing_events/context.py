@@ -53,7 +53,6 @@ class UsageQuotaEventContext(BaseModel):
     root_namespace_id: Optional[int] = Field(alias="ultimate_parent_namespace_id")
     user_id: Optional[str] = None
     global_user_id: Optional[str] = None
-    correlation_id: Optional[str] = None
     realm: Optional[str] = None
     deployment_type: Optional[str] = None
     feature_enablement_type: Optional[str] = None
