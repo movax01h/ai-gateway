@@ -15,6 +15,7 @@ from duo_workflow_service.interceptors import (
     X_GITLAB_HOST_NAME,
     X_GITLAB_INSTANCE_ID_HEADER,
     X_GITLAB_IS_A_GITLAB_MEMBER,
+    X_GITLAB_IS_GITLAB_MEMBER,
     X_GITLAB_NAMESPACE_ID,
     X_GITLAB_PROJECT_ID,
     X_GITLAB_REALM_HEADER,
@@ -49,7 +50,11 @@ class InternalEventsInterceptor(grpc.aio.ServerInterceptor):
     ) -> None:
         metadata = dict(handler_call_details.invocation_metadata)
 
+        # LSP and Gitlab monolith are sending different headers https://gitlab.com/gitlab-org/gitlab/-/issues/580618
         is_gitlab_member = metadata.get(X_GITLAB_IS_A_GITLAB_MEMBER, None)
+        is_gitlab_member = is_gitlab_member or metadata.get(
+            X_GITLAB_IS_GITLAB_MEMBER, None
+        )
         is_gitlab_member = (
             is_gitlab_member.lower() == "true" if is_gitlab_member else None
         )
