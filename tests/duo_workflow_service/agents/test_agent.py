@@ -5,7 +5,7 @@ from anthropic import APIStatusError
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 
 from ai_gateway.prompts.base import Prompt
-from duo_workflow_service.agents.agent import Agent, AgentPromptTemplate
+from duo_workflow_service.agents.agent import Agent, AgentPromptTemplate, build_agent
 from duo_workflow_service.entities import WorkflowEventType
 from duo_workflow_service.entities.event import WorkflowEvent
 from duo_workflow_service.entities.state import (
@@ -55,13 +55,6 @@ def agent_fixture(
 
 
 class TestAgent:
-    def test_internal_event_extra(self, agent: Agent):
-        assert agent.internal_event_extra == {
-            "agent_name": agent.name,
-            "workflow_id": agent.workflow_id,
-            "workflow_type": agent.workflow_type.value,
-        }
-
     @pytest.mark.asyncio
     async def test_run_with_empty_conversation(
         self,
@@ -299,3 +292,38 @@ Human message"""
                 == "There was an error connecting to the chosen LLM provider, please try again or contact "
                 "support if the issue persists."
             )
+
+
+def test_create_agent_with_prompt_registry(
+    user, mock_local_prompt_registry, tools, prompt, gl_http_client
+):
+    agent = build_agent(
+        name="test_agent",
+        prompt_registry=mock_local_prompt_registry,
+        user=user,
+        prompt_id="test/agent",
+        prompt_version="^1.0.0",
+        internal_event_category="test_category",
+        tools=tools,
+        workflow_id="workflow_123",
+        workflow_type=CategoryEnum.WORKFLOW_SOFTWARE_DEVELOPMENT,
+        check_events=True,
+        http_client=gl_http_client,
+    )
+
+    mock_local_prompt_registry.get_on_behalf.assert_called_once_with(
+        user,
+        "test/agent",
+        "^1.0.0",
+        tools=tools,
+        internal_event_extra={
+            "agent_name": "test_agent",
+            "workflow_id": "workflow_123",
+            "workflow_type": CategoryEnum.WORKFLOW_SOFTWARE_DEVELOPMENT,
+        },
+    )
+
+    assert isinstance(agent, Agent)
+    assert agent.name == "test_agent"
+    assert agent.workflow_id == "workflow_123"
+    assert agent.prompt == prompt

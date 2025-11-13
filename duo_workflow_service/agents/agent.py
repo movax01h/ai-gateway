@@ -232,12 +232,21 @@ def build_agent(
     workflow_type: CategoryEnum,
     **kwargs: Any,
 ):
-    prompt = prompt_registry.get_on_behalf(user, prompt_id, prompt_version, tools=tools)
+    prompt = prompt_registry.get_on_behalf(
+        user,
+        prompt_id,
+        prompt_version,
+        tools=tools,
+        internal_event_extra={
+            "agent_name": name,
+            "workflow_id": workflow_id,
+            "workflow_type": workflow_type.value,
+        },
+    )
 
     return Agent(
         name=name,
         workflow_id=workflow_id,
-        workflow_type=workflow_type,
         prompt=prompt,
         **kwargs,
     )
