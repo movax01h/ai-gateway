@@ -73,6 +73,9 @@ from duo_workflow_service.interceptors.monitoring_interceptor import (
 from duo_workflow_service.interceptors.prompt_caching_interceptor import (
     PromptCachingInterceptor,
 )
+from duo_workflow_service.interceptors.usage_quota_interceptor import (
+    UsageQuotaInterceptor,
+)
 from duo_workflow_service.llm_factory import validate_llm_access
 from duo_workflow_service.monitoring import duo_workflow_metrics, setup_monitoring
 from duo_workflow_service.profiling import setup_profiling
@@ -688,6 +691,7 @@ async def serve(port: int) -> None:
                 GitLabRealmInterceptor(),
                 ClientTypeInterceptor(),
                 InternalEventsInterceptor(),
+                UsageQuotaInterceptor(),
                 ModelMetadataInterceptor(),
                 PromptCachingInterceptor(),
                 MonitoringInterceptor(),

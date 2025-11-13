@@ -80,6 +80,7 @@ setuptools = "^78.1.1"
 h11 = "^0.16.0"
 urllib3 = "^2.5.0"
 cryptography = "^43.0.1"
+aiocache = "^0.12.3"
 
 [[tool.poetry.source]]
 name = "gitlab_cloud_connector"
