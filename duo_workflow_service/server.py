@@ -463,6 +463,16 @@ class DuoWorkflowService(contract_pb2_grpc.DuoWorkflowServicer):
                     f"workflow execution failure: {type(workflow.last_error).__name__}: {workflow.last_error}"
                 )
             else:
+                log.warning(
+                    "gRPC status set to UNKNOWN - workflow completed without proper terminal status",
+                    workflow_id=workflow_id,
+                    workflow_definition=workflow_definition,
+                    last_gitlab_status=str(workflow.last_gitlab_status),
+                    last_error=(
+                        str(workflow.last_error) if workflow.last_error else None
+                    ),
+                    is_done=workflow.is_done,
+                )
                 context.set_code(grpc.StatusCode.UNKNOWN)
                 context.set_details(
                     f"RPC ended with unknown workflow state: {workflow.last_gitlab_status}"
