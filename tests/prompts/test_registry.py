@@ -4,6 +4,7 @@ from typing import Any, Sequence, Type, cast
 from unittest.mock import Mock, patch
 
 import pytest
+from langchain.tools import BaseTool
 from langchain_anthropic import ChatAnthropic
 from langchain_community.chat_models import ChatLiteLLM
 from langchain_core.prompts import ChatPromptTemplate
@@ -713,17 +714,10 @@ prompt_template:
     def test_get_with_tool_choice(
         self,
         registry: LocalPromptRegistry,
+        tools: list[BaseTool],
         tool_choice: str | None,
     ):
         """Test that tool_choice parameter is correctly passed from get method to Prompt constructor."""
-
-        # We have custom BaseTool in ai_gateway.chat.tools.
-        # To avoid potential collisions, we import BaseTool from LangChain locally.
-        from langchain_core.tools.base import (  # pylint: disable=import-outside-toplevel
-            BaseTool,
-        )
-
-        tools: list[BaseTool] = [Mock(spec=BaseTool)]
         with patch("ai_gateway.prompts.registry.Prompt") as prompt_class:
             registry.get(
                 prompt_id="test",
@@ -1186,13 +1180,9 @@ prompt_template:
     def test_get_with_bedrock_model_adjusts_tool_choice(
         self,
         registry: LocalPromptRegistry,
+        tools: list[BaseTool],
     ):
         """Test that tool_choice is automatically adjusted when getting a prompt with a Bedrock model."""
-        from langchain_core.tools.base import (  # pylint: disable=import-outside-toplevel
-            BaseTool,
-        )
-
-        tools: list[BaseTool] = [Mock(spec=BaseTool)]
         bedrock_metadata = ModelMetadata(
             provider="custom",
             name="bedrock_model",
@@ -1217,13 +1207,9 @@ prompt_template:
     def test_get_with_azure_model_adjusts_tool_choice(
         self,
         registry: LocalPromptRegistry,
+        tools: list[BaseTool],
     ):
         """Test that tool_choice is automatically adjusted when getting a prompt with an Azure model."""
-        from langchain_core.tools.base import (  # pylint: disable=import-outside-toplevel
-            BaseTool,
-        )
-
-        tools: list[BaseTool] = [Mock(spec=BaseTool)]
         azure_metadata = ModelMetadata(
             provider="custom",
             name="azure_model",

@@ -9,6 +9,7 @@ import structlog
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from gitlab_cloud_connector import CloudConnectorUser, GitLabUnitPrimitive, UserClaims
+from langchain.tools import BaseTool
 from langchain_community.chat_models.fake import FakeListChatModel
 from langchain_core.messages import BaseMessage
 from langchain_core.messages.ai import AIMessage, UsageMetadata
@@ -627,14 +628,26 @@ def prompt_template_factory_fixture():
     return None
 
 
+@pytest.fixture(name="internal_event_extra")
+def internal_event_extra_fixture():
+    return {}
+
+
 @pytest.fixture(name="prompt")
 def prompt_fixture(
     model_factory: TypeModelFactory,
     prompt_config: PromptConfig,
     model_metadata: TypeModelMetadata | None,
     prompt_template_factory: TypePromptTemplateFactory | None,
+    internal_event_extra: dict[str, Any],
 ):
-    return Prompt(model_factory, prompt_config, model_metadata, prompt_template_factory)
+    return Prompt(
+        model_factory,
+        prompt_config,
+        model_metadata,
+        prompt_template_factory,
+        internal_event_extra=internal_event_extra,
+    )
 
 
 @pytest.fixture(name="internal_event_client")
@@ -761,3 +774,8 @@ def reset_context():
 @pytest.fixture(name="vertex_project")
 def vertex_project_fixture():
     return "vertex-project"
+
+
+@pytest.fixture(name="tools")
+def tools_fixture() -> list[BaseTool]:
+    return [Mock(spec=BaseTool)]

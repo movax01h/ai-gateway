@@ -121,6 +121,7 @@ class Prompt(RunnableBinding[Input, Output]):
     prompt_tpl: Runnable[Input, PromptValue]
     internal_event_client: Optional[InternalEventsClient] = None
     limits: Optional[ModelLimits] = None
+    internal_event_extra: dict[str, Any] = {}
 
     def __init__(
         self,
@@ -247,10 +248,6 @@ class Prompt(RunnableBinding[Input, Output]):
             llm_provider=self.llm_provider,
             model_provider=self.model_provider,
         )
-
-    @property
-    def internal_event_extra(self) -> dict[str, Any]:
-        return {}
 
     def set_limits(self, model_limits: ConfigModelLimits):
         self.limits = model_limits.for_model(

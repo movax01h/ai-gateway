@@ -23,11 +23,14 @@ def create_agent(
     prompt: Prompt = prompt_registry.get_on_behalf(
         user=user,
         prompt_id="chat/agent",
-        prompt_version="^1.0.0",  # type: ignore[arg-type]
+        prompt_version="^1.0.0",
         internal_event_category=internal_event_category,
         tools=tools.bindable,  # type: ignore[arg-type]
-        workflow_id=workflow_id,
-        workflow_type=workflow_type,
+        internal_event_extra={
+            "agent_name": "chat",
+            "workflow_id": workflow_id,
+            "workflow_type": workflow_type.value,
+        },
     )
 
     return ChatAgent(
