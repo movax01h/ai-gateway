@@ -344,24 +344,27 @@ configurable_unit_primitives:
       - "claude_sonnet_4_20250514"
       - "claude_sonnet_4_20250514_vertex"
       - "claude_sonnet_4_5_20250929"
-  - feature_setting: "resolve_sast_vulnerability_context"
-    unit_primitives: []
-    default_model: "claude_sonnet_4_20250514_vertex"
-    selectable_models:
-      - "claude_sonnet_3_7_20250219"
-      - "claude_sonnet_4_20250514"
-      - "claude_sonnet_4_20250514_vertex"
-      - "claude_sonnet_4_5_20250929"
   - feature_setting: "resolve_sast_vulnerability_execution"
-    unit_primitives: []
+    unit_primitives:
+      - "duo_agent_platform"
     default_model: "claude_sonnet_4_20250514_vertex"
     selectable_models:
       - "claude_sonnet_3_7_20250219"
       - "claude_sonnet_4_20250514"
       - "claude_sonnet_4_20250514_vertex"
       - "claude_sonnet_4_5_20250929"
-  - feature_setting: "resolve_sast_vulnerability_commit_and_push"
-    unit_primitives: []
+  - feature_setting: "resolve_sast_vulnerability_commit"
+    unit_primitives:
+      - "duo_agent_platform"
+    default_model: "claude_sonnet_4_20250514_vertex"
+    selectable_models:
+      - "claude_sonnet_3_7_20250219"
+      - "claude_sonnet_4_20250514"
+      - "claude_sonnet_4_20250514_vertex"
+      - "claude_sonnet_4_5_20250929"
+  - feature_setting: "resolve_sast_vulnerability_push_and_create_mr"
+    unit_primitives:
+      - "duo_agent_platform"
     default_model: "claude_sonnet_4_20250514_vertex"
     selectable_models:
       - "claude_sonnet_3_7_20250219"
@@ -369,7 +372,8 @@ configurable_unit_primitives:
       - "claude_sonnet_4_20250514_vertex"
       - "claude_sonnet_4_5_20250929"
   - feature_setting: "resolve_sast_evaluate_mr_readiness"
-    unit_primitives: []
+    unit_primitives:
+      - "duo_agent_platform"
     default_model: "claude_sonnet_4_20250514_vertex"
     selectable_models:
       - "claude_sonnet_3_7_20250219"
@@ -377,7 +381,8 @@ configurable_unit_primitives:
       - "claude_sonnet_4_20250514_vertex"
       - "claude_sonnet_4_5_20250929"
   - feature_setting: "resolve_sast_check_false_positive"
-    unit_primitives: []
+    unit_primitives:
+      - "duo_agent_platform"
     default_model: "claude_sonnet_4_20250514_vertex"
     selectable_models:
       - "claude_sonnet_3_7_20250219"
@@ -398,13 +403,6 @@ configurable_unit_primitives:
     selectable_models:
       - "claude_sonnet_4_20250514"
       - "claude_sonnet_4_20250514_vertex"
-      - "claude_sonnet_4_5_20250929"
-  - feature_setting: "link_vulnerability_to_mr"
-    unit_primitives: []
-    default_model: "claude_sonnet_4_20250514"
-    selectable_models:
-      - "claude_sonnet_3_7_20250219"
-      - "claude_sonnet_4_20250514"
       - "claude_sonnet_4_5_20250929"
   - feature_setting: "create_merge_request"
     unit_primitives:

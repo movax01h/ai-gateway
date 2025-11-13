@@ -128,6 +128,7 @@ class Flow(AbstractWorkflow):
             context={
                 "project_id": self._project.get("id"),  # type: ignore[union-attr]
                 "project_http_url_to_repo": self._project.get("http_url_to_repo"),  # type: ignore[union-attr]
+                "project_default_branch": self._project.get("default_branch"),  # type: ignore[union-attr]
                 "goal": goal,
                 "current_date": datetime.now().strftime("%Y-%m-%d"),
                 "workflow_id": self._workflow_id,
