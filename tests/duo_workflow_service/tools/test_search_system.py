@@ -20,7 +20,7 @@ class TestGrep:
         # Basic recursive search
         pytest.param(
             {
-                "pattern": "test",
+                "keywords": "test",
                 "search_directory": ".",
                 "case_insensitive": False,
             },
@@ -31,7 +31,7 @@ class TestGrep:
         # Test with directory
         pytest.param(
             {
-                "pattern": "test",
+                "keywords": "test",
                 "search_directory": "src",
                 "case_insensitive": False,
             },
@@ -41,7 +41,7 @@ class TestGrep:
         ),
         # Test with case_insensitive
         pytest.param(
-            {"pattern": "test", "search_directory": ".", "case_insensitive": True},
+            {"keywords": "test", "search_directory": ".", "case_insensitive": True},
             "test.py:10:TEST line",
             "-i test",
             id="ignore_case",
@@ -52,7 +52,7 @@ class TestGrep:
         # Test empty string response
         pytest.param(
             {
-                "pattern": "nonexistent",
+                "keywords": "nonexistent",
                 "search_directory": ".",
                 "case_insensitive": False,
             },
@@ -63,7 +63,7 @@ class TestGrep:
         # Test "No such file or directory" response
         pytest.param(
             {
-                "pattern": "test",
+                "keywords": "test",
                 "search_directory": "nonexistent_dir",
                 "case_insensitive": False,
             },
@@ -74,7 +74,7 @@ class TestGrep:
         # Test "exit status 1" response
         pytest.param(
             {
-                "pattern": "test",
+                "keywords": "test",
                 "search_directory": ".",
                 "case_insensitive": False,
             },
@@ -110,7 +110,7 @@ class TestGrep:
         grep_tool = self._setup_grep_tool_with_mocks(expected_output)
 
         result = await grep_tool._arun(
-            pattern=params["pattern"],
+            keywords=params["keywords"],
             search_directory=params["search_directory"],
             case_insensitive=params["case_insensitive"],
         )
@@ -128,7 +128,7 @@ class TestGrep:
         grep_tool = self._setup_grep_tool_with_mocks(mock_response)
 
         result = await grep_tool._arun(
-            pattern=params["pattern"],
+            keywords=params["keywords"],
             search_directory=params["search_directory"],
             case_insensitive=params["case_insensitive"],
         )
@@ -139,7 +139,7 @@ class TestGrep:
     async def test_grep_security_check(self):
         grep_tool = Grep()
         result = await grep_tool._arun(
-            pattern="test",
+            keywords="test",
             search_directory="../parent",
         )
 
@@ -150,14 +150,14 @@ def test_grep_format_display_message():
     tool = Grep(description="Grep description")
 
     # Basic test with directory
-    input_data = GrepInput(pattern="TODO", search_directory="./src")
+    input_data = GrepInput(keywords="TODO", search_directory="./src")
     message = tool.format_display_message(input_data)
     expected_message = "Search for 'TODO' in files in './src'"
     assert message == expected_message
 
     # Test with options
     input_data = GrepInput(
-        pattern="TODO", search_directory="./src", case_insensitive=True
+        keywords="TODO", search_directory="./src", case_insensitive=True
     )
     message = tool.format_display_message(input_data)
     expected_message = "Search for 'TODO' in files in './src'"
@@ -165,7 +165,7 @@ def test_grep_format_display_message():
 
     # Test with all options
     input_data = GrepInput(
-        pattern="TODO",
+        keywords="TODO",
         search_directory="./src",
         case_insensitive=True,
     )
@@ -178,13 +178,15 @@ def test_grep_format_display_message_no_directory():
     tool = Grep(description="Grep description")
 
     # Basic test with no directory
-    input_data = GrepInput(pattern="TODO", search_directory=None)
+    input_data = GrepInput(keywords="TODO", search_directory=None)
     message = tool.format_display_message(input_data)
     expected_message = "Search for 'TODO' in files in 'directory'"
     assert message == expected_message
 
     # Test with options and no directory
-    input_data = GrepInput(pattern="TODO", search_directory=None, case_insensitive=True)
+    input_data = GrepInput(
+        keywords="TODO", search_directory=None, case_insensitive=True
+    )
     message = tool.format_display_message(input_data)
     expected_message = "Search for 'TODO' in files in 'directory'"
     assert message == expected_message
