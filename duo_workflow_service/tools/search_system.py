@@ -14,10 +14,11 @@ class GrepInput(BaseModel):
         default=".",
         description="The relative path of directory in which to search. Defaults to current directory.",
     )
-    pattern: str = Field(description="The PATTERN to search for")
-    case_insensitive: bool = Field(
-        default=False,
-        description="Ignore case distinctions (equivalent to -i flag)",
+    keywords: str = Field(
+        description="A comma-separated list of keywords for searching relevant snippets."
+        " Do NOT provide regex expressions."
+        " Every keyword should be either camel-case or snake-case."
+        " Examples: 'authentication,login,user_session' or 'LoginComponent,LogoutComponent,Dashboard'"
     )
 
 
@@ -33,10 +34,12 @@ class Grep(DuoBaseTool):
     - Code patterns, imports, API calls
     - Error messages, comments, configuration values
 
-    **Examples:**
-    - Search for "TODO" in all files: grep(pattern="TODO")
-    - Case-insensitive search: grep(pattern="error", case_insensitive=True)
-    - Search in specific directory: grep(pattern="bug", search_directory="src/")
+    **How to use:**
+    Always provide 3-5 specific keywords per search to maximize precision and minimize irrelevant results
+
+    **Output structure:**
+    - The tool returns snippets from the top-n files with the most matches in the specified directory
+    - Snippets include start and end line numbers for each match where lines start from 0
 
     **Don't use this for:**
     - Finding files by name patterns (use find_files instead)
@@ -46,9 +49,9 @@ class Grep(DuoBaseTool):
 
     async def _execute(
         self,
-        pattern: str,
+        keywords: str,
         search_directory: str = ".",
-        case_insensitive: bool = False,
+        case_insensitive: bool = True,
     ) -> str:
         """Execute the standard grep command with the specified parameters."""
         if search_directory and ".." in search_directory:
@@ -58,7 +61,7 @@ class Grep(DuoBaseTool):
             self.metadata,  # type: ignore
             contract_pb2.Action(
                 grep=contract_pb2.Grep(
-                    pattern=pattern,
+                    pattern=keywords,
                     search_directory=search_directory,
                     case_insensitive=case_insensitive,
                 )
@@ -70,7 +73,7 @@ class Grep(DuoBaseTool):
             or "exit status 1" in result
             or result == ""
         ):
-            return _format_no_matches_message(pattern, search_directory)
+            return _format_no_matches_message(keywords, search_directory)
 
         return result
 
@@ -79,7 +82,7 @@ class Grep(DuoBaseTool):
     ) -> str:
         if not (search_dir := args.search_directory):
             search_dir = "directory"
-        message = f"Search for '{args.pattern}' in files in '{search_dir}'"
+        message = f"Search for '{args.keywords}' in files in '{search_dir}'"
         return message
 
 
