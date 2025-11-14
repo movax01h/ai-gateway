@@ -139,6 +139,9 @@ async def _execute_action(metadata: Dict[str, Any], action: contract_pb2.Action)
     elif response_type == "plainTextResponse":
         return actionResponse.plainTextResponse.response
     else:
+        # Backward compatibility: This fallback to legacy response field is required for GitLab versions < 18.5
+        # that doesn't have the following fix in Go Executor. Do not delete until 18.8
+        # https://gitlab.com/gitlab-org/duo-workflow/duo-workflow-executor/-/merge_requests/243
         log.warning(
             "Executor doesn't return expected response fields, falling back to legacy response"
         )
