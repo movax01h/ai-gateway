@@ -363,7 +363,11 @@ class TestReadFiles:
 
         mock_outbox.put_action_and_wait_for_response = AsyncMock(
             return_value=contract_pb2.ClientEvent(
-                actionResponse=contract_pb2.ActionResponse(response=mock_response)
+                actionResponse=contract_pb2.ActionResponse(
+                    plainTextResponse=contract_pb2.PlainTextResponse(
+                        response=mock_response
+                    )
+                )
             )
         )
 
@@ -509,7 +513,11 @@ class TestReadFiles:
         mock_response = '{"allowed_file.py": {"content": "hi"}}'
         mock_outbox.put_action_and_wait_for_response = AsyncMock(
             return_value=contract_pb2.ClientEvent(
-                actionResponse=contract_pb2.ActionResponse(response=mock_response)
+                actionResponse=contract_pb2.ActionResponse(
+                    plainTextResponse=contract_pb2.PlainTextResponse(
+                        response=mock_response
+                    )
+                )
             )
         )
 

@@ -133,12 +133,11 @@ async def test_execute_action_empty_inbox(metadata):
 
 
 @pytest.mark.asyncio
-async def test__execute_action_and_get_action_response_missing_legacy_response_from_http_success(
+async def test__execute_action_and_get_action_response_http_success(
     metadata,
 ):
     action = contract_pb2.Action()
     client_event = contract_pb2.ClientEvent()
-    client_event.actionResponse.response = ""
 
     client_event.actionResponse.httpResponse.statusCode = 200
     client_event.actionResponse.httpResponse.body = '{"result": "ok"}'
@@ -150,18 +149,16 @@ async def test__execute_action_and_get_action_response_missing_legacy_response_f
 
     response = await _execute_action_and_get_action_response(metadata, action)
 
-    assert response.response == '{"result": "ok"}'
     assert response.httpResponse.statusCode == 200
     assert response.httpResponse.body == '{"result": "ok"}'
 
 
 @pytest.mark.asyncio
-async def test__execute_action_and_get_action_response_missing_legacy_response_from_http_not_found(
+async def test__execute_action_and_get_action_response_http_not_found(
     metadata,
 ):
     action = contract_pb2.Action()
     client_event = contract_pb2.ClientEvent()
-    client_event.actionResponse.response = ""
 
     client_event.actionResponse.httpResponse.statusCode = 404
     client_event.actionResponse.httpResponse.body = ""
@@ -173,18 +170,16 @@ async def test__execute_action_and_get_action_response_missing_legacy_response_f
 
     response = await _execute_action_and_get_action_response(metadata, action)
 
-    assert response.response == "Error: unexpected status code: 404"
     assert response.httpResponse.statusCode == 404
     assert response.httpResponse.body == ""
 
 
 @pytest.mark.asyncio
-async def test__execute_action_and_get_action_response_missing_legacy_response_from_http_error(
+async def test__execute_action_and_get_action_response_http_error(
     metadata,
 ):
     action = contract_pb2.Action()
     client_event = contract_pb2.ClientEvent()
-    client_event.actionResponse.response = ""
 
     client_event.actionResponse.httpResponse.statusCode = 0
     client_event.actionResponse.httpResponse.body = ""
@@ -200,12 +195,11 @@ async def test__execute_action_and_get_action_response_missing_legacy_response_f
 
 
 @pytest.mark.asyncio
-async def test__execute_action_and_get_action_response_missing_legacy_response_from_plaintext(
+async def test__execute_action_and_get_action_response_plaintext_success(
     metadata,
 ):
     action = contract_pb2.Action()
     client_event = contract_pb2.ClientEvent()
-    client_event.actionResponse.response = ""
 
     client_event.actionResponse.plainTextResponse.response = "Response"
     client_event.actionResponse.plainTextResponse.error = ""
@@ -216,17 +210,15 @@ async def test__execute_action_and_get_action_response_missing_legacy_response_f
 
     response = await _execute_action_and_get_action_response(metadata, action)
 
-    assert response.response == "Response"
     assert response.plainTextResponse.response == "Response"
 
 
 @pytest.mark.asyncio
-async def test__execute_action_and_get_action_response_missing_legacy_response_from_plaintext_error(
+async def test__execute_action_and_get_action_response_plaintext_error(
     metadata,
 ):
     action = contract_pb2.Action()
     client_event = contract_pb2.ClientEvent()
-    client_event.actionResponse.response = ""
 
     client_event.actionResponse.plainTextResponse.response = ""
     client_event.actionResponse.plainTextResponse.error = "file not found"
@@ -241,8 +233,8 @@ async def test__execute_action_and_get_action_response_missing_legacy_response_f
 
 
 @pytest.mark.asyncio
-async def test_execute_action_only_legacy_response(metadata):
-    """Test that _execute_action raises ValueError for unknown response_type."""
+async def test_execute_action_fallback_to_legacy_response(metadata):
+    """Test that _execute_action falls back to legacy response when response_type is not set."""
     action = contract_pb2.Action()
     client_event = contract_pb2.ClientEvent()
 
@@ -254,9 +246,19 @@ async def test_execute_action_only_legacy_response(metadata):
         return_value=client_event
     )
 
-    response = await _execute_action(metadata, action)
+    with patch(
+        "duo_workflow_service.executor.action.structlog.stdlib.get_logger"
+    ) as mock_get_logger:
+        mock_logger = mock_get_logger.return_value
 
-    assert response == "some legacy response"
+        response = await _execute_action(metadata, action)
+
+        assert response == "some legacy response"
+
+        # Verify the warning was logged
+        mock_logger.warning.assert_called_once_with(
+            "Executor doesn't return expected response fields, falling back to legacy response"
+        )
 
 
 @pytest.mark.asyncio
