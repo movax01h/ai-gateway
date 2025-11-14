@@ -24,6 +24,102 @@ def test_add_truncation_instruction():
     assert "random ted unique" in notice
 
 
+def test_truncate_string_reverse():
+    """Test reverse truncation keeps the end of the content."""
+    from duo_workflow_service.tools.tool_output_manager import (
+        TruncationDirection,
+        truncate_string,
+    )
+
+    # Create content where we can identify beginning vs end
+    content = "START" + ("x" * 200 * 1024) + "END"
+
+    reverse_config = TruncationConfig(
+        max_bytes=200 * 1024,
+        truncated_size=100 * 1024,
+        direction=TruncationDirection.FROM_END,
+    )
+
+    result = truncate_string(content, "test_tool", reverse_config)
+
+    # Should contain END but not START
+    assert "END" in result
+    assert "START" not in result
+    assert "<truncation_notice>" in result
+
+
+def test_truncate_string_default_direction():
+    """Test that default truncation direction is FROM_START."""
+    from duo_workflow_service.tools.tool_output_manager import (
+        TruncationDirection,
+        truncate_string,
+    )
+
+    # Create content where we can identify beginning vs end
+    content = "START" + ("x" * 200 * 1024) + "END"
+
+    default_config = TruncationConfig(
+        max_bytes=200 * 1024,
+        truncated_size=100 * 1024,
+    )
+
+    # Verify default is FROM_START
+    assert default_config.direction == TruncationDirection.FROM_START
+
+    result = truncate_string(content, "test_tool", default_config)
+
+    # Should contain START but not END (same as FROM_START behavior)
+    assert "START" in result
+    assert "END" not in result
+    assert "<truncation_notice>" in result
+
+
+def test_truncate_string_forward():
+    """Test forward truncation keeps the beginning of the content."""
+    from duo_workflow_service.tools.tool_output_manager import (
+        TruncationDirection,
+        truncate_string,
+    )
+
+    # Create content where we can identify beginning vs end
+    content = "START" + ("x" * 200 * 1024) + "END"
+
+    forward_config = TruncationConfig(
+        max_bytes=200 * 1024,
+        truncated_size=100 * 1024,
+        direction=TruncationDirection.FROM_START,
+    )
+
+    result = truncate_string(content, "test_tool", forward_config)
+
+    # Should contain START but not END
+    assert "START" in result
+    assert "END" not in result
+    assert "<truncation_notice>" in result
+
+
+def test_truncate_string_reverse_no_truncation_needed():
+    """Test reverse truncation when content is under limit."""
+    from duo_workflow_service.tools.tool_output_manager import (
+        TruncationDirection,
+        truncate_string,
+    )
+
+    content = "Small content"
+
+    reverse_config = TruncationConfig(
+        max_bytes=200 * 1024,
+        truncated_size=100 * 1024,
+        direction=TruncationDirection.FROM_END,
+    )
+
+    result = truncate_string(content, "test_tool", reverse_config)
+
+    # Should return unchanged
+    assert result == content
+    assert "<truncation_notice>" not in result
+
+
 def test_truncate_tool_response_with_custom_config():
     """Test truncation with custom config (1MB/800KB)."""
     custom_config = TruncationConfig(
@@ -117,6 +213,7 @@ def test_truncate_tool_response(
             truncated_token_size=1,
             max_bytes=30,
             truncated_size=10,
+            direction="from_start",
         )
         result = result.content if isinstance(result, ToolMessage) else result
         assert expected_json_str[:10] in result

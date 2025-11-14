@@ -1,4 +1,5 @@
 import json
+from enum import Enum
 from textwrap import dedent
 from typing import Any
 
@@ -16,11 +17,21 @@ logger = structlog.get_logger("tools_executor")
 token_counter = ApproximateTokenCounter("planner")
 
 
+class TruncationDirection(str, Enum):
+    """Direction for truncation."""
+
+    FROM_START = "from_start"  # Keep the beginning (default)
+    FROM_END = "from_end"  # Keep the end (most recent)
+
+
 class TruncationConfig(BaseModel):
     """Configuration for tool output truncation limits."""
 
     max_bytes: int = 200 * 1024  # 200 KiB
     truncated_size: int = 100 * 1024  # 100 KiB
+    direction: TruncationDirection = (
+        TruncationDirection.FROM_START
+    )  # Default to keeping the beginning
 
 
 def _add_truncation_instruction(
@@ -62,13 +73,19 @@ def truncate_string(
 
     max_bytes = truncation_config.max_bytes
     truncated_size = truncation_config.truncated_size
+    direction = truncation_config.direction
 
     encoded = text.encode("utf-8")
 
     if len(encoded) <= max_bytes:
         return text
 
-    truncated_text = encoded[:truncated_size].decode("utf-8", errors="ignore")
+    if direction == TruncationDirection.FROM_END:
+        # Keep the end (most recent content)
+        truncated_text = encoded[-truncated_size:].decode("utf-8", errors="ignore")
+    else:
+        # Keep the beginning (default behavior)
+        truncated_text = encoded[:truncated_size].decode("utf-8", errors="ignore")
 
     # Log token size to be consistent
     original_token_size = token_counter.count_string_content(text)
@@ -81,6 +98,7 @@ def truncate_string(
         truncated_token_size=truncated_token_size,
         max_bytes=max_bytes,
         truncated_size=truncated_size,
+        direction=direction.value,
     )
 
     truncated_output = _add_truncation_instruction(
