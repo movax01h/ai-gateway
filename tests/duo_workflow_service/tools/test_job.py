@@ -249,3 +249,37 @@ async def test_get_job_logs_api_exception(gitlab_client_mock, metadata):
         path="/api/v4/projects/1/jobs/123/trace",
         parse_json=False,
     )
+
+
+def test_get_job_logs_has_from_end_truncation_config():
+    """Test that GetLogsFromJob is configured with from end truncation."""
+    from duo_workflow_service.tools.tool_output_manager import TruncationDirection
+
+    tool = GetLogsFromJob(description="Get job logs description")
+
+    # Verify truncation config is set correctly
+    assert tool.truncation_config.max_bytes == 200 * 1024
+    assert tool.truncation_config.truncated_size == 150 * 1024
+    assert tool.truncation_config.direction == TruncationDirection.FROM_END
+
+
+@pytest.mark.asyncio
+async def test_get_job_logs_truncates_large_logs_from_end(gitlab_client_mock, metadata):
+    """Test that large job logs are truncated from the beginning, keeping the end."""
+    # Create a large log with identifiable start and end
+    large_log = "START_OF_LOG\n" + ("x" * 250 * 1024) + "\nEND_OF_LOG"
+
+    mock_response = GitLabHttpResponse(
+        status_code=200,
+        body=large_log,
+    )
+    gitlab_client_mock.aget = AsyncMock(return_value=mock_response)
+
+    tool = GetLogsFromJob(metadata=metadata)
+
+    response = await tool.arun({"project_id": "1", "job_id": "1"})
+
+    # The response should be truncated
+    assert "<truncation_notice>" in response
+    assert "END_OF_LOG" in response
+    assert "START_OF_LOG" not in response

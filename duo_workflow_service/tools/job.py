@@ -7,6 +7,10 @@ from pydantic import BaseModel, Field
 from duo_workflow_service.gitlab.url_parser import GitLabUrlParseError, GitLabUrlParser
 from duo_workflow_service.tools.duo_base_tool import DuoBaseTool
 from duo_workflow_service.tools.gitlab_resource_input import ProjectResourceInput
+from duo_workflow_service.tools.tool_output_manager import (
+    TruncationConfig,
+    TruncationDirection,
+)
 
 log = structlog.stdlib.get_logger("workflow")
 
@@ -49,6 +53,12 @@ class GetLogsFromJob(DuoBaseTool):
     # editorconfig-checker-enable
 
     args_schema: Type[BaseModel] = GetLogsFromJobInput  # type: ignore
+    truncation_config: TruncationConfig = Field(
+        default_factory=lambda: TruncationConfig(
+            truncated_size=150 * 1024,  # 150 KiB
+            direction=TruncationDirection.FROM_END,  # Keep the most recent logs (bottom)
+        )
+    )
 
     def _validate_job_url(
         self,
