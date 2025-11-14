@@ -610,7 +610,7 @@ async def test_get_merge_request_validation(kwargs, expected_error, metadata):
 async def test_list_merge_request_diffs(gitlab_client_mock, metadata):
     mock_response = GitLabHttpResponse(
         status_code=200,
-        body='{"diffs": []}',
+        body="[]",
     )
     gitlab_client_mock.aget = AsyncMock(return_value=mock_response)
 
@@ -618,7 +618,7 @@ async def test_list_merge_request_diffs(gitlab_client_mock, metadata):
 
     response = await tool._arun(project_id=1, merge_request_iid=123)
 
-    expected_response = json.dumps({"diffs": {"diffs": []}})
+    expected_response = json.dumps({"diffs": []})
     assert response == expected_response
 
     gitlab_client_mock.aget.assert_called_once_with(
@@ -648,7 +648,7 @@ async def test_list_merge_request_diffs(gitlab_client_mock, metadata):
 async def test_list_merge_request_diffs_with_url_success(
     url, project_id, merge_request_iid, expected_path, gitlab_client_mock, metadata
 ):
-    diffs_data = '{"diffs": []}'
+    diffs_data = "[]"
     tool = ListMergeRequestDiffs(
         description="list merge request diffs description", metadata=metadata
     )
@@ -662,7 +662,7 @@ async def test_list_merge_request_diffs_with_url_success(
         response_data=diffs_data,
     )
 
-    expected_response = json.dumps({"diffs": {"diffs": []}})
+    expected_response = json.dumps({"diffs": []})
     assert response == expected_response
 
     gitlab_client_mock.aget.assert_called_once_with(
@@ -1411,15 +1411,10 @@ def test_update_merge_request_format_display_message(input_data, expected_messag
 
 # Tests for DiffExclusionPolicy integration
 @pytest.mark.asyncio
-@patch("duo_workflow_service.policies.file_exclusion_policy.is_feature_enabled")
-@patch("duo_workflow_service.policies.diff_exclusion_policy.is_feature_enabled")
 async def test_list_merge_request_diffs_with_diff_exclusion_policy_enabled(
-    mock_diff_feature_flag, mock_file_feature_flag, gitlab_client_mock, metadata
+    gitlab_client_mock, metadata
 ):
     """Test ListMergeRequestDiffs applies DiffExclusionPolicy when feature flag is enabled."""
-    mock_diff_feature_flag.return_value = True
-    mock_file_feature_flag.return_value = True
-
     # Mock diff data with both allowed and excluded files
     diff_data = [
         {
@@ -1492,15 +1487,10 @@ async def test_list_merge_request_diffs_with_diff_exclusion_policy_enabled(
 
 
 @pytest.mark.asyncio
-@patch("duo_workflow_service.policies.file_exclusion_policy.is_feature_enabled")
-@patch("duo_workflow_service.policies.diff_exclusion_policy.is_feature_enabled")
 async def test_list_merge_request_diffs_with_no_excluded_files(
-    mock_diff_feature_flag, mock_file_feature_flag, gitlab_client_mock, metadata
+    gitlab_client_mock, metadata
 ):
     """Test ListMergeRequestDiffs does not include excluded_files/excluded_reason when no files are excluded."""
-    mock_diff_feature_flag.return_value = True
-    mock_file_feature_flag.return_value = True
-
     # Mock diff data with only allowed files
     diff_data = [
         {

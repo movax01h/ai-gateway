@@ -15,16 +15,6 @@ from duo_workflow_service.tools.repository_files import (
 )
 
 
-@pytest.fixture(autouse=True)
-def mock_feature_flag():
-    """Mock feature flag to return True for USE_DUO_CONTEXT_EXCLUSION."""
-    with patch(
-        "duo_workflow_service.policies.file_exclusion_policy.is_feature_enabled"
-    ) as mock:
-        mock.return_value = True
-        yield mock
-
-
 @pytest.fixture(name="gitlab_client_mock")
 def gitlab_client_mock_fixture():
     mock = AsyncMock()

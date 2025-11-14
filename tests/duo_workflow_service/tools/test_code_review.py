@@ -251,18 +251,12 @@ line 1
 
 
 @pytest.mark.asyncio
-@patch("duo_workflow_service.policies.file_exclusion_policy.is_feature_enabled")
-@patch("duo_workflow_service.policies.diff_exclusion_policy.is_feature_enabled")
 async def test_build_review_context_basic_success(
-    mock_diff_feature_flag,
-    mock_file_feature_flag,
     gitlab_client_mock,
     metadata,
     mr_data,
     diffs_data,
 ):
-    mock_diff_feature_flag.return_value = True
-    mock_file_feature_flag.return_value = True
     original_file_content = {
         "content": base64.b64encode(
             b"class Calculator\n  def subtract(a, b)\n    # TODO: Implement\n  end\nend"
@@ -304,19 +298,12 @@ async def test_build_review_context_basic_success(
 
 
 @pytest.mark.asyncio
-@patch("duo_workflow_service.policies.file_exclusion_policy.is_feature_enabled")
-@patch("duo_workflow_service.policies.diff_exclusion_policy.is_feature_enabled")
 async def test_build_review_context_only_diffs(
-    mock_diff_feature_flag,
-    mock_file_feature_flag,
     gitlab_client_mock,
     metadata,
     mr_data,
     diffs_data,
 ):
-    mock_diff_feature_flag.return_value = True
-    mock_file_feature_flag.return_value = True
-
     gitlab_client_mock.aget = AsyncMock(
         side_effect=[
             GitLabHttpResponse(status_code=200, body=json.dumps(mr_data)),
@@ -344,19 +331,12 @@ async def test_build_review_context_only_diffs(
 
 
 @pytest.mark.asyncio
-@patch("duo_workflow_service.policies.file_exclusion_policy.is_feature_enabled")
-@patch("duo_workflow_service.policies.diff_exclusion_policy.is_feature_enabled")
 async def test_build_review_context_skips_large_files(
-    mock_diff_feature_flag,
-    mock_file_feature_flag,
     gitlab_client_mock,
     metadata,
     mr_data,
     diffs_data,
 ):
-    mock_diff_feature_flag.return_value = True
-    mock_file_feature_flag.return_value = True
-
     large_file_content = "\n".join([f"line {i}" for i in range(10001)])
     large_file_encoded = {
         "content": base64.b64encode(large_file_content.encode("utf-8")).decode("utf-8")
@@ -378,21 +358,15 @@ async def test_build_review_context_skips_large_files(
 
 
 @pytest.mark.asyncio
-@patch("duo_workflow_service.policies.file_exclusion_policy.is_feature_enabled")
-@patch("duo_workflow_service.policies.diff_exclusion_policy.is_feature_enabled")
 @patch("yaml.safe_load")
 async def test_build_review_context_with_custom_instructions(
     mock_yaml_load,
-    mock_diff_feature_flag,
-    mock_file_feature_flag,
     gitlab_client_mock,
     metadata,
     mr_data,
     diffs_data,
     custom_instructions_yaml,
 ):
-    mock_diff_feature_flag.return_value = True
-    mock_file_feature_flag.return_value = True
     mock_yaml_load.return_value = {
         "instructions": [
             {
@@ -425,18 +399,12 @@ async def test_build_review_context_with_custom_instructions(
 
 
 @pytest.mark.asyncio
-@patch("duo_workflow_service.policies.file_exclusion_policy.is_feature_enabled")
-@patch("duo_workflow_service.policies.diff_exclusion_policy.is_feature_enabled")
 async def test_build_review_context_with_url(
-    mock_diff_feature_flag,
-    mock_file_feature_flag,
     gitlab_client_mock,
     metadata,
     mr_data,
     diffs_data,
 ):
-    mock_diff_feature_flag.return_value = True
-    mock_file_feature_flag.return_value = True
     original_file_content = {
         "content": base64.b64encode(b"original content").decode("utf-8")
     }
@@ -459,21 +427,15 @@ async def test_build_review_context_with_url(
 
 
 @pytest.mark.asyncio
-@patch("duo_workflow_service.policies.file_exclusion_policy.is_feature_enabled")
-@patch("duo_workflow_service.policies.diff_exclusion_policy.is_feature_enabled")
 @patch("yaml.safe_load")
 async def test_build_review_context_no_matching_custom_instructions(
     mock_yaml_load,
-    mock_diff_feature_flag,
-    mock_file_feature_flag,
     gitlab_client_mock,
     metadata,
     mr_data,
     diffs_data,
     custom_instructions_yaml,
 ):
-    mock_diff_feature_flag.return_value = True
-    mock_file_feature_flag.return_value = True
     mock_yaml_load.return_value = {
         "instructions": [
             {
@@ -503,20 +465,14 @@ async def test_build_review_context_no_matching_custom_instructions(
 
 
 @pytest.mark.asyncio
-@patch("duo_workflow_service.policies.file_exclusion_policy.is_feature_enabled")
-@patch("duo_workflow_service.policies.diff_exclusion_policy.is_feature_enabled")
 @patch("yaml.safe_load")
 async def test_build_review_context_nested_vs_root_patterns(
     mock_yaml_load,
-    mock_diff_feature_flag,
-    mock_file_feature_flag,
     gitlab_client_mock,
     metadata,
     mr_data,
     custom_instructions_yaml,
 ):
-    mock_diff_feature_flag.return_value = True
-    mock_file_feature_flag.return_value = True
     nested_diffs_data = [
         {
             "diff": "@@ -1,3 +1,4 @@ class Calculator",
@@ -624,18 +580,11 @@ async def test_build_review_context_exception(gitlab_client_mock, metadata):
 
 
 @pytest.mark.asyncio
-@patch("duo_workflow_service.policies.file_exclusion_policy.is_feature_enabled")
-@patch("duo_workflow_service.policies.diff_exclusion_policy.is_feature_enabled")
 async def test_build_review_context_no_files_content(
-    mock_diff_feature_flag,
-    mock_file_feature_flag,
     gitlab_client_mock,
     metadata,
     mr_data,
 ):
-    mock_diff_feature_flag.return_value = True
-    mock_file_feature_flag.return_value = True
-
     new_files_diffs = [
         {
             "old_path": "",
