@@ -62,23 +62,24 @@ def graphql_request(
 
 
 def fetch_foundational_agent(
-    gitlab_url: str, gitlab_token: str, agent_id: int
+    gitlab_url: str, gitlab_token: str, agent_id: str
 ) -> Tuple[str, str]:
     """Sync a single foundational agent and return its workflow definition."""
+
+    file_name, catalog_id = agent_id.split(":")
 
     agent_response: Dict[str, Any] = graphql_request(
         f"{gitlab_url.rstrip('/')}/api/graphql",
         gitlab_token,
         FETCH_AGENT_QUERY,
         FETCH_AGENT_OPERATION_NAME,
-        {"id": f"gid://gitlab/Ai::Catalog::Item/{agent_id}"},
+        {"id": f"gid://gitlab/Ai::Catalog::Item/{catalog_id}"},
     )
 
     if "errors" in agent_response:
         raise RuntimeError(agent_response["errors"])
 
     version_id: str = agent_response["data"]["aiCatalogItem"]["latestVersion"]["id"]
-    name: str = agent_response["data"]["aiCatalogItem"]["name"]
 
     if not version_id:
         raise RuntimeError("Version not found")
@@ -93,7 +94,7 @@ def fetch_foundational_agent(
 
     flow_config: str = flow_response["data"]["aiCatalogAgentFlowConfig"]
 
-    return name.replace(" ", "_").lower(), flow_config
+    return file_name, flow_config
 
 
 def save_workflow_to_file(agent_id: str, flow_def: str, output_path: str) -> str:
@@ -133,17 +134,7 @@ def fetch_agents() -> None:
     """Main function to parse arguments and sync foundational agents."""
     args: argparse.Namespace = parse_arguments()
 
-    # Parse agent IDs
-    try:
-        agent_ids: List[int] = [
-            int(id.strip()) for id in args.foundational_agent_ids.split(",")
-        ]
-    except ValueError:
-        print(
-            "Error: foundational_agent_ids must be comma-separated integers",
-            file=sys.stderr,
-        )
-        sys.exit(1)
+    agent_ids: List[str] = args.foundational_agent_ids.split(",")
 
     # Validate output path if provided
     if args.output_path:
