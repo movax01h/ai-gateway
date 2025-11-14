@@ -1,3 +1,4 @@
+import litellm
 from dependency_injector import containers, providers
 from langchain_openai import ChatOpenAI
 from litellm.llms.custom_httpx.http_handler import AsyncHTTPHandler
@@ -13,12 +14,11 @@ __all__ = [
     "ContainerModels",
 ]
 
+litellm.module_level_aclient = AsyncHTTPHandler(event_hooks={"request": [log_request]})
+
 
 def _litellm_factory(*args, **kwargs) -> Model:
-
     if kwargs.get("custom_llm_provider", "") == "vertex_ai":
-        kwargs["client"] = AsyncHTTPHandler(event_hooks={"request": [log_request]})
-
         if kwargs.get("model", "").lower().startswith("claude"):
             kwargs["model_kwargs"] = kwargs.get("model_kwargs", {}) or {}
             kwargs["model_kwargs"]["extra_headers"] = {

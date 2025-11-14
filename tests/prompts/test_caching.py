@@ -155,6 +155,7 @@ class TestCacheControlInjectionPointsConverter:
     )
     def test_invoke(self, messages, converter: CacheControlInjectionPointsConverter):
         prompt_value = ChatPromptValue(messages=messages)
+        original_value = prompt_value.model_copy(deep=True)
 
         response = converter.invoke(prompt_value)
 
@@ -166,6 +167,10 @@ class TestCacheControlInjectionPointsConverter:
             "type": "ephemeral",
             "ttl": "5m",
         }
+
+        assert (
+            original_value.to_messages() == prompt_value.to_messages()
+        ), "Original list has been modified"
 
     @pytest.mark.parametrize(
         "model_class_provider",
