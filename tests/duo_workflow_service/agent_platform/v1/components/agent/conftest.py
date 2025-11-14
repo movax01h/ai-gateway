@@ -138,7 +138,9 @@ def mock_ai_message_fixture():
         "output_tokens": 50,
         "total_tokens": 150,
     }
-    mock_message.response_metadata = {"stop_reason": "end_turn"}
+    mock_message.response_metadata = {
+        "finish_reason": "stop"
+    }  # OpenAI format used by LiteLLM
     mock_message.tool_calls = []
     mock_message.additional_kwargs = {}
     return mock_message

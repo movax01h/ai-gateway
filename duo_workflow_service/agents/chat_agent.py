@@ -21,7 +21,7 @@ from duo_workflow_service.gitlab.gitlab_instance_info_service import (
     GitLabInstanceInfoService,
 )
 from duo_workflow_service.gitlab.gitlab_service_context import GitLabServiceContext
-from duo_workflow_service.llm_factory import AnthropicStopReason
+from duo_workflow_service.llm_factory import LLMFinishReason
 from duo_workflow_service.tracking.errors import log_exception
 
 log = structlog.stdlib.get_logger("chat_agent")
@@ -237,10 +237,10 @@ class ChatAgent:
             ):
                 agent_response = await self._get_agent_response(input)
 
-            # Check for abnormal stop reasons
-            stop_reason = agent_response.response_metadata.get("stop_reason")
-            if stop_reason in AnthropicStopReason.abnormal_values():
-                log.warning(f"LLM stopped abnormally with reason: {stop_reason}")
+            # Check for abnormal finish reasons
+            finish_reason = agent_response.response_metadata.get("finish_reason")
+            if finish_reason in LLMFinishReason.abnormal_values():
+                log.warning(f"LLM stopped abnormally with reason: {finish_reason}")
 
             return self._build_response(agent_response, input)
 

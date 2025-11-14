@@ -25,7 +25,7 @@ from duo_workflow_service.entities.state import (
 from duo_workflow_service.errors.error_handler import ERROR_TYPES, ModelErrorType
 from duo_workflow_service.gitlab.events import get_event
 from duo_workflow_service.gitlab.http_client import GitlabHttpClient
-from duo_workflow_service.llm_factory import AnthropicStopReason
+from duo_workflow_service.llm_factory import LLMFinishReason
 from duo_workflow_service.monitoring import duo_workflow_metrics
 from duo_workflow_service.tools.handover import HandoverTool
 from duo_workflow_service.tracking.errors import log_exception
@@ -105,15 +105,15 @@ class Agent(BaseAgent):
                 ):
                     model_completion = await super().ainvoke(input)
 
-                stop_reason = model_completion.response_metadata.get("stop_reason")
-                if stop_reason in AnthropicStopReason.abnormal_values():
-                    log.warning(f"LLM stopped abnormally with reason: {stop_reason}")
+                finish_reason = model_completion.response_metadata.get("finish_reason")
+                if finish_reason in LLMFinishReason.abnormal_values():
+                    log.warning(f"LLM stopped abnormally with reason: {finish_reason}")
 
                 duo_workflow_metrics.count_llm_response(
                     model=model_name,
                     provider=self.prompt.model_provider,
                     request_type=request_type,
-                    stop_reason=stop_reason,
+                    stop_reason=finish_reason,
                     # Hardcoded 200 status since model_completion only returns status codes for failures
                     status_code="200",
                     error_type="none",

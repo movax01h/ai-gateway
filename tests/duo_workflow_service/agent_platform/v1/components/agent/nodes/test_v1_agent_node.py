@@ -462,7 +462,7 @@ class TestAgentNodeMonitoring:
             model="claude-3-sonnet",
             provider="anthropic",
             request_type="test_component_completion",
-            stop_reason="end_turn",
+            stop_reason="stop",
             status_code="200",
             error_type="none",
         )
