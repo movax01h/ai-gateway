@@ -18,9 +18,6 @@ logger = logging.getLogger(__name__)
 class ExecutorGitLabHttpClient(GitlabHttpClient):
     """GitLab HTTP client implementation that uses the executor service."""
 
-    MAX_RETRIES = 3
-    RETRY_DELAY_SECONDS = 2
-
     def __init__(self, outbox: Outbox):
         self.outbox = outbox
 
@@ -59,56 +56,34 @@ class ExecutorGitLabHttpClient(GitlabHttpClient):
     async def graphql(
         self, query: str, variables: Optional[dict] = None, timeout: float = 10.0
     ) -> Any:
-        """Execute a GraphQL query with retry logic.
-
-        Args:
-            query: The GraphQL query string
-            variables: Optional dictionary of variables for the query
-            timeout: Timeout in seconds for each request attempt
-
-        Returns:
-            The data part of the GraphQL response
-
-        Raises:
-            Exception: If all retry attempts fail or timeout
-        """
         payload = {
             "query": query,
             "variables": variables or {},
         }
 
-        for attempt in range(self.MAX_RETRIES):
-            try:
-                response = await asyncio.wait_for(
-                    _execute_action(
-                        {"outbox": self.outbox},
-                        contract_pb2.Action(
-                            runHTTPRequest=contract_pb2.RunHTTPRequest(
-                                path="/api/graphql",
-                                method="POST",
-                                body=json.dumps(payload),
-                            )
-                        ),
+        try:
+            response = await asyncio.wait_for(
+                _execute_action(
+                    {"outbox": self.outbox},
+                    contract_pb2.Action(
+                        runHTTPRequest=contract_pb2.RunHTTPRequest(
+                            path="/api/graphql",
+                            method="POST",
+                            body=json.dumps(payload),
+                        )
                     ),
-                    timeout=timeout,
-                )
+                ),
+                timeout=timeout,
+            )
+        except asyncio.TimeoutError:
+            raise Exception(f"GraphQL request timed out after {timeout} seconds")
 
-                try:
-                    data = json.loads(response)
-                except json.JSONDecodeError:
-                    raise Exception(f"Invalid JSON response from GraphQL: {response}")
+        try:
+            data = json.loads(response)
+        except json.JSONDecodeError:
+            raise Exception(f"Invalid JSON response from GraphQL: {response}")
 
-                if "errors" in data:
-                    raise Exception(f"GraphQL errors: {data['errors']}")
+        if "errors" in data:
+            raise Exception(f"GraphQL errors: {data['errors']}")
 
-                return data["data"]
-
-            except Exception as ex:
-                logger.warning(
-                    f"GraphQL request attempt {attempt + 1}/{self.MAX_RETRIES} failed: {ex}"
-                )
-
-                if attempt < self.MAX_RETRIES - 1:
-                    await asyncio.sleep(self.RETRY_DELAY_SECONDS)
-                else:
-                    raise
+        return data["data"]
