@@ -163,13 +163,12 @@ class ReadFiles(DuoBaseTool):
                 return "Could not read files"
 
             try:
-                file_contents_result = file_contents_result_action_response.response
+                file_contents_result = (
+                    file_contents_result_action_response.plainTextResponse.response
+                )
                 result_dict = json.loads(file_contents_result)
             except json.JSONDecodeError as e:
                 log.error(f"Could not read files: {e}")
-                response = file_contents_result_action_response.response
-                if response:
-                    log.info(f"response_length={len(response)}")
                 plain_text_response = (
                     file_contents_result_action_response.plainTextResponse
                 )

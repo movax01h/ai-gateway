@@ -757,7 +757,11 @@ async def test_execute_workflow(
 
         for _ in range(request_iterator_count):
             yield contract_pb2.ClientEvent(
-                actionResponse=contract_pb2.ActionResponse(response="the response")
+                actionResponse=contract_pb2.ActionResponse(
+                    plainTextResponse=contract_pb2.PlainTextResponse(
+                        response="the response"
+                    )
+                )
             )
 
     current_user.set(CloudConnectorUser(authenticated=True, is_debug=True))
@@ -1240,7 +1244,11 @@ async def test_next_client_event():
             heartbeat=contract_pb2.HeartbeatRequest(timestamp=456)
         )
         yield contract_pb2.ClientEvent(
-            actionResponse=contract_pb2.ActionResponse(response="the response")
+            actionResponse=contract_pb2.ActionResponse(
+                plainTextResponse=contract_pb2.PlainTextResponse(
+                    response="the response"
+                )
+            )
         )
 
     iterator = mock_request_iterator()
@@ -1251,7 +1259,7 @@ async def test_next_client_event():
         result = await next_client_event(iterator)
         assert result.HasField("heartbeat")
         result = await next_client_event(iterator)
-        assert result.actionResponse.response == "the response"
+        assert result.actionResponse.plainTextResponse.response == "the response"
         assert not result.HasField("heartbeat")
         mock_log.info.assert_called()
 
