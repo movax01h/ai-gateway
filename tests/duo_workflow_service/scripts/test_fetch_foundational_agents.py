@@ -159,7 +159,9 @@ class TestFetchFoundationalAgent:
 
         mock_graphql_request.side_effect = [agent_response, flow_response]
 
-        name, flow_config = fetch_foundational_agent("http://test.com", "token", 123)
+        name, flow_config = fetch_foundational_agent(
+            "http://test.com", "token", "agent_1:123"
+        )
 
         # Verify both GraphQL calls were made
         assert mock_graphql_request.call_count == 2
@@ -182,7 +184,7 @@ class TestFetchFoundationalAgent:
             {"agentVersionId": "gid://gitlab/Ai::Catalog::ItemVersion/456"},
         )
 
-        assert name == "pirate_translator"
+        assert name == "agent_1"
         assert flow_config == "version: v1\ncomponents:\n  - name: pirate_translator"
 
     @patch("duo_workflow_service.scripts.fetch_foundational_agents.graphql_request")
@@ -207,7 +209,7 @@ class TestFetchFoundationalAgent:
 
         mock_graphql_request.side_effect = [agent_response, flow_response]
 
-        fetch_foundational_agent("http://test.com/", "token", 123)
+        fetch_foundational_agent("http://test.com/", "token", "agent_1:123")
 
         # Should strip trailing slash for both calls
         mock_graphql_request.assert_any_call(
@@ -225,7 +227,7 @@ class TestFetchFoundationalAgent:
         mock_graphql_request.return_value = mock_response
 
         with pytest.raises(RuntimeError) as exc_info:
-            fetch_foundational_agent("http://test.com", "token", 123)
+            fetch_foundational_agent("http://test.com", "token", "agent_1:123")
 
         assert exc_info.value.args[0] == [{"message": "Agent not found"}]
 
@@ -244,7 +246,7 @@ class TestFetchFoundationalAgent:
         mock_graphql_request.return_value = agent_response
 
         with pytest.raises(RuntimeError, match="Version not found"):
-            fetch_foundational_agent("http://test.com", "token", 123)
+            fetch_foundational_agent("http://test.com", "token", "agent_1:123")
 
 
 class TestSaveWorkflowToFile:
@@ -289,14 +291,18 @@ class TestParseArguments:
 
     def test_parse_required_arguments(self):
         """Test parsing with only required arguments."""
-        test_args = ["http://test.com/graphql", "test-token", "123,456,789"]
+        test_args = [
+            "http://test.com/graphql",
+            "test-token",
+            "agent_1:123,agent_2:456,agent_3:789",
+        ]
 
         with patch("sys.argv", ["script.py"] + test_args):
             args = parse_arguments()
 
         assert args.gitlab_url == "http://test.com/graphql"
         assert args.gitlab_token == "test-token"
-        assert args.foundational_agent_ids == "123,456,789"
+        assert args.foundational_agent_ids == "agent_1:123,agent_2:456,agent_3:789"
         assert args.output_path is None
 
     def test_parse_with_output_path(self):
@@ -304,7 +310,7 @@ class TestParseArguments:
         test_args = [
             "http://test.com/graphql",
             "test-token",
-            "123,456,789",
+            "agent_1:123,agent_2:456,agent_3:789",
             "--output-path",
             "/tmp/output",
         ]
@@ -314,7 +320,7 @@ class TestParseArguments:
 
         assert args.gitlab_url == "http://test.com/graphql"
         assert args.gitlab_token == "test-token"
-        assert args.foundational_agent_ids == "123,456,789"
+        assert args.foundational_agent_ids == "agent_1:123,agent_2:456,agent_3:789"
         assert args.output_path == "/tmp/output"
 
 
@@ -334,7 +340,7 @@ class TestFetchAgents:
         mock_args = Mock()
         mock_args.gitlab_url = "http://test.com"
         mock_args.gitlab_token = "token"
-        mock_args.foundational_agent_ids = "123,456"
+        mock_args.foundational_agent_ids = "agent_1:123,agent_2:456"
         mock_args.output_path = None
         mock_parse_args.return_value = mock_args
 
@@ -348,8 +354,8 @@ class TestFetchAgents:
 
         # Verify fetch_foundational_agent was called for each ID
         assert mock_fetch_agent.call_count == 2
-        mock_fetch_agent.assert_any_call("http://test.com", "token", 123)
-        mock_fetch_agent.assert_any_call("http://test.com", "token", 456)
+        mock_fetch_agent.assert_any_call("http://test.com", "token", "agent_1:123")
+        mock_fetch_agent.assert_any_call("http://test.com", "token", "agent_2:456")
 
         # Verify output to stdout - should print separator, name, and flow config for each workflow
         expected_calls = [
@@ -384,7 +390,7 @@ class TestFetchAgents:
         mock_args = Mock()
         mock_args.gitlab_url = "http://test.com"
         mock_args.gitlab_token = "token"
-        mock_args.foundational_agent_ids = "123"
+        mock_args.foundational_agent_ids = "agent_1:123"
         mock_args.output_path = "/tmp/output"
         mock_parse_args.return_value = mock_args
 
@@ -393,20 +399,20 @@ class TestFetchAgents:
 
         # Mock workflow definition - now returns tuple (name, flow_config)
         mock_fetch_agent.return_value = (
-            "agent1",
+            "agent_1",
             "version: v1\ncomponents:\n  - name: agent1",
         )
-        mock_save_workflow.return_value = "/tmp/output/agent1.yml"
+        mock_save_workflow.return_value = "/tmp/output/agent_1.yml"
 
         fetch_agents()
 
         # Verify save_workflow_to_file was called with correct parameters
         mock_save_workflow.assert_called_once_with(
-            "agent1", "version: v1\ncomponents:\n  - name: agent1", "/tmp/output"
+            "agent_1", "version: v1\ncomponents:\n  - name: agent1", "/tmp/output"
         )
 
         # Verify success message printed to stderr
         mock_print.assert_called_once_with(
-            "Successfully saved workflow definition(s): ['/tmp/output/agent1.yml']",
+            "Successfully saved workflow definition(s): ['/tmp/output/agent_1.yml']",
             file=sys.stderr,
         )
