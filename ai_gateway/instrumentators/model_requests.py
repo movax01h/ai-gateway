@@ -139,8 +139,12 @@ language_server_version: ContextVar[Optional[LanguageServerVersion]] = ContextVa
 
 class LLMFinishReason(str, Enum):
     STOP = "stop"
+    END_TURN = "end_turn"
     LENGTH = "length"  # Hit max_tokens limit
+    MAX_TOKENS = "max_tokens"
+    STOP_SEQUENCE = "stop_sequence"
     TOOL_CALLS = "tool_calls"
+    TOOL_USE = "tool_use"
     CONTENT_FILTER = "content_filter"
 
     @classmethod
