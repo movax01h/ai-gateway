@@ -15,13 +15,13 @@ from ai_gateway.models import KindAnthropicModel
 from duo_workflow_service.tracking.errors import log_exception
 
 
-class AnthropicStopReason(str, Enum):
-    END_TURN = "end_turn"
-    MAX_TOKENS = "max_tokens"
-    STOP_SEQUENCE = "stop_sequence"
-    TOOL_USE = "tool_use"
-    PAUSE_TURN = "pause_turn"
-    REFUSAL = "refusal"
+class LLMFinishReason(str, Enum):
+    """LLM finish reasons in OpenAI format (used by LiteLLM for normalization)."""
+
+    STOP = "stop"
+    LENGTH = "length"  # Hit max_tokens limit
+    TOOL_CALLS = "tool_calls"
+    CONTENT_FILTER = "content_filter"
 
     @classmethod
     def values(cls):
@@ -30,8 +30,8 @@ class AnthropicStopReason(str, Enum):
 
     @classmethod
     def abnormal_values(cls):
-        """Return abnormal stop reason values as a list."""
-        abnormal = [cls.MAX_TOKENS, cls.REFUSAL]
+        """Return abnormal finish reason values as a list."""
+        abnormal = [cls.LENGTH, cls.CONTENT_FILTER]
         return [e.value for e in abnormal]
 
 

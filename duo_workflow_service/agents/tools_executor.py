@@ -100,7 +100,7 @@ class ToolsExecutor:
                 tool_name,
                 tool_call,
                 plan,
-                last_message.response_metadata.get("stop_reason"),
+                last_message.response_metadata.get("finish_reason"),
             )
             response = result.get("response")
             if response and hasattr(response, "content"):
@@ -209,7 +209,7 @@ class ToolsExecutor:
         tool_name: str,
         tool_call: ToolCall,
         plan: Plan,
-        stop_reason: Optional[str] = None,
+        finish_reason: Optional[str] = None,
     ) -> Dict[str, Any]:
         tool_args = tool_call.get("args", {})
         tool = self._toolset[tool_name]
@@ -224,7 +224,7 @@ class ToolsExecutor:
             with duo_workflow_metrics.time_tool_call(
                 tool_name=tool_name, flow_type=self._workflow_type.value
             ):
-                if stop_reason == "max_tokens":
+                if finish_reason == "length":
                     raise IncompleteToolCallDueToMaxTokens(
                         f"Max tokens reached for tool {tool_name}."
                         " Try a simpler request or using a different tool."

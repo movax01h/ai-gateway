@@ -1025,7 +1025,7 @@ async def test_run_error_max_tokens(
         AIMessage(
             content=[{"type": "text", "text": "test"}],
             tool_calls=[tool_call],
-            response_metadata={"stop_reason": "max_tokens"},
+            response_metadata={"finish_reason": "length"},
         ),
     ]
 

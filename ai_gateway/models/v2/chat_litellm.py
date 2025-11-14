@@ -1,17 +1,29 @@
-from typing import Any, AsyncIterator, List, Mapping, Optional
+from typing import Any, AsyncIterator, List, Mapping, Optional, Type, cast
 
 import langchain_community.chat_models.litellm
+import structlog
 from langchain_community.chat_models.litellm import ChatLiteLLM as _LChatLiteLLM
+from langchain_community.chat_models.litellm import (
+    _convert_delta_to_message_chunk,
+    acompletion_with_retry,
+)
 from langchain_core.callbacks import AsyncCallbackManagerForLLMRun
-from langchain_core.messages import BaseMessage
+from langchain_core.messages import AIMessageChunk, BaseMessage, BaseMessageChunk
 from langchain_core.messages.ai import InputTokenDetails, UsageMetadata
 from langchain_core.outputs import ChatGenerationChunk
 
 __all__ = ["ChatLiteLLM"]
 
+log = structlog.getLogger(__name__)
+
 
 class ChatLiteLLM(_LChatLiteLLM):
-    """A wrapper around `langchain_community.chat_models.litellm.ChatLiteLLM` that adds custom stream_options."""
+    """Patch https://github.com/langchain-ai/langchain-community/blob/libs/community/v0.3.27/libs/community/
+    langchain_community/chat_models/litellm.py#L490
+    This patch adds custom stream_options and correctly handles finish_reason support.
+    NOTE: langchain_community's litellm adapter is deprecated
+    (https://github.com/langchain-ai/langchain-community/pull/11) and no longer maintained.
+    """
 
     async def _astream(
         self,
@@ -27,10 +39,55 @@ class ChatLiteLLM(_LChatLiteLLM):
             "include_usage": True,
         }
 
-        async for chunk in super()._astream(
-            messages=messages, stop=stop, run_manager=run_manager, **kwargs
+        # We need to intercept the raw chunks to extract finish_reason before LangChain processes them
+        message_dicts, params = self._create_message_dicts(messages, stop)
+        params = {**params, **kwargs, "stream": True}
+
+        default_chunk_class: Type[BaseMessageChunk] = AIMessageChunk
+        added_model_name = False
+        async for raw_chunk in await acompletion_with_retry(
+            self, messages=message_dicts, run_manager=run_manager, **params
         ):
-            yield chunk
+            if not isinstance(raw_chunk, dict):
+                raw_chunk = raw_chunk.model_dump()
+            if len(raw_chunk["choices"]) == 0:
+                continue
+
+            # Extract finish_reason from the raw chunk BEFORE processing
+            finish_reason = raw_chunk["choices"][0].get("finish_reason")
+
+            delta = raw_chunk["choices"][0]["delta"]
+            usage = raw_chunk.get("usage", {})
+            chunk = _convert_delta_to_message_chunk(delta, default_chunk_class)
+            if isinstance(chunk, AIMessageChunk):
+                if not added_model_name:
+                    chunk.response_metadata = {
+                        "model_name": self.model_name or self.model
+                    }
+                    added_model_name = True
+
+                # Add finish_reason to response_metadata
+                # LiteLLM normalizes all provider responses to OpenAI format
+                if finish_reason:
+                    chunk.response_metadata["finish_reason"] = finish_reason
+
+                chunk.usage_metadata = _create_usage_metadata(usage)
+            default_chunk_class = chunk.__class__
+            cg_chunk = ChatGenerationChunk(message=chunk)
+            if run_manager:
+                # Extract string content for callback
+                # Note: chunk.content can be str | list[str | dict[Any, Any]] per LangChain types,
+                # but on_llm_new_token expects only str. The original LangChain code doesn't handle
+                # this type mismatch. We explicitly handle both cases for type safety.
+                content = chunk.content
+                if isinstance(content, list):
+                    # Handle list content by joining text parts
+                    content = "".join(
+                        item.get("text", "") if isinstance(item, dict) else str(item)
+                        for item in content
+                    )
+                await run_manager.on_llm_new_token(cast(str, content), chunk=cg_chunk)
+            yield cg_chunk
 
 
 def _create_usage_metadata(token_usage: Mapping[str, Any]) -> UsageMetadata:

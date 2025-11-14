@@ -13,7 +13,7 @@ from duo_workflow_service.interceptors.gitlab_version_interceptor import gitlab_
 from duo_workflow_service.interceptors.language_server_version_interceptor import (
     language_server_version,
 )
-from duo_workflow_service.llm_factory import AnthropicStopReason
+from duo_workflow_service.llm_factory import LLMFinishReason
 
 session_type_context: ContextVar[Optional[str]] = ContextVar(
     "session_type", default="unknown"
@@ -40,7 +40,7 @@ WORKFLOW_TIME_SCALE_BUCKETS = [
 ]
 LLM_TIME_SCALE_BUCKETS = [0.25, 0.5, 1, 2, 4, 7, 10, 20, 30, 60]
 
-ANTHROPIC_STOP_REASONS = AnthropicStopReason.values()
+LLM_FINISH_REASONS = LLMFinishReason.values()
 
 
 class SessionTypeEnum(StrEnum):
@@ -235,7 +235,7 @@ class DuoWorkflowMetrics:  # pylint: disable=too-many-instance-attributes
         status_code="unknown",
         error_type="unknown",
     ):
-        if stop_reason in ANTHROPIC_STOP_REASONS or stop_reason == "error":
+        if stop_reason in LLM_FINISH_REASONS or stop_reason == "error":
             stop_reason_label = stop_reason
         elif stop_reason == "unknown":
             log.error("LLM response stop reason is missing")

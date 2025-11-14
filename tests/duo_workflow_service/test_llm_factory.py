@@ -6,7 +6,7 @@ import pytest
 from ai_gateway.models import KindAnthropicModel
 from duo_workflow_service.llm_factory import (
     AnthropicConfig,
-    AnthropicStopReason,
+    LLMFinishReason,
     VertexConfig,
     create_chat_model,
     validate_llm_access,
@@ -255,38 +255,29 @@ def test_new_chat_client_with_custom_model(
             mock_vertex_client.assert_not_called()
 
 
-class TestAnthropicStopReason:
-    """Test cases for AnthropicStopReason enum."""
+class TestLLMFinishReason:
+    """Test cases for LLMFinishReason enum (OpenAI format used by LiteLLM)."""
 
     def test_enum_values(self):
         """Test that all enum values are correctly defined."""
-        assert AnthropicStopReason.END_TURN == "end_turn"
-        assert AnthropicStopReason.MAX_TOKENS == "max_tokens"
-        assert AnthropicStopReason.STOP_SEQUENCE == "stop_sequence"
-        assert AnthropicStopReason.TOOL_USE == "tool_use"
-        assert AnthropicStopReason.PAUSE_TURN == "pause_turn"
-        assert AnthropicStopReason.REFUSAL == "refusal"
+        assert LLMFinishReason.STOP == "stop"
+        assert LLMFinishReason.LENGTH == "length"
+        assert LLMFinishReason.TOOL_CALLS == "tool_calls"
+        assert LLMFinishReason.CONTENT_FILTER == "content_filter"
 
     def test_values_class_method(self):
         """Test that values() returns all enum values as a list."""
-        expected_values = [
-            "end_turn",
-            "max_tokens",
-            "stop_sequence",
-            "tool_use",
-            "pause_turn",
-            "refusal",
-        ]
-        actual_values = AnthropicStopReason.values()
+        expected_values = ["stop", "length", "tool_calls", "content_filter"]
+        actual_values = LLMFinishReason.values()
 
         assert isinstance(actual_values, list)
-        assert len(actual_values) == 6
+        assert len(actual_values) == 4
         assert set(actual_values) == set(expected_values)
 
     def test_abnormal_values_class_method(self):
-        """Test that abnormal_values() returns only abnormal stop reasons."""
-        expected_abnormal = ["max_tokens", "refusal"]
-        actual_abnormal = AnthropicStopReason.abnormal_values()
+        """Test that abnormal_values() returns only abnormal finish reasons."""
+        expected_abnormal = ["length", "content_filter"]
+        actual_abnormal = LLMFinishReason.abnormal_values()
 
         assert isinstance(actual_abnormal, list)
         assert len(actual_abnormal) == 2
@@ -294,7 +285,7 @@ class TestAnthropicStopReason:
 
     def test_abnormal_values_subset_of_all_values(self):
         """Test that abnormal values are a subset of all values."""
-        all_values = set(AnthropicStopReason.values())
-        abnormal_values = set(AnthropicStopReason.abnormal_values())
+        all_values = set(LLMFinishReason.values())
+        abnormal_values = set(LLMFinishReason.abnormal_values())
 
         assert abnormal_values.issubset(all_values)

@@ -14,7 +14,7 @@ from duo_workflow_service.agent_platform.experimental.state import (
     get_vars_from_state,
 )
 from duo_workflow_service.errors.error_handler import ModelError, ModelErrorHandler
-from duo_workflow_service.llm_factory import AnthropicStopReason
+from duo_workflow_service.llm_factory import LLMFinishReason
 from duo_workflow_service.monitoring import duo_workflow_metrics
 from duo_workflow_service.token_counter.approximate_token_counter import (
     ApproximateTokenCounter,
@@ -107,17 +107,17 @@ class AgentNode:
                     completion: AIMessage = await self._prompt.ainvoke(
                         input={**variables, "history": history}
                     )
-                    stop_reason = completion.response_metadata.get("stop_reason")
-                    if stop_reason in AnthropicStopReason.abnormal_values():
+                    finish_reason = completion.response_metadata.get("finish_reason")
+                    if finish_reason in LLMFinishReason.abnormal_values():
                         log.warning(
-                            f"LLM stopped abnormally with reason: {stop_reason}"
+                            f"LLM stopped abnormally with reason: {finish_reason}"
                         )
                 self._track_tokens_data(completion, history)
                 duo_workflow_metrics.count_llm_response(
                     model=model_name,
                     provider=model_provider,
                     request_type=request_type,
-                    stop_reason=stop_reason,
+                    stop_reason=finish_reason,
                     # Hardcoded 200 status since model_completion only returns status codes for failures
                     status_code="200",
                     error_type="none",
