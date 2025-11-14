@@ -1,4 +1,4 @@
-from typing import Any, Optional, Type
+from typing import Any, List, Optional, Type
 
 from pydantic import BaseModel, Field
 
@@ -6,7 +6,7 @@ from contract import contract_pb2
 from duo_workflow_service.executor.action import _execute_action
 from duo_workflow_service.tools.duo_base_tool import DuoBaseTool
 
-_DISALLOWED_COMMANDS = ["git"]
+_DISALLOWED_COMMANDS: List[str] = []
 _DISALLOWED_OPERATORS = ["&&", "||", "|"]
 
 

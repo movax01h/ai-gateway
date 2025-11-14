@@ -97,8 +97,6 @@ CHAT_MUTATION_TOOLS = [
 
 RUN_COMMAND_TOOLS = ["run_command"]
 
-GIT_TOOLS = ["run_git_command"]
-
 
 class Workflow(AbstractWorkflow):
     _stream: bool = True
@@ -309,7 +307,6 @@ class Workflow(AbstractWorkflow):
             CHAT_READ_ONLY_TOOLS
             + CHAT_MUTATION_TOOLS
             + RUN_COMMAND_TOOLS
-            + GIT_TOOLS
             + CHAT_GITLAB_MUTATION_TOOLS
         )
 

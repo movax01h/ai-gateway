@@ -52,9 +52,9 @@ async def test_run_command_success(
 @pytest.mark.parametrize(
     ("program", "args", "should_be_blocked", "expected_message_contains"),
     [
-        # Disallowed commands
-        ("git", "status", True, "git commands are not supported"),
-        ("git", "", True, "git commands are not supported"),
+        # Allows git commands in local flows
+        ("git", "status", False, None),
+        ("git", "", False, None),
         # Disallowed operators in program
         ("echo && ls", "", True, "operators are not supported"),
         ("echo || ls", "", True, "operators are not supported"),
