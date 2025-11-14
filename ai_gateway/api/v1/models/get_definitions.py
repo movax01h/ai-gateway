@@ -11,6 +11,7 @@ router = APIRouter()
 class _GetModelResponseModel(BaseModel):
     name: str
     identifier: str
+    provider: str | None = None
 
 
 class _GetModelResponseUnitPrimitive(BaseModel):
@@ -37,7 +38,9 @@ async def get_models():
     response = _GetModelResponse(
         models=[
             _GetModelResponseModel(
-                name=definition.name, identifier=definition.gitlab_identifier
+                name=definition.name,
+                identifier=definition.gitlab_identifier,
+                provider=definition.provider,
             )
             for definition in selection_config.get_llm_definitions().values()
         ],

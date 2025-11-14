@@ -28,11 +28,18 @@ def mock_model_config_fixture():
             "model1": LLMDefinition(
                 name="Model 1",
                 gitlab_identifier="model1",
+                provider="Anthropic",
                 params={},
             ),
             "model2": LLMDefinition(
                 name="Model 2",
                 gitlab_identifier="model2",
+                provider="Vertex",
+                params={},
+            ),
+            "model3": LLMDefinition(
+                name="Model 3",
+                gitlab_identifier="model3",
                 params={},
             ),
         }
@@ -67,8 +74,21 @@ def test_get_models_returns_correct_data(mock_model_config, client):
     assert response.status_code == 200
     data = response.json()
 
-    assert data["models"][0] == {"name": "Model 1", "identifier": "model1"}
-    assert data["models"][1] == {"name": "Model 2", "identifier": "model2"}
+    assert data["models"][0] == {
+        "name": "Model 1",
+        "identifier": "model1",
+        "provider": "Anthropic",
+    }
+    assert data["models"][1] == {
+        "name": "Model 2",
+        "identifier": "model2",
+        "provider": "Vertex",
+    }
+    assert data["models"][2] == {
+        "name": "Model 3",
+        "identifier": "model3",
+        "provider": None,
+    }
     assert data["unit_primitives"][0] == {
         "feature_setting": "config1",
         "unit_primitives": ["ask_issue", "ask_epic"],

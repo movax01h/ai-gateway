@@ -16,6 +16,7 @@ class LLMDefinition(BaseModel):
 
     name: str
     gitlab_identifier: str
+    provider: Optional[str] = None
     params: dict[str, Any] = {}
     family: list[str] = []
 
