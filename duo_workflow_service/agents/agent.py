@@ -11,6 +11,7 @@ from langchain_core.runnables import Runnable, RunnableConfig
 from langchain_core.tools import BaseTool
 
 from ai_gateway.api.auth_utils import StarletteUser
+from ai_gateway.instrumentators.model_requests import LLMFinishReason
 from ai_gateway.prompts import BasePromptRegistry, prompt_template_to_messages
 from ai_gateway.prompts.config.base import PromptConfig
 from duo_workflow_service.agents.base import BaseAgent
@@ -25,7 +26,6 @@ from duo_workflow_service.entities.state import (
 from duo_workflow_service.errors.error_handler import ERROR_TYPES, ModelErrorType
 from duo_workflow_service.gitlab.events import get_event
 from duo_workflow_service.gitlab.http_client import GitlabHttpClient
-from duo_workflow_service.llm_factory import LLMFinishReason
 from duo_workflow_service.monitoring import duo_workflow_metrics
 from duo_workflow_service.tools.handover import HandoverTool
 from duo_workflow_service.tracking.errors import log_exception

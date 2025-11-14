@@ -4,7 +4,6 @@ from gitlab_cloud_connector import CloudConnectorUser
 from langchain.tools import BaseTool
 from pydantic import BaseModel
 
-from ai_gateway.code_suggestions.language_server import LanguageServerVersion
 from duo_workflow_service import tools
 from duo_workflow_service.executor.outbox import Outbox
 from duo_workflow_service.gitlab.gitlab_api import Project, WorkflowConfig
@@ -27,6 +26,7 @@ from duo_workflow_service.tools.vulnerabilities.get_vulnerability_details import
 from duo_workflow_service.tools.vulnerabilities.post_sast_fp_analysis_to_gitlab import (
     PostSastFpAnalysisToGitlab,
 )
+from lib.language_server import LanguageServerVersion
 
 
 class ToolMetadata(TypedDict):

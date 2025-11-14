@@ -779,3 +779,17 @@ def vertex_project_fixture():
 @pytest.fixture(name="tools")
 def tools_fixture() -> list[BaseTool]:
     return [Mock(spec=BaseTool)]
+
+
+@pytest.fixture(name="end_message")
+def end_message_fixture():
+    return AIMessage(
+        content="Done with the execution, over to handover agent",
+        tool_calls=[
+            {
+                "id": "1",
+                "name": "handover_tool",
+                "args": {"summary": "done"},
+            }
+        ],
+    )

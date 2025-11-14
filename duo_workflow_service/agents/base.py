@@ -1,8 +1,10 @@
 from datetime import datetime, timezone
+from typing import Any
 
+from langchain_core.messages import BaseMessage
 from langchain_core.runnables import RunnableBinding
 
-from ai_gateway.prompts import Input, Output, Prompt
+from ai_gateway.prompts import Prompt
 from duo_workflow_service.entities.state import (
     MessageTypeEnum,
     SlashCommandStatus,
@@ -12,7 +14,7 @@ from duo_workflow_service.entities.state import (
 )
 
 
-class BaseAgent(RunnableBinding[Input, Output]):
+class BaseAgent(RunnableBinding[Any, BaseMessage]):
     name: str
     prompt: Prompt
     workflow_id: str

@@ -3,10 +3,10 @@ from unittest.mock import Mock, patch
 
 import pytest
 
+from ai_gateway.instrumentators.model_requests import LLMFinishReason
 from ai_gateway.models import KindAnthropicModel
 from duo_workflow_service.llm_factory import (
     AnthropicConfig,
-    LLMFinishReason,
     VertexConfig,
     create_chat_model,
     validate_llm_access,

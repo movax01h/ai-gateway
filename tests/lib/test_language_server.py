@@ -1,7 +1,7 @@
 import pytest
 from packaging.version import Version
 
-from ai_gateway.code_suggestions.language_server import LanguageServerVersion
+from lib.language_server import LanguageServerVersion
 
 
 @pytest.mark.asyncio

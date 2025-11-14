@@ -19,7 +19,6 @@ from langgraph.checkpoint.base import (  # pylint: disable=no-langgraph-langchai
 from langgraph.types import Command
 from langsmith import traceable, tracing_context
 
-from ai_gateway.code_suggestions.language_server import LanguageServerVersion
 from ai_gateway.container import ContainerApplication
 from ai_gateway.models import KindAnthropicModel
 from ai_gateway.prompts import InMemoryPromptRegistry
@@ -55,6 +54,7 @@ from duo_workflow_service.workflows.type_definitions import (
 )
 from lib.internal_events import InternalEventAdditionalProperties, InternalEventsClient
 from lib.internal_events.event_enum import CategoryEnum, EventEnum
+from lib.language_server import LanguageServerVersion
 
 # Constants
 QUEUE_MAX_SIZE = 1

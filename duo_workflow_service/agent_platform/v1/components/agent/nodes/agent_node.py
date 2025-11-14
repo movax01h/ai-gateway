@@ -1,4 +1,4 @@
-from typing import ClassVar, Self
+from typing import ClassVar, Self, cast
 
 import structlog
 from anthropic import APIStatusError
@@ -6,6 +6,7 @@ from langchain_core.messages import AIMessage, ToolMessage
 from pydantic import BaseModel, ConfigDict, Field
 from pydantic_core import ValidationError
 
+from ai_gateway.instrumentators.model_requests import LLMFinishReason
 from ai_gateway.prompts import Prompt
 from duo_workflow_service.agent_platform.v1.state import (
     FlowState,
@@ -14,7 +15,6 @@ from duo_workflow_service.agent_platform.v1.state import (
     get_vars_from_state,
 )
 from duo_workflow_service.errors.error_handler import ModelError, ModelErrorHandler
-from duo_workflow_service.llm_factory import LLMFinishReason
 from duo_workflow_service.monitoring import duo_workflow_metrics
 from duo_workflow_service.token_counter.approximate_token_counter import (
     ApproximateTokenCounter,
@@ -93,8 +93,11 @@ class AgentNode:
                 with duo_workflow_metrics.time_llm_request(
                     model=model_name, request_type=request_type
                 ):
-                    completion: AIMessage = await self._prompt.ainvoke(
-                        input={**variables, "history": history}
+                    completion: AIMessage = cast(
+                        AIMessage,
+                        await self._prompt.ainvoke(
+                            input={**variables, "history": history}
+                        ),
                     )
                     finish_reason = completion.response_metadata.get("finish_reason")
                     if finish_reason in LLMFinishReason.abnormal_values():

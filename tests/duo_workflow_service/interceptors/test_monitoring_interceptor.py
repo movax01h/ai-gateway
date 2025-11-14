@@ -5,11 +5,11 @@ import pytest
 from prometheus_client import CollectorRegistry
 from structlog.testing import capture_logs
 
-from ai_gateway.code_suggestions.language_server import LanguageServerVersion
 from duo_workflow_service.interceptors.monitoring_interceptor import (
     MonitoringInterceptor,
 )
 from duo_workflow_service.tracking import MonitoringContext
+from lib.language_server import LanguageServerVersion
 
 
 @pytest.mark.asyncio

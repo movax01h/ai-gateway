@@ -1,7 +1,6 @@
 # pylint: disable=direct-environment-variable-reference
 
 import os
-from enum import Enum
 from typing import Literal, Optional, Union
 
 import structlog
@@ -13,26 +12,6 @@ from pydantic import BaseModel, Field, field_validator
 
 from ai_gateway.models import KindAnthropicModel
 from duo_workflow_service.tracking.errors import log_exception
-
-
-class LLMFinishReason(str, Enum):
-    """LLM finish reasons in OpenAI format (used by LiteLLM for normalization)."""
-
-    STOP = "stop"
-    LENGTH = "length"  # Hit max_tokens limit
-    TOOL_CALLS = "tool_calls"
-    CONTENT_FILTER = "content_filter"
-
-    @classmethod
-    def values(cls):
-        """Return all enum values as a list."""
-        return [e.value for e in cls]
-
-    @classmethod
-    def abnormal_values(cls):
-        """Return abnormal finish reason values as a list."""
-        abnormal = [cls.LENGTH, cls.CONTENT_FILTER]
-        return [e.value for e in abnormal]
 
 
 class ModelConfig(BaseModel):

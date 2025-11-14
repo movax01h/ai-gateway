@@ -1,11 +1,7 @@
-from contextvars import ContextVar
-from typing import Optional
-
 import grpc
 from gitlab_cloud_connector.auth import X_GITLAB_VERSION_HEADER
 
-# Context variable to store GitLab version
-gitlab_version: ContextVar[Optional[str]] = ContextVar("gitlab_version", default=None)
+from ai_gateway.instrumentators.model_requests import gitlab_version
 
 
 class GitLabVersionInterceptor(grpc.aio.ServerInterceptor):

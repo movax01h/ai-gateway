@@ -4,16 +4,13 @@ from enum import StrEnum
 from typing import Optional
 
 import structlog
-from packaging.version import InvalidVersion, Version
 from prometheus_client import REGISTRY, Counter, Histogram
 
-from duo_workflow_service.interceptors.client_type_interceptor import client_type
-from duo_workflow_service.interceptors.gitlab_realm_interceptor import gitlab_realm
-from duo_workflow_service.interceptors.gitlab_version_interceptor import gitlab_version
-from duo_workflow_service.interceptors.language_server_version_interceptor import (
-    language_server_version,
+from ai_gateway.instrumentators.model_requests import (
+    METADATA_LABELS,
+    LLMFinishReason,
+    build_metadata_labels,
 )
-from duo_workflow_service.llm_factory import LLMFinishReason
 
 session_type_context: ContextVar[Optional[str]] = ContextVar(
     "session_type", default="unknown"
@@ -47,52 +44,6 @@ class SessionTypeEnum(StrEnum):
     START = "start"
     RESUME = "resume"
     RETRY = "retry"
-
-
-def _language_server_version_label():
-    lsp_version = language_server_version.get()
-    if lsp_version:
-        return str(lsp_version.version)
-
-    return "unknown"
-
-
-def _gitlab_version_label():
-    try:
-        gl_version = Version(gitlab_version.get())  # type: ignore[arg-type]
-        return str(gl_version)
-    except (InvalidVersion, TypeError):
-        return "unknown"
-
-
-def _client_type_label():
-    client_type_value = client_type.get()
-    if client_type_value:
-        return str(client_type_value)
-
-    return "unknown"
-
-
-def _gitlab_realm_label():
-    gitlab_realm_value = gitlab_realm.get()
-    if gitlab_realm_value:
-        return str(gitlab_realm_value)
-
-    return "unknown"
-
-
-_METADATA_LABEL_GETTERS = {
-    "lsp_version": _language_server_version_label,
-    "gitlab_version": _gitlab_version_label,
-    "client_type": _client_type_label,
-    "gitlab_realm": _gitlab_realm_label,
-}
-
-METADATA_LABELS = list(_METADATA_LABEL_GETTERS.keys())
-
-
-def build_metadata_labels():
-    return {key: getter() for key, getter in _METADATA_LABEL_GETTERS.items()}
 
 
 class DuoWorkflowMetrics:  # pylint: disable=too-many-instance-attributes

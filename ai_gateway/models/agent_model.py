@@ -43,7 +43,7 @@ class AgentModel(TextGenModelBase):
 
         response = await self.prompt.ainvoke(params)
 
-        response_content = self._format_response_content(response.content) or ""
+        response_content = self._format_response_content(str(response.content)) or ""
 
         return TextGenModelOutput(
             text=response_content,
@@ -57,7 +57,7 @@ class AgentModel(TextGenModelBase):
         params: dict,
     ) -> AsyncIterator[TextGenModelChunk]:
         async for chunk in self.prompt.astream(params):
-            chunk_content = self._format_response_content(chunk.content) or ""
+            chunk_content = self._format_response_content(str(chunk.content)) or ""
             yield TextGenModelChunk(text=chunk_content)
 
     def _format_response_content(self, text: Optional[str]) -> Optional[str]:

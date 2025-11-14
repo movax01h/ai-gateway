@@ -1,24 +1,75 @@
 import time
 from contextlib import contextmanager
 from contextvars import ContextVar
+from enum import Enum
 from typing import List, Optional
 
 import structlog
 from gitlab_cloud_connector import GitLabUnitPrimitive
+from langchain_core.messages import BaseMessage
 from langchain_core.messages.ai import UsageMetadata
+from packaging.version import InvalidVersion, Version
 from prometheus_client import Counter, Gauge, Histogram
 
 from ai_gateway.api.feature_category import current_feature_category
 from ai_gateway.config import ModelLimits
 from ai_gateway.tracking.errors import log_exception
+from lib.language_server import LanguageServerVersion
+
+
+def _language_server_version_label():
+    lsp_version = language_server_version.get()
+    if lsp_version:
+        return str(lsp_version.version)
+
+    return "unknown"
+
+
+def _gitlab_version_label():
+    try:
+        gl_version = Version(gitlab_version.get() or "")
+        return str(gl_version)
+    except (InvalidVersion, TypeError):
+        return "unknown"
+
+
+def _client_type_label():
+    client_type_value = client_type.get()
+    if client_type_value:
+        return str(client_type_value)
+
+    return "unknown"
+
+
+def _gitlab_realm_label():
+    gitlab_realm_value = gitlab_realm.get()
+    if gitlab_realm_value:
+        return str(gitlab_realm_value)
+
+    return "unknown"
+
+
+_METADATA_LABEL_GETTERS = {
+    "lsp_version": _language_server_version_label,
+    "gitlab_version": _gitlab_version_label,
+    "client_type": _client_type_label,
+    "gitlab_realm": _gitlab_realm_label,
+}
+
+METADATA_LABELS = list(_METADATA_LABEL_GETTERS.keys())
 
 METRIC_LABELS = ["model_engine", "model_name"]
-INFERENCE_DETAILS = METRIC_LABELS + [
-    "error",
-    "streaming",
-    "feature_category",
-    "unit_primitive",
-]
+INFERENCE_DETAILS = (
+    METRIC_LABELS
+    + METADATA_LABELS
+    + [
+        "error",
+        "streaming",
+        "feature_category",
+        "unit_primitive",
+        "finish_reason",
+    ]
+)
 
 INFERENCE_IN_FLIGHT_GAUGE = Gauge(
     "model_inferences_in_flight",
@@ -78,6 +129,35 @@ token_usage: ContextVar[TokenUsage | None] = ContextVar("token_usage", default=N
 llm_operations: ContextVar[LlmOperations | None] = ContextVar(
     "llm_operations", default=None
 )
+client_type: ContextVar[Optional[str]] = ContextVar("client_type", default=None)
+gitlab_realm: ContextVar[Optional[str]] = ContextVar("gitlab_realm", default=None)
+gitlab_version: ContextVar[Optional[str]] = ContextVar("gitlab_version", default=None)
+language_server_version: ContextVar[Optional[LanguageServerVersion]] = ContextVar(
+    "language_server_version", default=None
+)
+
+
+class LLMFinishReason(str, Enum):
+    STOP = "stop"
+    LENGTH = "length"  # Hit max_tokens limit
+    TOOL_CALLS = "tool_calls"
+    CONTENT_FILTER = "content_filter"
+
+    @classmethod
+    def values(cls):
+        """Return all enum values as a list."""
+        return [e.value for e in cls]
+
+    @classmethod
+    def abnormal_values(cls):
+        """Return abnormal finish reason values as a list."""
+        abnormal = [cls.LENGTH, cls.CONTENT_FILTER]
+        return [e.value for e in abnormal]
+
+
+def build_metadata_labels():
+    return {key: getter() for key, getter in _METADATA_LABEL_GETTERS.items()}
+
 
 logger = structlog.get_logger()
 
@@ -140,6 +220,7 @@ class ModelRequestInstrumentator:
             self.streaming = streaming
             self.start_time = None
             self.unit_primitives = unit_primitives
+            self.finish_reason = "unknown"
 
         def start(self):
             """Register the start of the inference request.
@@ -180,6 +261,23 @@ class ModelRequestInstrumentator:
             INFERENCE_OUTPUT_TOKENS.labels(**token_usage_labels).inc(
                 usage["output_tokens"]
             )
+
+        def register_message(self, message: BaseMessage):
+            finish_reason = message.response_metadata.get(
+                "finish_reason"
+            ) or message.response_metadata.get("stop_reason")
+
+            if not finish_reason:
+                return
+
+            if finish_reason in LLMFinishReason.values():
+                self.finish_reason = finish_reason
+            else:
+                logger.error(
+                    f"Unexpected LLM response stop reason: {finish_reason}",
+                    source=__name__,
+                )
+                self.finish_reason = "other"
 
         def finish(self):
             """Register the end of the inference request.
@@ -229,8 +327,9 @@ class ModelRequestInstrumentator:
                 "streaming": "yes" if self.streaming else "no",
                 "feature_category": current_feature_category(),
                 "unit_primitive": unit_primitive,
+                "finish_reason": self.finish_reason,
             }
-            return {**self.labels, **detail_labels}
+            return {**self.labels, **detail_labels, **build_metadata_labels()}
 
     def __init__(
         self,

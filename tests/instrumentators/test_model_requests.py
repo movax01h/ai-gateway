@@ -3,6 +3,7 @@ from unittest import mock
 
 import pytest
 from gitlab_cloud_connector import GitLabUnitPrimitive
+from langchain_core.messages import AIMessage
 from structlog.testing import capture_logs
 
 from ai_gateway.instrumentators.model_requests import (
@@ -14,6 +15,20 @@ from ai_gateway.instrumentators.model_requests import (
     llm_operations,
     token_usage,
 )
+
+DEFAULT_ARGS = {
+    "model_engine": "test_engine",
+    "model_name": "test_model",
+    "error": "no",
+    "streaming": "no",
+    "feature_category": "unknown",
+    "unit_primitive": "unknown",
+    "lsp_version": "unknown",
+    "gitlab_version": "unknown",
+    "client_type": "unknown",
+    "gitlab_realm": "unknown",
+    "finish_reason": "unknown",
+}
 
 
 @pytest.fixture(name="container")
@@ -64,23 +79,9 @@ class TestWatchContainer:
         )
 
         assert mock_counters.mock_calls == [
-            mock.call(
-                model_engine="test_engine",
-                model_name="test_model",
-                error="no",
-                streaming="no",
-                feature_category="unknown",
-                unit_primitive="unknown",
-            ),
+            mock.call(**DEFAULT_ARGS),
             mock.call().inc(10),
-            mock.call(
-                model_engine="test_engine",
-                model_name="test_model",
-                error="no",
-                streaming="no",
-                feature_category="unknown",
-                unit_primitive="unknown",
-            ),
+            mock.call(**DEFAULT_ARGS),
             mock.call().inc(15),
         ]
         assert token_usage.get() == {
@@ -178,18 +179,41 @@ class TestWatchContainer:
     @mock.patch("prometheus_client.Counter.labels")
     @mock.patch("prometheus_client.Histogram.labels")
     @mock.patch("time.perf_counter")
+    @pytest.mark.parametrize(
+        "response_metadata_list,expected_stop_reason",
+        [
+            ([], "unknown"),  # Default value when `register_message` is never called
+            (
+                [{}],
+                "unknown",
+            ),  # Default value when `register_message` is called without model metadata
+            ([{"finish_reason": "length"}], "length"),
+            ([{"stop_reason": "tool_calls"}], "tool_calls"),
+            ([{"finish_reason": "unexpected"}], "other"),
+            # Check that the finish reason is retained through multiple `register_message` calls, even if the message
+            # with `finish_reason` is not necessarily the last one (which can happen in real world usage)
+            ([{}, {"finish_reason": "length"}, {}], "length"),
+        ],
+    )
     def test_finish(
         self,
         time_counter,
         mock_histograms,
         mock_counters,
         mock_gauges,
+        response_metadata_list,
+        expected_stop_reason,
         container,
     ):
         time_counter.side_effect = [1, 2]
 
         container.start()
         mock_gauges.reset_mock()  # So we only have the calls from `stop` below
+
+        for response_metadata in response_metadata_list:
+            container.register_message(
+                AIMessage(content="", response_metadata=response_metadata)
+            )
 
         with capture_logs() as cap_logs:
             container.finish()
@@ -203,28 +227,12 @@ class TestWatchContainer:
             mock.call().dec(),
         ]
 
-        assert mock_counters.mock_calls == [
-            mock.call(
-                model_engine="test_engine",
-                model_name="test_model",
-                error="no",
-                streaming="no",
-                feature_category="unknown",
-                unit_primitive="unknown",
-            ),
-            mock.call().inc(),
-        ]
-        assert mock_histograms.mock_calls == [
-            mock.call(
-                model_engine="test_engine",
-                model_name="test_model",
-                error="no",
-                streaming="no",
-                feature_category="unknown",
-                unit_primitive="unknown",
-            ),
-            mock.call().observe(1),
-        ]
+        expected_call = mock.call(
+            **{**DEFAULT_ARGS, "finish_reason": expected_stop_reason}
+        )
+
+        assert mock_counters.mock_calls == [expected_call, mock.call().inc()]
+        assert mock_histograms.mock_calls == [expected_call, mock.call().observe(1)]
 
 
 class TestModelRequestInstrumentator:
@@ -251,25 +259,11 @@ class TestModelRequestInstrumentator:
             mock_gauges.reset_mock()
 
         assert mock_counters.mock_calls == [
-            mock.call(
-                model_engine="test_engine",
-                model_name="test_model",
-                error="no",
-                streaming="no",
-                feature_category="unknown",
-                unit_primitive="unknown",
-            ),
+            mock.call(**DEFAULT_ARGS),
             mock.call().inc(),
         ]
         assert mock_histograms.mock_calls == [
-            mock.call(
-                model_engine="test_engine",
-                model_name="test_model",
-                error="no",
-                streaming="no",
-                feature_category="unknown",
-                unit_primitive="unknown",
-            ),
+            mock.call(**DEFAULT_ARGS),
             mock.call().observe(1),
         ]
 
@@ -304,25 +298,11 @@ class TestModelRequestInstrumentator:
             mock.call().dec(),
         ]
         assert mock_counters.mock_calls == [
-            mock.call(
-                model_engine="test_engine",
-                model_name="test_model",
-                error="yes",
-                streaming="no",
-                feature_category="unknown",
-                unit_primitive="unknown",
-            ),
+            mock.call(**{**DEFAULT_ARGS, "error": "yes"}),
             mock.call().inc(),
         ]
         assert mock_histograms.mock_calls == [
-            mock.call(
-                model_engine="test_engine",
-                model_name="test_model",
-                error="yes",
-                streaming="no",
-                feature_category="unknown",
-                unit_primitive="unknown",
-            ),
+            mock.call(**{**DEFAULT_ARGS, "error": "yes"}),
             mock.call().observe(1),
         ]
 
@@ -391,25 +371,11 @@ class TestModelRequestInstrumentator:
                 mock.call().dec(),
             ]
             assert mock_counters.mock_calls == [
-                mock.call(
-                    model_engine="test_engine",
-                    model_name="test_model",
-                    error="no",
-                    streaming="yes",
-                    feature_category="unknown",
-                    unit_primitive="unknown",
-                ),
+                mock.call(**{**DEFAULT_ARGS, "streaming": "yes"}),
                 mock.call().inc(),
             ]
             assert mock_histograms.mock_calls == [
-                mock.call(
-                    model_engine="test_engine",
-                    model_name="test_model",
-                    error="no",
-                    streaming="yes",
-                    feature_category="unknown",
-                    unit_primitive="unknown",
-                ),
+                mock.call(**{**DEFAULT_ARGS, "streaming": "yes"}),
                 mock.call().observe(1),
             ]
 

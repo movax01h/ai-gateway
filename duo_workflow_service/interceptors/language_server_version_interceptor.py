@@ -1,10 +1,8 @@
 import grpc
 
-from ai_gateway.code_suggestions.language_server import LanguageServerVersion
+from ai_gateway.instrumentators.model_requests import language_server_version
 from duo_workflow_service.interceptors import X_GITLAB_LANGUAGE_SERVER_VERSION
-from duo_workflow_service.tracking.language_server_context import (
-    language_server_version,
-)
+from lib.language_server import LanguageServerVersion
 
 
 class LanguageServerVersionInterceptor(grpc.aio.ServerInterceptor):

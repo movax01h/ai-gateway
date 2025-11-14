@@ -6,7 +6,6 @@ from typing import (
     MutableMapping,
     Optional,
     Sequence,
-    TypeVar,
     cast,
     overload,
 )
@@ -21,6 +20,7 @@ from jinja2 import PackageLoader, meta
 from jinja2.sandbox import SandboxedEnvironment
 from langchain_core.callbacks import BaseCallbackHandler, get_usage_metadata_callback
 from langchain_core.language_models import BaseChatModel
+from langchain_core.messages import BaseMessage
 from langchain_core.messages.ai import UsageMetadata
 from langchain_core.prompt_values import PromptValue
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder, string
@@ -47,15 +47,10 @@ from lib.internal_events.context import InternalEventAdditionalProperties
 
 __all__ = [
     "Prompt",
-    "Input",
-    "Output",
     "BasePromptRegistry",
     "jinja2_formatter",
     "prompt_template_to_messages",
 ]
-
-Input = TypeVar("Input")
-Output = TypeVar("Output")
 
 jinja_loader = PackageLoader("ai_gateway.prompts", "definitions")
 jinja_env = SandboxedEnvironment(loader=jinja_loader)
@@ -112,13 +107,13 @@ class PromptLoggingHandler(BaseCallbackHandler):
         )
 
 
-class Prompt(RunnableBinding[Input, Output]):
+class Prompt(RunnableBinding[Any, BaseMessage]):
     name: str
     llm_provider: str
     model_provider: str
     model: Model
     unit_primitives: list[GitLabUnitPrimitive]
-    prompt_tpl: Runnable[Input, PromptValue]
+    prompt_tpl: Runnable[Any, PromptValue]
     internal_event_client: Optional[InternalEventsClient] = None
     limits: Optional[ModelLimits] = None
     internal_event_extra: dict[str, Any] = {}
@@ -153,7 +148,7 @@ class Prompt(RunnableBinding[Input, Output]):
         )
 
         chain = cast(
-            Runnable[Input, Output],
+            Runnable[Any, BaseMessage],
             prompt
             | model.bind(**model_kwargs).with_config(
                 callbacks=[PromptLoggingHandler()]
@@ -176,7 +171,7 @@ class Prompt(RunnableBinding[Input, Output]):
         model_kwargs: MutableMapping[str, Any],
         prompt: Runnable,
         model_params: TypeModelParams,
-    ) -> Runnable:
+    ) -> Runnable[Any, PromptValue]:
         """Convert `cache_control_injection_points` LiteLLM param for non-LiteLLM model clients.
 
         https://docs.litellm.ai/docs/tutorials/prompt_caching
@@ -256,10 +251,10 @@ class Prompt(RunnableBinding[Input, Output]):
 
     async def ainvoke(
         self,
-        input: Input,
+        input: Any,
         config: Optional[RunnableConfig] = None,
         **kwargs: Optional[Any],
-    ) -> Output:
+    ) -> BaseMessage:
         with (
             self.instrumentator.watch(
                 stream=False, unit_primitives=self.unit_primitives
@@ -273,15 +268,16 @@ class Prompt(RunnableBinding[Input, Output]):
             )
 
             self.handle_usage_metadata(watcher, cb.usage_metadata)
+            watcher.register_message(result)
 
             return result
 
     async def astream(
         self,
-        input: Input,
+        input: Any,
         config: Optional[RunnableConfig] = None,
         **kwargs: Optional[Any],
-    ) -> AsyncIterator[Output]:
+    ) -> AsyncIterator[BaseMessage]:
         # pylint: disable=contextmanager-generator-missing-cleanup,line-too-long
         # To properly address this pylint issue, the upstream function would need to be altered to ensure proper cleanup.
         # See https://pylint.readthedocs.io/en/latest/user_guide/messages/warning/contextmanager-generator-missing-cleanup.html
@@ -294,13 +290,15 @@ class Prompt(RunnableBinding[Input, Output]):
             # The usage metadata callback only totals the usage at the `on_llm_end` event, so we need to be able to
             # yield the last stream item _after_ that event. Otherwise we'd need to yield an extra event just for the
             # usage metadata. To do this, we yield with a 1-item offset.
-            previous_item: Output | None = None
+            previous_item: BaseMessage | None = None
 
             async for item in super().astream(
                 input,
                 config,
                 **kwargs,
             ):
+                watcher.register_message(item)
+
                 if previous_item:
                     yield previous_item
                 previous_item = item
@@ -374,13 +372,11 @@ class Prompt(RunnableBinding[Input, Output]):
                     )
 
     @classmethod
-    def _build_prompt_template(
-        cls, config: PromptConfig
-    ) -> Runnable[Input, PromptValue]:
+    def _build_prompt_template(cls, config: PromptConfig) -> Runnable[Any, PromptValue]:
         messages = prompt_template_to_messages(config.prompt_template)
 
         return cast(
-            Runnable[Input, PromptValue],
+            Runnable[Any, PromptValue],
             ChatPromptTemplate.from_messages(messages, template_format="jinja2"),
         )
 

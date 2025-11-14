@@ -4,7 +4,6 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from gitlab_cloud_connector import CloudConnectorUser
 
-from ai_gateway.code_suggestions.language_server import LanguageServerVersion
 from duo_workflow_service import tools
 from duo_workflow_service.components.tools_registry import (
     _AGENT_PRIVILEGES,
@@ -41,6 +40,7 @@ from duo_workflow_service.tools.work_item import (
     ListWorkItems,
 )
 from lib.feature_flags import current_feature_flag_context
+from lib.language_server import LanguageServerVersion
 
 
 @pytest.fixture(name="gl_http_client")

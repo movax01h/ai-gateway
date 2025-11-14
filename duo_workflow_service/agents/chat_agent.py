@@ -6,6 +6,7 @@ from anthropic import APIStatusError
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, ToolMessage
 from langchain_core.output_parsers.string import StrOutputParser
 
+from ai_gateway.instrumentators.model_requests import LLMFinishReason
 from duo_workflow_service.agents.prompt_adapter import BasePromptAdapter
 from duo_workflow_service.components.tools_registry import ToolsRegistry
 from duo_workflow_service.entities.state import (
@@ -21,7 +22,6 @@ from duo_workflow_service.gitlab.gitlab_instance_info_service import (
     GitLabInstanceInfoService,
 )
 from duo_workflow_service.gitlab.gitlab_service_context import GitLabServiceContext
-from duo_workflow_service.llm_factory import LLMFinishReason
 from duo_workflow_service.tracking.errors import log_exception
 
 log = structlog.stdlib.get_logger("chat_agent")

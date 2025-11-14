@@ -1,11 +1,7 @@
-from contextvars import ContextVar
-from typing import Optional
-
 import grpc
 from gitlab_cloud_connector.auth import X_GITLAB_REALM_HEADER
 
-# Context variable to store GitLab realm
-gitlab_realm: ContextVar[Optional[str]] = ContextVar("gitlab_realm", default=None)
+from ai_gateway.instrumentators.model_requests import gitlab_realm
 
 
 class GitLabRealmInterceptor(grpc.aio.ServerInterceptor):

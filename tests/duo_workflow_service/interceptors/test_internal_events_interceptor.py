@@ -2,7 +2,6 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from ai_gateway.code_suggestions.language_server import LanguageServerVersion
 from duo_workflow_service.interceptors.gitlab_version_interceptor import gitlab_version
 from duo_workflow_service.interceptors.internal_events_interceptor import (
     InternalEventsInterceptor,
@@ -11,6 +10,7 @@ from duo_workflow_service.interceptors.language_server_version_interceptor impor
     language_server_version,
 )
 from lib.internal_events import current_event_context
+from lib.language_server import LanguageServerVersion
 
 
 @pytest.fixture(name="mock_continuation")
