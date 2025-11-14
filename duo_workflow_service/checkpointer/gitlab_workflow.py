@@ -487,6 +487,7 @@ class GitLabWorkflow(
                 user: CloudConnectorUser = current_user.get()
                 billing_metadata = {
                     "workflow_id": self._workflow_id,
+                    "workflow_type": self._workflow_type,
                     "execution_environment": "duo_agent_platform",
                     "llm_operations": get_llm_operations(),
                 }

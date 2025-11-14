@@ -1263,6 +1263,7 @@ async def test_created_status_with_existing_checkpoint_raises_error(
 async def test_track_workflow_completion_with_billing_event(
     gitlab_workflow,
     workflow_id,
+    workflow_type,
     billing_event_client,
     mock_user,
     status,
@@ -1301,6 +1302,7 @@ async def test_track_workflow_completion_with_billing_event(
         quantity=1,
         metadata={
             "workflow_id": workflow_id,
+            "workflow_type": workflow_type,
             "execution_environment": "duo_agent_platform",
             "llm_operations": operations,
         },
