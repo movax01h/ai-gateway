@@ -121,7 +121,6 @@ class GetWikiPage(WikiBaseTool):
         wiki_response = await self.gitlab_client.aget(
             path=wiki_path,
             parse_json=False,
-            use_http_response=True,  # type: ignore[call-arg]
         )
 
         if not wiki_response.is_success():
@@ -190,7 +189,6 @@ class GetWikiPage(WikiBaseTool):
             notes_response = await self.gitlab_client.aget(
                 path=notes_path,
                 parse_json=False,
-                use_http_response=True,  # type: ignore[call-arg]
             )
 
             if not notes_response.is_success():
