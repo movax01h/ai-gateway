@@ -355,7 +355,6 @@ mutation createWorkItem($input: WorkItemCreateInput!) {
                             nodes {
                                 id
                                 title
-                                color
                         }
                     }
                 }
@@ -429,7 +428,6 @@ mutation updateWorkItem($input: WorkItemUpdateInput!) {
                         nodes {
                             id
                             title
-                            color
                         }
                     }
                 }
