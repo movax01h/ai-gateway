@@ -4,6 +4,7 @@ from pydantic import BaseModel
 from starlette.responses import JSONResponse
 
 from ai_gateway.model_selection import ModelSelectionConfig
+from ai_gateway.model_selection.types import DeprecationInfo
 
 router = APIRouter()
 
@@ -12,6 +13,7 @@ class _GetModelResponseModel(BaseModel):
     name: str
     identifier: str
     provider: str | None = None
+    deprecation: DeprecationInfo | None = None
 
 
 class _GetModelResponseUnitPrimitive(BaseModel):
@@ -41,6 +43,7 @@ async def get_models():
                 name=definition.name,
                 identifier=definition.gitlab_identifier,
                 provider=definition.provider,
+                deprecation=definition.deprecation,
             )
             for definition in selection_config.get_llm_definitions().values()
         ],
@@ -50,4 +53,4 @@ async def get_models():
         ],
     )
 
-    return JSONResponse(content=response.model_dump())
+    return JSONResponse(content=response.model_dump(mode="json"))
