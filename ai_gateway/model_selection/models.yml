@@ -1,6 +1,6 @@
 # see docs/model_selection for documentation
 models:
-  - name: "Codestral 25.01"
+  - name: "Codestral 25.01 - Fireworks"
     provider: "Fireworks"
     gitlab_identifier: "codestral_2501_fireworks"
     params:
@@ -8,7 +8,7 @@ models:
       temperature: 0.7
       max_tokens: 64
 
-  - name: "Codestral 25.01"
+  - name: "Codestral 25.01 - Vertex"
     provider: "Vertex"
     gitlab_identifier: "codestral_2501_vertex"
     params:
@@ -17,7 +17,7 @@ models:
       temperature: 0.7
       max_tokens: 64
 
-  - name: "Gemini 1.5 Flash"
+  - name: "Gemini 1.5 Flash - Vertex"
     provider: "Vertex"
     gitlab_identifier: "gemini_1_5_flash_vertex"
     params:
@@ -27,7 +27,7 @@ models:
       top_k: 1
       max_tokens: 1000
 
-  - name: "Gemini 2.0 Flash Lite"
+  - name: "Gemini 2.0 Flash Lite - Vertex"
     provider: "Vertex"
     gitlab_identifier: "gemini_2_0_flash_lite_vertex"
     params:
@@ -37,7 +37,7 @@ models:
       top_k: 1
       max_tokens: 1000
 
-  - name: "Gemini 2.5 Flash"
+  - name: "Gemini 2.5 Flash - Vertex"
     provider: "Vertex"
     gitlab_identifier: "gemini_2_5_flash_vertex"
     params:
@@ -46,7 +46,7 @@ models:
       temperature: 0.7
       max_tokens: 4_096
 
-  - name: "Claude Opus 4.0"
+  - name: "Claude Opus 4.0 - Anthropic"
     provider: "Anthropic"
     gitlab_identifier: "claude_opus_4_20250514"
     params:
@@ -54,7 +54,7 @@ models:
       temperature: 0.0
       max_tokens: 4_096
 
-  - name: "Claude Opus 4.1"
+  - name: "Claude Opus 4.1 - Anthropic"
     provider: "Anthropic"
     gitlab_identifier: "claude_opus_4_1_20250805"
     params:
@@ -62,7 +62,7 @@ models:
       temperature: 0.0
       max_tokens: 4_096
 
-  - name: "Claude Sonnet 4.5"
+  - name: "Claude Sonnet 4.5 - Anthropic"
     provider: "Anthropic"
     gitlab_identifier: "claude_sonnet_4_5_20250929"
     family:
@@ -72,7 +72,7 @@ models:
       temperature: 0.0
       max_tokens: 4_096
 
-  - name: "Claude Sonnet 4.5"
+  - name: "Claude Sonnet 4.5 - Vertex"
     provider: "Vertex"
     gitlab_identifier: "claude_sonnet_4_5_20250929_vertex"
     family:
@@ -85,7 +85,7 @@ models:
       max_tokens: 4_096
       max_retries: 1
 
-  - name: "Claude Haiku 4.5"
+  - name: "Claude Haiku 4.5 - Anthropic"
     provider: "Anthropic"
     gitlab_identifier: "claude_haiku_4_5_20251001"
     family:
@@ -95,7 +95,7 @@ models:
       temperature: 0.0
       max_tokens: 4_096
 
-  - name: "Claude Haiku 4.5 20251001"
+  - name: "Claude Haiku 4.5 20251001 - Vertex"
     provider: "Vertex"
     gitlab_identifier: "claude_haiku_4_5_20251001_vertex"
     family:
@@ -108,7 +108,7 @@ models:
       max_tokens: 4_096
       max_retries: 1
 
-  - name: "Claude Sonnet 4.0"
+  - name: "Claude Sonnet 4.0 - Anthropic"
     provider: "Anthropic"
     gitlab_identifier: "claude_sonnet_4_20250514"
     params:
@@ -116,7 +116,7 @@ models:
       temperature: 0.0
       max_tokens: 4_096
 
-  - name: "Claude Sonnet 4.0"
+  - name: "Claude Sonnet 4.0 - Vertex"
     provider: "Vertex"
     gitlab_identifier: "claude_sonnet_4_20250514_vertex"
     family:
@@ -128,7 +128,7 @@ models:
       max_tokens: 4_096
       max_retries: 1
 
-  - name: "Claude Sonnet 3.7"
+  - name: "Claude Sonnet 3.7 - Anthropic"
     provider: "Anthropic"
     gitlab_identifier: "claude_sonnet_3_7_20250219"
     params:
@@ -136,7 +136,7 @@ models:
       temperature: 0.0
       max_tokens: 4_096
 
-  - name: "Claude Sonnet 3.7"
+  - name: "Claude Sonnet 3.7 - Vertex"
     provider: "Vertex"
     gitlab_identifier: "claude_sonnet_3_7_20250219_vertex"
     family:
@@ -147,7 +147,7 @@ models:
       temperature: 0.0
       max_tokens: 4_096
 
-  - name: "Claude 3.5 Haiku"
+  - name: "Claude 3.5 Haiku - Anthropic"
     provider: "Anthropic"
     gitlab_identifier: "claude_3_5_haiku_20241022"
     params:
@@ -164,7 +164,7 @@ models:
       temperature: 0.0
       max_tokens: 4_096
 
-  - name: "Claude Sonnet 3.5 20241022"
+  - name: "Claude Sonnet 3.5 20241022 - Anthropic"
     provider: "Anthropic"
     gitlab_identifier: "claude_3" # For backwards compatibility with requests asking for [prompt_id]/claude_3
     family:
@@ -174,7 +174,7 @@ models:
       temperature: 0.0
       max_tokens: 4_096
 
-  - name: "Claude Sonnet 3.5 20241022"
+  - name: "Claude Sonnet 3.5 20241022 - Vertex"
     provider: "Vertex"
     gitlab_identifier: "vertex" # For backwards compatibility with requests asking for [prompt_id]/vertex
     family:
@@ -185,7 +185,7 @@ models:
       temperature: 0.0
       max_tokens: 4_096
 
-  - name: "Claude 3 Haiku"
+  - name: "Claude 3 Haiku - Anthropic"
     provider: "Anthropic"
     gitlab_identifier: "claude_3_haiku_20240307"
     params:
@@ -193,7 +193,7 @@ models:
       temperature: 0.0
       max_tokens: 4_096
 
-  - name: "Claude Sonnet 3" # used by troubleshoot only
+  - name: "Claude Sonnet 3 - Anthropic" # used by troubleshoot only
     provider: "Anthropic"
     gitlab_identifier: "claude_3_sonnet_20240229"
     params:
@@ -201,7 +201,7 @@ models:
       temperature: 0.1
       max_tokens: 2_048
 
-  - name: "GPT-5"
+  - name: "GPT-5 - OpenAI"
     provider: "OpenAI"
     gitlab_identifier: "gpt_5"
     family:
@@ -212,7 +212,7 @@ models:
       temperature: 1.0 # this model always requires temperature to be 1
       max_tokens: 4_096
 
-  - name: "GPT-5-Mini"
+  - name: "GPT-5-Mini - OpenAI"
     provider: "OpenAI"
     gitlab_identifier: "gpt_5_mini"
     family:
@@ -222,7 +222,7 @@ models:
       model_class_provider: "openai"
       max_tokens: 4_096
 
-  - name: "GPT-5-Codex"
+  - name: "GPT-5-Codex - OpenAI"
     provider: "OpenAI"
     gitlab_identifier: "gpt_5_codex"
     family:
