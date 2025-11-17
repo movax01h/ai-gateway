@@ -6,6 +6,8 @@ import yaml
 from gitlab_cloud_connector import GitLabUnitPrimitive
 from pydantic import BaseModel, ConfigDict
 
+from ai_gateway.model_selection.types import DeprecationInfo
+
 BASE_PATH = Path(__file__).parent
 MODELS_CONFIG_PATH = BASE_PATH / "models.yml"
 UNIT_PRIMITIVE_CONFIG_PATH = BASE_PATH / "unit_primitives.yml"
@@ -19,6 +21,7 @@ class LLMDefinition(BaseModel):
     provider: Optional[str] = None
     params: dict[str, Any] = {}
     family: list[str] = []
+    deprecation: Optional[DeprecationInfo] = None
 
 
 class UnitPrimitiveConfig(BaseModel):

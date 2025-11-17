@@ -42,6 +42,15 @@ def mock_model_config_fixture():
                 gitlab_identifier="model3",
                 params={},
             ),
+            "model3": LLMDefinition(
+                name="Model 3",
+                gitlab_identifier="model3",
+                params={},
+                deprecation={
+                    "deprecation_date": "2025-10-28",
+                    "removal_version": "18.8",
+                },
+            ),
         }
         mock_configs.get_unit_primitive_config.return_value = [
             UnitPrimitiveConfig(
@@ -63,6 +72,15 @@ def mock_model_config_fixture():
                 selectable_models=["model2"],
                 beta_models=["model1"],
             ),
+            UnitPrimitiveConfig(
+                feature_setting="config3",
+                unit_primitives=[
+                    GitLabUnitPrimitive.DUO_CHAT,
+                ],
+                default_model="model3",
+                selectable_models=["model3"],
+                beta_models=[],
+            ),
         ]
 
         yield mock_configs
@@ -78,16 +96,19 @@ def test_get_models_returns_correct_data(mock_model_config, client):
         "name": "Model 1",
         "identifier": "model1",
         "provider": "Anthropic",
+        "deprecation": None,
     }
     assert data["models"][1] == {
         "name": "Model 2",
         "identifier": "model2",
         "provider": "Vertex",
+        "deprecation": None,
     }
     assert data["models"][2] == {
         "name": "Model 3",
         "identifier": "model3",
         "provider": None,
+        "deprecation": {"deprecation_date": "2025-10-28", "removal_version": "18.8"},
     }
     assert data["unit_primitives"][0] == {
         "feature_setting": "config1",
@@ -102,4 +123,11 @@ def test_get_models_returns_correct_data(mock_model_config, client):
         "default_model": "model2",
         "selectable_models": ["model2"],
         "beta_models": ["model1"],
+    }
+    assert data["unit_primitives"][2] == {
+        "feature_setting": "config3",
+        "unit_primitives": ["duo_chat"],
+        "default_model": "model3",
+        "selectable_models": ["model3"],
+        "beta_models": [],
     }
