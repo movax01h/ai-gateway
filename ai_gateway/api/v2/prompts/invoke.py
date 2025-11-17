@@ -2,11 +2,12 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, Request, status
 from gitlab_cloud_connector import GitLabFeatureCategory
+from langchain_core.messages import BaseMessage
 from pydantic import BaseModel, Field
 
 from ai_gateway.api.auth_utils import StarletteUser, get_current_user
 from ai_gateway.api.feature_category import feature_category
-from ai_gateway.api.v1.prompts.invoke import PromptChunk, PromptRequest, _invoke
+from ai_gateway.api.v1.prompts.invoke import PromptRequest, _invoke
 from ai_gateway.async_dependency_resolver import get_prompt_registry
 from ai_gateway.instrumentators.model_requests import (
     TokenUsage,
@@ -26,9 +27,9 @@ class PromptResponse(BaseModel):
 router = APIRouter()
 
 
-def _process_chunk(chunk: PromptChunk):
+def _process_chunk(chunk: BaseMessage):
     return PromptResponse(
-        content=chunk.content,
+        content=str(chunk.content),
         usage=get_token_usage(),
     )
 

@@ -3,10 +3,10 @@ from unittest.mock import Mock, patch
 
 import pytest
 
+from ai_gateway.instrumentators.model_requests import LLMFinishReason
 from ai_gateway.models import KindAnthropicModel
 from duo_workflow_service.llm_factory import (
     AnthropicConfig,
-    LLMFinishReason,
     VertexConfig,
     create_chat_model,
     validate_llm_access,
@@ -261,17 +261,30 @@ class TestLLMFinishReason:
     def test_enum_values(self):
         """Test that all enum values are correctly defined."""
         assert LLMFinishReason.STOP == "stop"
+        assert LLMFinishReason.END_TURN == "end_turn"
         assert LLMFinishReason.LENGTH == "length"
+        assert LLMFinishReason.MAX_TOKENS == "max_tokens"
+        assert LLMFinishReason.STOP_SEQUENCE == "stop_sequence"
         assert LLMFinishReason.TOOL_CALLS == "tool_calls"
+        assert LLMFinishReason.TOOL_USE == "tool_use"
         assert LLMFinishReason.CONTENT_FILTER == "content_filter"
 
     def test_values_class_method(self):
         """Test that values() returns all enum values as a list."""
-        expected_values = ["stop", "length", "tool_calls", "content_filter"]
+        expected_values = [
+            "stop",
+            "end_turn",
+            "length",
+            "max_tokens",
+            "stop_sequence",
+            "tool_calls",
+            "tool_use",
+            "content_filter",
+        ]
         actual_values = LLMFinishReason.values()
 
         assert isinstance(actual_values, list)
-        assert len(actual_values) == 4
+        assert len(actual_values) == 8
         assert set(actual_values) == set(expected_values)
 
     def test_abnormal_values_class_method(self):

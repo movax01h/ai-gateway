@@ -2,9 +2,9 @@ from fastapi import Request
 
 from ai_gateway.api.middleware import X_GITLAB_LANGUAGE_SERVER_VERSION
 from ai_gateway.api.v2.code.typing import CompletionsRequestWithVersion
-from ai_gateway.code_suggestions.language_server import LanguageServerVersion
 from ai_gateway.models.base import KindModelProvider
 from ai_gateway.models.litellm import KindLiteLlmModel
+from lib.language_server import LanguageServerVersion
 
 
 class BaseModelProviderHandler:

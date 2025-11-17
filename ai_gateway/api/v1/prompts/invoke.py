@@ -1,9 +1,10 @@
 from datetime import datetime
 from http.client import responses
-from typing import Annotated, Any, AsyncIterator, Callable, Optional, Protocol
+from typing import Annotated, Any, AsyncIterator, Callable, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from gitlab_cloud_connector import GitLabFeatureCategory, WrongUnitPrimitives
+from langchain_core.messages import BaseMessage
 from poetry.core.constraints.version.exceptions import ParseConstraintError
 from pydantic import BaseModel, RootModel, model_validator
 from starlette.responses import StreamingResponse
@@ -30,14 +31,10 @@ class PromptRequest(BaseModel):
     stream: Optional[bool] = False
 
 
-class PromptChunk(Protocol):
-    content: str
-
-
 router = APIRouter()
 
 
-def _process_chunk(chunk: PromptChunk):
+def _process_chunk(chunk: BaseMessage):
     return chunk.content
 
 
@@ -109,7 +106,7 @@ async def _invoke(
 
     try:
         if prompt_request.stream:
-            response: AsyncIterator[PromptChunk] = prompt.astream(
+            response: AsyncIterator[BaseMessage] = prompt.astream(
                 prompt_request.inputs.root
             )
 
@@ -125,7 +122,7 @@ async def _invoke(
 
             return StreamingResponse(_handle_stream(), media_type="text/event-stream")
 
-        response_chunk: PromptChunk = await prompt.ainvoke(prompt_request.inputs.root)
+        response_chunk: BaseMessage = await prompt.ainvoke(prompt_request.inputs.root)
         return process_chunk(response_chunk)
     except KeyError as e:
         raise HTTPException(

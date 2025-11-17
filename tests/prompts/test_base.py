@@ -264,7 +264,7 @@ configurable_unit_primitives:
         async for c in prompt.astream(
             {"name": "Duo", "content": "What's up?"}, runnable_config
         ):
-            response += c.content
+            response += str(c.content)
 
             # Make sure we don't finish prematurely
             mock_watcher.afinish.assert_not_awaited()
@@ -311,7 +311,7 @@ configurable_unit_primitives:
                 ],
             }
         ):
-            response += c.content
+            response += str(c.content)
 
             # Make sure we don't finish prematurely
             mock_watcher.afinish.assert_not_awaited()
@@ -427,7 +427,7 @@ configurable_unit_primitives:
             ),
         ],
     )
-    async def test_ainvoke_handle_usage_metadata(
+    async def test_ainvoke_model_instrumentator_callbacks(
         self,
         mock_watch: mock.Mock,
         internal_event_client: mock.Mock,
@@ -443,7 +443,9 @@ configurable_unit_primitives:
             self._mock_usage_metadata(prompt.model_name, usage_metadata),
             capture_logs() as cap_logs,
         ):
-            await prompt.ainvoke({"name": "Duo", "content": "What's up?"})
+            result = await prompt.ainvoke({"name": "Duo", "content": "What's up?"})
+
+        mock_watcher.register_message.assert_called_once_with(result)
 
         _assert_usage_metadata_handling(
             mock_watcher,
@@ -501,7 +503,7 @@ configurable_unit_primitives:
             ),
         ],
     )
-    async def test_astream_handle_usage_metadata(
+    async def test_astream_model_instrumentator_callbacks(
         self,
         mock_watch: mock.Mock,
         internal_event_client: mock.Mock,
@@ -517,9 +519,10 @@ configurable_unit_primitives:
             self._mock_usage_metadata(prompt.model_name, usage_metadata),
             capture_logs() as cap_logs,
         ):
-            # Consume stream
-            async for _ in prompt.astream({"name": "Duo", "content": "What's up?"}):
-                pass
+            async for message in prompt.astream(
+                {"name": "Duo", "content": "What's up?"}
+            ):
+                mock_watcher.register_message.assert_any_call(message)
 
         _assert_usage_metadata_handling(
             mock_watcher,
@@ -661,9 +664,9 @@ configurable_unit_primitives:
             await prompt.ainvoke({"content": "What's up?"})
 
     @pytest.mark.asyncio
-    async def test_astream_model_input(self, prompt: Prompt):
+    async def test_astream_model_input(self, prompt: Prompt, end_message: AIMessage):
         response = mock.AsyncMock()
-        response.__aiter__.return_value = iter(["response"])
+        response.__aiter__.return_value = iter([end_message])
 
         with mock.patch.object(
             FakeModel, "astream", return_value=response

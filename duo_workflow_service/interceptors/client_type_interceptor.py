@@ -1,6 +1,6 @@
 import grpc.aio
 
-from duo_workflow_service.tracking.client_type_context import client_type
+from ai_gateway.instrumentators.model_requests import client_type
 
 X_GITLAB_CLIENT_TYPE_HEADER = "X-Gitlab-Client-Type"
 
