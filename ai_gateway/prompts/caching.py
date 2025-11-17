@@ -62,7 +62,11 @@ class CacheControlInjectionPointsConverter(Runnable[PromptValue, PromptValue]):
         model_class_provider: str | None = None,
         **_kwargs: Any,
     ) -> PromptValue:
-        if not cache_control_injection_points or not model_class_provider:
+        if (
+            not cache_control_injection_points
+            or not model_class_provider
+            or not hasattr(input, "messages")
+        ):
             return input
 
         log.info(
@@ -71,10 +75,13 @@ class CacheControlInjectionPointsConverter(Runnable[PromptValue, PromptValue]):
             cache_control_injection_points=cache_control_injection_points,
         )
 
+        # Create a deep copy of messages to avoid modifying the original list
+        new_input = input.model_copy(deep=True)
+
         match model_class_provider:
             case ModelClassProvider.ANTHROPIC:
-                return self._convert_for_anthropic_client(
-                    input=input,
+                self._convert_for_anthropic_client(
+                    messages=new_input.messages,
                     cache_control_injection_points=cache_control_injection_points,
                 )
             case _:
@@ -82,20 +89,17 @@ class CacheControlInjectionPointsConverter(Runnable[PromptValue, PromptValue]):
                     "cache_control_injection_points is specified but conversion method is not defined"
                 )
 
-        return input
+        return new_input
 
     def _convert_for_anthropic_client(
-        self, input: PromptValue, cache_control_injection_points: list[dict]
-    ):
-        if not hasattr(input, "messages"):
-            return input
-
+        self,
+        messages: list[BaseMessage],
+        cache_control_injection_points: list[dict],
+    ) -> None:
         for point in cache_control_injection_points:
             if point.get("location") == "message":
-                target = input.messages[point["index"]]
+                target = messages[point["index"]]
                 self._annotate_cache_control(target)
-
-        return input
 
     def _annotate_cache_control(self, msg: BaseMessage):
         if isinstance(msg.content, str):

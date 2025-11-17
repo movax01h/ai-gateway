@@ -2,15 +2,20 @@ from typing import Any
 from unittest import mock
 
 import pytest
+from langchain_community.chat_models.litellm import ChatLiteLLM
 
 from ai_gateway.models.base import log_request
-from ai_gateway.models.v2.container import _litellm_factory, _mock_selector
+from ai_gateway.models.v2.container import _litellm_factory, _mock_selector, litellm
+
+
+def test_litellm_override():
+    assert "request" in litellm.module_level_aclient.event_hooks
+    assert litellm.module_level_aclient.event_hooks["request"] == [log_request]
 
 
 @mock.patch("ai_gateway.models.v2.container.ChatLiteLLM")
-@mock.patch("ai_gateway.models.v2.container.AsyncHTTPHandler")
 @pytest.mark.parametrize(
-    ("kwargs", "expected_kwargs", "expect_client_override"),
+    ("kwargs", "expected_kwargs"),
     [
         (
             {"model": "claude-3-sonnet@20240229", "custom_llm_provider": "vertex_ai"},
@@ -23,7 +28,6 @@ from ai_gateway.models.v2.container import _litellm_factory, _mock_selector
                     },
                 },
             },
-            True,
         ),
         (
             {"model": "mistral-small-2503", "custom_llm_provider": "vertex_ai"},
@@ -31,7 +35,6 @@ from ai_gateway.models.v2.container import _litellm_factory, _mock_selector
                 "model": "mistral-small-2503",
                 "custom_llm_provider": "vertex_ai",
             },
-            True,
         ),
         (
             {
@@ -40,7 +43,6 @@ from ai_gateway.models.v2.container import _litellm_factory, _mock_selector
             {
                 "model": "mistral",
             },
-            False,
         ),
         (
             {
@@ -51,7 +53,6 @@ from ai_gateway.models.v2.container import _litellm_factory, _mock_selector
                 "model": "mistral",
                 "disable_streaming": False,
             },
-            False,
         ),
         (
             {
@@ -62,28 +63,17 @@ from ai_gateway.models.v2.container import _litellm_factory, _mock_selector
                 "model": "mistral",
                 "disable_streaming": True,
             },
-            False,
         ),
     ],
 )
 def test_litellm_factory(
-    mock_async_http_handler: mock.Mock,
     mock_chat_lite_llm: mock.Mock,
     kwargs: dict[str, Any],
     expected_kwargs: dict[str, Any],
-    expect_client_override: bool,
 ):
     assert _litellm_factory(**kwargs) == mock_chat_lite_llm.return_value
 
-    if expect_client_override:
-        expected_kwargs["client"] = mock_async_http_handler.return_value
-
     mock_chat_lite_llm.assert_called_once_with(**expected_kwargs)
-
-    if expect_client_override:
-        mock_async_http_handler.assert_called_once_with(
-            event_hooks={"request": [log_request]}
-        )
 
 
 @pytest.mark.parametrize(
