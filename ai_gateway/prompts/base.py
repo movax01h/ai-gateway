@@ -267,8 +267,8 @@ class Prompt(RunnableBinding[Any, BaseMessage]):
                 **kwargs,
             )
 
-            self.handle_usage_metadata(watcher, cb.usage_metadata)
             watcher.register_message(result)
+            self.handle_usage_metadata(watcher, cb.usage_metadata)
 
             return result
 
