@@ -14,6 +14,7 @@ class _GetModelResponseModel(BaseModel):
     identifier: str
     provider: str | None = None
     deprecation: DeprecationInfo | None = None
+    description: str | None = None
 
 
 class _GetModelResponseUnitPrimitive(BaseModel):
@@ -44,6 +45,7 @@ async def get_models():
                 identifier=definition.gitlab_identifier,
                 provider=definition.provider,
                 deprecation=definition.deprecation,
+                description=definition.description,
             )
             for definition in selection_config.get_llm_definitions().values()
         ],

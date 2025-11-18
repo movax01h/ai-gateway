@@ -19,6 +19,7 @@ class LLMDefinition(BaseModel):
     name: str
     gitlab_identifier: str
     provider: Optional[str] = None
+    description: str | None = None
     params: dict[str, Any] = {}
     family: list[str] = []
     deprecation: Optional[DeprecationInfo] = None
