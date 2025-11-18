@@ -1,6 +1,7 @@
 # flake8: noqa
 
 from .audit_events import *
+from .branch import *
 from .ci_linter import *
 from .command import *
 from .commit import *
