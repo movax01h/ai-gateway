@@ -22,6 +22,7 @@ from duo_workflow_service.interceptors import (
     X_GITLAB_ROOT_NAMESPACE_ID,
     X_GITLAB_USER_ID_HEADER,
 )
+from duo_workflow_service.interceptors.authentication_interceptor import current_user
 from duo_workflow_service.interceptors.correlation_id_interceptor import correlation_id
 from duo_workflow_service.interceptors.gitlab_version_interceptor import gitlab_version
 from duo_workflow_service.interceptors.language_server_version_interceptor import (
@@ -41,7 +42,6 @@ def convert_feature_enabled_string_to_list(
 
 
 class InternalEventsInterceptor(grpc.aio.ServerInterceptor):
-
     def __init__(self):
         self._logger = structlog.stdlib.get_logger("internal_events_interceptor")
 
@@ -83,6 +83,12 @@ class InternalEventsInterceptor(grpc.aio.ServerInterceptor):
         # Get GitLab instance version from context
         instance_version_value = gitlab_version.get()
 
+        unique_instance_id = None
+
+        user = current_user.get()
+        if hasattr(user, "claims") and user.claims:
+            unique_instance_id = getattr(user.claims, "gitlab_instance_uid", None)
+
         context = EventContext(
             realm=metadata.get(X_GITLAB_REALM_HEADER),
             environment=os.environ.get(
@@ -90,6 +96,7 @@ class InternalEventsInterceptor(grpc.aio.ServerInterceptor):
             ),
             source="duo-workflow-service-python",
             instance_id=metadata.get(X_GITLAB_INSTANCE_ID_HEADER),
+            unique_instance_id=unique_instance_id,
             host_name=metadata.get(X_GITLAB_HOST_NAME),
             instance_version=instance_version_value,
             global_user_id=metadata.get(X_GITLAB_GLOBAL_USER_ID_HEADER),
