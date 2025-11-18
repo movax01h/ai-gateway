@@ -50,6 +50,33 @@ and on [DockerHub](https://hub.docker.com/repository/docker/gitlab/model-gateway
 
 Stable branches will not be receiving updates from main branch. If a bug at a version needs to be addressed, the developer can cherry-pick the necessary commits, and request a maintainer to bump the PATCH version and create a new release tag, publishing a new image. This allows AI teams to release fixes without getting blocked by GitLab-rails patch release process.
 
+#### How to backport a fix
+
+When you need to backport a fix to a specific AI Gateway release version:
+
+1. **Create a backport merge request**: Cherry-pick the fix from `main` to the appropriate stable branch (e.g., `stable-18-4-ee` for GitLab 18.4).
+   - Example: [MR !3888](https://gitlab.com/gitlab-org/modelops/applied-ml/code-suggestions/ai-assist/-/merge_requests/3888) backported a fix to `stable-18-4-ee`.
+
+1. **Get the merge request reviewed and merged**: Follow the standard review process and merge the backport MR.
+
+1. **Tag the merge commit**: After the MR is merged, a maintainer needs to tag the merge commit with a new patch version tag following the format `self-hosted-vX.Y.Z-ee`.
+   - For example, if backporting to version 18.4.1, the new tag would be `self-hosted-v18.4.2-ee`.
+
+```shell
+git tag -l "self-hosted-v18.4.*"
+
+self-hosted-v18.4.0-ee
+self-hosted-v18.4.1-ee
+```
+
+1. **Trigger the release**: Creating the tag automatically triggers the [release jobs](https://gitlab.com/gitlab-org/modelops/applied-ml/code-suggestions/ai-assist/-/pipelines) which build and publish a new Docker image.
+
+1. **Verify the image**: Once the release jobs succeed, verify the new image is available in:
+   - [GitLab Container Registry](https://gitlab.com/gitlab-org/modelops/applied-ml/code-suggestions/ai-assist/container_registry/3809284)
+   - [DockerHub](https://hub.docker.com/repository/docker/gitlab/model-gateway/tags)
+
+1. **Notify stakeholders**: Inform customers or stakeholders that they can update their installation with the new image version.
+
 ## GitLab managed AI Gateway Release process
 
 Releases are now automated using the `semantic-release` job from [common-ci-tasks](https://gitlab.com/gitlab-com/gl-infra/common-ci-tasks). The release process works as follows:
