@@ -103,7 +103,7 @@ class PromptLoggingHandler(BaseCallbackHandler):
 
     def on_llm_start(
         self,
-        serialized: dict[str, Any],  # pylint: disable=unused-argument
+        serialized: dict[str, Any],
         prompts: list[str],
         **_kwargs: Any,
     ) -> Any:

@@ -31,7 +31,6 @@ class TestHandoverAgent:
             "ui_chat_log": [],
         }
 
-    # pylint: disable=too-many-positional-arguments
     @pytest.mark.asyncio
     @pytest.mark.parametrize(
         "handover_from, conversation_history, include_conversation_history, expected_handover, expected_ui_chat_log",

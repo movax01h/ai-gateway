@@ -18,7 +18,7 @@ class GitCommandInput(BaseModel):
 class Command(DuoBaseTool):
     name: str = "run_git_command"
     description: str = """Runs a git command in the repository working directory."""
-    args_schema: Type[BaseModel] = GitCommandInput  # type: ignore
+    args_schema: Type[BaseModel] = GitCommandInput
 
     async def _execute(
         self, repository_url: str, command: str, args: Optional[str] = None

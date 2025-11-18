@@ -89,7 +89,7 @@ def encode_dangerous_tags(
         return [processed]
 
     # Type assertion: processed is guaranteed to be str or list after security processing
-    return processed  # type: ignore[no-any-return]
+    return processed
 
 
 def strip_hidden_unicode_tags(

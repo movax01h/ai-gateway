@@ -58,7 +58,7 @@ class GetWikiPage(WikiBaseTool):
 
 {WIKI_IDENTIFICATION_DESCRIPTION}
 """
-    args_schema: Type[BaseModel] = WikiResourceInput  # type: ignore
+    args_schema: Type[BaseModel] = WikiResourceInput
 
     def _get_resource_info(
         self, project_id: Optional[str], group_id: Optional[str]

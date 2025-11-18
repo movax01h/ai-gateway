@@ -22,6 +22,9 @@ The AI Gateway uses a streamlined review process optimized for speed and innovat
 
 - Authors cannot approve their own MRs
 - Never merge code you don't understand or aren't confident in
+- By default, Pylint/mypy rules should not be disabled inline because it negates agreed-upon code standards that the
+rule is attempting to apply to the codebase. If you must use inline disable, provide the reason as a code comment where
+the rule is disabled.
 
 **Always request a second review when:**
 

@@ -22,7 +22,7 @@ class ChatAgentPromptTemplate(Runnable[ChatWorkflowState, PromptValue]):
     def invoke(
         self,
         input: ChatWorkflowState,
-        config: Optional[RunnableConfig] = None,  # pylint: disable=unused-argument
+        config: Optional[RunnableConfig] = None,
         **_kwargs: Any,
     ) -> PromptValue:
         messages: list[BaseMessage] = []

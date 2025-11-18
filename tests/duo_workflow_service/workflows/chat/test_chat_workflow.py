@@ -50,7 +50,7 @@ def prompt_fixture(
 ):
     return ChatAgent(
         model_factory=model_factory,
-        config=prompt_config,  # type: ignore[arg-type] # mypy gets confused with `config` from `Runnable`
+        config=prompt_config,
         model_metadata=model_metadata,
         workflow_id=workflow_id,
         workflow_type=workflow_type,

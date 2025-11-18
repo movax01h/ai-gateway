@@ -12,7 +12,7 @@ async def test_ci_linter_success():
     gitlab_client_mock = AsyncMock()
     gitlab_client_mock.apost.return_value = mock_response
 
-    tool = CiLinter(metadata={"gitlab_client": gitlab_client_mock})  # type: ignore
+    tool = CiLinter(metadata={"gitlab_client": gitlab_client_mock})
 
     yaml_content = "image: ruby:2.6\ntest_job:\n  script: echo 'test'"
     response = await tool.arun({"project_id": 42, "content": yaml_content})
@@ -31,7 +31,7 @@ async def test_ci_linter_with_ref():
     gitlab_client_mock = AsyncMock()
     gitlab_client_mock.apost.return_value = mock_response
 
-    tool = CiLinter(metadata={"gitlab_client": gitlab_client_mock})  # type: ignore
+    tool = CiLinter(metadata={"gitlab_client": gitlab_client_mock})
 
     yaml_content = (
         "include: '.gitlab-ci-template.yml'\ntest_job:\n  script: echo 'test'"
@@ -57,7 +57,7 @@ async def test_ci_linter_with_empty_ref():
     gitlab_client_mock = AsyncMock()
     gitlab_client_mock.apost.return_value = mock_response
 
-    tool = CiLinter(metadata={"gitlab_client": gitlab_client_mock})  # type: ignore
+    tool = CiLinter(metadata={"gitlab_client": gitlab_client_mock})
 
     yaml_content = "image: ruby:2.6\ntest_job:\n  script: echo 'test'"
     response = await tool.arun({"project_id": 42, "content": yaml_content, "ref": ""})
@@ -83,7 +83,7 @@ async def test_ci_linter_invalid_yaml():
     gitlab_client_mock = AsyncMock()
     gitlab_client_mock.apost.return_value = mock_response
 
-    tool = CiLinter(metadata={"gitlab_client": gitlab_client_mock})  # type: ignore
+    tool = CiLinter(metadata={"gitlab_client": gitlab_client_mock})
 
     yaml_content = ".job:\n  script:\n    - echo 'A hidden job'"
 

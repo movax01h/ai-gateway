@@ -28,7 +28,7 @@ class RunCommand(DuoBaseTool):
         "and will result in error. "
         "Pay extra attention to correctly escape special characters like '`'"
     )
-    args_schema: Type[BaseModel] = RunCommandInput  # type: ignore
+    args_schema: Type[BaseModel] = RunCommandInput
 
     async def _execute(
         self,

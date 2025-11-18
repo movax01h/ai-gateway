@@ -97,7 +97,7 @@ class ReadFile(DuoBaseTool):
     - Do not make separate responses for each file - group related files together
 
     """
-    args_schema: Type[BaseModel] = ReadFileInput  # type: ignore
+    args_schema: Type[BaseModel] = ReadFileInput
     handle_tool_error: bool = True
     eval_prompts: List[str] = [
         "I need to read the content of the `readme.md`",
@@ -135,7 +135,7 @@ class ReadFiles(DuoBaseTool):
     name: str = "read_files"
     description: str = """Read one or more files in a single operation.
     """
-    args_schema: Type[BaseModel] = ReadFilesInput  # type: ignore
+    args_schema: Type[BaseModel] = ReadFilesInput
     handle_tool_error: bool = True
 
     async def _execute(self, file_paths: list[str]) -> str:
@@ -222,7 +222,7 @@ class WriteFile(DuoBaseTool):
     description: str = (
         "Create and write the given contents to a file. Please specify the `file_path` and the `contents` to write."
     )
-    args_schema: Type[BaseModel] = WriteFileInput  # type: ignore
+    args_schema: Type[BaseModel] = WriteFileInput
     handle_tool_error: bool = True
 
     async def _execute(self, file_path: str, contents: str) -> str:
@@ -290,7 +290,7 @@ class FindFiles(DuoBaseTool):
 
     Uses bash filename expansion syntax. Searches recursively and respects .gitignore rules.
     """
-    args_schema: Type[BaseModel] = FindFilesInput  # type: ignore
+    args_schema: Type[BaseModel] = FindFilesInput
 
     async def _execute(
         self,
@@ -338,7 +338,7 @@ class Mkdir(DuoBaseTool):
     description: str = """Create a new directory using the mkdir command.
     The directory creation is restricted to the current working directory tree."""
 
-    args_schema: Type[BaseModel] = MkdirInput  # type: ignore
+    args_schema: Type[BaseModel] = MkdirInput
 
     async def _execute(self, directory_path: str) -> str:
         if ".." in directory_path:
@@ -376,7 +376,6 @@ class EditFileInput(BaseModel):
 
 class EditFile(DuoBaseTool):
     name: str = "edit_file"
-    # pylint: disable=line-too-long
     description: str = """Use this tool to edit an existing file.
 
 IMPORTANT:
@@ -443,7 +442,7 @@ Examples of batched file edits:
         old_str="# Changelog\n\n## 1.0.0",
         new_str="# Changelog\n\n## 1.1.0\n- Bug fixes\n- Performance improvements\n\n## 1.0.0"
     )"""
-    args_schema: Type[BaseModel] = EditFileInput  # type: ignore
+    args_schema: Type[BaseModel] = EditFileInput
     handle_tool_error: bool = True
 
     async def _execute(self, file_path: str, old_str: str, new_str: str) -> str:
@@ -506,7 +505,7 @@ class ListDir(DuoBaseTool):
     Shows files and subdirectories relative to the repository root.
     Use this instead of trying to run 'ls' commands.
     """
-    args_schema: Type[BaseModel] = ListDirInput  # type: ignore
+    args_schema: Type[BaseModel] = ListDirInput
 
     async def _execute(self, directory: str) -> str:
         # Check file exclusion policy before executing action

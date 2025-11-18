@@ -786,14 +786,14 @@ class TestPromptTimeout:
             (
                 ChatLiteLLM(
                     model="claude-3-sonnet@20240229",
-                    custom_llm_provider="vertex_ai",  # type: ignore[call-arg]
+                    custom_llm_provider="vertex_ai",
                 ),
                 Timeout,
             ),
             (
                 ChatLiteLLM(
                     model="claude-3-5-sonnet-v2@20241022",
-                    custom_llm_provider="vertex_ai",  # type: ignore[call-arg]
+                    custom_llm_provider="vertex_ai",
                 ),
                 Timeout,
             ),

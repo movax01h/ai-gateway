@@ -1,4 +1,4 @@
-# pylint: disable=super-init-not-called,direct-environment-variable-reference,no-else-return,broad-exception-raised,attribute-defined-outside-init
+# pylint: disable=super-init-not-called,direct-environment-variable-reference,broad-exception-raised,attribute-defined-outside-init
 
 import asyncio
 import base64

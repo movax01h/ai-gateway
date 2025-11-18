@@ -73,7 +73,7 @@ class PlannerComponent(BaseComponent):
             self.user,
             "workflow/planner",
             "^1.0.0",
-            tools=planner_toolset.bindable,  # type: ignore[arg-type]
+            tools=planner_toolset.bindable,
             workflow_id=self.workflow_id,
             workflow_type=self.workflow_type,
             http_client=self.http_client,

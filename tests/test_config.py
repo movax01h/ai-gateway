@@ -47,7 +47,7 @@ from ai_gateway.config import (
 )
 def test_config_base(values: dict, expected: Config):
     with mock.patch.dict(os.environ, values, clear=True):
-        config = Config(_env_file=None, _env_prefix="AIGW_")  # type: ignore[call-arg]
+        config = Config(_env_file=None, _env_prefix="AIGW_")
 
         keys = {
             "gitlab_url",
@@ -78,7 +78,7 @@ def test_config_base(values: dict, expected: Config):
 )
 def test_config_logging(values: dict, expected: ConfigLogging):
     with mock.patch.dict(os.environ, values, clear=True):
-        config = Config(_env_file=None)  # type: ignore[call-arg]
+        config = Config(_env_file=None)
 
         assert config.logging == expected
 
@@ -115,7 +115,7 @@ def test_config_logging(values: dict, expected: ConfigLogging):
 )
 def test_config_fastapi(values: dict, expected: ConfigFastApi):
     with mock.patch.dict(os.environ, values, clear=True):
-        config = Config(_env_file=None)  # type: ignore[call-arg]
+        config = Config(_env_file=None)
 
         assert config.fastapi == expected
 
@@ -129,7 +129,7 @@ def test_config_fastapi(values: dict, expected: ConfigFastApi):
 )
 def test_config_auth_bypass_external(values: dict, expected: ConfigAuth):
     with mock.patch.dict(os.environ, values, clear=True):
-        config = Config(_env_file=None)  # type: ignore[call-arg]
+        config = Config(_env_file=None)
 
         assert config.auth == expected
 
@@ -146,7 +146,7 @@ def test_config_auth_bypass_external(values: dict, expected: ConfigAuth):
 )
 def test_config_auth_bypass_external_with_header(values: dict, expected: ConfigAuth):
     with mock.patch.dict(os.environ, values, clear=True):
-        config = Config(_env_file=None)  # type: ignore[call-arg]
+        config = Config(_env_file=None)
 
         assert config.auth == expected
 
@@ -169,7 +169,7 @@ def test_config_google_cloud_profiler(
     values: dict, expected: ConfigGoogleCloudProfiler
 ):
     with mock.patch.dict(os.environ, values, clear=True):
-        config = Config(_env_file=None)  # type: ignore[call-arg]
+        config = Config(_env_file=None)
 
         assert config.google_cloud_profiler == expected
 
@@ -192,7 +192,7 @@ def test_config_google_cloud_profiler(
 )
 def test_config_f_flags_code_suggestions(values: dict, expected: ConfigFeatureFlags):
     with mock.patch.dict(os.environ, values, clear=True):
-        config = Config(_env_file=None)  # type: ignore[call-arg]
+        config = Config(_env_file=None)
 
         assert config.feature_flags == expected
 
@@ -216,7 +216,7 @@ def test_config_f_flags_code_suggestions(values: dict, expected: ConfigFeatureFl
 )
 def test_config_snowplow(values: dict, expected: ConfigSnowplow):
     with mock.patch.dict(os.environ, values, clear=True):
-        config = Config(_env_file=None)  # type: ignore[call-arg]
+        config = Config(_env_file=None)
 
         assert config.snowplow == expected
 
@@ -238,7 +238,7 @@ def test_config_snowplow(values: dict, expected: ConfigSnowplow):
 )
 def test_config_instrumentator(values: dict, expected: ConfigInstrumentator):
     with mock.patch.dict(os.environ, values, clear=True):
-        config = Config(_env_file=None)  # type: ignore[call-arg]
+        config = Config(_env_file=None)
 
         assert config.instrumentator == expected
 
@@ -316,7 +316,7 @@ def test_config_google_cloud_platform(
     expected_vertex_search: ConfigVertexSearch,
 ):
     with mock.patch.dict(os.environ, values, clear=True):
-        config = Config(_env_file=None)  # type: ignore[call-arg]
+        config = Config(_env_file=None)
 
         assert config.google_cloud_platform == expected_google_cloud_platform
         assert config.vertex_text_model == expected_vertex_text_model
@@ -376,7 +376,7 @@ def test_custom_models(values: dict, expected: ConfigCustomModels):
 )
 def test_config_vertex_text_model(values: dict, expected: ConfigVertexTextModel):
     with mock.patch.dict(os.environ, values, clear=True):
-        config = Config(_env_file=None)  # type: ignore[call-arg]
+        config = Config(_env_file=None)
 
         assert config.vertex_text_model == expected
 
@@ -415,7 +415,7 @@ def test_config_vertex_text_model(values: dict, expected: ConfigVertexTextModel)
 )
 def test_config_model_endpoints(values: dict, expected: ConfigVertexTextModel):
     with mock.patch.dict(os.environ, values, clear=True):
-        config = Config(_env_file=None)  # type: ignore[call-arg]
+        config = Config(_env_file=None)
 
         assert config.model_endpoints == expected
 
@@ -447,7 +447,7 @@ def test_config_model_endpoints(values: dict, expected: ConfigVertexTextModel):
 )
 def test_config_vertex_search(values: dict, expected: ConfigVertexSearch):
     with mock.patch.dict(os.environ, values, clear=True):
-        config = Config(_env_file=None)  # type: ignore[call-arg]
+        config = Config(_env_file=None)
 
         assert config.vertex_search == expected
 
@@ -459,7 +459,7 @@ def test_amazon_q():
     }
 
     with mock.patch.dict(os.environ, values, clear=True):
-        config = Config(_env_file=None)  # type: ignore[call-arg]
+        config = Config(_env_file=None)
 
         assert config.amazon_q == ConfigAmazonQ(
             region="us-west-2",
@@ -495,7 +495,7 @@ def test_amazon_q():
 )
 def test_config_model_limits(values: dict, expected: ConfigModelLimits):
     with mock.patch.dict(os.environ, values, clear=True):
-        config = Config(_env_file=None)  # type: ignore[call-arg]
+        config = Config(_env_file=None)
 
         assert config.model_engine_limits == expected
 

@@ -53,7 +53,7 @@ class TestChatAnthropic:
     def test_unsupported_sync_methods(self):
         model = ChatAnthropic(
             async_client=AsyncAnthropic(), model="claude-3-5-sonnet-20241022"
-        )  # type: ignore[call-arg]
+        )
 
         with pytest.raises(NotImplementedError):
             model.invoke("What's your name?")
@@ -64,7 +64,7 @@ class TestChatAnthropic:
             model="claude-3-5-sonnet-20241022",
             anthropic_api_key="test_api_key",
             anthropic_api_url="http://anthropic.test",
-        )  # type: ignore[call-arg]
+        )
 
         assert model.anthropic_api_key.get_secret_value() == "test_api_key"
         assert model._async_client.api_key == "test_api_key"

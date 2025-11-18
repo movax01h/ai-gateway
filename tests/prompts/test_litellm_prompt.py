@@ -18,7 +18,7 @@ def model_metadata_fixture():
 @pytest.fixture(name="model")
 def model_fixture():
     return ChatLiteLLM(
-        model="claude-3-sonnet@20240229", custom_llm_provider="vertex_ai", max_retries=3  # type: ignore[call-arg]
+        model="claude-3-sonnet@20240229", custom_llm_provider="vertex_ai", max_retries=3
     )
 
 

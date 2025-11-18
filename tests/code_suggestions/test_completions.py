@@ -1,4 +1,3 @@
-# pylint: disable=too-many-lines
 from contextlib import contextmanager
 from typing import Any, Type
 from unittest.mock import AsyncMock, Mock, PropertyMock

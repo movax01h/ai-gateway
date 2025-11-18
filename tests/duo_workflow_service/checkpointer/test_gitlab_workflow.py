@@ -947,8 +947,8 @@ async def test_alist(gitlab_workflow, http_client):
     ]
 
     assert len(results) == 2
-    assert results[0].checkpoint == checkpoints[0]["checkpoint"]  # type: ignore
-    assert results[1].checkpoint == checkpoints[1]["checkpoint"]  # type: ignore
+    assert results[0].checkpoint == checkpoints[0]["checkpoint"]
+    assert results[1].checkpoint == checkpoints[1]["checkpoint"]
 
 
 @pytest.mark.asyncio
@@ -1203,7 +1203,7 @@ async def test_created_status_with_no_checkpoint_succeeds(
         http_client,
         workflow_id,
         workflow_type,
-        workflow_config,  # type: ignore[arg-type]
+        workflow_config,
     )
 
     config: RunnableConfig = {"configurable": {}}
@@ -1237,7 +1237,7 @@ async def test_created_status_with_existing_checkpoint_raises_error(
         http_client,
         workflow_id,
         workflow_type,
-        workflow_config,  # type: ignore[arg-type]
+        workflow_config,
     )
 
     config: RunnableConfig = {"configurable": {}}

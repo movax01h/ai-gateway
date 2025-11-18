@@ -1,4 +1,4 @@
-# pylint: disable=direct-environment-variable-reference,too-many-lines
+# pylint: disable=too-many-lines
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Type, cast

@@ -15,7 +15,7 @@ from duo_workflow_service.tools.duo_base_tool import (
 class DummyTool(DuoBaseTool):
     name: str = "dummy_tool"
     description: str = "A dummy tool for testing"
-    args_schema: Type[BaseModel] = BaseModel  # type: ignore
+    args_schema: Type[BaseModel] = BaseModel
 
     async def _execute(self, *args, **kwargs):
         return "dummy result"
@@ -30,7 +30,7 @@ class DummyToolWithArgs(DuoBaseTool):
         param2: int = Field(description="Second parameter")
         optional_param: str = Field(default="default", description="Optional parameter")
 
-    args_schema: Type[BaseModel] = ArgsSchema  # type: ignore
+    args_schema: Type[BaseModel] = ArgsSchema
 
     async def _execute(self, param1, param2, optional_param="default"):
         return f"{param1} {param2} {optional_param}"
@@ -43,7 +43,7 @@ class DummyToolWithResponseHandling(DuoBaseTool):
     class ArgsSchema(BaseModel):
         action: str = Field(description="Action to perform")
 
-    args_schema: Type[BaseModel] = ArgsSchema  # type: ignore
+    args_schema: Type[BaseModel] = ArgsSchema
 
     def format_display_message(self, args: ArgsSchema, tool_response: str = "") -> str:
         base_msg = f"Performing {args.action}"

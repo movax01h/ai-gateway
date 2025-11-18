@@ -675,7 +675,7 @@ async def test_workflow_run_with_retry(
                     "checkpoint_id": "checkpoint1",
                 }
             },
-            checkpoint=mock_checkpoint,  # type:ignore
+            checkpoint=mock_checkpoint,
             metadata={},
             parent_config={},
         )

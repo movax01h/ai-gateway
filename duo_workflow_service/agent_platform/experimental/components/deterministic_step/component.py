@@ -95,7 +95,7 @@ class DeterministicStepComponent(BaseComponent):
             if tool.args_schema:
                 error = cls._validate_tool_arguments(tool, inputs)
                 if error:
-                    schema = tool.args_schema.model_json_schema()  # type: ignore[union-attr]
+                    schema = tool.args_schema.model_json_schema()
                     raise ValueError(
                         f"Tool '{tool_name}' configuration validation failed:\n"
                         f"Error: {error}\n"

@@ -1,4 +1,3 @@
-# pylint: disable=direct-environment-variable-reference
 # pylint: disable=file-naming-for-tests
 """Tests for enhanced logging functionality in the Duo Workflow Service server module."""
 
