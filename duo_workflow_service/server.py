@@ -151,10 +151,10 @@ def clean_start_request(start_workflow_request: contract_pb2.ClientEvent):
 
 
 class DuoWorkflowService(contract_pb2_grpc.DuoWorkflowServicer):
-    # Set to 2 seconds to provide a reasonable balance between:
+    # Set to 10 seconds to provide a reasonable balance between:
     # - Giving tasks enough time to properly clean up resources
     # - Not delaying the server response for too long when handling errors
-    TASK_CANCELLATION_TIMEOUT = 2.0
+    TASK_CANCELLATION_TIMEOUT = 10.0
 
     # pylint: disable=invalid-overridden-method,too-many-statements,too-many-branches
     @inject
