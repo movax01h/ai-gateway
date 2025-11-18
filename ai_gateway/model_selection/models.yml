@@ -59,6 +59,7 @@ models:
       model: "claude-opus-4-20250514"
       temperature: 0.0
       max_tokens: 4_096
+      model_class_provider: anthropic
 
   - name: "Claude Opus 4.1 - Anthropic"
     provider: "Anthropic"
@@ -68,6 +69,7 @@ models:
       model: "claude-opus-4-1-20250805"
       temperature: 0.0
       max_tokens: 4_096
+      model_class_provider: anthropic
 
   - name: "Claude Sonnet 4.5 - Anthropic"
     provider: "Anthropic"
@@ -79,6 +81,7 @@ models:
       model: "claude-sonnet-4-5-20250929"
       temperature: 0.0
       max_tokens: 4_096
+      model_class_provider: anthropic
 
   - name: "Claude Sonnet 4.5 - Vertex"
     provider: "Vertex"
@@ -93,6 +96,7 @@ models:
       temperature: 0.0
       max_tokens: 4_096
       max_retries: 1
+      model_class_provider: litellm
 
   - name: "Claude Haiku 4.5 - Anthropic"
     provider: "Anthropic"
@@ -104,6 +108,7 @@ models:
       model: "claude-haiku-4-5-20251001"
       temperature: 0.0
       max_tokens: 4_096
+      model_class_provider: anthropic
 
   - name: "Claude Haiku 4.5 20251001 - Vertex"
     provider: "Vertex"
@@ -118,6 +123,7 @@ models:
       temperature: 0.0
       max_tokens: 4_096
       max_retries: 1
+      model_class_provider: litellm
 
   - name: "Claude Sonnet 4.0 - Anthropic"
     provider: "Anthropic"
@@ -127,6 +133,7 @@ models:
       model: "claude-sonnet-4-20250514"
       temperature: 0.0
       max_tokens: 4_096
+      model_class_provider: anthropic
 
   - name: "Claude Sonnet 4.0 - Vertex"
     provider: "Vertex"
@@ -140,6 +147,7 @@ models:
       temperature: 0.0
       max_tokens: 4_096
       max_retries: 1
+      model_class_provider: litellm
 
   - name: "Claude Sonnet 3.7 - Anthropic"
     provider: "Anthropic"
@@ -149,6 +157,7 @@ models:
       model: "claude-3-7-sonnet-20250219"
       temperature: 0.0
       max_tokens: 4_096
+      model_class_provider: anthropic
     deprecation:
       deprecation_date: "2025-10-28"
       removal_version: "18.8"
@@ -164,6 +173,7 @@ models:
       custom_llm_provider: "vertex_ai"
       temperature: 0.0
       max_tokens: 4_096
+      model_class_provider: litellm
 
   - name: "Claude 3.5 Haiku - Anthropic"
     provider: "Anthropic"
@@ -173,6 +183,7 @@ models:
       model: "claude-3-5-haiku-20241022"
       temperature: 0.0
       max_tokens: 4_096
+      model_class_provider: anthropic
 
   - name: "General"
     gitlab_identifier: "general" # For backwards compatibility with requests asking for [prompt_id]/general
@@ -182,6 +193,7 @@ models:
       model: "claude-3-5-sonnet-20241022"
       temperature: 0.0
       max_tokens: 4_096
+      model_class_provider: litellm
 
   - name: "Claude Sonnet 3.5 20241022 - Anthropic"
     provider: "Anthropic"
@@ -192,6 +204,7 @@ models:
       model: "claude-3-5-sonnet-20241022"
       temperature: 0.0
       max_tokens: 4_096
+      model_class_provider: anthropic
 
   - name: "Claude Sonnet 3.5 20241022 - Vertex"
     provider: "Vertex"
@@ -203,6 +216,7 @@ models:
       custom_llm_provider: "vertex_ai"
       temperature: 0.0
       max_tokens: 4_096
+      model_class_provider: litellm
 
   - name: "Claude 3 Haiku - Anthropic"
     provider: "Anthropic"
@@ -212,6 +226,7 @@ models:
       model: "claude-3-haiku-20240307"
       temperature: 0.0
       max_tokens: 4_096
+      model_class_provider: anthropic
 
   - name: "Claude Sonnet 3 - Anthropic" # used by troubleshoot only
     provider: "Anthropic"
@@ -221,6 +236,7 @@ models:
       model: "claude-3-sonnet-20240229"
       temperature: 0.1
       max_tokens: 2_048
+      model_class_provider: anthropic
 
   - name: "GPT-5.1 - OpenAI"
     provider: "OpenAI"
@@ -263,6 +279,7 @@ models:
       - amazon_q
     params:
       model: amazon_q
+      model_class_provider: amazon_q
 
   - name: Mistral
     gitlab_identifier: mistral

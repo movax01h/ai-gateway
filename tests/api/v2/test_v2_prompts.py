@@ -124,7 +124,10 @@ class TestPrompt:
                         name="amazon_q",
                         provider="amazon_q",
                         role_arn="role-arn",
-                        llm_definition_params={"model": "amazon_q"},
+                        llm_definition_params={
+                            "model": "amazon_q",
+                            "model_class_provider": "amazon_q",
+                        },
                         family=["amazon_q"],
                         friendly_name="Amazon Q",
                     ),
