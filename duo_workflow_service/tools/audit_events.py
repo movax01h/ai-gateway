@@ -204,7 +204,7 @@ class ListInstanceAuditEvents(BaseAuditEventsTool):
     - List audit events created after a certain date:
         list_instance_audit_events(created_after="2023-01-01T00:00:00Z")
     """
-    args_schema: Type[BaseModel] = ListInstanceAuditEventsInput  # type: ignore
+    args_schema: Type[BaseModel] = ListInstanceAuditEventsInput
 
     async def _execute(self, **kwargs: Any) -> str:
         # Validate entity_id requires entity_type
@@ -244,7 +244,7 @@ class ListGroupAuditEvents(BaseAuditEventsTool):
     - List recent audit events:
         list_group_audit_events(group_id=60, created_after="2023-01-01T00:00:00Z")
     """
-    args_schema: Type[BaseModel] = ListGroupAuditEventsInput  # type: ignore
+    args_schema: Type[BaseModel] = ListGroupAuditEventsInput
 
     async def _execute(self, **kwargs: Any) -> str:
         group_id = kwargs.get("group_id")
@@ -295,7 +295,7 @@ class ListProjectAuditEvents(BaseAuditEventsTool):
     - List recent audit events:
         list_project_audit_events(project_id=7, created_after="2023-01-01T00:00:00Z")
     """
-    args_schema: Type[BaseModel] = ListProjectAuditEventsInput  # type: ignore
+    args_schema: Type[BaseModel] = ListProjectAuditEventsInput
 
     async def _execute(self, **kwargs: Any) -> str:
         url = kwargs.get("url")

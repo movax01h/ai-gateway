@@ -137,7 +137,7 @@ For example:
 - Given the URL https://gitlab.com/namespace/project and the parent epic id equal 42, the tool call would be:
     create_issue(url="https://gitlab.com/namespace/project", epic_id: 42)
 """
-    args_schema: Type[BaseModel] = CreateIssueInput  # type: ignore
+    args_schema: Type[BaseModel] = CreateIssueInput
 
     async def _execute(self, title: str, **kwargs: Any) -> str:
         url = kwargs.pop("url", None)
@@ -268,7 +268,7 @@ class ListIssues(IssueBaseTool):
     - Given the URL https://gitlab.com/namespace/project, the tool call would be:
         list_issues(url="https://gitlab.com/namespace/project")
     """
-    args_schema: Type[BaseModel] = ListIssuesInput  # type: ignore
+    args_schema: Type[BaseModel] = ListIssuesInput
 
     async def _execute(self, **kwargs: Any) -> str:
         url = kwargs.pop("url", None)
@@ -319,7 +319,7 @@ class GetIssue(IssueBaseTool):
     - Given the URL https://gitlab.com/namespace/project/-/issues/103, the tool call would be:
         get_issue(url=https://gitlab.com/namespace/project/-/issues/103)
     """
-    args_schema: Type[BaseModel] = IssueResourceInput  # type: ignore
+    args_schema: Type[BaseModel] = IssueResourceInput
 
     async def _execute(self, **kwargs: Any) -> str:
         url = kwargs.get("url")
@@ -405,7 +405,7 @@ class UpdateIssue(IssueBaseTool):
     - Given the URL https://gitlab.com/namespace/project/-/issues/103 and title "Updated title", the tool call would be:
         update_issue(url="https://gitlab.com/namespace/project/-/issues/103", title="Updated title")
     """
-    args_schema: Type[BaseModel] = UpdateIssueInput  # type: ignore
+    args_schema: Type[BaseModel] = UpdateIssueInput
 
     async def _execute(self, **kwargs: Any) -> str:
         url = kwargs.pop("url", None)
@@ -466,7 +466,7 @@ For example:
 
 The body parameter is always required.
 """
-    args_schema: Type[BaseModel] = CreateIssueNoteInput  # type: ignore
+    args_schema: Type[BaseModel] = CreateIssueNoteInput
 
     async def _execute(self, body: str, **kwargs: Any) -> str:
         url = kwargs.pop("url", None)
@@ -535,7 +535,7 @@ class ListIssueNotes(IssueBaseTool):
     - Given the URL https://gitlab.com/namespace/project/-/issues/103, the tool call would be:
         list_issue_notes(url="https://gitlab.com/namespace/project/-/issues/103")
     """
-    args_schema: Type[BaseModel] = ListIssueNotesInput  # type: ignore
+    args_schema: Type[BaseModel] = ListIssueNotesInput
 
     async def _execute(self, **kwargs: Any) -> str:
         url = kwargs.pop("url", None)
@@ -595,7 +595,7 @@ class GetIssueNote(IssueBaseTool):
 
     The note_id parameter is always required.
     """
-    args_schema: Type[BaseModel] = GetIssueNoteInput  # type: ignore
+    args_schema: Type[BaseModel] = GetIssueNoteInput
 
     async def _execute(self, note_id: int, **kwargs: Any) -> str:
         url = kwargs.pop("url", None)

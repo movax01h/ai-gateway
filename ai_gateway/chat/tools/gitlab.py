@@ -152,7 +152,6 @@ class EpicReader(BaseRemoteTool):
 
     description: str = dedent(
         # editorconfig-checker-disable
-        # pylint: disable=line-too-long
         """\
         This tool retrieves the content of a specific epic or work item.
         ONLY if the user question fulfills the strict usage conditions below.
@@ -232,7 +231,6 @@ class BuildReader(BaseRemoteTool):
 
     description: str = dedent(
         # editorconfig-checker-disable
-        # pylint: disable=line-too-long
         """\
         This tool retrieves the content of a specific build, also known as a job
         ONLY if the user question fulfills the strict usage conditions below.
@@ -272,7 +270,6 @@ class MergeRequestReader(BaseRemoteTool):
 
     description: str = dedent(
         # editorconfig-checker-disable
-        # pylint: disable=line-too-long
         """\
         This tool retrieves the content of a specific merge request
         ONLY if the user question fulfills the strict usage conditions below.
@@ -294,7 +291,6 @@ class MergeRequestReader(BaseRemoteTool):
     )
 
     example: str = dedent(
-        # pylint: disable=line-too-long
         """\
         Question: Please identify the author of #123 merge request
         Thought: You have access to the same resources as user who asks a question.

@@ -70,14 +70,12 @@ class ChatAnthropic(_LChatAnthropic):
         if self.default_request_timeout is None or self.default_request_timeout > 0:
             client_options["timeout"] = self.default_request_timeout
 
-        # pylint: disable=attribute-defined-outside-init
         async_client: AsyncAnthropic = self.async_client
         self._async_client = async_client.with_options(**client_options)
 
         # hack: we don't use sync methods in the AIGW,
         # so to avoid unnecessary initialization, set None for the sync client
         self._client = None  # type: ignore[assignment]
-        # pylint: enable=attribute-defined-outside-init
 
         return self
 

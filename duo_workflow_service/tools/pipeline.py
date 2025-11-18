@@ -50,7 +50,7 @@ class GetPipelineErrors(DuoBaseTool):
     - Given a pipeline URL https://gitlab.com/namespace/project/-/pipelines/33, the tool call would be:
         get_pipeline_errors(url="https://gitlab.com/namespace/project/-/pipelines/33")
     """
-    args_schema: Type[BaseModel] = GetPipelineErrorsInput  # type: ignore
+    args_schema: Type[BaseModel] = GetPipelineErrorsInput
 
     unit_primitive: GitLabUnitPrimitive = GitLabUnitPrimitive.ASK_MERGE_REQUEST
 

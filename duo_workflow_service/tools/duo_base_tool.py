@@ -43,7 +43,6 @@ def format_tool_display_message(
         schema = getattr(tool, "args_schema", None)
 
         if isinstance(schema, type) and issubclass(schema, BaseModel):
-            # type: ignore[arg-type]
             parsed = schema(**args)
             return tool.format_display_message(parsed, tool_response)
 

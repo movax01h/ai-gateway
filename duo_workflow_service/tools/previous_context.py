@@ -30,7 +30,7 @@ class GetSessionContext(DuoBaseTool):
     Returns:
         A JSON string containing context data from a previous session or an error message if the context could not be retrieved.
     """
-    args_schema: Type[BaseModel] = GetSessionContextInput  # type: ignore
+    args_schema: Type[BaseModel] = GetSessionContextInput
 
     async def _execute(self, previous_session_id: int, **_kwargs: Any) -> str:
         try:

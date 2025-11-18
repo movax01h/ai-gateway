@@ -46,7 +46,7 @@ class TestBaseUILogEvents:
 
             class _InvalidEvents(BaseUILogEvents):
                 # Missing 'on_' prefix
-                START = "start"  # pylint: disable=invalid-name
+                START = "start"
 
     def test_init_subclass_invalid_key(self):
         # Test that an invalid key raises ValueError

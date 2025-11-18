@@ -123,7 +123,7 @@ class TestSearch:
 
         gitlab_client_mock.aget.side_effect = mock_aget
 
-        tool = tool_class(metadata=metadata)  # type: ignore
+        tool = tool_class(metadata=metadata)
 
         base_params = {
             "id": "1",
@@ -181,7 +181,7 @@ class TestSearch:
 
         gitlab_client_mock.aget.side_effect = mock_aget
 
-        tool = tool_class(metadata=metadata)  # type: ignore
+        tool = tool_class(metadata=metadata)
 
         base_params = {
             "id": "1",

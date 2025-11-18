@@ -554,7 +554,7 @@ def model_fixture(
     if isinstance(model_response, str):
         responses = [model_response.removeprefix("Thought: ")]
     else:
-        responses = model_response  # type: ignore[assignment]
+        responses = model_response
 
     return FakeModel(
         model_engine=model_engine,

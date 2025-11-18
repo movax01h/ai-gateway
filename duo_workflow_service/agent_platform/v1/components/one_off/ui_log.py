@@ -110,7 +110,6 @@ class UILogWriterOneOffTools(BaseUILogWriter):
         try:
             schema = getattr(tool, "args_schema", None)
             if isinstance(schema, type) and issubclass(schema, BaseModel):
-                # type: ignore[arg-type]
                 parsed = schema(**tool_call_args)
                 return tool.format_display_message(parsed, tool_response)
         except Exception:

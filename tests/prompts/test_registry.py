@@ -389,7 +389,6 @@ def model_metadata_fixture():
 @pytest.fixture(name="model_factories")
 def model_factories_fixture():
     return {
-        # type: ignore[call-arg]
         ModelClassProvider.ANTHROPIC: lambda model, **kwargs: ChatAnthropic(
             model=model, **kwargs
         ),

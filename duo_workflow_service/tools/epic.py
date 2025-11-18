@@ -452,7 +452,7 @@ For example:
 - Given the URL https://gitlab.com/groups/namespace/group/-/epics/42 and title 'Updated Epic', the tool call would be:
     update_epic(url="https://gitlab.com/groups/namespace/group/-/epics/42", title='Updated Epic')
 """
-    args_schema: Type[BaseModel] = UpdateEpicInput  # type: ignore
+    args_schema: Type[BaseModel] = UpdateEpicInput
 
     async def _execute(self, **kwargs: Any) -> str:
         url = kwargs.pop("url", None)

@@ -63,7 +63,7 @@ class UpdateVulnerabilitySeverity(DuoBaseTool):
             comment="These are false positives based on code analysis"
         )
     """
-    args_schema: Type[BaseModel] = UpdateVulnerabilitySeverityInput  # type: ignore
+    args_schema: Type[BaseModel] = UpdateVulnerabilitySeverityInput
 
     def ensure_list(self, value):
         if isinstance(value, list):

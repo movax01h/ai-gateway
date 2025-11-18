@@ -73,17 +73,15 @@ path_unit_primitive_map = {ci.name: ci.unit_primitive for ci in CHAT_INVOKABLES}
 @authorize_with_unit_primitive("chat_invokable", chat_invokables=CHAT_INVOKABLES)
 @track_metadata("chat_invokable", mapping=path_unit_primitive_map)
 async def chat(
-    request: Request,  # pylint: disable=unused-argument
+    _request: Request,
     chat_request: ChatRequest,
-    chat_invokable: str,  # pylint: disable=unused-argument
-    current_user: Annotated[  # pylint: disable=unused-argument
-        StarletteUser, Depends(get_current_user)
-    ],
+    chat_invokable: str,
+    _current_user: Annotated[StarletteUser, Depends(get_current_user)],
     anthropic_claude_factory: Annotated[
         FactoryAggregate, Depends(get_chat_anthropic_claude_factory_provider)
     ],
     litellm_factory: Annotated[Factory, Depends(get_chat_litellm_factory_provider)],
-    internal_event_client: Annotated[  # pylint: disable=unused-argument
+    internal_event_client: Annotated[
         InternalEventsClient, Depends(get_internal_event_client)
     ],
 ):

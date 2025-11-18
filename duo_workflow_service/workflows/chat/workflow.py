@@ -143,7 +143,7 @@ class Workflow(AbstractWorkflow):
             user=user,
             additional_context=additional_context,
             approval=approval,
-            prompt_registry=prompt_registry,  # type: ignore[arg-type]
+            prompt_registry=prompt_registry,
             internal_event_client=internal_event_client,
             **kwargs,
         )

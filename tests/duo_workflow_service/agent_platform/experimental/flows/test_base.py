@@ -302,7 +302,7 @@ class TestFlow:  # pylint: disable=too-many-public-methods
         mock_state_graph,
         mock_checkpointer,
         mock_tools_registry,  # pylint: disable=unused-argument
-        approval_decision,  # pylint: disable=unused-argument
+        approval_decision,
         expected_event_type,
         expected_message,
     ):
@@ -357,7 +357,7 @@ class TestFlow:  # pylint: disable=too-many-public-methods
         mock_flow_metadata,
         mock_invocation_metadata,
         sample_flow_config,
-        mock_state_graph,  # pylint: disable=unused-argument
+        mock_state_graph,
         mock_checkpointer,  # pylint: disable=unused-argument
         mock_tools_registry,  # pylint: disable=unused-argument
     ):
@@ -697,7 +697,7 @@ class TestFlow:  # pylint: disable=too-many-public-methods
         want_toolset,
         mock_flow_metadata,
         mock_invocation_metadata,
-        mock_tools_registry,  # pylint: disable=unused-argument
+        mock_tools_registry,
         mock_checkpointer,  # pylint: disable=unused-argument
         mock_state_graph,  # pylint: disable=unused-argument
     ):

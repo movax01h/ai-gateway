@@ -19,7 +19,7 @@ async def test_get_project():
         "gitlab_client": gitlab_client_mock,
     }
 
-    tool = GetProject(metadata=metadata)  # type: ignore
+    tool = GetProject(metadata=metadata)
 
     response = await tool.arun({"project_id": "1"})
 

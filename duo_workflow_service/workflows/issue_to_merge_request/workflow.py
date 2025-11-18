@@ -265,7 +265,7 @@ class Workflow(AbstractWorkflow):
         graph.add_node(
             "git_actions",
             RunToolNode[WorkflowState](
-                tool=tools_registry.get("run_git_command"),  # type: ignore
+                tool=tools_registry.get("run_git_command"),
                 input_parser=lambda _: [
                     {
                         "repository_url": self._project["http_url_to_repo"],  # type: ignore[index]

@@ -70,7 +70,7 @@ class MonitoringInterceptor(ServerInterceptor):
         # Wrap an RPC handler with the behavior that captures metrics.
         # The handler is of RpcMethodHandler type:
         #
-        # https://github.com/grpc/grpc/blob/46c658ac018ba750e3e42c00a5fa1864780cc0f5/src/python/grpcio/grpc/__init__.py#L1325  # pylint: disable=line-too-long
+        # https://github.com/grpc/grpc/blob/46c658ac018ba750e3e42c00a5fa1864780cc0f5/src/python/grpcio/grpc/__init__.py#L1325
         #
         # The handler contains implementations which are called based on the request/response types.
         # We wrap the implementations based on whether response is streamed or not with the behavior that captures the
@@ -97,7 +97,7 @@ class MonitoringInterceptor(ServerInterceptor):
         # As a result, an grpc.RpcMethodHandler object is build with the correct arguments set.
         # For example, for stream_stream case:
         #
-        # https://github.com/grpc/grpc/blob/b64756acca2eb942c97a416850ce5ab95a544d3e/src/python/grpcio/grpc/__init__.py#L1653  # pylint: disable=line-too-long
+        # https://github.com/grpc/grpc/blob/b64756acca2eb942c97a416850ce5ab95a544d3e/src/python/grpcio/grpc/__init__.py#L1653
         return handler_factory(
             handler_func,
             request_deserializer=handler.request_deserializer,
@@ -236,10 +236,9 @@ class MonitoringInterceptor(ServerInterceptor):
                 **fields,
             )
 
-    # pylint: disable=too-many-positional-arguments
     def _handle_error(
         self,
-        e: BaseException,  # pylint: disable=unused-argument
+        _e: BaseException,
         grpc_type: GRPCMethodType,
         grpc_service_name: str,
         grpc_method_name: str,
@@ -252,8 +251,6 @@ class MonitoringInterceptor(ServerInterceptor):
         self._increase_grpc_server_handled_total_counter(
             grpc_type, grpc_service_name, grpc_method_name, status_code
         )
-
-    # pylint: enable=too-many-positional-arguments
 
     def _increase_grpc_server_handled_total_counter(
         self,

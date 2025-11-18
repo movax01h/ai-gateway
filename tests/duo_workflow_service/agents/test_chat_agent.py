@@ -1,4 +1,3 @@
-# pylint: disable=too-many-lines
 from datetime import datetime, timezone
 from unittest.mock import ANY, AsyncMock, Mock, patch
 
@@ -67,7 +66,7 @@ def chat_agent_fixture(system_template_override: str):
 @pytest.fixture(autouse=True)
 def prepare_container(
     mock_duo_workflow_service_container,
-):  # pylint: disable=unused-argument
+):
     mock_duo_workflow_service_container.wire(
         modules=["tests.duo_workflow_service.agents.test_chat_agent"]
     )

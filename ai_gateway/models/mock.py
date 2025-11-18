@@ -128,9 +128,8 @@ class FakeModel(SimpleChatModel):
 
     def _call(
         self,
-        messages: List[BaseMessage],  # pylint: disable=unused-argument
-        stop: Optional[List[str]] = None,  # pylint: disable=unused-argument
-        # pylint: disable=unused-argument
+        messages: List[BaseMessage],
+        stop: Optional[List[str]] = None,
         run_manager: Optional[CallbackManagerForLLMRun] = None,
         **_kwargs: Any,
     ) -> str:

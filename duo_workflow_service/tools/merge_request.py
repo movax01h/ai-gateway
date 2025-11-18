@@ -156,7 +156,7 @@ class GetMergeRequest(DuoBaseTool):
     - Given the URL https://gitlab.com/namespace/project/-/merge_requests/103, the tool call would be:
         get_merge_request(url="https://gitlab.com/namespace/project/-/merge_requests/103")
     """
-    args_schema: Type[BaseModel] = MergeRequestResourceInput  # type: ignore
+    args_schema: Type[BaseModel] = MergeRequestResourceInput
 
     unit_primitive: GitLabUnitPrimitive = GitLabUnitPrimitive.ASK_MERGE_REQUEST
 
@@ -212,7 +212,7 @@ class ListMergeRequestDiffs(DuoBaseTool):
     - Given the URL https://gitlab.com/namespace/project/-/merge_requests/103, the tool call would be:
         list_merge_request_diffs(url="https://gitlab.com/namespace/project/-/merge_requests/103")
     """
-    args_schema: Type[BaseModel] = MergeRequestResourceInput  # type: ignore
+    args_schema: Type[BaseModel] = MergeRequestResourceInput
 
     unit_primitive: GitLabUnitPrimitive = GitLabUnitPrimitive.ASK_MERGE_REQUEST
 
@@ -301,7 +301,7 @@ For example:
 
 The body parameter is always required.
 """
-    args_schema: Type[BaseModel] = CreateMergeRequestNoteInput  # type: ignore
+    args_schema: Type[BaseModel] = CreateMergeRequestNoteInput
 
     unit_primitive: GitLabUnitPrimitive = GitLabUnitPrimitive.ASK_MERGE_REQUEST
 
@@ -374,7 +374,7 @@ class ListAllMergeRequestNotes(DuoBaseTool):
     - Given the URL https://gitlab.com/namespace/project/-/merge_requests/103, the tool call would be:
         list_all_merge_request_notes(url="https://gitlab.com/namespace/project/-/merge_requests/103")
     """
-    args_schema: Type[BaseModel] = MergeRequestResourceInput  # type: ignore
+    args_schema: Type[BaseModel] = MergeRequestResourceInput
 
     unit_primitive: GitLabUnitPrimitive = GitLabUnitPrimitive.ASK_MERGE_REQUEST
 

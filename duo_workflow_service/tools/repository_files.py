@@ -99,7 +99,7 @@ class GetRepositoryFile(RepositoryFileBaseTool):
     """
     # editorconfig-checker-enable
 
-    args_schema: Type[BaseModel] = RepositoryFileResourceInput  # type: ignore
+    args_schema: Type[BaseModel] = RepositoryFileResourceInput
 
     async def _execute(self, **kwargs) -> str:
         url = kwargs.get("url")
@@ -211,7 +211,7 @@ class ListRepositoryTree(DuoBaseTool):
     - To recursively list all files in a project:
         list_repository_tree(project_id=13, recursive=True)
     """
-    args_schema: Type[BaseModel] = RepositoryTreeResourceInput  # type: ignore
+    args_schema: Type[BaseModel] = RepositoryTreeResourceInput
 
     async def _execute(self, **kwargs) -> str:
         url = kwargs.get("url")

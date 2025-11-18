@@ -156,10 +156,7 @@ class DuoWorkflowService(contract_pb2_grpc.DuoWorkflowServicer):
     # - Not delaying the server response for too long when handling errors
     TASK_CANCELLATION_TIMEOUT = 2.0
 
-    # pylint: disable=invalid-overridden-method
-    # pylint: disable=too-many-statements
-    # pylint: disable=too-many-branches
-    # pylint: disable=too-many-locals
+    # pylint: disable=invalid-overridden-method,too-many-statements,too-many-branches
     @inject
     async def ExecuteWorkflow(
         self,

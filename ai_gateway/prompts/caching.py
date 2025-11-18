@@ -57,7 +57,7 @@ class CacheControlInjectionPointsConverter(Runnable[PromptValue, PromptValue]):
     def invoke(
         self,
         input: PromptValue,
-        config: Optional[RunnableConfig] = None,  # pylint: disable=unused-argument
+        config: Optional[RunnableConfig] = None,
         cache_control_injection_points: list[dict] | None = None,
         model_class_provider: str | None = None,
         **_kwargs: Any,

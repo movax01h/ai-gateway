@@ -52,7 +52,7 @@ class GetLogsFromJob(DuoBaseTool):
     """
     # editorconfig-checker-enable
 
-    args_schema: Type[BaseModel] = GetLogsFromJobInput  # type: ignore
+    args_schema: Type[BaseModel] = GetLogsFromJobInput
     truncation_config: TruncationConfig = Field(
         default_factory=lambda: TruncationConfig(
             truncated_size=150 * 1024,  # 150 KiB

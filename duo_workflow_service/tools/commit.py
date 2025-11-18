@@ -234,7 +234,7 @@ class ListCommits(CommitBaseTool):
         list_commits(url="https://gitlab.com/namespace/project")
     """
     # editorconfig-checker-enable
-    args_schema: Type[BaseModel] = ListCommitsInput  # type: ignore
+    args_schema: Type[BaseModel] = ListCommitsInput
 
     async def _execute(self, **kwargs: Any) -> str:
         url = kwargs.pop("url", None)
@@ -293,7 +293,7 @@ For example:
 - Given the URL https://gitlab.com/namespace/project/-/commit/6104942438c14ec7bd21c6cd5bd995272b3faff6, the tool call would be:
     get_commit(url="https://gitlab.com/namespace/project/-/commit/6104942438c14ec7bd21c6cd5bd995272b3faff6")
 """
-    args_schema: Type[BaseModel] = GetCommitInput  # type: ignore
+    args_schema: Type[BaseModel] = GetCommitInput
 
     async def _execute(self, **kwargs: Any) -> str:
         url = kwargs.get("url")
@@ -348,7 +348,7 @@ class GetCommitDiff(CommitBaseTool):
     - Given the URL https://gitlab.com/namespace/project/-/commit/6104942438c14ec7bd21c6cd5bd995272b3faff6, the tool call would be:
         get_commit_diff(url="https://gitlab.com/namespace/project/-/commit/6104942438c14ec7bd21c6cd5bd995272b3faff6")
     """
-    args_schema: Type[BaseModel] = CommitResourceInput  # type: ignore
+    args_schema: Type[BaseModel] = CommitResourceInput
 
     async def _execute(self, **kwargs: Any) -> str:
         url = kwargs.get("url")
@@ -420,7 +420,7 @@ class GetCommitComments(CommitBaseTool):
     - Given the URL https://gitlab.com/namespace/project/-/commit/6104942438c14ec7bd21c6cd5bd995272b3faff6, the tool call would be:
         get_commit_comments(url="https://gitlab.com/namespace/project/-/commit/6104942438c14ec7bd21c6cd5bd995272b3faff6")
     """
-    args_schema: Type[BaseModel] = CommitResourceInput  # type: ignore
+    args_schema: Type[BaseModel] = CommitResourceInput
 
     async def _execute(self, **kwargs: Any) -> str:
         url = kwargs.get("url")
@@ -579,7 +579,7 @@ class CreateCommit(CommitBaseTool):
     """
     # editorconfig-checker-enable
 
-    args_schema: Type[BaseModel] = CreateCommitInput  # type: ignore
+    args_schema: Type[BaseModel] = CreateCommitInput
 
     async def _execute(
         self,

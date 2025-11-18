@@ -220,6 +220,7 @@ disable = [
 enable = [
   "unsafe-dependency-resolution",
   "direct-environment-variable-reference",
+  "useless-suppression",
 ]
 
 [tool.pylint.reports]
@@ -229,6 +230,7 @@ score = "no"
 python_version = "3.12"
 ignore_missing_imports = true
 check_untyped_defs = true
+warn_unused_ignores = true
 
 [[tool.mypy.overrides]]
 module = "tests.*"

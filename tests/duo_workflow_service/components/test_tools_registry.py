@@ -607,7 +607,7 @@ async def test_registry_configuration_with_preapproved_tools(
         project=project_mock,
     )
 
-    always_enabled_tools = set([tool_cls.tool_title for tool_cls in NO_OP_TOOLS])  # type: ignore
+    always_enabled_tools = set([tool_cls.tool_title for tool_cls in NO_OP_TOOLS])
     always_enabled_tools.update([tool_cls().name for tool_cls in _DEFAULT_TOOLS])
 
     read_write_tools = {

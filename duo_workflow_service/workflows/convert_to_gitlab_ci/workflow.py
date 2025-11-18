@@ -273,7 +273,7 @@ class Workflow(AbstractWorkflow):
         graph.add_node(
             "load_files",
             RunToolNode[WorkflowState](
-                tool=tools_registry.get("read_file"),  # type: ignore
+                tool=tools_registry.get("read_file"),
                 input_parser=lambda _: [{"file_path": ci_config_file_path}],
                 output_parser=self._load_file_contents,  # type: ignore
                 flow_type=self._workflow_type,
@@ -294,7 +294,7 @@ class Workflow(AbstractWorkflow):
         graph.add_node(
             "git_actions",
             RunToolNode[WorkflowState](
-                tool=tools_registry.get("run_git_command"),  # type: ignore
+                tool=tools_registry.get("run_git_command"),
                 input_parser=lambda _: [
                     {
                         "repository_url": (self._project["http_url_to_repo"]),  # type: ignore[index]

@@ -11,7 +11,7 @@ def test_messages_with_string_content():
         HumanMessage(content="This is another single message"),
     ]
 
-    result = ApproximateTokenCounter("some_name").count_tokens(messages)  # type: ignore
+    result = ApproximateTokenCounter("some_name").count_tokens(messages)
 
     assert result == 23
 
@@ -22,7 +22,7 @@ def test_messages_with_string_content_and_tools():
         HumanMessage(content="This is another single message"),
     ]
 
-    result = ApproximateTokenCounter("context_builder").count_tokens(messages)  # type: ignore
+    result = ApproximateTokenCounter("context_builder").count_tokens(messages)
 
     # context_builder has 4735 tool tokens and these messages have 23
     assert result == 4758
@@ -34,7 +34,7 @@ def test_messages_for_chat_agent():
         HumanMessage(content="This is another single message"),
     ]
 
-    result = ApproximateTokenCounter("Chat Agent").count_tokens(messages)  # type: ignore
+    result = ApproximateTokenCounter("Chat Agent").count_tokens(messages)
 
     # Chat Agent has 2500 tool tokens and these messages have 23
     assert result == 2523
@@ -57,6 +57,6 @@ def test_messages_with_mixed_content():
         ),
     ]
 
-    result = ApproximateTokenCounter("some_name").count_tokens(messages)  # type: ignore
+    result = ApproximateTokenCounter("some_name").count_tokens(messages)
 
     assert result == 49

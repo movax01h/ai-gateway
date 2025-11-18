@@ -45,7 +45,7 @@ class Grep(DuoBaseTool):
     - Finding files by name patterns (use find_files instead)
     - Listing directory contents (use list_dir instead)
     """
-    args_schema: Type[BaseModel] = GrepInput  # type: ignore
+    args_schema: Type[BaseModel] = GrepInput
 
     async def _execute(
         self,
