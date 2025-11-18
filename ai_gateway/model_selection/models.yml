@@ -3,6 +3,7 @@ models:
   - name: "Codestral 25.01 - Fireworks"
     provider: "Fireworks"
     gitlab_identifier: "codestral_2501_fireworks"
+    description: "Fast code generation and assistance."
     params:
       model: "codestral-2501"
       temperature: 0.7
@@ -11,6 +12,7 @@ models:
   - name: "Codestral 25.01 - Vertex"
     provider: "Vertex"
     gitlab_identifier: "codestral_2501_vertex"
+    description: "Fast code generation and assistance."
     params:
       model: "codestral-2501"
       custom_llm_provider: "vertex_ai"
@@ -20,6 +22,7 @@ models:
   - name: "Gemini 1.5 Flash - Vertex"
     provider: "Vertex"
     gitlab_identifier: "gemini_1_5_flash_vertex"
+    description: "Multimodal for high-volume tasks."
     params:
       model: "vertex_ai/gemini-1.5-flash-002"
       temperature: 0.0
@@ -30,6 +33,7 @@ models:
   - name: "Gemini 2.0 Flash Lite - Vertex"
     provider: "Vertex"
     gitlab_identifier: "gemini_2_0_flash_lite_vertex"
+    description: "Optimized for high-volume, latency-sensitive tasks."
     params:
       model: "vertex_ai/gemini-2.0-flash-lite"
       temperature: 0.0
@@ -40,6 +44,7 @@ models:
   - name: "Gemini 2.5 Flash - Vertex"
     provider: "Vertex"
     gitlab_identifier: "gemini_2_5_flash_vertex"
+    description: "Multimodal reasoning with extended context."
     params:
       model: "gemini-2.5-flash"
       custom_llm_provider: "vertex_ai"
@@ -49,6 +54,7 @@ models:
   - name: "Claude Opus 4.0 - Anthropic"
     provider: "Anthropic"
     gitlab_identifier: "claude_opus_4_20250514"
+    description: "Earlier generation model for coding, reasoning, and agentic workflows."
     params:
       model: "claude-opus-4-20250514"
       temperature: 0.0
@@ -57,6 +63,7 @@ models:
   - name: "Claude Opus 4.1 - Anthropic"
     provider: "Anthropic"
     gitlab_identifier: "claude_opus_4_1_20250805"
+    description: "Superseded by Sonnet 4.5 for coding, reasoning, and agentic workflows."
     params:
       model: "claude-opus-4-1-20250805"
       temperature: 0.0
@@ -67,6 +74,7 @@ models:
     gitlab_identifier: "claude_sonnet_4_5_20250929"
     family:
       - claude_4_5
+    description: "Anthropic's flagship model for real-world coding, reasoning, and agentic workflows."
     params:
       model: "claude-sonnet-4-5-20250929"
       temperature: 0.0
@@ -75,6 +83,7 @@ models:
   - name: "Claude Sonnet 4.5 - Vertex"
     provider: "Vertex"
     gitlab_identifier: "claude_sonnet_4_5_20250929_vertex"
+    description: "Anthropic's flagship model for real-world coding, reasoning, and agentic workflows."
     family:
       - claude_vertex_4_5
       - vertex
@@ -90,6 +99,7 @@ models:
     gitlab_identifier: "claude_haiku_4_5_20251001"
     family:
       - claude_4_5
+    description: "Fast, cost-effective responses."
     params:
       model: "claude-haiku-4-5-20251001"
       temperature: 0.0
@@ -98,6 +108,7 @@ models:
   - name: "Claude Haiku 4.5 20251001 - Vertex"
     provider: "Vertex"
     gitlab_identifier: "claude_haiku_4_5_20251001_vertex"
+    description: "Fast, cost-effective responses."
     family:
       - claude_vertex_4_5
       - vertex
@@ -111,6 +122,7 @@ models:
   - name: "Claude Sonnet 4.0 - Anthropic"
     provider: "Anthropic"
     gitlab_identifier: "claude_sonnet_4_20250514"
+    description: "Earlier generation model for coding, reasoning, and agentic workflows."
     params:
       model: "claude-sonnet-4-20250514"
       temperature: 0.0
@@ -119,6 +131,7 @@ models:
   - name: "Claude Sonnet 4.0 - Vertex"
     provider: "Vertex"
     gitlab_identifier: "claude_sonnet_4_20250514_vertex"
+    description: "Earlier generation model for coding, reasoning, and agentic workflows."
     family:
       - vertex
     params:
@@ -131,6 +144,7 @@ models:
   - name: "Claude Sonnet 3.7 - Anthropic"
     provider: "Anthropic"
     gitlab_identifier: "claude_sonnet_3_7_20250219"
+    description: "Earlier generation model for coding, reasoning, and agentic workflows."
     params:
       model: "claude-3-7-sonnet-20250219"
       temperature: 0.0
@@ -142,6 +156,7 @@ models:
   - name: "Claude Sonnet 3.7 - Vertex"
     provider: "Vertex"
     gitlab_identifier: "claude_sonnet_3_7_20250219_vertex"
+    description: "Earlier generation model for coding, reasoning, and agentic workflows."
     family:
       - vertex
     params:
@@ -153,6 +168,7 @@ models:
   - name: "Claude 3.5 Haiku - Anthropic"
     provider: "Anthropic"
     gitlab_identifier: "claude_3_5_haiku_20241022"
+    description: "Earlier generation model for high volume tasks."
     params:
       model: "claude-3-5-haiku-20241022"
       temperature: 0.0
@@ -191,6 +207,7 @@ models:
   - name: "Claude 3 Haiku - Anthropic"
     provider: "Anthropic"
     gitlab_identifier: "claude_3_haiku_20240307"
+    description: "Earlier generation model for high-volume tasks."
     params:
       model: "claude-3-haiku-20240307"
       temperature: 0.0
@@ -199,6 +216,7 @@ models:
   - name: "Claude Sonnet 3 - Anthropic" # used by troubleshoot only
     provider: "Anthropic"
     gitlab_identifier: "claude_3_sonnet_20240229"
+    description: "Earlier generation model known for its computer use capability."
     params:
       model: "claude-3-sonnet-20240229"
       temperature: 0.1
@@ -207,6 +225,7 @@ models:
   - name: "GPT-5.1 - OpenAI"
     provider: "OpenAI"
     gitlab_identifier: "gpt_5"
+    description: "OpenAI's flagship model for coding, reasoning, writing, and agentic tasks."
     family:
       - gpt_5
     params:
@@ -218,6 +237,7 @@ models:
   - name: "GPT-5-Mini - OpenAI"
     provider: "OpenAI"
     gitlab_identifier: "gpt_5_mini"
+    description: "Model for high-volume coding, reasoning, and routine workflows."
     family:
       - gpt_5
     params:
@@ -228,6 +248,7 @@ models:
   - name: "GPT-5-Codex - OpenAI"
     provider: "OpenAI"
     gitlab_identifier: "gpt_5_codex"
+    description: "Optimized for agentic coding, refactoring, code review, and extended tasks."
     family:
       - gpt_5
     params:

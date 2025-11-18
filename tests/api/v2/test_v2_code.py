@@ -2,7 +2,7 @@
 
 import time
 from typing import Any, Dict, List, Union
-from unittest.mock import ANY, AsyncMock, Mock, patch
+from unittest.mock import ANY, Mock, patch
 
 import pytest
 from dependency_injector import containers
@@ -1351,6 +1351,7 @@ class TestGitLabModelProvider:
         test_model = LLMDefinition(
             name="Test Model",
             gitlab_identifier=gitlab_identifier,
+            description="A model description",
             family=["test-family"],
             params={"temperature": 0.0, "max_tokens": 4096},
         )
@@ -1439,6 +1440,7 @@ class TestGitLabModelProvider:
         test_model = LLMDefinition(
             name="Test Model",
             gitlab_identifier="test-model-id",
+            description="A model description",
             params={"temperature": 0.0, "max_tokens": 4096},
         )
 
@@ -1506,6 +1508,7 @@ class TestGitLabModelProvider:
         test_model = LLMDefinition(
             name="Test Model",
             gitlab_identifier="test-model-id",
+            description="A model description",
             family=["test-family"],
             params={"temperature": 0.0, "max_tokens": 4096},
         )
