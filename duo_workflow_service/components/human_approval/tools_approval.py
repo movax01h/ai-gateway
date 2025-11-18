@@ -1,3 +1,4 @@
+from datetime import datetime, timezone
 from typing import Literal
 
 from langchain_core.messages import AIMessage, HumanMessage, ToolCall, ToolMessage
@@ -5,13 +6,21 @@ from langchain_core.messages import AIMessage, HumanMessage, ToolCall, ToolMessa
 from duo_workflow_service.components.human_approval.component import (
     HumanApprovalComponent,
 )
-from duo_workflow_service.entities.state import WorkflowState, WorkflowStatusEnum
+from duo_workflow_service.entities.state import (
+    MessageTypeEnum,
+    ToolInfo,
+    ToolStatus,
+    UiChatLog,
+    WorkflowState,
+    WorkflowStatusEnum,
+)
 from duo_workflow_service.tools import (
     MalformedToolCallError,
     Toolset,
     format_tool_display_message,
 )
 from lib import Result, result
+from lib.feature_flags import FeatureFlag, is_feature_enabled
 
 
 class ToolsApprovalComponent(HumanApprovalComponent):
@@ -79,6 +88,20 @@ class ToolsApprovalComponent(HumanApprovalComponent):
                     ]
                 },
             }
+
+        # Check if inline tool approval UI is enabled via feature flag
+        if is_feature_enabled(FeatureFlag.USE_DUO_CHAT_UI_FOR_FLOW):
+            approval_required, approval_messages = self._get_approvals(last_message)
+
+            if not approval_required:
+                raise RuntimeError("No valid tool calls were found to display.")
+
+            return {
+                "status": self._approval_req_workflow_state,
+                "ui_chat_log": approval_messages,
+            }
+
+        # Fall back to old combined message format
         return super()._request_approval(state)
 
     def _filter_valid_tool_calls(
@@ -130,3 +153,47 @@ class ToolsApprovalComponent(HumanApprovalComponent):
             "select Deny to reject requested tool runs,"
             "otherwise provide your feedback via chat UI"
         )
+
+    def _get_approvals(self, message: AIMessage) -> tuple[bool, list[UiChatLog]]:
+        """Build approval request UI messages for tools requiring approval.
+
+        Args:
+            message: The AIMessage containing tool calls
+
+        Returns:
+            Tuple of (approval_required, approval_messages)
+        """
+        approval_required = False
+        approval_messages = []
+
+        for call in message.tool_calls:
+            # Skip pre-approved tools
+            if self._toolset.approved(call["name"]):
+                continue
+
+            try:
+                tool = self._toolset[call["name"]]
+            except KeyError:
+                # Skip NO-OP tools like HandOver that don't require approval
+                continue
+
+            # Get formatted display message for the tool
+            msg = format_tool_display_message(tool, call["args"])
+            if msg is None:
+                continue
+
+            approval_required = True
+            approval_messages.append(
+                UiChatLog(
+                    correlation_id=None,
+                    message_type=MessageTypeEnum.REQUEST,
+                    message_sub_type=None,
+                    content=msg,
+                    timestamp=datetime.now(timezone.utc).isoformat(),
+                    status=ToolStatus.SUCCESS,
+                    tool_info=ToolInfo(name=call["name"], args=call["args"]),
+                    additional_context=None,
+                )
+            )
+
+        return approval_required, approval_messages
