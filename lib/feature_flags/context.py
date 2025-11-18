@@ -13,6 +13,7 @@ class FeatureFlag(StrEnum):
     USAGE_QUOTA_LEFT_CHECK = "usage_quota_left_check"
     COMPRESS_CHECKPOINT = "duo_workflow_compress_checkpoint"
     AI_GATEWAY_ALLOW_CONVERSATION_CACHING = "ai_gateway_allow_conversation_caching"
+    USE_DUO_CHAT_UI_FOR_FLOW = "use_duo_chat_ui_for_flow"
 
 
 def is_feature_enabled(feature_name: FeatureFlag | str) -> bool:
