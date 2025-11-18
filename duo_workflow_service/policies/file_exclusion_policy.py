@@ -4,7 +4,6 @@ from typing import List
 import gitmatch
 
 from duo_workflow_service.gitlab.gitlab_api import Project
-from lib.feature_flags.context import FeatureFlag, is_feature_enabled
 
 CONTEXT_EXCLUSION_MESSAGE = "excluded due to policy"
 
@@ -23,9 +22,6 @@ class FileExclusionPolicy:
 
     def is_allowed(self, filename: str) -> bool:
         """Check if a single file matches any exclusion pattern."""
-        if not is_feature_enabled(FeatureFlag.USE_DUO_CONTEXT_EXCLUSION):
-            return True
-
         if not self._matcher:
             return True
 
@@ -37,9 +33,6 @@ class FileExclusionPolicy:
 
     def filter_allowed(self, filenames: List[str]):
         """Filter a list of filenames, returning only those allowed by the policy."""
-        if not is_feature_enabled(FeatureFlag.USE_DUO_CONTEXT_EXCLUSION):
-            return filenames, []
-
         if not self._matcher:
             return filenames, []
 

@@ -36,16 +36,6 @@ from tests.duo_workflow_service.tools.constants import (
 )
 
 
-@pytest.fixture(autouse=True)
-def mock_feature_flag():
-    """Mock feature flag to return True for USE_DUO_CONTEXT_EXCLUSION."""
-    with patch(
-        "duo_workflow_service.policies.file_exclusion_policy.is_feature_enabled"
-    ) as mock:
-        mock.return_value = True
-        yield mock
-
-
 @pytest.fixture
 def mock_project():
     return Project(

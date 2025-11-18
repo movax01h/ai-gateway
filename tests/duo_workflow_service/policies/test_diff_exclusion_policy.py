@@ -1,29 +1,11 @@
 """Tests for DiffExclusionPolicy class."""
 
 import json
-from unittest.mock import patch
 
 import pytest
 
 from duo_workflow_service.gitlab.gitlab_api import Project
 from duo_workflow_service.policies.diff_exclusion_policy import DiffExclusionPolicy
-from lib.feature_flags.context import FeatureFlag
-
-
-@pytest.fixture(autouse=True)
-def mock_feature_flag():
-    """Mock feature flag to return True for USE_DUO_CONTEXT_EXCLUSION."""
-    with (
-        patch(
-            "duo_workflow_service.policies.diff_exclusion_policy.is_feature_enabled"
-        ) as mock_diff,
-        patch(
-            "duo_workflow_service.policies.file_exclusion_policy.is_feature_enabled"
-        ) as mock_file,
-    ):
-        mock_diff.return_value = True
-        mock_file.return_value = True
-        yield mock_diff
 
 
 class TestDiffExclusionPolicy:
@@ -314,45 +296,6 @@ class TestDiffExclusionPolicy:
 class TestDiffExclusionPolicyFeatureFlag:
     """Test cases for DiffExclusionPolicy feature flag behavior."""
 
-    def test_filter_allowed_with_feature_flag_disabled(self, mock_feature_flag):
-        """Test that filter_allowed returns all diffs when feature flag is disabled."""
-        mock_feature_flag.return_value = False
-
-        project = Project(
-            id=1,
-            name="test-project",
-            description="Test project",
-            http_url_to_repo="http://example.com/repo.git",
-            web_url="http://example.com/repo",
-            languages=[],
-            exclusion_rules=["**/*.log", "/secrets/**"],
-        )
-
-        policy = DiffExclusionPolicy(project)
-
-        allowed_diff = {
-            "old_path": "src/main.py",
-            "new_path": "src/main.py",
-            "diff": "@@ -1,3 +1,3 @@\n-old content\n+new content",
-        }
-
-        excluded_diff = {
-            "old_path": "secrets/api_key.txt",
-            "new_path": "secrets/api_key.txt",
-            "diff": "@@ -1,3 +1,3 @@\n-old key\n+new key",
-        }
-
-        diffs = [allowed_diff, excluded_diff]
-        result, excluded = policy.filter_allowed_diffs(diffs)
-
-        # All diffs should be returned when feature flag is disabled
-        assert len(result) == 2
-        assert len(excluded) == 0
-        assert result == diffs
-
-        # Verify the feature flag was checked
-        mock_feature_flag.assert_called_with(FeatureFlag.USE_DUO_CONTEXT_EXCLUSION)
-
     def test_filter_allowed_excludes_duplicate_files(self):
         """Test that duplicate excluded files are not added to the excluded_files list."""
         project = Project(
@@ -387,43 +330,3 @@ class TestDiffExclusionPolicyFeatureFlag:
         # Should only have unique excluded files
         assert len(excluded_files) == 2
         assert excluded_files == ["app.log", "debug.log"]
-
-    def test_filter_allowed_with_feature_flag_enabled(self, mock_feature_flag):
-        """Test that filter_allowed respects exclusion rules when feature flag is enabled."""
-        mock_feature_flag.return_value = True
-
-        project = Project(
-            id=1,
-            name="test-project",
-            description="Test project",
-            http_url_to_repo="http://example.com/repo.git",
-            web_url="http://example.com/repo",
-            languages=[],
-            exclusion_rules=["**/*.log", "/secrets/**"],
-        )
-
-        policy = DiffExclusionPolicy(project)
-
-        allowed_diff = {
-            "old_path": "src/main.py",
-            "new_path": "src/main.py",
-            "diff": "@@ -1,3 +1,3 @@\n-old content\n+new content",
-        }
-
-        excluded_diff = {
-            "old_path": "secrets/api_key.txt",
-            "new_path": "secrets/api_key.txt",
-            "diff": "@@ -1,3 +1,3 @@\n-old key\n+new key",
-        }
-
-        diffs = [allowed_diff, excluded_diff]
-        filtered_diffs, excluded_files = policy.filter_allowed_diffs(diffs)
-
-        # Only allowed diffs should be returned when feature flag is enabled
-        assert len(filtered_diffs) == 1
-        assert filtered_diffs[0] == allowed_diff
-        assert len(excluded_files) == 1
-        assert excluded_files == ["secrets/api_key.txt"]
-
-        # Verify the feature flag was checked
-        mock_feature_flag.assert_called_with(FeatureFlag.USE_DUO_CONTEXT_EXCLUSION)

@@ -482,16 +482,12 @@ class TestBlobSearchFileExclusion:
 
         tool = BlobSearch(metadata=metadata_with_project)
 
-        with patch(
-            "duo_workflow_service.policies.file_exclusion_policy.is_feature_enabled",
-            return_value=True,
-        ):
-            response = await tool._arun(
-                id="1",
-                search="test search",
-                search_type="projects",
-                ref="main",
-            )
+        response = await tool._arun(
+            id="1",
+            search="test search",
+            search_type="projects",
+            ref="main",
+        )
 
         response_data = json.loads(response)
         search_results = response_data["search_results"]
@@ -506,35 +502,6 @@ class TestBlobSearchFileExclusion:
         assert "secrets/config.secret" not in included_paths
 
     @pytest.mark.asyncio
-    async def test_blob_search_no_exclusions_when_feature_disabled(
-        self,
-        gitlab_client_mock,
-        metadata_with_project,
-        blob_search_results,
-    ):
-        """Test that BlobSearch doesn't filter when feature flag is disabled."""
-        gitlab_client_mock.aget.side_effect = create_mock_aget(blob_search_results)
-
-        tool = BlobSearch(metadata=metadata_with_project)
-
-        with patch(
-            "duo_workflow_service.policies.file_exclusion_policy.is_feature_enabled",
-            return_value=False,
-        ):
-            response = await tool._arun(
-                id="1",
-                search="test search",
-                search_type="projects",
-                ref="main",
-            )
-
-        response_data = json.loads(response)
-        search_results = response_data["search_results"]
-
-        # Should include all files when feature is disabled
-        assert len(search_results) == 4
-
-    @pytest.mark.asyncio
     async def test_blob_search_no_exclusions_when_no_project(
         self,
         gitlab_client_mock,
@@ -546,16 +513,12 @@ class TestBlobSearchFileExclusion:
 
         tool = BlobSearch(metadata=metadata_no_project)
 
-        with patch(
-            "duo_workflow_service.policies.file_exclusion_policy.is_feature_enabled",
-            return_value=True,
-        ):
-            response = await tool._arun(
-                id="1",
-                search="test search",
-                search_type="projects",
-                ref="main",
-            )
+        response = await tool._arun(
+            id="1",
+            search="test search",
+            search_type="projects",
+            ref="main",
+        )
 
         response_data = json.loads(response)
         search_results = response_data["search_results"]
@@ -574,16 +537,12 @@ class TestBlobSearchFileExclusion:
 
         tool = BlobSearch(metadata=metadata_with_project)
 
-        with patch(
-            "duo_workflow_service.policies.file_exclusion_policy.is_feature_enabled",
-            return_value=True,
-        ):
-            response = await tool._arun(
-                id="1",
-                search="nonexistent",
-                search_type="projects",
-                ref="main",
-            )
+        response = await tool._arun(
+            id="1",
+            search="nonexistent",
+            search_type="projects",
+            ref="main",
+        )
 
         response_data = json.loads(response)
         search_results = response_data["search_results"]
@@ -625,16 +584,12 @@ class TestBlobSearchFileExclusion:
 
         tool = BlobSearch(metadata=metadata_with_project)
 
-        with patch(
-            "duo_workflow_service.policies.file_exclusion_policy.is_feature_enabled",
-            return_value=True,
-        ):
-            response = await tool._arun(
-                id="1",
-                search="test search",
-                search_type="projects",
-                ref="main",
-            )
+        response = await tool._arun(
+            id="1",
+            search="test search",
+            search_type="projects",
+            ref="main",
+        )
 
         response_data = json.loads(response)
         search_results = response_data["search_results"]

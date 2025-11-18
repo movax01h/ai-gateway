@@ -1,7 +1,6 @@
 from typing import List, Tuple
 
 from duo_workflow_service.policies.file_exclusion_policy import FileExclusionPolicy
-from lib.feature_flags.context import FeatureFlag, is_feature_enabled
 
 
 class DiffExclusionPolicy(FileExclusionPolicy):
@@ -14,9 +13,6 @@ class DiffExclusionPolicy(FileExclusionPolicy):
         Returns:
             Tuple of (filtered_diffs, excluded_files)
         """
-        if not is_feature_enabled(FeatureFlag.USE_DUO_CONTEXT_EXCLUSION):
-            return diffs, []
-
         if not self._matcher:
             return diffs, []
 

@@ -1345,15 +1345,10 @@ def test_create_commit_format_display_message(input_data, expected_message):
 
 # Tests for DiffExclusionPolicy integration
 @pytest.mark.asyncio
-@patch("duo_workflow_service.policies.file_exclusion_policy.is_feature_enabled")
-@patch("duo_workflow_service.policies.diff_exclusion_policy.is_feature_enabled")
 async def test_get_commit_diff_with_diff_exclusion_policy_enabled(
-    mock_diff_feature_flag, mock_file_feature_flag, gitlab_client_mock, metadata
+    gitlab_client_mock, metadata
 ):
     """Test GetCommitDiff applies DiffExclusionPolicy when feature flag is enabled."""
-    mock_diff_feature_flag.return_value = True
-    mock_file_feature_flag.return_value = True
-
     # Mock diff data with both allowed and excluded files
     diff_data = [
         {
@@ -1428,15 +1423,8 @@ async def test_get_commit_diff_with_diff_exclusion_policy_enabled(
 
 
 @pytest.mark.asyncio
-@patch("duo_workflow_service.policies.file_exclusion_policy.is_feature_enabled")
-@patch("duo_workflow_service.policies.diff_exclusion_policy.is_feature_enabled")
-async def test_get_commit_diff_with_no_excluded_files(
-    mock_diff_feature_flag, mock_file_feature_flag, gitlab_client_mock, metadata
-):
+async def test_get_commit_diff_with_no_excluded_files(gitlab_client_mock, metadata):
     """Test GetCommitDiff does not include excluded_files/excluded_reason when no files are excluded."""
-    mock_diff_feature_flag.return_value = True
-    mock_file_feature_flag.return_value = True
-
     # Mock diff data with only allowed files
     diff_data = [
         {
