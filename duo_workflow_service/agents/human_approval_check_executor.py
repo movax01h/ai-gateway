@@ -76,7 +76,7 @@ class HumanApprovalCheckExecutor:
                         correlation_id=correlation_id,
                         message_type=MessageTypeEnum.USER,
                         message_sub_type=None,
-                        content=f"Received message: {message}",
+                        content=message,
                         timestamp=datetime.now(timezone.utc).isoformat(),
                         status=ToolStatus.SUCCESS,
                         tool_info=None,
