@@ -1,7 +1,9 @@
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
+from gitlab_cloud_connector import CloudConnectorUser, UserClaims
 
+from duo_workflow_service.interceptors.authentication_interceptor import current_user
 from duo_workflow_service.interceptors.gitlab_version_interceptor import gitlab_version
 from duo_workflow_service.interceptors.internal_events_interceptor import (
     InternalEventsInterceptor,
@@ -21,6 +23,19 @@ def mock_continuation_fixture():
 @pytest.fixture(name="interceptor")
 def interceptor_fixture():
     return InternalEventsInterceptor()
+
+
+@pytest.fixture(name="mock_user")
+def mock_user():
+    return CloudConnectorUser(
+        authenticated=True,
+        claims=UserClaims(
+            scopes=[],
+            subject="1234",
+            gitlab_realm="self-managed",
+            gitlab_instance_uid="00000000-1111-2222-3333-000000000000",
+        ),
+    )
 
 
 def create_handler_call_details(metadata_dict):
@@ -50,6 +65,7 @@ def create_handler_call_details(metadata_dict):
             {
                 "realm": "test-realm",
                 "instance_id": "test-instance-id",
+                "unique_instance_id": "00000000-1111-2222-3333-000000000000",
                 "global_user_id": "test-global-user-id",
                 "host_name": "test-gitlab-host",
                 "feature_enabled_by_namespace_ids": [1, 2, 3],
@@ -77,6 +93,7 @@ def create_handler_call_details(metadata_dict):
             {
                 "realm": "test-realm",
                 "instance_id": "test-instance-id",
+                "unique_instance_id": "00000000-1111-2222-3333-000000000000",
                 "global_user_id": "test-global-user-id",
                 "host_name": "test-gitlab-host",
                 "feature_enabled_by_namespace_ids": [1, 2, 3],
@@ -104,6 +121,7 @@ def create_handler_call_details(metadata_dict):
             {
                 "realm": "test-realm",
                 "instance_id": "test-instance-id",
+                "unique_instance_id": "00000000-1111-2222-3333-000000000000",
                 "global_user_id": "test-global-user-id",
                 "host_name": "test-gitlab-host",
                 "feature_enabled_by_namespace_ids": [1, 2, 3],
@@ -131,6 +149,7 @@ def create_handler_call_details(metadata_dict):
             {
                 "realm": "test-realm",
                 "instance_id": "test-instance-id",
+                "unique_instance_id": "00000000-1111-2222-3333-000000000000",
                 "global_user_id": "test-global-user-id",
                 "host_name": "test-gitlab-host",
                 "feature_enabled_by_namespace_ids": [1, 2, 3],
@@ -158,6 +177,7 @@ def create_handler_call_details(metadata_dict):
             {
                 "realm": "test-realm",
                 "instance_id": "test-instance-id",
+                "unique_instance_id": "00000000-1111-2222-3333-000000000000",
                 "global_user_id": "test-global-user-id",
                 "host_name": "test-gitlab-host",
                 "feature_enabled_by_namespace_ids": None,
@@ -185,6 +205,7 @@ def create_handler_call_details(metadata_dict):
             {
                 "realm": "test-realm",
                 "instance_id": "test-instance-id",
+                "unique_instance_id": "00000000-1111-2222-3333-000000000000",
                 "global_user_id": "test-global-user-id",
                 "host_name": "test-gitlab-host",
                 "feature_enabled_by_namespace_ids": [1, 2, 3, 4, 5],
@@ -210,6 +231,7 @@ def create_handler_call_details(metadata_dict):
             {
                 "realm": "test-realm",
                 "instance_id": "test-instance-id",
+                "unique_instance_id": "00000000-1111-2222-3333-000000000000",
                 "global_user_id": "test-global-user-id",
                 "host_name": "test-gitlab-host",
                 "feature_enabled_by_namespace_ids": None,
@@ -224,10 +246,11 @@ def create_handler_call_details(metadata_dict):
     ],
 )
 async def test_interceptor_metadata_handling(
-    interceptor, mock_continuation, metadata, expected
+    interceptor, mock_continuation, mock_user, metadata, expected
 ):
     """Test that the interceptor correctly processes various metadata configurations."""
     handler_call_details = create_handler_call_details(metadata)
+    current_user.set(mock_user)
 
     await interceptor.intercept_service(mock_continuation, handler_call_details)
 
@@ -249,6 +272,7 @@ async def test_interceptor_metadata_handling(
         == expected["ultimate_parent_namespace_id"]
     )
     assert event_context.is_gitlab_team_member == expected["is_gitlab_team_member"]
+    assert event_context.unique_instance_id == expected["unique_instance_id"]
     # By default, no lsp_version should be in extra
     assert event_context.extra == {}
     # By default, instance_version should be None
@@ -256,7 +280,7 @@ async def test_interceptor_metadata_handling(
 
 
 @pytest.mark.asyncio
-async def test_interceptor_with_lsp_version(interceptor, mock_continuation):
+async def test_interceptor_with_lsp_version(interceptor, mock_continuation, mock_user):
     """Test that lsp_version is included in extra when language_server_version is set."""
     metadata = {
         "x-gitlab-realm": "test-realm",
@@ -265,6 +289,7 @@ async def test_interceptor_with_lsp_version(interceptor, mock_continuation):
         "x-gitlab-host-name": "test-gitlab-host",
     }
     handler_call_details = create_handler_call_details(metadata)
+    current_user.set(mock_user)
 
     # Set the language server version in the context
     test_version = LanguageServerVersion.from_string("7.43.0")
@@ -280,7 +305,9 @@ async def test_interceptor_with_lsp_version(interceptor, mock_continuation):
 
 
 @pytest.mark.asyncio
-async def test_interceptor_without_lsp_version(interceptor, mock_continuation):
+async def test_interceptor_without_lsp_version(
+    interceptor, mock_continuation, mock_user
+):
     """Test that extra is empty when language_server_version is not set."""
     metadata = {
         "x-gitlab-realm": "test-realm",
@@ -289,6 +316,7 @@ async def test_interceptor_without_lsp_version(interceptor, mock_continuation):
         "x-gitlab-host-name": "test-gitlab-host",
     }
     handler_call_details = create_handler_call_details(metadata)
+    current_user.set(mock_user)
 
     # Reset the language server version context
     language_server_version.set(None)
@@ -303,7 +331,7 @@ async def test_interceptor_without_lsp_version(interceptor, mock_continuation):
 
 @pytest.mark.asyncio
 async def test_interceptor_with_invalid_lsp_version_object(
-    interceptor, mock_continuation
+    interceptor, mock_continuation, mock_user
 ):
     """Test that extra is empty when language_server_version has invalid object without version attribute."""
     metadata = {
@@ -313,6 +341,7 @@ async def test_interceptor_with_invalid_lsp_version_object(
         "x-gitlab-host-name": "test-gitlab-host",
     }
     handler_call_details = create_handler_call_details(metadata)
+    current_user.set(mock_user)
 
     # Set an invalid object without version attribute
     invalid_object = MagicMock(spec=[])  # Object with no attributes
@@ -327,7 +356,9 @@ async def test_interceptor_with_invalid_lsp_version_object(
 
 
 @pytest.mark.asyncio
-async def test_interceptor_with_instance_version(interceptor, mock_continuation):
+async def test_interceptor_with_instance_version(
+    interceptor, mock_continuation, mock_user
+):
     """Test that instance_version is included when gitlab_version is set."""
     metadata = {
         "x-gitlab-realm": "test-realm",
@@ -336,6 +367,7 @@ async def test_interceptor_with_instance_version(interceptor, mock_continuation)
         "x-gitlab-host-name": "test-gitlab-host",
     }
     handler_call_details = create_handler_call_details(metadata)
+    current_user.set(mock_user)
 
     # Set the GitLab instance version in the context
     gitlab_version.set("16.11.0")
@@ -349,7 +381,9 @@ async def test_interceptor_with_instance_version(interceptor, mock_continuation)
 
 
 @pytest.mark.asyncio
-async def test_interceptor_without_instance_version(interceptor, mock_continuation):
+async def test_interceptor_without_instance_version(
+    interceptor, mock_continuation, mock_user
+):
     """Test that instance_version is None when gitlab_version is not set."""
     metadata = {
         "x-gitlab-realm": "test-realm",
@@ -358,6 +392,7 @@ async def test_interceptor_without_instance_version(interceptor, mock_continuati
         "x-gitlab-host-name": "test-gitlab-host",
     }
     handler_call_details = create_handler_call_details(metadata)
+    current_user.set(mock_user)
 
     # Reset the GitLab version context
     gitlab_version.set(None)
@@ -371,7 +406,9 @@ async def test_interceptor_without_instance_version(interceptor, mock_continuati
 
 
 @pytest.mark.asyncio
-async def test_interceptor_with_both_versions(interceptor, mock_continuation):
+async def test_interceptor_with_both_versions(
+    interceptor, mock_continuation, mock_user
+):
     """Test that both instance_version and lsp_version are included when both are set."""
     metadata = {
         "x-gitlab-realm": "test-realm",
@@ -380,6 +417,7 @@ async def test_interceptor_with_both_versions(interceptor, mock_continuation):
         "x-gitlab-host-name": "test-gitlab-host",
     }
     handler_call_details = create_handler_call_details(metadata)
+    current_user.set(mock_user)
 
     # Set both versions
     gitlab_version.set("16.11.0")
