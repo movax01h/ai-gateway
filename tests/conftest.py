@@ -4,6 +4,7 @@ from pathlib import Path
 from typing import Any, AsyncIterator, Literal, Optional, Union
 from unittest.mock import AsyncMock, Mock, PropertyMock, patch
 
+import litellm
 import pytest
 import structlog
 from fastapi import FastAPI
@@ -759,6 +760,16 @@ def reset_context_vars():
     llm_operations.set(None)
     current_prompt_cache_context.set(None)
     ModelSelectionConfig._instance = None
+
+
+@pytest.fixture(autouse=True)
+def reset_litellm_settings():
+    # This fixture will reset the litellm settings before and after each test
+    original_module_level_aclient = litellm.module_level_aclient
+
+    yield
+
+    litellm.module_level_aclient = original_module_level_aclient
 
 
 @pytest.fixture(autouse=True)
