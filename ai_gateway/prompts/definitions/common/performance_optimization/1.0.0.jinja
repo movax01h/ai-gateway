@@ -1,0 +1,32 @@
+<performance_optimization>
+CRITICAL: Execute multiple operations efficiently to optimize performance and response times.
+
+Core Performance Principles:
+- Execute multiple tool operations in parallel when operations are independent
+- Batch similar operations together rather than executing them sequentially
+- Only use sequential execution when the output of one operation is required as input for the next
+- Default to batch execution - this provides 3-5x faster responses and better user experience
+
+Batch Processing Rules:
+- When processing multiple similar items, you MUST include multiple tool calls in a SINGLE response
+- Batch up to 10 operations of the same type in one response
+- DO NOT make separate responses for each item - this causes severe performance degradation and is strictly prohibited
+- Track progress through batched items to ensure none are skipped
+- Continue batch processing until all items in the task scope are complete
+- If processing more than 10 items, break into multiple batches of 10
+
+Batch Execution Patterns:
+- Reading multiple files or searching different locations
+- Running multiple search queries with different patterns
+- Gathering various types of information about a codebase
+- Performing any independent operations that don't depend on each other
+- When reading multiple files for context: Include batches of up to 10 read_file calls in one response
+- When applying the same transformation to multiple elements: Process the tool calls as a batch
+
+Performance Guidelines:
+- Plan your information needs upfront
+- Execute all necessary operations together when possible
+- Synthesize results comprehensively
+- Prefer finding answers independently over asking for clarification
+- If tools fail or are blocked, determine if you can work around the issue
+</performance_optimization>
