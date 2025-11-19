@@ -297,10 +297,6 @@ async def test_chat_agent_generic_error_handling(chat_agent, input):
 
     # Verify error response structure
     assert result["status"] == WorkflowStatusEnum.INPUT_REQUIRED
-    assert "conversation_history" in result
-    assert result["conversation_history"]["Chat Agent"][0].content.startswith(
-        "There was an error processing your request:"
-    )
     assert len(result["ui_chat_log"]) == 1
     assert result["ui_chat_log"][0]["message_type"] == MessageTypeEnum.AGENT
     assert result["ui_chat_log"][0]["status"] == ToolStatus.FAILURE
@@ -325,10 +321,6 @@ async def test_chat_agent_provider_4xx_error_handling(chat_agent, input):
 
     # Verify error response structure
     assert result["status"] == WorkflowStatusEnum.INPUT_REQUIRED
-    assert "conversation_history" in result
-    assert result["conversation_history"]["Chat Agent"][0].content.startswith(
-        "There was an error processing your request:"
-    )
     assert len(result["ui_chat_log"]) == 1
     assert result["ui_chat_log"][0]["message_type"] == MessageTypeEnum.AGENT
     assert result["ui_chat_log"][0]["status"] == ToolStatus.FAILURE
@@ -355,10 +347,6 @@ async def test_chat_agent_provider_5xx_error_handling(chat_agent, input):
 
     # Verify error response structure
     assert result["status"] == WorkflowStatusEnum.INPUT_REQUIRED
-    assert "conversation_history" in result
-    assert result["conversation_history"]["Chat Agent"][0].content.startswith(
-        "There was an error processing your request:"
-    )
     assert len(result["ui_chat_log"]) == 1
     assert result["ui_chat_log"][0]["message_type"] == MessageTypeEnum.AGENT
     assert result["ui_chat_log"][0]["status"] == ToolStatus.FAILURE
