@@ -215,6 +215,7 @@ class AbstractWorkflow(ABC):
             "configurable": {"thread_id": self._workflow_id},
         }
         compiled_graph = None
+        checkpoint_notifier = UserInterface(outbox=self._outbox, goal=goal)
         try:
             self._project, self._namespace, self._workflow_config = (
                 await fetch_workflow_and_container_data(
@@ -252,7 +253,6 @@ class AbstractWorkflow(ABC):
                 user=user_for_registry,
                 language_server_version=self._language_server_version,
             )
-            checkpoint_notifier = UserInterface(outbox=self._outbox, goal=goal)
 
             def on_gitlab_status_update(status: WorkflowStatusEventEnum):
                 self._last_gitlab_status = status

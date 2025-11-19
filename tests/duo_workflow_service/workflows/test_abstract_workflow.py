@@ -5,12 +5,16 @@ from unittest.mock import AsyncMock, MagicMock, Mock, patch
 import pytest
 
 from contract import contract_pb2
+from duo_workflow_service.entities.state import WorkflowStatusEnum
 from duo_workflow_service.llm_factory import AnthropicConfig, VertexConfig
 from duo_workflow_service.workflows.abstract_workflow import (
     AbstractWorkflow,
     TraceableException,
 )
 from duo_workflow_service.workflows.chat import Workflow
+from duo_workflow_service.workflows.type_definitions import (
+    AIO_CANCEL_STOP_WORKFLOW_REQUEST,
+)
 from lib.internal_events import InternalEventAdditionalProperties
 from lib.internal_events.event_enum import CategoryEnum, EventEnum
 
@@ -293,6 +297,40 @@ async def test_compile_and_run_graph_with_exception(
     assert workflow.is_done
     assert isinstance(exc_info.value.original_exception, Exception)
     assert str(exc_info.value.original_exception) == "Test exception"
+
+
+@pytest.mark.asyncio
+@patch(
+    "duo_workflow_service.workflows.abstract_workflow.fetch_workflow_and_container_data"
+)
+@patch("duo_workflow_service.workflows.abstract_workflow.UserInterface")
+async def test_compile_and_run_graph_with_cancellation_during_fetch(
+    mock_user_interface,
+    mock_fetch_workflow,
+    workflow,
+):
+    from duo_workflow_service.entities.state import WorkflowStatusEnum
+
+    mock_fetch_workflow.side_effect = asyncio.CancelledError(
+        AIO_CANCEL_STOP_WORKFLOW_REQUEST
+    )
+
+    mock_notifier = AsyncMock()
+    mock_user_interface.return_value = mock_notifier
+
+    with pytest.raises(TraceableException) as exc_info:
+        await workflow._compile_and_run_graph("Test goal")
+
+    mock_fetch_workflow.assert_called_once()
+    assert workflow.is_done
+    assert isinstance(exc_info.value.original_exception, asyncio.CancelledError)
+    assert str(exc_info.value.original_exception) == AIO_CANCEL_STOP_WORKFLOW_REQUEST
+
+    mock_notifier.send_event.assert_called_once_with(
+        type="values",
+        state={"status": WorkflowStatusEnum.CANCELLED, "ui_chat_log": []},
+        stream=workflow._stream,
+    )
 
 
 @pytest.mark.asyncio
