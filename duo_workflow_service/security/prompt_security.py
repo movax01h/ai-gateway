@@ -195,6 +195,7 @@ class PromptSecurity:
         # Example: 'code_review': [],  # No security functions for code review tools
         # Add tools that need COMPLETE REPLACEMENT of default security functions below
         "read_file": [],  # No security functions for read_file tool
+        "read_repository_file": [],  # No security functions for read_repository_file tool
         "build_review_merge_request_context": [
             encode_dangerous_tags,
             strip_markdown_link_comments,
