@@ -451,9 +451,9 @@ Apply these additional review instructions to matching files:
 IMPORTANT: Only apply each custom instruction to files that match its specified pattern. If a file doesn't match any custom instruction pattern, only apply the standard review criteria.
 
 When commenting based on custom instructions, format as:
-"According to custom instructions in '[instruction_name]': [your comment here]"
+"According to custom instructions in '[instruction_name]' ([brief paraphrase of relevant instruction]): [your specific comment about the code]"
 
-Example: "According to custom instructions in 'Security Best Practices': This API endpoint should validate input parameters to prevent SQL injection."
+Example: "According to custom instructions in 'Security Best Practices' (validate all API input): This endpoint should validate input parameters to prevent SQL injection."
 
 This formatting is only required for custom instruction comments. Regular review comments based on standard review criteria should NOT include this prefix.
 </custom_instructions>"""
