@@ -12,5 +12,5 @@ prompt_template:
     {% include 'sast_fp_detection_agent_prompt/user/1.0.0.jinja' %}
   placeholder: history
 params:
-  timeout: 30
+  timeout: 120
 
