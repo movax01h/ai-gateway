@@ -1,0 +1,30 @@
+{{file_content}}
+In the file user selected this code:
+<selected_code>
+  {{selected_text}}
+</selected_code>
+
+{{input}}
+{{file_content_reuse}}
+Any code blocks in response should be formatted in markdown.
+
+First, analyze the provided code to assess its complexity and scope.
+
+Scope guidelines:
+- Small: <150 lines, single function/module
+- Medium: 150-400 lines, multiple related functions
+- Large: >400 lines, multiple classes/modules
+
+For medium scope, assess if it behaves more like small (straightforward) or large (complex).
+
+If the scope is small or straightforward:
+  go directly to writing the full refactored code, formatted in markdown.
+
+If the scope is large or complex:
+  1. Identify and list 3-5 small~medium scale refactoring opportunities.
+  2. For each opportunity, provide:
+     - clear title
+     - plan
+     - benefits
+  3. Present these opportunities as numbered choices.
+  4. Ask the user: "Which refactoring opportunity would you like me to proceed with first?".
