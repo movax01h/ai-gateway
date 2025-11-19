@@ -3,6 +3,8 @@ name: GPT Fix Pipeline Context
 model:
   params:
     model_class_provider: litellm
+unit_primitives:
+  - duo_agent_platform
 prompt_template:
   system: |
     {% include 'fix_pipeline_context/system/1.0.0.jinja' %}

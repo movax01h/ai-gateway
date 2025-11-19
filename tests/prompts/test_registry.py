@@ -543,6 +543,7 @@ model:
     params:
         model: test_model
         model_class_provider: litellm
+unit_primitives: []
 prompt_template:
     system: test
 """
