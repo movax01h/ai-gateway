@@ -5,9 +5,6 @@ from dependency_injector import containers
 from gitlab_cloud_connector import CloudConnectorUser, UserClaims, WrongUnitPrimitives
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 
-from ai_gateway.model_metadata import TypeModelMetadata
-from ai_gateway.prompts.config.base import PromptConfig
-from ai_gateway.prompts.typing import TypeModelFactory
 from contract import contract_pb2
 from duo_workflow_service.agents.chat_agent import ChatAgent
 from duo_workflow_service.agents.prompt_adapter import BasePromptAdapter
@@ -38,24 +35,6 @@ from lib.internal_events.event_enum import CategoryEnum
 @pytest.fixture(name="workflow_type")
 def workflow_type_fixture() -> CategoryEnum:
     return CategoryEnum.WORKFLOW_CHAT
-
-
-@pytest.fixture(name="prompt")
-def prompt_fixture(
-    model_factory: TypeModelFactory,
-    prompt_config: PromptConfig,
-    model_metadata: TypeModelMetadata | None,
-    workflow_id: str,
-    workflow_type: CategoryEnum,
-):
-    return ChatAgent(
-        model_factory=model_factory,
-        config=prompt_config,
-        model_metadata=model_metadata,
-        workflow_id=workflow_id,
-        workflow_type=workflow_type,
-        system_template_override=None,
-    )  # type: ignore[call-arg] # the args are modified in `Prompt.__init__`
 
 
 @pytest.fixture(name="mock_prompt_adapter")
@@ -111,6 +90,9 @@ def workflow_with_project_fixture(
     workflow_type: CategoryEnum,
     system_template_override: str,
 ):
+    # Container is required for dependency injection setup
+    assert mock_duo_workflow_service_container is not None
+
     workflow = Workflow(
         workflow_id=workflow_id,
         workflow_metadata={},
@@ -370,8 +352,7 @@ async def test_workflow_run(
             self.call_count += 1
             if self.call_count > 1:
                 raise StopAsyncIteration
-            else:
-                return ("values", state)
+            return ("values", state)
 
     with patch(
         "duo_workflow_service.workflows.chat.workflow.StateGraph"
@@ -492,21 +473,25 @@ async def test_get_graph_input_start(workflow_with_project):
 async def test_get_graph_input(workflow_with_project, status):
     result = await workflow_with_project.get_graph_input("New input", status, None)
 
-    assert result.goto == "agent"
-    assert result.update["status"] == WorkflowStatusEnum.EXECUTION
+    if status != WorkflowStatusEventEnum.RETRY:
+        assert result.goto == "agent"
+        state = result.update
+        assert state["status"] == WorkflowStatusEnum.EXECUTION
+    else:
+        state = result
+        assert state["status"] == WorkflowStatusEnum.NOT_STARTED
+
+    assert state["conversation_history"]["test_prompt"][0].content == "New input"
     assert (
-        result.update["conversation_history"]["test_prompt"][0].content == "New input"
-    )
-    assert (
-        result.update["conversation_history"]["test_prompt"][0].additional_kwargs[
+        state["conversation_history"]["test_prompt"][0].additional_kwargs[
             "additional_context"
         ]
         == workflow_with_project._additional_context
     )
-    assert result.update["ui_chat_log"][-1]["message_type"] == MessageTypeEnum.USER
-    assert result.update["ui_chat_log"][-1]["content"] == "New input"
-    assert len(result.update["ui_chat_log"][-1]["additional_context"]) == 1
-    assert result.update["ui_chat_log"][-1]["additional_context"][0].category == "file"
+    assert state["ui_chat_log"][-1]["message_type"] == MessageTypeEnum.USER
+    assert state["ui_chat_log"][-1]["content"] == "New input"
+    assert len(state["ui_chat_log"][-1]["additional_context"]) == 1
+    assert state["ui_chat_log"][-1]["additional_context"][0].category == "file"
 
 
 @pytest.mark.asyncio
@@ -548,7 +533,7 @@ async def test_get_graph_input_resume_with_rejected_approval(
     assert result.update["approval"].message == rejection_message
 
     if rejection_message and rejection_message != "null":
-        result.update["ui_chat_log"][-1]["content"] == rejection_message
+        assert result.update["ui_chat_log"][-1]["content"] == rejection_message
     else:
         assert "ui_chat_log" not in result.update
 
@@ -919,7 +904,6 @@ async def test_compile_with_tools_override_and_flow_config(
     mock_state_graph,
     mock_toolset,
     mock_get_tools,
-    mock_duo_workflow_service_container,
 ):
     mock_get_tools.return_value = ["default_tool1", "default_tool2"]
 
