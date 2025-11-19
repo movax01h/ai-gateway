@@ -7,6 +7,7 @@ from ai_gateway.config import (
     Config,
     ConfigAmazonQ,
     ConfigAuth,
+    ConfigBillingEvent,
     ConfigCustomModels,
     ConfigFastApi,
     ConfigFeatureFlags,
@@ -498,6 +499,46 @@ def test_config_model_limits(values: dict, expected: ConfigModelLimits):
         config = Config(_env_file=None)
 
         assert config.model_engine_limits == expected
+
+
+@pytest.mark.parametrize(
+    ("values", "expected"),
+    [
+        ({}, ConfigBillingEvent()),
+        (
+            {
+                "AIGW_BILLING_EVENT__ENABLED": "yes",
+                "AIGW_BILLING_EVENT__ENDPOINT": "endpoint.test",
+                "AIGW_BILLING_EVENT__BATCH_SIZE": "8",
+                "AIGW_BILLING_EVENT__THREAD_COUNT": "7",
+                "AIGW_BILLING_EVENT__USE_GLOBAL_USER_ID_FOR_TEAM_MEMBERS": "false",
+            },
+            ConfigBillingEvent(
+                enabled=True,
+                endpoint="endpoint.test",
+                thread_count=7,
+                batch_size=8,
+                use_global_user_id_for_team_members=False,
+            ),
+        ),
+        (
+            {
+                "AIGW_BILLING_EVENT__ENABLED": "yes",
+                "AIGW_BILLING_EVENT__ENDPOINT": "endpoint.test",
+            },
+            ConfigBillingEvent(
+                enabled=True,
+                endpoint="endpoint.test",
+                use_global_user_id_for_team_members=True,  # default value
+            ),
+        ),
+    ],
+)
+def test_config_billing_event(values: dict, expected: ConfigBillingEvent):
+    with mock.patch.dict(os.environ, values, clear=True):
+        config = Config(_env_file=None)
+
+        assert config.billing_event == expected
 
 
 # pylint: enable=direct-environment-variable-reference

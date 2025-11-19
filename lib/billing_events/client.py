@@ -56,10 +56,12 @@ class BillingEventsClient:
         batch_size: int,
         thread_count: int,
         internal_event_client: InternalEventsClient,
+        use_global_user_id_for_team_members: bool = True,
     ) -> None:
         self._logger = structlog.stdlib.get_logger("billing_events_client")
         self.enabled = enabled
         self.internal_event_client = internal_event_client
+        self.use_global_user_id_for_team_members = use_global_user_id_for_team_members
 
         self._logger.info(
             "Initializing BillingEventsClient",
@@ -69,6 +71,7 @@ class BillingEventsClient:
             namespace=namespace,
             batch_size=batch_size,
             thread_count=thread_count,
+            use_global_user_id_for_team_members=use_global_user_id_for_team_members,
         )
 
         if enabled:
@@ -160,6 +163,7 @@ class BillingEventsClient:
             subject=(
                 str(hash_global_user_id_to_int(internal_context.global_user_id))
                 if internal_context.is_gitlab_team_member
+                and self.use_global_user_id_for_team_members
                 else internal_context.user_id
             ),
             global_user_id=internal_context.global_user_id,

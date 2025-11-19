@@ -37,61 +37,63 @@ BASE_BILLING_CONTEXT_SCHEMA: Dict[str, Any] = {
 }
 
 
-class TestBillingEventsClient:
-    @pytest.fixture(scope="class", autouse=True)
-    def cleanup(self):
-        """Ensure Snowplow cache is reset between tests."""
-        yield
-        Snowplow.reset()
+@pytest.fixture(scope="class", autouse=True)
+def cleanup():
+    """Ensure Snowplow cache is reset between tests."""
+    yield
+    Snowplow.reset()
 
-    @pytest.fixture
-    def mock_dependencies(self):
-        with (
-            mock.patch("snowplow_tracker.Tracker.track") as mock_track,
-            mock.patch(
-                "snowplow_tracker.events.StructuredEvent.__init__", return_value=None
-            ) as mock_structured_event_init,
-            mock.patch("lib.billing_events.client.uuid") as mock_uuid,
-            mock.patch("lib.billing_events.client.datetime") as mock_datetime,
-        ):
-            mock_uuid.uuid4.return_value.__str__ = mock.Mock(
-                return_value="12345678-1234-5678-9012-123456789012"
-            )
-            mock_datetime.now.return_value.isoformat.return_value = (
-                "2023-12-01T10:00:00"
-            )
-            yield {
-                "track": mock_track,
-                "structured_event_init": mock_structured_event_init,
-                "uuid": mock_uuid,
-                "datetime": mock_datetime,
-            }
 
-    @pytest.fixture
-    def client(self):
-        """Fixture for an enabled BillingEventsClient with mocked initializers."""
-        with (
-            mock.patch("snowplow_tracker.Tracker.__init__", return_value=None),
-            mock.patch(
-                "snowplow_tracker.emitters.AsyncEmitter.__init__", return_value=None
-            ),
-        ):
-            yield BillingEventsClient(
-                enabled=True,
-                endpoint="https://billing.local",
-                app_id="gitlab_ai_gateway-billing",
-                namespace="gl",
-                batch_size=3,
-                thread_count=2,
-                internal_event_client=MagicMock(spec=InternalEventsClient),
-            )
+@pytest.fixture(name="mock_dependencies")
+def mock_dependencies_fixture():
+    with (
+        mock.patch("snowplow_tracker.Tracker.track") as mock_track,
+        mock.patch(
+            "snowplow_tracker.events.StructuredEvent.__init__", return_value=None
+        ) as mock_structured_event_init,
+        mock.patch("lib.billing_events.client.uuid") as mock_uuid,
+        mock.patch("lib.billing_events.client.datetime") as mock_datetime,
+    ):
+        mock_uuid.uuid4.return_value.__str__ = mock.Mock(
+            return_value="12345678-1234-5678-9012-123456789012"
+        )
+        mock_datetime.now.return_value.isoformat.return_value = "2023-12-01T10:00:00"
+        yield {
+            "track": mock_track,
+            "structured_event_init": mock_structured_event_init,
+            "uuid": mock_uuid,
+            "datetime": mock_datetime,
+        }
 
-    @pytest.fixture(name="user")
-    def user_fixture(self):
-        return CloudConnectorUser(
-            authenticated=True, claims=UserClaims(gitlab_instance_uid="abc")
+
+@pytest.fixture(name="client")
+def client_fixture():
+    """Fixture for an enabled BillingEventsClient with mocked initializers."""
+    with (
+        mock.patch("snowplow_tracker.Tracker.__init__", return_value=None),
+        mock.patch(
+            "snowplow_tracker.emitters.AsyncEmitter.__init__", return_value=None
+        ),
+    ):
+        yield BillingEventsClient(
+            enabled=True,
+            endpoint="https://billing.local",
+            app_id="gitlab_ai_gateway-billing",
+            namespace="gl",
+            batch_size=3,
+            thread_count=2,
+            internal_event_client=MagicMock(spec=InternalEventsClient),
         )
 
+
+@pytest.fixture(name="user")
+def user_fixture():
+    return CloudConnectorUser(
+        authenticated=True, claims=UserClaims(gitlab_instance_uid="abc")
+    )
+
+
+class TestBillingEventsClient:
     @mock.patch("snowplow_tracker.Tracker.__init__")
     @mock.patch("snowplow_tracker.emitters.AsyncEmitter.__init__")
     def test_initialization(self, mock_emitter_init, mock_tracker_init):
@@ -500,3 +502,149 @@ class TestBillingEventsClient:
         subject = event_args["context"][0].data["subject"]
 
         assert subject == "-1"
+
+    def test_use_global_user_id_for_team_members_disabled(
+        self, user, mock_dependencies
+    ):
+        """Test that GitLab team member user_id is NOT hashed when use_global_user_id_for_team_members is False."""
+        with (
+            mock.patch("snowplow_tracker.Tracker.__init__", return_value=None),
+            mock.patch(
+                "snowplow_tracker.emitters.AsyncEmitter.__init__", return_value=None
+            ),
+        ):
+            client = BillingEventsClient(
+                enabled=True,
+                endpoint="https://billing.local",
+                app_id="gitlab_ai_gateway-billing",
+                namespace="gl",
+                batch_size=3,
+                thread_count=2,
+                internal_event_client=MagicMock(spec=InternalEventsClient),
+                use_global_user_id_for_team_members=False,
+            )
+
+            current_feature_flag_context.set({FeatureFlag.DUO_USE_BILLING_ENDPOINT})
+            current_event_context.set(
+                EventContext(
+                    user_id="12345",
+                    global_user_id="global-user-abc-123",
+                    is_gitlab_team_member=True,
+                )
+            )
+
+            client.track_billing_event(
+                user=user,
+                event_type="ai_completion",
+                category="test",
+                unit_of_measure="tokens",
+                quantity=100.0,
+            )
+
+            event_args = mock_dependencies["structured_event_init"].call_args[1]
+            subject = event_args["context"][0].data["subject"]
+
+            # Subject should be the user_id, not hashed
+            assert subject == "12345"
+
+    def test_use_global_user_id_for_team_members_enabled(self, user, mock_dependencies):
+        """Test that GitLab team member global_user_id IS hashed when use_global_user_id_for_team_members is True."""
+        with (
+            mock.patch("snowplow_tracker.Tracker.__init__", return_value=None),
+            mock.patch(
+                "snowplow_tracker.emitters.AsyncEmitter.__init__", return_value=None
+            ),
+        ):
+            client = BillingEventsClient(
+                enabled=True,
+                endpoint="https://billing.local",
+                app_id="gitlab_ai_gateway-billing",
+                namespace="gl",
+                batch_size=3,
+                thread_count=2,
+                internal_event_client=MagicMock(spec=InternalEventsClient),
+                use_global_user_id_for_team_members=True,
+            )
+
+            current_feature_flag_context.set({FeatureFlag.DUO_USE_BILLING_ENDPOINT})
+            current_event_context.set(
+                EventContext(
+                    user_id="12345",
+                    global_user_id="global-user-abc-123",
+                    is_gitlab_team_member=True,
+                )
+            )
+
+            client.track_billing_event(
+                user=user,
+                event_type="ai_completion",
+                category="test",
+                unit_of_measure="tokens",
+                quantity=100.0,
+            )
+
+            event_args = mock_dependencies["structured_event_init"].call_args[1]
+            subject = event_args["context"][0].data["subject"]
+
+            # Subject should be a string representation of a hashed integer
+            assert subject.isdigit()
+            assert int(subject) > 0
+            assert subject != "12345"
+
+    def test_use_global_user_id_for_team_members_default_value(self):
+        """Test that use_global_user_id_for_team_members defaults to True."""
+        client = BillingEventsClient(
+            enabled=True,
+            endpoint="https://billing.local",
+            app_id="gitlab_ai_gateway-billing",
+            namespace="gl",
+            batch_size=3,
+            thread_count=2,
+            internal_event_client=MagicMock(spec=InternalEventsClient),
+        )
+
+        assert client.use_global_user_id_for_team_members is True
+
+    def test_use_global_user_id_for_team_members_does_not_affect_non_team_members(
+        self, user, mock_dependencies
+    ):
+        """Test that use_global_user_id_for_team_members does not affect non-team members."""
+        with (
+            mock.patch("snowplow_tracker.Tracker.__init__", return_value=None),
+            mock.patch(
+                "snowplow_tracker.emitters.AsyncEmitter.__init__", return_value=None
+            ),
+        ):
+            client = BillingEventsClient(
+                enabled=True,
+                endpoint="https://billing.local",
+                app_id="gitlab_ai_gateway-billing",
+                namespace="gl",
+                batch_size=3,
+                thread_count=2,
+                internal_event_client=MagicMock(spec=InternalEventsClient),
+                use_global_user_id_for_team_members=False,
+            )
+
+            current_feature_flag_context.set({FeatureFlag.DUO_USE_BILLING_ENDPOINT})
+            current_event_context.set(
+                EventContext(
+                    user_id="12345",
+                    global_user_id="global-user-abc-123",
+                    is_gitlab_team_member=False,
+                )
+            )
+
+            client.track_billing_event(
+                user=user,
+                event_type="ai_completion",
+                category="test",
+                unit_of_measure="tokens",
+                quantity=100.0,
+            )
+
+            event_args = mock_dependencies["structured_event_init"].call_args[1]
+            subject = event_args["context"][0].data["subject"]
+
+            # Subject should be the user_id for non-team members regardless of the flag
+            assert subject == "12345"
