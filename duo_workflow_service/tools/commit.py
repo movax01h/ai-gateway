@@ -103,8 +103,19 @@ class CommitBaseTool(DuoBaseTool):
 
     async def _get_default_branch(self, project_id: str) -> Optional[str]:
         """Fetch default branch name for a project."""
-        project_info = await self.gitlab_client.aget(f"/api/v4/projects/{project_id}")
-        return project_info.get("default_branch")
+        response = await self.gitlab_client.aget(f"/api/v4/projects/{project_id}")
+
+        if not response.is_success():
+            logger.error(
+                "API error - Status: %s, Body: %s",
+                response.status_code,
+                response.body,
+            )
+            raise ToolException(
+                f"GitLab API error in _get_default_branch: {response.status_code}"
+            )
+
+        return response.body.get("default_branch")
 
     async def _get_file_content(self, project_id: str, ref: str, file_path: str) -> str:
         """Fetch file content from GitLab and decode it."""

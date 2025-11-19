@@ -1502,7 +1502,7 @@ async def test_create_commit_branch_params_auto_branch(
     commit_data,
 ):
     """Covers new branch creation logic (no branch param provided)."""
-    gitlab_client_mock.aget = AsyncMock(return_value=project_info or {})
+    gitlab_client_mock.aget = AsyncMock(return_value=create_http_response(project_info))
     gitlab_client_mock.apost = AsyncMock(return_value=create_http_response(commit_data))
 
     with patch("duo_workflow_service.tools.commit.datetime") as mock_datetime:
@@ -1569,7 +1569,7 @@ async def test_partial_edit_auto_branch_fetches_from_default_branch(
 ):
     gitlab_client_mock.aget = AsyncMock(
         side_effect=[
-            {"default_branch": "main"},
+            create_http_response({"default_branch": "main"}),
             create_http_response(file_content_response),
         ]
     )
@@ -1695,7 +1695,7 @@ async def test_create_commit_nonexistent_branch_uses_default_branch(
     gitlab_client_mock.aget = AsyncMock(
         side_effect=[
             branch_not_found_response,
-            project_info_response,
+            create_http_response(project_info_response),
         ]
     )
     gitlab_client_mock.apost = AsyncMock(return_value=create_http_response(commit_data))
