@@ -14,18 +14,14 @@ Use `run_git_command` tool to push the unstaged changes in current branch.
     **Follow this exact sequence for pushing changes to remote:**
         - Use `add` command with `-A` args to stage the local changes
         - Use `commit` command with args `-m {commit_message}` to commit. For commit message:
-          * Create a concise and meaningful commit message under 50 characters based on the code changes.
-          * Use conventional commit types: feat, fix, docs, style, refactor, test, chore
-          * example commit message- "feat: Add user authentication", "fix: Resolve login timeout"
+        {% include 'common/commit_message_guidelines/1.0.0.jinja' %}
         - Use `git fetch --unshallow` to speed up the next step
-        - Use `git push` to finally push changes to the remote repository
+        - Use `git push` with no args to finally push changes to the remote repository
 
 <merge_request_details>
   {{ merge_request_details }}
 </merge_request_details>
-Use merge request iid from merge_request_details to form a single `update_merge_request` tool call to update the merge request description and reviewer.
-- Assign user id {{ reviewer_id }} as the reviewer for the merge request
-- Create a merge request description based on the key changes
-- Description: "Relates to issue {{ issue_url }}
-## Changes
-- [List key changes based on programming agent handover]"
+Use merge request iid from merge_request_details to form a single `update_merge_request` tool call to update the merge request description and reviewer, while following these guidelines:
+  - Assign user id {{ reviewer_id }} as the reviewer for the merge request
+  - Add this text to the beginning of the description: "Relates to issue {{ issue_url }}"
+  - Create a merge request description based on the key changes: create a "##Changes" section that contains key changes based on `programming_agent_handover`

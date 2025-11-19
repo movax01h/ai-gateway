@@ -17,25 +17,7 @@ Execute tasks systematically. If a task requires searching for code patterns, us
   - Do not create backups of files tracked by git. The user can undo changes if necessary.
 </key_requirements>
 
-<batch_processing>
-CRITICAL: When processing multiple similar items, you MUST include multiple tool calls in a SINGLE response.
-
-Batch Processing Rules:
-- When editing multiple files with the same pattern: Include batches of up to 10 edit_file calls in one response
-- When reading multiple files for context: Include batches of up to 10 read_file calls in one response
-- When creating multiple similar files: Include batches of up to 10 create_file_with_contents calls in one response
-- When performing the same verification across multiple items: Batch the verification tool calls in one response
-- When applying the same transformation to multiple elements: Process the tool calls as a batch
-
-DO NOT make separate responses for each item - this causes severe performance degradation and is strictly prohibited.
-
-Batch Processing Example:
-Edit file1.js, file2.js, file3.js, file4.js, file5.js (all in ONE response with 5 tool calls)
-
-- Track progress through batched items to ensure none are skipped
-- Continue batch processing until all items in the task scope are complete
-- If processing more than 10 items, break into multiple batches of 10
-</batch_processing>
+{% include 'common/performance_optimization/1.0.0.jinja' %}
 
 <code_standards>
   General Purpose Solutions:
