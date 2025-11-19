@@ -155,13 +155,6 @@ class BuildReviewMergeRequestContext(DuoBaseTool):
         diffs_data = await self._fetch_mr_diffs(validation_result)
         diffs_and_paths, modified_files = self._process_filtered_diffs(diffs_data)
 
-        # If only_diffs is True, skip fetching original files and custom instructions
-        if only_diffs:
-            return {
-                "mr_data": mr_data,
-                "diffs_and_paths": diffs_and_paths,
-            }
-
         # Get all diff file paths for instruction matching
         diff_file_paths = list(diffs_and_paths.keys())
 
@@ -170,13 +163,21 @@ class BuildReviewMergeRequestContext(DuoBaseTool):
         if not target_branch:
             raise ValueError("Target branch not found in merge request data")
 
-        files_content = await self._fetch_original_files(
-            validation_result.project_id, target_branch, modified_files
-        )
-
         # Get custom instructions filtered by matching files
         custom_instructions = await self._get_custom_instructions(
-            validation_result.project_id, target_branch, files_content, diff_file_paths
+            validation_result.project_id, target_branch, diff_file_paths
+        )
+
+        # If only_diffs is True, skip fetching original files and custom instructions
+        if only_diffs:
+            return {
+                "mr_data": mr_data,
+                "diffs_and_paths": diffs_and_paths,
+                "custom_instructions": custom_instructions,
+            }
+
+        files_content = await self._fetch_original_files(
+            validation_result.project_id, target_branch, modified_files
         )
 
         return {
@@ -310,19 +311,12 @@ class BuildReviewMergeRequestContext(DuoBaseTool):
         self,
         project_id: int,
         branch: str,
-        files_content: Dict[str, str],
         diff_file_paths: List[str],
     ) -> List[Dict[str, Any]]:
         """Get custom instructions filtered by matching file paths."""
-        instructions_path = ".gitlab/duo/mr-review-instructions.yaml"
-        instructions_content: Optional[str]
-        # Check if instructions file is in the diff
-        if instructions_path in files_content:
-            instructions_content = files_content[instructions_path]
-        else:
-            instructions_content = await self._fetch_custom_instructions_file(
-                project_id, branch
-            )
+        instructions_content = await self._fetch_custom_instructions_file(
+            project_id, branch
+        )
 
         all_instructions = self._parse_custom_instructions(instructions_content)
         return self._filter_matching_instructions(all_instructions, diff_file_paths)

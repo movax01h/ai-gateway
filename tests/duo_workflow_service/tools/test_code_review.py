@@ -266,8 +266,8 @@ async def test_build_review_context_basic_success(
         side_effect=[
             GitLabHttpResponse(status_code=200, body=json.dumps(mr_data)),
             GitLabHttpResponse(status_code=200, body=json.dumps(diffs_data)),
-            GitLabHttpResponse(status_code=200, body=json.dumps(original_file_content)),
             Exception("Custom instructions not found"),
+            GitLabHttpResponse(status_code=200, body=json.dumps(original_file_content)),
         ]
     )
     tool = BuildReviewMergeRequestContext(metadata=metadata)
@@ -308,6 +308,9 @@ async def test_build_review_context_only_diffs(
         side_effect=[
             GitLabHttpResponse(status_code=200, body=json.dumps(mr_data)),
             GitLabHttpResponse(status_code=200, body=json.dumps(diffs_data)),
+            GitLabHttpResponse(
+                status_code=404, body=json.dumps({"message": "404 Not Found"})
+            ),
         ]
     )
     tool = BuildReviewMergeRequestContext(metadata=metadata)
@@ -327,7 +330,57 @@ async def test_build_review_context_only_diffs(
 
     assert "<original_files>" not in response
     assert "<custom_instructions>" not in response
-    assert gitlab_client_mock.aget.call_count == 2
+    assert gitlab_client_mock.aget.call_count == 3
+
+
+@pytest.mark.asyncio
+@patch("yaml.safe_load")
+async def test_build_review_context_only_diffs_with_custom_instructions(
+    mock_yaml_load,
+    gitlab_client_mock,
+    metadata,
+    mr_data,
+    diffs_data,
+    custom_instructions_yaml,
+):
+    """Test that custom instructions are included when only_diffs=True."""
+    mock_yaml_load.return_value = {
+        "instructions": [
+            {
+                "name": "Ruby Code Quality",
+                "fileFilters": ["*.rb"],
+                "instructions": "1. Ensure proper error handling\n2. Follow Ruby naming conventions",
+            }
+        ]
+    }
+
+    gitlab_client_mock.aget = AsyncMock(
+        side_effect=[
+            GitLabHttpResponse(status_code=200, body=json.dumps(mr_data)),
+            GitLabHttpResponse(status_code=200, body=json.dumps(diffs_data)),
+            GitLabHttpResponse(
+                status_code=200, body=json.dumps(custom_instructions_yaml)
+            ),
+        ]
+    )
+
+    tool = BuildReviewMergeRequestContext(metadata=metadata)
+    response = await tool._arun(
+        project_id="test%2Fproject", merge_request_iid=123, only_diffs=True
+    )
+
+    # Should include custom instructions
+    assert "<custom_instructions>" in response
+    assert "Ruby Code Quality" in response
+
+    # Should NOT include original files
+    assert "<original_files>" not in response
+
+    # Should include diffs
+    assert '<file_diff filename="calculator.rb">' in response
+
+    # Verify only 3 API calls (MR data, diffs, custom instructions)
+    assert gitlab_client_mock.aget.call_count == 3
 
 
 @pytest.mark.asyncio
@@ -346,8 +399,8 @@ async def test_build_review_context_skips_large_files(
         side_effect=[
             GitLabHttpResponse(status_code=200, body=json.dumps(mr_data)),
             GitLabHttpResponse(status_code=200, body=json.dumps(diffs_data)),
-            GitLabHttpResponse(status_code=200, body=json.dumps(large_file_encoded)),
             Exception("Custom instructions not found"),
+            GitLabHttpResponse(status_code=200, body=json.dumps(large_file_encoded)),
         ]
     )
     tool = BuildReviewMergeRequestContext(metadata=metadata)
@@ -383,10 +436,10 @@ async def test_build_review_context_with_custom_instructions(
         side_effect=[
             GitLabHttpResponse(status_code=200, body=json.dumps(mr_data)),
             GitLabHttpResponse(status_code=200, body=json.dumps(diffs_data)),
-            GitLabHttpResponse(status_code=200, body=json.dumps(original_file_content)),
             GitLabHttpResponse(
                 status_code=200, body=json.dumps(custom_instructions_yaml)
             ),
+            GitLabHttpResponse(status_code=200, body=json.dumps(original_file_content)),
         ]
     )
     tool = BuildReviewMergeRequestContext(metadata=metadata)
@@ -412,8 +465,8 @@ async def test_build_review_context_with_url(
         side_effect=[
             GitLabHttpResponse(status_code=200, body=json.dumps(mr_data)),
             GitLabHttpResponse(status_code=200, body=json.dumps(diffs_data)),
-            GitLabHttpResponse(status_code=200, body=json.dumps(original_file_content)),
             Exception("Custom instructions not found"),
+            GitLabHttpResponse(status_code=200, body=json.dumps(original_file_content)),
         ]
     )
     tool = BuildReviewMergeRequestContext(metadata=metadata)
@@ -452,10 +505,10 @@ async def test_build_review_context_no_matching_custom_instructions(
         side_effect=[
             GitLabHttpResponse(status_code=200, body=json.dumps(mr_data)),
             GitLabHttpResponse(status_code=200, body=json.dumps(diffs_data)),
-            GitLabHttpResponse(status_code=200, body=json.dumps(original_file_content)),
             GitLabHttpResponse(
                 status_code=200, body=json.dumps(custom_instructions_yaml)
             ),
+            GitLabHttpResponse(status_code=200, body=json.dumps(original_file_content)),
         ]
     )
     tool = BuildReviewMergeRequestContext(metadata=metadata)
@@ -510,11 +563,11 @@ async def test_build_review_context_nested_vs_root_patterns(
         side_effect=[
             GitLabHttpResponse(status_code=200, body=json.dumps(mr_data)),
             GitLabHttpResponse(status_code=200, body=json.dumps(nested_diffs_data)),
-            GitLabHttpResponse(status_code=200, body=json.dumps(original_file_content)),
-            GitLabHttpResponse(status_code=200, body=json.dumps(original_file_content)),
             GitLabHttpResponse(
                 status_code=200, body=json.dumps(custom_instructions_yaml)
             ),
+            GitLabHttpResponse(status_code=200, body=json.dumps(original_file_content)),
+            GitLabHttpResponse(status_code=200, body=json.dumps(original_file_content)),
         ]
     )
     tool = BuildReviewMergeRequestContext(metadata=metadata)
