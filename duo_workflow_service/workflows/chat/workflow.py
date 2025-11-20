@@ -204,12 +204,6 @@ class Workflow(AbstractWorkflow):
         match status_event:
             case WorkflowStatusEventEnum.START:
                 return self.get_workflow_state(goal)
-            case WorkflowStatusEventEnum.RETRY:
-                if checkpoint_tuple is None:
-                    return self.get_workflow_state(
-                        goal
-                    )  # no saved checkpoints from last run
-                return None  # retry from last checkpoint
             case _:
                 state_update: dict[str, Any] = {
                     "status": WorkflowStatusEnum.EXECUTION,
