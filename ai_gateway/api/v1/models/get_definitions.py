@@ -1,3 +1,5 @@
+from typing import Any
+
 from fastapi import APIRouter, status
 from gitlab_cloud_connector import GitLabUnitPrimitive
 from pydantic import BaseModel
@@ -22,6 +24,7 @@ class _GetModelResponseUnitPrimitive(BaseModel):
     default_model: str
     selectable_models: list[str]
     beta_models: list[str]
+    dev: dict[str, Any] | None = None
     unit_primitives: list[GitLabUnitPrimitive]
 
 

@@ -164,16 +164,20 @@ Each Unit Primitive can be configured with:
 - A default model
 - A set of selectable models
 - Beta models available for testing
+- Developer-only models (restricted to specific groups)
 
-Unit primitive groups are defined in `ai_gateway/model_selection/unit_primitives.yml` and the following properties are
-available:
+Unit primitive groups are defined in `ai_gateway/model_selection/unit_primitives.yml` and the following properties are available:
 
-- feature_setting: An identifier used to refer to the feature name
-- unit_primitives: the list of unit primitives that belong to this group, as defined in
+- `feature_setting`: An identifier used to refer to the feature name
+- `unit_primitives`: the list of unit primitives that belong to this group, as defined in
   the [cloud_connector](https://gitlab.com/gitlab-org/cloud-connector/gitlab-cloud-connector/-/blob/main/src/python/gitlab_cloud_connector/gitlab_features.py#L19)
-- default_model: the `gitlab_identifier` of the model that is used if the user has not selected a different model
-- selectable_models: a list of `gitlab_identifier` for the models that the user can select from
-- beta_models: a list of models that are not fully supported but users can select from
+- `default_model`: the `gitlab_identifier` of the model that is used if the user has not selected a different model
+- `selectable_models`: a list of `gitlab_identifier` for the models that the user can select from
+- `beta_models`: a list of models that are not fully supported but users can select from
+- `dev`: optional nested configuration for developer-only models with the following fields:
+  - `default_model`: default model for users in the developer groups (must be in developer `selectable_models`). If specified, this field overrides the value of `default_model` from regular models.
+  - `selectable_models`: models only visible to users in groups specified by `group_ids`
+  - `group_ids`: GitLab group IDs that can access the developer models (e.g., `[9970]` for `gitlab-org`)
 
 Example:
 
@@ -185,6 +189,24 @@ configurable_unit_primitives:
       - "ask_commit"
     default_model: "claude_sonnet_3_7_20250219"
     selectable_models:
-      - "claude-3-7-sonnet-20250219"
+      - "claude_sonnet_3_7_20250219"
       - "claude_3_5_sonnet_20240620"
-```
+    dev:
+      default_model: "claude_sonnet_4_5_20250929"
+      selectable_models:
+        - "claude_sonnet_4_5_20250929"
+        - "claude_haiku_4_5_20251001"
+      group_ids:
+        - 9970
+  ```
+
+## Developer models
+
+The `dev` configuration allows you to test experimental models with internal team members before rolling them out to everyone. This is useful when you want to validate a new model internally without exposing customers to potential issues.
+
+The AI Gateway validates these fields at startup:
+
+- If you set `dev.selectable_models`, you must also specify at least one group in `dev.group_ids`. This prevents accidentally making "internal-only" models available to everyone.
+- If you set `dev.default_model`, it must be one of the models specified in `dev.selectable_models`.
+
+The actual access control happens in the client (GitLab Rails), which checks whether the user belongs to any of the groups in `dev.group_ids`. Users in those groups see both the regular and developer models, while everyone else only sees the regular ones.

@@ -110,24 +110,39 @@ def test_get_models_returns_correct_data(mock_model_config, client):
         "deprecation": {"deprecation_date": "2025-10-28", "removal_version": "18.8"},
         "description": None,
     }
-    assert data["unit_primitives"][0] == {
+
+    resp0 = data["unit_primitives"][0]
+    expected0 = {
         "feature_setting": "config1",
         "unit_primitives": ["ask_issue", "ask_epic"],
         "default_model": "model1",
         "selectable_models": ["model1", "model2"],
         "beta_models": [],
     }
-    assert data["unit_primitives"][1] == {
+    # subset match for dict keys/values (tolerates dev_* extras)
+    assert expected0.items() <= resp0.items()
+    assert set(resp0["unit_primitives"]) == set(expected0["unit_primitives"])
+
+    resp1 = data["unit_primitives"][1]
+    expected1 = {
         "feature_setting": "config2",
         "unit_primitives": ["duo_chat"],
         "default_model": "model2",
         "selectable_models": ["model2"],
         "beta_models": ["model1"],
     }
-    assert data["unit_primitives"][2] == {
+
+    assert expected1.items() <= resp1.items()
+    assert set(resp1["unit_primitives"]) == set(expected1["unit_primitives"])
+
+    resp2 = data["unit_primitives"][2]
+    expected2 = {
         "feature_setting": "config3",
         "unit_primitives": ["duo_chat"],
         "default_model": "model3",
         "selectable_models": ["model3"],
         "beta_models": [],
     }
+    # subset match for dict keys/values (tolerates dev_* extras)
+    assert expected2.items() <= resp2.items()
+    assert set(resp2["unit_primitives"]) == set(expected2["unit_primitives"])
