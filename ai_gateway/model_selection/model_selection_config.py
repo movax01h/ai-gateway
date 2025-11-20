@@ -25,12 +25,23 @@ class LLMDefinition(BaseModel):
     deprecation: Optional[DeprecationInfo] = None
 
 
+class DevConfig(BaseModel):
+    """Configuration for developer-only models."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    default_model: str | None = None
+    selectable_models: list[str] = []
+    group_ids: list[int] = []
+
+
 class UnitPrimitiveConfig(BaseModel):
     feature_setting: str
     unit_primitives: list[GitLabUnitPrimitive]
     default_model: str
     selectable_models: list[str] = []
     beta_models: list[str] = []
+    dev: DevConfig | None = None
 
 
 class ModelSelectionConfig:
@@ -86,12 +97,18 @@ class ModelSelectionConfig:
 
         errors: set[str] = set()
         default_model_not_selectable_errors: list[str] = []
+        dev_models_validation_errors: list[str] = []
 
         for unit_primitive_config in unit_primitive_configs:
             ids = chain(
                 [unit_primitive_config.default_model],
                 unit_primitive_config.selectable_models,
                 unit_primitive_config.beta_models,
+                (
+                    unit_primitive_config.dev.selectable_models
+                    if unit_primitive_config.dev
+                    else []
+                ),
             )
 
             errors.update(model_id for model_id in ids if model_id not in models_ids)
@@ -106,6 +123,23 @@ class ModelSelectionConfig:
                     f"'{unit_primitive_config.default_model}' that is not in selectable_models."
                 )
 
+            if unit_primitive_config.dev:
+                dev_default = unit_primitive_config.dev.default_model
+                dev_selectable = unit_primitive_config.dev.selectable_models
+                dev_groups = unit_primitive_config.dev.group_ids
+                # Validate that the dev_default_model is also included in dev_selectable_models
+                if dev_default and dev_default not in dev_selectable:
+                    dev_models_validation_errors.append(
+                        f"Feature '{unit_primitive_config.feature_setting}' has a developer default model "
+                        f"'{dev_default}' that is not in dev selectable_models."
+                    )
+                # Validate that dev_selectable_models has at least a dev group ID specified
+                if dev_selectable and not dev_groups:
+                    dev_models_validation_errors.append(
+                        f"Feature '{unit_primitive_config.feature_setting}' has dev selectable_models "
+                        f"but group_ids is empty. Specify at least one group ID."
+                    )
+
         error_messages = []
         if errors:
             error_messages.append(
@@ -118,6 +152,12 @@ class ModelSelectionConfig:
                 + "\n".join(
                     f"  - {error}" for error in default_model_not_selectable_errors
                 )
+            )
+
+        if dev_models_validation_errors:
+            error_messages.append(
+                "Developer-only models contain certain errors:\n"
+                + "\n".join(f"  - {error}" for error in dev_models_validation_errors)
             )
 
         if error_messages:
