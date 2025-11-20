@@ -3,6 +3,8 @@ from typing import Any, Optional, Type
 
 import structlog
 from gitlab_cloud_connector import GitLabUnitPrimitive
+from langchain_core.tools import ToolException
+from lxml import etree
 from pydantic import BaseModel, Field
 
 from duo_workflow_service.tools.duo_base_tool import (
@@ -17,17 +19,20 @@ from duo_workflow_service.tools.merge_request import (
 
 log = structlog.stdlib.get_logger("workflow")
 
+MAX_LOG_PAGES_FOR_PIPELINE = 20
+MAX_JOBS_RETURNED = 20
 
-class GetPipelineErrorsInput(ProjectResourceInput):
+
+class GetPipelineFailingJobsInput(ProjectResourceInput):
     merge_request_iid: Optional[int] = Field(
         default=None,
         description="The IID of the merge request. Required if URL is not provided.",
     )
 
 
-class GetPipelineErrors(DuoBaseTool):
-    name: str = "get_pipeline_errors"
-    description: str = f"""Get the logs for failed jobs in a pipeline.
+class GetPipelineFailingJobs(DuoBaseTool):
+    name: str = "get_pipeline_failing_jobs"
+    description: str = f"""Get the IDs for failed jobs in a pipeline.
     You can use this tool by passing in a merge request to get the failing jobs in the
     latest pipeline. You can also use this tool by identifying a pipeline directly.
     This tool can be used when you have a project_id and merge_request_iid.
@@ -44,21 +49,21 @@ class GetPipelineErrors(DuoBaseTool):
 
     For example:
     - Given project_id 13 and merge_request_iid 9, the tool call would be:
-        get_pipeline_errors(project_id=13, merge_request_iid=9)
+        get_pipeline_failing_jobs(project_id=13, merge_request_iid=9)
     - Given a merge request URL https://gitlab.com/namespace/project/-/merge_requests/103, the tool call would be:
-        get_pipeline_errors(url="https://gitlab.com/namespace/project/-/merge_requests/103")
+        get_pipeline_failing_jobs(url="https://gitlab.com/namespace/project/-/merge_requests/103")
     - Given a pipeline URL https://gitlab.com/namespace/project/-/pipelines/33, the tool call would be:
-        get_pipeline_errors(url="https://gitlab.com/namespace/project/-/pipelines/33")
+        get_pipeline_failing_jobs(url="https://gitlab.com/namespace/project/-/pipelines/33")
     """
-    args_schema: Type[BaseModel] = GetPipelineErrorsInput
+    args_schema: Type[BaseModel] = GetPipelineFailingJobsInput
 
     unit_primitive: GitLabUnitPrimitive = GitLabUnitPrimitive.ASK_MERGE_REQUEST
 
-    async def _execute(  # pylint: disable=too-many-return-statements,too-many-branches
+    async def _execute(  # pylint: disable=too-many-return-statements
         self, **kwargs: Any
     ) -> str:
         url = kwargs.get("url", None)
-        project_id = kwargs.get("project_id", None)
+        project_id = kwargs.get("project_id")
         merge_request_iid = kwargs.get("merge_request_iid", None)
 
         pipeline_id = None
@@ -66,141 +71,136 @@ class GetPipelineErrors(DuoBaseTool):
         validation_result: Optional[
             MergeRequestValidationResult | PipelineValidationResult
         ] = None
-        try:
-            if url and "/-/pipelines/" in url:
-                validation_result = self._validate_pipeline_url(url)
+        if url and "/-/pipelines/" in url:
+            validation_result = self._validate_pipeline_url(url)
 
-                if validation_result.errors:
-                    return json.dumps({"error": "; ".join(validation_result.errors)})
+            if validation_result.errors:
+                return json.dumps({"error": "; ".join(validation_result.errors)})
 
-                pipeline_id = validation_result.pipeline_iid
-            else:
-                validation_result = self._validate_merge_request_url(
-                    url, project_id, merge_request_iid
-                )
-
-                if validation_result.errors:
-                    return json.dumps({"error": "; ".join(validation_result.errors)})
-
-                merge_request_response = await self.gitlab_client.aget(
-                    path=f"/api/v4/projects/{validation_result.project_id}/merge_requests/"
-                    f"{validation_result.merge_request_iid}",
-                )
-
-                if merge_request_response.status_code == 404:
-                    return json.dumps(
-                        {
-                            "error": f"Merge request with iid {validation_result.merge_request_iid} not found"
-                        }
-                    )
-
-                if not merge_request_response.is_success():
-                    error_str = (
-                        f"Failed to fetch merge request: status_code={merge_request_response.status_code}, "
-                        f"response={merge_request_response.body}"
-                    )
-                    log.error(error_str)
-                    return json.dumps({"error": error_str})
-
-                merge_request = merge_request_response.body
-
-                pipelines_response = await self.gitlab_client.aget(
-                    path=f"/api/v4/projects/{validation_result.project_id}/merge_requests/"
-                    f"{validation_result.merge_request_iid}/pipelines",
-                )
-
-                if not pipelines_response.is_success():
-                    error_str = (
-                        f"Failed to fetch pipelines: status_code={pipelines_response.status_code}, "
-                        f"response={pipelines_response.body}"
-                    )
-                    log.error(error_str)
-                    return json.dumps({"error": error_str})
-
-                pipelines = pipelines_response.body
-
-                if not isinstance(pipelines, list) or len(pipelines) == 0:
-                    return json.dumps(
-                        {
-                            "error": f"No pipelines found for merge request iid {validation_result.merge_request_iid}"
-                        }
-                    )
-
-                last_pipeline = pipelines[0]
-                pipeline_id = last_pipeline["id"]
-
-            next_page = "1"
-            page_count = 0
-            max_pages = 20
-            traces = "Failed Jobs:\n<jobs>\n"
-            while next_page and page_count < max_pages:
-                page_count += 1
-                jobs_response = await self.gitlab_client.aget(
-                    path=f"/api/v4/projects/{validation_result.project_id}/pipelines/{pipeline_id}"
-                    f"/jobs?per_page=100&page={next_page}",
-                )
-
-                if not jobs_response.is_success():
-                    error_str = (
-                        f"Failed to fetch jobs: status_code={jobs_response.status_code}, "
-                        f"response={jobs_response.body}"
-                    )
-                    log.error(error_str)
-                    return json.dumps({"error": error_str})
-
-                jobs = jobs_response.body
-                if not isinstance(jobs, list):
-                    return json.dumps(
-                        {
-                            "error": f"Failed to fetch jobs for pipeline {pipeline_id}: {jobs}"
-                        }
-                    )
-
-                for job in jobs:
-                    if job["status"] == "failed":
-                        job_name = job["name"]
-                        job_id = job["id"]
-                        job_trace = await self._get_log_for_job_id(
-                            validation_result.project_id, job_id  # type: ignore[arg-type]
-                        )
-                        traces += (
-                            f"<job>\n"
-                            f"  <job_name>{job_name}</job_name>\n"
-                            f"  <job_id>{job_id}</job_id>\n"
-                            f"  <job_trace>{job_trace}</job_trace>\n"
-                            f"</job>\n"
-                        )
-                next_page = jobs_response.headers.get("X-Next-Page", "")
-            traces += "</jobs>\n"
-
-            if merge_request:
-                return json.dumps({"merge_request": merge_request, "traces": traces})
-
-            return json.dumps({"pipeline_id": pipeline_id, "traces": traces})
-        except Exception as e:
-            return json.dumps({"error": str(e)})
-
-    async def _get_log_for_job_id(self, project_id: str, job_id: str) -> str:
-        try:
-            trace_response = await self.gitlab_client.aget(
-                path=f"/api/v4/projects/{project_id}/jobs/{job_id}/trace",
-                parse_json=False,
+            pipeline_id = validation_result.pipeline_iid
+        else:
+            validation_result = self._validate_merge_request_url(
+                url, project_id, merge_request_iid
             )
-            if not trace_response.is_success():
+
+            if validation_result.errors:
+                return json.dumps({"error": "; ".join(validation_result.errors)})
+
+            merge_request_response = await self.gitlab_client.aget(
+                path=f"/api/v4/projects/{validation_result.project_id}/merge_requests/"
+                f"{validation_result.merge_request_iid}",
+            )
+
+            if merge_request_response.status_code == 404:
+                return json.dumps(
+                    {
+                        "error": f"Merge request with iid {validation_result.merge_request_iid} not found"
+                    }
+                )
+
+            if not merge_request_response.is_success():
                 error_str = (
-                    f"Failed to fetch job trace: status_code={trace_response.status_code}, "
-                    f"response={trace_response.body}"
+                    f"Failed to fetch merge request: status_code={merge_request_response.status_code}, "
+                    f"response={merge_request_response.body}"
                 )
                 log.error(error_str)
-                return f"Error fetching trace: {error_str}"
+                return json.dumps({"error": error_str})
 
-            return trace_response.body
-        except Exception as e:
-            return f"Error fetching trace: {str(e)}"
+            merge_request = merge_request_response.body
+
+            pipelines_response = await self.gitlab_client.aget(
+                path=f"/api/v4/projects/{validation_result.project_id}/merge_requests/"
+                f"{validation_result.merge_request_iid}/pipelines",
+            )
+
+            if not pipelines_response.is_success():
+                error_str = (
+                    f"Failed to fetch pipelines: status_code={pipelines_response.status_code}, "
+                    f"response={pipelines_response.body}"
+                )
+                log.error(error_str)
+                return json.dumps({"error": error_str})
+
+            pipelines = pipelines_response.body
+
+            if not isinstance(pipelines, list) or len(pipelines) == 0:
+                return json.dumps(
+                    {
+                        "error": f"No pipelines found for merge request iid {validation_result.merge_request_iid}"
+                    }
+                )
+
+            last_pipeline = pipelines[0]
+            pipeline_id = last_pipeline["id"]
+
+        failing_jobs = await self._get_failing_jobs(
+            validation_result.project_id, pipeline_id
+        )
+        if len(failing_jobs) > MAX_JOBS_RETURNED:
+            failing_jobs = failing_jobs[:MAX_JOBS_RETURNED]
+
+        if len(failing_jobs) == 0:
+            return json.dumps({"error": "No Failing Jobs Found."})
+
+        xml_root = etree.Element("jobs")
+        for job in failing_jobs:
+            xml_job = etree.SubElement(xml_root, "job")
+            job_id = job["id"]
+            job_name = job["name"]
+
+            job_name_elem = etree.SubElement(xml_job, "job_name")
+            job_name_elem.text = job_name
+
+            job_id_elem = etree.SubElement(xml_job, "job_id")
+            job_id_elem.text = str(job_id)
+
+        failed_jobs_str = "Failed Jobs:\n" + etree.tostring(
+            xml_root, pretty_print=True, encoding="unicode"
+        )
+
+        if merge_request:
+            return json.dumps(
+                {"merge_request": merge_request, "failed_jobs": failed_jobs_str}
+            )
+
+        return json.dumps({"pipeline_id": pipeline_id, "failed_jobs": failed_jobs_str})
+
+    async def _get_failing_jobs(
+        self, project_id: str | None, pipeline_id: int | None
+    ) -> list[dict]:
+        next_page = "1"
+        page_count = 0
+        failing_jobs: list[dict] = []
+        while next_page and page_count < MAX_LOG_PAGES_FOR_PIPELINE:
+            page_count += 1
+            jobs_response = await self.gitlab_client.aget(
+                path=f"/api/v4/projects/{project_id}/pipelines/{pipeline_id}"
+                f"/jobs?per_page=100&page={next_page}",
+            )
+
+            if not jobs_response.is_success():
+                error_str = (
+                    f"Failed to fetch jobs: status_code={jobs_response.status_code}, "
+                    f"response={jobs_response.body}"
+                )
+                raise ToolException(error_str)
+
+            jobs = jobs_response.body
+            if not isinstance(jobs, list):
+                raise ToolException(
+                    f"Failed to fetch jobs for pipeline {pipeline_id}: {jobs}"
+                )
+            for job in jobs:
+                if job["status"] == "failed":
+                    failing_jobs.append(job)
+
+            next_page = jobs_response.headers.get("X-Next-Page", "")
+
+        return failing_jobs
 
     def format_display_message(
-        self, args: GetPipelineErrorsInput, _tool_response: Any = None
+        self, args: GetPipelineFailingJobsInput, _tool_response: Any = None
     ) -> str:
         if args.url:
-            return f"Get pipeline error logs for {args.url}"
-        return f"Get pipeline error logs for merge request !{args.merge_request_iid} in project {args.project_id}"
+            return f"Get pipeline failing jobs for {args.url}"
+        return f"Get pipeline failing jobs for merge request !{args.merge_request_iid} in project {args.project_id}"

@@ -81,6 +81,7 @@ h11 = "^0.16.0"
 urllib3 = "^2.5.0"
 cryptography = "^43.0.1"
 aiocache = "^0.12.3"
+lxml = "^6.0.2"
 
 [[tool.poetry.source]]
 name = "gitlab_cloud_connector"
@@ -179,7 +180,7 @@ omit = [
 profile = "black"
 
 [tool.pylint.main]
-extension-pkg-allow-list = ["dependency_injector"]
+extension-pkg-allow-list = ["dependency_injector", "lxml"]
 # Exclude protobuf packages because they can't be parsed properly by pylint, leading to `no-name-in-module` errors.
 # See https://github.com/protocolbuffers/protobuf/issues/10372
 ignored-modules=["contract.contract_pb2", "google.protobuf.struct_pb2", "google.rpc.error_details_pb2"]
