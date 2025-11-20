@@ -4,8 +4,8 @@ import pytest
 
 from duo_workflow_service.interceptors.mcp_server_tools_interceptor import (
     McpServerToolsInterceptor,
-    current_mcp_server_tools_context,
 )
+from lib.mcp_server_tools.context import current_mcp_server_tools_context
 
 
 @pytest.fixture(name="reset_context")
