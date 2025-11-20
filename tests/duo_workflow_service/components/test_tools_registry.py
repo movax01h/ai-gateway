@@ -24,6 +24,7 @@ from duo_workflow_service.tools.findings.get_security_finding_details import (
 from duo_workflow_service.tools.findings.list_security_findings import (
     ListSecurityFindings,
 )
+from duo_workflow_service.tools.gitlab_api_generic import GitLabApiGet, GitLabGraphQL
 from duo_workflow_service.tools.mcp_tools import (
     convert_mcp_tools_to_langchain_tool_classes,
 )
@@ -34,13 +35,6 @@ from duo_workflow_service.tools.vulnerabilities.post_sast_fp_analysis_to_gitlab 
     PostSastFpAnalysisToGitlab,
 )
 from duo_workflow_service.tools.wiki import GetWikiPage
-from duo_workflow_service.tools.work_item import (
-    GetWorkItem,
-    GetWorkItemNotes,
-    ListWorkItems,
-)
-from lib.feature_flags import current_feature_flag_context
-from lib.language_server import LanguageServerVersion
 
 
 @pytest.fixture(name="gl_http_client")
@@ -147,6 +141,8 @@ _outbox = MagicMock(spec=Outbox)
                 "get_security_finding_details",
                 "list_security_findings",
                 "get_wiki_page",
+                "gitlab_api_get",
+                "gitlab_graphql",
             },
         ),
         (
@@ -226,6 +222,8 @@ _outbox = MagicMock(spec=Outbox)
                 "get_security_finding_details",
                 "list_security_findings",
                 "get_wiki_page",
+                "gitlab_api_get",
+                "gitlab_graphql",
             },
         ),
         (
@@ -415,6 +413,8 @@ def test_registry_initialization_initialises_tools_with_correct_attributes(
         ),
         "list_security_findings": ListSecurityFindings(metadata=tool_metadata),
         "get_wiki_page": GetWikiPage(metadata=tool_metadata),
+        "gitlab_api_get": GitLabApiGet(metadata=tool_metadata),
+        "gitlab_graphql": GitLabGraphQL(metadata=tool_metadata),
     }
 
     assert registry._enabled_tools == expected_tools
@@ -759,3 +759,69 @@ def test_toolset_method(
             pre_approved=expected_preapproved, all_tools=expected_all_tools
         )
         assert toolset == mock_toolset
+
+
+# Tests for Generic GitLab API Tools
+
+
+class TestGenericGitLabAPITools:
+    """Tests for generic GitLab API tools integration with ToolsRegistry."""
+
+    def test_generic_tools_available_with_gitlab_privileges(self, tool_metadata):
+        """Test that generic tools are available when GitLab privileges are enabled."""
+        registry = ToolsRegistry(
+            enabled_tools=["read_only_gitlab"],
+            preapproved_tools=[],
+            tool_metadata=tool_metadata,
+        )
+
+        # Verify generic tools are present
+        assert "gitlab_api_get" in registry._enabled_tools
+        assert "gitlab_graphql" in registry._enabled_tools
+        assert isinstance(registry._enabled_tools["gitlab_api_get"], GitLabApiGet)
+        assert isinstance(registry._enabled_tools["gitlab_graphql"], GitLabGraphQL)
+
+    def test_generic_tools_not_available_without_gitlab_privileges(self, tool_metadata):
+        """Test that generic tools are NOT available without GitLab privileges."""
+        registry = ToolsRegistry(
+            enabled_tools=["read_write_files"],
+            preapproved_tools=[],
+            tool_metadata=tool_metadata,
+        )
+
+        # Verify generic tools are NOT present
+        assert "gitlab_api_get" not in registry._enabled_tools
+        assert "gitlab_graphql" not in registry._enabled_tools
+
+    def test_generic_tools_follow_preapproval_rules(self, tool_metadata):
+        """Test that generic tools follow the same preapproval rules as other GitLab tools."""
+        # When GitLab privilege is preapproved, generic tools should be too
+        registry_preapproved = ToolsRegistry(
+            enabled_tools=["read_only_gitlab"],
+            preapproved_tools=["read_only_gitlab"],
+            tool_metadata=tool_metadata,
+        )
+        assert not registry_preapproved.approval_required("gitlab_api_get")
+        assert not registry_preapproved.approval_required("gitlab_graphql")
+
+        # When GitLab privilege is not preapproved, generic tools should require approval
+        registry_not_preapproved = ToolsRegistry(
+            enabled_tools=["read_only_gitlab"],
+            preapproved_tools=[],
+            tool_metadata=tool_metadata,
+        )
+        assert registry_not_preapproved.approval_required("gitlab_api_get")
+        assert registry_not_preapproved.approval_required("gitlab_graphql")
+
+    def test_generic_tools_can_be_used_in_toolset(self, tool_metadata):
+        """Test that generic tools can be requested in a toolset."""
+        registry = ToolsRegistry(
+            enabled_tools=["read_only_gitlab"],
+            preapproved_tools=[],
+            tool_metadata=tool_metadata,
+        )
+
+        toolset = registry.toolset(["gitlab_api_get", "gitlab_graphql"])
+
+        assert "gitlab_api_get" in toolset._all_tools
+        assert "gitlab_graphql" in toolset._all_tools

@@ -1918,7 +1918,7 @@ version = "3.2.4"
 description = "GraphQL implementation for Python, a port of GraphQL.js, the JavaScript reference implementation for GraphQL."
 optional = false
 python-versions = "<4,>=3.6"
-groups = ["eval"]
+groups = ["main", "eval"]
 files = [
     {file = "graphql-core-3.2.4.tar.gz", hash = "sha256:acbe2e800980d0e39b4685dd058c2f4042660b89ebca38af83020fd872ff1264"},
     {file = "graphql_core-3.2.4-py3-none-any.whl", hash = "sha256:1604f2042edc5f3114f49cac9d77e25863be51b23a54a61a23245cf32f6476f0"},
@@ -7260,4 +7260,4 @@ cffi = ["cffi (>=1.11)"]
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.12.0,<3.13.0"
-content-hash = "7b7f5f5a7fca08b1332b22915b4079c61feb6bcdce6758db6656c79a0f668460"
+content-hash = "3687c53914fd5529fda4c809cb14ce9e8e19f209776284e100a6bc7cd079a534"
