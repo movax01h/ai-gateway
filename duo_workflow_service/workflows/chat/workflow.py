@@ -35,6 +35,7 @@ from duo_workflow_service.workflows.abstract_workflow import (
     InvocationMetadata,
 )
 from duo_workflow_service.workflows.type_definitions import AdditionalContext
+from lib.feature_flags.context import FeatureFlag, is_feature_enabled
 from lib.internal_events.client import InternalEventsClient
 from lib.internal_events.event_enum import CategoryEnum
 
@@ -47,23 +48,14 @@ class Routes(StrEnum):
     STOP = "stop"
 
 
-CHAT_READ_ONLY_TOOLS = [
+# Simple read-only tools that can be replaced by generic gitlab_api_get/gitlab_graphql
+_SIMPLE_GITLAB_READ_ONLY_TOOLS = [
     "get_job_logs",
     "get_merge_request",
     "get_pipeline_failing_jobs",
     "get_project",
     "list_all_merge_request_notes",
-    "list_merge_request_diffs",
-    "gitlab_issue_search",
-    "gitlab_blob_search",
-    "gitlab_merge_request_search",
-    "gitlab_documentation_search",
-    "read_file",
-    "read_files",
     "get_repository_file",
-    "list_dir",
-    "find_files",
-    "grep",
     "list_repository_tree",
     "get_commit",
     "list_commits",
@@ -76,6 +68,36 @@ CHAT_READ_ONLY_TOOLS = [
     "get_vulnerability_details",
     "get_wiki_page",
 ]
+
+# Tools with special processing that should always be included
+_SPECIAL_PROCESSING_TOOLS = [
+    "list_merge_request_diffs",  # Has DiffExclusionPolicy
+    "gitlab_issue_search",  # Advanced search
+    "gitlab_blob_search",  # Code search
+    "gitlab_merge_request_search",  # MR search
+    "gitlab_documentation_search",  # AI-powered search
+]
+
+# Non-GitLab tools that should always be included
+_NON_GITLAB_TOOLS = [
+    "read_file",
+    "read_files",
+    "list_dir",
+    "find_files",
+    "grep",
+]
+
+# Generic GitLab API tools
+_GENERIC_GITLAB_TOOLS = [
+    "gitlab_api_get",
+    "gitlab_graphql",
+]
+
+# All traditional read-only tools (used when feature flag is disabled)
+# This constant is kept for backward compatibility and testing
+CHAT_READ_ONLY_TOOLS = (
+    _SIMPLE_GITLAB_READ_ONLY_TOOLS + _SPECIAL_PROCESSING_TOOLS + _NON_GITLAB_TOOLS
+)
 
 
 CHAT_GITLAB_MUTATION_TOOLS = [
@@ -303,8 +325,22 @@ class Workflow(AbstractWorkflow):
         return graph.compile(checkpointer=checkpointer)
 
     def _get_tools(self):
+        # Evaluate feature flag at runtime to determine which read-only tools to use
+        if is_feature_enabled(FeatureFlag.USE_GENERIC_GITLAB_API_TOOLS):
+            # Use generic tools instead of simple read-only tools
+            read_only_tools = (
+                _SPECIAL_PROCESSING_TOOLS + _NON_GITLAB_TOOLS + _GENERIC_GITLAB_TOOLS
+            )
+        else:
+            # Use all traditional tools
+            read_only_tools = (
+                _SIMPLE_GITLAB_READ_ONLY_TOOLS
+                + _SPECIAL_PROCESSING_TOOLS
+                + _NON_GITLAB_TOOLS
+            )
+
         available_tools = (
-            CHAT_READ_ONLY_TOOLS
+            read_only_tools
             + CHAT_MUTATION_TOOLS
             + RUN_COMMAND_TOOLS
             + CHAT_GITLAB_MUTATION_TOOLS

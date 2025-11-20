@@ -20,6 +20,7 @@ from duo_workflow_service.tools.findings.get_security_finding_details import (
 from duo_workflow_service.tools.findings.list_security_findings import (
     ListSecurityFindings,
 )
+from duo_workflow_service.tools.gitlab_api_generic import GitLabApiGet, GitLabGraphQL
 from duo_workflow_service.tools.vulnerabilities.get_vulnerability_details import (
     GetVulnerabilityDetails,
 )
@@ -104,6 +105,8 @@ _READ_ONLY_GITLAB_TOOLS: list[Type[BaseTool]] = [
     GetSecurityFindingDetails,
     ListSecurityFindings,
     tools.GetWikiPage,
+    GitLabApiGet,
+    GitLabGraphQL,
 ]
 
 _RUN_MCP_TOOLS_PRIVILEGE = "run_mcp_tools"
