@@ -25,7 +25,13 @@ components:
         as: "merge_request_url"
       - from: "context:fix_pipeline_agents_dot_md.tool_responses"
         as: "agents_dot_md"
-    toolset: ["get_pipeline_errors", "list_merge_request_diffs", "read_file", "find_files", "list_dir"]
+    toolset:
+      - get_pipeline_failing_jobs
+      - get_job_logs
+      - list_merge_request_diffs
+      - read_file
+      - find_files
+      - list_dir
     ui_log_events:
       - "on_agent_final_answer"
       - "on_tool_execution_success"

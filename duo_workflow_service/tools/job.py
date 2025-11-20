@@ -1,5 +1,6 @@
 import json
 from typing import Any, List, NamedTuple, Optional, Type
+from urllib.parse import quote
 
 import structlog
 from pydantic import BaseModel, Field
@@ -87,7 +88,9 @@ class GetLogsFromJob(DuoBaseTool):
             if not job_id:
                 errors.append("'job_id' must be provided when 'url' is not")
             return JobURLValidationResult(
-                None if project_id is None else str(project_id), job_id, errors
+                None if project_id is None else quote(str(project_id), safe=""),
+                job_id,
+                errors,
             )
 
         try:

@@ -12,7 +12,9 @@ The merge request URL is provided in the merge_request_url tag below:
 
 Follow these steps:
 <context_building_steps>
-  <context_building_step>Use the `get_pipeline_errors` tool to retrieve errors for the pipeline_url</context_building_step>
+  <context_building_step>Use the `get_pipeline_failing_jobs` tool to retrieve failing jobs for the pipeline_url</context_building_step>
+
+  <context_building_step>Use the `get_job_logs` tool to retrieve logs for the failing job IDs</context_building_step>
 
   {% if merge_request_url %}
   <context_building_step>Use the `list_merge_request_diffs` tool to retrieve changes made in this merge request</context_building_step>
