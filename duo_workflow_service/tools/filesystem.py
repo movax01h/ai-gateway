@@ -98,7 +98,6 @@ class ReadFile(DuoBaseTool):
 
     """
     args_schema: Type[BaseModel] = ReadFileInput
-    handle_tool_error: bool = True
     eval_prompts: List[str] = [
         "I need to read the content of the `readme.md`",
         "Let me check if class `DuoBaseTool` exists in `./tools/base.py`",
@@ -136,7 +135,6 @@ class ReadFiles(DuoBaseTool):
     description: str = """Read one or more files in a single operation.
     """
     args_schema: Type[BaseModel] = ReadFilesInput
-    handle_tool_error: bool = True
 
     async def _execute(self, file_paths: list[str]) -> str:
         policy = FileExclusionPolicy(self.project)
@@ -223,7 +221,6 @@ class WriteFile(DuoBaseTool):
         "Create and write the given contents to a file. Please specify the `file_path` and the `contents` to write."
     )
     args_schema: Type[BaseModel] = WriteFileInput
-    handle_tool_error: bool = True
 
     async def _execute(self, file_path: str, contents: str) -> str:
         # Check file exclusion policy
@@ -443,7 +440,6 @@ Examples of batched file edits:
         new_str="# Changelog\n\n## 1.1.0\n- Bug fixes\n- Performance improvements\n\n## 1.0.0"
     )"""
     args_schema: Type[BaseModel] = EditFileInput
-    handle_tool_error: bool = True
 
     async def _execute(self, file_path: str, old_str: str, new_str: str) -> str:
         # Check file exclusion policy
