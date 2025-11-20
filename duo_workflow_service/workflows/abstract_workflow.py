@@ -85,6 +85,7 @@ class AbstractWorkflow(ABC):
     _workflow_metadata: dict[str, Any]
     is_done: bool = False
     last_error: BaseException | None = None
+    checkpoint_notifier: Optional[UserInterface] = None
     _workflow_type: CategoryEnum
     _stream: bool = False
     _additional_context: list[AdditionalContext] | None
@@ -215,7 +216,8 @@ class AbstractWorkflow(ABC):
             "configurable": {"thread_id": self._workflow_id},
         }
         compiled_graph = None
-        checkpoint_notifier = UserInterface(outbox=self._outbox, goal=goal)
+        self.checkpoint_notifier = UserInterface(outbox=self._outbox, goal=goal)
+
         try:
             self._project, self._namespace, self._workflow_config = (
                 await fetch_workflow_and_container_data(
@@ -290,7 +292,7 @@ class AbstractWorkflow(ABC):
                         for step in state:
                             self.log.info(f"step: {step}")
                     else:
-                        await checkpoint_notifier.send_event(
+                        await self.checkpoint_notifier.send_event(
                             type=type, state=state, stream=self._stream
                         )
         except BaseException as e:
@@ -299,7 +301,7 @@ class AbstractWorkflow(ABC):
                 # when workflow is cancelled with AIO_CANCEL_STOP_WORKFLOW_REQUEST, a new checkpoint is not created and
                 # internal workflow state is not updated, thus the clients don't receive a newCheckpoint notification
                 # here we send a notification with stopped status for clients to react accordingly
-                await checkpoint_notifier.send_event(
+                await self.checkpoint_notifier.send_event(
                     type="values",
                     state={"status": WorkflowStatusEnum.CANCELLED, "ui_chat_log": []},
                     stream=self._stream,

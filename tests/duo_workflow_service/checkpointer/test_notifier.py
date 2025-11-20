@@ -54,6 +54,10 @@ async def test_send_event_with_values_type(checkpoint_notifier):
     assert checkpoint_notifier.status == WorkflowStatusEnum.COMPLETED
     assert checkpoint_notifier.steps == ["step1", "step2"]
     action = checkpoint_notifier.outbox.put_action.call_args[0][0]
+
+    # Action in outbox is a placeholder. We need to load the full latest checkpoint.
+    action.newCheckpoint.CopyFrom(checkpoint_notifier.most_recent_new_checkpoint())
+
     assert action.newCheckpoint.goal == "test_goal"
     assert action.newCheckpoint.status == "FINISHED"
     expected_checkpoint = dumps(
@@ -97,6 +101,10 @@ async def test_send_event_with_missing_plan_steps(checkpoint_notifier):
         }
     )
     action = checkpoint_notifier.outbox.put_action.call_args[0][0]
+
+    # Action in outbox is a placeholder. We need to load the full latest checkpoint.
+    action.newCheckpoint.CopyFrom(checkpoint_notifier.most_recent_new_checkpoint())
+
     assert action.newCheckpoint.checkpoint == expected_checkpoint
 
 
@@ -320,7 +328,45 @@ async def test_send_event_messages_stream(
 
         if should_execute_action:
             action = checkpoint_notifier.outbox.put_action.call_args[0][0]
+
+            # Action in outbox is a placeholder. We need to load the full latest checkpoint.
+            action.newCheckpoint.CopyFrom(
+                checkpoint_notifier.most_recent_new_checkpoint()
+            )
+
             assert action.newCheckpoint.goal == "test_goal"
             assert action.newCheckpoint.checkpoint is not None
         else:
             checkpoint_notifier.outbox.put_action.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_checkpoint_number_increments_on_send_event(checkpoint_notifier):
+    assert checkpoint_notifier.checkpoint_number == 0
+
+    state = {"status": WorkflowStatusEnum.PLANNING, "ui_chat_log": [], "plan": {}}
+    await checkpoint_notifier.send_event("values", state, False)
+    assert checkpoint_notifier.checkpoint_number == 1
+
+    await checkpoint_notifier.send_event("values", state, False)
+    assert checkpoint_notifier.checkpoint_number == 2
+
+
+def test_most_recent_new_checkpoint(checkpoint_notifier):
+    checkpoint_notifier.status = WorkflowStatusEnum.EXECUTION
+    checkpoint_notifier.ui_chat_log = [{"content": "test"}]
+    checkpoint_notifier.steps = [{"step": "1"}]
+
+    checkpoint = checkpoint_notifier.most_recent_new_checkpoint()
+
+    assert checkpoint.goal == "test_goal"
+    assert checkpoint.status == "RUNNING"
+    expected_checkpoint = dumps(
+        {
+            "channel_values": {
+                "ui_chat_log": [{"content": "test"}],
+                "plan": {"steps": [{"step": "1"}]},
+            }
+        }
+    )
+    assert checkpoint.checkpoint == expected_checkpoint

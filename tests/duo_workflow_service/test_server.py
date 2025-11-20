@@ -729,6 +729,12 @@ async def test_execute_workflow(
     mock_workflow_instance.run = AsyncMock()
     mock_workflow_instance.cleanup = AsyncMock()
 
+    checkpoint = contract_pb2.NewCheckpoint(checkpoint='{"checkpoint":1}')
+    mock_notifier = MagicMock()
+    mock_notifier.most_recent_checkpoint_number = MagicMock(side_effect=[1, 2, 3, 4])
+    mock_notifier.most_recent_new_checkpoint = MagicMock(return_value=checkpoint)
+    mock_workflow_instance.checkpoint_notifier = mock_notifier
+
     mock_workflow_instance.get_from_outbox = AsyncMock(
         side_effect=[
             contract_pb2.Action(
@@ -1394,3 +1400,79 @@ async def test_execute_workflow_tracks_receive_start_request_internal_event(
         ),
         category=CategoryEnum.WORKFLOW_SOFTWARE_DEVELOPMENT.value,
     )
+
+
+@pytest.mark.asyncio
+async def test_send_events_sends_all_checkpoints_if_number_increases():
+    yielded = []
+
+    events = [
+        contract_pb2.Action(
+            newCheckpoint=contract_pb2.NewCheckpoint(),
+        ),
+        contract_pb2.Action(
+            newCheckpoint=contract_pb2.NewCheckpoint(),
+        ),
+        OutboxSignal.NO_MORE_OUTBOUND_REQUESTS,
+    ]
+
+    mock_workflow_task = MagicMock()
+
+    mock_workflow = MagicMock()
+    mock_workflow.get_from_outbox = AsyncMock(side_effect=events)
+
+    # Mock checkpoint_number to keep increasing so we send all checkpoints
+    mock_notifier = MagicMock()
+    mock_notifier.most_recent_checkpoint_number = MagicMock(side_effect=[1, 2])
+
+    # Then mock the checkpoints returned to be different
+    checkpoint1 = contract_pb2.NewCheckpoint(checkpoint='{"checkpoint":1}')
+    checkpoint2 = contract_pb2.NewCheckpoint(checkpoint='{"checkpoint":2}')
+    mock_notifier.most_recent_new_checkpoint = MagicMock(
+        side_effect=[checkpoint1, checkpoint2]
+    )
+    mock_workflow.checkpoint_notifier = mock_notifier
+    servicer = DuoWorkflowService()
+    async for action in servicer.send_events(mock_workflow, mock_workflow_task):
+        yielded.append(action)
+
+    assert len(yielded) == 2
+    assert yielded[0].newCheckpoint.checkpoint == '{"checkpoint":1}'
+    assert yielded[1].newCheckpoint.checkpoint == '{"checkpoint":2}'
+
+
+@pytest.mark.asyncio
+async def test_send_events_sends_skips_checkpoint_if_already_sent():
+    yielded = []
+
+    # Add 2 newCheckpoint but we only expect to yield them once
+    events = [
+        contract_pb2.Action(
+            newCheckpoint=contract_pb2.NewCheckpoint(),
+        ),
+        contract_pb2.Action(
+            newCheckpoint=contract_pb2.NewCheckpoint(),
+        ),
+        OutboxSignal.NO_MORE_OUTBOUND_REQUESTS,
+    ]
+
+    mock_workflow_task = MagicMock()
+
+    mock_workflow = MagicMock()
+    mock_workflow.get_from_outbox = AsyncMock(side_effect=events)
+
+    # Now we mock most_recent_checkpoint_number to always return the same
+    # value. This should ensure that send_events skips the later checkpoints as
+    # it assumes it has already been sent.
+    mock_notifier = MagicMock()
+    mock_notifier.most_recent_checkpoint_number = MagicMock(side_effect=[1, 1])
+
+    checkpoint1 = contract_pb2.NewCheckpoint(checkpoint='{"checkpoint":1}')
+    mock_notifier.most_recent_new_checkpoint = MagicMock(side_effect=[checkpoint1])
+    mock_workflow.checkpoint_notifier = mock_notifier
+    servicer = DuoWorkflowService()
+    async for action in servicer.send_events(mock_workflow, mock_workflow_task):
+        yielded.append(action)
+
+    assert len(yielded) == 1
+    assert yielded[0].newCheckpoint.checkpoint == '{"checkpoint":1}'

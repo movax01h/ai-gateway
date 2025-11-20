@@ -322,59 +322,6 @@ class DuoWorkflowService(contract_pb2_grpc.DuoWorkflowServicer):
 
         workflow_task = asyncio.create_task(workflow.run(goal))
 
-        async def send_events() -> AsyncIterator[contract_pb2.Action]:
-            while True:
-                item: contract_pb2.Action | OutboxSignal = (
-                    await workflow.get_from_outbox()
-                )
-
-                if item == OutboxSignal.NO_MORE_OUTBOUND_REQUESTS:
-                    log.info("No more outbound requests. End send_events loop.")
-                    break
-
-                if not isinstance(item, contract_pb2.Action):
-                    raise RuntimeError(
-                        "Can not send an action that is not the Action type"
-                    )
-
-                payload_size = item.ByteSize()
-
-                if payload_size > MAX_MESSAGE_SIZE:
-                    log.error(
-                        "Failed to send an outgoing action: Message size too large",
-                        request_id=item.requestID,
-                        payload_size=payload_size,
-                        action_class=item.WhichOneof("action"),
-                    )
-                    workflow_task.cancel(OUTGOING_MESSAGE_TOO_LARGE)
-
-                    # We also need to fail this action in the outbox otherwise
-                    # we can block the checkpointing thread in langgraph which
-                    # is waiting on a response from a checkpoint that is too
-                    # large.
-                    workflow.fail_outbox_action(
-                        item.requestID, OUTGOING_MESSAGE_TOO_LARGE
-                    )
-
-                    # Continue so we have a chance to cleanup. Some outgoing
-                    # status updates hopefully make it through
-                    continue
-
-                log.info(
-                    "Sending an outgoing action",
-                    request_id=item.requestID,
-                    payload_size=payload_size,
-                    action_class=item.WhichOneof("action"),
-                )
-
-                yield item
-
-                log.info(
-                    "Sent an outgoing action",
-                    request_id=item.requestID,
-                    action_class=item.WhichOneof("action"),
-                )
-
         async def receive_events():
             while True:
                 event = await next_client_event(request_iterator)
@@ -429,7 +376,7 @@ class DuoWorkflowService(contract_pb2_grpc.DuoWorkflowServicer):
                     log_exception(ex, extra={"source": __name__})
 
         try:
-            async for action in send_events():
+            async for action in self.send_events(workflow, workflow_task):
                 yield action
 
             await workflow_task
@@ -505,6 +452,79 @@ class DuoWorkflowService(contract_pb2_grpc.DuoWorkflowServicer):
             await workflow.cleanup(workflow_id)
             receive_events_task.cancel()
             monitoring_context.workflow_last_gitlab_status = workflow.last_gitlab_status
+
+    async def send_events(
+        self, workflow: AbstractWorkflow, workflow_task: asyncio.Task
+    ) -> AsyncIterator[contract_pb2.Action]:
+        last_checkpoint_notified: Optional[int] = None
+        while True:
+            item: contract_pb2.Action | OutboxSignal = await workflow.get_from_outbox()
+
+            if item == OutboxSignal.NO_MORE_OUTBOUND_REQUESTS:
+                log.info("No more outbound requests. End send_events loop.")
+                break
+
+            if not isinstance(item, contract_pb2.Action):
+                raise RuntimeError(
+                    "Can not send an action that is not the Action type or UserInterface"
+                )
+
+            if item.HasField("newCheckpoint"):
+                # We use special optimized code path for
+                # newCheckpoint as they happen very frequently.
+                # If they get backed up in the queue we always
+                # jump to the latest version and can save
+                # ourselves sending incremental checkpoints.
+                checkpoint_number = (
+                    workflow.checkpoint_notifier.most_recent_checkpoint_number()  # type: ignore[union-attr]
+                )
+                if last_checkpoint_notified == checkpoint_number:
+                    log.info(
+                        "Skipping already sent checkpoint",
+                        checkpoint_number=checkpoint_number,
+                    )
+                    continue
+
+                item.newCheckpoint.CopyFrom(
+                    workflow.checkpoint_notifier.most_recent_new_checkpoint()  # type: ignore[union-attr]
+                )
+                last_checkpoint_notified = checkpoint_number
+
+            payload_size = item.ByteSize()
+
+            if payload_size > MAX_MESSAGE_SIZE:
+                log.error(
+                    "Failed to send an outgoing action: Message size too large",
+                    request_id=item.requestID,
+                    payload_size=payload_size,
+                    action_class=item.WhichOneof("action"),
+                )
+                workflow_task.cancel(OUTGOING_MESSAGE_TOO_LARGE)
+
+                # We also need to fail this action in the outbox otherwise
+                # we can block the checkpointing thread in langgraph which
+                # is waiting on a response from a checkpoint that is too
+                # large.
+                workflow.fail_outbox_action(item.requestID, OUTGOING_MESSAGE_TOO_LARGE)
+
+                # Continue so we have a chance to cleanup. Some outgoing
+                # status updates hopefully make it through
+                continue
+
+            log.info(
+                "Sending an outgoing action",
+                request_id=item.requestID,
+                payload_size=payload_size,
+                action_class=item.WhichOneof("action"),
+            )
+
+            yield item
+
+            log.info(
+                "Sent an outgoing action",
+                request_id=item.requestID,
+                action_class=item.WhichOneof("action"),
+            )
 
     async def ListTools(
         self, request: contract_pb2.ListToolsRequest, context: grpc.ServicerContext
