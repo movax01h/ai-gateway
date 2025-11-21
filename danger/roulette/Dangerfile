@@ -50,13 +50,16 @@ end
 
 NOT_AVAILABLE_TEMPLATES = {
   default: 'No %{role} available',
-  analytics_instrumentation: group_not_available_template('#g_analyze_analytics_instrumentation', '@gitlab-org/analytics-section/analytics-instrumentation/engineers')
+  analytics_instrumentation: group_not_available_template('#g_analyze_analytics_instrumentation', '@gitlab-org/analytics-section/analytics-instrumentation/engineers'),
+  utilization: group_not_available_template('#g_utilization', '@gitlab-org/fulfillment/utilization')
 }.freeze
 
 CATEGORY_LABELS = {
   ai_gateway: '~"devops::ai-powered"',
   duo_workflow_service: '~"group::agent foundations"',
   analytics_instrumentation: '~"group::analytics instrumentation"',
+  utilization: '~"group::utilization"',
+
 }.freeze
 
 def note_for_spin_role(spin, role, category)

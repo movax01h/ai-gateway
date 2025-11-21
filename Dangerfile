@@ -13,6 +13,7 @@ Gitlab::Dangerfiles.for_project(self, 'ai-gateway') do |dangerfiles|
     %r{\Alib/} => [:duo_workflow_service, :ai_gateway],
     %r{\Aconfig/events/} => [:analytics_instrumentation],
     [%r{.*}, %r{(InternalEventsClient|track_event|track_billing_event|BillingEventsClient)}] => [:ai_gateway, :analytics_instrumentation],
+    %r{\Aai_gateway/model_selection/models\.yml\z} => [:ai_gateway, :utilization],
     %r{.*} => :ai_gateway
   }.freeze
 
