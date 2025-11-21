@@ -34,6 +34,13 @@ flow:
 - **components**: List of components that make up your flow
 - **routers**: Define how components connect to each other
 - **flow**: Specify the entry point component and other options
+- **prompts**: List of inline prompt templates for flow components to use
+
+### Optional fields
+
+- **name**: User-readable name for the flow
+- **description**: Description of the flow
+- **product_group**: Attributes team ownership of flow (e.g. `agent_foundations`)
 
 ## Component Types
 
