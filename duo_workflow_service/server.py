@@ -146,6 +146,7 @@ def clean_start_request(start_workflow_request: contract_pb2.ClientEvent):
     request.CopyFrom(start_workflow_request)
     # Remove the goal from being logged to prevent logging sensitive user content
     request.startRequest.ClearField("goal")
+    request.startRequest.ClearField("flowConfig")
     request.startRequest.ClearField("workflowMetadata")
     return request
 
