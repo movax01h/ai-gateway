@@ -12,7 +12,7 @@ build-docker-model-gateway:
     KANIKO_BUILD_FILE: Dockerfile
     KANIKO_DESTINATION: "${TARGET_IMAGE}"
     KANIKO_EXTRA_ARGS:
-      --build-arg GITLAB_TOKEN=$GITLAB_TOKEN
+      --build-arg GITLAB_API_TOKEN=$GITLAB_API_TOKEN
 
 build:ingest-image:
   stage: build
