@@ -301,7 +301,7 @@ This deployment is currently available at `https://duo-workflow-svc.runway.gitla
 
 When an MR gets merged, CI will build a new Docker image, and trigger a Runway downstream pipeline that will deploy this image to staging, and then production. Downstream pipelines run against the [deployment project](https://gitlab.com/gitlab-com/gl-infra/platform/runway/deployments/duo-workflow-svc).
 
-The service overview dashboard is available at [here](https://dashboards.gitlab.net/d/runway-service/runway3a-runway-service-metrics?var-PROMETHEUS_DS=mimir-runway&var-environment=gprd&var-type=duo-workflow-svc).
+See the [service overview dashboard](https://dashboards.gitlab.net/d/runway-service/runway3a-runway-service-metrics?var-PROMETHEUS_DS=mimir-runway&var-environment=gprd&var-type=duo-workflow-svc).
 
 Currently, the service doesn't have a dependency on `gitlab-runway-production` GCP project. In the future, it could use Vertex AI resources through it.
 
