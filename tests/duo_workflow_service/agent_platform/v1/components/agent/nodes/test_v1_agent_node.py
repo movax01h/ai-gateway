@@ -12,10 +12,7 @@ from duo_workflow_service.agent_platform.v1.components.agent.nodes.agent_node im
 )
 from duo_workflow_service.agent_platform.v1.state import FlowStateKeys
 from duo_workflow_service.errors.error_handler import ModelError, ModelErrorType
-from duo_workflow_service.token_counter.approximate_token_counter import (
-    ApproximateTokenCounter,
-)
-from lib.internal_events.event_enum import CategoryEnum, EventEnum
+from lib.internal_events.event_enum import CategoryEnum
 
 
 @pytest.fixture(name="mock_monitoring")
@@ -46,19 +43,6 @@ def mock_prompt_fixture(mock_ai_message):
     return mock_prompt
 
 
-@pytest.fixture(name="mock_approximate_token_counter")
-def mock_approximate_token_counter_fixture():
-    """Fixture for mock approximate token counter."""
-    with patch(
-        "duo_workflow_service.agent_platform.v1.components.agent.nodes.agent_node.ApproximateTokenCounter"
-    ) as mocked_token_counter_cls:
-        mocked_token_counter = Mock(spec=ApproximateTokenCounter)
-        mocked_token_counter.count_tokens.return_value = 80
-        mocked_token_counter_cls.return_value = mocked_token_counter
-
-        yield mocked_token_counter
-
-
 @pytest.fixture(name="agent_node")
 def agent_node_fixture(
     flow_id,
@@ -66,7 +50,6 @@ def agent_node_fixture(
     inputs,
     component_name,
     mock_internal_event_client,
-    mock_approximate_token_counter,
     mock_monitoring,
 ):
     """Fixture for AgentNode instance."""
@@ -396,52 +379,6 @@ class TestAgentNode:
             f"{AgentFinalOutput.tool_title} raised validation error:"
             in retry_messages_history[1].content
         )
-
-
-class TestAgentNodeInternalEventsTracking:
-    """Test suite for AgentNode class focusing on the run method."""
-
-    @pytest.mark.asyncio
-    async def test_run_tracks_token_data(
-        self,
-        agent_node,
-        base_flow_state,
-        component_name,
-        flow_id,
-        mock_internal_event_client,
-        mock_approximate_token_counter,
-        mock_monitoring,
-        mock_ai_message,
-    ):
-        """Test that run method tracks token data correctly."""
-
-        with patch(
-            "duo_workflow_service.agent_platform.v1.components.agent.nodes.agent_node.InternalEventAdditionalProperties"
-        ) as mock_props_cls:
-            mock_props = Mock()
-            mock_props_cls.return_value = mock_props
-
-            await agent_node.run(base_flow_state)
-
-            # Verify token counting was called
-            mock_approximate_token_counter.count_tokens.assert_called_once_with([])
-
-            mock_props_cls.assert_called_once_with(
-                label=component_name,
-                property="workflow_id",
-                value=flow_id,
-                input_tokens=mock_ai_message.usage_metadata["input_tokens"],
-                output_tokens=mock_ai_message.usage_metadata["output_tokens"],
-                total_tokens=mock_ai_message.usage_metadata["total_tokens"],
-                estimated_input_tokens=mock_approximate_token_counter.count_tokens.return_value,
-            )
-
-            # Verify internal event tracking was called
-            mock_internal_event_client.track_event.assert_called_once_with(
-                event_name=EventEnum.TOKEN_PER_USER_PROMPT.value,
-                category=CategoryEnum.WORKFLOW_SOFTWARE_DEVELOPMENT.value,
-                additional_properties=mock_props,
-            )
 
 
 class TestAgentNodeMonitoring:

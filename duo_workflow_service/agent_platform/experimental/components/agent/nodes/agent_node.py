@@ -16,11 +16,8 @@ from duo_workflow_service.agent_platform.experimental.state import (
 )
 from duo_workflow_service.errors.error_handler import ModelError, ModelErrorHandler
 from duo_workflow_service.monitoring import duo_workflow_metrics
-from duo_workflow_service.token_counter.approximate_token_counter import (
-    ApproximateTokenCounter,
-)
-from lib.internal_events import InternalEventAdditionalProperties, InternalEventsClient
-from lib.internal_events.event_enum import CategoryEnum, EventEnum, EventPropertyEnum
+from lib.internal_events import InternalEventsClient
+from lib.internal_events.event_enum import CategoryEnum
 
 __all__ = ["AgentNode", "AgentFinalOutput"]
 
@@ -64,7 +61,6 @@ class AgentNode:
     _component_name: str
 
     _internal_event_client: InternalEventsClient
-    _approximate_token_counter: ApproximateTokenCounter
 
     _flow_id: str
     _flow_type: CategoryEnum
@@ -87,7 +83,6 @@ class AgentNode:
         self._inputs = inputs
         self._component_name = component_name
         self._internal_event_client = internal_event_client
-        self._approximate_token_counter = ApproximateTokenCounter(component_name)
         self._error_handler = ModelErrorHandler()
 
     async def run(self, state: FlowState) -> dict:
@@ -115,7 +110,6 @@ class AgentNode:
                         log.warning(
                             f"LLM stopped abnormally with reason: {finish_reason}"
                         )
-                self._track_tokens_data(completion, history)
                 duo_workflow_metrics.count_llm_response(
                     model=model_name,
                     provider=model_provider,
@@ -187,22 +181,3 @@ class AgentNode:
                     tool_call_id=final_answer["id"],
                 ),
             ]
-
-    def _track_tokens_data(self, message, history):
-        estimated = self._approximate_token_counter.count_tokens(history)
-        usage_metadata = message.usage_metadata if message.usage_metadata else {}
-
-        additional_properties = InternalEventAdditionalProperties(
-            label=self._component_name,
-            property=EventPropertyEnum.WORKFLOW_ID.value,
-            value=self._flow_id,
-            input_tokens=usage_metadata.get("input_tokens"),
-            output_tokens=usage_metadata.get("output_tokens"),
-            total_tokens=usage_metadata.get("total_tokens"),
-            estimated_input_tokens=estimated,
-        )
-        self._internal_event_client.track_event(
-            event_name=EventEnum.TOKEN_PER_USER_PROMPT.value,
-            additional_properties=additional_properties,
-            category=self._flow_type.value,
-        )
