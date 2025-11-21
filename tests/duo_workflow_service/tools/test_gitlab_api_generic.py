@@ -96,108 +96,12 @@ class TestGitLabApiGet:
         assert result_json["data"] == response_data
 
     @pytest.mark.asyncio
-    async def test_get_with_url_parsing_merge_request(
-        self, gitlab_api_get_tool, gitlab_client_mock
-    ):
-        """Test API GET request with URL parsing - path extracted as-is."""
-        # Mock response
-        response_data = {"id": 42, "title": "Test MR"}
-        mock_response = Mock(spec=GitLabHttpResponse)
-        mock_response.is_success.return_value = True
-        mock_response.body = response_data
-        gitlab_client_mock.aget = AsyncMock(return_value=mock_response)
-
-        # Execute tool with an API endpoint URL
-        result = await gitlab_api_get_tool._execute(
-            url="https://gitlab.com/api/v4/projects/13/merge_requests/42"
-        )
-
-        # Verify - path is extracted as-is from URL
-        expected_path = "/api/v4/projects/13/merge_requests/42"
-        gitlab_client_mock.aget.assert_called_once_with(path=expected_path)
-        result_json = json.loads(result)
-        assert result_json["status"] == "success"
-        assert result_json["data"] == response_data
-
-    @pytest.mark.asyncio
-    async def test_get_with_url_parsing_issue(
-        self, gitlab_api_get_tool, gitlab_client_mock
-    ):
-        """Test API GET request with URL parsing - path extracted as-is."""
-        # Mock response
-        response_data = {"iid": 10, "title": "Test Issue"}
-        mock_response = Mock(spec=GitLabHttpResponse)
-        mock_response.is_success.return_value = True
-        mock_response.body = response_data
-        gitlab_client_mock.aget = AsyncMock(return_value=mock_response)
-
-        # Execute tool with an API endpoint URL
-        result = await gitlab_api_get_tool._execute(
-            url="https://gitlab.com/api/v4/projects/13/issues/10"
-        )
-
-        # Verify - path is extracted as-is from URL
-        expected_path = "/api/v4/projects/13/issues/10"
-        gitlab_client_mock.aget.assert_called_once_with(path=expected_path)
-        result_json = json.loads(result)
-        assert result_json["status"] == "success"
-
-    @pytest.mark.asyncio
-    async def test_get_with_url_parsing_project(
-        self, gitlab_api_get_tool, gitlab_client_mock
-    ):
-        """Test API GET request with URL parsing - path extracted as-is."""
-        # Mock response
-        response_data = {"id": 13, "name": "Test Project"}
-        mock_response = Mock(spec=GitLabHttpResponse)
-        mock_response.is_success.return_value = True
-        mock_response.body = response_data
-        gitlab_client_mock.aget = AsyncMock(return_value=mock_response)
-
-        # Execute tool with an API endpoint URL
-        result = await gitlab_api_get_tool._execute(
-            url="https://gitlab.com/api/v4/projects/13"
-        )
-
-        # Verify - path is extracted as-is from URL
-        expected_path = "/api/v4/projects/13"
-        gitlab_client_mock.aget.assert_called_once_with(path=expected_path)
-        result_json = json.loads(result)
-        assert result_json["status"] == "success"
-
-    @pytest.mark.asyncio
-    async def test_get_with_nested_group_url(
-        self, gitlab_api_get_tool, gitlab_client_mock
-    ):
-        """Test API GET request with URL - path extracted as-is."""
-        # Mock response
-        response_data = {"id": 123, "name": "Nested Project"}
-        mock_response = Mock(spec=GitLabHttpResponse)
-        mock_response.is_success.return_value = True
-        mock_response.body = response_data
-        gitlab_client_mock.aget = AsyncMock(return_value=mock_response)
-
-        # Execute tool with an API endpoint URL
-        result = await gitlab_api_get_tool._execute(
-            url="https://gitlab.com/api/v4/groups/123/projects"
-        )
-
-        # Verify - path is extracted as-is from URL
-        expected_path = "/api/v4/groups/123/projects"
-        gitlab_client_mock.aget.assert_called_once_with(path=expected_path)
-        result_json = json.loads(result)
-        assert result_json["status"] == "success"
-
-    @pytest.mark.asyncio
-    async def test_get_error_no_endpoint_or_url(self, gitlab_api_get_tool):
-        """Test error when neither endpoint nor url is provided."""
+    async def test_get_error_no_endpoint(self, gitlab_api_get_tool):
+        """Test error when endpoint is not provided."""
         result = await gitlab_api_get_tool._execute()
         result_json = json.loads(result)
         assert "error" in result_json
-        assert (
-            "Either 'endpoint' or 'url' parameter must be provided"
-            in result_json["error"]
-        )
+        assert "The 'endpoint' parameter must be provided" in result_json["error"]
 
     @pytest.mark.asyncio
     async def test_get_error_invalid_endpoint_format(self, gitlab_api_get_tool):
@@ -206,15 +110,6 @@ class TestGitLabApiGet:
         result_json = json.loads(result)
         assert "error" in result_json
         assert "Invalid endpoint format" in result_json["error"]
-
-    @pytest.mark.asyncio
-    async def test_get_error_invalid_url(self, gitlab_api_get_tool):
-        """Test error when URL has no path."""
-        # Use a URL with no path
-        result = await gitlab_api_get_tool._execute(url="https://gitlab.com")
-        result_json = json.loads(result)
-        assert "error" in result_json
-        assert "Failed to parse GitLab URL" in result_json["error"]
 
     @pytest.mark.asyncio
     async def test_get_error_api_failure(self, gitlab_api_get_tool, gitlab_client_mock):
@@ -253,14 +148,6 @@ class TestGitLabApiGet:
         result_json = json.loads(result)
         assert "error" in result_json
         assert "Connection error" in result_json["details"]
-
-    def test_format_display_message_with_url(self, gitlab_api_get_tool):
-        """Test display message formatting with URL."""
-        args = GitLabApiGetInput(
-            url="https://gitlab.com/namespace/project/-/merge_requests/42"
-        )
-        message = gitlab_api_get_tool.format_display_message(args)
-        assert "https://gitlab.com/namespace/project/-/merge_requests/42" in message
 
     def test_format_display_message_with_endpoint(self, gitlab_api_get_tool):
         """Test display message formatting with endpoint."""

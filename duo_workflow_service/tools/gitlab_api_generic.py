@@ -6,7 +6,7 @@ and maintenance overhead compared to specialized tools.
 
 import json
 from typing import Any, Dict, Optional, Type
-from urllib.parse import urlencode, urlparse
+from urllib.parse import urlencode
 
 import structlog
 from gitlab_cloud_connector import GitLabUnitPrimitive
@@ -14,7 +14,6 @@ from graphql import parse as parse_graphql
 from graphql.language.ast import DocumentNode, OperationDefinitionNode, OperationType
 from pydantic import BaseModel, Field
 
-from duo_workflow_service.gitlab.url_parser import GitLabUrlParseError
 from duo_workflow_service.tools.duo_base_tool import DuoBaseTool
 
 log = structlog.stdlib.get_logger("workflow")
@@ -27,15 +26,7 @@ class GitLabApiGetInput(BaseModel):
         default=None,
         description=(
             "The GitLab API endpoint path (e.g., '/api/v4/projects/13/merge_requests/42'). "
-            "Must start with '/api/v4/'. Either endpoint or url must be provided."
-        ),
-    )
-    url: Optional[str] = Field(
-        default=None,
-        description=(
-            "A GitLab resource URL (e.g., 'https://gitlab.com/namespace/project/-/merge_requests/42'). "
-            "The tool will parse the URL and convert it to the appropriate API endpoint. "
-            "Either endpoint or url must be provided."
+            "Must start with '/api/v4/'."
         ),
     )
     params: Optional[Dict[str, Any]] = Field(
@@ -67,8 +58,7 @@ class GitLabApiGet(DuoBaseTool):
     """Generic tool for making read-only GitLab REST API GET requests.
 
     This tool provides access to any GitLab REST API GET endpoint, reducing the need
-    for specialized tools for every read operation. It supports both direct API endpoint
-    paths and GitLab resource URLs which are automatically parsed.
+    for specialized tools for every read operation.
 
     Security: Only supports GET requests. All write operations (POST, PUT, DELETE) must
     use specialized tools with proper validation.
@@ -82,9 +72,6 @@ class GitLabApiGet(DuoBaseTool):
             endpoint="/api/v4/projects/13/merge_requests",
             params={"state": "opened", "author_username": "janedoe"}
         )
-
-        # Using GitLab URL (automatically parsed)
-        gitlab_api_get(url="https://gitlab.com/namespace/project/-/merge_requests/42")
 
         # Get project information
         gitlab_api_get(endpoint="/api/v4/projects/13")
@@ -101,10 +88,10 @@ class GitLabApiGet(DuoBaseTool):
 
     name: str = "gitlab_api_get"
     description: str = (
-        "Make read-only GET requests to any GitLab REST API endpoint. "
-        "Supports both direct API endpoint paths and GitLab resource URLs. "
-        "Use this to retrieve information about projects, merge requests, issues, pipelines, "
-        "commits, users, or any other GitLab resource. "
+        "Make read-only GET requests to any GitLab REST API endpoint of the GitLab instance "
+        "the user is currently using. Use this to retrieve information about projects, "
+        "merge requests, issues, pipelines, commits, epics, work items, users, todos, wikis "
+        "or any other GitLab resource. "
         "\n\nCommon API patterns:\n"
         "- Projects: /api/v4/projects/{id}\n"
         "- Merge Requests: /api/v4/projects/{id}/merge_requests/{iid}\n"
@@ -117,48 +104,30 @@ class GitLabApiGet(DuoBaseTool):
     args_schema: Type[BaseModel] = GitLabApiGetInput
     unit_primitive: Optional[GitLabUnitPrimitive] = None
 
-    async def _execute(  # pylint: disable=too-many-return-statements,too-many-branches
+    async def _execute(
         self,
         endpoint: Optional[str] = None,
-        url: Optional[str] = None,
         params: Optional[Dict[str, Any]] = None,
         **kwargs: Any,
     ) -> str:
         """Execute the generic GitLab API GET request.
 
         Args:
-            endpoint: The API endpoint path (must start with /api/v4/)
-            url: A GitLab resource URL to parse and convert to an endpoint
+            endpoint: The API endpoint path (must always start with /api/v4/, don't add the full URL)
             params: Optional query parameters
             **kwargs: Additional keyword arguments (ignored)
 
         Returns:
             JSON string with the API response or error information
         """
-        # Validate that at least one of endpoint or url is provided
-        if not endpoint and not url:
+        # Validate that endpoint is provided
+        if not endpoint:
             return json.dumps(
                 {
-                    "error": "Either 'endpoint' or 'url' parameter must be provided",
-                    "details": "Please provide either an API endpoint path or a GitLab resource URL",
+                    "error": "The 'endpoint' parameter must be provided",
+                    "details": "Please provide an API endpoint path",
                 }
             )
-
-        # If url is provided, parse it to get the endpoint
-        if url and not endpoint:
-            try:
-                endpoint = self._parse_gitlab_url_to_endpoint(url)
-            except GitLabUrlParseError as e:
-                return json.dumps(
-                    {
-                        "error": "Failed to parse GitLab URL",
-                        "url": url,
-                        "details": str(e),
-                    }
-                )
-
-        # At this point, endpoint must be set (either provided or parsed from url)
-        assert endpoint is not None
 
         # Validate endpoint format
         if not endpoint.startswith("/api/v4/"):
@@ -255,38 +224,10 @@ class GitLabApiGet(DuoBaseTool):
                 }
             )
 
-    def _parse_gitlab_url_to_endpoint(self, url: str) -> str:
-        """Parse a GitLab URL and extract the path to use as an endpoint hint.
-
-        Args:
-            url: A GitLab URL (e.g., https://gitlab.com/namespace/project/-/merge_requests/42)
-
-        Returns:
-            The URL path that can be used as a hint for the endpoint
-
-        Raises:
-            GitLabUrlParseError: If the URL cannot be parsed
-        """
-        try:
-            parsed_url = urlparse(url)
-            path = parsed_url.path.rstrip("/")
-
-            if not path:
-                raise GitLabUrlParseError(f"URL does not contain a valid path: {url}")
-
-            # Return the path as-is - users can provide the full URL and we'll extract the path
-            # This allows maximum flexibility without restricting to specific URL patterns
-            return path
-
-        except Exception as e:
-            raise GitLabUrlParseError(f"Unable to parse URL: {url}. Error: {str(e)}")
-
     def format_display_message(
         self, args: GitLabApiGetInput, _tool_response: Any = None
     ) -> str:
         """Format a display message for the tool execution."""
-        if args.url:
-            return f"Fetching GitLab resource: {args.url}"
         if args.endpoint:
             params_str = f" with params {args.params}" if args.params else ""
             return f"Making GitLab API request: {args.endpoint}{params_str}"
