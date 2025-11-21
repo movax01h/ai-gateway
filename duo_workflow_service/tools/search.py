@@ -4,7 +4,6 @@ from textwrap import dedent
 from typing import Any, Literal, Optional, Type
 
 import structlog
-from gitlab_cloud_connector import GitLabUnitPrimitive
 from pydantic import BaseModel, Field
 
 from duo_workflow_service.policies.file_exclusion_policy import FileExclusionPolicy
@@ -187,8 +186,6 @@ class IssueSearch(GitLabSearchBase):
     name: str = "gitlab_issue_search"
     description: str = "Search issues by keyword in projects or groups."
     args_schema: Type[BaseModel] = IssueSearchInput
-
-    unit_primitive: GitLabUnitPrimitive = GitLabUnitPrimitive.ASK_ISSUE
 
     async def _execute(
         self,
@@ -430,8 +427,6 @@ class CommitSearch(GitLabSearchBase):
     """
     description: str = GitLabSearchBase._get_description(unique_description)
     args_schema: Type[BaseModel] = RefSearchInput
-
-    unit_primitive: GitLabUnitPrimitive = GitLabUnitPrimitive.ASK_COMMIT
 
     async def _execute(
         self,

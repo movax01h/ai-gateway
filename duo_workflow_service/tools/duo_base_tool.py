@@ -1,7 +1,6 @@
 from abc import abstractmethod
 from typing import Any, List, NamedTuple, Optional, final
 
-from gitlab_cloud_connector import GitLabUnitPrimitive
 from langchain_core.tools import BaseTool, ToolException
 from pydantic import BaseModel, Field
 
@@ -53,7 +52,6 @@ def format_tool_display_message(
 
 
 class DuoBaseTool(BaseTool):
-    unit_primitive: Optional[GitLabUnitPrimitive] = None
     eval_prompts: Optional[List[str]] = None
 
     # Default truncation configuration - tools can override this class attribute

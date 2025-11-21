@@ -5,7 +5,6 @@ from datetime import datetime, timezone
 from typing import Any, List, NamedTuple, Optional, Type, cast
 from urllib.parse import quote
 
-from gitlab_cloud_connector import GitLabUnitPrimitive
 from langchain_core.tools import ToolException
 from pydantic import BaseModel, Field
 
@@ -49,8 +48,6 @@ class CommitURLValidationResult(NamedTuple):
 
 
 class CommitBaseTool(DuoBaseTool):
-    unit_primitive: GitLabUnitPrimitive = GitLabUnitPrimitive.ASK_COMMIT
-
     def _validate_commit_url(
         self, url: Optional[str], project_id: Optional[Any], commit_sha: Optional[str]
     ) -> CommitURLValidationResult:

@@ -652,41 +652,6 @@ async def test_registry_configuration_error(
 
 
 @pytest.mark.parametrize(
-    "enabled_tools,user_can,available_tools,unavailable_tools",
-    [
-        (
-            ["read_write_gitlab"],
-            ["ask_issue"],
-            {"get_issue", "get_project"},
-            {"get_epic"},
-        ),
-        (
-            ["read_write_gitlab"],
-            ["ask_epic"],
-            {"get_epic", "get_project"},
-            {"get_issue"},
-        ),
-        (
-            ["use_git"],
-            ["ask_epic"],
-            {"run_git_command"},
-            {"get_epic"},
-        ),
-    ],
-)
-def test_available_tools_for_user(
-    enabled_tools, user_can, available_tools, unavailable_tools
-):
-    user = MagicMock(spec=CloudConnectorUser)
-    user.can = MagicMock(side_effect=lambda value: value in user_can)
-
-    registry = ToolsRegistry(enabled_tools, [], {}, None, user)
-
-    assert available_tools.issubset(set(registry._enabled_tools.keys()))
-    assert not unavailable_tools.issubset(set(registry._enabled_tools.keys()))
-
-
-@pytest.mark.parametrize(
     ("privileges", "tool_names", "expected_tool_names", "expected_preapproved"),
     [
         (

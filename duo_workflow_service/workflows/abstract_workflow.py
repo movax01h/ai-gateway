@@ -236,12 +236,6 @@ class AbstractWorkflow(ABC):
                     f"This workflow {self._workflow_type.value} does not support namespace-level workflow"
                 )
 
-            user_for_registry = (
-                self._user
-                if self._workflow_type == CategoryEnum.WORKFLOW_CHAT
-                else None
-            )
-
             tools_registry = await ToolsRegistry.configure(
                 outbox=self._outbox,
                 workflow_config=self._workflow_config,
@@ -252,7 +246,6 @@ class AbstractWorkflow(ABC):
                     if self._workflow_config.get("mcp_enabled", False)
                     else []
                 ),
-                user=user_for_registry,
                 language_server_version=self._language_server_version,
             )
 

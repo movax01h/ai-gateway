@@ -1,7 +1,6 @@
 import json
 from typing import Any, ClassVar, List, Type
 
-from gitlab_cloud_connector import GitLabUnitPrimitive
 from pydantic import BaseModel, Field
 
 from duo_workflow_service.tools.duo_base_tool import DuoBaseTool
@@ -37,9 +36,6 @@ class UpdateVulnerabilitySeverity(DuoBaseTool):
     MAX_COMMENT_LENGTH: ClassVar[int] = 50000
 
     name: str = "update_vulnerability_severity"
-    unit_primitive: GitLabUnitPrimitive = (
-        GitLabUnitPrimitive.UPDATE_VULNERABILITY_SEVERITY
-    )
     description: str = f"""Update the severity level of vulnerabilities in a GitLab project using GraphQL.
 
     {PROJECT_IDENTIFICATION_DESCRIPTION}

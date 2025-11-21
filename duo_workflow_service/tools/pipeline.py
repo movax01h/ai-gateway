@@ -2,7 +2,6 @@ import json
 from typing import Any, Optional, Type
 
 import structlog
-from gitlab_cloud_connector import GitLabUnitPrimitive
 from langchain_core.tools import ToolException
 from lxml import etree
 from pydantic import BaseModel, Field
@@ -56,8 +55,6 @@ class GetPipelineFailingJobs(DuoBaseTool):
         get_pipeline_failing_jobs(url="https://gitlab.com/namespace/project/-/pipelines/33")
     """
     args_schema: Type[BaseModel] = GetPipelineFailingJobsInput
-
-    unit_primitive: GitLabUnitPrimitive = GitLabUnitPrimitive.ASK_MERGE_REQUEST
 
     async def _execute(  # pylint: disable=too-many-return-statements
         self, **kwargs: Any
