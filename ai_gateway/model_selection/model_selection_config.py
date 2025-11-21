@@ -6,7 +6,7 @@ import yaml
 from gitlab_cloud_connector import GitLabUnitPrimitive
 from pydantic import BaseModel, ConfigDict
 
-from ai_gateway.model_selection.types import DeprecationInfo
+from ai_gateway.model_selection.types import DeprecationInfo, DevConfig
 
 BASE_PATH = Path(__file__).parent
 MODELS_CONFIG_PATH = BASE_PATH / "models.yml"
@@ -23,16 +23,6 @@ class LLMDefinition(BaseModel):
     params: dict[str, Any] = {}
     family: list[str] = []
     deprecation: Optional[DeprecationInfo] = None
-
-
-class DevConfig(BaseModel):
-    """Configuration for developer-only models."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    default_model: str | None = None
-    selectable_models: list[str] = []
-    group_ids: list[int] = []
 
 
 class UnitPrimitiveConfig(BaseModel):
@@ -124,15 +114,9 @@ class ModelSelectionConfig:
                 )
 
             if unit_primitive_config.dev:
-                dev_default = unit_primitive_config.dev.default_model
                 dev_selectable = unit_primitive_config.dev.selectable_models
                 dev_groups = unit_primitive_config.dev.group_ids
-                # Validate that the dev_default_model is also included in dev_selectable_models
-                if dev_default and dev_default not in dev_selectable:
-                    dev_models_validation_errors.append(
-                        f"Feature '{unit_primitive_config.feature_setting}' has a developer default model "
-                        f"'{dev_default}' that is not in dev selectable_models."
-                    )
+
                 # Validate that dev_selectable_models has at least a dev group ID specified
                 if dev_selectable and not dev_groups:
                     dev_models_validation_errors.append(
