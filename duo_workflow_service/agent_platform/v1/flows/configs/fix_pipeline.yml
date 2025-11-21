@@ -127,7 +127,6 @@ components:
     type: AgentComponent
     prompt_id: "fix_pipeline_push_changes"
     prompt_version: "^1.0.0"
-    max_correction_attempts: 3
     inputs:
       - from: "context:goal"
         as: "pipeline_url"
@@ -167,7 +166,6 @@ components:
         as: "session_url"
     toolset: ["create_merge_request_note"]
     ui_log_events:
-      - "on_agent_final_answer"
       - "on_tool_execution_success"
       - "on_tool_execution_failed"
 routers:
