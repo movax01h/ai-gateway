@@ -116,6 +116,11 @@ class AgentComponent(BaseComponent):
             model_metadata=current_model_metadata_context.get(),
             tools=tools,  # type: ignore[arg-type]
             tool_choice=tool_choice,
+            internal_event_extra={
+                "agent_name": self.name,
+                "workflow_id": self.flow_id,
+                "workflow_type": self.flow_type.value,
+            },
         )
 
         node_agent = AgentNode(

@@ -247,6 +247,11 @@ class TestAgentComponentAttachNodes:
         expected_tools = mock_toolset.bindable + [AgentFinalOutput]
         assert call_args[1]["tools"] == expected_tools
         assert call_args[1]["tool_choice"] == "any"
+        assert call_args[1]["internal_event_extra"] == {
+            "agent_name": component_name,
+            "workflow_id": flow_id,
+            "workflow_type": flow_type.value,
+        }
 
         # Verify AgentNode creation
         mock_agent_node_cls.assert_called_once()

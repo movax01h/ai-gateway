@@ -205,6 +205,11 @@ class TestOneOffComponentAttachNodes:
         # Check that tools and tool_choice are set correctly
         assert call_args[1]["tools"] == mock_toolset.bindable
         assert call_args[1]["tool_choice"] == "any"
+        assert call_args[1]["internal_event_extra"] == {
+            "agent_name": component_name,
+            "workflow_id": flow_id,
+            "workflow_type": flow_type.value,
+        }
 
         # Verify AgentNode creation
         mock_agent_node_cls.assert_called_once()
