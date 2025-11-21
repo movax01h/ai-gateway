@@ -3,7 +3,6 @@ import re
 from typing import Any, Optional, Type
 
 import structlog
-from gitlab_cloud_connector import GitLabUnitPrimitive
 from pydantic import BaseModel, Field
 
 from duo_workflow_service.policies.diff_exclusion_policy import DiffExclusionPolicy
@@ -83,8 +82,6 @@ class CreateMergeRequest(DuoBaseTool):
     """
     args_schema: Type[BaseModel] = CreateMergeRequestInput
 
-    unit_primitive: GitLabUnitPrimitive = GitLabUnitPrimitive.ASK_MERGE_REQUEST
-
     async def _execute(
         self,
         source_branch: str,
@@ -158,8 +155,6 @@ class GetMergeRequest(DuoBaseTool):
     """
     args_schema: Type[BaseModel] = MergeRequestResourceInput
 
-    unit_primitive: GitLabUnitPrimitive = GitLabUnitPrimitive.ASK_MERGE_REQUEST
-
     async def _execute(self, **kwargs: Any) -> str:
         url = kwargs.get("url")
         project_id = kwargs.get("project_id")
@@ -213,8 +208,6 @@ class ListMergeRequestDiffs(DuoBaseTool):
         list_merge_request_diffs(url="https://gitlab.com/namespace/project/-/merge_requests/103")
     """
     args_schema: Type[BaseModel] = MergeRequestResourceInput
-
-    unit_primitive: GitLabUnitPrimitive = GitLabUnitPrimitive.ASK_MERGE_REQUEST
 
     async def _execute(self, **kwargs: Any) -> str:
         url = kwargs.get("url")
@@ -303,8 +296,6 @@ The body parameter is always required.
 """
     args_schema: Type[BaseModel] = CreateMergeRequestNoteInput
 
-    unit_primitive: GitLabUnitPrimitive = GitLabUnitPrimitive.ASK_MERGE_REQUEST
-
     def _contains_quick_action(self, body: str) -> bool:
         quick_action_pattern = r"(?m)^/[a-zA-Z]+"
         return bool(re.search(quick_action_pattern, body))
@@ -375,8 +366,6 @@ class ListAllMergeRequestNotes(DuoBaseTool):
         list_all_merge_request_notes(url="https://gitlab.com/namespace/project/-/merge_requests/103")
     """
     args_schema: Type[BaseModel] = MergeRequestResourceInput
-
-    unit_primitive: GitLabUnitPrimitive = GitLabUnitPrimitive.ASK_MERGE_REQUEST
 
     async def _execute(self, **kwargs: Any) -> str:
         url = kwargs.get("url")
@@ -541,8 +530,6 @@ class ListMergeRequest(DuoBaseTool):
     """
     args_schema: Type[BaseModel] = ListMergeRequestInput
 
-    unit_primitive: GitLabUnitPrimitive = GitLabUnitPrimitive.ASK_MERGE_REQUEST
-
     async def _execute(self, **kwargs: Any) -> str:
         url = kwargs.pop("url", None)
         project_id = kwargs.pop("project_id", None)
@@ -637,8 +624,6 @@ For example:
     update_merge_request(url="https://gitlab.com/namespace/project/-/merge_requests/103", title="Updated title")
     """
     args_schema: Type[BaseModel] = UpdateMergeRequestInput
-
-    unit_primitive: GitLabUnitPrimitive = GitLabUnitPrimitive.ASK_MERGE_REQUEST
 
     async def _execute(self, **kwargs: Any) -> str:
         url = kwargs.pop("url", None)

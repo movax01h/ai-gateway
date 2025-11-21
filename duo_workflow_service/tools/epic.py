@@ -2,7 +2,6 @@ import json
 import logging
 from typing import Any, List, NamedTuple, Optional, Type, Union
 
-from gitlab_cloud_connector import GitLabUnitPrimitive
 from pydantic import BaseModel, Field
 
 from duo_workflow_service.gitlab.url_parser import GitLabUrlParseError, GitLabUrlParser
@@ -42,8 +41,6 @@ class EpicURLValidationResult(NamedTuple):
 
 
 class EpicBaseTool(DuoBaseTool):
-    unit_primitive: GitLabUnitPrimitive = GitLabUnitPrimitive.ASK_EPIC
-
     def _validate_group_url(
         self, url: Optional[str], group_id: Optional[int | str]
     ) -> GroupURLValidationResult:

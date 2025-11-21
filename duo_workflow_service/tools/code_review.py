@@ -7,7 +7,6 @@ from typing import Any, Dict, List, Optional, Type
 from urllib.parse import quote
 
 import yaml
-from gitlab_cloud_connector import GitLabUnitPrimitive
 from pydantic import BaseModel, Field
 
 from duo_workflow_service.policies.diff_exclusion_policy import DiffExclusionPolicy
@@ -38,7 +37,6 @@ class PostDuoCodeReview(DuoBaseTool):
         'review_output="<review>...</review>")'
     )
     args_schema: Type[BaseModel] = PostDuoCodeReviewInput
-    unit_primitive: GitLabUnitPrimitive = GitLabUnitPrimitive.ASK_MERGE_REQUEST
 
     async def _execute(
         self, project_id: int, merge_request_iid: int, review_output: str, **kwargs: Any
@@ -120,7 +118,6 @@ class BuildReviewMergeRequestContext(DuoBaseTool):
         "- build_review_merge_request_context(url='https://gitlab.com/...')"
     )
     args_schema: Type[BaseModel] = BuildReviewMergeRequestContextInput
-    unit_primitive: GitLabUnitPrimitive = GitLabUnitPrimitive.ASK_MERGE_REQUEST
     truncation_config: TruncationConfig = Field(
         default_factory=lambda: TruncationConfig(
             max_bytes=1 * 1024 * 1024,  # 1 MiB (~262K tokens)

@@ -1,6 +1,5 @@
 from typing import Optional, Type, TypedDict, Union
 
-from gitlab_cloud_connector import CloudConnectorUser
 from langchain.tools import BaseTool
 from pydantic import BaseModel
 
@@ -172,7 +171,6 @@ class ToolsRegistry:
         outbox: Outbox,
         project: Optional[Project],
         mcp_tools: Optional[list[type[BaseTool]]] = None,
-        user: Optional[CloudConnectorUser] = None,
         language_server_version: Optional[LanguageServerVersion] = None,
     ):
         if not workflow_config:
@@ -199,7 +197,6 @@ class ToolsRegistry:
             preapproved_tools=preapproved_tools,
             tool_metadata=tool_metadata,
             mcp_tools=mcp_tools,
-            user=user,
             language_server_version=language_server_version,
         )
 
@@ -209,7 +206,6 @@ class ToolsRegistry:
         preapproved_tools: list[str],
         tool_metadata: ToolMetadata,
         mcp_tools: Optional[list[type[BaseTool]]] = None,
-        user: Optional[CloudConnectorUser] = None,
         language_server_version: Optional[LanguageServerVersion] = None,
     ):
         tools_for_agent_privileges = _AGENT_PRIVILEGES
@@ -231,12 +227,6 @@ class ToolsRegistry:
         for privilege in enabled_tools:
             for tool_cls in tools_for_agent_privileges.get(privilege, []):
                 tool = tool_cls(metadata=tool_metadata)
-
-                # If user is passed, we check user permission to access this tool
-                if user:
-                    tool_primitive = getattr(tool, "unit_primitive", None)
-                    if tool_primitive and not user.can(tool_primitive):
-                        continue
 
                 # If language server client was detected, restrict tool versions
                 if isinstance(tool, DuoBaseTool) and language_server_version:

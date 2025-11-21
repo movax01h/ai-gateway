@@ -15,7 +15,6 @@ from typing import (
 )
 
 import structlog
-from gitlab_cloud_connector import GitLabUnitPrimitive
 from pydantic import StringConstraints
 
 from duo_workflow_service.gitlab.url_parser import GitLabUrlParseError, GitLabUrlParser
@@ -67,8 +66,6 @@ DateString = Annotated[str, StringConstraints(pattern=r"^\d{4}-\d{2}-\d{2}$")]
 
 
 class WorkItemBaseTool(DuoBaseTool):
-    unit_primitive: GitLabUnitPrimitive = GitLabUnitPrimitive.ASK_WORK_ITEM
-
     _GET_WORK_ITEM_QUERIES = {
         "group": (GET_GROUP_WORK_ITEM_QUERY, "namespace"),
         "project": (GET_PROJECT_WORK_ITEM_QUERY, "project"),
