@@ -154,7 +154,7 @@ flow:
 **Local Prompt Structure**:
 
 Mirrors the prompt structure of prompts taken from the prompt registry. More information about the structure can be
-found [here](../aigw_prompt_registry.md#ai-gateway-prompt-configuration-reference).
+found in the [AI Gateway Prompt Configuration Reference](../aigw_prompt_registry.md#ai-gateway-prompt-configuration-reference).
 
 **Benefits of Local Prompts**:
 
