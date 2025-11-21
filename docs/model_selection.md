@@ -175,7 +175,6 @@ Unit primitive groups are defined in `ai_gateway/model_selection/unit_primitives
 - `selectable_models`: a list of `gitlab_identifier` for the models that the user can select from
 - `beta_models`: a list of models that are not fully supported but users can select from
 - `dev`: optional nested configuration for developer-only models with the following fields:
-  - `default_model`: default model for users in the developer groups (must be in developer `selectable_models`). If specified, this field overrides the value of `default_model` from regular models.
   - `selectable_models`: models only visible to users in groups specified by `group_ids`
   - `group_ids`: GitLab group IDs that can access the developer models (e.g., `[9970]` for `gitlab-org`)
 
@@ -192,7 +191,6 @@ configurable_unit_primitives:
       - "claude_sonnet_3_7_20250219"
       - "claude_3_5_sonnet_20240620"
     dev:
-      default_model: "claude_sonnet_4_5_20250929"
       selectable_models:
         - "claude_sonnet_4_5_20250929"
         - "claude_haiku_4_5_20251001"
@@ -202,11 +200,10 @@ configurable_unit_primitives:
 
 ## Developer models
 
-The `dev` configuration allows you to test experimental models with internal team members before rolling them out to everyone. This is useful when you want to validate a new model internally without exposing customers to potential issues.
+The `dev` configuration allows you to test experimental models with internal team members before rolling them out to everyone.
+This is useful when you want to validate a new model internally without exposing customers to potential issues.
+When you set `dev.selectable_models`, you must also specify at least one group in `dev.group_ids`.
+This prevents accidentally making "internal-only" models available to everyone.
 
-The AI Gateway validates these fields at startup:
-
-- If you set `dev.selectable_models`, you must also specify at least one group in `dev.group_ids`. This prevents accidentally making "internal-only" models available to everyone.
-- If you set `dev.default_model`, it must be one of the models specified in `dev.selectable_models`.
-
-The actual access control happens in the client (GitLab Rails), which checks whether the user belongs to any of the groups in `dev.group_ids`. Users in those groups see both the regular and developer models, while everyone else only sees the regular ones.
+The actual access control happens in the client (GitLab Rails), which checks whether the user is a GitLab team member and belongs to any of the groups in `dev.group_ids`.
+Users in those groups see both the regular and developer models, while everyone else only sees the regular ones.
