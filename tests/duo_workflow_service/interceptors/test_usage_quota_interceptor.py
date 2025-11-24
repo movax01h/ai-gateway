@@ -249,3 +249,23 @@ async def test_customersdot_unexpected_error_raises_exception(
 
         with pytest.raises(RuntimeError):
             await interceptor.has_usage_quota_left(usage_quota_event_context)
+
+
+@pytest.mark.asyncio
+async def test_customersdot_forbidden_error_aborts_request(
+    continuation, handler_call_details
+):
+    """Test that forbidden HTTP code from CustomersDot aborts the request."""
+    interceptor = UsageQuotaInterceptor()
+
+    with patch(
+        "duo_workflow_service.interceptors.usage_quota_interceptor.httpx.AsyncClient"
+    ) as mock_client_cls:
+        mock_client = AsyncMock()
+        mock_client.__aenter__.return_value = mock_client
+        mock_client.__aexit__.return_value = None
+        mock_client.head.return_value = MagicMock(status_code=403)
+        mock_client_cls.return_value = mock_client
+
+        await interceptor.intercept_service(continuation, handler_call_details)
+        assert continuation.call_count == 0

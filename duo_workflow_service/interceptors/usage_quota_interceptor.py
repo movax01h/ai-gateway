@@ -131,10 +131,11 @@ class UsageQuotaInterceptor(ServerInterceptor):
                 ).time():
                     response = await client.head(url, params=params)
 
-                # The Customers Portal responds with two HTTP status codes:
+                # The Customers Portal responds with following HTTP status codes:
                 # - Payment Required (402):
-                #     returned when the customer does not have enough credits
-                #     or when the entitlement check fails.
+                #     returned when the customer does not have enough credits.
+                # - Forbidden (403):
+                #     returned when the entitlement check fails.
                 # - OK (200):
                 #     returned when the customer has sufficient credits
                 #     and the entitlement check passes.
@@ -143,7 +144,7 @@ class UsageQuotaInterceptor(ServerInterceptor):
 
                 status = response.status_code
 
-                if status == httpx.codes.PAYMENT_REQUIRED:
+                if status in [httpx.codes.PAYMENT_REQUIRED, httpx.codes.FORBIDDEN]:
                     USAGE_QUOTA_CUSTOMERSDOT_REQUESTS_TOTAL.labels(
                         outcome="denied", status=str(status)
                     ).inc()
