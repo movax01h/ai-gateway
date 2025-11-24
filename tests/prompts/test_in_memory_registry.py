@@ -1,9 +1,10 @@
 from unittest.mock import Mock
 
 import pytest
-from langchain_community.chat_models import ChatLiteLLM
+from langchain_community.chat_models import ChatAnthropic, ChatLiteLLM
 from pydantic import ValidationError
 
+from ai_gateway.model_metadata import ModelMetadata
 from ai_gateway.prompts.base import Prompt
 from ai_gateway.prompts.config import ModelClassProvider
 from ai_gateway.prompts.in_memory_registry import InMemoryPromptRegistry
@@ -22,7 +23,10 @@ class TestInMemoryPromptRegistry:
         registry.model_factories = {
             ModelClassProvider.LITE_LLM: lambda model, **kwargs: ChatLiteLLM(
                 model=model, **kwargs
-            )
+            ),
+            ModelClassProvider.ANTHROPIC: lambda model, **kwargs: ChatAnthropic(
+                model=model, **kwargs
+            ),
         }
         registry.disable_streaming = False
         return registry
@@ -184,7 +188,9 @@ class TestInMemoryPromptRegistry:
 
         in_memory_registry.register_prompt(prompt_id, invalid_prompt_data)
 
-        with pytest.raises(KeyError, match="'model'"):
+        with pytest.raises(
+            ValueError, match=f"Model config not provided for prompt {prompt_id}"
+        ):
             in_memory_registry.get(prompt_id, prompt_version=None)
 
     def test_get_local_prompt_missing_prompt_template(self, in_memory_registry):
@@ -209,3 +215,75 @@ class TestInMemoryPromptRegistry:
 
         with pytest.raises(KeyError, match="'prompt_template'"):
             in_memory_registry.get(prompt_id, prompt_version=None)
+
+    @pytest.mark.parametrize(
+        "raw_model_data,model_metadata,expected_result",
+        [
+            (
+                # Only the prompt model is provided
+                {
+                    "params": {
+                        "model": "claude-3-7-sonnet-20250219",
+                        "model_class_provider": ModelClassProvider.LITE_LLM,
+                    }
+                },
+                None,
+                "claude-3-7-sonnet-20250219",
+            ),
+            (
+                # Only the model_metadata is provided
+                None,
+                ModelMetadata(
+                    name="test",
+                    provider="test",
+                    llm_definition_params={
+                        "model": "claude-sonnet-4-20250514",
+                        "model_class_provider": ModelClassProvider.LITE_LLM,
+                    },
+                ),
+                "claude-sonnet-4-20250514",
+            ),
+            (
+                # Both the prompt model and the model_metadata are provided; we use the model_metadata
+                {
+                    "params": {
+                        "model": "claude-3-7-sonnet-20250219",
+                        "model_class_provider": ModelClassProvider.LITE_LLM,
+                    }
+                },
+                ModelMetadata(
+                    name="test",
+                    provider="test",
+                    llm_definition_params={
+                        "model": "claude-sonnet-4-20250514",
+                        "model_class_provider": ModelClassProvider.LITE_LLM,
+                    },
+                ),
+                "claude-sonnet-4-20250514",
+            ),
+        ],
+    )
+    def test_model_data_handling(
+        self,
+        in_memory_registry,
+        raw_model_data,
+        model_metadata,
+        expected_result,
+    ):
+        prompt_id = "test_prompt"
+        prompt_data = {
+            "prompt_template": {
+                "system": "You are a helpful assistant",
+                "user": "Task: {{goal}}",
+            }
+        }
+        if raw_model_data:
+            prompt_data["model"] = raw_model_data
+
+        in_memory_registry.register_prompt(prompt_id, prompt_data)
+
+        result = in_memory_registry.get(
+            prompt_id, prompt_version=None, model_metadata=model_metadata
+        )
+        assert isinstance(result, Prompt)
+        assert result.model.model == expected_result

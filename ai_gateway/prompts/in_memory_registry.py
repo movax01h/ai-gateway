@@ -70,9 +70,19 @@ class InMemoryPromptRegistry(BasePromptRegistry):
         factory.
         """
         raw_data = self._process_prompt_data(prompt_id)
+
+        model_data: dict[str, Any]
+
+        if model_metadata and model_metadata.llm_definition_params:
+            model_data = {"params": model_metadata.llm_definition_params}
+        elif model_from_prompt := raw_data.get("model"):
+            model_data = model_from_prompt
+        else:
+            raise ValueError(f"Model config not provided for prompt {prompt_id}")
+
         prompt_config = PromptConfig(
             name=prompt_id,
-            model=ModelConfig(**raw_data["model"]),
+            model=ModelConfig(**model_data),
             unit_primitives=raw_data.get("unit_primitives", []),
             prompt_template=raw_data["prompt_template"],
             params=raw_data.get("params"),

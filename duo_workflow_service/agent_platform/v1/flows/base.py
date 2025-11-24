@@ -103,7 +103,7 @@ class Flow(AbstractWorkflow):
                 prompt_id = prompt_config.prompt_id
                 self._flow_prompt_registry.register_prompt(
                     prompt_id=prompt_id,
-                    prompt_data=prompt_config.to_prompt_config().model_dump(),
+                    prompt_data=prompt_config.to_prompt_data(),
                 )
 
     # pylint: enable=dangerous-default-value

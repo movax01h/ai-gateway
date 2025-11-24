@@ -42,7 +42,7 @@ class TestInMemoryPromptConfig:
             "user": "{{user_input}}",
         }
 
-    def test_to_prompt_config(self):
+    def test_to_prompt_data(self):
         """Test converting InMemoryPromptConfig to PromptConfig."""
         config_data = {
             "prompt_id": "test/prompt",
@@ -65,7 +65,11 @@ class TestInMemoryPromptConfig:
         }
 
         in_memory_config = InMemoryPromptConfig(**config_data)
-        prompt_config = in_memory_config.to_prompt_config()
+        prompt_data = in_memory_config.to_prompt_data()
+
+        assert isinstance(prompt_data, dict)
+
+        prompt_config = PromptConfig(**prompt_data)
 
         # Should be a PromptConfig instance
         assert isinstance(prompt_config, PromptConfig)
