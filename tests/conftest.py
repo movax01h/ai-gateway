@@ -7,7 +7,7 @@ from unittest.mock import AsyncMock, Mock, PropertyMock, patch
 import litellm
 import pytest
 import structlog
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.testclient import TestClient
 from gitlab_cloud_connector import CloudConnectorUser, GitLabUnitPrimitive, UserClaims
 from langchain.tools import BaseTool
@@ -54,6 +54,7 @@ from duo_workflow_service.entities.state import (
 from duo_workflow_service.gitlab.gitlab_api import Project
 from duo_workflow_service.server import CONTAINER_APPLICATION_PACKAGES
 from duo_workflow_service.workflows.type_definitions import AdditionalContext
+from lib.billing_events.client import BillingEventsClient
 from lib.feature_flags.context import current_feature_flag_context
 from lib.internal_events.client import InternalEventsClient
 from lib.prompts.caching import current_prompt_cache_context
@@ -672,7 +673,7 @@ def user_is_debug_fixture():
 
 
 @pytest.fixture(name="user")
-def user_fixture(user_is_debug: bool, scopes: list[str]):
+def user_fixture(user_is_debug: bool, scopes: list[str]) -> StarletteUser | None:
     return StarletteUser(
         CloudConnectorUser(
             authenticated=True,
@@ -804,3 +805,17 @@ def end_message_fixture():
             }
         ],
     )
+
+
+@pytest.fixture(name="mock_request")
+def mock_request_fixture(user: StarletteUser | None):
+    request = Mock(spec=Request)
+    request.headers = {}
+    request.user = user
+    request.state = Mock(spec=[])
+    return request
+
+
+@pytest.fixture(name="billing_event_client")
+def billing_event_client_fixture():
+    return Mock(spec=BillingEventsClient)

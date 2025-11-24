@@ -2,7 +2,7 @@ import asyncio
 import json
 from asyncio import CancelledError
 from typing import Any, Optional, Sequence, TypedDict
-from unittest.mock import AsyncMock, MagicMock, Mock, call, patch
+from unittest.mock import AsyncMock, Mock, call, patch
 
 import pytest
 from gitlab_cloud_connector import CloudConnectorUser, UserClaims
@@ -34,7 +34,6 @@ from duo_workflow_service.json_encoder.encoder import CustomEncoder
 from duo_workflow_service.status_updater.gitlab_status_updater import (
     UnsupportedStatusEvent,
 )
-from lib.billing_events.client import BillingEventsClient
 from lib.feature_flags.context import FeatureFlag
 from lib.internal_events import InternalEventAdditionalProperties
 from lib.internal_events.event_enum import EventEnum, EventLabelEnum, EventPropertyEnum
@@ -81,11 +80,6 @@ def config_fixture() -> CustomRunnableConfig:
 @pytest.fixture(name="http_client")
 def http_client_fixture():
     return AsyncMock()
-
-
-@pytest.fixture(name="billing_event_client")
-def billing_event_client_fixture():
-    return MagicMock(spec=BillingEventsClient)
 
 
 @pytest.fixture(name="mock_user")

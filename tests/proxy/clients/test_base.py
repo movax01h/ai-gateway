@@ -5,6 +5,7 @@ import pytest
 from starlette.datastructures import URL
 
 from ai_gateway.proxy.clients.base import BaseProxyClient
+from ai_gateway.proxy.clients.token_usage import TokenUsage
 
 
 class TestProxyClient(BaseProxyClient):
@@ -30,6 +31,13 @@ class TestProxyClient(BaseProxyClient):
 
     def _extract_stream_flag(self, upstream_path, json_body):
         return json_body.get("stream", False)
+
+    def _extract_token_usage(self, upstream_path, json_body):
+        usage = json_body.get("usage", {})
+        return TokenUsage(
+            input_tokens=usage.get("input_tokens", 0),
+            output_tokens=usage.get("output_tokens", 0),
+        )
 
     def _update_headers_to_upstream(self, headers):
         headers.update({"X-Test-Header": "test"})

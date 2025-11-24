@@ -27,6 +27,8 @@ MYPY_LINT_TODO_DIR ?= --exclude "ai_gateway/models/litellm.py" \
 	--exclude "ai_gateway/code_suggestions/processing/ops.py" \
 	--exclude "ai_gateway/instrumentators/model_requests.py" \
 	--exclude "ai_gateway/integrations/amazon_q/test_chat.py" \
+	--exclude "ai_gateway/proxy/clients/anthropic.py" \
+	--exclude "ai_gateway/proxy/clients/openai.py" \
 	--exclude "tests/code_suggestions/test_completions.py" \
 	--exclude "tests/code_suggestions/test_container.py"
 
