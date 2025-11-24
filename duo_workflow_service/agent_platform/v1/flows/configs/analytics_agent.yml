@@ -25,6 +25,8 @@ prompts:
       params:
         model_class_provider: anthropic
         max_tokens: 8_192
+    unit_primitives:
+      - duo_agent_platform
     prompt_template:
       system: |
         You are an expert GLQL (GitLab Query Language) analyst who converts natural language analytical questions into precise GLQL queries. Your primary function is to translate user questions about GitLab data into working GLQL syntax that answers their specific analytical needs.
