@@ -1,5 +1,5 @@
 GET_GROUP_WORK_ITEM_QUERY = """
-query GetGroupWorkItem($fullPath: ID!, $iid: String!) {
+query GetGroupWorkItem($fullPath: ID!, $iid: String!, $childrenPageSize: Int, $childrenEndCursor: String, $pageSize: Int, $endCursor: String ) {
     namespace(fullPath: $fullPath) {
         workItems(iid: $iid) {
             nodes {
@@ -84,6 +84,71 @@ query GetGroupWorkItem($fullPath: ID!, $iid: String!) {
                             dueDate
                         }
                     }
+                    ... on WorkItemWidgetHierarchy {
+                        parent {
+                            id
+                            iid
+                            namespace {
+                                name
+                            }
+                            workItemType {
+                                name
+                            }
+                            title
+                            state
+                            createdAt
+                            closedAt
+                            webUrl
+                        }
+                        children(first: $childrenPageSize, after: $childrenEndCursor) {
+                            pageInfo {
+                                hasNextPage
+                                hasPreviousPage
+                                startCursor
+                                endCursor
+                            }
+                            count
+                            nodes {
+                                id
+                                iid
+                                workItemType {
+                                    name
+                                }
+                                namespace {
+                                    name
+                                }
+                                title
+                                state
+                                createdAt
+                                closedAt
+                                webUrl
+                            }
+                        }
+                        ancestors(first: $pageSize, after: $endCursor) {
+                            pageInfo {
+                                hasNextPage
+                                hasPreviousPage
+                                startCursor
+                                endCursor
+                            }
+                            count
+                            nodes {
+                                id
+                                iid
+                                workItemType {
+                                    name
+                                }
+                                namespace {
+                                    name
+                                }
+                                title
+                                state
+                                createdAt
+                                closedAt
+                                webUrl
+                            }
+                        }
+                    }
                 }
             }
         }
@@ -92,7 +157,7 @@ query GetGroupWorkItem($fullPath: ID!, $iid: String!) {
 """
 
 GET_PROJECT_WORK_ITEM_QUERY = """
-query GetProjectWorkItem($fullPath: ID!, $iid: String!) {
+query GetProjectWorkItem($fullPath: ID!, $iid: String!, $childrenPageSize: Int, $childrenEndCursor: String, $pageSize: Int, $endCursor: String ) {
     project(fullPath: $fullPath) {
         workItems(iid: $iid) {
             nodes {
@@ -175,6 +240,71 @@ query GetProjectWorkItem($fullPath: ID!, $iid: String!) {
                             title
                             startDate
                             dueDate
+                        }
+                    }
+                    ... on WorkItemWidgetHierarchy {
+                        parent {
+                            id
+                            iid
+                            namespace {
+                                name
+                            }
+                            workItemType {
+                                name
+                            }
+                            title
+                            state
+                            createdAt
+                            closedAt
+                            webUrl
+                        }
+                        children(first: $childrenPageSize, after: $childrenEndCursor) {
+                            pageInfo {
+                                hasNextPage
+                                hasPreviousPage
+                                startCursor
+                                endCursor
+                            }
+                            count
+                            nodes {
+                                id
+                                iid
+                                workItemType {
+                                    name
+                                }
+                                namespace {
+                                    name
+                                }
+                                title
+                                state
+                                createdAt
+                                closedAt
+                                webUrl
+                            }
+                        }
+                        ancestors(first: $pageSize, after: $endCursor) {
+                            pageInfo {
+                                hasNextPage
+                                hasPreviousPage
+                                startCursor
+                                endCursor
+                            }
+                            count
+                            nodes {
+                                id
+                                iid
+                                workItemType {
+                                    name
+                                }
+                                namespace {
+                                    name
+                                }
+                                title
+                                state
+                                createdAt
+                                closedAt
+                                webUrl
+                            }
                         }
                     }
                 }
