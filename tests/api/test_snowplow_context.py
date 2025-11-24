@@ -1,7 +1,4 @@
-from unittest.mock import Mock
-
 import pytest
-from fastapi import Request
 
 from ai_gateway.api.snowplow_context import (
     X_GITLAB_REALM_HEADER,
@@ -9,11 +6,9 @@ from ai_gateway.api.snowplow_context import (
 )
 
 
-@pytest.fixture(name="mock_request")
-def mock_request_fixture():
-    request = Mock(spec=Request)
-    request.user = None
-    return request
+@pytest.fixture(name="user")
+def user_fixture():
+    return None
 
 
 @pytest.mark.parametrize(

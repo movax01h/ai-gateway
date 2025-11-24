@@ -8,14 +8,17 @@ from ai_gateway.api.feature_category import X_GITLAB_UNIT_PRIMITIVE, feature_cat
 from ai_gateway.api.v1.proxy.request import (
     EXTENDED_FEATURE_CATEGORIES_FOR_PROXY_ENDPOINTS,
     authorize_with_unit_primitive_header,
+    track_billing_event,
 )
 from ai_gateway.async_dependency_resolver import (
     get_abuse_detector,
     get_anthropic_proxy_client,
+    get_billing_event_client,
     get_internal_event_client,
 )
 from ai_gateway.models.base import KindModelProvider
 from ai_gateway.proxy.clients import AnthropicProxyClient
+from lib.billing_events.client import BillingEventsClient
 from lib.internal_events import InternalEventsClient
 
 __all__ = [
@@ -29,6 +32,7 @@ router = APIRouter()
 
 @router.post(f"/{KindModelProvider.ANTHROPIC.value}" + "/{path:path}")
 @authorize_with_unit_primitive_header()
+@track_billing_event
 @feature_categories(EXTENDED_FEATURE_CATEGORIES_FOR_PROXY_ENDPOINTS)
 async def anthropic(
     request: Request,
@@ -41,6 +45,9 @@ async def anthropic(
     internal_event_client: Annotated[
         InternalEventsClient, Depends(get_internal_event_client)
     ],
+    billing_event_client: Annotated[
+        BillingEventsClient, Depends(get_billing_event_client)
+    ],  # pylint: disable=unused-argument
 ):
     unit_primitive = request.headers[X_GITLAB_UNIT_PRIMITIVE]
     internal_event_client.track_event(

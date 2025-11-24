@@ -1,21 +1,12 @@
 from unittest.mock import Mock
 
 import pytest
-from fastapi import BackgroundTasks, HTTPException, Request
+from fastapi import BackgroundTasks, HTTPException
 from gitlab_cloud_connector import GitLabUnitPrimitive
 
 from ai_gateway.abuse_detection import AbuseDetector
-from ai_gateway.api.auth_utils import StarletteUser
 from ai_gateway.api.feature_category import X_GITLAB_UNIT_PRIMITIVE
 from ai_gateway.api.v1.proxy.request import authorize_with_unit_primitive_header
-
-
-@pytest.fixture(name="mock_request")
-def mock_request_fixture():
-    request = Mock(spec=Request)
-    request.headers = {}
-    request.user = Mock(spec=StarletteUser)
-    return request
 
 
 @pytest.fixture(name="mock_background_tasks")
@@ -69,7 +60,6 @@ async def test_authorize_with_unit_primitive_header_unauthorized(
     mock_request, mock_background_tasks, mock_abuse_detector
 ):
     mock_request.headers[X_GITLAB_UNIT_PRIMITIVE] = GitLabUnitPrimitive.DUO_CHAT
-    mock_request.user.can.return_value = False
 
     @authorize_with_unit_primitive_header()
     async def dummy_func(request, background_tasks, abuse_detector):
@@ -87,11 +77,11 @@ async def test_authorize_with_unit_primitive_header_unauthorized(
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("scopes", [["duo_chat"]])
 async def test_authorize_with_unit_primitive_header_authorized(
     mock_request, mock_background_tasks, mock_abuse_detector
 ):
     mock_request.headers[X_GITLAB_UNIT_PRIMITIVE] = GitLabUnitPrimitive.DUO_CHAT
-    mock_request.user.can.return_value = True
     mock_abuse_detector.should_detect.return_value = True
 
     @authorize_with_unit_primitive_header()
@@ -104,11 +94,11 @@ async def test_authorize_with_unit_primitive_header_authorized(
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("scopes", [["duo_chat"]])
 async def test_authorize_with_unit_primitive_header_authorized_without_abuse_detection(
     mock_request, mock_background_tasks, mock_abuse_detector
 ):
     mock_request.headers[X_GITLAB_UNIT_PRIMITIVE] = GitLabUnitPrimitive.DUO_CHAT
-    mock_request.user.can.return_value = True
     mock_abuse_detector.should_detect.return_value = False
 
     @authorize_with_unit_primitive_header()

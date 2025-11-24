@@ -10,6 +10,7 @@ from starlette.background import BackgroundTask
 
 from ai_gateway.config import ConfigModelLimits
 from ai_gateway.instrumentators.model_requests import ModelRequestInstrumentator
+from ai_gateway.proxy.clients.token_usage import TokenUsage
 
 
 class BaseProxyClient(ABC):
@@ -58,6 +59,20 @@ class BaseProxyClient(ABC):
             response_from_upstream.headers
         )
 
+        # Extract token usage from response for billing tracking
+        # Only extract for non-streaming responses
+        if not stream and response_from_upstream.status_code == 200:
+            try:
+                response_json = response_from_upstream.json()
+                token_usage = self._extract_token_usage(upstream_path, response_json)
+                # Store in request state for billing event tracking
+                request.state.proxy_token_usage = token_usage
+                request.state.proxy_model_name = model_name
+            except Exception:
+                # If token extraction fails, continue without it
+                # The billing event will still be tracked without token details
+                pass
+
         if stream:
             return fastapi.responses.StreamingResponse(
                 response_from_upstream.aiter_text(),
@@ -105,6 +120,13 @@ class BaseProxyClient(ABC):
     @abstractmethod
     def _extract_stream_flag(self, upstream_path: str, json_body: typing.Any) -> bool:
         """Extract stream flag from the request."""
+        pass
+
+    @abstractmethod
+    def _extract_token_usage(
+        self, upstream_path: str, json_body: typing.Any
+    ) -> TokenUsage:
+        """Extract the proxy clients token usage per path request."""
         pass
 
     @abstractmethod
