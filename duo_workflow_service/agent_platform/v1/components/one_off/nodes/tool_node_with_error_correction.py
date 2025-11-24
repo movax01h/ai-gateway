@@ -179,10 +179,12 @@ class ToolNodeWithErrorCorrection:
 
             return tool_call_result
         except Exception as e:
+            response = getattr(e, "response", None)
             self._ui_history.log.error(
                 tool=tool,
                 tool_call_args=tool_call_args,
                 event=UILogEventsOneOff.ON_TOOL_EXECUTION_FAILED,
+                tool_response=f"{str(e)} {response}" if response else str(e),
             )
             if isinstance(e, ToolException):
                 err_format = self._format_tool_exception(tool_name=tool.name, error=e)
@@ -287,7 +289,7 @@ class ToolNodeWithErrorCorrection:
             },
         )
 
-        return f"Tool runtime exception due to {str(error)}"
+        return f"Tool runtime exception due to {str(error)} {getattr(error, "response", None)}"
 
     def _format_tool_exception(self, tool_name: str, error: ToolException) -> str:
         """Format tool exception response for LLM."""

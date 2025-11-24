@@ -1,5 +1,6 @@
 import copy
 import re
+import textwrap
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
@@ -352,7 +353,10 @@ class ToolsExecutor:
 
         log_exception(error, extra={"context": "Tools executor raised error"})
 
-        tool_response = f"Tool {tool_name} raised ToolException: {str(error)}"
+        response = getattr(error, "response", None)
+        tool_response = (
+            f"Tool {tool_name} raised ToolException: {str(error)} {response}"
+        )
         self._track_internal_event(
             event_name=EventEnum.WORKFLOW_TOOL_FAILURE,
             tool_name=tool_name,
@@ -362,11 +366,15 @@ class ToolsExecutor:
             },
         )
 
+        error_message = f"Tool call failed: {error_type}"
+        if response:
+            error_message = f"{error_message} {textwrap.shorten(str(response), 100)}"
+
         self._add_tool_ui_chat_log(
             tool_info={"name": tool_name, "args": tool_args},
             status=ToolStatus.FAILURE,
             ui_chat_logs=chat_logs,
-            error_message=f"Tool call failed: {error_type}",
+            error_message=error_message,
         )
 
         return {

@@ -1,3 +1,4 @@
+import textwrap
 from typing import Any, List, Optional, Type
 
 from pydantic import BaseModel, Field
@@ -59,7 +60,13 @@ Instead of '{disallowed_operator}' please use {self.name} multiple times consecu
         )
 
     def format_display_message(
-        self, args: RunCommandInput, _tool_response: Any = None
+        self,
+        args: RunCommandInput,
+        _tool_response: Any = None,
+        max_len: int = 100,
     ) -> str:
         command = f"{args.program} {args.args}".strip()
-        return f"Run command: {command}"
+        message = f"Run command: {command}"
+        if _tool_response is not None:
+            return f"{message} {textwrap.shorten(_tool_response, max_len)}"
+        return message

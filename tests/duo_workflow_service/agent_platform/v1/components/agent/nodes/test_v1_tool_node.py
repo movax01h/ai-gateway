@@ -1,4 +1,4 @@
-from unittest.mock import AsyncMock, Mock, patch
+from unittest.mock import ANY, AsyncMock, Mock, patch
 
 import pytest
 from langchain_core.messages import AIMessage, ToolMessage
@@ -244,6 +244,7 @@ class TestToolNode:
             tool=mock_tool,
             tool_call_args=mock_tool_call["args"],
             event=UILogEventsAgent.ON_TOOL_EXECUTION_FAILED,
+            tool_response="Invalid argument type",
         )
 
         # Verify ui_history.pop_state_updates was called
@@ -304,6 +305,11 @@ class TestToolNode:
             tool=mock_tool,
             tool_call_args=mock_tool_call["args"],
             event=UILogEventsAgent.ON_TOOL_EXECUTION_FAILED,
+            tool_response=ANY,
+        )
+
+        assert ui_history.log.error.call_args.kwargs["tool_response"].startswith(
+            "1 validation error"
         )
 
         # Verify ui_history.pop_state_updates was called
@@ -361,6 +367,7 @@ class TestToolNode:
             tool=mock_tool,
             tool_call_args=mock_tool_call["args"],
             event=UILogEventsAgent.ON_TOOL_EXECUTION_FAILED,
+            tool_response="Generic error",
         )
 
         # Verify ui_history.pop_state_updates was called

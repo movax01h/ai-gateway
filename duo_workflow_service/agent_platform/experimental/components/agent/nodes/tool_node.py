@@ -115,10 +115,12 @@ class ToolNode:
 
             return tool_call_result
         except Exception as e:
+            response = getattr(e, "response", None)
             self._ui_history.log.error(
                 tool=tool,
                 tool_call_args=tool_call_args,
                 event=UILogEventsAgent.ON_TOOL_EXECUTION_FAILED,
+                tool_response=f"{str(e)} {response}" if response else str(e),
             )
 
             if isinstance(e, TypeError):
@@ -216,7 +218,7 @@ class ToolNode:
             },
         )
 
-        return f"Tool runtime exception due to {str(error)}"
+        return f"Tool runtime exception due to {str(error)} {getattr(error, "response", None)}"
 
     def _record_metric(
         self,
