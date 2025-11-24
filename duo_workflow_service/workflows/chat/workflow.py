@@ -38,6 +38,7 @@ from duo_workflow_service.workflows.type_definitions import AdditionalContext
 from lib.feature_flags.context import FeatureFlag, is_feature_enabled
 from lib.internal_events.client import InternalEventsClient
 from lib.internal_events.event_enum import CategoryEnum
+from lib.mcp_server_tools.context import get_enabled_mcp_server_tools
 
 
 class Routes(StrEnum):
@@ -69,14 +70,18 @@ _SIMPLE_GITLAB_READ_ONLY_TOOLS = [
     "get_wiki_page",
 ]
 
-# Tools with special processing that should always be included
-_SPECIAL_PROCESSING_TOOLS = [
-    "list_merge_request_diffs",  # Has DiffExclusionPolicy
+# Search tools that can be replaced by MCP server tools
+_SEARCH_TOOLS = [
     "gitlab_issue_search",  # Advanced search
     "gitlab_blob_search",  # Code search
     "gitlab_merge_request_search",  # MR search
-    "gitlab_documentation_search",  # AI-powered search
 ]
+
+# Tools with special processing that should always be included
+_SPECIAL_PROCESSING_TOOLS = [
+    "list_merge_request_diffs",  # Has DiffExclusionPolicy
+    "gitlab_documentation_search",  # AI-powered search (not covered by MCP)
+] + _SEARCH_TOOLS
 
 # Non-GitLab tools that should always be included
 _NON_GITLAB_TOOLS = [
@@ -343,6 +348,14 @@ class Workflow(AbstractWorkflow):
                 + _SPECIAL_PROCESSING_TOOLS
                 + _NON_GITLAB_TOOLS
             )
+
+        # Check if gitlab_search MCP tool is enabled
+        enabled_mcp_tools = get_enabled_mcp_server_tools()
+        if "gitlab_search" in enabled_mcp_tools:
+            # Filter out all search tools when MCP search is enabled
+            read_only_tools = [
+                tool for tool in read_only_tools if tool not in _SEARCH_TOOLS
+            ]
 
         available_tools = (
             read_only_tools

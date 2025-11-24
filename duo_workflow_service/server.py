@@ -65,6 +65,9 @@ from duo_workflow_service.interceptors.language_server_version_interceptor impor
     LanguageServerVersionInterceptor,
     language_server_version,
 )
+from duo_workflow_service.interceptors.mcp_server_tools_interceptor import (
+    McpServerToolsInterceptor,
+)
 from duo_workflow_service.interceptors.model_metadata_interceptor import (
     ModelMetadataInterceptor,
 )
@@ -728,6 +731,7 @@ async def serve(port: int) -> None:
                 UsageQuotaInterceptor(),
                 ModelMetadataInterceptor(),
                 PromptCachingInterceptor(),
+                McpServerToolsInterceptor(),
                 MonitoringInterceptor(),
             ],
             options=server_options,

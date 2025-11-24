@@ -1012,3 +1012,92 @@ async def test_compile_without_overrides(
     # Verify _get_tools was called since no tools_override
     mock_get_tools.assert_called_once()
     tools_registry.toolset.assert_called_once_with(["default_tool1", "default_tool2"])
+
+
+class TestMcpServerToolsFiltering:
+    """Test MCP server tools filtering behavior."""
+
+    @pytest.fixture(autouse=True)
+    def reset_mcp_context(self):
+        """Reset MCP server tools context before each test."""
+        from lib.mcp_server_tools.context import current_mcp_server_tools_context
+
+        token = current_mcp_server_tools_context.set(set())
+        yield
+        current_mcp_server_tools_context.reset(token)
+
+    @pytest.mark.asyncio
+    async def test_get_tools_without_mcp_search_enabled(self, workflow_with_project):
+        """Test that search tools are included when MCP search is not enabled."""
+        from lib.mcp_server_tools.context import set_enabled_mcp_server_tools
+
+        # No MCP tools enabled
+        set_enabled_mcp_server_tools(set())
+
+        tools = workflow_with_project._get_tools()
+
+        # All search tools should be present
+        assert "gitlab_issue_search" in tools
+        assert "gitlab_blob_search" in tools
+        assert "gitlab_merge_request_search" in tools
+        assert "gitlab_documentation_search" in tools
+
+    @pytest.mark.asyncio
+    async def test_get_tools_with_mcp_search_enabled(self, workflow_with_project):
+        """Test that search tools are filtered when MCP search is enabled."""
+        from lib.mcp_server_tools.context import set_enabled_mcp_server_tools
+
+        # Enable gitlab_search MCP tool
+        set_enabled_mcp_server_tools({"gitlab_search"})
+
+        tools = workflow_with_project._get_tools()
+
+        # Search tools should be filtered out
+        assert "gitlab_issue_search" not in tools
+        assert "gitlab_blob_search" not in tools
+        assert "gitlab_merge_request_search" not in tools
+
+        # Documentation search should still be present (not covered by MCP)
+        assert "gitlab_documentation_search" in tools
+
+        # Other tools should still be present
+        assert "list_merge_request_diffs" in tools
+        assert "read_file" in tools
+
+    @pytest.mark.asyncio
+    async def test_get_tools_with_other_mcp_tools(self, workflow_with_project):
+        """Test that other MCP tools don't affect search tools."""
+        from lib.mcp_server_tools.context import set_enabled_mcp_server_tools
+
+        # Enable some other MCP tool (not gitlab_search)
+        set_enabled_mcp_server_tools({"some_other_tool", "another_tool"})
+
+        tools = workflow_with_project._get_tools()
+
+        # All search tools should still be present
+        assert "gitlab_issue_search" in tools
+        assert "gitlab_blob_search" in tools
+        assert "gitlab_merge_request_search" in tools
+        assert "gitlab_documentation_search" in tools
+
+    @pytest.mark.asyncio
+    async def test_get_tools_with_mcp_search_and_other_tools(
+        self, workflow_with_project
+    ):
+        """Test filtering when multiple MCP tools are enabled including search."""
+        from lib.mcp_server_tools.context import set_enabled_mcp_server_tools
+
+        # Enable multiple MCP tools including gitlab_search
+        set_enabled_mcp_server_tools(
+            {"gitlab_search", "some_other_tool", "another_tool"}
+        )
+
+        tools = workflow_with_project._get_tools()
+
+        # Search tools should be filtered out
+        assert "gitlab_issue_search" not in tools
+        assert "gitlab_blob_search" not in tools
+        assert "gitlab_merge_request_search" not in tools
+
+        # Documentation search should still be present
+        assert "gitlab_documentation_search" in tools
