@@ -1062,9 +1062,11 @@ async def test_signal_handler_calls_server_stop(
 @pytest.mark.asyncio
 @patch("duo_workflow_service.server.AbstractWorkflow")
 @patch("duo_workflow_service.server.resolve_workflow_class")
+@patch("duo_workflow_service.server.time.time")
 async def test_execute_workflow_missing_workflow_metadata(
-    mock_resolve_workflow, mock_abstract_workflow_class
+    mock_time, mock_resolve_workflow, mock_abstract_workflow_class
 ):
+    mock_time.return_value = 100.0
     mock_workflow = mock_abstract_workflow_class.return_value
     mock_workflow.is_done = True
     mock_workflow.run = AsyncMock()
@@ -1104,6 +1106,7 @@ async def test_execute_workflow_missing_workflow_metadata(
         approval=contract_pb2.Approval(),
         language_server_version=None,
         preapproved_tools=[],
+        workflow_start_time=100.0,
     )
 
     mock_context.set_code.assert_called_once_with(grpc.StatusCode.INTERNAL)
@@ -1115,9 +1118,11 @@ async def test_execute_workflow_missing_workflow_metadata(
 @pytest.mark.asyncio
 @patch("duo_workflow_service.server.AbstractWorkflow")
 @patch("duo_workflow_service.server.resolve_workflow_class")
+@patch("duo_workflow_service.server.time.time")
 async def test_execute_workflow_valid_workflow_metadata(
-    mock_resolve_workflow, mock_abstract_workflow_class
+    mock_time, mock_resolve_workflow, mock_abstract_workflow_class
 ):
+    mock_time.return_value = 200.0
     mock_workflow = mock_abstract_workflow_class.return_value
     mock_workflow.is_done = True
     mock_workflow.run = AsyncMock()
@@ -1187,6 +1192,7 @@ async def test_execute_workflow_valid_workflow_metadata(
         approval=approval,
         language_server_version=None,
         preapproved_tools=preapproved_tools,
+        workflow_start_time=200.0,
     )
 
     mock_context.set_code.assert_called_once_with(grpc.StatusCode.OK)

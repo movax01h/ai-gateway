@@ -177,6 +177,14 @@ class DuoWorkflowMetrics:  # pylint: disable=too-many-instance-attributes
             registry=registry,
         )
 
+        self.time_to_first_token = Histogram(
+            "duo_workflow_time_to_first_token_seconds",
+            "Time from ExecuteWorkflow call to first outgoing action",
+            ["workflow_type"] + METADATA_LABELS,
+            registry=registry,
+            buckets=LLM_TIME_SCALE_BUCKETS,
+        )
+
     def count_llm_response(
         self,
         model="unknown",
@@ -356,6 +364,14 @@ class DuoWorkflowMetrics:  # pylint: disable=too-many-instance-attributes
                 workflow_type=workflow_type
             ).observe(duration)
         )
+
+    def record_time_to_first_token(
+        self, duration: float, workflow_type: str = "unknown"
+    ) -> None:
+        self.time_to_first_token.labels(
+            workflow_type=workflow_type,
+            **build_metadata_labels(),
+        ).observe(duration)
 
     class _timer:
         def __init__(self, callback):
