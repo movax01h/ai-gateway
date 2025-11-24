@@ -29,13 +29,22 @@ Usage examples:
 import asyncio
 import json
 import re
+import time
 from typing import Any, AsyncIterator, Iterator, NamedTuple, Optional
 
-from langchain_core.callbacks import AsyncCallbackManagerForLLMRun, CallbackManagerForLLMRun
+from langchain_core.callbacks import (
+    AsyncCallbackManagerForLLMRun,
+    CallbackManagerForLLMRun,
+)
 from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.messages import AIMessage, AIMessageChunk, BaseMessage, HumanMessage
 from langchain_core.messages.tool import ToolCall
-from langchain_core.outputs import ChatGeneration, ChatGenerationChunk, ChatResult
+from langchain_core.outputs import (
+    ChatGeneration,
+    ChatGenerationChunk,
+    ChatResult,
+    LLMResult,
+)
 
 
 class Response(NamedTuple):
@@ -93,12 +102,16 @@ class ResponseHandler:
             stream = self._extract_stream_from_attributes(attributes_str)
             chunk_delay_ms = self._extract_chunk_delay_from_attributes(attributes_str)
 
-            parsed_responses.append(Response(clean_content, tool_calls, latency_ms, stream, chunk_delay_ms))
+            parsed_responses.append(
+                Response(clean_content, tool_calls, latency_ms, stream, chunk_delay_ms)
+            )
 
         return (
             parsed_responses
             if parsed_responses
-            else [Response("mock response (no response tag specified)", [], 0, False, 0)]
+            else [
+                Response("mock response (no response tag specified)", [], 0, False, 0)
+            ]
         )
 
     def _extract_tools_from_response(
@@ -205,7 +218,9 @@ class ResponseHandler:
             )
 
         if self.current_index >= len(self.responses):
-            return Response("mock response (all scripted responses exhausted)", [], 0, False, 0)
+            return Response(
+                "mock response (all scripted responses exhausted)", [], 0, False, 0
+            )
 
         response = self.responses[self.current_index]
         self.current_index += 1
@@ -264,7 +279,8 @@ class AgenticFakeModel(BaseChatModel):
 
         # Invoke callbacks for LangSmith tracing
         if run_manager:
-            run_manager.on_llm_end(result)
+            llm_result = LLMResult(generations=[[gen] for gen in result.generations])
+            run_manager.on_llm_end(llm_result)
 
         return result
 
@@ -282,7 +298,8 @@ class AgenticFakeModel(BaseChatModel):
 
         # Invoke callbacks for LangSmith tracing
         if run_manager:
-            await run_manager.on_llm_end(result)
+            llm_result = LLMResult(generations=[[gen] for gen in result.generations])
+            await run_manager.on_llm_end(llm_result)
 
         return result
 
@@ -301,7 +318,6 @@ class AgenticFakeModel(BaseChatModel):
 
         # Apply initial latency if specified
         if response.latency_ms > 0:
-            import time
             time.sleep(response.latency_ms / 1000.0)
 
         # If streaming is enabled, yield chunks
@@ -323,7 +339,6 @@ class AgenticFakeModel(BaseChatModel):
 
                 # Apply chunk delay if specified
                 if response.chunk_delay_ms > 0 and i < len(words) - 1:
-                    import time
                     time.sleep(response.chunk_delay_ms / 1000.0)
 
             # Yield final chunk with tool calls if present
