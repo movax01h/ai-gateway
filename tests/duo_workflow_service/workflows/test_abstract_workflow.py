@@ -459,3 +459,47 @@ async def test_tracing_enabled_based_on_env_and_extended_logging(
     mock_tracing_context.assert_called_once()
     call_kwargs = mock_tracing_context.call_args[1]
     assert call_kwargs["enabled"] == expected_tracing_enabled
+
+
+@pytest.mark.asyncio
+@patch(
+    "duo_workflow_service.workflows.abstract_workflow.fetch_workflow_and_container_data"
+)
+@patch("duo_workflow_service.workflows.abstract_workflow.GitLabWorkflow")
+@patch("duo_workflow_service.workflows.abstract_workflow.ToolsRegistry.configure")
+@patch("duo_workflow_service.workflows.abstract_workflow.duo_workflow_metrics")
+async def test_compile_and_run_graph_records_first_token_on_messages(
+    mock_metrics,
+    mock_tools_registry,
+    mock_gitlab_workflow,
+    mock_fetch_workflow,
+    mock_project,
+):
+    """Test that _compile_and_run_graph records time to first token when messages are streamed."""
+
+    class MockGraphWithMessages:
+        async def astream(self, input, config, stream_mode):
+            yield "updates", {"step1": {"key": "value"}}
+            yield "messages", {"message": "first message"}
+            yield "messages", {"message": "second message"}
+
+    mock_tools_registry.return_value = MagicMock()
+    mock_checkpointer = AsyncMock()
+    mock_checkpointer.aget_tuple = AsyncMock(return_value=None)
+    mock_checkpointer.initial_status_event = "START"
+    mock_gitlab_workflow.return_value.__aenter__.return_value = mock_checkpointer
+    mock_fetch_workflow.return_value = (mock_project, None, {"project_id": 1})
+
+    workflow = MockWorkflow(
+        "id",
+        {},
+        CategoryEnum.WORKFLOW_SOFTWARE_DEVELOPMENT,
+        workflow_start_time=100.0,
+    )
+
+    workflow._compile = MagicMock(return_value=MockGraphWithMessages())
+
+    await workflow._compile_and_run_graph("Test goal")
+
+    assert mock_metrics.record_time_to_first_token.call_count == 1
+    assert workflow._first_token_recorded is True

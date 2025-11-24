@@ -5,6 +5,7 @@ import functools
 import json
 import os
 import signal
+import time
 from itertools import chain
 from typing import AsyncIterable, AsyncIterator, Optional
 
@@ -150,6 +151,56 @@ def clean_start_request(start_workflow_request: contract_pb2.ClientEvent):
     return request
 
 
+def build_logging_context(workflow_id: str, workflow_definition: str) -> dict:
+    """Build enhanced logging context with event context information."""
+    event_context = current_event_context.get()
+
+    extra_context = {
+        "workflow_id": workflow_id,
+        "workflow_definition": workflow_definition,
+    }
+
+    if event_context is not None:
+        extra_context.update(
+            {
+                "instance_id": (
+                    str(event_context.instance_id)
+                    if event_context.instance_id is not None
+                    else "None"
+                ),
+                "host_name": (
+                    str(event_context.host_name)
+                    if event_context.host_name is not None
+                    else "None"
+                ),
+                "realm": (
+                    str(event_context.realm)
+                    if event_context.realm is not None
+                    else "None"
+                ),
+                "is_gitlab_team_member": (
+                    str(event_context.is_gitlab_team_member)
+                    if event_context.is_gitlab_team_member is not None
+                    else "None"
+                ),
+                "global_user_id": (
+                    str(event_context.global_user_id)
+                    if event_context.global_user_id is not None
+                    else "None"
+                ),
+                "correlation_id": (
+                    str(event_context.correlation_id)
+                    if event_context.correlation_id is not None
+                    else "None"
+                ),
+            }
+        )
+    else:
+        log.debug("Event context not available for enhanced logging")
+
+    return extra_context
+
+
 class DuoWorkflowService(contract_pb2_grpc.DuoWorkflowServicer):
     # Set to 10 seconds to provide a reasonable balance between:
     # - Giving tasks enough time to properly clean up resources
@@ -172,6 +223,7 @@ class DuoWorkflowService(contract_pb2_grpc.DuoWorkflowServicer):
         start_workflow_request: contract_pb2.ClientEvent = await anext(
             aiter(request_iterator)
         )
+        workflow_start_time = time.time()
 
         workflow_definition = start_workflow_request.startRequest.workflowDefinition
         unit_primitive = choose_unit_primitive(workflow_definition)
@@ -197,59 +249,12 @@ class DuoWorkflowService(contract_pb2_grpc.DuoWorkflowServicer):
         workflow_id = start_workflow_request.startRequest.workflowID
         set_workflow_id(workflow_id)
 
-        # Get event context for enhanced logging
-        event_context = current_event_context.get()
-
-        # Build extra logging context with safe attribute access
-        extra_context = {
-            "workflow_id": workflow_id,
-            "workflow_definition": workflow_definition,
-        }
-
-        if event_context is not None:
-            extra_context.update(
-                {
-                    "instance_id": (
-                        str(event_context.instance_id)
-                        if event_context.instance_id is not None
-                        else "None"
-                    ),
-                    "host_name": (
-                        str(event_context.host_name)
-                        if event_context.host_name is not None
-                        else "None"
-                    ),
-                    "realm": (
-                        str(event_context.realm)
-                        if event_context.realm is not None
-                        else "None"
-                    ),
-                    "is_gitlab_team_member": (
-                        str(event_context.is_gitlab_team_member)
-                        if event_context.is_gitlab_team_member is not None
-                        else "None"
-                    ),
-                    "global_user_id": (
-                        str(event_context.global_user_id)
-                        if event_context.global_user_id is not None
-                        else "None"
-                    ),
-                    "correlation_id": (
-                        str(event_context.correlation_id)
-                        if event_context.correlation_id is not None
-                        else "None"
-                    ),
-                }
-            )
-        else:
-            log.debug("Event context not available for enhanced logging")
-
-        # Enhanced logging with additional context
         log.info(
             "Starting workflow %s",
             clean_start_request(start_workflow_request),
-            extra=extra_context,
+            extra=build_logging_context(workflow_id, workflow_definition),
         )
+
         workflow_type = string_to_category_enum(workflow_definition)
         duo_workflow_metrics.count_agent_platform_receive_start_counter(
             flow_type=workflow_type
@@ -318,6 +323,7 @@ class DuoWorkflowService(contract_pb2_grpc.DuoWorkflowServicer):
             preapproved_tools=list(
                 start_workflow_request.startRequest.preapproved_tools
             ),
+            workflow_start_time=workflow_start_time,
         )
 
         workflow_task = asyncio.create_task(workflow.run(goal))
