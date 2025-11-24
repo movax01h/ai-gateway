@@ -221,6 +221,11 @@ class Workflow(AbstractWorkflow):
     async def get_graph_input(
         self, goal: str, status_event: str, checkpoint_tuple: Optional[CheckpointTuple]
     ) -> Any:
+        if status_event == WorkflowStatusEventEnum.RETRY and goal == "":
+            # Retry workflow with current checkpoint when goal is empty
+            # It is required to fix bug in https://gitlab.com/gitlab-org/gitlab/-/issues/556636
+            return None
+
         new_chat_message = goal
 
         match status_event:

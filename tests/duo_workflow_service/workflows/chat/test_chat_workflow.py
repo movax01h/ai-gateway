@@ -1,4 +1,4 @@
-from unittest.mock import ANY, MagicMock, Mock, patch
+from unittest.mock import ANY, AsyncMock, MagicMock, Mock, patch
 
 import pytest
 from dependency_injector import containers
@@ -351,13 +351,38 @@ def test_are_tools_called_with_tool_use(workflow_with_project):
     "mock_git_lab_workflow_instance",
     "mock_fetch_workflow_and_container_data",
 )
+@pytest.mark.parametrize(
+    ("state", "goal", "status_event"),
+    [
+        (
+            {"status": "Not Started", "ui_chat_log": []},
+            "New Input",
+            WorkflowStatusEventEnum.START,
+        ),
+        (
+            {"status": "Execution", "ui_chat_log": []},
+            "",
+            WorkflowStatusEventEnum.RETRY,
+        ),
+        (
+            {"status": "Execution", "ui_chat_log": []},
+            "Follow up",
+            WorkflowStatusEventEnum.RETRY,
+        ),
+    ],
+)
 async def test_workflow_run(
     mock_checkpoint_notifier,
     mock_tools_registry,
     workflow_with_project,
+    state,
+    goal,
+    status_event,
 ):
     mock_user_interface_instance = mock_checkpoint_notifier.return_value
-    state = {"status": "Not Started", "ui_chat_log": []}
+    mock_instance = AsyncMock()
+    mock_instance.initial_status_event = status_event
+    mock_instance.aget_tuple = AsyncMock(return_value=None)
 
     class AsyncIterator:
         def __init__(self):
@@ -373,13 +398,23 @@ async def test_workflow_run(
             else:
                 return ("values", state)
 
-    with patch(
-        "duo_workflow_service.workflows.chat.workflow.StateGraph"
-    ) as mock_graph_cls:
+    with (
+        patch(
+            "duo_workflow_service.workflows.chat.workflow.StateGraph"
+        ) as mock_graph_cls,
+        patch(
+            "duo_workflow_service.workflows.abstract_workflow.GitLabWorkflow"
+        ) as mock_gitlab_workflow,
+    ):
         compiled_graph = MagicMock()
         compiled_graph.astream.return_value = AsyncIterator()
         mock_graph = mock_graph_cls.return_value
         mock_graph.compile.return_value = compiled_graph
+
+        mock_gitlab_workflow.return_value.__aenter__ = AsyncMock(
+            return_value=mock_instance
+        )
+        mock_gitlab_workflow.return_value.__aexit__ = AsyncMock(return_value=None)
 
         workflow = workflow_with_project
 
@@ -389,7 +424,7 @@ async def test_workflow_run(
             "duo_workflow_service.workflows.chat.workflow.create_agent",
             return_value=mock_agent,
         ) as mock_create_agent:
-            await workflow.run("Test chat goal")
+            await workflow.run(goal=goal)
 
             assert workflow.is_done
 
