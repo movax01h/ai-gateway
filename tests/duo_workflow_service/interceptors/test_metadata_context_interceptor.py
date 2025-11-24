@@ -5,6 +5,7 @@ import pytest
 from duo_workflow_service.interceptors.metadata_context_interceptor import (
     MetadataContextInterceptor,
 )
+from lib.mcp_server_tools.context import current_mcp_server_tools_context
 
 
 @pytest.mark.asyncio
@@ -169,6 +170,7 @@ async def test_all_headers_together():
         ("x-gitlab-language-server-version", "1.2.3"),
         ("x-gitlab-enabled-instance-verbose-ai-logs", "true"),
         ("x-gitlab-model-prompt-cache-enabled", "false"),
+        ("x-gitlab-enabled-mcp-server-tools", "postgres,context7"),
     ]
 
     continuation = AsyncMock()
@@ -209,6 +211,10 @@ async def test_all_headers_together():
         mock_lsp_version.set.assert_called_once_with(mock_lsp_instance)
         mock_verbose_logs.set.assert_called_once_with(True)
         mock_prompt_caching.assert_called_once_with("false")
+        assert current_mcp_server_tools_context.get() == {
+            "postgres",
+            "context7",
+        }
         continuation.assert_called_once_with(handler_call_details)
         assert result == "mocked_response"
 
@@ -256,6 +262,8 @@ async def test_missing_headers():
         mock_verbose_logs.set.assert_called_once_with(False)
         # Prompt caching is always called (with None)
         mock_prompt_caching.assert_called_once_with(None)
+        # MCP server tools should be empty set when header is missing
+        assert current_mcp_server_tools_context.get() == set()
         continuation.assert_called_once_with(handler_call_details)
         assert result == "mocked_response"
 
@@ -269,6 +277,7 @@ async def test_empty_header_values():
         ("x-gitlab-client-type", ""),
         ("x-gitlab-realm", ""),
         ("x-gitlab-version", ""),
+        ("x-gitlab-enabled-mcp-server-tools", ""),
     ]
 
     continuation = AsyncMock()
@@ -291,5 +300,30 @@ async def test_empty_header_values():
         mock_client_type.set.assert_not_called()
         mock_gitlab_realm.set.assert_not_called()
         mock_gitlab_version.set.assert_not_called()
+        # Empty MCP server tools string should result in empty set
+        assert current_mcp_server_tools_context.get() == set()
         continuation.assert_called_once_with(handler_call_details)
         assert result == "mocked_response"
+
+
+@pytest.mark.asyncio
+async def test_mcp_server_tools_header():
+    """Test that MCP server tools header is properly parsed."""
+    interceptor = MetadataContextInterceptor()
+    handler_call_details = MagicMock()
+    handler_call_details.invocation_metadata = [
+        ("x-gitlab-enabled-mcp-server-tools", "tool1,tool2,tool3"),
+    ]
+
+    continuation = AsyncMock()
+    continuation.return_value = "mocked_response"
+
+    result = await interceptor.intercept_service(continuation, handler_call_details)
+
+    assert current_mcp_server_tools_context.get() == {
+        "tool1",
+        "tool2",
+        "tool3",
+    }
+    continuation.assert_called_once_with(handler_call_details)
+    assert result == "mocked_response"

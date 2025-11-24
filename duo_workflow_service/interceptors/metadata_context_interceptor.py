@@ -10,6 +10,10 @@ from ai_gateway.instrumentators.model_requests import (
     language_server_version as language_server_version_context,
 )
 from lib.language_server import LanguageServerVersion
+from lib.mcp_server_tools.context import (
+    X_GITLAB_ENABLED_MCP_SERVER_TOOLS,
+    set_enabled_mcp_server_tools,
+)
 from lib.prompts.caching import (
     X_GITLAB_MODEL_PROMPT_CACHE_ENABLED,
     set_prompt_caching_enabled_to_current_request,
@@ -30,6 +34,7 @@ class MetadataContextInterceptor(grpc.aio.ServerInterceptor):
     - LanguageServerVersionInterceptor
     - EnabledInstanceVerboseAiLogsInterceptor
     - PromptCachingInterceptor
+    - McpServerToolsInterceptor
     """
 
     X_GITLAB_CLIENT_TYPE_HEADER = "x-gitlab-client-type"
@@ -69,5 +74,10 @@ class MetadataContextInterceptor(grpc.aio.ServerInterceptor):
         set_prompt_caching_enabled_to_current_request(
             metadata.get(X_GITLAB_MODEL_PROMPT_CACHE_ENABLED.lower())
         )
+
+        # MCP server tools
+        enabled_tools = metadata.get(X_GITLAB_ENABLED_MCP_SERVER_TOOLS, "").split(",")
+        enabled_tools = set(tool.strip() for tool in enabled_tools if tool.strip())
+        set_enabled_mcp_server_tools(enabled_tools)
 
         return await continuation(handler_call_details)

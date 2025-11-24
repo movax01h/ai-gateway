@@ -53,9 +53,6 @@ from duo_workflow_service.interceptors.internal_events_interceptor import (
 from duo_workflow_service.interceptors.metadata_context_interceptor import (
     MetadataContextInterceptor,
 )
-from duo_workflow_service.interceptors.mcp_server_tools_interceptor import (
-    McpServerToolsInterceptor,
-)
 from duo_workflow_service.interceptors.model_metadata_interceptor import (
     ModelMetadataInterceptor,
 )
@@ -711,7 +708,6 @@ async def serve(port: int) -> None:
                 InternalEventsInterceptor(),
                 UsageQuotaInterceptor(),
                 ModelMetadataInterceptor(),
-                McpServerToolsInterceptor(),
                 MonitoringInterceptor(),
             ],
             options=server_options,
