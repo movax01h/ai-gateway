@@ -30,6 +30,7 @@ import duo_workflow_service.workflows.registry as flow_registry
 from ai_gateway.app import get_config
 from ai_gateway.config import Config, setup_litellm
 from ai_gateway.container import ContainerApplication
+from ai_gateway.instrumentators.model_requests import language_server_version
 from contract import contract_pb2, contract_pb2_grpc
 from duo_workflow_service.components import tools_registry
 from duo_workflow_service.executor.outbox import OutboxSignal
@@ -40,30 +41,17 @@ from duo_workflow_service.interceptors.authentication_interceptor import (
 from duo_workflow_service.interceptors.authentication_interceptor import (
     current_user as current_user_context_var,
 )
-from duo_workflow_service.interceptors.client_type_interceptor import (
-    ClientTypeInterceptor,
-)
 from duo_workflow_service.interceptors.correlation_id_interceptor import (
     CorrelationIdInterceptor,
-)
-from duo_workflow_service.interceptors.enabled_instance_verbose_ai_logs_interceptor import (
-    EnabledInstanceVerboseAiLogsInterceptor,
 )
 from duo_workflow_service.interceptors.feature_flag_interceptor import (
     FeatureFlagInterceptor,
 )
-from duo_workflow_service.interceptors.gitlab_realm_interceptor import (
-    GitLabRealmInterceptor,
-)
-from duo_workflow_service.interceptors.gitlab_version_interceptor import (
-    GitLabVersionInterceptor,
-)
 from duo_workflow_service.interceptors.internal_events_interceptor import (
     InternalEventsInterceptor,
 )
-from duo_workflow_service.interceptors.language_server_version_interceptor import (
-    LanguageServerVersionInterceptor,
-    language_server_version,
+from duo_workflow_service.interceptors.metadata_context_interceptor import (
+    MetadataContextInterceptor,
 )
 from duo_workflow_service.interceptors.mcp_server_tools_interceptor import (
     McpServerToolsInterceptor,
@@ -73,9 +61,6 @@ from duo_workflow_service.interceptors.model_metadata_interceptor import (
 )
 from duo_workflow_service.interceptors.monitoring_interceptor import (
     MonitoringInterceptor,
-)
-from duo_workflow_service.interceptors.prompt_caching_interceptor import (
-    PromptCachingInterceptor,
 )
 from duo_workflow_service.interceptors.usage_quota_interceptor import (
     UsageQuotaInterceptor,
@@ -719,18 +704,13 @@ async def serve(port: int) -> None:
 
         server = grpc.aio.server(
             interceptors=[
+                MetadataContextInterceptor(),
                 CorrelationIdInterceptor(),
                 AuthenticationInterceptor(),
                 FeatureFlagInterceptor(),
-                EnabledInstanceVerboseAiLogsInterceptor(),
-                LanguageServerVersionInterceptor(),
-                GitLabVersionInterceptor(),
-                GitLabRealmInterceptor(),
-                ClientTypeInterceptor(),
                 InternalEventsInterceptor(),
                 UsageQuotaInterceptor(),
                 ModelMetadataInterceptor(),
-                PromptCachingInterceptor(),
                 McpServerToolsInterceptor(),
                 MonitoringInterceptor(),
             ],

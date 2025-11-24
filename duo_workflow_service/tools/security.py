@@ -6,7 +6,7 @@ from typing import Any, Optional, Type
 from packaging.version import InvalidVersion, Version
 from pydantic import BaseModel, Field, field_validator
 
-from duo_workflow_service.interceptors.gitlab_version_interceptor import gitlab_version
+from ai_gateway.instrumentators.model_requests import gitlab_version
 from duo_workflow_service.tools.duo_base_tool import DuoBaseTool
 from duo_workflow_service.tracking.errors import log_exception
 
