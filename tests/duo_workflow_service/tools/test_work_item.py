@@ -372,6 +372,10 @@ async def test_list_work_items_with_filters(
         "author_username": "johndoe",
         "search": "bug",
         "created_after": "2025-01-01T00:00:00Z",
+        "created_before": "2025-06-01T00:00:00Z",
+        "updated_after": "2025-02-01T00:00:00Z",
+        "updated_before": "2025-11-01T00:00:00Z",
+        "due_after": "2025-03-01T00:00:00Z",
         "due_before": "2025-12-31T00:00:00Z",
         "sort": "CREATED_DESC",
     }
@@ -388,6 +392,10 @@ async def test_list_work_items_with_filters(
         "authorUsername": "johndoe",
         "search": "bug",
         "createdAfter": "2025-01-01T00:00:00Z",
+        "createdBefore": "2025-06-01T00:00:00Z",
+        "updatedAfter": "2025-02-01T00:00:00Z",
+        "updatedBefore": "2025-11-01T00:00:00Z",
+        "dueAfter": "2025-03-01T00:00:00Z",
         "dueBefore": "2025-12-31T00:00:00Z",
         "sort": "CREATED_DESC",
     }
@@ -395,10 +403,12 @@ async def test_list_work_items_with_filters(
     gql_vars = gitlab_client_mock.graphql.call_args[0][1]
     # Only check variables that are present in both dictionaries
     for key, expected_value in expected_vars.items():
-        if key in gql_vars:
-            assert (
-                gql_vars[key] == expected_value
-            ), f"Expected {key}={expected_value}, got {gql_vars[key]}"
+        assert (
+            key in gql_vars
+        ), f"Expected variable {key} not found in GraphQL variables"
+        assert (
+            gql_vars[key] == expected_value
+        ), f"Expected {key}={expected_value}, got {gql_vars[key]}"
 
 
 @pytest.mark.asyncio

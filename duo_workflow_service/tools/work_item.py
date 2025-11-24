@@ -18,6 +18,21 @@ from duo_workflow_service.tools.work_items.queries.work_items import (
 GROUP_ONLY_TYPES = {"Epic", "Objective", "Key Result"}
 ALL_TYPES = {"Issue", "Task", *GROUP_ONLY_TYPES}
 
+
+FILTER_KEY_MAPPING = {
+    "state": "state",
+    "search": "search",
+    "authorUsername": "author_username",
+    "createdAfter": "created_after",
+    "createdBefore": "created_before",
+    "updatedAfter": "updated_after",
+    "updatedBefore": "updated_before",
+    "dueAfter": "due_after",
+    "dueBefore": "due_before",
+    "sort": "sort",
+}
+
+
 PARENT_IDENTIFICATION_DESCRIPTION = """To identify the parent (group or project) you must provide either:
 - group_id parameter, or
 - project_id parameter, or
@@ -166,22 +181,10 @@ class ListWorkItems(WorkItemBaseTool):
         }
 
         # Handle optional filters
-        for key in [
-            "state",
-            "search",
-            "authorUsername",
-            "createdAfter",
-            "createdBefore",
-            "updatedAfter",
-            "updatedBefore",
-            "dueAfter",
-            "dueBefore",
-            "sort",
-        ]:
-            arg_key = key[0].lower() + key[1:]  # match Pydantic input
-            value = kwargs.get(arg_key)
+        for graphql_key, pydantic_key in FILTER_KEY_MAPPING.items():
+            value = kwargs.get(pydantic_key)
             if value is not None:
-                query_variables[key] = value
+                query_variables[graphql_key] = value
 
         warnings = []
 
