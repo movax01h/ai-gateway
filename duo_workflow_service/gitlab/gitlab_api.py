@@ -2,9 +2,9 @@ from typing import Optional, Tuple, TypedDict
 
 from packaging.version import InvalidVersion, Version
 
+from ai_gateway.instrumentators.model_requests import gitlab_version
 from duo_workflow_service.gitlab.http_client import GitlabHttpClient
 from duo_workflow_service.gitlab.url_parser import GitLabUrlParser
-from duo_workflow_service.interceptors.gitlab_version_interceptor import gitlab_version
 from duo_workflow_service.tracking.errors import log_exception
 
 

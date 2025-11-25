@@ -5,8 +5,8 @@ from urllib.parse import urlparse
 import structlog
 from pydantic import BaseModel
 
+from ai_gateway.instrumentators.model_requests import gitlab_version
 from duo_workflow_service.gitlab.gitlab_api import Namespace, Project
-from duo_workflow_service.interceptors.gitlab_version_interceptor import gitlab_version
 from duo_workflow_service.tracking.errors import log_exception
 
 log = structlog.stdlib.get_logger(__name__)

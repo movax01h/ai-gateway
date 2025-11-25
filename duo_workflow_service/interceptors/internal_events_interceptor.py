@@ -7,6 +7,10 @@ from typing import List, Optional
 import grpc
 import structlog
 
+from ai_gateway.instrumentators.model_requests import (
+    gitlab_version,
+    language_server_version,
+)
 from duo_workflow_service.interceptors import (
     X_GITLAB_DEPLOYMENT_TYPE,
     X_GITLAB_FEATURE_ENABLED_BY_NAMESPACE_IDS,
@@ -24,10 +28,6 @@ from duo_workflow_service.interceptors import (
 )
 from duo_workflow_service.interceptors.authentication_interceptor import current_user
 from duo_workflow_service.interceptors.correlation_id_interceptor import correlation_id
-from duo_workflow_service.interceptors.gitlab_version_interceptor import gitlab_version
-from duo_workflow_service.interceptors.language_server_version_interceptor import (
-    language_server_version,
-)
 from lib.internal_events import EventContext, current_event_context
 
 
