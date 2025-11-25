@@ -30,8 +30,16 @@ from ai_gateway.code_suggestions.processing.typing import LanguageId
 from ai_gateway.config import Config, ConfigModelLimits
 from ai_gateway.container import ContainerApplication
 from ai_gateway.instrumentators.model_requests import llm_operations, token_usage
-from ai_gateway.model_metadata import TypeModelMetadata, current_model_metadata_context
-from ai_gateway.model_selection.model_selection_config import ModelSelectionConfig
+from ai_gateway.model_metadata import (
+    ModelMetadata,
+    TypeModelMetadata,
+    current_model_metadata_context,
+)
+from ai_gateway.model_selection.model_selection_config import (
+    LLMDefinition,
+    ModelSelectionConfig,
+    PromptParams,
+)
 from ai_gateway.models.base import ModelMetadata as LegacyModelMetadata
 from ai_gateway.models.base_text import (
     TextGenModelBase,
@@ -39,7 +47,7 @@ from ai_gateway.models.base_text import (
     TextGenModelOutput,
 )
 from ai_gateway.prompts import Prompt
-from ai_gateway.prompts.config.base import ModelConfig, PromptConfig, PromptParams
+from ai_gateway.prompts.config.base import ModelConfig, PromptConfig
 from ai_gateway.prompts.config.models import ChatLiteLLMParams, TypeModelParams
 from ai_gateway.prompts.typing import Model, TypeModelFactory, TypePromptTemplateFactory
 from ai_gateway.safety_attributes import SafetyAttributes
@@ -620,9 +628,25 @@ def prompt_config_fixture(
     )
 
 
+@pytest.fixture(name="llm_definition")
+def llm_definition_fixture():
+    return LLMDefinition(
+        name="Mistral",
+        gitlab_identifier="mistral",
+        family=["mistral"],
+        params={"model": "mistral", "temperature": 0.0, "max_tokens": 4096},
+    )
+
+
 @pytest.fixture(name="model_metadata")
-def model_metadata_fixture():
-    return None
+def model_metadata_fixture(llm_definition: LLMDefinition):
+    return ModelMetadata(
+        provider="gitlab",
+        name="mistral",
+        family=["mistral"],
+        llm_definition=llm_definition,
+        friendly_name="Mistral",
+    )
 
 
 @pytest.fixture(name="prompt_template_factory")

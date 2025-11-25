@@ -18,32 +18,48 @@ from ai_gateway.model_selection import (
 )
 
 
+@pytest.fixture(name="gitlab_model1")
+def gitlab_model1_fixture():
+    return LLMDefinition(
+        gitlab_identifier="gitlab_model1",
+        name="gitlab_model",
+        family=["mixtral"],
+        params={
+            "model_class_provider": "provider",
+            "model": "model_family",
+        },
+        prompt_params={"timeout": 10},
+    )
+
+
+@pytest.fixture(name="gitlab_model2")
+def gitlab_model2_fixture():
+    return LLMDefinition(
+        gitlab_identifier="gitlab_model2",
+        name="gitlab_model2",
+        params={
+            "model_class_provider": "provider2",
+            "model": "model_family2",
+        },
+    )
+
+
+@pytest.fixture(name="amazon_q_model")
+def amazon_q_model_fixture():
+    return LLMDefinition(
+        gitlab_identifier="amazon_q",
+        name="amazon_q",
+        family=["amazon_q"],
+        params={"model": "amazon_q"},
+    )
+
+
 @pytest.fixture(autouse=True)
-def get_llm_definitions():
+def get_llm_definitions(gitlab_model1, gitlab_model2, amazon_q_model):
     mock_models = {
-        "gitlab_model1": LLMDefinition(
-            gitlab_identifier="gitlab_model1",
-            name="gitlab_model",
-            family=["mixtral"],
-            params={
-                "model_class_provider": "provider",
-                "model": "model_family",
-            },
-        ),
-        "gitlab_model2": LLMDefinition(
-            gitlab_identifier="gitlab_model2",
-            name="gitlab_model2",
-            params={
-                "model_class_provider": "provider2",
-                "model": "model_family2",
-            },
-        ),
-        "amazon_q": LLMDefinition(
-            gitlab_identifier="amazon_q",
-            name="amazon_q",
-            family=["amazon_q"],
-            params={"model": "amazon_q"},
-        ),
+        "gitlab_model1": gitlab_model1,
+        "gitlab_model2": gitlab_model2,
+        "amazon_q": amazon_q_model,
     }
 
     mock_definitions = {
@@ -103,7 +119,7 @@ def test_create_regular_model_metadata():
 
 
 class TestCreateModelMetadata:
-    def test_create_gitlab_model_metadata_with_identifier(self):
+    def test_create_gitlab_model_metadata_with_identifier(self, gitlab_model1):
         data = {
             "provider": "gitlab",
             "identifier": "gitlab_model1",
@@ -111,12 +127,9 @@ class TestCreateModelMetadata:
 
         result = create_model_metadata(data)
 
-        assert result.llm_definition_params == {
-            "model_class_provider": "provider",
-            "model": "model_family",
-        }
+        assert result.llm_definition == gitlab_model1
 
-    def test_create_gitlab_model_metadata_with_feature_setting(self):
+    def test_create_gitlab_model_metadata_with_feature_setting(self, gitlab_model1):
         data = {
             "provider": "gitlab",
             "feature_setting": "duo_chat",
@@ -124,12 +137,11 @@ class TestCreateModelMetadata:
 
         result = create_model_metadata(data)
 
-        assert result.llm_definition_params == {
-            "model_class_provider": "provider",
-            "model": "model_family",
-        }
+        assert result.llm_definition == gitlab_model1
 
-    def test_create_gitlab_model_metadata_with_identifier_and_feature_setting(self):
+    def test_create_gitlab_model_metadata_with_identifier_and_feature_setting(
+        self, gitlab_model2
+    ):
         data = {
             "provider": "gitlab",
             "identifier": "gitlab_model2",
@@ -138,10 +150,7 @@ class TestCreateModelMetadata:
 
         result = create_model_metadata(data)
 
-        assert result.llm_definition_params == {
-            "model_class_provider": "provider2",
-            "model": "model_family2",
-        }
+        assert result.llm_definition == gitlab_model2
 
     def test_required_parameters(self):
         data = {
@@ -188,14 +197,10 @@ class TestModelMetadataToParams:
             }
         )
 
-        assert model_metadata.llm_definition_params == {
-            "model_class_provider": "provider",
-            "model": "model_family",
-        }
-
         assert model_metadata.to_params() == {
             "api_base": "https://api.example.com",
             "api_key": "abcde",
+            "timeout": 10,
         }
 
     def test_with_identifier_no_provider(self):
@@ -209,16 +214,12 @@ class TestModelMetadataToParams:
             }
         )
 
-        assert model_metadata.llm_definition_params == {
-            "model_class_provider": "provider",
-            "model": "model_family",
-        }
-
         assert model_metadata.to_params() == {
             "api_base": "https://api.example.com",
             "api_key": "abcde",
             "model": "model_identifier",
             "custom_llm_provider": "custom_openai",
+            "timeout": 10,
         }
 
     def test_with_identifier_with_provider(self):
@@ -232,16 +233,12 @@ class TestModelMetadataToParams:
             }
         )
 
-        assert model_metadata.llm_definition_params == {
-            "model_class_provider": "provider",
-            "model": "model_family",
-        }
-
         assert model_metadata.to_params() == {
             "api_base": "https://api.example.com",
             "api_key": "abcde",
             "model": "model/identifier",
             "custom_llm_provider": "custom_provider",
+            "timeout": 10,
         }
 
     def test_with_identifier_with_bedrock_provider(self):
@@ -255,15 +252,11 @@ class TestModelMetadataToParams:
             }
         )
 
-        assert model_metadata.llm_definition_params == {
-            "model_class_provider": "provider",
-            "model": "model_family",
-        }
-
         assert model_metadata.to_params() == {
             "model": "model/identifier",
             "api_key": "abcde",
             "custom_llm_provider": "bedrock",
+            "timeout": 10,
         }
 
 
@@ -279,16 +272,6 @@ def test_create_model_metadata_without_provider():
 
 class TestFriendlyName:
     """Test friendly_name functionality in ModelMetadata."""
-
-    def test_model_metadata_has_friendly_name_field(self):
-        """Test that ModelMetadata includes friendly_name field."""
-        metadata = ModelMetadata(
-            name="test_model",
-            provider="test_provider",
-            friendly_name="Test Friendly Model",
-        )
-
-        assert metadata.friendly_name == "Test Friendly Model"
 
     def test_create_model_metadata_with_friendly_name_from_models_yml(self):
         """Test that create_model_metadata populates friendly_name from models.yml."""
@@ -400,17 +383,6 @@ class TestFriendlyName:
             assert result.name == "gpt_5"
             assert result.friendly_name == "OpenAI GPT-5"
 
-    def test_amazon_q_model_metadata_has_friendly_name_field(self):
-        """Test that AmazonQModelMetadata includes friendly_name field."""
-        metadata = AmazonQModelMetadata(
-            provider="amazon_q",
-            name="amazon_q",
-            role_arn="arn:aws:iam::123456789012:role/AmazonQRole",
-            friendly_name="Amazon Q Assistant",
-        )
-
-        assert metadata.friendly_name == "Amazon Q Assistant"
-
     def test_create_amazon_q_model_metadata_with_friendly_name(self):
         """Test that create_model_metadata populates friendly_name for AmazonQ."""
         data = {
@@ -437,12 +409,13 @@ class TestFriendlyName:
             assert result.friendly_name == "Amazon Q"
             assert result.role_arn == "arn:aws:iam::123456789012:role/AmazonQRole"
 
-    def test_model_metadata_friendly_name_optional(self):
+    def test_model_metadata_friendly_name_optional(self, llm_definition):
         """Test that friendly_name can be None."""
         metadata = ModelMetadata(
             name="test_model",
             provider="test_provider",
             friendly_name=None,
+            llm_definition=llm_definition,
         )
 
         assert metadata.friendly_name is None

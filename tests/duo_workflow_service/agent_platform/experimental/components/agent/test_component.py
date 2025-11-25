@@ -526,17 +526,12 @@ class TestAgentComponentModelMetadata:
         mock_prompt_registry,
         prompt_id,
         prompt_version,
+        model_metadata: ModelMetadata,
         mock_agent_node_cls,
         mock_tool_node_cls,
         mock_final_response_node_cls,
     ):
-        mock_model_metadata = ModelMetadata(
-            name="gpt_5",
-            provider="gitlab",
-            friendly_name="OpenAI GPT-5",
-        )
-
-        metadata_token = current_model_metadata_context.set(mock_model_metadata)
+        metadata_token = current_model_metadata_context.set(model_metadata)
 
         try:
             agent_component.attach(mock_state_graph, mock_router)
@@ -545,7 +540,7 @@ class TestAgentComponentModelMetadata:
             call_kwargs = mock_prompt_registry.get.call_args[1]
 
             assert "model_metadata" in call_kwargs
-            assert call_kwargs["model_metadata"] == mock_model_metadata
+            assert call_kwargs["model_metadata"] == model_metadata
         finally:
             current_model_metadata_context.reset(metadata_token)
 

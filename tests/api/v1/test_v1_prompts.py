@@ -12,6 +12,7 @@ from ai_gateway.model_metadata import (
     ModelMetadata,
     TypeModelMetadata,
 )
+from ai_gateway.model_selection import LLMDefinition
 
 
 @pytest.fixture(name="fast_api_router", scope="class")
@@ -57,6 +58,9 @@ class TestPrompt:
                     provider="litellm",
                     endpoint=AnyUrl("http://localhost:4000"),
                     api_key="token",
+                    llm_definition=LLMDefinition(
+                        gitlab_identifier="mistral", name="Mistral"
+                    ),
                 ),
                 (
                     "test",
@@ -66,11 +70,16 @@ class TestPrompt:
                         provider="litellm",
                         endpoint=AnyUrl("http://localhost:4000"),
                         api_key="token",
-                        llm_definition_params={
-                            "model": "mistral",
-                            "temperature": 0.0,
-                            "max_tokens": 4096,
-                        },
+                        llm_definition=LLMDefinition(
+                            name="Mistral",
+                            gitlab_identifier="mistral",
+                            family=["mistral"],
+                            params={
+                                "model": "mistral",
+                                "temperature": 0.0,
+                                "max_tokens": 4096,
+                            },
+                        ),
                         family=["mistral"],
                         friendly_name="Mistral",
                     ),
@@ -87,6 +96,9 @@ class TestPrompt:
                     name="amazon_q",
                     provider="amazon_q",
                     role_arn="role-arn",
+                    llm_definition=LLMDefinition(
+                        gitlab_identifier="amazon_q", name="Amazon Q"
+                    ),
                 ),
                 (
                     "test",
@@ -95,10 +107,15 @@ class TestPrompt:
                         name="amazon_q",
                         provider="amazon_q",
                         role_arn="role-arn",
-                        llm_definition_params={
-                            "model": "amazon_q",
-                            "model_class_provider": "amazon_q",
-                        },
+                        llm_definition=LLMDefinition(
+                            gitlab_identifier="amazon_q",
+                            name="Amazon Q",
+                            family=["amazon_q"],
+                            params={
+                                "model": "amazon_q",
+                                "model_class_provider": "amazon_q",
+                            },
+                        ),
                         family=["amazon_q"],
                         friendly_name="Amazon Q",
                     ),
@@ -164,7 +181,7 @@ class TestPrompt:
                 "prompt_version": prompt_version,
                 "model_metadata": input_model_metadata
                 and input_model_metadata.model_dump(
-                    exclude={"llm_definition_params", "family", "friendly_name"},
+                    exclude={"llm_definition", "family", "friendly_name"},
                     mode="json",
                 ),
             },
@@ -261,7 +278,7 @@ class TestMisdirectedRequest:
                 "inputs": {"name": "John", "age": 20},
                 "model_metadata": model_metadata
                 and model_metadata.model_dump(
-                    exclude={"llm_definition_params", "family", "friendly_name"},
+                    exclude={"llm_definition", "family", "friendly_name"},
                     mode="json",
                 ),
             },

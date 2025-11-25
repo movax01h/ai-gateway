@@ -348,10 +348,9 @@ class LocalPromptRegistry(BasePromptRegistry):
 
         config = self._get_prompt_config(prompt_registered.versions, prompt_version)  # type: ignore[arg-type]
         model_class_provider = (
-            model_metadata.llm_definition_params.get(
-                "model_class_provider"
-            )  # From model definition in models.yml
-            if model_metadata and model_metadata.llm_definition_params
+            # From model definition in models.yml
+            model_metadata.llm_definition.params.get("model_class_provider")
+            if model_metadata
             else None
         ) or config.model.params.model_class_provider  # From prompt file
 

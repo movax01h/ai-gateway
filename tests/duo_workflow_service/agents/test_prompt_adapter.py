@@ -12,7 +12,7 @@ from duo_workflow_service.agents.prompt_adapter import (
     ChatAgentPromptTemplate,
     DefaultPromptAdapter,
 )
-from duo_workflow_service.entities.state import ChatWorkflowState
+from duo_workflow_service.entities.state import ChatWorkflowState, WorkflowStatusEnum
 from duo_workflow_service.gitlab.gitlab_api import Namespace, Project
 from duo_workflow_service.gitlab.gitlab_instance_info_service import GitLabInstanceInfo
 from duo_workflow_service.gitlab.gitlab_service_context import GitLabServiceContext
@@ -28,33 +28,30 @@ def mock_datetime_fixture():
         yield mock
 
 
+@pytest.fixture(name="namespace")
+def namespace_fixture():
+    return Namespace(
+        id=456,
+        name="test-org",
+        description="Test organization",
+        web_url="https://gitlab.com/test-org",
+    )
+
+
 @pytest.fixture(name="sample_chat_workflow_state")
-def sample_chat_workflow_state_fixture():
+def sample_chat_workflow_state_fixture(project, namespace) -> ChatWorkflowState:
     """Sample ChatWorkflowState for testing."""
     return ChatWorkflowState(
         plan={"steps": []},
-        status="execution",
+        status=WorkflowStatusEnum.EXECUTION,
         conversation_history={"test_agent": [HumanMessage(content="Hello")]},
         ui_chat_log=[],
         last_human_input=None,
         goal="Test goal",
-        project=Project(
-            id=123,
-            name="Test Project",
-            description="Test project description",
-            http_url_to_repo="https://gitlab.com/test/project.git",
-            web_url="https://gitlab.com/test/project",
-            default_branch="main",
-            languages=[],
-            exclusion_rules=[],
-        ),
-        namespace=Namespace(
-            id=456,
-            name="test-org",
-            description="Test organization",
-            web_url="https://gitlab.com/test-org",
-        ),
+        project=project,
+        namespace=namespace,
         approval=None,
+        preapproved_tools=None,
     )
 
 
@@ -101,7 +98,8 @@ class TestChatAgentPromptTemplate:
     def test_split_system_prompts_create_separate_messages(
         self,
         prompt_config,
-        sample_chat_workflow_state,
+        sample_chat_workflow_state: ChatWorkflowState,
+        project: Project,
         mock_datetime,
     ):
         template = ChatAgentPromptTemplate(prompt_config)
@@ -154,14 +152,13 @@ class TestChatAgentPromptTemplate:
         assert isinstance(dynamic_system_message, SystemMessage)
         assert expected_date in dynamic_system_message.content
         assert expected_timezone in dynamic_system_message.content
-        assert "Test Project" in dynamic_system_message.content
         assert "<project_id>123</project_id>" in dynamic_system_message.content
         assert (
-            "<project_name>Test Project</project_name>"
+            f"<project_name>{project["name"]}</project_name>"
             in dynamic_system_message.content
         )
         assert (
-            "<project_url>https://gitlab.com/test/project</project_url>"
+            f"<project_url>{project["web_url"]}</project_url>"
             in dynamic_system_message.content
         )
         assert "<namespace_id>456</namespace_id>" in dynamic_system_message.content
@@ -300,15 +297,6 @@ class TestPromptAdapterFriendlyName:
             instance_version="17.0.0",
         )
 
-    @pytest.fixture
-    def mock_model_metadata(self):
-        """Mock model metadata with friendly_name."""
-        return ModelMetadata(
-            name="claude_sonnet_4_5_20250929",
-            provider="gitlab",
-            friendly_name="Claude Sonnet 4.5 - Anthropic",
-        )
-
     @patch(
         "duo_workflow_service.gitlab.gitlab_service_context.GitLabServiceContext.get_current_instance_info"
     )
@@ -318,25 +306,28 @@ class TestPromptAdapterFriendlyName:
         mock_context,
         mock_instance_info,
         mock_gitlab_instance_info,
-        mock_model_metadata,
+        model_metadata: ModelMetadata,
+        project,
+        namespace,
         prompt_config,
     ):
         """Test that ChatAgentPromptTemplate injects friendly_name into template."""
-        mock_context.get.return_value = mock_model_metadata
+        mock_context.get.return_value = model_metadata
         mock_instance_info.return_value = mock_gitlab_instance_info
 
         adapter = ChatAgentPromptTemplate(prompt_config)
 
-        input_data = {
+        input_data: ChatWorkflowState = {
             "conversation_history": {"test_agent": [HumanMessage(content="Hello")]},
-            "project": Project(id=1, name="test"),
-            "namespace": Namespace(id=1, name="test"),
+            "project": project,
+            "namespace": namespace,
             "plan": {"steps": []},
-            "status": "execution",
+            "status": WorkflowStatusEnum.EXECUTION,
             "ui_chat_log": [],
             "last_human_input": None,
             "goal": "Test goal",
             "approval": None,
+            "preapproved_tools": None,
         }
 
         with patch(
@@ -350,9 +341,7 @@ class TestPromptAdapterFriendlyName:
 
             _, first_kwargs = call_args_list[0]
             assert "model_friendly_name" in first_kwargs
-            assert (
-                first_kwargs["model_friendly_name"] == "Claude Sonnet 4.5 - Anthropic"
-            )
+            assert first_kwargs["model_friendly_name"] == model_metadata.friendly_name
 
     @patch(
         "duo_workflow_service.gitlab.gitlab_service_context.GitLabServiceContext.get_current_instance_info"
@@ -376,7 +365,7 @@ class TestPromptAdapterFriendlyName:
             "project": Project(id=1, name="test"),
             "namespace": Namespace(id=1, name="test"),
             "plan": {"steps": []},
-            "status": "execution",
+            "status": WorkflowStatusEnum.EXECUTION,
             "ui_chat_log": [],
             "last_human_input": None,
             "goal": "Test goal",
@@ -405,30 +394,30 @@ class TestPromptAdapterFriendlyName:
         mock_instance_info,
         mock_gitlab_instance_info,
         prompt_config,
+        model_metadata: ModelMetadata,
+        project,
+        namespace,
     ):
         """Test ChatAgentPromptTemplate when model metadata exists but has no friendly_name."""
-        metadata_no_friendly_name = ModelMetadata(
-            name="test_model",
-            provider="test_provider",
-            friendly_name=None,
-        )
+        model_metadata.friendly_name = None
 
         # Setup mocks
-        mock_context.get.return_value = metadata_no_friendly_name
+        mock_context.get.return_value = model_metadata
         mock_instance_info.return_value = mock_gitlab_instance_info
 
         adapter = ChatAgentPromptTemplate(prompt_config)
 
-        input_data = {
+        input_data: ChatWorkflowState = {
             "conversation_history": {"test_agent": [HumanMessage(content="Hello")]},
-            "project": Project(id=1, name="test"),
-            "namespace": Namespace(id=1, name="test"),
+            "project": project,
+            "namespace": namespace,
             "plan": {"steps": []},
-            "status": "execution",
+            "status": WorkflowStatusEnum.EXECUTION,
             "ui_chat_log": [],
             "last_human_input": None,
             "goal": "Test goal",
             "approval": None,
+            "preapproved_tools": None,
         }
 
         with patch(
@@ -442,50 +431,3 @@ class TestPromptAdapterFriendlyName:
 
             _, first_kwargs = call_args_list[0]
             assert first_kwargs["model_friendly_name"] == "Unknown"
-
-    @patch(
-        "duo_workflow_service.gitlab.gitlab_service_context.GitLabServiceContext.get_current_instance_info"
-    )
-    @patch("duo_workflow_service.agents.prompt_adapter.current_model_metadata_context")
-    def test_chat_agent_prompt_template_with_self_hosted_model(
-        self,
-        mock_context,
-        mock_instance_info,
-        mock_gitlab_instance_info,
-        prompt_config,
-    ):
-        """Test ChatAgentPromptTemplate with self-hosted model friendly_name."""
-        self_hosted_metadata = ModelMetadata(
-            name="llama3",
-            provider="custom_openai",
-            friendly_name="Llama3",
-        )
-
-        mock_context.get.return_value = self_hosted_metadata
-        mock_instance_info.return_value = mock_gitlab_instance_info
-
-        adapter = ChatAgentPromptTemplate(prompt_config)
-
-        input_data = {
-            "conversation_history": {"test_agent": [HumanMessage(content="Hello")]},
-            "project": Project(id=1, name="test"),
-            "namespace": Namespace(id=1, name="test"),
-            "plan": {"steps": []},
-            "status": "execution",
-            "ui_chat_log": [],
-            "last_human_input": None,
-            "goal": "Test goal",
-            "approval": None,
-        }
-
-        with patch(
-            "duo_workflow_service.agents.prompt_adapter.jinja2_formatter"
-        ) as mock_formatter:
-            mock_formatter.return_value = "Formatted prompt"
-
-            adapter.invoke(input_data, agent_name="test_agent")
-
-            call_args_list = mock_formatter.call_args_list
-
-            _, first_kwargs = call_args_list[0]
-            assert first_kwargs["model_friendly_name"] == "Llama3"

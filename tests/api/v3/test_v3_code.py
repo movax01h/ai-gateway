@@ -10,6 +10,7 @@ from langchain.tools import BaseTool
 from pydantic import AnyUrl
 
 from ai_gateway.api.v3 import api_router
+from ai_gateway.model_selection import LLMDefinition
 from ai_gateway.models.base import KindModelProvider
 from ai_gateway.tracking import SnowplowEventContext
 from lib.feature_flags.context import current_feature_flag_context
@@ -705,11 +706,16 @@ class TestEditorContentGeneration:
                     endpoint=AnyUrl("http://localhost:4000"),
                     api_key="token",
                     identifier="provider/some-model",
-                    llm_definition_params={
-                        "model": "mistral",
-                        "temperature": 0.0,
-                        "max_tokens": 4096,
-                    },
+                    llm_definition=LLMDefinition(
+                        name="Mistral",
+                        gitlab_identifier="mistral",
+                        family=["mistral"],
+                        params={
+                            "model": "mistral",
+                            "temperature": 0.0,
+                            "max_tokens": 4096,
+                        },
+                    ),
                     family=["mistral"],
                     friendly_name="Mistral",
                 ),
@@ -1248,6 +1254,9 @@ class TestAmazonQIntegrationV3:
                     provider="amazon_q",
                     name="amazon_q",
                     role_arn="test:role",
+                    llm_definition=LLMDefinition(
+                        gitlab_identifier="amazon_q", name="Amazon Q"
+                    ),
                 ),
                 {
                     "choices": [
@@ -1277,6 +1286,9 @@ class TestAmazonQIntegrationV3:
                     provider="amazon_q",
                     name="amazon_q",
                     role_arn="test:role",
+                    llm_definition=LLMDefinition(
+                        gitlab_identifier="amazon_q", name="Amazon Q"
+                    ),
                 ),
                 {
                     "choices": [],
@@ -1322,7 +1334,7 @@ class TestAmazonQIntegrationV3:
             "prompt_components": [prompt_component],
             "model_metadata": model_metadata
             and model_metadata.model_dump(
-                exclude={"llm_definition_params", "family", "friendly_name"},
+                exclude={"llm_definition", "family", "friendly_name"},
                 mode="json",
             ),
         }
@@ -1462,7 +1474,7 @@ class TestAmazonQIntegrationV3:
             "prompt_components": [prompt_component],
             "model_metadata": model_metadata
             and model_metadata.model_dump(
-                exclude={"llm_definition_params", "family", "friendly_name"},
+                exclude={"llm_definition", "family", "friendly_name"},
                 mode="json",
             ),
         }

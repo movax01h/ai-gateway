@@ -22,6 +22,7 @@ from ai_gateway.model_metadata import (
     ModelMetadata,
     TypeModelMetadata,
 )
+from ai_gateway.model_selection import LLMDefinition
 from ai_gateway.models.base_chat import Role
 
 
@@ -297,7 +298,12 @@ class TestGLAgentRemoteExecutorToolAction:
                 "17.2.0",
                 ReActAgentInputs(messages=[Message(role=Role.USER, content="Hi")]),
                 AmazonQModelMetadata(
-                    role_arn="role-arn", provider="amazon_q", name="amazon_q"
+                    role_arn="role-arn",
+                    provider="amazon_q",
+                    name="amazon_q",
+                    llm_definition=LLMDefinition(
+                        gitlab_identifier="amazon_q", name="Amazon Q"
+                    ),
                 ),
                 [],
                 [],
@@ -316,6 +322,9 @@ class TestGLAgentRemoteExecutorToolAction:
                     provider="litellm",
                     name="mistral",
                     endpoint=AnyUrl("http://localhost:4000"),
+                    llm_definition=LLMDefinition(
+                        gitlab_identifier="mistral", name="Mistral"
+                    ),
                 ),
                 [],
                 [],
@@ -331,7 +340,12 @@ class TestGLAgentRemoteExecutorToolAction:
                 "17.2.0",
                 ReActAgentInputs(messages=[Message(role=Role.USER, content="Hi")]),
                 AmazonQModelMetadata(
-                    role_arn="role-arn", provider="amazon_q", name="amazon_q"
+                    role_arn="role-arn",
+                    provider="amazon_q",
+                    name="amazon_q",
+                    llm_definition=LLMDefinition(
+                        gitlab_identifier="amazon_q", name="Amazon Q"
+                    ),
                 ),
                 [],
                 [

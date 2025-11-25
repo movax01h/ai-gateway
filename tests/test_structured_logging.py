@@ -11,14 +11,15 @@ from ai_gateway.structured_logging import prevent_logging_if_disabled, sanitize_
 
 
 class TestSanitizeLogs:
-    @pytest.fixture(name="inputs_with_model_metadata", scope="class")
-    def inputs_with_model_metadata_fixture(self):
+    @pytest.fixture(name="inputs_with_model_metadata")
+    def inputs_with_model_metadata_fixture(self, llm_definition):
         inputs = MagicMock(
             model_metadata=ModelMetadata(
                 name="mistral",
                 provider="openai",
                 api_key="secret-key-456",
                 endpoint="https://example.com",
+                llm_definition=llm_definition,
             ),
             other_fied="other_value",
         )

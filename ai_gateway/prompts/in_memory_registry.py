@@ -73,8 +73,8 @@ class InMemoryPromptRegistry(BasePromptRegistry):
 
         model_data: dict[str, Any]
 
-        if model_metadata and model_metadata.llm_definition_params:
-            model_data = {"params": model_metadata.llm_definition_params}
+        if model_metadata:
+            model_data = {"params": model_metadata.llm_definition.params}
         elif model_from_prompt := raw_data.get("model"):
             model_data = model_from_prompt
         else:

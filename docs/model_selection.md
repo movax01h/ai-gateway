@@ -51,6 +51,8 @@ models:
       model: codestral:22b
       max_tokens: 4_096
       temperature: 0.0
+    prompt_params:
+      timeout: 60
 ```
 
 ```yaml
@@ -76,6 +78,8 @@ unit_primitives:
 prompt_template:
   system: Complete the following code
   user: Here's my code: {{code}}
+params:
+  max_retries: 3
 ```
 
 Assume `code_suggestions/completions` is given as the `prompt_id`, and `1.0.0` as the `prompt_version` for each example.
@@ -93,7 +97,9 @@ steps will occur:
 searched in that folder
 - The prompt definition `ai_gateway/prompts/definitions/code_suggestions/completions/mistral/1.0.0.yml` is loaded
 
-Thus, the resulting values passed to the LLM invocation will be:
+Thus, the resulting values will be:
+
+- For LLM initialization:
 
 ```yaml
 model: codestral:22b # From model definition
@@ -102,6 +108,13 @@ temperature: 0.1 # Overwritten in prompt definition
 prompt_template: # From prompt definition
   system: Complete the following code
   user: Here's my code: {{code}}
+```
+
+- For `ainvoke`/`astream` calls:
+
+```yaml
+timeout: 60
+max_retries: 3
 ```
 
 #### Custom models example
@@ -114,7 +127,7 @@ the following steps occur:
 - The same process in the previous example to determine the prompt to load based on the `family` will apply
 - The prompt definition is loaded
 
-In this case, the resulting values passed to the LLM invocation will be:
+In this case, the resulting values passed for LLM initialization will be:
 
 ```yaml
 model: codestral:22b-v0.1-q2_K # Overwritten from user-supplied "identifier"
@@ -135,6 +148,7 @@ Models are defined in `ai_gateway/model_selection/models.yml`, and each model ha
 - `family` (optional): an ordered list of preferred prompt definitions to use with this model (see
 [How models and prompts are selected](#how-models-and-prompts-are-selected) for more details)
 - `params`: Dictionary with custom parameters to be passed to the model client
+- `prompt_params`: Dictionary with custom parameters to be passed to LLM invocations
 
 Example:
 
@@ -148,6 +162,9 @@ models:
       temperature: 0.0
       max_tokens: 4_096
       max_retries: 1
+    prompt_params:
+      timeout: 60
+      max_retries: 3
 ```
 
 ### Authorization
