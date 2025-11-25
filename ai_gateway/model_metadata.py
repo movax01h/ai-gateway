@@ -5,11 +5,11 @@ from typing import Annotated, Any, Dict, Literal, Optional
 from pydantic import AnyUrl, BaseModel, StringConstraints, UrlConstraints
 
 from ai_gateway.api.auth_utils import StarletteUser
-from ai_gateway.model_selection import ModelSelectionConfig
+from ai_gateway.model_selection import LLMDefinition, ModelSelectionConfig
 
 
 class BaseModelMetadata(BaseModel):
-    llm_definition_params: dict[str, Any] = {}
+    llm_definition: LLMDefinition
     family: list[str] = []
 
     def __init__(self, *args, **kwargs):
@@ -51,7 +51,9 @@ class ModelMetadata(BaseModelMetadata):
         This function also allows setting custom provider details based on the identifier, like fetching endpoints based
         on AIGW location.
         """
-        params: Dict[str, str] = {}
+        params: Dict[str, str] = self.llm_definition.prompt_params.model_dump(
+            exclude_none=True
+        )
 
         if self.endpoint:
             params["api_base"] = str(self.endpoint).removesuffix("/")
@@ -91,7 +93,7 @@ def create_model_metadata(data: dict[str, Any] | None) -> Optional[TypeModelMeta
     if data["provider"] == "amazon_q":
         llm_definition = configs.get_model("amazon_q")
         return AmazonQModelMetadata(
-            llm_definition_params=llm_definition.params.copy(),
+            llm_definition=llm_definition,
             family=llm_definition.family,
             friendly_name=llm_definition.name,
             **data,
@@ -119,7 +121,7 @@ def create_model_metadata(data: dict[str, Any] | None) -> Optional[TypeModelMeta
         data["name"] = llm_definition.gitlab_identifier
 
     return ModelMetadata(
-        llm_definition_params=llm_definition.params.copy(),
+        llm_definition=llm_definition,
         family=llm_definition.family,
         friendly_name=llm_definition.name,
         **data,

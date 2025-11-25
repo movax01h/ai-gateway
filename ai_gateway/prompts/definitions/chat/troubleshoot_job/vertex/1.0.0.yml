@@ -13,8 +13,4 @@ prompt_template:
   user: |
     {% include 'chat/troubleshoot_job/user/1.0.0.jinja' %}
 params:
-  # Overriding the `AIGW_GOOGLE_CLOUD_PLATFORM__PROJECT` config, since Claude models
-  # is only available in a handful of regions. See
-  # https://cloud.google.com/vertex-ai/generative-ai/docs/learn/locations#genai-partner-models
-  vertex_location: global
   timeout: 60

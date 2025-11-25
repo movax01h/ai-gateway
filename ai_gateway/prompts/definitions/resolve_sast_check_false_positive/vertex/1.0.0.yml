@@ -29,8 +29,4 @@ prompt_template:
     </vulnerability_context>
   placeholder: history
 params:
-  # Overriding the `AIGW_GOOGLE_CLOUD_PLATFORM__PROJECT` config, since Claude models
-  # is only available in a handful of regions. See
-  # https://cloud.google.com/vertex-ai/generative-ai/docs/learn/locations#genai-partner-models
-  vertex_location: global
   timeout: 30

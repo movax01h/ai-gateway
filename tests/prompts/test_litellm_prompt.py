@@ -6,13 +6,7 @@ import pytest
 from google.auth.credentials import Credentials
 from langchain_community.chat_models import ChatLiteLLM
 
-from ai_gateway.model_metadata import ModelMetadata
 from ai_gateway.prompts import Prompt
-
-
-@pytest.fixture(name="model_metadata")
-def model_metadata_fixture():
-    return ModelMetadata(provider="gitlab", name="vertex")
 
 
 @pytest.fixture(name="model")

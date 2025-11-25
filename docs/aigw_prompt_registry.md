@@ -131,7 +131,7 @@ prompt_template: # Required. Templates for model interaction
     user: <string>                  # Required. User message template (supports Jinja2)
     placeholder: <string>           # Optional. Creates MessagesPlaceholder for dynamic content (e.g., "history")
 
-params: # Required. Request handling parameters
+params: # Optional. Request handling parameters
     timeout: <integer>              # Optional. Maximum response time in seconds (default: 30)
     max_retries: <integer>          # Optional. Maximum retry attempts (default: 3)
 ```

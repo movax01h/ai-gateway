@@ -634,16 +634,11 @@ class TestOneOffComponentModelMetadata:
         mock_state_graph,
         mock_router,
         mock_prompt_registry,
+        model_metadata: ModelMetadata,
         prompt_id,
         prompt_version,
     ):
-        mock_model_metadata = ModelMetadata(
-            name="gpt_5",
-            provider="gitlab",
-            friendly_name="OpenAI GPT-5",
-        )
-
-        metadata_token = current_model_metadata_context.set(mock_model_metadata)
+        metadata_token = current_model_metadata_context.set(model_metadata)
 
         try:
             with (
@@ -660,7 +655,7 @@ class TestOneOffComponentModelMetadata:
             call_kwargs = mock_prompt_registry.get.call_args[1]
 
             assert "model_metadata" in call_kwargs
-            assert call_kwargs["model_metadata"] == mock_model_metadata
+            assert call_kwargs["model_metadata"] == model_metadata
         finally:
             current_model_metadata_context.reset(metadata_token)
 

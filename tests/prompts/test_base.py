@@ -30,9 +30,10 @@ from ai_gateway.model_metadata import (
     TypeModelMetadata,
     current_model_metadata_context,
 )
+from ai_gateway.model_selection import LLMDefinition, PromptParams
 from ai_gateway.models.v2.anthropic_claude import ChatAnthropic
 from ai_gateway.prompts import BasePromptRegistry, Prompt
-from ai_gateway.prompts.config.base import PromptConfig, PromptParams
+from ai_gateway.prompts.config.base import PromptConfig
 from ai_gateway.prompts.config.models import (
     ChatAnthropicParams,
     ChatLiteLLMParams,
@@ -912,6 +913,9 @@ class TestBaseRegistry:
                     provider="litellm",
                     endpoint=AnyUrl("http://localhost:4000"),
                     api_key="token",
+                    llm_definition=LLMDefinition(
+                        gitlab_identifier="mistral", name="Mistral"
+                    ),
                 ),
                 None,
                 True,
@@ -926,6 +930,9 @@ class TestBaseRegistry:
                     name="amazon_q",
                     provider="amazon_q",
                     role_arn="role-arn",
+                    llm_definition=LLMDefinition(
+                        gitlab_identifier="amazon_q", name="Amazon Q"
+                    ),
                 ),
                 None,
                 True,
@@ -1040,6 +1047,9 @@ class TestBaseRegistry:
                     provider="litellm",
                     endpoint=AnyUrl("http://localhost:4000"),
                     api_key="token",
+                    llm_definition=LLMDefinition(
+                        gitlab_identifier="mistral", name="Mistral"
+                    ),
                 ),
                 [GitLabUnitPrimitive.COMPLETE_CODE],
                 ["complete_code"],

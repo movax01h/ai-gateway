@@ -30,6 +30,7 @@ from ai_gateway.model_metadata import (
     ModelMetadata,
     TypeModelMetadata,
 )
+from ai_gateway.model_selection.model_selection_config import LLMDefinition
 from ai_gateway.models.base_chat import Role
 from ai_gateway.prompts.typing import Model
 
@@ -143,6 +144,9 @@ class TestReActAgentStream:
                     name="claude_3_5_haiku_20241022",
                     provider="anthropic",
                     endpoint=AnyUrl("http://localhost:4000"),
+                    llm_definition=LLMDefinition(
+                        gitlab_identifier="claude", name="claude"
+                    ),
                 ),
                 "thought\nFinal Answer: answer\n",
                 [AgentFinalAnswer(text=c) for c in "answer"],
@@ -160,6 +164,9 @@ class TestReActAgentStream:
                     name="amazon_q",
                     provider="amazon_q",
                     role_arn="role-arn",
+                    llm_definition=LLMDefinition(
+                        gitlab_identifier="amazon_q", name="Amazon Q"
+                    ),
                 ),
                 "thought\nFinal Answer: answer\n",
                 [AgentFinalAnswer(text=c) for c in "answer"],
@@ -203,6 +210,9 @@ class TestReActAgentStream:
                     provider="litellm",
                     endpoint=AnyUrl("http://localhost:4000"),
                     api_key="token",
+                    llm_definition=LLMDefinition(
+                        gitlab_identifier="mistral", name="Mistral"
+                    ),
                 ),
                 "thought\nFinal Answer: answer\n",
                 [AgentFinalAnswer(text=c) for c in "answer"],
@@ -247,6 +257,9 @@ class TestReActAgentStream:
                     provider="litellm",
                     endpoint=AnyUrl("http://localhost:4000"),
                     api_key="token",
+                    llm_definition=LLMDefinition(
+                        gitlab_identifier="mistral", name="Mistral"
+                    ),
                 ),
                 "thought\nFinal Answer: answer\n",
                 [AgentFinalAnswer(text=c) for c in "answer"],
@@ -301,7 +314,7 @@ class TestReActAgentStream:
         json_params = agent_request.model_dump(mode="json")
         if model_metadata:
             json_params["model_metadata"] = model_metadata.model_dump(
-                exclude={"llm_definition_params", "family", "friendly_name"},
+                exclude={"llm_definition", "family", "friendly_name"},
                 mode="json",
             )
 
@@ -377,6 +390,9 @@ class TestReActAgentStream:
                     provider="litellm",
                     endpoint=AnyUrl("http://localhost:4000"),
                     api_key="token",
+                    llm_definition=LLMDefinition(
+                        gitlab_identifier="mistral", name="Mistral"
+                    ),
                 ),
                 [
                     AgentToolAction(
@@ -428,7 +444,7 @@ class TestReActAgentStream:
                 json={
                     "messages": [m.model_dump(mode="json") for m in messages],
                     "model_metadata": model_metadata.model_dump(
-                        exclude={"llm_definition_params", "family", "friendly_name"},
+                        exclude={"llm_definition", "family", "friendly_name"},
                         mode="json",
                     ),
                     "unavailable_resources": unavailable_resources,
@@ -672,6 +688,9 @@ class TestReActAgentStream:
                     name="amazon_q",
                     provider="amazon_q",
                     role_arn="role-arn",
+                    llm_definition=LLMDefinition(
+                        gitlab_identifier="amazon_q", name="Amazon Q"
+                    ),
                 ),
             ),
             (
@@ -710,7 +729,7 @@ class TestReActAgentStream:
 
         if model_metadata:
             json_params["model_metadata"] = model_metadata.model_dump(
-                exclude={"llm_definition_params", "family", "friendly_name"},
+                exclude={"llm_definition", "family", "friendly_name"},
                 mode="json",
             )
 

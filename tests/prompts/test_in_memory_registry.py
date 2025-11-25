@@ -5,6 +5,7 @@ from langchain_community.chat_models import ChatAnthropic, ChatLiteLLM
 from pydantic import ValidationError
 
 from ai_gateway.model_metadata import ModelMetadata
+from ai_gateway.model_selection.model_selection_config import LLMDefinition
 from ai_gateway.prompts.base import Prompt
 from ai_gateway.prompts.config import ModelClassProvider
 from ai_gateway.prompts.in_memory_registry import InMemoryPromptRegistry
@@ -236,10 +237,14 @@ class TestInMemoryPromptRegistry:
                 ModelMetadata(
                     name="test",
                     provider="test",
-                    llm_definition_params={
-                        "model": "claude-sonnet-4-20250514",
-                        "model_class_provider": ModelClassProvider.LITE_LLM,
-                    },
+                    llm_definition=LLMDefinition(
+                        gitlab_identifier="claude",
+                        name="claude",
+                        params={
+                            "model": "claude-sonnet-4-20250514",
+                            "model_class_provider": ModelClassProvider.LITE_LLM,
+                        },
+                    ),
                 ),
                 "claude-sonnet-4-20250514",
             ),
@@ -254,10 +259,14 @@ class TestInMemoryPromptRegistry:
                 ModelMetadata(
                     name="test",
                     provider="test",
-                    llm_definition_params={
-                        "model": "claude-sonnet-4-20250514",
-                        "model_class_provider": ModelClassProvider.LITE_LLM,
-                    },
+                    llm_definition=LLMDefinition(
+                        gitlab_identifier="claude",
+                        name="claude",
+                        params={
+                            "model": "claude-sonnet-4-20250514",
+                            "model_class_provider": ModelClassProvider.LITE_LLM,
+                        },
+                    ),
                 ),
                 "claude-sonnet-4-20250514",
             ),

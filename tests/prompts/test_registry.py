@@ -18,6 +18,7 @@ from ai_gateway.config import ConfigModelLimits
 from ai_gateway.integrations.amazon_q.chat import ChatAmazonQ
 from ai_gateway.integrations.amazon_q.client import AmazonQClientFactory
 from ai_gateway.model_metadata import ModelMetadata, create_model_metadata
+from ai_gateway.model_selection import LLMDefinition
 from ai_gateway.models.litellm import KindLiteLlmModel
 from ai_gateway.prompts import LocalPromptRegistry, Prompt
 from ai_gateway.prompts.config import ModelClassProvider
@@ -381,11 +382,6 @@ params:
 # editorconfig-checker-enable
 
 
-@pytest.fixture(name="model_metadata")
-def model_metadata_fixture():
-    return ModelMetadata(provider="gitlab", name="test")
-
-
 @pytest.fixture(name="model_factories")
 def model_factories_fixture():
     return {
@@ -535,6 +531,7 @@ class TestLocalPromptRegistry:
         model_factories,
         internal_event_client: Mock,
         model_limits: ConfigModelLimits,
+        llm_definition: LLMDefinition,
     ):
         yaml_content = """
 ---
@@ -583,6 +580,7 @@ prompt_template:
                 name="codestral",
                 endpoint=HttpUrl("http://localhost:4000/"),
                 provider="custom_openai",
+                llm_definition=llm_definition,
             ),
         )
         assert prompt.unit_primitives == []
@@ -1155,6 +1153,7 @@ prompt_template:
         tool_choice: str | None,
         model_identifier: str | None,
         expected_tool_choice: str | None,
+        llm_definition: LLMDefinition,
     ):
         """Test that tool_choice is adjusted correctly based on model identifier."""
         model_metadata = None
@@ -1163,6 +1162,7 @@ prompt_template:
                 provider="custom",
                 name="test_model",
                 identifier=model_identifier,
+                llm_definition=llm_definition,
             )
 
         result = registry._adjust_tool_choice_for_model(tool_choice, model_metadata)
@@ -1181,12 +1181,14 @@ prompt_template:
         self,
         registry: LocalPromptRegistry,
         tools: list[BaseTool],
+        llm_definition: LLMDefinition,
     ):
         """Test that tool_choice is automatically adjusted when getting a prompt with a Bedrock model."""
         bedrock_metadata = ModelMetadata(
             provider="custom",
             name="bedrock_model",
             identifier="bedrock/anthropic.claude-3-sonnet-20240229-v1:0",
+            llm_definition=llm_definition,
         )
 
         with patch("ai_gateway.prompts.registry.Prompt") as prompt_class:
@@ -1208,12 +1210,14 @@ prompt_template:
         self,
         registry: LocalPromptRegistry,
         tools: list[BaseTool],
+        llm_definition: LLMDefinition,
     ):
         """Test that tool_choice is automatically adjusted when getting a prompt with an Azure model."""
         azure_metadata = ModelMetadata(
             provider="custom",
             name="azure_model",
             identifier="azure/gpt-4",
+            llm_definition=llm_definition,
         )
 
         with patch("ai_gateway.prompts.registry.Prompt") as prompt_class:

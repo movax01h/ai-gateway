@@ -33,12 +33,13 @@ from ai_gateway.api.auth_utils import StarletteUser
 from ai_gateway.config import ConfigModelLimits, ModelLimits
 from ai_gateway.instrumentators.model_requests import ModelRequestInstrumentator
 from ai_gateway.model_metadata import TypeModelMetadata, current_model_metadata_context
+from ai_gateway.model_selection import PromptParams
 from ai_gateway.prompts.caching import (
     CACHE_CONTROL_INJECTION_POINTS_KEY,
     CacheControlInjectionPointsConverter,
     filter_cache_control_injection_points,
 )
-from ai_gateway.prompts.config.base import ModelConfig, PromptConfig, PromptParams
+from ai_gateway.prompts.config.base import ModelConfig, PromptConfig
 from ai_gateway.prompts.config.models import ModelClassProvider, TypeModelParams
 from ai_gateway.prompts.typing import Model, TypeModelFactory, TypePromptTemplateFactory
 from ai_gateway.structured_logging import get_request_logger
@@ -216,8 +217,8 @@ class Prompt(RunnableBinding[Any, BaseMessage]):
     ) -> Model:
         # The params in the prompt file have higher precedence than the ones in the model definition
         llm_params = (
-            model_metadata.llm_definition_params if model_metadata else {}
-        ).copy()
+            model_metadata.llm_definition.params.copy() if model_metadata else {}
+        )
         # Exclude model_class_provider as it's used for factory selection, not model instantiation
         llm_params.pop("model_class_provider", None)
 
