@@ -15,7 +15,6 @@ from duo_workflow_service.agent_platform.experimental.state import (
     get_vars_from_state,
 )
 from duo_workflow_service.errors.error_handler import ModelError, ModelErrorHandler
-from duo_workflow_service.monitoring import duo_workflow_metrics
 from lib.internal_events import InternalEventsClient
 from lib.internal_events.event_enum import CategoryEnum
 
@@ -90,35 +89,16 @@ class AgentNode:
             self._component_name, []
         )
         variables = get_vars_from_state(self._inputs, state)
-        model_name = getattr(self._prompt.model, "model_name", "unknown")
-        request_type = f"{self._component_name}_completion"
-        model_provider = self._prompt.model_provider
 
         while True:
             try:
-                with duo_workflow_metrics.time_llm_request(
-                    model=model_name, request_type=request_type
-                ):
-                    completion: AIMessage = cast(
-                        AIMessage,
-                        await self._prompt.ainvoke(
-                            input={**variables, "history": history}
-                        ),
-                    )
-                    finish_reason = completion.response_metadata.get("finish_reason")
-                    if finish_reason in LLMFinishReason.abnormal_values():
-                        log.warning(
-                            f"LLM stopped abnormally with reason: {finish_reason}"
-                        )
-                duo_workflow_metrics.count_llm_response(
-                    model=model_name,
-                    provider=model_provider,
-                    request_type=request_type,
-                    stop_reason=finish_reason,
-                    # Hardcoded 200 status since model_completion only returns status codes for failures
-                    status_code="200",
-                    error_type="none",
+                completion: AIMessage = cast(
+                    AIMessage,
+                    await self._prompt.ainvoke(input={**variables, "history": history}),
                 )
+                finish_reason = completion.response_metadata.get("finish_reason")
+                if finish_reason in LLMFinishReason.abnormal_values():
+                    log.warning(f"LLM stopped abnormally with reason: {finish_reason}")
 
                 if len(updates := self._final_answer_validate(completion)) > 0:
                     history = [*history, *updates]
@@ -132,14 +112,6 @@ class AgentNode:
             except APIStatusError as e:
                 error_message = str(e)
                 status_code = e.response.status_code
-                duo_workflow_metrics.count_llm_response(
-                    model=model_name,
-                    provider=model_provider,
-                    request_type=request_type,
-                    stop_reason="error",
-                    status_code=e.response.status_code,
-                    error_type=self._error_handler.get_error_type(status_code),
-                )
                 model_error = ModelError(
                     error_type=self._error_handler.get_error_type(status_code),
                     status_code=status_code,

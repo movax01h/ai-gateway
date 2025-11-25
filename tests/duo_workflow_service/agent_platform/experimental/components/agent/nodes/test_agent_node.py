@@ -15,22 +15,6 @@ from duo_workflow_service.errors.error_handler import ModelError, ModelErrorType
 from lib.internal_events.event_enum import CategoryEnum
 
 
-@pytest.fixture(name="mock_monitoring")
-def mock_monitoring_fixture():
-    """Fixture for mocking duo_workflow_metrics."""
-    with patch(
-        "duo_workflow_service.agent_platform.experimental.components.agent.nodes.agent_node.duo_workflow_metrics"
-    ) as mock_metrics:
-        mock_context_manager = Mock()
-        mock_context_manager.__enter__ = Mock(return_value=mock_context_manager)
-        mock_context_manager.__exit__ = Mock(
-            return_value=None
-        )  # Important: return None to not suppress exceptions
-        mock_metrics.time_llm_request.return_value = mock_context_manager
-        mock_metrics.count_llm_response = Mock()
-        yield mock_metrics
-
-
 @pytest.fixture(name="mock_prompt")
 def mock_prompt_fixture(mock_ai_message):
     """Fixture for mock prompt."""
@@ -50,7 +34,6 @@ def agent_node_fixture(
     inputs,
     component_name,
     mock_internal_event_client,
-    mock_monitoring,
 ):
     """Fixture for AgentNode instance."""
     return AgentNode(
@@ -378,28 +361,4 @@ class TestAgentNode:
         assert (
             f"{AgentFinalOutput.tool_title} raised validation error:"
             in retry_messages_history[1].content
-        )
-
-
-class TestAgentNodeMonitoring:
-    @pytest.mark.asyncio
-    async def test_run(
-        self,
-        component_name,
-        base_flow_state,
-        mock_monitoring,
-        agent_node,
-    ):
-        await agent_node.run(base_flow_state)
-
-        mock_monitoring.time_llm_request.assert_called_once_with(
-            model="claude-3-sonnet", request_type=f"{component_name}_completion"
-        )
-        mock_monitoring.count_llm_response.assert_called_once_with(
-            model="claude-3-sonnet",
-            provider="anthropic",
-            request_type="test_component_completion",
-            stop_reason="stop",
-            status_code="200",
-            error_type="none",
         )

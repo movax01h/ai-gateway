@@ -21,12 +21,10 @@ class TestDuoWorkflowMetrics(unittest.TestCase):
         """Set up properly typed mocks for all histograms."""
         for metric_name in [
             "workflow_duration",
-            "llm_request_duration",
             "tool_call_duration",
             "compute_duration",
             "gitlab_response_duration",
             "network_latency",
-            "llm_response_counter",
             "checkpoint_counter",
             "agent_platform_session_start_counter",
             "agent_platform_session_success_counter",
@@ -63,32 +61,6 @@ class TestDuoWorkflowMetrics(unittest.TestCase):
         self.assertEqual(mock_callback.call_count, 1)
         args, _ = mock_callback.call_args
         self.assertGreater(args[0], 0)
-
-    def test_time_llm_request(self):
-        observe_mock = MagicMock()
-        labels_result_mock = MagicMock()
-        labels_result_mock.observe = observe_mock
-
-        cast(MagicMock, self.metrics.llm_request_duration.labels).return_value = (
-            labels_result_mock
-        )
-
-        with self.metrics.time_llm_request(
-            model="test_model", request_type="test_request"
-        ):
-            pass
-
-        cast(
-            MagicMock, self.metrics.llm_request_duration.labels
-        ).assert_called_once_with(
-            model="test_model",
-            request_type="test_request",
-            lsp_version="unknown",
-            gitlab_version="unknown",
-            client_type="unknown",
-            gitlab_realm="unknown",
-        )
-        observe_mock.assert_called_once()
 
     def test_time_tool_call(self):
         observe_mock = MagicMock()
@@ -199,30 +171,6 @@ class TestDuoWorkflowMetrics(unittest.TestCase):
 
         cast(MagicMock, counter.labels).assert_called_once_with(**expected_labels)
 
-    def test_llm_response_counter(self):
-        self._assert_counter_called(
-            "llm_response_counter",
-            "count_llm_response",
-            {
-                "model": "test_model",
-                "provider": "test_provider",
-                "request_type": "test_request",
-                "stop_reason": "other",
-                "status_code": "200",
-                "error_type": "none",
-                "lsp_version": "unknown",
-                "gitlab_version": "unknown",
-                "client_type": "unknown",
-                "gitlab_realm": "unknown",
-            },
-            model="test_model",
-            provider="test_provider",
-            request_type="test_request",
-            stop_reason="test_reason",
-            status_code="200",
-            error_type="none",
-        )
-
     def test_checkpoint_counter(self):
         self._assert_counter_called(
             "checkpoint_counter",
@@ -239,30 +187,6 @@ class TestDuoWorkflowMetrics(unittest.TestCase):
             endpoint="test_endpoint",
             status_code="test_status",
             method="POST",
-        )
-
-    def test_llm_response_counter_with_error(self):
-        self._assert_counter_called(
-            "llm_response_counter",
-            "count_llm_response",
-            {
-                "model": "test_model",
-                "provider": "Anthropic",
-                "request_type": "test_request",
-                "stop_reason": "error",
-                "status_code": "500",
-                "error_type": "test_reason",
-                "lsp_version": "unknown",
-                "gitlab_version": "unknown",
-                "client_type": "unknown",
-                "gitlab_realm": "unknown",
-            },
-            model="test_model",
-            provider="Anthropic",
-            request_type="test_request",
-            stop_reason="error",
-            status_code="500",
-            error_type="test_reason",
         )
 
     def test_agent_platform_session_start_counter(self):
