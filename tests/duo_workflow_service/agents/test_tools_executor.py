@@ -1256,3 +1256,95 @@ async def test_run_with_missing_plan_key(tools_executor):
 
     assert result is not None
     assert isinstance(result, list)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("all_tools", [{"test_tool": mock_tool()}])
+@pytest.mark.usefixtures("mock_datetime")
+async def test_skip_agent_msg_prevents_duplicate_messages(
+    all_tools, workflow_state, toolset
+):
+    """Test that skip_agent_msg=True prevents agent messages from being added to ui_chat_log."""
+    tool = all_tools["test_tool"]
+
+    # Create ToolsExecutor with skip_agent_msg=True
+    tools_executor = ToolsExecutor(
+        tools_agent_name="planner",
+        toolset=toolset,
+        workflow_id="123",
+        workflow_type=CategoryEnum.WORKFLOW_SOFTWARE_DEVELOPMENT,
+        skip_agent_msg=True,
+    )
+
+    workflow_state["conversation_history"]["planner"] = [
+        AIMessage(
+            content=[{"type": "text", "text": "I'll use a tool"}],
+            tool_calls=[
+                {
+                    "id": "1",
+                    "name": tool.name,
+                    "args": {"tasks": [{"description": "step1"}]},
+                }
+            ],
+        )
+    ]
+
+    result = await tools_executor.run(workflow_state)
+
+    update = cast(Command, result[-1]).update
+    assert update and "ui_chat_log" in update
+    ui_chat_log = update["ui_chat_log"]
+
+    # Verify no agent message was added, only tool message
+    assert len(ui_chat_log) == 1
+    assert ui_chat_log[0]["message_type"] == MessageTypeEnum.TOOL
+    assert (
+        ui_chat_log[0]["content"] == "Using test_tool: tasks=[{'description': 'step1'}]"
+    )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("all_tools", [{"test_tool": mock_tool()}])
+@pytest.mark.usefixtures("mock_datetime")
+async def test_skip_agent_msg_false_adds_agent_message(
+    all_tools, workflow_state, toolset
+):
+    """Test that skip_agent_msg=False (default) adds agent messages to ui_chat_log."""
+    tool = all_tools["test_tool"]
+
+    # Create ToolsExecutor with skip_agent_msg=False (default)
+    tools_executor = ToolsExecutor(
+        tools_agent_name="planner",
+        toolset=toolset,
+        workflow_id="123",
+        workflow_type=CategoryEnum.WORKFLOW_SOFTWARE_DEVELOPMENT,
+        skip_agent_msg=False,
+    )
+
+    workflow_state["conversation_history"]["planner"] = [
+        AIMessage(
+            content=[{"type": "text", "text": "I'll use a tool"}],
+            tool_calls=[
+                {
+                    "id": "1",
+                    "name": tool.name,
+                    "args": {"tasks": [{"description": "step1"}]},
+                }
+            ],
+        )
+    ]
+
+    result = await tools_executor.run(workflow_state)
+
+    update = cast(Command, result[-1]).update
+    assert update and "ui_chat_log" in update
+    ui_chat_log = update["ui_chat_log"]
+
+    # Verify both agent message and tool message were added
+    assert len(ui_chat_log) == 2
+    assert ui_chat_log[0]["message_type"] == MessageTypeEnum.AGENT
+    assert ui_chat_log[0]["content"] == "I'll use a tool"
+    assert ui_chat_log[1]["message_type"] == MessageTypeEnum.TOOL
+    assert (
+        ui_chat_log[1]["content"] == "Using test_tool: tasks=[{'description': 'step1'}]"
+    )

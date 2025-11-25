@@ -310,6 +310,7 @@ class Workflow(AbstractWorkflow):
             toolset=agents_toolset,
             workflow_id=self._workflow_id,
             workflow_type=self._workflow_type,
+            skip_agent_msg=True,
         ).run
 
         graph.add_node("agent", self._agent.run)
