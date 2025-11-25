@@ -1,13 +1,14 @@
 import time
+from unittest.mock import AsyncMock, Mock
 
 import pytest
-from langchain_core.messages import AIMessage, HumanMessage
-from langchain_core.outputs import ChatGeneration, ChatResult
+from langchain_core.messages import AIMessage, AIMessageChunk, HumanMessage
+from langchain_core.outputs import ChatGeneration, ChatGenerationChunk, ChatResult
 
 from ai_gateway.models.agentic_mock import AgenticFakeModel, ResponseHandler
 
 
-class TestAgenticFakeModel:
+class TestAgenticFakeModel:  # pylint: disable=too-many-public-methods
     @pytest.fixture
     def model(self):
         return AgenticFakeModel()
@@ -72,6 +73,31 @@ class TestAgenticFakeModel:
         end_time = time.time()
         self._assert_latency_simulation(result, start_time, end_time)
 
+    def test_stream_with_latency_simulation(self, model, latency_messages):
+        start_time = time.time()
+        chunks = list(model._stream(latency_messages))
+        end_time = time.time()
+
+        elapsed_ms = (end_time - start_time) * 1000
+        assert elapsed_ms >= 90  # Allow some tolerance for timing
+
+        assert len(chunks) == 1
+        assert chunks[0].message.content == "Delayed response"
+
+    @pytest.mark.asyncio
+    async def test_astream_with_latency_simulation(self, model, latency_messages):
+        start_time = time.time()
+        chunks = []
+        async for chunk in model._astream(latency_messages):
+            chunks.append(chunk)
+        end_time = time.time()
+
+        elapsed_ms = (end_time - start_time) * 1000
+        assert elapsed_ms >= 90  # Allow some tolerance for timing
+
+        assert len(chunks) == 1
+        assert chunks[0].message.content == "Delayed response"
+
     def test_model_properties(self, model):
         assert model._llm_type == "agentic-fake-provider"
         assert model._identifying_params == {"model": "agentic-fake-model"}
@@ -82,6 +108,216 @@ class TestAgenticFakeModel:
 
         result = model.bind_tools("tool1", "tool2", param=True)
         assert result is model
+
+    @pytest.mark.asyncio
+    async def test_astream_with_streaming_enabled(self, model):
+        messages = [
+            HumanMessage(
+                content="<response stream='true' chunk_delay_ms='10'>Hello world test</response>"
+            )
+        ]
+
+        chunks = []
+        async for chunk in model._astream(messages):
+            assert isinstance(chunk, ChatGenerationChunk)
+            assert isinstance(chunk.message, AIMessageChunk)
+            chunks.append(chunk.message.content)
+
+        # Should have 3 chunks: "Hello", " world", " test"
+        assert len(chunks) == 3
+        assert chunks[0] == "Hello"
+        assert chunks[1] == " world"
+        assert chunks[2] == " test"
+
+    @pytest.mark.asyncio
+    async def test_astream_with_streaming_and_tool_calls(self, model):
+        messages = [
+            HumanMessage(
+                content='<response stream="true">Analyze this <tool_calls>[{"name": "search"}]</tool_calls></response>'
+            )
+        ]
+
+        chunks = []
+        async for chunk in model._astream(messages):
+            chunks.append(chunk)
+
+        # Should have text chunks + final chunk with tool calls
+        assert len(chunks) == 3  # "Analyze", " this", and tool call chunk
+
+        # Last chunk should have tool calls
+        assert chunks[-1].message.tool_calls
+        assert chunks[-1].message.tool_calls[0]["name"] == "search"
+
+    @pytest.mark.asyncio
+    async def test_astream_without_streaming(self, model):
+        messages = [
+            HumanMessage(content="<response>Complete response at once</response>")
+        ]
+
+        chunks = []
+        async for chunk in model._astream(messages):
+            chunks.append(chunk)
+
+        # Should have only 1 chunk with complete response
+        assert len(chunks) == 1
+        assert chunks[0].message.content == "Complete response at once"
+
+    def test_stream_with_streaming_enabled(self, model):
+        messages = [
+            HumanMessage(content="<response stream='true'>Hello world</response>")
+        ]
+
+        chunks = []
+        for chunk in model._stream(messages):
+            assert isinstance(chunk, ChatGenerationChunk)
+            assert isinstance(chunk.message, AIMessageChunk)
+            chunks.append(chunk.message.content)
+
+        # Should have 2 chunks: "Hello", " world"
+        assert len(chunks) == 2
+        assert chunks[0] == "Hello"
+        assert chunks[1] == " world"
+
+    def test_generate_invokes_callback_on_llm_end(self, model):
+        messages = [HumanMessage(content="<response>Test response</response>")]
+        mock_run_manager = Mock()
+
+        model._generate(messages, run_manager=mock_run_manager)
+
+        mock_run_manager.on_llm_end.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_agenerate_invokes_callback_on_llm_end(self, model):
+        messages = [HumanMessage(content="<response>Test response</response>")]
+        mock_run_manager = AsyncMock()
+
+        await model._agenerate(messages, run_manager=mock_run_manager)
+
+        mock_run_manager.on_llm_end.assert_called_once()
+
+    def test_stream_invokes_callback_on_llm_new_token_streaming(self, model):
+        messages = [
+            HumanMessage(content="<response stream='true'>Hello world</response>")
+        ]
+        mock_run_manager = Mock()
+
+        list(model._stream(messages, run_manager=mock_run_manager))
+
+        assert mock_run_manager.on_llm_new_token.call_count == 2
+        calls = mock_run_manager.on_llm_new_token.call_args_list
+        assert calls[0][0][0] == "Hello"
+        assert calls[1][0][0] == " world"
+
+    def test_stream_invokes_callback_on_llm_new_token_non_streaming(self, model):
+        messages = [HumanMessage(content="<response>Complete response</response>")]
+        mock_run_manager = Mock()
+
+        list(model._stream(messages, run_manager=mock_run_manager))
+
+        mock_run_manager.on_llm_new_token.assert_called_once_with("Complete response")
+
+    @pytest.mark.asyncio
+    async def test_astream_invokes_callback_on_llm_new_token_streaming(self, model):
+        messages = [
+            HumanMessage(content="<response stream='true'>Hello world test</response>")
+        ]
+        mock_run_manager = AsyncMock()
+
+        async for _ in model._astream(messages, run_manager=mock_run_manager):
+            pass  # Just consume the generator
+
+        assert mock_run_manager.on_llm_new_token.call_count == 3
+        calls = mock_run_manager.on_llm_new_token.call_args_list
+        assert calls[0][0][0] == "Hello"
+        assert calls[1][0][0] == " world"
+        assert calls[2][0][0] == " test"
+
+    @pytest.mark.asyncio
+    async def test_astream_invokes_callback_on_llm_new_token_non_streaming(self, model):
+        messages = [HumanMessage(content="<response>Complete response</response>")]
+        mock_run_manager = AsyncMock()
+
+        async for _ in model._astream(messages, run_manager=mock_run_manager):
+            pass  # Just consume the generator
+
+        mock_run_manager.on_llm_new_token.assert_called_once_with("Complete response")
+
+    def test_stream_with_tool_calls_invokes_callbacks(self, model):
+        """Test that _stream invokes callbacks correctly with tool calls."""
+        messages = [
+            HumanMessage(
+                content='<response stream="true">Analyze <tool_calls>[{"name": "search"}]</tool_calls></response>'
+            )
+        ]
+        mock_run_manager = Mock()
+
+        list(model._stream(messages, run_manager=mock_run_manager))
+
+        # Verify on_llm_new_token was called for the text chunk
+        assert mock_run_manager.on_llm_new_token.call_count == 1
+        assert mock_run_manager.on_llm_new_token.call_args[0][0] == "Analyze"
+
+    @pytest.mark.asyncio
+    async def test_astream_with_tool_calls_invokes_callbacks(self, model):
+        """Test that _astream invokes callbacks correctly with tool calls."""
+        messages = [
+            HumanMessage(
+                content='<response stream="true">Analyze this <tool_calls>[{"name": "search"}]</tool_calls></response>'
+            )
+        ]
+        mock_run_manager = AsyncMock()
+
+        async for _ in model._astream(messages, run_manager=mock_run_manager):
+            pass  # Just consume the generator
+
+        # Verify on_llm_new_token was called for each text chunk
+        assert mock_run_manager.on_llm_new_token.call_count == 2
+        calls = mock_run_manager.on_llm_new_token.call_args_list
+        assert calls[0][0][0] == "Analyze"
+        assert calls[1][0][0] == " this"
+
+    @pytest.mark.asyncio
+    async def test_astream_with_chunk_delay(self, model):
+        messages = [
+            HumanMessage(
+                content="<response stream='true' chunk_delay_ms='50'>Hello world</response>"
+            )
+        ]
+
+        start_time = time.time()
+        chunks = []
+        async for chunk in model._astream(messages):
+            chunks.append(chunk.message.content)
+        end_time = time.time()
+
+        assert len(chunks) == 2
+        assert chunks[0] == "Hello"
+        assert chunks[1] == " world"
+
+        # Verify delay was applied (at least 40ms to allow for timing variance)
+        elapsed_ms = (end_time - start_time) * 1000
+        assert elapsed_ms >= 40
+
+    def test_stream_with_chunk_delay(self, model):
+        messages = [
+            HumanMessage(
+                content="<response stream='true' chunk_delay_ms='50'>Hello world</response>"
+            )
+        ]
+
+        start_time = time.time()
+        chunks = []
+        for chunk in model._stream(messages):
+            chunks.append(chunk.message.content)
+        end_time = time.time()
+
+        assert len(chunks) == 2
+        assert chunks[0] == "Hello"
+        assert chunks[1] == " world"
+
+        # Verify delay was applied (at least 40ms to allow for timing variance)
+        elapsed_ms = (end_time - start_time) * 1000
+        assert elapsed_ms >= 40
 
 
 class TestResponseHandler:
@@ -214,3 +450,31 @@ class TestResponseHandler:
         response = handler.get_next_response()
         assert response.content == "mock response (no response tag specified)"
         assert not response.tool_calls
+
+    def test_response_handler_streaming_attributes(self):
+        messages = [
+            HumanMessage(
+                content="""
+                <response stream='true' chunk_delay_ms='100'>Streaming response</response>
+                <response stream="false">Non-streaming response</response>
+                <response>Default response</response>
+            """
+            )
+        ]
+
+        handler = ResponseHandler(messages)
+
+        response1 = handler.get_next_response()
+        assert response1.content == "Streaming response"
+        assert response1.stream is True
+        assert response1.chunk_delay_ms == 100
+
+        response2 = handler.get_next_response()
+        assert response2.content == "Non-streaming response"
+        assert response2.stream is False
+        assert response2.chunk_delay_ms == 0
+
+        response3 = handler.get_next_response()
+        assert response3.content == "Default response"
+        assert response3.stream is False
+        assert response3.chunk_delay_ms == 0

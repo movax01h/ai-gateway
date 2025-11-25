@@ -76,6 +76,16 @@ Add delays using the `latency_ms` attribute to specify the number of millisecond
 </response>
 ```
 
+## Streaming simulation
+
+Simulate streamed responses using the `stream` attribute. This will stream the response as chunks, where each chunk is a single word:
+
+```xml
+<response latency_ms='1500' stream='true' chunk_delay_ms='50'>
+  After an initial delay of 1500ms this response will be streamed word by word with 50ms delay between chunks
+</response>
+```
+
 ## Example workflows
 
 Workflow with 2 tool calls:

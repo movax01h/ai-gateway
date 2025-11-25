@@ -21,24 +21,38 @@ Usage examples:
 
     Response with latency simulation:
     "<response latency_ms='500'>This response will be delayed by 500ms</response>"
+
+    Response with streaming simulation:
+    "<response stream='true' chunk_delay_ms='50'>This response will be streamed token by token</response>"
 """
 
 import asyncio
 import json
 import re
-from typing import Any, NamedTuple, Optional
+import time
+from typing import Any, AsyncIterator, Iterator, NamedTuple, Optional
 
-from langchain_core.callbacks import AsyncCallbackManagerForLLMRun
+from langchain_core.callbacks import (
+    AsyncCallbackManagerForLLMRun,
+    CallbackManagerForLLMRun,
+)
 from langchain_core.language_models.chat_models import BaseChatModel
-from langchain_core.messages import AIMessage, BaseMessage, HumanMessage
+from langchain_core.messages import AIMessage, AIMessageChunk, BaseMessage, HumanMessage
 from langchain_core.messages.tool import ToolCall
-from langchain_core.outputs import ChatGeneration, ChatResult
+from langchain_core.outputs import (
+    ChatGeneration,
+    ChatGenerationChunk,
+    ChatResult,
+    LLMResult,
+)
 
 
 class Response(NamedTuple):
     content: str
     tool_calls: list[ToolCall]
     latency_ms: int
+    stream: bool
+    chunk_delay_ms: int
 
 
 class ResponseHandler:
@@ -85,13 +99,19 @@ class ResponseHandler:
             response_text = response_text.strip()
             clean_content, tool_calls = self._extract_tools_from_response(response_text)
             latency_ms = self._extract_latency_from_attributes(attributes_str)
+            stream = self._extract_stream_from_attributes(attributes_str)
+            chunk_delay_ms = self._extract_chunk_delay_from_attributes(attributes_str)
 
-            parsed_responses.append(Response(clean_content, tool_calls, latency_ms))
+            parsed_responses.append(
+                Response(clean_content, tool_calls, latency_ms, stream, chunk_delay_ms)
+            )
 
         return (
             parsed_responses
             if parsed_responses
-            else [Response("mock response (no response tag specified)", [], 0)]
+            else [
+                Response("mock response (no response tag specified)", [], 0, False, 0)
+            ]
         )
 
     def _extract_tools_from_response(
@@ -160,6 +180,32 @@ class ResponseHandler:
 
         return 0
 
+    def _extract_stream_from_attributes(self, attributes_str: str) -> bool:
+        if not attributes_str:
+            return False
+
+        # Pattern to extract stream attribute value
+        stream_pattern = r"stream\s*=\s*['\"]?(true|false)['\"]?"
+        match = re.search(stream_pattern, attributes_str, re.IGNORECASE)
+
+        if match:
+            return match.group(1).lower() == "true"
+
+        return False
+
+    def _extract_chunk_delay_from_attributes(self, attributes_str: str) -> int:
+        if not attributes_str:
+            return 0
+
+        # Pattern to extract chunk_delay_ms attribute value
+        chunk_delay_pattern = r"chunk_delay_ms\s*=\s*['\"]?(\d+)['\"]?"
+        match = re.search(chunk_delay_pattern, attributes_str, re.IGNORECASE)
+
+        if match:
+            return int(match.group(1))
+
+        return 0
+
     def get_next_response(self) -> Response:
         """Get the next response in sequence, returning empty response when exhausted."""
         if not self.content:
@@ -167,10 +213,14 @@ class ResponseHandler:
                 "mock response (no response tag specified)",
                 [],
                 0,
+                False,
+                0,
             )
 
         if self.current_index >= len(self.responses):
-            return Response("mock response (all scripted responses exhausted)", [], 0)
+            return Response(
+                "mock response (all scripted responses exhausted)", [], 0, False, 0
+            )
 
         response = self.responses[self.current_index]
         self.current_index += 1
@@ -222,10 +272,17 @@ class AgenticFakeModel(BaseChatModel):
         self,
         messages: list[BaseMessage],
         stop: Optional[list[str]] = None,
-        run_manager: Optional[Any] = None,
+        run_manager: Optional[CallbackManagerForLLMRun] = None,
         **kwargs,
     ) -> ChatResult:
-        return asyncio.run(self._generate_with_latency(messages))
+        result = asyncio.run(self._generate_with_latency(messages))
+
+        # Invoke callbacks for LangSmith tracing
+        if run_manager:
+            llm_result = LLMResult(generations=[[gen] for gen in result.generations])
+            run_manager.on_llm_end(llm_result)
+
+        return result
 
     def bind_tools(self, *_args: Any, **_kwargs: Any) -> Any:
         return self
@@ -237,4 +294,129 @@ class AgenticFakeModel(BaseChatModel):
         run_manager: Optional[AsyncCallbackManagerForLLMRun] = None,
         **kwargs: Any,
     ) -> ChatResult:
-        return await self._generate_with_latency(messages)
+        result = await self._generate_with_latency(messages)
+
+        # Invoke callbacks for LangSmith tracing
+        if run_manager:
+            llm_result = LLMResult(generations=[[gen] for gen in result.generations])
+            await run_manager.on_llm_end(llm_result)
+
+        return result
+
+    def _stream(
+        self,
+        messages: list[BaseMessage],
+        stop: Optional[list[str]] = None,
+        run_manager: Optional[CallbackManagerForLLMRun] = None,
+        **kwargs: Any,
+    ) -> Iterator[ChatGenerationChunk]:
+        """Stream the response synchronously."""
+        if self._response_handler is None:
+            self._response_handler = ResponseHandler(messages)
+
+        response = self._response_handler.get_next_response()
+
+        # Apply initial latency if specified
+        if response.latency_ms > 0:
+            time.sleep(response.latency_ms / 1000.0)
+
+        # If streaming is enabled, yield chunks
+        if response.stream:
+            # Split content into words for token-like streaming
+            words = response.content.split()
+            for i, word in enumerate(words):
+                # Add space before word except for the first one
+                chunk_text = word if i == 0 else f" {word}"
+
+                chunk = AIMessageChunk(content=chunk_text)
+                chunk_generation = ChatGenerationChunk(message=chunk)
+
+                # Invoke callbacks for LangSmith tracing
+                if run_manager:
+                    run_manager.on_llm_new_token(chunk_text)
+
+                yield chunk_generation
+
+                # Apply chunk delay if specified
+                if response.chunk_delay_ms > 0 and i < len(words) - 1:
+                    time.sleep(response.chunk_delay_ms / 1000.0)
+
+            # Yield final chunk with tool calls if present
+            if response.tool_calls:
+                final_chunk = AIMessageChunk(
+                    content="",
+                    tool_calls=response.tool_calls,
+                )
+                yield ChatGenerationChunk(message=final_chunk)
+        else:
+            # Non-streaming: yield complete response
+            ai_message = AIMessageChunk(
+                content=response.content,
+                tool_calls=response.tool_calls if response.tool_calls else [],
+            )
+            chunk_generation = ChatGenerationChunk(message=ai_message)
+
+            # Invoke callbacks for LangSmith tracing
+            if run_manager:
+                run_manager.on_llm_new_token(response.content)
+
+            yield chunk_generation
+
+    async def _astream(
+        self,
+        messages: list[BaseMessage],
+        stop: Optional[list[str]] = None,
+        run_manager: Optional[AsyncCallbackManagerForLLMRun] = None,
+        **kwargs: Any,
+    ) -> AsyncIterator[ChatGenerationChunk]:
+        """Stream the response asynchronously."""
+        if self._response_handler is None:
+            self._response_handler = ResponseHandler(messages)
+
+        response = self._response_handler.get_next_response()
+
+        # Apply initial latency if specified
+        if response.latency_ms > 0:
+            await asyncio.sleep(response.latency_ms / 1000.0)
+
+        # If streaming is enabled, yield chunks
+        if response.stream:
+            # Split content into words for token-like streaming
+            words = response.content.split()
+            for i, word in enumerate(words):
+                # Add space before word except for the first one
+                chunk_text = word if i == 0 else f" {word}"
+
+                chunk = AIMessageChunk(content=chunk_text)
+                chunk_generation = ChatGenerationChunk(message=chunk)
+
+                # Invoke callbacks for LangSmith tracing
+                if run_manager:
+                    await run_manager.on_llm_new_token(chunk_text)
+
+                yield chunk_generation
+
+                # Apply chunk delay if specified
+                if response.chunk_delay_ms > 0 and i < len(words) - 1:
+                    await asyncio.sleep(response.chunk_delay_ms / 1000.0)
+
+            # Yield final chunk with tool calls if present
+            if response.tool_calls:
+                final_chunk = AIMessageChunk(
+                    content="",
+                    tool_calls=response.tool_calls,
+                )
+                yield ChatGenerationChunk(message=final_chunk)
+        else:
+            # Non-streaming: yield complete response
+            ai_message = AIMessageChunk(
+                content=response.content,
+                tool_calls=response.tool_calls if response.tool_calls else [],
+            )
+            chunk_generation = ChatGenerationChunk(message=ai_message)
+
+            # Invoke callbacks for LangSmith tracing
+            if run_manager:
+                await run_manager.on_llm_new_token(response.content)
+
+            yield chunk_generation

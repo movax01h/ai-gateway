@@ -55,7 +55,7 @@ Now let me check the existing files to see what's already implemented:
   {"name": "get_repository_file", "args": {"project_id": ${projectId}, "file_path": "ruby/server.rb", "ref": "HEAD"}}
 ]</tool_calls>
 </response>
-<response latency_ms='6000'>
+<response latency_ms='6000' stream='true' chunk_delay_ms='50'>
 ## Issue Summary
 
 **Issue #1: "Add an example of GoLang HTTP server"**
