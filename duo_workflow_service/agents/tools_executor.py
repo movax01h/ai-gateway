@@ -67,6 +67,7 @@ class ToolsExecutor:
         toolset: Toolset,
         workflow_id: str,
         workflow_type: CategoryEnum,
+        skip_agent_msg: bool = False,
         internal_event_client: InternalEventsClient = Provide[
             ContainerApplication.internal_event.client
         ],
@@ -76,6 +77,7 @@ class ToolsExecutor:
         self._workflow_id = workflow_id
         self._logger = structlog.stdlib.get_logger("workflow")
         self._workflow_type = workflow_type
+        self._skip_agent_msg = skip_agent_msg
         self._internal_event_client = internal_event_client
 
     async def run(self, state: DuoWorkflowStateType):
@@ -165,6 +167,9 @@ class ToolsExecutor:
     def _create_ai_message_ui_chat_log(
         self, message: BaseMessage, ui_chat_logs: List[UiChatLog]
     ):
+        if self._skip_agent_msg:
+            return
+
         tool_calls = getattr(message, "tool_calls", [])
         if tool_calls and all(
             tool_call["name"] in _HIDDEN_TOOLS for tool_call in tool_calls
