@@ -23,7 +23,6 @@ from duo_workflow_service.entities.state import (
     UiChatLog,
     WorkflowStatusEnum,
 )
-from duo_workflow_service.errors.error_handler import ERROR_TYPES, ModelErrorType
 from duo_workflow_service.gitlab.events import get_event
 from duo_workflow_service.gitlab.http_client import GitlabHttpClient
 from duo_workflow_service.monitoring import duo_workflow_metrics
@@ -77,18 +76,6 @@ class Agent(BaseAgent):
         ):
             updates: dict[str, Any] = {}
 
-            model_name_attrs = {
-                "ChatAnthropicVertex": "model_name",
-                "ChatAnthropic": "model",
-            }
-            model_name = getattr(
-                self.prompt.model,
-                model_name_attrs.get(self.prompt.model.get_name()) or "missing_attr",
-                "unknown",
-            )
-
-            request_type = f"{self.prompt.name}_completion"
-
             if self.check_events:
                 event: WorkflowEvent | None = await get_event(
                     self.http_client, self.workflow_id, False
@@ -100,24 +87,11 @@ class Agent(BaseAgent):
             try:
                 input = self._prepare_input(state)
 
-                with duo_workflow_metrics.time_llm_request(
-                    model=model_name, request_type=request_type
-                ):
-                    model_completion = await super().ainvoke(input)
+                model_completion = await super().ainvoke(input)
 
                 finish_reason = model_completion.response_metadata.get("finish_reason")
                 if finish_reason in LLMFinishReason.abnormal_values():
                     log.warning(f"LLM stopped abnormally with reason: {finish_reason}")
-
-                duo_workflow_metrics.count_llm_response(
-                    model=model_name,
-                    provider=self.prompt.model_provider,
-                    request_type=request_type,
-                    stop_reason=finish_reason,
-                    # Hardcoded 200 status since model_completion only returns status codes for failures
-                    status_code="200",
-                    error_type="none",
-                )
 
                 if self.prompt.name in state["conversation_history"]:
                     updates["conversation_history"] = {
@@ -150,15 +124,6 @@ class Agent(BaseAgent):
                         "There was an error processing your request in the Duo Agent Platform, please try again or "
                         "contact support if the issue persists."
                     )
-
-                duo_workflow_metrics.count_llm_response(
-                    model=model_name,
-                    provider=self.prompt.model_provider,
-                    request_type=request_type,
-                    status_code=status_code,
-                    stop_reason="error",
-                    error_type=ERROR_TYPES.get(status_code, ModelErrorType.UNKNOWN),
-                )
 
                 error_message = HumanMessage(
                     content=f"There was an error processing your request: {error}"

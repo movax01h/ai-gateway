@@ -56,14 +56,6 @@ class DuoWorkflowMetrics:  # pylint: disable=too-many-instance-attributes
             buckets=WORKFLOW_TIME_SCALE_BUCKETS,
         )
 
-        self.llm_request_duration = Histogram(
-            "duo_workflow_llm_request_seconds",
-            "Duration of LLM requests in Duo Workflow",
-            ["model", "request_type"] + METADATA_LABELS,
-            registry=registry,
-            buckets=LLM_TIME_SCALE_BUCKETS,
-        )
-
         self.tool_call_duration = Histogram(
             "duo_workflow_tool_call_seconds",
             "Duration of tool calls in Duo Workflow",
@@ -89,21 +81,6 @@ class DuoWorkflowMetrics:  # pylint: disable=too-many-instance-attributes
             "duo_workflow_network_latency_seconds",
             "Network latency between Duo Workflow and other services",
             ["source", "destination"],
-            registry=registry,
-        )
-
-        self.llm_response_counter = Counter(
-            "duo_workflow_llm_response_total",
-            "Response count of LLM calls in Duo Workflow with status code and error type",
-            [
-                "model",
-                "provider",
-                "request_type",
-                "stop_reason",
-                "status_code",
-                "error_type",
-            ]
-            + METADATA_LABELS,
             registry=registry,
         )
 
@@ -184,34 +161,6 @@ class DuoWorkflowMetrics:  # pylint: disable=too-many-instance-attributes
             registry=registry,
             buckets=LLM_TIME_SCALE_BUCKETS,
         )
-
-    def count_llm_response(
-        self,
-        model="unknown",
-        provider="unknown",
-        request_type="unknown",
-        stop_reason="unknown",
-        status_code="unknown",
-        error_type="unknown",
-    ):
-        if stop_reason in LLM_FINISH_REASONS or stop_reason == "error":
-            stop_reason_label = stop_reason
-        elif stop_reason == "unknown":
-            log.error("LLM response stop reason is missing")
-            stop_reason_label = "other"
-        else:
-            log.error(f"Unexpected LLM response stop reason: {stop_reason}")
-            stop_reason_label = "other"
-
-        self.llm_response_counter.labels(
-            model=model,
-            provider=provider,
-            request_type=request_type,
-            stop_reason=stop_reason_label,
-            status_code=status_code,
-            error_type=error_type,
-            **build_metadata_labels(),
-        ).inc()
 
     def count_checkpoints(
         self,
@@ -314,19 +263,6 @@ class DuoWorkflowMetrics:  # pylint: disable=too-many-instance-attributes
             flow_type=flow_type,
             **build_metadata_labels(),
         ).inc()
-
-    def time_llm_request(
-        self,
-        model="unknown",
-        request_type="unknown",
-    ):
-        return self._timer(
-            lambda duration: self.llm_request_duration.labels(
-                model=model,
-                request_type=request_type,
-                **build_metadata_labels(),
-            ).observe(duration)
-        )
 
     def time_tool_call(self, tool_name="unknown", flow_type="unknown"):
         return self._timer(
