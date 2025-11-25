@@ -30,6 +30,7 @@ FILTER_KEY_MAPPING = {
     "dueAfter": "due_after",
     "dueBefore": "due_before",
     "sort": "sort",
+    "labelName": "label_name",
 }
 
 
@@ -116,6 +117,10 @@ class ListWorkItemsInput(ParentResourceInput):
     due_before: Optional[str] = Field(
         default=None,
         description="Include only work items due on or before this date (ISO 8601 format).",
+    )
+    label_name: Optional[List[str]] = Field(
+        default=None,
+        description="Filter by label names.",
     )
     sort: Optional[str] = Field(
         default=None,
