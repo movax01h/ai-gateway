@@ -582,6 +582,13 @@ async def test_handle_workflow_failure(mock_log_exception, workflow_with_project
             "I'll help you with that.",
             [{"id": "call_123", "name": "list_issues", "args": {"project_id": 123}}],
             WorkflowStatusEnum.EXECUTION,
+            True,
+        ),
+        (
+            [HumanMessage(content="List issues")],
+            "",
+            [{"id": "call_123", "name": "list_issues", "args": {"project_id": 123}}],
+            WorkflowStatusEnum.EXECUTION,
             False,
         ),
         (
@@ -608,6 +615,7 @@ async def test_handle_workflow_failure(mock_log_exception, workflow_with_project
     ],
     ids=[
         "with_tool_calls_sets_execution_status",
+        "with_tool_calls_without_content",
         "without_tool_calls_sets_input_required_status",
         "with_empty_tool_calls_sets_input_required_status",
         "without_tools_returns_input_required",
@@ -641,9 +649,9 @@ async def test_chat_agent_status_handling(
         result = await workflow_with_project._agent.run(state)
 
     assert result["status"] == expected_status
+    assert "ui_chat_log" in result
 
     if has_ui_log:
-        assert "ui_chat_log" in result
         assert len(result["ui_chat_log"]) == 1
         assert result["ui_chat_log"][0]["content"] == response_content
         if conversation_content:  # Only check these for non-empty conversation
@@ -653,7 +661,7 @@ async def test_chat_agent_status_handling(
             assert result["ui_chat_log"][0]["message_type"] == MessageTypeEnum.AGENT
             assert result["ui_chat_log"][0]["status"] == ToolStatus.SUCCESS
     else:
-        assert "ui_chat_log" not in result
+        assert len(result["ui_chat_log"]) == 0
 
 
 @pytest.mark.asyncio
@@ -712,7 +720,6 @@ async def test_chat_workflow_status_flow_integration(workflow_with_project):
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("tool_approval_required", [True])
 @pytest.mark.usefixtures("mock_fetch_workflow_and_container_data")
 async def test_agent_run_with_tool_approval_required(workflow_with_project):
     """Test agent run method when tools require approval."""
@@ -752,14 +759,15 @@ async def test_agent_run_with_tool_approval_required(workflow_with_project):
 
     assert result["status"] == WorkflowStatusEnum.TOOL_CALL_APPROVAL_REQUIRED
     assert "ui_chat_log" in result
-    assert len(result["ui_chat_log"]) == 1
-    assert result["ui_chat_log"][0]["message_type"] == MessageTypeEnum.REQUEST
-    assert "requires approval" in result["ui_chat_log"][0]["content"]
-    assert result["ui_chat_log"][0]["tool_info"]["name"] == "create_file_with_contents"
+    assert len(result["ui_chat_log"]) == 2
+    assert result["ui_chat_log"][0]["message_type"] == MessageTypeEnum.AGENT
+    assert result["ui_chat_log"][0]["content"] == "I'll create the file for you"
+    assert result["ui_chat_log"][1]["message_type"] == MessageTypeEnum.REQUEST
+    assert "requires approval" in result["ui_chat_log"][1]["content"]
+    assert result["ui_chat_log"][1]["tool_info"]["name"] == "create_file_with_contents"
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("tool_approval_required", [True])
 @pytest.mark.usefixtures("mock_fetch_workflow_and_container_data")
 async def test_agent_run_with_preapproved_tools(workflow_with_project):
     """Test agent run method when executed with preapproved tools."""
@@ -1066,3 +1074,101 @@ class TestMcpServerToolsFiltering:
 
         # Documentation search should still be present
         assert "gitlab_documentation_search" in tools
+
+
+@pytest.mark.asyncio
+async def test_agent_returns_content_and_tool_calls(workflow_with_project):
+    """Test that when agent returns both text content and tool calls, both are handled correctly."""
+    state = ChatWorkflowState(
+        plan={"steps": []},
+        status=WorkflowStatusEnum.EXECUTION,
+        conversation_history={"test_prompt": [HumanMessage(content="List issues")]},
+        ui_chat_log=[],
+        last_human_input=None,
+        project=None,
+        approval=None,
+    )
+
+    ai_response = AIMessage(
+        content="I'll list the issues for you using the list_issues tool."
+    )
+    ai_response.tool_calls = [
+        {"id": "call_123", "name": "list_issues", "args": {"project_id": 123}}
+    ]
+
+    with patch.object(
+        workflow_with_project._agent.prompt_adapter,
+        "get_response",
+        return_value=ai_response,
+    ):
+        result = await workflow_with_project._agent.run(state)
+
+    assert len(result["ui_chat_log"]) == 1
+    assert (
+        result["ui_chat_log"][0]["content"]
+        == "I'll list the issues for you using the list_issues tool."
+    )
+    assert result["ui_chat_log"][0]["message_type"] == MessageTypeEnum.AGENT
+    assert result["ui_chat_log"][0]["status"] == ToolStatus.SUCCESS
+    assert result["status"] == WorkflowStatusEnum.EXECUTION
+    assert len(result["conversation_history"]["test_prompt"]) == 1
+    assert isinstance(result["conversation_history"]["test_prompt"][0], AIMessage)
+    assert (
+        result["conversation_history"]["test_prompt"][0].content
+        == "I'll list the issues for you using the list_issues tool."
+    )
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("mock_fetch_workflow_and_container_data")
+async def test_agent_returns_content_and_tool_calls_with_approval_required(
+    workflow_with_project,
+):
+    """Test that when agent returns both text content and tool calls requiring approval, both text and approval messages
+    are in ui_chat_log."""
+
+    state = ChatWorkflowState(
+        plan={"steps": []},
+        status=WorkflowStatusEnum.EXECUTION,
+        conversation_history={"test_prompt": [HumanMessage(content="Create a file")]},
+        ui_chat_log=[],
+        last_human_input=None,
+        project=None,
+        approval=None,
+    )
+
+    ai_message = AIMessage(
+        content="I'll create the file for you with the specified content."
+    )
+    ai_message.tool_calls = [
+        {
+            "id": "toolu_approval_id",
+            "args": {"path": "/test/file.txt", "content": "Test content"},
+            "name": "create_file_with_contents",
+        }
+    ]
+
+    workflow_with_project._agent.tools_registry.approval_required.return_value = True
+
+    mock_model = Mock()
+    mock_model._is_agentic_mock_model = False
+    workflow_with_project._agent.prompt_adapter.get_model.return_value = mock_model
+
+    with patch.object(
+        workflow_with_project._agent.prompt_adapter,
+        "get_response",
+        return_value=ai_message,
+    ):
+        result = await workflow_with_project._agent.run(state)
+
+    assert len(result["ui_chat_log"]) == 2
+    assert (
+        result["ui_chat_log"][0]["content"]
+        == "I'll create the file for you with the specified content."
+    )
+    assert result["ui_chat_log"][0]["message_type"] == MessageTypeEnum.AGENT
+    assert result["ui_chat_log"][0]["status"] == ToolStatus.SUCCESS
+    assert "requires approval" in result["ui_chat_log"][1]["content"]
+    assert result["ui_chat_log"][1]["message_type"] == MessageTypeEnum.REQUEST
+    assert result["ui_chat_log"][1]["tool_info"]["name"] == "create_file_with_contents"
+    assert result["status"] == WorkflowStatusEnum.TOOL_CALL_APPROVAL_REQUIRED

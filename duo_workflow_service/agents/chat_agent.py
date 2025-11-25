@@ -4,7 +4,6 @@ from typing import Any, Dict, List
 import structlog
 from anthropic import APIStatusError
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, ToolMessage
-from langchain_core.output_parsers.string import StrOutputParser
 
 from ai_gateway.instrumentators.model_requests import LLMFinishReason
 from duo_workflow_service.agents.prompt_adapter import BasePromptAdapter
@@ -145,36 +144,44 @@ class ChatAgent:
     def _build_response(
         self, agent_response: BaseMessage, input: ChatWorkflowState
     ) -> Dict[str, Any]:
-        if not isinstance(agent_response, AIMessage) or not agent_response.tool_calls:
-            return self._build_text_response(agent_response)
-
-        return self._build_tool_response(agent_response, input)
-
-    def _build_text_response(self, agent_response: BaseMessage) -> Dict[str, Any]:
-        ui_chat_log = UiChatLog(
-            message_type=MessageTypeEnum.AGENT,
-            message_sub_type=None,
-            content=StrOutputParser().invoke(agent_response) or "",
-            timestamp=datetime.now(timezone.utc).isoformat(),
-            status=ToolStatus.SUCCESS,
-            correlation_id=None,
-            tool_info=None,
-            additional_context=None,
-        )
-
-        return {
+        result = {
             "conversation_history": {self.name: [agent_response]},
             "status": WorkflowStatusEnum.INPUT_REQUIRED,
-            "ui_chat_log": [ui_chat_log],
         }
 
+        self._build_text_response(agent_response, result)
+        if isinstance(agent_response, AIMessage) and agent_response.tool_calls:
+            self._build_tool_response(agent_response, input, result)
+
+        return result
+
+    def _build_text_response(self, agent_response: BaseMessage, result: Dict[str, Any]):
+        content = agent_response.text()
+        ui_chat_log = []
+
+        if content:
+            ui_chat_log.append(
+                UiChatLog(
+                    message_type=MessageTypeEnum.AGENT,
+                    message_sub_type=None,
+                    content=content,
+                    timestamp=datetime.now(timezone.utc).isoformat(),
+                    status=ToolStatus.SUCCESS,
+                    correlation_id=None,
+                    tool_info=None,
+                    additional_context=None,
+                )
+            )
+
+        result["ui_chat_log"] = ui_chat_log
+
     def _build_tool_response(
-        self, agent_response: AIMessage, input: ChatWorkflowState
-    ) -> Dict[str, Any]:
-        result: Dict[str, Any] = {
-            "conversation_history": {self.name: [agent_response]},
-            "status": WorkflowStatusEnum.EXECUTION,
-        }
+        self,
+        agent_response: AIMessage,
+        input: ChatWorkflowState,
+        result: Dict[str, Any],
+    ):
+        result["status"] = WorkflowStatusEnum.EXECUTION
 
         preapproved_tools = input.get("preapproved_tools") or []
         tools_need_approval, approval_messages = self._get_approvals(
@@ -183,9 +190,7 @@ class ChatAgent:
 
         if len(agent_response.tool_calls) > 0 and tools_need_approval:
             result["status"] = WorkflowStatusEnum.TOOL_CALL_APPROVAL_REQUIRED
-            result["ui_chat_log"] = approval_messages
-
-        return result
+            result["ui_chat_log"].extend(approval_messages)
 
     def _create_error_response(self, error: Exception) -> Dict[str, Any]:
         error_message = HumanMessage(
