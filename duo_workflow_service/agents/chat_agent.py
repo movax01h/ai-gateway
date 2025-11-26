@@ -193,9 +193,7 @@ class ChatAgent:
             result["ui_chat_log"].extend(approval_messages)
 
     def _create_error_response(self, error: Exception) -> Dict[str, Any]:
-        error_message = HumanMessage(
-            content=f"There was an error processing your request: {error}"
-        )
+        log.info("We are hitting an error while making an llm call.")
 
         if isinstance(error, APIStatusError) and 500 <= error.status_code < 600:
             ui_content = (
@@ -220,7 +218,6 @@ class ChatAgent:
         )
 
         return {
-            "conversation_history": {self.name: [error_message]},
             "status": WorkflowStatusEnum.INPUT_REQUIRED,
             "ui_chat_log": [ui_chat_log],
         }
