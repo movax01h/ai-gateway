@@ -6,6 +6,7 @@ from langchain.tools import BaseTool
 
 from contract import contract_pb2
 from duo_workflow_service.tools.mcp_tools import (
+    UNTRUSTED_MCP_WARNING,
     McpTool,
     convert_mcp_tools_to_langchain_tool_classes,
 )
@@ -43,8 +44,13 @@ async def test_convert_mcp_tools_to_langchain_tool_classes():
 
         assert first_tool.name == "tool1"
         assert second_tool.name == "tool2"
-        assert first_tool.description == "Tool 1 description"
-        assert second_tool.description == "Tool 2 description"
+
+        expected_description_1 = f"{UNTRUSTED_MCP_WARNING}\n\nTool 1 description"
+        expected_description_2 = f"{UNTRUSTED_MCP_WARNING}\n\nTool 2 description"
+
+        assert first_tool.description == expected_description_1
+        assert second_tool.description == expected_description_2
+
         assert first_tool.metadata == metadata
         assert second_tool.metadata == metadata
         assert first_tool.args_schema == {}

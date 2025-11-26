@@ -7,6 +7,7 @@ import pytest
 from contract import contract_pb2
 from duo_workflow_service.entities.state import WorkflowStatusEnum
 from duo_workflow_service.llm_factory import AnthropicConfig, VertexConfig
+from duo_workflow_service.tools import UNTRUSTED_MCP_WARNING
 from duo_workflow_service.workflows.abstract_workflow import (
     AbstractWorkflow,
     TraceableException,
@@ -112,7 +113,7 @@ async def test_init(user):
     assert len(workflow._mcp_tools) == 1
     tool = workflow._mcp_tools[0](metadata={})
     assert tool.name == "get_issue"
-    assert tool.description == "Tool to get issue"
+    assert tool.description == f"{UNTRUSTED_MCP_WARNING}\n\nTool to get issue"
     assert workflow._user == user
 
 
