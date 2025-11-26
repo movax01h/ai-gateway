@@ -88,14 +88,38 @@ async def test_send_event_with_values_type(checkpoint_notifier):
 async def test_send_event_with_missing_plan_steps(checkpoint_notifier):
     state = {
         "status": WorkflowStatusEnum.EXECUTION,
-        "ui_chat_log": ["message"],
+        "ui_chat_log": [
+            {
+                "content": "message",
+                "message_type": MessageTypeEnum.AGENT,
+                "message_sub_type": None,
+                "timestamp": "2023-01-01T00:00:00+00:00",
+                "status": None,
+                "correlation_id": None,
+                "tool_info": None,
+                "additional_context": None,
+                "message_id": None,
+            }
+        ],
         "plan": {},
     }
     await checkpoint_notifier.send_event("values", state, False)
     expected_checkpoint = dumps(
         {
             "channel_values": {
-                "ui_chat_log": ["message"],
+                "ui_chat_log": [
+                    {
+                        "content": "message",
+                        "message_type": MessageTypeEnum.AGENT,
+                        "message_sub_type": None,
+                        "timestamp": "2023-01-01T00:00:00+00:00",
+                        "status": None,
+                        "correlation_id": None,
+                        "tool_info": None,
+                        "additional_context": None,
+                        "message_id": None,
+                    }
+                ],
                 "plan": {"steps": []},
             }
         }
@@ -154,6 +178,7 @@ async def test_init_sets_attributes(outbox):
             "New message",
             [
                 {
+                    "message_id": None,
                     "status": None,
                     "correlation_id": None,
                     "message_type": MessageTypeEnum.AGENT,
@@ -171,6 +196,7 @@ async def test_init_sets_attributes(outbox):
             [{"text": "Nested content", "type": "text"}],
             [
                 {
+                    "message_id": None,
                     "status": None,
                     "correlation_id": None,
                     "message_type": MessageTypeEnum.AGENT,
@@ -186,6 +212,7 @@ async def test_init_sets_attributes(outbox):
         (
             [
                 {
+                    "message_id": None,
                     "status": None,
                     "correlation_id": None,
                     "message_type": MessageTypeEnum.AGENT,
@@ -199,6 +226,7 @@ async def test_init_sets_attributes(outbox):
             "content",
             [
                 {
+                    "message_id": None,
                     "status": None,
                     "correlation_id": None,
                     "message_type": MessageTypeEnum.AGENT,
@@ -214,6 +242,7 @@ async def test_init_sets_attributes(outbox):
         (
             [
                 {
+                    "message_id": None,
                     "status": "COMPLETED",
                     "correlation_id": None,
                     "message_type": MessageTypeEnum.AGENT,
@@ -227,6 +256,7 @@ async def test_init_sets_attributes(outbox):
             "New message",
             [
                 {
+                    "message_id": None,
                     "status": "COMPLETED",
                     "correlation_id": None,
                     "message_type": MessageTypeEnum.AGENT,
@@ -237,6 +267,7 @@ async def test_init_sets_attributes(outbox):
                     "additional_context": None,
                 },
                 {
+                    "message_id": None,
                     "status": None,
                     "correlation_id": None,
                     "message_type": MessageTypeEnum.AGENT,
@@ -252,6 +283,7 @@ async def test_init_sets_attributes(outbox):
         (
             [
                 {
+                    "message_id": None,
                     "status": None,
                     "correlation_id": None,
                     "message_type": MessageTypeEnum.USER,
@@ -265,6 +297,7 @@ async def test_init_sets_attributes(outbox):
             "Agent response",
             [
                 {
+                    "message_id": None,
                     "status": None,
                     "correlation_id": None,
                     "message_type": MessageTypeEnum.USER,
@@ -275,6 +308,7 @@ async def test_init_sets_attributes(outbox):
                     "additional_context": None,
                 },
                 {
+                    "message_id": None,
                     "status": None,
                     "correlation_id": None,
                     "message_type": MessageTypeEnum.AGENT,
@@ -292,6 +326,7 @@ async def test_init_sets_attributes(outbox):
             "",
             [
                 {
+                    "message_id": None,
                     "status": None,
                     "correlation_id": None,
                     "message_type": MessageTypeEnum.AGENT,

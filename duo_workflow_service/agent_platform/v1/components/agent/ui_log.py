@@ -51,6 +51,7 @@ class UILogWriterAgentTools(BaseUILogWriter):
             tool_info=ToolInfo(name=tool.name, args=tool_call_args),
             additional_context=kwargs.get("context_elements", []),
             message_sub_type=tool.name,
+            message_id=None,
         )
 
     def _log_error(
@@ -73,6 +74,7 @@ class UILogWriterAgentTools(BaseUILogWriter):
             tool_info=ToolInfo(name=tool.name, args=tool_call_args),
             additional_context=kwargs.get("additional_context", []),
             message_sub_type=tool.name,
+            message_id=None,
         )
 
     @staticmethod

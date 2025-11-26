@@ -144,6 +144,7 @@ def _git_output(
             message_type=MessageTypeEnum.TOOL,
             message_sub_type=None,
             content=f"{command_output[-1]}",
+            message_id=None,
             timestamp=datetime.now(timezone.utc).isoformat(),
             status=ToolStatus.SUCCESS,
             correlation_id=None,

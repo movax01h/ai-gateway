@@ -40,4 +40,5 @@ class BaseAgent(RunnableBinding[Any, BaseMessage]):
             correlation_id=None,
             tool_info=tool_info,
             additional_context=None,
+            message_id=None,
         )

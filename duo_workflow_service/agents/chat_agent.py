@@ -65,6 +65,7 @@ class ChatAgent:
                         correlation_id=None,
                         tool_info=ToolInfo(name=call["name"], args=call["args"]),
                         additional_context=None,
+                        message_id=None,
                     )
                 )
 
@@ -170,6 +171,7 @@ class ChatAgent:
                     correlation_id=None,
                     tool_info=None,
                     additional_context=None,
+                    message_id=None,
                 )
             )
 
@@ -217,6 +219,7 @@ class ChatAgent:
             correlation_id=None,
             tool_info=None,
             additional_context=None,
+            message_id=None,
         )
 
         return {
