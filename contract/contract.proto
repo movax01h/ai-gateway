@@ -82,7 +82,12 @@ message Action {
         RunMCPTool runMCPTool = 12;
         Mkdir mkdir = 13;
         ReadFiles runReadFiles = 14;
+        RunShellCommand runShellCommand = 15;
     };
+}
+
+message RunShellCommand {
+    string command = 1;
 }
 
 message RunCommandAction {

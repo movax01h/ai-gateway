@@ -93,6 +93,11 @@ export interface Action {
   runMCPTool?: RunMCPTool | undefined;
   mkdir?: Mkdir | undefined;
   runReadFiles?: ReadFiles | undefined;
+  runShellCommand?: RunShellCommand | undefined;
+}
+
+export interface RunShellCommand {
+  command: string;
 }
 
 export interface RunCommandAction {
@@ -1135,6 +1140,7 @@ function createBaseAction(): Action {
     runMCPTool: undefined,
     mkdir: undefined,
     runReadFiles: undefined,
+    runShellCommand: undefined,
   };
 }
 
@@ -1181,6 +1187,9 @@ export const Action: MessageFns<Action> = {
     }
     if (message.runReadFiles !== undefined) {
       ReadFiles.encode(message.runReadFiles, writer.uint32(114).fork()).join();
+    }
+    if (message.runShellCommand !== undefined) {
+      RunShellCommand.encode(message.runShellCommand, writer.uint32(122).fork()).join();
     }
     return writer;
   },
@@ -1304,6 +1313,14 @@ export const Action: MessageFns<Action> = {
           message.runReadFiles = ReadFiles.decode(reader, reader.uint32());
           continue;
         }
+        case 15: {
+          if (tag !== 122) {
+            break;
+          }
+
+          message.runShellCommand = RunShellCommand.decode(reader, reader.uint32());
+          continue;
+        }
       }
       if ((tag & 7) === 4 || tag === 0) {
         break;
@@ -1329,6 +1346,7 @@ export const Action: MessageFns<Action> = {
       runMCPTool: isSet(object.runMCPTool) ? RunMCPTool.fromJSON(object.runMCPTool) : undefined,
       mkdir: isSet(object.mkdir) ? Mkdir.fromJSON(object.mkdir) : undefined,
       runReadFiles: isSet(object.runReadFiles) ? ReadFiles.fromJSON(object.runReadFiles) : undefined,
+      runShellCommand: isSet(object.runShellCommand) ? RunShellCommand.fromJSON(object.runShellCommand) : undefined,
     };
   },
 
@@ -1376,6 +1394,9 @@ export const Action: MessageFns<Action> = {
     if (message.runReadFiles !== undefined) {
       obj.runReadFiles = ReadFiles.toJSON(message.runReadFiles);
     }
+    if (message.runShellCommand !== undefined) {
+      obj.runShellCommand = RunShellCommand.toJSON(message.runShellCommand);
+    }
     return obj;
   },
 
@@ -1420,6 +1441,67 @@ export const Action: MessageFns<Action> = {
     message.runReadFiles = (object.runReadFiles !== undefined && object.runReadFiles !== null)
       ? ReadFiles.fromPartial(object.runReadFiles)
       : undefined;
+    message.runShellCommand = (object.runShellCommand !== undefined && object.runShellCommand !== null)
+      ? RunShellCommand.fromPartial(object.runShellCommand)
+      : undefined;
+    return message;
+  },
+};
+
+function createBaseRunShellCommand(): RunShellCommand {
+  return { command: "" };
+}
+
+export const RunShellCommand: MessageFns<RunShellCommand> = {
+  encode(message: RunShellCommand, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
+    if (message.command !== "") {
+      writer.uint32(10).string(message.command);
+    }
+    return writer;
+  },
+
+  decode(input: BinaryReader | Uint8Array, length?: number): RunShellCommand {
+    const reader = input instanceof BinaryReader ? input : new BinaryReader(input);
+    const end = length === undefined ? reader.len : reader.pos + length;
+    const message = createBaseRunShellCommand();
+    while (reader.pos < end) {
+      const tag = reader.uint32();
+      switch (tag >>> 3) {
+        case 1: {
+          if (tag !== 10) {
+            break;
+          }
+
+          message.command = reader.string();
+          continue;
+        }
+      }
+      if ((tag & 7) === 4 || tag === 0) {
+        break;
+      }
+      reader.skip(tag & 7);
+    }
+    return message;
+  },
+
+  fromJSON(object: any): RunShellCommand {
+    return { command: isSet(object.command) ? globalThis.String(object.command) : "" };
+  },
+
+  toJSON(message: RunShellCommand): unknown {
+    const obj: any = {};
+    if (message.command !== "") {
+      obj.command = message.command;
+    }
+    return obj;
+  },
+
+  create<I extends Exact<DeepPartial<RunShellCommand>, I>>(base?: I): RunShellCommand {
+    return RunShellCommand.fromPartial(base ?? ({} as any));
+  },
+  fromPartial<I extends Exact<DeepPartial<RunShellCommand>, I>>(object: I): RunShellCommand {
+    const message = createBaseRunShellCommand();
+    message.command = object.command ?? "";
     return message;
   },
 };
