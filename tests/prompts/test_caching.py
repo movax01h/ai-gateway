@@ -9,13 +9,12 @@ from ai_gateway.prompts.caching import (
     filter_cache_control_injection_points,
 )
 from ai_gateway.prompts.config.models import ModelClassProvider
-from lib.feature_flags.context import FeatureFlag, current_feature_flag_context
 from lib.prompts.caching import set_prompt_caching_enabled_to_current_request
 
 
 class TestFilterCacheControlInjectionPoints:
     @pytest.mark.parametrize(
-        "model_kwargs,prompt_cache_enabled,feature_flag,expected_cache_control_injection_points",
+        "model_kwargs,prompt_cache_enabled,expected_cache_control_injection_points",
         [
             (
                 {
@@ -32,7 +31,6 @@ class TestFilterCacheControlInjectionPoints:
                     ]
                 },
                 "true",
-                True,
                 [
                     {
                         "location": "message",
@@ -59,7 +57,6 @@ class TestFilterCacheControlInjectionPoints:
                     ]
                 },
                 "false",
-                True,
                 [
                     {
                         "location": "message",
@@ -67,44 +64,15 @@ class TestFilterCacheControlInjectionPoints:
                     },
                 ],
             ),
-            (
-                {
-                    CACHE_CONTROL_INJECTION_POINTS_KEY: [
-                        {
-                            "location": "message",
-                            "index": 0,
-                        },
-                        {
-                            "location": "message",
-                            "index": -1,
-                            REQUIRE_PROMPT_CACHING_ENABLED_IN_REQUEST: "true",
-                        },
-                    ]
-                },
-                "true",
-                False,
-                [
-                    {
-                        "location": "message",
-                        "index": 0,
-                    },
-                ],
-            ),
-            ({"other_key": "other_value"}, "true", True, None),
+            ({"other_key": "other_value"}, "true", None),
         ],
     )
     def test_filter(
         self,
         model_kwargs,
         prompt_cache_enabled,
-        feature_flag,
         expected_cache_control_injection_points,
     ):
-        if feature_flag:
-            current_feature_flag_context.set(
-                {FeatureFlag.AI_GATEWAY_ALLOW_CONVERSATION_CACHING}
-            )
-
         set_prompt_caching_enabled_to_current_request(prompt_cache_enabled)
 
         filter_cache_control_injection_points(model_kwargs)
