@@ -58,7 +58,7 @@ class TestBaseComponentValidateFields:
 
     @patch("duo_workflow_service.agent_platform.v1.components.base.IOKey")
     def test_validate_input_fields_with_allowed_targets(
-        self, mock_iokey_class, flow_type
+        self, mock_iokey_class, flow_type, user
     ):
         """Test validation passes when input targets are in allowed targets."""
         # Create real IOKey instances
@@ -72,6 +72,7 @@ class TestBaseComponentValidateFields:
             name="test_component",
             flow_id="test_workflow",
             flow_type=flow_type,
+            user=user,
             inputs=["context", "conversation_history"],
         )
 
@@ -86,7 +87,7 @@ class TestBaseComponentValidateFields:
 
     @patch("duo_workflow_service.agent_platform.v1.components.base.IOKey")
     def test_validate_input_fields_with_disallowed_input_target_raises_error(
-        self, mock_iokey_class, flow_type
+        self, mock_iokey_class, flow_type, user
     ):
         """Test validation fails when input target is not in allowed targets."""
         # Create real IOKey instance with disallowed target
@@ -101,6 +102,7 @@ class TestBaseComponentValidateFields:
                 name="test_component",
                 flow_id="test_workflow",
                 flow_type=flow_type,
+                user=user,
                 inputs=["status"],  # This target is not in _allowed_input_targets
             )
 
@@ -112,7 +114,7 @@ class TestBaseComponentValidateFields:
 
     @patch("duo_workflow_service.agent_platform.v1.components.base.IOKey")
     def test_validate_mixed_valid_and_invalid_input_targets_raises_error(
-        self, mock_iokey_class, flow_type
+        self, mock_iokey_class, flow_type, user
     ):
         """Test validation fails when one of multiple input targets is invalid."""
         # Create real IOKey instances - one valid, one invalid for this component
@@ -126,6 +128,7 @@ class TestBaseComponentValidateFields:
                 name="test_component",
                 flow_id="test_workflow",
                 flow_type=flow_type,
+                user=user,
                 inputs=["context", "status"],
             )
 
@@ -134,24 +137,26 @@ class TestBaseComponentValidateFields:
         assert "doesn't support the input target" in error_message
         assert "status" in error_message
 
-    def test_entry_hook_returns_expected_format(self, flow_type):
+    def test_entry_hook_returns_expected_format(self, flow_type, user):
         """Test that __entry_hook__ returns the expected format."""
         component = ConcreteComponent(
             name="test_component",
             flow_id="test_workflow",
             flow_type=flow_type,
+            user=user,
         )
 
         entry_name = component.__entry_hook__()
         assert entry_name == "test_component_entry"
 
     @patch("duo_workflow_service.agent_platform.v1.components.base.IOKey")
-    def test_component_without_inputs_fields(self, mock_iokey_class, flow_type):
+    def test_component_without_inputs_fields(self, mock_iokey_class, flow_type, user):
         """Test component creation when inputs are not provided."""
         component = ConcreteComponent(
             name="test_component",
             flow_id="test_workflow",
             flow_type=flow_type,
+            user=user,
         )
 
         # IOKey parsing methods should not be called when fields are not provided
@@ -163,12 +168,13 @@ class TestBaseComponentValidateFields:
 class TestBaseComponentOutputs:
     """Test BaseComponent outputs property and related functionality."""
 
-    def test_outputs_property_with_template_replacement(self, flow_type):
+    def test_outputs_property_with_template_replacement(self, flow_type, user):
         """Test that outputs property correctly replaces template placeholders."""
         component = ConcreteComponent(
             name="test_component",
             flow_id="test_workflow",
             flow_type=flow_type,
+            user=user,
         )
 
         outputs = component.outputs
@@ -184,12 +190,13 @@ class TestBaseComponentOutputs:
         assert outputs[1].target == "status"
         assert outputs[1].subkeys is None
 
-    def test_outputs_property_with_different_component_name(self, flow_type):
+    def test_outputs_property_with_different_component_name(self, flow_type, user):
         """Test outputs property with different component name."""
         component = ConcreteComponent(
             name="my_custom_component",
             flow_id="test_workflow",
             flow_type=flow_type,
+            user=user,
         )
 
         outputs = component.outputs
@@ -198,24 +205,26 @@ class TestBaseComponentOutputs:
         # Component name should be replaced in template
         assert outputs[0].subkeys == ["my_custom_component", "result"]
 
-    def test_outputs_property_with_component_without_outputs(self, flow_type):
+    def test_outputs_property_with_component_without_outputs(self, flow_type, user):
         """Test outputs property when component has no outputs defined."""
         component = ComponentWithoutOutputs(
             name="test_component",
             flow_id="test_workflow",
             flow_type=flow_type,
+            user=user,
         )
 
         outputs = component.outputs
 
         assert len(outputs) == 0
 
-    def test_outputs_property_immutability(self, flow_type):
+    def test_outputs_property_immutability(self, flow_type, user):
         """Test that outputs property returns a new tuple each time."""
         component = ConcreteComponent(
             name="test_component",
             flow_id="test_workflow",
             flow_type=flow_type,
+            user=user,
         )
 
         outputs1 = component.outputs
@@ -229,12 +238,13 @@ class TestBaseComponentOutputs:
 class TestBaseComponentSupportedEnvironments:
     """Test BaseComponent supported_environments functionality."""
 
-    def test_supported_environments_inheritance(self, flow_type):
+    def test_supported_environments_inheritance(self, flow_type, user):
         """Test that supported_environments is properly inherited."""
         component = ConcreteComponent(
             name="test_component",
             flow_id="test_workflow",
             flow_type=flow_type,
+            user=user,
         )
 
         # Should inherit from class variable
@@ -245,12 +255,13 @@ class TestEndComponent:
     """Test EndComponent functionality."""
 
     @pytest.fixture(name="end_component")
-    def end_component_fixture(self, flow_type):
+    def end_component_fixture(self, flow_type, user):
         """Fixture providing an EndComponent instance."""
         return EndComponent(
             name="end",
             flow_id="test-workflow",
             flow_type=flow_type,
+            user=user,
         )
 
     def test_entry_hook_returns_terminate_flow(self, end_component):

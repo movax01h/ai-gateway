@@ -69,12 +69,15 @@ def inputs_fixture():
 
 
 @pytest.fixture(name="deterministic_component")
-def deterministic_component_fixture(component_name, flow_id, flow_type, mock_toolset):
+def deterministic_component_fixture(
+    component_name, flow_id, flow_type, user, mock_toolset
+):
     """Fixture for DeterministicStepComponent instance."""
     return DeterministicStepComponent(
         name=component_name,
         flow_id=flow_id,
         flow_type=flow_type,
+        user=user,
         inputs=["context:user_input", "context:task_description"],
         tool_name="test_tool",
         toolset=mock_toolset,
@@ -133,6 +136,7 @@ def deterministic_step_component_fixture(
     component_name,
     flow_id,
     flow_type,
+    user,
     tool_name,
     ui_log_events,
     ui_role_as,
@@ -150,6 +154,7 @@ def deterministic_step_component_fixture(
         name=component_name,
         flow_id=flow_id,
         flow_type=flow_type,
+        user=user,
         inputs=["context:user_input", "context:task_description"],
         tool_name=tool_name,
         toolset=mock_toolset,
@@ -225,6 +230,7 @@ class TestDeterministicStepComponentInitialization:
         component_name,
         flow_id,
         flow_type,
+        user,
         mock_toolset,
         input_output,
     ):
@@ -234,6 +240,7 @@ class TestDeterministicStepComponentInitialization:
             name=component_name,
             flow_id=flow_id,
             flow_type=flow_type,
+            user=user,
             inputs=[input_output],
             toolset=mock_toolset,
             tool_name="test_tool",
@@ -252,6 +259,7 @@ class TestDeterministicStepComponentInitialization:
         component_name,
         flow_id,
         flow_type,
+        user,
         mock_toolset,
         input_output,
     ):
@@ -262,6 +270,7 @@ class TestDeterministicStepComponentInitialization:
                 name=component_name,
                 flow_id=flow_id,
                 flow_type=flow_type,
+                user=user,
                 inputs=[input_output],
                 toolset=mock_toolset,
                 tool_name="test_tool",
@@ -271,7 +280,7 @@ class TestDeterministicStepComponentInitialization:
 class TestDeterministicStepComponentToolValidation:
     """Test suite for DeterministicStepComponent tool validation."""
 
-    def test_tool_not_found_in_toolset(self, component_name, flow_id, flow_type):
+    def test_tool_not_found_in_toolset(self, component_name, flow_id, flow_type, user):
         """Test that component raises error when tool is not found in toolset."""
         mock_toolset = Mock(spec=Toolset)
         mock_toolset.__contains__ = Mock(return_value=False)
@@ -284,13 +293,14 @@ class TestDeterministicStepComponentToolValidation:
                 name=component_name,
                 flow_id=flow_id,
                 flow_type=flow_type,
+                user=user,
                 inputs=["context:user_input"],
                 tool_name="nonexistent_tool",
                 toolset=mock_toolset,
             )
 
     def test_tool_validation_with_schema_success(
-        self, component_name, flow_id, flow_type, toolset_with_schema_tool
+        self, component_name, flow_id, flow_type, user, toolset_with_schema_tool
     ):
         """Test successful tool validation when tool has schema."""
         # Create component with matching inputs
@@ -298,6 +308,7 @@ class TestDeterministicStepComponentToolValidation:
             name=component_name,
             flow_id=flow_id,
             flow_type=flow_type,
+            user=user,
             inputs=["context:required_param", "context:optional_param"],
             tool_name="schema_tool",
             toolset=toolset_with_schema_tool,
@@ -326,7 +337,7 @@ class TestDeterministicStepComponentToolValidation:
             )
 
     def test_tool_validation_unknown_params(
-        self, component_name, flow_id, flow_type, toolset_with_schema_tool
+        self, component_name, flow_id, flow_type, user, toolset_with_schema_tool
     ):
         """Test tool validation fails when unknown parameters are provided."""
         # Create component with unknown parameter
@@ -337,13 +348,14 @@ class TestDeterministicStepComponentToolValidation:
                 name=component_name,
                 flow_id=flow_id,
                 flow_type=flow_type,
+                user=user,
                 inputs=["context:required_param", "context:unknown_param"],
                 tool_name="schema_tool",
                 toolset=toolset_with_schema_tool,
             )
 
     def test_tool_validation_no_schema(
-        self, component_name, flow_id, flow_type, mock_toolset
+        self, component_name, flow_id, flow_type, user, mock_toolset
     ):
         """Test tool validation passes when tool has no schema."""
         # Tool with no schema should pass validation regardless of inputs
@@ -351,6 +363,7 @@ class TestDeterministicStepComponentToolValidation:
             name=component_name,
             flow_id=flow_id,
             flow_type=flow_type,
+            user=user,
             inputs=["context:any_param", "context:another_param"],
             tool_name="test_tool",
             toolset=mock_toolset,
@@ -358,25 +371,29 @@ class TestDeterministicStepComponentToolValidation:
 
         assert component.validated_tool is not None
 
-    def test_missing_tool_name(self, component_name, flow_id, flow_type, mock_toolset):
+    def test_missing_tool_name(
+        self, component_name, flow_id, flow_type, user, mock_toolset
+    ):
         """Test that validation fails when tool_name is missing."""
         with pytest.raises(ValidationError, match="tool_name is required"):
             DeterministicStepComponent(
                 name=component_name,
                 flow_id=flow_id,
                 flow_type=flow_type,
+                user=user,
                 inputs=["context:user_input"],
                 toolset=mock_toolset,
                 # tool_name is missing
             )
 
-    def test_missing_toolset(self, component_name, flow_id, flow_type):
+    def test_missing_toolset(self, component_name, flow_id, flow_type, user):
         """Test that validation fails when toolset is missing."""
         with pytest.raises(ValidationError, match="toolset is required"):
             DeterministicStepComponent(
                 name=component_name,
                 flow_id=flow_id,
                 flow_type=flow_type,
+                user=user,
                 inputs=["context:user_input"],
                 tool_name="test_tool",
                 # toolset is missing
@@ -385,7 +402,7 @@ class TestDeterministicStepComponentToolValidation:
 
 class TestValidateToolArguments:
     def test_no_args_tool_with_inputs_provided(
-        self, component_name, flow_id, flow_type, toolset_with_no_args_tool
+        self, component_name, flow_id, flow_type, user, toolset_with_no_args_tool
     ):
         """Test that providing inputs to a tool that takes no arguments fails."""
         with pytest.raises(ValueError, match="Unknown parameters: \\['some_param'\\]"):
@@ -393,18 +410,20 @@ class TestValidateToolArguments:
                 name=component_name,
                 flow_id=flow_id,
                 flow_type=flow_type,
+                user=user,
                 inputs=["context:some_param"],
                 tool_name="no_args_tool",
                 toolset=toolset_with_no_args_tool,
             )
 
     def test_no_args_tool_with_no_inputs(
-        self, component_name, flow_id, flow_type, toolset_with_no_args_tool
+        self, component_name, flow_id, flow_type, user, toolset_with_no_args_tool
     ):
         component = DeterministicStepComponent(
             name=component_name,
             flow_id=flow_id,
             flow_type=flow_type,
+            user=user,
             inputs=[],  # No inputs provided
             tool_name="no_args_tool",
             toolset=toolset_with_no_args_tool,
@@ -412,7 +431,7 @@ class TestValidateToolArguments:
         assert component.validated_tool is not None
 
     def test_validate_tool_arguments_with_alias(
-        self, component_name, flow_id, flow_type
+        self, component_name, flow_id, flow_type, user
     ):
         class MockSchema(BaseModel):
             actual_param_name: str
@@ -430,6 +449,7 @@ class TestValidateToolArguments:
             name=component_name,
             flow_id=flow_id,
             flow_type=flow_type,
+            user=user,
             inputs=[{"from": "context:some_key", "as": "actual_param_name"}],
             tool_name="alias_tool",
             toolset=toolset,
@@ -437,7 +457,7 @@ class TestValidateToolArguments:
         assert component.validated_tool is not None
 
     def test_validate_tool_with_multiple_missing_required(
-        self, component_name, flow_id, flow_type
+        self, component_name, flow_id, flow_type, user
     ):
         """Test error message when multiple required parameters are missing."""
 
@@ -463,6 +483,7 @@ class TestValidateToolArguments:
                 name=component_name,
                 flow_id=flow_id,
                 flow_type=flow_type,
+                user=user,
                 inputs=["context:param1"],  # Only providing one of three required
                 tool_name="multi_required_tool",
                 toolset=toolset,
@@ -591,6 +612,7 @@ class TestDeterministicStepComponentIntegration:
         component_name,
         flow_id,
         flow_type,
+        user,
         mock_toolset,
         mock_internal_event_client,
     ):
@@ -600,6 +622,7 @@ class TestDeterministicStepComponentIntegration:
                 name=component_name,
                 flow_id=flow_id,
                 flow_type=flow_type,
+                user=user,
                 inputs=["context:user_input"],
                 # tool_name is missing
                 toolset=mock_toolset,
@@ -611,6 +634,7 @@ class TestDeterministicStepComponentIntegration:
         component_name,
         flow_id,
         flow_type,
+        user,
         tool_name,
         mock_internal_event_client,
     ):
@@ -620,6 +644,7 @@ class TestDeterministicStepComponentIntegration:
                 name=component_name,
                 flow_id=flow_id,
                 flow_type=flow_type,
+                user=user,
                 inputs=["context:user_input"],
                 tool_name=tool_name,
                 # toolset is missing
@@ -631,6 +656,7 @@ class TestDeterministicStepComponentIntegration:
         component_name,
         flow_id,
         flow_type,
+        user,
         tool_name,
         mock_toolset,
         mock_internal_event_client,
@@ -640,6 +666,7 @@ class TestDeterministicStepComponentIntegration:
             name=component_name,
             flow_id=flow_id,
             flow_type=flow_type,
+            user=user,
             inputs=["context:user_input"],
             tool_name=tool_name,
             toolset=mock_toolset,
@@ -654,6 +681,7 @@ class TestDeterministicStepComponentIntegration:
         component_name,
         flow_id,
         flow_type,
+        user,
         mock_toolset,
     ):
         """Test that validated_tool is always set after component creation."""
@@ -661,6 +689,7 @@ class TestDeterministicStepComponentIntegration:
             name=component_name,
             flow_id=flow_id,
             flow_type=flow_type,
+            user=user,
             inputs=["context:user_input"],
             tool_name="test_tool",
             toolset=mock_toolset,

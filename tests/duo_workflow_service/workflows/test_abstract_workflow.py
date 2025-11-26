@@ -45,7 +45,7 @@ def prepare_container(mock_duo_workflow_service_container):
 
 
 @pytest.fixture(name="workflow")
-def workflow_fixture():
+def workflow_fixture(user):
     workflow_id = "test-workflow-id"
     metadata = {
         "extended_logging": True,
@@ -57,6 +57,7 @@ def workflow_fixture():
         workflow_id,
         metadata,
         workflow_type,
+        user,
     )
 
 
@@ -87,7 +88,7 @@ def mock_action():
 
 
 @pytest.mark.asyncio
-async def test_init():
+async def test_init(user):
     # Test initialization
     workflow_id = "test-workflow-id"
     metadata = {"key": "value"}
@@ -99,6 +100,7 @@ async def test_init():
         workflow_id,
         metadata,
         CategoryEnum.WORKFLOW_SOFTWARE_DEVELOPMENT,
+        user,
         {},
         mcp_tools,
         user,
@@ -167,6 +169,7 @@ async def test_compile_and_run_graph(
     mock_fetch_workflow,
     mock_project,
     mcp_enabled,
+    user,
 ):
     # Setup mocks
     mock_tools_registry.return_value = MagicMock()
@@ -187,6 +190,7 @@ async def test_compile_and_run_graph(
         "id",
         {},
         CategoryEnum.WORKFLOW_SOFTWARE_DEVELOPMENT,
+        user,
         {},
         [mcp_tool],
     )
@@ -440,6 +444,7 @@ async def test_tracing_enabled_based_on_env_and_extended_logging(
     env_var_value,
     extended_logging,
     expected_tracing_enabled,
+    user,
 ):
     """Test that tracing is enabled/disabled based on LANGSMITH_TRACING_V2 and extended_logging."""
     workflow_id = "test-workflow-id"
@@ -449,7 +454,7 @@ async def test_tracing_enabled_based_on_env_and_extended_logging(
         "git_sha": "abc123",
     }
     workflow_type = CategoryEnum.WORKFLOW_SOFTWARE_DEVELOPMENT
-    workflow = MockWorkflow(workflow_id, metadata, workflow_type)
+    workflow = MockWorkflow(workflow_id, metadata, workflow_type, user)
 
     with patch.dict(os.environ, {"LANGSMITH_TRACING_V2": env_var_value}, clear=False):
         await workflow.run("Test goal")
@@ -473,6 +478,7 @@ async def test_compile_and_run_graph_records_first_token_on_messages(
     mock_gitlab_workflow,
     mock_fetch_workflow,
     mock_project,
+    user,
 ):
     """Test that _compile_and_run_graph records time to first token when messages are streamed."""
 
@@ -493,6 +499,7 @@ async def test_compile_and_run_graph_records_first_token_on_messages(
         "id",
         {},
         CategoryEnum.WORKFLOW_SOFTWARE_DEVELOPMENT,
+        user,
         workflow_start_time=100.0,
     )
 

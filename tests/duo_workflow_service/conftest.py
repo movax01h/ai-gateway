@@ -3,6 +3,7 @@ from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from gitlab_cloud_connector import CloudConnectorUser, UserClaims
 
 from ai_gateway.instrumentators.model_requests import gitlab_version
 from duo_workflow_service.components.tools_registry import ToolMetadata, ToolsRegistry
@@ -164,3 +165,14 @@ def mock_tools_registry_fixture(tool_approval_required):
 @pytest.fixture(name="system_template_override")
 def system_template_override_fixture() -> str:
     return "Test system template"
+
+
+@pytest.fixture(name="user")
+def user_fixture():
+    return CloudConnectorUser(
+        authenticated=True,
+        claims=UserClaims(
+            scopes=["duo_workflow_execute_workflow"],
+            issuer="gitlab-duo-workflow-service",
+        ),
+    )

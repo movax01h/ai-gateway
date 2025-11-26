@@ -65,13 +65,13 @@ class Flow(AbstractWorkflow):
         workflow_id: str,
         workflow_metadata: Dict[str, Any],
         workflow_type: CategoryEnum,
+        user: CloudConnectorUser,
         config: FlowConfig,
         invocation_metadata: InvocationMetadata = {
             "base_url": "",
             "gitlab_token": "",
         },
         mcp_tools: list[contract_pb2.McpTool] = [],
-        user: Optional[CloudConnectorUser] = None,
         additional_context: Optional[list[AdditionalContext]] = None,
         approval: Optional[contract_pb2.Approval] = None,
         prompt_registry: LocalPromptRegistry = Provide[
@@ -222,6 +222,7 @@ class Flow(AbstractWorkflow):
             name="end",
             flow_id=self._workflow_id,
             flow_type=self._workflow_type,
+            user=self._user,
         )
         end_component.attach(graph)
 
@@ -238,6 +239,7 @@ class Flow(AbstractWorkflow):
                     "prompt_registry": self._flow_prompt_registry,  # override DI
                     "flow_id": self._workflow_id,
                     "flow_type": self._workflow_type,
+                    "user": self._user,
                 }
             )
 

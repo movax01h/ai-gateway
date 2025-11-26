@@ -1,6 +1,7 @@
 from abc import ABC, abstractmethod
 from typing import Annotated, Any, ClassVar, Optional, Protocol, Self
 
+from gitlab_cloud_connector import CloudConnectorUser
 from langgraph.graph import END, StateGraph
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
@@ -38,6 +39,7 @@ class BaseComponent(BaseModel, ABC):
     name: str
     flow_id: str
     flow_type: CategoryEnum
+    user: CloudConnectorUser
 
     @model_validator(mode="before")
     @classmethod
