@@ -10,6 +10,7 @@ from langgraph.checkpoint.base import CheckpointTuple
 from langgraph.checkpoint.memory import BaseCheckpointSaver
 from langgraph.graph import END, StateGraph
 from langgraph.types import Command
+from structlog import get_logger
 
 from ai_gateway.container import ContainerApplication
 from ai_gateway.prompts.registry import LocalPromptRegistry
@@ -39,6 +40,8 @@ from lib.feature_flags.context import FeatureFlag, is_feature_enabled
 from lib.internal_events.client import InternalEventsClient
 from lib.internal_events.event_enum import CategoryEnum
 from lib.mcp_server_tools.context import get_enabled_mcp_server_tools
+
+logger = get_logger("chat.workflow")
 
 
 class Routes(StrEnum):
@@ -226,6 +229,11 @@ class Workflow(AbstractWorkflow):
     async def get_graph_input(
         self, goal: str, status_event: str, checkpoint_tuple: Optional[CheckpointTuple]
     ) -> Any:
+        if goal == "":
+            logger.info(
+                f"Received empty goal with status_event: {status_event} from frontend."
+            )
+
         new_chat_message = goal
 
         match status_event:
