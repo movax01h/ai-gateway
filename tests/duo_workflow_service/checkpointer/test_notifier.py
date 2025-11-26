@@ -4,7 +4,7 @@ from typing import Any, Dict, List, Optional
 from unittest.mock import MagicMock, Mock, patch
 
 import pytest
-from langchain_core.messages import HumanMessage
+from langchain_core.messages import AIMessage, HumanMessage
 
 from duo_workflow_service.checkpointer.gitlab_workflow import (
     WORKFLOW_STATUS_TO_CHECKPOINT_STATUS,
@@ -42,6 +42,7 @@ async def test_send_event_with_values_type(checkpoint_notifier):
             "additional_context": AdditionalContext(
                 category="file", content="content", id="1"
             ),
+            "message_id": "msg-123",
         }
     ]
     state = {
@@ -51,6 +52,7 @@ async def test_send_event_with_values_type(checkpoint_notifier):
     }
     await checkpoint_notifier.send_event("values", state, False)
     assert checkpoint_notifier.ui_chat_log == ui_chat_log
+    assert checkpoint_notifier.ui_chat_log[0]["message_id"] == "msg-123"
     assert checkpoint_notifier.status == WorkflowStatusEnum.COMPLETED
     assert checkpoint_notifier.steps == ["step1", "step2"]
     action = checkpoint_notifier.outbox.put_action.call_args[0][0]
@@ -75,6 +77,7 @@ async def test_send_event_with_values_type(checkpoint_notifier):
                             "metadata": None,
                             "type": "AdditionalContext",
                         },
+                        "message_id": "msg-123",
                     }
                 ],
                 "plan": {"steps": ["step1", "step2"]},
@@ -98,7 +101,7 @@ async def test_send_event_with_missing_plan_steps(checkpoint_notifier):
                 "correlation_id": None,
                 "tool_info": None,
                 "additional_context": None,
-                "message_id": None,
+                "message_id": "agent-msg-id",
             }
         ],
         "plan": {},
@@ -117,7 +120,7 @@ async def test_send_event_with_missing_plan_steps(checkpoint_notifier):
                         "correlation_id": None,
                         "tool_info": None,
                         "additional_context": None,
-                        "message_id": None,
+                        "message_id": "agent-msg-id",
                     }
                 ],
                 "plan": {"steps": []},
@@ -178,7 +181,7 @@ async def test_init_sets_attributes(outbox):
             "New message",
             [
                 {
-                    "message_id": None,
+                    "message_id": "agent-msg-id",
                     "status": None,
                     "correlation_id": None,
                     "message_type": MessageTypeEnum.AGENT,
@@ -196,7 +199,7 @@ async def test_init_sets_attributes(outbox):
             [{"text": "Nested content", "type": "text"}],
             [
                 {
-                    "message_id": None,
+                    "message_id": "agent-msg-id",
                     "status": None,
                     "correlation_id": None,
                     "message_type": MessageTypeEnum.AGENT,
@@ -212,7 +215,7 @@ async def test_init_sets_attributes(outbox):
         (
             [
                 {
-                    "message_id": None,
+                    "message_id": "agent-msg-id",
                     "status": None,
                     "correlation_id": None,
                     "message_type": MessageTypeEnum.AGENT,
@@ -226,7 +229,7 @@ async def test_init_sets_attributes(outbox):
             "content",
             [
                 {
-                    "message_id": None,
+                    "message_id": "agent-msg-id",
                     "status": None,
                     "correlation_id": None,
                     "message_type": MessageTypeEnum.AGENT,
@@ -242,7 +245,7 @@ async def test_init_sets_attributes(outbox):
         (
             [
                 {
-                    "message_id": None,
+                    "message_id": "agent-completed-msg-id",
                     "status": "COMPLETED",
                     "correlation_id": None,
                     "message_type": MessageTypeEnum.AGENT,
@@ -256,7 +259,7 @@ async def test_init_sets_attributes(outbox):
             "New message",
             [
                 {
-                    "message_id": None,
+                    "message_id": "agent-completed-msg-id",
                     "status": "COMPLETED",
                     "correlation_id": None,
                     "message_type": MessageTypeEnum.AGENT,
@@ -267,7 +270,7 @@ async def test_init_sets_attributes(outbox):
                     "additional_context": None,
                 },
                 {
-                    "message_id": None,
+                    "message_id": "agent-msg-id",
                     "status": None,
                     "correlation_id": None,
                     "message_type": MessageTypeEnum.AGENT,
@@ -283,7 +286,7 @@ async def test_init_sets_attributes(outbox):
         (
             [
                 {
-                    "message_id": None,
+                    "message_id": "user-msg-id",
                     "status": None,
                     "correlation_id": None,
                     "message_type": MessageTypeEnum.USER,
@@ -297,7 +300,7 @@ async def test_init_sets_attributes(outbox):
             "Agent response",
             [
                 {
-                    "message_id": None,
+                    "message_id": "user-msg-id",
                     "status": None,
                     "correlation_id": None,
                     "message_type": MessageTypeEnum.USER,
@@ -308,7 +311,7 @@ async def test_init_sets_attributes(outbox):
                     "additional_context": None,
                 },
                 {
-                    "message_id": None,
+                    "message_id": "agent-msg-id",
                     "status": None,
                     "correlation_id": None,
                     "message_type": MessageTypeEnum.AGENT,
@@ -326,7 +329,7 @@ async def test_init_sets_attributes(outbox):
             "",
             [
                 {
-                    "message_id": None,
+                    "message_id": "agent-msg-id",
                     "status": None,
                     "correlation_id": None,
                     "message_type": MessageTypeEnum.AGENT,
@@ -356,7 +359,7 @@ async def test_send_event_messages_stream(
         mock_now.now.return_value.isoformat.return_value = "2023-01-01T00:00:00+00:00"
         mock_datetime.now = mock_now.now
 
-        message = HumanMessage(content=message_content)
+        message = AIMessage(content=message_content, id="agent-msg-id")
         await checkpoint_notifier.send_event("messages", (message, {}), True)
 
         assert checkpoint_notifier.ui_chat_log == expected_messages

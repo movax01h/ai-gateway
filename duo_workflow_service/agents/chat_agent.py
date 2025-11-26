@@ -1,5 +1,6 @@
 from datetime import datetime, timezone
 from typing import Any, Dict, List
+from uuid import uuid4
 
 import structlog
 from anthropic import APIStatusError
@@ -65,7 +66,7 @@ class ChatAgent:
                         correlation_id=None,
                         tool_info=ToolInfo(name=call["name"], args=call["args"]),
                         additional_context=None,
-                        message_id=None,
+                        message_id=f'{call["id"]}-approval',
                     )
                 )
 
@@ -171,7 +172,7 @@ class ChatAgent:
                     correlation_id=None,
                     tool_info=None,
                     additional_context=None,
-                    message_id=None,
+                    message_id=agent_response.id,
                 )
             )
 
@@ -217,7 +218,7 @@ class ChatAgent:
             correlation_id=None,
             tool_info=None,
             additional_context=None,
-            message_id=None,
+            message_id=f"error-{str(uuid4())}",
         )
 
         return {

@@ -1,4 +1,5 @@
 from unittest.mock import ANY, MagicMock, Mock, patch
+from uuid import UUID
 
 import pytest
 from dependency_injector import containers
@@ -63,7 +64,7 @@ def mock_prompt_adapter_fixture():
     adapter = Mock(spec=BasePromptAdapter)
 
     async def mock_get_response(_input, **_kwargs):
-        return AIMessage(content="Hello there!")
+        return AIMessage(content="Hello there!", id="mock-ai-msg-id")
 
     adapter.get_response = mock_get_response
 
@@ -156,7 +157,10 @@ def workflow_with_approval_fixture(workflow_with_project):
 
 
 @pytest.mark.asyncio
-async def test_workflow_initialization(workflow_with_project):
+@patch("duo_workflow_service.workflows.chat.workflow.uuid4")
+async def test_workflow_initialization(mock_uuid, workflow_with_project):
+    mock_uuid.return_value = UUID("12345678-1234-5678-1234-567812345678")
+
     initial_state = workflow_with_project.get_workflow_state("Test chat goal")
 
     assert initial_state["status"] == WorkflowStatusEnum.NOT_STARTED
@@ -165,13 +169,22 @@ async def test_workflow_initialization(workflow_with_project):
     assert initial_state["ui_chat_log"][0]["message_type"] == MessageTypeEnum.USER
     assert "Test chat goal" in initial_state["ui_chat_log"][0]["content"]
     assert initial_state["ui_chat_log"][0]["status"] == ToolStatus.SUCCESS
+    assert (
+        initial_state["ui_chat_log"][0]["message_id"]
+        == "user-12345678-1234-5678-1234-567812345678"
+    )
     assert len(initial_state["ui_chat_log"][0]["additional_context"]) == 1
     assert initial_state["ui_chat_log"][0]["additional_context"][0].category == "file"
     assert initial_state["project"]["name"] == "test-project"
 
 
 @pytest.mark.asyncio
-async def test_workflow_initialization_with_additional_context(workflow_with_project):
+@patch("duo_workflow_service.workflows.chat.workflow.uuid4")
+async def test_workflow_initialization_with_additional_context(
+    mock_uuid, workflow_with_project
+):
+    mock_uuid.return_value = UUID("12345678-1234-5678-1234-567812345678")
+
     additional_context = [
         AdditionalContext(
             category="file",
@@ -196,6 +209,10 @@ async def test_workflow_initialization_with_additional_context(workflow_with_pro
     initial_state = workflow_with_project.get_workflow_state("Test chat goal")
 
     assert initial_state["status"] == WorkflowStatusEnum.NOT_STARTED
+    assert (
+        initial_state["ui_chat_log"][0]["message_id"]
+        == "user-12345678-1234-5678-1234-567812345678"
+    )
     assert initial_state["ui_chat_log"][0]["additional_context"] == additional_context
     assert len(initial_state["ui_chat_log"][0]["additional_context"]) == 3
     assert initial_state["ui_chat_log"][0]["additional_context"][0].category == "file"
@@ -228,6 +245,7 @@ async def test_execute_agent(workflow_with_project):
     assert result["ui_chat_log"][0]["content"] == "Hello there!"
     assert result["ui_chat_log"][0]["message_type"] == MessageTypeEnum.AGENT
     assert result["ui_chat_log"][0]["status"] == ToolStatus.SUCCESS
+    assert result["ui_chat_log"][0]["message_id"] == "mock-ai-msg-id"
 
 
 class TestExecuteAgentWithTools:
@@ -244,7 +262,7 @@ class TestExecuteAgentWithTools:
         adapter = Mock(spec=BasePromptAdapter)
 
         async def mock_get_response(_input, **_kwargs):
-            return AIMessage(content="tool calling")
+            return AIMessage(content="tool calling", id="mock-tool-calling-id")
 
         adapter.get_response = mock_get_response
 
@@ -271,6 +289,7 @@ class TestExecuteAgentWithTools:
         assert result["ui_chat_log"][0]["content"] == "tool calling"
         assert result["ui_chat_log"][0]["message_type"] == MessageTypeEnum.AGENT
         assert result["ui_chat_log"][0]["status"] == ToolStatus.SUCCESS
+        assert result["ui_chat_log"][0]["message_id"] == "mock-tool-calling-id"
 
 
 @pytest.mark.parametrize(
@@ -471,7 +490,10 @@ def test_tools_registry_interaction(
 
 
 @pytest.mark.asyncio
-async def test_get_graph_input_start(workflow_with_project):
+@patch("duo_workflow_service.workflows.chat.workflow.uuid4")
+async def test_get_graph_input_start(mock_uuid, workflow_with_project):
+    mock_uuid.return_value = UUID("aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee")
+
     result = await workflow_with_project.get_graph_input(
         "Test goal", WorkflowStatusEventEnum.START, None
     )
@@ -481,6 +503,10 @@ async def test_get_graph_input_start(workflow_with_project):
     assert result["conversation_history"]["test_prompt"][0].content == "Test goal"
     assert result["ui_chat_log"][0]["message_type"] == MessageTypeEnum.USER
     assert "Test goal" in result["ui_chat_log"][0]["content"]
+    assert (
+        result["ui_chat_log"][0]["message_id"]
+        == "user-aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
+    )
     assert len(result["ui_chat_log"][0]["additional_context"]) == 1
     assert result["ui_chat_log"][0]["additional_context"][0].category == "file"
 
@@ -489,7 +515,10 @@ async def test_get_graph_input_start(workflow_with_project):
 @pytest.mark.parametrize(
     "status", [WorkflowStatusEventEnum.RETRY, WorkflowStatusEventEnum.RESUME]
 )
-async def test_get_graph_input(workflow_with_project, status):
+@patch("duo_workflow_service.workflows.chat.workflow.uuid4")
+async def test_get_graph_input(mock_uuid, workflow_with_project, status):
+    mock_uuid.return_value = UUID("11111111-2222-3333-4444-555555555555")
+
     result = await workflow_with_project.get_graph_input("New input", status, None)
 
     assert result.goto == "agent"
@@ -505,6 +534,10 @@ async def test_get_graph_input(workflow_with_project, status):
     )
     assert result.update["ui_chat_log"][-1]["message_type"] == MessageTypeEnum.USER
     assert result.update["ui_chat_log"][-1]["content"] == "New input"
+    assert (
+        result.update["ui_chat_log"][-1]["message_id"]
+        == "user-11111111-2222-3333-4444-555555555555"
+    )
     assert len(result.update["ui_chat_log"][-1]["additional_context"]) == 1
     assert result.update["ui_chat_log"][-1]["additional_context"][0].category == "file"
 
@@ -526,10 +559,12 @@ async def test_get_graph_input_resume_with_approval(workflow_with_approval):
 @pytest.mark.parametrize(
     "rejection_message", ["", "null", "Rejected the tool usage because it's not safe"]
 )
+@patch("duo_workflow_service.workflows.chat.workflow.uuid4")
 async def test_get_graph_input_resume_with_rejected_approval(
-    rejection_message, workflow_with_project
+    mock_uuid, rejection_message, workflow_with_project
 ):
     """Test graph input with rejected tool calls."""
+    mock_uuid.return_value = UUID("99999999-8888-7777-6666-555555555555")
 
     workflow_with_rejected_approval = workflow_with_project
     workflow_with_rejected_approval._approval = contract_pb2.Approval(
@@ -548,7 +583,11 @@ async def test_get_graph_input_resume_with_rejected_approval(
     assert result.update["approval"].message == rejection_message
 
     if rejection_message and rejection_message != "null":
-        result.update["ui_chat_log"][-1]["content"] == rejection_message
+        assert result.update["ui_chat_log"][-1]["content"] == rejection_message
+        assert (
+            result.update["ui_chat_log"][-1]["message_id"]
+            == "user-99999999-8888-7777-6666-555555555555"
+        )
     else:
         assert "ui_chat_log" not in result.update
 
@@ -734,7 +773,9 @@ async def test_agent_run_with_tool_approval_required(workflow_with_project):
         approval=None,
     )
 
-    ai_message = AIMessage(content="I'll create the file for you")
+    ai_message = AIMessage(
+        content="I'll create the file for you", id="ai-msg-approval-test"
+    )
     ai_message.tool_calls = [
         {
             "id": "toolu_approval_id",
@@ -762,6 +803,7 @@ async def test_agent_run_with_tool_approval_required(workflow_with_project):
     assert len(result["ui_chat_log"]) == 2
     assert result["ui_chat_log"][0]["message_type"] == MessageTypeEnum.AGENT
     assert result["ui_chat_log"][0]["content"] == "I'll create the file for you"
+    assert result["ui_chat_log"][0]["message_id"] == "ai-msg-approval-test"
     assert result["ui_chat_log"][1]["message_type"] == MessageTypeEnum.REQUEST
     assert "requires approval" in result["ui_chat_log"][1]["content"]
     assert result["ui_chat_log"][1]["tool_info"]["name"] == "create_file_with_contents"
@@ -1090,7 +1132,8 @@ async def test_agent_returns_content_and_tool_calls(workflow_with_project):
     )
 
     ai_response = AIMessage(
-        content="I'll list the issues for you using the list_issues tool."
+        content="I'll list the issues for you using the list_issues tool.",
+        id="ai-msg-with-tools",
     )
     ai_response.tool_calls = [
         {"id": "call_123", "name": "list_issues", "args": {"project_id": 123}}
@@ -1110,6 +1153,7 @@ async def test_agent_returns_content_and_tool_calls(workflow_with_project):
     )
     assert result["ui_chat_log"][0]["message_type"] == MessageTypeEnum.AGENT
     assert result["ui_chat_log"][0]["status"] == ToolStatus.SUCCESS
+    assert result["ui_chat_log"][0]["message_id"] == "ai-msg-with-tools"
     assert result["status"] == WorkflowStatusEnum.EXECUTION
     assert len(result["conversation_history"]["test_prompt"]) == 1
     assert isinstance(result["conversation_history"]["test_prompt"][0], AIMessage)
@@ -1138,7 +1182,8 @@ async def test_agent_returns_content_and_tool_calls_with_approval_required(
     )
 
     ai_message = AIMessage(
-        content="I'll create the file for you with the specified content."
+        content="I'll create the file for you with the specified content.",
+        id="ai-msg-approval-required",
     )
     ai_message.tool_calls = [
         {
@@ -1168,6 +1213,7 @@ async def test_agent_returns_content_and_tool_calls_with_approval_required(
     )
     assert result["ui_chat_log"][0]["message_type"] == MessageTypeEnum.AGENT
     assert result["ui_chat_log"][0]["status"] == ToolStatus.SUCCESS
+    assert result["ui_chat_log"][0]["message_id"] == "ai-msg-approval-required"
     assert "requires approval" in result["ui_chat_log"][1]["content"]
     assert result["ui_chat_log"][1]["message_type"] == MessageTypeEnum.REQUEST
     assert result["ui_chat_log"][1]["tool_info"]["name"] == "create_file_with_contents"

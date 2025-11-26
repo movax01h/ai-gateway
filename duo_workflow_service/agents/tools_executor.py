@@ -189,21 +189,20 @@ class ToolsExecutor:
                     correlation_id=None,
                     tool_info=None,
                     additional_context=None,
-                    message_id=None,
+                    message_id=message.id,
                 )
             )
 
     def _add_tool_ui_chat_log(
         self,
-        tool_info: Dict[str, Any],
+        tool_call: ToolCall,
         status: ToolStatus,
         ui_chat_logs: List[UiChatLog],
         error_message: Optional[str] = None,
         tool_response: Optional[Any] = None,
     ):
         chat_log = self._create_tool_ui_chat_log(
-            tool_name=tool_info["name"],
-            tool_args=tool_info["args"],
+            tool_call=tool_call,
             status=status,
             error_message=error_message,
             tool_response=tool_response,
@@ -218,7 +217,6 @@ class ToolsExecutor:
         plan: Plan,
         finish_reason: Optional[str] = None,
     ) -> Dict[str, Any]:
-        tool_args = tool_call.get("args", {})
         tool = self._toolset[tool_name]
         chat_logs: List[UiChatLog] = []
 
@@ -245,7 +243,7 @@ class ToolsExecutor:
             )
 
             self._add_tool_ui_chat_log(
-                tool_info={"name": tool_name, "args": tool_args},
+                tool_call=tool_call,
                 status=ToolStatus.SUCCESS,
                 ui_chat_logs=chat_logs,
                 tool_response=tool_response,
@@ -257,13 +255,13 @@ class ToolsExecutor:
             }
 
         except TypeError as error:
-            return self._handle_type_error(tool, tool_name, tool_args, error, chat_logs)
+            return self._handle_type_error(tool, tool_call, error, chat_logs)
 
         except ValidationError as error:
-            return self._handle_validation_error(tool_name, tool_args, error, chat_logs)
+            return self._handle_validation_error(tool_call, error, chat_logs)
 
         except ToolException as error:
-            return self._handle_tool_error(tool_name, tool_args, error, chat_logs)
+            return self._handle_tool_error(tool_call, error, chat_logs)
 
         except Exception as error:
             # Convert any unexpected exception to ToolException to avoid blocking workflow
@@ -271,18 +269,17 @@ class ToolsExecutor:
                 f"Unexpected error executing tool {tool_name}: {str(error)}"
             )
             tool_exception.__cause__ = error
-            return self._handle_tool_error(
-                tool_name, tool_args, tool_exception, chat_logs
-            )
+            return self._handle_tool_error(tool_call, tool_exception, chat_logs)
 
     def _handle_type_error(
         self,
         tool: Any,
-        tool_name: str,
-        tool_args: Dict[str, Any],
+        tool_call: ToolCall,
         error: TypeError,
         chat_logs: List[UiChatLog],
     ) -> Dict[str, Any]:
+        tool_name = tool_call["name"]
+
         # log the error itself to check if the TypeError is indeed
         # a schema error.
         log_exception(error, extra={"context": "Tools executor raised TypeError"})
@@ -307,7 +304,7 @@ class ToolsExecutor:
         )
 
         self._add_tool_ui_chat_log(
-            tool_info={"name": tool_name, "args": tool_args},
+            tool_call=tool_call,
             status=ToolStatus.FAILURE,
             ui_chat_logs=chat_logs,
             error_message="Invalid arguments",
@@ -320,11 +317,13 @@ class ToolsExecutor:
 
     def _handle_validation_error(
         self,
-        tool_name: str,
-        tool_args: Dict[str, Any],
+        tool_call: ToolCall,
         error: ValidationError,
         chat_logs: List[UiChatLog],
     ) -> Dict[str, Any]:
+        tool_name = tool_call["name"]
+        tool_args = tool_call.get("args", {})
+
         log_exception(error, extra={"tool_call_fields": list(tool_args.keys())})
         tool_response = f"Tool {tool_name} raised validation error {error}"
         self._track_internal_event(
@@ -337,7 +336,7 @@ class ToolsExecutor:
         )
 
         self._add_tool_ui_chat_log(
-            tool_info={"name": tool_name, "args": tool_args},
+            tool_call=tool_call,
             status=ToolStatus.FAILURE,
             ui_chat_logs=chat_logs,
             error_message="Validation error",
@@ -350,11 +349,11 @@ class ToolsExecutor:
 
     def _handle_tool_error(
         self,
-        tool_name: str,
-        tool_args: Dict[str, Any],
+        tool_call: ToolCall,
         error: ToolException,
         chat_logs: List[UiChatLog],
     ) -> Dict[str, Any]:
+        tool_name = tool_call["name"]
         error_type = type(error).__name__
 
         log_exception(error, extra={"context": "Tools executor raised error"})
@@ -377,7 +376,7 @@ class ToolsExecutor:
             error_message = f"{error_message} {textwrap.shorten(str(response), 100)}"
 
         self._add_tool_ui_chat_log(
-            tool_info={"name": tool_name, "args": tool_args},
+            tool_call=tool_call,
             status=ToolStatus.FAILURE,
             ui_chat_logs=chat_logs,
             error_message=error_message,
@@ -414,12 +413,15 @@ class ToolsExecutor:
 
     def _create_tool_ui_chat_log(
         self,
-        tool_name: str,
-        tool_args: Dict[str, Any],
+        tool_call: ToolCall,
         status: ToolStatus = ToolStatus.SUCCESS,
         error_message: Optional[str] = None,
         tool_response: Optional[Any] = None,
     ) -> Optional[UiChatLog]:
+        tool_name = tool_call["name"]
+        tool_args = tool_call.get("args", {})
+        tool_call_id = tool_call.get("id")
+
         display_message = self.get_tool_display_message(
             tool_name, tool_args, tool_response
         )
@@ -458,7 +460,7 @@ class ToolsExecutor:
                 else None
             ),
             additional_context=None,
-            message_id=None,
+            message_id=tool_call_id,
         )
 
     def get_tool_display_message(

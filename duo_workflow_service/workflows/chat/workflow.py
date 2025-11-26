@@ -2,6 +2,7 @@
 from datetime import datetime, timezone
 from enum import StrEnum
 from typing import Any, Dict, List, Optional, override
+from uuid import uuid4
 
 from dependency_injector.wiring import Provide, inject
 from gitlab_cloud_connector import CloudConnectorUser
@@ -197,7 +198,7 @@ class Workflow(AbstractWorkflow):
             message_sub_type=None,
             message_type=MessageTypeEnum.USER,
             content=goal,
-            message_id=None,
+            message_id=f"user-{str(uuid4())}",
             timestamp=datetime.now(timezone.utc).isoformat(),
             status=ToolStatus.SUCCESS,
             correlation_id=None,
@@ -272,7 +273,7 @@ class Workflow(AbstractWorkflow):
                         message_type=MessageTypeEnum.USER,
                         message_sub_type=None,
                         content=new_chat_message,
-                        message_id=None,
+                        message_id=f"user-{str(uuid4())}",
                         timestamp=datetime.now(timezone.utc).isoformat(),
                         status=ToolStatus.SUCCESS,
                         correlation_id=None,

@@ -119,7 +119,7 @@ class UserInterface:
             or self.ui_chat_log[-1]["status"]
         ):
             last_message = UiChatLog(
-                message_id=None,
+                message_id=message.id,
                 status=None,
                 correlation_id=None,
                 message_type=MessageTypeEnum.AGENT,
