@@ -1,5 +1,5 @@
 import os
-from typing import Callable, Optional
+from typing import Callable, Optional, cast
 from urllib.parse import urljoin
 
 import grpc
@@ -15,6 +15,12 @@ from ai_gateway.instrumentators.usage_quota import (
 from lib.billing_events.context import UsageQuotaEventContext
 from lib.feature_flags.context import FeatureFlag, current_feature_flag_context
 from lib.internal_events.context import current_event_context
+
+# pylint: disable=direct-environment-variable-reference
+CACHE_TTL = (
+    5 if os.environ.get("AIGW_MOCK_USAGE_CREDITS", "").lower() == "true" else 3600
+)
+# pylint: enable=direct-environment-variable-reference
 
 
 class UsageQuotaInterceptor(ServerInterceptor):
@@ -95,7 +101,7 @@ class UsageQuotaInterceptor(ServerInterceptor):
 
         return grpc.unary_unary_rpc_method_handler(handler)
 
-    @cached(ttl=3600, cache=SimpleMemoryCache)
+    @cached(ttl=CACHE_TTL, cache=SimpleMemoryCache)
     async def has_usage_quota_left(self, context: UsageQuotaEventContext) -> bool:
         """Check if the consumer has usage quota left.
 
@@ -113,10 +119,16 @@ class UsageQuotaInterceptor(ServerInterceptor):
         realm = getattr(context, "realm", "unknown")
         params = context.model_dump(exclude_none=True, exclude_unset=True)
         # pylint: disable=direct-environment-variable-reference
-        customer_portal_url: str = os.environ.get(
-            "DUO_WORKFLOW_AUTH__OIDC_CUSTOMER_PORTAL_URL",
-            "https://customers.gitlab.com",
+        customer_portal_url = (
+            os.environ.get("AIGW_MOCK_CRED_CD_URL")
+            if os.environ.get("AIGW_MOCK_USAGE_CREDITS", "").lower() == "true"
+            and os.environ.get("AIGW_MOCK_CRED_CD_URL")
+            else os.environ.get(
+                "DUO_WORKFLOW_AUTH__OIDC_CUSTOMER_PORTAL_URL",
+                "https://customers.gitlab.com",
+            )
         )
+
         # pylint: enable=direct-environment-variable-reference
 
         try:
@@ -124,7 +136,10 @@ class UsageQuotaInterceptor(ServerInterceptor):
                 timeout=httpx.Timeout(self.customersdot_request_timeout),
                 limits=httpx.Limits(max_keepalive_connections=20, max_connections=100),
             ) as client:
-                url = urljoin(customer_portal_url, "api/v1/consumers/resolve")
+                url = urljoin(
+                    cast(str, customer_portal_url),
+                    cast(str, "api/v1/consumers/resolve"),
+                )
 
                 with USAGE_QUOTA_CUSTOMERSDOT_LATENCY_SECONDS.labels(
                     realm=realm
