@@ -808,46 +808,6 @@ async def test_create_merge_request_note_with_url_error(
 @pytest.mark.parametrize(
     "note",
     [
-        "/merge",
-        "/close",
-        "/label ~bug",
-        "/assign @user",
-        "/milestone %v1.0",
-        "/remove_source_branch",
-        "/target_branch main",
-        "/title Update title",
-        "/board_move ~doing",
-        "/copy_metadata from !123",
-        "This is a multi-line note\n/merge",
-        "Line 1\n/close\nLine 3",
-        "/MErGE",
-    ],
-)
-async def test_create_merge_request_note_blocks_quick_actions(
-    note, gitlab_client_mock, metadata
-):
-    tool = CreateMergeRequestNote(metadata=metadata)
-
-    response = await tool.arun(
-        {"project_id": 1, "merge_request_iid": 123, "body": note}
-    )
-
-    expected_response = json.dumps(
-        {
-            "status": "error",
-            "message": """Notes containing GitLab quick actions are not allowed. Quick actions are text-based shortcuts for common GitLab actions.
-They are commands that are on their own line and start with a backslash. Examples include /merge, /approve, /close, etc.""",
-        }
-    )
-
-    assert response == expected_response
-    gitlab_client_mock.apost.assert_not_called()
-
-
-@pytest.mark.asyncio
-@pytest.mark.parametrize(
-    "note",
-    [
         "This is a regular note",
         "This note talks about /merge in the middle",
         "https://gitlab.com",

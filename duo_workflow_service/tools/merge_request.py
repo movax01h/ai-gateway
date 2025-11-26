@@ -1,5 +1,4 @@
 import json
-import re
 from typing import Any, Optional, Type
 
 import structlog
@@ -269,8 +268,6 @@ class ListMergeRequestDiffs(DuoBaseTool):
         return msg
 
 
-# The merge_request_diff_head_sha parameter is required for the /merge quick action.
-# We exclude it here as an added precautionary layer to prevent Duo Workflow from merging code without human approval.
 class CreateMergeRequestNoteInput(MergeRequestResourceInput):
     body: str = Field(
         description="The content of a note. Limited to 1,000,000 characters."
@@ -280,9 +277,7 @@ class CreateMergeRequestNoteInput(MergeRequestResourceInput):
 class CreateMergeRequestNote(DuoBaseTool):
     name: str = "create_merge_request_note"
     # pylint: disable=line-too-long
-    description: str = f"""Create a note (comment) on a merge request. You are NOT allowed to ever use a GitLab quick action in a merge request note.
-Quick actions are text-based shortcuts for common GitLab actions. They are commands that are on their own line and
-start with a backslash. Examples include /merge, /approve, /close, etc.
+    description: str = f"""Create a note (comment) on a merge request.
 
 {MERGE_REQUEST_IDENTIFICATION_DESCRIPTION}
 
@@ -296,10 +291,6 @@ The body parameter is always required.
 """
     args_schema: Type[BaseModel] = CreateMergeRequestNoteInput
 
-    def _contains_quick_action(self, body: str) -> bool:
-        quick_action_pattern = r"(?m)^/[a-zA-Z]+"
-        return bool(re.search(quick_action_pattern, body))
-
     async def _execute(self, body: str, **kwargs: Any) -> str:
         url = kwargs.pop("url", None)
         project_id = kwargs.pop("project_id", None)
@@ -311,15 +302,6 @@ The body parameter is always required.
 
         if validation_result.errors:
             return json.dumps({"error": "; ".join(validation_result.errors)})
-        if self._contains_quick_action(body):
-            return json.dumps(
-                {
-                    "status": "error",
-                    # pylint: disable=line-too-long
-                    "message": """Notes containing GitLab quick actions are not allowed. Quick actions are text-based shortcuts for common GitLab actions.
-They are commands that are on their own line and start with a backslash. Examples include /merge, /approve, /close, etc.""",
-                }
-            )
 
         try:
             response = await self.gitlab_client.apost(
