@@ -31,6 +31,7 @@ FILTER_KEY_MAPPING = {
     "dueBefore": "due_before",
     "sort": "sort",
     "labelName": "label_name",
+    "assigneeUsernames": "assignee_usernames",
 }
 
 
@@ -121,6 +122,10 @@ class ListWorkItemsInput(ParentResourceInput):
     label_name: Optional[List[str]] = Field(
         default=None,
         description="Filter by label names.",
+    )
+    assignee_usernames: Optional[List[str]] = Field(
+        default=None,
+        description="Filter by assignee usernames.",
     )
     sort: Optional[str] = Field(
         default=None,

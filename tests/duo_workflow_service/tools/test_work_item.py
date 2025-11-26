@@ -379,6 +379,7 @@ async def test_list_work_items_with_filters(
         "due_before": "2025-12-31T00:00:00Z",
         "sort": "CREATED_DESC",
         "label_name": ["api"],
+        "assignee_usernames": ["admin"],
     }
 
     response = await tool._arun(**args)
@@ -400,6 +401,7 @@ async def test_list_work_items_with_filters(
         "dueBefore": "2025-12-31T00:00:00Z",
         "sort": "CREATED_DESC",
         "labelName": ["api"],
+        "assigneeUsernames": ["admin"],
     }
 
     gql_vars = gitlab_client_mock.graphql.call_args[0][1]
