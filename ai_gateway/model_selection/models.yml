@@ -193,27 +193,6 @@ models:
       max_tokens: 4_096
       model_class_provider: anthropic
 
-  - name: "General"
-    gitlab_identifier: "general" # For backwards compatibility with requests asking for [prompt_id]/general
-    family:
-      - claude_3
-    params:
-      model: "claude-3-5-sonnet-20241022"
-      temperature: 0.0
-      max_tokens: 4_096
-      model_class_provider: litellm
-
-  - name: "Claude Sonnet 3.5 20241022 - Anthropic"
-    provider: "Anthropic"
-    gitlab_identifier: "claude_3" # For backwards compatibility with requests asking for [prompt_id]/claude_3
-    family:
-      - claude_3
-    params:
-      model: "claude-3-5-sonnet-20241022"
-      temperature: 0.0
-      max_tokens: 4_096
-      model_class_provider: anthropic
-
   - name: "Claude Sonnet 3.5 20241022 - Vertex"
     provider: "Vertex"
     gitlab_identifier: "vertex" # For backwards compatibility with requests asking for [prompt_id]/vertex
@@ -360,5 +339,23 @@ models:
       - deepseekcoder
     params:
       model: deepseekcoder
+      temperature: 0.0
+      max_tokens: 4_096
+
+  - name: "Self-Hosted Claude"
+    gitlab_identifier: "claude_3" # For backwards compatibility with requests asking for [prompt_id]/claude_3
+    family:
+      - claude_3
+    params:
+      model: "claude-3-5-sonnet-20241022" # This will be overridden later by the actual model used
+      temperature: 0.0
+      max_tokens: 4_096
+
+  - name: "Self-Hosted General Models"
+    gitlab_identifier: "general" # For backwards compatibility with requests asking for [prompt_id]/general
+    family:
+      - claude_3
+    params:
+      model: "claude-3-5-sonnet-20241022"
       temperature: 0.0
       max_tokens: 4_096
