@@ -5,7 +5,6 @@ import functools
 import json
 import os
 import signal
-import time
 from itertools import chain
 from typing import AsyncIterable, AsyncIterator, Optional
 
@@ -209,7 +208,6 @@ class DuoWorkflowService(contract_pb2_grpc.DuoWorkflowServicer):
         start_workflow_request: contract_pb2.ClientEvent = await anext(
             aiter(request_iterator)
         )
-        workflow_start_time = time.time()
 
         workflow_definition = start_workflow_request.startRequest.workflowDefinition
         unit_primitive = choose_unit_primitive(workflow_definition)
@@ -309,7 +307,6 @@ class DuoWorkflowService(contract_pb2_grpc.DuoWorkflowServicer):
             preapproved_tools=list(
                 start_workflow_request.startRequest.preapproved_tools
             ),
-            workflow_start_time=workflow_start_time,
         )
 
         workflow_task = asyncio.create_task(workflow.run(goal))

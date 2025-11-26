@@ -472,7 +472,7 @@ async def test_tracing_enabled_based_on_env_and_extended_logging(
 @patch("duo_workflow_service.workflows.abstract_workflow.GitLabWorkflow")
 @patch("duo_workflow_service.workflows.abstract_workflow.ToolsRegistry.configure")
 @patch("duo_workflow_service.workflows.abstract_workflow.duo_workflow_metrics")
-async def test_compile_and_run_graph_records_first_token_on_messages(
+async def test_compile_and_run_graph_records_first_response_on_first_graph_update(
     mock_metrics,
     mock_tools_registry,
     mock_gitlab_workflow,
@@ -480,12 +480,12 @@ async def test_compile_and_run_graph_records_first_token_on_messages(
     mock_project,
     user,
 ):
-    """Test that _compile_and_run_graph records time to first token when messages are streamed."""
+    """Test that _compile_and_run_graph records time to first response when graph is updated."""
 
     class MockGraphWithMessages:
         async def astream(self, input, config, stream_mode):
             yield "updates", {"step1": {"key": "value"}}
-            yield "messages", {"message": "first message"}
+            yield "values", {"status": "running", "ui_chat_log": []}
             yield "messages", {"message": "second message"}
 
     mock_tools_registry.return_value = MagicMock()
@@ -500,12 +500,11 @@ async def test_compile_and_run_graph_records_first_token_on_messages(
         {},
         CategoryEnum.WORKFLOW_SOFTWARE_DEVELOPMENT,
         user,
-        workflow_start_time=100.0,
     )
 
     workflow._compile = MagicMock(return_value=MockGraphWithMessages())
 
     await workflow._compile_and_run_graph("Test goal")
 
-    assert mock_metrics.record_time_to_first_token.call_count == 1
-    assert workflow._first_token_recorded is True
+    assert mock_metrics.record_time_to_first_response.call_count == 1
+    assert workflow._first_response_metric_recorded is True
