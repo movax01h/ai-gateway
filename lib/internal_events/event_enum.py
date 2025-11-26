@@ -66,3 +66,4 @@ class CategoryEnum(StrEnum):
     AI_CATALOG_AGENT = "ai_catalog_agent"
     UNKNOWN = "unknown"
     DEVELOPER = "developer"
+    DUO_DEVELOPER = "duo_developer"
