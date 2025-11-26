@@ -1,0 +1,29 @@
+# https://gitlab-com.gitlab.io/gl-infra/platform/runway/runwayctl/manifest.schema.html
+apiVersion: runway/v1
+kind: RunwayService
+metadata:
+  name: duo-workflow-service
+  department: eng-dev
+  department_group: eng-dev-create-shared-infra
+  product_category: duo_workflow
+  owner_email_handle: ecarey
+spec:
+  regions:
+  - us-east1
+  request_timeout: 3600
+  load_balancing:
+    external_load_balancer:
+      backend_protocol: "HTTP2"
+  observability:
+    scrape_targets:
+      - "localhost:8082"
+  scalability:
+    min_instances: 1
+    max_instances: 1
+    max_instance_request_concurrency: 50
+  execution_environment: EXECUTION_ENVIRONMENT_GEN2
+  resources:
+    startup_cpu_boost: true
+    limits:
+      cpu: 2000m
+      memory: 8G
