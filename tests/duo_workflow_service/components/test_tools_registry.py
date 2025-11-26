@@ -1,4 +1,3 @@
-import asyncio
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -6,7 +5,6 @@ from gitlab_cloud_connector import CloudConnectorUser
 
 from duo_workflow_service import tools
 from duo_workflow_service.components.tools_registry import (
-    _AGENT_PRIVILEGES,
     _DEFAULT_TOOLS,
     NO_OP_TOOLS,
     Toolset,
@@ -14,6 +12,7 @@ from duo_workflow_service.components.tools_registry import (
 )
 from duo_workflow_service.executor.outbox import Outbox
 from duo_workflow_service.gitlab.http_client import GitlabHttpClient
+from duo_workflow_service.tools.branch import CreateBranch
 from duo_workflow_service.tools.code_review import (
     BuildReviewMergeRequestContext,
     PostDuoCodeReview,
@@ -153,6 +152,7 @@ _outbox = MagicMock(spec=Outbox)
                 "add_new_task",
                 "remove_task",
                 "update_task_description",
+                "create_branch",
                 "update_vulnerability_severity",
                 "get_plan",
                 "set_task_status",
@@ -415,6 +415,7 @@ def test_registry_initialization_initialises_tools_with_correct_attributes(
         "get_wiki_page": GetWikiPage(metadata=tool_metadata),
         "gitlab_api_get": GitLabApiGet(metadata=tool_metadata),
         "gitlab_graphql": GitLabGraphQL(metadata=tool_metadata),
+        "create_branch": CreateBranch(metadata=tool_metadata),
     }
 
     assert registry._enabled_tools == expected_tools
@@ -450,7 +451,7 @@ async def test_registry_configuration(gl_http_client, mcp_tools, project_mock):
         "request_user_clarification_tool",
         "extra_tool",
     }
-    assert registry.approval_required("extra_tool") == True
+    assert registry.approval_required("extra_tool") is True
     assert registry._mcp_tool_names == ["extra_tool"]
 
 
@@ -609,7 +610,7 @@ async def test_registry_configuration_with_preapproved_tools(
         project=project_mock,
     )
 
-    always_enabled_tools = set([tool_cls.tool_title for tool_cls in NO_OP_TOOLS])
+    always_enabled_tools = {tool_cls.tool_title for tool_cls in NO_OP_TOOLS}
     always_enabled_tools.update([tool_cls().name for tool_cls in _DEFAULT_TOOLS])
 
     read_write_tools = {
@@ -708,9 +709,11 @@ def test_toolset_method(
         mcp_tools=mcp_tools,
     )
 
-    with patch("duo_workflow_service.components.tools_registry.Toolset") as MockToolset:
+    with patch(
+        "duo_workflow_service.components.tools_registry.Toolset"
+    ) as mock_toolset_class:
         mock_toolset = MagicMock(spec=Toolset)
-        MockToolset.return_value = mock_toolset
+        mock_toolset_class.return_value = mock_toolset
 
         toolset = registry.toolset(tool_names)
 
@@ -720,7 +723,7 @@ def test_toolset_method(
             if registry.get(tool_name)
         }
 
-        MockToolset.assert_called_once_with(
+        mock_toolset_class.assert_called_once_with(
             pre_approved=expected_preapproved, all_tools=expected_all_tools
         )
         assert toolset == mock_toolset

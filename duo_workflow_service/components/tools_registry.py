@@ -137,6 +137,7 @@ _AGENT_PRIVILEGES: dict[str, list[Type[BaseTool]]] = {
         tools.CreateEpic,
         tools.UpdateEpic,
         tools.CreateCommit,
+        tools.CreateBranch,
         tools.DismissVulnerability,
         tools.ConfirmVulnerability,
         tools.CreateWorkItem,
