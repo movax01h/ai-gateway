@@ -4,7 +4,6 @@ import pytest
 from langchain_core.prompts import PromptTemplate
 from langgraph.graph import StateGraph
 
-from ai_gateway.model_metadata import ModelMetadata, current_model_metadata_context
 from ai_gateway.prompts import LocalPromptRegistry
 from duo_workflow_service.agent_platform.experimental.components.human_input.component import (
     HumanInputComponent,
@@ -32,13 +31,14 @@ class TestHumanInputComponent:
         return registry
 
     @pytest.fixture
-    def human_input_component(self, mock_prompt_registry):
+    def human_input_component(self, user, mock_prompt_registry):
         """Create a HumanInputComponent instance for testing."""
         return HumanInputComponent(
             name="test_human_input",
             sends_response_to="awesome_agent",
             flow_id="test_flow",
             flow_type=CategoryEnum.WORKFLOW_CHAT,
+            user=user,
             prompt_id="test_prompt",
             prompt_version="v1.0",
             prompt_registry=mock_prompt_registry,
@@ -130,7 +130,7 @@ class TestHumanInputComponent:
             )
 
     def test_prompt_registry_integration(
-        self, human_input_component, mock_prompt_registry
+        self, human_input_component, mock_prompt_registry, user
     ):
         """Test integration with prompt registry like AgentComponent."""
         graph = StateGraph(FlowState)
@@ -157,21 +157,22 @@ class TestHumanInputComponent:
             human_input_component.attach(graph, router)
 
             # Verify prompt registry was called
-            mock_prompt_registry.get.assert_called_once_with(
-                "test_prompt", "v1.0", model_metadata=None
+            mock_prompt_registry.get_on_behalf.assert_called_once_with(
+                user, "test_prompt", "v1.0"
             )
 
             # Verify request node was created with prompt
             call_args = mock_request_node.call_args
             assert call_args[1]["prompt"] is not None
 
-    def test_optional_prompt(self, mock_prompt_registry):
+    def test_optional_prompt(self, user, mock_prompt_registry):
         """Test that prompt is optional when no prompt_id or prompt_version provided."""
         component = HumanInputComponent(
             name="test_human_input",
             sends_response_to="awesome_agent",
             flow_id="test_flow",
             flow_type=CategoryEnum.WORKFLOW_CHAT,
+            user=user,
             prompt_registry=mock_prompt_registry,
         )
 
@@ -199,7 +200,7 @@ class TestHumanInputComponent:
             component.attach(graph, router)
 
             # Verify prompt registry was not called
-            mock_prompt_registry.get.assert_not_called()
+            mock_prompt_registry.get_on_behalf.assert_not_called()
 
             # Verify request node was created with None prompt
             call_args = mock_request_node.call_args
@@ -258,108 +259,3 @@ class TestHumanInputComponent:
 
             fetch_node_ui_history = mock_fetch_node.call_args[1]["ui_history"]
             assert fetch_node_ui_history == mock_ui_history.return_value
-
-
-class TestHumanInputComponentModelMetadata:
-    """Test suite for HumanInputComponent model metadata handling."""
-
-    @pytest.fixture
-    def mock_prompt_registry(self):
-        """Mock prompt registry."""
-        registry = Mock(spec=LocalPromptRegistry)
-        prompt = Mock(spec=PromptTemplate)
-        prompt.format.return_value = "Test prompt content"
-        registry.get.return_value = prompt
-        return registry
-
-    @pytest.fixture
-    def human_input_component(self, mock_prompt_registry):
-        """Create a HumanInputComponent instance for testing."""
-        return HumanInputComponent(
-            name="test_human_input",
-            sends_response_to="awesome_agent",
-            flow_id="test_flow",
-            flow_type=CategoryEnum.WORKFLOW_CHAT,
-            prompt_id="test_prompt",
-            prompt_version="v1.0",
-            prompt_registry=mock_prompt_registry,
-        )
-
-    def test_attach_passes_model_metadata_from_context_to_prompt_registry(
-        self,
-        human_input_component,
-        mock_prompt_registry,
-        model_metadata: ModelMetadata,
-    ):
-        metadata_token = current_model_metadata_context.set(model_metadata)
-
-        try:
-            graph = StateGraph(FlowState)
-            router = Mock()
-
-            with (
-                patch(
-                    "duo_workflow_service.agent_platform.experimental.components.human_input.component.RequestNode"
-                ) as mock_request_node,
-                patch(
-                    "duo_workflow_service.agent_platform.experimental.components.human_input.component.FetchNode"
-                ) as mock_fetch_node,
-            ):
-                request_instance = Mock()
-                request_instance.name = "test_human_input#request_metadata_test"
-                request_instance.run = Mock()
-                mock_request_node.return_value = request_instance
-
-                fetch_instance = Mock()
-                fetch_instance.name = "test_human_input#fetch_metadata_test"
-                fetch_instance.run = Mock()
-                mock_fetch_node.return_value = fetch_instance
-
-                human_input_component.attach(graph, router)
-
-            mock_prompt_registry.get.assert_called_once()
-            call_kwargs = mock_prompt_registry.get.call_args[1]
-
-            assert "model_metadata" in call_kwargs
-            assert call_kwargs["model_metadata"] == model_metadata
-        finally:
-            current_model_metadata_context.reset(metadata_token)
-
-    def test_attach_passes_none_when_no_model_metadata_in_context(
-        self,
-        human_input_component,
-        mock_prompt_registry,
-    ):
-        metadata_token = current_model_metadata_context.set(None)
-
-        try:
-            graph = StateGraph(FlowState)
-            router = Mock()
-
-            with (
-                patch(
-                    "duo_workflow_service.agent_platform.experimental.components.human_input.component.RequestNode"
-                ) as mock_request_node,
-                patch(
-                    "duo_workflow_service.agent_platform.experimental.components.human_input.component.FetchNode"
-                ) as mock_fetch_node,
-            ):
-                request_instance = Mock()
-                request_instance.name = "test_human_input#request_none_metadata_test"
-                request_instance.run = Mock()
-                mock_request_node.return_value = request_instance
-
-                fetch_instance = Mock()
-                fetch_instance.name = "test_human_input#fetch_none_metadata_test"
-                fetch_instance.run = Mock()
-                mock_fetch_node.return_value = fetch_instance
-
-                human_input_component.attach(graph, router)
-
-            mock_prompt_registry.get.assert_called_once()
-            call_kwargs = mock_prompt_registry.get.call_args[1]
-
-            assert "model_metadata" in call_kwargs
-            assert call_kwargs["model_metadata"] is None
-        finally:
-            current_model_metadata_context.reset(metadata_token)

@@ -6,7 +6,6 @@ import pytest
 from langchain_core.messages import AIMessage
 from langchain_core.tools import BaseTool
 
-from ai_gateway.prompts.registry import LocalPromptRegistry
 from duo_workflow_service.agent_platform.experimental.components.agent.nodes.agent_node import (
     AgentFinalOutput,
 )
@@ -306,17 +305,6 @@ def mock_toolset_fixture(mock_tool):
     mock_toolset.__getitem__ = Mock(return_value=mock_tool)
     mock_toolset.bindable = [mock_tool]
     return mock_toolset
-
-
-@pytest.fixture(name="mock_prompt_registry")
-def mock_prompt_registry_fixture():
-    """Fixture for mock prompt registry."""
-    mock_registry = Mock(spec=LocalPromptRegistry)
-    mock_prompt = Mock()
-    mock_prompt.model = Mock()
-    mock_prompt.model.model_name = "claude-3-sonnet"
-    mock_registry.get.return_value = mock_prompt
-    return mock_registry
 
 
 @pytest.fixture(name="mock_router")

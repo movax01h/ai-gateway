@@ -102,12 +102,12 @@ class AbstractWorkflow(ABC):
         workflow_id: str,
         workflow_metadata: Dict[str, Any],
         workflow_type: CategoryEnum,
+        user: CloudConnectorUser,
         invocation_metadata: InvocationMetadata = {
             "base_url": "",
             "gitlab_token": "",
         },
         mcp_tools: list[contract_pb2.McpTool] = [],
-        user: Optional[CloudConnectorUser] = None,
         additional_context: Optional[list[AdditionalContext]] = None,
         approval: Optional[contract_pb2.Approval] = None,
         prompt_registry: LocalPromptRegistry = Provide[

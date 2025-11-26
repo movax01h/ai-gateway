@@ -213,6 +213,7 @@ class TestFlow:  # pylint: disable=too-many-public-methods
         self,
         mock_flow_metadata,
         mock_invocation_metadata,
+        user,
         sample_flow_config,
         mock_checkpointer,
         mock_tools_registry,
@@ -227,6 +228,7 @@ class TestFlow:  # pylint: disable=too-many-public-methods
                 workflow_id="test-workflow-123",
                 workflow_metadata=mock_flow_metadata,
                 workflow_type=CategoryEnum.WORKFLOW_CHAT,
+                user=user,
                 config=sample_flow_config,
                 invocation_metadata=mock_invocation_metadata,
             )
@@ -298,6 +300,7 @@ class TestFlow:  # pylint: disable=too-many-public-methods
         self,
         mock_flow_metadata,
         mock_invocation_metadata,
+        user,
         sample_flow_config,
         mock_state_graph,
         mock_checkpointer,
@@ -327,6 +330,7 @@ class TestFlow:  # pylint: disable=too-many-public-methods
                 workflow_id=f"test-workflow-{approval_decision or 'no-approval'}",
                 workflow_metadata=mock_flow_metadata,
                 workflow_type=CategoryEnum.WORKFLOW_CHAT,
+                user=user,
                 config=sample_flow_config,
                 invocation_metadata=mock_invocation_metadata,
                 approval=approval,
@@ -356,6 +360,7 @@ class TestFlow:  # pylint: disable=too-many-public-methods
         goal,
         mock_flow_metadata,
         mock_invocation_metadata,
+        user,
         sample_flow_config,
         mock_state_graph,
         mock_checkpointer,  # pylint: disable=unused-argument
@@ -375,6 +380,7 @@ class TestFlow:  # pylint: disable=too-many-public-methods
                 workflow_id="test-workflow-123",
                 workflow_metadata=mock_flow_metadata,
                 workflow_type=CategoryEnum.WORKFLOW_CHAT,
+                user=user,
                 config=sample_flow_config,
                 invocation_metadata=mock_invocation_metadata,
                 additional_context=[additional_context],
@@ -398,6 +404,7 @@ class TestFlow:  # pylint: disable=too-many-public-methods
         self,
         mock_flow_metadata,
         mock_invocation_metadata,
+        user,
         mock_state_graph,
         mock_tools_registry,  # pylint: disable=unused-argument
         mock_checkpointer,  # pylint: disable=unused-argument
@@ -427,6 +434,7 @@ class TestFlow:  # pylint: disable=too-many-public-methods
                 workflow_id="duplicated-workflow-123",
                 workflow_metadata=mock_flow_metadata,
                 workflow_type=CategoryEnum.WORKFLOW_CHAT,
+                user=user,
                 config=duplicate_config,
                 invocation_metadata=mock_invocation_metadata,
             )
@@ -450,6 +458,7 @@ class TestFlow:  # pylint: disable=too-many-public-methods
         self,
         mock_flow_metadata,
         mock_invocation_metadata,
+        user,
         mock_state_graph,
         mock_tools_registry,
         mock_checkpointer,
@@ -535,6 +544,7 @@ class TestFlow:  # pylint: disable=too-many-public-methods
                 workflow_id="complex-workflow-123",
                 workflow_metadata=mock_flow_metadata,
                 workflow_type=CategoryEnum.WORKFLOW_CHAT,
+                user=user,
                 config=complex_config,
                 invocation_metadata=mock_invocation_metadata,
             )
@@ -630,6 +640,7 @@ class TestFlow:  # pylint: disable=too-many-public-methods
         self,
         mock_flow_metadata,
         mock_invocation_metadata,
+        user,
         sample_flow_config,
         mock_state_graph,  # pylint: disable=unused-argument
         mock_checkpointer,
@@ -651,6 +662,7 @@ class TestFlow:  # pylint: disable=too-many-public-methods
                 workflow_id="test-workflow-invalid-approval",
                 workflow_metadata=mock_flow_metadata,
                 workflow_type=CategoryEnum.WORKFLOW_CHAT,
+                user=user,
                 config=sample_flow_config,
                 invocation_metadata=mock_invocation_metadata,
                 approval=approval,
@@ -697,6 +709,7 @@ class TestFlow:  # pylint: disable=too-many-public-methods
         want_toolset,
         mock_flow_metadata,
         mock_invocation_metadata,
+        user,
         mock_tools_registry,
         mock_checkpointer,  # pylint: disable=unused-argument
         mock_state_graph,  # pylint: disable=unused-argument
@@ -734,6 +747,7 @@ class TestFlow:  # pylint: disable=too-many-public-methods
                 workflow_id="test-workflow-123",
                 workflow_metadata=mock_flow_metadata,
                 workflow_type=CategoryEnum.WORKFLOW_CHAT,
+                user=user,
                 config=config,
                 invocation_metadata=mock_invocation_metadata,
             )

@@ -7,7 +7,6 @@ from langgraph.graph import StateGraph
 from pydantic import Field, model_validator
 
 from ai_gateway.container import ContainerApplication
-from ai_gateway.model_metadata import current_model_metadata_context
 from ai_gateway.prompts import InMemoryPromptRegistry, LocalPromptRegistry
 from duo_workflow_service.agent_platform.v1.components import (
     BaseComponent,
@@ -92,10 +91,10 @@ class OneOffComponent(BaseComponent):
         tools = self.toolset.bindable
         tool_choice = "any"
 
-        prompt = self.prompt_registry.get(
+        prompt = self.prompt_registry.get_on_behalf(
+            self.user,
             self.prompt_id,
             self.prompt_version,
-            model_metadata=current_model_metadata_context.get(),
             tools=tools,  # type: ignore[arg-type]
             tool_choice=tool_choice,
             internal_event_extra={

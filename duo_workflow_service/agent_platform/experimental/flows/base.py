@@ -222,6 +222,7 @@ class Flow(AbstractWorkflow):
             name="end",
             flow_id=self._workflow_id,
             flow_type=self._workflow_type,
+            user=self._user,
         )
         end_component.attach(graph)
 
@@ -238,6 +239,7 @@ class Flow(AbstractWorkflow):
                     "prompt_registry": self._flow_prompt_registry,  # override DI
                     "flow_id": self._workflow_id,
                     "flow_type": self._workflow_type,
+                    "user": self._user,
                 }
             )
 

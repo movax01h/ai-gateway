@@ -6,7 +6,6 @@ import pytest
 from langchain_core.messages import AIMessage, ToolMessage
 from langgraph.graph import END, StateGraph
 
-from ai_gateway.model_metadata import ModelMetadata, current_model_metadata_context
 from duo_workflow_service.agent_platform.v1.components.one_off.component import (
     OneOffComponent,
 )
@@ -41,6 +40,7 @@ def one_off_component_fixture(
     component_name,
     flow_id,
     flow_type,
+    user,
     prompt_id,
     prompt_version,
     ui_log_events,
@@ -54,6 +54,7 @@ def one_off_component_fixture(
         name=component_name,
         flow_id=flow_id,
         flow_type=flow_type,
+        user=user,
         inputs=["context:user_input", "context:task_description"],
         prompt_id=prompt_id,
         prompt_version=prompt_version,
@@ -106,6 +107,7 @@ class TestOneOffComponentInitialization:
         component_name,
         flow_id,
         flow_type,
+        user,
         prompt_id,
         prompt_version,
         mock_toolset,
@@ -119,6 +121,7 @@ class TestOneOffComponentInitialization:
             name=component_name,
             flow_id=flow_id,
             flow_type=flow_type,
+            user=user,
             inputs=[input_output],
             prompt_id=prompt_id,
             prompt_version=prompt_version,
@@ -181,6 +184,7 @@ class TestOneOffComponentAttachNodes:
         component_name,
         flow_id,
         flow_type,
+        user,
         inputs,
         mock_toolset,
         mock_prompt_registry,
@@ -193,27 +197,28 @@ class TestOneOffComponentAttachNodes:
         one_off_component.attach(mock_state_graph, mock_router)
 
         # Verify prompt registry is called with correct parameters
-        mock_prompt_registry.get.assert_called_once()
-        call_args = mock_prompt_registry.get.call_args
-
-        assert call_args[0][0] == prompt_id
-        assert call_args[0][1] == prompt_version
-
-        # Check that tools and tool_choice are set correctly
-        assert call_args[1]["tools"] == mock_toolset.bindable
-        assert call_args[1]["tool_choice"] == "any"
-        assert call_args[1]["internal_event_extra"] == {
-            "agent_name": component_name,
-            "workflow_id": flow_id,
-            "workflow_type": flow_type.value,
-        }
+        mock_prompt_registry.get_on_behalf.assert_called_once_with(
+            user,
+            prompt_id,
+            prompt_version,
+            tools=mock_toolset.bindable,
+            tool_choice="any",
+            internal_event_extra={
+                "agent_name": component_name,
+                "workflow_id": flow_id,
+                "workflow_type": flow_type.value,
+            },
+        )
 
         # Verify AgentNode creation
         mock_agent_node_cls.assert_called_once()
         agent_call_kwargs = mock_agent_node_cls.call_args[1]
         assert agent_call_kwargs["name"] == f"{component_name}#llm"
         assert agent_call_kwargs["component_name"] == component_name
-        assert agent_call_kwargs["prompt"] == mock_prompt_registry.get.return_value
+        assert (
+            agent_call_kwargs["prompt"]
+            == mock_prompt_registry.get_on_behalf.return_value
+        )
         assert agent_call_kwargs["inputs"] == inputs
         assert agent_call_kwargs["flow_id"] == flow_id
         assert agent_call_kwargs["flow_type"] == flow_type
@@ -289,6 +294,7 @@ class TestOneOffComponentToolsRouter:
         component_name,
         flow_id,
         flow_type,
+        user,
         prompt_id,
         prompt_version,
         mock_toolset,
@@ -333,6 +339,7 @@ class TestOneOffComponentToolsRouter:
             name=component_name,
             flow_id=flow_id,
             flow_type=flow_type,
+            user=user,
             inputs=["context:user_input", "context:task_description"],
             prompt_id=prompt_id,
             prompt_version=prompt_version,
@@ -368,6 +375,7 @@ class TestOneOffComponentToolsRouter:
         component_name,
         flow_id,
         flow_type,
+        user,
         prompt_id,
         prompt_version,
         mock_toolset,
@@ -439,6 +447,7 @@ class TestOneOffComponentToolsRouter:
             name=component_name,
             flow_id=flow_id,
             flow_type=flow_type,
+            user=user,
             inputs=["context:user_input", "context:task_description"],
             prompt_id=prompt_id,
             prompt_version=prompt_version,
@@ -471,6 +480,7 @@ class TestOneOffComponentToolsRouter:
         component_name,
         flow_id,
         flow_type,
+        user,
         prompt_id,
         prompt_version,
         mock_toolset,
@@ -515,6 +525,7 @@ class TestOneOffComponentToolsRouter:
             name=component_name,
             flow_id=flow_id,
             flow_type=flow_type,
+            user=user,
             inputs=["context:user_input", "context:task_description"],
             prompt_id=prompt_id,
             prompt_version=prompt_version,
@@ -545,6 +556,7 @@ class TestOneOffComponentToolsRouter:
         component_name,
         flow_id,
         flow_type,
+        user,
         prompt_id,
         prompt_version,
         mock_toolset,
@@ -597,6 +609,7 @@ class TestOneOffComponentToolsRouter:
             name=component_name,
             flow_id=flow_id,
             flow_type=flow_type,
+            user=user,
             inputs=["context:user_input", "context:task_description"],
             prompt_id=prompt_id,
             prompt_version=prompt_version,
@@ -623,66 +636,3 @@ class TestOneOffComponentToolsRouter:
         assert "tool_responses" in context
         assert "execution_result" in context
         assert context["execution_result"] == "success"
-
-
-class TestOneOffComponentModelMetadata:
-    """Test suite for OneOffComponent model metadata handling."""
-
-    def test_attach_passes_model_metadata_from_context_to_prompt_registry(
-        self,
-        one_off_component,
-        mock_state_graph,
-        mock_router,
-        mock_prompt_registry,
-        model_metadata: ModelMetadata,
-        prompt_id,
-        prompt_version,
-    ):
-        metadata_token = current_model_metadata_context.set(model_metadata)
-
-        try:
-            with (
-                patch(
-                    "duo_workflow_service.agent_platform.v1.components.one_off.component.AgentNode"
-                ),
-                patch(
-                    "duo_workflow_service.agent_platform.v1.components.one_off.component.ToolNodeWithErrorCorrection"
-                ),
-            ):
-                one_off_component.attach(mock_state_graph, mock_router)
-
-            mock_prompt_registry.get.assert_called_once()
-            call_kwargs = mock_prompt_registry.get.call_args[1]
-
-            assert "model_metadata" in call_kwargs
-            assert call_kwargs["model_metadata"] == model_metadata
-        finally:
-            current_model_metadata_context.reset(metadata_token)
-
-    def test_attach_passes_none_when_no_model_metadata_in_context(
-        self,
-        one_off_component,
-        mock_state_graph,
-        mock_router,
-        mock_prompt_registry,
-    ):
-        metadata_token = current_model_metadata_context.set(None)
-
-        try:
-            with (
-                patch(
-                    "duo_workflow_service.agent_platform.v1.components.one_off.component.AgentNode"
-                ),
-                patch(
-                    "duo_workflow_service.agent_platform.v1.components.one_off.component.ToolNodeWithErrorCorrection"
-                ),
-            ):
-                one_off_component.attach(mock_state_graph, mock_router)
-
-            mock_prompt_registry.get.assert_called_once()
-            call_kwargs = mock_prompt_registry.get.call_args[1]
-
-            assert "model_metadata" in call_kwargs
-            assert call_kwargs["model_metadata"] is None
-        finally:
-            current_model_metadata_context.reset(metadata_token)
