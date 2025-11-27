@@ -89,7 +89,7 @@ def input_fixture():
 @pytest.mark.asyncio
 async def test_run(chat_agent, input):
     chat_agent.prompt_adapter.get_response = AsyncMock(
-        return_value=AIMessage(content="Hello there!")
+        return_value=AIMessage(content="Hello there!", id="agent-msg-id")
     )
 
     result = await chat_agent.run(input)
@@ -107,7 +107,7 @@ async def test_run(chat_agent, input):
             correlation_id=None,
             tool_info=None,
             additional_context=None,
-            message_id=None,
+            message_id="agent-msg-id",
         )
     ]
     assert result["status"] == WorkflowStatusEnum.INPUT_REQUIRED

@@ -150,7 +150,7 @@ class ToolTestCase:
         ToolTestCase(
             tool_calls=[
                 {
-                    "id": "1",
+                    "id": "tool-call-1",
                     "name": mock_tool().name,
                     "args": {"tasks": [{"description": "step1"}]},
                 }
@@ -173,7 +173,7 @@ class ToolTestCase:
         ToolTestCase(
             tool_calls=[
                 {
-                    "id": "1",
+                    "id": "tool-call-2",
                     "name": "does_not_exist",
                     "args": {"summary": "done"},
                 }
@@ -185,7 +185,7 @@ class ToolTestCase:
                         "planner": [
                             ToolMessage(
                                 content="Tool does_not_exist not found",
-                                tool_call_id="1",
+                                tool_call_id="tool-call-2",
                             )
                         ]
                     }
@@ -195,12 +195,12 @@ class ToolTestCase:
         ToolTestCase(
             tool_calls=[
                 {
-                    "id": "1",
+                    "id": "tool-call-3",
                     "name": "does_not_exist",
                     "args": {"summary": "done"},
                 },
                 {
-                    "id": "2",
+                    "id": "tool-call-4",
                     "name": mock_tool().name,
                     "args": {"tasks": [{"description": "step1"}]},
                 },
@@ -212,7 +212,7 @@ class ToolTestCase:
                         "planner": [
                             ToolMessage(
                                 content="Tool does_not_exist not found",
-                                tool_call_id="1",
+                                tool_call_id="tool-call-3",
                             )
                         ]
                     }
@@ -263,9 +263,10 @@ async def test_run(
         workflow_type=workflow_type,
         internal_event_client=internal_event_client,
     )
-    workflow_state["conversation_history"]["planner"] = [
-        AIMessage(content=test_case.ai_content, tool_calls=test_case.tool_calls),
-    ]
+    ai_message = AIMessage(
+        content=test_case.ai_content, tool_calls=test_case.tool_calls, id="ai-msg-123"
+    )
+    workflow_state["conversation_history"]["planner"] = [ai_message]
 
     result = await tools_executor.run(workflow_state)
 
@@ -290,10 +291,27 @@ async def test_run(
 
         if expected_agent_messages > 0:
             assert ui_chat_logs[message_index]["message_type"] == MessageTypeEnum.AGENT
+            assert ui_chat_logs[message_index]["message_id"] == "ai-msg-123"
             message_index += 1
+
+        # Verify tool call ids are reflected in ui_chat_log
+        # Only tools that were successfully called will have ui_chat_log entries
+        successful_tool_calls = [
+            tc
+            for tc in test_case.tool_calls
+            if any(
+                tool.name == tc["name"] and expect_call
+                for tool, expect_call in test_case.tools.items()
+            )
+        ]
 
         for i in range(message_index, len(ui_chat_logs)):
             assert ui_chat_logs[i]["message_type"] == MessageTypeEnum.TOOL
+            # Map ui_chat_log index to successful tool call index
+            tool_log_index = i - message_index
+            if tool_log_index < len(successful_tool_calls):
+                expected_tool_call_id = successful_tool_calls[tool_log_index]["id"]
+                assert ui_chat_logs[i]["message_id"] == expected_tool_call_id
 
     for tool, expect_call in test_case.tools.items():
         if expect_call:
@@ -326,11 +344,12 @@ async def test_run(
                 content=[{"type": "text", "text": "I'm going to search for something"}],
                 tool_calls=[
                     {
-                        "id": "1",
+                        "id": "tool-call-ai-1",
                         "name": tool.name,
                         "args": {"tasks": [{"description": "step1"}]},
                     }
                 ],
+                id="ai-msg-1",
             ),
             [MessageTypeEnum.AGENT, MessageTypeEnum.TOOL],
         ),
@@ -340,6 +359,7 @@ async def test_run(
                     {"type": "text", "text": "I'm just thinking without using tools"}
                 ],
                 tool_calls=[],
+                id="ai-msg-2",
             ),
             [MessageTypeEnum.AGENT],
         ),
@@ -348,16 +368,17 @@ async def test_run(
                 content=[{"type": "text", "text": "I'm going to use multiple tools"}],
                 tool_calls=[
                     {
-                        "id": "1",
+                        "id": "tool-call-ai-3a",
                         "name": tool.name,
                         "args": {"tasks": [{"description": "step1"}]},
                     },
                     {
-                        "id": "2",
+                        "id": "tool-call-ai-3b",
                         "name": tool.name,
                         "args": {"tasks": [{"description": "step2"}]},
                     },
                 ],
+                id="ai-msg-3",
             ),
             [MessageTypeEnum.AGENT, MessageTypeEnum.TOOL, MessageTypeEnum.TOOL],
         ),
@@ -370,11 +391,12 @@ async def test_run(
                 content=[{"type": "text", "text": "I'm going to check the plan"}],
                 tool_calls=[
                     {
-                        "id": "1",
+                        "id": "tool-call-ai-5",
                         "name": "get_plan",
                         "args": {},
                     }
                 ],
+                id="ai-msg-5",
             ),
             [],
         ),
@@ -385,16 +407,17 @@ async def test_run(
                 ],
                 tool_calls=[
                     {
-                        "id": "1",
+                        "id": "tool-call-ai-6a",
                         "name": "get_plan",
                         "args": {},
                     },
                     {
-                        "id": "2",
+                        "id": "tool-call-ai-6b",
                         "name": tool.name,
                         "args": {"tasks": [{"description": "step1"}]},
                     },
                 ],
+                id="ai-msg-6",
             ),
             [MessageTypeEnum.AGENT, MessageTypeEnum.TOOL],
         ),
@@ -444,6 +467,25 @@ async def test_adding_ai_context_to_ui_chat_logs(
             else:
                 expected_content = message.content
             assert ui_chat_log[0]["content"] == expected_content
+            # Verify AI message id is reflected in ui_chat_log
+            assert ui_chat_log[0]["message_id"] == message.id
+
+    # Verify tool call ids are reflected in ui_chat_log
+    message = last_message(tool)
+    if isinstance(message, AIMessage) and message.tool_calls:
+        tool_log_start_index = (
+            1
+            if expected_message_types
+            and expected_message_types[0] == MessageTypeEnum.AGENT
+            else 0
+        )
+        visible_tool_calls = [
+            tc for tc in message.tool_calls if tc["name"] not in ["get_plan"]
+        ]
+        for i, tool_call in enumerate(visible_tool_calls):
+            log_index = tool_log_start_index + i
+            if log_index < len(ui_chat_log):
+                assert ui_chat_log[log_index]["message_id"] == tool_call["id"]
 
 
 @pytest.mark.asyncio
@@ -454,7 +496,7 @@ async def test_adding_ai_context_to_ui_chat_logs(
             "plan": {"steps": []},
             "tool_calls": [
                 {
-                    "id": "1",
+                    "id": "create-plan-1",
                     "name": "create_plan",
                     "args": {
                         "tasks": ["Task 1", "Task 2", "Task 3"],
@@ -463,7 +505,9 @@ async def test_adding_ai_context_to_ui_chat_logs(
             ],
             "tools_response": [
                 ToolMessage(
-                    content="Plan created", name="create_plan", tool_call_id="1"
+                    content="Plan created",
+                    name="create_plan",
+                    tool_call_id="create-plan-1",
                 )
             ],
             "expected_plan": {
@@ -479,14 +523,14 @@ async def test_adding_ai_context_to_ui_chat_logs(
             "plan": {"steps": []},
             "tool_calls": [
                 {
-                    "id": "1",
+                    "id": "create-plan-2a",
                     "name": "create_plan",
                     "args": {
                         "tasks": ["Task 1", "Task 2", "Task 3"],
                     },
                 },
                 {
-                    "id": "2",
+                    "id": "create-plan-2b",
                     "name": "create_plan",
                     "args": {
                         "tasks": ["Task 4", "Task 5"],
@@ -495,10 +539,14 @@ async def test_adding_ai_context_to_ui_chat_logs(
             ],
             "tools_response": [
                 ToolMessage(
-                    content="Plan created", name="create_plan", tool_call_id="1"
+                    content="Plan created",
+                    name="create_plan",
+                    tool_call_id="create-plan-2a",
                 ),
                 ToolMessage(
-                    content="Plan created", name="create_plan", tool_call_id="2"
+                    content="Plan created",
+                    name="create_plan",
+                    tool_call_id="create-plan-2b",
                 ),
             ],
             "expected_plan": {
@@ -516,7 +564,7 @@ async def test_adding_ai_context_to_ui_chat_logs(
             "plan": {"steps": []},
             "tool_calls": [
                 {
-                    "id": "1",
+                    "id": "update-task-3",
                     "name": "update_task_description",
                     "args": {
                         "task_id": "1",
@@ -528,7 +576,7 @@ async def test_adding_ai_context_to_ui_chat_logs(
                 ToolMessage(
                     content="Task not found: 1",
                     name="update_task_description",
-                    tool_call_id="1",
+                    tool_call_id="update-task-3",
                 )
             ],
             "expected_plan": {"steps": []},
@@ -538,7 +586,7 @@ async def test_adding_ai_context_to_ui_chat_logs(
             "plan": {"steps": [{"id": "1", "description": "old step1"}]},
             "tool_calls": [
                 {
-                    "id": "1",
+                    "id": "update-task-4",
                     "name": "update_task_description",
                     "args": {
                         "task_id": "1",
@@ -550,7 +598,7 @@ async def test_adding_ai_context_to_ui_chat_logs(
                 ToolMessage(
                     content="Task updated: 1",
                     name="update_task_description",
-                    tool_call_id="1",
+                    tool_call_id="update-task-4",
                 )
             ],
             "expected_plan": {"steps": [{"id": "1", "description": "new step1"}]},
@@ -560,14 +608,16 @@ async def test_adding_ai_context_to_ui_chat_logs(
             "plan": {"steps": []},
             "tool_calls": [
                 {
-                    "id": "1",
+                    "id": "add-task-5",
                     "name": "add_new_task",
                     "args": {"description": "New task"},
                 }
             ],
             "tools_response": [
                 ToolMessage(
-                    content="Step added: task-0", name="add_new_task", tool_call_id="1"
+                    content="Step added: task-0",
+                    name="add_new_task",
+                    tool_call_id="add-task-5",
                 )
             ],
             "expected_plan": {
@@ -585,14 +635,16 @@ async def test_adding_ai_context_to_ui_chat_logs(
             "plan": {"steps": [{"id": "1", "description": "Task to remove"}]},
             "tool_calls": [
                 {
-                    "id": "1",
+                    "id": "remove-task-6",
                     "name": "remove_task",
                     "args": {"task_id": "1", "description": "Test description 1"},
                 }
             ],
             "tools_response": [
                 ToolMessage(
-                    content="Task removed: 1", name="remove_task", tool_call_id="1"
+                    content="Task removed: 1",
+                    name="remove_task",
+                    tool_call_id="remove-task-6",
                 )
             ],
             "expected_plan": {"steps": []},
@@ -610,7 +662,7 @@ async def test_adding_ai_context_to_ui_chat_logs(
             },
             "tool_calls": [
                 {
-                    "id": "1",
+                    "id": "set-status-7",
                     "name": "set_task_status",
                     "args": {
                         "task_id": "1",
@@ -623,7 +675,7 @@ async def test_adding_ai_context_to_ui_chat_logs(
                 ToolMessage(
                     content="Task status set: 1 - In Progress",
                     name="set_task_status",
-                    tool_call_id="1",
+                    tool_call_id="set-status-7",
                 )
             ],
             "expected_plan": {
@@ -654,7 +706,7 @@ async def test_adding_ai_context_to_ui_chat_logs(
             },
             "tool_calls": [
                 {
-                    "id": "1",
+                    "id": "set-status-8a",
                     "name": "set_task_status",
                     "args": {
                         "task_id": "1",
@@ -663,7 +715,7 @@ async def test_adding_ai_context_to_ui_chat_logs(
                     },
                 },
                 {
-                    "id": "2",
+                    "id": "update-task-8b",
                     "name": "update_task_description",
                     "args": {
                         "task_id": "2",
@@ -675,12 +727,12 @@ async def test_adding_ai_context_to_ui_chat_logs(
                 ToolMessage(
                     content="Task status set: 1 - In Progress",
                     name="set_task_status",
-                    tool_call_id="1",
+                    tool_call_id="set-status-8a",
                 ),
                 ToolMessage(
                     content="Task updated: 2",
                     name="update_task_description",
-                    tool_call_id="2",
+                    tool_call_id="update-task-8b",
                 ),
             ],
             "expected_plan": {
@@ -719,7 +771,7 @@ async def test_adding_ai_context_to_ui_chat_logs(
             },
             "tool_calls": [
                 {
-                    "id": "1",
+                    "id": "set-status-9a",
                     "name": "set_task_status",
                     "args": {
                         "task_id": "1",
@@ -728,7 +780,7 @@ async def test_adding_ai_context_to_ui_chat_logs(
                     },
                 },
                 {
-                    "id": "2",
+                    "id": "remove-task-9b",
                     "name": "remove_task",
                     "args": {
                         "task_id": "2",
@@ -740,12 +792,12 @@ async def test_adding_ai_context_to_ui_chat_logs(
                 ToolMessage(
                     content="Task status set: 1 - In Progress",
                     name="set_task_status",
-                    tool_call_id="1",
+                    tool_call_id="set-status-9a",
                 ),
                 ToolMessage(
                     content="Task removed: 2",
                     name="remove_task",
-                    tool_call_id="2",
+                    tool_call_id="remove-task-9b",
                 ),
             ],
             "expected_plan": {
@@ -766,22 +818,26 @@ async def test_adding_ai_context_to_ui_chat_logs(
             "plan": {"steps": [{"id": "1", "description": "Task to remove"}]},
             "tool_calls": [
                 {
-                    "id": "1",
+                    "id": "remove-task-10a",
                     "name": "remove_task",
                     "args": {"task_id": "1", "description": "Test description 1"},
                 },
                 {
-                    "id": "2",
+                    "id": "remove-task-10b",
                     "name": "remove_task",
                     "args": {"task_id": "1", "description": "Test description 1"},
                 },
             ],
             "tools_response": [
                 ToolMessage(
-                    content="Task removed: 1", name="remove_task", tool_call_id="1"
+                    content="Task removed: 1",
+                    name="remove_task",
+                    tool_call_id="remove-task-10a",
                 ),
                 ToolMessage(
-                    content="Task removed: 1", name="remove_task", tool_call_id="2"
+                    content="Task removed: 1",
+                    name="remove_task",
+                    tool_call_id="remove-task-10b",
                 ),
             ],
             "expected_plan": {"steps": []},
@@ -802,6 +858,7 @@ async def test_state_manipulation(
         AIMessage(
             content=[{"type": "text", "text": "test"}],
             tool_calls=test_case["tool_calls"],
+            id="ai-msg-state-test",
         ),
     ]
     workflow_state["plan"] = test_case["plan"]
@@ -933,6 +990,7 @@ async def test_run_error_handling(
             content=[{"type": "text", "text": "test"}],
             tool_calls=[tool_call],
             response_metadata={"stop_reason": "tool_call"},
+            id="ai-msg-error-test",
         ),
     ]
 
@@ -1009,7 +1067,7 @@ async def test_run_error_max_tokens(
     mock_toolset.__getitem__ = MagicMock(return_value=None)
 
     tool_call = {
-        "id": "3",
+        "id": "read-file-max-tokens",
         "name": "read_file",
         "args": {"file_path": "some-long-file-name-that-is-truncated-"},
     }
@@ -1026,6 +1084,7 @@ async def test_run_error_max_tokens(
             content=[{"type": "text", "text": "test"}],
             tool_calls=[tool_call],
             response_metadata={"finish_reason": "length"},
+            id="ai-msg-max-tokens",
         ),
     ]
 
@@ -1149,7 +1208,7 @@ async def test_run_command_output(workflow_state, tools_executor, mock_client_ev
             content=[{"type": "text", "text": "testing"}],
             tool_calls=[
                 {
-                    "id": "1",
+                    "id": "run-command-test",
                     "name": "run_command",
                     "args": {
                         "program": "echo",
@@ -1158,6 +1217,7 @@ async def test_run_command_output(workflow_state, tools_executor, mock_client_ev
                     },
                 }
             ],
+            id="ai-msg-run-command",
         )
     ]
 
@@ -1187,9 +1247,10 @@ async def test_multiple_tool_calls(workflow_state, graph):
         AIMessage(
             content=[{"type": "text", "text": "test"}],
             tool_calls=[
-                {"id": "1", "name": "a", "args": {"a1": 1}},
-                {"id": "2", "name": "b", "args": {"b1": 1}},
+                {"id": "tool-a-call", "name": "a", "args": {"a1": 1}},
+                {"id": "tool-b-call", "name": "b", "args": {"b1": 1}},
             ],
+            id="ai-msg-multiple-tools",
         )
     ]
 
@@ -1200,6 +1261,23 @@ async def test_multiple_tool_calls(workflow_state, graph):
         HumanMessage(content="tool b"),
     ]
 
+    # Verify we have agent message + 2 tool messages
+    assert len(result["ui_chat_log"]) == 3
+
+    # Verify agent message
+    assert result["ui_chat_log"][0] == {
+        "message_type": MessageTypeEnum.AGENT,
+        "message_sub_type": None,
+        "content": "test",
+        "timestamp": "2025-01-01T12:00:00+00:00",
+        "status": ToolStatus.SUCCESS,
+        "tool_info": None,
+        "correlation_id": None,
+        "additional_context": None,
+        "message_id": "ai-msg-multiple-tools",
+    }
+
+    # Verify tool messages
     assert result["ui_chat_log"][-2:] == [
         {
             "message_type": MessageTypeEnum.TOOL,
@@ -1216,7 +1294,7 @@ async def test_multiple_tool_calls(workflow_state, graph):
             },
             "correlation_id": None,
             "additional_context": None,
-            "message_id": None,
+            "message_id": "tool-a-call",
         },
         {
             "message_type": MessageTypeEnum.TOOL,
@@ -1233,7 +1311,7 @@ async def test_multiple_tool_calls(workflow_state, graph):
             },
             "correlation_id": None,
             "additional_context": None,
-            "message_id": None,
+            "message_id": "tool-b-call",
         },
     ]
 
@@ -1283,11 +1361,12 @@ async def test_skip_agent_msg_prevents_duplicate_messages(
             content=[{"type": "text", "text": "I'll use a tool"}],
             tool_calls=[
                 {
-                    "id": "1",
+                    "id": "skip-agent-msg-tool-call",
                     "name": tool.name,
                     "args": {"tasks": [{"description": "step1"}]},
                 }
             ],
+            id="ai-msg-skip-test",
         )
     ]
 
@@ -1328,11 +1407,12 @@ async def test_skip_agent_msg_false_adds_agent_message(
             content=[{"type": "text", "text": "I'll use a tool"}],
             tool_calls=[
                 {
-                    "id": "1",
+                    "id": "no-skip-agent-msg-tool-call",
                     "name": tool.name,
                     "args": {"tasks": [{"description": "step1"}]},
                 }
             ],
+            id="ai-msg-no-skip-test",
         )
     ]
 
@@ -1346,7 +1426,9 @@ async def test_skip_agent_msg_false_adds_agent_message(
     assert len(ui_chat_log) == 2
     assert ui_chat_log[0]["message_type"] == MessageTypeEnum.AGENT
     assert ui_chat_log[0]["content"] == "I'll use a tool"
+    assert ui_chat_log[0]["message_id"] == "ai-msg-no-skip-test"
     assert ui_chat_log[1]["message_type"] == MessageTypeEnum.TOOL
     assert (
         ui_chat_log[1]["content"] == "Using test_tool: tasks=[{'description': 'step1'}]"
     )
+    assert ui_chat_log[1]["message_id"] == "no-skip-agent-msg-tool-call"
