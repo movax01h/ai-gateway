@@ -1,5 +1,6 @@
 from datetime import datetime, timezone
 from typing import Any, cast
+from uuid import uuid4
 
 import structlog
 from anthropic import APIStatusError
@@ -142,7 +143,7 @@ class Agent(BaseAgent):
                             correlation_id=None,
                             tool_info=None,
                             additional_context=None,
-                            message_id=None,
+                            message_id=f"error-{uuid4()}",
                         )
                     ],
                 }
@@ -162,29 +163,16 @@ class Agent(BaseAgent):
             isinstance(last_human_input, dict)
             and last_human_input.get("event_type") == WorkflowEventType.MESSAGE
         ):
-            content = self._parse_model_content(model_completion.content)
             return {
-                "ui_chat_log": ([self._create_ui_chat_log(content)] if content else []),
+                "ui_chat_log": (
+                    [self._create_ui_chat_log(model_completion)]
+                    if model_completion.text()
+                    else []
+                ),
                 "last_human_input": None,
             }
 
         return {}
-
-    def _parse_model_content(self, content: str | list) -> str | None:
-        if isinstance(content, str):
-            return content
-
-        if isinstance(content, list) and all(isinstance(item, str) for item in content):
-            return "\n".join(content)
-
-        return next(
-            (
-                item.get("text")
-                for item in content
-                if isinstance(item, dict) and item.get("text", False)
-            ),
-            None,
-        )
 
 
 def build_agent(

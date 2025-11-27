@@ -2,6 +2,7 @@
 
 import os
 from unittest.mock import AsyncMock, patch
+from uuid import UUID
 
 import pytest
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
@@ -59,7 +60,10 @@ class TestHumanApprovalCheckExecutor:
     @patch.dict(os.environ, {"WORKFLOW_INTERRUPT": "true"})
     @pytest.mark.asyncio
     @patch("duo_workflow_service.agents.human_approval_check_executor.interrupt")
-    async def test_run_with_message(self, mock_interrupt, workflow_state):
+    @patch("duo_workflow_service.agents.human_approval_check_executor.uuid4")
+    async def test_run_with_message(self, mock_uuid4, mock_interrupt, workflow_state):
+        mock_uuid4.return_value = UUID("87654321-4321-8765-4321-876543218765")
+
         event = {"event_type": WorkflowEventType.MESSAGE, "message": "response"}
         mock_interrupt.return_value = event
         executor = HumanApprovalCheckExecutor("agent", "1234", "approved-agent-status")
@@ -76,6 +80,11 @@ class TestHumanApprovalCheckExecutor:
 
         assert result["status"] == "approved-agent-status"
         assert result["last_human_input"] == event
+        assert len(result["ui_chat_log"]) == 1
+        assert (
+            result["ui_chat_log"][0]["message_id"]
+            == "user-87654321-4321-8765-4321-876543218765"
+        )
         assert result["conversation_history"]["agent"] == [
             ToolMessage(
                 content="Tool cancelled temporarily as user has a question",
@@ -89,7 +98,12 @@ class TestHumanApprovalCheckExecutor:
     @patch.dict(os.environ, {"WORKFLOW_INTERRUPT": "true"})
     @pytest.mark.asyncio
     @patch("duo_workflow_service.agents.human_approval_check_executor.interrupt")
-    async def test_run_with_empty_message(self, mock_interrupt, workflow_state):
+    @patch("duo_workflow_service.agents.human_approval_check_executor.uuid4")
+    async def test_run_with_empty_message(
+        self, mock_uuid4, mock_interrupt, workflow_state
+    ):
+        mock_uuid4.return_value = UUID("12345678-1234-5678-1234-567812345678")
+
         event = {"event_type": WorkflowEventType.MESSAGE, "message": ""}
         mock_interrupt.return_value = event
         executor = HumanApprovalCheckExecutor("agent", "1234", "approved-agent-status")
@@ -111,6 +125,10 @@ class TestHumanApprovalCheckExecutor:
         assert (
             result["ui_chat_log"][0]["content"]
             == "No message received, continuing workflow"
+        )
+        assert (
+            result["ui_chat_log"][0]["message_id"]
+            == "approval-12345678-1234-5678-1234-567812345678"
         )
         assert (
             "conversation_history" not in result

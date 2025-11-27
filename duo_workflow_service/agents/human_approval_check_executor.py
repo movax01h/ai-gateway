@@ -1,5 +1,6 @@
 from datetime import datetime, timezone
 from typing import Any, Dict, List
+from uuid import uuid4
 
 import structlog
 from langchain_core.messages import BaseMessage, HumanMessage, ToolMessage
@@ -68,7 +69,7 @@ class HumanApprovalCheckExecutor:
                         status=ToolStatus.SUCCESS,
                         tool_info=None,
                         additional_context=None,
-                        message_id=None,
+                        message_id=f"approval-{str(uuid4())}",
                     )
                 )
             else:
@@ -82,7 +83,7 @@ class HumanApprovalCheckExecutor:
                         status=ToolStatus.SUCCESS,
                         tool_info=None,
                         additional_context=None,
-                        message_id=None,
+                        message_id=f"user-{str(uuid4())}",
                     )
                 )
 

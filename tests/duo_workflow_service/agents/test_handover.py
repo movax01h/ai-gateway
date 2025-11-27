@@ -81,7 +81,7 @@ class TestHandoverAgent:
                         ],
                     ),
                     AIMessage(
-                        id="1",
+                        id="ai-msg-id",
                         content="test_message",
                         tool_calls=[
                             ToolCall(
@@ -108,7 +108,7 @@ class TestHandoverAgent:
                         "timestamp": "2025-01-01T12:00:00+00:00",
                         "tool_info": None,
                         "additional_context": None,
-                        "message_id": None,
+                        "message_id": "ai-msg-id",
                     },
                 ],
             ),
@@ -116,7 +116,7 @@ class TestHandoverAgent:
                 "test_agent",
                 [
                     AIMessage(
-                        id="1",
+                        id="ai-msg-id",
                         content="test_message",
                         tool_calls=[
                             ToolCall(
@@ -139,7 +139,7 @@ class TestHandoverAgent:
                         "correlation_id": None,
                         "tool_info": None,
                         "additional_context": None,
-                        "message_id": None,
+                        "message_id": "ai-msg-id",
                     },
                 ],
             ),
@@ -226,7 +226,7 @@ class TestHandoverAgent:
                     "correlation_id": None,
                     "tool_info": None,
                     "additional_context": None,
-                    "message_id": None,
+                    "message_id": "start-id",
                 }
             ],
         )

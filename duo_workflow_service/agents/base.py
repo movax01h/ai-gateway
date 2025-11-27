@@ -26,7 +26,7 @@ class BaseAgent(RunnableBinding[Any, BaseMessage]):
 
     def _create_ui_chat_log(
         self,
-        content: str,
+        message: BaseMessage,
         message_type: MessageTypeEnum = MessageTypeEnum.AGENT,
         status: ToolStatus | SlashCommandStatus | None = None,
         tool_info: ToolInfo | None = None,
@@ -34,11 +34,11 @@ class BaseAgent(RunnableBinding[Any, BaseMessage]):
         return UiChatLog(
             message_type=message_type,
             message_sub_type=None,
-            content=content,
+            content=message.text(),
             timestamp=datetime.now(timezone.utc).isoformat(),
             status=status,
             correlation_id=None,
             tool_info=tool_info,
             additional_context=None,
-            message_id=None,
+            message_id=message.id,
         )

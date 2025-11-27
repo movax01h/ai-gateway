@@ -166,8 +166,11 @@ Human message"""
         ("model_response", "expected_content"),
         [
             ("simple string", "simple string"),
-            ([["Line 1", "Line 2", "Line 3"]], "Line 1\nLine 2\nLine 3"),
-            ([[{"text": "Message from dict"}, {"other": "data"}]], "Message from dict"),
+            ([["Line 1", "Line 2", "Line 3"]], "Line 1Line 2Line 3"),
+            (
+                [[{"text": "Message from dict", "type": "text"}, {"other": "data"}]],
+                "Message from dict",
+            ),
             ([[{"other": "data"}, {"more": "data"}]], None),
         ],
     )
@@ -183,6 +186,7 @@ Human message"""
             assert len(result["ui_chat_log"]) == 1
             assert result["ui_chat_log"][0]["message_type"] == MessageTypeEnum.AGENT
             assert result["ui_chat_log"][0]["content"] == expected_content
+            assert result["ui_chat_log"][0]["message_id"].startswith("run--")
         else:
             assert len(result["ui_chat_log"]) == 0
 
@@ -253,6 +257,7 @@ Human message"""
             assert len(result["ui_chat_log"]) == 1
             assert result["ui_chat_log"][0]["message_type"] == MessageTypeEnum.AGENT
             assert result["ui_chat_log"][0]["status"] == ToolStatus.FAILURE
+            assert result["ui_chat_log"][0]["message_id"].startswith("error-")
             assert (
                 result["ui_chat_log"][0]["content"]
                 == "There was an error processing your request in the Duo Agent Platform, please try again or "
@@ -287,6 +292,7 @@ Human message"""
             assert len(result["ui_chat_log"]) == 1
             assert result["ui_chat_log"][0]["message_type"] == MessageTypeEnum.AGENT
             assert result["ui_chat_log"][0]["status"] == ToolStatus.FAILURE
+            assert result["ui_chat_log"][0]["message_id"].startswith("error-")
             assert (
                 result["ui_chat_log"][0]["content"]
                 == "There was an error connecting to the chosen LLM provider, please try again or contact "
