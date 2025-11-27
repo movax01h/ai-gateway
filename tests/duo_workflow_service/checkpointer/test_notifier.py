@@ -4,7 +4,7 @@ from typing import Any, Dict, List, Optional
 from unittest.mock import MagicMock, Mock, patch
 
 import pytest
-from langchain_core.messages import AIMessage, HumanMessage
+from langchain_core.messages import AIMessage, AIMessageChunk, HumanMessage
 
 from duo_workflow_service.checkpointer.gitlab_workflow import (
     WORKFLOW_STATUS_TO_CHECKPOINT_STATUS,
@@ -166,19 +166,19 @@ async def test_init_sets_attributes(outbox):
     assert notifier.ui_chat_log == []
     assert notifier.status == WorkflowStatusEnum.NOT_STARTED
     assert notifier.steps == []
+    assert notifier.latest_ai_message is None
 
 
 @pytest.mark.parametrize(
     (
-        "existing_messages",
-        "message_content",
+        "received_messages",
         "expected_messages",
-        "should_execute_action",
     ),
     [
         (
-            [],
-            "New message",
+            [
+                AIMessageChunk(id="agent-msg-id", content="New message"),
+            ],
             [
                 {
                     "message_id": "agent-msg-id",
@@ -192,11 +192,14 @@ async def test_init_sets_attributes(outbox):
                     "additional_context": None,
                 }
             ],
-            True,
         ),
         (
-            [],
-            [{"text": "Nested content", "type": "text"}],
+            [
+                AIMessageChunk(
+                    id="agent-msg-id",
+                    content=[{"text": "Nested content", "type": "text"}],
+                ),
+            ],
             [
                 {
                     "message_id": "agent-msg-id",
@@ -210,10 +213,24 @@ async def test_init_sets_attributes(outbox):
                     "additional_context": None,
                 }
             ],
-            True,
         ),
         (
             [
+                AIMessageChunk(id="different-msg-id", content="Different content"),
+                AIMessageChunk(id="agent-msg-id", content="New content"),
+            ],
+            [
+                {
+                    "message_id": "different-msg-id",
+                    "status": None,
+                    "correlation_id": None,
+                    "message_type": MessageTypeEnum.AGENT,
+                    "message_sub_type": None,
+                    "timestamp": "2023-01-01T00:00:00+00:00",
+                    "content": "Different content",
+                    "tool_info": None,
+                    "additional_context": None,
+                },
                 {
                     "message_id": "agent-msg-id",
                     "status": None,
@@ -221,12 +238,17 @@ async def test_init_sets_attributes(outbox):
                     "message_type": MessageTypeEnum.AGENT,
                     "message_sub_type": None,
                     "timestamp": "2023-01-01T00:00:00+00:00",
-                    "content": "Existing ",
+                    "content": "New content",
                     "tool_info": None,
                     "additional_context": None,
-                }
+                },
             ],
-            "content",
+        ),
+        (
+            [
+                AIMessageChunk(id="agent-msg-id", content="Existing "),
+                AIMessageChunk(id="agent-msg-id", content="content"),
+            ],
             [
                 {
                     "message_id": "agent-msg-id",
@@ -238,144 +260,41 @@ async def test_init_sets_attributes(outbox):
                     "content": "Existing content",
                     "tool_info": None,
                     "additional_context": None,
-                }
+                },
             ],
-            True,
         ),
         (
             [
-                {
-                    "message_id": "agent-completed-msg-id",
-                    "status": "COMPLETED",
-                    "correlation_id": None,
-                    "message_type": MessageTypeEnum.AGENT,
-                    "message_sub_type": None,
-                    "timestamp": "2023-01-01T00:00:00+00:00",
-                    "content": "Completed message",
-                    "tool_info": None,
-                    "additional_context": None,
-                }
+                AIMessage(id="agent-msg-id", content="Existing "),
+                AIMessage(id="agent-msg-id", content="content"),
             ],
-            "New message",
-            [
-                {
-                    "message_id": "agent-completed-msg-id",
-                    "status": "COMPLETED",
-                    "correlation_id": None,
-                    "message_type": MessageTypeEnum.AGENT,
-                    "message_sub_type": None,
-                    "timestamp": "2023-01-01T00:00:00+00:00",
-                    "content": "Completed message",
-                    "tool_info": None,
-                    "additional_context": None,
-                },
-                {
-                    "message_id": "agent-msg-id",
-                    "status": None,
-                    "correlation_id": None,
-                    "message_type": MessageTypeEnum.AGENT,
-                    "message_sub_type": None,
-                    "timestamp": "2023-01-01T00:00:00+00:00",
-                    "content": "New message",
-                    "tool_info": None,
-                    "additional_context": None,
-                },
-            ],
-            True,
-        ),
-        (
-            [
-                {
-                    "message_id": "user-msg-id",
-                    "status": None,
-                    "correlation_id": None,
-                    "message_type": MessageTypeEnum.USER,
-                    "message_sub_type": None,
-                    "timestamp": "2023-01-01T00:00:00+00:00",
-                    "content": "User message",
-                    "tool_info": None,
-                    "additional_context": None,
-                }
-            ],
-            "Agent response",
-            [
-                {
-                    "message_id": "user-msg-id",
-                    "status": None,
-                    "correlation_id": None,
-                    "message_type": MessageTypeEnum.USER,
-                    "message_sub_type": None,
-                    "timestamp": "2023-01-01T00:00:00+00:00",
-                    "content": "User message",
-                    "tool_info": None,
-                    "additional_context": None,
-                },
-                {
-                    "message_id": "agent-msg-id",
-                    "status": None,
-                    "correlation_id": None,
-                    "message_type": MessageTypeEnum.AGENT,
-                    "message_sub_type": None,
-                    "timestamp": "2023-01-01T00:00:00+00:00",
-                    "content": "Agent response",
-                    "tool_info": None,
-                    "additional_context": None,
-                },
-            ],
-            True,
-        ),
-        (
             [],
-            "",
-            [
-                {
-                    "message_id": "agent-msg-id",
-                    "status": None,
-                    "correlation_id": None,
-                    "message_type": MessageTypeEnum.AGENT,
-                    "message_sub_type": None,
-                    "timestamp": "2023-01-01T00:00:00+00:00",
-                    "content": "",
-                    "tool_info": None,
-                    "additional_context": None,
-                },
-            ],
-            True,
         ),
     ],
 )
 @pytest.mark.asyncio
 async def test_send_event_messages_stream(
     checkpoint_notifier,
-    existing_messages,
-    message_content,
+    received_messages,
     expected_messages,
-    should_execute_action,
 ):
-    checkpoint_notifier.ui_chat_log = existing_messages
-
     with patch("duo_workflow_service.checkpointer.notifier.datetime") as mock_datetime:
         mock_now = Mock()
         mock_now.now.return_value.isoformat.return_value = "2023-01-01T00:00:00+00:00"
         mock_datetime.now = mock_now.now
 
-        message = AIMessage(content=message_content, id="agent-msg-id")
-        await checkpoint_notifier.send_event("messages", (message, {}), True)
+        for message in received_messages:
+            await checkpoint_notifier.send_event("messages", (message, {}), True)
 
         assert checkpoint_notifier.ui_chat_log == expected_messages
 
-        if should_execute_action:
-            action = checkpoint_notifier.outbox.put_action.call_args[0][0]
+        action = checkpoint_notifier.outbox.put_action.call_args[0][0]
 
-            # Action in outbox is a placeholder. We need to load the full latest checkpoint.
-            action.newCheckpoint.CopyFrom(
-                checkpoint_notifier.most_recent_new_checkpoint()
-            )
+        # Action in outbox is a placeholder. We need to load the full latest checkpoint.
+        action.newCheckpoint.CopyFrom(checkpoint_notifier.most_recent_new_checkpoint())
 
-            assert action.newCheckpoint.goal == "test_goal"
-            assert action.newCheckpoint.checkpoint is not None
-        else:
-            checkpoint_notifier.outbox.put_action.assert_not_called()
+        assert action.newCheckpoint.goal == "test_goal"
+        assert action.newCheckpoint.checkpoint is not None
 
 
 @pytest.mark.asyncio
@@ -392,7 +311,7 @@ async def test_checkpoint_number_increments_on_send_event(checkpoint_notifier):
 
 def test_most_recent_new_checkpoint(checkpoint_notifier):
     checkpoint_notifier.status = WorkflowStatusEnum.EXECUTION
-    checkpoint_notifier.ui_chat_log = [{"content": "test"}]
+    checkpoint_notifier.ui_chat_log = [{"content": "test", "message_id": "msg-1"}]
     checkpoint_notifier.steps = [{"step": "1"}]
 
     checkpoint = checkpoint_notifier.most_recent_new_checkpoint()
@@ -402,7 +321,7 @@ def test_most_recent_new_checkpoint(checkpoint_notifier):
     expected_checkpoint = dumps(
         {
             "channel_values": {
-                "ui_chat_log": [{"content": "test"}],
+                "ui_chat_log": [{"content": "test", "message_id": "msg-1"}],
                 "plan": {"steps": [{"step": "1"}]},
             }
         }
