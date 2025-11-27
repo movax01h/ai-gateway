@@ -97,6 +97,7 @@ class HandoverAgent:
                         correlation_id=None,
                         tool_info=None,
                         additional_context=None,
+                        message_id=None,
                     )
                 )
                 return AIMessage(content=summary)

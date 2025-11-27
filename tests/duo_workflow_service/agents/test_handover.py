@@ -108,6 +108,7 @@ class TestHandoverAgent:
                         "timestamp": "2025-01-01T12:00:00+00:00",
                         "tool_info": None,
                         "additional_context": None,
+                        "message_id": None,
                     },
                 ],
             ),
@@ -138,6 +139,7 @@ class TestHandoverAgent:
                         "correlation_id": None,
                         "tool_info": None,
                         "additional_context": None,
+                        "message_id": None,
                     },
                 ],
             ),
@@ -224,6 +226,7 @@ class TestHandoverAgent:
                     "correlation_id": None,
                     "tool_info": None,
                     "additional_context": None,
+                    "message_id": None,
                 }
             ],
         )

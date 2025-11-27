@@ -38,6 +38,7 @@ class DefaultUILogWriter[E: BaseUILogEvents](BaseUILogWriter[E]):
             tool_info=None,
             additional_context=kwargs.get("additional_context", []),
             message_sub_type=None,
+            message_id=None,
         )
 
     def _log_warning(self, *args, **kwargs) -> UiChatLog:

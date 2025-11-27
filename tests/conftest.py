@@ -719,6 +719,7 @@ def ui_chat_log_fixture() -> list[UiChatLog]:
             "tool_info": None,
             "message_sub_type": None,
             "additional_context": None,
+            "message_id": None,
         }
     ]
 

@@ -112,6 +112,7 @@ class Flow(AbstractWorkflow):
         initial_ui_chat_log = UiChatLog(
             message_type=MessageTypeEnum.TOOL,
             content=f"Starting Flow: {goal}",
+            message_id=None,
             timestamp=datetime.now(timezone.utc).isoformat(),
             status=ToolStatus.SUCCESS,
             correlation_id=None,

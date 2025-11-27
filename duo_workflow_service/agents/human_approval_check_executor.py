@@ -68,6 +68,7 @@ class HumanApprovalCheckExecutor:
                         status=ToolStatus.SUCCESS,
                         tool_info=None,
                         additional_context=None,
+                        message_id=None,
                     )
                 )
             else:
@@ -81,6 +82,7 @@ class HumanApprovalCheckExecutor:
                         status=ToolStatus.SUCCESS,
                         tool_info=None,
                         additional_context=None,
+                        message_id=None,
                     )
                 )
 

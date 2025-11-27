@@ -317,6 +317,7 @@ class Workflow(AbstractWorkflow):
             message_type=MessageTypeEnum.TOOL,
             message_sub_type=None,
             content=f"Starting workflow with goal: {goal}",
+            message_id=None,
             timestamp=datetime.now(timezone.utc).isoformat(),
             status=ToolStatus.SUCCESS,
             correlation_id=None,
