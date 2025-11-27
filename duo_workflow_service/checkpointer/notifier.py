@@ -1,10 +1,10 @@
 from copy import deepcopy
 from datetime import datetime, timezone
 from json import dumps
-from typing import Union
+from typing import Optional, Union
 
 import structlog
-from langchain_core.messages import BaseMessage
+from langchain_core.messages import AIMessageChunk, BaseMessage, BaseMessageChunk
 
 from contract import contract_pb2
 from duo_workflow_service.checkpointer.gitlab_workflow import (
@@ -31,6 +31,7 @@ class UserInterface:
         self.status = WorkflowStatusEnum.NOT_STARTED
         self.steps: list[dict] = []
         self.checkpoint_number = 0
+        self.latest_ai_message: Optional[BaseMessageChunk] = None
 
     async def send_event(
         self,
@@ -56,9 +57,9 @@ class UserInterface:
         if type == "messages":
             (message, _) = state
 
-            has_content = self._append_chunk_to_ui_chat_log(message)
-            if has_content:
-                return await self._execute_action()
+            self._append_chunk_to_ui_chat_log(message)
+
+            return await self._execute_action()
 
     async def _execute_action(self):
         # This is a placeholder empty message. The message will be replaced
@@ -100,7 +101,7 @@ class UserInterface:
             ),
         )
 
-    def _append_chunk_to_ui_chat_log(self, message: BaseMessage) -> bool:
+    def _append_chunk_to_ui_chat_log(self, message: BaseMessage):
         """Append a message chunk to the UI chat log.
 
         Processes incoming message chunks and either creates a new chat log entry
@@ -108,31 +109,25 @@ class UserInterface:
 
         Args:
             message (BaseMessage): The message chunk to be processed and added to the log.
-
-        Returns:
-            bool: True if content was successfully added to the chat log, False if
-                the message had no content to add.
         """
-        if (
-            not self.ui_chat_log
-            or self.ui_chat_log[-1]["message_type"] != MessageTypeEnum.AGENT
-            or self.ui_chat_log[-1]["status"]
-        ):
-            last_message = UiChatLog(
+
+        if not isinstance(message, AIMessageChunk):
+            return
+
+        if self.latest_ai_message and self.latest_ai_message.id == message.id:
+            self.latest_ai_message += message
+            self.ui_chat_log[-1]["content"] = self.latest_ai_message.text()
+        else:
+            self.latest_ai_message = message
+            last_ui_message = UiChatLog(
                 message_id=message.id,
                 status=None,
                 correlation_id=None,
                 message_type=MessageTypeEnum.AGENT,
                 message_sub_type=None,
                 timestamp=datetime.now(timezone.utc).isoformat(),
-                content="",
+                content=message.text(),
                 tool_info=None,
                 additional_context=None,
             )
-            self.ui_chat_log.append(last_message)
-        else:
-            last_message = self.ui_chat_log[-1]
-
-        last_message["content"] = last_message["content"] + message.text()
-
-        return True
+            self.ui_chat_log.append(last_ui_message)
