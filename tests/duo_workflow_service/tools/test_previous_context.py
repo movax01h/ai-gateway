@@ -186,34 +186,3 @@ class TestGetSessionContext:
             match="Unable to parse context from last checkpoint for this session",
         ):
             get_last_checkpoint_tool._format_checkpoint_context(bad_checkpoint)
-
-    @pytest.mark.asyncio
-    async def test_format_checkpoint_context_failed_workflow(
-        self, get_last_checkpoint_tool
-    ):
-        checkpoint = {
-            "checkpoint": {
-                "channel_values": {
-                    "plan": {"steps": []},
-                    "handover": [
-                        {"type": "system", "content": "System message"},
-                        {"type": "human", "content": "Message without goal"},
-                        {"type": "ai", "content": "Summary"},
-                    ],
-                    "status": "Failed",
-                }
-            },
-            "metadata": {
-                "step": 4,
-                "source": "loop",
-                "writes": {},
-                "parents": {},
-                "thread_id": "123",
-            },
-        }
-
-        with pytest.raises(
-            ValueError,
-            match="Can only collect context on completed workflows",
-        ):
-            get_last_checkpoint_tool._format_checkpoint_context(checkpoint)

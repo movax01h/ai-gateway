@@ -84,9 +84,6 @@ class GetSessionContext(DuoBaseTool):
             return json.dumps(context)
 
         channel_values = checkpoint["checkpoint"]["channel_values"]
-        if channel_values.get("status", "") != "Completed":
-            raise ValueError("Can only collect context on completed workflows")
-
         plan = channel_values.get("plan", {})
 
         goal = ""
