@@ -380,6 +380,8 @@ async def test_list_work_items_with_filters(
         "sort": "CREATED_DESC",
         "label_name": ["api"],
         "assignee_usernames": ["admin"],
+        "health_status_filter": "atRisk",
+        "status": {"name": "Won't do"},
     }
 
     response = await tool._arun(**args)
@@ -402,6 +404,8 @@ async def test_list_work_items_with_filters(
         "sort": "CREATED_DESC",
         "labelName": ["api"],
         "assigneeUsernames": ["admin"],
+        "healthStatusFilter": "atRisk",
+        "status": {"name": "Won't do"},
     }
 
     gql_vars = gitlab_client_mock.graphql.call_args[0][1]

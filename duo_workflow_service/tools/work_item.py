@@ -32,6 +32,8 @@ FILTER_KEY_MAPPING = {
     "sort": "sort",
     "labelName": "label_name",
     "assigneeUsernames": "assignee_usernames",
+    "healthStatusFilter": "health_status_filter",
+    "status": "status",
 }
 
 
@@ -147,6 +149,17 @@ class ListWorkItemsInput(ParentResourceInput):
             "Filter by work item types. Must be one of: "
             + ", ".join(sorted(type.upper().replace(" ", "_") for type in ALL_TYPES))
         ),
+    )
+    health_status_filter: Optional[str] = Field(
+        default=None,
+        description=(
+            "Filter by health status. Must be one of: "
+            + ", ".join(sorted(status.value for status in HealthStatus))
+        ),
+    )
+    status: Optional[Dict[Literal["name"], str]] = Field(
+        default=None,
+        description=("Filter by status. Must be a dictionary with 'name' key."),
     )
 
 

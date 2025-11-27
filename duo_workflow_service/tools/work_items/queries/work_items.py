@@ -315,7 +315,7 @@ query GetProjectWorkItem($fullPath: ID!, $iid: String!, $childrenPageSize: Int, 
 """
 
 LIST_GROUP_WORK_ITEMS_QUERY = """
-query ListGroupWorkItems($fullPath: ID!, $state: IssuableState, $search: String, $authorUsername: String, $createdAfter: Time, $createdBefore: Time, $updatedAfter: Time, $updatedBefore: Time, $dueAfter: Time, $dueBefore: Time, $sort: WorkItemSort, $first: Int, $after: String, $types: [IssueType!], $labelName: [String!], $assigneeUsernames: [String!]) {
+query ListGroupWorkItems($fullPath: ID!, $state: IssuableState, $search: String, $authorUsername: String, $createdAfter: Time, $createdBefore: Time, $updatedAfter: Time, $updatedBefore: Time, $dueAfter: Time, $dueBefore: Time, $sort: WorkItemSort, $first: Int, $after: String, $types: [IssueType!], $labelName: [String!], $assigneeUsernames: [String!], healthStatusFilter: String, $status: WorkItemWidgetStatusFilterInput) {
     namespace(fullPath: $fullPath) {
         workItems(
             state: $state
@@ -333,6 +333,8 @@ query ListGroupWorkItems($fullPath: ID!, $state: IssuableState, $search: String,
             types: $types
             labelName: $labelName
             assigneeUsernames: $assigneeUsernames
+            healthStatusFilter: $healthStatusFilter
+            status: $status
         ) {
             pageInfo {
                 hasNextPage
@@ -364,7 +366,7 @@ query ListGroupWorkItems($fullPath: ID!, $state: IssuableState, $search: String,
 """
 
 LIST_PROJECT_WORK_ITEMS_QUERY = """
-query ListProjectWorkItems($fullPath: ID!, $state: IssuableState, $search: String, $authorUsername: String, $createdAfter: Time, $createdBefore: Time, $updatedAfter: Time, $updatedBefore: Time, $dueAfter: Time, $dueBefore: Time, $sort: WorkItemSort, $first: Int, $after: String, $types: [IssueType!], $labelName: [String!], $assigneeUsernames: [String!]) {
+query ListProjectWorkItems($fullPath: ID!, $state: IssuableState, $search: String, $authorUsername: String, $createdAfter: Time, $createdBefore: Time, $updatedAfter: Time, $updatedBefore: Time, $dueAfter: Time, $dueBefore: Time, $sort: WorkItemSort, $first: Int, $after: String, $types: [IssueType!], $labelName: [String!], $assigneeUsernames: [String!], healthStatusFilter: String, $status: WorkItemWidgetStatusFilterInput) {
     project(fullPath: $fullPath) {
         workItems(
             state: $state
@@ -382,6 +384,8 @@ query ListProjectWorkItems($fullPath: ID!, $state: IssuableState, $search: Strin
             types: $types
             labelName: $labelName
             assigneeUsernames: $assigneeUsernames
+            healthStatusFilter: $healthStatusFilter
+            status: $status
         ) {
             pageInfo {
                 hasNextPage
