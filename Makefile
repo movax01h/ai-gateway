@@ -109,7 +109,7 @@ gen-proto-node: bin/protoc
 		-I tmp/protoc-${PROTOC_VERSION}/include \
 		--proto_path=./contract \
 		--ts_proto_out=clients/node/src/grpc \
-		--ts_proto_opt=env=node,useAbortSignal=true,esModuleInterop=true,outputServices=grpc-js \
+		--ts_proto_opt=env=node,useAbortSignal=true,esModuleInterop=true,outputServices=grpc-js,snakeToCamel=false \
 		./contract/contract.proto
 		@echo "Building Node client after generating proto files..."
 		@(cd clients/node; npx tsc)
