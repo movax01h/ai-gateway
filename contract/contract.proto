@@ -30,11 +30,11 @@ message StartWorkflowRequest {
     repeated string clientCapabilities = 6;
     reserved 7; // Previously used for removed ContextElement field
     repeated McpTool mcpTools = 8;
-    repeated AdditionalContext additional_context = 9;
+    repeated AdditionalContext additional_context = 9 [json_name = "additional_context"];
     optional Approval approval = 10;
     optional google.protobuf.Struct flowConfig = 11;
     optional string flowConfigSchemaVersion = 12;
-    repeated string preapproved_tools = 13;
+    repeated string preapproved_tools = 13 [json_name = "preapproved_tools"];
 }
 
 message ActionResponse {
@@ -43,7 +43,7 @@ message ActionResponse {
     oneof response_type {
         PlainTextResponse plainTextResponse = 3;
         HttpResponse httpResponse = 4;
-    }
+    };
 }
 
 message HeartbeatRequest {
@@ -128,7 +128,7 @@ message RunHTTPRequest {
 message RunGitCommand {
     string command = 1;
     optional string arguments = 2;
-    string repository_url = 3;
+    string repository_url = 3 [json_name = "repository_url"];
 }
 
 message GenerateTokenRequest {
@@ -146,7 +146,7 @@ message ListToolsRequest {
 
 message ListToolsResponse {
   repeated google.protobuf.Struct tools = 1;
-  repeated google.protobuf.Struct eval_dataset = 2;
+  repeated google.protobuf.Struct eval_dataset = 2 [json_name = "eval_dataset"];
 }
 
 
@@ -157,7 +157,7 @@ message ListFlowsRequest {
 message ListFlowsRequestFilter {
     reserved 1;
     reserved "name";
-    repeated string flow_identifier = 4;
+    repeated string flow_identifier = 4 [json_name = "flow_identifier"];
     repeated string environment = 2;
     repeated string version = 3;
 }
@@ -178,13 +178,13 @@ message ListDirectory {
 }
 
 message Grep {
-    string search_directory = 1;
+    string search_directory = 1 [json_name = "search_directory"];
     string pattern = 2;
-    bool case_insensitive = 3;
+    bool case_insensitive = 3 [json_name = "case_insensitive"];
 }
 
 message FindFiles {
-    string name_pattern = 1;
+    string name_pattern = 1 [json_name = "name_pattern"];
 }
 
 message McpTool {
@@ -215,11 +215,11 @@ message Approval {
     oneof user_decision {
         Approved approval = 1;
         Rejected rejection = 2;
-    }
+    };
 }
 
 message Mkdir {
-    string directory_path = 1;
+    string directory_path = 1 [json_name = "directory_path"];
 }
 
 message OsInformationContext {
@@ -228,10 +228,10 @@ message OsInformationContext {
 }
 
 message ShellInformationContext {
-    string shell_name = 1;
-    string shell_type = 2;
-    optional string shell_variant = 3;
-    optional string shell_environment = 4;
-    optional bool ssh_session = 5;
+    string shell_name = 1 [json_name = "shell_name"];
+    string shell_type = 2 [json_name = "shell_type"];
+    optional string shell_variant = 3 [json_name = "shell_variant"];
+    optional string shell_environment = 4 [json_name = "shell_environment"];
+    optional bool ssh_session = 5 [json_name = "ssh_session"];
     optional string cwd = 6;
 }

@@ -39,11 +39,11 @@ export interface StartWorkflowRequest {
   workflowMetadata: string;
   clientCapabilities: string[];
   mcpTools: McpTool[];
-  additionalContext: AdditionalContext[];
+  additional_context: AdditionalContext[];
   approval?: Approval | undefined;
   flowConfig?: { [key: string]: any } | undefined;
   flowConfigSchemaVersion?: string | undefined;
-  preapprovedTools: string[];
+  preapproved_tools: string[];
 }
 
 export interface ActionResponse {
@@ -136,7 +136,7 @@ export interface RunHTTPRequest {
 export interface RunGitCommand {
   command: string;
   arguments?: string | undefined;
-  repositoryUrl: string;
+  repository_url: string;
 }
 
 export interface GenerateTokenRequest {
@@ -154,7 +154,7 @@ export interface ListToolsRequest {
 
 export interface ListToolsResponse {
   tools: { [key: string]: any }[];
-  evalDataset: { [key: string]: any }[];
+  eval_dataset: { [key: string]: any }[];
 }
 
 export interface ListFlowsRequest {
@@ -162,7 +162,7 @@ export interface ListFlowsRequest {
 }
 
 export interface ListFlowsRequestFilter {
-  flowIdentifier: string[];
+  flow_identifier: string[];
   environment: string[];
   version: string[];
 }
@@ -183,13 +183,13 @@ export interface ListDirectory {
 }
 
 export interface Grep {
-  searchDirectory: string;
+  search_directory: string;
   pattern: string;
-  caseInsensitive: boolean;
+  case_insensitive: boolean;
 }
 
 export interface FindFiles {
-  namePattern: string;
+  name_pattern: string;
 }
 
 export interface McpTool {
@@ -223,7 +223,7 @@ export interface Approval_Rejected {
 }
 
 export interface Mkdir {
-  directoryPath: string;
+  directory_path: string;
 }
 
 export interface OsInformationContext {
@@ -232,11 +232,11 @@ export interface OsInformationContext {
 }
 
 export interface ShellInformationContext {
-  shellName: string;
-  shellType: string;
-  shellVariant?: string | undefined;
-  shellEnvironment?: string | undefined;
-  sshSession?: boolean | undefined;
+  shell_name: string;
+  shell_type: string;
+  shell_variant?: string | undefined;
+  shell_environment?: string | undefined;
+  ssh_session?: boolean | undefined;
   cwd?: string | undefined;
 }
 
@@ -365,11 +365,11 @@ function createBaseStartWorkflowRequest(): StartWorkflowRequest {
     workflowMetadata: "",
     clientCapabilities: [],
     mcpTools: [],
-    additionalContext: [],
+    additional_context: [],
     approval: undefined,
     flowConfig: undefined,
     flowConfigSchemaVersion: undefined,
-    preapprovedTools: [],
+    preapproved_tools: [],
   };
 }
 
@@ -396,7 +396,7 @@ export const StartWorkflowRequest: MessageFns<StartWorkflowRequest> = {
     for (const v of message.mcpTools) {
       McpTool.encode(v!, writer.uint32(66).fork()).join();
     }
-    for (const v of message.additionalContext) {
+    for (const v of message.additional_context) {
       AdditionalContext.encode(v!, writer.uint32(74).fork()).join();
     }
     if (message.approval !== undefined) {
@@ -408,7 +408,7 @@ export const StartWorkflowRequest: MessageFns<StartWorkflowRequest> = {
     if (message.flowConfigSchemaVersion !== undefined) {
       writer.uint32(98).string(message.flowConfigSchemaVersion);
     }
-    for (const v of message.preapprovedTools) {
+    for (const v of message.preapproved_tools) {
       writer.uint32(106).string(v!);
     }
     return writer;
@@ -482,7 +482,7 @@ export const StartWorkflowRequest: MessageFns<StartWorkflowRequest> = {
             break;
           }
 
-          message.additionalContext.push(AdditionalContext.decode(reader, reader.uint32()));
+          message.additional_context.push(AdditionalContext.decode(reader, reader.uint32()));
           continue;
         }
         case 10: {
@@ -514,7 +514,7 @@ export const StartWorkflowRequest: MessageFns<StartWorkflowRequest> = {
             break;
           }
 
-          message.preapprovedTools.push(reader.string());
+          message.preapproved_tools.push(reader.string());
           continue;
         }
       }
@@ -537,16 +537,16 @@ export const StartWorkflowRequest: MessageFns<StartWorkflowRequest> = {
         ? object.clientCapabilities.map((e: any) => globalThis.String(e))
         : [],
       mcpTools: globalThis.Array.isArray(object?.mcpTools) ? object.mcpTools.map((e: any) => McpTool.fromJSON(e)) : [],
-      additionalContext: globalThis.Array.isArray(object?.additionalContext)
-        ? object.additionalContext.map((e: any) => AdditionalContext.fromJSON(e))
+      additional_context: globalThis.Array.isArray(object?.additional_context)
+        ? object.additional_context.map((e: any) => AdditionalContext.fromJSON(e))
         : [],
       approval: isSet(object.approval) ? Approval.fromJSON(object.approval) : undefined,
       flowConfig: isObject(object.flowConfig) ? object.flowConfig : undefined,
       flowConfigSchemaVersion: isSet(object.flowConfigSchemaVersion)
         ? globalThis.String(object.flowConfigSchemaVersion)
         : undefined,
-      preapprovedTools: globalThis.Array.isArray(object?.preapprovedTools)
-        ? object.preapprovedTools.map((e: any) => globalThis.String(e))
+      preapproved_tools: globalThis.Array.isArray(object?.preapproved_tools)
+        ? object.preapproved_tools.map((e: any) => globalThis.String(e))
         : [],
     };
   },
@@ -574,8 +574,8 @@ export const StartWorkflowRequest: MessageFns<StartWorkflowRequest> = {
     if (message.mcpTools?.length) {
       obj.mcpTools = message.mcpTools.map((e) => McpTool.toJSON(e));
     }
-    if (message.additionalContext?.length) {
-      obj.additionalContext = message.additionalContext.map((e) => AdditionalContext.toJSON(e));
+    if (message.additional_context?.length) {
+      obj.additional_context = message.additional_context.map((e) => AdditionalContext.toJSON(e));
     }
     if (message.approval !== undefined) {
       obj.approval = Approval.toJSON(message.approval);
@@ -586,8 +586,8 @@ export const StartWorkflowRequest: MessageFns<StartWorkflowRequest> = {
     if (message.flowConfigSchemaVersion !== undefined) {
       obj.flowConfigSchemaVersion = message.flowConfigSchemaVersion;
     }
-    if (message.preapprovedTools?.length) {
-      obj.preapprovedTools = message.preapprovedTools;
+    if (message.preapproved_tools?.length) {
+      obj.preapproved_tools = message.preapproved_tools;
     }
     return obj;
   },
@@ -604,13 +604,13 @@ export const StartWorkflowRequest: MessageFns<StartWorkflowRequest> = {
     message.workflowMetadata = object.workflowMetadata ?? "";
     message.clientCapabilities = object.clientCapabilities?.map((e) => e) || [];
     message.mcpTools = object.mcpTools?.map((e) => McpTool.fromPartial(e)) || [];
-    message.additionalContext = object.additionalContext?.map((e) => AdditionalContext.fromPartial(e)) || [];
+    message.additional_context = object.additional_context?.map((e) => AdditionalContext.fromPartial(e)) || [];
     message.approval = (object.approval !== undefined && object.approval !== null)
       ? Approval.fromPartial(object.approval)
       : undefined;
     message.flowConfig = object.flowConfig ?? undefined;
     message.flowConfigSchemaVersion = object.flowConfigSchemaVersion ?? undefined;
-    message.preapprovedTools = object.preapprovedTools?.map((e) => e) || [];
+    message.preapproved_tools = object.preapproved_tools?.map((e) => e) || [];
     return message;
   },
 };
@@ -2015,7 +2015,7 @@ export const RunHTTPRequest: MessageFns<RunHTTPRequest> = {
 };
 
 function createBaseRunGitCommand(): RunGitCommand {
-  return { command: "", arguments: undefined, repositoryUrl: "" };
+  return { command: "", arguments: undefined, repository_url: "" };
 }
 
 export const RunGitCommand: MessageFns<RunGitCommand> = {
@@ -2026,8 +2026,8 @@ export const RunGitCommand: MessageFns<RunGitCommand> = {
     if (message.arguments !== undefined) {
       writer.uint32(18).string(message.arguments);
     }
-    if (message.repositoryUrl !== "") {
-      writer.uint32(26).string(message.repositoryUrl);
+    if (message.repository_url !== "") {
+      writer.uint32(26).string(message.repository_url);
     }
     return writer;
   },
@@ -2060,7 +2060,7 @@ export const RunGitCommand: MessageFns<RunGitCommand> = {
             break;
           }
 
-          message.repositoryUrl = reader.string();
+          message.repository_url = reader.string();
           continue;
         }
       }
@@ -2076,7 +2076,7 @@ export const RunGitCommand: MessageFns<RunGitCommand> = {
     return {
       command: isSet(object.command) ? globalThis.String(object.command) : "",
       arguments: isSet(object.arguments) ? globalThis.String(object.arguments) : undefined,
-      repositoryUrl: isSet(object.repositoryUrl) ? globalThis.String(object.repositoryUrl) : "",
+      repository_url: isSet(object.repository_url) ? globalThis.String(object.repository_url) : "",
     };
   },
 
@@ -2088,8 +2088,8 @@ export const RunGitCommand: MessageFns<RunGitCommand> = {
     if (message.arguments !== undefined) {
       obj.arguments = message.arguments;
     }
-    if (message.repositoryUrl !== "") {
-      obj.repositoryUrl = message.repositoryUrl;
+    if (message.repository_url !== "") {
+      obj.repository_url = message.repository_url;
     }
     return obj;
   },
@@ -2101,7 +2101,7 @@ export const RunGitCommand: MessageFns<RunGitCommand> = {
     const message = createBaseRunGitCommand();
     message.command = object.command ?? "";
     message.arguments = object.arguments ?? undefined;
-    message.repositoryUrl = object.repositoryUrl ?? "";
+    message.repository_url = object.repository_url ?? "";
     return message;
   },
 };
@@ -2286,7 +2286,7 @@ export const ListToolsRequest: MessageFns<ListToolsRequest> = {
 };
 
 function createBaseListToolsResponse(): ListToolsResponse {
-  return { tools: [], evalDataset: [] };
+  return { tools: [], eval_dataset: [] };
 }
 
 export const ListToolsResponse: MessageFns<ListToolsResponse> = {
@@ -2294,7 +2294,7 @@ export const ListToolsResponse: MessageFns<ListToolsResponse> = {
     for (const v of message.tools) {
       Struct.encode(Struct.wrap(v!), writer.uint32(10).fork()).join();
     }
-    for (const v of message.evalDataset) {
+    for (const v of message.eval_dataset) {
       Struct.encode(Struct.wrap(v!), writer.uint32(18).fork()).join();
     }
     return writer;
@@ -2320,7 +2320,7 @@ export const ListToolsResponse: MessageFns<ListToolsResponse> = {
             break;
           }
 
-          message.evalDataset.push(Struct.unwrap(Struct.decode(reader, reader.uint32())));
+          message.eval_dataset.push(Struct.unwrap(Struct.decode(reader, reader.uint32())));
           continue;
         }
       }
@@ -2335,7 +2335,7 @@ export const ListToolsResponse: MessageFns<ListToolsResponse> = {
   fromJSON(object: any): ListToolsResponse {
     return {
       tools: globalThis.Array.isArray(object?.tools) ? [...object.tools] : [],
-      evalDataset: globalThis.Array.isArray(object?.evalDataset) ? [...object.evalDataset] : [],
+      eval_dataset: globalThis.Array.isArray(object?.eval_dataset) ? [...object.eval_dataset] : [],
     };
   },
 
@@ -2344,8 +2344,8 @@ export const ListToolsResponse: MessageFns<ListToolsResponse> = {
     if (message.tools?.length) {
       obj.tools = message.tools;
     }
-    if (message.evalDataset?.length) {
-      obj.evalDataset = message.evalDataset;
+    if (message.eval_dataset?.length) {
+      obj.eval_dataset = message.eval_dataset;
     }
     return obj;
   },
@@ -2356,7 +2356,7 @@ export const ListToolsResponse: MessageFns<ListToolsResponse> = {
   fromPartial<I extends Exact<DeepPartial<ListToolsResponse>, I>>(object: I): ListToolsResponse {
     const message = createBaseListToolsResponse();
     message.tools = object.tools?.map((e) => e) || [];
-    message.evalDataset = object.evalDataset?.map((e) => e) || [];
+    message.eval_dataset = object.eval_dataset?.map((e) => e) || [];
     return message;
   },
 };
@@ -2422,12 +2422,12 @@ export const ListFlowsRequest: MessageFns<ListFlowsRequest> = {
 };
 
 function createBaseListFlowsRequestFilter(): ListFlowsRequestFilter {
-  return { flowIdentifier: [], environment: [], version: [] };
+  return { flow_identifier: [], environment: [], version: [] };
 }
 
 export const ListFlowsRequestFilter: MessageFns<ListFlowsRequestFilter> = {
   encode(message: ListFlowsRequestFilter, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
-    for (const v of message.flowIdentifier) {
+    for (const v of message.flow_identifier) {
       writer.uint32(34).string(v!);
     }
     for (const v of message.environment) {
@@ -2451,7 +2451,7 @@ export const ListFlowsRequestFilter: MessageFns<ListFlowsRequestFilter> = {
             break;
           }
 
-          message.flowIdentifier.push(reader.string());
+          message.flow_identifier.push(reader.string());
           continue;
         }
         case 2: {
@@ -2481,8 +2481,8 @@ export const ListFlowsRequestFilter: MessageFns<ListFlowsRequestFilter> = {
 
   fromJSON(object: any): ListFlowsRequestFilter {
     return {
-      flowIdentifier: globalThis.Array.isArray(object?.flowIdentifier)
-        ? object.flowIdentifier.map((e: any) => globalThis.String(e))
+      flow_identifier: globalThis.Array.isArray(object?.flow_identifier)
+        ? object.flow_identifier.map((e: any) => globalThis.String(e))
         : [],
       environment: globalThis.Array.isArray(object?.environment)
         ? object.environment.map((e: any) => globalThis.String(e))
@@ -2493,8 +2493,8 @@ export const ListFlowsRequestFilter: MessageFns<ListFlowsRequestFilter> = {
 
   toJSON(message: ListFlowsRequestFilter): unknown {
     const obj: any = {};
-    if (message.flowIdentifier?.length) {
-      obj.flowIdentifier = message.flowIdentifier;
+    if (message.flow_identifier?.length) {
+      obj.flow_identifier = message.flow_identifier;
     }
     if (message.environment?.length) {
       obj.environment = message.environment;
@@ -2510,7 +2510,7 @@ export const ListFlowsRequestFilter: MessageFns<ListFlowsRequestFilter> = {
   },
   fromPartial<I extends Exact<DeepPartial<ListFlowsRequestFilter>, I>>(object: I): ListFlowsRequestFilter {
     const message = createBaseListFlowsRequestFilter();
-    message.flowIdentifier = object.flowIdentifier?.map((e) => e) || [];
+    message.flow_identifier = object.flow_identifier?.map((e) => e) || [];
     message.environment = object.environment?.map((e) => e) || [];
     message.version = object.version?.map((e) => e) || [];
     return message;
@@ -2742,19 +2742,19 @@ export const ListDirectory: MessageFns<ListDirectory> = {
 };
 
 function createBaseGrep(): Grep {
-  return { searchDirectory: "", pattern: "", caseInsensitive: false };
+  return { search_directory: "", pattern: "", case_insensitive: false };
 }
 
 export const Grep: MessageFns<Grep> = {
   encode(message: Grep, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
-    if (message.searchDirectory !== "") {
-      writer.uint32(10).string(message.searchDirectory);
+    if (message.search_directory !== "") {
+      writer.uint32(10).string(message.search_directory);
     }
     if (message.pattern !== "") {
       writer.uint32(18).string(message.pattern);
     }
-    if (message.caseInsensitive !== false) {
-      writer.uint32(24).bool(message.caseInsensitive);
+    if (message.case_insensitive !== false) {
+      writer.uint32(24).bool(message.case_insensitive);
     }
     return writer;
   },
@@ -2771,7 +2771,7 @@ export const Grep: MessageFns<Grep> = {
             break;
           }
 
-          message.searchDirectory = reader.string();
+          message.search_directory = reader.string();
           continue;
         }
         case 2: {
@@ -2787,7 +2787,7 @@ export const Grep: MessageFns<Grep> = {
             break;
           }
 
-          message.caseInsensitive = reader.bool();
+          message.case_insensitive = reader.bool();
           continue;
         }
       }
@@ -2801,22 +2801,22 @@ export const Grep: MessageFns<Grep> = {
 
   fromJSON(object: any): Grep {
     return {
-      searchDirectory: isSet(object.searchDirectory) ? globalThis.String(object.searchDirectory) : "",
+      search_directory: isSet(object.search_directory) ? globalThis.String(object.search_directory) : "",
       pattern: isSet(object.pattern) ? globalThis.String(object.pattern) : "",
-      caseInsensitive: isSet(object.caseInsensitive) ? globalThis.Boolean(object.caseInsensitive) : false,
+      case_insensitive: isSet(object.case_insensitive) ? globalThis.Boolean(object.case_insensitive) : false,
     };
   },
 
   toJSON(message: Grep): unknown {
     const obj: any = {};
-    if (message.searchDirectory !== "") {
-      obj.searchDirectory = message.searchDirectory;
+    if (message.search_directory !== "") {
+      obj.search_directory = message.search_directory;
     }
     if (message.pattern !== "") {
       obj.pattern = message.pattern;
     }
-    if (message.caseInsensitive !== false) {
-      obj.caseInsensitive = message.caseInsensitive;
+    if (message.case_insensitive !== false) {
+      obj.case_insensitive = message.case_insensitive;
     }
     return obj;
   },
@@ -2826,21 +2826,21 @@ export const Grep: MessageFns<Grep> = {
   },
   fromPartial<I extends Exact<DeepPartial<Grep>, I>>(object: I): Grep {
     const message = createBaseGrep();
-    message.searchDirectory = object.searchDirectory ?? "";
+    message.search_directory = object.search_directory ?? "";
     message.pattern = object.pattern ?? "";
-    message.caseInsensitive = object.caseInsensitive ?? false;
+    message.case_insensitive = object.case_insensitive ?? false;
     return message;
   },
 };
 
 function createBaseFindFiles(): FindFiles {
-  return { namePattern: "" };
+  return { name_pattern: "" };
 }
 
 export const FindFiles: MessageFns<FindFiles> = {
   encode(message: FindFiles, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
-    if (message.namePattern !== "") {
-      writer.uint32(10).string(message.namePattern);
+    if (message.name_pattern !== "") {
+      writer.uint32(10).string(message.name_pattern);
     }
     return writer;
   },
@@ -2857,7 +2857,7 @@ export const FindFiles: MessageFns<FindFiles> = {
             break;
           }
 
-          message.namePattern = reader.string();
+          message.name_pattern = reader.string();
           continue;
         }
       }
@@ -2870,13 +2870,13 @@ export const FindFiles: MessageFns<FindFiles> = {
   },
 
   fromJSON(object: any): FindFiles {
-    return { namePattern: isSet(object.namePattern) ? globalThis.String(object.namePattern) : "" };
+    return { name_pattern: isSet(object.name_pattern) ? globalThis.String(object.name_pattern) : "" };
   },
 
   toJSON(message: FindFiles): unknown {
     const obj: any = {};
-    if (message.namePattern !== "") {
-      obj.namePattern = message.namePattern;
+    if (message.name_pattern !== "") {
+      obj.name_pattern = message.name_pattern;
     }
     return obj;
   },
@@ -2886,7 +2886,7 @@ export const FindFiles: MessageFns<FindFiles> = {
   },
   fromPartial<I extends Exact<DeepPartial<FindFiles>, I>>(object: I): FindFiles {
     const message = createBaseFindFiles();
-    message.namePattern = object.namePattern ?? "";
+    message.name_pattern = object.name_pattern ?? "";
     return message;
   },
 };
@@ -3349,13 +3349,13 @@ export const Approval_Rejected: MessageFns<Approval_Rejected> = {
 };
 
 function createBaseMkdir(): Mkdir {
-  return { directoryPath: "" };
+  return { directory_path: "" };
 }
 
 export const Mkdir: MessageFns<Mkdir> = {
   encode(message: Mkdir, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
-    if (message.directoryPath !== "") {
-      writer.uint32(10).string(message.directoryPath);
+    if (message.directory_path !== "") {
+      writer.uint32(10).string(message.directory_path);
     }
     return writer;
   },
@@ -3372,7 +3372,7 @@ export const Mkdir: MessageFns<Mkdir> = {
             break;
           }
 
-          message.directoryPath = reader.string();
+          message.directory_path = reader.string();
           continue;
         }
       }
@@ -3385,13 +3385,13 @@ export const Mkdir: MessageFns<Mkdir> = {
   },
 
   fromJSON(object: any): Mkdir {
-    return { directoryPath: isSet(object.directoryPath) ? globalThis.String(object.directoryPath) : "" };
+    return { directory_path: isSet(object.directory_path) ? globalThis.String(object.directory_path) : "" };
   },
 
   toJSON(message: Mkdir): unknown {
     const obj: any = {};
-    if (message.directoryPath !== "") {
-      obj.directoryPath = message.directoryPath;
+    if (message.directory_path !== "") {
+      obj.directory_path = message.directory_path;
     }
     return obj;
   },
@@ -3401,7 +3401,7 @@ export const Mkdir: MessageFns<Mkdir> = {
   },
   fromPartial<I extends Exact<DeepPartial<Mkdir>, I>>(object: I): Mkdir {
     const message = createBaseMkdir();
-    message.directoryPath = object.directoryPath ?? "";
+    message.directory_path = object.directory_path ?? "";
     return message;
   },
 };
@@ -3484,31 +3484,31 @@ export const OsInformationContext: MessageFns<OsInformationContext> = {
 
 function createBaseShellInformationContext(): ShellInformationContext {
   return {
-    shellName: "",
-    shellType: "",
-    shellVariant: undefined,
-    shellEnvironment: undefined,
-    sshSession: undefined,
+    shell_name: "",
+    shell_type: "",
+    shell_variant: undefined,
+    shell_environment: undefined,
+    ssh_session: undefined,
     cwd: undefined,
   };
 }
 
 export const ShellInformationContext: MessageFns<ShellInformationContext> = {
   encode(message: ShellInformationContext, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
-    if (message.shellName !== "") {
-      writer.uint32(10).string(message.shellName);
+    if (message.shell_name !== "") {
+      writer.uint32(10).string(message.shell_name);
     }
-    if (message.shellType !== "") {
-      writer.uint32(18).string(message.shellType);
+    if (message.shell_type !== "") {
+      writer.uint32(18).string(message.shell_type);
     }
-    if (message.shellVariant !== undefined) {
-      writer.uint32(26).string(message.shellVariant);
+    if (message.shell_variant !== undefined) {
+      writer.uint32(26).string(message.shell_variant);
     }
-    if (message.shellEnvironment !== undefined) {
-      writer.uint32(34).string(message.shellEnvironment);
+    if (message.shell_environment !== undefined) {
+      writer.uint32(34).string(message.shell_environment);
     }
-    if (message.sshSession !== undefined) {
-      writer.uint32(40).bool(message.sshSession);
+    if (message.ssh_session !== undefined) {
+      writer.uint32(40).bool(message.ssh_session);
     }
     if (message.cwd !== undefined) {
       writer.uint32(50).string(message.cwd);
@@ -3528,7 +3528,7 @@ export const ShellInformationContext: MessageFns<ShellInformationContext> = {
             break;
           }
 
-          message.shellName = reader.string();
+          message.shell_name = reader.string();
           continue;
         }
         case 2: {
@@ -3536,7 +3536,7 @@ export const ShellInformationContext: MessageFns<ShellInformationContext> = {
             break;
           }
 
-          message.shellType = reader.string();
+          message.shell_type = reader.string();
           continue;
         }
         case 3: {
@@ -3544,7 +3544,7 @@ export const ShellInformationContext: MessageFns<ShellInformationContext> = {
             break;
           }
 
-          message.shellVariant = reader.string();
+          message.shell_variant = reader.string();
           continue;
         }
         case 4: {
@@ -3552,7 +3552,7 @@ export const ShellInformationContext: MessageFns<ShellInformationContext> = {
             break;
           }
 
-          message.shellEnvironment = reader.string();
+          message.shell_environment = reader.string();
           continue;
         }
         case 5: {
@@ -3560,7 +3560,7 @@ export const ShellInformationContext: MessageFns<ShellInformationContext> = {
             break;
           }
 
-          message.sshSession = reader.bool();
+          message.ssh_session = reader.bool();
           continue;
         }
         case 6: {
@@ -3582,31 +3582,31 @@ export const ShellInformationContext: MessageFns<ShellInformationContext> = {
 
   fromJSON(object: any): ShellInformationContext {
     return {
-      shellName: isSet(object.shellName) ? globalThis.String(object.shellName) : "",
-      shellType: isSet(object.shellType) ? globalThis.String(object.shellType) : "",
-      shellVariant: isSet(object.shellVariant) ? globalThis.String(object.shellVariant) : undefined,
-      shellEnvironment: isSet(object.shellEnvironment) ? globalThis.String(object.shellEnvironment) : undefined,
-      sshSession: isSet(object.sshSession) ? globalThis.Boolean(object.sshSession) : undefined,
+      shell_name: isSet(object.shell_name) ? globalThis.String(object.shell_name) : "",
+      shell_type: isSet(object.shell_type) ? globalThis.String(object.shell_type) : "",
+      shell_variant: isSet(object.shell_variant) ? globalThis.String(object.shell_variant) : undefined,
+      shell_environment: isSet(object.shell_environment) ? globalThis.String(object.shell_environment) : undefined,
+      ssh_session: isSet(object.ssh_session) ? globalThis.Boolean(object.ssh_session) : undefined,
       cwd: isSet(object.cwd) ? globalThis.String(object.cwd) : undefined,
     };
   },
 
   toJSON(message: ShellInformationContext): unknown {
     const obj: any = {};
-    if (message.shellName !== "") {
-      obj.shellName = message.shellName;
+    if (message.shell_name !== "") {
+      obj.shell_name = message.shell_name;
     }
-    if (message.shellType !== "") {
-      obj.shellType = message.shellType;
+    if (message.shell_type !== "") {
+      obj.shell_type = message.shell_type;
     }
-    if (message.shellVariant !== undefined) {
-      obj.shellVariant = message.shellVariant;
+    if (message.shell_variant !== undefined) {
+      obj.shell_variant = message.shell_variant;
     }
-    if (message.shellEnvironment !== undefined) {
-      obj.shellEnvironment = message.shellEnvironment;
+    if (message.shell_environment !== undefined) {
+      obj.shell_environment = message.shell_environment;
     }
-    if (message.sshSession !== undefined) {
-      obj.sshSession = message.sshSession;
+    if (message.ssh_session !== undefined) {
+      obj.ssh_session = message.ssh_session;
     }
     if (message.cwd !== undefined) {
       obj.cwd = message.cwd;
@@ -3619,11 +3619,11 @@ export const ShellInformationContext: MessageFns<ShellInformationContext> = {
   },
   fromPartial<I extends Exact<DeepPartial<ShellInformationContext>, I>>(object: I): ShellInformationContext {
     const message = createBaseShellInformationContext();
-    message.shellName = object.shellName ?? "";
-    message.shellType = object.shellType ?? "";
-    message.shellVariant = object.shellVariant ?? undefined;
-    message.shellEnvironment = object.shellEnvironment ?? undefined;
-    message.sshSession = object.sshSession ?? undefined;
+    message.shell_name = object.shell_name ?? "";
+    message.shell_type = object.shell_type ?? "";
+    message.shell_variant = object.shell_variant ?? undefined;
+    message.shell_environment = object.shell_environment ?? undefined;
+    message.ssh_session = object.ssh_session ?? undefined;
     message.cwd = object.cwd ?? undefined;
     return message;
   },
