@@ -15,6 +15,9 @@ from ai_gateway.instrumentators.model_requests import (
 session_type_context: ContextVar[Optional[str]] = ContextVar(
     "session_type", default="unknown"
 )
+workflow_start_time: ContextVar[Optional[float]] = ContextVar(
+    "workflow_start_time", default=None
+)
 
 log = structlog.stdlib.get_logger("monitoring")
 
@@ -36,6 +39,7 @@ WORKFLOW_TIME_SCALE_BUCKETS = [
     3600,
 ]
 LLM_TIME_SCALE_BUCKETS = [0.25, 0.5, 1, 2, 4, 7, 10, 20, 30, 60]
+FIRST_RESPONSE_SCALE_BUCKETS = [0.3, 0.5, 1, 2, 5, 10, 20, 30, 60]
 
 LLM_FINISH_REASONS = LLMFinishReason.values()
 
@@ -154,12 +158,12 @@ class DuoWorkflowMetrics:  # pylint: disable=too-many-instance-attributes
             registry=registry,
         )
 
-        self.time_to_first_token = Histogram(
-            "duo_workflow_time_to_first_token_seconds",
+        self.time_to_first_response = Histogram(
+            "duo_workflow_time_to_first_response_seconds",
             "Time from ExecuteWorkflow call to first outgoing action",
             ["workflow_type"] + METADATA_LABELS,
             registry=registry,
-            buckets=LLM_TIME_SCALE_BUCKETS,
+            buckets=FIRST_RESPONSE_SCALE_BUCKETS,
         )
 
     def count_checkpoints(
@@ -301,13 +305,25 @@ class DuoWorkflowMetrics:  # pylint: disable=too-many-instance-attributes
             ).observe(duration)
         )
 
-    def record_time_to_first_token(
-        self, duration: float, workflow_type: str = "unknown"
+    def record_time_to_first_response(
+        self,
+        workflow_type: str = "unknown",
     ) -> None:
-        self.time_to_first_token.labels(
+        """Record the time to first response ready metric.
+
+        Args:
+            workflow_type: Type of workflow being executed
+        """
+        start_time = workflow_start_time.get()
+        if start_time is None or start_time <= 0:
+            return
+
+        duration = time.time() - start_time
+        self.time_to_first_response.labels(
             workflow_type=workflow_type,
             **build_metadata_labels(),
         ).observe(duration)
+        log.info("Recorded time to first response", duration=duration)
 
     class _timer:
         def __init__(self, callback):

@@ -1,7 +1,6 @@
 # pylint: disable=direct-environment-variable-reference,unknown-option-value,too-many-instance-attributes,dangerous-default-value
 import asyncio
 import os
-import time
 from abc import ABC, abstractmethod
 from typing import Any, Dict, Optional, TypedDict, Union
 
@@ -94,7 +93,6 @@ class AbstractWorkflow(ABC):
     _approval: Optional[contract_pb2.Approval]
     _prompt_registry: InMemoryPromptRegistry | LocalPromptRegistry
     _language_server_version: Optional[LanguageServerVersion]
-    _workflow_start_time: float
 
     @inject
     def __init__(
@@ -118,7 +116,6 @@ class AbstractWorkflow(ABC):
         ],
         language_server_version: Optional[LanguageServerVersion] = None,
         preapproved_tools: Optional[list[str]] = [],
-        workflow_start_time: Optional[float] = None,
     ):
         self._outbox = Outbox()
         self._workflow_id = workflow_id
@@ -144,8 +141,7 @@ class AbstractWorkflow(ABC):
         self._preapproved_tools = preapproved_tools
         self._session_url: Optional[str] = None
         self._last_gitlab_status: WorkflowStatusEventEnum | None = None
-        self._workflow_start_time = workflow_start_time or 0.0
-        self._first_token_recorded = False
+        self._first_response_metric_recorded = False
 
     async def run(self, goal: str) -> None:
         with duo_workflow_metrics.time_workflow(
@@ -214,16 +210,13 @@ class AbstractWorkflow(ABC):
     def _recursion_limit(self):
         return RECURSION_LIMIT
 
-    def _record_first_token_metric(self):
-        """Record the time to first token metric."""
-        if not self._first_token_recorded and self._workflow_start_time > 0:
-            time_to_first_token = time.time() - self._workflow_start_time
-            duo_workflow_metrics.record_time_to_first_token(
-                duration=time_to_first_token,
+    def _record_first_response_metric(self):
+        """Record the time to first response ready metric."""
+        if not self._first_response_metric_recorded:
+            duo_workflow_metrics.record_time_to_first_response(
                 workflow_type=self._workflow_type.value,
             )
-            self._first_token_recorded = True
-            self.log.info("Recorded time to first token", duration=time_to_first_token)
+            self._first_response_metric_recorded = True
 
     @traceable
     async def _compile_and_run_graph(self, goal: str) -> None:
@@ -297,8 +290,8 @@ class AbstractWorkflow(ABC):
                     config=graph_config,
                     stream_mode=["values", "messages", "updates"],
                 ):
-                    if type == "messages":
-                        self._record_first_token_metric()
+                    if type == "values":
+                        self._record_first_response_metric()
 
                     if type == "updates":
                         for step in state:

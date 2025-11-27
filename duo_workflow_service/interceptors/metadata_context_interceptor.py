@@ -1,3 +1,5 @@
+import time
+
 import grpc
 from gitlab_cloud_connector.auth import X_GITLAB_REALM_HEADER, X_GITLAB_VERSION_HEADER
 
@@ -9,6 +11,7 @@ from ai_gateway.instrumentators.model_requests import (
 from ai_gateway.instrumentators.model_requests import (
     language_server_version as language_server_version_context,
 )
+from duo_workflow_service.tracking.duo_workflow_metrics import workflow_start_time
 from lib.language_server import LanguageServerVersion
 from lib.mcp_server_tools.context import (
     X_GITLAB_ENABLED_MCP_SERVER_TOOLS,
@@ -47,6 +50,8 @@ class MetadataContextInterceptor(grpc.aio.ServerInterceptor):
     ):
         """Intercept incoming requests to propagate metadata to context."""
         metadata = dict(handler_call_details.invocation_metadata)
+
+        workflow_start_time.set(time.time())
 
         # Client type
         if value := metadata.get(self.X_GITLAB_CLIENT_TYPE_HEADER):
