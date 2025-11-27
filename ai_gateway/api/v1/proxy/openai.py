@@ -36,15 +36,16 @@ router = APIRouter()
 async def openai(
     request: Request,
     background_tasks: BackgroundTasks,  # pylint: disable=unused-argument
-    # pylint: disable=unused-argument
-    abuse_detector: Annotated[AbuseDetector, Depends(get_abuse_detector)],
+    abuse_detector: Annotated[  # pylint: disable=unused-argument
+        AbuseDetector, Depends(get_abuse_detector)
+    ],
     openai_proxy_client: Annotated[OpenAIProxyClient, Depends(get_openai_proxy_client)],
     internal_event_client: Annotated[
         InternalEventsClient, Depends(get_internal_event_client)
     ],
-    billing_event_client: Annotated[
+    billing_event_client: Annotated[  # pylint: disable=unused-argument
         BillingEventsClient, Depends(get_billing_event_client)
-    ],  # pylint: disable=unused-argument
+    ],
 ):
     unit_primitive = request.headers[X_GITLAB_UNIT_PRIMITIVE]
     internal_event_client.track_event(
