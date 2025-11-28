@@ -2,7 +2,7 @@ from typing import override
 from urllib.parse import urljoin
 
 import httpx
-from cachetools import TTLCache, cached
+from aiocache import SimpleMemoryCache, cached
 from starlette.middleware.base import BaseHTTPMiddleware, RequestResponseEndpoint
 from starlette.requests import Request
 from starlette.responses import JSONResponse, Response
@@ -81,7 +81,7 @@ class UsageQuotaMiddleware(BaseHTTPMiddleware):
 
         return response
 
-    @cached(cache=TTLCache(maxsize=10_000, ttl=3600))
+    @cached(ttl=3600, cache=SimpleMemoryCache)
     async def has_usage_quota_left(self, context: UsageQuotaEventContext) -> bool:
         realm = getattr(context, "realm", "unknown")
         params = context.model_dump(exclude_none=True, exclude_unset=True)
