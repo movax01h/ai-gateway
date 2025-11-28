@@ -5,9 +5,7 @@ import pytest
 from google.protobuf import struct_pb2
 
 from duo_workflow_service.agent_platform import experimental, v1
-from duo_workflow_service.agent_platform.experimental.flows.flow_config import (
-    FlowConfig,
-)
+from duo_workflow_service.agent_platform.v1.flows.flow_config import FlowConfig
 from duo_workflow_service.workflows import chat
 from duo_workflow_service.workflows.abstract_workflow import AbstractWorkflow
 from duo_workflow_service.workflows.registry import (
@@ -67,7 +65,14 @@ def build_chat_flow_config(
             }
         ]
     if prompts is None:
-        prompts = [{"prompt_id": "custom/prompt", "content": "test prompt"}]
+        prompts = [
+            {
+                "prompt_id": "custom/prompt",
+                "name": "test prompt 1",
+                "unit_primitives": [],
+                "prompt_template": {"user": "test"},
+            }
+        ]
     if routers is None:
         routers = []
     if flow is None:
@@ -81,7 +86,7 @@ def build_chat_flow_config(
     }
 
     expected_data = {
-        "version": "experimental",
+        "version": "v1",
         "environment": CHAT_AGENT_COMPONENT_ENVIRONMENT,
         "components": components,
         "routers": routers,
@@ -219,7 +224,7 @@ def test_resolve_workflow_class_with_chat_flow_config_success(config_params):
     with (
         patch(
             "duo_workflow_service.workflows.registry._FLOW_BY_VERSIONS",
-            {"experimental": (mocks["flow_config_cls"], mocks["flow_cls"])},
+            {"v1": (mocks["flow_config_cls"], mocks["flow_cls"])},
         ),
         patch(
             "duo_workflow_service.workflows.registry.MessageToDict",
@@ -229,7 +234,7 @@ def test_resolve_workflow_class_with_chat_flow_config_success(config_params):
         result = resolve_workflow_class(
             workflow_definition=None,
             flow_config=mocks["struct"],
-            flow_config_schema_version="experimental",
+            flow_config_schema_version="v1",
         )
 
         assert isinstance(result, partial)
@@ -257,8 +262,18 @@ def test_resolve_workflow_class_with_chat_flow_config_success(config_params):
             {
                 "components": [{"type": "AgentComponent"}],
                 "prompts": [
-                    {"prompt_id": "prompt1", "content": "test prompt 1"},
-                    {"prompt_id": "prompt2", "content": "test prompt 2"},
+                    {
+                        "prompt_id": "prompt1",
+                        "name": "test prompt 1",
+                        "unit_primitives": [],
+                        "prompt_template": {"user": "test"},
+                    },
+                    {
+                        "prompt_id": "prompt2",
+                        "name": "test prompt 2",
+                        "unit_primitives": [],
+                        "prompt_template": {"user": "test"},
+                    },
                 ],
             },
             "Chat-partial environment expects exactly one prompt in prompt configuration, but received 2",
@@ -266,7 +281,14 @@ def test_resolve_workflow_class_with_chat_flow_config_success(config_params):
         (
             {
                 "components": [{"type": "AgentComponent", "prompt_version": "v1.0"}],
-                "prompts": [{"prompt_id": "prompt1", "content": "test prompt"}],
+                "prompts": [
+                    {
+                        "prompt_id": "prompt1",
+                        "name": "test prompt 2",
+                        "unit_primitives": [],
+                        "prompt_template": {"user": "test"},
+                    }
+                ],
             },
             "Chat-partial environment expects either inline or in repository prompt configuration, but received both",
         ),
@@ -286,7 +308,7 @@ def test_resolve_workflow_class_with_chat_flow_config_failure(
     with (
         patch(
             "duo_workflow_service.workflows.registry._FLOW_BY_VERSIONS",
-            {"experimental": (mocks["flow_config_cls"], mocks["flow_cls"])},
+            {"v1": (mocks["flow_config_cls"], mocks["flow_cls"])},
         ),
         patch(
             "duo_workflow_service.workflows.registry.MessageToDict",
@@ -297,7 +319,7 @@ def test_resolve_workflow_class_with_chat_flow_config_failure(
             resolve_workflow_class(
                 workflow_definition=None,
                 flow_config=mocks["struct"],
-                flow_config_schema_version="experimental",
+                flow_config_schema_version="v1",
             )
 
 
