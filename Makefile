@@ -30,7 +30,8 @@ MYPY_LINT_TODO_DIR ?= --exclude "ai_gateway/models/litellm.py" \
 	--exclude "ai_gateway/proxy/clients/anthropic.py" \
 	--exclude "ai_gateway/proxy/clients/openai.py" \
 	--exclude "tests/code_suggestions/test_completions.py" \
-	--exclude "tests/code_suggestions/test_container.py"
+	--exclude "tests/code_suggestions/test_container.py" \
+	--exclude "scripts/validate_graphql.py"
 
 EDITORCONFIG_LINT_WORKING_DIR ?=
 CODESPELL_LINT_WORKING_DIR ?= ${ROOT_DIR}
@@ -192,7 +193,7 @@ format: codespell black isort docformatter
 lint: lint-code lint-doc
 
 .PHONY: lint-code
-lint-code: flake8 check-black check-isort check-pylint check-mypy check-codespell check-docformatter check-editorconfig
+lint-code: flake8 check-black check-isort check-pylint check-mypy check-codespell check-docformatter check-editorconfig check-graphql
 
 .PHONY: lint-commit
 lint-commit:
@@ -243,6 +244,11 @@ check-docformatter: install-lint-deps
 check-editorconfig: install-lint-deps
 	@echo "Running editorconfig check..."
 	@poetry run ec ${EDITORCONFIG_LINT_WORKING_DIR}
+
+.PHONY: check-graphql
+check-graphql:
+	@echo "Running GraphQL validation..."
+	@poetry run python scripts/validate_graphql.py
 
 .PHONY: install-test-deps
 install-test-deps:

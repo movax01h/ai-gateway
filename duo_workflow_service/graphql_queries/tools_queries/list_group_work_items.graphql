@@ -1,0 +1,67 @@
+query ListGroupWorkItems(
+    $fullPath: ID!
+    $state: IssuableState
+    $search: String
+    $authorUsername: String
+    $createdAfter: Time
+    $createdBefore: Time
+    $updatedAfter: Time
+    $updatedBefore: Time
+    $dueAfter: Time
+    $dueBefore: Time
+    $sort: WorkItemSort
+    $first: Int
+    $after: String
+    $types: [IssueType!]
+    $labelName: [String!]
+    $assigneeUsernames: [String!]
+    $healthStatusFilter: String
+    $status: WorkItemWidgetStatusFilterInput
+) {
+    namespace(fullPath: $fullPath) {
+        workItems(
+            state: $state
+            search: $search
+            authorUsername: $authorUsername
+            createdAfter: $createdAfter
+            createdBefore: $createdBefore
+            updatedAfter: $updatedAfter
+            updatedBefore: $updatedBefore
+            dueAfter: $dueAfter
+            dueBefore: $dueBefore
+            sort: $sort
+            first: $first
+            after: $after
+            types: $types
+            labelName: $labelName
+            assigneeUsernames: $assigneeUsernames
+            healthStatusFilter: $healthStatusFilter
+            status: $status
+        ) {
+            pageInfo {
+                hasNextPage
+                endCursor
+            }
+            nodes {
+                id
+                iid
+                title
+                state
+                createdAt
+                updatedAt
+                author {
+                    username
+                    name
+                }
+                widgets {
+                    ... on WorkItemWidgetMilestone {
+                        milestone {
+                            id
+                            title
+                        }
+                    }
+                }
+            }
+        }
+    }
+}

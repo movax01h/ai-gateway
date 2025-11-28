@@ -1,0 +1,23 @@
+query GetGroupWorkItemNotes($fullPath: ID!, $workItemIid: String!) {
+    namespace(fullPath: $fullPath) {
+        workItems(iid: $workItemIid) {
+            nodes {
+                widgets {
+                    ... on WorkItemWidgetNotes {
+                        notes {
+                            nodes {
+                                id
+                                body
+                                createdAt
+                                author {
+                                    username
+                                    name
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}

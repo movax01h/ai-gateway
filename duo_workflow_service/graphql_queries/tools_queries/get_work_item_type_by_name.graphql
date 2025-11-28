@@ -1,0 +1,10 @@
+query GetWorkItemType($fullPath: ID!) {
+    namespace(fullPath: $fullPath) {
+        workItemTypes {
+            nodes {
+                id
+                name
+            }
+        }
+    }
+}
