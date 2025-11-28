@@ -37,11 +37,11 @@ async def test_get_current_user_success():
     assert "user" in parsed_response
 
     user_data = parsed_response["user"]
+    assert user_data["user_id"] == 123
     assert user_data["user_name"] == "john_doe"
     assert user_data["job_title"] == "Software Engineer"
     assert user_data["preferred_language"] == "en"
-    assert len(user_data) == 3
-    assert "id" not in user_data
+    assert len(user_data) == 4
     assert "email" not in user_data
 
     gitlab_client_mock.aget.assert_called_once_with(
@@ -52,6 +52,7 @@ async def test_get_current_user_success():
 @pytest.mark.asyncio
 async def test_get_current_user_with_missing_fields():
     mock_response_data = {
+        "id": 123,
         "username": "jane_doe",
         # job_title and preferred_language are missing
     }
@@ -73,6 +74,7 @@ async def test_get_current_user_with_missing_fields():
 
     parsed_response = json.loads(response)
     user_data = parsed_response["user"]
+    assert user_data["user_id"] == 123
     assert user_data["user_name"] == "jane_doe"
     assert user_data["job_title"] is None
     assert user_data["preferred_language"] is None
@@ -113,6 +115,7 @@ def test_get_current_user_tool_properties():
     assert tool.name == "get_current_user"
     assert "Get the current user information from GitLab API" in tool.description
     assert tool.args_schema == GetCurrentUserInput
+    assert "user id" in tool.description
     assert "user name" in tool.description
     assert "job title" in tool.description
     assert "preferred language" in tool.description
@@ -121,6 +124,7 @@ def test_get_current_user_tool_properties():
 @pytest.mark.asyncio
 async def test_get_current_user_json_serialization():
     mock_response_data = {
+        "id": 123,
         "username": "test_user",
         "job_title": "Developer",
         "preferred_language": "es",

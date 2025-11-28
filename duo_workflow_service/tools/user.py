@@ -19,6 +19,7 @@ class GetCurrentUser(DuoBaseTool):
     Get the current user information from GitLab API
 
     Only the following information will be retrieved from the current user endpoint:
+    - user id
     - user name
     - job title
     - preferred languages (written in ISO 639‑1 language code)
@@ -39,6 +40,7 @@ class GetCurrentUser(DuoBaseTool):
                 )
 
             formatted_response = {
+                "user_id": response.body.get("id"),
                 "user_name": response.body.get("username"),
                 "job_title": response.body.get("job_title"),
                 "preferred_language": response.body.get("preferred_language"),
