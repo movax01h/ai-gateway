@@ -313,6 +313,11 @@ class Flow(AbstractWorkflow):
         tools_registry: ToolsRegistry,
         checkpointer: BaseCheckpointSaver,
     ) -> Any:
+        if self._config.flow.entry_point is None:
+            raise ValueError(
+                "Can not compile flow: entry_point is not defined in the flow config."
+            )
+
         graph = StateGraph(FlowState)
         components = self._build_components(tools_registry, graph)
         self._build_routers(components, graph)
