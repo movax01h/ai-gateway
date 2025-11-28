@@ -12,12 +12,28 @@ from ai_gateway.prompts.config.base import PromptConfig
 from duo_workflow_service.entities.state import ChatWorkflowState
 from duo_workflow_service.gitlab.gitlab_api import Namespace, Project
 from duo_workflow_service.gitlab.gitlab_service_context import GitLabServiceContext
+from duo_workflow_service.slash_commands.error_handler import (
+    SlashCommandValidationError,
+)
 from duo_workflow_service.slash_commands.goal_parser import parse as slash_command_parse
+
+VALID_SLASH_COMMANDS = ["explain", "refactor", "tests", "fix"]
 
 
 class ChatAgentPromptTemplate(Runnable[ChatWorkflowState, PromptValue]):
     def __init__(self, config: PromptConfig):
         self.prompt_template = config.prompt_template
+
+    def is_slash_command_format(self, message):
+        content = message.content.strip()
+        if not content.startswith("/"):
+            return False
+
+        # Exclude file paths like '/home/dir'
+        if content.split(" ")[0].count("/") > 1:
+            return False
+
+        return True
 
     def invoke(
         self,
@@ -80,8 +96,16 @@ class ChatAgentPromptTemplate(Runnable[ChatWorkflowState, PromptValue]):
             if isinstance(m, HumanMessage):
                 slash_command = None
 
-                if isinstance(m.content, str) and m.content.strip().startswith("/"):
+                if isinstance(m.content, str) and self.is_slash_command_format(m):
                     command_name, remaining_text = slash_command_parse(m.content)
+
+                    # Check if this is the last message and validate it
+                    is_last_message = m == input["conversation_history"][agent_name][-1]
+                    if is_last_message and command_name not in VALID_SLASH_COMMANDS:
+                        raise SlashCommandValidationError(
+                            f"The command '/{command_name}' does not exist."
+                        )
+
                     slash_command = {
                         "name": command_name,
                         "input": remaining_text,

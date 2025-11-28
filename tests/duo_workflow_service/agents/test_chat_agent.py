@@ -18,6 +18,9 @@ from duo_workflow_service.entities.state import (
 from duo_workflow_service.gitlab.gitlab_api import Project
 from duo_workflow_service.gitlab.gitlab_instance_info_service import GitLabInstanceInfo
 from duo_workflow_service.gitlab.gitlab_service_context import GitLabServiceContext
+from duo_workflow_service.slash_commands.error_handler import (
+    SlashCommandValidationError,
+)
 from lib.internal_events.event_enum import CategoryEnum
 
 
@@ -358,6 +361,54 @@ async def test_chat_agent_provider_5xx_error_handling(chat_agent, input):
     assert (
         result["ui_chat_log"][0]["content"]
         == "There was an error connecting to the chosen LLM provider, please try again or contact support if the issue persists."
+    )
+
+
+@pytest.mark.asyncio
+@patch("duo_workflow_service.agents.chat_agent.log_exception")
+async def test_chat_agent_invalid_slash_command_error_handling(
+    mock_log_exception, chat_agent, input
+):
+    """Test that ChatAgent properly handles SlashCommandValidationError and returns a user-friendly message."""
+
+    # Mock the prompt adapter to raise a SlashCommandValidationError
+    chat_agent.prompt_adapter.get_response = AsyncMock(
+        side_effect=SlashCommandValidationError(
+            "The command '/invalid_command' does not exist."
+        )
+    )
+
+    result = await chat_agent.run(input)
+
+    # Verify that log_exception was called with the correct parameters
+    mock_log_exception.assert_called_once()
+    call_args = mock_log_exception.call_args
+    assert isinstance(call_args[0][0], SlashCommandValidationError)
+    assert str(call_args[0][0]) == "The command '/invalid_command' does not exist."
+    assert call_args[1]["extra"] == {
+        "context": "User provided an invalid slash command"
+    }
+
+    # Verify error response structure
+    assert result["status"] == WorkflowStatusEnum.INPUT_REQUIRED
+    assert "conversation_history" in result
+
+    # Check that the error message is returned to the user
+    conversation_history = result["conversation_history"]["Chat Agent"]
+    assert len(conversation_history) == 1
+    assert isinstance(conversation_history[0], AIMessage)
+    assert (
+        conversation_history[0].content
+        == "The command '/invalid_command' does not exist."
+    )
+
+    # Check UI chat log
+    assert len(result["ui_chat_log"]) == 1
+    assert result["ui_chat_log"][0]["message_type"] == MessageTypeEnum.AGENT
+    assert result["ui_chat_log"][0]["status"] == ToolStatus.FAILURE
+    assert (
+        result["ui_chat_log"][0]["content"]
+        == "The command '/invalid_command' does not exist."
     )
 
 

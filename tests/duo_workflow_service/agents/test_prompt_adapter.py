@@ -16,6 +16,9 @@ from duo_workflow_service.entities.state import ChatWorkflowState, WorkflowStatu
 from duo_workflow_service.gitlab.gitlab_api import Namespace, Project
 from duo_workflow_service.gitlab.gitlab_instance_info_service import GitLabInstanceInfo
 from duo_workflow_service.gitlab.gitlab_service_context import GitLabServiceContext
+from duo_workflow_service.slash_commands.error_handler import (
+    SlashCommandValidationError,
+)
 
 
 @pytest.fixture(name="mock_datetime")
@@ -243,6 +246,193 @@ class TestChatAgentPromptTemplate:
 
         # Should have 2 system messages and 1 user message
         assert len(messages) == 3
+
+    @pytest.mark.parametrize(
+        "message_content,expected_result",
+        [
+            ("/a_command", True),  # Fake command
+            ("/refactor", True),  # Real command
+            (
+                "/refactor also look at /home/test",
+                True,
+            ),  # Command followed by directory
+            ("/home/test", False),  # Directory path
+            ("a normal message", False),  # Normal message
+        ],
+    )
+    def test_slash_command_detection(
+        self, prompt_config, message_content, expected_result
+    ):
+        template = ChatAgentPromptTemplate(prompt_config)
+        message = HumanMessage(content=message_content)
+
+        result = template.is_slash_command_format(message)
+
+        assert result == expected_result
+
+    def test_invalid_slash_command_raises_error(self, prompt_config):
+        """Test that an invalid slash command raises SlashCommandValidationError."""
+        state_with_invalid_command = ChatWorkflowState(
+            plan={"steps": []},
+            status="execution",
+            conversation_history={
+                "test_agent": [
+                    HumanMessage(content="/invalid_command do something"),
+                ]
+            },
+            ui_chat_log=[],
+            last_human_input=None,
+            project=None,
+            namespace=None,
+            approval=None,
+        )
+
+        template = ChatAgentPromptTemplate(prompt_config)
+
+        with patch.object(
+            GitLabServiceContext, "get_current_instance_info", return_value=None
+        ):
+            with pytest.raises(SlashCommandValidationError) as exc_info:
+                template.invoke(
+                    state_with_invalid_command,
+                    agent_name="test_agent",
+                )
+
+        assert "The command '/invalid_command' does not exist." in str(exc_info.value)
+
+    def test_valid_slash_command_does_not_raise_error(self, prompt_config):
+        """Test that a valid slash command does not raise an error."""
+        state_with_valid_command = ChatWorkflowState(
+            plan={"steps": []},
+            status="execution",
+            conversation_history={
+                "test_agent": [
+                    HumanMessage(content="/explain this code"),
+                ]
+            },
+            ui_chat_log=[],
+            last_human_input=None,
+            project=None,
+            namespace=None,
+            approval=None,
+        )
+
+        template = ChatAgentPromptTemplate(prompt_config)
+
+        with patch.object(
+            GitLabServiceContext, "get_current_instance_info", return_value=None
+        ):
+            result = template.invoke(
+                state_with_valid_command,
+                agent_name="test_agent",
+            )
+
+        assert isinstance(result, ChatPromptValue)
+
+    def test_valid_command_after_invalid_command_does_not_raise_error(
+        self, prompt_config
+    ):
+        """Test that a valid command sent after an invalid command does not raise an error.
+
+        This ensures that invalid commands in history are not re-validated.
+        """
+        state_with_history = ChatWorkflowState(
+            plan={"steps": []},
+            status="execution",
+            conversation_history={
+                "test_agent": [
+                    HumanMessage(content="/invalid_command do something"),
+                    AIMessage(content="The command '/invalid_command' does not exist."),
+                    HumanMessage(content="/explain this code"),
+                ]
+            },
+            ui_chat_log=[],
+            last_human_input=None,
+            project=None,
+            namespace=None,
+            approval=None,
+        )
+
+        template = ChatAgentPromptTemplate(prompt_config)
+
+        with patch.object(
+            GitLabServiceContext, "get_current_instance_info", return_value=None
+        ):
+            # Should not raise any exception because only the last message is validated
+            result = template.invoke(
+                state_with_history,
+                agent_name="test_agent",
+            )
+
+        assert isinstance(result, ChatPromptValue)
+
+    def test_normal_message_after_invalid_command_does_not_raise_error(
+        self, prompt_config
+    ):
+        """Test that a normal message sent after an invalid command does not raise an error."""
+        state_with_history = ChatWorkflowState(
+            plan={"steps": []},
+            status="execution",
+            conversation_history={
+                "test_agent": [
+                    HumanMessage(content="/invalid_command do something"),
+                    AIMessage(content="The command '/invalid_command' does not exist."),
+                    HumanMessage(content="hello"),
+                ]
+            },
+            ui_chat_log=[],
+            last_human_input=None,
+            project=None,
+            namespace=None,
+            approval=None,
+        )
+
+        template = ChatAgentPromptTemplate(prompt_config)
+
+        with patch.object(
+            GitLabServiceContext, "get_current_instance_info", return_value=None
+        ):
+            # Should not raise any exception
+            result = template.invoke(
+                state_with_history,
+                agent_name="test_agent",
+            )
+
+        assert isinstance(result, ChatPromptValue)
+
+    @pytest.mark.parametrize(
+        "valid_command",
+        ["/explain", "/refactor", "/tests", "/fix"],
+    )
+    def test_all_valid_commands_do_not_raise_error(self, prompt_config, valid_command):
+        """Test that all valid slash commands do not raise an error."""
+        state_with_command = ChatWorkflowState(
+            plan={"steps": []},
+            status="execution",
+            conversation_history={
+                "test_agent": [
+                    HumanMessage(content=f"{valid_command} some context"),
+                ]
+            },
+            ui_chat_log=[],
+            last_human_input=None,
+            project=None,
+            namespace=None,
+            approval=None,
+        )
+
+        template = ChatAgentPromptTemplate(prompt_config)
+
+        with patch.object(
+            GitLabServiceContext, "get_current_instance_info", return_value=None
+        ):
+            # Should not raise any exception
+            result = template.invoke(
+                state_with_command,
+                agent_name="test_agent",
+            )
+
+        assert isinstance(result, ChatPromptValue)
 
 
 class TestDefaultPromptAdapter:
