@@ -22,6 +22,9 @@ from duo_workflow_service.gitlab.gitlab_instance_info_service import (
     GitLabInstanceInfoService,
 )
 from duo_workflow_service.gitlab.gitlab_service_context import GitLabServiceContext
+from duo_workflow_service.slash_commands.error_handler import (
+    SlashCommandValidationError,
+)
 from duo_workflow_service.tracking.errors import log_exception
 
 log = structlog.stdlib.get_logger("chat_agent")
@@ -250,6 +253,28 @@ class ChatAgent:
 
             return self._build_response(agent_response, input)
 
+        except SlashCommandValidationError as error:
+            log_exception(
+                error, extra={"context": "User provided an invalid slash command"}
+            )
+            # Handle invalid slash commands with a user-friendly message
+            error_message = AIMessage(content=str(error))
+            ui_chat_log = UiChatLog(
+                message_type=MessageTypeEnum.AGENT,
+                message_sub_type=None,
+                content=str(error),
+                timestamp=datetime.now(timezone.utc).isoformat(),
+                status=ToolStatus.FAILURE,
+                correlation_id=None,
+                tool_info=None,
+                additional_context=None,
+                message_id=None,
+            )
+            return {
+                "conversation_history": {self.name: [error_message]},
+                "status": WorkflowStatusEnum.INPUT_REQUIRED,
+                "ui_chat_log": [ui_chat_log],
+            }
         except Exception as error:
             log_exception(error, extra={"context": "Error processing chat agent"})
             return self._create_error_response(error)
