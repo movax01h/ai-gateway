@@ -1,0 +1,15 @@
+# Override these jobs defined from
+# project: "gitlab-com/gl-infra/platform/runway/runwayctl"
+# file: "ci-tasks/service-project/runway.yml"
+
+🛫 [dws-loadtest] Trigger runway deployment staging:
+  rules:
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+      when: manual
+      allow_failure: true # so this job doesn't block the pipeline
+
+🛫 [dws-loadtest] Trigger runway deployment production:
+  rules:
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+      when: manual
+      allow_failure: true # so this job doesn't block the pipeline
