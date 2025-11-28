@@ -24,6 +24,9 @@ pre-commit:
         LINT_WORKING_DIR="$STAGED_FILES" \
         CODESPELL_LINT_WORKING_DIR="$STAGED_FILES" \
         EDITORCONFIG_LINT_WORKING_DIR="$STAGED_FILES"
+    lint-graphql:
+      glob: "*.graphql"
+      run: make check-graphql
     lint-other:
       exclude:
         - "*.py"
