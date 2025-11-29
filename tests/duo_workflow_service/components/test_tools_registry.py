@@ -140,8 +140,6 @@ _outbox = MagicMock(spec=Outbox)
                 "get_security_finding_details",
                 "list_security_findings",
                 "get_wiki_page",
-                "gitlab_api_get",
-                "gitlab_graphql",
             },
         ),
         (
@@ -222,8 +220,6 @@ _outbox = MagicMock(spec=Outbox)
                 "get_security_finding_details",
                 "list_security_findings",
                 "get_wiki_page",
-                "gitlab_api_get",
-                "gitlab_graphql",
             },
         ),
         (
@@ -273,7 +269,12 @@ _outbox = MagicMock(spec=Outbox)
         "read_write_files_privileges",
     ],
 )
-def test_registry_initialization(tool_metadata, config, expected_tools_set):
+@patch("duo_workflow_service.components.tools_registry.is_feature_enabled")
+def test_registry_initialization(
+    mock_is_feature_enabled, tool_metadata, config, expected_tools_set
+):
+    mock_is_feature_enabled.return_value = False
+
     registry = ToolsRegistry(
         enabled_tools=config,
         preapproved_tools=[],
@@ -284,9 +285,13 @@ def test_registry_initialization(tool_metadata, config, expected_tools_set):
     assert set(registry._enabled_tools.keys()) == expected_tools_set
 
 
+@patch("duo_workflow_service.components.tools_registry.is_feature_enabled")
 def test_registry_initialization_initialises_tools_with_correct_attributes(
+    mock_is_feature_enabled,
     tool_metadata,
 ):
+    mock_is_feature_enabled.return_value = False
+
     registry = ToolsRegistry(
         enabled_tools=[
             "run_commands",
@@ -413,8 +418,6 @@ def test_registry_initialization_initialises_tools_with_correct_attributes(
         ),
         "list_security_findings": ListSecurityFindings(metadata=tool_metadata),
         "get_wiki_page": GetWikiPage(metadata=tool_metadata),
-        "gitlab_api_get": GitLabApiGet(metadata=tool_metadata),
-        "gitlab_graphql": GitLabGraphQL(metadata=tool_metadata),
         "create_branch": CreateBranch(metadata=tool_metadata),
     }
 
@@ -735,19 +738,41 @@ def test_toolset_method(
 class TestGenericGitLabAPITools:
     """Tests for generic GitLab API tools integration with ToolsRegistry."""
 
-    def test_generic_tools_available_with_gitlab_privileges(self, tool_metadata):
-        """Test that generic tools are available when GitLab privileges are enabled."""
+    @patch("duo_workflow_service.components.tools_registry.is_feature_enabled")
+    def test_generic_tools_available_with_feature_flag_enabled(
+        self, mock_is_feature_enabled, tool_metadata
+    ):
+        """Test that generic tools are available when feature flag is enabled."""
+        mock_is_feature_enabled.return_value = True
+
         registry = ToolsRegistry(
             enabled_tools=["read_only_gitlab"],
             preapproved_tools=[],
             tool_metadata=tool_metadata,
         )
 
-        # Verify generic tools are present
+        # Verify generic tools are present when feature flag is enabled
         assert "gitlab_api_get" in registry._enabled_tools
         assert "gitlab_graphql" in registry._enabled_tools
         assert isinstance(registry._enabled_tools["gitlab_api_get"], GitLabApiGet)
         assert isinstance(registry._enabled_tools["gitlab_graphql"], GitLabGraphQL)
+
+    @patch("duo_workflow_service.components.tools_registry.is_feature_enabled")
+    def test_generic_tools_not_available_with_feature_flag_disabled(
+        self, mock_is_feature_enabled, tool_metadata
+    ):
+        """Test that generic tools are NOT available when feature flag is disabled."""
+        mock_is_feature_enabled.return_value = False
+
+        registry = ToolsRegistry(
+            enabled_tools=["read_only_gitlab"],
+            preapproved_tools=[],
+            tool_metadata=tool_metadata,
+        )
+
+        # Verify generic tools are NOT present when feature flag is disabled
+        assert "gitlab_api_get" not in registry._enabled_tools
+        assert "gitlab_graphql" not in registry._enabled_tools
 
     def test_generic_tools_not_available_without_gitlab_privileges(self, tool_metadata):
         """Test that generic tools are NOT available without GitLab privileges."""
@@ -761,28 +786,38 @@ class TestGenericGitLabAPITools:
         assert "gitlab_api_get" not in registry._enabled_tools
         assert "gitlab_graphql" not in registry._enabled_tools
 
-    def test_generic_tools_follow_preapproval_rules(self, tool_metadata):
+    @patch("duo_workflow_service.components.tools_registry.is_feature_enabled")
+    def test_generic_tools_follow_preapproval_rules(
+        self, mock_is_feature_enabled, tool_metadata
+    ):
         """Test that generic tools follow the same preapproval rules as other GitLab tools."""
-        # When GitLab privilege is preapproved, generic tools should be too
+        mock_is_feature_enabled.return_value = True
+
+        # When generic tools privilege is preapproved, generic tools should be too
         registry_preapproved = ToolsRegistry(
-            enabled_tools=["read_only_gitlab"],
-            preapproved_tools=["read_only_gitlab"],
+            enabled_tools=["use_generic_gitlab_api_tools"],
+            preapproved_tools=["use_generic_gitlab_api_tools"],
             tool_metadata=tool_metadata,
         )
         assert not registry_preapproved.approval_required("gitlab_api_get")
         assert not registry_preapproved.approval_required("gitlab_graphql")
 
-        # When GitLab privilege is not preapproved, generic tools should require approval
+        # When generic tools privilege is not preapproved, generic tools should require approval
         registry_not_preapproved = ToolsRegistry(
-            enabled_tools=["read_only_gitlab"],
+            enabled_tools=["use_generic_gitlab_api_tools"],
             preapproved_tools=[],
             tool_metadata=tool_metadata,
         )
         assert registry_not_preapproved.approval_required("gitlab_api_get")
         assert registry_not_preapproved.approval_required("gitlab_graphql")
 
-    def test_generic_tools_can_be_used_in_toolset(self, tool_metadata):
+    @patch("duo_workflow_service.components.tools_registry.is_feature_enabled")
+    def test_generic_tools_can_be_used_in_toolset(
+        self, mock_is_feature_enabled, tool_metadata
+    ):
         """Test that generic tools can be requested in a toolset."""
+        mock_is_feature_enabled.return_value = True
+
         registry = ToolsRegistry(
             enabled_tools=["read_only_gitlab"],
             preapproved_tools=[],

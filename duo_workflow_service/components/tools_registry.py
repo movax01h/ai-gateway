@@ -26,6 +26,7 @@ from duo_workflow_service.tools.vulnerabilities.get_vulnerability_details import
 from duo_workflow_service.tools.vulnerabilities.post_sast_fp_analysis_to_gitlab import (
     PostSastFpAnalysisToGitlab,
 )
+from lib.feature_flags.context import FeatureFlag, is_feature_enabled
 from lib.language_server import LanguageServerVersion
 
 
@@ -104,11 +105,16 @@ _READ_ONLY_GITLAB_TOOLS: list[Type[BaseTool]] = [
     GetSecurityFindingDetails,
     ListSecurityFindings,
     tools.GetWikiPage,
+]
+
+# Generic GitLab API tools - conditionally enabled via feature flag
+_GENERIC_GITLAB_API_TOOLS: list[Type[BaseTool]] = [
     GitLabApiGet,
     GitLabGraphQL,
 ]
 
 _RUN_MCP_TOOLS_PRIVILEGE = "run_mcp_tools"
+_USE_GENERIC_GITLAB_API_TOOLS_PRIVILEGE = "use_generic_gitlab_api_tools"
 
 _AGENT_PRIVILEGES: dict[str, list[Type[BaseTool]]] = {
     "read_write_files": [
@@ -156,6 +162,7 @@ _AGENT_PRIVILEGES: dict[str, list[Type[BaseTool]]] = {
         tools.RunCommand,
     ],
     _RUN_MCP_TOOLS_PRIVILEGE: [],
+    _USE_GENERIC_GITLAB_API_TOOLS_PRIVILEGE: _GENERIC_GITLAB_API_TOOLS,
 }
 
 
@@ -216,6 +223,11 @@ class ToolsRegistry:
 
         if _RUN_MCP_TOOLS_PRIVILEGE in enabled_tools:
             tools_for_agent_privileges[_RUN_MCP_TOOLS_PRIVILEGE] = mcp_tools or []
+
+        # Conditionally enable generic GitLab API tools based on feature flag
+        if is_feature_enabled(FeatureFlag.USE_GENERIC_GITLAB_API_TOOLS):
+            if _USE_GENERIC_GITLAB_API_TOOLS_PRIVILEGE not in enabled_tools:
+                enabled_tools.append(_USE_GENERIC_GITLAB_API_TOOLS_PRIVILEGE)
 
         self._enabled_tools = {
             **{tool_cls.tool_title: tool_cls for tool_cls in NO_OP_TOOLS},  # type: ignore
