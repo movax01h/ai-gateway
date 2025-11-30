@@ -172,6 +172,7 @@ class TestHumanApprovalComponent:
             assert chat_log["timestamp"] is not None
             assert chat_log["status"] == ToolStatus.SUCCESS
             assert chat_log["tool_info"] is None
+            assert chat_log["message_id"].startswith("request-")
 
             mock_check_executor.run.assert_called_once()
             mock_entry_node.assert_called_once()
@@ -216,6 +217,7 @@ class TestHumanApprovalComponent:
             assert chat_log["timestamp"] is not None
             assert chat_log["status"] == ToolStatus.SUCCESS
             assert chat_log["tool_info"] is None
+            assert chat_log["message_id"].startswith("request-")
 
             mock_entry_node.assert_called_once()
             mock_check_executor.run.assert_called_once()
@@ -270,6 +272,7 @@ class TestHumanApprovalComponent:
             assert chat_log1["timestamp"] is not None
             assert chat_log1["status"] == ToolStatus.SUCCESS
             assert chat_log1["tool_info"] is None
+            assert chat_log1["message_id"].startswith("request-")
 
             chat_log2 = response["ui_chat_log"][1]
             assert chat_log2["correlation_id"] is None
@@ -278,6 +281,7 @@ class TestHumanApprovalComponent:
             assert chat_log2["timestamp"] is not None
             assert chat_log2["status"] == ToolStatus.SUCCESS
             assert chat_log2["tool_info"] is None
+            assert chat_log2["message_id"].startswith("request-")
 
             assert mock_entry_node.call_count == 2
             assert mock_check_executor.run.call_count == 2

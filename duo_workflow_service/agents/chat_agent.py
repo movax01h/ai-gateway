@@ -69,7 +69,7 @@ class ChatAgent:
                         correlation_id=None,
                         tool_info=ToolInfo(name=call["name"], args=call["args"]),
                         additional_context=None,
-                        message_id=f'{call["id"]}-approval',
+                        message_id=f'request-{call["id"]}',
                     )
                 )
 

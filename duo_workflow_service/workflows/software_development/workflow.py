@@ -4,6 +4,7 @@ from datetime import datetime, timezone
 from enum import StrEnum
 from functools import partial
 from typing import Annotated
+from uuid import uuid4
 
 # pylint disables are going to be fixed via
 # https://gitlab.com/gitlab-org/duo-workflow/duo-workflow-service/-/issues/78
@@ -317,7 +318,7 @@ class Workflow(AbstractWorkflow):
             message_type=MessageTypeEnum.TOOL,
             message_sub_type=None,
             content=f"Starting workflow with goal: {goal}",
-            message_id=None,
+            message_id=f"tool-{str(uuid4())}",
             timestamp=datetime.now(timezone.utc).isoformat(),
             status=ToolStatus.SUCCESS,
             correlation_id=None,

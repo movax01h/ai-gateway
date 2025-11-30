@@ -5,6 +5,7 @@ from abc import ABC, abstractmethod
 from datetime import datetime, timezone
 from enum import StrEnum
 from typing import Annotated, Literal
+from uuid import uuid4
 
 import structlog
 from langgraph.graph import END, StateGraph
@@ -138,7 +139,7 @@ class HumanApprovalComponent(ABC):
                 message_type=MessageTypeEnum.REQUEST,
                 message_sub_type=None,
                 content=approval_request.value,
-                message_id=None,
+                message_id=f"request-{str(uuid4())}",
                 timestamp=datetime.now(timezone.utc).isoformat(),
                 status=ToolStatus.SUCCESS,
                 tool_info=None,

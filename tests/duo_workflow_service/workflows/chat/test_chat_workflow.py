@@ -676,7 +676,7 @@ async def test_chat_agent_status_handling(
         last_human_input=None,
     )
 
-    ai_response = AIMessage(content=response_content)
+    ai_response = AIMessage(content=response_content, id="agent-msg-id")
     if tool_calls is not None:
         ai_response.tool_calls = tool_calls
 
@@ -695,9 +695,11 @@ async def test_chat_agent_status_handling(
         assert result["ui_chat_log"][0]["content"] == response_content
         if conversation_content:  # Only check these for non-empty conversation
             assert result["ui_chat_log"][0]["message_type"] == MessageTypeEnum.AGENT
+            assert result["ui_chat_log"][0]["message_id"] == "agent-msg-id"
             assert result["ui_chat_log"][0]["status"] == ToolStatus.SUCCESS
         else:  # For empty conversation case
             assert result["ui_chat_log"][0]["message_type"] == MessageTypeEnum.AGENT
+            assert result["ui_chat_log"][0]["message_id"] == "agent-msg-id"
             assert result["ui_chat_log"][0]["status"] == ToolStatus.SUCCESS
     else:
         assert len(result["ui_chat_log"]) == 0
@@ -805,6 +807,7 @@ async def test_agent_run_with_tool_approval_required(workflow_with_project):
     assert result["ui_chat_log"][0]["content"] == "I'll create the file for you"
     assert result["ui_chat_log"][0]["message_id"] == "ai-msg-approval-test"
     assert result["ui_chat_log"][1]["message_type"] == MessageTypeEnum.REQUEST
+    assert result["ui_chat_log"][1]["message_id"] == "request-toolu_approval_id"
     assert "requires approval" in result["ui_chat_log"][1]["content"]
     assert result["ui_chat_log"][1]["tool_info"]["name"] == "create_file_with_contents"
 
@@ -1216,5 +1219,6 @@ async def test_agent_returns_content_and_tool_calls_with_approval_required(
     assert result["ui_chat_log"][0]["message_id"] == "ai-msg-approval-required"
     assert "requires approval" in result["ui_chat_log"][1]["content"]
     assert result["ui_chat_log"][1]["message_type"] == MessageTypeEnum.REQUEST
+    assert result["ui_chat_log"][1]["message_id"] == "request-toolu_approval_id"
     assert result["ui_chat_log"][1]["tool_info"]["name"] == "create_file_with_contents"
     assert result["status"] == WorkflowStatusEnum.TOOL_CALL_APPROVAL_REQUIRED
