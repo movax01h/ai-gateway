@@ -1280,24 +1280,6 @@ async def test_create_work_item_with_hierarchy_widget(
     assert "message" in response_json
 
 
-@pytest.mark.asyncio
-async def test_create_work_item_rejects_quick_actions_in_description(
-    gitlab_client_mock, metadata
-):
-    tool = CreateWorkItem(description="create work item", metadata=metadata)
-
-    response = await tool._arun(
-        group_id="namespace/group",
-        title="Blocked",
-        type_name="Issue",
-        description="/close",
-    )
-
-    resp = json.loads(response)
-    assert "error" in resp
-    gitlab_client_mock.graphql.assert_not_called()
-
-
 @pytest.mark.parametrize(
     "input_data,expected_message",
     [
@@ -1628,24 +1610,6 @@ def test_create_work_item_note_format_display_message(input_data, expected_messa
     assert message == expected_message
 
 
-@pytest.mark.asyncio
-async def test_create_work_item_note_rejects_quick_actions_in_body(
-    gitlab_client_mock, metadata
-):
-    tool = CreateWorkItemNote(description="create work item note", metadata=metadata)
-
-    response = await tool._arun(
-        project_id="namespace/project",
-        work_item_iid=42,
-        body="/close",
-    )
-
-    response_json = json.loads(response)
-    assert "error" in response_json
-    assert "Body contains GitLab quick actions" in response_json["error"]
-    gitlab_client_mock.graphql.assert_not_called()
-
-
 @pytest.fixture
 def resolved_work_item(work_item_data):
     return ResolvedWorkItem(
@@ -1926,24 +1890,6 @@ async def test_update_work_item_with_invalid_hierarchy_widget(
     mutation, variables = gitlab_client_mock.graphql.call_args[0]
     input_data = variables["input"]
     assert "hierarchyWidget" not in input_data
-
-
-@pytest.mark.asyncio
-async def test_update_work_item_rejects_quick_actions_in_description(
-    gitlab_client_mock, metadata, resolved_work_item
-):
-    tool = UpdateWorkItem(description="update work item", metadata=metadata)
-    tool._resolve_work_item_data = AsyncMock(return_value=resolved_work_item)
-
-    response = await tool._arun(
-        project_id="namespace/project",
-        work_item_iid=42,
-        description="/close",
-    )
-
-    resp = json.loads(response)
-    assert "error" in resp
-    gitlab_client_mock.graphql.assert_not_called()
 
 
 @pytest.mark.parametrize(

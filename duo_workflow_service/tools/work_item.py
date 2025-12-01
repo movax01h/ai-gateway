@@ -4,7 +4,6 @@ from typing import Annotated, Any, Dict, List, Literal, Optional, Type, Union
 
 from pydantic import BaseModel, Field, StringConstraints
 
-from duo_workflow_service.security.quick_actions import validate_no_quick_actions
 from duo_workflow_service.tools.duo_base_tool import DESCRIPTION_CHARACTER_LIMIT
 from duo_workflow_service.tools.work_items.base_tool import (
     ResolvedWorkItem,
@@ -57,10 +56,6 @@ WORK_ITEM_IDENTIFICATION_DESCRIPTION = """To identify a work item you must provi
     - https://gitlab.com/groups/namespace/group/-/work_items/42
     - https://gitlab.com/namespace/project/-/work_items/42
 """
-
-WORK_ITEM_QUICK_ACTION_NOTE = """You are NOT allowed to ever use a GitLab quick action in work item description
-or work item note body. Quick actions are text-based shortcuts for common GitLab actions. They are commands that are
-on their own line and start with a backslash. Examples include /merge, /approve, /close, etc."""
 
 DateString = Annotated[str, StringConstraints(pattern=r"^\d{4}-\d{2}-\d{2}$")]
 
@@ -441,8 +436,6 @@ class CreateWorkItem(WorkItemBaseTool):
     name: str = "create_work_item"
     description: str = f"""Create a new work item in a GitLab group or project.
 
-    {WORK_ITEM_QUICK_ACTION_NOTE}
-
     {PARENT_IDENTIFICATION_DESCRIPTION}
 
     For example:
@@ -522,8 +515,6 @@ class UpdateWorkItem(WorkItemBaseTool):
     name: str = "update_work_item"
     description: str = f"""Update an existing work item in a GitLab group or project.
 
-    {WORK_ITEM_QUICK_ACTION_NOTE}
-
     {WORK_ITEM_IDENTIFICATION_DESCRIPTION}
 
     For example:
@@ -574,8 +565,6 @@ class CreateWorkItemNote(WorkItemBaseTool):
     name: str = "create_work_item_note"
     description: str = f"""Create a new note (comment) on a GitLab work item.
 
-    {WORK_ITEM_QUICK_ACTION_NOTE}
-
     {WORK_ITEM_IDENTIFICATION_DESCRIPTION}
 
     For example:
@@ -599,9 +588,6 @@ class CreateWorkItemNote(WorkItemBaseTool):
         work_item_iid = kwargs.pop("work_item_iid", None)
         internal = kwargs.pop("internal", None)
         discussion_id = kwargs.pop("discussion_id", None)
-
-        if err := validate_no_quick_actions(body, field="body"):
-            return json.dumps({"error": err})
 
         resolved = await self._validate_work_item_url(
             url, group_id, project_id, work_item_iid

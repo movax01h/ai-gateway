@@ -406,7 +406,6 @@ Track events using GitLab Internal Events:
 
 - **Authentication**: JWT-based (Cloud Connector), bypass options for local dev
 - **Prompt security**: Tools in `duo_workflow_service/security/` validate and sanitize prompts
-- **Quick actions**: Blocked in work items and MR notes (see `duo_workflow_service/security/quick_actions.py`)
 
 ### Troubleshooting
 

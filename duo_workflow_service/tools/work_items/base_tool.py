@@ -18,7 +18,6 @@ import structlog
 from pydantic import StringConstraints
 
 from duo_workflow_service.gitlab.url_parser import GitLabUrlParseError, GitLabUrlParser
-from duo_workflow_service.security.quick_actions import validate_no_quick_actions
 from duo_workflow_service.tools.duo_base_tool import DuoBaseTool
 from duo_workflow_service.tools.work_items.queries.work_items import (
     CREATE_WORK_ITEM_MUTATION,
@@ -473,11 +472,6 @@ class WorkItemBaseTool(DuoBaseTool):
         input_kwargs: Dict[str, Any],
         type_name: str,
     ) -> str:
-        description = input_kwargs.get("description")
-        if description is not None:
-            if error := validate_no_quick_actions(description, field="description"):
-                return json.dumps({"error": error})
-
         type_id = await self._resolve_work_item_type_id(namespace_path, type_name)
         if isinstance(type_id, dict):
             return json.dumps(type_id)
@@ -527,11 +521,6 @@ class WorkItemBaseTool(DuoBaseTool):
             kwargs["type_name"] = (
                 (resolved.full_data or {}).get("workItemType", {}).get("name", "")
             )
-
-        if kwargs.get("description") is not None:
-            err = validate_no_quick_actions(kwargs["description"], field="description")
-            if err:
-                return json.dumps({"error": err})
 
         input_fields, warnings = self._build_work_item_input_fields(kwargs)
 
