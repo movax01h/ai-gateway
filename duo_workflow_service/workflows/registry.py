@@ -29,6 +29,8 @@ from duo_workflow_service.agent_platform.experimental.flows.flow_config import (
 from duo_workflow_service.agent_platform.v1 import list_configs as v1_list_configs
 from duo_workflow_service.agent_platform.v1.flows import Flow as V1Flow
 from duo_workflow_service.agent_platform.v1.flows import FlowConfig as V1FlowConfig
+from duo_workflow_service.security.exceptions import SecurityException
+from duo_workflow_service.security.prompt_security import PromptSecurity
 from duo_workflow_service.workflows import (
     chat,
     convert_to_gitlab_ci,
@@ -116,10 +118,86 @@ def _convert_struct_to_flow_config(
     return flow_config_cls(**config_dict)
 
 
+def _validate_flow_config_prompts(
+    config: Union[ExperimentalFlowConfig, V1FlowConfig],
+) -> None:
+    """Validate all prompts in flow config for security issues.
+
+    Flow configs are developer-controlled and must be secure by design. This
+    function validates (not sanitizes) prompt content and raises SecurityException
+    if dangerous patterns are detected
+
+    Args:
+        config: The flow configuration to validate.
+
+    Raises:
+        SecurityException: If any prompt contains dangerous content that would
+            require sanitization. The exception message includes the prompt_id
+            and role for easier debugging.
+    """
+    # Early return if no prompts to validate
+    if not hasattr(config, "prompts") or not config.prompts:
+        return
+
+    # Check if prompts is iterable (handles Mock objects in tests)
+    try:
+        prompts_iter = iter(config.prompts)
+    except TypeError:
+        return
+
+    # Validate only actual prompt text roles, not metadata/placeholders
+    # Roles that contain actual prompt content to validate
+    prompt_text_roles = {"system", "user", "assistant", "function"}
+
+    # Validate each prompt configuration
+    for prompt_config in prompts_iter:
+        # Extract prompt_id and prompt_template from various formats
+        if isinstance(prompt_config, InMemoryPromptConfig):
+            prompt_id = prompt_config.prompt_id
+            prompt_template = prompt_config.prompt_template
+        elif isinstance(prompt_config, dict):
+            prompt_id = prompt_config.get("prompt_id", "unknown")
+            prompt_template = prompt_config.get("prompt_template", {})
+        else:
+            # Handle objects with attributes (e.g., Pydantic models, test mocks)
+            prompt_id = getattr(prompt_config, "prompt_id", "unknown")
+            prompt_template = getattr(prompt_config, "prompt_template", {})
+
+        for role, text in prompt_template.items():
+            # Skip non-text roles (e.g., "placeholder: history" is metadata, not content)
+            if role not in prompt_text_roles:
+                continue
+
+            if text and isinstance(text, str):
+                try:
+                    # Validate using PromptSecurity with validate_only=True.
+                    # This raises SecurityException if the content contains
+                    # dangerous patterns instead of sanitizing them.
+                    PromptSecurity.apply_security_to_tool_response(
+                        response=text,
+                        tool_name="flow_config_prompts",
+                        validate_only=True,
+                    )
+                except SecurityException as e:
+                    # Re-raise with clearer error message
+                    # Show examples in original form developers would recognize (not HTML entities)
+                    raise SecurityException(
+                        f"Flow config prompt '{prompt_id}' (role: '{role}') contains dangerous content. "
+                        f"Developer-controlled prompts cannot contain:\n"
+                        f"  - Dangerous tags: <system>, <goal>\n"
+                        f"  - HTML comments: <!-- ... -->\n"
+                        f"  - Hidden unicode characters\n"
+                        f"Please remove these patterns from your prompt configuration."
+                    ) from e
+
+
 def _flow_factory(
     flow_cls: FlowFactory,
     config: Union[ExperimentalFlowConfig, V1FlowConfig],
 ) -> FlowFactory:
+    # Validate all prompts for security issues before creating the flow
+    _validate_flow_config_prompts(config)
+
     if config.environment != CHAT_AGENT_COMPONENT_ENVIRONMENT:
         return partial(flow_cls, config=config)
 

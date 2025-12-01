@@ -201,11 +201,21 @@ class PromptSecurity:
             strip_markdown_link_comments,
             strip_hidden_unicode_tags,
         ],
+        # Flow config prompts: Use strict validation (with validate_only=True)
+        # to ensure developer-controlled prompts are secure by design
+        "flow_config_prompts": [
+            encode_dangerous_tags,
+            strip_hidden_unicode_tags,
+            strip_markdown_link_comments,
+            strip_hidden_html_comments,
+        ],
     }
 
     @staticmethod
     def apply_security_to_tool_response(
-        response: Union[str, Dict[str, Any], List[Any]], tool_name: str
+        response: Union[str, Dict[str, Any], List[Any]],
+        tool_name: str,
+        validate_only: bool = False,
     ) -> Union[str, List[Union[str, Dict[str, Any]]]]:
         """Apply all configured security functions for a specific tool.
 
@@ -218,14 +228,21 @@ class PromptSecurity:
         - Raise SecurityException if validation fails
 
         Args:
-            response: The response to secure (compatible with LangChain ToolCall/ToolMessage)
-            tool_name: Name of the tool being used
+            response: The response to secure (compatible with LangChain ToolCall/ToolMessage).
+            tool_name: Name of the tool being used.
+            validate_only: If True, validates content and raises SecurityException on
+                violations instead of sanitizing. Used for developer-controlled content
+                (e.g., flow config prompts) that must be secure by design. Provides
+                better performance by failing fast on first violation. Defaults to False.
 
         Returns:
-            Secured response compatible with ToolMessage.content (str | list[str | dict])
+            Secured response compatible with ToolMessage.content (str | list[str | dict]).
+            If validate_only=True and validation passes, returns the original response
+            unmodified.
 
         Raises:
-            SecurityException: If any security validation fails
+            SecurityException: If any security validation fails. Always raised in
+                validate_only mode when content would be modified by security functions.
         """
         # Check if tool has override configuration
         if tool_name in PromptSecurity.TOOL_SECURITY_OVERRIDES:
@@ -273,6 +290,23 @@ class PromptSecurity:
                     secured_response
                 )
                 if before_hash != after_hash:
+                    # In validate_only mode: fail fast on first modification
+                    # for better performance and immediate error detection
+                    if validate_only:
+                        log.error(
+                            "Security validation failed - content would be modified",
+                            tool_name=tool_name,
+                            security_function=func.__name__,
+                            chars_would_be_removed=before_length - after_length,
+                            validate_only=True,
+                        )
+                        raise SecurityException(
+                            f"Security validation failed for '{tool_name}': "
+                            f"Content contains dangerous patterns detected by {func.__name__}. "
+                            f"This content must be secure by design and cannot contain "
+                            f"dangerous tags (<system>, <goal>) or hidden unicode characters."
+                        )
+
                     functions_that_modified.append(
                         {
                             "function": func.__name__,
@@ -286,6 +320,7 @@ class PromptSecurity:
                     tool_name=tool_name,
                     security_function=func.__name__,
                     error=str(e),
+                    validate_only=validate_only,
                 )
                 raise
 
@@ -301,11 +336,22 @@ class PromptSecurity:
                     f"Security function {func.__name__} failed for tool '{tool_name}': {str(e)}"
                 ) from e
 
-        # Check if any security functions modified the response
+        # Final check: compare original and secured responses
         secured_hash, secured_length = compute_response_hash_with_length(
             secured_response
         )
         response_modified = original_hash != secured_hash
+
+        # In validate_only mode: reaching here means all validations passed
+        if validate_only:
+            log.info(
+                "Security validation passed - no dangerous content detected",
+                tool_name=tool_name,
+                functions_applied=len(all_functions),
+                validate_only=True,
+            )
+            # Return original response unmodified
+            return response  # type: ignore[return-value]
 
         if response_modified:
             log.warning(
