@@ -53,15 +53,39 @@ query ListProjectWorkItems(
                 state
                 createdAt
                 updatedAt
-                author {
-                    username
+                workItemType{
                     name
                 }
+                author {
+                    username
+                }
                 widgets {
+                      ... on WorkItemWidgetStartAndDueDate {
+                        startDate
+                        dueDate
+                    }
+                    ... on WorkItemWidgetHealthStatus {
+                        healthStatus
+                    }
+                    ... on WorkItemWidgetLabels {
+                        labels {
+                            nodes {
+                                id
+                                title
+                            }
+                        }
+                    }
+                    ... on WorkItemWidgetAssignees {
+                        assignees {
+                            nodes {
+                                username
+                            }
+                        }
+                    }
                     ... on WorkItemWidgetMilestone {
                         milestone {
-                            id
                             title
+                            dueDate
                         }
                     }
                 }
