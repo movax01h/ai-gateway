@@ -64,6 +64,7 @@ from duo_workflow_service.interceptors.usage_quota_interceptor import (
 from duo_workflow_service.llm_factory import validate_llm_access
 from duo_workflow_service.monitoring import duo_workflow_metrics, setup_monitoring
 from duo_workflow_service.profiling import setup_profiling
+from duo_workflow_service.security.exceptions import SecurityException
 from duo_workflow_service.structured_logging import set_workflow_id, setup_logging
 from duo_workflow_service.tools.duo_base_tool import DuoBaseTool
 from duo_workflow_service.tracking import MonitoringContext, current_monitoring_context
@@ -285,9 +286,21 @@ class DuoWorkflowService(contract_pb2_grpc.DuoWorkflowServicer):
             start_workflow_request.startRequest.flowConfigSchemaVersion or None
         )
 
-        workflow_class: FlowFactory = resolve_workflow_class(
-            workflow_definition, flow_config, flow_config_schema_version
-        )
+        try:
+            workflow_class: FlowFactory = resolve_workflow_class(
+                workflow_definition, flow_config, flow_config_schema_version
+            )
+        except SecurityException as e:
+            log.error(
+                "Flow config security validation failed",
+                workflow_id=workflow_id,
+                workflow_definition=workflow_definition,
+                error=str(e),
+            )
+            await context.abort(
+                grpc.StatusCode.CANCELLED,
+                f"Flow configuration failed security validation: {str(e)}",
+            )
 
         invocation_metadata = dict(context.invocation_metadata())
 
