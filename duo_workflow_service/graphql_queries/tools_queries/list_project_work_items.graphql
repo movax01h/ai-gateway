@@ -15,8 +15,10 @@ query ListProjectWorkItems(
     $types: [IssueType!]
     $labelName: [String!]
     $assigneeUsernames: [String!]
-    $healthStatusFilter: String
+    $healthStatusFilter: HealthStatusFilter
     $status: WorkItemWidgetStatusFilterInput
+    $milestoneTitle: [String!]
+    $milestoneWildcardId: MilestoneWildcardId
 ) {
     project(fullPath: $fullPath) {
         workItems(
@@ -37,6 +39,8 @@ query ListProjectWorkItems(
             assigneeUsernames: $assigneeUsernames
             healthStatusFilter: $healthStatusFilter
             status: $status
+            milestoneTitle: $milestoneTitle
+            milestoneWildcardId: $milestoneWildcardId
         ) {
             pageInfo {
                 hasNextPage

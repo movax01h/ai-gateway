@@ -18,7 +18,6 @@ from duo_workflow_service.tools.work_items.queries.work_items import (
 GROUP_ONLY_TYPES = {"Epic", "Objective", "Key Result"}
 ALL_TYPES = {"Issue", "Task", *GROUP_ONLY_TYPES}
 
-
 FILTER_KEY_MAPPING = {
     "state": "state",
     "search": "search",
@@ -34,6 +33,8 @@ FILTER_KEY_MAPPING = {
     "assigneeUsernames": "assignee_usernames",
     "healthStatusFilter": "health_status_filter",
     "status": "status",
+    "milestoneTitle": "milestone_title",
+    "milestoneWildcardId": "milestone_wildcard_id",
 }
 
 
@@ -69,6 +70,13 @@ class HealthStatus(str, Enum):
     ON_TRACK = "onTrack"
     NEEDS_ATTENTION = "needsAttention"
     AT_RISK = "atRisk"
+
+
+class MilestoneWildcardId(str, Enum):
+    ANY = "ANY"
+    NONE = "NONE"
+    STARTED = "STARTED"
+    UPCOMING = "UPCOMING"
 
 
 class ParentResourceInput(BaseModel):
@@ -128,6 +136,18 @@ class ListWorkItemsInput(ParentResourceInput):
     assignee_usernames: Optional[List[str]] = Field(
         default=None,
         description="Filter by assignee usernames.",
+    )
+    milestone_title: Optional[List[str]] = Field(
+        default=None,
+        description="Filter by milestone title.",
+    )
+    milestone_wildcard_id: Optional[MilestoneWildcardId] = Field(
+        default=None,
+        description=(
+            "Filter by milestone ID wildcard. Must be one of: "
+            + ", ".join(status.value for status in MilestoneWildcardId)
+            + ". Incompatible with milestoneTitle."
+        ),
     )
     sort: Optional[str] = Field(
         default=None,

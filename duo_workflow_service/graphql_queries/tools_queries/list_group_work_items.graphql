@@ -15,8 +15,10 @@ query ListGroupWorkItems(
     $types: [IssueType!]
     $labelName: [String!]
     $assigneeUsernames: [String!]
-    $healthStatusFilter: String
+    $healthStatusFilter: HealthStatusFilter
     $status: WorkItemWidgetStatusFilterInput
+    $milestoneTitle: [String!]
+    $milestoneWildcardId: MilestoneWildcardId
 ) {
     namespace(fullPath: $fullPath) {
         workItems(
@@ -37,6 +39,8 @@ query ListGroupWorkItems(
             assigneeUsernames: $assigneeUsernames
             healthStatusFilter: $healthStatusFilter
             status: $status
+            milestoneTitle: $milestoneTitle
+            milestoneWildcardId: $milestoneWildcardId
         ) {
             pageInfo {
                 hasNextPage
