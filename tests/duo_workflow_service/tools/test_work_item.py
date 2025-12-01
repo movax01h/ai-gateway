@@ -382,6 +382,8 @@ async def test_list_work_items_with_filters(
         "assignee_usernames": ["admin"],
         "health_status_filter": "atRisk",
         "status": {"name": "Won't do"},
+        "milestone_title": ["milestone1"],
+        "milestone_wildcard_id": "ANY",
     }
 
     response = await tool._arun(**args)
@@ -406,6 +408,8 @@ async def test_list_work_items_with_filters(
         "assigneeUsernames": ["admin"],
         "healthStatusFilter": "atRisk",
         "status": {"name": "Won't do"},
+        "milestoneTitle": ["milestone1"],
+        "milestoneWildcardId": "ANY",
     }
 
     gql_vars = gitlab_client_mock.graphql.call_args[0][1]
@@ -1915,6 +1919,66 @@ def test_update_work_item_format_display_message(input_data, expected_message):
     tool = UpdateWorkItem(description="update work item")
     message = tool.format_display_message(input_data)
     assert message == expected_message
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "milestone_wildcard_id,expected_value",
+    [
+        ("ANY", "ANY"),
+        ("NONE", "NONE"),
+        ("STARTED", "STARTED"),
+        ("UPCOMING", "UPCOMING"),
+    ],
+)
+async def test_list_work_items_with_milestone_wildcard_id(
+    gitlab_client_mock, metadata, work_items_list, milestone_wildcard_id, expected_value
+):
+    graphql_response = {
+        "project": {
+            "workItems": {
+                "nodes": work_items_list,
+                "pageInfo": {"hasNextPage": False, "endCursor": None},
+            }
+        }
+    }
+    gitlab_client_mock.graphql = AsyncMock(return_value=graphql_response)
+
+    tool = ListWorkItems(description="list work items", metadata=metadata)
+
+    response = await tool._arun(
+        project_id="namespace/project",
+        milestone_wildcard_id=milestone_wildcard_id,
+    )
+
+    response_json = json.loads(response)
+    assert response_json["work_items"] == work_items_list
+
+    gql_vars = gitlab_client_mock.graphql.call_args[0][1]
+    assert gql_vars["milestoneWildcardId"] == expected_value
+
+
+def test_list_work_items_input_validates_milestone_wildcard_id():
+    """Test that ListWorkItemsInput validates milestone_wildcard_id enum values."""
+    from pydantic import ValidationError
+
+    # Valid values should work
+    valid_input = ListWorkItemsInput(
+        project_id="namespace/project",
+        milestone_wildcard_id="ANY",
+    )
+    assert valid_input.milestone_wildcard_id == "ANY"
+
+    # Invalid value should raise ValidationError
+    with pytest.raises(ValidationError) as exc_info:
+        ListWorkItemsInput(
+            project_id="namespace/project",
+            milestone_wildcard_id="INVALID",
+        )
+
+    # Check that the error message mentions the valid values
+    error_message = str(exc_info.value)
+    assert "milestone_wildcard_id" in error_message.lower()
 
 
 class TestBuildWorkItemInputFields:
