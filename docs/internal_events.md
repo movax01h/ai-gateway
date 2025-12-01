@@ -54,6 +54,30 @@ internal_event_client.track_event(
 Various arguments can be set aside from the event name.
 See [this section](https://docs.gitlab.com/ee/development/internal_analytics/internal_event_instrumentation/quick_start.html#trigger-events) for more information.
 
+## Unit tests
+
+Whenever you add a new internal event, make sure to include a corresponding test in the MR. The tracking can be tested as follows:
+
+```python
+from unittest.mock import Mock
+from lib.internal_events import InternalEventAdditionalProperties
+
+
+def test_track_internal_event(internal_event_client: Mock):
+    additional_properties = InternalEventAdditionalProperties(label="event_label")
+
+    instance = YourClass()
+    instance._internal_event_client = internal_event_client
+
+    instance.trigger_action()
+
+    internal_event_client.track_event.assert_called_once_with(
+        event_name="trigger_action",
+        additional_properties=additional_properties,
+        category="Instance",
+    )
+```
+
 ## Test locally
 
 1. Enable snowplow micro in GDK with [these instructions](https://docs.gitlab.com/ee/development/internal_analytics/internal_event_instrumentation/local_setup_and_debugging.html#snowplow-micro).
