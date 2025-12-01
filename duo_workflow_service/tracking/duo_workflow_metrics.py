@@ -39,7 +39,7 @@ WORKFLOW_TIME_SCALE_BUCKETS = [
     3600,
 ]
 LLM_TIME_SCALE_BUCKETS = [0.25, 0.5, 1, 2, 4, 7, 10, 20, 30, 60]
-FIRST_RESPONSE_SCALE_BUCKETS = [0.3, 0.5, 1, 2, 5, 10, 20, 30, 60]
+FIRST_RESPONSE_SCALE_BUCKETS = [0.5, 1, 1.5, 2, 2.5, 3, 5, 10, 20, 30, 60]
 
 LLM_FINISH_REASONS = LLMFinishReason.values()
 
@@ -323,7 +323,11 @@ class DuoWorkflowMetrics:  # pylint: disable=too-many-instance-attributes
             workflow_type=workflow_type,
             **build_metadata_labels(),
         ).observe(duration)
-        log.info("Recorded time to first response", duration=duration)
+        log.info(
+            "Recorded time to first response",
+            duration_s=duration,
+            **build_metadata_labels(),
+        )
 
     class _timer:
         def __init__(self, callback):
