@@ -209,10 +209,9 @@ configurable_unit_primitives:
   - feature_setting: "duo_agent_platform_agentic_chat"
     unit_primitives:
       - "duo_agent_platform"
-    default_model: "claude_haiku_4_5_20251001_vertex"
+    default_model: "claude_haiku_4_5_20251001"
     selectable_models:
       - "claude_haiku_4_5_20251001"
-      - "claude_haiku_4_5_20251001_vertex"
       - "claude_sonnet_3_7_20250219"
       - "claude_sonnet_4_20250514"
       - "claude_sonnet_4_20250514_vertex"
