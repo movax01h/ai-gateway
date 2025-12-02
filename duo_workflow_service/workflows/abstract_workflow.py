@@ -47,7 +47,11 @@ from duo_workflow_service.gitlab.url_parser import SESSION_URL_PATH
 from duo_workflow_service.llm_factory import AnthropicConfig, VertexConfig
 from duo_workflow_service.monitoring import duo_workflow_metrics
 from duo_workflow_service.tools import convert_mcp_tools_to_langchain_tool_classes
-from duo_workflow_service.tracking import log_exception
+from duo_workflow_service.tracking import (
+    MonitoringContext,
+    current_monitoring_context,
+    log_exception,
+)
 from duo_workflow_service.workflows.type_definitions import (
     AIO_CANCEL_STOP_WORKFLOW_REQUEST,
     AdditionalContext,
@@ -157,6 +161,9 @@ class AbstractWorkflow(ABC):
             # By default, tracing follows extended_logging. Only disable if LANGSMITH_TRACING_V2 is explicitly "false"
             langsmith_tracing_v2_env = os.getenv("LANGSMITH_TRACING_V2", "").lower()
             tracing_enabled = extended_logging and (langsmith_tracing_v2_env != "false")
+
+            monitoring_context: MonitoringContext = current_monitoring_context.get()
+            monitoring_context.tracing_enabled = str(tracing_enabled)
 
             with tracing_context(enabled=tracing_enabled):
                 try:
