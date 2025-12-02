@@ -31,6 +31,7 @@ from ai_gateway.config import Config, setup_litellm
 from ai_gateway.container import ContainerApplication
 from ai_gateway.instrumentators.model_requests import language_server_version
 from contract import contract_pb2, contract_pb2_grpc
+from duo_workflow_service.client_capabilities import client_capabilities
 from duo_workflow_service.components import tools_registry
 from duo_workflow_service.executor.outbox import OutboxSignal
 from duo_workflow_service.gitlab.connection_pool import connection_pool
@@ -208,6 +209,10 @@ class DuoWorkflowService(contract_pb2_grpc.DuoWorkflowServicer):
         # Fetch the start workflow call
         start_workflow_request: contract_pb2.ClientEvent = await anext(
             aiter(request_iterator)
+        )
+
+        client_capabilities.set(
+            set(start_workflow_request.startRequest.clientCapabilities)
         )
 
         workflow_definition = start_workflow_request.startRequest.workflowDefinition

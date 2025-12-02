@@ -26,6 +26,7 @@ from contract import contract_pb2
 from duo_workflow_service.agent_platform.experimental.flows.flow_config import (
     list_configs,
 )
+from duo_workflow_service.client_capabilities import client_capabilities
 from duo_workflow_service.executor.outbox import OutboxSignal
 from duo_workflow_service.interceptors.authentication_interceptor import current_user
 from duo_workflow_service.server import (
@@ -758,7 +759,10 @@ async def test_execute_workflow(
 
     async def mock_request_iterator() -> AsyncIterable[contract_pb2.ClientEvent]:
         yield contract_pb2.ClientEvent(
-            startRequest=contract_pb2.StartWorkflowRequest(goal="test")
+            startRequest=contract_pb2.StartWorkflowRequest(
+                goal="test",
+                clientCapabilities=["capability_a", "capability_b"],
+            )
         )
 
         for _ in range(request_iterator_count):
@@ -794,6 +798,8 @@ async def test_execute_workflow(
     assert (
         mock_workflow_instance.set_action_response.call_count == request_iterator_count
     )
+
+    assert client_capabilities.get() == {"capability_a", "capability_b"}
 
 
 @pytest.mark.asyncio
