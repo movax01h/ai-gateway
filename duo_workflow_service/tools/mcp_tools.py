@@ -1,4 +1,6 @@
 import json
+import keyword
+import re
 from functools import partialmethod
 from typing import Any
 
@@ -31,6 +33,8 @@ class McpTool(BaseTool):
         # Build logging context with tool name and event context
         log_context = {
             "tool_name": self.name,
+            "tool_class": self.__class__.__name__,
+            "original_mcp_name": getattr(self.__class__, "_original_mcp_name", None),
             "mcp_tool_args_count": len(arguments),
         }
 
@@ -78,13 +82,41 @@ class McpTool(BaseTool):
             metadata,
             contract_pb2.Action(
                 runMCPTool=contract_pb2.RunMCPTool(
-                    name=self.name, args=json.dumps(arguments)
+                    name=getattr(self.__class__, "_original_mcp_name", self.name),
+                    args=json.dumps(arguments),
                 )
             ),
         )
 
     def format_display_message(self, arguments, _tool_response: Any = None) -> str:
         return f"Run MCP tool {self.name}: {arguments}"
+
+
+def sanitize_llm_name(name: str) -> str:
+    if not name:
+        raise ValueError("MCP tool is missing a name")
+
+    sanitized = re.sub(r"[^a-zA-Z0-9_-]", "_", name)
+    sanitized = sanitized.strip("-_")
+    if not sanitized:
+        raise ValueError(f"MCP tool name '{name}' yields empty sanitized identifier")
+
+    return sanitized[:128]
+
+
+def sanitize_python_identifier(name: str) -> str:
+    if not name:
+        raise ValueError("MCP tool is missing a name")
+
+    sanitized = re.sub(r"[^a-zA-Z0-9_]", "_", name)
+
+    if not re.search(r"[a-zA-Z0-9]", sanitized):
+        raise ValueError(f"MCP tool name '{name}' yields invalid python identifier")
+
+    if sanitized[0].isdigit() or keyword.iskeyword(sanitized):
+        sanitized = f"tool_{sanitized}"
+
+    return sanitized
 
 
 def convert_mcp_tools_to_langchain_tool_classes(
@@ -103,9 +135,24 @@ def convert_mcp_tools_to_langchain_tool_classes(
         A list of dynamically created tool classes that inherit from BaseTool.
     """
 
+    log = structlog.stdlib.get_logger("workflow")
     result: list[type[BaseTool]] = []
 
     for tool in mcp_tools:
+        original_name = tool.name
+        llm_name = sanitize_llm_name(original_name)
+        python_name = sanitize_python_identifier(original_name)
+
+        existing_names = {cls.__name__ for cls in result}
+        base_python_name = python_name
+        type_name = f"McpTool_{python_name}"
+        counter = 1
+
+        while type_name in existing_names:
+            python_name = f"{base_python_name}_{counter}"
+            type_name = f"McpTool_{python_name}"
+            counter += 1
+
         try:
             args_schema = json.loads(tool.inputSchema)
         except json.JSONDecodeError:
@@ -114,18 +161,29 @@ def convert_mcp_tools_to_langchain_tool_classes(
         description = f"{UNTRUSTED_MCP_WARNING}\n\n{tool.description}"
 
         tool_cls = type(
-            f"McpTool_{tool.name}",
+            f"McpTool_{python_name}",
             (McpTool,),
             {
                 "__init__": partialmethod(
                     McpTool.__init__,
-                    name=tool.name,
+                    name=llm_name,
                     description=description,
                     args_schema=args_schema,
-                )
+                ),
             },
         )
-        setattr(tool_cls, "name", tool.name)
+
+        setattr(tool_cls, "name", llm_name)
+        setattr(tool_cls, "_original_mcp_name", original_name)
+
+        log.info(
+            "Registered MCP tool",
+            extra={
+                "original_mcp_name": original_name,
+                "llm_name": llm_name,
+                "python_name": python_name,
+            },
+        )
 
         result.append(tool_cls)
 

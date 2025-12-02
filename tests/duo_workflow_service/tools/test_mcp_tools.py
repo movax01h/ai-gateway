@@ -9,6 +9,8 @@ from duo_workflow_service.tools.mcp_tools import (
     UNTRUSTED_MCP_WARNING,
     McpTool,
     convert_mcp_tools_to_langchain_tool_classes,
+    sanitize_llm_name,
+    sanitize_python_identifier,
 )
 
 
@@ -136,6 +138,8 @@ async def test_mcp_tool_logging_with_event_context(
             "is_gitlab_team_member": "True",
             "global_user_id": "user-123",
             "correlation_id": "corr-456",
+            "tool_class": "McpTool",
+            "original_mcp_name": None,
         },
     )
 
@@ -169,6 +173,8 @@ async def test_mcp_tool_logging_without_event_context(
         "Executing MCP tool",
         extra={
             "tool_name": "test_tool",
+            "tool_class": "McpTool",
+            "original_mcp_name": None,
             "mcp_tool_args_count": 1,
         },
     )
@@ -176,3 +182,93 @@ async def test_mcp_tool_logging_without_event_context(
     # Verify action execution
     mock_execute_action.assert_called_once()
     assert result == "test result"
+
+
+@pytest.mark.asyncio
+async def test_convert_mcp_tools_handles_name_collisions():
+    """Test that tools with the same name get unique Python class names."""
+    metadata = {"outbox": AsyncMock()}
+    mcp_tools = [
+        contract_pb2.McpTool(
+            name="search", description="First search tool", inputSchema="{}"
+        ),
+        contract_pb2.McpTool(
+            name="delete", description="Delete tool", inputSchema="{}"
+        ),
+        contract_pb2.McpTool(
+            name="search", description="Second search tool", inputSchema="{}"
+        ),
+    ]
+
+    result = convert_mcp_tools_to_langchain_tool_classes(mcp_tools)
+
+    assert len(result) == 3
+
+    assert result[0].__name__ == "McpTool_search"
+    assert result[1].__name__ == "McpTool_delete"
+    assert result[2].__name__ == "McpTool_search_1"
+
+
+@pytest.mark.parametrize(
+    "input_name,expected",
+    [
+        ("Tool-Name_123", "Tool-Name_123"),
+        ("tool name!", "tool_name"),
+        ("a*b&c", "a_b_c"),
+        ("__abc", "abc"),
+        ("--abc", "abc"),
+    ],
+)
+def test_sanitize_llm_name_valid(input_name, expected):
+    assert sanitize_llm_name(input_name) == expected
+
+
+@pytest.mark.parametrize(
+    "input_name",
+    [
+        "",
+        "!!!",
+        "   ",
+    ],
+)
+def test_sanitize_llm_name_invalid(input_name):
+    with pytest.raises(ValueError):
+        sanitize_llm_name(input_name)
+
+
+def test_sanitize_llm_name_max_length():
+    long_name = "A" * 300
+    result = sanitize_llm_name(long_name)
+    assert len(result) == 128
+
+
+@pytest.mark.parametrize(
+    "input_name,expected",
+    [
+        ("tool_name", "tool_name"),
+        ("Tool123_Name", "Tool123_Name"),
+        ("a b c", "a_b_c"),
+        ("a*b&c", "a_b_c"),
+        ("_abc", "_abc"),
+        ("tool$name", "tool_name"),
+        ("class", "tool_class"),
+        ("if", "tool_if"),
+        ("9_name", "tool_9_name"),
+        ("value!!!", "value___"),
+    ],
+)
+def test_sanitize_python_identifier(input_name, expected):
+    assert sanitize_python_identifier(input_name) == expected
+
+
+@pytest.mark.parametrize(
+    "input_name",
+    [
+        "",
+        "!!!",
+        "   ",
+    ],
+)
+def test_sanitize_python_identifier_invalid(input_name):
+    with pytest.raises(ValueError):
+        sanitize_python_identifier(input_name)
