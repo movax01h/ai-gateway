@@ -59,17 +59,17 @@ class PostDuoCodeReview(DuoBaseTool):
             "merge_request_iid": merge_request_iid,
             "review_output": review_output,
         }
-        return await self.gitlab_client.apost(
+        response = await self.gitlab_client.apost(
             path="/api/v4/ai/duo_workflows/code_review/add_comments",
             body=json.dumps(request_body),
+            parse_json=False,
         )
+
+        return json.loads(response.body)
 
     def _format_response(self, response: dict, merge_request_iid: int) -> str:
         """Format API response as JSON string."""
-        if (
-            isinstance(response, dict)
-            and response.get("message") == "Comments added successfully"
-        ):
+        if response.get("message") == "Comments added successfully":
             return json.dumps(
                 {
                     "status": "success",
