@@ -96,7 +96,9 @@ instructions:
 @pytest.mark.asyncio
 async def test_post_duo_code_review(gitlab_client_mock, metadata):
     gitlab_client_mock.apost = AsyncMock(
-        return_value={"message": "Comments added successfully"}
+        return_value=GitLabHttpResponse(
+            status_code=200, body=json.dumps({"message": "Comments added successfully"})
+        )
     )
     tool = PostDuoCodeReview(metadata=metadata)
     response = await tool._arun(
@@ -115,6 +117,7 @@ async def test_post_duo_code_review(gitlab_client_mock, metadata):
                 "review_output": "<review>test</review>",
             }
         ),
+        parse_json=False,
     )
 
 
