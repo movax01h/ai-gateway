@@ -19,6 +19,25 @@ components:
     ui_log_events:
       - "on_tool_execution_success"
       - "on_tool_execution_failed"
+  - name: "create_repository_branch"
+    type: AgentComponent
+    prompt_id: "create_repository_branch"
+    prompt_version: "^1.0.0"
+    toolset:
+      - "create_branch"
+      - "run_git_command"
+    inputs:
+      - from: "context:project_id"
+        as: "project_id"
+      - from: "context:inputs.agent_platform_standard_context.primary_branch"
+        as: "ref"
+      - from: "context:project_http_url_to_repo"
+        as: "repository_url"
+      - from: "context:issue_parser.tool_responses"
+        as: "issue_details"
+    ui_log_events:
+      - "on_tool_execution_success"
+      - "on_tool_execution_failed"
   - name: "draft_merge_request_creator"
     type: OneOffComponent
     prompt_id: "create_merge_request"
@@ -33,8 +52,8 @@ components:
         as: "issue_details"
       - from: "context:workflow_id"
         as: "workflow_id"
-      - from: "context:inputs.agent_platform_standard_context.workload_branch"
-        as: "source_branch"
+      - from: "context:create_repository_branch.final_answer"
+        as: "source_branch_details"
       - from: "context:inputs.agent_platform_standard_context.primary_branch"
         as: "target_branch"
       - from: "context:agents_dot_md.tool_responses"
@@ -194,6 +213,8 @@ routers:
   - from: "agents_dot_md"
     to: "issue_parser"
   - from: "issue_parser"
+    to: "create_repository_branch"
+  - from: "create_repository_branch"
     to: "draft_merge_request_creator"
   - from: "draft_merge_request_creator"
     to: "tool_listing_agent"
