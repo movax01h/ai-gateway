@@ -50,6 +50,9 @@ query GetGroupWorkItem(
                                         ... on WorkItemWidgetHealthStatus {
                                             healthStatus
                                         }
+                                        ... on WorkItemWidgetHierarchy {
+                                            hasChildren
+                                        }
                                     }
                                 }
                             }
@@ -135,6 +138,11 @@ query GetGroupWorkItem(
                                 createdAt
                                 closedAt
                                 webUrl
+                                widgets {
+                                    ... on WorkItemWidgetHierarchy {
+                                        hasChildren
+                                    }
+                                }
                             }
                         }
                         ancestors(first: $pageSize, after: $endCursor) {
