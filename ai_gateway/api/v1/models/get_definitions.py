@@ -15,6 +15,7 @@ class _GetModelResponseModel(BaseModel):
     provider: str | None = None
     deprecation: DeprecationInfo | None = None
     description: str | None = None
+    cost_indicator: str | None = None
 
 
 class _GetModelResponseUnitPrimitive(BaseModel):
@@ -47,6 +48,7 @@ async def get_models():
                 provider=definition.provider,
                 deprecation=definition.deprecation,
                 description=definition.description,
+                cost_indicator=definition.cost_indicator,
             )
             for definition in selection_config.get_llm_definitions().values()
         ],

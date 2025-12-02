@@ -145,6 +145,21 @@ Models are defined in `ai_gateway/model_selection/models.yml`, and each model ha
 
 - `name`: A human-readable name for the model, to be displayed in UI
 - `gitlab_identifier`: an identifier used to reference the model within GitLab configuration
+- `provider` (optional): The provider of the model, used for display in the UI (e.g "Vertex", "Anthropic")
+- `description` (optional): A brief description of the model, used for display in the UI (e.g "Fast, cost-effective responses").
+  These should be no more than 90 characters and may require vendor approval. Please tag `@tmccaslin` (Taylor McCaslin)
+  for review when updating/adding descriptions.
+- `cost_indicator` (optional): A visual cost indicator for the model, used for display in the UI (i.e `$`, `$$`, `$$$`).
+  See table below for thresholds when updating/adding new cost indicators. These are based off model drawdown rates defined by our pricing team for usage billing. See [issue](https://gitlab.com/gitlab-org/gitlab/-/issues/566740).
+
+  **TODO:** Add link to rate cards once they are officially documented.
+
+  | Cost Indicator | Drawdown Rate Range |
+  | -------------- | ------------------- |
+  | `$`            | 0.01 ≤ rate ≤ 0.3   |
+  | `$$`           | 0.3 < rate ≤ 0.6    |
+  | `$$$`          | 0.6 < rate ≤ 1.0    |
+
 - `family` (optional): an ordered list of preferred prompt definitions to use with this model (see
 [How models and prompts are selected](#how-models-and-prompts-are-selected) for more details)
 - `params`: Dictionary with custom parameters to be passed to the model client
@@ -155,6 +170,9 @@ Example:
 ```yaml
 models:
   - name: "Claude Sonnet 3.5 - Anthropic"
+    provider: "Anthropic"
+    description: "Earlier generation model for coding, reasoning, and agentic workflows."
+    cost_indicator: "$$$"
     gitlab_identifier: "claude_3_5_sonnet_20240620"
     params:
       model_class_provider: "anthropic"
