@@ -1,6 +1,6 @@
 from itertools import chain
 from pathlib import Path
-from typing import Any, Iterable, Optional
+from typing import Any, Iterable, Literal, Optional
 
 import yaml
 from gitlab_cloud_connector import GitLabUnitPrimitive
@@ -33,6 +33,7 @@ class LLMDefinition(BaseModel):
     prompt_params: PromptParams = PromptParams()
     provider: Optional[str] = None
     description: str | None = None
+    cost_indicator: Literal["$", "$$", "$$$"] | None = None
     params: dict[str, Any] = {}
     family: list[str] = []
     deprecation: Optional[DeprecationInfo] = None

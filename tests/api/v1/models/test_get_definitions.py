@@ -30,6 +30,7 @@ def mock_model_config_fixture():
                 gitlab_identifier="model1",
                 provider="Anthropic",
                 description="Fast, cost-effective responses.",
+                cost_indicator="$",
                 params={},
             ),
             "model2": LLMDefinition(
@@ -37,6 +38,7 @@ def mock_model_config_fixture():
                 gitlab_identifier="model2",
                 provider="Vertex",
                 description="Fast, cost-effective responses.",
+                cost_indicator="$$",
                 params={},
             ),
             "model3": LLMDefinition(
@@ -95,6 +97,7 @@ def test_get_models_returns_correct_data(mock_model_config, client):
         "provider": "Anthropic",
         "deprecation": None,
         "description": "Fast, cost-effective responses.",
+        "cost_indicator": "$",
     }
     assert data["models"][1] == {
         "name": "Model 2",
@@ -102,6 +105,7 @@ def test_get_models_returns_correct_data(mock_model_config, client):
         "provider": "Vertex",
         "deprecation": None,
         "description": "Fast, cost-effective responses.",
+        "cost_indicator": "$$",
     }
     assert data["models"][2] == {
         "name": "Model 3",
@@ -109,6 +113,7 @@ def test_get_models_returns_correct_data(mock_model_config, client):
         "provider": None,
         "deprecation": {"deprecation_date": "2025-10-28", "removal_version": "18.8"},
         "description": None,
+        "cost_indicator": None,
     }
 
     resp0 = data["unit_primitives"][0]
