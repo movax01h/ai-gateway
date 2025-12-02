@@ -458,3 +458,10 @@ configurable_unit_primitives:
     selectable_models:
       - "claude_sonnet_4_20250514"
       - "claude_sonnet_4_20250514_vertex"
+  - feature_setting: "create_repository_branch"
+    unit_primitives:
+      - "duo_workflow_execute_workflow"
+    default_model: "claude_sonnet_4_20250514"
+    selectable_models:
+      - "claude_sonnet_4_20250514"
+      - "claude_sonnet_4_20250514_vertex"
