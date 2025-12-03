@@ -100,14 +100,14 @@ class TestPrompt:
                         llm_definition=LLMDefinition(
                             name="Mistral",
                             gitlab_identifier="mistral",
-                            family=["mistral"],
+                            family=["mistral", "litellm"],
                             params={
                                 "model": "mistral",
                                 "temperature": 0.0,
                                 "max_tokens": 4096,
                             },
                         ),
-                        family=["mistral"],
+                        family=["mistral", "litellm"],
                         friendly_name="Mistral",
                     ),
                     None,

@@ -96,6 +96,7 @@ models:
     family:
       - claude_vertex_4_5
       - vertex
+      - litellm
     params:
       model: "claude-sonnet-4-5@20250929"
       custom_llm_provider: "vertex_ai"
@@ -127,6 +128,7 @@ models:
     family:
       - claude_vertex_4_5
       - vertex
+      - litellm
     params:
       model: "claude-haiku-4-5@20251001"
       custom_llm_provider: "vertex_ai"
@@ -155,6 +157,7 @@ models:
     cost_indicator: "$$$"
     family:
       - vertex
+      - litellm
     params:
       model: "claude-sonnet-4@20250514"
       custom_llm_provider: "vertex_ai"
@@ -186,6 +189,7 @@ models:
     cost_indicator: "$$$"
     family:
       - vertex
+      - litellm
     params:
       model: "claude-3-7-sonnet@20250219"
       custom_llm_provider: "vertex_ai"
@@ -212,6 +216,7 @@ models:
     gitlab_identifier: "vertex" # For backwards compatibility with requests asking for [prompt_id]/vertex
     family:
       - vertex
+      - litellm
     params:
       model: "claude-3-5-sonnet-v2@20241022"
       custom_llm_provider: "vertex_ai"
@@ -248,6 +253,7 @@ models:
     cost_indicator: "$$"
     family:
       - gpt_5
+      - litellm
     params:
       model: gpt-5.1-2025-11-13
       model_class_provider: "openai"
@@ -261,6 +267,7 @@ models:
     cost_indicator: "$"
     family:
       - gpt_5
+      - litellm
     params:
       model: gpt-5-mini-2025-08-07
       model_class_provider: "openai"
@@ -273,6 +280,7 @@ models:
     cost_indicator: "$$"
     family:
       - gpt_5
+      - litellm
     params:
       model: gpt-5-codex
       model_class_provider: "openai"
@@ -291,6 +299,7 @@ models:
     gitlab_identifier: mistral
     family:
       - mistral
+      - litellm
     params:
       model: mistral
       temperature: 0.0
@@ -301,6 +310,7 @@ models:
     family:
       - mixtral
       - mistral
+      - litellm
     params:
       model: mixtral
       temperature: 0.0
@@ -311,6 +321,7 @@ models:
     family:
       - codestral
       - mistral
+      - litellm
     params:
       model: codestral
       temperature: 0.0
@@ -320,6 +331,7 @@ models:
     gitlab_identifier: llama3
     family:
       - llama3
+      - litellm
     params:
       model: llama3
       temperature: 0.0
@@ -329,6 +341,7 @@ models:
     gitlab_identifier: codellama
     family:
       - codellama
+      - litellm
     params:
       model: codellama
       temperature: 0.0
@@ -338,6 +351,7 @@ models:
     gitlab_identifier: gpt
     family:
       - gpt
+      - litellm
     params:
       model: gpt
       temperature: 0.0
@@ -365,6 +379,7 @@ models:
     gitlab_identifier: "claude_3" # For backwards compatibility with requests asking for [prompt_id]/claude_3
     family:
       - claude_3
+      - litellm
     params:
       model: "claude-3-5-sonnet-20241022" # This will be overridden later by the actual model used
       temperature: 0.0
@@ -374,6 +389,7 @@ models:
     gitlab_identifier: "general" # For backwards compatibility with requests asking for [prompt_id]/general
     family:
       - claude_3
+      - litellm
     params:
       model: "claude-3-5-sonnet-20241022"
       temperature: 0.0
