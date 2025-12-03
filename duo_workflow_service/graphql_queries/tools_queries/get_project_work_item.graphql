@@ -11,40 +11,31 @@ query GetProjectWorkItem(
             nodes {
                 author {
                     username
-                    name
                 }
                 closedAt
-                confidential
                 createdAt
                 description
                 id
                 iid
-                imported
                 namespace {
-                    id
                     fullPath
                 }
                 project {
-                    id
                     fullPath
                 }
                 state
                 title
                 updatedAt
                 workItemType {
-                    id
                     name
                 }
-                archived
                 widgets {
                     ...on WorkItemWidgetLinkedItems {
                         type
                         linkedItems {
                             nodes {
                                 linkType
-                                workItemState
                                 workItem {
-                                    id
                                     iid
                                     namespace {
                                         id
@@ -55,9 +46,11 @@ query GetProjectWorkItem(
                                     }
                                     title
                                     state
-                                    createdAt
-                                    closedAt
-                                    webUrl
+                                    widgets{
+                                        ... on WorkItemWidgetHealthStatus {
+                                            healthStatus
+                                        }
+                                    }
                                 }
                             }
                         }
@@ -67,18 +60,12 @@ query GetProjectWorkItem(
                             nodes {
                                 id
                                 title
-                                description
                             }
                         }
                     }
                     ...on WorkItemWidgetMilestone {
                         milestone {
-                            id
                             title
-                            state
-                            expired
-                            upcoming
-                            startDate
                             dueDate
                         }
                     }
@@ -88,6 +75,26 @@ query GetProjectWorkItem(
                             title
                             startDate
                             dueDate
+                        }
+                    }
+                    ... on WorkItemWidgetStartAndDueDate {
+                        dueDate
+                        startDate
+                        isFixed
+                    }
+                    ... on WorkItemWidgetHealthStatus {
+                        healthStatus
+                    }
+                    ... on WorkItemWidgetAssignees {
+                        assignees {
+                            nodes {
+                                username
+                            }
+                        }
+                    }
+                    ... on WorkItemWidgetStatus {
+                        status {
+                            name
                         }
                     }
                     ... on WorkItemWidgetHierarchy {
