@@ -10,6 +10,7 @@ from contract import contract_pb2
 from duo_workflow_service.checkpointer.gitlab_workflow import (
     WORKFLOW_STATUS_TO_CHECKPOINT_STATUS,
 )
+from duo_workflow_service.client_capabilities import is_client_capable
 from duo_workflow_service.entities.state import (
     MessageTypeEnum,
     UiChatLog,
@@ -32,6 +33,7 @@ class UserInterface:
         self.steps: list[dict] = []
         self.checkpoint_number = 0
         self.latest_ai_message: Optional[BaseMessageChunk] = None
+        self.last_sent_ui_message_id: Optional[str] = None
 
     async def send_event(
         self,
@@ -87,19 +89,61 @@ class UserInterface:
     # them and just send the most recent. This is done by keeping track of the
     # checkpoint_number so we remember the last one we sent.
     def most_recent_new_checkpoint(self):
+        recent_ui_chat_log_changes = self._pop_recent_ui_chat_log_changes()
+
         return contract_pb2.NewCheckpoint(
             goal=self.goal,
             status=WORKFLOW_STATUS_TO_CHECKPOINT_STATUS[self.status],
             checkpoint=dumps(
                 {
                     "channel_values": {
-                        "ui_chat_log": self.ui_chat_log,
+                        "ui_chat_log": recent_ui_chat_log_changes,
                         "plan": {"steps": self.steps},
                     }
                 },
                 cls=CustomEncoder,
             ),
         )
+
+    def _pop_recent_ui_chat_log_changes(self) -> list[UiChatLog]:
+        """Extract UI chat log messages that need to be sent or re-rendered.
+
+        This method optimizes checkpoint updates by returning only the messages
+        that have been added or updated since the last checkpoint was sent when
+        the client supports incremental streaming. For clients that don't support
+        this capability, it returns the full chat log.
+
+        It tracks the last sent message ID and returns a slice of the chat log
+        starting from that message (inclusive), allowing the client to re-render
+        it if needed.
+
+        Returns:
+            list[UiChatLog]: A list of UI chat log messages that need to be sent.
+                            Returns the full chat log if this is the first send,
+                            the client doesn't support incremental streaming,
+                            or an empty list if there are no messages.
+        """
+        if not self.ui_chat_log:
+            return self.ui_chat_log
+
+        if not is_client_capable("incremental_streaming"):
+            return self.ui_chat_log
+
+        if self.last_sent_ui_message_id:
+            ui_chat_log_diff_idx = next(
+                (
+                    idx
+                    for idx, msg in enumerate(self.ui_chat_log)
+                    if msg["message_id"] == self.last_sent_ui_message_id
+                ),
+                0,
+            )
+        else:
+            ui_chat_log_diff_idx = 0
+
+        self.last_sent_ui_message_id = self.ui_chat_log[-1]["message_id"]
+
+        return self.ui_chat_log[ui_chat_log_diff_idx:]
 
     def _append_chunk_to_ui_chat_log(self, message: BaseMessage):
         """Append a message chunk to the UI chat log.
@@ -110,7 +154,6 @@ class UserInterface:
         Args:
             message (BaseMessage): The message chunk to be processed and added to the log.
         """
-
         if not isinstance(message, AIMessageChunk):
             return
 
