@@ -10,6 +10,8 @@ metadata:
 spec:
   regions:
   - us-east1
+  - asia-northeast1
+  - europe-west2
   request_timeout: 3600
   load_balancing:
     external_load_balancer:
