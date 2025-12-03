@@ -10,7 +10,7 @@ This guide provides the practical knowledge developers need to build flows effec
 
 Flow Registry is being versioned in order to provide stable experience, and assure backwards compatibility.
 At the current moment a stable version of Flow Registry is `v1`, it should be used for all other purposes
-then experimental features development
+than experimental feature development.
 
 |version|description|documentation| flow config location |
 |-------|-----------|-------------|---------|
@@ -19,8 +19,8 @@ then experimental features development
 
 Flow Registry configs declares used version via `version` attribute.
 
-Each of versions is being implemented by an independent Python package in AI Gateway repository, flow configs
-location must adhere to a declared version
+Each version is being implemented by an independent Python package in AI Gateway repository, flow configs
+location must adhere to a declared version.
 
 ## Development Plan
 
@@ -40,7 +40,7 @@ Flow Registry is ready this setup will no longer be required for those building 
 
 ## Quick Start
 
-For quick start guide please visit to _v1_ [documentation](v1.md#quick-start) page
+For quick start guide please visit to _v1_ [documentation](v1.md#quick-start) page.
 
 ## Contribution Guidelines
 
