@@ -181,7 +181,16 @@ async def test_compile_and_run_graph(
     mock_fetch_workflow.return_value = (
         mock_project,
         None,
-        {"project_id": 1, "mcp_enabled": mcp_enabled},
+        {
+            "project_id": 1,
+            "mcp_enabled": mcp_enabled,
+            "agent_privileges_names": [],
+            "pre_approved_agent_privileges_names": [],
+            "allow_agent_to_request_user": False,
+            "first_checkpoint": None,
+            "workflow_status": "",
+            "gitlab_host": "example.com",
+        },
     )
 
     mcp_tool = MagicMock()
@@ -409,7 +418,20 @@ async def test_namespace_level_workflow(
     mock_checkpointer.aget_tuple = AsyncMock(return_value=None)
     mock_checkpointer.initial_status_event = "START"
     mock_gitlab_workflow.return_value.__aenter__.return_value = mock_checkpointer
-    mock_fetch_workflow.return_value = (None, mock_namespace, {"namespace_id": 1})
+    mock_fetch_workflow.return_value = (
+        None,
+        mock_namespace,
+        {
+            "namespace_id": 1,
+            "agent_privileges_names": [],
+            "pre_approved_agent_privileges_names": [],
+            "allow_agent_to_request_user": False,
+            "mcp_enabled": False,
+            "first_checkpoint": None,
+            "workflow_status": "",
+            "gitlab_host": "example.com",
+        },
+    )
 
     # Run the method
     with pytest.raises(TraceableException) as exc_info:
@@ -494,7 +516,20 @@ async def test_compile_and_run_graph_records_first_response_on_first_graph_updat
     mock_checkpointer.aget_tuple = AsyncMock(return_value=None)
     mock_checkpointer.initial_status_event = "START"
     mock_gitlab_workflow.return_value.__aenter__.return_value = mock_checkpointer
-    mock_fetch_workflow.return_value = (mock_project, None, {"project_id": 1})
+    mock_fetch_workflow.return_value = (
+        mock_project,
+        None,
+        {
+            "project_id": 1,
+            "agent_privileges_names": [],
+            "pre_approved_agent_privileges_names": [],
+            "allow_agent_to_request_user": False,
+            "mcp_enabled": False,
+            "first_checkpoint": None,
+            "workflow_status": "",
+            "gitlab_host": "example.com",
+        },
+    )
 
     workflow = MockWorkflow(
         "id",

@@ -79,7 +79,16 @@ class TestFlow:  # pylint: disable=too-many-public-methods
         with (
             patch("duo_workflow_service.workflows.abstract_workflow.get_http_client"),
             patch(
-                "duo_workflow_service.workflows.abstract_workflow.empty_workflow_config"
+                "duo_workflow_service.workflows.abstract_workflow.empty_workflow_config",
+                return_value={
+                    "agent_privileges_names": [],
+                    "pre_approved_agent_privileges_names": [],
+                    "allow_agent_to_request_user": False,
+                    "mcp_enabled": False,
+                    "first_checkpoint": None,
+                    "workflow_status": "",
+                    "gitlab_host": "",
+                },
             ),
             patch(
                 "duo_workflow_service.workflows.abstract_workflow.fetch_workflow_and_container_data"
@@ -99,7 +108,15 @@ class TestFlow:  # pylint: disable=too-many-public-methods
             mock_fetch.return_value = (
                 mock_project,
                 None,
-                {"config": "test"},
+                {
+                    "agent_privileges_names": [],
+                    "pre_approved_agent_privileges_names": [],
+                    "allow_agent_to_request_user": False,
+                    "mcp_enabled": False,
+                    "first_checkpoint": None,
+                    "workflow_status": "",
+                    "gitlab_host": "gitlab.com",
+                },
             )
             mock_parser.extract_host_from_url.return_value = "gitlab.com"
 
@@ -260,14 +277,29 @@ class TestFlow:  # pylint: disable=too-many-public-methods
         mock_checkpointer,
         mock_state_graph,
         mock_project,
-        checkpoint_tuple,
     ):
         """Test get_graph_input returns appropriate input based on status event."""
         mock_checkpointer.initial_status_event = status_event
         if checkpoint_tuple_present:
-            mock_checkpointer.aget_tuple = AsyncMock(return_value=checkpoint_tuple)
-
-        await flow_instance.run(goal)
+            with patch(
+                "duo_workflow_service.workflows.abstract_workflow.fetch_workflow_and_container_data"
+            ) as mock_fetch:
+                mock_fetch.return_value = (
+                    mock_project,
+                    None,
+                    {
+                        "agent_privileges_names": [],
+                        "pre_approved_agent_privileges_names": [],
+                        "allow_agent_to_request_user": False,
+                        "mcp_enabled": False,
+                        "first_checkpoint": {"checkpoint": "test"},
+                        "workflow_status": "",
+                        "gitlab_host": "gitlab.com",
+                    },
+                )
+                await flow_instance.run(goal)
+        else:
+            await flow_instance.run(goal)
 
         kwargs = mock_state_graph.compile.return_value.astream.call_args[1]
 
