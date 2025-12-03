@@ -128,6 +128,13 @@ class TestGitLabUrlParser:
                 quote("namespace/project-with-dashes", safe=""),
                 42,
             ),
+            # Test work item URL for issues
+            (
+                "https://gitlab.com/namespace/project/-/work_items/42",
+                "gitlab.com",
+                quote("namespace/project", safe=""),
+                42,
+            ),
         ],
     )
     def test_parse_issue_url(
@@ -144,19 +151,19 @@ class TestGitLabUrlParser:
             (
                 "https://gitlab.com/namespace/project/-/issues",
                 "gitlab.com",
-                "Could not parse issue URL",
+                "Could not parse issue or work item URL",
             ),
             # Test invalid URL (issue ID not a number)
             (
                 "https://gitlab.com/namespace/project/-/issues/abc",
                 "gitlab.com",
-                "Could not parse issue URL",
+                "Could not parse issue or work item URL",
             ),
             # Test invalid URL (not an issue URL)
             (
                 "https://gitlab.com/namespace/project",
                 "gitlab.com",
-                "Could not parse issue URL",
+                "Could not parse issue or work item URL",
             ),
             # Test URL with non-matching netloc
             (
@@ -423,7 +430,7 @@ class TestGitLabUrlParser:
 
     def test_extract_path_components_exception_handling(self):
         url = "https://gitlab.com/namespace/project"
-        pattern = f"]invalid-pattern["
+        pattern = "]invalid-pattern["
         error_message = "Test error message"
 
         with pytest.raises(GitLabUrlParseError, match=f"{error_message}: {url}"):
