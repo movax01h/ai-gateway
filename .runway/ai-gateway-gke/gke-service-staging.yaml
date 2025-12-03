@@ -19,7 +19,7 @@ ai-gateway-gke:
       AIGW_GITLAB_API_URL: "https://staging.gitlab.com/api/v4/"
       AIGW_CUSTOMER_PORTAL_URL: "https://customers.staging.gitlab.com"
       AIGW_GLGO_BASE_URL: "https://glgo.staging.runway.gitlab.net"
-      AIGW_GOOGLE_CLOUD_PLATFORM__PROJECT: "gitlab-ai-framework-leg-prod"
+      AIGW_GOOGLE_CLOUD_PLATFORM__PROJECT: "gitlab-ai-framework-stage"
       AIGW_VERTEX_SEARCH__FALLBACK_DATASTORE_VERSION: "17.0"
       AIGW_SNOWPLOW__ENABLED: "false"
       AIGW_INTERNAL_EVENT__ENABLED: "true"
