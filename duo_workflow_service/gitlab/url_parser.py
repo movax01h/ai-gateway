@@ -2,6 +2,8 @@ import re
 from typing import List, Literal, NamedTuple, Tuple
 from urllib.parse import quote, unquote, urlparse
 
+import structlog
+
 PROJECT_URL_REGEX = r"^(.+?)(?:/-/.*)?$"
 ISSUE_URL_REGEX = r"^(.+?)/-/issues/(\d+)"
 GROUP_URL_REGEX = r"^(?:groups/)?(.+?)(?:/-/.*)?$"
@@ -16,6 +18,7 @@ WORK_ITEM_URL_REGEX = (
 )
 
 SESSION_URL_PATH = "/-/automate/agent-sessions/"
+log = structlog.stdlib.get_logger("url_parser")
 
 
 class ParsedWorkItemUrl(NamedTuple):
@@ -164,15 +167,22 @@ class GitLabUrlParser:
             GitLabUrlParseError: If the URL cannot be parsed or if the netloc doesn't match gitlab_host
         """
         GitLabUrlParser._validate_url_netloc(url, gitlab_host)
-
-        components = GitLabUrlParser._extract_path_components(
-            url, ISSUE_URL_REGEX, "Could not parse issue URL"
-        )
+        try:
+            components = GitLabUrlParser._extract_path_components(
+                url, ISSUE_URL_REGEX, "Could not parse issue URL"
+            )
+            issue_iid = int(components[1])
+        except GitLabUrlParseError as e:
+            log.info(
+                f"Could not parse issue URL: {url}: {e}, trying again with work item regex"
+            )
+            components = GitLabUrlParser._extract_path_components(
+                url, WORK_ITEM_URL_REGEX, "Could not parse issue or work item URL"
+            )
+            issue_iid = int(components[2])
 
         # URL-encode the project path for API calls
         encoded_path = quote(components[0], safe="")
-        issue_iid = int(components[1])
-
         return encoded_path, issue_iid
 
     @staticmethod
