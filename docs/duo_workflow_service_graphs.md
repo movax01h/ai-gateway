@@ -266,7 +266,7 @@ graph TD;
     classDef last fill:#bfb6fc;
 ```
 
-## Graph: `duo_developer/v1` (Flow Registry)
+## Graph: `developer/v1` (Flow Registry)
 
 ```mermaid
 
