@@ -1,5 +1,5 @@
 ---
-name: Claude 3 Review Merge Request
+name: Review Merge Request
 model:
   params:
     model_class_provider: litellm
@@ -8,6 +8,6 @@ unit_primitives:
   - review_merge_request
 prompt_template:
   system: |
-    {% include 'review_merge_request/system/1.1.0.jinja' %}
+    {% include 'review_merge_request/system/1.2.0.jinja' %}
   user: |
-    {% include 'review_merge_request/user/1.1.0.jinja' %}
+    {% include 'review_merge_request/user/1.2.0.jinja' %}
