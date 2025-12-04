@@ -1,0 +1,17 @@
+---
+name: create_branch
+model:
+  params:
+    model_class_provider: anthropic
+    max_tokens: 32_768
+    max_retries: 1
+unit_primitives:
+  - duo_workflow_execute_workflow
+prompt_template:
+  system: |
+    {% include 'create_repository_branch/system/1.0.0.jinja' %}
+  user: |
+    {% include 'workflow/create_branch/user/1.0.0.jinja' %}
+  placeholder: history
+params:
+  timeout: 30
