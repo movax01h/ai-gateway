@@ -1,3 +1,4 @@
+import shlex
 import textwrap
 from typing import Any, List, Optional, Type
 
@@ -48,12 +49,17 @@ Instead of '{disallowed_operator}' please use {self.name} multiple times consecu
             if program.startswith(disallowed_command):
                 return f"{disallowed_command} commands are not supported with {self.name} tool."
 
+        try:
+            arguments = shlex.split(args)
+        except ValueError as e:
+            return f"Invalid argument syntax: {e}. Check for unclosed quotes."
+
         return await _execute_action(
             self.metadata,  # type: ignore
             contract_pb2.Action(
                 runCommand=contract_pb2.RunCommandAction(
                     program=program,
-                    arguments=args.split(),
+                    arguments=arguments,
                     flags=[],
                 )
             ),
