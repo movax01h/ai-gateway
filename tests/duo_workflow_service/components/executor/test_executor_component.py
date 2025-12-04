@@ -218,6 +218,7 @@ class TestExecutorComponent:
                 "set_task_status_tool_name": "set_task_status",
                 "get_plan_tool_name": "get_plan",
                 "agent_user_environment": {},
+                "agents_dot_md": None,
             },
         )
 

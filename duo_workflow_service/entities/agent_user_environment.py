@@ -14,6 +14,8 @@ _CONTEXT_REGISTRY: Dict[Type[BaseModel], str] = {
     ShellInformationContext: "shell_information_context",
 }
 
+_AGENTS_DOT_MD_ID = "agents-md-user-instructions"
+
 
 def process_agent_user_environment(
     additional_contexts: list[AdditionalContext] | None = None,
@@ -62,3 +64,16 @@ def process_agent_user_environment(
                 continue
 
     return contexts
+
+
+def process_agents_dot_md(
+    additional_contexts: list[AdditionalContext] | None = None,
+) -> str | None:
+    if not additional_contexts:
+        return None
+
+    for context in additional_contexts:
+        if context.id == _AGENTS_DOT_MD_ID:
+            return context.content
+
+    return None
