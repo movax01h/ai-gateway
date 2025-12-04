@@ -1,0 +1,38 @@
+apiVersion: runway/v1
+kind: RunwayKubernetesDeployment
+
+duo-workflow-svc-eks:
+  metadata:
+    labels:
+      gitlab.com/department: eng-dev
+      gitlab.com/department_group: eng-dev-create-shared-infra
+      gitlab.com/product_category: duo_workflow
+      gitlab.com/owner_email_handle: dgriffith
+
+  serviceMixins:
+    - "runway-eks.service-mixin"
+
+  spec:
+    environment:
+      DUO_WORKFLOW_AUTH__OIDC_GITLAB_URL: "https://staging.gitlab.com/"
+      DUO_WORKFLOW_AUTH__OIDC_CUSTOMER_PORTAL_URL: "https://customers.staging.gitlab.com"
+      DUO_WORKFLOW_GOOGLE_CLOUD_PROFILER__ENABLED: "true"
+      LANGSMITH_PROJECT: "duo-workflow-staging"
+      DUO_WORKFLOW_SERVICE_ENVIRONMENT: "staging"
+      DUO_WORKFLOW_DIRECT_CONNECTION_BASE_URL: "https://staging.gitlab.com"
+      AIGW_GOOGLE_CLOUD_PLATFORM__PROJECT: "gitlab-ai-framework-stage"
+      AIGW_BILLING_EVENT__USE_GLOBAL_USER_ID_FOR_TEAM_MEMBERS: "false"
+    scalability:
+      min_instances: 1
+      max_instances: 8
+
+  workloadSecrets:
+    - name: env-vars
+    - name: gcp-service-account
+
+  secretEnvFrom:
+    - env-vars
+
+  secretVolumes:
+    - name: gcp-service-account
+      path: /secrets/gcp-service-account
