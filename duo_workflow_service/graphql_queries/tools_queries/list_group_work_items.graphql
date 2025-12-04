@@ -19,6 +19,7 @@ query ListGroupWorkItems(
     $status: WorkItemWidgetStatusFilterInput
     $milestoneTitle: [String!]
     $milestoneWildcardId: MilestoneWildcardId
+    $includeDescendants: Boolean = true
 ) {
     namespace(fullPath: $fullPath) {
         workItems(
@@ -41,6 +42,7 @@ query ListGroupWorkItems(
             status: $status
             milestoneTitle: $milestoneTitle
             milestoneWildcardId: $milestoneWildcardId
+            includeDescendants: $includeDescendants
         ) {
             pageInfo {
                 hasNextPage
