@@ -1,5 +1,4 @@
 import asyncio
-import os
 from typing import Any
 from unittest.mock import ANY, AsyncMock, MagicMock, Mock, patch
 
@@ -32,6 +31,16 @@ def mock_planner_component_fixture():
         autospec=True,
     ) as mock:
         mock.return_value.attach.return_value = "set_status_to_execution"
+        yield mock
+
+
+@pytest.fixture(name="mock_create_branch_component")
+def mock_create_branch_component_fixture():
+    with patch(
+        "duo_workflow_service.workflows.issue_to_merge_request.workflow.CreateRepositoryBranchComponent",
+        autospec=True,
+    ) as mock:
+        mock.return_value.attach.return_value = "build_context"
         yield mock
 
 
@@ -128,7 +137,7 @@ def workflow_type_fixture() -> CategoryEnum:
 
 @pytest.fixture(name="workflow")
 def workflow_fixture(
-    mock_duo_workflow_service_container: Mock,
+    mock_duo_workflow_service_container: Mock,  # pylint: disable=unused-argument
     workflow_type: CategoryEnum,
     user: CloudConnectorUser,
     gl_http_client: GitlabHttpClient,
@@ -154,15 +163,16 @@ def workflow_fixture(
 async def test_workflow_run(
     mock_checkpoint_notifier,
     mock_git_lab_workflow_instance,
-    mock_fetch_workflow_and_container_data,
+    mock_fetch_workflow_and_container_data,  # pylint: disable=unused-argument
     mock_run_tool_node_class,
     mock_tools_executor,
     mock_tools_approval_component,
     mock_planner_component,
     mock_executor_component,
+    mock_create_branch_component,
     mock_handover_agent,
     mock_agent,
-    checkpoint_tuple,
+    checkpoint_tuple,  # pylint: disable=unused-argument
     graph_input,
     workflow,
 ):
@@ -178,6 +188,12 @@ async def test_workflow_run(
     }
 
     await workflow.run("https://example.com/project/-/issues/1")
+
+    mock_create_branch_component.return_value.attach.assert_called_once_with(
+        graph=ANY,
+        next_node="build_context",
+        exit_node="plan_terminator",
+    )
 
     mock_planner_component.return_value.attach.assert_called_once_with(
         graph=ANY,
@@ -216,14 +232,7 @@ async def test_workflow_run(
 
 @pytest.mark.asyncio
 async def test_workflow_run_when_exception(
-    mock_git_lab_workflow_instance,
-    mock_fetch_workflow_and_container_data,
-    mock_run_tool_node_class,
-    mock_tools_executor,
-    mock_handover_agent,
-    mock_agent,
-    mock_planner_component,
-    mock_executor_component,
+    mock_fetch_workflow_and_container_data,  # pylint: disable=unused-argument
     workflow,
 ):
     class AsyncIterator:

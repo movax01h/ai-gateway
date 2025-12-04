@@ -15,6 +15,9 @@ from duo_workflow_service.agents import (
 )
 from duo_workflow_service.agents.agent import build_agent
 from duo_workflow_service.components import ToolsApprovalComponent, ToolsRegistry
+from duo_workflow_service.components.create_repository_branch.component import (
+    CreateRepositoryBranchComponent,
+)
 from duo_workflow_service.components.executor import ExecutorComponent
 from duo_workflow_service.components.planner import PlannerComponent
 from duo_workflow_service.entities import (
@@ -61,6 +64,13 @@ CONTEXT_BUILDER_TOOLS = [
     "list_work_items",
     "get_work_item_notes",
     "create_merge_request",
+]
+
+CREATE_BRANCH_TOOLS = [
+    "run_git_command",
+    "create_branch",
+    "get_issue",
+    "handover_tool",
 ]
 
 PLANNER_TOOLS = [
@@ -193,7 +203,26 @@ class Workflow(AbstractWorkflow):
         self.log.info("Starting %s workflow graph compilation", self._workflow_type)
 
         # Add nodes to the graph
-        graph.set_entry_point("build_context")
+        create_branch_component = CreateRepositoryBranchComponent(
+            user=self._user,
+            workflow_id=self._workflow_id,
+            workflow_type=self._workflow_type,
+            toolset=tools_registry.toolset(CREATE_BRANCH_TOOLS),
+            tools_registry=tools_registry,
+            model_config=self._model_config,
+            goal=f"Here is the issue url for your work: {goal}",
+            project=self._project,  # type: ignore[arg-type]
+            http_client=self._http_client,
+            additional_context=self._additional_context,
+        )
+
+        create_branch_entry_node = create_branch_component.attach(
+            graph=graph,
+            next_node="build_context",
+            exit_node="plan_terminator",
+        )
+
+        graph.set_entry_point(create_branch_entry_node)
 
         build_context_handover_node = self._add_context_builder_nodes(
             graph, goal, tools_registry

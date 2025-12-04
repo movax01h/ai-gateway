@@ -137,6 +137,9 @@ config:
 ---
 graph TD;
     __start__([<p>__start__</p>]):::first
+    create_branch(create_branch)
+    create_branch_tools(create_branch_tools)
+    create_branch_handover(create_branch_handover)
     build_context(build_context)
     build_context_tools(build_context_tools)
     build_context_handover(build_context_handover)
@@ -153,13 +156,19 @@ graph TD;
     execution_handover(execution_handover)
     git_actions(git_actions)
     __end__([<p>__end__</p>]):::last
-    __start__ --> build_context;
+    __start__ --> create_branch;
     build_context -. &nbsp;HandoverAgent&nbsp; .-> build_context_handover;
     build_context -. &nbsp;call_tool&nbsp; .-> build_context_tools;
     build_context -. &nbsp;stop&nbsp; .-> plan_terminator;
     build_context_handover --> planning;
     build_context_tools -.-> build_context;
     build_context_tools -. &nbsp;stop&nbsp; .-> plan_terminator;
+    create_branch -. &nbsp;HandoverAgent&nbsp; .-> create_branch_handover;
+    create_branch -. &nbsp;call_tool&nbsp; .-> create_branch_tools;
+    create_branch -. &nbsp;stop&nbsp; .-> plan_terminator;
+    create_branch_handover --> build_context;
+    create_branch_tools -. &nbsp;continue&nbsp; .-> create_branch;
+    create_branch_tools -. &nbsp;stop&nbsp; .-> plan_terminator;
     execution -. &nbsp;HandoverAgent&nbsp; .-> execution_handover;
     execution -. &nbsp;PlanSupervisorAgent&nbsp; .-> execution_supervisor;
     execution -. &nbsp;call_tool&nbsp; .-> execution_tools;
