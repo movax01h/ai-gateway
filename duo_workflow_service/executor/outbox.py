@@ -13,6 +13,7 @@ type ActionRequestID = str
 type ActionType = str
 
 MAX_MESSAGE_LENGTH = 200
+ACTION_TYPES_WITHOUT_RESPONSES = ["newCheckpoint"]
 
 
 class OutboxSignal(StrEnum):
@@ -37,8 +38,12 @@ class Outbox:
         """Put an item into the outbox queue."""
 
         action.requestID = str(uuid4())
-        self._action_response[action.requestID] = result
-        self._legacy_action_response[action.requestID] = action.WhichOneof("action")
+        action_type = action.WhichOneof("action")
+
+        if action_type not in ACTION_TYPES_WITHOUT_RESPONSES:
+            self._action_response[action.requestID] = result
+            self._legacy_action_response[action.requestID] = action_type
+
         self._queue.put_nowait(action)
 
         return action.requestID
@@ -78,19 +83,37 @@ class Outbox:
 
     def set_action_response(self, event: contract_pb2.ClientEvent):
         """Set action response to the future object which is awaited by the caller."""
+        request_id = event.actionResponse.requestID
 
-        if event.actionResponse.requestID in self._action_response:
-            self._set_action_response_for_request_id(
-                event.actionResponse.requestID, event
-            )
-        else:
-            log.error(
-                "Request ID not found.",
-                responseType=event.WhichOneof("response"),
-                request_id=event.actionResponse.requestID,
-                awaiting_request_ids=self.awaiting_request_ids(),
-            )
+        if request_id in self._action_response:
+            self._set_action_response_for_request_id(request_id, event)
+            return
+
+        # Log when a response has an unknown request ID so we can monitor clients' behavior.
+        # See https://gitlab.com/gitlab-org/modelops/applied-ml/code-suggestions/ai-assist/-/issues/1122#note_2830605887
+        log.error(
+            "Request ID not found.",
+            responseType=event.WhichOneof("response"),
+            request_id=request_id,
+            awaiting_request_ids=self.awaiting_request_ids(),
+        )
+
+        # Some clients don't include request ID in the response, but they do in the
+        # request. We need to handle this case to maintain backward compatibility with
+        # older clients.
+        if not request_id:
             self.legacy_set_action_response(event)
+            return
+
+        # Request ID provided but not found in tracking dictionaries.
+        # This is expected for actions that don't expect responses (e.g., NewCheckpoint).
+        # Discard these responses to maintain backward compatibility with
+        # legacy executors that still send responses for such actions.
+        log.info(
+            "Received response for action that doesn't expect responses. Discarding.",
+            responseType=event.WhichOneof("response"),
+            request_id=request_id,
+        )
 
     def awaiting_request_ids(self) -> str:
         return ",".join(list(self._action_response.keys()))
@@ -123,7 +146,9 @@ class Outbox:
             ):
                 break
 
-            if action_type in ["newCheckpoint", "runHTTPRequest"]:
+            # newCheckpoint actions are no longer tracked in _legacy_action_response
+            # (filtered out in put_action), so we only need to check for runHTTPRequest
+            if action_type == "runHTTPRequest":
                 if not request_id_expecting_http_response:
                     request_id_expecting_http_response = request_id
             else:
