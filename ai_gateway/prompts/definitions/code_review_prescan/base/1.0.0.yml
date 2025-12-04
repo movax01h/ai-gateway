@@ -1,5 +1,5 @@
 ---
-name: code_review_prescan
+name: Code Review Prescan
 model:
   params:
     model_class_provider: anthropic

@@ -1,5 +1,5 @@
 ---
-name: Amazon Q code_review_prescan
+name: Amazon Q Code Review Prescan
 model:
   params:
     model_class_provider: amazon_q
