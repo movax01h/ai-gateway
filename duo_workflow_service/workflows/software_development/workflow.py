@@ -56,97 +56,69 @@ DEBUG = os.getenv("DEBUG")
 MAX_MESSAGES_TO_DISPLAY = 5
 MAX_MESSAGE_LENGTH = 200
 
-EXECUTOR_TOOLS = [
-    "create_issue",
-    "list_issues",
+_GITLAB_READ_TOOLS = [
+    # Epic tools
+    "get_epic",
+    "list_epics",
+    "list_epic_notes",
+    # Work item tools
+    "get_work_item",
+    "list_work_items",
+    "get_work_item_notes",
+    # Issue tools
     "get_issue",
-    "update_issue",
-    "dismiss_vulnerability",
-    "confirm_vulnerability",
-    "create_issue_note",
-    "get_vulnerability_details",
-    "create_merge_request_note",
+    "list_issues",
     "list_issue_notes",
     "get_issue_note",
-    "create_merge_request",
-    "get_job_logs",
+    # Merge request tools
     "get_merge_request",
-    "get_pipeline_failing_jobs",
-    "get_project",
     "list_all_merge_request_notes",
     "list_merge_request_diffs",
+    # Project tools
+    "get_project",
+    # Search tools
     "gitlab_issue_search",
-    "gitlab_blob_search",
     "gitlab_merge_request_search",
-    "run_command",
+]
+
+_FILE_SYSTEM_READ_TOOLS = [
     "read_file",
     "read_files",
-    "update_vulnerability_severity",
-    "revert_to_detected_vulnerability",
-    "create_file_with_contents",
-    "edit_file",
     "find_files",
     "grep",
+    "list_dir",
+]
+
+_FILE_SYSTEM_WRITE_TOOLS = [
+    "create_file_with_contents",
+    "edit_file",
     "mkdir",
+]
+
+_PLAN_MANAGEMENT_TOOLS = [
     "add_new_task",
     "remove_task",
     "update_task_description",
     "get_plan",
     "set_task_status",
-    "handover_tool",
-    "get_epic",
-    "list_epics",
-    "create_epic",
-    "update_epic",
-    "get_repository_file",
-    "list_dir",
-    "list_epic_notes",
-    "get_commit",
-    "list_commits",
-    "get_commit_comments",
-    "get_commit_diff",
-    "get_work_item",
-    "list_work_items",
-    "get_work_item_notes",
-    "create_work_item",
-    "create_work_item_note",
-    "post_duo_code_review",
 ]
 
+# Context builder: Read-only information gathering before planning
 CONTEXT_BUILDER_TOOLS = [
+    *_GITLAB_READ_TOOLS,
+    *_FILE_SYSTEM_READ_TOOLS,
     "get_previous_session_context",
-    "list_issues",
-    "get_issue",
-    "list_issue_notes",
-    "get_issue_note",
-    "get_job_logs",
-    "get_merge_request",
-    "get_project",
-    "get_pipeline_failing_jobs",
-    "run_git_command",
-    "list_all_merge_request_notes",
-    "list_merge_request_diffs",
-    "gitlab_issue_search",
-    "gitlab_blob_search",
-    "gitlab_merge_request_search",
-    "read_file",
-    "read_files",
-    "find_files",
-    "list_dir",
-    "grep",
     "handover_tool",
-    "get_epic",
-    "list_epics",
-    "get_repository_file",
-    "list_epic_notes",
-    "get_commit",
-    "list_commits",
-    "get_commit_comments",
-    "get_commit_diff",
-    "get_work_item",
-    "list_work_items",
-    "get_work_item_notes",
-    "create_work_item",
+]
+
+# Executor: Full read/write access for implementing the approved plan
+EXECUTOR_TOOLS = [
+    *_GITLAB_READ_TOOLS,
+    *_FILE_SYSTEM_READ_TOOLS,
+    *_FILE_SYSTEM_WRITE_TOOLS,
+    *_PLAN_MANAGEMENT_TOOLS,
+    "run_command",
+    "handover_tool",
 ]
 
 PLANNER_TOOLS = [
