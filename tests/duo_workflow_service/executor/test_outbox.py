@@ -23,6 +23,11 @@ class TestOutbox:
         [
             (contract_pb2.Action(), None, True),
             (contract_pb2.Action(), asyncio.Future(), True),
+            (
+                contract_pb2.Action(newCheckpoint=contract_pb2.NewCheckpoint()),
+                None,
+                False,
+            ),
         ],
     )
     def test_put_action(
@@ -143,6 +148,8 @@ class TestOutbox:
 
             assert len(cap_logs) == 3
             assert cap_logs[0]["event"] == "Request ID not found."
+            assert cap_logs[1]["event"] == "legacy_set_action_response"
+            assert cap_logs[2]["event"] == "Setting action response for request ID."
 
         if result:
             assert result.result() is response
@@ -170,13 +177,26 @@ class TestOutbox:
         )
         outbox.put_action(new_checkpoint_action)
 
+        # Verify that newCheckpoint actions are NOT added to response dictionaries
+        assert len(outbox._action_response) == 1
+        assert len(outbox._legacy_action_response) == 1
+
         response = contract_pb2.ClientEvent(
             actionResponse=contract_pb2.ActionResponse(
                 plainTextResponse=contract_pb2.PlainTextResponse(),
                 requestID=new_checkpoint_action.requestID,
             )
         )
-        outbox.set_action_response(response)
+
+        with capture_logs() as cap_logs:
+            outbox.set_action_response(response)
+
+            assert any(
+                log.get("event")
+                == "Received response for action that doesn't expect responses. Discarding."
+                and log.get("request_id") == new_checkpoint_action.requestID
+                for log in cap_logs
+            )
 
         assert result.done() is False
 
