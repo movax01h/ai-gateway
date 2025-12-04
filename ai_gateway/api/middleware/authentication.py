@@ -28,7 +28,7 @@ from ai_gateway.api.middleware.base import _PathResolver
 from ai_gateway.api.timing import timing
 from ai_gateway.auth.glgo import cloud_connector_token_context_var
 
-log = logging.getLogger("codesuggestions")
+log = logging.getLogger("authentication")
 
 
 class MiddlewareAuthentication(Middleware):
