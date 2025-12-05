@@ -239,7 +239,7 @@ models:
     provider: "Anthropic"
     gitlab_identifier: "claude_3_sonnet_20240229"
     description: "Earlier generation model known for its computer use capability."
-    cost_indicator: "$"
+    cost_indicator: "$$$"
     params:
       model: "claude-3-sonnet-20240229"
       temperature: 0.1
