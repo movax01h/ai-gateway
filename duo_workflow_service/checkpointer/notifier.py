@@ -134,14 +134,14 @@ class UserInterface:
                 (
                     idx
                     for idx, msg in enumerate(self.ui_chat_log)
-                    if msg["message_id"] == self.last_sent_ui_message_id
+                    if msg.get("message_id", None) == self.last_sent_ui_message_id
                 ),
                 0,
             )
         else:
             ui_chat_log_diff_idx = 0
 
-        self.last_sent_ui_message_id = self.ui_chat_log[-1]["message_id"]
+        self.last_sent_ui_message_id = self.ui_chat_log[-1].get("message_id", None)
 
         return self.ui_chat_log[ui_chat_log_diff_idx:]
 

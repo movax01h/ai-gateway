@@ -594,3 +594,53 @@ def test_most_recent_new_checkpoint_without_incremental_streaming(checkpoint_not
         }
     )
     assert checkpoint3.checkpoint == expected_checkpoint3
+
+
+def test_most_recent_new_checkpoint_with_missing_message_ids(checkpoint_notifier):
+    """Test that messages without message_id are handled gracefully."""
+    client_capabilities.set({"incremental_streaming"})
+
+    checkpoint_notifier.status = WorkflowStatusEnum.EXECUTION
+    checkpoint_notifier.ui_chat_log = [
+        {"content": "test1"},  # No message_id
+        {"content": "test2", "message_id": "msg-2"},
+        {"content": "test3"},  # No message_id
+        {"content": "test4", "message_id": "msg-4"},
+    ]
+    checkpoint_notifier.steps = [{"step": "1"}]
+
+    checkpoint = checkpoint_notifier.most_recent_new_checkpoint()
+    expected_checkpoint = dumps(
+        {
+            "channel_values": {
+                "ui_chat_log": [
+                    {"content": "test1"},
+                    {"content": "test2", "message_id": "msg-2"},
+                    {"content": "test3"},
+                    {"content": "test4", "message_id": "msg-4"},
+                ],
+                "plan": {"steps": [{"step": "1"}]},
+            }
+        }
+    )
+    assert checkpoint.checkpoint == expected_checkpoint
+    assert checkpoint_notifier.last_sent_ui_message_id == "msg-4"
+
+    checkpoint_notifier.ui_chat_log.append({"content": "test5"})
+    checkpoint_notifier.ui_chat_log.append({"content": "test6", "message_id": "msg-6"})
+
+    checkpoint2 = checkpoint_notifier.most_recent_new_checkpoint()
+    expected_checkpoint2 = dumps(
+        {
+            "channel_values": {
+                "ui_chat_log": [
+                    {"content": "test4", "message_id": "msg-4"},
+                    {"content": "test5"},
+                    {"content": "test6", "message_id": "msg-6"},
+                ],
+                "plan": {"steps": [{"step": "1"}]},
+            }
+        }
+    )
+    assert checkpoint2.checkpoint == expected_checkpoint2
+    assert checkpoint_notifier.last_sent_ui_message_id == "msg-6"

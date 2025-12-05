@@ -268,7 +268,7 @@ class ChatAgent:
                 correlation_id=None,
                 tool_info=None,
                 additional_context=None,
-                message_id=None,
+                message_id=f"error-{str(uuid4())}",
             )
             return {
                 "conversation_history": {self.name: [error_message]},
