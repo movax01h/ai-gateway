@@ -7,7 +7,6 @@ from uuid import uuid4
 from dependency_injector.wiring import Provide, inject
 from gitlab_cloud_connector import CloudConnectorUser
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage
-from langgraph.checkpoint.base import CheckpointTuple
 from langgraph.checkpoint.memory import BaseCheckpointSaver
 from langgraph.graph import END, StateGraph
 from langgraph.types import Command
@@ -229,7 +228,7 @@ class Workflow(AbstractWorkflow):
         )
 
     async def get_graph_input(
-        self, goal: str, status_event: str, checkpoint_tuple: Optional[CheckpointTuple]
+        self, goal: str, status_event: str, checkpoint_tuple: Any
     ) -> Any:
         if goal == "":
             logger.info(

@@ -14,7 +14,6 @@ from langchain_core.runnables import RunnableConfig
 # https://gitlab.com/gitlab-org/duo-workflow/duo-workflow-service/-/issues/78
 from langgraph.checkpoint.base import (  # pylint: disable=no-langgraph-langchain-imports
     BaseCheckpointSaver,
-    CheckpointTuple,
 )
 from langgraph.types import Command
 from langsmith import traceable, tracing_context
@@ -276,7 +275,7 @@ class AbstractWorkflow(ABC):
                 gitlab_status_update_callback=on_gitlab_status_update,
             ) as checkpointer:
                 status_event = getattr(checkpointer, "initial_status_event", None)
-                checkpoint_tuple = await checkpointer.aget_tuple(graph_config)
+                checkpoint_tuple = self._workflow_config["first_checkpoint"]
                 if not status_event:
                     status_event = (
                         "" if checkpoint_tuple else WorkflowStatusEventEnum.START
@@ -325,7 +324,7 @@ class AbstractWorkflow(ABC):
             self.is_done = True
 
     async def get_graph_input(
-        self, goal: str, status_event: str, checkpoint_tuple: Optional[CheckpointTuple]
+        self, goal: str, status_event: str, checkpoint_tuple: Any
     ) -> Any:
         match status_event:
             case WorkflowStatusEventEnum.START:

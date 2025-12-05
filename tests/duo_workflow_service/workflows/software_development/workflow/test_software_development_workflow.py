@@ -774,7 +774,19 @@ async def test_workflow_run_with_tool_approvals(
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
-    "workflow_config", [{"project_id": 1, "allow_agent_to_request_user": False}]
+    "workflow_config",
+    [
+        {
+            "project_id": 1,
+            "allow_agent_to_request_user": False,
+            "agent_privileges_names": [],
+            "pre_approved_agent_privileges_names": [],
+            "mcp_enabled": False,
+            "first_checkpoint": None,
+            "workflow_status": "",
+            "gitlab_host": "gitlab.com",
+        }
+    ],
 )
 @patch(
     "duo_workflow_service.workflows.software_development.workflow.PlanApprovalComponent",

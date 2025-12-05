@@ -401,7 +401,7 @@ async def test_workflow_run(
     assert mock_run_tool_node_class.return_value.run.call_count == 1
 
     assert mock_git_lab_workflow_instance.aput.call_count >= 2
-    assert mock_git_lab_workflow_instance.aget_tuple.call_count == 2
+    assert mock_git_lab_workflow_instance.aget_tuple.call_count == 1
 
     assert mock_checkpoint_notifier_instance.send_event.call_count >= 2
 
@@ -435,7 +435,7 @@ async def test_workflow_run_with_file_not_found(
     assert mock_run_tool_node_class.return_value.run.call_count == 1
 
     assert mock_git_lab_workflow_instance.aput.call_count == 2
-    assert mock_git_lab_workflow_instance.aget_tuple.call_count == 2
+    assert mock_git_lab_workflow_instance.aget_tuple.call_count == 1
 
     assert mock_checkpoint_notifier_instance.send_event.call_count == 1
 
