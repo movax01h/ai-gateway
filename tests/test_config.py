@@ -511,14 +511,12 @@ def test_config_model_limits(values: dict, expected: ConfigModelLimits):
                 "AIGW_BILLING_EVENT__ENDPOINT": "endpoint.test",
                 "AIGW_BILLING_EVENT__BATCH_SIZE": "8",
                 "AIGW_BILLING_EVENT__THREAD_COUNT": "7",
-                "AIGW_BILLING_EVENT__USE_GLOBAL_USER_ID_FOR_TEAM_MEMBERS": "false",
             },
             ConfigBillingEvent(
                 enabled=True,
                 endpoint="endpoint.test",
                 thread_count=7,
                 batch_size=8,
-                use_global_user_id_for_team_members=False,
             ),
         ),
         (
@@ -529,7 +527,6 @@ def test_config_model_limits(values: dict, expected: ConfigModelLimits):
             ConfigBillingEvent(
                 enabled=True,
                 endpoint="endpoint.test",
-                use_global_user_id_for_team_members=True,  # default value
             ),
         ),
     ],
