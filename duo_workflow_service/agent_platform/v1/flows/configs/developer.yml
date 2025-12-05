@@ -34,7 +34,7 @@ components:
       - from: "context:project_http_url_to_repo"
         as: "repository_url"
       - from: "context:issue_parser.tool_responses"
-        as: "issue_details"
+        as: "naming_context"
     ui_log_events:
       - "on_tool_execution_success"
       - "on_tool_execution_failed"
