@@ -405,6 +405,7 @@ async def test_chat_agent_invalid_slash_command_error_handling(
     # Check UI chat log
     assert len(result["ui_chat_log"]) == 1
     assert result["ui_chat_log"][0]["message_type"] == MessageTypeEnum.AGENT
+    assert result["ui_chat_log"][0]["message_id"].startswith("error-")
     assert result["ui_chat_log"][0]["status"] == ToolStatus.FAILURE
     assert (
         result["ui_chat_log"][0]["content"]
