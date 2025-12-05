@@ -90,6 +90,10 @@ query ListGroupWorkItems(
                             dueDate
                         }
                     }
+                    ... on WorkItemWidgetHierarchy {
+                        hasChildren
+                        hasParent
+                    }
                 }
             }
         }
