@@ -24,7 +24,18 @@ log = structlog.stdlib.get_logger("agent_node")
 
 
 class AgentFinalOutput(BaseModel):
-    """A final response to the user."""
+    """
+    MANDATORY COMPLETION TOOL: You MUST use this tool to provide your final answer
+    when you have completed the user's request. This is the ONLY way to properly
+    end the conversation and deliver your response to the user.
+    Use this tool when:
+    1. You have gathered all necessary information
+    2. You have completed the requested task or analysis
+    3. You are ready to give your final answer
+    CRITICAL: Always use this tool to conclude your work - do not continue
+    using other tools once you have the information needed to answer the user.
+    The final_response must contain your complete answer.
+    """
 
     model_config = ConfigDict(title="final_response_tool", frozen=True)
 
