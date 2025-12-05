@@ -48,7 +48,7 @@ async def test_execute_action_success_http_response(metadata):
         # Verify the log entry was created for the _execute_action call
         mock_logger.warning.assert_any_call(
             "HTTP response when plain text response expected, returning body",
-            requestID="test-request-123",
+            request_id="test-request-123",
             action_class="runHTTPRequest",
         )
 

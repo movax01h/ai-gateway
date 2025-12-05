@@ -64,7 +64,7 @@ class Outbox:
 
     def fail_action(self, request_id: str, message: str):
         """Fail an action by setting an exception on its future."""
-        log.error("Failing action", requestID=request_id, failure_reason=message)
+        log.error("Failing action", request_id=request_id, failure_reason=message)
 
         future = self._action_response.get(request_id)
         if future and not future.cancelled():
