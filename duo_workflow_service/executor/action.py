@@ -39,7 +39,7 @@ async def _execute_action_and_get_action_response(
     action_class = action.WhichOneof("action")
     log.info(
         "Attempting action from the egress queue",
-        requestID=action.requestID,
+        request_id=action.requestID,
         action_class=action_class,
     )
 
@@ -53,7 +53,7 @@ async def _execute_action_and_get_action_response(
         duration = time.time() - start_time
         log.info(
             "Read ClientEvent into the ingres queue",
-            requestID=event.actionResponse.requestID,
+            request_id=event.actionResponse.requestID,
             action_class=action_class,
             duration_s=duration,
         )
@@ -61,7 +61,7 @@ async def _execute_action_and_get_action_response(
         if event.actionResponse.httpResponse.error:
             log.error(
                 "Http response error",
-                requestID=event.actionResponse.requestID,
+                request_id=event.actionResponse.requestID,
                 action_class=action_class,
             )
             raise ToolException(
@@ -71,7 +71,7 @@ async def _execute_action_and_get_action_response(
         if event.actionResponse.plainTextResponse.error:
             log.error(
                 "Plaintext response error",
-                requestID=event.actionResponse.requestID,
+                request_id=event.actionResponse.requestID,
                 action_class=action_class,
             )
             error = f"Action error: {event.actionResponse.plainTextResponse.error}"
@@ -100,7 +100,7 @@ async def _execute_action(metadata: Dict[str, Any], action: contract_pb2.Action)
     if response_type == "httpResponse":
         log.warning(
             "HTTP response when plain text response expected, returning body",
-            requestID=actionResponse.requestID,
+            request_id=actionResponse.requestID,
             action_class=action.WhichOneof("action"),
         )
         return actionResponse.httpResponse.body
