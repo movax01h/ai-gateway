@@ -179,6 +179,32 @@ components:
       - "on_tool_execution_success"
       - "on_tool_execution_failed"
 
+  - name: "fix_pipeline_summarize"
+    type: OneOffComponent
+    prompt_id: "fix_pipeline_summarize_changes"
+    prompt_version: "^1.0.0"
+    inputs:
+      - from: "context:goal"
+        as: "pipeline_url"
+      - from: "context:inputs.merge_request.url"
+        as: "merge_request_url"
+      - from: "context:fix_pipeline_agents_dot_md.tool_responses"
+        as: "agents_dot_md"
+      - from: "context:fix_pipeline_git_push.final_answer"
+        as: "git_push_response"
+      - from: "context:workflow_id"
+        as: "workflow_id"
+      - from: "context:session_url"
+        as: "session_url"
+      - from: "context:fix_pipeline_execution.final_answer"
+        as: "execution_results"
+    toolset:
+      - "update_merge_request"
+    ui_log_events:
+      - "on_agent_final_answer"
+      - "on_tool_execution_success"
+      - "on_tool_execution_failed"
+
   - name: "fix_pipeline_comment_link"
     type: OneOffComponent
     prompt_id: "fix_pipeline_comment_link"
@@ -223,6 +249,8 @@ routers:
   - from: "fix_pipeline_git_commit"
     to: "fix_pipeline_git_push"
   - from: "fix_pipeline_git_push"
+    to: "fix_pipeline_summarize"
+  - from: "fix_pipeline_summarize"
     to: "fix_pipeline_comment_link"
   - from: "fix_pipeline_comment_link"
     to: "end"
