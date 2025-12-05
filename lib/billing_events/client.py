@@ -1,4 +1,3 @@
-import hashlib
 import uuid
 from datetime import datetime
 from typing import Any, Dict, Optional
@@ -18,29 +17,6 @@ from lib.internal_events.context import (
 
 __all__ = ["BillingEventsClient"]
 
-# Based on https://gitlab.com/gitlab-org/gitlab/-/blob/3c53c0fa/lib/gitlab/database.rb#L23
-MAX_INT_VALUE = 2_147_483_647
-
-
-def hash_global_user_id_to_int(global_user_id: Optional[str]) -> int:
-    """Convert global_user_id to deterministic integer using SHA-256.
-
-    Args:
-        global_user_id: anonymized global user id
-
-    Returns:
-        A deterministic positive integer derived from the global_user_id. For GitLab team members,
-        this is the hashed global_user_id. For non-team members, this is the user_id.
-        Returns -1 if global_user_id is not defined (None or empty).
-        Ref - https://gitlab.com/groups/gitlab-org/-/epics/18586#note_2872728169
-    """
-    if not global_user_id:
-        return -1
-
-    hash_bytes = hashlib.sha256(global_user_id.encode("utf-8")).digest()
-    hash_int = int.from_bytes(hash_bytes[:8], byteorder="big")
-    return (hash_int % MAX_INT_VALUE) + 1
-
 
 class BillingEventsClient:
     """Client to handle billing events using SnowplowClient."""
@@ -56,12 +32,10 @@ class BillingEventsClient:
         batch_size: int,
         thread_count: int,
         internal_event_client: InternalEventsClient,
-        use_global_user_id_for_team_members: bool = True,
     ) -> None:
         self._logger = structlog.stdlib.get_logger("billing_events_client")
         self.enabled = enabled
         self.internal_event_client = internal_event_client
-        self.use_global_user_id_for_team_members = use_global_user_id_for_team_members
 
         self._logger.info(
             "Initializing BillingEventsClient",
@@ -71,7 +45,6 @@ class BillingEventsClient:
             namespace=namespace,
             batch_size=batch_size,
             thread_count=thread_count,
-            use_global_user_id_for_team_members=use_global_user_id_for_team_members,
         )
 
         if enabled:
@@ -160,12 +133,7 @@ class BillingEventsClient:
             unit_of_measure=unit_of_measure,
             quantity=quantity,
             metadata=metadata,
-            subject=(
-                str(hash_global_user_id_to_int(internal_context.global_user_id))
-                if internal_context.is_gitlab_team_member
-                and self.use_global_user_id_for_team_members
-                else internal_context.user_id
-            ),
+            subject=internal_context.user_id,
             global_user_id=internal_context.global_user_id,
             seat_ids=["TODO"],  # TODO : We need to pass seatIDs from GitLab instance
             realm=mapped_realm,

@@ -5,7 +5,6 @@ from datetime import datetime, timezone
 from typing import List, Optional
 
 import grpc
-import structlog
 
 from ai_gateway.instrumentators.model_requests import (
     gitlab_version,
@@ -42,9 +41,6 @@ def convert_feature_enabled_string_to_list(
 
 
 class InternalEventsInterceptor(grpc.aio.ServerInterceptor):
-    def __init__(self):
-        self._logger = structlog.stdlib.get_logger("internal_events_interceptor")
-
     async def intercept_service(
         self, continuation, handler_call_details: grpc.HandlerCallDetails
     ) -> None:
@@ -117,12 +113,5 @@ class InternalEventsInterceptor(grpc.aio.ServerInterceptor):
         )
 
         current_event_context.set(context)
-
-        if context.is_gitlab_team_member and not context.global_user_id:
-            self._logger.warning(
-                "GitLab team member has empty global_user_id, subject will be set to -1",
-                correlation_id=context.correlation_id,
-                user_id=context.user_id,
-            )
 
         return await continuation(handler_call_details)

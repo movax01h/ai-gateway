@@ -82,7 +82,6 @@ class ConfigBillingEvent(BaseModel):
     endpoint: Optional[str] = None
     batch_size: Optional[int] = 1
     thread_count: Optional[int] = 1
-    use_global_user_id_for_team_members: bool = True
 
 
 # TODO: Migrate to InternalEvent
