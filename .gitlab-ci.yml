@@ -116,14 +116,6 @@ include:
       image: "$CI_REGISTRY_IMAGE/model-gateway:${CI_COMMIT_SHORT_SHA}"
       runway_version: v4.1.1
     rules: *skip-if-not-canonical
-  # NOTE: Temporary workload for validating security mirror deployments.
-  - project: "gitlab-com/gl-infra/platform/runway/runwayctl"
-    file: "ci-tasks/service-project/runway.yml"
-    inputs:
-      runway_service_id: duo-agent-mirror
-      image: "$CI_REGISTRY_IMAGE/model-gateway:${CI_COMMIT_SHORT_SHA}"
-      runway_version: v4.1.1
-    rules: *skip-if-not-security
   - project: "gitlab-com/gl-infra/platform/runway/runwayctl"
     file: "ci-tasks/service-project/runway.yml"
     inputs:
