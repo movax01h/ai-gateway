@@ -22,6 +22,16 @@ from duo_workflow_service.tools.command import RunCommand, RunCommandInput
             "  tests/test_main.py::test_app_start ",
             ["tests/test_main.py::test_app_start"],
         ),
+        (
+            "grep",
+            '-n "Duo CLI" packages/cli/scripts/test-headless-in-docker/README.md',
+            ["-n", "Duo CLI", "packages/cli/scripts/test-headless-in-docker/README.md"],
+        ),
+        (
+            "echo",
+            "'single quotes work too'",
+            ["single quotes work too"],
+        ),
     ],
 )
 async def test_run_command_success(
@@ -76,6 +86,9 @@ async def test_run_command_success(
         ("python", "script.py", False, None),
         ("echo", None, False, None),
         ("echo", "", False, None),
+        # Malformed quotes (shlex.split raises ValueError)
+        ("echo", '"unclosed quote', True, "Invalid argument syntax"),
+        ("echo", "it's a trap", True, "Invalid argument syntax"),
     ],
 )
 @mock.patch("duo_workflow_service.tools.command._execute_action")
