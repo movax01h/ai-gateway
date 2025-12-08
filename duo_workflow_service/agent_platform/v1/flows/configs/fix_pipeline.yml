@@ -73,6 +73,26 @@ components:
       - "on_tool_execution_success"
       - "on_tool_execution_failed"
 
+  - name: "create_repository_branch"
+    type: AgentComponent
+    prompt_id: "create_repository_branch"
+    prompt_version: "^1.0.0"
+    toolset:
+      - "create_branch"
+      - "run_git_command"
+    inputs:
+      - from: "context:project_id"
+        as: "project_id"
+      - from: "context:inputs.pipeline.source_branch"
+        as: "ref"
+      - from: "context:project_http_url_to_repo"
+        as: "repository_url"
+      - from: "context:fix_pipeline_context.final_answer"
+        as: "naming_context"
+    ui_log_events:
+      - "on_tool_execution_success"
+      - "on_tool_execution_failed"
+
   - name: "fix_pipeline_create_plan"
     type: AgentComponent
     prompt_id: "fix_pipeline_create_plan"
@@ -190,10 +210,12 @@ routers:
       input: "context:fix_pipeline_decide_approach.final_answer"
       routes:
         "add_comment": "fix_pipeline_add_comment"
-        "create_fix": "fix_pipeline_create_plan"
+        "create_fix": "create_repository_branch"
         "default_route": "fix_pipeline_add_comment"
   - from: "fix_pipeline_add_comment"
     to: "end"
+  - from: "create_repository_branch"
+    to: "fix_pipeline_create_plan"
   - from: "fix_pipeline_create_plan"
     to: "fix_pipeline_execution"
   - from: "fix_pipeline_execution"
