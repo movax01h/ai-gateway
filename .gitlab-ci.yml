@@ -63,10 +63,12 @@ variables:
 .skip-if-not-canonical: &skip-if-not-canonical
   - <<: *if-not-canonical-project
     when: never
+  - when: always
 
 .skip-if-not-security: &skip-if-not-security
   - <<: *if-not-security-project
     when: never
+  - when: always
 
 include:
   - local: .gitlab/ci/build.gitlab-ci.yml
