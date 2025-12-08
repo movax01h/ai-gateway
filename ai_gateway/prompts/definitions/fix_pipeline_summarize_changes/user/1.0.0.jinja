@@ -1,0 +1,13 @@
+The merge request you created is contained within the tool_response tag below. Extract the URL for the merge
+request you created from this data:
+<tool_response>{{git_push_response}}</tool_response>
+
+Use the `update_merge_request` tool to update the merge request description, base on this execution_output:
+<execution_output>
+    {{ execution_results }}
+</execution_output>
+
+Add this text to the bottom of the summary:
+<text>
+    Fixes [failing pipeline]({{pipeline_url}}){% if merge_request_url %} on {{merge_request_url}}{% endif %}<br><br>[Session {{ workflow_id }}]({{ session_url }})
+</text>
