@@ -64,36 +64,43 @@ def mock_fs_fixture(fs: FakeFilesystem):
 models:
   - name: Test
     gitlab_identifier: test
+    max_context_tokens: 200000
     params:
         model: claude-3-5-sonnet-20241022
   - name: Haiku
     gitlab_identifier: haiku
+    max_context_tokens: 200000
     params:
         model: claude-3-haiku-20240307
   - name: Codestral
     gitlab_identifier: codestral
+    max_context_tokens: 200000
     params:
         model: codestral
   - name: Custom
     gitlab_identifier: custom
+    max_context_tokens: 200000
     family:
         - custom
     params:
         model: custom
   - name: General
     gitlab_identifier: general
+    max_context_tokens: 200000
     family:
         - claude_3
     params:
         model: general
   - name: Amazon Q
     gitlab_identifier: amazon_q
+    max_context_tokens: 200000
     family:
         - amazon_q
     params:
         model: amazon_q
   - name: Multi family
     gitlab_identifier: multi_family
+    max_context_tokens: 200000
     family:
         - non_existing
         - custom
@@ -101,6 +108,7 @@ models:
         model: custom
   - name: Claude Sonnet 4.5
     gitlab_identifier: claude_sonnet_4_5
+    max_context_tokens: 200000
     family:
         - claude_4_5
         - claude_3
@@ -108,6 +116,7 @@ models:
         model: claude-sonnet-4-5-20250929
   - name: Claude Sonnet 4.5 Vertex
     gitlab_identifier: claude_sonnet_4_5_vertex
+    max_context_tokens: 200000
     family:
         - claude_vertex_4_5
         - vertex

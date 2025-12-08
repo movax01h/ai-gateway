@@ -302,7 +302,9 @@ class TestGLAgentRemoteExecutorToolAction:
                     provider="amazon_q",
                     name="amazon_q",
                     llm_definition=LLMDefinition(
-                        gitlab_identifier="amazon_q", name="Amazon Q"
+                        gitlab_identifier="amazon_q",
+                        name="Amazon Q",
+                        max_context_tokens=100000,
                     ),
                 ),
                 [],
@@ -323,7 +325,9 @@ class TestGLAgentRemoteExecutorToolAction:
                     name="mistral",
                     endpoint=AnyUrl("http://localhost:4000"),
                     llm_definition=LLMDefinition(
-                        gitlab_identifier="mistral", name="Mistral"
+                        gitlab_identifier="mistral",
+                        name="Mistral",
+                        max_context_tokens=128000,
                     ),
                 ),
                 [],
@@ -344,7 +348,9 @@ class TestGLAgentRemoteExecutorToolAction:
                     provider="amazon_q",
                     name="amazon_q",
                     llm_definition=LLMDefinition(
-                        gitlab_identifier="amazon_q", name="Amazon Q"
+                        gitlab_identifier="amazon_q",
+                        name="Amazon Q",
+                        max_context_tokens=100000,
                     ),
                 ),
                 [],

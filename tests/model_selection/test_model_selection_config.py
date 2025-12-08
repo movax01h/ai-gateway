@@ -27,11 +27,13 @@ def mock_fs_fixture(fs: FakeFilesystem):
             models:
               - name: Model One
                 gitlab_identifier: gitlab-model-1
+                max_context_tokens: 200000
                 params:
                   model: provider-model-1
                   param1: value1
               - name: Model Two
                 gitlab_identifier: gitlab-model-2
+                max_context_tokens: 200000
                 params:
                   model: provider-model-2
             """
@@ -70,11 +72,13 @@ def test_load_llm_definitions(selection_config):
         "gitlab-model-1": LLMDefinition(
             name="Model One",
             gitlab_identifier="gitlab-model-1",
+            max_context_tokens=200000,
             params={"model": "provider-model-1", "param1": "value1"},
         ),
         "gitlab-model-2": LLMDefinition(
             name="Model Two",
             gitlab_identifier="gitlab-model-2",
+            max_context_tokens=200000,
             params={"model": "provider-model-2"},
         ),
     }
@@ -165,6 +169,7 @@ def test_get_model(selection_config):
     assert selection_config.get_model("gitlab-model-1") == LLMDefinition(
         name="Model One",
         gitlab_identifier="gitlab-model-1",
+        max_context_tokens=200000,
         params={"model": "provider-model-1", "param1": "value1"},
     )
 
@@ -178,6 +183,7 @@ def test_get_model_for_feature(selection_config):
     assert selection_config.get_model_for_feature("test_config") == LLMDefinition(
         name="Model One",
         gitlab_identifier="gitlab-model-1",
+        max_context_tokens=200000,
         params={"model": "provider-model-1", "param1": "value1"},
     )
 
@@ -224,6 +230,7 @@ def test_validate_with_error(fs: FakeFilesystem):
             models:
               - name: Model One
                 gitlab_identifier: model_1
+                max_context_tokens: 200000
                 params:
                   model: provider-model-1
             """
@@ -254,14 +261,17 @@ def test_validate_default_model_not_in_selectable_models(fs: FakeFilesystem):
             models:
               - name: Model One
                 gitlab_identifier: model_1
+                max_context_tokens: 200000
                 params:
                   model: provider-model-1
               - name: Model Two
                 gitlab_identifier: model_2
+                max_context_tokens: 200000
                 params:
                   model: provider-model-2
               - name: Model Three
                 gitlab_identifier: model_3
+                max_context_tokens: 200000
                 params:
                   model: provider-model-3
             """

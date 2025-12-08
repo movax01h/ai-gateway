@@ -29,6 +29,7 @@ def mock_model_config_fixture():
                 name="Model 1",
                 gitlab_identifier="model1",
                 provider="Anthropic",
+                max_context_tokens=200000,
                 description="Fast, cost-effective responses.",
                 cost_indicator="$",
                 params={},
@@ -37,6 +38,7 @@ def mock_model_config_fixture():
                 name="Model 2",
                 gitlab_identifier="model2",
                 provider="Vertex",
+                max_context_tokens=200000,
                 description="Fast, cost-effective responses.",
                 cost_indicator="$$",
                 params={},
@@ -44,6 +46,7 @@ def mock_model_config_fixture():
             "model3": LLMDefinition(
                 name="Model 3",
                 gitlab_identifier="model3",
+                max_context_tokens=200000,
                 params={},
                 deprecation={
                     "deprecation_date": "2025-10-28",

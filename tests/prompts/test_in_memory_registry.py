@@ -240,6 +240,7 @@ class TestInMemoryPromptRegistry:
                     llm_definition=LLMDefinition(
                         gitlab_identifier="claude",
                         name="claude",
+                        max_context_tokens=200000,
                         params={
                             "model": "claude-sonnet-4-20250514",
                             "model_class_provider": ModelClassProvider.LITE_LLM,
@@ -262,6 +263,7 @@ class TestInMemoryPromptRegistry:
                     llm_definition=LLMDefinition(
                         gitlab_identifier="claude",
                         name="claude",
+                        max_context_tokens=200000,
                         params={
                             "model": "claude-sonnet-4-20250514",
                             "model_class_provider": ModelClassProvider.LITE_LLM,

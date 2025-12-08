@@ -633,6 +633,7 @@ def llm_definition_fixture():
     return LLMDefinition(
         name="Mistral",
         gitlab_identifier="mistral",
+        max_context_tokens=128000,
         family=["mistral", "litellm"],
         params={"model": "mistral", "temperature": 0.0, "max_tokens": 4096},
     )

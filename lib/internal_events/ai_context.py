@@ -7,7 +7,7 @@ __all__ = ["AIContext"]
 
 
 @dataclass
-class AIContext:  # pylint: disable=too-many-instance-attributes
+class AIContext:
     """AI Context for Snowplow events.
 
     This context follows the com.gitlab/ai_context/jsonschema/1-0-0 schema.
