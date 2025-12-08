@@ -36,9 +36,9 @@ components:
       - "on_tool_execution_failed"
       - "on_agent_final_answer"
 
-  # Step 3: Perform code review
-  - name: "perform_code_review"
-    type: AgentComponent
+  # Step 3: Perform code review and publish
+  - name: "perform_code_review_and_publish"
+    type: OneOffComponent
     prompt_id: "review_merge_request"
     prompt_version: "^2.0.0"
     inputs:
@@ -48,20 +48,15 @@ components:
         as: "codebase_context"
       - from: "context:current_date"
         as: "current_date"
-    toolset: []
-
-  # Step 4: Publish code review
-  - name: "publish_review"
-    type: DeterministicStepComponent
-    tool_name: "post_duo_code_review"
-    inputs:
-      - from: "context:perform_code_review.final_answer"
-        as: "review_output"
       - from: "context:project_id"
         as: "project_id"
       - from: "context:goal"
         as: "merge_request_iid"
+    toolset:
+      - "post_duo_code_review"
+    max_correction_attempts: 3
     ui_log_events:
+      - "on_tool_call_input"
       - "on_tool_execution_success"
       - "on_tool_execution_failed"
 
@@ -69,10 +64,8 @@ routers:
   - from: "build_review_context"
     to: "prescan_codebase"
   - from: "prescan_codebase"
-    to: "perform_code_review"
-  - from: "perform_code_review"
-    to: "publish_review"
-  - from: "publish_review"
+    to: "perform_code_review_and_publish"
+  - from: "perform_code_review_and_publish"
     to: "end"
 
 flow:
