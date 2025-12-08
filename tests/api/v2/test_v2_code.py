@@ -1351,6 +1351,7 @@ class TestGitLabModelProvider:
         test_model = LLMDefinition(
             name="Test Model",
             gitlab_identifier=gitlab_identifier,
+            max_context_tokens=200000,
             description="A model description",
             family=["test-family"],
             params={"temperature": 0.0, "max_tokens": 4096},
@@ -1440,6 +1441,7 @@ class TestGitLabModelProvider:
         test_model = LLMDefinition(
             name="Test Model",
             gitlab_identifier="test-model-id",
+            max_context_tokens=200000,
             description="A model description",
             params={"temperature": 0.0, "max_tokens": 4096},
         )
@@ -1508,6 +1510,7 @@ class TestGitLabModelProvider:
         test_model = LLMDefinition(
             name="Test Model",
             gitlab_identifier="test-model-id",
+            max_context_tokens=200000,
             description="A model description",
             family=["test-family"],
             params={"temperature": 0.0, "max_tokens": 4096},

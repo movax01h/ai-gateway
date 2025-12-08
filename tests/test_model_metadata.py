@@ -23,6 +23,7 @@ def gitlab_model1_fixture():
     return LLMDefinition(
         gitlab_identifier="gitlab_model1",
         name="gitlab_model",
+        max_context_tokens=200000,
         family=["mixtral"],
         params={
             "model_class_provider": "provider",
@@ -37,6 +38,7 @@ def gitlab_model2_fixture():
     return LLMDefinition(
         gitlab_identifier="gitlab_model2",
         name="gitlab_model2",
+        max_context_tokens=200000,
         params={
             "model_class_provider": "provider2",
             "model": "model_family2",
@@ -49,17 +51,44 @@ def amazon_q_model_fixture():
     return LLMDefinition(
         gitlab_identifier="amazon_q",
         name="amazon_q",
+        max_context_tokens=200000,
         family=["amazon_q"],
         params={"model": "amazon_q"},
     )
 
 
 @pytest.fixture(autouse=True)
-def get_llm_definitions(gitlab_model1, gitlab_model2, amazon_q_model):
+def get_llm_definitions(
+    gitlab_model1, gitlab_model2, amazon_q_model
+):  # pylint: disable=unused-argument
     mock_models = {
-        "gitlab_model1": gitlab_model1,
-        "gitlab_model2": gitlab_model2,
-        "amazon_q": amazon_q_model,
+        "gitlab_model1": LLMDefinition(
+            gitlab_identifier="gitlab_model1",
+            name="gitlab_model",
+            max_context_tokens=200000,
+            family=["mixtral"],
+            params={
+                "model_class_provider": "provider",
+                "model": "model_family",
+            },
+            prompt_params={"timeout": 10},
+        ),
+        "gitlab_model2": LLMDefinition(
+            gitlab_identifier="gitlab_model2",
+            name="gitlab_model2",
+            max_context_tokens=200000,
+            params={
+                "model_class_provider": "provider2",
+                "model": "model_family2",
+            },
+        ),
+        "amazon_q": LLMDefinition(
+            gitlab_identifier="amazon_q",
+            name="amazon_q",
+            max_context_tokens=200000,
+            family=["amazon_q"],
+            params={"model": "amazon_q"},
+        ),
     }
 
     mock_definitions = {
@@ -286,6 +315,7 @@ class TestFriendlyName:
             mock_definition = LLMDefinition(
                 gitlab_identifier="gitlab_model1",
                 name="GitLab Model One",  # This becomes friendly_name
+                max_context_tokens=200000,
                 family=["mixtral"],
                 params={
                     "model_class_provider": "provider",
@@ -312,6 +342,7 @@ class TestFriendlyName:
             mock_definition = LLMDefinition(
                 gitlab_identifier="claude_sonnet_4_5_20250929",
                 name="Claude Sonnet 4.5 - Anthropic",
+                max_context_tokens=200000,
                 family=["claude_4"],
                 params={
                     "model_class_provider": "anthropic",
@@ -341,6 +372,7 @@ class TestFriendlyName:
             mock_definition = LLMDefinition(
                 gitlab_identifier="llama3",
                 name="Llama3",
+                max_context_tokens=200000,
                 family=["llama3"],
                 params={
                     "model_class_provider": "custom_openai",
@@ -369,6 +401,7 @@ class TestFriendlyName:
             mock_definition = LLMDefinition(
                 gitlab_identifier="gpt_5",
                 name="OpenAI GPT-5",
+                max_context_tokens=200000,
                 family=["gpt_5"],
                 params={
                     "model_class_provider": "openai",
@@ -395,6 +428,7 @@ class TestFriendlyName:
             mock_definition = LLMDefinition(
                 gitlab_identifier="amazon_q",
                 name="Amazon Q",  # This becomes friendly_name
+                max_context_tokens=200000,
                 family=["amazon_q"],
                 params={
                     "model_class_provider": "amazon_q",
@@ -414,6 +448,7 @@ class TestFriendlyName:
         metadata = ModelMetadata(
             name="test_model",
             provider="test_provider",
+            max_context_tokens=200000,
             friendly_name=None,
             llm_definition=llm_definition,
         )
@@ -431,6 +466,7 @@ class TestFriendlyName:
             mock_definition = LLMDefinition(
                 gitlab_identifier="gitlab_model1",
                 name="GitLab Identifier Model",
+                max_context_tokens=200000,
                 family=["mixtral"],
                 params={
                     "model_class_provider": "provider",

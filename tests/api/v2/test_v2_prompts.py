@@ -85,7 +85,9 @@ class TestPrompt:
                     endpoint=AnyUrl("http://localhost:4000"),
                     api_key="token",
                     llm_definition=LLMDefinition(
-                        gitlab_identifier="mistral", name="Mistral"
+                        gitlab_identifier="mistral",
+                        name="Mistral",
+                        max_context_tokens=128000,
                     ),
                 ),
                 None,
@@ -100,6 +102,7 @@ class TestPrompt:
                         llm_definition=LLMDefinition(
                             name="Mistral",
                             gitlab_identifier="mistral",
+                            max_context_tokens=128000,
                             family=["mistral", "litellm"],
                             params={
                                 "model": "mistral",
@@ -124,7 +127,9 @@ class TestPrompt:
                     provider="amazon_q",
                     role_arn="role-arn",
                     llm_definition=LLMDefinition(
-                        gitlab_identifier="amazon_q", name="Amazon Q"
+                        gitlab_identifier="amazon_q",
+                        name="Amazon Q",
+                        max_context_tokens=200000,
                     ),
                 ),
                 None,
@@ -138,6 +143,7 @@ class TestPrompt:
                         llm_definition=LLMDefinition(
                             gitlab_identifier="amazon_q",
                             name="Amazon Q",
+                            max_context_tokens=200000,
                             family=["amazon_q"],
                             params={
                                 "model": "amazon_q",

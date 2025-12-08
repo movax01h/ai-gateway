@@ -1,38 +1,19 @@
 from enum import StrEnum
-from typing import (
-    Annotated,
-    Any,
-    Dict,
-    List,
-    NotRequired,
-    Optional,
-    Tuple,
-    TypedDict,
-    Union,
-)
+from typing import Annotated, Any, Dict, List, NotRequired, Optional, TypedDict, Union
 
 import structlog
-from langchain_core.messages import (
-    AIMessage,
-    BaseMessage,
-    HumanMessage,
-    SystemMessage,
-    ToolMessage,
-    trim_messages,
-)
+from langchain_core.messages import BaseMessage
 from pydantic import BaseModel
 
+from ai_gateway.model_metadata import current_model_metadata_context
+from duo_workflow_service.conversation.trimmer import (
+    LEGACY_MAX_CONTEXT_TOKENS,
+    trim_conversation_history,
+)
 from duo_workflow_service.entities.event import WorkflowEvent
 from duo_workflow_service.gitlab.gitlab_api import Namespace, Project
-from duo_workflow_service.token_counter.approximate_token_counter import (
-    ApproximateTokenCounter,
-)
-from duo_workflow_service.tracking.errors import log_exception
 from duo_workflow_service.workflows.type_definitions import AdditionalContext
-
-# max content tokens is 400K but adding a buffer of 10% just in case
-MAX_CONTEXT_TOKENS = int(400_000 * 0.90)
-MAX_SINGLE_MESSAGE_TOKENS = int(MAX_CONTEXT_TOKENS * 0.65)
+from lib.feature_flags import FeatureFlag, is_feature_enabled
 
 logger = structlog.stdlib.get_logger("workflow")
 
@@ -111,68 +92,6 @@ class UiChatLog(TypedDict):
     message_id: Optional[str]
 
 
-def _pretrim_large_messages(
-    messages: List[BaseMessage], token_counter: ApproximateTokenCounter
-) -> List[BaseMessage]:
-    processed_messages = []
-    for message in messages:
-        msg_token = token_counter.count_tokens([message])
-        if msg_token > MAX_SINGLE_MESSAGE_TOKENS:
-            logger.info(
-                f"Message with role: {message.type} token size: {msg_token} "
-                f"exceeds the single message token limit: {MAX_SINGLE_MESSAGE_TOKENS}."
-                f"Replacing its content with a placeholder."
-            )
-            message_copy = message.model_copy()
-            message_copy.content = (
-                "Previous message was too large for context window and was omitted. Please respond "
-                "based on the visible context."
-            )
-            processed_messages.append(message_copy)
-        else:
-            processed_messages.append(message)
-    return processed_messages
-
-
-def _deduplicate_additional_context(messages: List[BaseMessage]) -> List[BaseMessage]:
-    """Remove duplicate <additional_context> tags, keeping only the first occurrence.
-
-    Deduplication is done based on identical content and not ids. If the content changes then the old content and the
-    new content will both be kept.
-    """
-
-    seen_contexts = set()
-    result = []
-
-    for message in messages:
-        contexts = message.additional_kwargs.get("additional_context") or []
-
-        new_contexts = []
-
-        for ctx in contexts:
-            content = None
-            if hasattr(ctx, "content"):
-                content = ctx.content
-            else:
-                # For some reason it's a dict sometimes
-                content = ctx.get("content", "")
-            if content not in seen_contexts:
-                new_contexts.append(ctx)
-                seen_contexts.add(content)
-
-        if new_contexts != contexts:
-            message_copy = message.model_copy()
-            message_copy.additional_kwargs = {
-                **message.additional_kwargs,
-                "additional_context": new_contexts,
-            }
-            message = message_copy
-
-        result.append(message)
-
-    return result
-
-
 def _plan_reducer(current: Plan, new: Optional[Plan]) -> Plan:
     if new is None:
         return current
@@ -210,37 +129,6 @@ def _plan_reducer(current: Plan, new: Optional[Plan]) -> Plan:
     return current
 
 
-def get_messages_role(messages: List[BaseMessage]) -> List[str]:
-    # log the tool call id suffix 8 character to keep it concise
-    return [
-        (
-            f"{msg.type}-{[(call.get("id") or "")[-8:] for call in msg.tool_calls]}"
-            if isinstance(msg, AIMessage)
-            else (
-                f"{msg.type}-{msg.tool_call_id[-8:]}"
-                if isinstance(msg, ToolMessage)
-                else msg.type
-            )
-        )
-        for msg in messages
-    ]
-
-
-def get_messages_profile(
-    messages: List[BaseMessage],
-    token_counter: ApproximateTokenCounter,
-    include_tool_tokens: bool = True,
-) -> Tuple[List[str], int]:
-
-    roles = get_messages_role(messages=messages)
-    token_size = (
-        token_counter.count_tokens(messages, include_tool_tokens=include_tool_tokens)
-        if messages
-        else 0
-    )
-    return roles, token_size
-
-
 # reducers can be called multiple times by the LangGraph framework. One MUST assure
 # that fully new object is returned from reducer function. If mutation happens instead,
 # results might be broken !!!!!!
@@ -256,183 +144,24 @@ def _conversation_history_reducer(
         if not new_messages:
             continue
 
-        token_counter = ApproximateTokenCounter(agent_name)
-
-        current_msg_roles, current_msg_token = get_messages_profile(
-            messages=reduced.get(agent_name, []),
-            token_counter=token_counter,
-            include_tool_tokens=False,
-        )
-
-        new_msg_roles, new_msg_token = get_messages_profile(
-            messages=new_messages,
-            token_counter=token_counter,
-            include_tool_tokens=False,
-        )
-
-        logger.info(
-            f"Starting trimming conversation history for {agent_name} with "
-            f"current messages roles: {current_msg_roles}, token size: {current_msg_token}; "
-            f"new messages roles: {new_msg_roles}, token size: {new_msg_token}; "
-            f"total token size including tool specs: {current_msg_token + new_msg_token + token_counter.tool_tokens}",
-            current_msg_tokens=current_msg_token,
-            new_msg_token=new_msg_token,
-            total_tokens_before_trimming=current_msg_token
-            + new_msg_token
-            + token_counter.tool_tokens,
-        )
-
-        processed_messages = _pretrim_large_messages(new_messages, token_counter)
-
-        if not processed_messages:
-            continue
-
         existing_messages = reduced.get(agent_name, [])
-        reduced[agent_name] = existing_messages + processed_messages
+        combined_messages = existing_messages + new_messages
 
-        pretrimmed_msg_roles, pretrimmed_msg_token = get_messages_profile(
-            messages=reduced[agent_name],
-            token_counter=token_counter,
-            include_tool_tokens=False,
-        )
-
-        logger.info(
-            f"Finished pretrim with messages roles: {pretrimmed_msg_roles}, message token: {pretrimmed_msg_token}, "
-            f"estimated token size including tool specs: {pretrimmed_msg_token + token_counter.tool_tokens}",
-            total_tokens_after_pretrimming=pretrimmed_msg_token
-            + token_counter.tool_tokens,
-        )
-
-        deduplicated_messages = _deduplicate_additional_context(reduced[agent_name])
-
-        try:
-            trimmed_messages = trim_messages(
-                deduplicated_messages,
-                max_tokens=MAX_CONTEXT_TOKENS,
-                strategy="last",
-                token_counter=token_counter.count_tokens,
-                start_on="human",
-                include_system=True,
-                allow_partial=False,
-            )
-
-            reduced[agent_name] = _restore_message_consistency(trimmed_messages)
-
-            # If trimming resulted in empty list, keep at least the last few messages along with the system message
-            if not reduced[agent_name] or (
-                len(reduced[agent_name]) == 1
-                and isinstance(reduced[agent_name][0], SystemMessage)
-            ):
-                all_messages = current.get(agent_name, []) + processed_messages
-                system_messages = [
-                    msg for msg in all_messages if isinstance(msg, SystemMessage)
-                ]
-                non_system_messages = [
-                    msg for msg in all_messages if not isinstance(msg, SystemMessage)
-                ]
-
-                min_non_system = min(3, len(non_system_messages))
-                fallback_messages = (
-                    system_messages + non_system_messages[-min_non_system:]
-                )
-
-                reduced[agent_name] = _restore_message_consistency(fallback_messages)
-
-                logger.warning(
-                    "Trim resulted in empty messages/invalid messages - falling back to minimal context",
-                    agent_name=agent_name,
-                )
-
-            # Detect potential conversation loops or trimming failures
-            post_trimmed_messages = reduced[agent_name]
-            if (
-                existing_messages == post_trimmed_messages
-                and len(processed_messages) > 0
-            ):
-                logger.warning(
-                    "Trimming resulted in identical message state - possible conversation loop",
-                    agent_name=agent_name,
-                )
-
-        except Exception as e:
-            log_exception(
-                e,
-                extra={
-                    "context": "Error during message trimming",
-                    "agent_name": agent_name,
-                },
-            )
-            # Keep the system messages plus a few recent messages as fallback
-            all_messages = current.get(agent_name, []) + processed_messages
-            system_messages = [
-                msg for msg in all_messages if isinstance(msg, SystemMessage)
-            ]
-            non_system_messages = [
-                msg for msg in all_messages if not isinstance(msg, SystemMessage)
-            ]
-
-            fallback_messages = system_messages + non_system_messages[-5:]
-            reduced[agent_name] = _restore_message_consistency(fallback_messages)
-
-        posttrimmed_msg_roles, posttrimmed_msg_token = get_messages_profile(
-            messages=reduced[agent_name],
-            token_counter=token_counter,
-            include_tool_tokens=False,
-        )
-
-        logger.info(
-            f"Finished posttrim with messages roles: {posttrimmed_msg_roles}, message token: {posttrimmed_msg_token}, "
-            f"estimated token size including tool specs: {posttrimmed_msg_token + token_counter.tool_tokens}",
-            total_tokens_before_trimming=current_msg_token
-            + new_msg_token
-            + token_counter.tool_tokens,
-            total_tokens_after_posttrimming=posttrimmed_msg_token
-            + token_counter.tool_tokens,
+        # If feature flag is enabled, trim to max context window for the specific model
+        # Otherwise trim to the old 400K context window size for all models.
+        model_metadata = current_model_metadata_context.get()
+        reduced[agent_name] = trim_conversation_history(
+            messages=combined_messages,
+            component_name=agent_name,
+            max_context_tokens=(
+                model_metadata.llm_definition.max_context_tokens
+                if is_feature_enabled(FeatureFlag.AI_PER_MODEL_CONTEXT_WINDOW)
+                and model_metadata is not None
+                else LEGACY_MAX_CONTEXT_TOKENS
+            ),
         )
 
     return reduced
-
-
-def _restore_message_consistency(messages: List[BaseMessage]) -> List[BaseMessage]:
-    if not messages:
-        return []
-
-    roles = get_messages_role(messages=messages)
-    logger.info(f"Message roles before restore: {roles}")
-
-    # Identify all AIMessages with tool calls
-    tool_call_indices = {}
-    for i, msg in enumerate(messages):
-        if isinstance(msg, AIMessage) and hasattr(msg, "tool_calls") and msg.tool_calls:
-            for tool_call in msg.tool_calls:
-                tool_call_id = tool_call.get("id")
-                if tool_call_id:
-                    tool_call_indices[tool_call_id] = i
-
-    # Process the messages to ensure consistency
-    result: List[BaseMessage] = []
-    for i, msg in enumerate(messages):
-        if isinstance(msg, ToolMessage):
-            tool_call_id = getattr(msg, "tool_call_id", None)
-            # Check if this tool message has a corresponding AIMessage with tool_calls
-            # AND if the tool message appears after its parent
-            if (
-                tool_call_id
-                and tool_call_id in tool_call_indices
-                and i > tool_call_indices[tool_call_id]
-            ):
-                result.append(msg)
-            else:
-                # Convert invalid ToolMessage to HumanMessage
-                if msg.content:
-                    result.append(HumanMessage(content=msg.content))
-        else:
-            result.append(msg)
-
-    roles = get_messages_role(messages=result)
-    logger.info(f"Message roles after restore: {roles}")
-
-    return result
 
 
 def _ui_chat_log_reducer(

@@ -276,7 +276,6 @@ class CreateMergeRequestNoteInput(MergeRequestResourceInput):
 
 class CreateMergeRequestNote(DuoBaseTool):
     name: str = "create_merge_request_note"
-    # pylint: disable=line-too-long
     description: str = f"""Create a note (comment) on a merge request.
 
 {MERGE_REQUEST_IDENTIFICATION_DESCRIPTION}

@@ -17,6 +17,7 @@ class TestSanitizeLogs:
             model_metadata=ModelMetadata(
                 name="mistral",
                 provider="openai",
+                max_context_tokens=200000,
                 api_key="secret-key-456",
                 endpoint="https://example.com",
                 llm_definition=llm_definition,

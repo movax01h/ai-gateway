@@ -12,7 +12,6 @@ from duo_workflow_service.agents import HandoverAgent, RunToolNode, ToolsExecuto
 from duo_workflow_service.agents.agent import build_agent
 from duo_workflow_service.components import ToolsRegistry
 from duo_workflow_service.entities import (
-    MAX_SINGLE_MESSAGE_TOKENS,
     MessageTypeEnum,
     Plan,
     ToolStatus,
@@ -31,6 +30,7 @@ from duo_workflow_service.workflows.abstract_workflow import (
 from duo_workflow_service.workflows.type_definitions import AdditionalContext
 from lib.internal_events.event_enum import CategoryEnum
 
+DEFAULT_MAX_CONTEXT_TOKENS = 1_000_000
 AGENT_NAME = "ci_pipelines_manager_agent"
 
 
@@ -180,9 +180,10 @@ class Workflow(AbstractWorkflow):
                 "Failed to load file contents, ensure that file is present"
             )
 
+        max_single_message_tokens = int(DEFAULT_MAX_CONTEXT_TOKENS * 0.65)
         if (
             ApproximateTokenCounter(AGENT_NAME).count_string_content(content)
-            > MAX_SINGLE_MESSAGE_TOKENS
+            > max_single_message_tokens
         ):
             return {
                 "ui_chat_log": [

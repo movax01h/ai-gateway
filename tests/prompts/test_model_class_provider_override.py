@@ -39,6 +39,7 @@ models:
     -
         name: "OpenAI GPT-5"
         gitlab_identifier: "gpt_5"
+        max_context_tokens: 400000
         family:
             - gpt_5
         params:

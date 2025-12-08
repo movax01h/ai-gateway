@@ -709,6 +709,7 @@ class TestEditorContentGeneration:
                     llm_definition=LLMDefinition(
                         name="Mistral",
                         gitlab_identifier="mistral",
+                        max_context_tokens=128000,
                         family=["mistral", "litellm"],
                         params={
                             "model": "mistral",
@@ -1255,7 +1256,9 @@ class TestAmazonQIntegrationV3:
                     name="amazon_q",
                     role_arn="test:role",
                     llm_definition=LLMDefinition(
-                        gitlab_identifier="amazon_q", name="Amazon Q"
+                        gitlab_identifier="amazon_q",
+                        name="Amazon Q",
+                        max_context_tokens=100000,
                     ),
                 ),
                 {
@@ -1287,7 +1290,9 @@ class TestAmazonQIntegrationV3:
                     name="amazon_q",
                     role_arn="test:role",
                     llm_definition=LLMDefinition(
-                        gitlab_identifier="amazon_q", name="Amazon Q"
+                        gitlab_identifier="amazon_q",
+                        name="Amazon Q",
+                        max_context_tokens=100000,
                     ),
                 ),
                 {

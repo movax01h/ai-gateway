@@ -145,7 +145,9 @@ class TestReActAgentStream:
                     provider="anthropic",
                     endpoint=AnyUrl("http://localhost:4000"),
                     llm_definition=LLMDefinition(
-                        gitlab_identifier="claude", name="claude"
+                        gitlab_identifier="claude",
+                        name="claude",
+                        max_context_tokens=200000,
                     ),
                 ),
                 "thought\nFinal Answer: answer\n",
@@ -165,7 +167,9 @@ class TestReActAgentStream:
                     provider="amazon_q",
                     role_arn="role-arn",
                     llm_definition=LLMDefinition(
-                        gitlab_identifier="amazon_q", name="Amazon Q"
+                        gitlab_identifier="amazon_q",
+                        name="Amazon Q",
+                        max_context_tokens=100000,
                     ),
                 ),
                 "thought\nFinal Answer: answer\n",
@@ -211,7 +215,9 @@ class TestReActAgentStream:
                     endpoint=AnyUrl("http://localhost:4000"),
                     api_key="token",
                     llm_definition=LLMDefinition(
-                        gitlab_identifier="mistral", name="Mistral"
+                        gitlab_identifier="mistral",
+                        name="Mistral",
+                        max_context_tokens=128000,
                     ),
                 ),
                 "thought\nFinal Answer: answer\n",
@@ -258,7 +264,9 @@ class TestReActAgentStream:
                     endpoint=AnyUrl("http://localhost:4000"),
                     api_key="token",
                     llm_definition=LLMDefinition(
-                        gitlab_identifier="mistral", name="Mistral"
+                        gitlab_identifier="mistral",
+                        name="Mistral",
+                        max_context_tokens=128000,
                     ),
                 ),
                 "thought\nFinal Answer: answer\n",
@@ -391,7 +399,9 @@ class TestReActAgentStream:
                     endpoint=AnyUrl("http://localhost:4000"),
                     api_key="token",
                     llm_definition=LLMDefinition(
-                        gitlab_identifier="mistral", name="Mistral"
+                        gitlab_identifier="mistral",
+                        name="Mistral",
+                        max_context_tokens=128000,
                     ),
                 ),
                 [
@@ -689,7 +699,9 @@ class TestReActAgentStream:
                     provider="amazon_q",
                     role_arn="role-arn",
                     llm_definition=LLMDefinition(
-                        gitlab_identifier="amazon_q", name="Amazon Q"
+                        gitlab_identifier="amazon_q",
+                        name="Amazon Q",
+                        max_context_tokens=100000,
                     ),
                 ),
             ),

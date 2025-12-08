@@ -31,6 +31,7 @@ class LLMDefinition(BaseModel):
     name: str
     gitlab_identifier: str
     prompt_params: PromptParams = PromptParams()
+    max_context_tokens: int
     provider: Optional[str] = None
     description: str | None = None
     cost_indicator: Literal["$", "$$", "$$$"] | None = None

@@ -11,16 +11,15 @@ from duo_workflow_service.components.tools_registry import (
     _AGENT_PRIVILEGES,
     ToolsRegistry,
 )
-from duo_workflow_service.entities import (
-    MAX_SINGLE_MESSAGE_TOKENS,
-    Plan,
-    WorkflowState,
-    WorkflowStatusEnum,
-)
+from duo_workflow_service.entities import Plan, WorkflowState, WorkflowStatusEnum
 from duo_workflow_service.gitlab.gitlab_api import Project
 from duo_workflow_service.gitlab.http_client import GitlabHttpClient
 from duo_workflow_service.workflows.convert_to_gitlab_ci import Workflow
-from duo_workflow_service.workflows.convert_to_gitlab_ci.workflow import Routes, _router
+from duo_workflow_service.workflows.convert_to_gitlab_ci.workflow import (
+    DEFAULT_MAX_CONTEXT_TOKENS,
+    Routes,
+    _router,
+)
 from duo_workflow_service.workflows.type_definitions import AdditionalContext
 from lib.internal_events.event_enum import CategoryEnum
 
@@ -287,8 +286,9 @@ async def test_translation_tools(
 )
 @pytest.mark.asyncio
 async def test_file_content_too_large(mock_token_counter, workflow_state, workflow):
+    max_single_message_tokens = int(DEFAULT_MAX_CONTEXT_TOKENS * 0.65)
     mock_token_counter.return_value.count_string_content.return_value = (
-        MAX_SINGLE_MESSAGE_TOKENS + 1
+        max_single_message_tokens + 1
     )
 
     result = workflow._load_file_contents(["large file content"], workflow_state)
