@@ -205,6 +205,12 @@ configurable_unit_primitives:
       - "gpt_5"
       - "gpt_5_codex"
       - "gpt_5_mini"
+    dev:
+      selectable_models:
+        - "claude_opus_4_5_20251101"
+      group_ids:
+        - 9970
+
   # This work is still in progress: https://gitlab.com/groups/gitlab-org/-/epics/19998
   - feature_setting: "duo_agent_platform_agentic_chat"
     unit_primitives:
@@ -219,6 +225,12 @@ configurable_unit_primitives:
       - "gpt_5"
       - "gpt_5_codex"
       - "gpt_5_mini"
+    dev:
+      selectable_models:
+        - "claude_opus_4_5_20251101"
+      group_ids:
+        - 9970
+
   - feature_setting: "categorize_question"
     unit_primitives:
       - "duo_chat"
