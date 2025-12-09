@@ -83,6 +83,20 @@ models:
       max_tokens: 4_096
       model_class_provider: anthropic
 
+  - name: "Claude Opus 4.5 - Anthropic"
+    provider: "Anthropic"
+    gitlab_identifier: "claude_opus_4_5_20251101"
+    description: "Claude's most intelligent model, combining maximum capability with practical performance."
+    cost_indicator: "$$$"
+    max_context_tokens: 200000 # https://platform.claude.com/docs/en/about-claude/models/overview#latest-models-comparison
+    family:
+      - claude_4_5
+    params:
+      model: "claude-opus-4-5-20251101"
+      temperature: 0.0
+      max_tokens: 4_096
+      model_class_provider: anthropic
+
   - name: "Claude Sonnet 4.5 - Anthropic"
     provider: "Anthropic"
     gitlab_identifier: "claude_sonnet_4_5_20250929"
