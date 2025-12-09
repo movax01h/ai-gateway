@@ -3,6 +3,7 @@ from typing import Any, Type
 
 from pydantic import BaseModel, Field
 
+from duo_workflow_service.security.tool_output_security import ToolTrustLevel
 from duo_workflow_service.tools import DuoBaseTool
 
 
@@ -32,6 +33,7 @@ class PostSastFpAnalysisToGitlab(DuoBaseTool):
     )
 """
     args_schema: Type[BaseModel] = PostSastFpAnalysisToGitlabInput
+    trust_level: ToolTrustLevel = ToolTrustLevel.TRUSTED_INTERNAL
 
     async def _execute(
         self, vulnerability_id: int, false_positive_likelihood: float, explanation: str

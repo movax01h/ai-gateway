@@ -4,6 +4,7 @@ from typing import Annotated, Any, Dict, List, Literal, Optional, Type, Union
 
 from pydantic import BaseModel, Field, StringConstraints
 
+from duo_workflow_service.security.tool_output_security import ToolTrustLevel
 from duo_workflow_service.tools.duo_base_tool import DESCRIPTION_CHARACTER_LIMIT
 from duo_workflow_service.tools.work_items.base_tool import (
     ResolvedWorkItem,
@@ -463,6 +464,7 @@ class CreateWorkItem(WorkItemBaseTool):
         create_work_item(group_id='namespace/group', title="Implement feature X", type_name="issue")
     """
     args_schema: Type[BaseModel] = CreateWorkItemInput
+    trust_level: ToolTrustLevel = ToolTrustLevel.TRUSTED_INTERNAL
 
     async def _execute(self, type_name: str, **kwargs: Any) -> str:
         kwargs["type_name"] = type_name
@@ -544,6 +546,7 @@ class UpdateWorkItem(WorkItemBaseTool):
     - update_work_item(url="https://gitlab.com/namespace/project/-/work_items/42", title="Updated title")
     """
     args_schema: Type[BaseModel] = UpdateWorkItemInput
+    trust_level: ToolTrustLevel = ToolTrustLevel.TRUSTED_INTERNAL
 
     async def _execute(self, **kwargs: Any) -> str:
         resolved = await self._resolve_work_item_data(
@@ -600,6 +603,7 @@ class CreateWorkItemNote(WorkItemBaseTool):
     The body parameter is always required.
     """
     args_schema: Type[BaseModel] = CreateWorkItemNoteInput
+    trust_level: ToolTrustLevel = ToolTrustLevel.TRUSTED_INTERNAL
 
     async def _execute(self, body: str, **kwargs: Any) -> str:
         url = kwargs.pop("url", None)
