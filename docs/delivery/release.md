@@ -45,6 +45,7 @@ To view released versions of AI Gateway, visit the following links:
 When a new minor GitLab version is released (vX.Y.0-ee), a new branch is created with the name `stable-{gitlab-major}-{gitlab-minor}-ee`, and new tag with name `self-hosted-vX.Y.0-ee` is created, which triggers the release of a new image. Users on self-hosted environments can use this to download a version of AI Gateway that is compatible with their GitLab installation. These images are available both on
 [GitLab container registry](https://gitlab.com/gitlab-org/modelops/applied-ml/code-suggestions/ai-assist/container_registry/3809284)
 and on [DockerHub](https://hub.docker.com/repository/docker/gitlab/model-gateway/tags).
+These tags and branches are created by [the script in GitLab-Rails](https://gitlab.com/gitlab-org/gitlab/-/blob/master/scripts/aigw-tagging.sh) that runs in tag pipelines.
 
 ### Releasing patches to previous versions
 
@@ -77,15 +78,18 @@ self-hosted-v18.4.1-ee
 
 1. **Notify stakeholders**: Inform customers or stakeholders that they can update their installation with the new image version.
 
-## GitLab managed AI Gateway Release process
+## Semantic releases in AI Gateway
 
-Releases are now automated using the `semantic-release` job from [common-ci-tasks](https://gitlab.com/gitlab-com/gl-infra/common-ci-tasks). The release process works as follows:
+Aside from the custom release process for self-hosted solutions, we also create [releases](https://docs.gitlab.com/user/project/releases/) via
+[semantic-release](https://github.com/semantic-release/semantic-release). The release automation works as follows:
 
-1. When commits following [Conventional Commits](https://www.conventionalcommits.org/en) are pushed to the `main` branch, the `semantic_release_base` job automatically runs.
+1. When commits following [Conventional Commits](https://www.conventionalcommits.org/en) are pushed to the `main` branch, the `semantic_release_base` job automatically runs via [common-ci-tasks](https://gitlab.com/gitlab-com/gl-infra/common-ci-tasks).
 1. This job calculates the next version based on the commit messages, creates a new Git tag, and publishes a release.
 1. No manual intervention is required - releases happen automatically when appropriate conventional commits are detected.
 
 The semantic release job uses the configuration defined in `.releaserc.json` and is managed through the common-ci-tasks template.
+
+Note that these releases and associated Docker images are not used by any production environments including SaaS, Dedicated, Self-managed GitLab and Self-hosted Duo.
 
 ## Configure release workflow
 
