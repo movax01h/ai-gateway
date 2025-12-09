@@ -11,6 +11,7 @@ components:
         as: "project_id"
     toolset:
       - "get_current_user"
+      - "run_glql_query"
     ui_log_events:
       - "on_agent_final_answer"
       - "on_tool_execution_success"
@@ -137,6 +138,10 @@ prompts:
         **Response Pattern:**
         - Acknowledge context, explain GLQL can't filter by iid and offer to filter by author/state/date.
         - If the current context is the item, then explain that the UI itself gives the most detailed information and that you are better at searching across multiple items.
+
+        ## Query execution
+
+        After generating the GLQL query, execute it using the "run_glql_query" tool. Return the data in a human-readable format.
 
         ## Response Format
 

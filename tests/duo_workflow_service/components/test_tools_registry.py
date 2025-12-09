@@ -136,6 +136,7 @@ _outbox = MagicMock(spec=Outbox)
                 "list_work_items",
                 "get_work_item_notes",
                 "extract_lines_from_text",
+                "run_glql_query",
                 "build_review_merge_request_context",
                 "get_security_finding_details",
                 "list_security_findings",
@@ -215,6 +216,7 @@ _outbox = MagicMock(spec=Outbox)
                 "get_work_item_notes",
                 "post_duo_code_review",
                 "extract_lines_from_text",
+                "run_glql_query",
                 "post_sast_fp_analysis_to_gitlab",
                 "build_review_merge_request_context",
                 "get_security_finding_details",
@@ -406,6 +408,7 @@ def test_registry_initialization_initialises_tools_with_correct_attributes(
         "get_work_item_notes": tools.GetWorkItemNotes(metadata=tool_metadata),
         "post_duo_code_review": PostDuoCodeReview(metadata=tool_metadata),
         "extract_lines_from_text": tools.ExtractLinesFromText(metadata=tool_metadata),
+        "run_glql_query": tools.RunGLQLQuery(metadata=tool_metadata),
         "post_sast_fp_analysis_to_gitlab": PostSastFpAnalysisToGitlab(
             metadata=tool_metadata
         ),

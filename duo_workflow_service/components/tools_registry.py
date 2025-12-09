@@ -101,6 +101,7 @@ _READ_ONLY_GITLAB_TOOLS: list[Type[BaseTool]] = [
     tools.GetCurrentUser,
     GetVulnerabilityDetails,
     tools.ExtractLinesFromText,
+    tools.RunGLQLQuery,
     BuildReviewMergeRequestContext,
     GetSecurityFindingDetails,
     ListSecurityFindings,
