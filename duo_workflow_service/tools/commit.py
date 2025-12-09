@@ -10,6 +10,7 @@ from pydantic import BaseModel, Field
 
 from duo_workflow_service.gitlab.url_parser import GitLabUrlParseError, GitLabUrlParser
 from duo_workflow_service.policies.diff_exclusion_policy import DiffExclusionPolicy
+from duo_workflow_service.security.tool_output_security import ToolTrustLevel
 from duo_workflow_service.tools.duo_base_tool import DuoBaseTool
 from duo_workflow_service.tools.gitlab_resource_input import ProjectResourceInput
 
@@ -547,6 +548,8 @@ class CreateCommitInput(ProjectResourceInput):
 
 class CreateCommit(CommitBaseTool):
     """Tool to create a commit with multiple file actions in a GitLab repository."""
+
+    trust_level: ToolTrustLevel = ToolTrustLevel.TRUSTED_INTERNAL
 
     name: str = "create_commit"
 

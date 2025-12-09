@@ -10,6 +10,7 @@ from pydantic import BaseModel, Field
 
 from ai_gateway.instrumentators.model_requests import gitlab_version
 from ai_gateway.searches import VertexAISearch
+from duo_workflow_service.security.tool_output_security import ToolTrustLevel
 from duo_workflow_service.tools.duo_base_tool import DuoBaseTool
 
 DEFAULT_PAGE_SIZE = 4
@@ -73,6 +74,7 @@ class DocumentationSearch(DuoBaseTool):
     """
 
     args_schema: Type[BaseModel] = SearchInput
+    trust_level: ToolTrustLevel = ToolTrustLevel.UNTRUSTED_EXTERNAL
 
     async def _execute(self, search: str) -> str:
         try:

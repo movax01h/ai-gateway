@@ -2,6 +2,7 @@ from typing import Any, Type
 
 from pydantic import BaseModel, Field
 
+from duo_workflow_service.security.tool_output_security import ToolTrustLevel
 from duo_workflow_service.tools.command import RunCommand
 from duo_workflow_service.tools.duo_base_tool import DuoBaseTool
 
@@ -29,6 +30,7 @@ class RunTests(DuoBaseTool):
     - Custom: run_tests(command="make test")
     """
     args_schema: Type[BaseModel] = RunTestsInput
+    trust_level: ToolTrustLevel = ToolTrustLevel.TRUSTED_INTERNAL
 
     async def _execute(self, command: str, **kwargs: Any) -> str:
         parts = command.split(maxsplit=1)

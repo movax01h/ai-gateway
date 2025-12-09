@@ -4,6 +4,7 @@ from typing import Any, Type
 from gitlab_cloud_connector import GitLabUnitPrimitive
 from pydantic import BaseModel, Field
 
+from duo_workflow_service.security.tool_output_security import ToolTrustLevel
 from duo_workflow_service.tools.duo_base_tool import DuoBaseTool
 from duo_workflow_service.tools.gitlab_resource_input import ProjectResourceInput
 
@@ -19,6 +20,8 @@ class CreateBranchInput(ProjectResourceInput):
 
 class CreateBranch(DuoBaseTool):
     """Tool to create a new branch in a GitLab repository."""
+
+    trust_level: ToolTrustLevel = ToolTrustLevel.TRUSTED_INTERNAL
 
     name: str = "create_branch"
     unit_primitive: GitLabUnitPrimitive = GitLabUnitPrimitive.DUO_AGENT_PLATFORM

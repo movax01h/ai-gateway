@@ -8,6 +8,7 @@ from pydantic import BaseModel, Field
 
 from duo_workflow_service.gitlab.url_parser import GitLabUrlParseError, GitLabUrlParser
 from duo_workflow_service.policies.file_exclusion_policy import FileExclusionPolicy
+from duo_workflow_service.security.tool_output_security import ToolTrustLevel
 from duo_workflow_service.tools.duo_base_tool import DuoBaseTool
 from duo_workflow_service.tools.gitlab_resource_input import ProjectResourceInput
 
@@ -212,6 +213,7 @@ class ListRepositoryTree(DuoBaseTool):
         list_repository_tree(project_id=13, recursive=True)
     """
     args_schema: Type[BaseModel] = RepositoryTreeResourceInput
+    trust_level: ToolTrustLevel = ToolTrustLevel.TRUSTED_INTERNAL
 
     async def _execute(self, **kwargs) -> str:
         url = kwargs.get("url")

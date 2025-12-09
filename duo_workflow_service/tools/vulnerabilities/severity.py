@@ -3,6 +3,7 @@ from typing import Any, ClassVar, List, Type
 
 from pydantic import BaseModel, Field
 
+from duo_workflow_service.security.tool_output_security import ToolTrustLevel
 from duo_workflow_service.tools.duo_base_tool import DuoBaseTool
 
 PROJECT_IDENTIFICATION_DESCRIPTION = """The project must be specified using its full path (e.g., 'namespace/project' or 'group/subgroup/project')."""
@@ -34,6 +35,7 @@ class UpdateVulnerabilitySeverity(DuoBaseTool):
         "UNKNOWN",
     }
     MAX_COMMENT_LENGTH: ClassVar[int] = 50000
+    trust_level: ToolTrustLevel = ToolTrustLevel.TRUSTED_INTERNAL
 
     name: str = "update_vulnerability_severity"
     description: str = f"""Update the severity level of vulnerabilities in a GitLab project using GraphQL.

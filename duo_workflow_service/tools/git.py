@@ -4,6 +4,7 @@ from pydantic import BaseModel, Field
 
 from contract import contract_pb2
 from duo_workflow_service.executor.action import _execute_action
+from duo_workflow_service.security.tool_output_security import ToolTrustLevel
 from duo_workflow_service.tools.duo_base_tool import DuoBaseTool
 
 
@@ -19,6 +20,7 @@ class Command(DuoBaseTool):
     name: str = "run_git_command"
     description: str = """Runs a git command in the repository working directory."""
     args_schema: Type[BaseModel] = GitCommandInput
+    trust_level: ToolTrustLevel = ToolTrustLevel.TRUSTED_INTERNAL
 
     async def _execute(
         self, repository_url: str, command: str, args: Optional[str] = None

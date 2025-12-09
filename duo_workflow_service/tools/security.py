@@ -7,6 +7,7 @@ from packaging.version import InvalidVersion, Version
 from pydantic import BaseModel, Field, field_validator
 
 from ai_gateway.instrumentators.model_requests import gitlab_version
+from duo_workflow_service.security.tool_output_security import ToolTrustLevel
 from duo_workflow_service.tools.duo_base_tool import DuoBaseTool
 from duo_workflow_service.tracking.errors import log_exception
 
@@ -340,6 +341,7 @@ class DismissVulnerability(DuoBaseTool):
         )
     """
     args_schema: Type[BaseModel] = DismissVulnerabilityInput
+    trust_level: ToolTrustLevel = ToolTrustLevel.TRUSTED_INTERNAL
 
     async def _execute(self, **kwargs: Any) -> str:
         vulnerability_id = kwargs.pop("vulnerability_id")
@@ -447,6 +449,7 @@ class CreateVulnerabilityIssue(DuoBaseTool):
         )
     """
     args_schema: Type[BaseModel] = CreateVulnerabilityIssueInput
+    trust_level: ToolTrustLevel = ToolTrustLevel.TRUSTED_INTERNAL
 
     # pylint: disable-next=too-many-return-statements
     async def _execute(self, **kwargs: Any) -> str:
@@ -575,6 +578,7 @@ class LinkVulnerabilityToIssue(DuoBaseTool):
         )
     """
     args_schema: Type[BaseModel] = LinkVulnerabilityToIssueInput
+    trust_level: ToolTrustLevel = ToolTrustLevel.TRUSTED_INTERNAL
 
     async def _execute(self, **kwargs: Any) -> str:
         issue_id = kwargs.pop("issue_id")
@@ -680,6 +684,7 @@ class LinkVulnerabilityToMergeRequest(DuoBaseTool):
         )
     """
     args_schema: Type[BaseModel] = LinkVulnerabilityToMergeRequestInput
+    trust_level: ToolTrustLevel = ToolTrustLevel.TRUSTED_INTERNAL
 
     async def _execute(self, **kwargs: Any) -> str:
         version_18_2 = Version("18.2.0")
@@ -786,6 +791,7 @@ This is typically done when a security team has verified that the vulnerability 
 that needs to be addressed.
 """
     args_schema: Type[BaseModel] = ConfirmVulnerabilityInput
+    trust_level: ToolTrustLevel = ToolTrustLevel.TRUSTED_INTERNAL
 
     async def _execute(self, **kwargs: Any) -> str:
         vulnerability_id = kwargs.pop("vulnerability_id")
@@ -880,6 +886,7 @@ class RevertToDetectedVulnerability(DuoBaseTool):
         revert_to_detected_vulnerability(vulnerability_id="gid://gitlab/Vulnerability/123", comment="Reverting for re-assessment after code changes")
     """
     args_schema: Type[BaseModel] = RevertToDetectedVulnerabilityInput
+    trust_level: ToolTrustLevel = ToolTrustLevel.TRUSTED_INTERNAL
 
     async def _execute(self, **kwargs: Any) -> str:
         vulnerability_id = kwargs.pop("vulnerability_id")

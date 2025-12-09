@@ -5,6 +5,7 @@ from typing import Any, List, NamedTuple, Optional, Type, Union
 from pydantic import BaseModel, Field
 
 from duo_workflow_service.gitlab.url_parser import GitLabUrlParseError, GitLabUrlParser
+from duo_workflow_service.security.tool_output_security import ToolTrustLevel
 from duo_workflow_service.tools.duo_base_tool import (
     DESCRIPTION_CHARACTER_LIMIT,
     DuoBaseTool,
@@ -201,6 +202,7 @@ class CreateEpic(EpicBaseTool):
     """
 
     args_schema: Type[BaseModel] = WriteEpicInput
+    trust_level: ToolTrustLevel = ToolTrustLevel.TRUSTED_INTERNAL
 
     async def _execute(self, title: str, **kwargs: Any) -> str:
         url = kwargs.pop("url", None)
@@ -450,6 +452,7 @@ For example:
     update_epic(url="https://gitlab.com/groups/namespace/group/-/epics/42", title='Updated Epic')
 """
     args_schema: Type[BaseModel] = UpdateEpicInput
+    trust_level: ToolTrustLevel = ToolTrustLevel.TRUSTED_INTERNAL
 
     async def _execute(self, **kwargs: Any) -> str:
         url = kwargs.pop("url", None)

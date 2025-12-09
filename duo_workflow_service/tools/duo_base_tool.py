@@ -7,6 +7,7 @@ from pydantic import BaseModel, Field
 from duo_workflow_service.gitlab.gitlab_api import Project
 from duo_workflow_service.gitlab.http_client import GitlabHttpClient, GitLabHttpResponse
 from duo_workflow_service.gitlab.url_parser import GitLabUrlParseError, GitLabUrlParser
+from duo_workflow_service.security.tool_output_security import ToolTrustLevel
 from duo_workflow_service.tools.tool_output_manager import (
     TruncationConfig,
     truncate_tool_response,
@@ -57,6 +58,10 @@ class DuoBaseTool(BaseTool):
     # Default truncation configuration - tools can override this class attribute
     truncation_config: TruncationConfig = Field(default_factory=TruncationConfig)
 
+    # Trust level for security wrapping (defaults to UNTRUSTED for fail-secure)
+    # Tools that access only local filesystem/git should override to TRUSTED_INTERNAL
+    trust_level: ToolTrustLevel = ToolTrustLevel.UNTRUSTED_USER_CONTENT
+
     @property
     def gitlab_client(self) -> GitlabHttpClient:
         client = self.metadata.get("gitlab_client")  # type: ignore
@@ -93,11 +98,18 @@ class DuoBaseTool(BaseTool):
         This method should NOT be overridden by subclasses.
         """
         tool_result = await self._execute(*args, **kwargs)
+
+        # Apply truncation
         tool_response = truncate_tool_response(
             tool_response=tool_result,
             tool_name=self.name,
             truncation_config=self.truncation_config,
         )
+
+        # TODO: Security wrapping will be added in a future MR
+        # This allows us to mark tools with trust levels first,
+        # then enable wrapping in a separate, controlled rollout
+
         return tool_response
 
     @abstractmethod

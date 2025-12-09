@@ -10,6 +10,7 @@ import yaml
 from pydantic import BaseModel, Field
 
 from duo_workflow_service.policies.diff_exclusion_policy import DiffExclusionPolicy
+from duo_workflow_service.security.tool_output_security import ToolTrustLevel
 from duo_workflow_service.tools.duo_base_tool import DuoBaseTool
 from duo_workflow_service.tools.gitlab_resource_input import ProjectResourceInput
 from duo_workflow_service.tools.tool_output_manager import TruncationConfig
@@ -29,6 +30,8 @@ class PostDuoCodeReviewInput(BaseModel):
 
 class PostDuoCodeReview(DuoBaseTool):
     """Tool for posting Duo Code Review to a merge request."""
+
+    trust_level: ToolTrustLevel = ToolTrustLevel.TRUSTED_INTERNAL
 
     name: str = "post_duo_code_review"
     description: str = (

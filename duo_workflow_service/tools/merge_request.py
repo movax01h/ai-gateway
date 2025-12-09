@@ -5,6 +5,7 @@ import structlog
 from pydantic import BaseModel, Field
 
 from duo_workflow_service.policies.diff_exclusion_policy import DiffExclusionPolicy
+from duo_workflow_service.security.tool_output_security import ToolTrustLevel
 from duo_workflow_service.tools.duo_base_tool import (
     DESCRIPTION_CHARACTER_LIMIT,
     DuoBaseTool,
@@ -80,6 +81,7 @@ class CreateMergeRequest(DuoBaseTool):
         create_merge_request(url="https://gitlab.com/namespace/project", source_branch="feature", target_branch="main", title="New feature")
     """
     args_schema: Type[BaseModel] = CreateMergeRequestInput
+    trust_level: ToolTrustLevel = ToolTrustLevel.TRUSTED_INTERNAL
 
     async def _execute(
         self,
@@ -289,6 +291,7 @@ For example:
 The body parameter is always required.
 """
     args_schema: Type[BaseModel] = CreateMergeRequestNoteInput
+    trust_level: ToolTrustLevel = ToolTrustLevel.TRUSTED_INTERNAL
 
     async def _execute(self, body: str, **kwargs: Any) -> str:
         url = kwargs.pop("url", None)
@@ -605,6 +608,7 @@ For example:
     update_merge_request(url="https://gitlab.com/namespace/project/-/merge_requests/103", title="Updated title")
     """
     args_schema: Type[BaseModel] = UpdateMergeRequestInput
+    trust_level: ToolTrustLevel = ToolTrustLevel.TRUSTED_INTERNAL
 
     async def _execute(self, **kwargs: Any) -> str:
         url = kwargs.pop("url", None)

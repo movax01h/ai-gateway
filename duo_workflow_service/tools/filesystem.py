@@ -16,6 +16,7 @@ from duo_workflow_service.policies.file_exclusion_policy import (
     CONTEXT_EXCLUSION_MESSAGE,
     FileExclusionPolicy,
 )
+from duo_workflow_service.security.tool_output_security import ToolTrustLevel
 from duo_workflow_service.tools.duo_base_tool import DuoBaseTool
 
 # Security denylist of sensitive directories and files that should not be accessed
@@ -224,6 +225,7 @@ class WriteFile(DuoBaseTool):
     )
     args_schema: Type[BaseModel] = WriteFileInput
     handle_tool_error: bool = True
+    trust_level: ToolTrustLevel = ToolTrustLevel.TRUSTED_INTERNAL
 
     async def _execute(self, file_path: str, contents: str) -> str:
         # Check file exclusion policy
@@ -291,6 +293,7 @@ class FindFiles(DuoBaseTool):
     Uses bash filename expansion syntax. Searches recursively and respects .gitignore rules.
     """
     args_schema: Type[BaseModel] = FindFilesInput
+    trust_level: ToolTrustLevel = ToolTrustLevel.TRUSTED_INTERNAL
 
     async def _execute(
         self,
@@ -339,6 +342,7 @@ class Mkdir(DuoBaseTool):
     The directory creation is restricted to the current working directory tree."""
 
     args_schema: Type[BaseModel] = MkdirInput
+    trust_level: ToolTrustLevel = ToolTrustLevel.TRUSTED_INTERNAL
 
     async def _execute(self, directory_path: str) -> str:
         if ".." in directory_path:
@@ -444,6 +448,7 @@ Examples of batched file edits:
     )"""
     args_schema: Type[BaseModel] = EditFileInput
     handle_tool_error: bool = True
+    trust_level: ToolTrustLevel = ToolTrustLevel.TRUSTED_INTERNAL
 
     async def _execute(self, file_path: str, old_str: str, new_str: str) -> str:
         # Check file exclusion policy
@@ -506,6 +511,7 @@ class ListDir(DuoBaseTool):
     Use this instead of trying to run 'ls' commands.
     """
     args_schema: Type[BaseModel] = ListDirInput
+    trust_level: ToolTrustLevel = ToolTrustLevel.TRUSTED_INTERNAL
 
     async def _execute(self, directory: str) -> str:
         # Check file exclusion policy before executing action
