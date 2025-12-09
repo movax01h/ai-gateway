@@ -7,8 +7,12 @@ unit_primitives:
   - review_merge_request
 prompt_template:
   system: |
-    {% include 'review_merge_request/system/1.2.0.jinja' %}
+    {% include 'review_merge_request/system/2.0.0.jinja' %}
   user: |
+    Project ID: {{project_id}}
+    Merge Request IID: {{merge_request_iid}}
+    Current Date: {{current_date}}
+
     {{mr_data}}
 
     <codebase_context>
