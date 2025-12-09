@@ -18,6 +18,7 @@ from ai_gateway.api.middleware.headers import (
     X_GITLAB_INSTANCE_ID_HEADER,
     X_GITLAB_INTERFACE,
     X_GITLAB_NAMESPACE_ID,
+    X_GITLAB_PROJECT_ID,
     X_GITLAB_REALM_HEADER,
     X_GITLAB_ROOT_NAMESPACE_ID,
     X_GITLAB_SAAS_DUO_PRO_NAMESPACE_IDS_HEADER,
@@ -60,6 +61,9 @@ class InternalEventMiddleware:
         if hasattr(user, "claims") and user.claims:
             unique_instance_id = user.claims.gitlab_instance_uid
 
+        project_id_str = request.headers.get(X_GITLAB_PROJECT_ID)
+        project_id = int(project_id_str) if project_id_str else None
+
         namespace_id_str = request.headers.get(
             X_GITLAB_NAMESPACE_ID,
         )
@@ -87,6 +91,7 @@ class InternalEventMiddleware:
             client_name=request.headers.get(X_GITLAB_CLIENT_NAME),
             client_version=request.headers.get(X_GITLAB_CLIENT_VERSION),
             interface=request.headers.get(X_GITLAB_INTERFACE),
+            project_id=project_id,
             feature_enabled_by_namespace_ids=feature_enabled_by_namespace_ids,
             feature_enablement_type=request.headers.get(
                 X_GITLAB_FEATURE_ENABLEMENT_TYPE_HEADER
