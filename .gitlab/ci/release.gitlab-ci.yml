@@ -6,6 +6,17 @@
     - docker tag "${TARGET_IMAGE}" "${RELEASE_VERSION}"
     - docker push "${RELEASE_VERSION}"
 
+.docker-hub-release:
+  extends: .docker-release
+  variables:
+    REGISTRY_USER: "$DOCKERHUB_USERNAME"
+    REGISTRY_PASSWORD: "$DOCKERHUB_PASSWORD"
+    REGISTRY: "docker.io"
+  after_script:
+    - echo $RELEASE_VERSION
+    - echo $REGISTRY_USER
+    - echo $REGISTRY
+
 release-docker-image:latest:
   stage: release
   extends: .docker-release
@@ -24,31 +35,17 @@ release-docker-image:tag:
 
 release-docker-hub-image:self-managed-tag:
   stage: release
-  extends: .docker-release
+  extends: .docker-hub-release
   variables:
-    RELEASE_VERSION: "$DOCKERHUB_MODEL_GATEWAY_IMAGE"
-    REGISTRY_USER: "$DOCKERHUB_USERNAME"
-    REGISTRY_PASSWORD: "$DOCKERHUB_PASSWORD"
-    REGISTRY: "docker.io"
-  after_script:
-    - echo $RELEASE_VERSION
-    - echo $REGISTRY_USER
-    - echo $REGISTRY
+    RELEASE_VERSION: "gitlab/model-gateway:$CI_COMMIT_TAG"
   rules:
     - if: $CI_COMMIT_TAG =~ /^self-hosted-/
 
 release-docker-hub-image:self-managed-nightly:
   stage: release
-  extends: .docker-release
+  extends: .docker-hub-release
   variables:
-    RELEASE_VERSION: "$DOCKERHUB_MODEL_GATEWAY_SELF_HOSTED_IMAGE"
-    REGISTRY_USER: "$DOCKERHUB_USERNAME"
-    REGISTRY_PASSWORD: "$DOCKERHUB_PASSWORD"
-    REGISTRY: "docker.io"
-  after_script:
-    - echo $RELEASE_VERSION
-    - echo $REGISTRY_USER
-    - echo $REGISTRY
+    RELEASE_VERSION: "gitlab/model-gateway-self-hosted:$CI_COMMIT_SHORT_SHA"
   rules:
     - if: $CI_COMMIT_BRANCH && $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
 
@@ -86,3 +83,21 @@ publish-node-client:
     - if: $CI_COMMIT_BRANCH == "main"
       changes:
         - clients/node/**/*
+
+release-docker-fips-image:tag:
+  stage: release
+  extends: .docker-release
+  variables:
+    TARGET_IMAGE: "$FIPS_TARGET_IMAGE"
+    RELEASE_VERSION: "$DOCKER_MODEL_GATEWAY:$CI_COMMIT_TAG"
+  rules:
+    - if: $CI_COMMIT_TAG =~ /-fips$/
+
+release-docker-hub-self-hosted-fips-image:tag:
+  stage: release
+  extends: .docker-hub-release
+  variables:
+    TARGET_IMAGE: "$SELF_HOSTED_FIPS_TARGET_IMAGE"
+    RELEASE_VERSION: "gitlab/model-gateway-self-hosted-fips:${CI_COMMIT_TAG%-fips}"
+  rules:
+    - if: $CI_COMMIT_TAG =~ /-fips$/
