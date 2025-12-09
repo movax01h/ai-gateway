@@ -88,6 +88,10 @@ query ListProjectWorkItems(
                             dueDate
                         }
                     }
+                    ... on WorkItemWidgetHierarchy {
+                        hasChildren
+                        hasParent
+                    }
                 }
             }
         }
