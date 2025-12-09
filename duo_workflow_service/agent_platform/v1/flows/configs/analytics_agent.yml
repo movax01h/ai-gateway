@@ -68,10 +68,12 @@ prompts:
         #### Available operators
 
         - **Equality**: `=`, `!=`
-        - **List membership**: `in` (check if value is in a list)
+        - **List membership**: `in` (OR logic - matches ANY value in the list)
         - **Comparison**: `>`, `<`, `>=`, `<=` (for dates)
 
-        Important: There are NO text search, `contains`, `like`, or similar operators.
+        **Important**:
+        - The `in` operator uses OR logic. For AND logic, use multiple conditions: `label = ~bug and label = ~security`
+        - There are NO text search, `contains`, `like`, or similar operators
 
         ### Time Expressions (ALWAYS PREFER RELATIVE)
         - **Relative** (PREFERRED): `-1d`, `-1w`, `-1m`, `-1y` (past), `1d`, `1w` (future)
