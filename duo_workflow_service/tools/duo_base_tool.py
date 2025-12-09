@@ -1,5 +1,5 @@
 from abc import abstractmethod
-from typing import Any, List, NamedTuple, Optional, final
+from typing import Any, ClassVar, List, NamedTuple, Optional, Type, final
 
 from langchain_core.tools import BaseTool, ToolException
 from pydantic import BaseModel, Field
@@ -61,6 +61,12 @@ class DuoBaseTool(BaseTool):
     # Trust level for security wrapping (defaults to UNTRUSTED for fail-secure)
     # Tools that access only local filesystem/git should override to TRUSTED_INTERNAL
     trust_level: ToolTrustLevel = ToolTrustLevel.UNTRUSTED_USER_CONTENT
+
+    # Tool class that this tool supersedes (if any)
+    supersedes: ClassVar[Optional[Type["DuoBaseTool"]]] = None
+
+    # Client capability required to use this tool (if any)
+    required_capability: ClassVar[Optional[str]] = None
 
     @property
     def gitlab_client(self) -> GitlabHttpClient:
