@@ -12,7 +12,6 @@ mutation updateWorkItem($input: WorkItemUpdateInput!) {
                 ... on WorkItemWidgetAssignees {
                     assignees {
                         nodes {
-                            id
                             username
                         }
                     }

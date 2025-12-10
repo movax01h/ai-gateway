@@ -12,7 +12,6 @@ mutation createWorkItem($input: WorkItemCreateInput!) {
                 ... on WorkItemWidgetAssignees {
                     assignees {
                         nodes {
-                            id
                             username
                         }
                     }
