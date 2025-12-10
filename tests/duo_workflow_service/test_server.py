@@ -57,7 +57,7 @@ from lib.internal_events.event_enum import (
 @pytest.fixture
 def simple_flow_config():
     return {
-        "version": "1.0",
+        "version": "v1",
         "environment": "test",
         "components": [{"name": "test_agent", "type": "AgentComponent"}],
         "flow": {"entry_point": "test_agent"},
@@ -1286,19 +1286,29 @@ async def test_next_client_event_client_streaming_closed():
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
-    "flow_config_name,flow_config_schema_version",
-    [("simple_flow_config", "experimental")],
+    "flow_config_name,flow_config_schema_version,ignore_schema_version,expected_version",
+    [
+        ("simple_flow_config", "experimental", True, "v1"),
+        ("simple_flow_config", "experimental", False, "experimental"),
+    ],
 )
 @patch("duo_workflow_service.server.AbstractWorkflow")
 @patch("duo_workflow_service.server.resolve_workflow_class")
+@patch("duo_workflow_service.server.language_server_version")
 async def test_execute_workflow_with_flow_config_schema_version_parameterized(
+    mock_language_server_version,
     mock_resolve_workflow,
     mock_abstract_workflow_class,
     request,
     flow_config_name,
     flow_config_schema_version,
+    ignore_schema_version,
+    expected_version,
 ):
     # Setup mocks
+    mock_language_server_version.get.return_value.ignore_broken_flow_schema_version.return_value = (
+        ignore_schema_version
+    )
     mock_workflow = mock_abstract_workflow_class.return_value
     mock_workflow.is_done = True
     mock_workflow.run = AsyncMock()
@@ -1338,9 +1348,7 @@ async def test_execute_workflow_with_flow_config_schema_version_parameterized(
     with pytest.raises(StopAsyncIteration):
         await anext(result)
 
-    mock_resolve_workflow.assert_called_once_with(
-        "test", flow_config, flow_config_schema_version
-    )
+    mock_resolve_workflow.assert_called_once_with("test", flow_config, expected_version)
 
 
 @pytest.mark.asyncio
