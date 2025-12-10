@@ -8,19 +8,13 @@ from gitlab_cloud_connector import cloud_connector_ready
 
 from ai_gateway.async_dependency_resolver import (
     get_code_suggestions_completions_litellm_factory_provider,
-    get_code_suggestions_generations_anthropic_chat_factory_provider,
     get_config,
+    get_prompt_registry,
 )
-from ai_gateway.code_suggestions import CodeCompletions, CodeGenerations
-from ai_gateway.code_suggestions.processing import MetadataPromptBuilder, Prompt
-from ai_gateway.code_suggestions.processing.typing import MetadataCodeContent
-from ai_gateway.models import (
-    KindAnthropicModel,
-    KindLiteLlmModel,
-    KindModelProvider,
-    Message,
-    Role,
-)
+from ai_gateway.code_suggestions.completions import CodeCompletions
+from ai_gateway.models.base import KindModelProvider
+from ai_gateway.models.litellm import KindLiteLlmModel
+from ai_gateway.prompts.base import BasePromptRegistry
 
 __all__ = [
     "router",
@@ -60,62 +54,10 @@ def single_validation(
     return _decorator
 
 
-# TODO: replace this with the correct vertex model
-# @single_validation(KindModelProvider.VERTEX_AI)
-# async def validate_vertex_available(
-#     completions_legacy_vertex_factory: Annotated[
-#         Factory[CodeCompletionsLegacy],
-#         Depends(get_code_suggestions_completions_vertex_legacy_provider),
-#     ],
-# ) -> bool:
-#     code_completions = completions_legacy_vertex_factory()
-#     await code_completions.execute(
-#         prefix="def hello_world():",
-#         suffix="",
-#         file_name="monitoring.py",
-#         editor_lang="python",
-#     )
-#     return True
-
-
-@single_validation(KindModelProvider.ANTHROPIC)
-async def validate_anthropic_available(
-    generations_anthropic_chat_factory: Annotated[
-        Factory[CodeGenerations],
-        Depends(get_code_suggestions_generations_anthropic_chat_factory_provider),
-    ],
+async def validate_default_models_available(
+    prompt_registry: Annotated[BasePromptRegistry, Depends(get_prompt_registry)],
 ) -> bool:
-    prompt = Prompt(
-        prefix=[
-            Message(content="Complete this code: def hello_world()", role=Role.USER),
-            Message(content="<new_code>", role=Role.ASSISTANT),
-        ],
-        metadata=MetadataPromptBuilder(
-            components={
-                "prefix": MetadataCodeContent(length=10, length_tokens=2),
-            },
-        ),
-        suffix="# End of function",
-    )
-
-    code_generations = generations_anthropic_chat_factory(
-        model__name=KindAnthropicModel.CLAUDE_3_HAIKU.value,
-        model__stop_sequences=["</new_code>"],
-    )
-
-    # Assign the prompt to the code generations object
-    code_generations.prompt = prompt
-
-    # The generation prompt is currently built in rails, so include a minimal one
-    # here to replace that
-    await code_generations.execute(
-        prefix="",
-        file_name="monitoring.py",
-        editor_lang="python",
-        model_provider=KindModelProvider.ANTHROPIC.value,
-    )
-
-    return True
+    return await prompt_registry.validate_default_models()
 
 
 @single_validation(KindModelProvider.FIREWORKS)
@@ -164,9 +106,8 @@ router.add_api_route(
     "/ready",
     health(
         [
-            # validate_vertex_available,
-            validate_anthropic_available,
             validate_fireworks_available,
+            validate_default_models_available,
             validate_cloud_connector_ready,
         ]
     ),

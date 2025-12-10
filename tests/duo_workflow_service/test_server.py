@@ -4,12 +4,13 @@ import json
 import os
 import signal
 from datetime import datetime, timedelta, timezone
-from typing import AsyncIterable, List, Optional
+from typing import AsyncIterable, List, Optional, cast
 from unittest.mock import AsyncMock, MagicMock, call, patch
 
 import grpc
 import litellm
 import pytest
+from dependency_injector import providers
 from gitlab_cloud_connector import (
     CloudConnectorConfig,
     CloudConnectorUser,
@@ -22,6 +23,8 @@ from langchain.globals import get_llm_cache
 from langchain_community.cache import SQLiteCache
 
 from ai_gateway.config import Config, ConfigCustomModels, ConfigGoogleCloudPlatform
+from ai_gateway.container import ContainerApplication
+from ai_gateway.prompts import BasePromptRegistry
 from contract import contract_pb2
 from duo_workflow_service.agent_platform.experimental.flows.flow_config import (
     list_configs,
@@ -38,6 +41,7 @@ from duo_workflow_service.server import (
     serve,
     setup_signal_handlers,
     string_to_category_enum,
+    validate_llm_access,
 )
 from duo_workflow_service.tools.duo_base_tool import DuoBaseTool
 from duo_workflow_service.workflows.type_definitions import (
@@ -52,6 +56,12 @@ from lib.internal_events.event_enum import (
     EventLabelEnum,
     EventPropertyEnum,
 )
+
+
+@pytest.fixture(autouse=True)
+def setup_event_loop():
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
 
 
 @pytest.fixture
@@ -134,6 +144,18 @@ def test_run(custom_models_enabled, vertex_project, should_validate_llm):
 
         # Clean up the coroutine to prevent the warning
         actual_arg.close()
+
+
+def test_validate_ll_access(mock_duo_workflow_service_container: ContainerApplication):
+    pkg_prompts = cast(
+        providers.Container, mock_duo_workflow_service_container.pkg_prompts
+    )
+    prompt_registry = cast(BasePromptRegistry, pkg_prompts.prompt_registry())
+
+    with patch.object(prompt_registry, "validate_default_models") as mock_validate:
+        validate_llm_access()
+
+    mock_validate.assert_awaited_once_with(GitLabUnitPrimitive.DUO_AGENT_PLATFORM)
 
 
 @pytest.mark.asyncio

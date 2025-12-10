@@ -56,7 +56,6 @@ class TestCreateRepositoryBranchComponent:
             "goal": goal,
             "toolset": mock_toolset,
             "tools_registry": mock_tool_registry,
-            "model_config": "",
             "project": project,
             "http_client": gl_http_client,
             "user": user,
@@ -90,7 +89,6 @@ class TestCreateRepositoryBranchComponent:
         assert component.goal == goal
         assert component.toolset == mock_dependencies["toolset"]
         assert component.tools_registry == mock_dependencies["tools_registry"]
-        assert component.model_config == mock_dependencies["model_config"]
         assert component.project == project
         assert component.http_client == mock_dependencies["http_client"]
 

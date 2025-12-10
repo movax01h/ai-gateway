@@ -1102,3 +1102,197 @@ class TestBaseRegistry:
         )
 
         assert result == prompt
+
+
+class TestValidateDefaultModels:
+    @pytest.fixture
+    def prompt_template(self):
+        return {"system": "Just say hi"}
+
+    @pytest.fixture(autouse=True)
+    def mock_fs(self, fs: FakeFilesystem):
+        ai_gateway_dir = Path(__file__).parent.parent.parent / "ai_gateway"
+        model_selection_dir = ai_gateway_dir / "model_selection"
+        prompts_definitions_dir = ai_gateway_dir / "prompts" / "definitions"
+
+        # editorconfig-checker-disable
+        fs.create_file(
+            model_selection_dir / "models.yml",
+            contents="""---
+models:
+  - name: Model A
+    gitlab_identifier: model_a
+    max_context_tokens: 1000
+  - name: Model B
+    gitlab_identifier: model_b
+    max_context_tokens: 1000
+  - name: Model C
+    gitlab_identifier: model_c
+    max_context_tokens: 1000
+""",
+        )
+        fs.create_file(
+            model_selection_dir / "unit_primitives.yml",
+            contents="""---
+configurable_unit_primitives:
+  - feature_setting: "setting_a"
+    unit_primitives:
+      - "duo_chat"
+    default_model: "model_a"
+    selectable_models:
+      - "model_a"
+      - "model_c"
+  - feature_setting: "b"
+    unit_primitives:
+      - "code_suggestions"
+    default_model: "model_b"
+    selectable_models:
+      - "model_b"
+""",
+        )
+        # editorconfig-checker-enable
+        fs.create_file(
+            prompts_definitions_dir / "system.jinja",
+            contents="Hi, I'm {{name}}",
+        )
+
+    @pytest.mark.asyncio
+    async def test_success(
+        self,
+        registry: BasePromptRegistry,
+    ):
+        """Test successful validation of all default models."""
+        with capture_logs() as cap_logs:
+            with mock.patch.object(FakeModel, "ainvoke") as mock_ainvoke:
+                result = await registry.validate_default_models()
+
+        assert result is True
+        # Should validate both unique default models
+        assert mock_ainvoke.call_count == 2
+
+        # Verify logging - should have 2 log entries for the 2 models
+        log_messages = [
+            log for log in cap_logs if log.get("event") == "Validating default model"
+        ]
+        assert len(log_messages) == 2
+        logged_models = {log["model"] for log in log_messages}
+        assert logged_models == {"model_a", "model_b"}
+
+    @pytest.mark.asyncio
+    async def test_with_unit_primitive_filter_matching(
+        self,
+        registry: BasePromptRegistry,
+    ):
+        with mock.patch.object(FakeModel, "ainvoke") as mock_ainvoke:
+            result = await registry.validate_default_models(
+                unit_primitive=GitLabUnitPrimitive("duo_chat")
+            )
+
+        assert result is True
+        mock_ainvoke.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_with_non_matching_unit_primitive(
+        self,
+        registry: BasePromptRegistry,
+    ):
+        """Test validation skips models when unit primitive doesn't match.
+
+        Using a unit primitive that doesn't exist in the config should skip all validations.
+        """
+        with mock.patch.object(FakeModel, "ainvoke") as mock_ainvoke:
+            result = await registry.validate_default_models(
+                unit_primitive=GitLabUnitPrimitive("duo_agent_platform")
+            )
+
+        assert result is True
+        # Should not invoke any prompts since the unit primitive is not in the config
+        mock_ainvoke.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_caches_validations(
+        self,
+        registry: BasePromptRegistry,
+    ):
+        """Test that validations are cached per model.
+
+        Validating model_a first, then all models should only validate model_b on second call.
+        """
+        with mock.patch.object(FakeModel, "ainvoke") as mock_ainvoke:
+            # First call - validate only model_a
+            result1 = await registry.validate_default_models(
+                unit_primitive=GitLabUnitPrimitive("duo_chat")
+            )
+            assert result1 is True
+            assert mock_ainvoke.call_count == 1
+
+            # Second call - validate all models, but model_a is already cached
+            result2 = await registry.validate_default_models()
+            assert result2 is True
+            # Should be 2 total (1 from first call + 1 new for model_b)
+            assert mock_ainvoke.call_count == 2
+
+            # Third call - validate all models, but all models are cached
+            result2 = await registry.validate_default_models()
+            assert result2 is True
+            # Call count shouldn't have changed
+            assert mock_ainvoke.call_count == 2
+
+    @pytest.mark.asyncio
+    async def test_calls_get_with_correct_params(
+        self,
+        prompt: Prompt,
+        registry: BasePromptRegistry,
+    ):
+        """Test that validate_default_models calls get() with correct parameters.
+
+        Should call get() twice (once for model_a, once for model_b) with proper metadata.
+        """
+        with mock.patch.object(registry, "get", return_value=prompt) as mock_get:
+            await registry.validate_default_models()
+
+            # Verify get was called twice (once per unique default model)
+            mock_get.assert_has_calls(
+                [
+                    mock.call(
+                        "model_configuration/check",
+                        registry._DEFAULT_VERSION,
+                        model_metadata=ModelMetadata(
+                            provider="gitlab",
+                            name="model_a",
+                            friendly_name="Model A",
+                            llm_definition=LLMDefinition(
+                                name="Model A",
+                                gitlab_identifier="model_a",
+                                max_context_tokens=1000,
+                            ),
+                        ),
+                    ),
+                    mock.call(
+                        "model_configuration/check",
+                        registry._DEFAULT_VERSION,
+                        model_metadata=ModelMetadata(
+                            provider="gitlab",
+                            name="model_b",
+                            friendly_name="Model B",
+                            llm_definition=LLMDefinition(
+                                name="Model B",
+                                gitlab_identifier="model_b",
+                                max_context_tokens=1000,
+                            ),
+                        ),
+                    ),
+                ]
+            )
+
+    @pytest.mark.asyncio
+    async def test_propagates_exceptions(
+        self,
+        registry: BasePromptRegistry,
+    ):
+        """Test that exceptions from prompt invocation are propagated."""
+        with mock.patch.object(FakeModel, "ainvoke") as mock_ainvoke:
+            mock_ainvoke.side_effect = Exception("Model validation failed")
+
+            with pytest.raises(Exception, match="Model validation failed"):
+                await registry.validate_default_models()

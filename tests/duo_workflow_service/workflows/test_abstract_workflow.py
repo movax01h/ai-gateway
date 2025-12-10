@@ -5,14 +5,11 @@ from unittest.mock import AsyncMock, MagicMock, Mock, patch
 import pytest
 
 from contract import contract_pb2
-from duo_workflow_service.entities.state import WorkflowStatusEnum
-from duo_workflow_service.llm_factory import AnthropicConfig, VertexConfig
 from duo_workflow_service.tools import UNTRUSTED_MCP_WARNING
 from duo_workflow_service.workflows.abstract_workflow import (
     AbstractWorkflow,
     TraceableException,
 )
-from duo_workflow_service.workflows.chat import Workflow
 from duo_workflow_service.workflows.type_definitions import (
     AIO_CANCEL_STOP_WORKFLOW_REQUEST,
 )
@@ -363,40 +360,6 @@ async def test_run_passes_correct_metadata_to_langsmith_extra(
     assert metadata["git_url"] == "https://example.com"
     assert metadata["git_sha"] == "abc123"
     assert metadata["workflow_type"] == CategoryEnum.WORKFLOW_SOFTWARE_DEVELOPMENT.value
-
-
-@pytest.mark.asyncio
-@patch.dict(os.environ, {"AIGW_GOOGLE_CLOUD_PLATFORM__PROJECT": ""})
-async def test_workflow_get_chat_model_without_vertex():
-    """Test _get_model_config returns standard model when VERTEX_PROJECT_ID is not set."""
-    workflow = Workflow(
-        "123",
-        {},
-        workflow_type=CategoryEnum.WORKFLOW_SOFTWARE_DEVELOPMENT,
-    )
-
-    anthropic_model: AnthropicConfig = workflow._get_model_config()
-    assert anthropic_model.model_name == "claude-sonnet-4-20250514"
-
-
-@pytest.mark.asyncio
-@patch.dict(
-    os.environ,
-    {
-        "AIGW_GOOGLE_CLOUD_PLATFORM__PROJECT": "123",
-        "DUO_WORKFLOW__VERTEX_LOCATION": "us-central",
-    },
-)
-async def test_workflow_get_chat_model_with_vertex():
-    """Test _get_model_config returns standard model when VERTEX_PROJECT_ID is not set."""
-    workflow = Workflow(
-        "123",
-        {},
-        workflow_type=CategoryEnum.WORKFLOW_SOFTWARE_DEVELOPMENT,
-    )
-
-    vertex_model: VertexConfig = workflow._get_model_config()
-    assert vertex_model.model_name == "claude-sonnet-4@20250514"
 
 
 @pytest.mark.asyncio
