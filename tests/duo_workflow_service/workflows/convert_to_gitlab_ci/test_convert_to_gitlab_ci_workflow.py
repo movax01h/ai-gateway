@@ -281,9 +281,7 @@ async def test_translation_tools(
     ), f"The following tools are missing from the tools registry: {missing_tools}"
 
 
-@patch(
-    "duo_workflow_service.workflows.convert_to_gitlab_ci.workflow.ApproximateTokenCounter"
-)
+@patch("duo_workflow_service.workflows.convert_to_gitlab_ci.workflow.TikTokenCounter")
 @pytest.mark.asyncio
 async def test_file_content_too_large(mock_token_counter, workflow_state, workflow):
     max_single_message_tokens = int(DEFAULT_MAX_CONTEXT_TOKENS * 0.65)

@@ -19,9 +19,7 @@ from duo_workflow_service.entities import (
     WorkflowState,
     WorkflowStatusEnum,
 )
-from duo_workflow_service.token_counter.approximate_token_counter import (
-    ApproximateTokenCounter,
-)
+from duo_workflow_service.token_counter.tiktoken_counter import TikTokenCounter
 from duo_workflow_service.tracking import log_exception
 from duo_workflow_service.workflows.abstract_workflow import (
     RECURSION_LIMIT,
@@ -182,7 +180,7 @@ class Workflow(AbstractWorkflow):
 
         max_single_message_tokens = int(DEFAULT_MAX_CONTEXT_TOKENS * 0.65)
         if (
-            ApproximateTokenCounter(AGENT_NAME).count_string_content(content)
+            TikTokenCounter(AGENT_NAME).count_string_content(content)
             > max_single_message_tokens
         ):
             return {
