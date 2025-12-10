@@ -15,6 +15,7 @@ from ai_gateway.api.middleware.headers import (
     X_GITLAB_INSTANCE_ID_HEADER,
     X_GITLAB_INTERFACE,
     X_GITLAB_NAMESPACE_ID,
+    X_GITLAB_PROJECT_ID,
     X_GITLAB_REALM_HEADER,
     X_GITLAB_ROOT_NAMESPACE_ID,
     X_GITLAB_SAAS_DUO_PRO_NAMESPACE_IDS_HEADER,
@@ -117,6 +118,7 @@ async def test_middleware_set_context(internal_event_middleware, user):
                 (X_GITLAB_CLIENT_VERSION.lower().encode(), b"1.97.0"),
                 (X_GITLAB_INTERFACE.lower().encode(), b"duo_chat"),
                 (X_GITLAB_NAMESPACE_ID.lower().encode(), b""),
+                (X_GITLAB_PROJECT_ID.lower().encode(), b"456"),
                 (X_GITLAB_ROOT_NAMESPACE_ID.lower().encode(), b""),
             ],
             "user": user,
@@ -152,6 +154,7 @@ async def test_middleware_set_context(internal_event_middleware, user):
             client_version="1.97.0",
             client_type="ide",
             interface="duo_chat",
+            project_id=456,
             feature_enabled_by_namespace_ids=[],
             context_generated_at=mock_event_context.set.call_args[0][
                 0
@@ -303,6 +306,75 @@ async def test_middleware_set_context_namespace_id(
             realm=None,
             instance_id=None,
             namespace_id=int(expected) if expected else None,
+            unique_instance_id=None,
+            host_name=None,
+            instance_version=None,
+            global_user_id=None,
+            is_gitlab_team_member=None,
+            feature_enablement_type=None,
+            feature_enabled_by_namespace_ids=[],
+            context_generated_at=mock_event_context.set.call_args[0][
+                0
+            ].context_generated_at,
+        )
+        mock_event_context.set.assert_called_once_with(expected_context)
+
+    internal_event_middleware.app.assert_called_once_with(scope, receive, send)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "headers, expected",
+    [
+        (
+            [
+                (
+                    X_GITLAB_PROJECT_ID.lower().encode(),
+                    b"",
+                )
+            ],
+            None,
+        ),
+        (
+            [
+                (
+                    X_GITLAB_PROJECT_ID.lower().encode(),
+                    b"789",
+                )
+            ],
+            789,
+        ),
+    ],
+)
+async def test_middleware_set_context_project_id(
+    internal_event_middleware, headers, expected
+):
+    request = Request(
+        {
+            "type": "http",
+            "path": "/api/endpoint",
+            "headers": headers,
+            "user": None,
+        }
+    )
+    scope = request.scope
+    receive = AsyncMock()
+    send = AsyncMock()
+
+    with (
+        request_cycle_context({}),
+        patch(
+            "ai_gateway.api.middleware.internal_event.current_event_context"
+        ) as mock_event_context,
+    ):
+        await internal_event_middleware(scope, receive, send)
+
+        expected_context = EventContext(
+            environment="test",
+            source="ai-gateway-python",
+            realm=None,
+            instance_id=None,
+            project_id=int(expected) if expected else None,
             unique_instance_id=None,
             host_name=None,
             instance_version=None,
