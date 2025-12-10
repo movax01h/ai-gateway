@@ -4,7 +4,6 @@ from langchain.tools import BaseTool
 from pydantic import BaseModel
 
 from duo_workflow_service import tools
-from duo_workflow_service.client_capabilities import is_client_capable
 from duo_workflow_service.executor.outbox import Outbox
 from duo_workflow_service.gitlab.gitlab_api import Project, WorkflowConfig
 from duo_workflow_service.gitlab.http_client import GitlabHttpClient
@@ -58,12 +57,6 @@ _DEFAULT_TOOLS: list[Type[BaseTool]] = [
 NO_OP_TOOLS: list[Type[BaseModel]] = [
     tools.HandoverTool,
     tools.RequestUserClarificationTool,
-]
-
-# These tools require specific client capabilities to function properly.
-# They are only enabled when the required capability is present.
-_CAPABILITY_DEPENDENT_TOOLS: list[Type[BaseTool]] = [
-    tools.ShellCommand,
 ]
 
 _READ_ONLY_GITLAB_TOOLS: list[Type[BaseTool]] = [
@@ -258,46 +251,6 @@ class ToolsRegistry:
                 if privilege in preapproved_tools:
                     self._preapproved_tool_names.add(tool.name)
 
-        # Add capability-dependent tools if condition is met
-        for tool_cls in _CAPABILITY_DEPENDENT_TOOLS:
-            # Access required_capability as a class variable (ClassVar)
-            required_capability = getattr(tool_cls, "required_capability", None)
-            if not required_capability:
-                error_msg = (
-                    f"Tool {tool_cls.__name__} is in "
-                    "_CAPABILITY_DEPENDENT_TOOLS but does not define "
-                    "'required_capability'"
-                )
-                raise RuntimeError(error_msg)
-
-            # Don't add capability dependent tool if it supersedes another tool
-            # and agent privilege for the superseded tool is missing
-            supersedes = getattr(tool_cls, "supersedes", None)
-            if supersedes and supersedes().name not in self._enabled_tools:
-                continue
-
-            if is_client_capable(required_capability):
-                tool = tool_cls(metadata=tool_metadata)
-                self._enabled_tools[tool.name] = tool
-
-                # If this tool supersedes another tool, inherit pre-approval status
-                self._inherit_preapproval_from_superseded(tool_cls, tool_metadata)
-
-        # Remove superseded tools
-        self._remove_superseded_tools()
-
-    def _inherit_preapproval_from_superseded(
-        self, tool_cls: Type[BaseTool], tool_metadata: ToolMetadata
-    ):
-        """Inherit pre-approval status from superseded tool if applicable."""
-        supersedes = getattr(tool_cls, "supersedes", None)
-        if supersedes:
-            # Create a temporary instance to get the name
-            superseded_tool_name = supersedes().name
-            if superseded_tool_name in self._preapproved_tool_names:
-                tool = tool_cls(metadata=tool_metadata)
-                self._preapproved_tool_names.add(tool.name)
-
     def get(self, tool_name: str) -> Optional[ToolType]:
         return self._enabled_tools.get(tool_name)
 
@@ -328,25 +281,6 @@ class ToolsRegistry:
             True otherwise.
         """
         return tool_name not in self._preapproved_tool_names
-
-    def _remove_superseded_tools(self):
-        """Remove tools that have been superseded by other tools."""
-        tools_to_remove = []
-
-        for tool_name, tool in self._enabled_tools.items():
-            # Access supersedes from the tool's class, not the instance (since it's a ClassVar)
-            supersedes = getattr(tool.__class__, "supersedes", None)
-            if isinstance(tool, DuoBaseTool) and supersedes:
-                # Create a temporary instance to get the name (since name is a Pydantic field)
-                superseded_tool_name = supersedes().name
-
-                if superseded_tool_name in self._enabled_tools:
-                    tools_to_remove.append(superseded_tool_name)
-
-        # Remove superseded tools
-        for tool_name in tools_to_remove:
-            del self._enabled_tools[tool_name]
-            self._preapproved_tool_names.discard(tool_name)
 
     def toolset(self, tool_names: list[str]) -> Toolset:
         """Create a Toolset instance representing complete collection of tools available to an agent.
