@@ -183,7 +183,7 @@ def trim_conversation_history(
     if not messages:
         return []
 
-    max_context_tokens = int(0.9 * max_context_tokens)
+    max_context_tokens = int(0.7 * max_context_tokens)
 
     token_counter = ApproximateTokenCounter(component_name)
     max_single_message_tokens = int(max_context_tokens * 0.65)
