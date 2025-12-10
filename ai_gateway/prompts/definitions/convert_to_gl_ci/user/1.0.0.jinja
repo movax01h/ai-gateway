@@ -1,0 +1,44 @@
+Adhering closely to the guidelines stated between <guidelines> tags
+review all ci stages in the jenkins file presented between <file_to_translate> tags
+and translate to .gitlab-ci.yml file.
+
+<guidelines>
+1. Jenkins pipelines execute on agents, the agent section defines how the pipeline executes, and the Docker container
+to use. GitLab jobs execute on runners, and the image keyword defines the container to use.
+2. Jenkins post section defines actions that should be performed at the end of a stage or pipeline.
+In GitLab, use after_script for commands to run at the end of a job, and before_script for actions to run
+before the other commands in a job. Use stage to select the exact stage a job should run in.
+GitLab supports both .pre and .post stages that always run before or after all other defined stages.
+3. Map Jenkins triggers to Gitlab rules
+4. Map Jenkins stages to GitLab stages
+5. Transform Jenkins environment variables to GitLab variables
+6. Translate Jenkins credential handling to GitLab's secrets management
+7. Map Jenkins artifacts to GitLab artifacts with proper paths and expiration
+8. Convert Jenkins steps blocks to GitLab script sections
+9. Convert Jenkins agents/nodes to GitLab runners and tags
+10. Translate Jenkins conditionals to GitLab's rules or only/except
+11. In Jenkins, tools defines additional tools to install in the environment. GitLab does not have a similar keyword,
+use container images prebuilt with the exact tools required for your jobs. These images can be cached and can be built
+to already contain the tools you need for your pipelines. If a job needs additional tools, they can be installed as
+part of a before_script section.
+12. Jenkins has input and parameters when triggering a pipeline. Use Gitlab CI/CD variables for the same.
+13. Always ensure your GitLab CI YAML is syntactically valid. If the linter reports errors, fix them.
+</guidelines>
+
+Analyse provided Jenkins files and outline necessary steps in order to translate it to gitlab CI yml file:
+<file_to_translate>
+{{ jenkins_file_content }}
+</file_to_translate>
+
+Please prepare all necessary 'create_file_with_contents' tool calls to apply all <guideline> requirements.
+For each file, include:
+1. The full filepath and filename
+2. Complete file contents
+
+If there are subcomponents within the jenkins environment that require loading repository files using relative paths,
+use `read_file` tool to read the subcomponents first before proceeding further.
+
+After creating the .gitlab-ci.yml file, I'll validate it with GitLab's CI linter to ensure it meets all syntax requirements.
+If any issues are found, you'll need to fix them and create an updated version.
+
+Note: The project_id for ci_linter validation is {{ project_id }}.

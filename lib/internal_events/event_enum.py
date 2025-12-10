@@ -67,3 +67,4 @@ class CategoryEnum(StrEnum):
     AI_CATALOG_AGENT = "ai_catalog_agent"
     UNKNOWN = "unknown"
     DEVELOPER = "developer"
+    CONVERT_TO_GITLAB_CI = "convert_to_gl_ci"
