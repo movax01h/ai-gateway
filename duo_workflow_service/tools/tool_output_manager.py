@@ -8,13 +8,11 @@ from langchain_core.messages import ToolMessage
 from langgraph.types import Command
 from pydantic import BaseModel
 
-from duo_workflow_service.token_counter.approximate_token_counter import (
-    ApproximateTokenCounter,
-)
+from duo_workflow_service.token_counter.tiktoken_counter import TikTokenCounter
 
 logger = structlog.get_logger("tools_executor")
 
-token_counter = ApproximateTokenCounter("planner")
+token_counter = TikTokenCounter("planner")
 
 
 class TruncationDirection(str, Enum):

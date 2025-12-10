@@ -18,9 +18,7 @@ from duo_workflow_service.conversation.trimmer import (
     get_messages_profile,
     trim_conversation_history,
 )
-from duo_workflow_service.token_counter.approximate_token_counter import (
-    ApproximateTokenCounter,
-)
+from duo_workflow_service.token_counter.tiktoken_counter import TikTokenCounter
 from duo_workflow_service.workflows.type_definitions import AdditionalContext
 
 
@@ -28,7 +26,7 @@ def test_pretrim_large_messages():
     token_counter = MagicMock()
     max_single_messages_tokens = 100
     # Simulate token count
-    token_counter.count_tokens.side_effect = lambda msgs: (
+    token_counter.count_tokens.side_effect = lambda msgs, include_tool_tokens=True: (
         50 if "small" in msgs[0].content else 150
     )
 
@@ -591,7 +589,7 @@ def test_trim_conversation_history_single_human_message_no_unnecessary_fallback(
 
 def test_get_messages_profile():
     messages = []
-    token_counter = ApproximateTokenCounter(agent_name="context_builder")
+    token_counter = TikTokenCounter(agent_name="context_builder")
     roles, tokens = get_messages_profile(messages, token_counter=token_counter)
     assert roles == []
     assert tokens == 0

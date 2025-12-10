@@ -10,9 +10,7 @@ from langchain_core.messages import (
     trim_messages,
 )
 
-from duo_workflow_service.token_counter.approximate_token_counter import (
-    ApproximateTokenCounter,
-)
+from duo_workflow_service.token_counter.tiktoken_counter import TikTokenCounter
 from duo_workflow_service.tracking.errors import log_exception
 
 logger = structlog.stdlib.get_logger("conversation_trimmer")
@@ -23,7 +21,7 @@ LEGACY_MAX_CONTEXT_TOKENS = 400_000  # old default for backwards compatibility
 
 def _pretrim_large_messages(
     messages: List[BaseMessage],
-    token_counter: ApproximateTokenCounter,
+    token_counter: TikTokenCounter,
     max_single_message_tokens: int,
 ) -> List[BaseMessage]:
     """Replace messages that exceed the single message token limit with a placeholder.
@@ -38,7 +36,7 @@ def _pretrim_large_messages(
     """
     processed_messages = []
     for message in messages:
-        msg_token = token_counter.count_tokens([message])
+        msg_token = token_counter.count_tokens([message], include_tool_tokens=False)
         if msg_token > max_single_message_tokens:
             logger.info(
                 f"Message with role: {message.type} token size: {msg_token} "
@@ -136,7 +134,7 @@ def _restore_message_consistency(messages: List[BaseMessage]) -> List[BaseMessag
 
 def get_messages_profile(
     messages: List[BaseMessage],
-    token_counter: ApproximateTokenCounter,
+    token_counter: TikTokenCounter,
     include_tool_tokens: bool = True,
 ) -> Tuple[List[str], int]:
     """Get the roles and token count for a list of messages.
@@ -185,7 +183,7 @@ def trim_conversation_history(
 
     max_context_tokens = int(0.7 * max_context_tokens)
 
-    token_counter = ApproximateTokenCounter(component_name)
+    token_counter = TikTokenCounter(component_name)
     max_single_message_tokens = int(max_context_tokens * 0.65)
 
     # Log initial state
