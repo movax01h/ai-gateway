@@ -52,3 +52,27 @@ class TestLanguageServer:
         subject = LanguageServerVersion.from_string(semver)
         assert subject.version == expected_version
         assert subject.supports_node_executor_tools() == supports_node_executor_tools
+
+    @pytest.mark.parametrize(
+        ("semver", "ignore_broken_flow_schema_version"),
+        [
+            (None, True),
+            ("invalid version", True),
+            ("0.0.0", True),
+            ("7.18.0", True),
+            ("7.18.0", True),
+            ("7.18.0", True),
+            ("7.18.0", False),
+            ("7.18.0", False),
+            ("7.18.0", False),
+            ("999.99.9", False),
+        ],
+    )
+    async def ignore_broken_flow_schema_version(
+        self, semver, ignore_broken_flow_schema_version
+    ):
+        subject = LanguageServerVersion.from_string(semver)
+        assert (
+            subject.ignore_broken_flow_schema_version()
+            == ignore_broken_flow_schema_version
+        )

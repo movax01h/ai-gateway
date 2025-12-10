@@ -19,6 +19,7 @@ from gitlab_cloud_connector import (
     TokenAuthority,
     data_model,
 )
+from google.protobuf.json_format import MessageToDict
 from google.protobuf.struct_pb2 import Struct
 from grpc_reflection.v1alpha import reflection
 from langchain.globals import set_llm_cache
@@ -291,6 +292,11 @@ class DuoWorkflowService(contract_pb2_grpc.DuoWorkflowServicer):
             start_workflow_request.startRequest.flowConfigSchemaVersion or None
         )
 
+        lsp_version = language_server_version.get()
+
+        if not lsp_version or lsp_version.ignore_broken_flow_schema_version():
+            flow_config_schema_version = MessageToDict(flow_config).get("version")
+
         try:
             workflow_class: FlowFactory = resolve_workflow_class(
                 workflow_definition, flow_config, flow_config_schema_version
@@ -321,7 +327,7 @@ class DuoWorkflowService(contract_pb2_grpc.DuoWorkflowServicer):
                 "gitlab_token": invocation_metadata.get("x-gitlab-oauth-token", ""),
             },
             approval=start_workflow_request.startRequest.approval,
-            language_server_version=language_server_version.get(),
+            language_server_version=lsp_version,
             preapproved_tools=list(
                 start_workflow_request.startRequest.preapproved_tools
             ),
