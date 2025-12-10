@@ -109,7 +109,6 @@ class TestPlannerComponent:
             "planner_toolset": mock_toolset,
             "executor_toolset": {"test_tool": mock_tool},
             "tools_registry": mock_tool_registry,
-            "model_config": "",
             "project": project,
             "http_client": gl_http_client,
             "user": user,
@@ -143,7 +142,6 @@ class TestPlannerComponent:
         assert component.planner_toolset == mock_dependencies["planner_toolset"]
         assert component.executor_toolset == mock_dependencies["executor_toolset"]
         assert component.tools_registry == mock_dependencies["tools_registry"]
-        assert component.model_config == mock_dependencies["model_config"]
         assert component.project == mock_dependencies["project"]
         assert component.http_client == mock_dependencies["http_client"]
 

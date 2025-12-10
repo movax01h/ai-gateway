@@ -1,3 +1,4 @@
+from typing import cast
 from unittest.mock import Mock, call, patch
 
 import pytest
@@ -9,6 +10,7 @@ from ai_gateway.api import create_fast_api_server
 from ai_gateway.api.monitoring import validated
 from ai_gateway.config import Config
 from ai_gateway.models import ModelAPIError
+from ai_gateway.prompts.container import ContainerPrompts
 
 
 @pytest.fixture(name="config_values")
@@ -43,6 +45,17 @@ def client_fixture(
     return TestClient(fastapi_server_app)
 
 
+@pytest.fixture(name="mock_validate_default_models")
+def mock_validate_default_models_fixture(
+    mock_ai_gateway_container: containers.Container,
+):
+    with patch.object(
+        cast(ContainerPrompts, mock_ai_gateway_container.pkg_prompts).prompt_registry(),
+        "validate_default_models",
+    ) as mock:
+        yield mock
+
+
 # Avoid the global state of checks leaking between tests
 @pytest.fixture(autouse=True)
 def reset_validated():
@@ -57,64 +70,34 @@ def test_healthz(client: TestClient):
 
 def test_ready(
     client: TestClient,
-    mock_generations: Mock,
+    mock_validate_default_models: Mock,
     mock_llm_text: Mock,
 ):
     with patch("ai_gateway.api.monitoring.cloud_connector_ready", return_value=True):
         response = client.get("/monitoring/ready")
-        response = client.get("/monitoring/ready")
 
     assert response.status_code == 200
-    # assert we only called each model once
-    assert mock_generations.mock_calls == [
-        call.execute(
-            prefix="",
-            file_name="monitoring.py",
-            editor_lang="python",
-            model_provider="anthropic",
-        )
-    ]
 
+    mock_validate_default_models.assert_called_once()
     assert mock_llm_text.mock_calls == [call("def hello_world():", None, False)]
 
-    # Assert the attributes of the mock code generations object
-    assert mock_generations.return_value.model.name == "claude-3-haiku-20240307"
 
+def test_ready_failure(
+    client: TestClient,
+    mock_validate_default_models: Mock,
+    mock_llm_text: Mock,  # pylint: disable=unused-argument
+):
+    with patch("ai_gateway.api.monitoring.cloud_connector_ready", return_value=True):
+        mock_validate_default_models.side_effect = ModelAPIError("test error")
+        response = client.get("/monitoring/ready")
 
-def model_failure(*args, **kwargs):
-    raise ModelAPIError("Vertex unreachable")
-
-
-@pytest.mark.usefixtures("mock_llm_text")
-def test_ready_anthropic_failure(client: TestClient, mock_generations: Mock):
-    mock_generations.side_effect = model_failure
-
-    response = client.get("/monitoring/ready")
-
-    assert mock_generations.mock_calls == [
-        call.execute(
-            prefix="",
-            file_name="monitoring.py",
-            editor_lang="python",
-            model_provider="anthropic",
-        )
-    ]
-
-    # Assert the attributes of the mock code generations object
-    assert mock_generations.return_value.model.name == "claude-3-haiku-20240307"
-
+    mock_validate_default_models.assert_called_once()
     assert response.status_code == 503
 
 
-@pytest.mark.usefixtures("mock_generations")
-def test_ready_fireworks_failure(client: TestClient, mock_llm_text: Mock):
-    mock_llm_text.side_effect = model_failure
-    response = client.get("/monitoring/ready")
-
-    assert response.status_code == 503
-
-
-@pytest.mark.usefixtures("mock_generations", "mock_llm_text", "mock_config")
+@pytest.mark.usefixtures(
+    "mock_generations", "mock_llm_text", "mock_config", "mock_validate_default_models"
+)
 def test_ready_cloud_connector_failure_from_library(client: TestClient):
     with patch("ai_gateway.api.monitoring.cloud_connector_ready", return_value=False):
         response = client.get("/monitoring/ready")
@@ -141,7 +124,12 @@ class TestCustomModelEnabled:
             },
         }
 
-    @pytest.mark.usefixtures("mock_generations", "mock_llm_text", "mock_config")
+    @pytest.mark.usefixtures(
+        "mock_generations",
+        "mock_llm_text",
+        "mock_config",
+        "mock_validate_default_models",
+    )
     def test_ready_custom_models_enabled_skips_cloud_connector(
         self,
         client: TestClient,

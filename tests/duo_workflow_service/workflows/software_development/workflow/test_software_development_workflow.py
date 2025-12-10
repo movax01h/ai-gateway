@@ -1,6 +1,5 @@
 # pylint: disable=file-naming-for-tests, unused-argument, redefined-outer-name, direct-environment-variable-reference
 import asyncio
-import os
 from typing import Any
 from unittest.mock import ANY, AsyncMock, MagicMock, Mock, call, patch
 
@@ -11,7 +10,6 @@ from langgraph.checkpoint.base import CheckpointTuple
 from langgraph.checkpoint.memory import MemorySaver
 from langgraph.constants import END
 
-from ai_gateway.models import KindAnthropicModel
 from contract import contract_pb2
 from duo_workflow_service.components.tools_registry import (
     _AGENT_PRIVILEGES,
@@ -20,7 +18,6 @@ from duo_workflow_service.components.tools_registry import (
 from duo_workflow_service.entities import Plan, WorkflowStatusEnum
 from duo_workflow_service.executor.outbox import Outbox
 from duo_workflow_service.gitlab.http_client import GitlabHttpClient
-from duo_workflow_service.llm_factory import AnthropicConfig, VertexConfig
 from duo_workflow_service.workflows.software_development.workflow import (
     CONTEXT_BUILDER_TOOLS,
     EXECUTOR_TOOLS,
@@ -855,37 +852,3 @@ async def test_workflow_cleanup(workflow, mock_action):
 
     assert workflow.is_done
     assert workflow._outbox._queue.qsize() == 0
-
-
-@pytest.mark.parametrize(
-    "env_vars,expected_config_type,expected_model",
-    [
-        # Vertex (falls back to parent's hardcoded model)
-        (
-            {
-                "AIGW_GOOGLE_CLOUD_PLATFORM__PROJECT": "test-project",
-                "DUO_WORKFLOW__VERTEX_LOCATION": "us-central1",
-            },
-            VertexConfig,
-            KindAnthropicModel.CLAUDE_SONNET_4_VERTEX.value,
-        ),
-        # Anthropic API (falls back to parent's hardcoded model)
-        (
-            {"ANTHROPIC_API_KEY": "test-key"},
-            AnthropicConfig,
-            KindAnthropicModel.CLAUDE_SONNET_4.value,
-        ),
-    ],
-)
-def test_software_development_workflow_model_config(
-    env_vars,
-    expected_config_type,
-    expected_model,
-    workflow,
-):
-    """Test that software development workflow uses correct model based on feature flags."""
-    with patch.dict(os.environ, env_vars, clear=True):
-        config = workflow._get_model_config()
-
-        assert isinstance(config, expected_config_type)
-        assert config.model_name == expected_model

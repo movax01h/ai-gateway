@@ -2,7 +2,7 @@
 import asyncio
 import os
 from abc import ABC, abstractmethod
-from typing import Any, Dict, Optional, TypedDict, Union
+from typing import Any, Dict, Optional, TypedDict
 
 import structlog
 from dependency_injector.wiring import Provide, inject
@@ -19,7 +19,6 @@ from langgraph.types import Command
 from langsmith import traceable, tracing_context
 
 from ai_gateway.container import ContainerApplication
-from ai_gateway.models import KindAnthropicModel
 from ai_gateway.prompts import InMemoryPromptRegistry
 from ai_gateway.prompts.registry import LocalPromptRegistry
 from contract import contract_pb2
@@ -43,7 +42,6 @@ from duo_workflow_service.gitlab.gitlab_api import (
 from duo_workflow_service.gitlab.http_client import GitlabHttpClient
 from duo_workflow_service.gitlab.http_client_factory import get_http_client
 from duo_workflow_service.gitlab.url_parser import SESSION_URL_PATH
-from duo_workflow_service.llm_factory import AnthropicConfig, VertexConfig
 from duo_workflow_service.monitoring import duo_workflow_metrics
 from duo_workflow_service.tools import convert_mcp_tools_to_langchain_tool_classes
 from duo_workflow_service.tracking import (
@@ -135,7 +133,6 @@ class AbstractWorkflow(ABC):
         self._mcp_tools = convert_mcp_tools_to_langchain_tool_classes(
             mcp_tools=mcp_tools
         )
-        self._model_config = self._get_model_config()
         self._approval = approval
         self._prompt_registry = prompt_registry
         self._workflow_config = empty_workflow_config()
@@ -376,36 +373,6 @@ class AbstractWorkflow(ABC):
             additional_properties=additional_properties,
             category=category.value if category else self.__class__.__name__,
         )
-
-    def _get_model_config(self) -> Union[AnthropicConfig, VertexConfig]:
-        """Determine the appropriate model configuration based on deployment environment.
-
-        This method creates the appropriate configuration object for either
-        Vertex AI or standard Anthropic API deployments. It automatically
-        detects the deployment environment and returns the corresponding
-        configuration with the appropriate model.
-
-        The method checks for the presence of AIGW_GOOGLE_CLOUD_PLATFORM__PROJECT
-        environment variable to determine if running on Google Cloud Vertex AI.
-
-        Returns:
-            Union[AnthropicConfig, VertexConfig]: The configuration object for
-                the current deployment environment:
-                - VertexConfig: When running on Google Cloud Vertex AI
-                - AnthropicConfig: When using Anthropic API directly
-
-        Note:
-            Subclasses can override this method to implement custom model selection
-            logic or to use different model versions.
-        """
-        # Check for Vertex AI project configuration
-        _vertex_project_id = os.getenv("AIGW_GOOGLE_CLOUD_PLATFORM__PROJECT")
-        if bool(_vertex_project_id and len(_vertex_project_id) > 1):
-            return VertexConfig(
-                model_name=KindAnthropicModel.CLAUDE_SONNET_4_VERTEX.value
-            )
-
-        return AnthropicConfig(model_name=KindAnthropicModel.CLAUDE_SONNET_4.value)
 
     def _support_namespace_level_workflow(self) -> bool:
         """Indicate if a workflow class supports namespace-level workflows.

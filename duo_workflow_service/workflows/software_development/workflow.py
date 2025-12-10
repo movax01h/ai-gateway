@@ -203,7 +203,6 @@ class Workflow(AbstractWorkflow):
             planner_toolset=tools_registry.toolset(PLANNER_TOOLS),
             executor_toolset=tools_registry.toolset(EXECUTOR_TOOLS),
             tools_registry=tools_registry,
-            model_config=self._model_config,
             goal=goal,
             project=self._project,  # type: ignore[arg-type]
             http_client=self._http_client,
@@ -249,7 +248,6 @@ class Workflow(AbstractWorkflow):
             workflow_type=self._workflow_type,
             executor_toolset=tools_registry.toolset(EXECUTOR_TOOLS),
             tools_registry=tools_registry,
-            model_config=self._model_config,
             goal=goal,
             project=self._project,  # type: ignore[arg-type]
             http_client=self._http_client,

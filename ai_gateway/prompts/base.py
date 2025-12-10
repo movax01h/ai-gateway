@@ -1,3 +1,4 @@
+import asyncio
 from abc import ABC, abstractmethod
 from typing import Any, AsyncIterator, List, MutableMapping, Optional, Sequence, cast
 
@@ -23,8 +24,12 @@ from langchain_core.tools import BaseTool
 from ai_gateway.api.auth_utils import StarletteUser
 from ai_gateway.config import ConfigModelLimits, ModelLimits
 from ai_gateway.instrumentators.model_requests import ModelRequestInstrumentator
-from ai_gateway.model_metadata import TypeModelMetadata, current_model_metadata_context
-from ai_gateway.model_selection import PromptParams
+from ai_gateway.model_metadata import (
+    TypeModelMetadata,
+    create_model_metadata,
+    current_model_metadata_context,
+)
+from ai_gateway.model_selection import ModelSelectionConfig, PromptParams
 from ai_gateway.prompts.caching import (
     CACHE_CONTROL_INJECTION_POINTS_KEY,
     CacheControlInjectionPointsConverter,
@@ -377,6 +382,7 @@ class BasePromptRegistry(ABC):
     internal_event_client: InternalEventsClient
     model_limits: ConfigModelLimits
     _DEFAULT_VERSION: str | None = "^1.0.0"
+    validations: set[str] | None = None
 
     @abstractmethod
     def get(
@@ -428,3 +434,44 @@ class BasePromptRegistry(ABC):
             )
 
         return prompt
+
+    async def validate_default_models(
+        self, unit_primitive: GitLabUnitPrimitive | None = None
+    ) -> bool:
+        model_selection_config = ModelSelectionConfig.instance()
+
+        if self.validations is None:
+            # TODO: Remove this exception once the prompt registry properly supports Fireworks.
+            # See https://gitlab.com/gitlab-org/modelops/applied-ml/code-suggestions/ai-assist/-/work_items/906
+            self.validations = set({"codestral_2501_fireworks"})
+
+        # Collect invocations to execute them in parallel
+        tasks = []
+
+        for unit_primitive_config in model_selection_config.get_unit_primitive_config():
+            model = unit_primitive_config.default_model
+
+            if model in self.validations or (
+                unit_primitive
+                and unit_primitive not in unit_primitive_config.unit_primitives
+            ):
+                continue
+
+            log.info("Validating default model", model=model)
+
+            prompt = self.get(
+                "model_configuration/check",
+                self._DEFAULT_VERSION,
+                model_metadata=create_model_metadata(
+                    {"provider": "gitlab", "name": model}
+                ),
+            )
+
+            tasks.append(prompt.ainvoke({}))
+
+            # Persist validations so we don't incur in multiple 3rd party LLM calls from multiple invocations
+            self.validations.add(model)
+
+        await asyncio.gather(*tasks)
+
+        return True

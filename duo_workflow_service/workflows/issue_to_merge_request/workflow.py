@@ -209,7 +209,6 @@ class Workflow(AbstractWorkflow):
             workflow_type=self._workflow_type,
             toolset=tools_registry.toolset(CREATE_BRANCH_TOOLS),
             tools_registry=tools_registry,
-            model_config=self._model_config,
             goal=f"Here is the issue url for your work: {goal}",
             project=self._project,  # type: ignore[arg-type]
             http_client=self._http_client,
@@ -235,7 +234,6 @@ class Workflow(AbstractWorkflow):
             planner_toolset=tools_registry.toolset(PLANNER_TOOLS),
             executor_toolset=tools_registry.toolset(EXECUTOR_TOOLS),
             tools_registry=tools_registry,
-            model_config=self._model_config,
             goal=f"Consider the following issue url: {goal}. Create an implementation plan to address the issue "
             f"requirements.",
             project=self._project,  # type: ignore[arg-type]
@@ -275,7 +273,6 @@ class Workflow(AbstractWorkflow):
             workflow_type=self._workflow_type,
             executor_toolset=tools_registry.toolset(EXECUTOR_TOOLS),
             tools_registry=tools_registry,
-            model_config=self._model_config,
             goal=f"Consider the following issue url: {goal}. Implement changes to meet issue requirements.",
             project=self._project,  # type: ignore[arg-type]
             http_client=self._http_client,

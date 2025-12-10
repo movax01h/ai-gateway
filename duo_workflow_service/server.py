@@ -30,6 +30,7 @@ from ai_gateway.app import get_config
 from ai_gateway.config import Config, setup_litellm
 from ai_gateway.container import ContainerApplication
 from ai_gateway.instrumentators.model_requests import language_server_version
+from ai_gateway.prompts import BasePromptRegistry
 from contract import contract_pb2, contract_pb2_grpc
 from duo_workflow_service.client_capabilities import client_capabilities
 from duo_workflow_service.components import tools_registry
@@ -62,7 +63,6 @@ from duo_workflow_service.interceptors.monitoring_interceptor import (
 from duo_workflow_service.interceptors.usage_quota_interceptor import (
     UsageQuotaInterceptor,
 )
-from duo_workflow_service.llm_factory import validate_llm_access
 from duo_workflow_service.monitoring import duo_workflow_metrics, setup_monitoring
 from duo_workflow_service.profiling import setup_profiling
 from duo_workflow_service.security.exceptions import SecurityException
@@ -771,6 +771,17 @@ def configure_cache() -> None:
         set_llm_cache(SQLiteCache(database_path=".llm_cache.db"))
     else:
         set_llm_cache(None)
+
+
+@inject
+def validate_llm_access(
+    prompt_registry: BasePromptRegistry = Provide[
+        ContainerApplication.pkg_prompts.prompt_registry
+    ],
+):
+    asyncio.get_event_loop().run_until_complete(
+        prompt_registry.validate_default_models(GitLabUnitPrimitive.DUO_AGENT_PLATFORM)
+    )
 
 
 def setup_cloud_connector():

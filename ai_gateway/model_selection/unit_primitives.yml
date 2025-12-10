@@ -243,7 +243,7 @@ configurable_unit_primitives:
       - "gemini_2_0_flash_lite_vertex"
   - feature_setting: "workflow"
     unit_primitives:
-      - "duo_workflow_execute_workflow"
+      - "duo_agent_platform"
     default_model: "claude_sonnet_4_20250514_vertex"
     selectable_models:
       - "claude_sonnet_4_20250514"
@@ -252,12 +252,12 @@ configurable_unit_primitives:
   - feature_setting: model_configuration
     unit_primitives:
       - "complete_code"
-    default_model: "claude_3"
+    default_model: "claude_sonnet_4_5_20250929_vertex"
     selectable_models:
-      - "claude_3"
+      - "claude_sonnet_4_5_20250929_vertex"
   - feature_setting: "fix_pipeline_context"
     unit_primitives:
-      - "duo_workflow_execute_workflow"
+      - "duo_agent_platform"
     default_model: "claude_sonnet_4_20250514_vertex"
     selectable_models:
       - "claude_sonnet_4_20250514"
@@ -265,7 +265,7 @@ configurable_unit_primitives:
       - "claude_sonnet_4_5_20250929"
   - feature_setting: "fix_pipeline_create_plan"
     unit_primitives:
-      - "duo_workflow_execute_workflow"
+      - "duo_agent_platform"
     default_model: "claude_sonnet_4_20250514_vertex"
     selectable_models:
       - "claude_sonnet_4_20250514"
@@ -273,7 +273,7 @@ configurable_unit_primitives:
       - "claude_sonnet_4_5_20250929"
   - feature_setting: "fix_pipeline_execution"
     unit_primitives:
-      - "duo_workflow_execute_workflow"
+      - "duo_agent_platform"
     default_model: "claude_sonnet_4_20250514_vertex"
     selectable_models:
       - "claude_sonnet_4_20250514"
@@ -281,7 +281,7 @@ configurable_unit_primitives:
       - "claude_sonnet_4_5_20250929"
   - feature_setting: "fix_pipeline_push_changes"
     unit_primitives:
-      - "duo_workflow_execute_workflow"
+      - "duo_agent_platform"
     default_model: "claude_sonnet_4_20250514_vertex"
     selectable_models:
       - "claude_sonnet_4_20250514"
@@ -289,7 +289,7 @@ configurable_unit_primitives:
       - "claude_sonnet_4_5_20250929"
   - feature_setting: "fix_pipeline_decide_approach"
     unit_primitives:
-      - "duo_workflow_execute_workflow"
+      - "duo_agent_platform"
     default_model: "claude_sonnet_4_20250514_vertex"
     selectable_models:
       - "claude_sonnet_4_20250514"
@@ -297,7 +297,7 @@ configurable_unit_primitives:
       - "claude_sonnet_4_5_20250929"
   - feature_setting: "fix_pipeline_add_comment"
     unit_primitives:
-      - "duo_workflow_execute_workflow"
+      - "duo_agent_platform"
     default_model: "claude_sonnet_4_20250514_vertex"
     selectable_models:
       - "claude_sonnet_4_20250514"
@@ -305,7 +305,7 @@ configurable_unit_primitives:
       - "claude_sonnet_4_5_20250929"
   - feature_setting: "fix_pipeline_comment_link"
     unit_primitives:
-      - "duo_workflow_execute_workflow"
+      - "duo_agent_platform"
     default_model: "claude_sonnet_4_20250514_vertex"
     selectable_models:
       - "claude_sonnet_4_20250514"
@@ -420,7 +420,7 @@ configurable_unit_primitives:
       - "claude_sonnet_4_5_20250929"
   - feature_setting: "create_merge_request"
     unit_primitives:
-      - "duo_workflow_execute_workflow"
+      - "duo_agent_platform"
     default_model: "claude_sonnet_4_20250514"
     selectable_models:
       - "claude_sonnet_4_20250514"
@@ -428,7 +428,7 @@ configurable_unit_primitives:
       - "claude_sonnet_4_5_20250929"
   - feature_setting: "developer_planner"
     unit_primitives:
-      - "duo_workflow_execute_workflow"
+      - "duo_agent_platform"
     default_model: "claude_sonnet_4_5_20250929"
     selectable_models:
       - "claude_sonnet_4_20250514"
@@ -436,7 +436,7 @@ configurable_unit_primitives:
       - "claude_sonnet_4_5_20250929"
   - feature_setting: "programming_agent"
     unit_primitives:
-      - "duo_workflow_execute_workflow"
+      - "duo_agent_platform"
     default_model: "claude_sonnet_4_5_20250929"
     selectable_models:
       - "claude_sonnet_4_20250514"
@@ -444,7 +444,7 @@ configurable_unit_primitives:
       - "claude_sonnet_4_5_20250929"
   - feature_setting: "push_to_remote"
     unit_primitives:
-      - "duo_workflow_execute_workflow"
+      - "duo_agent_platform"
     default_model: "claude_sonnet_4_20250514"
     selectable_models:
       - "claude_sonnet_4_20250514"
@@ -452,14 +452,14 @@ configurable_unit_primitives:
       - "claude_sonnet_4_5_20250929"
   - feature_setting: "list_available_tools"
     unit_primitives:
-      - "duo_workflow_execute_workflow"
+      - "duo_agent_platform"
     default_model: "claude_sonnet_4_20250514"
     selectable_models:
       - "claude_sonnet_4_20250514"
       - "claude_sonnet_4_20250514_vertex"
   - feature_setting: "create_repository_branch"
     unit_primitives:
-      - "duo_workflow_execute_workflow"
+      - "duo_agent_platform"
     default_model: "claude_sonnet_4_20250514"
     selectable_models:
       - "claude_sonnet_4_20250514"

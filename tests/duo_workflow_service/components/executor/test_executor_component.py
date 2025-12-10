@@ -121,7 +121,6 @@ class TestExecutorComponent:
             "goal": goal,
             "executor_toolset": mock_toolset,
             "tools_registry": mock_tool_registry,
-            "model_config": "",
             "project": project,
             "http_client": gl_http_client,
             "additional_context": additional_context,
@@ -143,7 +142,6 @@ class TestExecutorComponent:
         assert component.goal == goal
         assert component.executor_toolset == mock_dependencies["executor_toolset"]
         assert component.tools_registry == mock_dependencies["tools_registry"]
-        assert component.model_config == mock_dependencies["model_config"]
         assert component.project == mock_dependencies["project"]
         assert component.http_client == mock_dependencies["http_client"]
 
