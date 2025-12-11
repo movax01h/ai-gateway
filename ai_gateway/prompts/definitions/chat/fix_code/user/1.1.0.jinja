@@ -1,0 +1,27 @@
+{{file_content}}
+In the file user selected this code:
+<selected_code>
+  {{selected_text}}
+</selected_code>
+
+{{input}}
+{{file_content_reuse}}
+Any code snippets in response should be formatted in markdown.
+
+Select a snippet of code that is less than 100 lines.
+Output the new fixed code.
+Output instructions to the user on how to add the changes you made to the file.
+
+If the code you are fixing is a subset of the user selected code:
+- Explain to the user that due to the large size of the code you have only selected a small section.
+- Tell the user how to identify that section. Avoid using line numbers and instead use:
+  - The line, or nearby lines.
+  - The block of code the lines are in (such as the method name, if statement, loop, etc).
+
+Use the following priority list to identify which section to fix if there are multiple:
+1. First fix the security issue.
+2. If there is not a security issue, then fix an error that will prevent the code from running.
+3. If there is not an error that will prevent the code from running, then fix a performance issue.
+4. If there is not a performance issue, then fix a code quality/style issue.
+
+Only mention and output code to fix one of the identified issues.
