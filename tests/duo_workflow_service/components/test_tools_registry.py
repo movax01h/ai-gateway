@@ -33,6 +33,9 @@ from duo_workflow_service.tools.vulnerabilities.get_vulnerability_details import
 from duo_workflow_service.tools.vulnerabilities.post_sast_fp_analysis_to_gitlab import (
     PostSastFpAnalysisToGitlab,
 )
+from duo_workflow_service.tools.vulnerabilities.post_secret_fp_analysis_to_gitlab import (
+    PostSecretFpAnalysisToGitlab,
+)
 from duo_workflow_service.tools.wiki import GetWikiPage
 
 
@@ -218,6 +221,7 @@ _outbox = MagicMock(spec=Outbox)
                 "extract_lines_from_text",
                 "run_glql_query",
                 "post_sast_fp_analysis_to_gitlab",
+                "post_secret_fp_analysis_to_gitlab",
                 "build_review_merge_request_context",
                 "get_security_finding_details",
                 "list_security_findings",
@@ -410,6 +414,9 @@ def test_registry_initialization_initialises_tools_with_correct_attributes(
         "extract_lines_from_text": tools.ExtractLinesFromText(metadata=tool_metadata),
         "run_glql_query": tools.RunGLQLQuery(metadata=tool_metadata),
         "post_sast_fp_analysis_to_gitlab": PostSastFpAnalysisToGitlab(
+            metadata=tool_metadata
+        ),
+        "post_secret_fp_analysis_to_gitlab": PostSecretFpAnalysisToGitlab(
             metadata=tool_metadata
         ),
         "run_tests": tools.RunTests(metadata=tool_metadata),

@@ -485,3 +485,43 @@ configurable_unit_primitives:
     selectable_models:
       - "claude_sonnet_4_20250514"
       - "claude_sonnet_4_20250514_vertex"
+  - feature_setting: "secret_vulnerability_source_file_agent_prompt"
+    unit_primitives: []
+    default_model: "claude_sonnet_4_5_20250929"
+    selectable_models:
+      - "claude_sonnet_3_7_20250219"
+      - "claude_sonnet_4_20250514"
+      - "claude_sonnet_4_20250514_vertex"
+      - "claude_sonnet_4_5_20250929"
+  - feature_setting: "secret_vulnerability_lines_agent_prompt"
+    unit_primitives: []
+    default_model: "claude_sonnet_4_5_20250929"
+    selectable_models:
+      - "claude_sonnet_3_7_20250219"
+      - "claude_sonnet_4_20250514"
+      - "claude_sonnet_4_20250514_vertex"
+      - "claude_sonnet_4_5_20250929"
+  - feature_setting: "secret_vulnerability_report_agent_prompt"
+    unit_primitives: []
+    default_model: "claude_sonnet_4_5_20250929"
+    selectable_models:
+      - "claude_sonnet_3_7_20250219"
+      - "claude_sonnet_4_20250514"
+      - "claude_sonnet_4_20250514_vertex"
+      - "claude_sonnet_4_5_20250929"
+  - feature_setting: "secret_fp_detection_agent_prompt"
+    unit_primitives: []
+    default_model: "claude_sonnet_4_5_20250929"
+    selectable_models:
+      - "claude_sonnet_3_7_20250219"
+      - "claude_sonnet_4_20250514"
+      - "claude_sonnet_4_20250514_vertex"
+      - "claude_sonnet_4_5_20250929"
+  - feature_setting: "secret_post_results_to_gitlab_agent_prompt"
+    unit_primitives: []
+    default_model: "claude_sonnet_4_5_20250929"
+    selectable_models:
+      - "claude_sonnet_4_20250514"
+      - "claude_sonnet_4_20250514_vertex"
+      - "claude_sonnet_4_5_20250929"
+      - "claude_sonnet_3_7_20250219"
