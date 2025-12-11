@@ -525,3 +525,17 @@ configurable_unit_primitives:
       - "claude_sonnet_4_20250514_vertex"
       - "claude_sonnet_4_5_20250929"
       - "claude_sonnet_3_7_20250219"
+  - feature_setting: "push_changes"
+    unit_primitives:
+      - "duo_agent_platform"
+    default_model: "claude_sonnet_4_20250514"
+    selectable_models:
+      - "claude_sonnet_4_20250514"
+      - "claude_sonnet_4_20250514_vertex"
+  - feature_setting: "convert_to_gl_ci"
+    unit_primitives:
+      - "duo_agent_platform"
+    default_model: "claude_sonnet_4_20250514"
+    selectable_models:
+      - "claude_sonnet_4_20250514"
+      - "claude_sonnet_4_20250514_vertex"

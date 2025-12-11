@@ -1,0 +1,128 @@
+name: "Convert to GitLab CI"
+description: |
+  Converts Jenkins pipelines (Jenkinsfile) to GitLab CI/CD configuration files (.gitlab-ci.yml).
+  This flow reads a Jenkins configuration file, translates it to GitLab CI format with validation,
+  and creates a merge request with the converted configuration.
+product_group: agent_foundations
+version: "v1"
+environment: ambient
+
+components:
+  - name: "load_jenkins_file"
+    type: DeterministicStepComponent
+    inputs:
+      - from: "context:goal"
+        as: "file_path"
+    tool_name: "read_file"
+    ui_log_events:
+      - "on_tool_execution_success"
+      - "on_tool_execution_failed"
+
+  - name: "convert_to_gitlab_ci"
+    type: AgentComponent
+    prompt_id: "convert_to_gl_ci"
+    prompt_version: "^1.0.0"
+    inputs:
+      - from: "context:load_jenkins_file.tool_responses"
+        as: "jenkins_file_content"
+      - from: "context:project_id"
+        as: "project_id"
+    toolset:
+      - "create_file_with_contents"
+      - "read_file"
+      - "ci_linter"
+    ui_log_events:
+      - "on_agent_final_answer"
+      - "on_tool_execution_success"
+      - "on_tool_execution_failed"
+
+  - name: "create_repository_branch"
+    type: AgentComponent
+    prompt_id: "create_repository_branch"
+    prompt_version: "^1.0.0"
+    toolset:
+      - "create_branch"
+      - "run_git_command"
+    inputs:
+      - from: "context:project_id"
+        as: "project_id"
+      - from: "context:inputs.agent_platform_standard_context.primary_branch"
+        as: "ref"
+      - from: "context:project_http_url_to_repo"
+        as: "repository_url"
+      - from: "Duo Agent: Convert to GitLab CI"
+        as: "naming_context"
+        literal: True
+    ui_log_events:
+      - "on_tool_execution_success"
+      - "on_tool_execution_failed"
+
+  - name: "git_commit"
+    type: AgentComponent
+    prompt_id: "commit_changes"
+    prompt_version: "^1.0.0"
+    inputs:
+      - from: "context:project_http_url_to_repo"
+        as: "repository_url"
+    toolset:
+      - "run_git_command"
+    ui_log_events:
+      - "on_tool_execution_success"
+      - "on_tool_execution_failed"
+
+  - name: "git_push"
+    type: AgentComponent
+    prompt_id: "push_changes"
+    prompt_version: "^1.0.0"
+    inputs:
+      - from: "context:project_http_url_to_repo"
+        as: "repository_url"
+      - from: "context:create_repository_branch.final_answer"
+        as: "target_branch_details"
+      - from: "context:inputs.agent_platform_standard_context.primary_branch"
+        as: "source_branch"
+      - from: "context:project_id"
+        as: "project_id"
+      - from: "context:workflow_id"
+        as: "workflow_id"
+      - from: "context:session_url"
+        as: "session_url"
+    toolset:
+      - "run_git_command"
+      - "create_merge_request"
+    ui_log_events:
+      - "on_agent_final_answer"
+      - "on_tool_execution_success"
+      - "on_tool_execution_failed"
+
+routers:
+  - from: "load_jenkins_file"
+    to: "convert_to_gitlab_ci"
+  - from: "convert_to_gitlab_ci"
+    to: "create_repository_branch"
+  - from: "create_repository_branch"
+    to: "git_commit"
+  - from: "git_commit"
+    to: "git_push"
+  - from: "git_push"
+    to: "end"
+
+flow:
+  entry_point: "load_jenkins_file"
+  inputs:
+    - category: agent_user_environment
+      input_schema:
+        source_branch:
+          type: string
+          description: Source branch of the Jenkins file
+    - category: agent_platform_standard_context
+      input_schema:
+        workload_branch:
+          type: string
+          description: The workload branch for the GitLab Merge Request
+        primary_branch:
+          type: string
+          description: Merge Request target branch
+        session_owner_id:
+          type: string
+          description: Human user's ID that initiated the flow

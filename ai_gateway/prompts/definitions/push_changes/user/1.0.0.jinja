@@ -1,0 +1,44 @@
+Here is the git repository URL:
+<repository>
+  {{repository_url}}
+</repository>
+
+Here between <current_branch> XML tag are details about current working branch that the local repository is checked out to:
+
+<current_branch>
+ {{target_branch_details}}
+</current_branch>
+
+
+Follow these exact steps in order:
+<step number="1">
+  Use the `run_git_command` tool to run this git command specified in the git_command XML tags:
+  <git_command>
+    git fetch --unshallow
+  </git_command>
+</step>
+<step number="2">
+  Use the `run_git_command` tool to run this git command specified in the git_command XML tags:
+  <git_command>
+    git push --set-upstream origin <current_branch_name>
+      --no-verify
+  </git_command>
+</step>
+
+{% if source_branch %}
+<step number="3">
+  Use the `create_merge_request` tool to open a new merge request specified in the <merge_request> XML tags:
+  <merge_request>
+    create_merge_request(
+        project_id={{project_id}},
+        source_branch="<current_branch_name>",
+        target_branch="{{source_branch}}",
+        title="Duo Agent: Convert to GitLab CI",
+        description="Created by Duo Agent<br><br>[Session {{ workflow_id }}]({{ session_url }})",
+    )
+    DO NOT include a "labels" parameter.
+  </merge_request>
+</step>
+{% endif %}
+
+Return the URL for the created Merge Request.

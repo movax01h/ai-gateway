@@ -1,0 +1,16 @@
+name: convert_to_gl_ci_prompt
+model:
+  params:
+    model_class_provider: anthropic
+    max_tokens: 32_768
+unit_primitives:
+  - duo_agent_platform
+prompt_template:
+  system: |
+    {% include 'convert_to_gl_ci/system/1.0.0.jinja' %}
+  user: |
+    {% include 'convert_to_gl_ci/user/1.0.0.jinja' %}
+  placeholder: history
+params:
+  timeout: 60
+
