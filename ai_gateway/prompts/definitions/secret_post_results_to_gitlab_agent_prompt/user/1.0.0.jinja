@@ -1,0 +1,15 @@
+Given the following data:
+  1. Secret false positive analysis results in <secret_fp_detection_analysis> tag
+  2. Vulnerability details in <vulnerability_details> tag
+
+<vulnerability_analysis>
+  {{secret_fp_detection_analysis}}
+</vulnerability_analysis>
+
+<vulnerability_details>
+  {{vulnerability_details_json}}
+</vulnerability_details>
+
+Extract the vulnerability ID from the GitLab GID format (convert "gid://gitlab/Vulnerability/XXX" to just "XXX"), extract the false positive likelihood score and explanation from the analysis results, then use the post_secret_fp_analysis_to_gitlab tool to post these results to GitLab.
+
+Remember: The vulnerability_id parameter should be just the numeric ID, not the full GID.

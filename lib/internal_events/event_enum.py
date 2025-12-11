@@ -63,6 +63,7 @@ class CategoryEnum(StrEnum):
     FIX_PIPELINE = "fix_pipeline"
     RESOLVE_SAST_VULNERABILITY = "resolve_sast_vulnerability"
     SAST_FP_DETECTION = "sast_fp_detection"
+    SECRETS_FP_DETECTION = "secrets_fp_detection"
     AI_CATALOG_AGENT = "ai_catalog_agent"
     UNKNOWN = "unknown"
     DEVELOPER = "developer"
