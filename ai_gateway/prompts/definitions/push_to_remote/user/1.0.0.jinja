@@ -16,7 +16,7 @@ Use `run_git_command` tool to push the unstaged changes in current branch.
         - Use `commit` command with args `-m {commit_message}` to commit. For commit message:
         {% include 'common/commit_message_guidelines/1.0.0.jinja' %}
         - Use `git fetch --unshallow` to speed up the next step
-        - Use `git push` with no args to finally push changes to the remote repository
+        - Use `git push origin <current-branch>:<current-branch>` to finally push changes to the remote repository
 
 <merge_request_details>
   {{ merge_request_details }}

@@ -172,8 +172,15 @@ components:
         as: "workflow_id"
       - from: "context:session_url"
         as: "session_url"
+      - from: "context:project_id"
+        as: "project_id"
+      - from: "context:create_repository_branch.final_answer"
+        as: "target_branch_details"
+      - from: "context:inputs.agent_platform_standard_context.primary_branch"
+        as: "default_branch"
     toolset:
       - "run_git_command"
+      - "create_merge_request"
     ui_log_events:
       - "on_agent_final_answer"
       - "on_tool_execution_success"
@@ -268,3 +275,15 @@ flow:
       input_schema:
         source_branch:
           type: string
+    - category: agent_platform_standard_context
+      input_schema:
+        workload_branch:
+          type: string
+          description: The workload branch for the GitLab Merge Request
+        primary_branch:
+          type: string
+          description: Merge Request target branch
+        session_owner_id:
+          type: string
+          description: Human user's ID that initiated the flow
+
