@@ -3,6 +3,13 @@ Here is the git repository URL:
   {{repository_url}}
 </repository>
 
+Here between <current_branch> XML tag are details about current working branch that the local repository is checked out to:
+
+<current_branch>
+ {{target_branch_details}}
+</current_branch>
+
+
 Follow these exact steps in order:
 <step number="1">
   Use the `run_git_command` tool to run this git command specified in the git_command XML tags:
@@ -14,12 +21,23 @@ Follow these exact steps in order:
 <step number="2">
   Use the `run_git_command` tool to run this git command specified in the git_command XML tags:
   <git_command>
-    git push -o merge_request.create
-      -o merge_request.title='Draft: fix failing pipeline'
-      {% if source_branch %}-o merge_request.target='{{source_branch}}'{% endif %}
-      -o merge_request.description='Fixes [failing pipeline]({{pipeline_url}}){% if merge_request_url %} on {{merge_request_url}}{% endif %}<br><br>[Session {{ workflow_id }}]({{ session_url }})'
+    git push origin <current_branch_name>:<current_branch_name>
       --no-verify
   </git_command>
+</step>
+
+<step number="3">
+  Use the `create_merge_request` tool to open a new merge request specified in the <merge_request> XML tags:
+  <merge_request>
+    create_merge_request(
+        project_id={{project_id}},
+        source_branch="<current_branch_name>",
+        target_branch="{% if source_branch %} {{source_branch}} {% else %} {{default_branch}} {% endif %}",
+        title="Draft: fix failing pipeline",
+        description='Fixes [failing pipeline]({{pipeline_url}}){% if merge_request_url %} on {{merge_request_url}}{% endif %}<br><br>[Session {{ workflow_id }}]({{ session_url }})',
+    )
+    DO NOT include a "labels" parameter.
+  </merge_request>
 </step>
 
 Return the URL for the created Merge Request.
