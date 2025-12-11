@@ -26,28 +26,35 @@ class TikTokenCounter:
         self._logger = structlog.stdlib.get_logger("tiktoken_counter")
         self._encoding = tiktoken.encoding_for_model(model)
 
-    def count_string_content(self, content: str) -> int:
-        # For small strings, use accurate tiktoken counting
-        if len(content) <= 1500:
+    def count_string_content(
+        self, content: str, n_samples: int = 30, sample_size: int = 300
+    ) -> int:
+        threshold = n_samples * sample_size
+
+        if len(content) <= threshold:
             return len(self._encoding.encode(content))
 
-        # For large strings: sample-based estimation
-        # Sample from start, middle, and end for better representation
-        sample_size = 500
-        mid_start = (len(content) - sample_size) // 2
+        # Divide file into n_samples equal cells, sample from center of each
+        cell_size = len(content) // n_samples
+        offset = (cell_size - sample_size) // 2
 
-        start_sample = content[:sample_size]
-        mid_sample = content[mid_start : mid_start + sample_size]
-        end_sample = content[-sample_size:]
+        densities = []
+        for i in range(n_samples):
+            start_pos = i * cell_size + offset
+            sample = content[start_pos : start_pos + sample_size]
+            tokens = len(self._encoding.encode(sample))
+            densities.append(tokens / len(sample))
 
-        sample_tokens = (
-            len(self._encoding.encode(start_sample))
-            + len(self._encoding.encode(mid_sample))
-            + len(self._encoding.encode(end_sample))
-        )
-        avg_tokens_per_char = sample_tokens / (sample_size * 3)
+        # Use trimmed mean
+        trim = int(n_samples * 0.1)
+        trimmed_densities = densities[trim:-trim]
+        if not trimmed_densities:
+            avg_density = sum(densities) / len(densities)
+        else:
+            avg_density = sum(trimmed_densities) / len(trimmed_densities)
 
-        return int(len(content) * avg_tokens_per_char)
+        # Add 10% safety buffer to prevent undercounts
+        return int(len(content) * avg_density * 1.10)
 
     def count_tokens_in_list(self, content_list: list) -> int:
         result = 0
