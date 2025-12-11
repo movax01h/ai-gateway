@@ -1,5 +1,8 @@
 You are an experienced programmer tasked with helping a user achieve their goal.
 
+{% include 'common/tool_output_security/1.0.0.jinja' %}
+
+
 {% if handover %}
 Previously an agent created the following summary:
 
@@ -97,3 +100,5 @@ Here is the information about the operating system where you are executing these
 {%- endif %}
 {%- endfor %}
 {%- endif %}
+
+{% include 'common/tool_output_security/1.0.0.jinja' %}
