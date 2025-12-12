@@ -786,15 +786,14 @@ class TestEditorContentGeneration:
     @pytest.mark.parametrize(
         ("prompt", "want_called"),
         [
-            # non-empty suggestions from model
+            # All cases should not call with_prompt_prepared since we now use Prompt Registry
             (
                 "",
                 False,
             ),
-            # empty suggestions from model
             (
                 "some prompt",
-                True,
+                False,
             ),
             (
                 None,
@@ -842,6 +841,7 @@ class TestEditorContentGeneration:
 
         assert response.status_code == 200
 
+        # with_prompt_prepared should never be called since we now use Prompt Registry
         assert mock_with_prompt_prepared.called == want_called
         if want_called:
             mock_with_prompt_prepared.assert_called_with(prompt)
@@ -867,8 +867,8 @@ class TestEditorContentGeneration:
                     ]
                 },
                 {
-                    "engine": "vertex-ai",
-                    "name": "code-bison@002",
+                    "engine": "agent",
+                    "name": "Code Generations Agent",
                     "lang": "python",
                 },
             ),
@@ -885,8 +885,8 @@ class TestEditorContentGeneration:
                     ]
                 },
                 {
-                    "engine": "anthropic",
-                    "name": "claude-3-5-sonnet-20241022",
+                    "engine": "agent",
+                    "name": "Claude Sonnet 4 Code Generations Agent",
                     "lang": "python",
                 },
             ),
@@ -904,8 +904,8 @@ class TestEditorContentGeneration:
                     ]
                 },
                 {
-                    "engine": "vertex-ai",
-                    "name": "code-bison@002",
+                    "engine": "agent",
+                    "name": "Code Generations Agent",
                     "lang": "python",
                 },
             ),
@@ -921,8 +921,7 @@ class TestEditorContentGeneration:
     def test_model_provider(
         self,
         mock_client: TestClient,
-        mock_anthropic: Mock,
-        mock_code_bison: Mock,
+        mock_agent_model: Mock,
         model_provider: str,
         expected_code: int,
         expected_response: dict,
@@ -967,6 +966,61 @@ class TestEditorContentGeneration:
 
         assert body["choices"] == expected_response["choices"]
         assert body["metadata"]["model"] == expected_model
+
+    @pytest.mark.parametrize(
+        ("model_provider", "expected_model"),
+        [
+            ("anthropic", "claude_sonnet_4_5_20250929"),
+            ("vertex-ai", "claude_sonnet_4_5_20250929_vertex"),
+        ],
+    )
+    def test_legacy_generation_model_provider_override(
+        self, mock_client, route, mock_generations, model_provider, expected_model
+    ):
+        """Test that legacy generation requests respect model_provider parameter."""
+        with patch(
+            "ai_gateway.prompts.registry.LocalPromptRegistry.get_on_behalf"
+        ) as mock_registry_get:
+            payload = {
+                "file_name": "main.py",
+                "content_above_cursor": "# Create a fast binary search\n",
+                "content_below_cursor": "\n",
+                "language_identifier": "python",
+                "model_provider": model_provider,
+            }
+
+            data = {
+                "prompt_components": [
+                    {
+                        "type": "code_editor_generation",
+                        "payload": payload,
+                    }
+                ],
+            }
+
+            response = mock_client.post(
+                route,
+                headers={
+                    "Authorization": "Bearer 12345",
+                    "X-Gitlab-Authentication-Type": "oidc",
+                    "X-GitLab-Instance-Id": "1234",
+                    "X-GitLab-Realm": "self-managed",
+                },
+                json=data,
+            )
+
+            assert response.status_code == 200
+
+            # Verify prompt_registry.get_on_behalf was called with model_metadata
+            assert mock_registry_get.called
+            call_kwargs = mock_registry_get.call_args.kwargs
+            assert call_kwargs["prompt_id"] == "code_suggestions/generations"
+
+            # Verify model_metadata was passed and contains the expected model
+            model_metadata = call_kwargs.get("model_metadata")
+            assert model_metadata is not None
+            assert model_metadata.provider == "gitlab"
+            assert expected_model == model_metadata.name
 
 
 class TestEditorContentGenerationStream:

@@ -38,7 +38,11 @@ from ai_gateway.code_suggestions import (
 from ai_gateway.code_suggestions.base import SAAS_PROMPT_MODEL_MAP
 from ai_gateway.config import Config
 from ai_gateway.container import ContainerApplication
-from ai_gateway.model_metadata import TypeModelMetadata, current_model_metadata_context
+from ai_gateway.model_metadata import (
+    TypeModelMetadata,
+    create_model_metadata,
+    current_model_metadata_context,
+)
 from ai_gateway.models import KindModelProvider
 from ai_gateway.prompts import BasePromptRegistry
 from ai_gateway.structured_logging import get_request_logger
@@ -254,12 +258,6 @@ async def code_generation(
     prompt_registry: BasePromptRegistry,
     stream_handler: StreamHandler,
     snowplow_event_context: SnowplowEventContext,
-    generations_vertex_factory: Factory[CodeGenerations] = Provide[
-        ContainerApplication.code_suggestions.generations.vertex.provider
-    ],
-    generations_anthropic_factory: Factory[CodeGenerations] = Provide[
-        ContainerApplication.code_suggestions.generations.anthropic_default.provider
-    ],
     agent_factory: Factory[CodeGenerations] = Provide[
         ContainerApplication.code_suggestions.generations.agent_factory.provider
     ],
@@ -310,14 +308,34 @@ async def code_generation(
             prompt_model_name=prompt.model_name,
         )
     else:
-        # TODO: Since we are migrating to prompt registry, we should sunset this branch
-        if model_provider == KindModelProvider.ANTHROPIC:
-            engine = generations_anthropic_factory()
-        else:
-            engine = generations_vertex_factory()
+        # If model_provider is specified in payload but no prompt_id, use it to override model_metadata
+        if model_provider and not model_metadata:
+            if model_provider == KindModelProvider.ANTHROPIC:
+                model_metadata = create_model_metadata(
+                    {"provider": "gitlab", "identifier": "claude_sonnet_4_5_20250929"}
+                )
+            elif model_provider == KindModelProvider.VERTEX_AI:
+                model_metadata = create_model_metadata(
+                    {
+                        "provider": "gitlab",
+                        "identifier": "claude_sonnet_4_5_20250929_vertex",
+                    }
+                )
 
-        if payload.prompt:
-            engine.with_prompt_prepared(payload.prompt)
+        prompt = prompt_registry.get_on_behalf(
+            user=current_user,
+            prompt_id="code_suggestions/generations",
+            model_metadata=model_metadata,
+            internal_event_category=__name__,
+        )
+        engine = agent_factory(model__prompt=prompt)
+
+        request_log.info(
+            "Executing code generation with prompt registry (legacy path)",
+            prompt_name=prompt.name,
+            prompt_model_class=prompt.model.__class__.__name__,
+            prompt_model_name=prompt.model_name,
+        )
 
     suggestion = await engine.execute(
         prefix=payload.content_above_cursor,

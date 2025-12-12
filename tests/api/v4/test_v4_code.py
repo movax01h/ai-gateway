@@ -116,8 +116,8 @@ class TestEditorContentGenerationStream:
                 "vertex-ai",
                 None,
                 {
-                    "engine": "vertex-ai",
-                    "name": "code-bison@002",
+                    "engine": "agent",
+                    "name": "Code Generations Agent",
                 },
                 {"flag_a", "flag_b"},
             ),
@@ -126,8 +126,8 @@ class TestEditorContentGenerationStream:
                 "anthropic",
                 None,
                 {
-                    "engine": "anthropic",
-                    "name": "claude-3-5-sonnet-20241022",
+                    "engine": "agent",
+                    "name": "Claude Sonnet 4 Code Generations Agent",
                 },
                 {"flag_a", "flag_b"},
             ),
