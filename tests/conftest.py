@@ -24,6 +24,7 @@ from ai_gateway.api.middleware import (
     MiddlewareAuthentication,
     ModelConfigMiddleware,
 )
+from ai_gateway.api.middleware.internal_event import InternalEventMiddleware
 from ai_gateway.api.server import CONTAINER_APPLICATION_MODULES
 from ai_gateway.code_suggestions.base import CodeSuggestionsChunk, CodeSuggestionsOutput
 from ai_gateway.code_suggestions.processing.typing import LanguageId
@@ -111,6 +112,9 @@ def test_client_fixture(fast_api_router, stub_auth_provider):
         Middleware(RawContextMiddleware),
         Middleware(AccessLogMiddleware, skip_endpoints=[]),
         MiddlewareAuthentication(stub_auth_provider, False, None),
+        Middleware(
+            InternalEventMiddleware, skip_endpoints=[], enabled=True, environment="test"
+        ),
         Middleware(ModelConfigMiddleware),
     ]
     app = FastAPI(middleware=middlewares)
