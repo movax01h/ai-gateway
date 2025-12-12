@@ -20,6 +20,7 @@ from langchain_core.prompts.chat import MessageLikeRepresentation
 from langchain_core.prompts.string import DEFAULT_FORMATTER_MAPPING
 from langchain_core.runnables import Runnable, RunnableBinding, RunnableConfig
 from langchain_core.tools import BaseTool
+from langsmith import tracing_context
 
 from ai_gateway.api.auth_utils import StarletteUser
 from ai_gateway.config import ConfigModelLimits, ModelLimits
@@ -472,6 +473,7 @@ class BasePromptRegistry(ABC):
             # Persist validations so we don't incur in multiple 3rd party LLM calls from multiple invocations
             self.validations.add(model)
 
-        await asyncio.gather(*tasks)
+        with tracing_context(enabled=False):
+            await asyncio.gather(*tasks)
 
         return True
