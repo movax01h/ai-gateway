@@ -152,12 +152,6 @@ def verify_project_namespace_metadata():
             internal_context: EventContext = current_event_context.get()
             user_claims = request.user.claims
 
-            if str(internal_context.instance_id) != str(user_claims.gitlab_instance_id):
-                raise HTTPException(
-                    status_code=status.HTTP_403_FORBIDDEN,
-                    detail="Gitlab instance-id mismatch",
-                )
-
             extra_claims = user_claims.extra or {}
 
             if str(internal_context.project_id) != str(
