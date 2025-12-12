@@ -7,6 +7,7 @@ from gitlab_cloud_connector import (
     GitLabFeatureCategory,
     GitLabUnitPrimitive,
     TokenAuthority,
+    UserClaims,
 )
 
 from ai_gateway.api.auth_utils import StarletteUser, get_current_user
@@ -37,15 +38,15 @@ async def user_access_token(
     internal_event_client: Annotated[
         InternalEventsClient, Depends(get_internal_event_client)
     ],
-    x_gitlab_global_user_id: Annotated[
+    x_gitlab_project_id: Annotated[
         Optional[str], Header()
-    ] = None,  # This is the value of X_GITLAB_GLOBAL_USER_ID_HEADER
-    x_gitlab_realm: Annotated[
+    ] = None,  # This is the value of X_GITLAB_PROJECT_ID_HEADER
+    x_gitlab_namespace_id: Annotated[
         Optional[str], Header()
-    ] = None,  # This is the value of X_GITLAB_REALM_HEADER
-    x_gitlab_instance_id: Annotated[
+    ] = None,  # This is the value of X_GITLAB_NAMESPACE_ID_HEADER
+    x_gitlab_root_namespace_id: Annotated[
         Optional[str], Header()
-    ] = None,  # This is the value of X_GITLAB_INSTANCE_ID_HEADER
+    ] = None,  # This is the value of X_GITLAB_ROOT_NAMESPACE_ID_HEADER
 ):
     unit_primitives = [
         GitLabUnitPrimitive.COMPLETE_CODE,
@@ -70,31 +71,26 @@ async def user_access_token(
         category=__name__,
     )
 
-    if not x_gitlab_global_user_id:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Missing X-Gitlab-Global-User-Id header",
-        )
+    user_claims = current_user.claims or UserClaims()
 
-    if not x_gitlab_instance_id:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Missing X-Gitlab-Instance-Id header",
-        )
-
-    if not x_gitlab_realm:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Missing X-Gitlab-Realm header",
-        )
+    extra_claims = {}
+    # We can only trust the provided headers when the auth token is from SaaS
+    # Otherwise, a user can perform a direct call to AIGW and specify arbitrary values
+    if user_claims.gitlab_realm == "saas":
+        extra_claims = {
+            "gitlab_project_id": x_gitlab_project_id,
+            "gitlab_namespace_id": x_gitlab_namespace_id,
+            "gitlab_root_namespace_id": x_gitlab_root_namespace_id,
+        }
 
     try:
         token, expires_at = token_authority.encode(
-            x_gitlab_global_user_id,
-            x_gitlab_realm,
+            current_user.global_user_id,
+            user_claims.gitlab_realm,
             current_user,
-            x_gitlab_instance_id,
+            user_claims.gitlab_instance_id,
             scopes=scopes,
+            extra_claims=extra_claims,
         )
     except Exception:
         raise HTTPException(

@@ -19,7 +19,13 @@ def auth_user_fixture():
     return CloudConnectorUser(
         authenticated=True,
         claims=UserClaims(
-            scopes=EXTENDED_FEATURE_CATEGORIES_FOR_PROXY_ENDPOINTS.keys()
+            scopes=EXTENDED_FEATURE_CATEGORIES_FOR_PROXY_ENDPOINTS.keys(),
+            gitlab_instance_id="1",
+            extra={
+                "gitlab_project_id": "1",
+                "gitlab_namespace_id": "1",
+                "gitlab_root_namespace_id": "1",
+            },
         ),
     )
 
@@ -36,11 +42,15 @@ class TestProxyVertexAI:
             return_value={"response": "test"},
         ):
             response = mock_client.post(
-                "/proxy/vertex-ai",
+                "/proxy/vertex-ai/",
                 headers={
                     "Authorization": "Bearer 12345",
                     "X-Gitlab-Authentication-Type": "oidc",
                     "X-Gitlab-Unit-Primitive": unit_primitive,
+                    "X-Gitlab-Instance-Id": "1",
+                    "X-Gitlab-Project-Id": "1",
+                    "X-Gitlab-Namespace-Id": "1",
+                    "x-gitlab-root-namespace-id": "1",
                 },
                 json={
                     "model": "claude-3-5-haiku-20241022",
@@ -70,11 +80,15 @@ class TestUnauthorizedScopes:
     def test_failed_authorization_scope(self, mock_client):
         with patch("ai_gateway.proxy.clients.VertexAIProxyClient.proxy"):
             response = mock_client.post(
-                "/proxy/vertex-ai",
+                "/proxy/vertex-ai/",
                 headers={
                     "Authorization": "Bearer 12345",
                     "X-Gitlab-Authentication-Type": "oidc",
                     "X-Gitlab-Unit-Primitive": GitLabUnitPrimitive.EXPLAIN_VULNERABILITY,
+                    "X-Gitlab-Instance-Id": "1",
+                    "X-Gitlab-Project-Id": "1",
+                    "X-Gitlab-Namespace-Id": "1",
+                    "x-gitlab-root-namespace-id": "1",
                 },
                 json={
                     "model": "claude-3-5-haiku-20241022",
@@ -88,3 +102,69 @@ class TestUnauthorizedScopes:
         assert response.json() == {
             "detail": "Unauthorized to access explain_vulnerability"
         }
+
+
+class TestDataMismatch:
+    @pytest.mark.parametrize(
+        "header_key,header_value,expected_status,expected_detail",
+        [
+            (
+                "X-Gitlab-Instance-Id",
+                "999",
+                401,
+                "Header mismatch",
+            ),
+            (
+                "X-Gitlab-Project-Id",
+                "999",
+                403,
+                "Gitlab project id mismatch",
+            ),
+            (
+                "X-Gitlab-Namespace-Id",
+                "999",
+                403,
+                "Gitlab namespace id mismatch",
+            ),
+            (
+                "x-gitlab-root-namespace-id",
+                "999",
+                403,
+                "Gitlab root namespace id mismatch",
+            ),
+        ],
+    )
+    def test_header_mismatch(
+        self, mock_client, header_key, header_value, expected_status, expected_detail
+    ):
+        """Test that mismatched headers are rejected with appropriate status codes."""
+        with patch("ai_gateway.proxy.clients.VertexAIProxyClient.proxy"):
+            headers = {
+                "Authorization": "Bearer 12345",
+                "X-Gitlab-Authentication-Type": "oidc",
+                "X-Gitlab-Unit-Primitive": GitLabUnitPrimitive.ASK_BUILD,
+                "X-Gitlab-Instance-Id": "1",
+                "X-Gitlab-Project-Id": "1",
+                "X-Gitlab-Namespace-Id": "1",
+                "x-gitlab-root-namespace-id": "1",
+            }
+            # Override the header with mismatched value
+            headers[header_key] = header_value
+
+            response = mock_client.post(
+                "/proxy/vertex-ai/",
+                headers=headers,
+                json={
+                    "model": "claude-3-5-haiku-20241022",
+                    "max_tokens": 1024,
+                    "messages": [{"role": "user", "content": "Hi, how are you?"}],
+                    "stream": "true",
+                },
+            )
+
+            assert response.status_code == expected_status
+            response_json = response.json()
+            if expected_status == 401:
+                assert expected_detail in response_json["error"]
+            else:
+                assert response_json == {"detail": expected_detail}
