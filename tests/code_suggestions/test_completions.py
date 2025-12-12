@@ -1,6 +1,6 @@
 from contextlib import contextmanager
 from typing import Any, Type
-from unittest.mock import AsyncMock, Mock, PropertyMock
+from unittest.mock import AsyncMock, Mock, PropertyMock, patch
 
 import pytest
 from gitlab_cloud_connector import CloudConnectorUser
@@ -891,3 +891,66 @@ class TestCodeCompletions:
 
         assert chunks == ["hello ", "world!"]
         mock_billing_client.track_billing_event.assert_called_once()
+
+    async def test_execute_agent_model_with_unknown_language_should_not_crash(self):
+        """Test that AgentModel handles the case where both editor_lang is None and resolve_lang_name returns None
+        without crashing.
+
+        This test reproduces the production error:
+        AttributeError: 'NoneType' object has no attribute 'lower'
+        """
+        prefix = "some code"
+        suffix = ""
+        file_name = "unknown_file_without_extension"  # File with no extension
+        editor_lang = None  # No editor language provided
+        stream = False
+
+        agent_model = Mock(spec=AgentModel)
+        agent_model.input_token_limit = 16
+        agent_model.generate = AsyncMock(
+            return_value=TextGenModelOutput(
+                text="completion",
+                score=0,
+                safety_attributes=SafetyAttributes(),
+                metadata=Mock(output_tokens=5, spec_set=["output_tokens"]),
+            )
+        )
+
+        use_case = CodeCompletions(agent_model, Mock(spec=TokenStrategyBase))
+        use_case.instrumentator = InstrumentorMock(spec=TextGenModelInstrumentator)
+
+        # Mock prompt builder
+        use_case.prompt_builder = Mock(spec=PromptBuilderPrefixBased)
+        use_case.prompt_builder.build.return_value = Prompt(
+            prefix=prefix,
+            suffix=suffix,
+            metadata=MetadataPromptBuilder(
+                components={
+                    "prefix": MetadataCodeContent(length=10, length_tokens=2),
+                    "suffix": MetadataCodeContent(length=10, length_tokens=2),
+                }
+            ),
+        )
+
+        # Mock resolve_lang_name to return None (unknown file extension)
+        with patch(
+            "ai_gateway.code_suggestions.completions.resolve_lang_name",
+            return_value=None,
+        ):
+            # This should not crash with AttributeError: 'NoneType' object has no attribute 'lower'
+            # Instead, it should handle the None case gracefully
+            actual = await use_case.execute(
+                prefix=prefix,
+                suffix=suffix,
+                file_name=file_name,
+                editor_lang=editor_lang,
+                stream=stream,
+            )
+
+            # Should return empty result when language cannot be determined
+            assert actual.text == ""
+            assert actual.score == 0
+            assert actual.lang_id is None
+
+            # Model.generate should not be called when language is unknown
+            agent_model.generate.assert_not_called()

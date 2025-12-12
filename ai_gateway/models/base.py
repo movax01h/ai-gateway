@@ -44,6 +44,16 @@ class KindModelProvider(StrEnum):
     AMAZON_Q = "amazon_q"
     GITLAB = "gitlab"
 
+    @classmethod
+    def from_definition_provider(cls, provider: str) -> "KindModelProvider":
+        if provider == "Anthropic":
+            return KindModelProvider.ANTHROPIC
+        if provider == "Vertex":
+            return KindModelProvider.VERTEX_AI
+        if provider == "Fireworks":
+            return KindModelProvider.FIREWORKS
+        raise ValueError(f"Unknown provider for KindModelProvider: {provider}")
+
 
 class ModelAPIError(Exception):
     def __init__(self, message: str, errors: tuple = (), details: tuple = ()):

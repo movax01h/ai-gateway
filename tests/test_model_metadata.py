@@ -8,6 +8,7 @@ from pydantic import HttpUrl
 
 from ai_gateway.model_metadata import (
     AmazonQModelMetadata,
+    FireworksModelMetadata,
     ModelMetadata,
     create_model_metadata,
 )
@@ -57,38 +58,24 @@ def amazon_q_model_fixture():
     )
 
 
+@pytest.fixture(name="fireworks_model")
+def fireworks_model_fixture():
+    return LLMDefinition(
+        gitlab_identifier="fireworks_ai",
+        name="fireworks_ai",
+        max_context_tokens=200000,
+        family=["codestral"],
+        params={"model": "test_model"},
+    )
+
+
 @pytest.fixture(autouse=True)
-def get_llm_definitions(
-    gitlab_model1, gitlab_model2, amazon_q_model
-):  # pylint: disable=unused-argument
+def get_llm_definitions(gitlab_model1, gitlab_model2, amazon_q_model, fireworks_model):
     mock_models = {
-        "gitlab_model1": LLMDefinition(
-            gitlab_identifier="gitlab_model1",
-            name="gitlab_model",
-            max_context_tokens=200000,
-            family=["mixtral"],
-            params={
-                "model_class_provider": "provider",
-                "model": "model_family",
-            },
-            prompt_params={"timeout": 10},
-        ),
-        "gitlab_model2": LLMDefinition(
-            gitlab_identifier="gitlab_model2",
-            name="gitlab_model2",
-            max_context_tokens=200000,
-            params={
-                "model_class_provider": "provider2",
-                "model": "model_family2",
-            },
-        ),
-        "amazon_q": LLMDefinition(
-            gitlab_identifier="amazon_q",
-            name="amazon_q",
-            max_context_tokens=200000,
-            family=["amazon_q"],
-            params={"model": "amazon_q"},
-        ),
+        "gitlab_model1": gitlab_model1,
+        "gitlab_model2": gitlab_model2,
+        "amazon_q": amazon_q_model,
+        "test_model": fireworks_model,
     }
 
     mock_definitions = {
@@ -297,6 +284,125 @@ def test_create_model_metadata_with_none_data():
 def test_create_model_metadata_without_provider():
     result = create_model_metadata({"name": "test"})
     assert result is None
+
+
+class TestFireworksModelMetadata:
+    """Test Fireworks model metadata creation and validation."""
+
+    def test_create_fireworks_model_metadata_missing_identifier(self):
+        """Test that missing model identifier raises ValueError."""
+        data = {
+            "provider": "fireworks_ai",
+            "name": "test_model",
+            "provider_keys": {"fireworks_api_key": "test-key"},
+            "model_endpoints": {
+                "fireworks_current_region_endpoint": {
+                    "test_model": {
+                        "endpoint": "https://api.fireworks.ai/inference/v1"
+                        # Missing "identifier" key
+                    }
+                }
+            },
+        }
+
+        with pytest.raises(
+            ValueError,
+            match=r"Fireworks model identifier is missing for model test_model\.",
+        ):
+            create_model_metadata(data)
+
+    def test_create_fireworks_model_metadata_empty_string_identifier(self):
+        """Test that empty string model identifier raises ValueError."""
+        data = {
+            "provider": "fireworks_ai",
+            "name": "test_model",
+            "provider_keys": {"fireworks_api_key": "test-key"},
+            "model_endpoints": {
+                "fireworks_current_region_endpoint": {
+                    "test_model": {
+                        "endpoint": "https://api.fireworks.ai/inference/v1",
+                        "identifier": "",  # Empty string identifier
+                    }
+                }
+            },
+        }
+
+        with pytest.raises(
+            ValueError,
+            match=r"Fireworks model identifier is missing for model test_model\.",
+        ):
+            create_model_metadata(data)
+
+    def test_create_fireworks_model_metadata_none_identifier(self):
+        """Test that None model identifier raises ValueError."""
+        data = {
+            "provider": "fireworks_ai",
+            "name": "test_model",
+            "provider_keys": {"fireworks_api_key": "test-key"},
+            "model_endpoints": {
+                "fireworks_current_region_endpoint": {
+                    "test_model": {
+                        "endpoint": "https://api.fireworks.ai/inference/v1",
+                        "identifier": None,  # None identifier
+                    }
+                }
+            },
+        }
+
+        with pytest.raises(
+            ValueError,
+            match=r"Fireworks model identifier is missing for model test_model\.",
+        ):
+            create_model_metadata(data)
+
+    def test_create_fireworks_model_metadata_valid_identifier(self, fireworks_model):
+        """Test that valid model identifier creates FireworksModelMetadata successfully."""
+        data = {
+            "provider": "fireworks_ai",
+            "name": "test_model",
+            "provider_keys": {"fireworks_api_key": "test-key"},
+            "model_endpoints": {
+                "fireworks_current_region_endpoint": {
+                    "test_model": {
+                        "endpoint": "https://api.fireworks.ai/inference/v1",
+                        "identifier": "accounts/fireworks/models/llama-v3p1-70b-instruct",
+                    }
+                }
+            },
+            "llm_definition": fireworks_model,
+        }
+
+        result = create_model_metadata(data)
+
+        assert isinstance(result, FireworksModelMetadata)
+        assert result.provider == "fireworks_ai"
+        assert result.name == "test_model"
+        assert (
+            result.model_identifier
+            == "accounts/fireworks/models/llama-v3p1-70b-instruct"
+        )
+        assert result.api_key == "test-key"
+        assert str(result.endpoint) == "https://api.fireworks.ai/inference/v1"
+
+    def test_fireworks_to_params_with_all_fields(self, fireworks_model):
+        """Test that to_params includes all fields when provided."""
+        metadata = FireworksModelMetadata(
+            provider="fireworks_ai",
+            name="test_model",
+            endpoint="https://api.fireworks.ai/v1",
+            api_key="test_key",
+            model_identifier="test_identifier",
+            using_cache="True",
+            session_id="test_session_id",
+            llm_definition=fireworks_model,
+            family=["codestral"],
+        )
+        params = metadata.to_params()
+        assert params["model"] == "test_identifier"
+        assert params["api_key"] == "test_key"
+        assert params["api_base"] == "https://api.fireworks.ai/v1"
+        assert params["using_cache"] == "True"
+        assert params["session_id"] == "test_session_id"
 
 
 class TestFriendlyName:

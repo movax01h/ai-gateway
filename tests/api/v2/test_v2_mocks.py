@@ -60,7 +60,7 @@ class TestMockedModels:
 
         body = response.json()
 
-        assert body["choices"][0]["text"].startswith("echo:")
+        assert body["choices"][0]["text"].startswith("mock")
 
     def test_fake_generations(self, mock_client: TestClient):
         """Generations: v2 with Anthropic models."""

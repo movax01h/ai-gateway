@@ -6,7 +6,6 @@ from unittest.mock import Mock, patch
 import pytest
 from langchain.tools import BaseTool
 from langchain_anthropic import ChatAnthropic
-from langchain_community.chat_models import ChatLiteLLM
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.prompts.chat import MessageLikeRepresentation
 from langchain_core.runnables import Runnable, RunnableBinding, RunnableSequence
@@ -24,6 +23,7 @@ from ai_gateway.prompts import LocalPromptRegistry, Prompt
 from ai_gateway.prompts.config import ModelClassProvider
 from ai_gateway.prompts.config.base import PromptConfig
 from ai_gateway.prompts.typing import Model, TypeModelFactory, TypePromptTemplateFactory
+from ai_gateway.vendor.langchain_litellm.litellm import ChatLiteLLM
 
 
 class MockPromptTemplateClass(Runnable):

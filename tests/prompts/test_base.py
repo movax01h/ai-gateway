@@ -9,7 +9,6 @@ from unittest.mock import Mock, call
 import pytest
 from anthropic import APITimeoutError, AsyncAnthropic
 from gitlab_cloud_connector import GitLabUnitPrimitive, WrongUnitPrimitives
-from langchain_community.chat_models import ChatLiteLLM
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 from langchain_core.messages.ai import InputTokenDetails, UsageMetadata
 from langchain_core.prompt_values import ChatPromptValue
@@ -40,6 +39,7 @@ from ai_gateway.prompts.config.models import (
     ModelClassProvider,
 )
 from ai_gateway.prompts.typing import TypeModelFactory, TypePromptTemplateFactory
+from ai_gateway.vendor.langchain_litellm.litellm import ChatLiteLLM
 from lib.internal_events.context import InternalEventAdditionalProperties
 from tests.conftest import FakeModel
 

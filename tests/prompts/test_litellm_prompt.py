@@ -4,9 +4,9 @@ import httpx
 import litellm
 import pytest
 from google.auth.credentials import Credentials
-from langchain_community.chat_models import ChatLiteLLM
 
 from ai_gateway.prompts import Prompt
+from ai_gateway.vendor.langchain_litellm.litellm import ChatLiteLLM
 
 
 @pytest.fixture(name="model")

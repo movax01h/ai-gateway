@@ -78,7 +78,7 @@ system.
 ### Example Prompt Retrieval Code
 
 ```python
-from langchain_community.chat_models import ChatLiteLLM
+from ai_gateway.vendor.langchain_litellm.litellm import ChatLiteLLM
 from ai_gateway.prompts import Prompt, LocalPromptRegistry
 from ai_gateway.chat.agents import ReActAgent, ReActAgentInputs
 

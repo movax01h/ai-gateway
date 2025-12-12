@@ -54,6 +54,7 @@ PROVIDERS_MODELS_MAP = {
 
 USE_CASES_MODELS_MAP = {
     KindUseCase.CODE_COMPLETIONS: {
+        KindAnthropicModel.CLAUDE_SONNET_4,
         KindAnthropicModel.CLAUDE_3_5_SONNET,
         KindAnthropicModel.CLAUDE_3_5_HAIKU,
         KindAnthropicModel.CLAUDE_3_5_SONNET_V2,
@@ -74,9 +75,13 @@ USE_CASES_MODELS_MAP = {
         KindGitLabModel.CODESTRAL_2501_FIREWORKS,
         KindGitLabModel.CODESTRAL_2501_VERTEX,
         KindGitLabModel.CLAUDE_SONNET_3_7,
-        KindGitLabModel.CLAUDE_3_5_SONNET,
         KindGitLabModel.CLAUDE_3_5_HAIKU,
         KindGitLabModel.GITLAB_DEFAULT_MODEL,
+        KindGitLabModel.CLAUDE_SONNET_3_7_VERTEX,
+        KindGitLabModel.CLAUDE_4_SONNET,
+        KindGitLabModel.CLAUDE_4_SONNET_VERTEX,
+        KindGitLabModel.CLAUDE_4_5_SONNET,
+        KindGitLabModel.CLAUDE_4_5_SONNET_VERTEX,
     },
     KindUseCase.CODE_GENERATIONS: {
         KindVertexTextModel.CODE_BISON_002,

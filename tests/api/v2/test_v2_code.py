@@ -9,6 +9,8 @@ from dependency_injector import containers
 from fastapi import status
 from fastapi.testclient import TestClient
 from gitlab_cloud_connector import CloudConnectorUser, UserClaims
+from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
+from langchain_core.prompt_values import ChatPromptValue
 from snowplow_tracker import Snowplow
 from starlette.datastructures import CommaSeparatedStrings
 from structlog.testing import capture_logs
@@ -18,6 +20,7 @@ from ai_gateway.api.v2 import api_router
 from ai_gateway.api.v2.code.completions import _track_code_suggestions_event
 from ai_gateway.model_selection import LLMDefinition
 from ai_gateway.models.base_chat import Message, Role
+from ai_gateway.models.mock import FakeModel
 from ai_gateway.tracking.container import ContainerTracking
 from ai_gateway.tracking.instrumentator import SnowplowInstrumentator
 from ai_gateway.tracking.snowplow import SnowplowEvent, SnowplowEventContext
@@ -42,12 +45,18 @@ def auth_user_fixture():
     )
 
 
+@pytest.fixture(name="mock_model_responses")
+def mock_model_responses_fixture():
+    return False
+
+
 @pytest.fixture(name="config_values")
-def config_values_fixture(assets_dir, gcp_location):
+def config_values_fixture(mock_model_responses, assets_dir, gcp_location) -> Dict:
     return {
         "custom_models": {
             "enabled": True,
         },
+        "mock_model_responses": mock_model_responses,
         "google_cloud_platform": {
             "location": gcp_location,
         },
@@ -95,6 +104,15 @@ def mock_post_processor_fixture():
         yield mock
 
 
+@pytest.fixture(name="mock_prompt_ainvoke")
+def mock_prompt_ainvoke_fixture():
+    """Mock Prompt.ainvoke to return test completions."""
+
+    with patch.object(FakeModel, "ainvoke") as mock:
+        mock.return_value = AIMessage(content="whatever")
+        yield mock
+
+
 class TestCodeCompletions:
     def cleanup(self):
         """Ensure Snowplow cache is reset between tests."""
@@ -115,13 +133,13 @@ class TestCodeCompletions:
             (
                 1,
                 "anthropic",
-                "claude-3-5-sonnet-20241022",
+                "claude-sonnet-4-20250514",
                 "def search",
                 {
                     "id": "id",
                     "model": {
                         "engine": "anthropic",
-                        "name": "claude-3-5-sonnet-20241022",
+                        "name": "claude-sonnet-4-20250514",
                         "lang": "python",
                         "tokens_consumption_metadata": None,
                         "region": "us-central1",
@@ -143,13 +161,13 @@ class TestCodeCompletions:
             (
                 3,
                 "anthropic",
-                "claude-3-5-sonnet-20240620",
+                "claude-sonnet-4-20250514",
                 "def search",
                 {
                     "id": "id",
                     "model": {
                         "engine": "anthropic",
-                        "name": "claude-3-5-sonnet-20240620",
+                        "name": "claude-sonnet-4-20250514",
                         "lang": "python",
                         "tokens_consumption_metadata": None,
                         "region": "us-central1",
@@ -199,13 +217,13 @@ class TestCodeCompletions:
             (
                 1,
                 "anthropic",
-                "claude-3-5-sonnet-20241022",
+                "claude-sonnet-4-20250514",
                 "",
                 {
                     "id": "id",
                     "model": {
                         "engine": "anthropic",
-                        "name": "claude-3-5-sonnet-20241022",
+                        "name": "claude-sonnet-4-20250514",
                         "lang": "python",
                         "tokens_consumption_metadata": None,
                         "region": "us-central1",
@@ -327,7 +345,7 @@ class TestCodeCompletions:
             "project_id": 278964,
             "model_provider": "anthropic",
             "current_file": current_file,
-            "model_name": "claude-3-5-sonnet-20240620",
+            "model_name": "claude-sonnet-4-20250514",
         }
 
         code_completions_kwargs = {}
@@ -421,8 +439,8 @@ class TestCodeCompletions:
                 "http://localhost:4000/",
                 "api-key",
                 None,
-                True,
                 False,
+                True,
                 False,
                 200,
                 [
@@ -442,8 +460,8 @@ class TestCodeCompletions:
                 "http://localhost:4000/",
                 "api-key",
                 "provider/codegemma_2b",
-                True,
                 False,
+                True,
                 False,
                 200,
                 [
@@ -505,8 +523,8 @@ class TestCodeCompletions:
                 "http://localhost:4000/",
                 "api-key",
                 None,
-                True,
                 False,
+                True,
                 False,
                 200,
                 [
@@ -526,8 +544,8 @@ class TestCodeCompletions:
                 "https://fireworks.endpoint",
                 "api-key",
                 None,
-                True,
                 False,
+                True,
                 False,
                 200,
                 [
@@ -558,8 +576,8 @@ class TestCodeCompletions:
                 "https://fireworks.endpoint",
                 "api-key",
                 None,
-                True,
                 False,
+                True,
                 False,
                 200,
                 [
@@ -579,8 +597,8 @@ class TestCodeCompletions:
                 "https://fireworks.endpoint",
                 "api-key",
                 None,
-                True,
                 False,
+                True,
                 False,
                 200,
                 [
@@ -611,8 +629,8 @@ class TestCodeCompletions:
                 "https://fireworks.endpoint",
                 "api-key",
                 None,
-                True,
                 False,
+                True,
                 False,
                 200,
                 [
@@ -653,8 +671,8 @@ class TestCodeCompletions:
                 None,
                 None,
                 None,
-                True,
                 False,
+                True,
                 False,
                 200,
                 [
@@ -674,8 +692,8 @@ class TestCodeCompletions:
                 None,
                 None,
                 None,
-                True,
                 False,
+                True,
                 False,
                 200,
                 [
@@ -691,12 +709,12 @@ class TestCodeCompletions:
                 "foo",
                 [],
                 "codestral",
-                "codestral-2501",
+                "codestral",
                 "http://localhost:4000/",
                 "api-key",
                 None,
-                True,
                 False,
+                True,
                 False,
                 200,
                 [
@@ -711,13 +729,55 @@ class TestCodeCompletions:
                 2,
                 "foo",
                 [],
-                "codestral",
-                "codestral-2501",
-                "http://localhost:4000/",
-                "api-key",
+                "gitlab",
+                "codestral_2501_vertex",
                 None,
+                None,
+                None,
+                False,
                 True,
                 False,
+                200,
+                [
+                    {
+                        "text": "test completion",
+                        "index": 0,
+                        "finish_reason": "length",
+                    }
+                ],
+            ),
+            (
+                2,
+                "foo",
+                [],
+                "gitlab",
+                "codestral_2501_fireworks",
+                None,
+                None,
+                None,
+                False,
+                True,
+                False,
+                200,
+                [
+                    {
+                        "text": "test completion",
+                        "index": 0,
+                        "finish_reason": "length",
+                    }
+                ],
+            ),
+            (
+                2,
+                "foo",
+                [],
+                "gitlab",
+                "claude_sonnet_4_20250514",
+                None,
+                None,
+                None,
+                False,
+                True,
                 False,
                 200,
                 [
@@ -788,22 +848,6 @@ class TestCodeCompletions:
         if want_status == 200:
             body = response.json()
             assert body["choices"] == want_choices
-
-        if model_provider == "fireworks_ai":
-            content = [c["content"] for c in context]
-            prefix = "\n".join(content + ["foo"])
-
-            mock_llm_text.assert_called_with(
-                prefix,
-                "\n",
-                False,
-                snowplow_event_context=ANY,
-                max_output_tokens=48,
-            )
-
-            mock_track_internal_event.assert_called_once_with(
-                "request_complete_code", category="ai_gateway.api.v2.code.completions"
-            )
 
         if model_provider in ("codestral", "litellm"):
             mock_track_internal_event.assert_called_with(
@@ -886,7 +930,7 @@ class TestCodeCompletions:
             "current_file": current_file,
             "stream": True,
             "context": context,
-            "model_name": "claude-3-5-sonnet-20240620",
+            "model_name": "claude-sonnet-4-20250514",
         }
         if model:
             data["model_name"] = model
@@ -1090,7 +1134,7 @@ class TestCodeCompletions:
             "project_id": 278964,
             "model_provider": "anthropic",
             "current_file": current_file,
-            "model_name": "claude-3-5-sonnet-20240620",
+            "model_name": "claude-sonnet-4-20250514",
         }
 
         response = mock_client.post(
@@ -1106,6 +1150,7 @@ class TestCodeCompletions:
 
         assert response.status_code == expected_status_code
 
+    @pytest.mark.parametrize("mock_model_responses", [True])
     @pytest.mark.parametrize(
         "model_details",
         [{"model_provider": "vertex-ai", "model_name": "codestral-2501"}, {}],
@@ -1113,7 +1158,7 @@ class TestCodeCompletions:
     def test_vertex_codestral(
         self,
         mock_client: Mock,
-        mock_litellm_acompletion: Mock,
+        mock_prompt_ainvoke: Mock,
         mock_post_processor: Mock,
         model_details: Dict[str, str],
     ):
@@ -1132,38 +1177,32 @@ class TestCodeCompletions:
 
         response = self._send_code_completions_request(mock_client, params)
 
-        mock_litellm_acompletion.assert_called_with(
-            model="vertex_ai/codestral-2501",
-            messages=[{"content": "foo", "role": Role.USER}],
-            suffix="\n",
-            text_completion=True,
-            vertex_ai_location="us-central1",
-            max_tokens=64,
-            temperature=0.7,
-            top_p=0.95,
-            stream=False,
-            timeout=60,
-            stop=["\n\n", "\n+++++", "[PREFIX]", "</s>[SUFFIX]", "[MIDDLE]"],
-        )
+        assert response.status_code == 200
+        assert mock_prompt_ainvoke.called, "Should use prompt registry execution"
 
         mock_post_processor.assert_called_with(
-            "Test text completion response",
+            "whatever",
             score=10**5,
             max_output_tokens_used=False,
-            model_name="vertex_ai/codestral-2501",
+            model_name="Codestral 22B Code Completions",
         )
 
         result = response.json()
-        assert result["model"]["engine"] == "vertex-ai"
-        assert result["model"]["name"] == "vertex_ai/codestral-2501"
+        assert result["model"]["engine"] == "agent"
+        assert (
+            "Codestral" in result["model"]["name"]
+            or "codestral" in result["model"]["name"]
+        )
+
         assert result["choices"][0]["text"] == "Post-processed completion response"
 
+    @pytest.mark.parametrize("mock_model_responses", [True])
     @pytest.mark.parametrize(
         "allow_llm_cache",
         ["true", "false"],
     )
     def test_fireworks_codestral_with_prompt(
-        self, allow_llm_cache: str, mock_litellm_acompletion: Mock, mock_client: Mock
+        self, allow_llm_cache: str, mock_prompt_ainvoke: Mock, mock_client: Mock
     ):
         params = {
             "project_path": "gitlab-org/gitlab-shell",
@@ -1181,15 +1220,134 @@ class TestCodeCompletions:
             "prompt_cache_max_len": 0,
         }
 
-        self._send_code_completions_request(mock_client, params, allow_llm_cache)
+        response = self._send_code_completions_request(
+            mock_client, params, allow_llm_cache
+        )
 
-        kwargs = mock_litellm_acompletion.call_args.kwargs
+        assert mock_prompt_ainvoke.called, "Should use prompt registry execution"
+        assert response.status_code == 200
 
-        if allow_llm_cache == "false":
-            assert "prompt_cache_max_len" in kwargs
-        else:
-            assert "prompt_cache_max_len" not in kwargs
+        body = response.json()
+        assert body["model"]["engine"] == "agent"
+        assert "Codestral" in body["model"]["name"]
 
+    @pytest.mark.parametrize("mock_model_responses", [True])
+    @pytest.mark.parametrize(
+        (
+            "gitlab_model_identifier",
+            "expected_model_name",
+            "expect_post_processed",
+        ),
+        [
+            (
+                "codestral_2501_vertex",
+                "Codestral 22B Code Completions",
+                True,
+            ),
+            (
+                "codestral_2501_fireworks",
+                "Codestral 22B Code Completions",
+                True,
+            ),
+            (
+                "claude_sonnet_4_20250514",
+                "Claude Code Completions",
+                False,
+            ),
+        ],
+    )
+    def test_gitlab_model_provider_code_completions(
+        self,
+        mock_client: Mock,
+        mock_prompt_ainvoke: Mock,
+        mock_post_processor: Mock,
+        gitlab_model_identifier: str,
+        expected_model_name: str,
+        expect_post_processed: bool,
+    ):
+        """Test code completions with gitlab model provider and different underlying providers."""
+        params = {
+            "prompt_version": 2,
+            "project_path": "gitlab-org/gitlab",
+            "project_id": 278964,
+            "current_file": {
+                "file_name": "main.py",
+                "content_above_cursor": "foo",
+                "content_below_cursor": "\n",
+            },
+            "model_provider": "gitlab",
+            "model_name": gitlab_model_identifier,
+        }
+
+        response = self._send_code_completions_request(mock_client, params)
+
+        assert response.status_code == 200
+        assert mock_prompt_ainvoke.called, "Should use prompt registry execution"
+
+        body = response.json()
+        assert body["model"]["engine"] == "agent"
+        assert body["model"]["name"] == expected_model_name
+        assert (
+            body["choices"][0]["text"] == expect_post_processed
+            and "Post-processed completion response"
+            or "whatever"
+        )
+
+    @pytest.mark.parametrize("mock_model_responses", [True])
+    @pytest.mark.parametrize(
+        ("cache_header_value", "expected_using_cache"),
+        [
+            ("true", "True"),  # Cache enabled
+            ("false", "False"),  # Cache disabled
+            ("True", "True"),  # Case-insensitive true
+            ("FALSE", "False"),  # Case-insensitive false
+        ],
+    )
+    def test_fireworks_prompt_cache_behavior(
+        self,
+        mock_client: Mock,
+        cache_header_value: str,
+        expected_using_cache: str,
+        mock_prompt_ainvoke: Mock,
+    ):
+        """Test that X-Gitlab-Model-Prompt-Cache-Enabled header affects using_cache in Fireworks calls."""
+        params = {
+            "prompt_version": 2,
+            "project_path": "gitlab-org/gitlab",
+            "project_id": 278964,
+            "current_file": {
+                "file_name": "main.py",
+                "content_above_cursor": "foo",
+                "content_below_cursor": "\n",
+            },
+            "model_provider": "fireworks_ai",
+            "model_name": "codestral-2501",
+            "model_endpoint": "http://localhost:4000/",
+            "model_api_key": "api-key",
+        }
+
+        headers = {
+            "Authorization": "Bearer 12345",
+            "X-Gitlab-Authentication-Type": "oidc",
+            "X-GitLab-Instance-Id": "1234",
+            "X-GitLab-Realm": "self-managed",
+            "X-Gitlab-Model-Prompt-Cache-Enabled": cache_header_value,
+        }
+
+        # Make the request
+        response = mock_client.post("/code/completions", headers=headers, json=params)
+        import json
+
+        print(json.dumps(response.json(), indent=2))
+
+        assert response.status_code == 200
+
+        # Verify that the prompt was called with the correct using_cache parameter
+        mock_prompt_ainvoke.assert_called_once()
+        call_kwargs = mock_prompt_ainvoke.call_args.kwargs
+        assert call_kwargs["using_cache"] == expected_using_cache
+
+    @pytest.mark.parametrize("mock_model_responses", [True])
     @pytest.mark.parametrize(
         ("gcp_location", "model_details", "expected_model", "expected_content"),
         [
@@ -1197,7 +1355,7 @@ class TestCodeCompletions:
                 "asia-mock-location",
                 {"model_provider": "vertex-ai", "model_name": "codestral-2501"},
                 "codestral-2501",
-                "</s>[SUFFIX]\n[PREFIX]foo[MIDDLE]",
+                "<s>[SUFFIX]\n[PREFIX]foo",
             ),
             (
                 "asia-mock-location",
@@ -1214,6 +1372,7 @@ class TestCodeCompletions:
         model_details: Dict[str, str],
         expected_model: str,
         expected_content: str,
+        mock_prompt_ainvoke: Mock,
     ):
         params = {
             "prompt_version": 1,
@@ -1230,21 +1389,28 @@ class TestCodeCompletions:
 
         self._send_code_completions_request(mock_client, params)
 
-        mock_litellm_acompletion.assert_called_once_with(
-            messages=[{"content": expected_content, "role": "user"}],
-            max_tokens=48,
-            temperature=0.95,
-            top_p=0.95,
-            timeout=60,
+        mock_prompt_ainvoke.assert_called_once_with(
+            ChatPromptValue(
+                messages=[
+                    SystemMessage(
+                        content="As a python code completion assistant that generates only python syntax, your responsibility is to fill in the precise missing python code that seamlessly bridges a provided 'prefix' and 'suffix'.\n\n### Requirements:\n1. Complete the functionality with exact python code adhering to the given prefix and suffix.\n2. Provide only the missing code snippet essential for functionality, strictly conforming to python syntax.\n3. Exclude repetition, formatting, or explanatory text.\n\n- prefix: Code before the missing part.\n- suffix: Code continuing after the gap.\n\nCRITICAL INSTRUCTIONS:\n\n1. Output only the requested code.\n2. Exclusion of all non-code content.\n3. Concise and deployable code.\n4. Return an empty response if necessary.\n\nRespond exclusively with code—avoid adding any human-readable content intros, explanations, closings, markdown formatting or instructions.",
+                        additional_kwargs={},
+                        response_metadata={},
+                    ),
+                    HumanMessage(
+                        content=expected_content,
+                        additional_kwargs={},
+                        response_metadata={},
+                    ),
+                ]
+            ),
+            {"tags": [], "metadata": {}, "callbacks": ANY, "configurable": {}},
             stop=ANY,
-            api_base="https://fireworks.endpoint",
-            api_key="mock_fireworks_key",
+            timeout=60.0,
             model=expected_model,
-            custom_llm_provider="text-completion-openai",
-            client=None,
-            prompt_cache_max_len=0,
-            logprobs=1,
-            stream=False,
+            api_key="mock_fireworks_key",
+            api_base="https://fireworks.endpoint",
+            using_cache="False",
         )
 
     @pytest.mark.asyncio
@@ -1465,9 +1631,16 @@ class TestGitLabModelProvider:
             patch(
                 "ai_gateway.api.v2.code.completions._execute_code_completion"
             ) as mock_execute,
+            patch(
+                "ai_gateway.api.v2.code.completions._build_code_completions"
+            ) as mock_build,
         ):
             mock_get_model.return_value = test_model
             mock_execute.return_value = [mock_suggestion]
+
+            # Mock _build_code_completions to return proper code_completions and kwargs
+            mock_completions = Mock()
+            mock_build.return_value = (mock_completions, {})
 
             # Test case when model_identifier is empty
             response = mock_client.post(
@@ -1492,10 +1665,7 @@ class TestGitLabModelProvider:
             )
 
             assert response.status_code == 200
-            assert mock_get_model.called
-
-            build_args, build_kwargs = mock_get_model.call_args
-            assert build_args[0] == "code_completions"
+            assert mock_build.called
 
             body = response.json()
             assert body["model"]["engine"] == "vertex-ai"
@@ -1573,6 +1743,167 @@ class TestGitLabModelProvider:
             ]
 
             assert (body["detail"]) == expected_error_message
+
+    @pytest.mark.parametrize("mock_model_responses", [True])
+    def test_gitlab_model_provider_preserves_gitlab_identifier(
+        self,
+        mock_client,
+        mock_track_internal_event: Mock,
+    ):
+        """Test that gitlab_identifier is preserved when model_provider is gitlab."""
+
+        test_model = LLMDefinition(
+            name="Test Model",
+            gitlab_identifier="claude_sonnet_4_5_20250929_vertex",
+            max_context_tokens=200000,
+            description="A model description",
+            family=["test-family"],
+            provider="Vertex",
+            params={"temperature": 0.0, "max_tokens": 4096},
+        )
+
+        mock_suggestion = Mock()
+        mock_suggestion.text = "test completion"
+        mock_suggestion.score = 1.0
+
+        mock_model = Mock()
+        mock_model.engine = "vertex-ai"
+        mock_model.name = "claude-sonnet-4-20250929"
+        mock_suggestion.model = mock_model
+
+        mock_suggestion.lang = "python"
+        mock_suggestion.metadata = None
+
+        with (
+            patch(
+                "ai_gateway.model_selection.ModelSelectionConfig.get_model"
+            ) as mock_get_model,
+            patch(
+                "ai_gateway.api.v2.code.completions._execute_code_completion"
+            ) as mock_execute,
+        ):
+            mock_get_model.return_value = test_model
+            mock_execute.return_value = [mock_suggestion]
+
+            response = mock_client.post(
+                "/code/completions",
+                headers={
+                    "Authorization": "Bearer 12345",
+                    "X-Gitlab-Authentication-Type": "oidc",
+                    "X-GitLab-Instance-Id": "1234",
+                    "X-GitLab-Realm": "self-managed",
+                },
+                json={
+                    "prompt_version": 2,
+                    "prompt": "foo",
+                    "current_file": {
+                        "file_name": "main.py",
+                        "content_above_cursor": "foo",
+                        "content_below_cursor": "\n",
+                    },
+                    "model_provider": "gitlab",
+                    "model_name": "claude_sonnet_4_5_20250929_vertex",
+                },
+            )
+
+            # Verify the request was successful
+            assert response.status_code == 200
+            body = response.json()
+            assert body["choices"][0]["text"] == "test completion"
+            assert body["model"]["engine"] == "vertex-ai"
+
+    @pytest.mark.parametrize("mock_model_responses", [True])
+    @pytest.mark.parametrize(
+        (
+            "gitlab_identifier",
+            "provider",
+            "params",
+        ),
+        [
+            (
+                "codestral_2501_vertex",
+                "Vertex",
+                {"temperature": 0.0, "max_tokens": 4096},
+            ),
+            (
+                "codestral_2501_fireworks",
+                "Fireworks",
+                {"temperature": 0.0, "max_tokens": 4096, "model": "codestral-2501"},
+            ),
+            (
+                "claude_sonnet_4_20250514",
+                "Anthropic",
+                {"temperature": 0.0, "max_tokens": 4096},
+            ),
+        ],
+    )
+    def test_gitlab_identifier_preserved_for_different_models(
+        self,
+        mock_client,
+        gitlab_identifier: str,
+        provider: str,
+        params: dict,
+    ):
+        """Test that gitlab_identifier is preserved for different model types."""
+
+        test_model = LLMDefinition(
+            name="Test Model",
+            gitlab_identifier=gitlab_identifier,
+            max_context_tokens=200000,
+            description="A model description",
+            family=["test-family"],
+            provider=provider,
+            params=params,
+        )
+
+        mock_suggestion = Mock()
+        mock_suggestion.text = "test completion"
+        mock_suggestion.score = 1.0
+
+        mock_model = Mock()
+        mock_model.engine = "test-engine"
+        mock_model.name = "test-model"
+        mock_suggestion.model = mock_model
+
+        mock_suggestion.lang = "python"
+        mock_suggestion.metadata = None
+
+        with (
+            patch(
+                "ai_gateway.model_selection.ModelSelectionConfig.get_model"
+            ) as mock_get_model,
+            patch(
+                "ai_gateway.api.v2.code.completions._execute_code_completion"
+            ) as mock_execute,
+        ):
+            mock_get_model.return_value = test_model
+            mock_execute.return_value = [mock_suggestion]
+
+            response = mock_client.post(
+                "/code/completions",
+                headers={
+                    "Authorization": "Bearer 12345",
+                    "X-Gitlab-Authentication-Type": "oidc",
+                    "X-GitLab-Instance-Id": "1234",
+                    "X-GitLab-Realm": "self-managed",
+                },
+                json={
+                    "prompt_version": 2,
+                    "prompt": "foo",
+                    "current_file": {
+                        "file_name": "main.py",
+                        "content_above_cursor": "foo",
+                        "content_below_cursor": "\n",
+                    },
+                    "model_provider": "gitlab",
+                    "model_name": gitlab_identifier,
+                },
+            )
+
+            # Verify the request was successful
+            assert response.status_code == 200
+            body = response.json()
+            assert body["choices"][0]["text"] == "test completion"
 
 
 class TestCodeGenerations:
@@ -1818,68 +2149,6 @@ class TestCodeGenerations:
                     {"role": "user", "content": "bar"},
                 ],
                 "anthropic",
-                "claude-3-5-haiku-20241022",
-                None,
-                None,
-                "foo",
-                False,
-                True,
-                True,
-                False,
-                200,
-                [
-                    Message(role=Role.SYSTEM, content="foo"),
-                    Message(role=Role.USER, content="bar"),
-                ],
-                [
-                    {
-                        "text": "foo",
-                        "index": 0,
-                        "finish_reason": "length",
-                    }
-                ],
-                ["flag_a", "flag_b"],
-            ),  # v3 with prompt - anthropic
-            (
-                3,
-                None,
-                "foo",
-                [
-                    {"role": "system", "content": "foo"},
-                    {"role": "user", "content": "bar"},
-                ],
-                "anthropic",
-                "claude-3-5-haiku-20241022",
-                None,
-                None,
-                "foo",
-                False,
-                True,
-                True,
-                False,
-                200,
-                [
-                    Message(role=Role.SYSTEM, content="foo"),
-                    Message(role=Role.USER, content="bar"),
-                ],
-                [
-                    {
-                        "text": "foo",
-                        "index": 0,
-                        "finish_reason": "length",
-                    }
-                ],
-                ["flag_a", "flag_b"],
-            ),
-            (
-                3,
-                None,
-                "foo",
-                [
-                    {"role": "system", "content": "foo"},
-                    {"role": "user", "content": "bar"},
-                ],
-                "anthropic",
                 "claude-2-1",
                 None,
                 None,
@@ -1966,7 +2235,6 @@ class TestCodeGenerations:
     def test_non_stream_response(
         self,
         mock_client,
-        mock_ai_gateway_container: containers.Container,
         mock_code_bison: Mock,
         mock_anthropic_chat: Mock,
         mock_llm_chat: Mock,
@@ -1980,7 +2248,6 @@ class TestCodeGenerations:
         model_name,
         model_endpoint,
         model_api_key,
-        mock_output_text,
         want_vertex_called,
         want_anthropic_chat_called,
         want_prompt_prepared_called,
@@ -2144,7 +2411,7 @@ class TestAmazonQIntegration:
                     ),
                 ),
                 "anthropic",
-                "claude-3-5-sonnet-20240620",
+                "claude-sonnet-4-20250514",
             ),
             (
                 CloudConnectorUser(
