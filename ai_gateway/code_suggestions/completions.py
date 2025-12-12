@@ -142,16 +142,17 @@ class CodeCompletions:
                 watch_container.register_lang(lang_id, editor_lang)
 
                 if isinstance(self.model, AgentModel):
-                    params = {
-                        "prefix": prompt.prefix,
-                        "suffix": prompt.suffix,
-                        "file_name": file_name,
-                        "language": (
-                            editor_lang or resolve_lang_name(file_name)
-                        ).lower(),
-                    }
+                    if lang := (editor_lang or resolve_lang_name(file_name)):
+                        params = {
+                            "prefix": prompt.prefix,
+                            "suffix": prompt.suffix,
+                            "file_name": file_name,
+                            "language": lang.lower(),
+                        }
 
-                    res = await self.model.generate(params, stream)
+                        res = await self.model.generate(params, stream)
+                    else:
+                        res = None
                 elif isinstance(self.model, ChatModelBase):
                     res = await self.model.generate(
                         prompt.prefix, stream=stream, **kwargs

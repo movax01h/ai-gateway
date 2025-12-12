@@ -73,7 +73,11 @@ class ContainerModels(containers.DeclarativeContainer):
 
     lite_llm_chat_fn = providers.Selector(
         _mock_selector,
-        original=providers.Factory(_litellm_factory),
+        original=providers.Factory(
+            _litellm_factory,
+            model_keys=config.model_keys,
+            model_endpoints=config.model_endpoints,
+        ),
         mocked=providers.Factory(mock.FakeModel),
         agentic=providers.Factory(mock.AgenticFakeModel),
     )

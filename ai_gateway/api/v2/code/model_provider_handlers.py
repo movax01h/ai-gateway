@@ -60,6 +60,20 @@ class FireworksHandler(BaseModelProviderHandler):
             self.payload.model_name = default_model
 
 
+class VertexHandler(BaseModelProviderHandler):
+    def update_completion_params(self):
+        self.completion_params.update(
+            {"temperature": 0.7, "max_output_tokens": 64, "context_max_percent": 0.3}
+        )
+
+        if self.payload.context:
+            self._update_code_context()
+
+        self.payload.model_provider = KindModelProvider.VERTEX_AI
+        if not self.payload.model_name:
+            self.payload.model_name = KindLiteLlmModel.CODESTRAL_2501
+
+
 class LegacyHandler(BaseModelProviderHandler):
     def update_completion_params(self):
         choices_count = self.payload.choices_count

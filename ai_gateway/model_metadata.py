@@ -37,6 +37,36 @@ class AmazonQModelMetadata(BaseModelMetadata):
         }
 
 
+class FireworksModelMetadata(BaseModelMetadata):
+    provider: Literal["fireworks_ai"]
+    name: Annotated[str, StringConstraints(max_length=255)]
+    endpoint: Optional[Annotated[AnyUrl, UrlConstraints(max_length=255)]] = None
+    api_key: Optional[Annotated[str, StringConstraints(max_length=2000)]] = None
+    friendly_name: Optional[Annotated[str, StringConstraints(max_length=255)]] = None
+    model_identifier: str
+    using_cache: Optional[bool] = None
+    session_id: Optional[str] = None
+
+    def to_params(self) -> Dict[str, Any]:
+        params = {
+            "model": self.model_identifier,
+        }
+
+        if self.api_key:
+            params["api_key"] = self.api_key
+
+        if self.endpoint:
+            params["api_base"] = str(self.endpoint).removesuffix("/")
+
+        if self.using_cache is not None:
+            params["using_cache"] = str(self.using_cache)
+
+        if self.session_id is not None:
+            params["session_id"] = self.session_id
+
+        return params
+
+
 class ModelMetadata(BaseModelMetadata):
     name: Annotated[str, StringConstraints(max_length=255)]
     provider: Annotated[str, StringConstraints(max_length=255)]
@@ -51,7 +81,7 @@ class ModelMetadata(BaseModelMetadata):
         This function also allows setting custom provider details based on the identifier, like fetching endpoints based
         on AIGW location.
         """
-        params: Dict[str, str] = self.llm_definition.prompt_params.model_dump(
+        params: Dict[str, Any] = self.llm_definition.prompt_params.model_dump(
             exclude_none=True
         )
 
@@ -71,7 +101,7 @@ class ModelMetadata(BaseModelMetadata):
                 params["model"] = self.identifier
 
         if self.api_key:
-            params["api_key"] = str(self.api_key)
+            params["api_key"] = self.api_key
         else:
             # Set a default dummy key to avoid LiteLLM errors
             # See https://gitlab.com/gitlab-org/gitlab/-/issues/520512
@@ -81,7 +111,7 @@ class ModelMetadata(BaseModelMetadata):
         return params
 
 
-TypeModelMetadata = AmazonQModelMetadata | ModelMetadata
+TypeModelMetadata = AmazonQModelMetadata | ModelMetadata | FireworksModelMetadata
 
 
 def create_model_metadata(data: dict[str, Any] | None) -> Optional[TypeModelMetadata]:
@@ -97,6 +127,40 @@ def create_model_metadata(data: dict[str, Any] | None) -> Optional[TypeModelMeta
             family=llm_definition.family,
             friendly_name=llm_definition.name,
             **data,
+        )
+
+    if data["provider"] == "fireworks_ai":
+        fireworks_llm_definition = (
+            configs.get_model(data["name"]) if data.get("name") else None
+        )
+
+        if not fireworks_llm_definition:
+            raise ValueError(
+                f"No LLM definition found for Fireworks model {data['name']}."
+            )
+
+        provider_keys = data.get("provider_keys", {})
+        model_endpoints = data.get("model_endpoints", {})
+
+        region_config = model_endpoints.get("fireworks_current_region_endpoint", {})
+        model_config = region_config.get(fireworks_llm_definition.params["model"], {})
+
+        model_identifier = model_config.get("identifier")
+        if not model_identifier or model_identifier == "":
+            raise ValueError(
+                f"Fireworks model identifier is missing for model {data['name']}."
+            )
+
+        return FireworksModelMetadata(
+            provider="fireworks_ai",
+            name=data["name"],
+            endpoint=model_config.get("endpoint"),
+            api_key=provider_keys.get("fireworks_api_key"),
+            model_identifier=model_identifier,
+            using_cache=data.get("using_cache"),
+            session_id=data.get("session_id"),
+            llm_definition=fireworks_llm_definition,
+            family=fireworks_llm_definition.family,
         )
 
     if name := data.get("name"):

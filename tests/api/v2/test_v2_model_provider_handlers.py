@@ -7,6 +7,7 @@ from ai_gateway.api.v2.code.model_provider_handlers import (
     FireworksHandler,
     LegacyHandler,
     LiteLlmHandler,
+    VertexHandler,
 )
 
 
@@ -118,6 +119,73 @@ class TestFireworksHandler:
         FireworksHandler(payload, request, completion_params).update_completion_params()
 
         assert completion_params == want_completion_params
+
+
+class TestVertexHandler:
+    @pytest.mark.parametrize(
+        ("context", "initial_model_name", "want_completion_params", "want_model_name"),
+        [
+            (
+                [],
+                "claude-sonnet-4-5@20250929",
+                {
+                    "temperature": 0.7,
+                    "max_output_tokens": 64,
+                    "context_max_percent": 0.3,
+                },
+                "claude-sonnet-4-5@20250929",
+            ),
+            (
+                [
+                    Mock(
+                        type="file",
+                        name="foo.py",
+                        content="from typing import List",
+                    ),
+                    Mock(
+                        type="file",
+                        name="bar.py",
+                        content="from typing import Any",
+                    ),
+                ],
+                "claude-sonnet-4-5@20250929",
+                {
+                    "temperature": 0.7,
+                    "max_output_tokens": 64,
+                    "context_max_percent": 0.3,
+                    "code_context": [
+                        "from typing import List",
+                        "from typing import Any",
+                    ],
+                },
+                "claude-sonnet-4-5@20250929",
+            ),
+            (
+                [],
+                None,
+                {
+                    "temperature": 0.7,
+                    "max_output_tokens": 64,
+                    "context_max_percent": 0.3,
+                },
+                "codestral-2501",
+            ),
+        ],
+    )
+    def test_update_completion_params_preserves_model_name(
+        self, context, initial_model_name, want_completion_params, want_model_name
+    ):
+        """Test that VertexHandler preserves the model_name when provided, and only defaults to CODESTRAL_2501 when not
+        provided."""
+        payload = Mock(context=context, model_name=initial_model_name)
+        request = Mock()
+        completion_params = {}
+
+        VertexHandler(payload, request, completion_params).update_completion_params()
+
+        assert completion_params == want_completion_params
+        # Ensure model_name is preserved when provided, or defaults to CODESTRAL_2501 when not
+        assert payload.model_name == want_model_name
 
 
 class TestLegacyHandler:

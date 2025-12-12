@@ -1,7 +1,7 @@
 from unittest.mock import Mock
 
 import pytest
-from langchain_community.chat_models import ChatAnthropic, ChatLiteLLM
+from langchain_community.chat_models import ChatAnthropic
 from pydantic import ValidationError
 
 from ai_gateway.model_metadata import ModelMetadata
@@ -10,6 +10,7 @@ from ai_gateway.prompts.base import Prompt
 from ai_gateway.prompts.config import ModelClassProvider
 from ai_gateway.prompts.in_memory_registry import InMemoryPromptRegistry
 from ai_gateway.prompts.registry import LocalPromptRegistry
+from ai_gateway.vendor.langchain_litellm.litellm import ChatLiteLLM
 
 
 class TestInMemoryPromptRegistry:

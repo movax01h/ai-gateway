@@ -2,7 +2,6 @@ from typing import Any
 from unittest import mock
 
 import pytest
-from langchain_community.chat_models.litellm import ChatLiteLLM
 
 from ai_gateway.models.base import log_request
 from ai_gateway.models.v2.container import _litellm_factory, _mock_selector, litellm

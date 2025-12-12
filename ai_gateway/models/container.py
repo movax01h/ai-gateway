@@ -184,11 +184,7 @@ class ContainerModels(containers.DeclarativeContainer):
         mocked=providers.Factory(mock.ChatModel),
     )
 
-    agent_model = providers.Selector(
-        _mock_selector,
-        original=providers.Factory(AgentModel),
-        mocked=providers.Factory(mock.LLM),
-    )
+    agent_model = providers.Factory(AgentModel)
 
     amazon_q_model = providers.Selector(
         _mock_selector,
