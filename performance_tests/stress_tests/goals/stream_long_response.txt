@@ -1,0 +1,6 @@
+This is a test of a long LLM response with streaming
+
+<response latency_ms='6000' stream='true' chunk_delay_ms='50' file='performance_tests/stress_tests/fixtures/50kb_response.txt' />
+<response>
+All done
+</response>

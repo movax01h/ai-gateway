@@ -86,6 +86,74 @@ Simulate streamed responses using the `stream` attribute. This will stream the r
 </response>
 ```
 
+## File-based responses
+
+Agentic Chat limits the input goal to approximately 16,000 characters. That prevents us from specifying long
+responses in the goal, which we might want to do to test long flows, for example.
+
+If long mock responses are needed, you can load them from files that are included as server-side fixtures.
+
+For example, create a file with your response content:
+
+```plaintext
+# performance_tests/stress_tests/fixtures/long_analysis.txt
+This is a comprehensive analysis of the codebase...
+[... many lines of detailed analysis ...]
+```
+
+In the goal, reference the file using the `file` attribute in a self-closing `<response>` tag:
+
+```xml
+Analyze this entire codebase in detail.
+
+<response file='performance_tests/stress_tests/fixtures/long_analysis.txt' stream='true' chunk_delay_ms='50' />
+```
+
+Example with mixed inline and file-based responses:
+
+```xml
+Review this large codebase.
+
+<response>
+  I'll start by analyzing the architecture.
+  <tool_calls>
+    [{"name": "list_files", "args": {"path": "src/"}}]
+  </tool_calls>
+</response>
+<response file='performance_tests/stress_tests/fixtures/long_analysis.txt' stream='true' chunk_delay_ms='100' />
+<response>
+  Based on my analysis, I recommend the following improvements...
+</response>
+```
+
+## Template variable substitution
+
+The agentic mock model supports Jinja2 template variable substitution, allowing you to define variables
+in your input goal and substitute them into file-based responses.
+
+For example, define variables using Jinja2 `{% set %}` statements at the beginning of your input:
+
+```xml
+{% set projectId = 1000001 %}
+
+Explain what this project is about.
+
+<response file='performance_tests/stress_tests/fixtures/list_repo_tree_tool_call.txt' />
+```
+
+Reference variables in the file (`performance_tests/stress_tests/fixtures/list_repo_tree_tool_call.txt`):
+
+```xml
+Let me examine the current project structure to understand the codebase.
+<tool_calls>
+[
+  {"name": "gitlab_api_get", "args": {"endpoint": "/api/v4/projects/{{ projectId }}/repository/tree", "params": { "per_page": 100 }}}
+]
+</tool_calls>
+```
+
+When the file is loaded, `{{ projectId }}` will be replaced with `1000001`.
+
 ## Example workflows
 
 Workflow with 2 tool calls:
@@ -137,3 +205,19 @@ Help me understand this bug report.
   The fix is to update the session renewal mechanism in `session_manager.py`.
 </response>
 ```
+
+### The agentic mock model in practice: memory utilization testing
+
+The agentic mock model was used to
+[investigate and reproduce high memory usage in the Duo Workflow Service](https://gitlab.com/gitlab-org/modelops/applied-ml/code-suggestions/ai-assist/-/issues/1648).
+By simulating large streamed responses, the testing confirmed that checkpoint data accumulation was a
+significant source of memory consumption.
+
+#### Test files used
+
+- [`performance_tests/stress_tests/goals/stream_long_response.txt`](../../performance_tests/stress_tests/goals/stream_long_response.txt) -
+Tests streamed long responses with 6-second latency and 50ms chunk delays
+- [`performance_tests/stress_tests/goals/no_stream_long_response.txt`](../../performance_tests/stress_tests/goals/no_stream_long_response.txt) -
+Tests non-streamed long responses with 60-second latency for roughly comparable overall delays
+- [`performance_tests/stress_tests/fixtures/50kb_response.txt`](../../performance_tests/stress_tests/fixtures/50kb_response.txt) -
+Contains ~50KB of response content (approximately 1200 lines of code) that was used in the above goals
