@@ -116,6 +116,7 @@ class IOKey(BaseModel):
     subkeys: Optional[list[str]] = None
     alias: Optional[str] = None
     literal: Optional[bool] = False
+    optional: Optional[bool] = False
 
     _target_separator: ClassVar[str] = ":"
     _key_separator: ClassVar[str] = "."
@@ -124,6 +125,7 @@ class IOKey(BaseModel):
         from_: str = Field(alias="from")
         as_: Optional[str] = Field(default=None, alias="as")
         literal_: Optional[bool] = Field(default=False, alias="literal")
+        optional_: Optional[bool] = Field(default=False, alias="optional")
 
     @model_validator(mode="after")
     def parse_valid_target(self) -> Self:
@@ -166,12 +168,14 @@ class IOKey(BaseModel):
     def parse_key(cls, key: str | dict) -> Self:
         alias: Optional[str] = None
         literal: Optional[bool] = False
+        optional: Optional[bool] = False
 
         if isinstance(key, dict):
             key_config = cls._AliasedIOKeyConfig(**key)
             key = key_config.from_
             alias = key_config.as_
             literal = key_config.literal_
+            optional = key_config.optional_
 
         subkeys = None
         if literal:
@@ -182,7 +186,13 @@ class IOKey(BaseModel):
             if remaining:
                 subkeys = remaining.split(cls._key_separator)
 
-        return cls(target=target, subkeys=subkeys, alias=alias, literal=literal)
+        return cls(
+            target=target,
+            subkeys=subkeys,
+            alias=alias,
+            literal=literal,
+            optional=optional,
+        )
 
     def template_variable_from_state(self, state: FlowState) -> dict[str, Any]:
         # self.target presence in state is validated in parse_valid_target
@@ -191,6 +201,7 @@ class IOKey(BaseModel):
             return {self.alias: self.target}  # type: ignore[dict-item]
 
         value = self.value_from_state(state)
+
         if self.alias:
             return {self.alias: value}
 
@@ -205,7 +216,7 @@ class IOKey(BaseModel):
         current = state[self.target]  # type: ignore[literal-required]
         if self.subkeys:
             for key in self.subkeys:  # pylint: disable=not-an-iterable
-                current = current[key]
+                current = current.get(key) if self.optional else current[key]
         return current
 
     def to_nested_dict(self, value: Any) -> dict[str, Any]:

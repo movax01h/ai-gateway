@@ -162,6 +162,46 @@ inputs:
 This will set the value of the input variable `file_path` to be `file.txt`, rather than interpreting the input source as
 a path.
 
+### Optional Inputs and Default Values
+
+By default, all inputs are required and the flow will fail if the specified path doesn't exist in the state. You can
+make inputs optional:
+
+**Optional inputs** allow components to gracefully handle missing data:
+
+```yaml
+inputs:
+    - from: "context:inputs.user_preferences.theme"
+      as: "theme"
+      optional: true
+```
+
+When `optional: true` is set:
+
+- If the path exists in the state, its value is used
+- If the path doesn't exist, the value will be `None`
+- No error is raised for missing data
+
+**Example with multiple optional inputs**:
+
+```yaml
+components:
+    - name: "report_generator"
+      type: AgentComponent
+      prompt_id: "generate_report"
+      inputs:
+          - from: "context:goal"
+            as: "task"
+          - from: "context:analysis.findings"
+            as: "findings"
+            optional: true
+```
+
+In this example:
+
+- `goal` is required and will fail if missing
+- `findings` will be set to None if the analysis component didn't run
+
 ### Additional Context
 
 Additional Context can be passed to the Flow (in additional to the `goal`), but the schema for these fields must be defined in the `flow` section of the YAML file:
