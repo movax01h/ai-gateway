@@ -124,15 +124,44 @@ def test_billing_event_context_seat_ids_list():
     assert len(context.seat_ids) == 3
 
 
-def test_usage_quota_event_context_from_internal_event():
-    event = EventContext(
-        environment="prod",
-        project_id=1234,
-        ultimate_parent_namespace_id=1,
-        namespace_id=2,
-    )
-    context = UsageQuotaEventContext.from_internal_event(event)
-    assert context.environment == "prod"
-    assert context.project_id == 1234
-    assert context.namespace_id == 2
-    assert context.root_namespace_id == 1
+class TestUsageQuotaContext:
+    def test_from_internal_event(self):
+        event = EventContext(
+            environment="prod",
+            project_id=1234,
+            ultimate_parent_namespace_id=1,
+            namespace_id=2,
+        )
+        context = UsageQuotaEventContext.from_internal_event(event)
+        assert context.environment == "prod"
+        assert context.project_id == 1234
+        assert context.namespace_id == 2
+        assert context.root_namespace_id == 1
+
+    def test_to_cache_key_all_field_present(self):
+        context = UsageQuotaEventContext(
+            environment="production",
+            realm="saas",
+            deployment_type="saas",
+            instance_id="00000000-1111-2222-3333-000000000000",
+            unique_instance_id="00000000-1111-2222-3333-000000000000",
+            feature_enablement_type="duo_pro",
+            ultimate_parent_namespace_id=123,
+            namespace_id=456,
+            user_id="user_123",
+            global_user_id="gid://gitlab/User/123",
+            correlation_id="correlation_id",
+        )
+        assert (
+            context.to_cache_key()
+            == "production:saas:user_123:gid://gitlab/User/123:123:00000000-1111-2222-3333-000000000000:duo_pro"
+        )
+
+    def test_to_cache_key_excludes_none_fields(self) -> None:
+        context = UsageQuotaEventContext(
+            environment="prod",
+            user_id="123",
+            feature_enablement_type="beta",
+        )
+
+        assert context.to_cache_key() == "prod:123:beta"
