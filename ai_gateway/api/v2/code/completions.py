@@ -306,6 +306,7 @@ async def generations(
         generations_litellm_factory,
         generations_agent_factory,
         internal_event_client,
+        config,
     )
 
     if payload.prompt_version == 3:
@@ -362,6 +363,7 @@ def _resolve_prompt_code_generations(
     current_user: StarletteUser,
     prompt_registry: BasePromptRegistry,
     generations_agent_factory: Factory[CodeGenerations],
+    config: Config,
 ) -> CodeGenerations:
     has_model_info = (
         payload.model_name is not None and payload.model_provider is not None
@@ -375,7 +377,8 @@ def _resolve_prompt_code_generations(
                 "api_key": payload.model_api_key,
                 "provider": "custom_openai",
                 "identifier": payload.model_identifier,
-            }
+            },
+            mock_model_responses=config.mock_model_responses,
         )
         prompt = prompt_registry.get_on_behalf(
             current_user,
@@ -403,6 +406,7 @@ def _build_code_generations(
     generations_litellm_factory: Factory[CodeGenerations],
     generations_agent_factory: Factory[CodeGenerations],
     internal_event_client: InternalEventsClient,
+    config: Config,
 ) -> CodeGenerations:
     if payload.prompt_id:
         return _resolve_prompt_code_generations(
@@ -410,6 +414,7 @@ def _build_code_generations(
             current_user,
             prompt_registry,
             generations_agent_factory,
+            config,
         )
 
     tracking_event = f"request_{GitLabUnitPrimitive.GENERATE_CODE}"
@@ -462,7 +467,8 @@ def _resolve_code_completions_litellm(
             "model_endpoints": model_endpoints,
             "using_cache": using_cache,
             "session_id": current_user.global_user_id,
-        }
+        },
+        mock_model_responses=config.mock_model_responses,
     )
 
     # Create post processor based on model provider and name
@@ -617,7 +623,8 @@ def _build_code_completions(
                 "feature_setting": "code_completions",
                 "provider_keys": model_keys,
                 "model_endpoints": model_endpoints,
-            }
+            },
+            mock_model_responses=config.mock_model_responses,
         )
 
         actual_provider = KindModelProvider.from_definition_provider(

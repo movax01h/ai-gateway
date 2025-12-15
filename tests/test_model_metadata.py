@@ -384,6 +384,31 @@ class TestFireworksModelMetadata:
         assert result.api_key == "test-key"
         assert str(result.endpoint) == "https://api.fireworks.ai/inference/v1"
 
+    def test_create_fireworks_model_metadata_empty_identifier_with_mock_enabled(self):
+        """Test that empty model identifier is allowed when mock_model_responses is True."""
+        data = {
+            "provider": "fireworks_ai",
+            "name": "test_model",
+            "provider_keys": {"fireworks_api_key": "test-key"},
+            "model_endpoints": {
+                "fireworks_current_region_endpoint": {
+                    "test_model": {
+                        "endpoint": "https://api.fireworks.ai/inference/v1",
+                        "identifier": "",  # Empty string identifier
+                    }
+                }
+            },
+        }
+
+        result = create_model_metadata(data, mock_model_responses=True)
+
+        assert isinstance(result, FireworksModelMetadata)
+        assert result.provider == "fireworks_ai"
+        assert result.name == "test_model"
+        assert result.model_identifier == ""
+        assert result.api_key == "test-key"
+        assert str(result.endpoint) == "https://api.fireworks.ai/inference/v1"
+
     def test_fireworks_to_params_with_all_fields(self, fireworks_model):
         """Test that to_params includes all fields when provided."""
         metadata = FireworksModelMetadata(

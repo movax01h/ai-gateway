@@ -151,6 +151,7 @@ async def code_suggestions(
             stream_handler=stream_handler,
             snowplow_event_context=snowplow_code_suggestion_context,
             model_metadata=current_model_metadata_context.get(),
+            config=config,
         )
 
 
@@ -267,6 +268,7 @@ async def code_generation(
     # pylint: disable=unused-argument
     code_context: Optional[list[CodeContextPayload]] = None,
     model_metadata: Optional[TypeModelMetadata] = None,
+    config: Optional[Config] = None,
 ):
     model_provider = payload.model_provider or (
         model_metadata and model_metadata.provider
@@ -312,14 +314,20 @@ async def code_generation(
         if model_provider and not model_metadata:
             if model_provider == KindModelProvider.ANTHROPIC:
                 model_metadata = create_model_metadata(
-                    {"provider": "gitlab", "identifier": "claude_sonnet_4_5_20250929"}
+                    {"provider": "gitlab", "identifier": "claude_sonnet_4_5_20250929"},
+                    mock_model_responses=(
+                        config.mock_model_responses if config else False
+                    ),
                 )
             elif model_provider == KindModelProvider.VERTEX_AI:
                 model_metadata = create_model_metadata(
                     {
                         "provider": "gitlab",
                         "identifier": "claude_sonnet_4_5_20250929_vertex",
-                    }
+                    },
+                    mock_model_responses=(
+                        config.mock_model_responses if config else False
+                    ),
                 )
 
         prompt = prompt_registry.get_on_behalf(

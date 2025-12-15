@@ -43,14 +43,15 @@ class FireworksModelMetadata(BaseModelMetadata):
     endpoint: Optional[Annotated[AnyUrl, UrlConstraints(max_length=255)]] = None
     api_key: Optional[Annotated[str, StringConstraints(max_length=2000)]] = None
     friendly_name: Optional[Annotated[str, StringConstraints(max_length=255)]] = None
-    model_identifier: str
+    model_identifier: Optional[str] = None
     using_cache: Optional[bool] = None
     session_id: Optional[str] = None
 
     def to_params(self) -> Dict[str, Any]:
-        params = {
-            "model": self.model_identifier,
-        }
+        params = {}
+
+        if self.model_identifier:
+            params["model"] = self.model_identifier
 
         if self.api_key:
             params["api_key"] = self.api_key
@@ -114,7 +115,9 @@ class ModelMetadata(BaseModelMetadata):
 TypeModelMetadata = AmazonQModelMetadata | ModelMetadata | FireworksModelMetadata
 
 
-def create_model_metadata(data: dict[str, Any] | None) -> Optional[TypeModelMetadata]:
+def create_model_metadata(
+    data: dict[str, Any] | None, mock_model_responses: bool = False
+) -> Optional[TypeModelMetadata]:
     if not data or "provider" not in data:
         return None
 
@@ -147,9 +150,12 @@ def create_model_metadata(data: dict[str, Any] | None) -> Optional[TypeModelMeta
 
         model_identifier = model_config.get("identifier")
         if not model_identifier or model_identifier == "":
-            raise ValueError(
-                f"Fireworks model identifier is missing for model {data['name']}."
-            )
+            if not mock_model_responses:
+                raise ValueError(
+                    f"Fireworks model identifier is missing for model {data['name']}."
+                )
+            # Allow empty identifier when mock_model_responses is True
+            model_identifier = ""
 
         return FireworksModelMetadata(
             provider="fireworks_ai",
