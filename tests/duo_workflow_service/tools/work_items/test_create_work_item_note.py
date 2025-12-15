@@ -143,7 +143,6 @@ async def test_create_work_item_note_with_optional_parameters(
         work_item_iid=42,
         body="This is an internal comment",
         internal=True,
-        discussion_id="gid://gitlab/Discussion/789",
     )
 
     response_json = json.loads(response)
@@ -153,6 +152,43 @@ async def test_create_work_item_note_with_optional_parameters(
     note_input = second_call_args[1]["input"]
     assert note_input["body"] == "This is an internal comment"
     assert note_input["internal"] is True
+
+
+@pytest.mark.asyncio
+async def test_create_work_item_note_reply_to_note(
+    gitlab_client_mock, metadata, work_item_data, created_note_data_fixture
+):
+    """Test creating a reply to an existing note using note_id."""
+    # Mock the GraphQL calls
+    gitlab_client_mock.graphql = AsyncMock()
+    gitlab_client_mock.graphql.side_effect = [
+        {"project": {"workItems": {"nodes": [work_item_data]}}},
+        {
+            "note": {
+                "id": "gid://gitlab/Note/456",
+                "discussion": {"replyId": "gid://gitlab/Discussion/789"},
+            }
+        },
+        {"createNote": {"note": created_note_data_fixture, "errors": []}},
+    ]
+
+    tool = CreateWorkItemNote(description="create work item note", metadata=metadata)
+
+    response = await tool._arun(
+        project_id="namespace/project",
+        work_item_iid=42,
+        body="This is a reply to a comment",
+        note_id=456,
+    )
+
+    response_json = json.loads(response)
+    assert response_json["status"] == "success"
+
+    assert gitlab_client_mock.graphql.call_count == 3
+
+    third_call_args = gitlab_client_mock.graphql.call_args_list[2][0]
+    note_input = third_call_args[1]["input"]
+    assert note_input["body"] == "This is a reply to a comment"
     assert note_input["discussionId"] == "gid://gitlab/Discussion/789"
 
 
@@ -286,6 +322,67 @@ async def test_create_work_item_note_with_optional_parameters(
             "No project found in response",
             None,
             1,
+        ),
+        # Note not found when using note_id
+        (
+            {
+                "project_id": "namespace/project",
+                "work_item_iid": 42,
+                "body": "This reply will fail",
+                "note_id": 999,
+            },
+            [
+                {
+                    "project": {
+                        "workItems": {
+                            "nodes": [
+                                {
+                                    "id": "gid://gitlab/WorkItem/123",
+                                    "iid": "42",
+                                    "title": "Test Work Item",
+                                }
+                            ]
+                        }
+                    }
+                },
+                {"note": None},
+            ],
+            "No note found for ID 999",
+            None,
+            2,
+        ),
+        # Note has no discussion when using note_id
+        (
+            {
+                "project_id": "namespace/project",
+                "work_item_iid": 42,
+                "body": "This reply will fail",
+                "note_id": 456,
+            },
+            [
+                {
+                    "project": {
+                        "workItems": {
+                            "nodes": [
+                                {
+                                    "id": "gid://gitlab/WorkItem/123",
+                                    "iid": "42",
+                                    "title": "Test Work Item",
+                                }
+                            ]
+                        }
+                    }
+                },
+                {
+                    "note": {
+                        "id": "gid://gitlab/Note/456",
+                        "discussion": None,
+                    }
+                },
+            ],
+            "Note 456 exists but is not part of a discussion",
+            None,
+            2,
         ),
     ],
 )

@@ -10,6 +10,7 @@ from duo_workflow_service.tools.work_items.base_tool import (
     ResolvedWorkItem,
     WorkItemBaseTool,
 )
+from duo_workflow_service.tools.work_items.queries.graphql_queries import GET_NOTE_QUERY
 from duo_workflow_service.tools.work_items.queries.work_items import (
     CREATE_NOTE_MUTATION,
 )
@@ -585,14 +586,17 @@ class CreateWorkItemNoteInput(WorkItemResourceInput):
     internal: Optional[bool] = Field(
         default=None, description="Internal flag for a note. Default is false."
     )
-    discussion_id: Optional[str] = Field(
-        default=None, description="Global ID of the discussion the note is in reply to."
+    note_id: Optional[int] = Field(
+        default=None,
+        description="ID of an existing note to reply to. "
+        "The tool will automatically find the discussion containing this note. "
+        "If not provided, creates a standalone comment.",
     )
 
 
 class CreateWorkItemNote(WorkItemBaseTool):
     name: str = "create_work_item_note"
-    description: str = f"""Create a new note (comment) on a GitLab work item.
+    description: str = f"""Create a new note (comment) on a GitLab work item or reply to an existing comment.
 
     {WORK_ITEM_IDENTIFICATION_DESCRIPTION}
 
@@ -606,6 +610,11 @@ class CreateWorkItemNote(WorkItemBaseTool):
     - Given the URL https://gitlab.com/namespace/project/-/work_items/42 and body "This is a comment", the tool call would be:
         create_work_item_note(url="https://gitlab.com/namespace/project/-/work_items/42", body="This is a comment")
 
+    To create a standalone comment:
+    - create_work_item_note(project_id='namespace/project', work_item_iid=42, body="This is a comment")
+    To reply to a specific comment:
+    - Use note_id: create_work_item_note(project_id='namespace/project', work_item_iid=42, note_id=1536, body="Reply text")
+
     The body parameter is always required.
     """
     args_schema: Type[BaseModel] = CreateWorkItemNoteInput
@@ -617,7 +626,7 @@ class CreateWorkItemNote(WorkItemBaseTool):
         project_id = kwargs.pop("project_id", None)
         work_item_iid = kwargs.pop("work_item_iid", None)
         internal = kwargs.pop("internal", None)
-        discussion_id = kwargs.pop("discussion_id", None)
+        note_id = kwargs.pop("note_id", None)
 
         resolved = await self._validate_work_item_url(
             url, group_id, project_id, work_item_iid
@@ -629,6 +638,13 @@ class CreateWorkItemNote(WorkItemBaseTool):
         try:
             if "error" in (result := await self._get_work_item_id(resolved)):
                 return json.dumps(result)
+
+            discussion_id = None
+            if note_id is not None:
+                discussion_result = await self._get_discussion_id_from_note(note_id)
+                if "error" in discussion_result:
+                    return json.dumps(discussion_result)
+                discussion_id = discussion_result.get("replyId")
 
             note_input = {"noteableId": result["id"], "body": body}
 
@@ -702,3 +718,35 @@ class CreateWorkItemNote(WorkItemBaseTool):
         if args.group_id:
             return f"Add comment to work item #{args.work_item_iid} in group {args.group_id}"
         return f"Add comment to work item #{args.work_item_iid} in project {args.project_id}"
+
+    async def _get_discussion_id_from_note(self, note_id: int) -> dict:
+        """Resolve a discussion reply ID from a note ID using GraphQL."""
+
+        note_gid = f"gid://gitlab/Note/{note_id}"
+        variables = {"id": note_gid}
+
+        try:
+            response = await self.gitlab_client.graphql(
+                GET_NOTE_QUERY,
+                variables,
+            )
+
+            if "errors" in response:
+                return {"error": f"GraphQL error: {response['errors']}"}
+
+            note = response.get("note")
+            if not note:
+                return {"error": f"No note found for ID {note_id}."}
+
+            discussion = note.get("discussion")
+            if not discussion:
+                return {
+                    "error": (f"Note {note_id} exists but is not part of a discussion.")
+                }
+
+            return {"replyId": discussion.get("replyId")}
+
+        except Exception as e:
+            return {
+                "error": f"Failed to resolve discussion for note {note_id}: {str(e)}"
+            }
