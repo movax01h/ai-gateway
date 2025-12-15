@@ -111,6 +111,16 @@ allowed_ijwt_scopes = {
     if "duo_workflow_service" in unit_primitive.backend_services
 }
 
+CUSTOMERSDOT_URL: str | None = (
+    os.environ.get("AIGW_MOCK_CRED_CD_URL")
+    if os.environ.get("AIGW_MOCK_USAGE_CREDITS", "").lower() == "true"
+    and os.environ.get("AIGW_MOCK_CRED_CD_URL")
+    else os.environ.get(
+        "DUO_WORKFLOW_AUTH__OIDC_CUSTOMER_PORTAL_URL",
+        "https://customers.gitlab.com",
+    )
+)
+
 
 def string_to_category_enum(category_string: str) -> CategoryEnum:
     try:
@@ -727,9 +737,9 @@ async def serve(port: int) -> None:
                 AuthenticationInterceptor(),
                 FeatureFlagInterceptor(),
                 InternalEventsInterceptor(),
-                UsageQuotaInterceptor(),
                 ModelMetadataInterceptor(),
                 MonitoringInterceptor(),
+                UsageQuotaInterceptor(customersdot_url=str(CUSTOMERSDOT_URL)),
             ],
             options=server_options,
         )

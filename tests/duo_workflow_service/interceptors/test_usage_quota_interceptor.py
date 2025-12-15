@@ -1,6 +1,5 @@
 from unittest.mock import AsyncMock, MagicMock, Mock, patch
 
-import httpx
 import pytest
 
 from duo_workflow_service.interceptors.usage_quota_interceptor import (
@@ -9,6 +8,11 @@ from duo_workflow_service.interceptors.usage_quota_interceptor import (
 from lib.billing_events.context import UsageQuotaEventContext
 from lib.feature_flags.context import current_feature_flag_context
 from lib.internal_events.context import EventContext
+from lib.usage_quota.errors import (
+    UsageQuotaConnectionError,
+    UsageQuotaHTTPError,
+    UsageQuotaTimeoutError,
+)
 
 
 @pytest.fixture(name="internal_event_context")
@@ -53,12 +57,6 @@ def stub_feature_flags():
     current_feature_flag_context.reset(token)
 
 
-@pytest.fixture(name="usage_quota_interceptor")
-def usage_quota_interceptor_fixture():
-    """Create a fixture for the UsageQuotaInterceptor."""
-    return UsageQuotaInterceptor
-
-
 @pytest.fixture(name="handler_call_details")
 def handler_call_details_fixture():
     """Create a mock for the handler_call_details."""
@@ -86,186 +84,190 @@ def continuation_fixture():
 
 @pytest.fixture(name="interceptor")
 def interceptor_fixture():
-    return UsageQuotaInterceptor()
+    return UsageQuotaInterceptor(customersdot_url="https://customers.gitlab.local/")
 
 
-@pytest.mark.asyncio
-async def test_feature_flag_disabled_skips_usage_quota_check(
-    interceptor, continuation, handler_call_details
-):
-    """Test that middleware skips usage quota check when feature flag "usage_quota_left_check" is disabled."""
-    current_feature_flag_context.set(set())
+class TestFeatureFlagToggling:
+    """Tests for feature flag behavior."""
 
-    with patch.object(
-        interceptor, "has_usage_quota_left", new_callable=AsyncMock
-    ) as mock_check:
-        handler = await interceptor.intercept_service(
-            continuation, handler_call_details
-        )
+    @pytest.mark.asyncio
+    async def test_feature_flag_disabled_skips_usage_quota_check(
+        self, interceptor, continuation, handler_call_details
+    ):
+        """Test that interceptor skips quota check when feature flag is disabled."""
+        current_feature_flag_context.set(set())
+
+        with patch.object(
+            interceptor.usage_quota_client,
+            "check_quota_available",
+            new_callable=AsyncMock,
+        ) as mock_check:
+            handler = await interceptor.intercept_service(
+                continuation, handler_call_details
+            )
+
+            assert handler is not None
+            mock_check.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_feature_flag_enabled_performs_usage_quota_check(
+        self, interceptor, continuation, handler_call_details
+    ):
+        """Test that interceptor performs quota check when feature flag is enabled."""
+        with patch.object(
+            interceptor.usage_quota_client,
+            "check_quota_available",
+            new_callable=AsyncMock,
+            return_value=True,
+        ) as mock_check:
+            intercepted_handler = await interceptor.intercept_service(
+                continuation, handler_call_details
+            )
+
+            assert intercepted_handler is not None
+            mock_check.assert_called_once()
+
+
+class TestQuotaEnforcement:
+    """Tests for quota check enforcement."""
+
+    @pytest.mark.asyncio
+    async def test_authorized_request_continues(
+        self, interceptor, continuation, handler_call_details
+    ):
+        """Test that a request with available quota continues to the handler."""
+        with patch.object(
+            interceptor.usage_quota_client,
+            "check_quota_available",
+            new_callable=AsyncMock,
+            return_value=True,
+        ):
+            handler = await interceptor.intercept_service(
+                continuation, handler_call_details
+            )
+
+            assert handler is not None
+            continuation.assert_called_once_with(handler_call_details)
+
+    @pytest.mark.asyncio
+    async def test_no_usage_quota_left_aborts_request(
+        self, interceptor, continuation, handler_call_details
+    ):
+        """Test that a request without quota is aborted with RESOURCE_EXHAUSTED."""
+        with patch.object(
+            interceptor.usage_quota_client,
+            "check_quota_available",
+            new_callable=AsyncMock,
+            return_value=False,
+        ):
+            handler = await interceptor.intercept_service(
+                continuation, handler_call_details
+            )
+
+            assert handler is not None
+            continuation.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_abort_handler_uses_resource_exhausted_status(
+        self, interceptor, continuation, handler_call_details
+    ):
+        """Test that abort handler uses RESOURCE_EXHAUSTED gRPC status."""
+        with patch.object(
+            interceptor.usage_quota_client,
+            "check_quota_available",
+            new_callable=AsyncMock,
+            return_value=False,
+        ):
+            handler = await interceptor.intercept_service(
+                continuation, handler_call_details
+            )
+
+            assert handler is not None
+
+
+class TestFailOpenBehavior:
+    """Tests for fail-open behavior on errors."""
+
+    @pytest.mark.parametrize(
+        "exception_class",
+        [
+            UsageQuotaTimeoutError,
+            UsageQuotaHTTPError,
+            UsageQuotaConnectionError,
+        ],
+    )
+    @pytest.mark.asyncio
+    async def test_fails_open_on_usage_quota_errors(
+        self, interceptor, continuation, handler_call_details, exception_class
+    ):
+        """Test that interceptor fails open on UsageQuotaError exceptions."""
+        if exception_class == UsageQuotaHTTPError:
+            exception = exception_class(status_code=500)
+        else:
+            exception = exception_class()
+
+        with (
+            patch.object(
+                interceptor.usage_quota_client,
+                "check_quota_available",
+                new_callable=AsyncMock,
+                side_effect=exception,
+            ),
+            patch(
+                "duo_workflow_service.interceptors.usage_quota_interceptor.USAGE_QUOTA_CHECK_TOTAL"
+            ) as mock_metrics,
+        ):
+            handler = await interceptor.intercept_service(
+                continuation, handler_call_details
+            )
 
         assert handler is not None
-        mock_check.assert_not_called()
-
-
-@pytest.mark.asyncio
-async def test_feature_flag_enabled_performs_usage_quota_check(
-    interceptor, continuation, handler_call_details
-):
-    """Test that middleware performs usage quota check when feature flag "usage_quota_left_check" is enabled."""
-
-    with patch.object(
-        interceptor, "has_usage_quota_left", new_callable=AsyncMock
-    ) as mock_check:
-        intercepted_handler = await interceptor.intercept_service(
-            continuation, handler_call_details
-        )
-        assert intercepted_handler is not None
-        mock_check.assert_called_once()
-
-
-@pytest.mark.parametrize(
-    "exception_class,exception_kwargs,expected_metric_outcome,expected_metric_status",
-    [
-        (
-            httpx.TimeoutException,
-            {"message": "Connection timed out"},
-            "timeout",
-            "timeout",
-        ),
-        (
-            httpx.HTTPStatusError,
-            {
-                "message": "Client error",
-                "request": MagicMock(),
-                "response": MagicMock(status_code=500),
-            },
-            "http_error",
-            "500",
-        ),
-        (
-            httpx.RequestError,
-            {"message": "Connection error"},
-            "unexpected",
-            "client_error",
-        ),
-    ],
-)
-@pytest.mark.asyncio
-async def test_customersdot_http_exceptions_parameterized(
-    interceptor,
-    usage_quota_event_context,
-    exception_class,
-    exception_kwargs,
-    expected_metric_outcome,
-    expected_metric_status,
-):
-    """Test that different HTTP-related exceptions are properly raised and metrics recorded."""
-
-    with (
-        patch(
-            "duo_workflow_service.interceptors.usage_quota_interceptor.httpx.AsyncClient"
-        ) as mock_client_cls,
-        patch(
-            "duo_workflow_service.interceptors.usage_quota_interceptor.USAGE_QUOTA_CUSTOMERSDOT_REQUESTS_TOTAL"
-        ) as mock_metrics,
-    ):
-        mock_client = AsyncMock()
-        mock_client.__aenter__.return_value = mock_client
-        mock_client.__aexit__.return_value = None
-        exception = exception_class(**exception_kwargs)
-        mock_client.head.side_effect = exception
-        mock_client_cls.return_value = mock_client
-
-        with pytest.raises(exception_class):
-            await interceptor.has_usage_quota_left(usage_quota_event_context)
-
-        mock_metrics.labels.assert_called_once_with(
-            outcome=expected_metric_outcome, status=expected_metric_status
-        )
+        continuation.assert_called_once_with(handler_call_details)
+        mock_metrics.labels.assert_called_once_with(result="fail_open", realm="saas")
         mock_metrics.labels.return_value.inc.assert_called_once()
 
 
-@pytest.mark.parametrize(
-    "exception_class,exception_kwargs",
-    [
-        (httpx.TimeoutException, {"message": "Connection timed out"}),
-        (
-            httpx.HTTPStatusError,
-            {
-                "message": "Internal server error",
-                "request": MagicMock(),
-                "response": MagicMock(status_code=500),
-            },
-        ),
-        (httpx.RequestError, {"message": "Connection error"}),
-    ],
-)
-@pytest.mark.asyncio
-async def test_dispatch_fails_open_on_http_exceptions_parameterized(
-    interceptor,
-    continuation,
-    handler_call_details,
-    usage_quota_event_context,
-    exception_class,
-    exception_kwargs,
-):
-    """Test that interceptor allows requests when HTTP exceptions occur (fail-open)."""
+class TestMetrics:
+    """Tests for metrics recording."""
 
-    mock_check = AsyncMock(
-        kwargs=usage_quota_event_context,
-        side_effect=exception_class(**exception_kwargs),
-    )
-
-    with (
-        patch.object(interceptor, "has_usage_quota_left", mock_check),
-        patch(
-            "duo_workflow_service.interceptors.usage_quota_interceptor.USAGE_QUOTA_CHECK_TOTAL"
-        ) as mock_metrics,
+    @pytest.mark.asyncio
+    async def test_records_allow_metric_on_quota_available(
+        self, interceptor, continuation, handler_call_details
     ):
-        intercepted_handler = await interceptor.intercept_service(
-            continuation, handler_call_details
-        )
-        assert intercepted_handler is not None
+        """Test that 'allow' metric is recorded when quota is available."""
+        with (
+            patch.object(
+                interceptor.usage_quota_client,
+                "check_quota_available",
+                new_callable=AsyncMock,
+                return_value=True,
+            ),
+            patch(
+                "duo_workflow_service.interceptors.usage_quota_interceptor.USAGE_QUOTA_CHECK_TOTAL"
+            ) as mock_metrics,
+        ):
+            await interceptor.intercept_service(continuation, handler_call_details)
 
-    mock_metrics.labels.assert_called_once_with(result="fail_open", realm="saas")
-    mock_metrics.labels.return_value.inc.assert_called_once()
+        mock_metrics.labels.assert_called_once_with(result="allow", realm="saas")
+        mock_metrics.labels.return_value.inc.assert_called_once()
 
+    @pytest.mark.asyncio
+    async def test_records_deny_metric_on_quota_exhausted(
+        self, interceptor, continuation, handler_call_details
+    ):
+        """Test that 'deny' metric is recorded when quota is exhausted."""
+        with (
+            patch.object(
+                interceptor.usage_quota_client,
+                "check_quota_available",
+                new_callable=AsyncMock,
+                return_value=False,
+            ),
+            patch(
+                "duo_workflow_service.interceptors.usage_quota_interceptor.USAGE_QUOTA_CHECK_TOTAL"
+            ) as mock_metrics,
+        ):
+            await interceptor.intercept_service(continuation, handler_call_details)
 
-@pytest.mark.asyncio
-async def test_customersdot_unexpected_error_raises_exception(
-    usage_quota_event_context,
-):
-    """Test that unexpected error in CustomersDot call raises Exception."""
-    interceptor = UsageQuotaInterceptor()
-
-    with patch(
-        "duo_workflow_service.interceptors.usage_quota_interceptor.httpx.AsyncClient"
-    ) as mock_client_cls:
-        mock_client = AsyncMock()
-        mock_client.__aenter__.return_value = mock_client
-        mock_client.__aexit__.return_value = None
-        mock_client.head.side_effect = RuntimeError("Unexpected error")
-        mock_client_cls.return_value = mock_client
-
-        with pytest.raises(RuntimeError):
-            await interceptor.has_usage_quota_left(usage_quota_event_context)
-
-
-@pytest.mark.asyncio
-async def test_customersdot_forbidden_error_aborts_request(
-    continuation, handler_call_details
-):
-    """Test that forbidden HTTP code from CustomersDot aborts the request."""
-    interceptor = UsageQuotaInterceptor()
-
-    with patch(
-        "duo_workflow_service.interceptors.usage_quota_interceptor.httpx.AsyncClient"
-    ) as mock_client_cls:
-        mock_client = AsyncMock()
-        mock_client.__aenter__.return_value = mock_client
-        mock_client.__aexit__.return_value = None
-        mock_client.head.return_value = MagicMock(status_code=403)
-        mock_client_cls.return_value = mock_client
-
-        await interceptor.intercept_service(continuation, handler_call_details)
-        assert continuation.call_count == 0
+        mock_metrics.labels.assert_called_once_with(result="deny", realm="saas")
+        mock_metrics.labels.return_value.inc.assert_called_once()

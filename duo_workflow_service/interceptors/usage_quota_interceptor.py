@@ -1,36 +1,22 @@
-import os
-from typing import Callable, Optional, cast
-from urllib.parse import urljoin
+from typing import Callable, Optional
 
 import grpc
-import httpx
-from aiocache import SimpleMemoryCache, cached
 from grpc.aio import ServerInterceptor, ServicerContext
 
-from ai_gateway.instrumentators.usage_quota import (
-    USAGE_QUOTA_CHECK_TOTAL,
-    USAGE_QUOTA_CUSTOMERSDOT_LATENCY_SECONDS,
-    USAGE_QUOTA_CUSTOMERSDOT_REQUESTS_TOTAL,
-)
+from ai_gateway.instrumentators.usage_quota import USAGE_QUOTA_CHECK_TOTAL
+from lib import usage_quota
 from lib.billing_events.context import UsageQuotaEventContext
 from lib.feature_flags.context import FeatureFlag, current_feature_flag_context
 from lib.internal_events.context import current_event_context
-
-# pylint: disable=direct-environment-variable-reference
-CACHE_TTL = (
-    5 if os.environ.get("AIGW_MOCK_USAGE_CREDITS", "").lower() == "true" else 3600
-)
-# pylint: enable=direct-environment-variable-reference
+from lib.usage_quota.client import UsageQuotaClient
 
 
 class UsageQuotaInterceptor(ServerInterceptor):
     def __init__(
         self,
-        # The API call to CustomersDot must be completed in under 1 sec
-        # to avoid increasing latency for any AI requests.
-        customersdot_request_timeout: float = 1.0,
+        customersdot_url: str,
     ):
-        self.customersdot_request_timeout = customersdot_request_timeout
+        self.usage_quota_client = UsageQuotaClient(customersdot_url=customersdot_url)
 
     async def intercept_service(
         self,
@@ -50,26 +36,33 @@ class UsageQuotaInterceptor(ServerInterceptor):
             return await continuation(handler_call_details)
 
         event_context = current_event_context.get()
-        realm = getattr(event_context, "realm", "unknown")
         usage_quota_event_context = UsageQuotaEventContext.from_internal_event(
             event_context
         )
 
         try:
-            has_usage_quota = await self.has_usage_quota_left(usage_quota_event_context)
-        except httpx.HTTPError:
-            USAGE_QUOTA_CHECK_TOTAL.labels(result="fail_open", realm=realm).inc()
+            is_quota_available = await self.usage_quota_client.check_quota_available(
+                usage_quota_event_context
+            )
+        except usage_quota.UsageQuotaError:
+            USAGE_QUOTA_CHECK_TOTAL.labels(
+                result="fail_open", realm=usage_quota_event_context.realm
+            ).inc()
             return await continuation(handler_call_details)
 
-        if not has_usage_quota:
-            USAGE_QUOTA_CHECK_TOTAL.labels(result="deny", realm=realm).inc()
+        if not is_quota_available:
+            USAGE_QUOTA_CHECK_TOTAL.labels(
+                result="deny", realm=usage_quota_event_context.realm
+            ).inc()
             return self._abort_handler(
                 grpc.StatusCode.RESOURCE_EXHAUSTED,
                 "Consumer does not have sufficient credits for this request. "
                 "Error code: USAGE_QUOTA_EXCEEDED",
             )
 
-        USAGE_QUOTA_CHECK_TOTAL.labels(result="allow", realm=realm).inc()
+        USAGE_QUOTA_CHECK_TOTAL.labels(
+            result="allow", realm=usage_quota_event_context.realm
+        ).inc()
         return await continuation(handler_call_details)
 
     def _abort_handler(
@@ -100,90 +93,3 @@ class UsageQuotaInterceptor(ServerInterceptor):
             return None
 
         return grpc.unary_unary_rpc_method_handler(handler)
-
-    @cached(ttl=CACHE_TTL, cache=SimpleMemoryCache)
-    async def has_usage_quota_left(self, context: UsageQuotaEventContext) -> bool:
-        """Check if the consumer has usage quota left.
-
-        This method is cached with a TTL of 1 hour to reduce load on CustomersDot.
-
-        Args:
-            context: Usage quota event context containing consumer information
-
-        Returns:
-            True if the consumer has sufficient credits, False otherwise
-
-        Raises:
-            httpx.HTTPError: If there's an error communicating with CustomersDot
-        """
-        realm = getattr(context, "realm", "unknown")
-        params = context.model_dump(exclude_none=True, exclude_unset=True)
-        # pylint: disable=direct-environment-variable-reference
-        customer_portal_url = (
-            os.environ.get("AIGW_MOCK_CRED_CD_URL")
-            if os.environ.get("AIGW_MOCK_USAGE_CREDITS", "").lower() == "true"
-            and os.environ.get("AIGW_MOCK_CRED_CD_URL")
-            else os.environ.get(
-                "DUO_WORKFLOW_AUTH__OIDC_CUSTOMER_PORTAL_URL",
-                "https://customers.gitlab.com",
-            )
-        )
-
-        # pylint: enable=direct-environment-variable-reference
-
-        try:
-            async with httpx.AsyncClient(
-                timeout=httpx.Timeout(self.customersdot_request_timeout),
-                limits=httpx.Limits(max_keepalive_connections=20, max_connections=100),
-            ) as client:
-                url = urljoin(
-                    cast(str, customer_portal_url),
-                    cast(str, "api/v1/consumers/resolve"),
-                )
-
-                with USAGE_QUOTA_CUSTOMERSDOT_LATENCY_SECONDS.labels(
-                    realm=realm
-                ).time():
-                    response = await client.head(url, params=params)
-
-                # The Customers Portal responds with following HTTP status codes:
-                # - Payment Required (402):
-                #     returned when the customer does not have enough credits.
-                # - Forbidden (403):
-                #     returned when the entitlement check fails.
-                # - OK (200):
-                #     returned when the customer has sufficient credits
-                #     and the entitlement check passes.
-                # For all other HTTP status codes, we raise an exception,
-                # which causes the request to fail open.
-
-                status = response.status_code
-
-                if status in [httpx.codes.PAYMENT_REQUIRED, httpx.codes.FORBIDDEN]:
-                    USAGE_QUOTA_CUSTOMERSDOT_REQUESTS_TOTAL.labels(
-                        outcome="denied", status=str(status)
-                    ).inc()
-                    return False
-
-                response.raise_for_status()
-
-                USAGE_QUOTA_CUSTOMERSDOT_REQUESTS_TOTAL.labels(
-                    outcome="success", status="200"
-                ).inc()
-                return True
-
-        except httpx.TimeoutException as e:
-            USAGE_QUOTA_CUSTOMERSDOT_REQUESTS_TOTAL.labels(
-                outcome="timeout", status="timeout"
-            ).inc()
-            raise e
-        except httpx.HTTPStatusError as e:
-            USAGE_QUOTA_CUSTOMERSDOT_REQUESTS_TOTAL.labels(
-                outcome="http_error", status=str(e.response.status_code)
-            ).inc()
-            raise e
-        except httpx.RequestError as e:
-            USAGE_QUOTA_CUSTOMERSDOT_REQUESTS_TOTAL.labels(
-                outcome="unexpected", status="client_error"
-            ).inc()
-            raise e
