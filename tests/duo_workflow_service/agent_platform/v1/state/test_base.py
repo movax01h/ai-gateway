@@ -697,6 +697,41 @@ class TestIOKey:
 
         assert result == expected_result
 
+    @pytest.mark.parametrize(
+        "state_has_key,optional,should_raise_error,expected_value",
+        [
+            (True, False, False, "test_value"),  # key not missing
+            (True, True, False, "test_value"),  # key not missing, optional
+            (False, False, True, None),  # key missing with error
+            (False, True, False, None),  # key missing optional is true
+        ],
+    )
+    def test_iokey_optional_behavior(
+        self,
+        state_has_key,
+        optional,
+        should_raise_error,
+        expected_value,
+    ):
+        state: FlowState = {
+            "status": WorkflowStatusEnum.NOT_STARTED,
+            "conversation_history": {},
+            "ui_chat_log": [],
+            "context": {},
+        }
+
+        if state_has_key:
+            state["context"]["test_key"] = "test_value"
+
+        io_key = IOKey(target="context", subkeys=["test_key"], optional=optional)
+
+        if should_raise_error:
+            with pytest.raises(KeyError):
+                io_key.value_from_state(state)
+        else:
+            result = io_key.value_from_state(state)
+            assert result == expected_value
+
 
 class TestIOKeyModelValidations:
     """Test IOKey class model validations."""
