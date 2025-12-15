@@ -195,7 +195,7 @@ cache.
 
 ## Architecture
 
-<https://docs.gitlab.com/ee/architecture/blueprints/duo_workflow/>
+<https://handbook.gitlab.com/handbook/engineering/architecture/design-documents/duo_workflow/>
 
 ### LangGraph Abstraction Layers
 
