@@ -1,0 +1,6 @@
+This is a test of a long LLM response without streaming
+
+<response latency_ms='60000' file='performance_tests/stress_tests/fixtures/50kb_response.txt' />
+<response>
+All done
+</response>

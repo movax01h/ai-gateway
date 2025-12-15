@@ -1,0 +1,6 @@
+Let me examine the current project structure to understand the codebase.
+<tool_calls>
+[
+  {"name": "gitlab_api_get", "args": {"endpoint": "/api/v4/projects/{{ projectId }}/repository/tree", "params": { "per_page": 100 }}}
+]
+</tool_calls>

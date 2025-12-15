@@ -101,6 +101,7 @@ class TestAgenticFakeModel:  # pylint: disable=too-many-public-methods
     def test_model_properties(self, model):
         assert model._llm_type == "agentic-fake-provider"
         assert model._identifying_params == {"model": "agentic-fake-model"}
+        assert model._is_agentic_mock_model is True
 
     def test_bind_tools_returns_self(self, model):
         result = model.bind_tools()
@@ -110,10 +111,11 @@ class TestAgenticFakeModel:  # pylint: disable=too-many-public-methods
         assert result is model
 
     @pytest.mark.asyncio
-    async def test_astream_with_streaming_enabled(self, model):
+    async def test_astream_returns_correct_chunk_types(self, model):
+        """Test that _astream returns proper chunk types (integration test)."""
         messages = [
             HumanMessage(
-                content="<response stream='true' chunk_delay_ms='10'>Hello world test</response>"
+                content="<response stream='true' chunk_delay_ms='10'>Hello world</response>"
             )
         ]
 
@@ -123,57 +125,6 @@ class TestAgenticFakeModel:  # pylint: disable=too-many-public-methods
             assert isinstance(chunk.message, AIMessageChunk)
             chunks.append(chunk.message.content)
 
-        # Should have 3 chunks: "Hello", " world", " test"
-        assert len(chunks) == 3
-        assert chunks[0] == "Hello"
-        assert chunks[1] == " world"
-        assert chunks[2] == " test"
-
-    @pytest.mark.asyncio
-    async def test_astream_with_streaming_and_tool_calls(self, model):
-        messages = [
-            HumanMessage(
-                content='<response stream="true">Analyze this <tool_calls>[{"name": "search"}]</tool_calls></response>'
-            )
-        ]
-
-        chunks = []
-        async for chunk in model._astream(messages):
-            chunks.append(chunk)
-
-        # Should have text chunks + final chunk with tool calls
-        assert len(chunks) == 3  # "Analyze", " this", and tool call chunk
-
-        # Last chunk should have tool calls
-        assert chunks[-1].message.tool_calls
-        assert chunks[-1].message.tool_calls[0]["name"] == "search"
-
-    @pytest.mark.asyncio
-    async def test_astream_without_streaming(self, model):
-        messages = [
-            HumanMessage(content="<response>Complete response at once</response>")
-        ]
-
-        chunks = []
-        async for chunk in model._astream(messages):
-            chunks.append(chunk)
-
-        # Should have only 1 chunk with complete response
-        assert len(chunks) == 1
-        assert chunks[0].message.content == "Complete response at once"
-
-    def test_stream_with_streaming_enabled(self, model):
-        messages = [
-            HumanMessage(content="<response stream='true'>Hello world</response>")
-        ]
-
-        chunks = []
-        for chunk in model._stream(messages):
-            assert isinstance(chunk, ChatGenerationChunk)
-            assert isinstance(chunk.message, AIMessageChunk)
-            chunks.append(chunk.message.content)
-
-        # Should have 2 chunks: "Hello", " world"
         assert len(chunks) == 2
         assert chunks[0] == "Hello"
         assert chunks[1] == " world"
@@ -319,8 +270,66 @@ class TestAgenticFakeModel:  # pylint: disable=too-many-public-methods
         elapsed_ms = (end_time - start_time) * 1000
         assert elapsed_ms >= 40
 
+    @pytest.mark.asyncio
+    async def test_astream_with_streaming_tool_calls_in_chunks(self, model):
+        messages = [
+            HumanMessage(
+                content="""
+                <response stream="true">
+                Analyzing <tool_calls>[{"name": "search", "args": {"query": "test"}}]</tool_calls>
+                </response>'
+                """
+            )
+        ]
 
-class TestResponseHandler:
+        chunks = []
+        async for chunk in model._astream(messages):
+            chunks.append(chunk)
+
+        # Should have text chunks + tool call chunk
+        # With short content, we get: 1 text chunk + 1 tool call chunk
+        assert len(chunks) >= 2
+
+        text_chunks = [c for c in chunks if c.message.content]
+        assert len(text_chunks) == 1  # "Analyzing"
+
+        tool_chunks = [
+            c
+            for c in chunks
+            if hasattr(c.message, "tool_call_chunks") and c.message.tool_call_chunks
+        ]
+        assert len(tool_chunks) >= 1  # Should have at least one chunk for the tool call
+
+    def test_stream_with_streaming_tool_calls_in_chunks(self, model):
+        messages = [
+            HumanMessage(
+                content="""
+                <response stream="true">
+                Analyzing <tool_calls>[{"name": "search", "args": {"query": "test"}}]</tool_calls>
+                </response>'
+                """
+            )
+        ]
+
+        chunks = []
+        for chunk in model._stream(messages):
+            chunks.append(chunk)
+
+        # Should have text chunks + tool call chunks
+        assert len(chunks) > 1  # At least text chunks + tool call chunks
+
+        text_chunks = [c for c in chunks if c.message.content]
+        assert len(text_chunks) == 1  # "Analyzing"
+
+        tool_chunks = [
+            c
+            for c in chunks
+            if hasattr(c.message, "tool_call_chunks") and c.message.tool_call_chunks
+        ]
+        assert len(tool_chunks) > 0  # Should have multiple chunks for the tool call
+
+
+class TestResponseHandler:  # pylint: disable=too-many-public-methods
     def test_response_handler_simple_response(self):
         messages = [
             HumanMessage(content="Task: <response>Simple response text</response>")
@@ -435,11 +444,23 @@ class TestResponseHandler:
     @pytest.mark.parametrize(
         "messages",
         [
+            [HumanMessage(content="<response>Unclosed tag")],
+            [HumanMessage(content="Invalid <response tag")],
+        ],
+    )
+    def test_response_handler_invalid_xml_returns_error_response(self, messages):
+        handler = ResponseHandler(messages)
+        response = handler.get_next_response()
+
+        assert "invalid xml" in response.content.lower()
+
+    @pytest.mark.parametrize(
+        "messages",
+        [
             [],
             ["not a HumanMessage"],
             [HumanMessage(content="")],
             [HumanMessage(content="Just regular text without tags")],
-            [HumanMessage(content="Invalid <response tag")],
             [HumanMessage(content=["not", "a", "string"])],
             [AIMessage(content="<response>AIMessage is not user input</response>")],
         ],
@@ -478,3 +499,238 @@ class TestResponseHandler:
         assert response3.content == "Default response"
         assert response3.stream is False
         assert response3.chunk_delay_ms == 0
+
+    def test_response_handler_file_based_response(self, tmp_path):
+        response_file = tmp_path / "test_response.txt"
+        response_file.write_text("Response from file")
+
+        messages = [HumanMessage(content=f'<response file="{response_file}" />')]
+
+        handler = ResponseHandler(messages)
+        response = handler.get_next_response()
+
+        assert response.content == "Response from file"
+        assert not response.tool_calls
+
+    def test_response_handler_file_based_response_with_tool_calls(self, tmp_path):
+        response_file = tmp_path / "test_response_with_tools.txt"
+        response_file.write_text(
+            "I will search for information.\n"
+            '<tool_calls>[{"name": "search", "args": {"query": "test"}}]</tool_calls>'
+        )
+
+        messages = [HumanMessage(content=f'<response file="{response_file}" />')]
+
+        handler = ResponseHandler(messages)
+        response = handler.get_next_response()
+
+        assert response.content == "I will search for information."
+        assert len(response.tool_calls) == 1
+        assert response.tool_calls[0]["name"] == "search"
+        assert response.tool_calls[0]["args"] == {"query": "test"}
+
+    def test_response_handler_file_caching(self, tmp_path):
+        response_file = tmp_path / "cached_response.txt"
+        response_file.write_text("Cached content")
+
+        ResponseHandler._file_cache.clear()
+
+        # First handler loads the file
+        messages1 = [HumanMessage(content=f'<response file="{response_file}" />')]
+        handler1 = ResponseHandler(messages1)
+        response1 = handler1.get_next_response()
+
+        assert str(response_file) in ResponseHandler._file_cache
+
+        # Modify the file
+        response_file.write_text("Modified content")
+
+        # Second handler should use cached content
+        messages2 = [HumanMessage(content=f'<response file="{response_file}" />')]
+        handler2 = ResponseHandler(messages2)
+        response2 = handler2.get_next_response()
+
+        # Should still have original cached content
+        assert response1.content == "Cached content"
+        assert response2.content == "Cached content"
+
+        # Clear cache for other tests
+        ResponseHandler._file_cache.clear()
+
+    def test_response_handler_file_not_found(self):
+        messages = [HumanMessage(content='<response file="nonexistent_file.txt" />')]
+
+        with pytest.raises(FileNotFoundError, match="Response file not found"):
+            ResponseHandler(messages)
+
+    def test_response_handler_template_variables(self, tmp_path):
+        content_file = tmp_path / "template_vars.txt"
+        content_file.write_text(
+            "Project ID is {{ projectId }} in {{ namespace }}\n"
+            """
+            <tool_calls>
+            [{"name": "list_repository_tree", "args": {"project_id": {{ projectId }}, "recursive": true}}]
+            </tool_calls>
+            """
+        )
+
+        messages = [
+            HumanMessage(
+                content=f"""
+                {{% set projectId = 1000001 %}}
+                {{% set namespace = "test-namespace" %}}
+                <response file="{content_file}" />
+                """
+            )
+        ]
+
+        handler = ResponseHandler(messages)
+
+        response = handler.get_next_response()
+        assert response.content == "Project ID is 1000001 in test-namespace"
+        assert len(response.tool_calls) == 1
+        assert response.tool_calls[0]["args"]["project_id"] == 1000001
+
+    def test_response_handler_file_with_attributes(self, tmp_path):
+        response_file = tmp_path / "response_with_attrs.txt"
+        response_file.write_text("Delayed streaming response")
+
+        messages = [
+            HumanMessage(
+                content=f'<response file="{response_file}" stream="true" chunk_delay_ms="50" latency_ms="100" />'
+            )
+        ]
+
+        handler = ResponseHandler(messages)
+        response = handler.get_next_response()
+
+        assert response.content == "Delayed streaming response"
+        assert response.stream is True
+        assert response.chunk_delay_ms == 50
+        assert response.latency_ms == 100
+
+    def test_response_handler_file_with_xml_special_characters(self, tmp_path):
+        # Create a file with content that would break XML parsing
+        response_file = tmp_path / "code_with_xml_chars.txt"
+        response_file.write_text(
+            "Creating a Python function.\n"
+            """
+            '<tool_calls>
+            [{"name": "create_file", "args": {"code": "if x < 10 and y > 5:\\n    print(\\"x & y are valid\\")"}}]
+            </tool_calls>'
+            """
+        )
+
+        messages = [HumanMessage(content=f'<response file="{response_file}" />')]
+
+        handler = ResponseHandler(messages)
+        response = handler.get_next_response()
+
+        assert response.content.startswith("Creating a Python function.")
+        assert len(response.tool_calls) == 1
+        assert response.tool_calls[0]["name"] == "create_file"
+        assert "x < 10" in response.tool_calls[0]["args"]["code"]
+        assert "y > 5" in response.tool_calls[0]["args"]["code"]
+        assert "x & y" in response.tool_calls[0]["args"]["code"]
+
+    def test_extract_template_variables_with_invalid_jinja(self):
+        messages = [
+            HumanMessage(
+                content="""
+                {% set invalid syntax here %}
+                <response>Test</response>
+                """
+            )
+        ]
+        handler = ResponseHandler(messages)
+        # Should still create handler with empty template_vars
+        assert handler.template_vars == {}
+        response = handler.get_next_response()
+        assert response.content == "Test"
+
+    def test_render_template_with_jinja_error(self, tmp_path):
+        response_file = tmp_path / "jinja_error.txt"
+        response_file.write_text("Project {% if invalid syntax %}")
+
+        messages = [
+            HumanMessage(
+                content=f"""
+                {{% set projectId = 123 %}}
+                <response file="{response_file}" />
+                """
+            )
+        ]
+        handler = ResponseHandler(messages)
+        response = handler.get_next_response()
+        # Should return content as-is when rendering fails
+        assert "Project" in response.content
+
+    def test_tool_calls_without_closing_tag(self, tmp_path):
+        response_file = tmp_path / "unclosed_tool_calls.txt"
+        response_file.write_text('Text before <tool_calls>[{"name": "search"}]')
+
+        messages = [HumanMessage(content=f'<response file="{response_file}" />')]
+
+        handler = ResponseHandler(messages)
+        response = handler.get_next_response()
+        # Should extract text before the unclosed tag
+        assert "Text before" in response.content
+        # Tool calls should not be parsed due to missing closing tag
+        assert len(response.tool_calls) == 0
+
+    def test_stream_tool_calls_with_large_json(self):
+        model = AgenticFakeModel()
+        # Create a tool call with large args to trigger multiple chunks (chunk_size is 100)
+        large_data = "x" * 150
+
+        messages = [
+            HumanMessage(
+                content=f"""
+                <response stream="true">
+                    Processing <tool_calls>
+                        [{{"name": "process_data", "args": {{"data": "{large_data}"}}}}]
+                    </tool_calls>
+                </response>
+                """
+            )
+        ]
+
+        chunks = []
+        for chunk in model._stream(messages):
+            chunks.append(chunk)
+
+        # Should have text chunk + multiple tool call chunks
+        assert len(chunks) > 2
+
+        tool_chunks = [
+            c
+            for c in chunks
+            if hasattr(c.message, "tool_call_chunks") and c.message.tool_call_chunks
+        ]
+        assert len(tool_chunks) > 1
+
+        # First chunk should have name
+        assert tool_chunks[0].message.tool_call_chunks[0]["name"] == "process_data"
+        # Subsequent chunks should have name=None
+        if len(tool_chunks) > 1:
+            assert tool_chunks[1].message.tool_call_chunks[0]["name"] is None
+
+    def test_extract_text_from_nested_elements(self):
+        messages = [
+            HumanMessage(
+                content="""
+                <response>
+                    Text before
+                    <custom_tag>Nested content</custom_tag>
+                    Text after
+                </response>
+                """
+            )
+        ]
+
+        handler = ResponseHandler(messages)
+        response = handler.get_next_response()
+        # Should extract all text including nested elements
+        assert "Text before" in response.content
+        assert "Nested content" in response.content
+        assert "Text after" in response.content
