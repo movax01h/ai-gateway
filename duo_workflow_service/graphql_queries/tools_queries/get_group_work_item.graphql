@@ -5,6 +5,7 @@ query GetGroupWorkItem(
     $childrenEndCursor: String
     $pageSize: Int
     $endCursor: String
+    $includeHierarchyWidget: Boolean!
 ) {
     namespace(fullPath: $fullPath) {
         workItems(iid: $iid) {
@@ -139,7 +140,7 @@ query GetGroupWorkItem(
                                 closedAt
                                 webUrl
                                 widgets {
-                                    ... on WorkItemWidgetHierarchy {
+                                    ... on WorkItemWidgetHierarchy @include(if: $includeHierarchyWidget) {
                                         hasChildren
                                     }
                                 }

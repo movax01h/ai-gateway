@@ -20,6 +20,7 @@ query ListGroupWorkItems(
     $milestoneTitle: [String!]
     $milestoneWildcardId: MilestoneWildcardId
     $includeDescendants: Boolean = true
+    $includeHierarchyWidget: Boolean!
 ) {
     namespace(fullPath: $fullPath) {
         workItems(
@@ -90,7 +91,7 @@ query ListGroupWorkItems(
                             dueDate
                         }
                     }
-                    ... on WorkItemWidgetHierarchy {
+                    ... on WorkItemWidgetHierarchy @include(if: $includeHierarchyWidget) {
                         hasChildren
                         hasParent
                     }
