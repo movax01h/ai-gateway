@@ -222,10 +222,10 @@ configurable_unit_primitives:
     unit_primitives:
       - "ask_build"
       - "ask_commit"
-    default_model: "claude_sonnet_3_7_20250219"
+    default_model: "claude_sonnet_4_5_20250929"
     selectable_models:
-      - "claude_sonnet_3_7_20250219"
-      - "claude_3_5_sonnet_20240620"
+      - "claude_sonnet_4_5_20250929"
+      - "claude_sonnet_4_20250514"
     dev:
       selectable_models:
         - "claude_sonnet_4_5_20250929"
