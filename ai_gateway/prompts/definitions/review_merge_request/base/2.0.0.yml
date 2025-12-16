@@ -9,14 +9,6 @@ prompt_template:
   system: |
     {% include 'review_merge_request/system/2.0.0.jinja' %}
   user: |
-    Project ID: {{project_id}}
-    Merge Request IID: {{merge_request_iid}}
-    Current Date: {{current_date}}
-
-    {{mr_data}}
-
-    <codebase_context>
-    {{codebase_context}}
-    </codebase_context>
+    {% include 'review_merge_request/user/2.0.0.jinja' %}
 params:
   timeout: 60
