@@ -19,6 +19,7 @@ query ListProjectWorkItems(
     $status: WorkItemWidgetStatusFilterInput
     $milestoneTitle: [String!]
     $milestoneWildcardId: MilestoneWildcardId
+    $includeHierarchyWidget: Boolean!
 ) {
     project(fullPath: $fullPath) {
         workItems(
@@ -88,7 +89,7 @@ query ListProjectWorkItems(
                             dueDate
                         }
                     }
-                    ... on WorkItemWidgetHierarchy {
+                    ... on WorkItemWidgetHierarchy @include(if: $includeHierarchyWidget) {
                         hasChildren
                         hasParent
                     }

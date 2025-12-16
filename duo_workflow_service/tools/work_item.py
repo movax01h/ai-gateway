@@ -13,6 +13,9 @@ from duo_workflow_service.tools.work_items.base_tool import (
 from duo_workflow_service.tools.work_items.queries.work_items import (
     CREATE_NOTE_MUTATION,
 )
+from duo_workflow_service.tools.work_items.version_compatibility import (
+    get_query_variables_for_version,
+)
 
 # Supported work item types in GitLab
 GROUP_ONLY_TYPES = {"Epic", "Objective", "Key Result"}
@@ -247,6 +250,9 @@ class ListWorkItems(WorkItemBaseTool):
                 warnings.append(
                     f"Some types were invalid and skipped: {', '.join(invalid_types)}"
                 )
+
+        # Add version-specific variables
+        query_variables.update(get_query_variables_for_version())
 
         try:
             response = await self.gitlab_client.graphql(query, query_variables)

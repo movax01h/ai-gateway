@@ -5,6 +5,7 @@ query GetProjectWorkItem(
     $childrenEndCursor: String
     $pageSize: Int
     $endCursor: String
+    $includeHierarchyWidget: Boolean!
 ) {
     project(fullPath: $fullPath) {
         workItems(iid: $iid) {
@@ -139,8 +140,8 @@ query GetProjectWorkItem(
                                 closedAt
                                 webUrl
                                 widgets {
-                                    ... on WorkItemWidgetHierarchy {
-                                        hasChildren
+                                ... on WorkItemWidgetHierarchy @include(if: $includeHierarchyWidget) {
+                                    hasChildren
                                     }
                                 }
                             }

@@ -30,6 +30,9 @@ from duo_workflow_service.tools.work_items.queries.work_items import (
     LIST_PROJECT_WORK_ITEMS_QUERY,
     UPDATE_WORK_ITEM_MUTATION,
 )
+from duo_workflow_service.tools.work_items.version_compatibility import (
+    get_query_variables_for_version,
+)
 
 log = structlog.stdlib.get_logger(__name__)
 
@@ -256,18 +259,12 @@ class WorkItemBaseTool(DuoBaseTool):
         if kwargs.get("confidential") is not None:
             input_data["confidential"] = kwargs["confidential"]
 
-        warnings = []
+        warnings: List[str] = []
 
-        if kwargs.get("assignee_ids") is not None:
-            valid_ids, invalid_ids = WorkItemBaseTool._normalize_gids(
-                kwargs["assignee_ids"], "User"
-            )
-            if valid_ids:
-                input_data["assigneesWidget"] = {"assigneeIds": valid_ids}
-            if invalid_ids:
-                warnings.append(
-                    f"Some assignee_ids were invalid and skipped: {invalid_ids}"
-                )
+        assignees_widget = WorkItemBaseTool._build_assignees_widget(kwargs, warnings)
+
+        if assignees_widget:
+            input_data["assigneesWidget"] = assignees_widget
 
         labels_widget = WorkItemBaseTool._build_labels_widget(kwargs, warnings)
 
@@ -280,6 +277,36 @@ class WorkItemBaseTool(DuoBaseTool):
             input_data["hierarchyWidget"] = hierarchy_widget
 
         return input_data, warnings
+
+    @staticmethod
+    def _build_assignees_widget(
+        kwargs: Dict[str, Any], warnings: List[str]
+    ) -> Optional[Dict[str, Any]]:
+        """Build assignees widget configuration for work item operations.
+
+        Args:
+            kwargs: Input parameters that may contain assignee_ids
+            warnings: List to collect validation warnings
+
+        Returns:
+            Dictionary with assignees widget configuration or None if not provided
+        """
+        if kwargs.get("assignee_ids") is None:
+            return None
+
+        valid_ids, invalid_ids = WorkItemBaseTool._normalize_gids(
+            kwargs["assignee_ids"], "User"
+        )
+
+        if invalid_ids:
+            warnings.append(
+                f"Some assignee_ids were invalid and skipped: {invalid_ids}"
+            )
+
+        if valid_ids:
+            return {"assigneeIds": valid_ids}
+
+        return None
 
     @staticmethod
     def _build_labels_widget(
@@ -412,6 +439,7 @@ class WorkItemBaseTool(DuoBaseTool):
         variables = {
             "fullPath": resolved.parent.full_path,
             "iid": str(resolved.work_item_iid),
+            **get_query_variables_for_version(),
         }
 
         response = await self.gitlab_client.graphql(query, variables)
@@ -566,6 +594,7 @@ class WorkItemBaseTool(DuoBaseTool):
         query_variables = {
             "fullPath": resolved.parent.full_path,
             "iid": str(resolved.work_item_iid),
+            **get_query_variables_for_version(),
         }
 
         response = await self.gitlab_client.graphql(query, query_variables)
