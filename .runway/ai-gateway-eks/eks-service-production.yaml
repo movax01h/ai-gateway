@@ -19,7 +19,7 @@ ai-gateway-eks:
       AIGW_GITLAB_API_URL: "https://gitlab.com/api/v4/"
       AIGW_CUSTOMER_PORTAL_URL: "https://customers.gitlab.com"
       AIGW_GLGO_BASE_URL: "https://auth.aws.gitlab.com"
-      AIGW_GOOGLE_CLOUD_PLATFORM__PROJECT: "gitlab-ai-framework-leg-prod"
+      AIGW_GOOGLE_CLOUD_PLATFORM__PROJECT: "gitlab-ai-framework-prod"
       AIGW_VERTEX_SEARCH__FALLBACK_DATASTORE_VERSION: "17.0"
       AIGW_SNOWPLOW__ENABLED: "true"
       AIGW_SNOWPLOW__ENDPOINT: "https://snowplowprd.trx.gitlab.net"
@@ -41,11 +41,11 @@ ai-gateway-eks:
 
   workloadSecrets:
     - name: env-vars
-    - name: gcp-service-account-legacy
+    - name: gcp-service-account
 
   secretEnvFrom:
     - env-vars
 
   secretVolumes:
-    - name: gcp-service-account-legacy
+    - name: gcp-service-account
       path: /secrets/gcp-service-account
