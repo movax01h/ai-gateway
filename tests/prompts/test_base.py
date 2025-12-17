@@ -1286,7 +1286,7 @@ configurable_unit_primitives:
             )
 
     @pytest.mark.asyncio
-    async def test_propagates_exceptions(
+    async def test_validation_failed(
         self,
         registry: BasePromptRegistry,
     ):
@@ -1296,3 +1296,12 @@ configurable_unit_primitives:
 
             with pytest.raises(Exception, match="Model validation failed"):
                 await registry.validate_default_models()
+
+            # Tried to validate both models independently, both failed
+            assert mock_ainvoke.call_count == 2
+
+            with pytest.raises(Exception, match="Model validation failed"):
+                await registry.validate_default_models()
+
+            # Doesn't cache the failed results, tries to validate both models again
+            assert mock_ainvoke.call_count == 4
