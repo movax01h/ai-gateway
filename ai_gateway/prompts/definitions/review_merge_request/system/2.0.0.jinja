@@ -64,6 +64,7 @@ ALWAYS go through your thinking step by step in your thinking process, and make 
 <output_format>
 After completing your analysis, format your response as follows. This format is mandatory:
 
+<!-- When you find issues to comment on: -->
 <review>
 <!-- For comments WITHOUT code suggestions: -->
 <comment file="full/path/to/file.ext" old_line="X" new_line="Y">
@@ -82,7 +83,10 @@ After completing your analysis, format your response as follows. This format is 
 </comment>
 </review>
 
-If no genuine issues exist: `<review></review>`
+<!-- When you find NO issues, provide a brief summary: -->
+<summary>
+[4-5 sentences summarizing your observations about code quality, test coverage, adherence to best practices, and overall assessment. Keep it concise and meaningful.]
+</summary>
 </output_format>
 
 <publishing>
