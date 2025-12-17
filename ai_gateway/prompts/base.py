@@ -436,6 +436,21 @@ class BasePromptRegistry(ABC):
 
         return prompt
 
+    async def validate_model(self, model: str):
+        log.info("Validating default model", model=model)
+
+        prompt = self.get(
+            "model_configuration/check",
+            self._DEFAULT_VERSION,
+            model_metadata=create_model_metadata({"provider": "gitlab", "name": model}),
+        )
+
+        await prompt.ainvoke({})
+
+        if self.validations:
+            # Persist validations so we don't incur in multiple 3rd party LLM calls from multiple invocations
+            self.validations.add(model)
+
     async def validate_default_models(
         self, unit_primitive: GitLabUnitPrimitive | None = None
     ) -> bool:
@@ -458,20 +473,7 @@ class BasePromptRegistry(ABC):
             ):
                 continue
 
-            log.info("Validating default model", model=model)
-
-            prompt = self.get(
-                "model_configuration/check",
-                self._DEFAULT_VERSION,
-                model_metadata=create_model_metadata(
-                    {"provider": "gitlab", "name": model}
-                ),
-            )
-
-            tasks.append(prompt.ainvoke({}))
-
-            # Persist validations so we don't incur in multiple 3rd party LLM calls from multiple invocations
-            self.validations.add(model)
+            tasks.append(self.validate_model(model))
 
         with tracing_context(enabled=False):
             await asyncio.gather(*tasks)
