@@ -19,7 +19,11 @@ def create_agent(
     workflow_id: str,
     workflow_type: CategoryEnum,
     system_template_override: str | None,
+    agent_name_override: str | None = None,
 ) -> ChatAgent:
+    # Use agent_name_override for chat-partial flows, default to "chat"
+    agent_name = agent_name_override if agent_name_override else "chat"
+
     prompt: Prompt = prompt_registry.get_on_behalf(
         user=user,
         prompt_id="chat/agent",
@@ -27,7 +31,7 @@ def create_agent(
         internal_event_category=internal_event_category,
         tools=tools.bindable,  # type: ignore[arg-type]
         internal_event_extra={
-            "agent_name": "chat",
+            "agent_name": agent_name,
             "workflow_id": workflow_id,
             "workflow_type": workflow_type.value,
         },

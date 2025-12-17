@@ -224,7 +224,15 @@ def _flow_factory(
             "Chat-partial environment expects either inline or in repository prompt configuration, but received both"
         )
 
-    args = {"tools_override": agent_component["toolset"]}
+    # Extract agent name from component for proper event tracking
+    # This ensures chat-partial agents (e.g., Duo Planner, analytics_agent)
+    # are tracked with their actual names instead of generic "chat"
+    agent_name = agent_component.get("name")
+
+    args = {
+        "tools_override": agent_component["toolset"],
+        "agent_name_override": agent_name,
+    }
 
     if prompt_template_override := (config.prompts[0] if config.prompts else None):
         if isinstance(prompt_template_override, InMemoryPromptConfig):
