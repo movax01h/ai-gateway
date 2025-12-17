@@ -46,7 +46,6 @@ class TikTokenCounter:
             densities.append(tokens / len(sample))
 
         # Use trimmed mean
-        densities.sort()
         trim = int(n_samples * 0.1)
         trimmed_densities = densities[trim:-trim]
         if not trimmed_densities:
@@ -74,7 +73,6 @@ class TikTokenCounter:
     def count_tokens_in_dict(self, content: dict) -> int:
         result = 0
         for key, value in content.items():
-            result += self.count_string_content(key)
             if isinstance(value, str):
                 result += self.count_string_content(value)
             elif isinstance(value, list):

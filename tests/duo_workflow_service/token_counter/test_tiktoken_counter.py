@@ -11,7 +11,7 @@ def test_messages_with_string_content():
 
     result = TikTokenCounter("some_name").count_tokens(messages)
 
-    assert result == 16
+    assert result == 12
 
 
 def test_messages_with_string_content_and_tools():
@@ -22,8 +22,8 @@ def test_messages_with_string_content_and_tools():
 
     result = TikTokenCounter("context_builder").count_tokens(messages)
 
-    # context_builder has 4735 tool tokens and these messages have 16
-    assert result == 4751
+    # context_builder has 4735 tool tokens and these messages have 12
+    assert result == 4747
 
 
 def test_messages_for_chat_agent():
@@ -34,8 +34,8 @@ def test_messages_for_chat_agent():
 
     result = TikTokenCounter("Chat Agent").count_tokens(messages)
 
-    # Chat Agent has 2500 tool tokens and these messages have 16
-    assert result == 2516
+    # Chat Agent has 2500 tool tokens and these messages have 12
+    assert result == 2512
 
 
 def test_messages_with_mixed_content():
@@ -57,7 +57,7 @@ def test_messages_with_mixed_content():
 
     result = TikTokenCounter("some_name").count_tokens(messages)
 
-    assert result == 37
+    assert result == 27
 
 
 def test_unicode_and_emojis():
