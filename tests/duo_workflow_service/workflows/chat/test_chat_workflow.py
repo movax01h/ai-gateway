@@ -421,12 +421,86 @@ async def test_workflow_run(
                 workflow_id=workflow._workflow_id,
                 workflow_type=workflow._workflow_type,
                 system_template_override=workflow.system_template_override,
+                agent_name_override=None,  # Default workflow has no override
             )
 
             mock_user_interface_instance.send_event.assert_called_with(
                 type="values", state=state, stream=True
             )
             assert mock_user_interface_instance.send_event.call_count == 1
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures(
+    "mock_tools_registry_cls",
+    "mock_git_lab_workflow_instance",
+    "mock_fetch_workflow_and_container_data",
+)
+async def test_workflow_run_with_agent_name_override(
+    mock_checkpoint_notifier,
+    mock_tools_registry,
+    user,
+    workflow_id,
+    workflow_type,
+):
+    """Test that agent_name_override is passed to create_agent for chat-partial flows."""
+    mock_user_interface_instance = mock_checkpoint_notifier.return_value
+    state = {"status": "Not Started", "ui_chat_log": []}
+
+    class AsyncIterator:
+        def __init__(self):
+            self.call_count = 0
+
+        def __aiter__(self):
+            return self
+
+        async def __anext__(self):
+            self.call_count += 1
+            if self.call_count > 1:
+                raise StopAsyncIteration
+            else:
+                return ("values", state)
+
+    # Create workflow with agent_name_override (simulating chat-partial flow)
+    workflow = Workflow(
+        workflow_id=workflow_id,
+        workflow_metadata={},
+        workflow_type=CategoryEnum.AI_CATALOG_AGENT,
+        user=user,
+        agent_name_override="348/0",  # Duo Planner agent name
+    )
+    workflow._project = {"id": 123, "name": "test-project"}
+    workflow._namespace = None
+
+    with patch(
+        "duo_workflow_service.workflows.chat.workflow.StateGraph"
+    ) as mock_graph_cls:
+        compiled_graph = MagicMock()
+        compiled_graph.astream.return_value = AsyncIterator()
+        mock_graph = mock_graph_cls.return_value
+        mock_graph.compile.return_value = compiled_graph
+
+        mock_agent = MagicMock()
+        with patch(
+            "duo_workflow_service.workflows.chat.workflow.create_agent",
+            return_value=mock_agent,
+        ) as mock_create_agent:
+            await workflow.run("Test chat goal")
+
+            assert workflow.is_done
+
+            # Verify agent_name_override is passed through
+            mock_create_agent.assert_called_once_with(
+                user=workflow._user,
+                tools_registry=ANY,
+                internal_event_category="duo_workflow_service.workflows.chat.workflow",
+                tools=ANY,
+                prompt_registry=workflow._prompt_registry,
+                workflow_id=workflow._workflow_id,
+                workflow_type=workflow._workflow_type,
+                system_template_override=None,
+                agent_name_override="348/0",  # Should pass the override
+            )
 
 
 class TestUnauthorizedChatExecution:

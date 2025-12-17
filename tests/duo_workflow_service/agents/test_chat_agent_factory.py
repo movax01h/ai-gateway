@@ -57,3 +57,67 @@ class TestCreateAgent:
                 "workflow_type": CategoryEnum.WORKFLOW_CHAT,
             },
         )
+
+    def test_create_agent_with_agent_name_override(
+        self,
+        user,
+        mock_tools_registry,
+        mock_toolset,
+        mock_local_prompt_registry,
+        prompt,
+    ):
+        """Test that agent_name_override is used for chat-partial foundational agents."""
+        agent = create_agent(
+            user=user,
+            tools_registry=mock_tools_registry,
+            internal_event_category="test_category",
+            tools=mock_toolset,
+            prompt_registry=mock_local_prompt_registry,
+            workflow_id="workflow_123",
+            workflow_type=CategoryEnum.AI_CATALOG_AGENT,
+            system_template_override=None,
+            agent_name_override="348/0",
+        )
+
+        assert isinstance(agent, ChatAgent)
+        assert agent.name == prompt.name
+
+        # Verify that the agent_name in internal_event_extra uses the override
+        mock_local_prompt_registry.get_on_behalf.assert_called_once_with(
+            user=user,
+            prompt_id="chat/agent",
+            prompt_version="^1.0.0",
+            internal_event_category="test_category",
+            tools=[],
+            internal_event_extra={
+                "agent_name": "348/0",  # Should use the override
+                "workflow_id": "workflow_123",
+                "workflow_type": CategoryEnum.AI_CATALOG_AGENT,
+            },
+        )
+
+    def test_create_agent_without_override_defaults_to_chat(
+        self,
+        user,
+        mock_tools_registry,
+        mock_toolset,
+        mock_local_prompt_registry,
+    ):
+        """Test that agent_name defaults to 'chat' when no override is provided."""
+        agent = create_agent(
+            user=user,
+            tools_registry=mock_tools_registry,
+            internal_event_category="test_category",
+            tools=mock_toolset,
+            prompt_registry=mock_local_prompt_registry,
+            workflow_id="workflow_123",
+            workflow_type=CategoryEnum.WORKFLOW_CHAT,
+            system_template_override=None,
+            agent_name_override=None,
+        )
+
+        assert isinstance(agent, ChatAgent)
+
+        # Verify that the agent_name defaults to "chat"
+        call_kwargs = mock_local_prompt_registry.get_on_behalf.call_args.kwargs
+        assert call_kwargs["internal_event_extra"]["agent_name"] == "chat"

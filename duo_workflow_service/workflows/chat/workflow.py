@@ -134,6 +134,7 @@ class Workflow(AbstractWorkflow):
     _tools_override: list[str]
     _workflow_id: str
     _workflow_type: CategoryEnum
+    _agent_name_override: Optional[str] = None
 
     # pylint: disable=dangerous-default-value
     @inject
@@ -160,6 +161,7 @@ class Workflow(AbstractWorkflow):
         **kwargs,
     ):
         self._tools_override = kwargs.pop("tools_override", None)
+        self._agent_name_override = kwargs.pop("agent_name_override", None)
         self.system_template_override = system_template_override
         self._workflow_id = workflow_id
         self._workflow_type = workflow_type
@@ -313,6 +315,7 @@ class Workflow(AbstractWorkflow):
             workflow_id=self._workflow_id,
             workflow_type=self._workflow_type,
             system_template_override=self.system_template_override,
+            agent_name_override=self._agent_name_override,
         )
 
         tools_runner = ToolsExecutor(

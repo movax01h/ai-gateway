@@ -243,6 +243,47 @@ def test_resolve_workflow_class_with_chat_flow_config_success(config_params):
         expected_kwargs = {
             "tools_override": ["tool1", "tool2"],
             "system_template_override": None,
+            "agent_name_override": None,  # Default component has no name
+        }
+        assert result.keywords == expected_kwargs
+
+
+def test_resolve_workflow_class_with_chat_flow_config_extracts_agent_name():
+    """Test that agent_name is extracted from chat-partial flow config."""
+    components = [
+        {
+            "name": "348/0",  # Agent name for Duo Planner
+            "type": "AgentComponent",
+            "toolset": ["tool1", "tool2"],
+            "prompt_id": "custom/prompt",
+        }
+    ]
+    mocks = build_chat_flow_config(components=components)
+
+    with (
+        patch(
+            "duo_workflow_service.workflows.registry._FLOW_BY_VERSIONS",
+            {"v1": (mocks["flow_config_cls"], mocks["flow_cls"])},
+        ),
+        patch(
+            "duo_workflow_service.workflows.registry.MessageToDict",
+            return_value=mocks["expected_dict"],
+        ),
+    ):
+        result = resolve_workflow_class(
+            workflow_definition=None,
+            flow_config=mocks["struct"],
+            flow_config_schema_version="v1",
+        )
+
+        assert isinstance(result, partial)
+        assert result.func == chat.Workflow
+
+        # Verify agent_name_override is extracted from component name
+        expected_kwargs = {
+            "tools_override": ["tool1", "tool2"],
+            "system_template_override": None,
+            "agent_name_override": "348/0",
         }
         assert result.keywords == expected_kwargs
 
