@@ -447,6 +447,14 @@ configurable_unit_primitives:
       - "claude_sonnet_4_20250514"
       - "claude_sonnet_4_5_20250929_vertex"
       - "claude_sonnet_4_5_20250929"
+  - feature_setting: "developer_add_plan_comment"
+    unit_primitives:
+      - "duo_agent_platform"
+    default_model: "claude_sonnet_4_5_20250929"
+    selectable_models:
+      - "claude_sonnet_4_20250514"
+      - "claude_sonnet_4_20250514_vertex"
+      - "claude_sonnet_4_5_20250929"
   - feature_setting: "programming_agent"
     unit_primitives:
       - "duo_agent_platform"
