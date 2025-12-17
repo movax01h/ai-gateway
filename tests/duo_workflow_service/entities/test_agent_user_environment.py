@@ -6,6 +6,7 @@ import pytest
 
 from duo_workflow_service.entities.agent_user_environment import (
     process_agent_user_environment,
+    process_agents_dot_md,
 )
 from duo_workflow_service.workflows.type_definitions import (
     AdditionalContext,
@@ -325,3 +326,33 @@ class TestProcessAgentUserEnvironment:
         assert result["shell_information_context"].shell_variant is None
         assert result["shell_information_context"].shell_environment is None
         assert result["shell_information_context"].ssh_session is None
+
+
+@pytest.mark.parametrize(
+    "contexts,expected_result",
+    [
+        (
+            [
+                AdditionalContext(
+                    category="user_rule",
+                    id="agents-md-user-instructions",
+                    content="# AGENTS.md\n\nThis is the agents documentation.",
+                )
+            ],
+            "# AGENTS.md\n\nThis is the agents documentation.",
+        ),
+        (
+            [
+                AdditionalContext(
+                    category="user_rule", id="different-id", content="Some content"
+                )
+            ],
+            None,
+        ),
+        ([], None),
+        (None, None),
+    ],
+)
+def test_process_agents_dot_md(contexts, expected_result):
+    result = process_agents_dot_md(contexts)
+    assert result == expected_result

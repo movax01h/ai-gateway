@@ -17,6 +17,7 @@ from duo_workflow_service.components.human_approval.plan_approval import (
 from duo_workflow_service.entities import WorkflowState, WorkflowStatusEnum
 from duo_workflow_service.entities.agent_user_environment import (
     process_agent_user_environment,
+    process_agents_dot_md,
 )
 from duo_workflow_service.gitlab.gitlab_api import Project
 from duo_workflow_service.tools.handover import HandoverTool
@@ -94,6 +95,7 @@ class PlannerComponent(BaseComponent):
                 "agent_user_environment": process_agent_user_environment(
                     self.additional_context
                 ),
+                "agents_dot_md": process_agents_dot_md(self.additional_context),
             },
         )
 

@@ -43,6 +43,7 @@ from duo_workflow_service.entities import (
 )
 from duo_workflow_service.entities.agent_user_environment import (
     process_agent_user_environment,
+    process_agents_dot_md,
 )
 from duo_workflow_service.tools.handover import HandoverTool
 from duo_workflow_service.tracking.errors import log_exception
@@ -326,6 +327,10 @@ class Workflow(AbstractWorkflow):
         context_builder.prompt_template_inputs.setdefault(
             "agent_user_environment", {}
         ).update(process_agent_user_environment(self._additional_context))
+
+        context_builder.prompt_template_inputs["agents_dot_md"] = process_agents_dot_md(
+            self._additional_context
+        )
 
         return {
             "agent": context_builder,
