@@ -34,7 +34,7 @@ class LLMDefinition(BaseModel):
     max_context_tokens: int
     provider: Optional[str] = None
     description: str | None = None
-    cost_indicator: Literal["$", "$$", "$$$"] | None = None
+    cost_indicator: Literal["$", "$$", "$$$", "$$$$"] | None = None
     params: dict[str, Any] = {}
     family: list[str] = []
     deprecation: Optional[DeprecationInfo] = None
