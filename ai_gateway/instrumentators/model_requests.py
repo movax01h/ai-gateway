@@ -16,6 +16,15 @@ from ai_gateway.config import ModelLimits
 from ai_gateway.tracking.errors import log_exception
 from lib.language_server import LanguageServerVersion
 
+# Error type constants
+ERROR_TYPE_NONE = "none"
+ERROR_TYPE_PROMPT_TOO_LONG = "prompt_too_long"
+ERROR_TYPE_OVERLOADED = "overloaded"
+ERROR_TYPE_HTTP_400 = "http_400"
+ERROR_TYPE_PERMISSION_ERROR = "permission_error"
+ERROR_TYPE_SERVICE_UNAVAILABLE = "service_unavailable"
+ERROR_TYPE_OTHER = "other"
+
 
 def _language_server_version_label():
     lsp_version = language_server_version.get()
@@ -64,6 +73,7 @@ INFERENCE_DETAILS = (
     + METADATA_LABELS
     + [
         "error",
+        "error_type",
         "streaming",
         "feature_category",
         "unit_primitive",
@@ -221,6 +231,7 @@ class ModelRequestInstrumentator:
             self.labels = labels
             self.limits = limits
             self.error = False
+            self.error_type = ERROR_TYPE_NONE
             self.streaming = streaming
             self.start_time = None
             self.unit_primitives = unit_primitives
@@ -249,8 +260,46 @@ class ModelRequestInstrumentator:
 
             INFERENCE_IN_FLIGHT_GAUGE.labels(**self.labels).inc()
 
-        def register_error(self):
+        def register_error(self, exception: Optional[Exception] = None):
             self.error = True
+
+            if not exception:
+                self.error_type = ERROR_TYPE_OTHER
+                return
+
+            error_message = str(exception)
+
+            # Check for prompt too long in error message (case-insensitive, works across multiple providers)
+            # Vertex: "Prompt is too long"
+            # Anthropic: "prompt is too long: X tokens > Y maximum"
+            # LiteLLM: "Prompt is too long"
+            if "prompt is too long" in error_message.lower():
+                self.error_type = ERROR_TYPE_PROMPT_TOO_LONG
+                return
+
+            # Check for overloaded in error message
+            # LiteLLM: "Overloaded"
+            if "overloaded" in error_message.lower():
+                self.error_type = ERROR_TYPE_OVERLOADED
+                return
+
+            # Check if exception has a status_code or code attribute (works across providers)
+            # Anthropic/OpenAI use status_code, LiteLLM uses code
+            status_code = getattr(exception, "status_code", None) or getattr(
+                exception, "code", None
+            )
+
+            if not status_code:
+                self.error_type = ERROR_TYPE_OTHER
+                return
+
+            status_code_map = {
+                400: ERROR_TYPE_HTTP_400,
+                403: ERROR_TYPE_PERMISSION_ERROR,
+                503: ERROR_TYPE_SERVICE_UNAVAILABLE,
+            }
+
+            self.error_type = status_code_map.get(status_code, ERROR_TYPE_OTHER)
 
         def register_token_usage(self, model: str, usage: UsageMetadata):
             token_usage_labels = {**self._detail_labels(), "model_name": model}
@@ -328,6 +377,7 @@ class ModelRequestInstrumentator:
             )
             detail_labels = {
                 "error": "yes" if self.error else "no",
+                "error_type": self.error_type,
                 "streaming": "yes" if self.streaming else "no",
                 "feature_category": current_feature_category(),
                 "unit_primitive": unit_primitive,
@@ -363,7 +413,7 @@ class ModelRequestInstrumentator:
             yield watcher
         except Exception as ex:
             log_exception(ex, self.labels)
-            watcher.register_error()
+            watcher.register_error(ex)
             watcher.finish()
             raise
 
