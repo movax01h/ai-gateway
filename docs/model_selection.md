@@ -149,7 +149,7 @@ Models are defined in `ai_gateway/model_selection/models.yml`, and each model ha
 - `description` (optional): A brief description of the model, used for display in the UI (e.g "Fast, cost-effective responses").
   These should be no more than 90 characters and may require vendor approval. Please tag `@tmccaslin` (Taylor McCaslin)
   for review when updating/adding descriptions.
-- `cost_indicator` (optional): A visual cost indicator for the model, used for display in the UI (i.e `$`, `$$`, `$$$`).
+- `cost_indicator` (optional): A visual cost indicator for the model, used for display in the UI (i.e `$`, `$$`, `$$$`, `$$$$`).
   See table below for thresholds when updating/adding new cost indicators. These are based off model drawdown rates defined by our pricing team for usage billing. See [issue](https://gitlab.com/gitlab-org/gitlab/-/issues/566740).
 
   **TODO:** Add link to rate cards once they are officially documented.
@@ -159,6 +159,7 @@ Models are defined in `ai_gateway/model_selection/models.yml`, and each model ha
   | `$`            | 0.01 ≤ rate ≤ 0.3   |
   | `$$`           | 0.3 < rate ≤ 0.6    |
   | `$$$`          | 0.6 < rate ≤ 1.0    |
+  | `$$$$`         | 1.0 < rate          |
 
 - `family` (optional): an ordered list of preferred prompt definitions to use with this model (see
 [How models and prompts are selected](#how-models-and-prompts-are-selected) for more details)

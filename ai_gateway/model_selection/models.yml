@@ -87,7 +87,7 @@ models:
     provider: "Anthropic"
     gitlab_identifier: "claude_opus_4_5_20251101"
     description: "Claude's most intelligent model, combining maximum capability with practical performance."
-    cost_indicator: "$$$"
+    cost_indicator: "$$$$"
     max_context_tokens: 200000 # https://platform.claude.com/docs/en/about-claude/models/overview#latest-models-comparison
     family:
       - claude_4_5
