@@ -20,6 +20,7 @@ DEFAULT_ARGS = {
     "model_engine": "test_engine",
     "model_name": "test_model",
     "error": "no",
+    "error_type": "none",
     "streaming": "no",
     "feature_category": "unknown",
     "unit_primitive": "unknown",
@@ -298,11 +299,11 @@ class TestModelRequestInstrumentator:
             mock.call().dec(),
         ]
         assert mock_counters.mock_calls == [
-            mock.call(**{**DEFAULT_ARGS, "error": "yes"}),
+            mock.call(**{**DEFAULT_ARGS, "error": "yes", "error_type": "other"}),
             mock.call().inc(),
         ]
         assert mock_histograms.mock_calls == [
-            mock.call(**{**DEFAULT_ARGS, "error": "yes"}),
+            mock.call(**{**DEFAULT_ARGS, "error": "yes", "error_type": "other"}),
             mock.call().observe(1),
         ]
 
@@ -417,7 +418,129 @@ class TestDetailLabels:
             GitLabUnitPrimitive.CODE_SUGGESTIONS,
 
     def test_detail_labels_without_unit_primitive(self, instrumentator):
-
         with instrumentator.watch(unit_primitives=None) as watcher:
             labels = watcher._detail_labels()
             assert labels["unit_primitive"] == "unknown"
+
+
+class TestRegisterError:
+    def test_register_error_no_exception(self, container):
+        container.register_error(None)
+        assert container.error is True
+        assert container.error_type == "other"
+
+    def test_register_error_prompt_too_long_lowercase(self, container):
+        class CustomError(Exception):
+            pass
+
+        exception = CustomError("prompt is too long: 189294 tokens > 180000 maximum")
+        container.register_error(exception)
+        assert container.error is True
+        assert container.error_type == "prompt_too_long"
+
+    def test_register_error_prompt_too_long_capitalized(self, container):
+        class CustomError(Exception):
+            pass
+
+        exception = CustomError("Prompt is too long")
+        container.register_error(exception)
+        assert container.error is True
+        assert container.error_type == "prompt_too_long"
+
+    def test_register_error_status_code_400(self, container):
+        class BadRequestError(Exception):
+            def __init__(self):
+                self.status_code = 400
+
+        exception = BadRequestError()
+        container.register_error(exception)
+        assert container.error is True
+        assert container.error_type == "http_400"
+
+    def test_register_error_status_code_403(self, container):
+        class PermissionError(Exception):
+            def __init__(self):
+                self.status_code = 403
+
+        exception = PermissionError()
+        container.register_error(exception)
+        assert container.error is True
+        assert container.error_type == "permission_error"
+
+    def test_register_error_code_attribute_403(self, container):
+        """Test that code attribute is checked (used by LiteLLM)"""
+
+        class LiteLLMError(Exception):
+            def __init__(self):
+                self.code = 403
+
+        exception = LiteLLMError()
+        container.register_error(exception)
+        assert container.error is True
+        assert container.error_type == "permission_error"
+
+    def test_register_error_status_code_unknown(self, container):
+        class UnknownError(Exception):
+            def __init__(self):
+                self.status_code = 418  # I'm a teapot
+
+        exception = UnknownError()
+        container.register_error(exception)
+        assert container.error is True
+        assert container.error_type == "other"
+
+    def test_register_error_no_status_code(self, container):
+        class GenericError(Exception):
+            pass
+
+        exception = GenericError("Some error")
+        container.register_error(exception)
+        assert container.error is True
+        assert container.error_type == "other"
+
+    def test_register_error_prompt_too_long_takes_precedence(self, container):
+        """Test that prompt_too_long check takes precedence over status_code."""
+
+        class BadRequestError(Exception):
+            def __init__(self):
+                self.status_code = 400
+
+        exception = BadRequestError()
+        exception.args = ("prompt is too long: 189294 tokens > 180000 maximum",)
+        container.register_error(exception)
+        assert container.error is True
+        assert container.error_type == "prompt_too_long"
+
+    def test_register_error_overloaded_message(self, container):
+        """Test that 'Overloaded' in message is caught."""
+
+        class LiteLLMError(Exception):
+            pass
+
+        exception = LiteLLMError("Overloaded")
+        container.register_error(exception)
+        assert container.error is True
+        assert container.error_type == "overloaded"
+
+    def test_register_error_status_code_503(self, container):
+        class ServiceUnavailableError(Exception):
+            def __init__(self):
+                self.status_code = 503
+
+        exception = ServiceUnavailableError()
+        container.register_error(exception)
+        assert container.error is True
+        assert container.error_type == "service_unavailable"
+
+    def test_register_error_overloaded_message_takes_precedence(self, container):
+        """Test that overloaded message check takes precedence over status_code."""
+
+        class LiteLLMError(Exception):
+            def __init__(self):
+                self.status_code = 400
+
+        exception = LiteLLMError()
+        exception.args = ("Overloaded",)
+        container.register_error(exception)
+        assert container.error is True
+        assert container.error_type == "overloaded"
