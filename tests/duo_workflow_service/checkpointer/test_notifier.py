@@ -6,7 +6,6 @@ from unittest.mock import MagicMock, Mock, patch
 import pytest
 from langchain_core.messages import AIMessage, AIMessageChunk, HumanMessage
 
-from ai_gateway.instrumentators.model_requests import gitlab_version
 from duo_workflow_service.checkpointer.gitlab_workflow import (
     WORKFLOW_STATUS_TO_CHECKPOINT_STATUS,
 )
@@ -22,18 +21,8 @@ def outbox_fixture() -> MagicMock:
     return MagicMock(spec=Outbox())
 
 
-@pytest.fixture(name="gl_version_18_7")
-def gl_version_18_7_fixture():
-    """Set GitLab version to 18.7.0 for client capabilities support."""
-    gitlab_version.set("18.7.0")
-    yield
-    gitlab_version.set(None)
-
-
 @pytest.fixture(name="checkpoint_notifier")
-def checkpoint_notifier_fixture(
-    outbox, gl_version_18_7
-):  # pylint: disable=unused-argument
+def checkpoint_notifier_fixture(outbox):
     client_capabilities.set({"incremental_streaming"})
     return UserInterface(outbox=outbox, goal="test_goal")
 
