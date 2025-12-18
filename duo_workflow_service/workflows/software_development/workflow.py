@@ -119,6 +119,7 @@ EXECUTOR_TOOLS = [
     *_FILE_SYSTEM_WRITE_TOOLS,
     *_PLAN_MANAGEMENT_TOOLS,
     "run_command",
+    "shell_command",
     "handover_tool",
 ]
 
