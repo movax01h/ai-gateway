@@ -312,3 +312,70 @@ def test_validate_default_model_not_in_selectable_models(fs: FakeFilesystem):
         "  - Feature 'another_config' has default model 'model_2' that is not in selectable_models."
     )
     assert error_message == expected_error
+
+
+def test_get_proxy_models_for_provider(fs: FakeFilesystem):
+    """Test that get_proxy_models_for_provider returns models with matching proxy_provider."""
+    model_selection_dir = (
+        Path(__file__).parent.parent.parent / "ai_gateway" / "model_selection"
+    )
+
+    # editorconfig-checker-disable
+    fs.create_file(
+        model_selection_dir / "models.yml",
+        contents=dedent(
+            """
+            models:
+              - name: Claude Sonnet
+                gitlab_identifier: claude_sonnet
+                max_context_tokens: 200000
+                proxy_provider: anthropic
+                params:
+                  model: claude-sonnet-4-5-20250929
+              - name: Claude Opus
+                gitlab_identifier: claude_opus
+                max_context_tokens: 200000
+                proxy_provider: anthropic
+                params:
+                  model: claude-opus-4-5-20251101
+              - name: GPT Model
+                gitlab_identifier: gpt_model
+                max_context_tokens: 128000
+                proxy_provider: openai
+                params:
+                  model: gpt-5
+              - name: Non-proxy Model
+                gitlab_identifier: non_proxy
+                max_context_tokens: 200000
+                params:
+                  model: some-model
+            """
+        ),
+    )
+
+    fs.create_file(
+        model_selection_dir / "unit_primitives.yml",
+        contents=dedent(
+            """
+            configurable_unit_primitives: []
+            """
+        ),
+    )
+    # editorconfig-checker-enable
+
+    config = ModelSelectionConfig()
+
+    # Test anthropic provider
+    anthropic_models = config.get_proxy_models_for_provider("anthropic")
+    assert set(anthropic_models) == {
+        "claude-sonnet-4-5-20250929",
+        "claude-opus-4-5-20251101",
+    }
+
+    # Test openai provider
+    openai_models = config.get_proxy_models_for_provider("openai")
+    assert set(openai_models) == {"gpt-5"}
+
+    # Test unknown provider returns empty list
+    unknown_models = config.get_proxy_models_for_provider("unknown")
+    assert not unknown_models

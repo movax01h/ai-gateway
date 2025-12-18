@@ -4,6 +4,7 @@ import typing
 import fastapi
 from fastapi import status
 
+from ai_gateway.model_selection import ModelSelectionConfig
 from ai_gateway.proxy.clients.base import BaseProxyClient
 from ai_gateway.proxy.clients.token_usage import TokenUsage
 
@@ -23,8 +24,6 @@ class OpenAIProxyClient(BaseProxyClient):
         "user-agent",
     ]
 
-    ALLOWED_UPSTREAM_MODELS = ["gpt-5", "gpt-5-codex", "gpt-5.1", "gpt-5.1-codex"]
-
     ALLOWED_HEADERS_TO_DOWNSTREAM = ["content-type"]
 
     PROVIDER_NAME = "openai"
@@ -38,8 +37,9 @@ class OpenAIProxyClient(BaseProxyClient):
     def _allowed_headers_to_downstream(self):
         return OpenAIProxyClient.ALLOWED_HEADERS_TO_DOWNSTREAM
 
-    def _allowed_upstream_models(self):
-        return OpenAIProxyClient.ALLOWED_UPSTREAM_MODELS
+    def _allowed_upstream_models(self) -> list[str]:
+        config = ModelSelectionConfig.instance()
+        return config.get_proxy_models_for_provider(self.PROVIDER_NAME)
 
     def _upstream_service(self):
         return OpenAIProxyClient.PROVIDER_NAME
