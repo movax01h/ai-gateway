@@ -50,14 +50,28 @@ class UsageQuotaClient:
 
     Args:
         customersdot_url: Base URL of the CustomersDot service
+        customersdot_api_user: API username for calling the Customers Portal
+        customersdot_api_token: API Token for calling the Customers Portal
         request_timeout: Maximum time to wait for API response (default: 1.0s)
     """
 
-    def __init__(self, customersdot_url: str, request_timeout: float = 1.0) -> None:
+    def __init__(
+        self,
+        customersdot_url: str,
+        customersdot_api_user: str | None,
+        customersdot_api_token: str | None,
+        request_timeout: float = 1.0,
+    ) -> None:
         if not customersdot_url or not customersdot_url.strip():
             raise ValueError("customersdot_url cannot be empty")
 
         self.customersdot_url = customersdot_url
+        self.customersdot_api_user = customersdot_api_user
+        self.customersdot_api_token = customersdot_api_token
+        self.enabled = (
+            self.customersdot_api_token is not None
+            and self.customersdot_api_user is not None
+        )
         self.request_timeout = request_timeout
 
     @cached(
@@ -88,8 +102,16 @@ class UsageQuotaClient:
             Callers should implement fail-open error handling to avoid blocking
             legitimate users when CustomersDot is unavailable.
         """
+        if not self.enabled:
+            log.debug("Usage quota is disabled")
+            return True
+
         realm = getattr(context, "realm", "unknown")
         params = context.model_dump(exclude_none=True, exclude_unset=True)
+        headers = {
+            "X-Admin-Email": str(self.customersdot_api_user),
+            "X-Admin-Token": str(self.customersdot_api_token),
+        }
 
         try:
             async with httpx.AsyncClient(
@@ -103,7 +125,7 @@ class UsageQuotaClient:
                 with USAGE_QUOTA_CUSTOMERSDOT_LATENCY_SECONDS.labels(
                     realm=realm
                 ).time():
-                    response = await client.head(url, params=params)
+                    response = await client.head(url, params=params, headers=headers)
 
                 # The Customers Portal responds with two HTTP status codes:
                 # - Payment Required (402):

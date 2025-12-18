@@ -7,7 +7,6 @@ from starlette.responses import Response
 
 from ai_gateway.api.middleware.usage_quota import UsageQuotaMiddleware
 from lib.billing_events.context import UsageQuotaEventContext
-from lib.feature_flags.context import current_feature_flag_context
 from lib.internal_events.context import EventContext
 from lib.usage_quota.errors import (
     UsageQuotaConnectionError,
@@ -51,21 +50,15 @@ def mock_context(internal_event_context):
         yield
 
 
-@pytest.fixture(autouse=True)
-def stub_feature_flags():
-    token = current_feature_flag_context.set({"usage_quota_left_check"})
-    yield
-    current_feature_flag_context.reset(token)
-
-
 @pytest.fixture(name="usage_quota_middleware")
 def usage_quota_middleware_fixture(mock_app):
     """Create a UsageQuotaMiddleware instance for testing."""
     middleware = UsageQuotaMiddleware(
         app=mock_app,
         customersdot_url="https://customers.gitlab.local",
+        customersdot_api_user="customersdot_api_user",
+        customersdot_api_token="customersdot_api_token",
         skip_endpoints=["/health", "/metrics"],
-        enabled=True,
         environment="test",
     )
     return middleware
@@ -117,90 +110,6 @@ class TestEndpointSkipping:
             new_callable=AsyncMock,
         ) as mock_check:
             response = await usage_quota_middleware.dispatch(request, call_next)
-
-            assert response.status_code == 200
-            call_next.assert_called_once_with(request)
-            mock_check.assert_not_called()
-
-
-class TestFeatureFlagToggling:
-    """Tests for feature flag behavior."""
-
-    @pytest.mark.asyncio
-    async def test_feature_flag_disabled_skips_usage_quota_check(
-        self, usage_quota_middleware
-    ):
-        """Test that middleware skips usage quota check when feature flag is disabled."""
-        request = Request(
-            {"type": "http", "path": "/api/v1/chat", "method": "POST", "headers": []}
-        )
-        call_next = AsyncMock(return_value=Response(status_code=200))
-
-        with (
-            patch(
-                "ai_gateway.api.middleware.usage_quota.is_feature_enabled"
-            ) as mock_ff,
-            patch.object(
-                usage_quota_middleware.usage_quota_client,
-                "check_quota_available",
-                new_callable=AsyncMock,
-            ) as mock_check,
-        ):
-            mock_ff.return_value = False
-
-            response = await usage_quota_middleware.dispatch(request, call_next)
-
-        assert response.status_code == 200
-        call_next.assert_called_once_with(request)
-        mock_check.assert_not_called()
-
-    @pytest.mark.asyncio
-    async def test_feature_flag_enabled_performs_usage_quota_check(
-        self, usage_quota_middleware
-    ):
-        """Test that middleware performs usage quota check when feature flag is enabled."""
-        request = Request(
-            {"type": "http", "path": "/api/v1/chat", "method": "POST", "headers": []}
-        )
-        call_next = AsyncMock(return_value=Response(status_code=200))
-
-        with patch.object(
-            usage_quota_middleware.usage_quota_client,
-            "check_quota_available",
-            new_callable=AsyncMock,
-            return_value=True,
-        ) as mock_check:
-            response = await usage_quota_middleware.dispatch(request, call_next)
-
-        assert response.status_code == 200
-        call_next.assert_called_once_with(request)
-        mock_check.assert_called_once()
-
-
-class TestMiddlewareEnabled:
-    """Tests for middleware enabled/disabled state."""
-
-    @pytest.mark.asyncio
-    async def test_middleware_disabled_skips_usage_quota_check(self, mock_app):
-        """Test that middleware skips usage quota check when middleware is disabled."""
-        middleware = UsageQuotaMiddleware(
-            app=mock_app,
-            customersdot_url="https://customers.gitlab.local",
-            skip_endpoints=[],
-            enabled=False,  # disabled
-            environment="test",
-        )
-        request = Request(
-            {"type": "http", "path": "/api/v1/chat", "method": "POST", "headers": []}
-        )
-        call_next = AsyncMock(return_value=Response(status_code=200))
-
-        with patch.object(
-            middleware.usage_quota_client,
-            "check_quota_available",
-            new_callable=AsyncMock,
-        ) as mock_check:
-            response = await middleware.dispatch(request, call_next)
 
             assert response.status_code == 200
             call_next.assert_called_once_with(request)

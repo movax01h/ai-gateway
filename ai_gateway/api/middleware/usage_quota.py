@@ -9,7 +9,6 @@ from ai_gateway.api.middleware.base import _PathResolver
 from ai_gateway.instrumentators.usage_quota import USAGE_QUOTA_CHECK_TOTAL
 from lib import usage_quota
 from lib.billing_events.context import UsageQuotaEventContext
-from lib.feature_flags import FeatureFlag, is_feature_enabled
 from lib.internal_events.context import current_event_context
 from lib.usage_quota.client import UsageQuotaClient
 
@@ -19,28 +18,28 @@ class UsageQuotaMiddleware(BaseHTTPMiddleware):
         self,
         app: ASGIApp,
         customersdot_url: str,
+        customersdot_api_user: str | None,
+        customersdot_api_token: str | None,
         skip_endpoints: list[str],
-        enabled: bool,
         environment: str,
     ):
         super().__init__(app)
 
-        self.usage_quota_client = UsageQuotaClient(customersdot_url=customersdot_url)
-        self.enabled: bool = enabled
+        self.usage_quota_client = UsageQuotaClient(
+            customersdot_url=customersdot_url,
+            customersdot_api_user=customersdot_api_user,
+            customersdot_api_token=customersdot_api_token,
+        )
         self.environment: str = environment
         self.path_resolver = _PathResolver.from_optional_list(skip_endpoints)
-
-    def is_active(self) -> bool:
-        return self.enabled and is_feature_enabled(FeatureFlag.USAGE_QUOTA_LEFT_CHECK)
 
     @override
     async def dispatch(
         self, request: Request, call_next: RequestResponseEndpoint
     ) -> Response:
-        if not self.is_active():
-            return await call_next(request)
-
-        if self.path_resolver.skip_path(request.url.path):
+        if not self.usage_quota_client.enabled or self.path_resolver.skip_path(
+            request.url.path
+        ):
             return await call_next(request)
 
         event_context = current_event_context.get()

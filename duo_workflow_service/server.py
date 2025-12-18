@@ -739,7 +739,17 @@ async def serve(port: int) -> None:
                 InternalEventsInterceptor(),
                 ModelMetadataInterceptor(),
                 MonitoringInterceptor(),
-                UsageQuotaInterceptor(customersdot_url=str(CUSTOMERSDOT_URL)),
+                UsageQuotaInterceptor(
+                    customersdot_url=str(CUSTOMERSDOT_URL),
+                    # pylint: disable=direct-environment-variable-reference
+                    customersdot_api_user=os.environ.get(
+                        "CUSTOMER_PORTAL_USAGE_QUOTA_API_USER", None
+                    ),
+                    customersdot_api_token=os.environ.get(
+                        "CUSTOMER_PORTAL_USAGE_QUOTA_API_TOKEN", None
+                    ),
+                    # pylint: enable=direct-environment-variable-reference
+                ),
             ],
             options=server_options,
         )

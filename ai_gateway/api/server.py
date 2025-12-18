@@ -158,10 +158,17 @@ def create_fast_api_server(config: Config):
             ),
             Middleware(
                 UsageQuotaMiddleware,
-                enabled=config.billing_event.enabled,
                 skip_endpoints=_SKIP_ENDPOINTS,
                 environment=config.environment,
                 customersdot_url=config.customer_portal_url,
+                # pylint: disable=direct-environment-variable-reference
+                customersdot_api_user=os.environ.get(
+                    "CUSTOMER_PORTAL_USAGE_QUOTA_API_USER", None
+                ),
+                customersdot_api_token=os.environ.get(
+                    "CUSTOMER_PORTAL_USAGE_QUOTA_API_TOKEN", None
+                ),
+                # pylint: enable=direct-environment-variable-reference
             ),
             Middleware(ModelConfigMiddleware),
         ],

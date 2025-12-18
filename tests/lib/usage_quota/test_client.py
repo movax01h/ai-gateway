@@ -21,6 +21,8 @@ async def usage_quota_client_fixture() -> AsyncGenerator[UsageQuotaClient, None]
     """Create a UsageQuotaClient instance for testing."""
     usage_quota_client = UsageQuotaClient(
         customersdot_url="https://customers.gitlab.local/",
+        customersdot_api_user="aigw@gitlab.local",
+        customersdot_api_token="customersdot_api_token",
         request_timeout=1.0,
     )
     yield usage_quota_client
@@ -108,6 +110,8 @@ class TestCheckQuotaAvailable:
         mock_quota_exhausted_response: MagicMock,
     ):
         """Should return False when CustomersDot returns 402 Payment Required."""
+        await usage_quota_client.check_quota_available.cache.clear()
+
         with patch("httpx.AsyncClient") as mock_client_class:
             mock_http_client.head = AsyncMock(
                 return_value=mock_quota_exhausted_response
@@ -126,6 +130,8 @@ class TestCheckQuotaAvailable:
         mock_http_client: AsyncMock,
     ):
         """Should raise UsageQuotaTimeoutError when request times out."""
+        await usage_quota_client.check_quota_available.cache.clear()
+
         with patch("httpx.AsyncClient") as mock_client_class:
             mock_http_client.head = AsyncMock(
                 side_effect=httpx.TimeoutException("Request timed out")
@@ -144,6 +150,8 @@ class TestCheckQuotaAvailable:
         mock_error_response,
     ):
         """Should raise UsageQuotaHTTPError on unexpected HTTP status codes."""
+        await usage_quota_client.check_quota_available.cache.clear()
+
         with patch("httpx.AsyncClient") as mock_client_class:
             mock_http_client.head = AsyncMock(return_value=mock_error_response)
             mock_http_client.head.return_value.raise_for_status = MagicMock(
@@ -166,6 +174,8 @@ class TestCheckQuotaAvailable:
         mock_http_client: AsyncMock,
     ):
         """Should raise UsageQuotaConnectionError on connection failures."""
+        await usage_quota_client.check_quota_available.cache.clear()
+
         with patch("httpx.AsyncClient") as mock_client_class:
             mock_http_client.head = AsyncMock(
                 side_effect=httpx.RequestError("Connection failed")
@@ -184,6 +194,8 @@ class TestCheckQuotaAvailable:
         mock_success_response,
     ):
         """Should send HEAD request to /api/v1/consumers/resolve endpoint."""
+        await usage_quota_client.check_quota_available.cache.clear()
+
         with patch("httpx.AsyncClient") as mock_client_class:
             mock_http_client.head = AsyncMock(return_value=mock_success_response)
             mock_client_class.return_value = mock_http_client
@@ -203,6 +215,8 @@ class TestCheckQuotaAvailable:
         mock_success_response,
     ):
         """Should pass context fields as query parameters."""
+        await usage_quota_client.check_quota_available.cache.clear()
+
         with patch("httpx.AsyncClient") as mock_client_class:
             mock_http_client.head = AsyncMock(return_value=mock_success_response)
             mock_client_class.return_value = mock_http_client
@@ -223,6 +237,8 @@ class TestCheckQuotaAvailable:
         mock_success_response,
     ):
         """Should use the configured request timeout."""
+        await usage_quota_client.check_quota_available.cache.clear()
+
         with patch("httpx.AsyncClient") as mock_client_class:
             mock_http_client.head = AsyncMock(return_value=mock_success_response)
             mock_client_class.return_value = mock_http_client
@@ -253,19 +269,126 @@ class TestCheckQuotaAvailable:
 
             assert result is True
 
+    @pytest.mark.asyncio
+    async def test_returns_true_when_client_disabled(
+        self, usage_quota_context: UsageQuotaEventContext
+    ):
+        """Should return True without making HTTP request when client is disabled."""
+        disabled_client = UsageQuotaClient(
+            customersdot_url="https://customers.gitlab.local/",
+            customersdot_api_user=None,
+            customersdot_api_token=None,
+            request_timeout=1.0,
+        )
+
+        with patch("httpx.AsyncClient") as mock_client_class:
+            result = await disabled_client.check_quota_available(usage_quota_context)
+
+            assert result is True
+            mock_client_class.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_sends_authorization_headers(
+        self,
+        usage_quota_context: UsageQuotaEventContext,
+        mock_http_client: AsyncMock,
+        mock_success_response: MagicMock,
+    ):
+        """Should send X-Admin-Email and X-Admin-Token headers."""
+        client = UsageQuotaClient(
+            customersdot_url="https://customers.gitlab.local/",
+            customersdot_api_user="aigw@gitlab.local",
+            customersdot_api_token="customersdot_api_token",
+            request_timeout=1.0,
+        )
+
+        await client.check_quota_available.cache.clear()
+
+        with patch("httpx.AsyncClient") as mock_client_class:
+            mock_http_client.head = AsyncMock(return_value=mock_success_response)
+            mock_client_class.return_value = mock_http_client
+
+            await client.check_quota_available(usage_quota_context)
+
+            call_args = mock_http_client.head.call_args
+            assert "headers" in call_args[1]
+            headers = call_args[1]["headers"]
+            assert headers["X-Admin-Email"] == "aigw@gitlab.local"
+            assert headers["X-Admin-Token"] == "customersdot_api_token"
+
+    @pytest.mark.asyncio
+    async def test_url_joining_with_trailing_slash(
+        self,
+        usage_quota_context: UsageQuotaEventContext,
+        mock_http_client: AsyncMock,
+        mock_success_response: MagicMock,
+    ):
+        """Should correctly join URL with trailing slash."""
+        client = UsageQuotaClient(
+            customersdot_url="https://customers.gitlab.local/",
+            customersdot_api_user="aigw@gitlab.local",
+            customersdot_api_token="customersdot_api_token",
+            request_timeout=1.0,
+        )
+
+        await client.check_quota_available.cache.clear()
+
+        with patch("httpx.AsyncClient") as mock_client_class:
+            mock_http_client.head = AsyncMock(return_value=mock_success_response)
+            mock_client_class.return_value = mock_http_client
+
+            await client.check_quota_available(usage_quota_context)
+
+            call_args = mock_http_client.head.call_args
+            url = call_args[0][0]
+            assert url == "https://customers.gitlab.local/api/v1/consumers/resolve"
+
+    @pytest.mark.asyncio
+    async def test_url_joining_without_trailing_slash(
+        self,
+        usage_quota_context: UsageQuotaEventContext,
+        mock_http_client: AsyncMock,
+        mock_success_response: MagicMock,
+    ):
+        """Should correctly join URL without trailing slash."""
+        client = UsageQuotaClient(
+            customersdot_url="https://customers.gitlab.local",
+            customersdot_api_user="aigw@gitlab.local",
+            customersdot_api_token="customersdot_api_token",
+            request_timeout=1.0,
+        )
+
+        await client.check_quota_available.cache.clear()
+
+        with patch("httpx.AsyncClient") as mock_client_class:
+            mock_http_client.head = AsyncMock(return_value=mock_success_response)
+            mock_client_class.return_value = mock_http_client
+
+            await client.check_quota_available(usage_quota_context)
+
+            call_args = mock_http_client.head.call_args
+            url = call_args[0][0]
+            assert url == "https://customers.gitlab.local/api/v1/consumers/resolve"
+
 
 class TestClientInitialization:
     """Tests for UsageQuotaClient initialization."""
 
     def test_initializes_with_default_timeout(self):
         """Should use default timeout of 1.0 seconds."""
-        client = UsageQuotaClient(customersdot_url="https://customers.gitlab.local/")
+        client = UsageQuotaClient(
+            customersdot_url="https://customers.gitlab.local/",
+            customersdot_api_user="aigw@gitlab.local",
+            customersdot_api_token="customersdot_api_token",
+        )
         assert client.request_timeout == 1.0
 
     def test_initializes_with_custom_timeout(self):
         """Should accept custom timeout value."""
         client = UsageQuotaClient(
             customersdot_url="https://customers.gitlab.local/",
+            customersdot_api_user="aigw@gitlab.local",
+            customersdot_api_token="customersdot_api_token",
             request_timeout=5.0,
         )
         assert client.request_timeout == 5.0
@@ -273,13 +396,75 @@ class TestClientInitialization:
     def test_stores_customersdot_url(self):
         """Should store the CustomersDot URL."""
         url = "https://customers.gitlab.local/"
-        client = UsageQuotaClient(customersdot_url=url)
+        client = UsageQuotaClient(
+            customersdot_url=url,
+            customersdot_api_user="aigw@gitlab.local",
+            customersdot_api_token="customersdot_api_token",
+        )
         assert client.customersdot_url == url
 
     def test_raises_value_error_customersdot_url_empty(self):
         """Should raise ValueError if the CustomersDot URL is an empty string."""
         with pytest.raises(ValueError):
-            UsageQuotaClient(customersdot_url="   ")
+            UsageQuotaClient(
+                customersdot_url="   ",
+                customersdot_api_user="aigw@gitlab.local",
+                customersdot_api_token="customersdot_api_token",
+            )
+
+    def test_enabled_true_when_api_token_and_user_provided(self):
+        """Should set enabled to True when both API token and user are provided."""
+        client = UsageQuotaClient(
+            customersdot_url="https://customers.gitlab.local/",
+            customersdot_api_user="aigw@gitlab.local",
+            customersdot_api_token="customersdot_api_token",
+        )
+        assert client.enabled is True
+
+    def test_enabled_false_when_api_token_is_none(self):
+        """Should set enabled to False when API token is None."""
+        client = UsageQuotaClient(
+            customersdot_url="https://customers.gitlab.local/",
+            customersdot_api_user="aigw@gitlab.local",
+            customersdot_api_token=None,
+        )
+        assert client.enabled is False
+
+    def test_enabled_false_when_api_user_is_none(self):
+        """Should set enabled to False when API user is None."""
+        client = UsageQuotaClient(
+            customersdot_url="https://customers.gitlab.local/",
+            customersdot_api_user=None,
+            customersdot_api_token="customersdot_api_token",
+        )
+        assert client.enabled is False
+
+    def test_enabled_false_when_both_api_credentials_are_none(self):
+        """Should set enabled to False when both API user and token are None."""
+        client = UsageQuotaClient(
+            customersdot_url="https://customers.gitlab.local/",
+            customersdot_api_user=None,
+            customersdot_api_token=None,
+        )
+        assert client.enabled is False
+
+    def test_stores_customersdot_api_user(self):
+        """Should store the CustomersDot API user."""
+        client = UsageQuotaClient(
+            customersdot_url="https://customers.gitlab.local/",
+            customersdot_api_user="aigw@gitlab.local",
+            customersdot_api_token="customersdot_api_token",
+        )
+        assert client.customersdot_api_user == "aigw@gitlab.local"
+
+    def test_stores_customersdot_api_token(self):
+        """Should store the CustomersDot API token."""
+        client = UsageQuotaClient(
+            customersdot_url="https://customers.gitlab.local/",
+            customersdot_api_user="aigw@gitlab.local",
+            customersdot_api_token="customersdot_api_token",
+        )
+        assert client.customersdot_api_token == "customersdot_api_token"
 
 
 class TestErrorHandling:
@@ -313,6 +498,8 @@ class TestErrorHandling:
         mock_error_response: MagicMock,
     ):
         """Should include status code in UsageQuotaHTTPError."""
+        await usage_quota_client.check_quota_available.cache.clear()
+
         with patch("httpx.AsyncClient") as mock_client_class:
             mock_http_client.head = AsyncMock(return_value=mock_error_response)
             mock_http_client.head.return_value.raise_for_status = MagicMock(
