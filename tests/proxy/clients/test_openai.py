@@ -19,7 +19,7 @@ def openai_client_fixture(async_client_factory, limits, monkeypatch):
 def request_params_fixture():
     """Fixture for common request parameters."""
     return {
-        "model": "gpt-5",
+        "model": "gpt-5-codex",
         "max_tokens": 1024,
         "messages": [{"role": "user", "content": "Hi, how are you?"}],
         "stream": True,
@@ -30,7 +30,7 @@ def request_params_fixture():
 def completion_request_params_fixture():
     """Fixture for completion API request parameters."""
     return {
-        "model": "gpt-5",
+        "model": "gpt-5-codex",
         "prompt": "Hello, world!",
         "max_tokens": 100,
         "temperature": 0.7,
@@ -227,7 +227,7 @@ async def test_stream_flag_extraction(
     """Test stream flag extraction from request."""
     # Test with stream=True
     stream_params = {
-        "model": "gpt-5",
+        "model": "gpt-5-codex",
         "messages": [{"role": "user", "content": "Hello"}],
         "stream": True,
     }
@@ -245,7 +245,7 @@ async def test_stream_flag_extraction(
 
     # Test with stream=False (default)
     no_stream_params = {
-        "model": "gpt-5",
+        "model": "gpt-5-codex",
         "messages": [{"role": "user", "content": "Hello"}],
     }
 

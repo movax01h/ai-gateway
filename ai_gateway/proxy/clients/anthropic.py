@@ -4,7 +4,7 @@ import typing
 import fastapi
 from fastapi import status
 
-from ai_gateway.models.anthropic import KindAnthropicModel
+from ai_gateway.model_selection import ModelSelectionConfig
 from ai_gateway.models.base import KindModelProvider
 from ai_gateway.proxy.clients.base import BaseProxyClient
 from ai_gateway.proxy.clients.token_usage import TokenUsage
@@ -37,7 +37,8 @@ class AnthropicProxyClient(BaseProxyClient):
         return self.ALLOWED_HEADERS_TO_DOWNSTREAM
 
     def _allowed_upstream_models(self) -> list[str]:
-        return [el.value for el in KindAnthropicModel]
+        config = ModelSelectionConfig.instance()
+        return config.get_proxy_models_for_provider(self.PROVIDER_NAME)
 
     def _upstream_service(self) -> str:
         return KindModelProvider.ANTHROPIC.value

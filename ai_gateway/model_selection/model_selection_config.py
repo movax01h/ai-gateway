@@ -38,6 +38,7 @@ class LLMDefinition(BaseModel):
     params: dict[str, Any] = {}
     family: list[str] = []
     deprecation: Optional[DeprecationInfo] = None
+    proxy_provider: Optional[str] = None
 
 
 class UnitPrimitiveConfig(BaseModel):
@@ -166,6 +167,22 @@ class ModelSelectionConfig:
         """Refresh the configuration by reloading from source files."""
         self._llm_definitions = None
         self._unit_primitive_configs = None
+
+    def get_proxy_models_for_provider(self, provider: str) -> list[str]:
+        """Get list of allowed model names for a provider's proxy endpoint.
+
+        Args:
+            provider: The provider name (e.g., "anthropic", "openai")
+
+        Returns:
+            List of model names allowed for proxy
+        """
+        llm_definitions = self.get_llm_definitions()
+        return [
+            llm_def.params.get("model", "")
+            for llm_def in llm_definitions.values()
+            if llm_def.proxy_provider == provider and llm_def.params.get("model")
+        ]
 
     def get_model(self, model_id: str) -> LLMDefinition:
         if model := self.get_llm_definitions().get(model_id, None):

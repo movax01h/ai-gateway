@@ -88,7 +88,6 @@ async def _validate_request(
     if abuse_detector.should_detect():
         body_bytes = await request.body()
         body = body_bytes.decode("utf-8", errors="ignore")
-
         description = UNIT_PRIMITIVE_AND_DESCRIPTION_MAPPING.get(unit_primitive, "")
         background_tasks.add_task(abuse_detector.detect, request, body, description)
 
