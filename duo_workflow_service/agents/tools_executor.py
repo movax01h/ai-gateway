@@ -28,12 +28,7 @@ from duo_workflow_service.security.prompt_security import (
     PromptSecurity,
     SecurityException,
 )
-from duo_workflow_service.tools import (
-    RunCommand,
-    ShellCommand,
-    Toolset,
-    format_tool_display_message,
-)
+from duo_workflow_service.tools import RunCommand, Toolset, format_tool_display_message
 from duo_workflow_service.tools.planner import PlannerTool
 from duo_workflow_service.tracking.errors import log_exception
 from lib.internal_events import InternalEventAdditionalProperties, InternalEventsClient
@@ -51,7 +46,6 @@ _ACTION_HANDLERS = [
 
 _COMMAND_OUTPUT_TOOLS = {
     "run_command": RunCommand,
-    "shell_command": ShellCommand,
 }
 
 # Display only first 4KB of a tool response on UI to avoid duplicating large responses twice in a checkpoint
