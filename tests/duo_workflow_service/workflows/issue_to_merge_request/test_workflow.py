@@ -34,16 +34,6 @@ def mock_planner_component_fixture():
         yield mock
 
 
-@pytest.fixture(name="mock_create_branch_component")
-def mock_create_branch_component_fixture():
-    with patch(
-        "duo_workflow_service.workflows.issue_to_merge_request.workflow.CreateRepositoryBranchComponent",
-        autospec=True,
-    ) as mock:
-        mock.return_value.attach.return_value = "build_context"
-        yield mock
-
-
 @pytest.fixture(name="mock_tools_approval_component")
 def mock_tools_approval_component_fixture():
     with patch(
@@ -169,7 +159,6 @@ async def test_workflow_run(
     mock_tools_approval_component,
     mock_planner_component,
     mock_executor_component,
-    mock_create_branch_component,
     mock_handover_agent,
     mock_agent,
     checkpoint_tuple,  # pylint: disable=unused-argument
@@ -188,12 +177,6 @@ async def test_workflow_run(
     }
 
     await workflow.run("https://example.com/project/-/issues/1")
-
-    mock_create_branch_component.return_value.attach.assert_called_once_with(
-        graph=ANY,
-        next_node="build_context",
-        exit_node="plan_terminator",
-    )
 
     mock_planner_component.return_value.attach.assert_called_once_with(
         graph=ANY,
