@@ -6,7 +6,6 @@ from grpc.aio import ServerInterceptor, ServicerContext
 from ai_gateway.instrumentators.usage_quota import USAGE_QUOTA_CHECK_TOTAL
 from lib import usage_quota
 from lib.billing_events.context import UsageQuotaEventContext
-from lib.feature_flags.context import FeatureFlag, current_feature_flag_context
 from lib.internal_events.context import current_event_context
 from lib.usage_quota.client import UsageQuotaClient
 
@@ -15,8 +14,14 @@ class UsageQuotaInterceptor(ServerInterceptor):
     def __init__(
         self,
         customersdot_url: str,
+        customersdot_api_user: str | None,
+        customersdot_api_token: str | None,
     ):
-        self.usage_quota_client = UsageQuotaClient(customersdot_url=customersdot_url)
+        self.usage_quota_client = UsageQuotaClient(
+            customersdot_url=customersdot_url,
+            customersdot_api_user=customersdot_api_user,
+            customersdot_api_token=customersdot_api_token,
+        )
 
     async def intercept_service(
         self,
@@ -32,7 +37,7 @@ class UsageQuotaInterceptor(ServerInterceptor):
         Returns:
             The RPC method handler, either the original or an abort handler
         """
-        if FeatureFlag.USAGE_QUOTA_LEFT_CHECK not in current_feature_flag_context.get():
+        if not self.usage_quota_client.enabled:
             return await continuation(handler_call_details)
 
         event_context = current_event_context.get()

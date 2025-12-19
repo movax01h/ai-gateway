@@ -6,7 +6,6 @@ from duo_workflow_service.interceptors.usage_quota_interceptor import (
     UsageQuotaInterceptor,
 )
 from lib.billing_events.context import UsageQuotaEventContext
-from lib.feature_flags.context import current_feature_flag_context
 from lib.internal_events.context import EventContext
 from lib.usage_quota.errors import (
     UsageQuotaConnectionError,
@@ -50,13 +49,6 @@ def mock_context(internal_event_context):
         yield
 
 
-@pytest.fixture(autouse=True)
-def stub_feature_flags():
-    token = current_feature_flag_context.set({"usage_quota_left_check"})
-    yield
-    current_feature_flag_context.reset(token)
-
-
 @pytest.fixture(name="handler_call_details")
 def handler_call_details_fixture():
     """Create a mock for the handler_call_details."""
@@ -84,48 +76,11 @@ def continuation_fixture():
 
 @pytest.fixture(name="interceptor")
 def interceptor_fixture():
-    return UsageQuotaInterceptor(customersdot_url="https://customers.gitlab.local/")
-
-
-class TestFeatureFlagToggling:
-    """Tests for feature flag behavior."""
-
-    @pytest.mark.asyncio
-    async def test_feature_flag_disabled_skips_usage_quota_check(
-        self, interceptor, continuation, handler_call_details
-    ):
-        """Test that interceptor skips quota check when feature flag is disabled."""
-        current_feature_flag_context.set(set())
-
-        with patch.object(
-            interceptor.usage_quota_client,
-            "check_quota_available",
-            new_callable=AsyncMock,
-        ) as mock_check:
-            handler = await interceptor.intercept_service(
-                continuation, handler_call_details
-            )
-
-            assert handler is not None
-            mock_check.assert_not_called()
-
-    @pytest.mark.asyncio
-    async def test_feature_flag_enabled_performs_usage_quota_check(
-        self, interceptor, continuation, handler_call_details
-    ):
-        """Test that interceptor performs quota check when feature flag is enabled."""
-        with patch.object(
-            interceptor.usage_quota_client,
-            "check_quota_available",
-            new_callable=AsyncMock,
-            return_value=True,
-        ) as mock_check:
-            intercepted_handler = await interceptor.intercept_service(
-                continuation, handler_call_details
-            )
-
-            assert intercepted_handler is not None
-            mock_check.assert_called_once()
+    return UsageQuotaInterceptor(
+        customersdot_url="https://customers.gitlab.local/",
+        customersdot_api_user="aigw@gitlab.local",
+        customersdot_api_token="customersdot_api_token",
+    )
 
 
 class TestQuotaEnforcement:
