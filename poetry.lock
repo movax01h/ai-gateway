@@ -1412,14 +1412,14 @@ smmap = ">=3.0.1,<6"
 
 [[package]]
 name = "gitlab-cloud-connector"
-version = "3.15.1"
+version = "3.16.0"
 description = "Cloud Connector library for Python backends"
 optional = false
 python-versions = ">=3.11,<4.0"
 groups = ["main"]
 files = [
-    {file = "gitlab_cloud_connector-3.15.1-py3-none-any.whl", hash = "sha256:8a0e7c1f363af375a9bd37d2db97dfebf16c54866b18b5aad3e6da6508217cdd"},
-    {file = "gitlab_cloud_connector-3.15.1.tar.gz", hash = "sha256:9450140b871df2cb2397db80b6a0a0cc450852878ce1b7235efcf7871fd4e488"},
+    {file = "gitlab_cloud_connector-3.16.0-py3-none-any.whl", hash = "sha256:00f940ac286138dbb5fec8b559395488d1b2c83ffb16bdb10282a5ccb4b8bdd4"},
+    {file = "gitlab_cloud_connector-3.16.0.tar.gz", hash = "sha256:9ac3eb3006dffda468df06a45f8aed6607b4d637405cac695d89b2fa07738daf"},
 ]
 
 [package.dependencies]
@@ -7260,4 +7260,4 @@ cffi = ["cffi (>=1.11)"]
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.12.0,<3.13.0"
-content-hash = "98400b4e5370335366753db4d87ca2d03e4e28590bebc7c6829bb75876cb38d0"
+content-hash = "2203fef32c9c03ce2c1bc851eca1eb6dcbd25324195682b976869cc7bf2eda08"
