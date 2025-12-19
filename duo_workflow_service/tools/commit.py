@@ -176,6 +176,60 @@ class CommitBaseTool(DuoBaseTool):
 
         return actions_data
 
+    async def _merge_duplicate_update_actions(
+        self,
+        project_id: str,
+        actions: List["CreateCommitAction"],
+        ref_to_fetch: str,
+    ) -> List["CreateCommitAction"]:
+        """Merge multiple update actions targeting the same file into a single update."""
+
+        updates_by_file: dict[str, List[CreateCommitAction]] = {}
+        other_actions: List[CreateCommitAction] = []
+
+        for action in actions:
+            if action.action == "update":
+                updates_by_file.setdefault(action.file_path, []).append(action)
+            else:
+                other_actions.append(action)
+
+        merged_actions: List[CreateCommitAction] = []
+
+        for file_path, updates in updates_by_file.items():
+            if len(updates) == 1:
+                merged_actions.append(updates[0])
+                continue
+
+            current_content = await self._get_file_content(
+                project_id, ref_to_fetch, file_path
+            )
+
+            for update in updates:
+                if update.content is not None:
+                    current_content = update.content
+                elif update.old_str is not None and update.new_str is not None:
+                    if update.old_str not in current_content:
+                        raise ToolException(
+                            f"old_str not found during merge for {file_path}"
+                        )
+                    current_content = current_content.replace(
+                        update.old_str, update.new_str, 1
+                    )
+                else:
+                    raise ToolException(
+                        f"Invalid update action for {file_path}: must have content or (old_str/new_str)"
+                    )
+
+            merged_actions.append(
+                CreateCommitAction(
+                    action="update",
+                    file_path=file_path,
+                    content=current_content,
+                )
+            )
+
+        return other_actions + merged_actions
+
 
 class ListCommitsInput(ProjectResourceInput):
     all: Optional[bool] = Field(
@@ -630,6 +684,12 @@ class CreateCommit(CommitBaseTool):
 
         base_ref = start_branch or start_sha or default_branch or "main"
         ref_to_fetch = branch if branch_exists else base_ref
+
+        actions = await self._merge_duplicate_update_actions(
+            project_id=project_id,
+            actions=actions,
+            ref_to_fetch=ref_to_fetch,
+        )
 
         actions_data = await self._prepare_actions_data(
             project_id=project_id,

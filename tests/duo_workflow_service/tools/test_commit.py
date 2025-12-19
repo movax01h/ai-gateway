@@ -1031,12 +1031,6 @@ async def test_create_commit_with_multiple_action_types(
             content="This is a new file",
         ),
         CreateCommitAction(
-            action="update",
-            file_path="existing_file.txt",
-            content="Updated content",
-            last_commit_id="previous_commit_sha",
-        ),
-        CreateCommitAction(
             action="delete",
             file_path="delete_me.txt",
             last_commit_id="delete_commit_sha",
@@ -1045,6 +1039,12 @@ async def test_create_commit_with_multiple_action_types(
             action="move",
             file_path="new_path.txt",
             previous_path="old_path.txt",
+        ),
+        CreateCommitAction(
+            action="update",
+            file_path="existing_file.txt",
+            content="Updated content",
+            last_commit_id="previous_commit_sha",
         ),
         CreateCommitAction(
             action="chmod",
@@ -1737,3 +1737,137 @@ async def test_create_commit_nonexistent_branch_uses_default_branch(
     assert commit_params["start_branch"] == "main"
     assert commit_params["commit_message"] == "Test commit on nonexistent branch"
     assert len(commit_params["actions"]) == 1
+
+
+@pytest.mark.asyncio
+async def test_merge_duplicate_update_actions_multiple_partials(
+    gitlab_client_mock, metadata, file_content_response
+):
+    """Test merging multiple partial edits (old_str/new_str) on the same file."""
+    initial_content = "# Title\n\nLine 1\nLine 2\nLine 3\n"
+
+    mock_file_response = GitLabHttpResponse(
+        status_code=200,
+        body={"content": base64.b64encode(initial_content.encode()).decode()},
+    )
+    gitlab_client_mock.aget = AsyncMock(return_value=mock_file_response)
+
+    tool = CreateCommit(metadata=metadata)
+
+    actions = [
+        CreateCommitAction(
+            action="update",
+            file_path="README.md",
+            old_str="Line 1",
+            new_str="Updated Line 1",
+        ),
+        CreateCommitAction(
+            action="update",
+            file_path="README.md",
+            old_str="Line 2",
+            new_str="Updated Line 2",
+        ),
+        CreateCommitAction(
+            action="update",
+            file_path="README.md",
+            old_str="Line 3",
+            new_str="Updated Line 3",
+        ),
+    ]
+
+    merged = await tool._merge_duplicate_update_actions(
+        project_id="24",
+        actions=actions,
+        ref_to_fetch="main",
+    )
+
+    assert len(merged) == 1
+    assert merged[0].action == "update"
+    assert merged[0].file_path == "README.md"
+    assert (
+        merged[0].content
+        == "# Title\n\nUpdated Line 1\nUpdated Line 2\nUpdated Line 3\n"
+    )
+
+    # File should be fetched only once
+    gitlab_client_mock.aget.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_merge_duplicate_update_actions_old_str_not_found(
+    gitlab_client_mock, metadata
+):
+    """Test that merge raises ToolException when old_str is not found after previous updates."""
+    initial_content = "# Title\n\nLine 1\nLine 2\nLine 3\n"
+
+    mock_file_response = GitLabHttpResponse(
+        status_code=200,
+        body={"content": base64.b64encode(initial_content.encode()).decode()},
+    )
+    gitlab_client_mock.aget = AsyncMock(return_value=mock_file_response)
+
+    tool = CreateCommit(metadata=metadata)
+
+    actions = [
+        CreateCommitAction(
+            action="update",
+            file_path="README.md",
+            old_str="Line 2\nLine 3",
+            new_str="Line 2 Updated\nLine 3 Updated",
+        ),
+        CreateCommitAction(
+            action="update",
+            file_path="README.md",
+            old_str="Line 2\nLine 3",
+            new_str="Another Update",
+        ),
+    ]
+
+    with pytest.raises(
+        ToolException, match="old_str not found during merge for README.md"
+    ):
+        await tool._merge_duplicate_update_actions(
+            project_id="24",
+            actions=actions,
+            ref_to_fetch="main",
+        )
+
+
+@pytest.mark.asyncio
+async def test_merge_duplicate_update_actions_invalid_action(
+    gitlab_client_mock, metadata
+):
+    """Test that merge raises ToolException for invalid update action (no content or old_str/new_str)."""
+    initial_content = "# Title\n\nLine 1\n"
+
+    mock_file_response = GitLabHttpResponse(
+        status_code=200,
+        body={"content": base64.b64encode(initial_content.encode()).decode()},
+    )
+    gitlab_client_mock.aget = AsyncMock(return_value=mock_file_response)
+
+    tool = CreateCommit(metadata=metadata)
+
+    actions = [
+        CreateCommitAction(
+            action="update",
+            file_path="README.md",
+            old_str="Line 1",
+            new_str="Updated Line 1",
+        ),
+        CreateCommitAction(
+            action="update",
+            file_path="README.md",
+            # Missing content, old_str, and new_str
+        ),
+    ]
+
+    with pytest.raises(
+        ToolException,
+        match="Invalid update action for README.md: must have content or \\(old_str/new_str\\)",
+    ):
+        await tool._merge_duplicate_update_actions(
+            project_id="24",
+            actions=actions,
+            ref_to_fetch="main",
+        )
