@@ -16,13 +16,11 @@ from lib.internal_events.event_enum import CategoryEnum, EventEnum
 
 @pytest.fixture(name="mock_prompt_security")
 def mock_prompt_security_fixture():
-    """Fixture for mocking PromptSecurity."""
+    """Fixture for mocking apply_security_scanning."""
     with patch(
-        "duo_workflow_service.agent_platform.experimental.components.deterministic_step.nodes.deterministic_step_node.PromptSecurity"
+        "duo_workflow_service.agent_platform.experimental.components.deterministic_step.nodes.deterministic_step_node.apply_security_scanning"
     ) as mock_security:
-        mock_security.apply_security_to_tool_response.return_value = (
-            "Sanitized response"
-        )
+        mock_security.return_value = "Sanitized response"
         yield mock_security
 
 
@@ -197,9 +195,10 @@ class TestDeterministicStepNode:
         mock_tool.arun.assert_called_once_with({"param": "value"})
 
         # Verify security sanitization was called
-        mock_prompt_security.apply_security_to_tool_response.assert_called_once_with(
-            response="Tool execution result", tool_name="test_tool"
-        )
+        mock_prompt_security.assert_called_once()
+        call_kwargs = mock_prompt_security.call_args[1]
+        assert call_kwargs["response"] == "Tool execution result"
+        assert call_kwargs["tool_name"] == "test_tool"
 
         # Verify ui_history.log.success was called
         ui_history.log.success.assert_called_once()
@@ -438,61 +437,37 @@ class TestDeterministicStepNodeEdgeCases:
         assert FlowStateKeys.CONTEXT in result
 
     @pytest.mark.asyncio
-    async def test_response_with_list_type(
+    @pytest.mark.parametrize(
+        "tool_response,sanitized_response",
+        [
+            (["item1", "item2"], ["sanitized1", "sanitized2"]),
+            ({"key": "value"}, {"key": "sanitized"}),
+        ],
+        ids=["list_type", "dict_type"],
+    )
+    async def test_response_with_complex_types(
         self,
         deterministic_step_node,
         workflow_state,
         mock_tool,
         mock_get_vars_from_state,
         mock_prompt_security,
+        tool_response,
+        sanitized_response,
     ):
-        """Test that list responses are handled properly."""
-        # Configure tool to return a list
-        mock_tool.arun = AsyncMock(return_value=["item1", "item2"])
-        mock_prompt_security.apply_security_to_tool_response.return_value = [
-            "sanitized1",
-            "sanitized2",
-        ]
+        """Test that list and dict responses are handled properly."""
+        mock_tool.arun = AsyncMock(return_value=tool_response)
+        mock_prompt_security.return_value = sanitized_response
 
         result = await deterministic_step_node.run(workflow_state)
 
         # Verify security was called with original response
-        mock_prompt_security.apply_security_to_tool_response.assert_called_once_with(
-            response=["item1", "item2"], tool_name="test_tool"
-        )
+        mock_prompt_security.assert_called_once()
+        call_kwargs = mock_prompt_security.call_args[1]
+        assert call_kwargs["response"] == tool_response
+        assert call_kwargs["tool_name"] == "test_tool"
 
-        # Should handle list response successfully
+        # Should handle response successfully
         assert FlowStateKeys.CONTEXT in result
         assert "responses" in result[FlowStateKeys.CONTEXT]
-        assert result[FlowStateKeys.CONTEXT]["responses"] == [
-            "sanitized1",
-            "sanitized2",
-        ]
-
-    @pytest.mark.asyncio
-    async def test_response_with_dict_type(
-        self,
-        deterministic_step_node,
-        workflow_state,
-        mock_tool,
-        mock_get_vars_from_state,
-        mock_prompt_security,
-    ):
-        """Test that dict responses are handled properly."""
-        # Configure tool to return a dict
-        mock_tool.arun = AsyncMock(return_value={"key": "value"})
-        mock_prompt_security.apply_security_to_tool_response.return_value = {
-            "key": "sanitized"
-        }
-
-        result = await deterministic_step_node.run(workflow_state)
-
-        # Verify security was called with original response
-        mock_prompt_security.apply_security_to_tool_response.assert_called_once_with(
-            response={"key": "value"}, tool_name="test_tool"
-        )
-
-        # Should handle dict response successfully
-        assert FlowStateKeys.CONTEXT in result
-        assert "responses" in result[FlowStateKeys.CONTEXT]
-        assert result[FlowStateKeys.CONTEXT]["responses"] == {"key": "sanitized"}
+        assert result[FlowStateKeys.CONTEXT]["responses"] == sanitized_response

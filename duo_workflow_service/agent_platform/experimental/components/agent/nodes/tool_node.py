@@ -15,10 +15,8 @@ from duo_workflow_service.agent_platform.experimental.state import (
 )
 from duo_workflow_service.agent_platform.experimental.ui_log import UIHistory
 from duo_workflow_service.monitoring import duo_workflow_metrics
-from duo_workflow_service.security.prompt_security import (
-    PromptSecurity,
-    SecurityException,
-)
+from duo_workflow_service.security.prompt_security import SecurityException
+from duo_workflow_service.security.scanner_factory import apply_security_scanning
 from duo_workflow_service.tools.toolset import Toolset
 from lib.internal_events import InternalEventAdditionalProperties, InternalEventsClient
 from lib.internal_events.event_enum import CategoryEnum, EventEnum, EventLabelEnum
@@ -77,11 +75,13 @@ class ToolNode:
                     f"Invalid response type for tool {tool_name}: {response}"
                 )
 
+            tool = self._toolset.get(tool_name)
+            sanitized = self._sanitize_response(
+                response=response, tool_name=tool_name, tool=tool
+            )
             tools_responses.append(
                 ToolMessage(
-                    content=self._sanitize_response(
-                        response=response, tool_name=tool_name
-                    ),
+                    content=sanitized,  # type: ignore[arg-type]
                     tool_call_id=tool_call_id,
                 )
             )
@@ -133,15 +133,25 @@ class ToolNode:
             return err_format
 
     def _sanitize_response(
-        self, response: str | dict | list, tool_name: str
-    ) -> str | list[str | dict]:
+        self,
+        response: str | dict | list,
+        tool_name: str,
+        tool: BaseTool | None = None,
+    ) -> str | dict | list:
         try:
-            return PromptSecurity.apply_security_to_tool_response(
-                response=response, tool_name=tool_name
+            trust_level = getattr(tool, "trust_level", None)
+            return apply_security_scanning(
+                response=response,
+                tool_name=tool_name,
+                trust_level=trust_level,
             )
         except SecurityException as e:
             self._logger.error(f"Security validation failed for tool {tool_name}: {e}")
-            raise
+            return (
+                f"Security scan blocked the content from tool '{tool_name}'. "
+                "The content was flagged as potentially malicious. "
+                "Please try a different approach."
+            )
 
     def _track_internal_event(
         self,

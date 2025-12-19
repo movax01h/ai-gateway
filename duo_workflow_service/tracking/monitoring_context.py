@@ -12,6 +12,7 @@ class MonitoringContext(BaseModel):
     workflow_stop_reason: Optional[str] = None
     workflow_last_gitlab_status: Optional[str] = None
     tracing_enabled: Optional[str] = None
+    use_ai_prompt_scanning: bool = False
 
 
 current_monitoring_context: ContextVar[MonitoringContext] = ContextVar(

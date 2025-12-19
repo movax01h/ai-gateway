@@ -1,5 +1,5 @@
 import re
-from typing import Any, Optional
+from typing import Any
 
 import structlog
 from langchain_core.messages import HumanMessage, ToolMessage
@@ -18,10 +18,8 @@ from duo_workflow_service.agent_platform.experimental.state import (
 )
 from duo_workflow_service.agent_platform.experimental.ui_log import UIHistory
 from duo_workflow_service.monitoring import duo_workflow_metrics
-from duo_workflow_service.security.prompt_security import (
-    PromptSecurity,
-    SecurityException,
-)
+from duo_workflow_service.security.prompt_security import SecurityException
+from duo_workflow_service.security.scanner_factory import apply_security_scanning
 from duo_workflow_service.tools.toolset import Toolset
 from lib.internal_events import InternalEventAdditionalProperties, InternalEventsClient
 from lib.internal_events.event_enum import CategoryEnum, EventEnum, EventLabelEnum
@@ -41,9 +39,9 @@ class ToolNodeWithErrorCorrection:
         internal_event_client: InternalEventsClient,
         ui_history: UIHistory[UILogWriterOneOffTools, UILogEventsOneOff],
         max_correction_attempts: int = 3,
-        tool_calls_key: Optional[IOKey] = None,
-        tool_responses_key: Optional[IOKey] = None,
-        execution_result_key: Optional[IOKey] = None,
+        tool_calls_key: IOKey | None = None,
+        tool_responses_key: IOKey | None = None,
+        execution_result_key: IOKey | None = None,
     ):
         self.name = name
         self._component_name = component_name
@@ -94,11 +92,13 @@ class ToolNodeWithErrorCorrection:
                     tool_call_args=tool_call_args,
                 )
 
+            tool = self._toolset.get(tool_name)
+            sanitized = self._sanitize_response(
+                response=response, tool_name=tool_name, tool=tool
+            )
             tool_responses.append(
                 ToolMessage(
-                    content=self._sanitize_response(
-                        response=response, tool_name=tool_name
-                    ),
+                    content=sanitized,  # type: ignore[arg-type]
                     tool_call_id=tool_call_id,
                 )
             )
@@ -198,17 +198,26 @@ class ToolNodeWithErrorCorrection:
             return err_format
 
     def _sanitize_response(
-        self, response: str | dict | list, tool_name: str
-    ) -> str | list[str | dict]:
+        self,
+        response: str | dict | list,
+        tool_name: str,
+        tool: BaseTool | None = None,
+    ) -> str | dict | list:
         """Sanitize tool response for security."""
         try:
-            return PromptSecurity.apply_security_to_tool_response(
+            trust_level = getattr(tool, "trust_level", None)
+            return apply_security_scanning(
                 response=response,
                 tool_name=tool_name,
+                trust_level=trust_level,
             )
         except SecurityException as e:
             self._logger.error(f"Security validation failed for tool {tool_name}: {e}")
-            raise
+            return (
+                f"Security scan blocked the content from tool '{tool_name}'. "
+                "The content was flagged as potentially malicious. "
+                "Please try a different approach."
+            )
 
     def _track_internal_event(
         self,

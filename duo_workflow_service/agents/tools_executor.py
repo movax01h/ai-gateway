@@ -24,10 +24,8 @@ from duo_workflow_service.entities.state import (
     UiChatLog,
 )
 from duo_workflow_service.monitoring import duo_workflow_metrics
-from duo_workflow_service.security.prompt_security import (
-    PromptSecurity,
-    SecurityException,
-)
+from duo_workflow_service.security.prompt_security import SecurityException
+from duo_workflow_service.security.scanner_factory import apply_security_scanning
 from duo_workflow_service.tools import RunCommand, Toolset, format_tool_display_message
 from duo_workflow_service.tools.planner import PlannerTool
 from duo_workflow_service.tracking.errors import log_exception
@@ -108,11 +106,12 @@ class ToolsExecutor:
             response = result.get("response")
             if response and hasattr(response, "content"):
                 try:
-                    result["response"].content = (
-                        PromptSecurity.apply_security_to_tool_response(
-                            response=result["response"].content,
-                            tool_name=tool_name,
-                        )
+                    tool = self._toolset.get(tool_name)
+                    trust_level = getattr(tool, "trust_level", None)
+                    result["response"].content = apply_security_scanning(
+                        response=result["response"].content,
+                        tool_name=tool_name,
+                        trust_level=trust_level,
                     )
                 except SecurityException as e:
                     log_exception(
@@ -122,7 +121,11 @@ class ToolsExecutor:
                             "tool_name": tool_name,
                         },
                     )
-                    raise
+                    result["response"].content = (
+                        f"Security scan blocked the content from tool '{tool_name}'. "
+                        "The content was flagged as potentially malicious. "
+                        "Please try a different approach."
+                    )
 
             chat_logs = result.get("chat_logs", [])
             if chat_logs and isinstance(chat_logs[0], dict):

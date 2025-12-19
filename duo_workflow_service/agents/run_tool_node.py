@@ -9,10 +9,8 @@ from langchain.tools import BaseTool
 from duo_workflow_service.entities import MessageTypeEnum, ToolStatus, UiChatLog
 from duo_workflow_service.entities.state import ToolInfo, WorkflowState
 from duo_workflow_service.monitoring import duo_workflow_metrics
-from duo_workflow_service.security.prompt_security import (
-    PromptSecurity,
-    SecurityException,
-)
+from duo_workflow_service.security.prompt_security import SecurityException
+from duo_workflow_service.security.scanner_factory import apply_security_scanning
 from duo_workflow_service.tracking.errors import log_exception
 from lib.internal_events.event_enum import CategoryEnum
 
@@ -85,11 +83,12 @@ class RunToolNode(Generic[WorkflowStateT]):
             ):
                 if output := await self._tool._arun(**tool_params):
                     try:
-                        secure_output = PromptSecurity.apply_security_to_tool_response(
+                        trust_level = getattr(self._tool, "trust_level", None)
+                        output = apply_security_scanning(
                             response=output,
                             tool_name=self._tool.name,
+                            trust_level=trust_level,
                         )
-                        output = secure_output
                     except SecurityException as e:
                         log_exception(
                             e,
@@ -98,7 +97,11 @@ class RunToolNode(Generic[WorkflowStateT]):
                                 "tool_name": self._tool.name,
                             },
                         )
-                        raise
+                        output = (
+                            f"Security scan blocked the content from tool '{self._tool.name}'. "
+                            "The content was flagged as potentially malicious. "
+                            "Please try a different approach."
+                        )
 
             outputs.append(output)
             logs.append(
