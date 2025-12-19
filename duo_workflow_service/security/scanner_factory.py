@@ -118,10 +118,6 @@ def _get_hiddenlayer_scanner():
             )
 
             _hiddenlayer_scanner_instance = HiddenLayerScanner()
-            log.info(
-                "Hidden Layer scanner initialized",
-                enabled=_hiddenlayer_scanner_instance.enabled,
-            )
         except Exception as e:
             log.error(
                 "Failed to initialize Hidden Layer scanner",
