@@ -53,6 +53,7 @@ from duo_workflow_service.workflows.type_definitions import (
     AIO_CANCEL_STOP_WORKFLOW_REQUEST,
     AdditionalContext,
 )
+from lib.feature_flags.context import FeatureFlag, is_feature_enabled
 from lib.internal_events import InternalEventAdditionalProperties, InternalEventsClient
 from lib.internal_events.event_enum import CategoryEnum, EventEnum
 from lib.language_server import LanguageServerVersion
@@ -160,6 +161,9 @@ class AbstractWorkflow(ABC):
 
             monitoring_context: MonitoringContext = current_monitoring_context.get()
             monitoring_context.tracing_enabled = str(tracing_enabled)
+            monitoring_context.use_ai_prompt_scanning = is_feature_enabled(
+                FeatureFlag.AI_PROMPT_SCANNING
+            )
 
             with tracing_context(enabled=tracing_enabled):
                 try:

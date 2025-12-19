@@ -17,6 +17,14 @@ from lib.internal_events import InternalEventsClient
 from lib.internal_events.event_enum import CategoryEnum
 
 
+def assert_security_called_with(mock_security, expected_response, expected_tool_name):
+    """Helper to verify security scanning was called with expected arguments."""
+    mock_security.assert_called_once()
+    call_kwargs = mock_security.call_args[1]
+    assert call_kwargs["response"] == expected_response
+    assert call_kwargs["tool_name"] == expected_tool_name
+
+
 @pytest.fixture(name="flow_id")
 def flow_id_fixture():
     """Fixture for flow ID."""

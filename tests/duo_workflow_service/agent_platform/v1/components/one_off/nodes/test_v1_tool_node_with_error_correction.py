@@ -20,13 +20,11 @@ from lib.internal_events.event_enum import CategoryEnum, EventEnum
 
 @pytest.fixture(name="mock_prompt_security")
 def mock_prompt_security_fixture():
-    """Fixture for mocking PromptSecurity."""
+    """Fixture for mocking apply_security_scanning."""
     with patch(
-        "duo_workflow_service.agent_platform.v1.components.one_off.nodes.tool_node_with_error_correction.PromptSecurity"
+        "duo_workflow_service.agent_platform.v1.components.one_off.nodes.tool_node_with_error_correction.apply_security_scanning"
     ) as mock_security:
-        mock_security.apply_security_to_tool_response.return_value = (
-            "Sanitized response"
-        )
+        mock_security.return_value = "Sanitized response"
         yield mock_security
 
 
@@ -202,7 +200,7 @@ class TestToolNodeWithErrorCorrectionRun:
         mock_tool.ainvoke.assert_called_once_with(mock_tool_call["args"])
 
         # Verify security sanitization was called
-        mock_prompt_security.apply_security_to_tool_response.assert_called_once()
+        mock_prompt_security.assert_called_once()
 
         # Verify ui_history methods were called
         ui_history_one_off.log._log_tool_call_input.assert_called_once()
@@ -257,7 +255,7 @@ class TestToolNodeWithErrorCorrectionRun:
         tool_message = conversation_messages[0]
         assert isinstance(tool_message, ToolMessage)
 
-        security_args = mock_prompt_security.apply_security_to_tool_response.call_args
+        security_args = mock_prompt_security.call_args
         assert (
             f"Tool {mock_tool_call['name']} not found" in security_args[1]["response"]
         )
@@ -280,8 +278,8 @@ class TestToolNodeWithErrorCorrectionRun:
 
         await tool_node_with_error_correction.run(flow_state_with_tool_calls_one_off)
 
-        # Check what was passed to PromptSecurity (the actual error message)
-        security_args = mock_prompt_security.apply_security_to_tool_response.call_args
+        # Check what was passed to apply_security_scanning (the actual error message)
+        security_args = mock_prompt_security.call_args
         assert (
             "Tool runtime exception due to Tool execution failed"
             in security_args[1]["response"]
@@ -370,7 +368,7 @@ class TestToolNodeWithErrorCorrectionRun:
         mock_tool.ainvoke = AsyncMock(side_effect=tool_error)
 
         # Configure security to return the actual error message
-        mock_prompt_security.apply_security_to_tool_response.return_value = (
+        mock_prompt_security.return_value = (
             "Tool exception occurred due to Tool validation failed"
         )
 
@@ -531,18 +529,18 @@ class TestToolNodeWithErrorCorrectionSecurity:
         mock_logger,
     ):
         """Test run handles SecurityException during response sanitization."""
-        # Configure PromptSecurity to raise SecurityException
+        # Configure apply_security_scanning to raise SecurityException
         security_error = SecurityException("Security validation failed")
 
         with patch(
-            "duo_workflow_service.agent_platform.v1.components.one_off.nodes.tool_node_with_error_correction.PromptSecurity"
+            "duo_workflow_service.agent_platform.v1.components.one_off.nodes.tool_node_with_error_correction.apply_security_scanning"
         ) as mock_security:
-            mock_security.apply_security_to_tool_response.side_effect = security_error
+            mock_security.side_effect = security_error
 
-            with pytest.raises(SecurityException):
-                await tool_node_with_error_correction.run(
-                    flow_state_with_tool_calls_one_off
-                )
+            # Exception is caught internally, error message is returned
+            result = await tool_node_with_error_correction.run(
+                flow_state_with_tool_calls_one_off
+            )
 
             # Verify error was logged
             mock_logger.error.assert_called_once()
@@ -551,23 +549,26 @@ class TestToolNodeWithErrorCorrectionSecurity:
                 in mock_logger.error.call_args[0][0]
             )
 
+            # Verify error message is in the response
+            tool_messages = result[FlowStateKeys.CONVERSATION_HISTORY][component_name]
+            assert "Security scan blocked" in tool_messages[0].content
+
     def test_sanitize_response_success(self, tool_node_with_error_correction):
         """Test _sanitize_response method with successful sanitization."""
         with patch(
-            "duo_workflow_service.agent_platform.v1.components.one_off.nodes.tool_node_with_error_correction.PromptSecurity"
+            "duo_workflow_service.agent_platform.v1.components.one_off.nodes.tool_node_with_error_correction.apply_security_scanning"
         ) as mock_security:
-            mock_security.apply_security_to_tool_response.return_value = (
-                "Sanitized safe response"
-            )
+            mock_security.return_value = "Sanitized safe response"
 
             result = tool_node_with_error_correction._sanitize_response(
                 response="Original response", tool_name="test_tool"
             )
 
             # Verify sanitization was called
-            mock_security.apply_security_to_tool_response.assert_called_once_with(
-                response="Original response", tool_name="test_tool"
-            )
+            mock_security.assert_called_once()
+            call_kwargs = mock_security.call_args[1]
+            assert call_kwargs["response"] == "Original response"
+            assert call_kwargs["tool_name"] == "test_tool"
 
             assert result == "Sanitized safe response"
 

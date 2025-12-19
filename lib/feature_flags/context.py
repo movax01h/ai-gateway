@@ -14,6 +14,7 @@ class FeatureFlag(StrEnum):
     AI_PER_MODEL_CONTEXT_WINDOW = "ai_per_model_context_window"
     USE_DUO_CHAT_UI_FOR_FLOW = "use_duo_chat_ui_for_flow"
     USE_GENERIC_GITLAB_API_TOOLS = "use_generic_gitlab_api_tools"
+    AI_PROMPT_SCANNING = "ai_prompt_scanning"
 
 
 def is_feature_enabled(feature_name: FeatureFlag | str) -> bool:

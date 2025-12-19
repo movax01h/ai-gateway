@@ -2213,6 +2213,32 @@ files = [
 ]
 
 [[package]]
+name = "hiddenlayer-sdk"
+version = "3.2.0"
+description = "The official Python library for the hiddenlayer API"
+optional = false
+python-versions = ">=3.9"
+groups = ["main"]
+files = [
+    {file = "hiddenlayer_sdk-3.2.0-py3-none-any.whl", hash = "sha256:7e6dfce122b7ff85dc2dc3b89235412fd4f44b127445f9e72859863ea353bf61"},
+    {file = "hiddenlayer_sdk-3.2.0.tar.gz", hash = "sha256:8e2f38c8631fa5670c132e7a2c194d1b265420d06bd96dc88639a65313b061b8"},
+]
+
+[package.dependencies]
+anyio = ">=3.5.0,<5"
+distro = ">=1.7.0,<2"
+httpx = ">=0.23.0,<1"
+pydantic = ">=1.9.0,<3"
+requests = ">=2.32.4"
+requests-auth = ">=8.0.0"
+sniffio = "*"
+types-requests = ">=2.32.0.20241016"
+typing-extensions = ">=4.10,<5"
+
+[package.extras]
+aiohttp = ["aiohttp", "httpx-aiohttp (>=0.1.9)"]
+
+[[package]]
 name = "httpcore"
 version = "1.0.9"
 description = "A minimal low-level HTTP client."
@@ -5113,6 +5139,24 @@ socks = ["PySocks (>=1.5.6,!=1.5.7)"]
 use-chardet-on-py3 = ["chardet (>=3.0.2,<6)"]
 
 [[package]]
+name = "requests-auth"
+version = "8.0.0"
+description = "Authentication for Requests"
+optional = false
+python-versions = ">=3.8"
+groups = ["main"]
+files = [
+    {file = "requests_auth-8.0.0-py3-none-any.whl", hash = "sha256:7faf0c58cadb61d2398fed9ea412a38641d70a856b1db25db281f9057194f1ca"},
+    {file = "requests_auth-8.0.0.tar.gz", hash = "sha256:ca2f2126d8a41e1d1615faa8cf8d5d62ea01d705f9ee99f470b9a44abd5dee82"},
+]
+
+[package.dependencies]
+requests = "==2.*"
+
+[package.extras]
+testing = ["pyjwt (==2.*)", "pytest-cov (==5.*)", "pytest-responses (==0.5.*)"]
+
+[[package]]
 name = "requests-toolbelt"
 version = "1.0.0"
 description = "A utility belt for advanced users of python-requests"
@@ -6344,14 +6388,14 @@ files = [
 
 [[package]]
 name = "types-requests"
-version = "2.32.0.20240712"
+version = "2.32.4.20250913"
 description = "Typing stubs for requests"
 optional = false
-python-versions = ">=3.8"
+python-versions = ">=3.9"
 groups = ["main", "eval", "lint"]
 files = [
-    {file = "types-requests-2.32.0.20240712.tar.gz", hash = "sha256:90c079ff05e549f6bf50e02e910210b98b8ff1ebdd18e19c873cd237737c1358"},
-    {file = "types_requests-2.32.0.20240712-py3-none-any.whl", hash = "sha256:f754283e152c752e46e70942fa2a146b5bc70393522257bb85bd1ef7e019dcc3"},
+    {file = "types_requests-2.32.4.20250913-py3-none-any.whl", hash = "sha256:78c9c1fffebbe0fa487a418e0fa5252017e9c60d1a2da394077f1780f655d7e1"},
+    {file = "types_requests-2.32.4.20250913.tar.gz", hash = "sha256:abd6d4f9ce3a9383f269775a9835a4c24e5cd6b9f647d64f88aa4613c33def5d"},
 ]
 
 [package.dependencies]
@@ -7260,4 +7304,4 @@ cffi = ["cffi (>=1.11)"]
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.12.0,<3.13.0"
-content-hash = "2203fef32c9c03ce2c1bc851eca1eb6dcbd25324195682b976869cc7bf2eda08"
+content-hash = "326bdc0389d14b4a45c674144d272b2173b93899bb65010fca9932d64df86d35"

@@ -16,7 +16,7 @@ from duo_workflow_service.agent_platform.v1.state import (
 )
 from duo_workflow_service.agent_platform.v1.ui_log import UIHistory
 from duo_workflow_service.monitoring import duo_workflow_metrics
-from duo_workflow_service.security.prompt_security import PromptSecurity
+from duo_workflow_service.security.scanner_factory import apply_security_scanning
 from lib.internal_events import InternalEventAdditionalProperties, InternalEventsClient
 from lib.internal_events.event_enum import CategoryEnum, EventEnum, EventLabelEnum
 
@@ -123,8 +123,11 @@ class DeterministicStepNode:
         ):
             tool_call_result = await tool.arun(tool_call_args)
 
-        secure_result = PromptSecurity.apply_security_to_tool_response(
-            response=tool_call_result, tool_name=self._tool_name
+        trust_level = getattr(tool, "trust_level", None)
+        secure_result = apply_security_scanning(
+            response=tool_call_result,
+            tool_name=self._tool_name,
+            trust_level=trust_level,
         )
 
         self._track_internal_event(

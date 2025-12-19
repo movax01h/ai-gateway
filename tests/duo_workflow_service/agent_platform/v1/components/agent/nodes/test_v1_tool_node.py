@@ -14,17 +14,18 @@ from duo_workflow_service.agent_platform.v1.components.agent.ui_log import (
 from duo_workflow_service.agent_platform.v1.state import FlowStateKeys
 from duo_workflow_service.security.prompt_security import SecurityException
 from lib.internal_events.event_enum import CategoryEnum, EventEnum
+from tests.duo_workflow_service.agent_platform.v1.components.agent.conftest import (
+    assert_security_called_with,
+)
 
 
 @pytest.fixture(name="mock_prompt_security")
 def mock_prompt_security_fixture():
-    """Fixture for mocking PromptSecurity."""
+    """Fixture for mocking apply_security_scanning."""
     with patch(
-        "duo_workflow_service.agent_platform.v1.components.agent.nodes.tool_node.PromptSecurity"
+        "duo_workflow_service.agent_platform.v1.components.agent.nodes.tool_node.apply_security_scanning"
     ) as mock_security:
-        mock_security.apply_security_to_tool_response.return_value = (
-            "Sanitized response"
-        )
+        mock_security.return_value = "Sanitized response"
         yield mock_security
 
 
@@ -108,8 +109,8 @@ class TestToolNode:
         mock_tool.arun.assert_called_once_with(mock_tool_call["args"])
 
         # Verify security sanitization was called
-        mock_prompt_security.apply_security_to_tool_response.assert_called_once_with(
-            response="Tool execution result", tool_name=mock_tool.name
+        assert_security_called_with(
+            mock_prompt_security, "Tool execution result", mock_tool.name
         )
 
         # Verify ui_history.log.success was called with the correct parameters
@@ -184,9 +185,7 @@ class TestToolNode:
         result = await tool_node.run(flow_state_with_tool_calls)
 
         # Verify result structure
-        secutiry_harness_args = (
-            mock_prompt_security.apply_security_to_tool_response.call_args
-        )
+        secutiry_harness_args = mock_prompt_security.call_args
         assert "Tool test_tool not found" in secutiry_harness_args[1]["response"]
         tool_messages = result[FlowStateKeys.CONVERSATION_HISTORY][component_name]
         assert len(tool_messages) == 1
@@ -220,9 +219,7 @@ class TestToolNode:
         result = await tool_node.run(flow_state_with_tool_calls)
 
         # Verify error message in result
-        secutiry_harness_args = (
-            mock_prompt_security.apply_security_to_tool_response.call_args
-        )
+        secutiry_harness_args = mock_prompt_security.call_args
         assert secutiry_harness_args[1]["tool_name"] == mock_tool.name
         assert (
             "Tool test_tool execution failed due to wrong arguments"
@@ -282,9 +279,7 @@ class TestToolNode:
         result = await tool_node.run(flow_state_with_tool_calls)
 
         # Verify error message in result
-        secutiry_harness_args = (
-            mock_prompt_security.apply_security_to_tool_response.call_args
-        )
+        secutiry_harness_args = mock_prompt_security.call_args
         assert secutiry_harness_args[1]["tool_name"] == mock_tool.name
         assert (
             "Tool test_tool raised validation error"
@@ -344,9 +339,7 @@ class TestToolNode:
         result = await tool_node.run(flow_state_with_tool_calls)
 
         # Verify error message in result
-        secutiry_harness_args = (
-            mock_prompt_security.apply_security_to_tool_response.call_args
-        )
+        secutiry_harness_args = mock_prompt_security.call_args
         assert secutiry_harness_args[1]["tool_name"] == mock_tool.name
         assert (
             "Tool runtime exception due to Generic error"
@@ -451,16 +444,16 @@ class TestToolNodeSecurity:
         mock_logger,
     ):
         """Test run handles SecurityException during response sanitization."""
-        # Configure PromptSecurity to raise SecurityException
+        # Configure apply_security_scanning to raise SecurityException
         security_error = SecurityException("Security validation failed")
 
         with patch(
-            "duo_workflow_service.agent_platform.v1.components.agent.nodes.tool_node.PromptSecurity"
+            "duo_workflow_service.agent_platform.v1.components.agent.nodes.tool_node.apply_security_scanning"
         ) as mock_security:
-            mock_security.apply_security_to_tool_response.side_effect = security_error
+            mock_security.side_effect = security_error
 
-            with pytest.raises(SecurityException):
-                await tool_node.run(flow_state_with_tool_calls)
+            # Exception is caught internally, error message is returned
+            result = await tool_node.run(flow_state_with_tool_calls)
 
             # Verify error was logged
             mock_logger.error.assert_called_once()
@@ -468,6 +461,10 @@ class TestToolNodeSecurity:
                 "Security validation failed for tool test_tool"
                 in mock_logger.error.call_args[0][0]
             )
+
+            # Verify error message is in the response
+            tool_messages = result[FlowStateKeys.CONVERSATION_HISTORY][component_name]
+            assert "Security scan blocked" in tool_messages[0].content
 
     @pytest.mark.asyncio
     async def test_run_security_sanitization_success(
@@ -480,17 +477,15 @@ class TestToolNodeSecurity:
     ):
         """Test run with successful security sanitization."""
         with patch(
-            "duo_workflow_service.agent_platform.v1.components.agent.nodes.tool_node.PromptSecurity"
+            "duo_workflow_service.agent_platform.v1.components.agent.nodes.tool_node.apply_security_scanning"
         ) as mock_security:
-            mock_security.apply_security_to_tool_response.return_value = (
-                "Sanitized safe response"
-            )
+            mock_security.return_value = "Sanitized safe response"
 
             result = await tool_node.run(flow_state_with_tool_calls)
 
             # Verify sanitization was called
-            mock_security.apply_security_to_tool_response.assert_called_once_with(
-                response="Tool execution result", tool_name=mock_tool.name
+            assert_security_called_with(
+                mock_security, "Tool execution result", mock_tool.name
             )
 
             # Verify sanitized response in result
