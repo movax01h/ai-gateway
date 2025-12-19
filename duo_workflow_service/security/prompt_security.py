@@ -16,6 +16,7 @@ from duo_workflow_service.security.markdown_content_security import (
 from duo_workflow_service.security.security_utils import (
     compute_response_hash_with_length,
 )
+from duo_workflow_service.security.tool_output_security import SECURITY_DELIMITER_TAGS
 
 log = structlog.stdlib.get_logger("security")
 
@@ -49,15 +50,22 @@ def encode_dangerous_tags(
 
     def _encode_recursive(data: Any) -> Any:
         """Internal recursive function that doesn't change top-level structure."""
+        # Core dangerous tags that could be used for prompt injection
         DANGEROUS_TAGS = {
             "goal": "goal",
             "system": "system",
         }
+        # Add security delimiter tags to prevent delimiter escape attacks
+        for tag in SECURITY_DELIMITER_TAGS:
+            DANGEROUS_TAGS[tag] = tag
 
         if isinstance(data, dict):
             return {k: _encode_recursive(v) for k, v in data.items()}
         elif isinstance(data, list):
             return [_encode_recursive(item) for item in data]
+        elif not isinstance(data, str):
+            # Return non-string types (int, float, bool, None, etc.) as-is
+            return data
 
         for tag_name, replacement in DANGEROUS_TAGS.items():
             data = re.sub(

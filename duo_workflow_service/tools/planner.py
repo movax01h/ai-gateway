@@ -7,6 +7,7 @@ from langgraph.types import Command as LangGraphCommand
 from pydantic import BaseModel, Field
 
 from duo_workflow_service.entities.state import Plan, Task, TaskStatus
+from duo_workflow_service.security.tool_output_security import ToolTrustLevel
 from duo_workflow_service.tools.duo_base_tool import DuoBaseTool
 
 
@@ -46,6 +47,9 @@ class PlannerTool(DuoBaseTool):
     tool_call_id: str | None = None
     _plan: Plan | None = None
     _tools_agent_name: str | None = None
+
+    # Planner tools return internal workflow commands, not user content
+    trust_level: ToolTrustLevel = ToolTrustLevel.TRUSTED_INTERNAL
 
     @property
     def plan(self) -> Plan:

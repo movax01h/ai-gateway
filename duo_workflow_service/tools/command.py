@@ -6,7 +6,6 @@ from pydantic import BaseModel, Field
 
 from contract import contract_pb2
 from duo_workflow_service.executor.action import _execute_action
-from duo_workflow_service.security.tool_output_security import ToolTrustLevel
 from duo_workflow_service.tools.duo_base_tool import DuoBaseTool
 
 _DISALLOWED_COMMANDS: List[str] = []
@@ -32,7 +31,6 @@ class RunCommand(DuoBaseTool):
         "Pay extra attention to correctly escape special characters like '`'"
     )
     args_schema: Type[BaseModel] = RunCommandInput
-    trust_level: ToolTrustLevel = ToolTrustLevel.TRUSTED_INTERNAL
 
     async def _execute(
         self,

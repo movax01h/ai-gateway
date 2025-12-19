@@ -8,6 +8,10 @@ from langchain_core.messages import ToolMessage
 from langgraph.types import Command
 from pydantic import BaseModel
 
+from duo_workflow_service.security.tool_output_security import (
+    TRUNCATED_TOOL_OUTPUT_TAG,
+    TRUNCATION_NOTICE_TAG,
+)
 from duo_workflow_service.token_counter.tiktoken_counter import TikTokenCounter
 
 logger = structlog.get_logger("tools_executor")
@@ -39,7 +43,7 @@ def _add_truncation_instruction(
     percentage = (truncated_token_size / original_token_size) * 100
     return dedent(
         f"""
-        <truncation_notice>
+        <{TRUNCATION_NOTICE_TAG}>
         IMPORTANT: This tool output has been truncated due to size limits.
 
         <truncation_details>
@@ -48,9 +52,9 @@ def _add_truncation_instruction(
         - Percentage shown: {percentage:.1f}%
         </truncation_details>
 
-        <truncated_tool_output>
+        <{TRUNCATED_TOOL_OUTPUT_TAG}>
         {truncated_text}
-        </truncated_tool_output>
+        </{TRUNCATED_TOOL_OUTPUT_TAG}>
 
         <instructions>
         When generating a response based on truncated tool output, explicitly inform the user by including a note such as: "Note: This response is based on truncated tool output and may be incomplete."
@@ -59,7 +63,7 @@ def _add_truncation_instruction(
         1. Refine your tool call to request a specific subset or filter the data
         2. Use alternative approaches to gather the necessary information
         </instructions>
-        </truncation_notice>
+        </{TRUNCATION_NOTICE_TAG}>
         """
     )
 
