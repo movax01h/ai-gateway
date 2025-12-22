@@ -276,6 +276,11 @@ async def test_build_review_context_basic_success(
     tool = BuildReviewMergeRequestContext(metadata=metadata)
     response = await tool._arun(project_id="test%2Fproject", merge_request_iid=123)
 
+    # Check for BOUNDARY_ID and unique delimiters
+    assert "BOUNDARY_ID:" in response
+    assert "═══UNTRUSTED_CONTENT_START_" in response
+    assert "═══UNTRUSTED_CONTENT_END_" in response
+
     assert "Here are the merge request details for you to review:" in response
     assert "<input>" in response
     assert "<mr_title>" in response
@@ -320,6 +325,11 @@ async def test_build_review_context_only_diffs(
     response = await tool._arun(
         project_id="test%2Fproject", merge_request_iid=123, only_diffs=True
     )
+
+    # Check for BOUNDARY_ID and unique delimiters
+    assert "BOUNDARY_ID:" in response
+    assert "═══UNTRUSTED_CONTENT_START_" in response
+    assert "═══UNTRUSTED_CONTENT_END_" in response
 
     assert "Here are the merge request details for you to review:" in response
     assert "<input>" in response
@@ -372,6 +382,11 @@ async def test_build_review_context_only_diffs_with_custom_instructions(
         project_id="test%2Fproject", merge_request_iid=123, only_diffs=True
     )
 
+    # Check for BOUNDARY_ID and unique delimiters
+    assert "BOUNDARY_ID:" in response
+    assert "═══UNTRUSTED_CONTENT_START_" in response
+    assert "═══UNTRUSTED_CONTENT_END_" in response
+
     # Should include custom instructions
     assert "<custom_instructions>" in response
     assert "Ruby Code Quality" in response
@@ -408,6 +423,11 @@ async def test_build_review_context_skips_large_files(
     )
     tool = BuildReviewMergeRequestContext(metadata=metadata)
     response = await tool._arun(project_id="test%2Fproject", merge_request_iid=123)
+
+    # Check for BOUNDARY_ID and unique delimiters
+    assert "BOUNDARY_ID:" in response
+    assert "═══UNTRUSTED_CONTENT_START_" in response
+    assert "═══UNTRUSTED_CONTENT_END_" in response
 
     assert "<original_files>" not in response
     assert '<file_diff filename="calculator.rb">' in response
@@ -448,6 +468,11 @@ async def test_build_review_context_with_custom_instructions(
     tool = BuildReviewMergeRequestContext(metadata=metadata)
     response = await tool._arun(project_id="test%2Fproject", merge_request_iid=123)
 
+    # Check for BOUNDARY_ID and unique delimiters
+    assert "BOUNDARY_ID:" in response
+    assert "═══UNTRUSTED_CONTENT_START_" in response
+    assert "═══UNTRUSTED_CONTENT_END_" in response
+
     assert "custom_instructions" in response
     assert "Ruby Code Quality" in response
     assert "Apply these additional review instructions to matching files:" in response
@@ -476,6 +501,11 @@ async def test_build_review_context_with_url(
     response = await tool._arun(
         url="https://gitlab.com/namespace/project/-/merge_requests/123"
     )
+
+    # Check for BOUNDARY_ID and unique delimiters
+    assert "BOUNDARY_ID:" in response
+    assert "═══UNTRUSTED_CONTENT_START_" in response
+    assert "═══UNTRUSTED_CONTENT_END_" in response
 
     assert "Implement calculator method" in response
     assert "<input>" in response
@@ -516,6 +546,11 @@ async def test_build_review_context_no_matching_custom_instructions(
     )
     tool = BuildReviewMergeRequestContext(metadata=metadata)
     response = await tool._arun(project_id="test%2Fproject", merge_request_iid=123)
+
+    # Check for BOUNDARY_ID and unique delimiters
+    assert "BOUNDARY_ID:" in response
+    assert "═══UNTRUSTED_CONTENT_START_" in response
+    assert "═══UNTRUSTED_CONTENT_END_" in response
 
     assert "<custom_instructions>" not in response
 
@@ -575,6 +610,11 @@ async def test_build_review_context_nested_vs_root_patterns(
     )
     tool = BuildReviewMergeRequestContext(metadata=metadata)
     response = await tool._arun(project_id="test%2Fproject", merge_request_iid=123)
+
+    # Check for BOUNDARY_ID and unique delimiters
+    assert "BOUNDARY_ID:" in response
+    assert "═══UNTRUSTED_CONTENT_START_" in response
+    assert "═══UNTRUSTED_CONTENT_END_" in response
 
     assert "Nested Ruby Files Only" in response
     assert "All Ruby Files" in response
@@ -660,6 +700,11 @@ async def test_build_review_context_no_files_content(
     )
     tool = BuildReviewMergeRequestContext(metadata=metadata)
     response = await tool._arun(project_id="test%2Fproject", merge_request_iid=123)
+
+    # Check for BOUNDARY_ID and unique delimiters
+    assert "BOUNDARY_ID:" in response
+    assert "═══UNTRUSTED_CONTENT_START_" in response
+    assert "═══UNTRUSTED_CONTENT_END_" in response
 
     assert "<original_files>" not in response
     assert '<file_diff filename="new_file.rb">' in response
