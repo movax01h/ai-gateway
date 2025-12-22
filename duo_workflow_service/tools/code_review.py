@@ -1,8 +1,10 @@
 import base64
 import fnmatch
+import html
 import json
 import logging
 import re
+import secrets
 from typing import Any, Dict, List, Optional, Type
 from urllib.parse import quote
 
@@ -397,22 +399,36 @@ class BuildReviewMergeRequestContext(DuoBaseTool):
         return matches_include and not matches_exclude
 
     def _format_output(self, context: dict) -> str:
-        """Format output in the simple template structure."""
+        """Format output with unique delimiters and escaped user content."""
+
+        # Generate unpredictable boundary ID
+        boundary_id = secrets.token_hex(16)
+
+        # Escape user-controlled fields to prevent HTML/XML injection
+        title = html.escape(context["mr_data"].get("title", ""))
+        description = html.escape(context["mr_data"].get("description", ""))
+
         custom_instructions_section = self._format_custom_instructions(
             context.get("custom_instructions", [])
         )
         diff_section = self._format_diffs(context["diffs_and_paths"])
         files_section = self._format_original_files(context.get("files_content", {}))
 
-        return f"""Here are the merge request details for you to review:
+        # Unique delimiters per request - unpredictable to attackers
+        delimiter_start = f"═══UNTRUSTED_CONTENT_START_{boundary_id}═══"
+        delimiter_end = f"═══UNTRUSTED_CONTENT_END_{boundary_id}═══"
+
+        content = f"""{delimiter_start}
+
+Here are the merge request details for you to review:
 
 <input>
 <mr_title>
-{context['mr_data'].get('title', '')}
+{title}
 </mr_title>
 
 <mr_description>
-{context['mr_data'].get('description', '')}
+{description}
 </mr_description>
 
 {custom_instructions_section}
@@ -422,7 +438,11 @@ class BuildReviewMergeRequestContext(DuoBaseTool):
 </git_diffs>
 
 {files_section}
-</input>"""
+</input>
+
+{delimiter_end}"""
+
+        return f"BOUNDARY_ID:{boundary_id}\n\n{content}"
 
     def _format_custom_instructions(
         self, custom_instructions: List[Dict[str, Any]]
