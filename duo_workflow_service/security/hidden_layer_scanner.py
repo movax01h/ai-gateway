@@ -33,6 +33,7 @@ class HiddenLayerConfig:
     client_id: Optional[str] = None
     client_secret: Optional[str] = None
     environment: str = "prod-us"
+    base_url: Optional[str] = None
 
     @classmethod
     def from_environment(cls) -> "HiddenLayerConfig":
@@ -41,6 +42,7 @@ class HiddenLayerConfig:
             client_id=os.getenv("HL_CLIENT_ID"),
             client_secret=os.getenv("HL_CLIENT_SECRET"),
             environment=os.getenv("HIDDENLAYER_ENVIRONMENT", "prod-us"),
+            base_url=os.getenv("HIDDENLAYER_BASE_URL"),
         )
 
 
@@ -83,11 +85,19 @@ class HiddenLayerScanner(PromptScanner):
             hl_environment = cast(
                 Literal["prod-us", "prod-eu"], self._config.environment
             )
-            self._client = AsyncHiddenLayer(
-                client_id=self._config.client_id,
-                client_secret=self._config.client_secret,
-                environment=hl_environment,
-            )
+            # skip setting environment if base_url is set
+            if self._config.base_url:
+                self._client = AsyncHiddenLayer(
+                    client_id=self._config.client_id,
+                    client_secret=self._config.client_secret,
+                    base_url=self._config.base_url,
+                )
+            else:
+                self._client = AsyncHiddenLayer(
+                    client_id=self._config.client_id,
+                    client_secret=self._config.client_secret,
+                    environment=hl_environment,
+                )
 
             self._initialized = True
             log.info(

@@ -42,6 +42,7 @@ Tool Response
 | `HL_CLIENT_ID` | HiddenLayer client ID |
 | `HL_CLIENT_SECRET` | HiddenLayer client secret |
 | `HIDDENLAYER_ENVIRONMENT` | `prod-us` or `prod-eu` |
+| `HIDDENLAYER_BASE_URL` | Custom Base URL for HiddenLayer |
 
 **Feature flag:** `AI_PROMPT_SCANNING` enables HiddenLayer for untrusted tools.
 
