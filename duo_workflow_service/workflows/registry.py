@@ -26,6 +26,7 @@ from duo_workflow_service.agent_platform.experimental.flows import (
 from duo_workflow_service.agent_platform.experimental.flows.flow_config import (
     list_configs as experimental_list_configs,
 )
+from duo_workflow_service.agent_platform.utils import parse_workflow_definition
 from duo_workflow_service.agent_platform.v1 import list_configs as v1_list_configs
 from duo_workflow_service.agent_platform.v1.flows import Flow as V1Flow
 from duo_workflow_service.agent_platform.v1.flows import FlowConfig as V1FlowConfig
@@ -279,7 +280,8 @@ def resolve_workflow_class(
             ) from e
 
     if not workflow_definition:
-        return software_development.Workflow  # for backwards compatibility
+        # backward compatibility for old GitLab instances
+        return software_development.Workflow
 
     if workflow_definition in _WORKFLOWS_LOOKUP:
         return _WORKFLOWS_LOOKUP[workflow_definition]
@@ -297,16 +299,6 @@ def resolve_workflow_class(
         return _flow_factory(flow_cls, config)
     except Exception:
         raise ValueError(f"Unknown Flow: {workflow_definition}")
-
-
-def parse_workflow_definition(
-    workflow_definition: str,
-) -> Tuple[str, str]:
-    """Resolves a workflow definition string to its corresponding components."""
-    flow_version = Path(workflow_definition).name
-    flow_config_path = Path(workflow_definition).parent
-
-    return flow_version, str(flow_config_path)
 
 
 def list_configs():

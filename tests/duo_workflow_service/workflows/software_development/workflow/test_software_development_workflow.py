@@ -24,7 +24,7 @@ from duo_workflow_service.workflows.software_development.workflow import (
     PLANNER_TOOLS,
     Workflow,
 )
-from lib.internal_events.event_enum import CategoryEnum
+from lib.events import GLReportingEventContext
 
 
 class MockComponent:
@@ -50,6 +50,11 @@ class MockComponent:
         return node_name
 
 
+@pytest.fixture(name="flow_type")
+def flow_type_fixture() -> GLReportingEventContext:
+    return GLReportingEventContext.from_workflow_definition("software_development")
+
+
 @pytest.fixture(autouse=True)
 def prepare_container(mock_duo_workflow_service_container):
     pass
@@ -60,12 +65,13 @@ def workflow_fixture(
     mock_duo_workflow_service_container: Mock,
     gl_http_client: GitlabHttpClient,
     user: CloudConnectorUser,
+    flow_type: GLReportingEventContext,
 ):
     """Create a software development workflow instance."""
     workflow = Workflow(
         "test",
         {},
-        workflow_type=CategoryEnum.WORKFLOW_SOFTWARE_DEVELOPMENT,
+        workflow_type=flow_type,
         user=user,
     )
     workflow._project = {"id": 1, "name": "test", "http_url_to_repo": "http://test"}  # type: ignore

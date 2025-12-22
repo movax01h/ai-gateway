@@ -17,8 +17,9 @@ from duo_workflow_service.agent_platform.v1.state import (
 from duo_workflow_service.agent_platform.v1.ui_log import UIHistory
 from duo_workflow_service.monitoring import duo_workflow_metrics
 from duo_workflow_service.security.scanner_factory import apply_security_scanning
+from lib.events import GLReportingEventContext
 from lib.internal_events import InternalEventAdditionalProperties, InternalEventsClient
-from lib.internal_events.event_enum import CategoryEnum, EventEnum, EventLabelEnum
+from lib.internal_events.event_enum import EventEnum, EventLabelEnum
 
 __all__ = ["DeterministicStepNode"]
 
@@ -36,7 +37,7 @@ class DeterministicStepNode:
         tool_name: str,
         inputs: list[IOKey],
         flow_id: str,
-        flow_type: CategoryEnum,
+        flow_type: GLReportingEventContext,
         internal_event_client: InternalEventsClient,
         ui_history: UIHistory[
             UILogWriterDeterministicStep, UILogEventsDeterministicStep

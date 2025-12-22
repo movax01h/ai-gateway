@@ -53,9 +53,10 @@ from duo_workflow_service.workflows.type_definitions import (
     AIO_CANCEL_STOP_WORKFLOW_REQUEST,
     AdditionalContext,
 )
+from lib.events import GLReportingEventContext
 from lib.feature_flags.context import FeatureFlag, is_feature_enabled
 from lib.internal_events import InternalEventAdditionalProperties, InternalEventsClient
-from lib.internal_events.event_enum import CategoryEnum, EventEnum
+from lib.internal_events.event_enum import EventEnum
 from lib.language_server import LanguageServerVersion
 
 # Constants
@@ -88,7 +89,7 @@ class AbstractWorkflow(ABC):
     is_done: bool = False
     last_error: BaseException | None = None
     checkpoint_notifier: Optional[UserInterface] = None
-    _workflow_type: CategoryEnum
+    _workflow_type: GLReportingEventContext
     _stream: bool = False
     _additional_context: list[AdditionalContext] | None
     _mcp_tools: list[type[BaseTool]]
@@ -101,7 +102,7 @@ class AbstractWorkflow(ABC):
         self,
         workflow_id: str,
         workflow_metadata: Dict[str, Any],
-        workflow_type: CategoryEnum,
+        workflow_type: GLReportingEventContext,
         user: CloudConnectorUser,
         invocation_metadata: InvocationMetadata = {
             "base_url": "",
@@ -369,7 +370,7 @@ class AbstractWorkflow(ABC):
         self,
         event_name: EventEnum,
         additional_properties: InternalEventAdditionalProperties,
-        category: CategoryEnum,
+        category: GLReportingEventContext,
     ):
         self.log.info("Tracking Internal event %s", event_name.value)
         self._internal_event_client.track_event(

@@ -23,7 +23,7 @@ from duo_workflow_service.agent_platform.v1.state.base import FlowEventType
 from duo_workflow_service.checkpointer.gitlab_workflow import WorkflowStatusEventEnum
 from duo_workflow_service.entities.state import MessageTypeEnum, WorkflowStatusEnum
 from duo_workflow_service.workflows.type_definitions import AdditionalContext
-from lib.internal_events.event_enum import CategoryEnum
+from lib.events import GLReportingEventContext
 
 
 @pytest.mark.usefixtures("mock_duo_workflow_service_container")
@@ -46,6 +46,10 @@ class TestFlow:  # pylint: disable=too-many-public-methods
                 MagicMock(return_value=mock_comp) for mock_comp in mock_components
             ]
             yield mock_components
+
+    @pytest.fixture(name="flow_type")
+    def flow_type_fixture(self) -> GLReportingEventContext:
+        return GLReportingEventContext.from_workflow_definition("chat")
 
     @pytest.fixture(name="mock_project")
     def mock_project_fixture(self):
@@ -231,6 +235,7 @@ class TestFlow:  # pylint: disable=too-many-public-methods
         mock_checkpointer,
         mock_tools_registry,
         mock_state_graph,
+        flow_type: GLReportingEventContext,
     ):  # pylint: disable=unused-argument
         """Fixture providing a Flow instance with mocked dependencies."""
         with (
@@ -240,7 +245,7 @@ class TestFlow:  # pylint: disable=too-many-public-methods
             flow = Flow(
                 workflow_id="test-workflow-123",
                 workflow_metadata=mock_flow_metadata,
-                workflow_type=CategoryEnum.WORKFLOW_CHAT,
+                workflow_type=flow_type,
                 user=user,
                 config=sample_flow_config,
                 invocation_metadata=mock_invocation_metadata,
@@ -336,6 +341,7 @@ class TestFlow:  # pylint: disable=too-many-public-methods
         approval_decision,
         expected_event_type,
         expected_message,
+        flow_type: GLReportingEventContext,
     ):
         """Test _resume_command returns correct FlowEvent based on approval decision."""
         # Create approval mock if decision is provided
@@ -357,7 +363,7 @@ class TestFlow:  # pylint: disable=too-many-public-methods
             flow = Flow(
                 workflow_id=f"test-workflow-{approval_decision or 'no-approval'}",
                 workflow_metadata=mock_flow_metadata,
-                workflow_type=CategoryEnum.WORKFLOW_CHAT,
+                workflow_type=flow_type,
                 user=user,
                 config=sample_flow_config,
                 invocation_metadata=mock_invocation_metadata,
@@ -372,14 +378,15 @@ class TestFlow:  # pylint: disable=too-many-public-methods
             input = kwargs.get("input")
 
             assert isinstance(input, Command)
-            assert input.resume["event_type"] == expected_event_type
+            assert input.resume["event_type"] == expected_event_type  # type: ignore[index]
 
             if expected_message:
-                assert input.resume["message"] == expected_message
+                assert input.resume["message"] == expected_message  # type: ignore[index]
             else:
                 # For APPROVE events, message should not be present
                 assert (
-                    "message" not in input.resume or input.resume.get("message") is None
+                    "message" not in input.resume  # type: ignore[operator]
+                    or input.resume.get("message") is None  # type: ignore[union-attr]
                 )
 
     @pytest.mark.asyncio
@@ -391,6 +398,7 @@ class TestFlow:  # pylint: disable=too-many-public-methods
         mock_invocation_metadata,
         sample_flow_config,
         mock_state_graph,
+        flow_type: GLReportingEventContext,
         mock_checkpointer,  # pylint: disable=unused-argument
         mock_tools_registry,  # pylint: disable=unused-argument
     ):
@@ -407,7 +415,7 @@ class TestFlow:  # pylint: disable=too-many-public-methods
             flow = Flow(
                 workflow_id="test-workflow-123",
                 workflow_metadata=mock_flow_metadata,
-                workflow_type=CategoryEnum.WORKFLOW_CHAT,
+                workflow_type=flow_type,
                 user=user,
                 config=sample_flow_config,
                 invocation_metadata=mock_invocation_metadata,
@@ -434,13 +442,14 @@ class TestFlow:  # pylint: disable=too-many-public-methods
         user,
         mock_invocation_metadata,
         mock_state_graph,
+        flow_type: GLReportingEventContext,
         mock_tools_registry,  # pylint: disable=unused-argument
         mock_checkpointer,  # pylint: disable=unused-argument
     ):
         """Test that duplicate component names are detected during compilation."""
         # Create config with duplicate component names
         duplicate_config = FlowConfig(
-            flow={"entry_point": "agent"},
+            flow={"entry_point": "agent"},  # type: ignore[arg-type]
             components=[
                 {"name": "agent", "type": "AgentComponent"},
                 {"name": "agent", "type": "AnotherComponent"},  # Duplicate name
@@ -461,7 +470,7 @@ class TestFlow:  # pylint: disable=too-many-public-methods
             flow_instance = Flow(
                 workflow_id="duplicated-workflow-123",
                 workflow_metadata=mock_flow_metadata,
-                workflow_type=CategoryEnum.WORKFLOW_CHAT,
+                workflow_type=flow_type,
                 user=user,
                 config=duplicate_config,
                 invocation_metadata=mock_invocation_metadata,
@@ -490,6 +499,7 @@ class TestFlow:  # pylint: disable=too-many-public-methods
         mock_state_graph,
         mock_tools_registry,
         mock_checkpointer,
+        flow_type: GLReportingEventContext,
     ):
         """Test Flow with complex configuration via run method to trigger _compile."""
         complex_config = FlowConfig(
@@ -519,7 +529,7 @@ class TestFlow:  # pylint: disable=too-many-public-methods
                     },
                 },
             ],
-            flow={"entry_point": "agent"},
+            flow={"entry_point": "agent"},  # type: ignore[arg-type]
         )
 
         # Create mock component instances
@@ -571,7 +581,7 @@ class TestFlow:  # pylint: disable=too-many-public-methods
             flow = Flow(
                 workflow_id="complex-workflow-123",
                 workflow_metadata=mock_flow_metadata,
-                workflow_type=CategoryEnum.WORKFLOW_CHAT,
+                workflow_type=flow_type,
                 user=user,
                 config=complex_config,
                 invocation_metadata=mock_invocation_metadata,
@@ -596,7 +606,7 @@ class TestFlow:  # pylint: disable=too-many-public-methods
             agent_call_args = mock_agent_class.call_args[1]
             assert agent_call_args["name"] == "agent"
             assert agent_call_args["flow_id"] == "complex-workflow-123"
-            assert agent_call_args["flow_type"] == CategoryEnum.WORKFLOW_CHAT
+            assert agent_call_args["flow_type"] == flow_type
             assert agent_call_args["prompt_id"] == "agents/awesome"
             assert agent_call_args["inputs"] == ["context:goal"]
             assert agent_call_args["toolset"] == [
@@ -612,14 +622,14 @@ class TestFlow:  # pylint: disable=too-many-public-methods
                 {"from": "conversation_history:agent", "as": "history"}
             ]
             assert human_input_call_args["flow_id"] == "complex-workflow-123"
-            assert human_input_call_args["flow_type"] == CategoryEnum.WORKFLOW_CHAT
+            assert human_input_call_args["flow_type"] == flow_type
 
             # EndComponent component
             mock_end_component_class.assert_called_once()
             end_component_call_args = mock_end_component_class.call_args[1]
             assert end_component_call_args["name"] == "end"
             assert end_component_call_args["flow_id"] == "complex-workflow-123"
-            assert end_component_call_args["flow_type"] == CategoryEnum.WORKFLOW_CHAT
+            assert end_component_call_args["flow_type"] == flow_type
             mock_end_component.attach.assert_called_once_with(mock_state_graph)
 
             # Assert routers were created and attached
@@ -670,6 +680,7 @@ class TestFlow:  # pylint: disable=too-many-public-methods
         mock_invocation_metadata,
         user,
         sample_flow_config,
+        flow_type: GLReportingEventContext,
         mock_state_graph,  # pylint: disable=unused-argument
         mock_checkpointer,
         mock_tools_registry,  # pylint: disable=unused-argument
@@ -689,7 +700,7 @@ class TestFlow:  # pylint: disable=too-many-public-methods
             flow = Flow(
                 workflow_id="test-workflow-invalid-approval",
                 workflow_metadata=mock_flow_metadata,
-                workflow_type=CategoryEnum.WORKFLOW_CHAT,
+                workflow_type=flow_type,
                 user=user,
                 config=sample_flow_config,
                 invocation_metadata=mock_invocation_metadata,
@@ -739,6 +750,7 @@ class TestFlow:  # pylint: disable=too-many-public-methods
         user,
         mock_invocation_metadata,
         mock_tools_registry,
+        flow_type: GLReportingEventContext,
         mock_checkpointer,  # pylint: disable=unused-argument
         mock_state_graph,  # pylint: disable=unused-argument
     ):
@@ -757,7 +769,7 @@ class TestFlow:  # pylint: disable=too-many-public-methods
             component_config["tool_name"] = tool_name
 
         config = FlowConfig(
-            flow={"entry_point": "tool_call"},
+            flow={"entry_point": "tool_call"},  # type: ignore[arg-type]
             components=[component_config],
             routers=[{"from": "tool_call", "to": "end"}],
             environment="chat-partial",
@@ -774,7 +786,7 @@ class TestFlow:  # pylint: disable=too-many-public-methods
             flow = Flow(
                 workflow_id="test-workflow-123",
                 workflow_metadata=mock_flow_metadata,
-                workflow_type=CategoryEnum.WORKFLOW_CHAT,
+                workflow_type=flow_type,
                 user=user,
                 config=config,
                 invocation_metadata=mock_invocation_metadata,

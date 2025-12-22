@@ -12,7 +12,7 @@ from duo_workflow_service.agent_platform.experimental.state import (
     IOKeyTemplate,
 )
 from duo_workflow_service.entities.state import WorkflowStatusEnum
-from lib.internal_events.event_enum import CategoryEnum
+from lib.events import GLReportingEventContext
 
 __all__ = ["RouterProtocol", "BaseComponent", "EndComponent"]
 
@@ -38,7 +38,7 @@ class BaseComponent(BaseModel, ABC):
     inputs: list[IOKey] = Field(default_factory=list)
     name: str
     flow_id: str
-    flow_type: CategoryEnum
+    flow_type: GLReportingEventContext
     user: CloudConnectorUser
 
     @model_validator(mode="before")

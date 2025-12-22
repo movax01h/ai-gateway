@@ -12,7 +12,7 @@ from duo_workflow_service.monitoring import duo_workflow_metrics
 from duo_workflow_service.security.prompt_security import SecurityException
 from duo_workflow_service.security.scanner_factory import apply_security_scanning
 from duo_workflow_service.tracking.errors import log_exception
-from lib.internal_events.event_enum import CategoryEnum
+from lib.events import GLReportingEventContext
 
 WorkflowStateT_contra = TypeVar(
     "WorkflowStateT_contra",
@@ -50,7 +50,7 @@ class RunToolNode(Generic[WorkflowStateT]):
         tool: BaseTool,
         input_parser: InputParserProtocol[WorkflowStateT],
         output_parser: OutputParserProtocol[WorkflowStateT],
-        flow_type: CategoryEnum,
+        flow_type: GLReportingEventContext,
     ):
         """Initialize the RunToolNode.
 

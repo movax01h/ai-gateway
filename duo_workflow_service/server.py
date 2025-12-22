@@ -79,17 +79,13 @@ from duo_workflow_service.workflows.type_definitions import (
     OUTGOING_MESSAGE_TOO_LARGE,
     AdditionalContext,
 )
+from lib.events import GLReportingEventContext
 from lib.internal_events import InternalEventsClient
 from lib.internal_events.context import (
     InternalEventAdditionalProperties,
     current_event_context,
 )
-from lib.internal_events.event_enum import (
-    CategoryEnum,
-    EventEnum,
-    EventLabelEnum,
-    EventPropertyEnum,
-)
+from lib.internal_events.event_enum import EventEnum, EventLabelEnum, EventPropertyEnum
 
 CONTAINER_APPLICATION_PACKAGES = ["duo_workflow_service"]
 
@@ -120,23 +116,6 @@ CUSTOMERSDOT_URL: str | None = (
         "https://customers.gitlab.com",
     )
 )
-
-
-def string_to_category_enum(category_string: str) -> CategoryEnum:
-    try:
-        if "/" in category_string:
-            _, flow_config_path = flow_registry.parse_workflow_definition(
-                category_string
-            )
-            category_string = flow_config_path
-
-        return CategoryEnum(category_string)
-    except ValueError:
-        # Handle case when string doesn't match any enum value
-        # We will return default workflow type
-        # Since it isn't a blocker for workflow run
-        log.warning(f"Unknown category string: {category_string}")
-        return CategoryEnum.UNKNOWN
 
 
 def clean_start_request(start_workflow_request: contract_pb2.ClientEvent):
@@ -256,9 +235,13 @@ class DuoWorkflowService(contract_pb2_grpc.DuoWorkflowServicer):
             extra=build_logging_context(workflow_id, workflow_definition),
         )
 
-        workflow_type = string_to_category_enum(workflow_definition)
+        flow_config = start_workflow_request.startRequest.flowConfig
+        gl_event_context = GLReportingEventContext.from_workflow_definition(
+            workflow_definition, bool(flow_config)
+        )
+
         duo_workflow_metrics.count_agent_platform_receive_start_counter(
-            flow_type=workflow_type
+            flow_type=gl_event_context.value
         )
         internal_event_client.track_event(
             event_name=EventEnum.RECEIVE_START_REQUEST.value,
@@ -267,7 +250,7 @@ class DuoWorkflowService(contract_pb2_grpc.DuoWorkflowServicer):
                 property=EventPropertyEnum.WORKFLOW_ID.value,
                 value=workflow_id,
             ),
-            category=workflow_type.value,
+            category=gl_event_context.value,
         )
 
         goal = start_workflow_request.startRequest.goal
@@ -297,7 +280,6 @@ class DuoWorkflowService(contract_pb2_grpc.DuoWorkflowServicer):
         if start_workflow_request.startRequest.mcpTools:
             mcp_tools = list(start_workflow_request.startRequest.mcpTools)
 
-        flow_config = start_workflow_request.startRequest.flowConfig
         flow_config_schema_version = (
             start_workflow_request.startRequest.flowConfigSchemaVersion or None
         )
@@ -328,7 +310,7 @@ class DuoWorkflowService(contract_pb2_grpc.DuoWorkflowServicer):
         workflow: AbstractWorkflow = workflow_class(
             workflow_id=workflow_id,
             workflow_metadata=workflow_metadata,
-            workflow_type=workflow_type,
+            workflow_type=gl_event_context,
             user=user,
             mcp_tools=mcp_tools,
             additional_context=additional_context,

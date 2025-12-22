@@ -15,11 +15,15 @@ from duo_workflow_service.agent_platform.experimental.components.human_input.ui_
 )
 from duo_workflow_service.agent_platform.experimental.state import FlowState, IOKey
 from duo_workflow_service.agent_platform.experimental.ui_log.base import UIHistory
-from lib.internal_events.event_enum import CategoryEnum
+from lib.events import GLReportingEventContext
 
 
 class TestHumanInputComponent:
     """Test suite for HumanInputComponent."""
+
+    @pytest.fixture(name="flow_type")
+    def flow_type_fixture(self) -> GLReportingEventContext:
+        return GLReportingEventContext.from_workflow_definition("chat")
 
     @pytest.fixture
     def mock_prompt_registry(self):
@@ -31,13 +35,15 @@ class TestHumanInputComponent:
         return registry
 
     @pytest.fixture
-    def human_input_component(self, user, mock_prompt_registry):
+    def human_input_component(
+        self, user, mock_prompt_registry, flow_type: GLReportingEventContext
+    ):
         """Create a HumanInputComponent instance for testing."""
         return HumanInputComponent(
             name="test_human_input",
             sends_response_to="awesome_agent",
             flow_id="test_flow",
-            flow_type=CategoryEnum.WORKFLOW_CHAT,
+            flow_type=flow_type,
             user=user,
             prompt_id="test_prompt",
             prompt_version="v1.0",
@@ -165,13 +171,15 @@ class TestHumanInputComponent:
             call_args = mock_request_node.call_args
             assert call_args[1]["prompt"] is not None
 
-    def test_optional_prompt(self, user, mock_prompt_registry):
+    def test_optional_prompt(
+        self, user, mock_prompt_registry, flow_type: GLReportingEventContext
+    ):
         """Test that prompt is optional when no prompt_id or prompt_version provided."""
         component = HumanInputComponent(
             name="test_human_input",
             sends_response_to="awesome_agent",
             flow_id="test_flow",
-            flow_type=CategoryEnum.WORKFLOW_CHAT,
+            flow_type=flow_type,
             user=user,
             prompt_registry=mock_prompt_registry,
         )

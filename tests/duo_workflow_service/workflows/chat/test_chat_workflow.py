@@ -32,13 +32,13 @@ from duo_workflow_service.workflows.chat.workflow import (
     Workflow,
 )
 from duo_workflow_service.workflows.type_definitions import AdditionalContext
+from lib.events import GLReportingEventContext
 from lib.feature_flags import current_feature_flag_context
-from lib.internal_events.event_enum import CategoryEnum
 
 
-@pytest.fixture(name="workflow_type")
-def workflow_type_fixture() -> CategoryEnum:
-    return CategoryEnum.WORKFLOW_CHAT
+@pytest.fixture(name="flow_type")
+def flow_type_fixture() -> GLReportingEventContext:
+    return GLReportingEventContext.from_workflow_definition("chat")
 
 
 @pytest.fixture(name="prompt")
@@ -47,14 +47,14 @@ def prompt_fixture(
     prompt_config: PromptConfig,
     model_metadata: TypeModelMetadata | None,
     workflow_id: str,
-    workflow_type: CategoryEnum,
+    flow_type: GLReportingEventContext,
 ):
     return ChatAgent(
         model_factory=model_factory,
         config=prompt_config,
         model_metadata=model_metadata,
         workflow_id=workflow_id,
-        workflow_type=workflow_type,
+        workflow_type=flow_type,
         system_template_override=None,
     )  # type: ignore[call-arg] # the args are modified in `Prompt.__init__`
 
@@ -109,13 +109,13 @@ def workflow_with_project_fixture(
     user: CloudConnectorUser,
     mock_tools_registry: Mock,
     workflow_id: str,
-    workflow_type: CategoryEnum,
+    flow_type: GLReportingEventContext,
     system_template_override: str,
 ):
     workflow = Workflow(
         workflow_id=workflow_id,
         workflow_metadata={},
-        workflow_type=workflow_type,
+        workflow_type=flow_type,
         mcp_tools=[contract_pb2.McpTool(name="extra_tool", description="Extra tool")],
         user=user,
         system_template_override=system_template_override,
@@ -442,6 +442,7 @@ async def test_workflow_run_with_agent_name_override(
     user,
     workflow_id,
     workflow_type,
+    flow_type,
 ):
     """Test that agent_name_override is passed to create_agent for chat-partial flows."""
     mock_user_interface_instance = mock_checkpoint_notifier.return_value
@@ -465,7 +466,7 @@ async def test_workflow_run_with_agent_name_override(
     workflow = Workflow(
         workflow_id=workflow_id,
         workflow_metadata={},
-        workflow_type=CategoryEnum.AI_CATALOG_AGENT,
+        workflow_type=flow_type,
         user=user,
         agent_name_override="348/0",  # Duo Planner agent name
     )
@@ -1018,7 +1019,7 @@ async def test_agent_run_with_cancel_tool_message(
 
 
 @pytest.mark.asyncio
-async def test_workflow_with_approval_object():
+async def test_workflow_with_approval_object(flow_type: GLReportingEventContext):
     """Test creating a workflow with an approval object."""
     approval = contract_pb2.Approval(approval=contract_pb2.Approval.Approved())
     start_request = contract_pb2.StartWorkflowRequest()
@@ -1027,7 +1028,7 @@ async def test_workflow_with_approval_object():
     workflow = Workflow(
         workflow_id="test-id",
         workflow_metadata={},
-        workflow_type=CategoryEnum.WORKFLOW_CHAT,
+        workflow_type=flow_type,
         approval=approval,
         preapproved_tools=list(start_request.preapproved_tools),
     )
@@ -1047,6 +1048,7 @@ async def test_compile_with_tools_override_and_flow_config(
     mock_toolset,
     mock_get_tools,
     mock_duo_workflow_service_container,
+    flow_type: GLReportingEventContext,
 ):
     mock_get_tools.return_value = ["default_tool1", "default_tool2"]
 
@@ -1069,7 +1071,7 @@ async def test_compile_with_tools_override_and_flow_config(
     workflow = Workflow(
         workflow_id="test-id",
         workflow_metadata={},
-        workflow_type=CategoryEnum.WORKFLOW_CHAT,
+        workflow_type=flow_type,
         user=user,
         tools_override=["tool1", "tool2"],
     )

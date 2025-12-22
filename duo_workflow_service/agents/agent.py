@@ -29,7 +29,7 @@ from duo_workflow_service.gitlab.http_client import GitlabHttpClient
 from duo_workflow_service.monitoring import duo_workflow_metrics
 from duo_workflow_service.tools.handover import HandoverTool
 from duo_workflow_service.tracking.errors import log_exception
-from lib.internal_events.event_enum import CategoryEnum
+from lib.events import GLReportingEventContext
 
 log = structlog.stdlib.get_logger("agent_v2")
 
@@ -183,7 +183,7 @@ def build_agent(
     prompt_version: str,
     tools: list[BaseTool],
     workflow_id: str,
-    workflow_type: CategoryEnum,
+    workflow_type: GLReportingEventContext,
     **kwargs: Any,
 ):
     prompt = prompt_registry.get_on_behalf(

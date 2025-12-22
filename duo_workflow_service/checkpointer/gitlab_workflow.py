@@ -68,14 +68,10 @@ from duo_workflow_service.workflows.type_definitions import (
     AIO_CANCEL_STOP_WORKFLOW_REQUEST,
 )
 from lib.billing_events import BillingEventsClient
+from lib.events import GLReportingEventContext
 from lib.feature_flags import FeatureFlag, is_feature_enabled
 from lib.internal_events import InternalEventAdditionalProperties, InternalEventsClient
-from lib.internal_events.event_enum import (
-    CategoryEnum,
-    EventEnum,
-    EventLabelEnum,
-    EventPropertyEnum,
-)
+from lib.internal_events.event_enum import EventEnum, EventLabelEnum, EventPropertyEnum
 
 T = TypeVar("T", bound=callable)  # type: ignore
 
@@ -152,7 +148,7 @@ class GitLabWorkflow(
         self,
         client: GitlabHttpClient,
         workflow_id: str,
-        workflow_type: CategoryEnum,
+        workflow_type: GLReportingEventContext,
         workflow_config: WorkflowConfig,
         gitlab_status_update_callback: (
             Callable[[WorkflowStatusEventEnum], NoReturn] | None
@@ -487,7 +483,8 @@ class GitLabWorkflow(
                 user: CloudConnectorUser = current_user.get()
                 billing_metadata = {
                     "workflow_id": self._workflow_id,
-                    "workflow_type": self._workflow_type,
+                    "feature_qualified_name": self._workflow_type.feature_qualified_name,
+                    "feature_ai_catalog_item": self._workflow_type.feature_ai_catalog_item,
                     "execution_environment": "duo_agent_platform",
                     "llm_operations": get_llm_operations(),
                 }

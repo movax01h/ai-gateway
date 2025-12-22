@@ -15,13 +15,13 @@ from duo_workflow_service.agent_platform.experimental.state import (
     IOKeyTemplate,
 )
 from duo_workflow_service.entities.state import WorkflowStatusEnum
-from lib.internal_events.event_enum import CategoryEnum
+from lib.events import GLReportingEventContext
 
 
 @pytest.fixture(name="flow_type")
-def flow_type_fixture():
+def flow_type_fixture() -> GLReportingEventContext:
     """Fixture for flow type."""
-    return CategoryEnum.WORKFLOW_SOFTWARE_DEVELOPMENT
+    return GLReportingEventContext.from_workflow_definition("software_development")
 
 
 class ConcreteComponent(BaseComponent):

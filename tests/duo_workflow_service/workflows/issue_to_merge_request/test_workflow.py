@@ -11,7 +11,7 @@ from duo_workflow_service.entities import Plan, WorkflowStatusEnum
 from duo_workflow_service.gitlab.gitlab_api import Project
 from duo_workflow_service.gitlab.http_client import GitlabHttpClient
 from duo_workflow_service.workflows.issue_to_merge_request.workflow import Workflow
-from lib.internal_events.event_enum import CategoryEnum
+from lib.events import GLReportingEventContext
 
 
 @pytest.fixture(name="mock_executor_component")
@@ -120,15 +120,15 @@ def mock_tools_executor_fixture():
         yield mock
 
 
-@pytest.fixture(name="workflow_type")
-def workflow_type_fixture() -> CategoryEnum:
-    return CategoryEnum.WORKFLOW_ISSUE_TO_MERGE_REQUEST
+@pytest.fixture(name="flow_type")
+def flow_type_fixture() -> GLReportingEventContext:
+    return GLReportingEventContext.from_workflow_definition("issue_to_merge_request")
 
 
 @pytest.fixture(name="workflow")
 def workflow_fixture(
     mock_duo_workflow_service_container: Mock,  # pylint: disable=unused-argument
-    workflow_type: CategoryEnum,
+    flow_type: GLReportingEventContext,
     user: CloudConnectorUser,
     gl_http_client: GitlabHttpClient,
     project: Project,
@@ -140,7 +140,7 @@ def workflow_fixture(
         workflow = Workflow(
             workflow_id="test_id",
             workflow_metadata={"git_branch": "test-branch"},
-            workflow_type=workflow_type,
+            workflow_type=flow_type,
             user=user,
         )
         workflow._project = project

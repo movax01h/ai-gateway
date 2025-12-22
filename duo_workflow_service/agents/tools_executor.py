@@ -29,8 +29,9 @@ from duo_workflow_service.security.scanner_factory import apply_security_scannin
 from duo_workflow_service.tools import RunCommand, Toolset, format_tool_display_message
 from duo_workflow_service.tools.planner import PlannerTool
 from duo_workflow_service.tracking.errors import log_exception
+from lib.events import GLReportingEventContext
 from lib.internal_events import InternalEventAdditionalProperties, InternalEventsClient
-from lib.internal_events.event_enum import CategoryEnum, EventEnum, EventLabelEnum
+from lib.internal_events.event_enum import EventEnum, EventLabelEnum
 
 _HIDDEN_TOOLS = ["get_plan"]
 
@@ -64,7 +65,7 @@ class ToolsExecutor:
         tools_agent_name: str,
         toolset: Toolset,
         workflow_id: str,
-        workflow_type: CategoryEnum,
+        workflow_type: GLReportingEventContext,
         skip_agent_msg: bool = False,
         internal_event_client: InternalEventsClient = Provide[
             ContainerApplication.internal_event.client
