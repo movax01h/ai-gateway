@@ -36,4 +36,4 @@ class LanguageServerVersion:
         return self.version >= MINIMUM_WORKFLOW_CLIENT_VERSION
 
     def ignore_broken_flow_schema_version(self) -> bool:
-        return self.version <= FLOW_SCHEMA_VERSION_LANGUAGE_SERVER_VERSION
+        return self.version < FLOW_SCHEMA_VERSION_LANGUAGE_SERVER_VERSION
