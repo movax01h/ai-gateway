@@ -21,7 +21,7 @@ from duo_workflow_service.workflows.convert_to_gitlab_ci.workflow import (
     _router,
 )
 from duo_workflow_service.workflows.type_definitions import AdditionalContext
-from lib.internal_events.event_enum import CategoryEnum
+from lib.events import GLReportingEventContext
 
 
 @pytest.fixture(name="tools_registry_with_all_privileges")
@@ -47,15 +47,15 @@ def mock_build_agent():
         yield mock
 
 
-@pytest.fixture(name="workflow_type")
-def workflow_type_fixture() -> CategoryEnum:
-    return CategoryEnum.WORKFLOW_CONVERT_TO_GITLAB_CI
+@pytest.fixture(name="flow_type")
+def flow_type_fixture() -> GLReportingEventContext:
+    return GLReportingEventContext.from_workflow_definition("convert_to_gitlab_ci")
 
 
 @pytest.fixture(name="workflow")
 def workflow_fixture(
     mock_duo_workflow_service_container: Mock,
-    workflow_type: CategoryEnum,
+    flow_type: GLReportingEventContext,
     user: CloudConnectorUser,
     gl_http_client: GitlabHttpClient,
     project: Project,
@@ -67,7 +67,7 @@ def workflow_fixture(
         workflow = Workflow(
             workflow_id="test_id",
             workflow_metadata={},
-            workflow_type=workflow_type,
+            workflow_type=flow_type,
             user=user,
         )
         workflow._project = project
@@ -314,8 +314,8 @@ async def test_workflow_compilation(
     mock_build_agent,
     mock_tools_registry,
     mock_checkpointer,
-    workflow_type,
     workflow,
+    flow_type,
 ):
     """Test workflow compilation process."""
     # Compile the workflow graph
@@ -334,7 +334,7 @@ async def test_workflow_compilation(
         "^1.0.0",
         tools=mock_tools_registry.toolset.return_value.bindable,
         workflow_id=workflow._workflow_id,
-        workflow_type=workflow_type,
+        workflow_type=flow_type,
         http_client=workflow._http_client,
     )
     mock_tools_registry.get.assert_called()  # Should call get() for tools

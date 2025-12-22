@@ -26,7 +26,6 @@ from duo_workflow_service.workflows.abstract_workflow import (
     AbstractWorkflow,
 )
 from duo_workflow_service.workflows.type_definitions import AdditionalContext
-from lib.internal_events.event_enum import CategoryEnum
 
 DEFAULT_MAX_CONTEXT_TOKENS = 1_000_000
 AGENT_NAME = "ci_pipelines_manager_agent"
@@ -231,7 +230,7 @@ class Workflow(AbstractWorkflow):
             "^1.0.0",
             tools=agents_toolset.bindable,  # type: ignore[arg-type]
             workflow_id=self._workflow_id,
-            workflow_type=CategoryEnum.WORKFLOW_CONVERT_TO_GITLAB_CI,
+            workflow_type=self._workflow_type,
             http_client=self._http_client,
         )
 
@@ -242,7 +241,7 @@ class Workflow(AbstractWorkflow):
                 tools_agent_name=AGENT_NAME,
                 toolset=agents_toolset,
                 workflow_id=self._workflow_id,
-                workflow_type=CategoryEnum.WORKFLOW_CONVERT_TO_GITLAB_CI,
+                workflow_type=self._workflow_type,
             ),
             "start_node": "request_translation",
         }

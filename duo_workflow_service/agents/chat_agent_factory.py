@@ -7,7 +7,7 @@ from ai_gateway.prompts.registry import LocalPromptRegistry
 from duo_workflow_service.agents.chat_agent import ChatAgent
 from duo_workflow_service.agents.prompt_adapter import DefaultPromptAdapter
 from duo_workflow_service.components.tools_registry import Toolset, ToolsRegistry
-from lib.internal_events.event_enum import CategoryEnum
+from lib.events import GLReportingEventContext
 
 
 def create_agent(
@@ -17,7 +17,7 @@ def create_agent(
     tools: Toolset,
     prompt_registry: Union[LocalPromptRegistry, InMemoryPromptRegistry],
     workflow_id: str,
-    workflow_type: CategoryEnum,
+    workflow_type: GLReportingEventContext,
     system_template_override: str | None,
     agent_name_override: str | None = None,
 ) -> ChatAgent:

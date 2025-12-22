@@ -18,8 +18,9 @@ from duo_workflow_service.monitoring import duo_workflow_metrics
 from duo_workflow_service.security.prompt_security import SecurityException
 from duo_workflow_service.security.scanner_factory import apply_security_scanning
 from duo_workflow_service.tools.toolset import Toolset
+from lib.events import GLReportingEventContext
 from lib.internal_events import InternalEventAdditionalProperties, InternalEventsClient
-from lib.internal_events.event_enum import CategoryEnum, EventEnum, EventLabelEnum
+from lib.internal_events.event_enum import EventEnum, EventLabelEnum
 
 __all__ = ["ToolNode"]
 
@@ -32,7 +33,7 @@ class ToolNode:
         component_name: str,
         toolset: Toolset,
         flow_id: str,
-        flow_type: CategoryEnum,
+        flow_type: GLReportingEventContext,
         internal_event_client: InternalEventsClient,
         ui_history: UIHistory[UILogWriterAgentTools, UILogEventsAgent],
     ):

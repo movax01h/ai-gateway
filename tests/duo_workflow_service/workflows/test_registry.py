@@ -111,12 +111,13 @@ def build_chat_flow_config(
 
 
 def test_registry_resolve():
-    # Test resolving default workflow
-    assert resolve_workflow_class(None) == Workflow
-
     # Test resolving a non-existent workflow
-    with pytest.raises(ValueError, match="Unknown Flow"):
+    with pytest.raises(ValueError, match="Unsupported workflow_definition value"):
         resolve_workflow_class("non_existent_workflow")
+
+    # Test resolving a non-existent Flow Registry version
+    with pytest.raises(ValueError, match="Unknown Flow version"):
+        resolve_workflow_class("non_existent_workflow/unknown")
 
     # Test that resolved class is a subclass of AbstractWorkflow
     resolved_class = resolve_workflow_class("software_development")

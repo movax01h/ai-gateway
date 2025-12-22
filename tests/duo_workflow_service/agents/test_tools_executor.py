@@ -34,8 +34,9 @@ from duo_workflow_service.tools.planner import (
     UpdateTaskDescription,
 )
 from duo_workflow_service.tools.toolset import ToolType
+from lib.events import GLReportingEventContext
 from lib.internal_events import InternalEventAdditionalProperties
-from lib.internal_events.event_enum import CategoryEnum, EventEnum, EventLabelEnum
+from lib.internal_events.event_enum import EventEnum, EventLabelEnum
 
 
 def mock_tool(
@@ -51,6 +52,11 @@ def mock_tool(
             content=content, name=name, tool_call_id="fake-call-1"
         )
     return mock
+
+
+@pytest.fixture(name="flow_type")
+def flow_type_fixture() -> GLReportingEventContext:
+    return GLReportingEventContext.from_workflow_definition("software_development")
 
 
 @pytest.fixture(autouse=True)
@@ -80,12 +86,14 @@ def toolset_fixture(all_tools: dict[str, ToolType]) -> Toolset:
 
 
 @pytest.fixture(name="tools_executor")
-def tools_executor_fixture(toolset: Toolset) -> ToolsExecutor:
+def tools_executor_fixture(
+    toolset: Toolset, flow_type: GLReportingEventContext
+) -> ToolsExecutor:
     return ToolsExecutor(
         tools_agent_name="planner",
         toolset=toolset,
         workflow_id="123",
-        workflow_type=CategoryEnum.WORKFLOW_SOFTWARE_DEVELOPMENT,
+        workflow_type=flow_type,
     )
 
 
@@ -233,10 +241,11 @@ class ToolTestCase:
     ],
 )
 async def test_run(
-    workflow_state, test_case: ToolTestCase, internal_event_client: Mock
+    workflow_state,
+    test_case: ToolTestCase,
+    internal_event_client: Mock,
+    flow_type: GLReportingEventContext,
 ):
-    workflow_type = CategoryEnum.WORKFLOW_SOFTWARE_DEVELOPMENT
-
     # Create mock toolset
     mock_toolset = MagicMock(spec=Toolset)
 
@@ -260,7 +269,7 @@ async def test_run(
         tools_agent_name="planner",
         toolset=mock_toolset,
         workflow_id="123",
-        workflow_type=workflow_type,
+        workflow_type=flow_type,
         internal_event_client=internal_event_client,
     )
     ai_message = AIMessage(
@@ -326,7 +335,7 @@ async def test_run(
                             property=mock_tool().name,
                             value="123",
                         ),
-                        category=workflow_type.value,
+                        category=flow_type.value,
                     ),
                 ]
             )
@@ -969,8 +978,8 @@ async def test_run_error_handling(
     expected_log_prefix,
     expected_tool_info,
     expected_extra_log,
+    flow_type: GLReportingEventContext,
 ):
-    workflow_type = CategoryEnum.WORKFLOW_SOFTWARE_DEVELOPMENT
     tool = mock_tool(side_effect=tool_side_effect, args_schema=tool_args_schema)
 
     mock_toolset = MagicMock(spec=Toolset)
@@ -982,7 +991,7 @@ async def test_run_error_handling(
         tools_agent_name="planner",
         toolset=mock_toolset,
         workflow_id="123",
-        workflow_type=workflow_type,
+        workflow_type=flow_type,
         internal_event_client=internal_event_client,
     )
     workflow_state["conversation_history"]["planner"] = [
@@ -1008,7 +1017,7 @@ async def test_run_error_handling(
                     error=str(tool_side_effect),
                     error_type=type(tool_side_effect).__name__,
                 ),
-                category=workflow_type.value,
+                category=flow_type.value,
             ),
         ]
     )
@@ -1038,7 +1047,7 @@ async def test_run_error_handling(
     assert tool_log["tool_info"] == expected_tool_info
 
     mock_duo_workflow_metrics.count_agent_platform_tool_failure.assert_called_once_with(
-        flow_type=workflow_type.value,
+        flow_type=flow_type.value,
         tool_name=mock_tool().name,
         failure_reason=type(tool_side_effect).__name__,
     )
@@ -1058,9 +1067,8 @@ async def test_run_error_max_tokens(
     mock_duo_workflow_metrics,
     workflow_state,
     internal_event_client: Mock,
+    flow_type: GLReportingEventContext,
 ):
-    workflow_type = CategoryEnum.WORKFLOW_SOFTWARE_DEVELOPMENT
-
     mock_toolset = MagicMock(spec=Toolset)
 
     mock_toolset.__contains__ = MagicMock(return_value=True)
@@ -1076,7 +1084,7 @@ async def test_run_error_max_tokens(
         tools_agent_name="planner",
         toolset=mock_toolset,
         workflow_id="123",
-        workflow_type=workflow_type,
+        workflow_type=flow_type,
         internal_event_client=internal_event_client,
     )
     workflow_state["conversation_history"]["planner"] = [
@@ -1102,7 +1110,7 @@ async def test_run_error_max_tokens(
                     error="Max tokens reached for tool read_file. Try a simpler request or using a different tool.",
                     error_type="IncompleteToolCallDueToMaxTokens",
                 ),
-                category=workflow_type.value,
+                category=flow_type.value,
             ),
         ]
     )
@@ -1127,7 +1135,7 @@ async def test_run_error_max_tokens(
     )
 
     mock_duo_workflow_metrics.count_agent_platform_tool_failure.assert_called_once_with(
-        flow_type=workflow_type.value,
+        flow_type=flow_type.value,
         tool_name="read_file",
         failure_reason="IncompleteToolCallDueToMaxTokens",
     )
@@ -1342,7 +1350,7 @@ async def test_run_with_missing_plan_key(tools_executor):
 @pytest.mark.parametrize("all_tools", [{"test_tool": mock_tool()}])
 @pytest.mark.usefixtures("mock_datetime")
 async def test_skip_agent_msg_prevents_duplicate_messages(
-    all_tools, workflow_state, toolset
+    all_tools, workflow_state, toolset, flow_type: GLReportingEventContext
 ):
     """Test that skip_agent_msg=True prevents agent messages from being added to ui_chat_log."""
     tool = all_tools["test_tool"]
@@ -1352,7 +1360,7 @@ async def test_skip_agent_msg_prevents_duplicate_messages(
         tools_agent_name="planner",
         toolset=toolset,
         workflow_id="123",
-        workflow_type=CategoryEnum.WORKFLOW_SOFTWARE_DEVELOPMENT,
+        workflow_type=flow_type,
         skip_agent_msg=True,
     )
 
@@ -1388,7 +1396,7 @@ async def test_skip_agent_msg_prevents_duplicate_messages(
 @pytest.mark.parametrize("all_tools", [{"test_tool": mock_tool()}])
 @pytest.mark.usefixtures("mock_datetime")
 async def test_skip_agent_msg_false_adds_agent_message(
-    all_tools, workflow_state, toolset
+    all_tools, workflow_state, toolset, flow_type: GLReportingEventContext
 ):
     """Test that skip_agent_msg=False (default) adds agent messages to ui_chat_log."""
     tool = all_tools["test_tool"]
@@ -1398,7 +1406,7 @@ async def test_skip_agent_msg_false_adds_agent_message(
         tools_agent_name="planner",
         toolset=toolset,
         workflow_id="123",
-        workflow_type=CategoryEnum.WORKFLOW_SOFTWARE_DEVELOPMENT,
+        workflow_type=flow_type,
         skip_agent_msg=False,
     )
 

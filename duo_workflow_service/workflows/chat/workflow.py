@@ -36,9 +36,9 @@ from duo_workflow_service.workflows.abstract_workflow import (
     InvocationMetadata,
 )
 from duo_workflow_service.workflows.type_definitions import AdditionalContext
+from lib.events import GLReportingEventContext
 from lib.feature_flags.context import FeatureFlag, is_feature_enabled
 from lib.internal_events.client import InternalEventsClient
-from lib.internal_events.event_enum import CategoryEnum
 from lib.mcp_server_tools.context import get_enabled_mcp_server_tools
 
 logger = get_logger("chat.workflow")
@@ -133,7 +133,7 @@ class Workflow(AbstractWorkflow):
     _agent: ChatAgent
     _tools_override: list[str]
     _workflow_id: str
-    _workflow_type: CategoryEnum
+    _workflow_type: GLReportingEventContext
     _agent_name_override: Optional[str] = None
 
     # pylint: disable=dangerous-default-value
@@ -142,7 +142,7 @@ class Workflow(AbstractWorkflow):
         self,
         workflow_id: str,
         workflow_metadata: Dict[str, Any],
-        workflow_type: CategoryEnum,
+        workflow_type: GLReportingEventContext,
         invocation_metadata: InvocationMetadata = {
             "base_url": "",
             "gitlab_token": "",

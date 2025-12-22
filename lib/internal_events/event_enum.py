@@ -54,6 +54,7 @@ class EventPropertyEnum(StrEnum):
     WORKFLOW_MESSAGE_BY_USER = "message_request_by_user_duo_workflow"
 
 
+# Deprecated: Use FlowType from duo_workflow_service.entities.flow instead
 class CategoryEnum(StrEnum):
     WORKFLOW_SOFTWARE_DEVELOPMENT = "software_development"
     WORKFLOW_CONVERT_TO_GITLAB_CI = "convert_to_gitlab_ci"

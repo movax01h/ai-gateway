@@ -6,7 +6,7 @@ from ai_gateway.prompts.registry import LocalPromptRegistry
 from duo_workflow_service.components.tools_registry import ToolsRegistry
 from duo_workflow_service.gitlab.http_client import GitlabHttpClient
 from duo_workflow_service.workflows.type_definitions import AdditionalContext
-from lib.internal_events.event_enum import CategoryEnum
+from lib.events import GLReportingEventContext
 
 
 class BaseComponent:
@@ -14,7 +14,7 @@ class BaseComponent:
     def __init__(
         self,
         workflow_id: str,
-        workflow_type: CategoryEnum,
+        workflow_type: GLReportingEventContext,
         goal: str,
         tools_registry: ToolsRegistry,
         http_client: GitlabHttpClient,

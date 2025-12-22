@@ -26,9 +26,6 @@ from ai_gateway.config import Config, ConfigCustomModels, ConfigGoogleCloudPlatf
 from ai_gateway.container import ContainerApplication
 from ai_gateway.prompts import BasePromptRegistry
 from contract import contract_pb2
-from duo_workflow_service.agent_platform.experimental.flows.flow_config import (
-    list_configs,
-)
 from duo_workflow_service.client_capabilities import client_capabilities
 from duo_workflow_service.executor.outbox import OutboxSignal
 from duo_workflow_service.interceptors.authentication_interceptor import current_user
@@ -40,7 +37,6 @@ from duo_workflow_service.server import (
     run,
     serve,
     setup_signal_handlers,
-    string_to_category_enum,
     validate_llm_access,
 )
 from duo_workflow_service.tools.duo_base_tool import DuoBaseTool
@@ -49,6 +45,7 @@ from duo_workflow_service.workflows.type_definitions import (
     OUTGOING_MESSAGE_TOO_LARGE,
     AdditionalContext,
 )
+from lib.events import GLReportingEventContext
 from lib.internal_events.context import InternalEventAdditionalProperties
 from lib.internal_events.event_enum import (
     CategoryEnum,
@@ -1124,7 +1121,9 @@ async def test_execute_workflow_missing_workflow_metadata(
     mock_abstract_workflow_class.assert_called_once_with(
         workflow_id="123",
         workflow_metadata={},
-        workflow_type=CategoryEnum.UNKNOWN,
+        workflow_type=GLReportingEventContext.from_workflow_definition(
+            "software_development"
+        ),  # backward compatibility when workflow_definition is empty
         user=user,
         additional_context=None,
         invocation_metadata={"base_url": "", "gitlab_token": ""},
@@ -1200,7 +1199,9 @@ async def test_execute_workflow_valid_workflow_metadata(
     mock_abstract_workflow_class.assert_called_once_with(
         workflow_id="123",
         workflow_metadata={"key": "value"},
-        workflow_type=CategoryEnum.UNKNOWN,
+        workflow_type=GLReportingEventContext.from_workflow_definition(
+            "software_development"
+        ),  # backward compatibility when workflow_definition is empty,
         user=user,
         additional_context=[
             AdditionalContext(
@@ -1242,30 +1243,6 @@ def test_clean_start_request():
     assert cleaned_request.startRequest.workflowMetadata == ""
     assert cleaned_request.startRequest.workflowID == "test-id"
     assert cleaned_request.startRequest.goal == ""
-
-
-def test_string_to_category_enum():
-    # Test a valid category string
-    assert (
-        string_to_category_enum(CategoryEnum.WORKFLOW_SOFTWARE_DEVELOPMENT)
-        == CategoryEnum.WORKFLOW_SOFTWARE_DEVELOPMENT
-    )
-
-    # Test an invalid category string
-    with patch("duo_workflow_service.server.log") as mock_log:
-        assert string_to_category_enum("INVALID_CATEGORY") == "unknown"
-        mock_log.warning.assert_called_once_with(
-            "Unknown category string: INVALID_CATEGORY"
-        )
-
-    # Test Flow Registry flows:
-    for config in list_configs():
-        assert (
-            string_to_category_enum(
-                getattr(CategoryEnum, config["flow_identifier"].upper())
-            )
-            == config["flow_identifier"]
-        )
 
 
 @pytest.mark.asyncio

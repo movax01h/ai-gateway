@@ -15,8 +15,8 @@ from duo_workflow_service.agent_platform.experimental.state import (
     get_vars_from_state,
 )
 from duo_workflow_service.errors.error_handler import ModelError, ModelErrorHandler
+from lib.events import GLReportingEventContext
 from lib.internal_events import InternalEventsClient
-from lib.internal_events.event_enum import CategoryEnum
 
 __all__ = ["AgentNode", "AgentFinalOutput"]
 
@@ -62,13 +62,13 @@ class AgentNode:
     _internal_event_client: InternalEventsClient
 
     _flow_id: str
-    _flow_type: CategoryEnum
+    _flow_type: GLReportingEventContext
     _error_handler: ModelErrorHandler
 
     def __init__(
         self,
         flow_id: str,
-        flow_type: CategoryEnum,
+        flow_type: GLReportingEventContext,
         name: str,
         prompt: Prompt,
         inputs: list[IOKey],

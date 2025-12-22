@@ -14,8 +14,8 @@ from duo_workflow_service.agent_platform.v1.state import FlowStateKeys, IOKey
 from duo_workflow_service.agent_platform.v1.ui_log import UIHistory
 from duo_workflow_service.entities.state import WorkflowStatusEnum
 from duo_workflow_service.tools.toolset import Toolset
+from lib.events import GLReportingEventContext
 from lib.internal_events import InternalEventsClient
-from lib.internal_events.event_enum import CategoryEnum
 
 
 def assert_security_called_with(mock_security, expected_response, expected_tool_name):
@@ -39,9 +39,9 @@ def component_name_fixture():
 
 
 @pytest.fixture(name="flow_type")
-def flow_type_fixture():
+def flow_type_fixture() -> GLReportingEventContext:
     """Fixture for flow type."""
-    return CategoryEnum.WORKFLOW_SOFTWARE_DEVELOPMENT
+    return GLReportingEventContext.from_workflow_definition("software_development")
 
 
 @pytest.fixture(name="tool_call_id")

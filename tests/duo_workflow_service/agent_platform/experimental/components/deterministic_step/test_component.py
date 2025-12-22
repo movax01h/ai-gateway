@@ -15,8 +15,8 @@ from duo_workflow_service.agent_platform.experimental.components.deterministic_s
 from duo_workflow_service.agent_platform.experimental.state import IOKey
 from duo_workflow_service.agent_platform.experimental.ui_log import UIHistory
 from duo_workflow_service.tools.toolset import Toolset
+from lib.events import GLReportingEventContext
 from lib.internal_events import InternalEventsClient
-from lib.internal_events.event_enum import CategoryEnum
 
 
 @pytest.fixture(name="mock_tool")
@@ -54,9 +54,9 @@ def flow_id_fixture():
 
 
 @pytest.fixture(name="flow_type")
-def flow_type_fixture():
+def flow_type_fixture() -> GLReportingEventContext:
     """Fixture for flow type."""
-    return CategoryEnum.WORKFLOW_SOFTWARE_DEVELOPMENT
+    return GLReportingEventContext.from_workflow_definition("software_development")
 
 
 @pytest.fixture(name="inputs")

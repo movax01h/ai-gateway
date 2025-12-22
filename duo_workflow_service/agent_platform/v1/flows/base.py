@@ -41,8 +41,8 @@ from duo_workflow_service.workflows.abstract_workflow import (
     InvocationMetadata,
 )
 from duo_workflow_service.workflows.type_definitions import AdditionalContext
+from lib.events import GLReportingEventContext
 from lib.internal_events.client import InternalEventsClient
-from lib.internal_events.event_enum import CategoryEnum
 
 __all__ = ["Flow"]
 
@@ -64,7 +64,7 @@ class Flow(AbstractWorkflow):
         self,
         workflow_id: str,
         workflow_metadata: Dict[str, Any],
-        workflow_type: CategoryEnum,
+        workflow_type: GLReportingEventContext,
         user: CloudConnectorUser,
         config: FlowConfig,
         invocation_metadata: InvocationMetadata = {

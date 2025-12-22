@@ -1296,7 +1296,8 @@ async def test_track_workflow_completion_with_billing_event(
         quantity=1,
         metadata={
             "workflow_id": workflow_id,
-            "workflow_type": workflow_type,
+            "feature_qualified_name": workflow_type.feature_qualified_name,
+            "feature_ai_catalog_item": workflow_type.feature_ai_catalog_item,
             "execution_environment": "duo_agent_platform",
             "llm_operations": operations,
         },

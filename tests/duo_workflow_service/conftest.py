@@ -16,7 +16,7 @@ from duo_workflow_service.entities.state import (
 from duo_workflow_service.executor.outbox import Outbox
 from duo_workflow_service.gitlab.gitlab_api import Project
 from duo_workflow_service.gitlab.http_client import GitlabHttpClient
-from lib.internal_events.event_enum import CategoryEnum
+from lib.events import GLReportingEventContext
 
 
 @pytest.fixture(name="config_values")
@@ -132,8 +132,8 @@ def workflow_id_fixture():
 
 
 @pytest.fixture(name="workflow_type")
-def workflow_type_fixture() -> CategoryEnum:
-    return CategoryEnum.WORKFLOW_SOFTWARE_DEVELOPMENT
+def workflow_type_fixture() -> GLReportingEventContext:
+    return GLReportingEventContext.from_workflow_definition("software_development")
 
 
 @pytest.fixture(name="agent_responses")
