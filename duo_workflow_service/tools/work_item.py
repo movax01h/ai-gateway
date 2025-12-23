@@ -62,7 +62,7 @@ WORK_ITEM_IDENTIFICATION_DESCRIPTION = """To identify a work item you must provi
     - https://gitlab.com/namespace/project/-/work_items/42
 """
 
-DateString = Annotated[str, StringConstraints(pattern=r"^\d{4}-\d{2}-\d{2}$")]
+DateString = Annotated[str, StringConstraints(pattern=r"^[0-9]{4}-[0-9]{2}-[0-9]{2}$")]
 
 
 class HealthStatus(str, Enum):
