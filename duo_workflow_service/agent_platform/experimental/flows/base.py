@@ -49,6 +49,13 @@ from lib.internal_events.client import InternalEventsClient
 
 __all__ = ["Flow"]
 
+_EXECUTOR_CONTEXT = [
+    "os_information",
+    "shell_information",
+    "agent_user_environment",
+    "user_rule",
+]
+
 
 class UserDecision(StrEnum):
     APPROVE = "approval"
@@ -147,7 +154,7 @@ class Flow(AbstractWorkflow):
         jsonschemas_by_category = self._config.input_json_schemas_by_category()
         for item in additional_context:
             if (
-                item.category == "os_information"
+                item.category in _EXECUTOR_CONTEXT
             ):  # This category is passed in from the executor
                 processed_additional_context[item.category] = item.content
                 continue

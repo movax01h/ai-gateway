@@ -2,14 +2,6 @@ version: "experimental"
 environment: remote
 
 components:
-  - name: "agents_dot_md"
-    type: DeterministicStepComponent
-    inputs:
-      - from: "AGENTS.md"
-        as: "file_path"
-        literal: true
-    tool_name: "read_file"
-    ui_log_events: [ ]
   - name: "issue_parser"
     type: DeterministicStepComponent
     tool_name: "get_issue"
@@ -56,8 +48,9 @@ components:
         as: "source_branch_details"
       - from: "context:inputs.agent_platform_standard_context.primary_branch"
         as: "target_branch"
-      - from: "context:agents_dot_md.tool_responses"
+      - from: "context:inputs.user_rule"
         as: "agents_dot_md"
+        optional: True
     ui_log_events:
       - "on_tool_call_input"
       - "on_tool_execution_success"
@@ -105,8 +98,9 @@ components:
         as: "issue_details"
       - from: "context:tool_listing_agent.final_answer"
         as: "coding_agent_tools"
-      - from: "context:agents_dot_md.tool_responses"
+      - from: "context:inputs.user_rule"
         as: "agents_dot_md"
+        optional: True
     toolset:
       - "list_issues"
       - "get_issue"
@@ -169,8 +163,9 @@ components:
         as: "planner_handover"
       - from: "context:inputs.os_information"
         as: "os_information"
-      - from: "context:agents_dot_md.tool_responses"
+      - from: "context:inputs.user_rule"
         as: "agents_dot_md"
+        optional: True
     toolset:
       - "list_issues"
       - "get_issue"
@@ -216,8 +211,9 @@ components:
         as: "reviewer_id"
       - from: "context:goal"
         as: "issue_url"
-      - from: "context:agents_dot_md.tool_responses"
+      - from: "context:inputs.user_rule"
         as: "agents_dot_md"
+        optional: True
     toolset:
       - "run_git_command"
       - "update_merge_request"
@@ -226,8 +222,6 @@ components:
       - "on_tool_execution_failed"
 
 routers:
-  - from: "agents_dot_md"
-    to: "issue_parser"
   - from: "issue_parser"
     to: "create_repository_branch"
   - from: "create_repository_branch"
@@ -246,7 +240,7 @@ routers:
     to: "end"
 
 flow:
-  entry_point: "agents_dot_md"
+  entry_point: "issue_parser"
   inputs:
     - category: agent_platform_standard_context
       input_schema:

@@ -845,9 +845,7 @@ class TestFlow:  # pylint: disable=too-many-public-methods
     def test_process_additional_context_no_schema(self, flow_instance):
         """Test _process_additional_context logs warning and skips unknown category."""
         additional_context = [
-            AdditionalContext(
-                category="agent_user_environment", content='{"os": "linux"}'
-            )
+            AdditionalContext(category="unknown_category", content='{"os": "linux"}')
         ]
 
         # Unknown categories should be skipped with a warning, not raise an error
