@@ -34,6 +34,7 @@ class HiddenLayerConfig:
     client_secret: Optional[str] = None
     environment: str = "prod-us"
     base_url: Optional[str] = None
+    project_id: Optional[str] = None
 
     @classmethod
     def from_environment(cls) -> "HiddenLayerConfig":
@@ -43,6 +44,7 @@ class HiddenLayerConfig:
             client_secret=os.getenv("HL_CLIENT_SECRET"),
             environment=os.getenv("HIDDENLAYER_ENVIRONMENT", "prod-us"),
             base_url=os.getenv("HIDDENLAYER_BASE_URL"),
+            project_id=os.getenv("HL_PROJECT_ID"),
         )
 
 
@@ -85,19 +87,26 @@ class HiddenLayerScanner(PromptScanner):
             hl_environment = cast(
                 Literal["prod-us", "prod-eu"], self._config.environment
             )
+
+            # Build client kwargs
+            client_kwargs: Dict[str, Any] = {
+                "client_id": self._config.client_id,
+                "client_secret": self._config.client_secret,
+            }
+
+            # Add default headers only if project_id is configured
+            if self._config.project_id:
+                client_kwargs["default_headers"] = {
+                    "HL-Project-Id": self._config.project_id
+                }
+
             # skip setting environment if base_url is set
             if self._config.base_url:
-                self._client = AsyncHiddenLayer(
-                    client_id=self._config.client_id,
-                    client_secret=self._config.client_secret,
-                    base_url=self._config.base_url,
-                )
+                client_kwargs["base_url"] = self._config.base_url
             else:
-                self._client = AsyncHiddenLayer(
-                    client_id=self._config.client_id,
-                    client_secret=self._config.client_secret,
-                    environment=hl_environment,
-                )
+                client_kwargs["environment"] = hl_environment
+
+            self._client = AsyncHiddenLayer(**client_kwargs)
 
             self._initialized = True
             log.info(
