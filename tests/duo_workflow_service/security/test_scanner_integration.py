@@ -209,3 +209,98 @@ class TestScanPrompt:
             result = scan_prompt(content)
 
             assert result == content
+
+
+class TestHiddenLayerConfig:
+    """Test HiddenLayerConfig configuration handling."""
+
+    def test_from_environment_includes_project_id(self):
+        """Verify from_environment loads HL_PROJECT_ID."""
+        from duo_workflow_service.security.hidden_layer_scanner import HiddenLayerConfig
+
+        with patch.dict(
+            "os.environ",
+            {
+                "HL_CLIENT_ID": "test-client-id",
+                "HL_CLIENT_SECRET": "test-client-secret",
+                "HL_PROJECT_ID": "internal-search-chatbot",
+            },
+            clear=False,
+        ):
+            config = HiddenLayerConfig.from_environment()
+
+            assert config.client_id == "test-client-id"
+            assert config.client_secret == "test-client-secret"
+            assert config.project_id == "internal-search-chatbot"
+
+    def test_from_environment_project_id_optional(self):
+        """Verify from_environment handles missing HL_PROJECT_ID."""
+        from duo_workflow_service.security.hidden_layer_scanner import HiddenLayerConfig
+
+        # Mock os.getenv to return None for HL_PROJECT_ID
+        def mock_getenv(key, default=None):
+            env_values = {
+                "HL_CLIENT_ID": "test-client-id",
+                "HL_CLIENT_SECRET": "test-client-secret",
+                "HIDDENLAYER_ENVIRONMENT": "prod-us",
+                "HIDDENLAYER_BASE_URL": None,
+                "HL_PROJECT_ID": None,
+            }
+            return env_values.get(key, default)
+
+        with patch("os.getenv", side_effect=mock_getenv):
+            config = HiddenLayerConfig.from_environment()
+
+            assert config.project_id is None
+
+    def test_config_default_project_id_is_none(self):
+        """Verify HiddenLayerConfig defaults project_id to None."""
+        from duo_workflow_service.security.hidden_layer_scanner import HiddenLayerConfig
+
+        config = HiddenLayerConfig()
+        assert config.project_id is None
+
+    def test_scanner_passes_project_id_header_to_client(self):
+        """Verify HiddenLayerScanner passes HL-Project-Id header when configured."""
+        from duo_workflow_service.security.hidden_layer_scanner import (
+            HiddenLayerConfig,
+            HiddenLayerScanner,
+        )
+
+        config = HiddenLayerConfig(
+            client_id="test-client-id",
+            client_secret="test-client-secret",
+            project_id="my-project",
+        )
+
+        with patch("hiddenlayer.AsyncHiddenLayer") as mock_client_class:
+            _ = HiddenLayerScanner(config=config)
+
+            mock_client_class.assert_called_once_with(
+                client_id="test-client-id",
+                client_secret="test-client-secret",
+                default_headers={"HL-Project-Id": "my-project"},
+                environment="prod-us",
+            )
+
+    def test_scanner_no_headers_when_project_id_not_set(self):
+        """Verify HiddenLayerScanner omits default_headers when project_id not set."""
+        from duo_workflow_service.security.hidden_layer_scanner import (
+            HiddenLayerConfig,
+            HiddenLayerScanner,
+        )
+
+        config = HiddenLayerConfig(
+            client_id="test-client-id",
+            client_secret="test-client-secret",
+        )
+
+        with patch("hiddenlayer.AsyncHiddenLayer") as mock_client_class:
+            _ = HiddenLayerScanner(config=config)
+
+            # default_headers should NOT be passed when project_id is not set
+            mock_client_class.assert_called_once_with(
+                client_id="test-client-id",
+                client_secret="test-client-secret",
+                environment="prod-us",
+            )
