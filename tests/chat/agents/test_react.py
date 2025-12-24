@@ -456,6 +456,26 @@ class TestReActAgent:
                         ),
                     ],
                 ),
+                ValueError(
+                    "litellm.ServiceUnavailableError: litellm.MidStreamFallbackError: litellm.InternalServerError: AnthropicError - Overloaded Original exception: InternalServerError: litellm.InternalServerError: AnthropicError - Overloaded"
+                ),
+                "litellm.ServiceUnavailableError: litellm.MidStreamFallbackError: litellm.InternalServerError: AnthropicError - Overloaded Original exception: InternalServerError: litellm.InternalServerError: AnthropicError - Overloaded",
+                [
+                    AgentError(
+                        message="litellm.ServiceUnavailableError: litellm.MidStreamFallbackError: litellm.InternalServerError: AnthropicError - Overloaded Original exception: InternalServerError: litellm.InternalServerError: AnthropicError - Overloaded",
+                        retryable=True,
+                    ),
+                ],
+            ),
+            (
+                ReActAgentInputs(
+                    messages=[
+                        Message(
+                            role=Role.USER,
+                            content="What's the title of this epic?",
+                        ),
+                    ],
+                ),
                 ValueError("api_error"),
                 "api_error",
                 [
