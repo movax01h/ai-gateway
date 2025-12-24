@@ -190,7 +190,10 @@ class ReActPromptTemplate(Runnable[ReActAgentInputs, PromptValue]):
 
 
 class ReActAgent(RunnableBinding[ReActAgentInputs, TypeAgentEvent]):
-    RETRYABLE_ERRORS: list[str] = ["overloaded_error"]
+    RETRYABLE_ERRORS: list[str] = [
+        "overloaded_error",
+        "AnthropicError - Overloaded",
+    ]
 
     def __init__(self, prompt: Prompt) -> None:
         super().__init__(bound=prompt | ReActPlainTextParser())
