@@ -14,9 +14,20 @@ from duo_workflow_service.structured_logging import LoggingConfig
             {},
             {
                 "level": "INFO",
-                "json_format": True,
+                "json_format": False,
                 "to_file": None,
                 "environment": "development",
+            },
+        ),
+        (
+            {
+                "DUO_WORKFLOW_SERVICE_ENVIRONMENT": "production",
+            },
+            {
+                "level": "INFO",
+                "json_format": True,
+                "to_file": None,
+                "environment": "production",
             },
         ),
         (
