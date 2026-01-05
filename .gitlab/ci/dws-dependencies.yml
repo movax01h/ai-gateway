@@ -12,7 +12,6 @@
     - ai_gateway/config.py
     - ai_gateway/container.py
     - ai_gateway/instrumentators/model_requests.py
-    - ai_gateway/instrumentators/usage_quota.py
     - ai_gateway/model_metadata.py
     - ai_gateway/prompts/*.py
     - ai_gateway/prompts/config/base.py
