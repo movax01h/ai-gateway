@@ -74,6 +74,7 @@ USE_CASES_MODELS_MAP = {
         KindAmazonQModel.AMAZON_Q,
         KindGitLabModel.CODESTRAL_2501_FIREWORKS,
         KindGitLabModel.CODESTRAL_2501_VERTEX,
+        KindGitLabModel.CODESTRAL_2508_VERTEX,
         KindGitLabModel.CLAUDE_SONNET_3_7,
         KindGitLabModel.CLAUDE_3_5_HAIKU,
         KindGitLabModel.GITLAB_DEFAULT_MODEL,

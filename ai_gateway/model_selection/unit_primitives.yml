@@ -37,6 +37,7 @@ configurable_unit_primitives:
       - "claude_sonnet_4_20250514_vertex"
       - "claude_sonnet_4_5_20250929"
       - "codestral_2501_fireworks"
+      - "codestral_2508_vertex"
       - "codestral_2501_vertex"
   - feature_setting: "duo_chat_fix_code"
     unit_primitives:

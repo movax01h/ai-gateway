@@ -14,6 +14,20 @@ models:
       temperature: 0.7
       max_tokens: 48
 
+  - name: "Codestral 25.08 - Vertex"
+    provider: "Vertex"
+    gitlab_identifier: "codestral_2508_vertex"
+    description: "Fast code generation and assistance."
+    cost_indicator: "$"
+    max_context_tokens: 128000 # https://docs.cloud.google.com/vertex-ai/generative-ai/docs/partner-models/mistral/codestral-2
+    family:
+      - codestral
+    params:
+      model: "codestral-2"
+      custom_llm_provider: "vertex_ai"
+      temperature: 0.7
+      max_tokens: 48
+
   - name: "Codestral 25.01 - Vertex"
     provider: "Vertex"
     gitlab_identifier: "codestral_2501_vertex"
@@ -27,6 +41,9 @@ models:
       custom_llm_provider: "vertex_ai"
       temperature: 0.7
       max_tokens: 64
+    deprecation:
+      deprecation_date: "2025-10-23"
+      removal_version: "18.9"
 
   - name: "Gemini 1.5 Flash - Vertex"
     provider: "Vertex"
