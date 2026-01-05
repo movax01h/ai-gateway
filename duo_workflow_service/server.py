@@ -1,4 +1,4 @@
-# pylint: disable=direct-environment-variable-reference
+# pylint: disable=direct-environment-variable-reference,invalid-overridden-method,too-many-branches,too-many-statements
 
 import asyncio
 import functools
@@ -6,7 +6,7 @@ import json
 import os
 import signal
 from itertools import chain
-from typing import AsyncIterable, AsyncIterator, Optional
+from typing import AsyncIterable, AsyncIterator, Callable, Optional
 
 import aiohttp
 import grpc
@@ -61,8 +61,8 @@ from duo_workflow_service.interceptors.model_metadata_interceptor import (
 from duo_workflow_service.interceptors.monitoring_interceptor import (
     MonitoringInterceptor,
 )
-from duo_workflow_service.interceptors.usage_quota_interceptor import (
-    UsageQuotaInterceptor,
+from duo_workflow_service.interceptors.route import (
+    has_sufficient_usage_quota as _has_sufficient_usage_quota,
 )
 from duo_workflow_service.monitoring import duo_workflow_metrics, setup_monitoring
 from duo_workflow_service.profiling import setup_profiling
@@ -86,6 +86,7 @@ from lib.internal_events.context import (
     current_event_context,
 )
 from lib.internal_events.event_enum import EventEnum, EventLabelEnum, EventPropertyEnum
+from lib.usage_quota import EventType
 
 CONTAINER_APPLICATION_PACKAGES = ["duo_workflow_service"]
 
@@ -116,6 +117,23 @@ CUSTOMERSDOT_URL: str | None = (
         "https://customers.gitlab.com",
     )
 )
+
+
+# TODO: move the creation process to the DI container
+def has_sufficient_usage_quota(event: EventType):
+    def wrapper(func: Callable):
+        return _has_sufficient_usage_quota(
+            customersdot_url=CUSTOMERSDOT_URL or "",
+            user=os.environ.get(
+                "CUSTOMER_PORTAL_USAGE_QUOTA_API_USER", None
+            ),  # pylint: enable=direct-environment-variable-reference
+            token=os.environ.get(
+                "CUSTOMER_PORTAL_USAGE_QUOTA_API_TOKEN", None
+            ),  # pylint: enable=direct-environment-variable-reference
+            event=event,
+        )(func)
+
+    return wrapper
 
 
 def clean_start_request(start_workflow_request: contract_pb2.ClientEvent):
@@ -184,7 +202,7 @@ class DuoWorkflowService(contract_pb2_grpc.DuoWorkflowServicer):
     # - Not delaying the server response for too long when handling errors
     TASK_CANCELLATION_TIMEOUT = 10.0
 
-    # pylint: disable=invalid-overridden-method,too-many-statements,too-many-branches
+    @has_sufficient_usage_quota(event=EventType.DUO_AGENT_PLATFORM_FLOW_ON_EXECUTE)
     @inject
     async def ExecuteWorkflow(
         self,
@@ -721,17 +739,6 @@ async def serve(port: int) -> None:
                 InternalEventsInterceptor(),
                 ModelMetadataInterceptor(),
                 MonitoringInterceptor(),
-                UsageQuotaInterceptor(
-                    customersdot_url=str(CUSTOMERSDOT_URL),
-                    # pylint: disable=direct-environment-variable-reference
-                    customersdot_api_user=os.environ.get(
-                        "CUSTOMER_PORTAL_USAGE_QUOTA_API_USER", None
-                    ),
-                    customersdot_api_token=os.environ.get(
-                        "CUSTOMER_PORTAL_USAGE_QUOTA_API_TOKEN", None
-                    ),
-                    # pylint: enable=direct-environment-variable-reference
-                ),
             ],
             options=server_options,
         )
