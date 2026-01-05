@@ -64,7 +64,7 @@ class HealthStatus(str, Enum):
     AT_RISK = "atRisk"
 
 
-DateString = Annotated[str, StringConstraints(pattern=r"^\d{4}-\d{2}-\d{2}$")]
+DateString = Annotated[str, StringConstraints(pattern=r"^[0-9]{4}-[0-9]{2}-[0-9]{2}$")]
 
 
 class WorkItemBaseTool(DuoBaseTool):
