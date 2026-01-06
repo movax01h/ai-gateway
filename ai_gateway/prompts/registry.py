@@ -139,8 +139,8 @@ LEGACY_MODEL_MAPPING = {
         "1.2.0": "claude_sonnet_4_20250514",
     },
     "glab_ask_git_command": {
-        "1.0.0": "claude_3_haiku_20240307",
-        "1.0.1": "claude_3_5_haiku_20241022",
+        "1.0.0": "claude_haiku_4_5_20251001",
+        "1.0.1": "claude_haiku_4_5_20251001",
     },
     "measure_comment_temperature": {
         "1.0.0": "gemini_1_5_flash_vertex",

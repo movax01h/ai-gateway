@@ -19,7 +19,7 @@ def anthropic_client_fixture(async_client_factory, limits, monkeypatch):
 def request_params_fixture():
     """Fixture for common request parameters."""
     return {
-        "model": "claude-3-5-haiku-20241022",
+        "model": "claude-haiku-4-5-20251001",
         "max_tokens": 1024,
         "messages": [{"role": "user", "content": "Hi, how are you?"}],
         "stream": True,
@@ -110,7 +110,7 @@ async def test_count_tokens_endpoint(
     request_headers,
 ):
     count_tokens_request_body = {
-        "model": "claude-3-5-haiku-20241022",
+        "model": "claude-haiku-4-5-20251001",
         "messages": [{"role": "user", "content": "Hi, how are you?"}],
     }
 
