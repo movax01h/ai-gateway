@@ -25,8 +25,16 @@ async def usage_quota_client_fixture() -> AsyncGenerator[UsageQuotaClient, None]
         customersdot_api_token="customersdot_api_token",
         request_timeout=1.0,
     )
+
+    # NOTE: The `check_quota_available` cache is not scoped to individual instances. For clarity, we call the cache
+    # clear method on the class (even though `usage_quota_client.check_quota_available.cache.clear()` would have the
+    # same effect). It's also important to clear the cache _before_ and _after_ yielding the client, because other
+    # instances not created through this fixture could have dirtied it or be affected by our instance.
+    await UsageQuotaClient.check_quota_available.cache.clear()
+
     yield usage_quota_client
-    await usage_quota_client.check_quota_available.cache.clear()
+
+    await UsageQuotaClient.check_quota_available.cache.clear()
 
 
 @pytest.fixture(name="usage_quota_context")
@@ -110,7 +118,6 @@ class TestCheckQuotaAvailable:
         mock_quota_exhausted_response: MagicMock,
     ):
         """Should return False when CustomersDot returns 402 Payment Required."""
-        await usage_quota_client.check_quota_available.cache.clear()
 
         with patch("httpx.AsyncClient") as mock_client_class:
             mock_http_client.head = AsyncMock(
@@ -130,7 +137,6 @@ class TestCheckQuotaAvailable:
         mock_http_client: AsyncMock,
     ):
         """Should raise UsageQuotaTimeoutError when request times out."""
-        await usage_quota_client.check_quota_available.cache.clear()
 
         with patch("httpx.AsyncClient") as mock_client_class:
             mock_http_client.head = AsyncMock(
@@ -150,7 +156,6 @@ class TestCheckQuotaAvailable:
         mock_error_response,
     ):
         """Should raise UsageQuotaHTTPError on unexpected HTTP status codes."""
-        await usage_quota_client.check_quota_available.cache.clear()
 
         with patch("httpx.AsyncClient") as mock_client_class:
             mock_http_client.head = AsyncMock(return_value=mock_error_response)
@@ -174,7 +179,6 @@ class TestCheckQuotaAvailable:
         mock_http_client: AsyncMock,
     ):
         """Should raise UsageQuotaConnectionError on connection failures."""
-        await usage_quota_client.check_quota_available.cache.clear()
 
         with patch("httpx.AsyncClient") as mock_client_class:
             mock_http_client.head = AsyncMock(
@@ -194,7 +198,6 @@ class TestCheckQuotaAvailable:
         mock_success_response,
     ):
         """Should send HEAD request to /api/v1/consumers/resolve endpoint."""
-        await usage_quota_client.check_quota_available.cache.clear()
 
         with patch("httpx.AsyncClient") as mock_client_class:
             mock_http_client.head = AsyncMock(return_value=mock_success_response)
@@ -215,7 +218,6 @@ class TestCheckQuotaAvailable:
         mock_success_response,
     ):
         """Should pass context fields as query parameters."""
-        await usage_quota_client.check_quota_available.cache.clear()
 
         with patch("httpx.AsyncClient") as mock_client_class:
             mock_http_client.head = AsyncMock(return_value=mock_success_response)
@@ -237,7 +239,6 @@ class TestCheckQuotaAvailable:
         mock_success_response,
     ):
         """Should use the configured request timeout."""
-        await usage_quota_client.check_quota_available.cache.clear()
 
         with patch("httpx.AsyncClient") as mock_client_class:
             mock_http_client.head = AsyncMock(return_value=mock_success_response)
@@ -477,7 +478,6 @@ class TestErrorHandling:
         usage_quota_context: UsageQuotaEventContext,
     ):
         """Should preserve the original exception in UsageQuotaTimeoutError."""
-        await usage_quota_client.check_quota_available.cache.clear()
         original_error = httpx.TimeoutException("Original timeout")
         mock_http_client = AsyncMock()
         mock_http_client.__aenter__ = AsyncMock(return_value=mock_http_client)
@@ -499,7 +499,6 @@ class TestErrorHandling:
         mock_error_response: MagicMock,
     ):
         """Should include status code in UsageQuotaHTTPError."""
-        await usage_quota_client.check_quota_available.cache.clear()
 
         with patch("httpx.AsyncClient") as mock_client_class:
             mock_http_client.head = AsyncMock(return_value=mock_error_response)
