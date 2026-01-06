@@ -23,6 +23,7 @@ from ai_gateway.async_dependency_resolver import get_config, get_container_appli
 from ai_gateway.code_suggestions import CodeSuggestionsChunk
 from ai_gateway.config import Config
 from ai_gateway.prompts import BasePromptRegistry
+from lib.events import FeatureQualifiedNameStatic
 from lib.usage_quota import UsageQuotaEvent
 
 __all__ = [
@@ -90,7 +91,7 @@ async def get_code_suggestion_event_type(payload: CompletionRequest) -> UsageQuo
 @router.post("/suggestions")
 @feature_category(GitLabFeatureCategory.CODE_SUGGESTIONS)
 @has_sufficient_usage_quota(
-    feature_qualified_name="code_suggestions",
+    feature_qualified_name=FeatureQualifiedNameStatic.CODE_SUGGESTIONS,
     event=get_code_suggestion_event_type,
 )
 async def suggestions(

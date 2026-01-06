@@ -67,6 +67,7 @@ from ai_gateway.structured_logging import get_request_logger
 from ai_gateway.tracking import SnowplowEvent, SnowplowEventContext
 from ai_gateway.tracking.errors import log_exception
 from ai_gateway.tracking.instrumentator import SnowplowInstrumentator
+from lib.events import FeatureQualifiedNameStatic
 from lib.feature_flags.context import current_feature_flag_context
 from lib.internal_events import InternalEventsClient
 from lib.prompts.caching import X_GITLAB_MODEL_PROMPT_CACHE_ENABLED
@@ -115,7 +116,7 @@ async def get_prompt_registry():
 @feature_category(GitLabFeatureCategory.CODE_SUGGESTIONS)
 @capture_validation_errors()
 @has_sufficient_usage_quota(
-    feature_qualified_name="code_suggestions",
+    feature_qualified_name=FeatureQualifiedNameStatic.CODE_SUGGESTIONS,
     event=UsageQuotaEvent.CODE_SUGGESTIONS_CODE_COMPLETIONS,
 )
 async def completions(
@@ -238,7 +239,7 @@ async def completions(
 @feature_category(GitLabFeatureCategory.CODE_SUGGESTIONS)
 @capture_validation_errors()
 @has_sufficient_usage_quota(
-    feature_qualified_name="code_suggestions",
+    feature_qualified_name=FeatureQualifiedNameStatic.CODE_SUGGESTIONS,
     event=UsageQuotaEvent.CODE_SUGGESTIONS_CODE_GENERATIONS,
 )
 async def generations(

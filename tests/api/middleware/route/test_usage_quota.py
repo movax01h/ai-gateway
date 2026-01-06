@@ -5,6 +5,7 @@ from starlette.requests import Request
 from starlette.responses import JSONResponse
 
 from ai_gateway.api.middleware.route.usage_quota import has_sufficient_usage_quota
+from lib.events import FeatureQualifiedNameStatic
 from lib.usage_quota import InsufficientCredits, UsageQuotaEvent
 
 
@@ -29,7 +30,7 @@ class TestDecoratorBasics:
             return JSONResponse({"status": "ok"})
 
         decorated = has_sufficient_usage_quota(
-            feature_qualified_name="test_feature",
+            feature_qualified_name=FeatureQualifiedNameStatic.CODE_SUGGESTIONS,
             event=UsageQuotaEvent.CODE_SUGGESTIONS_CODE_COMPLETIONS,
         )(test_handler)
 
@@ -47,7 +48,7 @@ class TestDecoratorBasics:
             return JSONResponse({"status": "ok"})
 
         decorated = has_sufficient_usage_quota(
-            feature_qualified_name="test_feature",
+            feature_qualified_name=FeatureQualifiedNameStatic.CODE_SUGGESTIONS,
             event=UsageQuotaEvent.CODE_SUGGESTIONS_CODE_COMPLETIONS,
         )(test_handler)
 
@@ -67,7 +68,7 @@ class TestDecoratorBasics:
             return JSONResponse({"status": "ok"})
 
         decorated = has_sufficient_usage_quota(
-            feature_qualified_name="test_feature",
+            feature_qualified_name=FeatureQualifiedNameStatic.CODE_SUGGESTIONS,
             event=UsageQuotaEvent.CODE_SUGGESTIONS_CODE_COMPLETIONS,
         )(test_handler)
 
@@ -94,7 +95,7 @@ class TestEventTypeResolution:
             return JSONResponse({"status": "ok"})
 
         decorated = has_sufficient_usage_quota(
-            feature_qualified_name="test_feature",
+            feature_qualified_name=FeatureQualifiedNameStatic.CODE_SUGGESTIONS,
             event=UsageQuotaEvent.CODE_SUGGESTIONS_CODE_COMPLETIONS,
         )(test_handler)
 
@@ -117,7 +118,7 @@ class TestEventTypeResolution:
             return JSONResponse({"status": "ok"})
 
         decorated = has_sufficient_usage_quota(
-            feature_qualified_name="test_feature",
+            feature_qualified_name=FeatureQualifiedNameStatic.CODE_SUGGESTIONS,
             event=resolve_event_type,
         )(test_handler)
 
@@ -144,7 +145,7 @@ class TestEventTypeResolution:
             return JSONResponse({"status": "ok"})
 
         decorated = has_sufficient_usage_quota(
-            feature_qualified_name="test_feature",
+            feature_qualified_name=FeatureQualifiedNameStatic.CODE_SUGGESTIONS,
             event=failing_resolver,
         )(test_handler)
 
@@ -169,7 +170,7 @@ class TestFeatureQualifiedName:
         async def test_handler(request, *args, **kwargs):
             return JSONResponse({"status": "ok"})
 
-        feature_name = "code_suggestions"
+        feature_name = FeatureQualifiedNameStatic.CODE_SUGGESTIONS
 
         decorated = has_sufficient_usage_quota(
             feature_qualified_name=feature_name,
@@ -182,7 +183,7 @@ class TestFeatureQualifiedName:
 
         # Verify execute was called with correct feature name
         call_args = mock_request.app.state.usage_quota_service.execute.call_args
-        assert call_args[0][0].feature_qualified_name == feature_name
+        assert call_args[0][0].feature_qualified_name == feature_name.value
 
 
 class TestErrorHandling:
@@ -196,7 +197,7 @@ class TestErrorHandling:
             return JSONResponse({"status": "ok"})
 
         decorated = has_sufficient_usage_quota(
-            feature_qualified_name="test_feature",
+            feature_qualified_name=FeatureQualifiedNameStatic.CODE_SUGGESTIONS,
             event=UsageQuotaEvent.CODE_SUGGESTIONS_CODE_COMPLETIONS,
         )(test_handler)
 
@@ -222,7 +223,7 @@ class TestErrorHandling:
             )
 
         decorated = has_sufficient_usage_quota(
-            feature_qualified_name="test_feature",
+            feature_qualified_name=FeatureQualifiedNameStatic.CODE_SUGGESTIONS,
             event=UsageQuotaEvent.CODE_SUGGESTIONS_CODE_COMPLETIONS,
         )(test_handler)
 
@@ -244,7 +245,7 @@ class TestEventTypeEnum:
             return JSONResponse({"status": "ok"})
 
         decorated = has_sufficient_usage_quota(
-            feature_qualified_name="test_feature",
+            feature_qualified_name=FeatureQualifiedNameStatic.CODE_SUGGESTIONS,
             event=UsageQuotaEvent.CODE_SUGGESTIONS_CODE_COMPLETIONS,
         )(test_handler)
 
@@ -264,7 +265,7 @@ class TestEventTypeEnum:
             return JSONResponse({"status": "ok"})
 
         decorated = has_sufficient_usage_quota(
-            feature_qualified_name="test_feature",
+            feature_qualified_name=FeatureQualifiedNameStatic.CODE_SUGGESTIONS,
             event=UsageQuotaEvent.CODE_SUGGESTIONS_CODE_GENERATIONS,
         )(test_handler)
 
@@ -284,7 +285,7 @@ class TestEventTypeEnum:
             return JSONResponse({"status": "ok"})
 
         decorated = has_sufficient_usage_quota(
-            feature_qualified_name="test_feature",
+            feature_qualified_name=FeatureQualifiedNameStatic.DUO_CHAT_CLASSIC,
             event=UsageQuotaEvent.DUO_CHAT_CLASSIC,
         )(test_handler)
 

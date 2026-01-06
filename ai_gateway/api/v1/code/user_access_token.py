@@ -18,6 +18,7 @@ from ai_gateway.async_dependency_resolver import (
     get_internal_event_client,
     get_token_authority,
 )
+from lib.events import FeatureQualifiedNameStatic
 from lib.internal_events import InternalEventsClient
 from lib.usage_quota import UsageQuotaEvent
 
@@ -34,7 +35,7 @@ router = APIRouter()
 @router.post("/user_access_token")
 @feature_category(GitLabFeatureCategory.CODE_SUGGESTIONS)
 @has_sufficient_usage_quota(
-    feature_qualified_name="code_suggestions",
+    feature_qualified_name=FeatureQualifiedNameStatic.CODE_SUGGESTIONS,
     event=UsageQuotaEvent.CODE_SUGGESTIONS_CODE_COMPLETIONS,
 )
 async def user_access_token(

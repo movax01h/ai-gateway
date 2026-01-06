@@ -21,6 +21,7 @@ from ai_gateway.async_dependency_resolver import (
 from ai_gateway.models.base import KindModelProvider
 from ai_gateway.proxy.clients import AnthropicProxyClient
 from lib.billing_events.client import BillingEventsClient
+from lib.events import FeatureQualifiedNameStatic
 from lib.internal_events import InternalEventsClient
 from lib.usage_quota import UsageQuotaEvent
 
@@ -39,7 +40,8 @@ router = APIRouter()
 @verify_project_namespace_metadata()
 @feature_categories(EXTENDED_FEATURE_CATEGORIES_FOR_PROXY_ENDPOINTS)
 @has_sufficient_usage_quota(
-    feature_qualified_name="ai_gateway_proxy_use", event=UsageQuotaEvent.AIGW_PROXY_USE
+    feature_qualified_name=FeatureQualifiedNameStatic.AIGW_PROXY_USE,
+    event=UsageQuotaEvent.AIGW_PROXY_USE,
 )
 async def anthropic(
     request: Request,
