@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Optional
 
 import structlog
-from pydantic import Field, field_validator
+from pydantic import Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from structlog.dev import ConsoleRenderer
 from structlog.processors import JSONRenderer
@@ -28,7 +28,7 @@ class LoggingConfig(BaseSettings):
     model_config = SettingsConfigDict(env_prefix="DUO_WORKFLOW_LOGGING__")
 
     level: str = "INFO"
-    json_format: bool = True
+    json_format: Optional[bool] = None
     to_file: Optional[str] = None
     environment: str = Field(
         default="development", alias="DUO_WORKFLOW_SERVICE_ENVIRONMENT"
@@ -38,6 +38,13 @@ class LoggingConfig(BaseSettings):
     @classmethod
     def level_to_upper(cls, v: str) -> str:
         return v.upper()
+
+    @model_validator(mode="after")
+    def set_json_format_default(self) -> "LoggingConfig":
+        """Set json_format based on environment if not explicitly provided."""
+        if self.json_format is None:
+            self.json_format = self.environment != "development"
+        return self
 
 
 def setup_logging():
