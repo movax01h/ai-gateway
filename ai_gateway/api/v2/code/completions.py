@@ -70,7 +70,7 @@ from ai_gateway.tracking.instrumentator import SnowplowInstrumentator
 from lib.feature_flags.context import current_feature_flag_context
 from lib.internal_events import InternalEventsClient
 from lib.prompts.caching import X_GITLAB_MODEL_PROMPT_CACHE_ENABLED
-from lib.usage_quota import EventType
+from lib.usage_quota import UsageQuotaEvent
 
 __all__ = [
     "router",
@@ -116,7 +116,7 @@ async def get_prompt_registry():
 @capture_validation_errors()
 @has_sufficient_usage_quota(
     feature_qualified_name="code_suggestions",
-    event=EventType.CODE_SUGGESTIONS_CODE_COMPLETIONS,
+    event=UsageQuotaEvent.CODE_SUGGESTIONS_CODE_COMPLETIONS,
 )
 async def completions(
     request: Request,
@@ -239,7 +239,7 @@ async def completions(
 @capture_validation_errors()
 @has_sufficient_usage_quota(
     feature_qualified_name="code_suggestions",
-    event=EventType.CODE_SUGGESTIONS_CODE_GENERATIONS,
+    event=UsageQuotaEvent.CODE_SUGGESTIONS_CODE_GENERATIONS,
 )
 async def generations(
     request: Request,

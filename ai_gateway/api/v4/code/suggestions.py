@@ -23,7 +23,7 @@ from ai_gateway.async_dependency_resolver import get_config, get_container_appli
 from ai_gateway.code_suggestions import CodeSuggestionsChunk
 from ai_gateway.config import Config
 from ai_gateway.prompts import BasePromptRegistry
-from lib.usage_quota import EventType
+from lib.usage_quota import UsageQuotaEvent
 
 __all__ = [
     "router",
@@ -75,15 +75,15 @@ async def handle_stream_sse(
     )
 
 
-async def get_code_suggestion_event_type(payload: CompletionRequest) -> EventType:
+async def get_code_suggestion_event_type(payload: CompletionRequest) -> UsageQuotaEvent:
     """Determine event type from completion request payload."""
     if not payload.prompt_components:
         raise ValueError("No prompt components provided")
     component = payload.prompt_components[0]
     return (
-        EventType.CODE_SUGGESTIONS_CODE_COMPLETIONS
+        UsageQuotaEvent.CODE_SUGGESTIONS_CODE_COMPLETIONS
         if component.type == CodeEditorComponents.COMPLETION
-        else EventType.CODE_SUGGESTIONS_CODE_GENERATIONS
+        else UsageQuotaEvent.CODE_SUGGESTIONS_CODE_GENERATIONS
     )
 
 

@@ -10,7 +10,7 @@ from contract import contract_pb2
 from duo_workflow_service.interceptors.route.usage_quota import (
     has_sufficient_usage_quota,
 )
-from lib.usage_quota import EventType, InsufficientCredits
+from lib.usage_quota import InsufficientCredits, UsageQuotaEvent
 
 
 @pytest.fixture(name="mock_service")
@@ -36,7 +36,7 @@ async def test_stream_decorator_success(mock_service) -> None:
     """Test stream decorator with sufficient quota."""
 
     @has_sufficient_usage_quota(
-        EventType.DUO_AGENT_PLATFORM_FLOW_ON_EXECUTE,
+        UsageQuotaEvent.DAP_FLOW_ON_EXECUTE,
         "https://customers.example.com",
     )
     async def ExecuteWorkflow(
@@ -70,7 +70,7 @@ async def test_stream_decorator_insufficient_credits(
     mock_service.execute.side_effect = InsufficientCredits("Insufficient credits")
 
     @has_sufficient_usage_quota(
-        EventType.DUO_AGENT_PLATFORM_FLOW_ON_EXECUTE,
+        UsageQuotaEvent.DAP_FLOW_ON_EXECUTE,
         "https://customers.example.com",
     )
     async def ExecuteWorkflow(
@@ -103,7 +103,7 @@ async def test_unary_decorator_success(mock_service) -> None:
     """Test unary decorator with sufficient quota."""
 
     @has_sufficient_usage_quota(
-        EventType.DUO_AGENT_PLATFORM_FLOW_ON_EXECUTE,
+        UsageQuotaEvent.DAP_FLOW_ON_EXECUTE,
         "https://customers.example.com",
     )
     async def unary_method(_self: Any, _request: Any, _context: ServicerContext) -> str:
@@ -120,7 +120,7 @@ async def test_decorator_with_credentials(mock_service) -> None:
     """Test decorator with custom credentials."""
 
     @has_sufficient_usage_quota(
-        EventType.DUO_AGENT_PLATFORM_FLOW_ON_EXECUTE,
+        UsageQuotaEvent.DAP_FLOW_ON_EXECUTE,
         "https://customers.example.com",
         user="test_user",
         token="**********",
@@ -139,7 +139,7 @@ def test_unsupported_stream_method() -> None:
     with pytest.raises(TypeError, match="unsupported method to intercept"):
 
         @has_sufficient_usage_quota(
-            EventType.DUO_AGENT_PLATFORM_FLOW_ON_EXECUTE,
+            UsageQuotaEvent.DAP_FLOW_ON_EXECUTE,
             "https://customers.example.com",
         )
         async def unsupported_stream(

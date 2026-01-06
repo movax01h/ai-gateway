@@ -5,12 +5,12 @@ from starlette.requests import Request
 from starlette.responses import JSONResponse
 
 from lib.events import GLReportingEventContext
-from lib.usage_quota import EventType, InsufficientCredits
+from lib.usage_quota import InsufficientCredits, UsageQuotaEvent
 
 
 def has_sufficient_usage_quota(
     feature_qualified_name: str,
-    event: EventType | Callable[[Any], Any],
+    event: UsageQuotaEvent | Callable[[Any], Any],
 ):
     """Decorator to enforce usage quota checks on API routes.
 
@@ -31,7 +31,7 @@ def has_sufficient_usage_quota(
 
     def decorator(func: Callable) -> Callable:
         event_type_resolver = event if callable(event) else None
-        static_event: Optional[EventType] = event if not callable(event) else None
+        static_event: Optional[UsageQuotaEvent] = event if not callable(event) else None
         return _process_route(
             func, feature_qualified_name, static_event, event_type_resolver
         )
@@ -42,7 +42,7 @@ def has_sufficient_usage_quota(
 async def _resolve_event_type_from_request(
     event_type_resolver: Optional[Callable[[Any], Any]],
     kwargs: dict[str, Any],
-) -> Optional[EventType]:
+) -> Optional[UsageQuotaEvent]:
     if event_type_resolver:
         try:
             # Extract the payload from kwargs (Pydantic model without Query/Path/Depends)
@@ -75,7 +75,7 @@ def _insufficient_credits_response() -> JSONResponse:
 def _process_route(
     func: Callable,
     feature_qualified_name: str,
-    event: Optional[EventType],
+    event: Optional[UsageQuotaEvent],
     event_type_resolver: Optional[Callable[[Any], Any]],
 ) -> Callable:
     @functools.wraps(func)

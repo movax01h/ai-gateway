@@ -86,7 +86,7 @@ from lib.internal_events.context import (
     current_event_context,
 )
 from lib.internal_events.event_enum import EventEnum, EventLabelEnum, EventPropertyEnum
-from lib.usage_quota import EventType
+from lib.usage_quota import UsageQuotaEvent
 
 CONTAINER_APPLICATION_PACKAGES = ["duo_workflow_service"]
 
@@ -120,7 +120,7 @@ CUSTOMERSDOT_URL: str | None = (
 
 
 # TODO: move the creation process to the DI container
-def has_sufficient_usage_quota(event: EventType):
+def has_sufficient_usage_quota(event: UsageQuotaEvent):
     def wrapper(func: Callable):
         return _has_sufficient_usage_quota(
             customersdot_url=CUSTOMERSDOT_URL or "",
@@ -202,7 +202,7 @@ class DuoWorkflowService(contract_pb2_grpc.DuoWorkflowServicer):
     # - Not delaying the server response for too long when handling errors
     TASK_CANCELLATION_TIMEOUT = 10.0
 
-    @has_sufficient_usage_quota(event=EventType.DUO_AGENT_PLATFORM_FLOW_ON_EXECUTE)
+    @has_sufficient_usage_quota(event=UsageQuotaEvent.DAP_FLOW_ON_EXECUTE)
     @inject
     async def ExecuteWorkflow(
         self,

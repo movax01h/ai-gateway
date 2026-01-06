@@ -5,7 +5,7 @@ from starlette.requests import Request
 from starlette.responses import JSONResponse
 
 from ai_gateway.api.middleware.route.usage_quota import has_sufficient_usage_quota
-from lib.usage_quota import EventType, InsufficientCredits
+from lib.usage_quota import InsufficientCredits, UsageQuotaEvent
 
 
 @pytest.fixture
@@ -30,7 +30,7 @@ class TestDecoratorBasics:
 
         decorated = has_sufficient_usage_quota(
             feature_qualified_name="test_feature",
-            event=EventType.CODE_SUGGESTIONS_CODE_COMPLETIONS,
+            event=UsageQuotaEvent.CODE_SUGGESTIONS_CODE_COMPLETIONS,
         )(test_handler)
 
         mock_request.app.state.usage_quota_service.execute = AsyncMock()
@@ -48,7 +48,7 @@ class TestDecoratorBasics:
 
         decorated = has_sufficient_usage_quota(
             feature_qualified_name="test_feature",
-            event=EventType.CODE_SUGGESTIONS_CODE_COMPLETIONS,
+            event=UsageQuotaEvent.CODE_SUGGESTIONS_CODE_COMPLETIONS,
         )(test_handler)
 
         mock_request.app.state.usage_quota_service.execute = AsyncMock(
@@ -68,7 +68,7 @@ class TestDecoratorBasics:
 
         decorated = has_sufficient_usage_quota(
             feature_qualified_name="test_feature",
-            event=EventType.CODE_SUGGESTIONS_CODE_COMPLETIONS,
+            event=UsageQuotaEvent.CODE_SUGGESTIONS_CODE_COMPLETIONS,
         )(test_handler)
 
         mock_request.app.state.usage_quota_service.execute = AsyncMock(
@@ -95,7 +95,7 @@ class TestEventTypeResolution:
 
         decorated = has_sufficient_usage_quota(
             feature_qualified_name="test_feature",
-            event=EventType.CODE_SUGGESTIONS_CODE_COMPLETIONS,
+            event=UsageQuotaEvent.CODE_SUGGESTIONS_CODE_COMPLETIONS,
         )(test_handler)
 
         mock_request.app.state.usage_quota_service.execute = AsyncMock()
@@ -104,14 +104,14 @@ class TestEventTypeResolution:
 
         # Verify execute was called with correct event_type
         call_args = mock_request.app.state.usage_quota_service.execute.call_args
-        assert call_args[0][1] == EventType.CODE_SUGGESTIONS_CODE_COMPLETIONS
+        assert call_args[0][1] == UsageQuotaEvent.CODE_SUGGESTIONS_CODE_COMPLETIONS
 
     @pytest.mark.asyncio
     async def test_uses_dynamic_event_type_resolver(self, mock_request):
         """Test that decorator uses callable resolver when provided."""
 
         async def resolve_event_type(payload):
-            return EventType.CODE_SUGGESTIONS_CODE_GENERATIONS
+            return UsageQuotaEvent.CODE_SUGGESTIONS_CODE_GENERATIONS
 
         async def test_handler(request, *args, payload=None, **kwargs):
             return JSONResponse({"status": "ok"})
@@ -131,7 +131,7 @@ class TestEventTypeResolution:
 
         # Verify execute was called with resolved event_type
         call_args = mock_request.app.state.usage_quota_service.execute.call_args
-        assert call_args[0][1] == EventType.CODE_SUGGESTIONS_CODE_GENERATIONS
+        assert call_args[0][1] == UsageQuotaEvent.CODE_SUGGESTIONS_CODE_GENERATIONS
 
     @pytest.mark.asyncio
     async def test_resolver_falls_back_to_none_on_error(self, mock_request):
@@ -173,7 +173,7 @@ class TestFeatureQualifiedName:
 
         decorated = has_sufficient_usage_quota(
             feature_qualified_name=feature_name,
-            event=EventType.CODE_SUGGESTIONS_CODE_COMPLETIONS,
+            event=UsageQuotaEvent.CODE_SUGGESTIONS_CODE_COMPLETIONS,
         )(test_handler)
 
         mock_request.app.state.usage_quota_service.execute = AsyncMock()
@@ -197,7 +197,7 @@ class TestErrorHandling:
 
         decorated = has_sufficient_usage_quota(
             feature_qualified_name="test_feature",
-            event=EventType.CODE_SUGGESTIONS_CODE_COMPLETIONS,
+            event=UsageQuotaEvent.CODE_SUGGESTIONS_CODE_COMPLETIONS,
         )(test_handler)
 
         mock_request.app.state.usage_quota_service.execute = AsyncMock(
@@ -223,7 +223,7 @@ class TestErrorHandling:
 
         decorated = has_sufficient_usage_quota(
             feature_qualified_name="test_feature",
-            event=EventType.CODE_SUGGESTIONS_CODE_COMPLETIONS,
+            event=UsageQuotaEvent.CODE_SUGGESTIONS_CODE_COMPLETIONS,
         )(test_handler)
 
         mock_request.app.state.usage_quota_service.execute = AsyncMock()
@@ -245,7 +245,7 @@ class TestEventTypeEnum:
 
         decorated = has_sufficient_usage_quota(
             feature_qualified_name="test_feature",
-            event=EventType.CODE_SUGGESTIONS_CODE_COMPLETIONS,
+            event=UsageQuotaEvent.CODE_SUGGESTIONS_CODE_COMPLETIONS,
         )(test_handler)
 
         mock_request.app.state.usage_quota_service.execute = AsyncMock()
@@ -254,7 +254,7 @@ class TestEventTypeEnum:
 
         assert response.status_code == 200
         call_args = mock_request.app.state.usage_quota_service.execute.call_args
-        assert call_args[0][1] == EventType.CODE_SUGGESTIONS_CODE_COMPLETIONS
+        assert call_args[0][1] == UsageQuotaEvent.CODE_SUGGESTIONS_CODE_COMPLETIONS
 
     @pytest.mark.asyncio
     async def test_supports_code_generations_event(self, mock_request):
@@ -265,7 +265,7 @@ class TestEventTypeEnum:
 
         decorated = has_sufficient_usage_quota(
             feature_qualified_name="test_feature",
-            event=EventType.CODE_SUGGESTIONS_CODE_GENERATIONS,
+            event=UsageQuotaEvent.CODE_SUGGESTIONS_CODE_GENERATIONS,
         )(test_handler)
 
         mock_request.app.state.usage_quota_service.execute = AsyncMock()
@@ -274,7 +274,7 @@ class TestEventTypeEnum:
 
         assert response.status_code == 200
         call_args = mock_request.app.state.usage_quota_service.execute.call_args
-        assert call_args[0][1] == EventType.CODE_SUGGESTIONS_CODE_GENERATIONS
+        assert call_args[0][1] == UsageQuotaEvent.CODE_SUGGESTIONS_CODE_GENERATIONS
 
     @pytest.mark.asyncio
     async def test_supports_duo_chat_event(self, mock_request):
@@ -285,7 +285,7 @@ class TestEventTypeEnum:
 
         decorated = has_sufficient_usage_quota(
             feature_qualified_name="test_feature",
-            event=EventType.DUO_CHAT_CLASSIC,
+            event=UsageQuotaEvent.DUO_CHAT_CLASSIC,
         )(test_handler)
 
         mock_request.app.state.usage_quota_service.execute = AsyncMock()
@@ -294,4 +294,4 @@ class TestEventTypeEnum:
 
         assert response.status_code == 200
         call_args = mock_request.app.state.usage_quota_service.execute.call_args
-        assert call_args[0][1] == EventType.DUO_CHAT_CLASSIC
+        assert call_args[0][1] == UsageQuotaEvent.DUO_CHAT_CLASSIC

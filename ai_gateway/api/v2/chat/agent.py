@@ -34,7 +34,7 @@ from ai_gateway.models import Role
 from ai_gateway.prompts import BasePromptRegistry
 from ai_gateway.structured_logging import get_request_logger
 from lib.internal_events import InternalEventsClient
-from lib.usage_quota import EventType
+from lib.usage_quota import UsageQuotaEvent
 
 __all__ = [
     "router",
@@ -159,7 +159,7 @@ async def create_event_stream(
 @feature_category(GitLabFeatureCategory.DUO_CHAT)
 @has_sufficient_usage_quota(
     feature_qualified_name="duo_chat_classic",
-    event=EventType.DUO_CHAT_CLASSIC,
+    event=UsageQuotaEvent.DUO_CHAT_CLASSIC,
 )
 async def chat(
     request: Request,
