@@ -271,7 +271,9 @@ models:
       temperature: 0.0
       max_tokens: 4_096
       model_class_provider: anthropic
-
+    deprecation:
+      deprecation_date: "2025-12-19"
+      removal_version: "18.9"
 
   - name: "Claude Sonnet 3.5 20241022 - Vertex"
     provider: "Vertex"
