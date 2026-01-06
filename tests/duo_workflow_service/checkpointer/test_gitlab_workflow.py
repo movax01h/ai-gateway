@@ -34,6 +34,7 @@ from duo_workflow_service.json_encoder.encoder import CustomEncoder
 from duo_workflow_service.status_updater.gitlab_status_updater import (
     UnsupportedStatusEvent,
 )
+from lib.billing_events import BillingEvent
 from lib.feature_flags.context import FeatureFlag
 from lib.internal_events import InternalEventAdditionalProperties
 from lib.internal_events.event_enum import EventEnum, EventLabelEnum, EventPropertyEnum
@@ -1290,7 +1291,7 @@ async def test_track_workflow_completion_with_billing_event(
 
     billing_event_client.track_billing_event.assert_called_once_with(
         user=mock_user,
-        event_type="duo_agent_platform_workflow_completion",
+        event=BillingEvent.DAP_FLOW_ON_COMPLETION,
         category="GitLabWorkflow",
         unit_of_measure="request",
         quantity=1,

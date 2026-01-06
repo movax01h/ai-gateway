@@ -31,7 +31,7 @@ from ai_gateway.models.base_text import (
     TextGenModelOutput,
 )
 from ai_gateway.safety_attributes import SafetyAttributes
-from lib.billing_events.client import BillingEventsClient
+from lib.billing_events import BillingEvent, BillingEventsClient
 
 
 class InstrumentorMock(Mock):
@@ -702,7 +702,7 @@ class TestCodeCompletions:
 
         mock_billing_client.track_billing_event.assert_called_once_with(
             user=mock_user,
-            event_type="code_completions",
+            event=BillingEvent.CODE_SUGGESTIONS_CODE_COMPLETIONS,
             category="CodeCompletions",
             unit_of_measure="request",
             quantity=1,
@@ -714,6 +714,8 @@ class TestCodeCompletions:
                         "completion_tokens": expected_output_tokens,
                     }
                 ],
+                "feature_qualified_name": "code_suggestions",
+                "feature_ai_catalog_item": False,
             },
         )
 
@@ -795,7 +797,7 @@ class TestCodeCompletions:
         # Should still track billing event even with 0 tokens for consistency
         mock_billing_client.track_billing_event.assert_called_once_with(
             user=mock_user,
-            event_type="code_completions",
+            event=BillingEvent.CODE_SUGGESTIONS_CODE_COMPLETIONS,
             category="CodeCompletions",
             unit_of_measure="request",
             quantity=1,
@@ -804,6 +806,8 @@ class TestCodeCompletions:
                 "llm_operations": [
                     {"model_id": "test-model-id", "completion_tokens": 0}
                 ],
+                "feature_qualified_name": "code_suggestions",
+                "feature_ai_catalog_item": False,
             },
         )
 
@@ -842,7 +846,7 @@ class TestCodeCompletions:
         # Billing events should be tracked for streaming responses
         mock_billing_client.track_billing_event.assert_called_once_with(
             user=mock_user,
-            event_type="code_completions",
+            event=BillingEvent.CODE_SUGGESTIONS_CODE_COMPLETIONS,
             category="CodeCompletions",
             unit_of_measure="request",
             quantity=1,
@@ -851,6 +855,8 @@ class TestCodeCompletions:
                 "llm_operations": [
                     {"model_id": "test-model-id", "completion_tokens": 12}
                 ],
+                "feature_qualified_name": "code_suggestions",
+                "feature_ai_catalog_item": False,
             },
         )
 

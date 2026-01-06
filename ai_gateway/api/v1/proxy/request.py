@@ -12,7 +12,8 @@ from gitlab_cloud_connector import (
 from ai_gateway.abuse_detection import AbuseDetector
 from ai_gateway.api.auth_utils import StarletteUser
 from ai_gateway.api.feature_category import X_GITLAB_UNIT_PRIMITIVE
-from lib.billing_events.client import BillingEventsClient
+from lib.billing_events import BillingEvent, BillingEventsClient
+from lib.events import FeatureQualifiedNameStatic, GLReportingEventContext
 from lib.internal_events.context import EventContext, current_event_context
 
 # It's implemented here, because eventually we want to restrict this endpoint to
@@ -93,6 +94,10 @@ async def _validate_request(
 
 
 def track_billing_event(func):
+    gl_event_context = GLReportingEventContext.from_static_name(
+        FeatureQualifiedNameStatic.AIGW_PROXY_USE
+    )
+
     @functools.wraps(func)
     async def wrapper(
         request: Request,
@@ -118,7 +123,11 @@ def track_billing_event(func):
                         "model_id": model_id,
                         **token_usage.to_billing_metadata(),
                     }
-                    metadata = {"llm_operations": [llm_operation]}
+                    metadata = {
+                        "llm_operations": [llm_operation],
+                        "feature_qualified_name": gl_event_context.feature_qualified_name,
+                        "feature_ai_catalog_item": gl_event_context.feature_ai_catalog_item,
+                    }
             except KeyError:
                 # If we can't parse the response, continue without metadata
                 pass
@@ -126,7 +135,7 @@ def track_billing_event(func):
         # Track event only after `func` returns so we don't trigger a billable event if an exception occurred
         billing_event_client.track_billing_event(
             request.user,
-            event_type="ai_gateway_proxy_use",
+            event=BillingEvent.AIGW_PROXY_USE,
             category=__name__,
             unit_of_measure="request",
             quantity=1,

@@ -10,7 +10,7 @@ The billing events system tracks consumption of AI features (tokens, requests, e
 To trigger a billing event, call the `track_billing_event` method of the `BillingEventsClient` object with the desired arguments:
 
 ```python
-from lib.billing_events import BillingEventsClient
+from lib.billing_events import BillingEventsClient, BillingEvent
 from dependency_injector.wiring import Provide, inject
 from ai_gateway.container import ContainerApplication
 
@@ -21,11 +21,11 @@ async def ai_completion_feature(
     ],
 ):
 
-   billable_client.track_billing_event(
+   billing_event_client.track_billing_event(
         user=user,
-        event_type="billable_event_type",  # → action + event_type
-        category=__name__,                 # → where event happened
-        metadata={                         # → billable context metadata
+        event=BillingEvent.AIGW_PROXY_USE,  # → BillingEvent enum value
+        category=__name__,                  # → where event happened
+        metadata={                          # → billable context metadata
             "workflow_id": "wf_123456",
             "execution_environment": "ci_pipeline",
             "resource_consumption": {
@@ -51,11 +51,12 @@ async def ai_completion_feature(
 
 The `track_billing_event` method accepts the following parameters:
 
-- **`event_type`** (required): The type of billable event (e.g., "ai_completion", "code_suggestions", "duo_chat")
-- **`unit_of_measure`** (optional, default: "request"): The unit used for measurement ("token", "request", "second", "message", "execution") Used for accurate unit conversion and billing calculations.
-- **`quantity`** (required): The quantity of usage for this billing record
+- **`user`** (required): CloudConnectorUser object containing user claims and authentication information
+- **`event`** (required): BillingEvent enum value representing the type of billable event
+- **`category`** (required): The location/class where the billing event occurred (e.g., `__name__`)
+- **`unit_of_measure`** (optional, default: "tokens"): The unit used for measurement ("tokens", "request", "bytes", "seconds"). Used for accurate unit conversion and billing calculations.
+- **`quantity`** (optional, default: 1.0): The quantity of usage for this billing record. Must be greater than 0.
 - **`metadata`** (optional): Dictionary containing additional billing-related data
-- **`category`** (optional, default: "default_category"): The location/class where the billing event occurred
 
 ## Billing Event Context
 
@@ -126,8 +127,9 @@ Otherwise, no events are visible in the UI until the batch size has been reached
 
 ## Best Practices
 
-1. **Use descriptive event types**: Choose clear, consistent names like "ai_completion", "code_suggestions", "duo_chat"
+1. **Use the correct BillingEvent enum**: Select the appropriate `BillingEvent` enum value that matches your feature (e.g., `BillingEvent.CODE_SUGGESTIONS_CODE_COMPLETIONS` for code completions)
 1. **Include relevant metadata**: Add context that helps with billing analysis (model, feature, language, etc.)
 1. **Track accurately**: Ensure quantity reflects actual usage (tokens consumed, requests made, etc.)
-1. **Validate inputs**: The client automatically rejects negative quantities and handles missing metadata
-1. **Use appropriate categories**: Pass the class name where the event is triggered for better debugging
+1. **Validate inputs**: The client automatically rejects negative or zero quantities and handles missing metadata
+1. **Use appropriate categories**: Pass the class name (e.g., `__name__`) where the event is triggered for better debugging
+1. **Choose the right unit of measure**: Match the unit to what you're tracking ("tokens" for LLM usage, "request" for API calls, etc.)
