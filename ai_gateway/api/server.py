@@ -28,7 +28,6 @@ from ai_gateway.api.middleware import (
     InternalEventMiddleware,
     MiddlewareAuthentication,
     ModelConfigMiddleware,
-    UsageQuotaMiddleware,
 )
 from ai_gateway.api.middleware.self_hosted_logging import (
     EnabledInstanceVerboseAiLogsHeaderPlugin,
@@ -46,6 +45,7 @@ from ai_gateway.models import ModelAPIError
 from ai_gateway.models.base import ModelAPICallError
 from ai_gateway.profiling import setup_profiling
 from ai_gateway.structured_logging import can_log_request_data, setup_app_logging
+from lib.usage_quota import UsageQuotaService
 
 __all__ = [
     "create_fast_api_server",
@@ -112,6 +112,15 @@ def create_fast_api_server(config: Config):
         bypass_auth_jwt_signature=config.auth.bypass_jwt_signature,
     )
 
+    # Initialize usage quota service for route decorator
+    # pylint: disable=direct-environment-variable-reference
+    usage_quota_service = UsageQuotaService(
+        customersdot_url=config.customer_portal_url,
+        customersdot_api_user=os.environ.get("CUSTOMER_PORTAL_USAGE_QUOTA_API_USER"),
+        customersdot_api_token=os.environ.get("CUSTOMER_PORTAL_USAGE_QUOTA_API_TOKEN"),
+    )
+    # pylint: enable=direct-environment-variable-reference
+
     fastapi_app = FastAPI(
         title="GitLab AI Gateway",
         description="GitLab AI Gateway API to execute AI actions",
@@ -156,20 +165,6 @@ def create_fast_api_server(config: Config):
                 enabled=config.internal_event.enabled,
                 environment=config.environment,
             ),
-            Middleware(
-                UsageQuotaMiddleware,
-                skip_endpoints=_SKIP_ENDPOINTS,
-                environment=config.environment,
-                customersdot_url=config.customer_portal_url,
-                # pylint: disable=direct-environment-variable-reference
-                customersdot_api_user=os.environ.get(
-                    "CUSTOMER_PORTAL_USAGE_QUOTA_API_USER", None
-                ),
-                customersdot_api_token=os.environ.get(
-                    "CUSTOMER_PORTAL_USAGE_QUOTA_API_TOKEN", None
-                ),
-                # pylint: enable=direct-environment-variable-reference
-            ),
             Middleware(ModelConfigMiddleware),
         ],
         extra={"config": config},
@@ -178,6 +173,7 @@ def create_fast_api_server(config: Config):
     fastapi_app.state.cloud_connector_auth_provider = (
         auth_provider  # For readiness check
     )
+    fastapi_app.state.usage_quota_service = usage_quota_service
     setup_custom_exception_handlers(fastapi_app)
     setup_router(fastapi_app)
     setup_app_logging(fastapi_app)

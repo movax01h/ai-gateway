@@ -152,10 +152,11 @@ class TestUsageQuotaContext:
             global_user_id="gid://gitlab/User/123",
             correlation_id="correlation_id",
         )
-        assert (
-            context.to_cache_key()
-            == "production:saas:user_123:gid://gitlab/User/123:123:00000000-1111-2222-3333-000000000000:duo_pro"
+        expected_key = (
+            "production:saas:user_123:gid://gitlab/User/123:123:"
+            "00000000-1111-2222-3333-000000000000:duo_pro"
         )
+        assert context.to_cache_key() == expected_key
 
     def test_to_cache_key_excludes_none_fields(self) -> None:
         context = UsageQuotaEventContext(
@@ -165,3 +166,86 @@ class TestUsageQuotaContext:
         )
 
         assert context.to_cache_key() == "prod:123:beta"
+
+    def test_event_type_field(self):
+        """Test that event_type field is properly set and retrieved."""
+        context = UsageQuotaEventContext(
+            environment="prod",
+            event_type="code_completions",
+        )
+        assert context.event_type == "code_completions"
+
+    def test_feature_qualified_name_field(self):
+        """Test that feature_qualified_name field is properly set and retrieved."""
+        context = UsageQuotaEventContext(
+            environment="prod",
+            feature_qualified_name="code_suggestions",
+        )
+        assert context.feature_qualified_name == "code_suggestions"
+
+    def test_feature_ai_catalog_item_field(self):
+        """Test that feature_ai_catalog_item field is properly set and retrieved."""
+        context = UsageQuotaEventContext(
+            environment="prod",
+            feature_ai_catalog_item=True,
+        )
+        assert context.feature_ai_catalog_item is True
+
+    def test_all_new_fields_together(self):
+        """Test that all new fields work together."""
+        context = UsageQuotaEventContext(
+            environment="production",
+            realm="saas",
+            user_id="user_123",
+            global_user_id="gid://gitlab/User/123",
+            event_type="code_completions",
+            feature_qualified_name="code_suggestions",
+            feature_ai_catalog_item=True,
+        )
+        assert context.event_type == "code_completions"
+        assert context.feature_qualified_name == "code_suggestions"
+        assert context.feature_ai_catalog_item is True
+
+    def test_new_fields_optional(self):
+        """Test that new fields are optional."""
+        context = UsageQuotaEventContext(
+            environment="prod",
+        )
+        assert context.event_type is None
+        assert context.feature_qualified_name is None
+        assert context.feature_ai_catalog_item is None
+
+    def test_cache_key_excludes_new_fields(self):
+        """Test  that cache key doesn't include event_type, feature_qualified_name, feature_ai_catalog_item."""
+        context = UsageQuotaEventContext(
+            environment="prod",
+            user_id="123",
+            feature_enablement_type="beta",
+            event_type="code_completions",
+            feature_qualified_name="code_suggestions",
+            feature_ai_catalog_item=True,
+        )
+        # Cache key should only include CACHE_KEY_FIELDS
+        assert context.to_cache_key() == "prod:123:beta"
+        # Verify new fields are not in cache key
+        assert "code_completions" not in context.to_cache_key()
+        assert "code_suggestions" not in context.to_cache_key()
+
+    def test_model_copy_with_new_fields(self):
+        """Test that model_copy works with new fields."""
+        context = UsageQuotaEventContext(
+            environment="prod",
+            user_id="123",
+        )
+        updated_context = context.model_copy(
+            update={
+                "event_type": "code_generations",
+                "feature_qualified_name": "code_suggestions",
+                "feature_ai_catalog_item": False,
+            }
+        )
+        assert updated_context.event_type == "code_generations"
+        assert updated_context.feature_qualified_name == "code_suggestions"
+        assert updated_context.feature_ai_catalog_item is False
+        # Original context should be unchanged (frozen model)
+        assert context.event_type is None

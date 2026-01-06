@@ -67,6 +67,7 @@ from lib.billing_events.client import BillingEventsClient
 from lib.feature_flags.context import current_feature_flag_context
 from lib.internal_events.client import InternalEventsClient
 from lib.prompts.caching import current_prompt_cache_context
+from lib.usage_quota import UsageQuotaService
 
 pytest_plugins = ("pytest_asyncio",)
 
@@ -149,8 +150,19 @@ def mock_client_fixture(
     auth_user,
     mock_ai_gateway_container,  # pylint: disable=unused-argument
     model_metadata_context,  # pylint: disable=unused-argument
+    mock_config,
 ):
     """Setup all the needed mocks to perform requests in the test environment."""
+    # Set the config on the app in the nested structure: extra['extra']['config']
+    test_client.app.extra["extra"] = {"config": mock_config}
+
+    # Initialize usage quota service for tests
+    test_client.app.state.usage_quota_service = UsageQuotaService(
+        customersdot_url=mock_config.customer_portal_url,
+        customersdot_api_user=None,
+        customersdot_api_token=None,
+    )
+
     with patch.object(stub_auth_provider, "authenticate", return_value=auth_user):
         yield test_client
 

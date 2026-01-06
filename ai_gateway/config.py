@@ -19,6 +19,7 @@ __all__ = [
     "ConfigCustomModels",
     "ConfigModelKeys",
     "ConfigModelEndpoints",
+    "ConfigCustomersDot",
 ]
 
 ENV_PREFIX = "AIGW"
@@ -101,6 +102,11 @@ class ConfigCustomModels(BaseModel):
 class ConfigAbuseDetection(BaseModel):
     enabled: bool = False
     sampling_rate: float = 0.1  # 1/10 of requests are sampled
+
+
+class ConfigCustomersDot(BaseModel):
+    api_user: Optional[str] = None
+    api_token: Optional[str] = None
 
 
 class ConfigModelKeys(BaseModel):
@@ -261,6 +267,9 @@ class Config(BaseSettings):
     feature_flags: Annotated[
         ConfigFeatureFlags, Field(default_factory=ConfigFeatureFlags)
     ] = ConfigFeatureFlags()
+    customersdot: Annotated[
+        ConfigCustomersDot, Field(default_factory=ConfigCustomersDot)
+    ] = ConfigCustomersDot()
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
