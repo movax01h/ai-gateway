@@ -9,11 +9,11 @@ from grpc.aio import ServicerContext
 
 from contract import contract_pb2, contract_pb2_grpc
 from lib.events import GLReportingEventContext
-from lib.usage_quota import EventType, InsufficientCredits, UsageQuotaService
+from lib.usage_quota import InsufficientCredits, UsageQuotaEvent, UsageQuotaService
 
 
 def has_sufficient_usage_quota(
-    event: EventType,
+    event: UsageQuotaEvent,
     customersdot_url: str,
     user: str | None = None,
     token: str | None = None,
@@ -41,7 +41,7 @@ async def abort_route_interceptor(
     return
 
 
-def _process_stream(func: Callable, service: UsageQuotaService, event: EventType):
+def _process_stream(func: Callable, service: UsageQuotaService, event: UsageQuotaEvent):
     if func.__name__ != contract_pb2_grpc.DuoWorkflowServicer.ExecuteWorkflow.__name__:
         raise TypeError(f"unsupported method to intercept '{func.__qualname__}'")
 
@@ -80,7 +80,7 @@ def _process_stream(func: Callable, service: UsageQuotaService, event: EventType
     return wrapper
 
 
-def _process_unary(func: Callable, service: UsageQuotaService, event: EventType):
+def _process_unary(func: Callable, service: UsageQuotaService, event: UsageQuotaEvent):
     @functools.wraps(func)
     async def wrapper(
         obj,

@@ -5,7 +5,7 @@ import pytest
 from lib.billing_events.context import UsageQuotaEventContext
 from lib.events.base import GLReportingEventContext
 from lib.internal_events.context import EventContext
-from lib.usage_quota import EventType, InsufficientCredits, UsageQuotaService
+from lib.usage_quota import InsufficientCredits, UsageQuotaEvent, UsageQuotaService
 from lib.usage_quota.errors import (
     UsageQuotaConnectionError,
     UsageQuotaHTTPError,
@@ -102,7 +102,9 @@ class TestQuotaEnforcement:
         )
 
         # Should not raise any exception and not call check_quota_available
-        await service.execute(gl_context, EventType.CODE_SUGGESTIONS_CODE_COMPLETIONS)
+        await service.execute(
+            gl_context, UsageQuotaEvent.CODE_SUGGESTIONS_CODE_COMPLETIONS
+        )
 
     @pytest.mark.asyncio
     async def test_authorized_request_continues(self, service, gl_context):
@@ -115,7 +117,7 @@ class TestQuotaEnforcement:
         ):
             # Should not raise any exception
             await service.execute(
-                gl_context, EventType.CODE_SUGGESTIONS_CODE_COMPLETIONS
+                gl_context, UsageQuotaEvent.CODE_SUGGESTIONS_CODE_COMPLETIONS
             )
 
     @pytest.mark.asyncio
@@ -129,7 +131,7 @@ class TestQuotaEnforcement:
         ):
             with pytest.raises(InsufficientCredits):
                 await service.execute(
-                    gl_context, EventType.CODE_SUGGESTIONS_CODE_COMPLETIONS
+                    gl_context, UsageQuotaEvent.CODE_SUGGESTIONS_CODE_COMPLETIONS
                 )
 
 
@@ -140,12 +142,12 @@ class TestEventTypeHandling:
     @pytest.mark.parametrize(
         "event_type",
         [
-            EventType.CODE_SUGGESTIONS_CODE_COMPLETIONS,
-            EventType.CODE_SUGGESTIONS_CODE_GENERATIONS,
-            EventType.DUO_CHAT_CLASSIC,
-            EventType.DUO_AGENT_PLATFORM_FLOW_ON_EXECUTE,
-            EventType.AMAZON_Q_INTEGRATION,
-            EventType.AI_GATEWAY_PROXY_USE,
+            UsageQuotaEvent.CODE_SUGGESTIONS_CODE_COMPLETIONS,
+            UsageQuotaEvent.CODE_SUGGESTIONS_CODE_GENERATIONS,
+            UsageQuotaEvent.DUO_CHAT_CLASSIC,
+            UsageQuotaEvent.DAP_FLOW_ON_EXECUTE,
+            UsageQuotaEvent.AMAZON_Q_INTEGRATION,
+            UsageQuotaEvent.AIGW_PROXY_USE,
         ],
     )
     async def test_handles_all_event_types(self, service, gl_context, event_type):
@@ -172,7 +174,7 @@ class TestContextExtension:
             return_value=True,
         ) as mock_check:
             await service.execute(
-                gl_context, EventType.CODE_SUGGESTIONS_CODE_COMPLETIONS
+                gl_context, UsageQuotaEvent.CODE_SUGGESTIONS_CODE_COMPLETIONS
             )
 
             # Verify check_quota_available was called with extended context
@@ -182,7 +184,7 @@ class TestContextExtension:
             assert isinstance(extended_context, UsageQuotaEventContext)
             assert (
                 extended_context.event_type
-                == EventType.CODE_SUGGESTIONS_CODE_COMPLETIONS.value
+                == UsageQuotaEvent.CODE_SUGGESTIONS_CODE_COMPLETIONS.value
             )
             assert (
                 extended_context.feature_qualified_name
@@ -226,7 +228,7 @@ class TestFailOpenBehavior:
         ):
             # Should not raise exception (fail-open behavior)
             await service.execute(
-                gl_context, EventType.CODE_SUGGESTIONS_CODE_COMPLETIONS
+                gl_context, UsageQuotaEvent.CODE_SUGGESTIONS_CODE_COMPLETIONS
             )
 
         mock_metrics.labels.assert_called_once_with(result="fail_open", realm="saas")
@@ -249,7 +251,7 @@ class TestMetrics:
             patch("lib.usage_quota.service.USAGE_QUOTA_CHECK_TOTAL") as mock_metrics,
         ):
             await service.execute(
-                gl_context, EventType.CODE_SUGGESTIONS_CODE_COMPLETIONS
+                gl_context, UsageQuotaEvent.CODE_SUGGESTIONS_CODE_COMPLETIONS
             )
 
         mock_metrics.labels.assert_called_once_with(result="allow", realm="saas")
@@ -269,7 +271,7 @@ class TestMetrics:
         ):
             with pytest.raises(InsufficientCredits):
                 await service.execute(
-                    gl_context, EventType.CODE_SUGGESTIONS_CODE_COMPLETIONS
+                    gl_context, UsageQuotaEvent.CODE_SUGGESTIONS_CODE_COMPLETIONS
                 )
 
         mock_metrics.labels.assert_called_once_with(result="deny", realm="saas")
@@ -288,7 +290,7 @@ class TestMetrics:
             patch("lib.usage_quota.service.USAGE_QUOTA_CHECK_TOTAL") as mock_metrics,
         ):
             await service.execute(
-                gl_context, EventType.CODE_SUGGESTIONS_CODE_COMPLETIONS
+                gl_context, UsageQuotaEvent.CODE_SUGGESTIONS_CODE_COMPLETIONS
             )
 
         mock_metrics.labels.assert_called_once_with(result="fail_open", realm="saas")

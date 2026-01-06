@@ -8,19 +8,19 @@ from lib.usage_quota.client import UsageQuotaClient
 from lib.usage_quota.errors import UsageQuotaError
 
 __all__ = [
-    "EventType",
+    "UsageQuotaEvent",
     "InsufficientCredits",
     "UsageQuotaService",
 ]
 
 
-class EventType(StrEnum):
-    DUO_AGENT_PLATFORM_FLOW_ON_EXECUTE = "duo_agent_platform_workflow_on_execute"
+class UsageQuotaEvent(StrEnum):
+    DAP_FLOW_ON_EXECUTE = "duo_agent_platform_workflow_on_execute"
     CODE_SUGGESTIONS_CODE_GENERATIONS = "code_generations"
     CODE_SUGGESTIONS_CODE_COMPLETIONS = "code_completions"
     DUO_CHAT_CLASSIC = "duo_chat_classic"
     AMAZON_Q_INTEGRATION = "amazon_q_integration"
-    AI_GATEWAY_PROXY_USE = "ai_gateway_proxy_use"
+    AIGW_PROXY_USE = "ai_gateway_proxy_use"
 
 
 class InsufficientCredits(Exception):
@@ -43,7 +43,9 @@ class UsageQuotaService:
             customersdot_api_token=customersdot_api_token,
         )
 
-    async def execute(self, gl_context: GLReportingEventContext, event: EventType):
+    async def execute(
+        self, gl_context: GLReportingEventContext, event: UsageQuotaEvent
+    ):
         if not self.usage_quota_client.enabled:
             return
 

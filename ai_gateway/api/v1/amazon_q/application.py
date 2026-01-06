@@ -19,7 +19,7 @@ from ai_gateway.async_dependency_resolver import (
 )
 from ai_gateway.integrations.amazon_q.client import AmazonQClientFactory
 from lib.internal_events import InternalEventsClient
-from lib.usage_quota import EventType
+from lib.usage_quota import UsageQuotaEvent
 
 __all__ = [
     "router",
@@ -32,7 +32,7 @@ router = APIRouter()
 @feature_category(GitLabFeatureCategory.DUO_CHAT)
 @has_sufficient_usage_quota(
     feature_qualified_name="amazon_q_integration",
-    event=EventType.AMAZON_Q_INTEGRATION,
+    event=UsageQuotaEvent.AMAZON_Q_INTEGRATION,
 )
 async def oauth_create_application(
     request: Request,  # pylint: disable=unused-argument
@@ -61,7 +61,7 @@ async def oauth_create_application(
 @feature_category(GitLabFeatureCategory.DUO_CHAT)
 @has_sufficient_usage_quota(
     feature_qualified_name="amazon_q_integration",
-    event=EventType.AMAZON_Q_INTEGRATION,
+    event=UsageQuotaEvent.AMAZON_Q_INTEGRATION,
 )
 async def oauth_delete_application(
     request: Request,  # pylint: disable=unused-argument
@@ -90,7 +90,7 @@ async def oauth_delete_application(
 @feature_category(GitLabFeatureCategory.DUO_CHAT)
 @has_sufficient_usage_quota(
     feature_qualified_name="amazon_q_integration",
-    event=EventType.AMAZON_Q_INTEGRATION,
+    event=UsageQuotaEvent.AMAZON_Q_INTEGRATION,
 )
 async def validate_auth_app(
     request: Request,  # pylint: disable=unused-argument
