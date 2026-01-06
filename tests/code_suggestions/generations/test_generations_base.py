@@ -28,7 +28,7 @@ from ai_gateway.models.base_text import (
 from ai_gateway.safety_attributes import SafetyAttributes
 from ai_gateway.tracking.instrumentator import SnowplowInstrumentator
 from ai_gateway.tracking.snowplow import SnowplowEvent, SnowplowEventContext
-from lib.billing_events.client import BillingEventsClient
+from lib.billing_events import BillingEvent, BillingEventsClient
 
 
 class InstrumentorMock(Mock):
@@ -486,7 +486,7 @@ class TestCodeGeneration:
         # Verify billing event was tracked with correct parameters
         mock_billing_client.track_billing_event.assert_called_once_with(
             user=mock_user,
-            event_type="code_generations",
+            event=BillingEvent.CODE_SUGGESTIONS_CODE_GENERATIONS,
             category="CodeGenerations",
             unit_of_measure="request",
             quantity=1,
@@ -495,6 +495,8 @@ class TestCodeGeneration:
                 "llm_operations": [
                     {"model_id": "test-model-id", "completion_tokens": 25}
                 ],
+                "feature_qualified_name": "code_suggestions",
+                "feature_ai_catalog_item": False,
             },
         )
 
@@ -667,7 +669,7 @@ class TestCodeGeneration:
         # Should still track billing event even with 0 tokens for consistency
         mock_billing_client.track_billing_event.assert_called_once_with(
             user=mock_user,
-            event_type="code_generations",
+            event=BillingEvent.CODE_SUGGESTIONS_CODE_GENERATIONS,
             category="CodeGenerations",
             unit_of_measure="request",
             quantity=1,
@@ -676,6 +678,8 @@ class TestCodeGeneration:
                 "llm_operations": [
                     {"model_id": "test-model-id", "completion_tokens": 0}
                 ],
+                "feature_qualified_name": "code_suggestions",
+                "feature_ai_catalog_item": False,
             },
         )
 
@@ -707,7 +711,7 @@ class TestCodeGeneration:
         # Verify billing event was tracked
         mock_billing_client.track_billing_event.assert_called_once_with(
             user=mock_user,
-            event_type="code_generations",
+            event=BillingEvent.CODE_SUGGESTIONS_CODE_GENERATIONS,
             category="CodeGenerations",
             unit_of_measure="request",
             quantity=1,
@@ -716,6 +720,8 @@ class TestCodeGeneration:
                 "llm_operations": [
                     {"model_id": "test-model-id", "completion_tokens": 25}
                 ],
+                "feature_qualified_name": "code_suggestions",
+                "feature_ai_catalog_item": False,
             },
         )
 
@@ -751,7 +757,7 @@ class TestCodeGeneration:
         # The billing event is tracked in the finally block of _handle_stream
         mock_billing_client.track_billing_event.assert_called_once_with(
             user=mock_user,
-            event_type="code_generations",
+            event=BillingEvent.CODE_SUGGESTIONS_CODE_GENERATIONS,
             category="CodeGenerations",
             unit_of_measure="request",
             quantity=1,
@@ -760,5 +766,7 @@ class TestCodeGeneration:
                 "llm_operations": [
                     {"model_id": "test-model-id", "completion_tokens": 55}
                 ],
+                "feature_qualified_name": "code_suggestions",
+                "feature_ai_catalog_item": False,
             },
         )

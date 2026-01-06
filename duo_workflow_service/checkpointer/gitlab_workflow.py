@@ -67,7 +67,7 @@ from duo_workflow_service.tracking.errors import log_exception
 from duo_workflow_service.workflows.type_definitions import (
     AIO_CANCEL_STOP_WORKFLOW_REQUEST,
 )
-from lib.billing_events import BillingEventsClient
+from lib.billing_events import BillingEvent, BillingEventsClient
 from lib.events import GLReportingEventContext
 from lib.feature_flags import FeatureFlag, is_feature_enabled
 from lib.internal_events import InternalEventAdditionalProperties, InternalEventsClient
@@ -490,7 +490,7 @@ class GitLabWorkflow(
                 }
                 self._billing_event_client.track_billing_event(
                     user=user,
-                    event_type="duo_agent_platform_workflow_completion",
+                    event=BillingEvent.DAP_FLOW_ON_COMPLETION,
                     category=self.__class__.__name__,
                     unit_of_measure="request",
                     quantity=1,

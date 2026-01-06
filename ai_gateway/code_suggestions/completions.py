@@ -26,7 +26,8 @@ from ai_gateway.models.base_text import (
     TextGenModelChunk,
     TextGenModelOutput,
 )
-from lib.billing_events.client import BillingEventsClient
+from lib.billing_events import BillingEvent, BillingEventsClient
+from lib.events import FeatureQualifiedNameStatic, GLReportingEventContext
 
 __all__ = ["CodeCompletions"]
 
@@ -63,6 +64,10 @@ class CodeCompletions:
         """Track billing event for code completions."""
         if self.billing_event_client and user:
             try:
+                gl_event_context = GLReportingEventContext.from_static_name(
+                    FeatureQualifiedNameStatic.CODE_SUGGESTIONS
+                )
+
                 billing_metadata = {
                     "execution_environment": "code_completions",
                     "llm_operations": [
@@ -71,11 +76,13 @@ class CodeCompletions:
                             "completion_tokens": output_tokens,
                         }
                     ],
+                    "feature_qualified_name": gl_event_context.feature_qualified_name,
+                    "feature_ai_catalog_item": gl_event_context.feature_ai_catalog_item,
                 }
 
                 self.billing_event_client.track_billing_event(
                     user=user,
-                    event_type="code_completions",
+                    event=BillingEvent.CODE_SUGGESTIONS_CODE_COMPLETIONS,
                     category=self.__class__.__name__,
                     unit_of_measure="request",
                     quantity=1,

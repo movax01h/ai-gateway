@@ -5,6 +5,7 @@ from fastapi import Response
 
 from ai_gateway.api.v1.proxy.request import track_billing_event
 from ai_gateway.proxy.clients.token_usage import TokenUsage
+from lib.billing_events import BillingEvent
 
 
 @pytest.fixture
@@ -42,7 +43,7 @@ async def test_track_billing_event(mock_request, billing_event_client):
 
     billing_event_client.track_billing_event.assert_called_once_with(
         mock_request.user,
-        event_type="ai_gateway_proxy_use",
+        event=BillingEvent.AIGW_PROXY_USE,
         category="ai_gateway.api.v1.proxy.request",
         unit_of_measure="request",
         quantity=1,
@@ -81,12 +82,14 @@ async def test_track_billing_event_with_token_usage(
                 "completion_tokens": 50,
                 "total_tokens": 150,
             }
-        ]
+        ],
+        "feature_qualified_name": "ai_gateway_proxy_use",
+        "feature_ai_catalog_item": False,
     }
 
     billing_event_client.track_billing_event.assert_called_once_with(
         mock_request.user,
-        event_type="ai_gateway_proxy_use",
+        event=BillingEvent.AIGW_PROXY_USE,
         category="ai_gateway.api.v1.proxy.request",
         unit_of_measure="request",
         quantity=1,
@@ -131,12 +134,14 @@ async def test_track_billing_event_with_cache_tokens(
                 "cache_creation_input_tokens": 20,
                 "cache_read_input_tokens": 30,
             }
-        ]
+        ],
+        "feature_qualified_name": "ai_gateway_proxy_use",
+        "feature_ai_catalog_item": False,
     }
 
     billing_event_client.track_billing_event.assert_called_once_with(
         mock_request.user,
-        event_type="ai_gateway_proxy_use",
+        event=BillingEvent.AIGW_PROXY_USE,
         category="ai_gateway.api.v1.proxy.request",
         unit_of_measure="request",
         quantity=1,
@@ -176,7 +181,7 @@ async def test_track_billing_event_with_non_200_status(
     # Should not include metadata for non-200 responses
     billing_event_client.track_billing_event.assert_called_once_with(
         mock_request.user,
-        event_type="ai_gateway_proxy_use",
+        event=BillingEvent.AIGW_PROXY_USE,
         category="ai_gateway.api.v1.proxy.request",
         unit_of_measure="request",
         quantity=1,
@@ -218,12 +223,14 @@ async def test_track_billing_event_with_openai_format(
                 "completion_tokens": 1024,
                 "total_tokens": 1062,
             }
-        ]
+        ],
+        "feature_qualified_name": "ai_gateway_proxy_use",
+        "feature_ai_catalog_item": False,
     }
 
     billing_event_client.track_billing_event.assert_called_once_with(
         mock_request.user,
-        event_type="ai_gateway_proxy_use",
+        event=BillingEvent.AIGW_PROXY_USE,
         category="ai_gateway.api.v1.proxy.request",
         unit_of_measure="request",
         quantity=1,
@@ -269,12 +276,14 @@ async def test_track_billing_event_with_openai_cached_tokens(
                 "total_tokens": 150,
                 "cache_read_input_tokens": 30,
             }
-        ]
+        ],
+        "feature_qualified_name": "ai_gateway_proxy_use",
+        "feature_ai_catalog_item": False,
     }
 
     billing_event_client.track_billing_event.assert_called_once_with(
         mock_request.user,
-        event_type="ai_gateway_proxy_use",
+        event=BillingEvent.AIGW_PROXY_USE,
         category="ai_gateway.api.v1.proxy.request",
         unit_of_measure="request",
         quantity=1,
@@ -326,12 +335,14 @@ async def test_track_billing_event_with_openai_reasoning_tokens(
                 "total_tokens": 1062,
                 "reasoning_tokens": 1024,  # Reasoning tokens are also tracked separately
             }
-        ]
+        ],
+        "feature_qualified_name": "ai_gateway_proxy_use",
+        "feature_ai_catalog_item": False,
     }
 
     billing_event_client.track_billing_event.assert_called_once_with(
         mock_request.user,
-        event_type="ai_gateway_proxy_use",
+        event=BillingEvent.AIGW_PROXY_USE,
         category="ai_gateway.api.v1.proxy.request",
         unit_of_measure="request",
         quantity=1,

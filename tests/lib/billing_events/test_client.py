@@ -6,7 +6,7 @@ import pytest
 from gitlab_cloud_connector import CloudConnectorUser, UserClaims
 from snowplow_tracker import SelfDescribingJson, Snowplow
 
-from lib.billing_events.client import BillingEventsClient
+from lib.billing_events import BillingEvent, BillingEventsClient
 from lib.feature_flags import FeatureFlag, current_feature_flag_context
 from lib.internal_events.client import InternalEventsClient
 from lib.internal_events.context import (
@@ -124,10 +124,10 @@ class TestBillingEventsClient:
         assert len(tracker_args["emitters"]) == 1
 
     @pytest.mark.parametrize(
-        "event_type, unit_of_measure, quantity, metadata, category, kwargs",
+        "event, unit_of_measure, quantity, metadata, category, kwargs",
         [
             (
-                "ai_completion",
+                BillingEvent.AIGW_PROXY_USE,
                 "tokens",
                 100.0,
                 None,
@@ -135,7 +135,7 @@ class TestBillingEventsClient:
                 {},
             ),
             (
-                "code_suggestions",
+                BillingEvent.CODE_SUGGESTIONS_CODE_COMPLETIONS,
                 "requests",
                 5.0,
                 {"model": "claude-3", "feature": "completion"},
@@ -143,7 +143,7 @@ class TestBillingEventsClient:
                 {"project_id": 123, "namespace_id": 456},
             ),
             (
-                "duo_chat",
+                BillingEvent.CODE_SUGGESTIONS_CODE_GENERATIONS,
                 "messages",
                 1.0,
                 {"session_id": "session-123"},
@@ -156,7 +156,7 @@ class TestBillingEventsClient:
         self,
         client,
         mock_dependencies,
-        event_type,
+        event,
         unit_of_measure,
         quantity,
         metadata,
@@ -187,7 +187,7 @@ class TestBillingEventsClient:
         expected_context_data = {
             **BASE_BILLING_CONTEXT_SCHEMA,
             "event_id": "12345678-1234-5678-9012-123456789012",
-            "event_type": event_type,
+            "event_type": event.value,
             "unit_of_measure": unit_of_measure,
             "quantity": quantity,
             "realm": "user",
@@ -208,7 +208,7 @@ class TestBillingEventsClient:
 
         client.track_billing_event(
             user=user,
-            event_type=event_type,
+            event=event,
             unit_of_measure=unit_of_measure,
             quantity=quantity,
             metadata=metadata,
@@ -219,7 +219,7 @@ class TestBillingEventsClient:
         mock_dependencies["structured_event_init"].assert_called_once()
 
         event_init_args = mock_dependencies["structured_event_init"].call_args[1]
-        assert event_init_args["action"] == event_type
+        assert event_init_args["action"] == event.value
 
         context = event_init_args["context"][0]
         assert isinstance(context, SelfDescribingJson)
@@ -242,7 +242,7 @@ class TestBillingEventsClient:
         try:
             client.track_billing_event(
                 user=user,
-                event_type="ai_completion",
+                event=BillingEvent.AIGW_PROXY_USE,
                 category=__name__,
                 unit_of_measure="tokens",
                 quantity=100.0,
@@ -254,7 +254,7 @@ class TestBillingEventsClient:
         with mock.patch.object(client.snowplow_tracker, "track") as mock_track:
             client.track_billing_event(
                 user=user,
-                event_type="ai_completion",
+                event=BillingEvent.AIGW_PROXY_USE,
                 category=__name__,
                 unit_of_measure="tokens",
                 quantity=-100.0,
@@ -267,7 +267,7 @@ class TestBillingEventsClient:
         with mock.patch.object(client.snowplow_tracker, "track") as mock_track:
             client.track_billing_event(
                 user=user,
-                event_type="ai_completion",
+                event=BillingEvent.AIGW_PROXY_USE,
                 category=__name__,
                 unit_of_measure="tokens",
                 quantity=100.0,
@@ -282,7 +282,7 @@ class TestBillingEventsClient:
 
         client.track_billing_event(
             user=user,
-            event_type="ai_completion",
+            event=BillingEvent.AIGW_PROXY_USE,
             category=__name__,
             unit_of_measure="tokens",
             quantity=100.0,
@@ -316,7 +316,7 @@ class TestBillingEventsClient:
 
         client.track_billing_event(
             user=user,
-            event_type="duo_workflow",
+            event=BillingEvent.DAP_FLOW_ON_COMPLETION,
             category=__name__,
             unit_of_measure="executions",
             quantity=1.0,
@@ -328,7 +328,7 @@ class TestBillingEventsClient:
         context = event_init_args["context"][0]
         billing_data = context.data
 
-        assert billing_data["event_type"] == "duo_workflow"
+        assert billing_data["event_type"] == BillingEvent.DAP_FLOW_ON_COMPLETION.value
         assert billing_data["realm"] == "project"
         assert billing_data["instance_id"] == "gitlab-instance-456"
         assert billing_data["subject"] == "user-456"
@@ -352,7 +352,7 @@ class TestBillingEventsClient:
             try:
                 client.track_billing_event(
                     user=user,
-                    event_type="ai_completion",
+                    event=BillingEvent.AIGW_PROXY_USE,
                     category=__name__,
                     unit_of_measure="tokens",
                     quantity=100.0,
@@ -365,12 +365,12 @@ class TestBillingEventsClient:
     ):
         """Test that internal_events_client.track_event is called with correct parameters."""
         current_feature_flag_context.set({FeatureFlag.DUO_USE_BILLING_ENDPOINT})
-        event_type = "ai_completion"
+        event = BillingEvent.AIGW_PROXY_USE
         category = "test_category"
 
         client.track_billing_event(
             user=user,
-            event_type=event_type,
+            event=event,
             category=category,
             unit_of_measure="tokens",
             quantity=100.0,
@@ -380,7 +380,7 @@ class TestBillingEventsClient:
             event_name="usage_billing_event",
             category=category,
             additional_properties=InternalEventAdditionalProperties(
-                property=event_type, label="12345678-1234-5678-9012-123456789012"
+                property=event.value, label="12345678-1234-5678-9012-123456789012"
             ),
         )
 
@@ -404,7 +404,7 @@ class TestBillingEventsClient:
 
             client.track_billing_event(
                 user=user,
-                event_type="ai_completion",
+                event=BillingEvent.AIGW_PROXY_USE,
                 category="test_category",
                 unit_of_measure="tokens",
                 quantity=100.0,
@@ -420,7 +420,7 @@ class TestBillingEventsClient:
 
         client.track_billing_event(
             user=user,
-            event_type="ai_completion",
+            event=BillingEvent.AIGW_PROXY_USE,
             category="test_category",
             unit_of_measure="tokens",
             quantity=100.0,

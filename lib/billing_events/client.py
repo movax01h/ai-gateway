@@ -1,5 +1,6 @@
 import uuid
 from datetime import datetime
+from enum import StrEnum
 from typing import Any, Dict, Optional
 
 import structlog
@@ -15,7 +16,14 @@ from lib.internal_events.context import (
     current_event_context,
 )
 
-__all__ = ["BillingEventsClient"]
+__all__ = ["BillingEventsClient", "BillingEvent"]
+
+
+class BillingEvent(StrEnum):
+    DAP_FLOW_ON_COMPLETION = "duo_agent_platform_workflow_completion"
+    AIGW_PROXY_USE = "ai_gateway_proxy_use"
+    CODE_SUGGESTIONS_CODE_COMPLETIONS = "code_completions"
+    CODE_SUGGESTIONS_CODE_GENERATIONS = "code_generations"
 
 
 class BillingEventsClient:
@@ -67,7 +75,7 @@ class BillingEventsClient:
     def track_billing_event(
         self,
         user: CloudConnectorUser,
-        event_type: str,
+        event: BillingEvent,
         category: str,
         unit_of_measure: str = "tokens",
         quantity: float = 1.0,
@@ -76,14 +84,14 @@ class BillingEventsClient:
         """Send billing event to Data Insights Platform.
 
         Args:
-            event_type: Name of billable event
-            unit_of_measure: The base unit used for measurement and billing (e.g., 'bytes', 'seconds', 'tokens').
-            quantity: Quantity of usage for this record.
-            metadata: Dictionary containing any additional key-value pairs for billing event.
-            category: The location where the billing event happened ideally classname which invoked the event.
-
-        Returns:
-            None
+            user: CloudConnectorUser object containing user claims and authentication information.
+            event: BillingEvent enum value representing the type of billable event (e.g., CODE_COMPLETIONS,
+                AIGW_PROXY_USE).
+            category: The location where the billing event occurred, ideally the class name which invoked the event.
+            unit_of_measure: The base unit used for measurement and billing (e.g., 'bytes', 'seconds', 'tokens',
+                'request'). Defaults to 'tokens'.
+            quantity: Quantity of usage for this record. Must be greater than 0. Defaults to 1.0.
+            metadata: Optional dictionary containing additional key-value pairs for the billing event context.
         """
         if not self.enabled:
             self._logger.debug("Billing events disabled")
@@ -93,7 +101,7 @@ class BillingEventsClient:
             self._logger.debug("DUO_USE_BILLING_ENDPOINT feature flag not enabled")
             return
 
-        self._logger.debug("Tracking billing event", event_type=event_type)
+        self._logger.debug("Tracking billing event", event_type=event.value)
 
         if quantity <= 0:
             self._logger.warning("Invalid quantity", quantity=quantity)
@@ -129,7 +137,7 @@ class BillingEventsClient:
 
         billing_context = BillingEventContext(
             event_id=event_id,
-            event_type=event_type,
+            event_type=event.value,
             unit_of_measure=unit_of_measure,
             quantity=quantity,
             metadata=metadata,
@@ -156,7 +164,7 @@ class BillingEventsClient:
                 )
             ],
             category=category,
-            action=event_type,
+            action=event.value,
         )
 
         try:
@@ -165,7 +173,7 @@ class BillingEventsClient:
 
             additional_properties = InternalEventAdditionalProperties(
                 label=event_id,
-                property=event_type,
+                property=event.value,
             )
             self.internal_event_client.track_event(
                 event_name="usage_billing_event",
