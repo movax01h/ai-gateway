@@ -6,6 +6,7 @@ from gitlab_cloud_connector import GitLabFeatureCategory
 
 from ai_gateway.api.auth_utils import StarletteUser, get_current_user
 from ai_gateway.api.feature_category import feature_category
+from ai_gateway.api.middleware.route import has_sufficient_usage_quota
 from ai_gateway.api.v1.amazon_q.typing import (
     ApplicationDeleteRequest,
     ApplicationRequest,
@@ -18,6 +19,7 @@ from ai_gateway.async_dependency_resolver import (
 )
 from ai_gateway.integrations.amazon_q.client import AmazonQClientFactory
 from lib.internal_events import InternalEventsClient
+from lib.usage_quota import EventType
 
 __all__ = [
     "router",
@@ -28,6 +30,10 @@ router = APIRouter()
 
 @router.post("/application")
 @feature_category(GitLabFeatureCategory.DUO_CHAT)
+@has_sufficient_usage_quota(
+    feature_qualified_name="amazon_q_integration",
+    event=EventType.AMAZON_Q_INTEGRATION,
+)
 async def oauth_create_application(
     request: Request,  # pylint: disable=unused-argument
     application_request: ApplicationRequest,
@@ -53,6 +59,10 @@ async def oauth_create_application(
 
 @router.post("/application/delete")
 @feature_category(GitLabFeatureCategory.DUO_CHAT)
+@has_sufficient_usage_quota(
+    feature_qualified_name="amazon_q_integration",
+    event=EventType.AMAZON_Q_INTEGRATION,
+)
 async def oauth_delete_application(
     request: Request,  # pylint: disable=unused-argument
     application_request: ApplicationDeleteRequest,
@@ -78,6 +88,10 @@ async def oauth_delete_application(
 
 @router.post("/application/verify")
 @feature_category(GitLabFeatureCategory.DUO_CHAT)
+@has_sufficient_usage_quota(
+    feature_qualified_name="amazon_q_integration",
+    event=EventType.AMAZON_Q_INTEGRATION,
+)
 async def validate_auth_app(
     request: Request,  # pylint: disable=unused-argument
     health_request: HealthRequest,

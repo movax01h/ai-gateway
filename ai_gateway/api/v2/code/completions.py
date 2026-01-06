@@ -14,6 +14,7 @@ from gitlab_cloud_connector import (
 from ai_gateway.api.auth_utils import StarletteUser, get_current_user
 from ai_gateway.api.error_utils import capture_validation_errors
 from ai_gateway.api.feature_category import feature_category
+from ai_gateway.api.middleware.route import has_sufficient_usage_quota
 from ai_gateway.api.snowplow_context import get_snowplow_code_suggestion_context
 from ai_gateway.api.v2.code.model_provider_handlers import (
     AnthropicHandler,
@@ -69,6 +70,7 @@ from ai_gateway.tracking.instrumentator import SnowplowInstrumentator
 from lib.feature_flags.context import current_feature_flag_context
 from lib.internal_events import InternalEventsClient
 from lib.prompts.caching import X_GITLAB_MODEL_PROMPT_CACHE_ENABLED
+from lib.usage_quota import EventType
 
 __all__ = [
     "router",
@@ -112,6 +114,10 @@ async def get_prompt_registry():
 @router.post("/code/completions")
 @feature_category(GitLabFeatureCategory.CODE_SUGGESTIONS)
 @capture_validation_errors()
+@has_sufficient_usage_quota(
+    feature_qualified_name="code_suggestions",
+    event=EventType.CODE_SUGGESTIONS_CODE_COMPLETIONS,
+)
 async def completions(
     request: Request,
     payload: CompletionsRequestWithVersion,
@@ -231,6 +237,10 @@ async def completions(
 @router.post("/code/generations")
 @feature_category(GitLabFeatureCategory.CODE_SUGGESTIONS)
 @capture_validation_errors()
+@has_sufficient_usage_quota(
+    feature_qualified_name="code_suggestions",
+    event=EventType.CODE_SUGGESTIONS_CODE_GENERATIONS,
+)
 async def generations(
     request: Request,
     payload: GenerationsRequestWithVersion,

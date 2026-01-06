@@ -5,6 +5,7 @@ from fastapi import APIRouter, BackgroundTasks, Depends, Request
 
 from ai_gateway.abuse_detection import AbuseDetector
 from ai_gateway.api.feature_category import X_GITLAB_UNIT_PRIMITIVE, feature_categories
+from ai_gateway.api.middleware.route import has_sufficient_usage_quota
 from ai_gateway.api.v1.proxy.request import (
     EXTENDED_FEATURE_CATEGORIES_FOR_PROXY_ENDPOINTS,
     authorize_with_unit_primitive_header,
@@ -20,6 +21,7 @@ from ai_gateway.async_dependency_resolver import (
 from ai_gateway.proxy.clients import OpenAIProxyClient
 from lib.billing_events.client import BillingEventsClient
 from lib.internal_events import InternalEventsClient
+from lib.usage_quota import EventType
 
 __all__ = [
     "router",
@@ -35,6 +37,9 @@ router = APIRouter()
 @track_billing_event
 @verify_project_namespace_metadata()
 @feature_categories(EXTENDED_FEATURE_CATEGORIES_FOR_PROXY_ENDPOINTS)
+@has_sufficient_usage_quota(
+    feature_qualified_name="ai_gateway_proxy_use", event=EventType.AI_GATEWAY_PROXY_USE
+)
 async def openai(
     request: Request,
     background_tasks: BackgroundTasks,  # pylint: disable=unused-argument

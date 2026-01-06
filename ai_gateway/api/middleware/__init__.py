@@ -21,7 +21,6 @@ from .headers import (
 )
 from .internal_event import InternalEventMiddleware
 from .model_config import ModelConfigMiddleware
-from .usage_quota import UsageQuotaMiddleware
 
 __all__ = [
     "AccessLogMiddleware",
@@ -30,7 +29,6 @@ __all__ = [
     "InternalEventMiddleware",
     "MiddlewareAuthentication",
     "ModelConfigMiddleware",
-    "UsageQuotaMiddleware",
     "X_GITLAB_CLIENT_NAME",
     "X_GITLAB_CLIENT_TYPE",
     "X_GITLAB_CLIENT_VERSION",

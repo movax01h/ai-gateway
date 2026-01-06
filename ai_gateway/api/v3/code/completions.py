@@ -13,6 +13,7 @@ from gitlab_cloud_connector import (
 from ai_gateway.api.auth_utils import StarletteUser, get_current_user
 from ai_gateway.api.feature_category import feature_category
 from ai_gateway.api.middleware import X_GITLAB_LANGUAGE_SERVER_VERSION
+from ai_gateway.api.middleware.route import has_sufficient_usage_quota
 from ai_gateway.api.snowplow_context import get_snowplow_code_suggestion_context
 from ai_gateway.api.v3.code.typing import (
     CodeContextPayload,
@@ -48,6 +49,7 @@ from ai_gateway.prompts import BasePromptRegistry
 from ai_gateway.structured_logging import get_request_logger
 from ai_gateway.tracking import SnowplowEventContext
 from lib.feature_flags.context import current_feature_flag_context
+from lib.usage_quota import EventType
 
 __all__ = [
     "router",
@@ -76,8 +78,24 @@ async def handle_stream(
     )
 
 
+async def get_event_type(payload: CompletionRequest) -> str:
+    """Determine event type from completion request payload."""
+    if not payload.prompt_components:
+        raise ValueError("No prompt components provided")
+    component = payload.prompt_components[0]
+    return (
+        EventType.CODE_SUGGESTIONS_CODE_COMPLETIONS
+        if component.type == CodeEditorComponents.COMPLETION
+        else EventType.CODE_SUGGESTIONS_CODE_GENERATIONS
+    )
+
+
 @router.post("/completions")
 @feature_category(GitLabFeatureCategory.CODE_SUGGESTIONS)
+@has_sufficient_usage_quota(
+    feature_qualified_name="code_suggestions",
+    event=get_event_type,
+)
 async def completions(
     request: Request,
     payload: CompletionRequest,

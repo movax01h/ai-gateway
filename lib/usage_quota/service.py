@@ -16,6 +16,11 @@ __all__ = [
 
 class EventType(StrEnum):
     DUO_AGENT_PLATFORM_FLOW_ON_EXECUTE = "duo_agent_platform_workflow_on_execute"
+    CODE_SUGGESTIONS_CODE_GENERATIONS = "code_generations"
+    CODE_SUGGESTIONS_CODE_COMPLETIONS = "code_completions"
+    DUO_CHAT_CLASSIC = "duo_chat_classic"
+    AMAZON_Q_INTEGRATION = "amazon_q_integration"
+    AI_GATEWAY_PROXY_USE = "ai_gateway_proxy_use"
 
 
 class InsufficientCredits(Exception):
@@ -38,7 +43,7 @@ class UsageQuotaService:
             customersdot_api_token=customersdot_api_token,
         )
 
-    async def execute(self, _context: GLReportingEventContext, _event: EventType):
+    async def execute(self, gl_context: GLReportingEventContext, event: EventType):
         if not self.usage_quota_client.enabled:
             return
 
@@ -47,9 +52,18 @@ class UsageQuotaService:
             event_context
         )
 
+        # Extend usage_quota_event_context with GLReportingEventContext attributes
+        extended_context = usage_quota_event_context.model_copy(
+            update={
+                "event_type": event.value,
+                "feature_qualified_name": gl_context.feature_qualified_name,
+                "feature_ai_catalog_item": gl_context.feature_ai_catalog_item,
+            }
+        )
+
         try:
             is_quota_available = await self.usage_quota_client.check_quota_available(
-                usage_quota_event_context
+                extended_context
             )
         except UsageQuotaError:
             USAGE_QUOTA_CHECK_TOTAL.labels(

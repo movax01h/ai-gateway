@@ -69,6 +69,9 @@ class UsageQuotaEventContext(BaseModel):
     deployment_type: Optional[str] = None
     feature_enablement_type: Optional[str] = None
     correlation_id: Optional[str] = None
+    event_type: Optional[str] = None
+    feature_qualified_name: Optional[str] = None
+    feature_ai_catalog_item: Optional[bool] = None
 
     @classmethod
     def from_internal_event(cls, internal_event_context: EventContext) -> Self:

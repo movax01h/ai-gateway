@@ -12,12 +12,14 @@ from gitlab_cloud_connector import (
 
 from ai_gateway.api.auth_utils import StarletteUser, get_current_user
 from ai_gateway.api.feature_category import feature_category
+from ai_gateway.api.middleware.route import has_sufficient_usage_quota
 from ai_gateway.api.v1.code.typing import Token
 from ai_gateway.async_dependency_resolver import (
     get_internal_event_client,
     get_token_authority,
 )
 from lib.internal_events import InternalEventsClient
+from lib.usage_quota import EventType
 
 __all__ = [
     "router",
@@ -31,6 +33,10 @@ router = APIRouter()
 
 @router.post("/user_access_token")
 @feature_category(GitLabFeatureCategory.CODE_SUGGESTIONS)
+@has_sufficient_usage_quota(
+    feature_qualified_name="code_suggestions",
+    event=EventType.CODE_SUGGESTIONS_CODE_COMPLETIONS,
+)
 async def user_access_token(
     request: Request,  # pylint: disable=unused-argument
     current_user: Annotated[StarletteUser, Depends(get_current_user)],

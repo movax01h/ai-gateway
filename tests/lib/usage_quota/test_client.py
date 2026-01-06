@@ -475,15 +475,16 @@ class TestErrorHandling:
         self,
         usage_quota_client: UsageQuotaClient,
         usage_quota_context: UsageQuotaEventContext,
-        mock_http_client: AsyncMock,
     ):
         """Should preserve the original exception in UsageQuotaTimeoutError."""
+        await usage_quota_client.check_quota_available.cache.clear()
         original_error = httpx.TimeoutException("Original timeout")
+        mock_http_client = AsyncMock()
+        mock_http_client.__aenter__ = AsyncMock(return_value=mock_http_client)
+        mock_http_client.__aexit__ = AsyncMock(return_value=None)
+        mock_http_client.head = AsyncMock(side_effect=original_error)
 
-        with patch("httpx.AsyncClient") as mock_client_class:
-            mock_http_client.head = AsyncMock(side_effect=original_error)
-            mock_client_class.return_value = mock_http_client
-
+        with patch("httpx.AsyncClient", return_value=mock_http_client):
             with pytest.raises(UsageQuotaTimeoutError) as exc_info:
                 await usage_quota_client.check_quota_available(usage_quota_context)
 
