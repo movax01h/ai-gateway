@@ -370,14 +370,6 @@ configurable_unit_primitives:
       - "claude_sonnet_4_20250514"
       - "claude_sonnet_4_20250514_vertex"
       - "claude_sonnet_4_5_20250929"
-  - feature_setting: "resolve_sast_check_false_positive"
-    unit_primitives:
-      - "duo_agent_platform"
-    default_model: "claude_sonnet_4_20250514_vertex"
-    selectable_models:
-      - "claude_sonnet_4_20250514"
-      - "claude_sonnet_4_20250514_vertex"
-      - "claude_sonnet_4_5_20250929"
   - feature_setting: "sast_post_results_to_gitlab_agent_prompt"
     unit_primitives: []
     default_model: "claude_sonnet_4_5_20250929"
@@ -495,3 +487,19 @@ configurable_unit_primitives:
     selectable_models:
       - "claude_sonnet_4_20250514"
       - "claude_sonnet_4_20250514_vertex"
+  - feature_setting: "validate_sast_fix_has_changes"
+    unit_primitives:
+      - "duo_agent_platform"
+    default_model: "claude_sonnet_4_20250514_vertex"
+    selectable_models:
+      - "claude_sonnet_4_20250514"
+      - "claude_sonnet_4_20250514_vertex"
+      - "claude_sonnet_4_5_20250929"
+  - feature_setting: "check_sast_false_positive_status"
+    unit_primitives:
+      - "duo_agent_platform"
+    default_model: "claude_sonnet_4_20250514_vertex"
+    selectable_models:
+      - "claude_sonnet_4_20250514"
+      - "claude_sonnet_4_20250514_vertex"
+      - "claude_sonnet_4_5_20250929"

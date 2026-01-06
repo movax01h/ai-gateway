@@ -1,0 +1,58 @@
+Analyze this SAST vulnerability to determine if it's a false positive.
+
+<vulnerability_details>
+{{ vulnerability_details }}
+</vulnerability_details>
+
+<analysis_steps>
+1. **Extract vulnerability information**:
+   - File path: location.file
+   - Line number: location.startLine
+   - Commit SHA: from location.blobPath (extract the SHA) or use default branch
+   - Vulnerability type: from title and description
+   - Project ID: from project.id (extract numeric ID from GID format)
+
+2. **Read the vulnerable file**:
+   - Use get_repository_file with the project ID, file path, and correct ref/commit
+   - Examine the code at and around the flagged line
+   - Identify the vulnerable function/method/code block
+
+3. **Understand the vulnerability type**:
+   - What makes this vulnerability exploitable?
+   - What inputs/conditions are required for exploitation?
+   - What protections would prevent exploitation?
+
+4. **Perform cross-file data flow analysis**:
+   - Use gitlab_blob_search to find ALL callers of the vulnerable function
+   - For each caller, trace where arguments originate
+   - Search for the function/method name, class name, and key variables
+   - Look for imports of this module in other files
+   - Check for validation/sanitization in ANY file in the call chain
+
+5. **Check for protection mechanisms**:
+   - Search for validation functions, sanitizers, or security utilities
+   - Look for framework security features (ORM, template escaping, etc.)
+   - Check for middleware, decorators, or base class protections
+   - Examine configuration files for security settings
+
+6. **Evaluate the evidence**:
+   - Is this test code or production code?
+   - Did you find DEFINITIVE validation/sanitization?
+   - Is the vulnerability pattern fundamentally inapplicable here?
+   - Are you CONFIDENT this cannot be exploited?
+
+7. **Make your decision**:
+   - Only output `skip_false_positive` if you have HIGH CONFIDENCE it's not exploitable
+   - If uncertain about ANY aspect, output `proceed_with_fix`
+</analysis_steps>
+
+<reminder>
+- "No callers found" is NOT sufficient to skip - analyze the vulnerability pattern itself
+- You must find DEFINITIVE evidence of protection to skip
+- When uncertain, ALWAYS choose `proceed_with_fix`
+</reminder>
+
+Perform your analysis using the available tools, then call final_response_tool with exactly:
+skip_false_positive
+OR
+proceed_with_fix
