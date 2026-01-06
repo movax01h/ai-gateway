@@ -1,6 +1,20 @@
+from enum import StrEnum
 from typing import Self
 
 from duo_workflow_service.agent_platform.utils import parse_workflow_definition
+
+
+class FeatureQualifiedNameStatic(StrEnum):
+    """Billing, UsageQuota, and GLReportingEventContext are used both in the AIGW and DWS code bases.
+
+    In the DWS code base, we define the feature name based on the passed workflow definition. However, in the AIGW code
+    base, we define these feature names as static since no other information is provided by Rails.
+    """
+
+    CODE_SUGGESTIONS = "code_suggestions"
+    AMAZON_Q_INTEGRATION = "amazon_q_integration"
+    DUO_CHAT_CLASSIC = "duo_chat_classic"
+    AIGW_PROXY_USE = "ai_gateway_proxy_use"
 
 
 class GLReportingEventContext:
@@ -10,6 +24,7 @@ class GLReportingEventContext:
     - Legacy workflow types (e.g., "software_development", "chat")
     - Flow Registry definitions with versioning (e.g., "my_flow/v1")
     - AI Catalog items (flows with flow_config)
+    - Static feature names (e.g., "code_suggestions", "duo_chat_classic")
 
     The class maintains backward compatibility with CategoryEnum through the `value` property, which returns the
     legacy workflow type string that can be used in places expecting CategoryEnum values.
@@ -30,6 +45,15 @@ class GLReportingEventContext:
             'my_flow'
             >>> context.feature_qualified_name
             'my_flow/v1'
+            >>> context.feature_ai_catalog_item
+            False
+
+        Static feature name:
+            >>> context = GLReportingEventContext.from_static_name(FeatureQualifiedNameStatic.CODE_SUGGESTIONS)
+            >>> context.value
+            'code_suggestions'
+            >>> context.feature_qualified_name
+            'code_suggestions'
             >>> context.feature_ai_catalog_item
             False
     """
@@ -116,3 +140,19 @@ class GLReportingEventContext:
             new_flow_type = value
 
         return cls(legacy_workflow_type, new_flow_type, has_flow_config)
+
+    @classmethod
+    def from_static_name(cls, name: FeatureQualifiedNameStatic) -> Self:
+        """Create a GLReportingEventContext from a static feature name.
+
+        This factory method is used in the AI Gateway code base where feature names are predefined
+        and static, as opposed to the Duo Workflow Service where they're derived from workflow definitions.
+
+        Args:
+            name: A static feature name enum value (e.g., CODE_SUGGESTIONS, DUO_CHAT_CLASSIC).
+
+        Returns:
+            A GLReportingEventContext instance with the static name used for both legacy and qualified names,
+            and marked as not being an AI Catalog item.
+        """
+        return cls(name.value, name.value, False)

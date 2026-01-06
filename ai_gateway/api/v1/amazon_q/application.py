@@ -18,6 +18,7 @@ from ai_gateway.async_dependency_resolver import (
     get_internal_event_client,
 )
 from ai_gateway.integrations.amazon_q.client import AmazonQClientFactory
+from lib.events import FeatureQualifiedNameStatic
 from lib.internal_events import InternalEventsClient
 from lib.usage_quota import UsageQuotaEvent
 
@@ -31,7 +32,7 @@ router = APIRouter()
 @router.post("/application")
 @feature_category(GitLabFeatureCategory.DUO_CHAT)
 @has_sufficient_usage_quota(
-    feature_qualified_name="amazon_q_integration",
+    feature_qualified_name=FeatureQualifiedNameStatic.AMAZON_Q_INTEGRATION,
     event=UsageQuotaEvent.AMAZON_Q_INTEGRATION,
 )
 async def oauth_create_application(
@@ -60,7 +61,7 @@ async def oauth_create_application(
 @router.post("/application/delete")
 @feature_category(GitLabFeatureCategory.DUO_CHAT)
 @has_sufficient_usage_quota(
-    feature_qualified_name="amazon_q_integration",
+    feature_qualified_name=FeatureQualifiedNameStatic.AMAZON_Q_INTEGRATION,
     event=UsageQuotaEvent.AMAZON_Q_INTEGRATION,
 )
 async def oauth_delete_application(
@@ -89,7 +90,7 @@ async def oauth_delete_application(
 @router.post("/application/verify")
 @feature_category(GitLabFeatureCategory.DUO_CHAT)
 @has_sufficient_usage_quota(
-    feature_qualified_name="amazon_q_integration",
+    feature_qualified_name=FeatureQualifiedNameStatic.AMAZON_Q_INTEGRATION,
     event=UsageQuotaEvent.AMAZON_Q_INTEGRATION,
 )
 async def validate_auth_app(

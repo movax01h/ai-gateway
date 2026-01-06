@@ -48,6 +48,7 @@ from ai_gateway.models import KindModelProvider
 from ai_gateway.prompts import BasePromptRegistry
 from ai_gateway.structured_logging import get_request_logger
 from ai_gateway.tracking import SnowplowEventContext
+from lib.events import FeatureQualifiedNameStatic
 from lib.feature_flags.context import current_feature_flag_context
 from lib.usage_quota import UsageQuotaEvent
 
@@ -93,7 +94,7 @@ async def get_event_type(payload: CompletionRequest) -> str:
 @router.post("/completions")
 @feature_category(GitLabFeatureCategory.CODE_SUGGESTIONS)
 @has_sufficient_usage_quota(
-    feature_qualified_name="code_suggestions",
+    feature_qualified_name=FeatureQualifiedNameStatic.CODE_SUGGESTIONS,
     event=get_event_type,
 )
 async def completions(

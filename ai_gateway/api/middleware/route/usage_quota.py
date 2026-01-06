@@ -4,12 +4,12 @@ from typing import Any, Callable, Optional
 from starlette.requests import Request
 from starlette.responses import JSONResponse
 
-from lib.events import GLReportingEventContext
+from lib.events import FeatureQualifiedNameStatic, GLReportingEventContext
 from lib.usage_quota import InsufficientCredits, UsageQuotaEvent
 
 
 def has_sufficient_usage_quota(
-    feature_qualified_name: str,
+    feature_qualified_name: FeatureQualifiedNameStatic,
     event: UsageQuotaEvent | Callable[[Any], Any],
 ):
     """Decorator to enforce usage quota checks on API routes.
@@ -19,11 +19,11 @@ def has_sufficient_usage_quota(
     and returns a 402 response if the user has insufficient credits.
 
     Args:
-        feature_qualified_name: The feature name for this endpoint
-            (e.g., "code_suggestions"). Required parameter.
-        event: Either an EventType enum value or a callable that resolves
+        feature_qualified_name: A static feature name enum value for this endpoint
+            (e.g., FeatureQualifiedNameStatic.CODE_SUGGESTIONS). Required parameter.
+        event: Either a UsageQuotaEvent enum value or a callable that resolves
             the event type from the request payload. The callable can be
-            sync or async and should return an EventType.
+            sync or async and should return a UsageQuotaEvent.
 
     Returns:
         A decorator function that wraps the route handler
@@ -74,7 +74,7 @@ def _insufficient_credits_response() -> JSONResponse:
 
 def _process_route(
     func: Callable,
-    feature_qualified_name: str,
+    feature_qualified_name: FeatureQualifiedNameStatic,
     event: Optional[UsageQuotaEvent],
     event_type_resolver: Optional[Callable[[Any], Any]],
 ) -> Callable:
@@ -90,7 +90,7 @@ def _process_route(
         )
         event_to_use = resolved_event if resolved_event else event
 
-        gl_reporting_context = GLReportingEventContext.from_workflow_definition(
+        gl_reporting_context = GLReportingEventContext.from_static_name(
             feature_qualified_name
         )
 

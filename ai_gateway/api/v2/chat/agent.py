@@ -33,6 +33,7 @@ from ai_gateway.model_metadata import current_model_metadata_context
 from ai_gateway.models import Role
 from ai_gateway.prompts import BasePromptRegistry
 from ai_gateway.structured_logging import get_request_logger
+from lib.events import FeatureQualifiedNameStatic
 from lib.internal_events import InternalEventsClient
 from lib.usage_quota import UsageQuotaEvent
 
@@ -158,7 +159,7 @@ async def create_event_stream(
 @router.post("/agent")
 @feature_category(GitLabFeatureCategory.DUO_CHAT)
 @has_sufficient_usage_quota(
-    feature_qualified_name="duo_chat_classic",
+    feature_qualified_name=FeatureQualifiedNameStatic.DUO_CHAT_CLASSIC,
     event=UsageQuotaEvent.DUO_CHAT_CLASSIC,
 )
 async def chat(

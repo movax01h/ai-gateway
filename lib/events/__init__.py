@@ -1,3 +1,3 @@
-from lib.events.base import GLReportingEventContext
+from lib.events.base import FeatureQualifiedNameStatic, GLReportingEventContext
 
-__all__ = ["GLReportingEventContext"]
+__all__ = ["GLReportingEventContext", "FeatureQualifiedNameStatic"]
