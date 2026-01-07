@@ -7,10 +7,7 @@ from pydantic import BaseModel, Field
 from duo_workflow_service.gitlab.gitlab_api import Project
 from duo_workflow_service.gitlab.http_client import GitlabHttpClient, GitLabHttpResponse
 from duo_workflow_service.gitlab.url_parser import GitLabUrlParseError, GitLabUrlParser
-from duo_workflow_service.security.tool_output_security import (
-    ToolTrustLevel,
-    wrap_tool_output_with_security,
-)
+from duo_workflow_service.security.tool_output_security import ToolTrustLevel
 from duo_workflow_service.tools.tool_output_manager import (
     TruncationConfig,
     truncate_tool_response,
@@ -108,10 +105,6 @@ class DuoBaseTool(BaseTool):
             tool_name=self.name,
             truncation_config=self.truncation_config,
         )
-
-        # Apply security wrapping for untrusted content
-        if self.trust_level != ToolTrustLevel.TRUSTED_INTERNAL:
-            tool_response = wrap_tool_output_with_security(tool_response, self)
 
         return tool_response
 
