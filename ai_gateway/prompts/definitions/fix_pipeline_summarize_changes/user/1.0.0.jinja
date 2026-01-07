@@ -11,3 +11,5 @@ Add this text to the bottom of the summary:
 <text>
     Fixes [failing pipeline]({{pipeline_url}}){% if merge_request_url %} on {{merge_request_url}}{% endif %}<br><br>[Session {{ workflow_id }}]({{ session_url }})
 </text>
+
+Also assign user id `{{ reviewer_id }}` as the reviewer for the merge request
