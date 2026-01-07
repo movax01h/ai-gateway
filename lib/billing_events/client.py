@@ -8,7 +8,6 @@ from gitlab_cloud_connector import CloudConnectorUser
 from snowplow_tracker import AsyncEmitter, SelfDescribingJson, StructuredEvent, Tracker
 
 from lib.billing_events.context import BillingEventContext
-from lib.feature_flags import FeatureFlag, is_feature_enabled
 from lib.internal_events.client import InternalEventsClient
 from lib.internal_events.context import (
     EventContext,
@@ -95,10 +94,6 @@ class BillingEventsClient:
         """
         if not self.enabled:
             self._logger.debug("Billing events disabled")
-            return
-
-        if not is_feature_enabled(FeatureFlag.DUO_USE_BILLING_ENDPOINT):
-            self._logger.debug("DUO_USE_BILLING_ENDPOINT feature flag not enabled")
             return
 
         self._logger.debug("Tracking billing event", event_type=event.value)
