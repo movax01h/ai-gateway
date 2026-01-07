@@ -3,6 +3,8 @@ from typing import Optional
 
 from pydantic import BaseModel
 
+from duo_workflow_service.gitlab.gitlab_api import PromptInjectionProtectionLevel
+
 __all__ = ["MonitoringContext", "current_monitoring_context"]
 
 
@@ -13,6 +15,9 @@ class MonitoringContext(BaseModel):
     workflow_last_gitlab_status: Optional[str] = None
     tracing_enabled: Optional[str] = None
     use_ai_prompt_scanning: bool = False
+    prompt_injection_protection_level: PromptInjectionProtectionLevel = (
+        PromptInjectionProtectionLevel.LOG_ONLY
+    )
 
 
 current_monitoring_context: ContextVar[MonitoringContext] = ContextVar(

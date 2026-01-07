@@ -122,11 +122,25 @@ class ToolsExecutor:
                             "tool_name": tool_name,
                         },
                     )
-                    result["response"].content = (
-                        f"Security scan blocked the content from tool '{tool_name}'. "
-                        "The content was flagged as potentially malicious. "
-                        "Please try a different approach."
-                    )
+                    error_message = e.format_user_message(tool_name)
+                    result["response"].content = error_message
+                    # Replace success chat log with security error
+                    result["chat_logs"] = [
+                        UiChatLog(
+                            message_type=MessageTypeEnum.TOOL,
+                            message_sub_type=tool_name,
+                            content=f"Security error: {error_message}",
+                            timestamp=datetime.now(timezone.utc).isoformat(),
+                            status=ToolStatus.FAILURE,
+                            correlation_id=None,
+                            tool_info=ToolInfo(
+                                name=tool_name,
+                                args=tool_call.get("args", {}),
+                            ),
+                            additional_context=None,
+                            message_id=tool_call.get("id"),
+                        )
+                    ]
 
             chat_logs = result.get("chat_logs", [])
             if chat_logs and isinstance(chat_logs[0], dict):

@@ -35,6 +35,7 @@ from duo_workflow_service.gitlab.events import get_event
 from duo_workflow_service.gitlab.gitlab_api import (
     Namespace,
     Project,
+    PromptInjectionProtectionLevel,
     WorkflowConfig,
     empty_workflow_config,
     fetch_workflow_and_container_data,
@@ -240,6 +241,15 @@ class AbstractWorkflow(ABC):
                 await fetch_workflow_and_container_data(
                     client=self._http_client,
                     workflow_id=self._workflow_id,
+                )
+            )
+
+            # Update monitoring context with prompt injection protection level
+            monitoring_context = current_monitoring_context.get()
+            monitoring_context.prompt_injection_protection_level = (
+                self._workflow_config.get(
+                    "prompt_injection_protection_level",
+                    PromptInjectionProtectionLevel.LOG_ONLY,
                 )
             )
 
