@@ -24,6 +24,8 @@ from duo_workflow_service.entities.state import (
     WorkflowStatusEnum,
 )
 from duo_workflow_service.executor.outbox import Outbox
+from duo_workflow_service.security.prompt_scanner import DetectionType, ScanResult
+from duo_workflow_service.security.scanner_factory import PromptInjectionDetectedError
 from duo_workflow_service.tools import RunCommand, Toolset
 from duo_workflow_service.tools.planner import (
     AddNewTask,
@@ -36,7 +38,7 @@ from duo_workflow_service.tools.planner import (
 from duo_workflow_service.tools.toolset import ToolType
 from lib.events import GLReportingEventContext
 from lib.internal_events import InternalEventAdditionalProperties
-from lib.internal_events.event_enum import EventEnum, EventLabelEnum
+from lib.internal_events.event_enum import CategoryEnum, EventEnum, EventLabelEnum
 
 
 def mock_tool(
@@ -1440,3 +1442,68 @@ async def test_skip_agent_msg_false_adds_agent_message(
         ui_chat_log[1]["content"] == "Using test_tool: tasks=[{'description': 'step1'}]"
     )
     assert ui_chat_log[1]["message_id"] == "no-skip-agent-msg-tool-call"
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("mock_datetime")
+@patch("duo_workflow_service.agents.tools_executor.apply_security_scanning")
+@patch("duo_workflow_service.agents.tools_executor.log_exception")
+async def test_security_exception_creates_failure_ui_chat_log(
+    mock_log_exception,
+    mock_apply_security,
+    workflow_state,
+):
+    """SecurityException creates UiChatLog with ToolStatus.FAILURE."""
+    scan_result = ScanResult(
+        detected=True,
+        blocked=True,
+        detection_type=DetectionType.PROMPT_INJECTION,
+        details="Malicious content detected",
+    )
+    security_error = PromptInjectionDetectedError(scan_result, "test_tool")
+    mock_apply_security.side_effect = security_error
+
+    tool = mock_tool(name="test_tool", content="tool response")
+    mock_toolset = MagicMock(spec=Toolset)
+    mock_toolset.__contains__ = MagicMock(return_value=True)
+    mock_toolset.__getitem__ = MagicMock(return_value=tool)
+    mock_toolset.get = MagicMock(return_value=tool)
+
+    tools_executor = ToolsExecutor(
+        tools_agent_name="planner",
+        toolset=mock_toolset,
+        workflow_id="123",
+        workflow_type=CategoryEnum.WORKFLOW_SOFTWARE_DEVELOPMENT,
+    )
+
+    workflow_state["conversation_history"]["planner"] = [
+        AIMessage(
+            content=[{"type": "text", "text": "test"}],
+            tool_calls=[{"id": "sec-test-1", "name": "test_tool", "args": {}}],
+            id="ai-msg-security-test",
+        )
+    ]
+
+    result = await tools_executor.run(workflow_state)
+
+    # Verify security exception was logged
+    mock_log_exception.assert_called_once()
+
+    # Verify response content contains error message
+    assert (
+        "Security scan detected potentially malicious content"
+        in result[0]["conversation_history"]["planner"][0].content
+    )
+
+    # Verify UI chat log has failure status
+    update = cast(Command, result[-1]).update
+    ui_chat_logs = update["ui_chat_log"]
+
+    # Find the tool log (skip agent message)
+    tool_log = next(
+        log for log in ui_chat_logs if log["message_type"] == MessageTypeEnum.TOOL
+    )
+
+    assert tool_log["status"] == ToolStatus.FAILURE
+    assert "Security error" in tool_log["content"]
+    assert tool_log["tool_info"]["name"] == "test_tool"

@@ -551,7 +551,10 @@ class TestToolNodeWithErrorCorrectionSecurity:
 
             # Verify error message is in the response
             tool_messages = result[FlowStateKeys.CONVERSATION_HISTORY][component_name]
-            assert "Security scan blocked" in tool_messages[0].content
+            assert (
+                "Security scan detected potentially malicious content"
+                in tool_messages[0].content
+            )
 
     def test_sanitize_response_success(self, tool_node_with_error_correction):
         """Test _sanitize_response method with successful sanitization."""

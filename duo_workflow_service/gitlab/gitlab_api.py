@@ -1,3 +1,4 @@
+from enum import Enum
 from typing import Optional, Tuple, TypedDict
 
 from packaging.version import InvalidVersion, Version
@@ -6,6 +7,32 @@ from ai_gateway.instrumentators.model_requests import gitlab_version
 from duo_workflow_service.gitlab.http_client import GitlabHttpClient
 from duo_workflow_service.gitlab.url_parser import GitLabUrlParser
 from duo_workflow_service.tracking.errors import log_exception
+
+
+class PromptInjectionProtectionLevel(str, Enum):
+    """Protection level for prompt injection scanning.
+
+    Values:
+        NO_CHECKS: No scanning performed
+        LOG_ONLY: Evaluation mode - detections logged but content allowed through
+        INTERRUPT: Block mode - content blocked when injection detected
+    """
+
+    NO_CHECKS = "no_checks"
+    LOG_ONLY = "log_only"
+    INTERRUPT = "interrupt"
+
+    @classmethod
+    def from_graphql(cls, value: Optional[str]) -> "PromptInjectionProtectionLevel":
+        """Convert GraphQL value to enum, defaulting to LOG_ONLY for safety."""
+        if value is None:
+            return cls.LOG_ONLY
+        # GraphQL returns uppercase values like "INTERRUPT", "LOG_ONLY", "NO_CHECKS"
+        normalized = value.lower()
+        try:
+            return cls(normalized)
+        except ValueError:
+            return cls.LOG_ONLY
 
 
 class Language(TypedDict):
@@ -43,6 +70,7 @@ class WorkflowConfig(TypedDict):
     allow_agent_to_request_user: bool
     gitlab_host: str
     first_checkpoint: Optional[Checkpoint]
+    prompt_injection_protection_level: PromptInjectionProtectionLevel
 
 
 GITLAB_18_2_QUERY = """
@@ -120,17 +148,79 @@ query($workflowId: AiDuoWorkflowsWorkflowID!) {
 }
 """
 
+# This query adds aiSettings.promptInjectionProtectionLevel available in GitLab 18.8+.
+GITLAB_18_8_OR_ABOVE_QUERY = """
+query($workflowId: AiDuoWorkflowsWorkflowID!) {
+    duoWorkflowWorkflows(workflowId: $workflowId) {
+        nodes {
+            statusName
+            projectId
+            project {
+                id
+                name
+                description
+                httpUrlToRepo
+                languages {
+                    name
+                    share
+                }
+                webUrl
+                statisticsDetailsPaths {
+                    repository
+                }
+                duoContextExclusionSettings {
+                    exclusionRules
+                }
+                rootGroup {
+                    aiSettings {
+                        promptInjectionProtectionLevel
+                    }
+                }
+            }
+            namespaceId
+            namespace {
+                id
+                name
+                description
+                webUrl
+                rootNamespace {
+                    aiSettings {
+                        promptInjectionProtectionLevel
+                    }
+                }
+            }
+            agentPrivilegesNames
+            preApprovedAgentPrivilegesNames
+            mcpEnabled
+            allowAgentToRequestUser
+            firstCheckpoint {
+                checkpoint
+            }
+        }
+    }
+}
+"""
+
 version_18_2 = Version("18.2.0")
 version_18_3 = Version("18.3.0")
+version_18_8 = Version("18.8.0")
 FALLBACK_VERSION = version_18_2
 
 
 def fetch_workflow_and_container_query():
+    """Select the appropriate GraphQL query based on GitLab version.
+
+    Returns:
+        GraphQL query string compatible with the detected GitLab version.
+    """
     try:
         gl_version = Version(gitlab_version.get())  # type: ignore[arg-type]
     except (InvalidVersion, TypeError) as ex:
         log_exception(ex)
         gl_version = FALLBACK_VERSION
+
+    if version_18_8 <= gl_version:
+        return GITLAB_18_8_OR_ABOVE_QUERY
 
     if version_18_3 <= gl_version:
         return GITLAB_18_3_OR_ABOVE_QUERY
@@ -156,13 +246,11 @@ async def fetch_workflow_and_container_data(
     workflow = workflows[0]
 
     # Extract project data
-    project_data = workflow.get("project")
-    namespace_data = workflow.get("namespace")
+    project_data = workflow.get("project") or {}
+    namespace_data = workflow.get("namespace") or {}
 
-    # Convert GraphQL response to expected Container format
-    web_url = ""
-    if project_data:
-        project = Project(
+    project = (
+        Project(
             id=extract_id_from_global_id(workflow.get("projectId", "0")),
             name=project_data.get("name", ""),
             http_url_to_repo=project_data.get("httpUrlToRepo", ""),
@@ -174,22 +262,36 @@ async def fetch_workflow_and_container_data(
                 "exclusionRules", []
             ),
         )
+        if project_data
+        else None
+    )
 
-        web_url = project_data.get("webUrl", "")
-    else:
-        project = None
-
-    if namespace_data:
-        namespace = Namespace(
+    namespace = (
+        Namespace(
             id=extract_id_from_global_id(workflow.get("namespaceId", "0")),
             name=namespace_data.get("name", ""),
             web_url=namespace_data.get("webUrl", ""),
             description=namespace_data.get("description", ""),
         )
+        if namespace_data
+        else None
+    )
 
-        web_url = namespace_data.get("webUrl", "")
-    else:
-        namespace = None
+    # Convert GraphQL response to expected Container format
+    # Extract prompt injection protection level from project.rootGroup.aiSettings.
+    # Default to LOG_ONLY for GitLab < 18.8 where aiSettings is not available.
+    # LOG_ONLY mode scans in background without interrupting workflow or showing UI messages.
+    web_url = project_data.get("webUrl", "") or namespace_data.get("webUrl", "")
+
+    prompt_injection_protection_level = PromptInjectionProtectionLevel.LOG_ONLY
+
+    ai_settings = project_data.get("rootGroup", {}).get(
+        "aiSettings", {}
+    ) or namespace_data.get("rootNamespace", {}).get("aiSettings", {})
+
+    prompt_injection_protection_level = PromptInjectionProtectionLevel.from_graphql(
+        ai_settings.get("promptInjectionProtectionLevel")
+    )
 
     gitlab_host = GitLabUrlParser.extract_host_from_url(web_url)
 
@@ -209,6 +311,7 @@ async def fetch_workflow_and_container_data(
         allow_agent_to_request_user=workflow.get("allowAgentToRequestUser", False),
         first_checkpoint=workflow.get("firstCheckpoint", None),
         gitlab_host=gitlab_host,
+        prompt_injection_protection_level=prompt_injection_protection_level,
     )
 
     return project, namespace, workflow_config
@@ -245,4 +348,5 @@ def empty_workflow_config() -> WorkflowConfig:
         "first_checkpoint": None,
         "workflow_status": "",
         "gitlab_host": "",
+        "prompt_injection_protection_level": PromptInjectionProtectionLevel.LOG_ONLY,
     }

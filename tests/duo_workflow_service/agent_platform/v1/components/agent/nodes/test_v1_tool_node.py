@@ -464,7 +464,10 @@ class TestToolNodeSecurity:
 
             # Verify error message is in the response
             tool_messages = result[FlowStateKeys.CONVERSATION_HISTORY][component_name]
-            assert "Security scan blocked" in tool_messages[0].content
+            assert (
+                "Security scan detected potentially malicious content"
+                in tool_messages[0].content
+            )
 
     @pytest.mark.asyncio
     async def test_run_security_sanitization_success(

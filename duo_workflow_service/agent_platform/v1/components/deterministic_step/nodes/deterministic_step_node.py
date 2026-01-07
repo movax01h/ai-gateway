@@ -16,6 +16,7 @@ from duo_workflow_service.agent_platform.v1.state import (
 )
 from duo_workflow_service.agent_platform.v1.ui_log import UIHistory
 from duo_workflow_service.monitoring import duo_workflow_metrics
+from duo_workflow_service.security.exceptions import SecurityException
 from duo_workflow_service.security.scanner_factory import apply_security_scanning
 from lib.events import GLReportingEventContext
 from lib.internal_events import InternalEventAdditionalProperties, InternalEventsClient
@@ -88,6 +89,8 @@ class DeterministicStepNode:
                 err_format = self._format_validation_error(
                     tool_name=self._tool_name, error=e
                 )
+            elif isinstance(e, SecurityException):
+                err_format = e.format_user_message(self._tool_name)
             else:
                 err_format = self._format_execution_error(
                     tool_name=self._tool_name, error=e
@@ -98,6 +101,7 @@ class DeterministicStepNode:
                 tool=self._validated_tool,
                 tool_call_args=tool_call_args,
                 event=UILogEventsDeterministicStep.ON_TOOL_EXECUTION_FAILED,
+                message=err_format if isinstance(e, SecurityException) else None,
                 tool_response=f"{str(e)} {response}" if response else str(e),
             )
 

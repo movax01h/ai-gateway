@@ -214,11 +214,15 @@ class ToolNodeWithErrorCorrection:
             )
         except SecurityException as e:
             self._logger.error(f"Security validation failed for tool {tool_name}: {e}")
-            return (
-                f"Security scan blocked the content from tool '{tool_name}'. "
-                "The content was flagged as potentially malicious. "
-                "Please try a different approach."
-            )
+            error_message = e.format_user_message(tool_name)
+            if tool is not None:
+                self._ui_history.log.error(
+                    tool=tool,
+                    tool_call_args={},
+                    message=error_message,
+                    event=UILogEventsOneOff.ON_TOOL_EXECUTION_FAILED,
+                )
+            return error_message
 
     def _track_internal_event(
         self,

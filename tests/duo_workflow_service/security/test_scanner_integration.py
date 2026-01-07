@@ -1,40 +1,42 @@
 """Tests for AI prompt scanning integration.
 
-These tests verify that the security scanning integration works correctly
-based on the use_ai_prompt_scanning feature flag and tool trust level:
+Tests verify security scanning behavior based on prompt_injection_protection_level:
+- NO_CHECKS: PromptSecurity only, no HiddenLayer scanning
+- LOG_ONLY: PromptSecurity + non-blocking HiddenLayer scan (threats logged)
+- INTERRUPT: PromptSecurity + blocking HiddenLayer scan (raises on detection)
 
-- Feature flag enabled + untrusted tool: PromptSecurity runs, then HiddenLayer scan
-- Feature flag enabled + trusted tool: PromptSecurity runs, HiddenLayer skipped
-- Feature flag disabled: PromptSecurity runs, HiddenLayer skipped
-
-PromptSecurity sanitization always runs regardless of feature flag state.
+PromptSecurity sanitization always runs regardless of protection level.
 """
 
-import asyncio
 from unittest.mock import MagicMock, patch
 
+import pytest
+
+from duo_workflow_service.gitlab.gitlab_api import PromptInjectionProtectionLevel
+from duo_workflow_service.security.prompt_scanner import DetectionType, ScanResult
+from duo_workflow_service.security.scanner_factory import PromptInjectionDetectedError
 from duo_workflow_service.security.tool_output_security import ToolTrustLevel
 from duo_workflow_service.tracking import MonitoringContext
 
 
 class TestApplySecurityScanning:
-    """Test the apply_security_scanning helper function."""
+    """Test apply_security_scanning with different protection levels."""
 
-    def test_feature_flag_enabled_untrusted_tool_runs_security_and_scan(self):
-        """When feature flag is enabled and tool is untrusted, both security layers run."""
+    def test_no_checks_skips_hiddenlayer_scan(self):
+        """NO_CHECKS mode: PromptSecurity runs, HiddenLayer skipped."""
         with (
             patch(
                 "duo_workflow_service.tracking.current_monitoring_context"
             ) as mock_context,
             patch(
-                "duo_workflow_service.security.scanner_factory.scan_prompt"
+                "duo_workflow_service.security.scanner_factory._schedule_fire_and_forget_scan"
             ) as mock_scan,
             patch(
                 "duo_workflow_service.security.prompt_security.PromptSecurity"
             ) as mock_security,
         ):
             mock_context.get.return_value = MonitoringContext(
-                use_ai_prompt_scanning=True
+                prompt_injection_protection_level=PromptInjectionProtectionLevel.NO_CHECKS
             )
             mock_security.apply_security_to_tool_response.return_value = (
                 "sanitized content"
@@ -44,171 +46,165 @@ class TestApplySecurityScanning:
                 apply_security_scanning,
             )
 
-            content = "test content"
             result = apply_security_scanning(
-                response=content,
-                tool_name="test_tool",
-                trust_level=None,  # Untrusted (defaults to UNTRUSTED_USER_CONTENT)
-            )
-
-            mock_security.apply_security_to_tool_response.assert_called_once_with(
-                response=content, tool_name="test_tool"
-            )
-            mock_scan.assert_called_once_with("sanitized content")
-            assert result == "sanitized content"
-
-    def test_feature_flag_enabled_trusted_tool_skips_scan(self):
-        """When feature flag is enabled but tool is trusted, HiddenLayer scan is skipped."""
-        with (
-            patch(
-                "duo_workflow_service.tracking.current_monitoring_context"
-            ) as mock_context,
-            patch(
-                "duo_workflow_service.security.scanner_factory.scan_prompt"
-            ) as mock_scan,
-            patch(
-                "duo_workflow_service.security.prompt_security.PromptSecurity"
-            ) as mock_security,
-        ):
-            mock_context.get.return_value = MonitoringContext(
-                use_ai_prompt_scanning=True
-            )
-            mock_security.apply_security_to_tool_response.return_value = (
-                "sanitized content"
-            )
-
-            from duo_workflow_service.security.scanner_factory import (
-                apply_security_scanning,
-            )
-
-            content = "test content"
-            result = apply_security_scanning(
-                response=content,
-                tool_name="test_tool",
-                trust_level=ToolTrustLevel.TRUSTED_INTERNAL,
-            )
-
-            mock_security.apply_security_to_tool_response.assert_called_once_with(
-                response=content, tool_name="test_tool"
-            )
-            mock_scan.assert_not_called()
-            assert result == "sanitized content"
-
-    def test_feature_flag_disabled_skips_scan(self):
-        """When feature flag is disabled, HiddenLayer scan is skipped regardless of trust level."""
-        with (
-            patch(
-                "duo_workflow_service.tracking.current_monitoring_context"
-            ) as mock_context,
-            patch(
-                "duo_workflow_service.security.scanner_factory.scan_prompt"
-            ) as mock_scan,
-            patch(
-                "duo_workflow_service.security.prompt_security.PromptSecurity"
-            ) as mock_security,
-        ):
-            mock_context.get.return_value = MonitoringContext(
-                use_ai_prompt_scanning=False
-            )
-            mock_security.apply_security_to_tool_response.return_value = (
-                "sanitized content"
-            )
-
-            from duo_workflow_service.security.scanner_factory import (
-                apply_security_scanning,
-            )
-
-            content = "test content"
-            result = apply_security_scanning(
-                response=content,
+                response="test content",
                 tool_name="test_tool",
                 trust_level=None,
             )
 
-            mock_security.apply_security_to_tool_response.assert_called_once_with(
-                response=content, tool_name="test_tool"
+            mock_security.apply_security_to_tool_response.assert_called_once()
+            mock_scan.assert_not_called()
+            assert result == "sanitized content"
+
+    def test_log_only_runs_fire_and_forget_scan(self):
+        """LOG_ONLY mode: PromptSecurity runs, HiddenLayer scan is non-blocking."""
+        with (
+            patch(
+                "duo_workflow_service.tracking.current_monitoring_context"
+            ) as mock_context,
+            patch(
+                "duo_workflow_service.security.scanner_factory._schedule_fire_and_forget_scan"
+            ) as mock_scan,
+            patch(
+                "duo_workflow_service.security.prompt_security.PromptSecurity"
+            ) as mock_security,
+        ):
+            mock_context.get.return_value = MonitoringContext(
+                prompt_injection_protection_level=PromptInjectionProtectionLevel.LOG_ONLY
             )
+            mock_security.apply_security_to_tool_response.return_value = (
+                "sanitized content"
+            )
+
+            from duo_workflow_service.security.scanner_factory import (
+                apply_security_scanning,
+            )
+
+            result = apply_security_scanning(
+                response="test content",
+                tool_name="test_tool",
+                trust_level=None,
+            )
+
+            mock_security.apply_security_to_tool_response.assert_called_once()
+            mock_scan.assert_called_once_with("sanitized content")
+            assert result == "sanitized content"
+
+    def test_interrupt_runs_blocking_scan(self):
+        """INTERRUPT mode: PromptSecurity runs, HiddenLayer scan blocks."""
+        with (
+            patch(
+                "duo_workflow_service.tracking.current_monitoring_context"
+            ) as mock_context,
+            patch(
+                "duo_workflow_service.security.scanner_factory._run_blocking_scan"
+            ) as mock_scan,
+            patch(
+                "duo_workflow_service.security.prompt_security.PromptSecurity"
+            ) as mock_security,
+        ):
+            mock_context.get.return_value = MonitoringContext(
+                prompt_injection_protection_level=PromptInjectionProtectionLevel.INTERRUPT
+            )
+            mock_security.apply_security_to_tool_response.return_value = (
+                "sanitized content"
+            )
+
+            from duo_workflow_service.security.scanner_factory import (
+                apply_security_scanning,
+            )
+
+            result = apply_security_scanning(
+                response="test content",
+                tool_name="test_tool",
+                trust_level=None,
+            )
+
+            mock_security.apply_security_to_tool_response.assert_called_once()
+            mock_scan.assert_called_once()
+            assert result == "sanitized content"
+
+    def test_trusted_tool_skips_scan_regardless_of_level(self):
+        """Trusted tools skip HiddenLayer scan in all modes."""
+        with (
+            patch(
+                "duo_workflow_service.tracking.current_monitoring_context"
+            ) as mock_context,
+            patch(
+                "duo_workflow_service.security.scanner_factory._schedule_fire_and_forget_scan"
+            ) as mock_scan,
+            patch(
+                "duo_workflow_service.security.prompt_security.PromptSecurity"
+            ) as mock_security,
+        ):
+            mock_context.get.return_value = MonitoringContext(
+                prompt_injection_protection_level=PromptInjectionProtectionLevel.LOG_ONLY
+            )
+            mock_security.apply_security_to_tool_response.return_value = (
+                "sanitized content"
+            )
+
+            from duo_workflow_service.security.scanner_factory import (
+                apply_security_scanning,
+            )
+
+            result = apply_security_scanning(
+                response="test content",
+                tool_name="test_tool",
+                trust_level=ToolTrustLevel.TRUSTED_INTERNAL,
+            )
+
+            mock_security.apply_security_to_tool_response.assert_called_once()
             mock_scan.assert_not_called()
             assert result == "sanitized content"
 
 
-class TestScanPrompt:
-    """Test the scan_prompt function behavior."""
+class TestInterruptModeBlocking:
+    """Test INTERRUPT mode blocking behavior."""
 
-    def test_scan_prompt_schedules_async_task(self):
-        """Verify scan_prompt schedules an async task without blocking."""
-        from duo_workflow_service.security.scanner_factory import scan_prompt
+    def test_interrupt_raises_on_threat_detection(self):
+        """INTERRUPT mode raises PromptInjectionDetectedError when threat detected."""
+        threat_result = ScanResult(
+            detected=True,
+            blocked=True,
+            detection_type=DetectionType.PROMPT_INJECTION,
+            confidence=0.95,
+            details="Malicious prompt injection detected",
+        )
 
-        with patch(
-            "duo_workflow_service.security.scanner_factory._get_hiddenlayer_scanner"
-        ) as mock_get_scanner:
-            mock_scanner = MagicMock()
-            mock_scanner.enabled = True
-            mock_get_scanner.return_value = mock_scanner
+        with (
+            patch(
+                "duo_workflow_service.tracking.current_monitoring_context"
+            ) as mock_context,
+            patch(
+                "duo_workflow_service.security.scanner_factory._run_blocking_scan"
+            ) as mock_blocking_scan,
+            patch(
+                "duo_workflow_service.security.prompt_security.PromptSecurity"
+            ) as mock_security,
+        ):
+            mock_context.get.return_value = MonitoringContext(
+                prompt_injection_protection_level=PromptInjectionProtectionLevel.INTERRUPT
+            )
+            mock_security.apply_security_to_tool_response.return_value = "content"
+            # _run_blocking_scan raises exception when threat detected
+            mock_blocking_scan.side_effect = PromptInjectionDetectedError(
+                threat_result, "dangerous_tool"
+            )
 
-            async def run_test():
-                result = scan_prompt("test content")
-                # scan_prompt should return immediately (fire-and-forget)
-                assert result == "test content"
-                # Give async task a chance to be scheduled
-                await asyncio.sleep(0.01)
+            from duo_workflow_service.security.scanner_factory import (
+                apply_security_scanning,
+            )
 
-            asyncio.run(run_test())
+            with pytest.raises(PromptInjectionDetectedError) as exc_info:
+                apply_security_scanning(
+                    response="malicious content",
+                    tool_name="dangerous_tool",
+                    trust_level=None,
+                )
 
-    def test_scan_prompt_returns_original_content(self):
-        """Verify scan_prompt returns the original content unchanged."""
-        from duo_workflow_service.security.scanner_factory import scan_prompt
-
-        with patch(
-            "duo_workflow_service.security.scanner_factory._get_hiddenlayer_scanner"
-        ) as mock_get_scanner:
-            mock_scanner = MagicMock()
-            mock_scanner.enabled = False
-            mock_get_scanner.return_value = mock_scanner
-
-            content = {"key": "value", "nested": {"data": "test"}}
-            result = scan_prompt(content)
-
-            assert result == content
-
-    def test_scan_prompt_handles_nested_structures(self):
-        """Verify scan_prompt processes nested data structures."""
-        from duo_workflow_service.security.scanner_factory import scan_prompt
-
-        with patch(
-            "duo_workflow_service.security.scanner_factory._get_hiddenlayer_scanner"
-        ) as mock_get_scanner:
-            mock_scanner = MagicMock()
-            mock_scanner.enabled = False
-            mock_get_scanner.return_value = mock_scanner
-
-            content = {
-                "messages": [
-                    {"role": "user", "content": "hello"},
-                    {"role": "assistant", "content": "hi there"},
-                ],
-                "metadata": {"source": "test"},
-            }
-            result = scan_prompt(content)
-
-            assert result == content
-
-    def test_scan_prompt_handles_no_event_loop(self):
-        """Verify scan_prompt handles case when no event loop is running."""
-        from duo_workflow_service.security.scanner_factory import scan_prompt
-
-        with patch(
-            "duo_workflow_service.security.scanner_factory._get_hiddenlayer_scanner"
-        ) as mock_get_scanner:
-            mock_scanner = MagicMock()
-            mock_scanner.enabled = True
-            mock_get_scanner.return_value = mock_scanner
-
-            # Call without an event loop - should not raise
-            content = "test content"
-            result = scan_prompt(content)
-
-            assert result == content
+            assert exc_info.value.tool_name == "dangerous_tool"
+            assert exc_info.value.scan_result == threat_result
 
 
 class TestHiddenLayerConfig:

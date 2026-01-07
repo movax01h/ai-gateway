@@ -49,9 +49,10 @@ class HiddenLayerConfig:
 
 
 class HiddenLayerScanner(PromptScanner):
-    """Async scanner using Hidden Layer's AI Security SDK.
+    """Scanner using Hidden Layer's AI Security SDK.
 
-    This scanner uses the Hidden Layer SDK to detect prompt injection and other security threats in prompts.
+    This scanner uses the Hidden Layer SDK to detect prompt injection and other security threats in prompts. Provides
+    both async and sync scanning methods.
     """
 
     def __init__(self, config: Optional[HiddenLayerConfig] = None) -> None:
@@ -61,12 +62,13 @@ class HiddenLayerScanner(PromptScanner):
             config: Configuration for the scanner. If None, loads from environment.
         """
         self._config = config or HiddenLayerConfig.from_environment()
-        self._client: Any = None
+        self._async_client: Any = None
+        self._sync_client: Any = None
         self._initialized = False
         self._initialize()
 
     def _initialize(self) -> None:
-        """Initialize Hidden Layer async SDK client."""
+        """Initialize Hidden Layer SDK clients (async and sync)."""
         if not self._config.client_id or not self._config.client_secret:
             log.error(
                 "Hidden Layer requires HL_CLIENT_ID and HL_CLIENT_SECRET "
@@ -79,15 +81,14 @@ class HiddenLayerScanner(PromptScanner):
 
         try:
             log.info(
-                "Initializing Hidden Layer async SDK",
+                "Initializing Hidden Layer SDK",
                 environment=self._config.environment,
             )
-            from hiddenlayer import AsyncHiddenLayer
+            from hiddenlayer import AsyncHiddenLayer, HiddenLayer
 
             hl_environment = cast(
                 Literal["prod-us", "prod-eu"], self._config.environment
             )
-
             # Build client kwargs
             client_kwargs: Dict[str, Any] = {
                 "client_id": self._config.client_id,
@@ -106,7 +107,8 @@ class HiddenLayerScanner(PromptScanner):
             else:
                 client_kwargs["environment"] = hl_environment
 
-            self._client = AsyncHiddenLayer(**client_kwargs)
+            self._async_client = AsyncHiddenLayer(**client_kwargs)
+            self._sync_client = HiddenLayer(**client_kwargs)
 
             self._initialized = True
             log.info(
@@ -159,7 +161,7 @@ class HiddenLayerScanner(PromptScanner):
         log.debug("Calling Hidden Layer API", text_length=len(text) if text else 0)
 
         try:
-            response = await self._client.interactions.analyze(
+            response = await self._async_client.interactions.analyze(
                 metadata={
                     "model": "duo",
                     "requester_id": "gitlab-duo-workflow",
@@ -181,11 +183,71 @@ class HiddenLayerScanner(PromptScanner):
             )
             raise HiddenLayerError(f"API request failed: {e}") from e
 
-        # Parse SDK response
-        raw_response = self._response_to_dict(response)
-        log.info("Hidden Layer scan completed", response=raw_response)
+        return self._parse_response(response)
 
-        # Extract evaluation results
+    def scan_sync(self, text: str) -> ScanResult:
+        """Synchronously scan text for security threats using Hidden Layer SDK.
+
+        This method uses the synchronous HiddenLayer client for blocking scans
+        in interrupt mode where we need to stop the workflow on threat detection.
+
+        Args:
+            text: The text to evaluate for security threats.
+
+        Returns:
+            ScanResult with detection status and details.
+
+        Raises:
+            HiddenLayerError: If the scan operation fails.
+        """
+        if not self.enabled:
+            log.debug("Hidden Layer scan skipped - scanner not enabled")
+            return ScanResult(
+                detected=False,
+                detection_type=DetectionType.SAFE,
+                details="Hidden Layer scanner is not enabled",
+            )
+
+        log.debug(
+            "Calling Hidden Layer API (sync)", text_length=len(text) if text else 0
+        )
+
+        try:
+            response = self._sync_client.interactions.analyze(
+                metadata={
+                    "model": "duo",
+                    "requester_id": "gitlab-duo-workflow",
+                },
+                input={
+                    "messages": [
+                        {
+                            "role": "user",
+                            "content": text,
+                        }
+                    ]
+                },
+            )
+        except Exception as e:
+            log.error(
+                "Hidden Layer API request failed (sync)",
+                error=str(e),
+                error_type=type(e).__name__,
+            )
+            raise HiddenLayerError(f"API request failed: {e}") from e
+
+        return self._parse_response(response)
+
+    def _parse_response(self, response: Any) -> ScanResult:
+        """Parse Hidden Layer SDK response into ScanResult.
+
+        Args:
+            response: The SDK response object.
+
+        Returns:
+            ScanResult with detection status and details.
+        """
+        raw_response = self._response_to_dict(response)
+
         evaluation = getattr(response, "evaluation", None)
         has_detections = False
         action = "Allow"
@@ -194,12 +256,10 @@ class HiddenLayerScanner(PromptScanner):
             has_detections = getattr(evaluation, "has_detections", False)
             action = getattr(evaluation, "action", "Allow")
 
-        # Determine detection type
         detection_type = DetectionType.SAFE
         if has_detections:
             detection_type = DetectionType.PROMPT_INJECTION
 
-        # Check analysis results for specific findings
         analysis_list = getattr(response, "analysis", []) or []
         findings_details = []
         for analysis in analysis_list:
@@ -210,7 +270,6 @@ class HiddenLayerScanner(PromptScanner):
                     if finding_type:
                         findings_details.append(finding_type)
 
-        # Build details message
         details = None
         if has_detections:
             if findings_details:
@@ -218,7 +277,6 @@ class HiddenLayerScanner(PromptScanner):
             else:
                 details = f"Threat detected (action: {action})"
 
-        # Determine if content should be blocked based on action
         blocked = action in ("Block", "Redact")
 
         if has_detections:

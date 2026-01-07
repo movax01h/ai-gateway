@@ -97,11 +97,24 @@ class RunToolNode(Generic[WorkflowStateT]):
                                 "tool_name": self._tool.name,
                             },
                         )
-                        output = (
-                            f"Security scan blocked the content from tool '{self._tool.name}'. "
-                            "The content was flagged as potentially malicious. "
-                            "Please try a different approach."
+                        output = e.format_user_message(self._tool.name)
+                        outputs.append(output)
+                        logs.append(
+                            UiChatLog(
+                                message_type=MessageTypeEnum.TOOL,
+                                message_sub_type=None,
+                                content=output,
+                                timestamp=datetime.now(timezone.utc).isoformat(),
+                                status=ToolStatus.FAILURE,
+                                correlation_id=None,
+                                tool_info=ToolInfo(
+                                    name=self._tool.name, args=tool_params
+                                ),
+                                additional_context=None,
+                                message_id=None,
+                            )
                         )
+                        continue
 
             outputs.append(output)
             logs.append(
