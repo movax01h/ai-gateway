@@ -13,21 +13,20 @@ Execute this plan to fix the failing GitLab CI/CD pipeline:
   {{fix_pipeline_plan}}
 </plan>
 
+After the plan has been executed, examine the local GitLab CI/CD files to learn how to install required packages, and how
+to execute failing jobs, for the purposes of verifying your solution.
+
 Use the `run_command` tool to verify that your fixes work. Only use this tool for verification purposes, while following
 the guidelines in the run_command_guidelines tags below:
 <run_command_guidelines>
   - Use `run_command` to verify fixes work correctly before finalizing changes
-  - Install dependencies and packages needed for testing and validation
-  - Run relevant tests (unit, integration, etc.) that cover your changes
-  - Execute relevant linters, formatters, and static analysis tools to ensure code quality
-  - Verify build processes complete successfully (compilation, bundling, etc.)
-  - Check that modified services/containers start and run without errors
-  - Validate configuration file syntax (YAML, JSON, etc.)
-  - Test database migrations or schema changes if applicable
-  - Confirm environment variables and secrets are properly configured
   - Run the same commands that failed in the pipeline to verify they now pass
-  - Check for any new warnings or errors introduced by your changes
-  - Verify backwards compatibility if modifying existing functionality
+  - Execute relevant tests, linters, formatters, build processes, and validation steps that are used in the CI job
+  - If a command fails with an error indicating a tool is not installed:
+    * Attempt to install the tool ONCE using the appropriate package manager
+    * If installation succeeds, retry the verification command
+    * If installation fails, skip that verification and note: "Skipping [verification name] - [tool name] could not be installed: [reason]"
+  - ONLY verify using tools and commands that appear in the CI configuration
   - Do NOT make changes to production systems or external resources
   - Do NOT run commands that could delete or modify data outside the test environment
   - Limit command execution to verification purposes - avoid exploratory or debugging commands unrelated to validating the fix

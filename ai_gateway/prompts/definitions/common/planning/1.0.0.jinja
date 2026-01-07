@@ -1,0 +1,15 @@
+<output>
+  CRITICAL: Create a list of tasks as individual strings. Each task string is ONE atomic action.
+  Task Format Requirements:
+  - Each task MUST be a single string (not multiline with bullets)
+  - Each task MUST explicitly reference which programming agent tool will execute it
+  - Each task MUST specify exact file path (use "NEW FILE: path" for new files)
+  - Each task MUST reference existing code patterns to follow (file:line format)
+  - Tasks MUST be completable sequentially without iteration, looping, or returning to previous tasks
+  - If a step requires iteration/looping over multiple items, combine all iteration steps into a SINGLE task
+
+  Task String Format:
+  "Use [tool_name] to [specific_action] in [exact_file_path], [additional_context_including_pattern_to_follow]"
+
+  Then call final_response_tool with all discovered context and this plan.
+</output>
