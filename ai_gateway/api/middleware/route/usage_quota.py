@@ -91,7 +91,7 @@ def _process_route(
         event_to_use = resolved_event if resolved_event else event
 
         gl_reporting_context = GLReportingEventContext.from_static_name(
-            feature_qualified_name
+            feature_qualified_name, is_ai_catalog_item=False
         )
 
         try:

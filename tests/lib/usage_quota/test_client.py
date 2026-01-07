@@ -231,6 +231,40 @@ class TestCheckQuotaAvailable:
             assert params["realm"] == "saas"
 
     @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        "feature_ai_catalog_item_value",
+        [True, False, None],
+    )
+    async def test_always_includes_feature_ai_catalog_item(
+        self,
+        usage_quota_client: UsageQuotaClient,
+        mock_http_client: AsyncMock,
+        mock_success_response: MagicMock,
+        feature_ai_catalog_item_value: bool | None,
+    ):
+        """Should always include feature_ai_catalog_item in params regardless of value.
+
+        This is important because None indicates we were unable to resolve the value when processing legacy logic, and
+        CustomersDot needs to know this.
+        """
+        context = UsageQuotaEventContext(
+            environment="production",
+            realm="saas",
+            feature_ai_catalog_item=feature_ai_catalog_item_value,
+        )
+
+        with patch("httpx.AsyncClient") as mock_client_class:
+            mock_http_client.head = AsyncMock(return_value=mock_success_response)
+            mock_client_class.return_value = mock_http_client
+
+            await usage_quota_client.check_quota_available(context)
+
+            call_args = mock_http_client.head.call_args
+            params = call_args[1]["params"]
+            assert "feature_ai_catalog_item" in params
+            assert params["feature_ai_catalog_item"] is feature_ai_catalog_item_value
+
+    @pytest.mark.asyncio
     async def test_uses_configured_timeout(
         self,
         usage_quota_client: UsageQuotaClient,

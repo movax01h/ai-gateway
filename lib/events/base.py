@@ -16,6 +16,11 @@ class FeatureQualifiedNameStatic(StrEnum):
     DUO_CHAT_CLASSIC = "duo_chat_classic"
     AIGW_PROXY_USE = "ai_gateway_proxy_use"
 
+    # Overall, in the DWS codebase, we resolve feature name based on the passed workflow_definition.
+    # However, some endpoints such as GenerateToken don't always provide workflow_definition with every request.
+    # Thus, we send the predefined variable also known to CustomerDot.
+    DAP_FEATURE_LEGACY = "dap_feature_legacy"
+
 
 class GLReportingEventContext:
     """Stores flow context for legacy and Flow Registry definitions used in UsageQuota and Billing events.
@@ -31,7 +36,10 @@ class GLReportingEventContext:
 
     Examples:
         Legacy workflow:
-            >>> context = GLReportingEventContext.from_workflow_definition("software_development")
+            >>> context = GLReportingEventContext.from_workflow_definition(
+            >>>     "software_development",
+            >>>     is_ai_catalog_item=False
+            >>> )
             >>> context.value
             'software_development'
             >>> context.feature_qualified_name
@@ -46,10 +54,13 @@ class GLReportingEventContext:
             >>> context.feature_qualified_name
             'my_flow/v1'
             >>> context.feature_ai_catalog_item
-            False
+            None
 
         Static feature name:
-            >>> context = GLReportingEventContext.from_static_name(FeatureQualifiedNameStatic.CODE_SUGGESTIONS)
+            >>> context = GLReportingEventContext.from_static_name(
+            >>>     FeatureQualifiedNameStatic.CODE_SUGGESTIONS,
+            >>>     is_ai_catalog_item=False
+            >>> )
             >>> context.value
             'code_suggestions'
             >>> context.feature_qualified_name
@@ -59,14 +70,18 @@ class GLReportingEventContext:
     """
 
     def __init__(
-        self, legacy_workflow_type: str, flow_definition: str, is_ai_catalog_item: bool
+        self,
+        legacy_workflow_type: str,
+        flow_definition: str,
+        is_ai_catalog_item: bool | None,
     ):
         """Initialize a GLReportingEventContext instance.
 
         Args:
             legacy_workflow_type: The legacy workflow type string (e.g., "software_development").
             flow_definition: The full flow definition string (e.g., "my_flow/v1").
-            is_ai_catalog_item: Whether this flow is an AI Catalog item.
+            is_ai_catalog_item: Whether this flow is an AI Catalog item. None if unknown (legacy support),
+                True if it is an AI Catalog item, False if it explicitly isn't.
         """
         self._legacy_workflow_type = legacy_workflow_type
         self._flow_definition = flow_definition
@@ -91,14 +106,11 @@ class GLReportingEventContext:
         return self._flow_definition
 
     @property
-    def feature_ai_catalog_item(self) -> bool:
+    def feature_ai_catalog_item(self) -> bool | None:
         """Check if this flow is an AI Catalog item.
 
-        AI Catalog items are flows that have an associated flow_config stored in Rails,
-        indicating they're part of the AI Catalog system.
-
         Returns:
-            True if this is an AI Catalog item, False otherwise.
+            True if this is an AI Catalog item, False if it explicitly isn't, None if unknown (legacy support).
         """
         return self._is_ai_catalog_item
 
@@ -112,7 +124,7 @@ class GLReportingEventContext:
 
     @classmethod
     def from_workflow_definition(
-        cls, value: str | None, has_flow_config: bool = False
+        cls, value: str | None, is_ai_catalog_item: bool | None = None
     ) -> Self:
         """Create a GLReportingEventContext from a workflow definition string.
 
@@ -123,7 +135,8 @@ class GLReportingEventContext:
         Args:
             value: The workflow definition string. Can be a legacy type ("software_development", "chat") or a Flow
                 Registry path ("my_flow/v1"). If None, defaults to "software_development" for backward compatibility.
-            has_flow_config: Whether this flow has an associated flow configuration, marking it as an AI Catalog item.
+            is_ai_catalog_item: Whether this flow is an AI Catalog item. None if unknown, True if it has a flow config,
+                False if it explicitly doesn't have one.
 
         Returns:
             A GLReportingEventContext instance configured based on the input.
@@ -139,10 +152,12 @@ class GLReportingEventContext:
             legacy_workflow_type = value
             new_flow_type = value
 
-        return cls(legacy_workflow_type, new_flow_type, has_flow_config)
+        return cls(legacy_workflow_type, new_flow_type, is_ai_catalog_item)
 
     @classmethod
-    def from_static_name(cls, name: FeatureQualifiedNameStatic) -> Self:
+    def from_static_name(
+        cls, name: FeatureQualifiedNameStatic, is_ai_catalog_item: bool | None = None
+    ) -> Self:
         """Create a GLReportingEventContext from a static feature name.
 
         This factory method is used in the AI Gateway code base where feature names are predefined
@@ -150,9 +165,10 @@ class GLReportingEventContext:
 
         Args:
             name: A static feature name enum value (e.g., CODE_SUGGESTIONS, DUO_CHAT_CLASSIC).
+            is_ai_catalog_item: Whether this flow is an AI Catalog item. None if unknown, True if it has a flow config,
+                False if it explicitly doesn't have one.
 
         Returns:
-            A GLReportingEventContext instance with the static name used for both legacy and qualified names,
-            and marked as not being an AI Catalog item.
+            A GLReportingEventContext instance with the static name used for both legacy and qualified names.
         """
-        return cls(name.value, name.value, False)
+        return cls(name.value, name.value, is_ai_catalog_item)

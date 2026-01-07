@@ -618,6 +618,7 @@ class DuoWorkflowService(contract_pb2_grpc.DuoWorkflowServicer):
 
         return response
 
+    @has_sufficient_usage_quota(event=UsageQuotaEvent.DAP_FLOW_ON_GENERATE_TOKEN)
     async def GenerateToken(
         self, request: contract_pb2.GenerateTokenRequest, context: grpc.ServicerContext
     ) -> contract_pb2.GenerateTokenResponse:

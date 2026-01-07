@@ -1,14 +1,12 @@
 import functools
-import inspect
 from collections.abc import AsyncIterable
 from typing import Callable
 
-from google.protobuf.message import Message
 from grpc import StatusCode
 from grpc.aio import ServicerContext
 
 from contract import contract_pb2, contract_pb2_grpc
-from lib.events import GLReportingEventContext
+from lib.events import FeatureQualifiedNameStatic, GLReportingEventContext
 from lib.usage_quota import InsufficientCredits, UsageQuotaEvent, UsageQuotaService
 
 
@@ -23,13 +21,15 @@ def has_sufficient_usage_quota(
             customersdot_url, customersdot_api_user=user, customersdot_api_token=token
         )
 
-        if inspect.isasyncgenfunction(func):
-            return _process_stream(func, service, event)
-
-        # TODO: investigate what unary endpoints need to be wrapped with '@has_sufficient_usage_quota'.
-        # TODO: At this moment, it sends empty feature_qualified_name,
-        # TODO: replicating the behaviour of the removed interceptor.
-        return _process_unary(func, service, event)
+        match func.__name__:
+            case contract_pb2_grpc.DuoWorkflowServicer.ExecuteWorkflow.__name__:
+                return _process_execute_workflow_stream(func, service, event)
+            case contract_pb2_grpc.DuoWorkflowServicer.GenerateToken.__name__:
+                return _process_generate_token_unary(func, service, event)
+            case _:
+                raise TypeError(
+                    f"unsupported method to intercept '{func.__qualname__}'"
+                )
 
     return decorator
 
@@ -41,9 +41,13 @@ async def abort_route_interceptor(
     return
 
 
-def _process_stream(func: Callable, service: UsageQuotaService, event: UsageQuotaEvent):
-    if func.__name__ != contract_pb2_grpc.DuoWorkflowServicer.ExecuteWorkflow.__name__:
-        raise TypeError(f"unsupported method to intercept '{func.__qualname__}'")
+def _process_execute_workflow_stream(
+    func: Callable, service: UsageQuotaService, event: UsageQuotaEvent
+):
+    if event is not event.DAP_FLOW_ON_EXECUTE:
+        raise ValueError(
+            f"Unsupported event type '{event.value}'. Expected to be '{event.DAP_FLOW_ON_EXECUTE}"
+        )
 
     @functools.wraps(func)
     async def wrapper(
@@ -57,7 +61,7 @@ def _process_stream(func: Callable, service: UsageQuotaService, event: UsageQuot
             message = await anext(aiter(request))
             gl_events_context = GLReportingEventContext.from_workflow_definition(
                 message.startRequest.workflowDefinition,
-                has_flow_config=bool(message.startRequest.flowConfig),
+                is_ai_catalog_item=bool(message.startRequest.flowConfig),
             )
 
             async def _chained():
@@ -80,19 +84,44 @@ def _process_stream(func: Callable, service: UsageQuotaService, event: UsageQuot
     return wrapper
 
 
-def _process_unary(func: Callable, service: UsageQuotaService, event: UsageQuotaEvent):
+def _process_generate_token_unary(
+    func: Callable, service: UsageQuotaService, event: UsageQuotaEvent
+):
+    if event is not event.DAP_FLOW_ON_GENERATE_TOKEN:
+        raise ValueError(
+            f"Unsupported event type '{event.value}'. Expected to be {event.DAP_FLOW_ON_GENERATE_TOKEN}"
+        )
+
     @functools.wraps(func)
     async def wrapper(
         obj,
-        request: AsyncIterable[Message],
-        context: ServicerContext,
+        request: contract_pb2.GenerateTokenRequest,
+        grpc_context: ServicerContext,
         *args,
         **kwargs,
     ):
-        # Create a minimal GLReportingEventContext for unary calls
-        gl_events_context = GLReportingEventContext("", "", is_ai_catalog_item=False)
-        await service.execute(gl_events_context, event)
+        try:
+            if request.workflowDefinition:
+                gl_events_context = GLReportingEventContext.from_workflow_definition(
+                    request.workflowDefinition,
+                    # Legacy support: we pass None since GenerateTokenRequest doesn't provide any information
+                    # to resolve the value correctly. The method is limited to the DAP_FLOW_ON_GENERATE_TOKEN event only
+                    # and this behavior is known to CustomerDot.
+                    is_ai_catalog_item=None,
+                )
+            else:
+                gl_events_context = GLReportingEventContext.from_static_name(
+                    FeatureQualifiedNameStatic.DAP_FEATURE_LEGACY,
+                    is_ai_catalog_item=None,
+                )
 
-        return await func(obj, request, context, *args, **kwargs)
+            await service.execute(gl_events_context, event)
+            return await func(obj, request, grpc_context, *args, **kwargs)
+        except InsufficientCredits as e:
+            await abort_route_interceptor(
+                grpc_context,
+                StatusCode.RESOURCE_EXHAUSTED,
+                f"{str(e).rstrip(".")}. Error code: USAGE_QUOTA_EXCEEDED",
+            )
 
     return wrapper
