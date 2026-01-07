@@ -258,6 +258,8 @@ class HiddenLayerScanner(PromptScanner):
 
         detection_type = DetectionType.SAFE
         if has_detections:
+            # Log response only when there is a detection
+            log.warning("Hidden Layer scan detects threats", response=raw_response)
             detection_type = DetectionType.PROMPT_INJECTION
 
         analysis_list = getattr(response, "analysis", []) or []
