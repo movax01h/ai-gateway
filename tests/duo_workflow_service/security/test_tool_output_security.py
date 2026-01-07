@@ -50,7 +50,7 @@ class MockToolReturningDict(DuoBaseTool):
     trust_level: ToolTrustLevel = ToolTrustLevel.UNTRUSTED_USER_CONTENT
 
     async def _execute(self, *args, **kwargs):
-        return {"result": "data", "items": [1, 2, 3]}
+        return '{"result": "data", "items": [1, 2, 3]}'
 
 
 class TestSecurityWrappingIntegration:
@@ -72,11 +72,12 @@ class TestSecurityWrappingIntegration:
         tool = MockUntrustedTool()
         result = await tool._arun()
 
-        assert "<tool_response" in result
-        assert 'tool="mock_untrusted_tool"' in result
-        assert 'trust_level="untrusted_user_content"' in result
+        # decision has been made to revert the wrapper
+        assert "<tool_response" not in result
+        assert 'tool="mock_untrusted_tool"' not in result
+        assert 'trust_level="untrusted_user_content"' not in result
         assert "untrusted output" in result
-        assert "<<<BEGIN_UNTRUSTED_DATA>>>" in result
+        assert "<<<BEGIN_UNTRUSTED_DATA>>>" not in result
 
     @pytest.mark.asyncio
     async def test_tool_without_trust_level_output_is_wrapped(self):
@@ -84,8 +85,9 @@ class TestSecurityWrappingIntegration:
         tool = MockToolWithoutTrustLevel()
         result = await tool._arun()
 
-        assert "<tool_response" in result
-        assert "<<<BEGIN_UNTRUSTED_DATA>>>" in result
+        # decision has been made to revert the wrapper
+        assert "<tool_response" not in result
+        assert "<<<BEGIN_UNTRUSTED_DATA>>>" not in result
         assert "output" in result
 
     @pytest.mark.asyncio
@@ -94,10 +96,10 @@ class TestSecurityWrappingIntegration:
         tool = MockToolReturningDict()
         result = await tool._arun()
 
-        # Should be wrapped string containing JSON
+        # decision has been made to revert the wrapper
         assert isinstance(result, str)
-        assert "<tool_response" in result
-        assert "<<<BEGIN_UNTRUSTED_DATA>>>" in result
+        assert "<tool_response" not in result
+        assert "<<<BEGIN_UNTRUSTED_DATA>>>" not in result
         assert '"result": "data"' in result
         assert '"items": [1, 2, 3]' in result
 
