@@ -225,40 +225,6 @@ models:
     prompt_params:
       vertex_location: global
 
-  - name: "Claude Sonnet 3.7 - Anthropic"
-    provider: "Anthropic"
-    gitlab_identifier: "claude_sonnet_3_7_20250219"
-    description: "Earlier generation model for coding, reasoning, and agentic workflows."
-    cost_indicator: "$$$"
-    max_context_tokens: 200000 # https://docs.claude.com/en/docs/about-claude/models/overview#legacy-models
-    proxy_provider: anthropic
-    params:
-      model: "claude-3-7-sonnet-20250219"
-      temperature: 0.0
-      max_tokens: 4_096
-      model_class_provider: anthropic
-    deprecation:
-      deprecation_date: "2025-10-28"
-      removal_version: "18.8"
-
-  - name: "Claude Sonnet 3.7 - Vertex"
-    provider: "Vertex"
-    gitlab_identifier: "claude_sonnet_3_7_20250219_vertex"
-    description: "Earlier generation model for coding, reasoning, and agentic workflows."
-    cost_indicator: "$$$"
-    max_context_tokens: 200000 # https://console.cloud.google.com/vertex-ai/publishers/anthropic/model-garden/claude-3-7-sonnet
-    family:
-      - vertex
-      - litellm
-    params:
-      model: "claude-3-7-sonnet@20250219"
-      custom_llm_provider: "vertex_ai"
-      temperature: 0.0
-      max_tokens: 4_096
-      model_class_provider: litellm
-    prompt_params:
-      vertex_location: global
-
   - name: "Claude 3.5 Haiku - Anthropic"
     provider: "Anthropic"
     gitlab_identifier: "claude_3_5_haiku_20241022"
