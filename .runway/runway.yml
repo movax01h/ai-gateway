@@ -45,3 +45,4 @@ spec:
       backend_protocol: HTTPS
   vpc_access:
     enabled: true
+    egress: ALL_TRAFFIC
