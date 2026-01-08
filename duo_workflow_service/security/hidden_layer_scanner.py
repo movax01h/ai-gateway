@@ -309,7 +309,7 @@ class HiddenLayerScanner(PromptScanner):
         if hasattr(response, "to_dict"):
             return response.to_dict()
         if hasattr(response, "model_dump"):
-            return response.model_dump()
+            return response.model_dump(mode="json")
         if hasattr(response, "__dict__"):
             return {k: v for k, v in response.__dict__.items() if not k.startswith("_")}
         return {"raw": str(response)}
