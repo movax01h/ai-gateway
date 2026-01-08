@@ -357,8 +357,12 @@ def apply_security_scanning(
     monitoring_context = current_monitoring_context.get()
     protection_level = monitoring_context.prompt_injection_protection_level
 
-    # Skip HiddenLayer scanning for NO_CHECKS or trusted tools
-    if protection_level == PromptInjectionProtectionLevel.NO_CHECKS:
+    # Skip HiddenLayer scanning if feature flag is disabled or NO_CHECKS mode
+    no_checks = (
+        protection_level == PromptInjectionProtectionLevel.NO_CHECKS
+        or not monitoring_context.use_ai_prompt_scanning
+    )
+    if no_checks:
         return sanitized_response
 
     if trust_level == ToolTrustLevel.TRUSTED_INTERNAL:
