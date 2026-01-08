@@ -70,7 +70,8 @@ class TestApplySecurityScanning:
             ) as mock_security,
         ):
             mock_context.get.return_value = MonitoringContext(
-                prompt_injection_protection_level=PromptInjectionProtectionLevel.LOG_ONLY
+                use_ai_prompt_scanning=True,
+                prompt_injection_protection_level=PromptInjectionProtectionLevel.LOG_ONLY,
             )
             mock_security.apply_security_to_tool_response.return_value = (
                 "sanitized content"
@@ -104,7 +105,8 @@ class TestApplySecurityScanning:
             ) as mock_security,
         ):
             mock_context.get.return_value = MonitoringContext(
-                prompt_injection_protection_level=PromptInjectionProtectionLevel.INTERRUPT
+                use_ai_prompt_scanning=True,
+                prompt_injection_protection_level=PromptInjectionProtectionLevel.INTERRUPT,
             )
             mock_security.apply_security_to_tool_response.return_value = (
                 "sanitized content"
@@ -184,7 +186,8 @@ class TestInterruptModeBlocking:
             ) as mock_security,
         ):
             mock_context.get.return_value = MonitoringContext(
-                prompt_injection_protection_level=PromptInjectionProtectionLevel.INTERRUPT
+                use_ai_prompt_scanning=True,
+                prompt_injection_protection_level=PromptInjectionProtectionLevel.INTERRUPT,
             )
             mock_security.apply_security_to_tool_response.return_value = "content"
             # _run_blocking_scan raises exception when threat detected
@@ -300,3 +303,119 @@ class TestHiddenLayerConfig:
                 client_secret="test-client-secret",
                 environment="prod-us",
             )
+
+
+class TestUseAiPromptScanningFlag:
+    """Test that use_ai_prompt_scanning flag controls HiddenLayer scanning."""
+
+    @pytest.mark.parametrize(
+        "use_ai_prompt_scanning,protection_level,should_skip_scan",
+        [
+            # use_ai_prompt_scanning=False should skip scanning regardless of protection level
+            (False, PromptInjectionProtectionLevel.LOG_ONLY, True),
+            (False, PromptInjectionProtectionLevel.INTERRUPT, True),
+            (False, PromptInjectionProtectionLevel.NO_CHECKS, True),
+            # use_ai_prompt_scanning=True with NO_CHECKS should skip scanning
+            (True, PromptInjectionProtectionLevel.NO_CHECKS, True),
+            # use_ai_prompt_scanning=True with LOG_ONLY should scan
+            (True, PromptInjectionProtectionLevel.LOG_ONLY, False),
+            # use_ai_prompt_scanning=True with INTERRUPT should scan
+            (True, PromptInjectionProtectionLevel.INTERRUPT, False),
+        ],
+    )
+    def test_use_ai_prompt_scanning_controls_hiddenlayer_scanning(
+        self,
+        use_ai_prompt_scanning,
+        protection_level,
+        should_skip_scan,
+    ):
+        """Test that use_ai_prompt_scanning flag properly controls HiddenLayer scanning."""
+        with (
+            patch(
+                "duo_workflow_service.tracking.current_monitoring_context"
+            ) as mock_context,
+            patch(
+                "duo_workflow_service.security.scanner_factory._schedule_fire_and_forget_scan"
+            ) as mock_fire_and_forget,
+            patch(
+                "duo_workflow_service.security.scanner_factory._run_blocking_scan"
+            ) as mock_blocking_scan,
+            patch(
+                "duo_workflow_service.security.prompt_security.PromptSecurity"
+            ) as mock_security,
+        ):
+            # Setup monitoring context
+            mock_context.get.return_value = MonitoringContext(
+                use_ai_prompt_scanning=use_ai_prompt_scanning,
+                prompt_injection_protection_level=protection_level,
+            )
+
+            # Setup sanitization to return the input unchanged
+            mock_security.apply_security_to_tool_response.return_value = "test response"
+
+            from duo_workflow_service.security.scanner_factory import (
+                apply_security_scanning,
+            )
+
+            # Call apply_security_scanning
+            result = apply_security_scanning(
+                response="test response",
+                tool_name="test_tool",
+                trust_level=ToolTrustLevel.UNTRUSTED_USER_CONTENT,
+            )
+
+            # Verify result
+            assert result == "test response"
+
+            # Verify HiddenLayer scanning behavior
+            if should_skip_scan:
+                # Neither fire-and-forget nor blocking scan should be called
+                mock_fire_and_forget.assert_not_called()
+                mock_blocking_scan.assert_not_called()
+            else:
+                # One of the scan methods should be called based on protection level
+                if protection_level == PromptInjectionProtectionLevel.LOG_ONLY:
+                    mock_fire_and_forget.assert_called_once()
+                    mock_blocking_scan.assert_not_called()
+                elif protection_level == PromptInjectionProtectionLevel.INTERRUPT:
+                    mock_fire_and_forget.assert_not_called()
+                    mock_blocking_scan.assert_called_once()
+
+    def test_trusted_tools_skip_scanning_regardless_of_flag(self):
+        """Test that TRUSTED_INTERNAL tools skip HiddenLayer scanning even when flag is enabled."""
+        with (
+            patch(
+                "duo_workflow_service.tracking.current_monitoring_context"
+            ) as mock_context,
+            patch(
+                "duo_workflow_service.security.scanner_factory._schedule_fire_and_forget_scan"
+            ) as mock_fire_and_forget,
+            patch(
+                "duo_workflow_service.security.prompt_security.PromptSecurity"
+            ) as mock_security,
+        ):
+            # Setup monitoring context with scanning enabled
+            mock_context.get.return_value = MonitoringContext(
+                use_ai_prompt_scanning=True,
+                prompt_injection_protection_level=PromptInjectionProtectionLevel.LOG_ONLY,
+            )
+
+            # Setup sanitization to return the input unchanged
+            mock_security.apply_security_to_tool_response.return_value = "test response"
+
+            from duo_workflow_service.security.scanner_factory import (
+                apply_security_scanning,
+            )
+
+            # Call apply_security_scanning with TRUSTED_INTERNAL tool
+            result = apply_security_scanning(
+                response="test response",
+                tool_name="test_tool",
+                trust_level=ToolTrustLevel.TRUSTED_INTERNAL,
+            )
+
+            # Verify result
+            assert result == "test response"
+
+            # Verify no scanning was performed
+            mock_fire_and_forget.assert_not_called()
