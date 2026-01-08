@@ -530,7 +530,9 @@ def _create_post_processor_for_model(
                 PostProcessorOperation.FILTER_SCORE,
                 PostProcessorOperation.FIX_TRUNCATION,
             ],
-            score_threshold=config.feature_flags.fireworks_score_threshold,
+            score_threshold=config.feature_flags.fireworks_score_threshold().get(
+                model_name, None
+            ),
         )
 
     return None

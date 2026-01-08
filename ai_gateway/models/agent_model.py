@@ -45,10 +45,15 @@ class AgentModel(TextGenModelBase):
 
         response_content = self._format_response_content(str(response.content)) or ""
 
+        score = 10**5
+        if response.response_metadata and "score" in response.response_metadata:
+            metadata_score = response.response_metadata["score"]
+            if metadata_score is not None:
+                score = metadata_score
         return TextGenModelOutput(
             text=response_content,
             # Give a high value, the model doesn't return scores.
-            score=10**5,
+            score=score,
             safety_attributes=SafetyAttributes(),
         )
 
