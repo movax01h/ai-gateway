@@ -150,6 +150,7 @@ class BillingEventsClient:
             correlation_id=internal_context.correlation_id,
             deployment_type=internal_context.deployment_type,
             assignments=assignments,
+            instance_version=internal_context.instance_version,
         )
 
         structured_event = StructuredEvent(
