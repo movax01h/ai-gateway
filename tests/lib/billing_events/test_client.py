@@ -22,6 +22,7 @@ BASE_BILLING_CONTEXT_SCHEMA: Dict[str, Any] = {
     "realm": None,
     "timestamp": None,
     "instance_id": None,
+    "instance_version": None,
     "unique_instance_id": "",
     "host_name": None,
     "project_id": None,
@@ -409,3 +410,37 @@ class TestBillingEventsClient:
         )
 
         client.internal_event_client.track_event.assert_not_called()
+
+    def test_track_billing_event_with_instance_version(
+        self, client, user, mock_dependencies
+    ):
+        """Test that instance_version is properly included in billing context when provided."""
+        instance_version = "16.8.0-pre"
+        internal_context = EventContext(
+            realm="user",
+            instance_id="instance-123",
+            instance_version=instance_version,
+            host_name="gitlab.example.com",
+            correlation_id="corr-456",
+            deployment_type="self-managed",
+        )
+        current_event_context.set(internal_context)
+
+        client.track_billing_event(
+            user=user,
+            event=BillingEvent.AIGW_PROXY_USE,
+            category="test_category",
+            unit_of_measure="tokens",
+            quantity=50.0,
+        )
+
+        mock_dependencies["track"].assert_called_once()
+        mock_dependencies["structured_event_init"].assert_called_once()
+
+        event_init_args = mock_dependencies["structured_event_init"].call_args[1]
+        context = event_init_args["context"][0]
+        billing_data = context.data
+
+        assert billing_data["instance_version"] == instance_version
+        assert billing_data["instance_id"] == "instance-123"
+        assert billing_data["deployment_type"] == "self-managed"

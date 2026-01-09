@@ -23,6 +23,7 @@ class BillingEventContext(BaseModel):
     realm: Optional[str] = None
     timestamp: str
     instance_id: Optional[str] = None
+    instance_version: Optional[str] = None
     unique_instance_id: Optional[str] = None
     host_name: Optional[str] = None
     project_id: Optional[int] = None
