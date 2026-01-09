@@ -44,6 +44,8 @@ Tool Response
 | `HIDDENLAYER_ENVIRONMENT` | `prod-us` or `prod-eu` |
 | `HIDDENLAYER_BASE_URL` | Custom Base URL for HiddenLayer |
 | `HL_PROJECT_ID` | Project ID or alias for request governance |
+| `HIDDENLAYER_LOG_ALLOWED_REALMS` | Control what gitlab realms are allowed to log the hidden layer response, by default only log for `saas` |
+
 
 **Feature flag:** `AI_PROMPT_SCANNING` enables HiddenLayer for untrusted tools.
 

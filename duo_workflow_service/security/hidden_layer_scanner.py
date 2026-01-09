@@ -8,11 +8,12 @@ other malicious content in AI applications.
 from __future__ import annotations
 
 import os
-from dataclasses import dataclass
-from typing import Any, Dict, Literal, Optional, cast
+from dataclasses import dataclass, field
+from typing import Any, Dict, Literal, Optional, cast, get_args
 
 import structlog
 
+from ai_gateway.instrumentators.model_requests import gitlab_realm
 from duo_workflow_service.security.prompt_scanner import (
     DetectionType,
     PromptScanner,
@@ -20,6 +21,8 @@ from duo_workflow_service.security.prompt_scanner import (
 )
 
 log = structlog.stdlib.get_logger("hidden_layer_scanner")
+
+GITLAB_REALM = Literal["saas", "self-managed"]
 
 
 class HiddenLayerError(Exception):
@@ -35,16 +38,25 @@ class HiddenLayerConfig:
     environment: str = "prod-us"
     base_url: Optional[str] = None
     project_id: Optional[str] = None
+    log_allowed_realms: set[GITLAB_REALM] = field(default_factory=lambda: {"saas"})
 
     @classmethod
     def from_environment(cls) -> "HiddenLayerConfig":
         """Create configuration from environment variables."""
+        allowed_realms: set[GITLAB_REALM] = set(
+            cast(GITLAB_REALM, item.strip())
+            for item in os.getenv("HIDDENLAYER_LOG_ALLOWED_REALMS", "saas")
+            .lower()
+            .split(",")
+            if item.strip() in get_args(GITLAB_REALM)
+        )
         return cls(
             client_id=os.getenv("HL_CLIENT_ID"),
             client_secret=os.getenv("HL_CLIENT_SECRET"),
             environment=os.getenv("HIDDENLAYER_ENVIRONMENT", "prod-us"),
             base_url=os.getenv("HIDDENLAYER_BASE_URL"),
             project_id=os.getenv("HL_PROJECT_ID"),
+            log_allowed_realms=allowed_realms,
         )
 
 
@@ -79,10 +91,18 @@ class HiddenLayerScanner(PromptScanner):
                 "Set HL_CLIENT_ID and HL_CLIENT_SECRET"
             )
 
+        if not self._config.log_allowed_realms:
+            log.error("Hidden Layer requires a proper log_allowed_realms configuration")
+            raise HiddenLayerError(
+                "Hidden Layer log_allowed_realms not configured correctly. "
+                "Set HIDDENLAYER_LOG_ALLOWED_REALMS"
+            )
+
         try:
             log.info(
                 "Initializing Hidden Layer SDK",
                 environment=self._config.environment,
+                log_allowed_realms=self._config.log_allowed_realms,
             )
             from hiddenlayer import AsyncHiddenLayer, HiddenLayer
 
@@ -114,6 +134,7 @@ class HiddenLayerScanner(PromptScanner):
             log.info(
                 "Hidden Layer scanner initialized",
                 environment=self._config.environment,
+                log_allowed_realms=self._config.log_allowed_realms,
             )
         except ImportError as e:
             log.error(
@@ -257,9 +278,16 @@ class HiddenLayerScanner(PromptScanner):
             action = getattr(evaluation, "action", "Allow")
 
         detection_type = DetectionType.SAFE
+        gl_realm = gitlab_realm.get()
         if has_detections:
             # Log response only when there is a detection
-            log.warning("Hidden Layer scan detects threats", response=raw_response)
+            if gl_realm in self._config.log_allowed_realms:
+                log.warning(
+                    "Hidden Layer scan detects threats",
+                    gitlab_realm=gl_realm,
+                    log_allowed_realms=self._config.log_allowed_realms,
+                    response=raw_response,
+                )
             detection_type = DetectionType.PROMPT_INJECTION
 
         analysis_list = getattr(response, "analysis", []) or []
@@ -284,6 +312,8 @@ class HiddenLayerScanner(PromptScanner):
         if has_detections:
             log.warning(
                 "Hidden Layer detected potential threat",
+                gitlab_realm=gl_realm,
+                log_allowed_realms=self._config.log_allowed_realms,
                 detection_type=detection_type.value,
                 action=action,
                 details=details,
