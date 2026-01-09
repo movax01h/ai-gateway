@@ -452,7 +452,6 @@ For example:
     update_epic(url="https://gitlab.com/groups/namespace/group/-/epics/42", title='Updated Epic')
 """
     args_schema: Type[BaseModel] = UpdateEpicInput
-    trust_level: ToolTrustLevel = ToolTrustLevel.TRUSTED_INTERNAL
 
     async def _execute(self, **kwargs: Any) -> str:
         url = kwargs.pop("url", None)

@@ -341,7 +341,6 @@ class DismissVulnerability(DuoBaseTool):
         )
     """
     args_schema: Type[BaseModel] = DismissVulnerabilityInput
-    trust_level: ToolTrustLevel = ToolTrustLevel.TRUSTED_INTERNAL
 
     async def _execute(self, **kwargs: Any) -> str:
         vulnerability_id = kwargs.pop("vulnerability_id")
@@ -578,7 +577,6 @@ class LinkVulnerabilityToIssue(DuoBaseTool):
         )
     """
     args_schema: Type[BaseModel] = LinkVulnerabilityToIssueInput
-    trust_level: ToolTrustLevel = ToolTrustLevel.TRUSTED_INTERNAL
 
     async def _execute(self, **kwargs: Any) -> str:
         issue_id = kwargs.pop("issue_id")
@@ -684,7 +682,6 @@ class LinkVulnerabilityToMergeRequest(DuoBaseTool):
         )
     """
     args_schema: Type[BaseModel] = LinkVulnerabilityToMergeRequestInput
-    trust_level: ToolTrustLevel = ToolTrustLevel.TRUSTED_INTERNAL
 
     async def _execute(self, **kwargs: Any) -> str:
         version_18_2 = Version("18.2.0")
@@ -791,7 +788,6 @@ This is typically done when a security team has verified that the vulnerability 
 that needs to be addressed.
 """
     args_schema: Type[BaseModel] = ConfirmVulnerabilityInput
-    trust_level: ToolTrustLevel = ToolTrustLevel.TRUSTED_INTERNAL
 
     async def _execute(self, **kwargs: Any) -> str:
         vulnerability_id = kwargs.pop("vulnerability_id")
@@ -886,7 +882,6 @@ class RevertToDetectedVulnerability(DuoBaseTool):
         revert_to_detected_vulnerability(vulnerability_id="gid://gitlab/Vulnerability/123", comment="Reverting for re-assessment after code changes")
     """
     args_schema: Type[BaseModel] = RevertToDetectedVulnerabilityInput
-    trust_level: ToolTrustLevel = ToolTrustLevel.TRUSTED_INTERNAL
 
     async def _execute(self, **kwargs: Any) -> str:
         vulnerability_id = kwargs.pop("vulnerability_id")

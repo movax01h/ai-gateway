@@ -553,7 +553,6 @@ class UpdateWorkItem(WorkItemBaseTool):
     - update_work_item(url="https://gitlab.com/namespace/project/-/work_items/42", title="Updated title")
     """
     args_schema: Type[BaseModel] = UpdateWorkItemInput
-    trust_level: ToolTrustLevel = ToolTrustLevel.TRUSTED_INTERNAL
 
     async def _execute(self, **kwargs: Any) -> str:
         resolved = await self._resolve_work_item_data(
