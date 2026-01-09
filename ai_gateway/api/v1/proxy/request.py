@@ -95,7 +95,7 @@ async def _validate_request(
 
 def track_billing_event(func):
     gl_event_context = GLReportingEventContext.from_static_name(
-        FeatureQualifiedNameStatic.AIGW_PROXY_USE
+        FeatureQualifiedNameStatic.AIGW_PROXY_USE, is_ai_catalog_item=False
     )
 
     @functools.wraps(func)

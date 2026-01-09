@@ -16,6 +16,7 @@ __all__ = [
 
 class UsageQuotaEvent(StrEnum):
     DAP_FLOW_ON_EXECUTE = "duo_agent_platform_workflow_on_execute"
+    DAP_FLOW_ON_GENERATE_TOKEN = "duo_agent_platform_workflow_on_generate_token"
     CODE_SUGGESTIONS_CODE_GENERATIONS = "code_generations"
     CODE_SUGGESTIONS_CODE_COMPLETIONS = "code_completions"
     DUO_CHAT_CLASSIC = "duo_chat_classic"

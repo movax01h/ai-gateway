@@ -101,7 +101,8 @@ class CodeGenerations:
         if self.billing_event_client and user:
             try:
                 gl_event_context = GLReportingEventContext.from_static_name(
-                    FeatureQualifiedNameStatic.CODE_SUGGESTIONS
+                    FeatureQualifiedNameStatic.CODE_SUGGESTIONS,
+                    is_ai_catalog_item=False,
                 )
 
                 billing_metadata = {

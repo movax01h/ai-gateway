@@ -108,6 +108,10 @@ class UsageQuotaClient:
 
         realm = getattr(context, "realm", "unknown")
         params = context.model_dump(exclude_none=True, exclude_unset=True)
+        # We always send feature_ai_catalog_item even when it's None
+        # since None means we were not able to resolve the value when processing the legacy logic.
+        params["feature_ai_catalog_item"] = context.feature_ai_catalog_item
+
         headers = {
             "X-Admin-Email": str(self.customersdot_api_user),
             "X-Admin-Token": str(self.customersdot_api_token),
