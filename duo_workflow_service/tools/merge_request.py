@@ -608,7 +608,6 @@ For example:
     update_merge_request(url="https://gitlab.com/namespace/project/-/merge_requests/103", title="Updated title")
     """
     args_schema: Type[BaseModel] = UpdateMergeRequestInput
-    trust_level: ToolTrustLevel = ToolTrustLevel.TRUSTED_INTERNAL
 
     async def _execute(self, **kwargs: Any) -> str:
         url = kwargs.pop("url", None)

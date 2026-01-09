@@ -405,7 +405,6 @@ class UpdateIssue(IssueBaseTool):
         update_issue(url="https://gitlab.com/namespace/project/-/issues/103", title="Updated title")
     """
     args_schema: Type[BaseModel] = UpdateIssueInput
-    trust_level: ToolTrustLevel = ToolTrustLevel.TRUSTED_INTERNAL
 
     async def _execute(self, **kwargs: Any) -> str:
         url = kwargs.pop("url", None)
