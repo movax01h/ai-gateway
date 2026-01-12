@@ -652,6 +652,13 @@ class DuoWorkflowService(contract_pb2_grpc.DuoWorkflowServicer):
         gitlab_realm = metadata.get("x-gitlab-realm")
         gitlab_instance_id = metadata.get("x-gitlab-instance-id")
 
+        extra_claims = {}
+
+        if hasattr(user, "claims") and user.claims:
+            extra_claims = {
+                "gitlab_instance_uid": getattr(user.claims, "gitlab_instance_uid", None)
+            }
+
         scopes = []
         if user.is_debug:
             scopes = list(allowed_ijwt_scopes)
@@ -667,6 +674,7 @@ class DuoWorkflowService(contract_pb2_grpc.DuoWorkflowServicer):
             user,
             gitlab_instance_id,
             scopes,
+            extra_claims=extra_claims,
         )
 
         return contract_pb2.GenerateTokenResponse(token=token, expiresAt=expires_at)
