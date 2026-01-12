@@ -141,7 +141,7 @@ class TestReActAgentStream:
                     ],
                 ),
                 ModelMetadata(
-                    name="claude_3_5_haiku_20241022",
+                    name="claude_haiku_4_5_20251001",
                     provider="anthropic",
                     endpoint=AnyUrl("http://localhost:4000"),
                     llm_definition=LLMDefinition(
