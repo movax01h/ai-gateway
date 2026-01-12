@@ -755,6 +755,7 @@ def _resolve_agent_code_completions(
 
     return completions_agent_factory(
         model__prompt=prompt,
+        model__llm_definition=model_metadata.llm_definition,
         post_processor=post_processor,
     )
 

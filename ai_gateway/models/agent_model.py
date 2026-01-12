@@ -1,5 +1,6 @@
 from typing import Any, AsyncIterator, Optional
 
+from ai_gateway.model_selection import LLMDefinition
 from ai_gateway.models.base import ModelMetadata
 from ai_gateway.models.base_text import (
     TextGenModelBase,
@@ -20,8 +21,10 @@ class AgentModel(TextGenModelBase):
     def __init__(
         self,
         prompt: Prompt,
+        llm_definition: Optional[LLMDefinition] = None,
     ):
         self.prompt = prompt
+        self._llm_definition = llm_definition
         self._metadata = ModelMetadata(
             name=prompt.name,
             engine=AGENT,
@@ -30,6 +33,14 @@ class AgentModel(TextGenModelBase):
     @property
     def metadata(self) -> ModelMetadata:
         return self._metadata
+
+    @property
+    def input_token_limit(self) -> int:
+        if self._llm_definition:
+            return self._llm_definition.max_context_tokens
+
+        # Most modern models support at least 32k tokens
+        return 32_768
 
     async def generate(  # type: ignore[override]
         self,
