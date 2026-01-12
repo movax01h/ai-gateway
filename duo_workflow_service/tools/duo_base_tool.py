@@ -1,3 +1,4 @@
+import json
 from abc import abstractmethod
 from typing import Any, List, NamedTuple, Optional, final
 
@@ -262,6 +263,47 @@ class DuoBaseTool(BaseTool):
             args_str = str(args)
 
         return f"Using {self.name}: {args_str}"
+
+    async def _get_discussion_id_from_note_rest(
+        self,
+        project_id: str,
+        resource_type: str,
+        resource_iid: int,
+        note_id: int,
+    ) -> dict:
+        """Resolve the REST discussion ID containing the given note_id.
+
+        Args:
+            project_id: The project ID
+            resource_type: The type of resource ("issues" or "merge_requests")
+            resource_iid: The IID of the resource (issue_iid or merge_request_iid)
+            note_id: The ID of the note to find
+
+        Returns:
+            A dict with discussionId key if found, or a dict with error key if not found
+        """
+        try:
+            response = await self.gitlab_client.aget(
+                path=f"/api/v4/projects/{project_id}/{resource_type}/{resource_iid}/discussions",
+                parse_json=False,
+            )
+            if not response.is_success():
+                return {"error": f"Failed to fetch {resource_type} discussions"}
+
+            discussions = json.loads(response.body) if response.body else []
+
+            for discussion in discussions:
+                for note in discussion.get("notes", []):
+                    if note.get("id") == note_id:
+                        return {"discussionId": discussion["id"]}
+
+            resource_name = (
+                "merge request" if resource_type == "merge_requests" else "issue"
+            )
+            return {"error": f"Note {note_id} not found in this {resource_name}."}
+
+        except Exception as e:
+            return {"error": str(e)}
 
     @staticmethod
     def _process_http_response(identifier: str, response: Any) -> Any:

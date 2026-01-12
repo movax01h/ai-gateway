@@ -1,5 +1,6 @@
+import json
 from typing import Any, Type
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, Mock, patch
 
 import pytest
 from langchain_core.tools import BaseTool, ToolException
@@ -53,6 +54,22 @@ class DummyToolWithResponseHandling(DuoBaseTool):
 
     async def _execute(self, action):
         return f"Completed {action}"
+
+
+@pytest.fixture(name="gitlab_client_mock")
+def gitlab_client_mock_fixture():
+    mock = Mock()
+    mock.aget = AsyncMock()
+    return mock
+
+
+@pytest.fixture(name="tool_with_client")
+def tool_with_client_fixture(gitlab_client_mock):
+    return DummyTool(
+        metadata={
+            "gitlab_client": gitlab_client_mock,
+        }
+    )
 
 
 def test_gitlab_client():
@@ -265,3 +282,161 @@ def test_process_http_response_error_message_truncation():
 
     assert error_message == expected_message
     assert len(error_message) == len(expected_prefix) + 300
+
+
+@pytest.mark.parametrize(
+    "project_id,resource_type,resource_iid,note_id,discussions,expected_result",
+    [
+        (
+            "456",
+            "merge_requests",
+            99,
+            2001,
+            [
+                {
+                    "id": "mr-discussion-123",
+                    "notes": [
+                        {"id": 2001, "body": "MR comment"},
+                    ],
+                }
+            ],
+            {"discussionId": "mr-discussion-123"},
+        ),
+        # Success: multiple discussions
+        (
+            "123",
+            "issues",
+            42,
+            202,
+            [
+                {
+                    "id": "discussion1",
+                    "notes": [
+                        {"id": 101, "body": "Comment 1"},
+                        {"id": 102, "body": "Comment 2"},
+                    ],
+                },
+                {
+                    "id": "discussion2",
+                    "notes": [
+                        {"id": 201, "body": "Comment 3"},
+                        {"id": 202, "body": "Comment 4"},
+                    ],
+                },
+            ],
+            {"discussionId": "discussion2"},
+        ),
+    ],
+)
+@pytest.mark.asyncio
+async def test_get_discussion_id_from_note_rest_success(
+    tool_with_client,
+    gitlab_client_mock,
+    project_id,
+    resource_type,
+    resource_iid,
+    note_id,
+    discussions,
+    expected_result,
+):
+    """Test successfully finding discussion ID."""
+    mock_response = Mock()
+    mock_response.is_success.return_value = True
+    mock_response.body = json.dumps(discussions)
+
+    gitlab_client_mock.aget.return_value = mock_response
+
+    result = await tool_with_client._get_discussion_id_from_note_rest(
+        project_id=project_id,
+        resource_type=resource_type,
+        resource_iid=resource_iid,
+        note_id=note_id,
+    )
+
+    assert result == expected_result
+    gitlab_client_mock.aget.assert_called_once_with(
+        path=f"/api/v4/projects/{project_id}/{resource_type}/{resource_iid}/discussions",
+        parse_json=False,
+    )
+
+
+@pytest.mark.asyncio
+async def test_get_discussion_id_from_note_rest_not_found(
+    tool_with_client, gitlab_client_mock
+):
+    """Test when note is not found in discussions."""
+    discussions = [
+        {
+            "id": "discussion1",
+            "notes": [
+                {"id": 101, "body": "Comment 1"},
+                {"id": 102, "body": "Comment 2"},
+            ],
+        },
+    ]
+
+    mock_response = Mock()
+    mock_response.is_success.return_value = True
+    mock_response.body = json.dumps(discussions)
+
+    gitlab_client_mock.aget.return_value = mock_response
+
+    result = await tool_with_client._get_discussion_id_from_note_rest(
+        project_id="123",
+        resource_type="issues",
+        resource_iid=42,
+        note_id=999,
+    )
+
+    assert isinstance(result, dict)
+    assert "error" in result
+    assert "Note 999 not found" in result["error"]
+
+
+@pytest.mark.asyncio
+async def test_get_discussion_id_from_note_rest_api_failure(
+    tool_with_client, gitlab_client_mock
+):
+    """Test when API call fails."""
+    mock_response = Mock()
+    mock_response.is_success.return_value = False
+
+    gitlab_client_mock.aget.return_value = mock_response
+
+    result = await tool_with_client._get_discussion_id_from_note_rest(
+        project_id="123",
+        resource_type="issues",
+        resource_iid=42,
+        note_id=1,
+    )
+
+    assert isinstance(result, dict)
+    assert "error" in result
+    assert "Failed to fetch issues discussions" in result["error"]
+
+
+@pytest.mark.parametrize(
+    "exception_msg",
+    [
+        "Connection timeout",
+        "Network error",
+        "Invalid response",
+    ],
+)
+@pytest.mark.asyncio
+async def test_get_discussion_id_from_note_rest_api_exception(
+    tool_with_client, gitlab_client_mock, exception_msg
+):
+    """Test when API call raises an exception."""
+    gitlab_client_mock.aget.side_effect = Exception(exception_msg)
+
+    result = await tool_with_client._get_discussion_id_from_note_rest(
+        project_id="123",
+        resource_type="issues",
+        resource_iid=42,
+        note_id=1,
+    )
+
+    assert isinstance(result, dict)
+    assert "error" in result
+    assert exception_msg in result["error"]

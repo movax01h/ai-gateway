@@ -274,6 +274,12 @@ class CreateMergeRequestNoteInput(MergeRequestResourceInput):
     body: str = Field(
         description="The content of a note. Limited to 1,000,000 characters."
     )
+    note_id: Optional[int] = Field(
+        default=None,
+        description="ID of an existing note to reply to. "
+        "The tool will automatically find the discussion containing this note. "
+        "If not provided, creates a standalone comment.",
+    )
 
 
 class CreateMergeRequestNote(DuoBaseTool):
@@ -297,6 +303,7 @@ The body parameter is always required.
         url = kwargs.pop("url", None)
         project_id = kwargs.pop("project_id", None)
         merge_request_iid = kwargs.pop("merge_request_iid", None)
+        note_id = kwargs.pop("note_id", None)
 
         validation_result = self._validate_merge_request_url(
             url, project_id, merge_request_iid
@@ -305,15 +312,40 @@ The body parameter is always required.
         if validation_result.errors:
             return json.dumps({"error": "; ".join(validation_result.errors)})
 
+        if not validation_result.project_id or not validation_result.merge_request_iid:
+            return json.dumps(
+                {"error": "Missing required identifiers after validation"}
+            )
+
+        discussion_id = None
+        if note_id is not None:
+            discussion_result = await self._get_discussion_id_from_note_rest(
+                validation_result.project_id,
+                "merge_requests",
+                validation_result.merge_request_iid,
+                note_id,
+            )
+            if "error" in discussion_result:
+                return json.dumps(discussion_result)
+            discussion_id = discussion_result.get("discussionId")
+
+        if discussion_id:
+            path = (
+                f"/api/v4/projects/{validation_result.project_id}/merge_requests/"
+                f"{validation_result.merge_request_iid}/discussions/{discussion_id}/notes"
+            )
+        else:
+            path = (
+                f"/api/v4/projects/{validation_result.project_id}/merge_requests/"
+                f"{validation_result.merge_request_iid}/notes"
+            )
+
+        payload = {"body": body}
+
         try:
             response = await self.gitlab_client.apost(
-                path=f"/api/v4/projects/{validation_result.project_id}/merge_requests/"
-                f"{validation_result.merge_request_iid}/notes",
-                body=json.dumps(
-                    {
-                        "body": body,
-                    },
-                ),
+                path=path,
+                body=json.dumps(payload),
             )
 
             if not response.is_success():

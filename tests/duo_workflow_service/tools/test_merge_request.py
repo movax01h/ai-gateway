@@ -720,6 +720,63 @@ async def test_create_merge_request_note(gitlab_client_mock, metadata):
 
 
 @pytest.mark.asyncio
+async def test_create_merge_request_note_with_note_id_reply(
+    gitlab_client_mock, metadata
+):
+    """Test creating a reply to an existing note using note_id."""
+    discussions_response = GitLabHttpResponse(
+        status_code=200,
+        body=json.dumps(
+            [{"id": "abc123", "notes": [{"id": 1, "body": "Original note"}]}]
+        ),
+    )
+
+    reply_response = GitLabHttpResponse(
+        status_code=200,
+        body={
+            "id": 2,
+            "body": "This is a reply",
+            "discussion_id": "gid://gitlab/Discussion/789",
+        },
+    )
+
+    gitlab_client_mock.aget = AsyncMock(return_value=discussions_response)
+    gitlab_client_mock.apost = AsyncMock(return_value=reply_response)
+
+    tool = CreateMergeRequestNote(metadata=metadata)
+
+    response = await tool._arun(
+        project_id=1,
+        merge_request_iid=123,
+        body="This is a reply",
+        note_id=1,
+    )
+
+    expected_response = json.dumps(
+        {
+            "status": "success",
+            "body": "This is a reply",
+            "response": {
+                "id": 2,
+                "body": "This is a reply",
+                "discussion_id": "gid://gitlab/Discussion/789",
+            },
+        }
+    )
+    assert response == expected_response
+
+    gitlab_client_mock.aget.assert_called_once_with(
+        path="/api/v4/projects/1/merge_requests/123/discussions",
+        parse_json=False,
+    )
+
+    gitlab_client_mock.apost.assert_called_once_with(
+        path="/api/v4/projects/1/merge_requests/123/discussions/abc123/notes",
+        body=json.dumps({"body": "This is a reply"}),
+    )
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize(
     "url,project_id,merge_request_iid,expected_path",
     [
@@ -778,6 +835,91 @@ async def test_create_merge_request_note_with_url_success(
     gitlab_client_mock.apost.assert_called_once_with(
         path=expected_path,
         body=json.dumps({"body": "Test note"}),
+    )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "url,project_id,merge_request_iid,expected_path",
+    [
+        (
+            "https://gitlab.com/namespace/project/-/merge_requests/123",
+            None,
+            None,
+            "/api/v4/projects/namespace%2Fproject/merge_requests/123/discussions/abc123/notes",
+        ),
+        (
+            "https://gitlab.com/namespace/project/-/merge_requests/123",
+            "namespace%2Fproject",
+            123,
+            "/api/v4/projects/namespace%2Fproject/merge_requests/123/discussions/abc123/notes",
+        ),
+    ],
+)
+async def test_create_merge_request_note_with_url_and_note_id_success(
+    url,
+    project_id,
+    merge_request_iid,
+    expected_path,
+    gitlab_client_mock,
+    metadata,
+):
+    """Test creating a reply to an existing note via URL with note_id."""
+    discussions_response = GitLabHttpResponse(
+        status_code=200,
+        body=json.dumps(
+            [{"id": "abc123", "notes": [{"id": 1, "body": "Original note"}]}]
+        ),
+    )
+
+    # Mock for creating the reply
+    reply_data = {
+        "id": 2,
+        "body": "This is a reply",
+        "created_at": "2024-01-01T13:00:00Z",
+        "author": {"id": 1, "name": "Test User"},
+        "discussion_id": "gid://gitlab/Discussion/789",
+    }
+
+    reply_response = GitLabHttpResponse(
+        status_code=200,
+        body=reply_data,
+        headers={"content-type": "application/json"},
+    )
+
+    gitlab_client_mock.aget = AsyncMock(return_value=discussions_response)
+    gitlab_client_mock.apost = AsyncMock(return_value=reply_response)
+
+    tool = CreateMergeRequestNote(
+        description="create merge request note description", metadata=metadata
+    )
+
+    response = await tool._arun(
+        url=url,
+        project_id=project_id,
+        merge_request_iid=merge_request_iid,
+        body="This is a reply",
+        note_id=1,
+    )
+
+    expected_response = json.dumps(
+        {
+            "status": "success",
+            "body": "This is a reply",
+            "response": {
+                "id": 2,
+                "body": "This is a reply",
+                "created_at": "2024-01-01T13:00:00Z",
+                "author": {"id": 1, "name": "Test User"},
+                "discussion_id": "gid://gitlab/Discussion/789",
+            },
+        }
+    )
+    assert response == expected_response
+
+    gitlab_client_mock.apost.assert_called_once_with(
+        path=expected_path,
+        body=json.dumps({"body": "This is a reply"}),
     )
 
 
@@ -1298,6 +1440,23 @@ def test_list_merge_request_diffs_format_display_message(input_data, expected_me
             CreateMergeRequestNoteInput(
                 url="https://gitlab.com/namespace/project/-/merge_requests/42",
                 body="This is a note on the merge request",
+            ),
+            "Add comment to merge request https://gitlab.com/namespace/project/-/merge_requests/42",
+        ),
+        (
+            CreateMergeRequestNoteInput(
+                project_id=42,
+                merge_request_iid=123,
+                body="This is a reply to a comment",
+                note_id=1,
+            ),
+            "Add comment to merge request !123 in project 42",
+        ),
+        (
+            CreateMergeRequestNoteInput(
+                url="https://gitlab.com/namespace/project/-/merge_requests/42",
+                body="This is a reply to a comment",
+                note_id=1,
             ),
             "Add comment to merge request https://gitlab.com/namespace/project/-/merge_requests/42",
         ),
