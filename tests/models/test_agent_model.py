@@ -2,6 +2,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
+from ai_gateway.model_selection import LLMDefinition
 from ai_gateway.models.agent_model import AgentModel
 from ai_gateway.models.base_text import TextGenModelOutput
 from ai_gateway.prompts.base import Prompt
@@ -23,9 +24,24 @@ class TestAgentModel:
 
         return prompt
 
+    @pytest.fixture(name="llm_definition")
+    def llm_definition_fixture(self) -> LLMDefinition:
+        return LLMDefinition(
+            name="Test Model",
+            gitlab_identifier="test_model",
+            max_context_tokens=128000,
+            params={"model": "test-model"},
+        )
+
     @pytest.fixture(name="model")
     def model_fixture(self, prompt: Prompt):
         return AgentModel(prompt)
+
+    @pytest.fixture(name="model_with_llm_definition")
+    def model_with_llm_definition_fixture(
+        self, prompt: Prompt, llm_definition: LLMDefinition
+    ):
+        return AgentModel(prompt, llm_definition=llm_definition)
 
     @pytest.fixture(name="mixtral_prompt")
     def mixtral_prompt_fixture(self) -> Prompt:
@@ -60,6 +76,19 @@ class TestAgentModel:
         assert model.prompt == prompt
         assert model.metadata.name == "test"
         assert model.metadata.engine == "agent"
+
+    def test_input_token_limit_with_llm_definition(
+        self, model_with_llm_definition, llm_definition
+    ):
+        assert model_with_llm_definition.input_token_limit == 128000
+        assert (
+            model_with_llm_definition.input_token_limit
+            == llm_definition.max_context_tokens
+        )
+
+    def test_input_token_limit_without_llm_definition(self, model):
+        # Should fall back to default of 32,768
+        assert model.input_token_limit == 32_768
 
     @pytest.mark.asyncio
     async def test_generate(self, prompt, model, params):

@@ -139,9 +139,10 @@ class PromptBuilderPrefixBased(PromptBuilderBase):
         if not self.code_context:
             return None
 
+        text = "\n".join(self.code_context)
         original = CodeContent(
-            text="\n".join(self.code_context),
-            length_tokens=self.tkn_strategy.estimate_length(self.code_context)[0],
+            text=text,
+            length_tokens=self.tkn_strategy.estimate_length(text)[0],
         )
 
         truncated = self.tkn_strategy.truncate_content(
