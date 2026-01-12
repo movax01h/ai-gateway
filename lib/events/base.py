@@ -13,7 +13,6 @@ class FeatureQualifiedNameStatic(StrEnum):
 
     CODE_SUGGESTIONS = "code_suggestions"
     AMAZON_Q_INTEGRATION = "amazon_q_integration"
-    DUO_CHAT_CLASSIC = "duo_chat_classic"
     AIGW_PROXY_USE = "ai_gateway_proxy_use"
 
     # Overall, in the DWS codebase, we resolve feature name based on the passed workflow_definition.

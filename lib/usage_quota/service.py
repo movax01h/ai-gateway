@@ -19,7 +19,6 @@ class UsageQuotaEvent(StrEnum):
     DAP_FLOW_ON_GENERATE_TOKEN = "duo_agent_platform_workflow_on_generate_token"
     CODE_SUGGESTIONS_CODE_GENERATIONS = "code_generations"
     CODE_SUGGESTIONS_CODE_COMPLETIONS = "code_completions"
-    DUO_CHAT_CLASSIC = "duo_chat_classic"
     AMAZON_Q_INTEGRATION = "amazon_q_integration"
     AIGW_PROXY_USE = "ai_gateway_proxy_use"
 

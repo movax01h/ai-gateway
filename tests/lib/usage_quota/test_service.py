@@ -144,7 +144,6 @@ class TestEventTypeHandling:
         [
             UsageQuotaEvent.CODE_SUGGESTIONS_CODE_COMPLETIONS,
             UsageQuotaEvent.CODE_SUGGESTIONS_CODE_GENERATIONS,
-            UsageQuotaEvent.DUO_CHAT_CLASSIC,
             UsageQuotaEvent.DAP_FLOW_ON_EXECUTE,
             UsageQuotaEvent.AMAZON_Q_INTEGRATION,
             UsageQuotaEvent.AIGW_PROXY_USE,

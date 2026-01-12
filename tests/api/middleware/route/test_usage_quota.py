@@ -278,15 +278,15 @@ class TestEventTypeEnum:
         assert call_args[0][1] == UsageQuotaEvent.CODE_SUGGESTIONS_CODE_GENERATIONS
 
     @pytest.mark.asyncio
-    async def test_supports_duo_chat_event(self, mock_request):
-        """Test decorator with DUO_CHAT event type."""
+    async def test_supports_amazon_q_integration_event(self, mock_request):
+        """Test decorator with AMAZON_Q_INTEGRATION event type."""
 
         async def test_handler(request, *args, **kwargs):
             return JSONResponse({"status": "ok"})
 
         decorated = has_sufficient_usage_quota(
-            feature_qualified_name=FeatureQualifiedNameStatic.DUO_CHAT_CLASSIC,
-            event=UsageQuotaEvent.DUO_CHAT_CLASSIC,
+            feature_qualified_name=FeatureQualifiedNameStatic.AMAZON_Q_INTEGRATION,
+            event=UsageQuotaEvent.AMAZON_Q_INTEGRATION,
         )(test_handler)
 
         mock_request.app.state.usage_quota_service.execute = AsyncMock()
@@ -295,4 +295,4 @@ class TestEventTypeEnum:
 
         assert response.status_code == 200
         call_args = mock_request.app.state.usage_quota_service.execute.call_args
-        assert call_args[0][1] == UsageQuotaEvent.DUO_CHAT_CLASSIC
+        assert call_args[0][1] == UsageQuotaEvent.AMAZON_Q_INTEGRATION

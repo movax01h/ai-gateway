@@ -7,7 +7,6 @@ from gitlab_cloud_connector import GitLabUnitPrimitive
 
 from ai_gateway.api.auth_utils import StarletteUser, get_current_user
 from ai_gateway.api.feature_category import track_metadata
-from ai_gateway.api.middleware.route import has_sufficient_usage_quota
 from ai_gateway.api.v1.chat.auth import ChatInvokable, authorize_with_unit_primitive
 from ai_gateway.api.v1.chat.typing import (
     ChatRequest,
@@ -30,9 +29,7 @@ from ai_gateway.models import (
 )
 from ai_gateway.models.base_text import TextGenModelChunk, TextGenModelOutput
 from ai_gateway.tracking import log_exception
-from lib.events import FeatureQualifiedNameStatic
 from lib.internal_events import InternalEventsClient
-from lib.usage_quota import UsageQuotaEvent
 
 __all__ = [
     "router",
@@ -75,10 +72,6 @@ path_unit_primitive_map = {ci.name: ci.unit_primitive for ci in CHAT_INVOKABLES}
 )
 @authorize_with_unit_primitive("chat_invokable", chat_invokables=CHAT_INVOKABLES)
 @track_metadata("chat_invokable", mapping=path_unit_primitive_map)
-@has_sufficient_usage_quota(
-    feature_qualified_name=FeatureQualifiedNameStatic.DUO_CHAT_CLASSIC,
-    event=UsageQuotaEvent.DUO_CHAT_CLASSIC,
-)
 async def chat(
     _request: Request,
     chat_request: ChatRequest,
