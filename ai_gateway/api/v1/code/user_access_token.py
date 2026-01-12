@@ -89,6 +89,8 @@ async def user_access_token(
             "gitlab_namespace_id": x_gitlab_namespace_id,
             "gitlab_root_namespace_id": x_gitlab_root_namespace_id,
         }
+    elif user_claims.gitlab_realm == "self-managed":
+        extra_claims = {"gitlab_instance_uid": user_claims.gitlab_instance_uid}
 
     try:
         token, expires_at = token_authority.encode(
