@@ -285,9 +285,11 @@ async def fetch_workflow_and_container_data(
 
     prompt_injection_protection_level = PromptInjectionProtectionLevel.LOG_ONLY
 
-    ai_settings = project_data.get("rootGroup", {}).get(
-        "aiSettings", {}
-    ) or namespace_data.get("rootNamespace", {}).get("aiSettings", {})
+    ai_settings = (
+        project_data.get("rootGroup", {}).get("aiSettings", {})
+        or namespace_data.get("rootNamespace", {}).get("aiSettings", {})
+        or {}  # set ai_settings default to empty dict in case project and namespace data are both None
+    )
 
     prompt_injection_protection_level = PromptInjectionProtectionLevel.from_graphql(
         ai_settings.get("promptInjectionProtectionLevel")
