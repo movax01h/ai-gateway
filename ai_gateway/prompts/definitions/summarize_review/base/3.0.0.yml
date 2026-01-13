@@ -1,10 +1,10 @@
 ---
-name: Claude 3.7 Summarize Review
+name: Summarize Review
 model:
   params:
-    model_class_provider: litellm
+    model_class_provider: anthropic
 unit_primitives:
-  - summarize_review
+  - duo_agent_platform
 prompt_template:
   system: |
     {% include 'summarize_review/system/1.0.0.jinja' %}
