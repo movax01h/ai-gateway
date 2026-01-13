@@ -17,7 +17,18 @@ components:
     ui_log_events:
       - "on_tool_execution_success"
       - "on_tool_execution_failed"
-
+  - name: "set_remote"
+    type: AgentComponent
+    prompt_id: "set_remote"
+    prompt_version: "^1.0.0"
+    toolset:
+      - "run_git_command"
+    inputs:
+      - from: "context:project_http_url_to_repo"
+        as: "repository_url"
+    ui_log_events:
+      - "on_tool_execution_success"
+      - "on_tool_execution_failed"
   - name: "convert_to_gitlab_ci"
     type: AgentComponent
     prompt_id: "convert_to_gl_ci"
@@ -97,6 +108,8 @@ components:
 
 routers:
   - from: "load_jenkins_file"
+    to: "set_remote"
+  - from: "set_remote"
     to: "convert_to_gitlab_ci"
   - from: "convert_to_gitlab_ci"
     to: "create_repository_branch"

@@ -1,0 +1,16 @@
+name: set_remote_prompt
+model:
+  params:
+    model_class_provider: anthropic
+    max_tokens: 2048
+    max_retries: 3
+unit_primitives:
+  - duo_workflow_execute_workflow
+prompt_template:
+  system: |
+    {% include 'set_remote/system/1.0.0.jinja' %}
+  user: |
+    {% include 'set_remote/user/1.0.0.jinja' %}
+  placeholder: history
+params:
+  timeout: 30
