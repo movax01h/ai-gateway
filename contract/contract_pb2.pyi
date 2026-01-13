@@ -317,8 +317,14 @@ class AdditionalContext(_message.Message):
 class Approval(_message.Message):
     __slots__ = ("approval", "rejection")
     class Approved(_message.Message):
-        __slots__ = ()
-        def __init__(self) -> None: ...
+        __slots__ = ("remember_approval", "tool_name", "tool_args_json")
+        REMEMBER_APPROVAL_FIELD_NUMBER: _ClassVar[int]
+        TOOL_NAME_FIELD_NUMBER: _ClassVar[int]
+        TOOL_ARGS_JSON_FIELD_NUMBER: _ClassVar[int]
+        remember_approval: bool
+        tool_name: str
+        tool_args_json: str
+        def __init__(self, remember_approval: bool = ..., tool_name: _Optional[str] = ..., tool_args_json: _Optional[str] = ...) -> None: ...
     class Rejected(_message.Message):
         __slots__ = ("message",)
         MESSAGE_FIELD_NUMBER: _ClassVar[int]

@@ -206,7 +206,11 @@ message AdditionalContext {
 }
 
 message Approval {
-    message Approved {}
+    message Approved {
+        optional bool remember_approval = 1 [json_name = "remember_approval"];
+        optional string tool_name = 2 [json_name = "tool_name"];
+        optional string tool_args_json = 3 [json_name = "tool_args_json"];
+    }
 
     message Rejected {
         optional string message = 1;
