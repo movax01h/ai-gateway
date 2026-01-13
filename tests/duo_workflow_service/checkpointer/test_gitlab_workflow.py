@@ -1253,6 +1253,8 @@ async def test_created_status_with_existing_checkpoint_raises_error(
         WorkflowStatusEnum.FINISHED,
         WorkflowStatusEnum.STOPPED,
         WorkflowStatusEnum.INPUT_REQUIRED,
+        WorkflowStatusEnum.TOOL_CALL_APPROVAL_REQUIRED,
+        WorkflowStatusEnum.PLAN_APPROVAL_REQUIRED,
     ],
 )
 async def test_track_workflow_completion_with_billing_event(

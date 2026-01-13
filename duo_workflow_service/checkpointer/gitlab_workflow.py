@@ -93,6 +93,8 @@ BILLABLE_STATUSES = frozenset(
         WorkflowStatusEnum.FINISHED,
         WorkflowStatusEnum.STOPPED,
         WorkflowStatusEnum.INPUT_REQUIRED,
+        WorkflowStatusEnum.TOOL_CALL_APPROVAL_REQUIRED,
+        WorkflowStatusEnum.PLAN_APPROVAL_REQUIRED,
     ]
 )
 
