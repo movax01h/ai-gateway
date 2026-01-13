@@ -13,7 +13,6 @@ from starlette.responses import StreamingResponse
 from ai_gateway.api.auth_utils import StarletteUser, get_current_user
 from ai_gateway.api.feature_category import feature_category
 from ai_gateway.api.middleware import X_GITLAB_VERSION_HEADER
-from ai_gateway.api.middleware.route import has_sufficient_usage_quota
 from ai_gateway.api.v2.chat.typing import AgentRequest
 from ai_gateway.async_dependency_resolver import (
     get_container_application,
@@ -33,9 +32,7 @@ from ai_gateway.model_metadata import current_model_metadata_context
 from ai_gateway.models import Role
 from ai_gateway.prompts import BasePromptRegistry
 from ai_gateway.structured_logging import get_request_logger
-from lib.events import FeatureQualifiedNameStatic
 from lib.internal_events import InternalEventsClient
-from lib.usage_quota import UsageQuotaEvent
 
 __all__ = [
     "router",
@@ -158,10 +155,6 @@ async def create_event_stream(
 
 @router.post("/agent")
 @feature_category(GitLabFeatureCategory.DUO_CHAT)
-@has_sufficient_usage_quota(
-    feature_qualified_name=FeatureQualifiedNameStatic.DUO_CHAT_CLASSIC,
-    event=UsageQuotaEvent.DUO_CHAT_CLASSIC,
-)
 async def chat(
     request: Request,
     agent_request: AgentRequest,
