@@ -216,6 +216,9 @@ export interface Approval {
 }
 
 export interface Approval_Approved {
+  remember_approval?: boolean | undefined;
+  tool_name?: string | undefined;
+  tool_args_json?: string | undefined;
 }
 
 export interface Approval_Rejected {
@@ -3248,11 +3251,20 @@ export const Approval: MessageFns<Approval> = {
 };
 
 function createBaseApproval_Approved(): Approval_Approved {
-  return {};
+  return { remember_approval: undefined, tool_name: undefined, tool_args_json: undefined };
 }
 
 export const Approval_Approved: MessageFns<Approval_Approved> = {
-  encode(_: Approval_Approved, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
+  encode(message: Approval_Approved, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
+    if (message.remember_approval !== undefined) {
+      writer.uint32(8).bool(message.remember_approval);
+    }
+    if (message.tool_name !== undefined) {
+      writer.uint32(18).string(message.tool_name);
+    }
+    if (message.tool_args_json !== undefined) {
+      writer.uint32(26).string(message.tool_args_json);
+    }
     return writer;
   },
 
@@ -3263,6 +3275,30 @@ export const Approval_Approved: MessageFns<Approval_Approved> = {
     while (reader.pos < end) {
       const tag = reader.uint32();
       switch (tag >>> 3) {
+        case 1: {
+          if (tag !== 8) {
+            break;
+          }
+
+          message.remember_approval = reader.bool();
+          continue;
+        }
+        case 2: {
+          if (tag !== 18) {
+            break;
+          }
+
+          message.tool_name = reader.string();
+          continue;
+        }
+        case 3: {
+          if (tag !== 26) {
+            break;
+          }
+
+          message.tool_args_json = reader.string();
+          continue;
+        }
       }
       if ((tag & 7) === 4 || tag === 0) {
         break;
@@ -3272,20 +3308,36 @@ export const Approval_Approved: MessageFns<Approval_Approved> = {
     return message;
   },
 
-  fromJSON(_: any): Approval_Approved {
-    return {};
+  fromJSON(object: any): Approval_Approved {
+    return {
+      remember_approval: isSet(object.remember_approval) ? globalThis.Boolean(object.remember_approval) : undefined,
+      tool_name: isSet(object.tool_name) ? globalThis.String(object.tool_name) : undefined,
+      tool_args_json: isSet(object.tool_args_json) ? globalThis.String(object.tool_args_json) : undefined,
+    };
   },
 
-  toJSON(_: Approval_Approved): unknown {
+  toJSON(message: Approval_Approved): unknown {
     const obj: any = {};
+    if (message.remember_approval !== undefined) {
+      obj.remember_approval = message.remember_approval;
+    }
+    if (message.tool_name !== undefined) {
+      obj.tool_name = message.tool_name;
+    }
+    if (message.tool_args_json !== undefined) {
+      obj.tool_args_json = message.tool_args_json;
+    }
     return obj;
   },
 
   create<I extends Exact<DeepPartial<Approval_Approved>, I>>(base?: I): Approval_Approved {
     return Approval_Approved.fromPartial(base ?? ({} as any));
   },
-  fromPartial<I extends Exact<DeepPartial<Approval_Approved>, I>>(_: I): Approval_Approved {
+  fromPartial<I extends Exact<DeepPartial<Approval_Approved>, I>>(object: I): Approval_Approved {
     const message = createBaseApproval_Approved();
+    message.remember_approval = object.remember_approval ?? undefined;
+    message.tool_name = object.tool_name ?? undefined;
+    message.tool_args_json = object.tool_args_json ?? undefined;
     return message;
   },
 };
