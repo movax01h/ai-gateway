@@ -63,7 +63,7 @@ configurable_unit_primitives:
   - feature_setting: "duo_chat_explain_code"
     unit_primitives:
       - "explain_code"
-    default_model: "claude_sonnet_4_5_20250929_vertex"
+    default_model: "claude_sonnet_4_20250514"
     selectable_models:
       - "claude_sonnet_4_20250514"
       - "claude_sonnet_4_20250514_vertex"
