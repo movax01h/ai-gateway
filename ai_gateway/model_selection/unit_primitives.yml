@@ -489,6 +489,13 @@ configurable_unit_primitives:
     selectable_models:
       - "claude_sonnet_4_20250514"
       - "claude_sonnet_4_20250514_vertex"
+  - feature_setting: "set_remote"
+    unit_primitives:
+      - "duo_agent_platform"
+    default_model: "claude_sonnet_4_20250514"
+    selectable_models:
+      - "claude_sonnet_4_20250514"
+      - "claude_sonnet_4_20250514_vertex"
   - feature_setting: "validate_sast_fix_has_changes"
     unit_primitives:
       - "duo_agent_platform"
