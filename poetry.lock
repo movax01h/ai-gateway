@@ -2850,7 +2850,7 @@ version = "0.1.21"
 description = "The LangChain Hub API client"
 optional = false
 python-versions = "<4.0,>=3.8.1"
-groups = ["main", "eval"]
+groups = ["eval"]
 files = [
     {file = "langchainhub-0.1.21-py3-none-any.whl", hash = "sha256:1cc002dc31e0d132a776afd044361e2b698743df5202618cf2bad399246b895f"},
     {file = "langchainhub-0.1.21.tar.gz", hash = "sha256:723383b3964a47dbaea6ad5d0ef728accefbc9d2c07480e800bdec43510a8c10"},
@@ -6329,7 +6329,7 @@ version = "6.2.0.20250809"
 description = "Typing stubs for bleach"
 optional = false
 python-versions = ">=3.9"
-groups = ["dev"]
+groups = ["lint"]
 files = [
     {file = "types_bleach-6.2.0.20250809-py3-none-any.whl", hash = "sha256:0b372a75117947d9ac8a31ae733fd0f8d92ec75c4772e7b37093ba3fa5b48fb9"},
     {file = "types_bleach-6.2.0.20250809.tar.gz", hash = "sha256:188d7a1119f6c953140b513ed57ba4213755695815472c19d0c22ac09c79b90b"},
@@ -6356,7 +6356,7 @@ version = "1.1.11.20250809"
 description = "Typing stubs for html5lib"
 optional = false
 python-versions = ">=3.9"
-groups = ["dev"]
+groups = ["lint"]
 files = [
     {file = "types_html5lib-1.1.11.20250809-py3-none-any.whl", hash = "sha256:e5f48ab670ae4cdeafd88bbc47113d8126dcf08318e0b8d70df26ecc13eca9b6"},
     {file = "types_html5lib-1.1.11.20250809.tar.gz", hash = "sha256:7976ec7426bb009997dc5e072bca3ed988dd747d0cbfe093c7dfbd3d5ec8bf57"},
@@ -6467,21 +6467,6 @@ files = [
     {file = "unidiff-0.7.5-py2.py3-none-any.whl", hash = "sha256:c93bf2265cc1ba2a520e415ab05da587370bc2a3ae9e0414329f54f0c2fc09e8"},
     {file = "unidiff-0.7.5.tar.gz", hash = "sha256:2e5f0162052248946b9f0970a40e9e124236bf86c82b70821143a6fc1dea2574"},
 ]
-
-[[package]]
-name = "unique-names-generator"
-version = "1.0.2"
-description = "Generate unique and memorable name strings."
-optional = false
-python-versions = ">=3.6.0"
-groups = ["main"]
-files = [
-    {file = "unique-names-generator-1.0.2.tar.gz", hash = "sha256:1f8fcc95b27ae5f065b3df8ab62d5e749e9fd383ff7748607e63a10345248e7a"},
-    {file = "unique_names_generator-1.0.2-py2.py3-none-any.whl", hash = "sha256:ea3c7ba5e1d2926e82b183a306bbef924980b007fe7492a8f64b62b052de1b77"},
-]
-
-[package.extras]
-dev = ["coverage (==5.1)", "ipython (==7.14.0)", "pre-commit (==2.3.0)", "pytest (==5.4.1)", "pytest-mock (==3.1.0)"]
 
 [[package]]
 name = "untokenize"
@@ -7304,4 +7289,4 @@ cffi = ["cffi (>=1.11)"]
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.12.0,<3.13.0"
-content-hash = "326bdc0389d14b4a45c674144d272b2173b93899bb65010fca9932d64df86d35"
+content-hash = "610ab4dc49bd660e6332f84d8f65bccd9605f50142bc8bd15e2d0c430803415c"
