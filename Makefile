@@ -326,3 +326,7 @@ duo-workflow-service-dependencies:
 	@echo "Generating Duo Workflow Service dependencies for CI configuration..."
 	@poetry install
 	@poetry run python scripts/generate_dws_change_patterns.py
+
+.PHONY: duo-workflow-service-memray
+duo-workflow-service-memray: install-test-deps
+	poetry run memray run -c "from duo_workflow_service.server import run_app; run_app()"

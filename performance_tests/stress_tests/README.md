@@ -38,6 +38,7 @@ k6 run performance_tests/stress_tests/api_v4_duo_workflow_chat_graphql_api.js
 - `AI_DUO_WORKFLOW_ROOT_NAMESPACE_ID`: The namespace ID with Duo Agent Platform enabled (required)
 - `AI_DUO_WORKFLOW_PROJECT_ID`: The project ID in the above namespace (required)
 - `SCENARIO_TYPE`: Either `mocked_llm` (default) or `real_llm`
+- `MOCKED_GOAL_FILE`: A file containing the goal to pass to Agentic Chat (default: [`goals/summarize_issue_check_implementation.txt`](goals/summarize_issue_check_implementation.txt))
 
 For mocked responses, ensure the Duo Workflow Service is configured with:
 ```
