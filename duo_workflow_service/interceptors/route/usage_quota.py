@@ -2,12 +2,17 @@ import functools
 from collections.abc import AsyncIterable
 from typing import Callable
 
+from gitlab_cloud_connector.user import CloudConnectorUser
 from grpc import StatusCode
 from grpc.aio import ServicerContext
 
 from contract import contract_pb2, contract_pb2_grpc
+from duo_workflow_service.interceptors.authentication_interceptor import (
+    current_user as current_user_context_var,
+)
 from lib.events import FeatureQualifiedNameStatic, GLReportingEventContext
 from lib.usage_quota import InsufficientCredits, UsageQuotaEvent, UsageQuotaService
+from lib.usage_quota.client import should_skip_usage_quota_for_user
 
 
 def has_sufficient_usage_quota(
@@ -69,7 +74,10 @@ def _process_execute_workflow_stream(
                 async for _item in request:
                     yield _item
 
-            await service.execute(gl_events_context, event)
+            current_user: CloudConnectorUser = current_user_context_var.get(None)
+
+            if not should_skip_usage_quota_for_user(current_user):
+                await service.execute(gl_events_context, event)
 
             async for item in func(obj, _chained(), grpc_context, *args, **kwargs):
                 yield item
@@ -78,7 +86,7 @@ def _process_execute_workflow_stream(
             await abort_route_interceptor(
                 grpc_context,
                 StatusCode.RESOURCE_EXHAUSTED,
-                f"{str(e).rstrip(".")}. Error code: USAGE_QUOTA_EXCEEDED",
+                f"{str(e).rstrip('.')}. Error code: USAGE_QUOTA_EXCEEDED",
             )
 
     return wrapper
@@ -115,13 +123,17 @@ def _process_generate_token_unary(
                     is_ai_catalog_item=None,
                 )
 
-            await service.execute(gl_events_context, event)
+            current_user: CloudConnectorUser = current_user_context_var.get(None)
+
+            if not should_skip_usage_quota_for_user(current_user):
+                await service.execute(gl_events_context, event)
+
             return await func(obj, request, grpc_context, *args, **kwargs)
         except InsufficientCredits as e:
             await abort_route_interceptor(
                 grpc_context,
                 StatusCode.RESOURCE_EXHAUSTED,
-                f"{str(e).rstrip(".")}. Error code: USAGE_QUOTA_EXCEEDED",
+                f"{str(e).rstrip('.')}. Error code: USAGE_QUOTA_EXCEEDED",
             )
 
     return wrapper

@@ -1,12 +1,29 @@
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
+from gitlab_cloud_connector import CloudConnectorUser, UserClaims
 from starlette.requests import Request
 from starlette.responses import JSONResponse
 
 from ai_gateway.api.middleware.route.usage_quota import has_sufficient_usage_quota
 from lib.events import FeatureQualifiedNameStatic
 from lib.usage_quota import InsufficientCredits, UsageQuotaEvent
+from lib.usage_quota.client import SKIP_USAGE_CUTOFF_CLAIM
+
+
+@pytest.fixture
+def mock_user():
+    return CloudConnectorUser(
+        authenticated=True,
+    )
+
+
+@pytest.fixture
+def mock_user_with_skip_usage_cutoff():
+    return CloudConnectorUser(
+        authenticated=True,
+        claims=UserClaims(extra={SKIP_USAGE_CUTOFF_CLAIM: True}),
+    )
 
 
 @pytest.fixture
@@ -23,8 +40,12 @@ class TestDecoratorBasics:
     """Tests for basic decorator functionality."""
 
     @pytest.mark.asyncio
-    async def test_decorator_allows_request_on_sufficient_quota(self, mock_request):
+    async def test_decorator_allows_request_on_sufficient_quota(
+        self, mock_request, mock_user
+    ):
         """Test that decorator allows request when quota check passes."""
+
+        mock_request.user = mock_user
 
         async def test_handler(request, *args, **kwargs):
             return JSONResponse({"status": "ok"})
@@ -38,6 +59,29 @@ class TestDecoratorBasics:
 
         response = await decorated(mock_request)
 
+        assert response.status_code == 200
+
+    @pytest.mark.asyncio
+    async def test_decorator_allows_request_for_user_with_skip_usage_cutoff_extra_claim(
+        self, mock_request, mock_user_with_skip_usage_cutoff: CloudConnectorUser
+    ):
+        """Test that decorator allows request when the user has `skip_usage_cutoff` extra claim."""
+
+        mock_request.user = mock_user_with_skip_usage_cutoff
+
+        async def test_handler(request, *args, **kwargs):
+            return JSONResponse({"status": "ok"})
+
+        decorated = has_sufficient_usage_quota(
+            feature_qualified_name=FeatureQualifiedNameStatic.CODE_SUGGESTIONS,
+            event=UsageQuotaEvent.CODE_SUGGESTIONS_CODE_COMPLETIONS,
+        )(test_handler)
+
+        mock_request.app.state.usage_quota_service.execute = AsyncMock()
+
+        response = await decorated(mock_request)
+
+        assert not mock_request.app.state.usage_quota_service.called
         assert response.status_code == 200
 
     @pytest.mark.asyncio

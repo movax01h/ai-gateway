@@ -5,7 +5,9 @@ from urllib.parse import urljoin
 
 import httpx
 from aiocache import Cache, cached
+from gitlab_cloud_connector import CloudConnectorUser
 
+from ai_gateway.api.auth_utils import StarletteUser
 from ai_gateway.instrumentators.usage_quota import (
     USAGE_QUOTA_CUSTOMERSDOT_LATENCY_SECONDS,
     USAGE_QUOTA_CUSTOMERSDOT_REQUESTS_TOTAL,
@@ -28,6 +30,17 @@ CACHE_TTL = (
 MAX_KEEPALIVE_CONNECTIONS = 20  # Per client instance
 MAX_CONNECTIONS = 100  # Total connection pool size
 MAX_CACHE_SIZE = 10_000
+
+SKIP_USAGE_CUTOFF_CLAIM = "skip_usage_cutoff"
+
+
+def should_skip_usage_quota_for_user(user: CloudConnectorUser | StarletteUser | None):
+    return (
+        user
+        and user.claims
+        and user.claims.extra
+        and SKIP_USAGE_CUTOFF_CLAIM in user.claims.extra
+    )
 
 
 def usage_quota_cache_key_builder(
