@@ -1,5 +1,8 @@
 <system_status>
 <current_date>{{ current_date }} (ISO 8601 format)</current_date>
+{%- if should_show_current_time %}
+<current_time>{{ current_time }}</current_time>
+{%- endif %}
 <user_timezone>{{ current_timezone }}</user_timezone>
 {%- if project %}
 <project>

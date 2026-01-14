@@ -9,6 +9,7 @@ from langchain_core.runnables import Runnable, RunnableConfig
 from ai_gateway.model_metadata import current_model_metadata_context
 from ai_gateway.prompts import Prompt, jinja2_formatter
 from ai_gateway.prompts.config.base import PromptConfig
+from ai_gateway.prompts.config.models import ModelClassProvider
 from duo_workflow_service.entities.state import ChatWorkflowState
 from duo_workflow_service.gitlab.gitlab_api import Namespace, Project
 from duo_workflow_service.gitlab.gitlab_service_context import GitLabServiceContext
@@ -16,6 +17,7 @@ from duo_workflow_service.slash_commands.error_handler import (
     SlashCommandValidationError,
 )
 from duo_workflow_service.slash_commands.goal_parser import parse as slash_command_parse
+from lib.prompts.caching import prompt_caching_enabled_in_current_request
 
 VALID_SLASH_COMMANDS = ["explain", "refactor", "tests", "fix"]
 
@@ -83,10 +85,30 @@ class ChatAgentPromptTemplate(Runnable[ChatWorkflowState, PromptValue]):
             messages.append(system_msg)
 
         if "system_dynamic" in self.prompt_template:
+            model_class_provider = None
+            if model_metadata and model_metadata.llm_definition:
+                provider_value = model_metadata.llm_definition.params.get(
+                    "model_class_provider"
+                )
+                if isinstance(provider_value, str):
+                    try:
+                        model_class_provider = ModelClassProvider(provider_value)
+                    except ValueError:
+                        model_class_provider = None
+                else:
+                    model_class_provider = provider_value
+
+            is_openai_model = model_class_provider == ModelClassProvider.OPENAI
+            caching_status = prompt_caching_enabled_in_current_request()
+            user_opted_out_of_caching = caching_status == "false"
+            should_show_current_time = is_openai_model and user_opted_out_of_caching
+
             dynamic_content = jinja2_formatter(
                 self.prompt_template["system_dynamic"],
                 current_date=datetime.now().strftime("%Y-%m-%d"),
+                current_time=datetime.now().strftime("%H:%M:%S"),
                 current_timezone=datetime.now().astimezone().tzname(),
+                should_show_current_time=should_show_current_time,
                 project=project,
                 namespace=namespace,
             )

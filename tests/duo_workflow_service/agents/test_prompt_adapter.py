@@ -76,6 +76,9 @@ Your primary role is collaborative programming.
             "system_dynamic": """<context>
 The current date is {{ current_date }}. The user's timezone is
 {{ current_timezone }}.
+{%- if should_show_current_time %}
+The current time is {{ current_time }}.
+{%- endif %}
 {%- if project %}
 Here is the project information for the current GitLab project the USER is working on:
 <project>
@@ -433,6 +436,88 @@ class TestChatAgentPromptTemplate:
             )
 
         assert isinstance(result, ChatPromptValue)
+
+    @pytest.mark.parametrize(
+        "model_class_provider,caching_enabled_for_user,should_include_time",
+        [
+            (ModelClassProvider.OPENAI, "false", True),
+            (ModelClassProvider.OPENAI, "true", False),
+            (ModelClassProvider.ANTHROPIC, "false", False),
+            (ModelClassProvider.ANTHROPIC, "true", False),
+            (ModelClassProvider.LITE_LLM, "false", False),
+        ],
+        ids=[
+            "openai_opted_out",
+            "openai_not_opted_out",
+            "anthropic_opted_out",
+            "anthropic_not_opted_out",
+            "litellm_opted_out",
+        ],
+    )
+    @patch("duo_workflow_service.agents.prompt_adapter.datetime")
+    @patch(
+        "duo_workflow_service.agents.prompt_adapter.prompt_caching_enabled_in_current_request"
+    )
+    def test_current_time_included_only_for_openai_models_with_opted_out_caching(
+        self,
+        mock_prompt_caching,
+        mock_datetime,
+        prompt_config,
+        sample_chat_workflow_state: ChatWorkflowState,
+        model_class_provider,
+        caching_enabled_for_user,
+        should_include_time,
+        model_metadata,
+    ):
+        frozen_time = datetime(2023, 12, 25, 15, 30, 45, tzinfo=timezone.utc)
+        mock_datetime.now.return_value = frozen_time
+        mock_datetime.timezone = timezone
+
+        mock_prompt_caching.return_value = caching_enabled_for_user
+
+        template = ChatAgentPromptTemplate(prompt_config)
+
+        # Update model_metadata's llm_definition params with the test provider (as string value)
+        model_metadata.llm_definition.params["model_class_provider"] = (
+            model_class_provider.value
+        )
+
+        mock_gitlab_info = GitLabInstanceInfo(
+            instance_type="GitLab.com (SaaS)",
+            instance_url="https://gitlab.com",
+            instance_version="16.5.0-ee",
+        )
+
+        with (
+            patch.object(
+                GitLabServiceContext,
+                "get_current_instance_info",
+                return_value=mock_gitlab_info,
+            ),
+            patch(
+                "duo_workflow_service.agents.prompt_adapter.current_model_metadata_context"
+            ) as mock_context,
+        ):
+            mock_context.get.return_value = model_metadata
+
+            result = template.invoke(
+                sample_chat_workflow_state,
+                agent_name="test_agent",
+            )
+
+        assert isinstance(result, ChatPromptValue)
+        messages = result.messages
+
+        # Find the dynamic system message (second message)
+        dynamic_system_message = messages[1]
+        assert isinstance(dynamic_system_message, SystemMessage)
+
+        expected_time = frozen_time.strftime("%H:%M:%S")
+
+        if should_include_time:
+            assert expected_time in dynamic_system_message.content
+        else:
+            assert expected_time not in dynamic_system_message.content
 
 
 class TestDefaultPromptAdapter:
