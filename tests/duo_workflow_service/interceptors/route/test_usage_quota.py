@@ -3,15 +3,26 @@ from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from gitlab_cloud_connector import CloudConnectorUser, UserClaims
 from grpc import StatusCode
 from grpc.aio import ServicerContext
 
 from contract import contract_pb2
+from duo_workflow_service.interceptors.authentication_interceptor import current_user
 from duo_workflow_service.interceptors.route.usage_quota import (
     has_sufficient_usage_quota,
 )
 from lib.events import FeatureQualifiedNameStatic, GLReportingEventContext
 from lib.usage_quota import InsufficientCredits, UsageQuotaEvent
+from lib.usage_quota.client import SKIP_USAGE_CUTOFF_CLAIM
+
+
+@pytest.fixture(name="mock_user_with_skip_usage_cutoff")
+def mock_user_with_skip_usage_cutoff_fixture():
+    return CloudConnectorUser(
+        authenticated=True,
+        claims=UserClaims(extra={SKIP_USAGE_CUTOFF_CLAIM: True}),
+    )
 
 
 @pytest.fixture(name="mock_service")
@@ -39,6 +50,34 @@ async def mock_request_generator() -> AsyncIterator[contract_pb2.ClientEvent]:
             workflowDefinition="test_workflow"
         )
     )
+
+
+@pytest.mark.asyncio
+async def test_execute_workflow_for_user_with_skip_usage_cutoff_extra_claim(
+    mock_service, mock_user_with_skip_usage_cutoff
+) -> None:
+    """Test ExecuteWorkflow with sufficient quota."""
+
+    current_user.set(mock_user_with_skip_usage_cutoff)
+
+    @has_sufficient_usage_quota(
+        UsageQuotaEvent.DAP_FLOW_ON_EXECUTE, "https://customers.example.com"
+    )
+    async def ExecuteWorkflow(
+        _self: Any,
+        request: AsyncIterator[contract_pb2.ClientEvent],
+        _context: ServicerContext,
+    ) -> AsyncIterator[contract_pb2.ClientEvent]:
+        async for item in request:
+            yield item
+
+    result = [
+        item
+        async for item in ExecuteWorkflow(None, mock_request_generator(), MagicMock())
+    ]
+
+    assert len(result) == 1
+    assert not mock_service.execute.called
 
 
 @pytest.mark.asyncio
