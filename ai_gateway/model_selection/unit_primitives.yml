@@ -172,6 +172,7 @@ configurable_unit_primitives:
       - "claude_sonnet_4_5_20250929"
       - "claude_sonnet_4_5_20250929_vertex"
       - "claude_haiku_4_5_20251001"
+      - "claude_opus_4_5_20251101"
       - "gpt_5"
       - "gpt_5_codex"
       - "gpt_5_mini"
@@ -187,16 +188,11 @@ configurable_unit_primitives:
       - "claude_sonnet_4_20250514_vertex"
       - "claude_sonnet_4_5_20250929"
       - "claude_sonnet_4_5_20250929_vertex"
+      - "claude_opus_4_5_20251101"
       - "gpt_5"
       - "gpt_5_codex"
       - "gpt_5_mini"
       - "gpt_5_2"
-    dev:
-      selectable_models:
-        - "claude_opus_4_5_20251101"
-      group_ids:
-        - 9970
-        - 6543
 
   - feature_setting: "categorize_question"
     unit_primitives:
