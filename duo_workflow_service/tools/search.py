@@ -137,21 +137,16 @@ class GroupProjectSearch(GitLabSearchBase):
     Parameters:
     - id: The ID of the group (required)
     - search_type: Must be "groups" for this search (required)
-    - search: The search term (required)
-    - order_by: Sort results. Allowed value is created_at
-    - sort: Sort order. Allowed values are asc or desc
+    - search: The search term (required). Do not use regex, use a blank string to search for all projects.
+    - order_by: Sort results. Allowed value is 'created_at'
+    - sort: Sort order. Allowed values are 'asc' or 'desc'
 
-    An example tool_call is presented below
-    {
-        'id': 'toolu_01KqpqRQhTM2pxJrhtTscMWu',
-        'name': 'gitlab_group_project_search',
-        'type': 'tool_use'
-        'input': {
-            'id': 123,
-            'scope': 'projects',
-            'search': 'Duo Workflow',
-        },
-    }
+    Example 1: Search for all projects in group with an ID of 1:
+    gitlab_group_project_search(id=1, search="", search_type="groups")
+
+    Example 2: Search for projects with the word "test" in the name, in group ID 100,
+    in descending order, ordered by "created_at":
+    gitlab_group_project_search(id=100, search="test", search_type="groups", order_by="created_at", sort="desc")
     """
     description: str = GitLabSearchBase._get_description(unique_description)
     args_schema: Type[BaseModel] = BaseSearchInput
@@ -160,6 +155,7 @@ class GroupProjectSearch(GitLabSearchBase):
         self,
         id: str,
         search: str,
+        search_type: str,
         order_by: Optional[str] = None,
         sort: Optional[str] = None,
     ) -> str:
@@ -172,7 +168,7 @@ class GroupProjectSearch(GitLabSearchBase):
         if sort:
             params["sort"] = sort
 
-        return await self._perform_search(id, params, "groups")
+        return await self._perform_search(id, params, search_type)
 
 
 class IssueSearchInput(BaseSearchInput):

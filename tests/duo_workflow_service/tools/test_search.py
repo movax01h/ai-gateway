@@ -186,6 +186,7 @@ class TestSearch:
         base_params = {
             "id": "1",
             "search": "not found search term",
+            "search_type": "groups",
         }
         search_type_param = {"search_type": search_type}
         all_params = {**base_params, **extra_params}
@@ -224,12 +225,12 @@ class TestSearch:
         "search_params, optional_params, mock_response",
         [
             (
-                {"id": "123", "search": "test project"},
+                {"id": "123", "search": "test project", "search_type": "groups"},
                 {"order_by": None, "sort": None},
                 [{"id": 1, "name": "Test Project", "description": "A test project"}],
             ),
             (
-                {"id": "456", "search": "workflow"},
+                {"id": "456", "search": "workflow", "search_type": "groups"},
                 {"order_by": "created_at", "sort": "desc"},
                 [
                     {
@@ -270,6 +271,7 @@ class TestSearch:
 
         expected_params = {"scope": "projects", **all_params}
         expected_params.pop("id")
+        expected_params.pop("search_type")
         expected_params = {k: v for k, v in expected_params.items() if v is not None}
 
         gitlab_client_mock.aget.assert_called_once_with(
@@ -290,6 +292,7 @@ class TestSearch:
         search_params = {
             "id": "789",
             "search": "nonexistent project",
+            "search_type": "groups",
         }
 
         response = await tool._arun(**search_params)
