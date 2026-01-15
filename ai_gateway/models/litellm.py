@@ -51,6 +51,7 @@ class LiteLlmInternalServerError(ModelAPIError):
 
 class KindGitLabModel(StrEnum):
     CODESTRAL_2501_FIREWORKS = "codestral_2501_fireworks"
+    CODESTRAL_2508_FIREWORKS = "codestral_2508_fireworks"
     CODESTRAL_2501_VERTEX = "codestral_2501_vertex"
     CODESTRAL_2508_VERTEX = "codestral_2508_vertex"
     CLAUDE_SONNET_3_7 = "claude_sonnet_3_7_20250219"
@@ -69,6 +70,7 @@ class KindLiteLlmModel(StrEnum):
     CODELLAMA = "codellama"
     CODESTRAL = "codestral"
     CODESTRAL_2501 = "codestral-2501"
+    CODESTRAL_2508 = "codestral-2508"
     MISTRAL = "mistral"
     MIXTRAL = "mixtral"
     DEEPSEEKCODER = "deepseekcoder"
