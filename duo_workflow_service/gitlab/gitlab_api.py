@@ -58,8 +58,11 @@ class Namespace(TypedDict):
     web_url: str
 
 
-class Checkpoint(TypedDict):
+class Checkpoint(TypedDict, total=False):
     checkpoint: str
+    threadTs: str
+    parentTs: str
+    metadata: str
 
 
 class WorkflowConfig(TypedDict):
@@ -70,6 +73,7 @@ class WorkflowConfig(TypedDict):
     allow_agent_to_request_user: bool
     gitlab_host: str
     first_checkpoint: Optional[Checkpoint]
+    latest_checkpoint: Optional[Checkpoint]
     prompt_injection_protection_level: PromptInjectionProtectionLevel
 
 
@@ -193,7 +197,10 @@ query($workflowId: AiDuoWorkflowsWorkflowID!) {
             preApprovedAgentPrivilegesNames
             mcpEnabled
             allowAgentToRequestUser
-            firstCheckpoint {
+            latestCheckpoint {
+                threadTs
+                parentTs
+                metadata
                 checkpoint
             }
         }
@@ -312,6 +319,7 @@ async def fetch_workflow_and_container_data(
         mcp_enabled=workflow.get("mcpEnabled", False),
         allow_agent_to_request_user=workflow.get("allowAgentToRequestUser", False),
         first_checkpoint=workflow.get("firstCheckpoint", None),
+        latest_checkpoint=workflow.get("latestCheckpoint", None),
         gitlab_host=gitlab_host,
         prompt_injection_protection_level=prompt_injection_protection_level,
     )
@@ -348,6 +356,7 @@ def empty_workflow_config() -> WorkflowConfig:
         "allow_agent_to_request_user": False,
         "mcp_enabled": False,
         "first_checkpoint": None,
+        "latest_checkpoint": None,
         "workflow_status": "",
         "gitlab_host": "",
         "prompt_injection_protection_level": PromptInjectionProtectionLevel.LOG_ONLY,

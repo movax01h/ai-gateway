@@ -49,6 +49,7 @@ def workflow_config_fixture(agent_privileges_names: list[str]) -> dict[str, Any]
         "allow_agent_to_request_user": False,
         "mcp_enabled": False,
         "first_checkpoint": None,
+        "latest_checkpoint": None,
         "workflow_status": "",
         "gitlab_host": "gitlab.com",
     }

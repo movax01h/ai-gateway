@@ -34,7 +34,7 @@ def workflow_and_project_data_fixture():
                     "preApprovedAgentPrivilegesNames": [],
                     "mcpEnabled": False,
                     "allowAgentToRequestUser": False,
-                    "firstCheckpoint": None,
+                    "latestCheckpoint": None,
                 }
             ]
         }
@@ -89,7 +89,7 @@ async def test_fetch_workflow_and_container_data_success():
                     "preApprovedAgentPrivilegesNames": ["read_repository"],
                     "mcpEnabled": True,
                     "allowAgentToRequestUser": True,
-                    "firstCheckpoint": {"checkpoint": "{}"},
+                    "latestCheckpoint": {"checkpoint": "{}"},
                 }
             ]
         }
@@ -130,7 +130,7 @@ async def test_fetch_workflow_and_container_data_success():
     assert workflow_config["workflow_status"] == "created"
     assert workflow_config["mcp_enabled"] is True
     assert workflow_config["allow_agent_to_request_user"] is True
-    assert workflow_config["first_checkpoint"] == {"checkpoint": "{}"}
+    assert workflow_config["latest_checkpoint"] == {"checkpoint": "{}"}
 
 
 @pytest.mark.asyncio
@@ -174,7 +174,7 @@ async def test_fetch_workflow_and_container_data_with_empty_languages():
                     "preApprovedAgentPrivilegesNames": [],
                     "mcpEnabled": False,
                     "allowAgentToRequestUser": False,
-                    "firstCheckpoint": None,
+                    "latestCheckpoint": None,
                 }
             ]
         }
@@ -223,7 +223,7 @@ async def test_fetch_workflow_and_container_data_with_missing_languages():
                     "preApprovedAgentPrivilegesNames": [],
                     "mcpEnabled": False,
                     "allowAgentToRequestUser": False,
-                    "firstCheckpoint": None,
+                    "latestCheckpoint": None,
                 }
             ]
         }
@@ -279,7 +279,7 @@ async def test_fetch_namespace_level_workflow():
                     "preApprovedAgentPrivilegesNames": ["read_repository"],
                     "mcpEnabled": True,
                     "allowAgentToRequestUser": True,
-                    "firstCheckpoint": {"checkpoint": "{}"},
+                    "latestCheckpoint": {"checkpoint": "{}"},
                 }
             ]
         }
@@ -335,7 +335,7 @@ async def test_fetch_workflow_and_container_data_with_exclusion_rules():
                     "preApprovedAgentPrivilegesNames": [],
                     "mcpEnabled": False,
                     "allowAgentToRequestUser": False,
-                    "firstCheckpoint": None,
+                    "latestCheckpoint": None,
                 }
             ]
         }
@@ -379,7 +379,7 @@ async def test_fetch_workflow_and_container_data_without_exclusion_rules():
                     "preApprovedAgentPrivilegesNames": [],
                     "mcpEnabled": False,
                     "allowAgentToRequestUser": False,
-                    "firstCheckpoint": None,
+                    "latestCheckpoint": None,
                 }
             ]
         }
@@ -427,7 +427,7 @@ async def test_fetch_workflow_with_prompt_injection_protection_level():
                     "preApprovedAgentPrivilegesNames": [],
                     "mcpEnabled": False,
                     "allowAgentToRequestUser": False,
-                    "firstCheckpoint": None,
+                    "latestCheckpoint": None,
                 }
             ]
         }
@@ -466,7 +466,7 @@ async def test_fetch_workflow_protection_level_defaults_to_log_only():
                     "preApprovedAgentPrivilegesNames": [],
                     "mcpEnabled": False,
                     "allowAgentToRequestUser": False,
-                    "firstCheckpoint": None,
+                    "latestCheckpoint": None,
                 }
             ]
         }
@@ -522,6 +522,101 @@ class TestQueryVersionSelection:
 
 
 @pytest.mark.asyncio
+async def test_fetch_workflow_18_2_query_uses_first_checkpoint():
+    """Test that GitLab 18.2 query uses firstCheckpoint and sets first_checkpoint in config."""
+    gitlab_client = AsyncMock()
+    # Mock GraphQL response for GitLab 18.2 (uses firstCheckpoint)
+    gitlab_client.graphql.return_value = {
+        "duoWorkflowWorkflows": {
+            "nodes": [
+                {
+                    "statusName": "created",
+                    "projectId": "gid://gitlab/Project/123",
+                    "project": {
+                        "id": "gid://gitlab/Project/123",
+                        "name": "test-project",
+                        "description": "Test Project",
+                        "httpUrlToRepo": "http://example.com/test-project.git",
+                        "webUrl": "http://example.com/test-project",
+                        "languages": [{"name": "Python", "share": 100.0}],
+                    },
+                    "agentPrivilegesNames": ["read_repository"],
+                    "preApprovedAgentPrivilegesNames": [],
+                    "mcpEnabled": False,
+                    "allowAgentToRequestUser": False,
+                    "firstCheckpoint": {"checkpoint": "{}"},
+                }
+            ]
+        }
+    }
+
+    project, namespace, workflow_config = await fetch_workflow_and_container_data(
+        gitlab_client, "123"
+    )
+
+    # Verify that first_checkpoint is set from the 18.2 query response
+    assert workflow_config["first_checkpoint"] == {"checkpoint": "{}"}
+    # Verify that latest_checkpoint is None (not in 18.2 response)
+    assert workflow_config["latest_checkpoint"] is None
+    assert project["id"] == 123
+    assert namespace is None
+
+
+@pytest.mark.asyncio
+async def test_fetch_workflow_18_3_plus_query_uses_latest_checkpoint():
+    """Test that GitLab 18.3+ query uses latestCheckpoint and sets latest_checkpoint in config."""
+    gitlab_client = AsyncMock()
+    # Mock GraphQL response for GitLab 18.3+ (uses latestCheckpoint)
+    gitlab_client.graphql.return_value = {
+        "duoWorkflowWorkflows": {
+            "nodes": [
+                {
+                    "statusName": "created",
+                    "projectId": "gid://gitlab/Project/123",
+                    "project": {
+                        "id": "gid://gitlab/Project/123",
+                        "name": "test-project",
+                        "description": "Test Project",
+                        "httpUrlToRepo": "http://example.com/test-project.git",
+                        "webUrl": "http://example.com/test-project",
+                        "languages": [{"name": "Python", "share": 100.0}],
+                        "duoContextExclusionSettings": {"exclusionRules": []},
+                    },
+                    "namespaceId": None,
+                    "namespace": None,
+                    "agentPrivilegesNames": ["read_repository"],
+                    "preApprovedAgentPrivilegesNames": [],
+                    "mcpEnabled": False,
+                    "allowAgentToRequestUser": False,
+                    "latestCheckpoint": {
+                        "threadTs": "latest-id",
+                        "parentTs": None,
+                        "metadata": {},
+                        "checkpoint": "{}",
+                    },
+                }
+            ]
+        }
+    }
+
+    project, namespace, workflow_config = await fetch_workflow_and_container_data(
+        gitlab_client, "123"
+    )
+
+    # Verify that latest_checkpoint is set from the 18.3+ query response
+    assert workflow_config["latest_checkpoint"] == {
+        "threadTs": "latest-id",
+        "parentTs": None,
+        "metadata": {},
+        "checkpoint": "{}",
+    }
+    # Verify that first_checkpoint is None (not in 18.3+ response)
+    assert workflow_config["first_checkpoint"] is None
+    assert project["id"] == 123
+    assert namespace is None
+
+
+@pytest.mark.asyncio
 async def test_protection_level_defaults_to_log_only_when_ai_settings_missing():
     """GitLab < 18.8: namespace exists but aiSettings missing, defaults to LOG_ONLY."""
     gitlab_client = AsyncMock()
@@ -544,7 +639,7 @@ async def test_protection_level_defaults_to_log_only_when_ai_settings_missing():
                     "preApprovedAgentPrivilegesNames": [],
                     "mcpEnabled": False,
                     "allowAgentToRequestUser": False,
-                    "firstCheckpoint": None,
+                    "latestCheckpoint": None,
                 }
             ]
         }
