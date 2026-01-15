@@ -66,7 +66,7 @@ class PostProcessor(PostProcessorBase):
         ] = None,
         exclude: Optional[list] = None,
         extras: Optional[list] = None,
-        score_threshold: Optional[dict[str, float]] = None,
+        score_threshold: Optional[float] = None,
     ):
         self.code_context = code_context
         self.lang_id = lang_id
@@ -74,7 +74,7 @@ class PostProcessor(PostProcessorBase):
         self.overrides = overrides if overrides else {}
         self.exclude = set(exclude) if exclude else []
         self.extras = extras if extras else []
-        self.score_threshold = score_threshold or {}
+        self.score_threshold = score_threshold or None
 
     @property
     def ops(
@@ -141,10 +141,8 @@ class PostProcessor(PostProcessorBase):
         func = self.ops[actual_processor_key]
 
         if actual_processor_key == PostProcessorOperation.FILTER_SCORE:
-            model_name = kwargs.get("model_name", "").partition("/")[-1]
-            threshold = self.score_threshold.get(model_name)
             score = kwargs.get("score")
-            func = partial(func, score=score, threshold=threshold)
+            func = partial(func, score=score, threshold=self.score_threshold)
 
         if actual_processor_key == PostProcessorOperation.FIX_TRUNCATION:
             max_output_tokens_used = kwargs.get("max_output_tokens_used", False)

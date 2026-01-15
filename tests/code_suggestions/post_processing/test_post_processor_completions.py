@@ -176,7 +176,7 @@ class TestPostProcessorCompletions:
                 PostProcessorOperation.FILTER_SCORE,
                 PostProcessorOperation.FIX_TRUNCATION,
             ],
-            score_threshold={"test-model": -1.0},
+            score_threshold=-1.0,
         )
         await post_processor.process(completion, model_name="test/test-model")
 

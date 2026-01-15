@@ -18,7 +18,9 @@ class TestAgentModel:
         prompt = MagicMock(spec=Prompt)
         prompt.name = "test"
         prompt.ainvoke = AsyncMock(
-            side_effect=lambda *_args, **_kwargs: AsyncMock(content="whole part")
+            side_effect=lambda *_args, **_kwargs: AsyncMock(
+                content="whole part", response_metadata={"score": 0.95}
+            )
         )
         prompt.astream = MagicMock(side_effect=_stream_prompt)
 
@@ -57,7 +59,7 @@ class TestAgentModel:
         prompt.model_name = "mixtral"
         prompt.ainvoke = AsyncMock(
             side_effect=lambda *_args, **_kwargs: AsyncMock(
-                content="underscore\\_mistral output"
+                content="underscore\\_mistral output", response_metadata={"score": 0.85}
             )
         )
         prompt.astream = MagicMock(side_effect=_stream_prompt)
@@ -96,6 +98,7 @@ class TestAgentModel:
 
         assert isinstance(response, TextGenModelOutput)
         assert response.text == "whole part"
+        assert response.score == 0.95
 
         prompt.ainvoke.assert_called_with(params)
 
@@ -133,3 +136,57 @@ class TestAgentModel:
         assert response.text == "underscore_mistral output"
 
         mixtral_prompt.ainvoke.assert_called_with(params)
+
+    @pytest.mark.asyncio
+    async def test_generate_with_missing_score(self, params):
+        """Test that missing score defaults to 10**5."""
+        prompt = MagicMock(spec=Prompt)
+        prompt.name = "test"
+        prompt.ainvoke = AsyncMock(
+            side_effect=lambda *_args, **_kwargs: AsyncMock(
+                content="test content", response_metadata={"score": None}
+            )
+        )
+
+        model = AgentModel(prompt)
+        response = await model.generate(params, stream=False)
+
+        assert isinstance(response, TextGenModelOutput)
+        assert response.text == "test content"
+        assert response.score == 10**5
+
+    @pytest.mark.asyncio
+    async def test_generate_with_zero_score(self, params):
+        """Test that zero score stays zero."""
+        prompt = MagicMock(spec=Prompt)
+        prompt.name = "test"
+        prompt.ainvoke = AsyncMock(
+            side_effect=lambda *_args, **_kwargs: AsyncMock(
+                content="test content", response_metadata={"score": 0.0}
+            )
+        )
+
+        model = AgentModel(prompt)
+        response = await model.generate(params, stream=False)
+
+        assert isinstance(response, TextGenModelOutput)
+        assert response.text == "test content"
+        assert response.score == 0.0
+
+    @pytest.mark.asyncio
+    async def test_generate_with_high_score(self, params):
+        """Test that high scores are preserved."""
+        prompt = MagicMock(spec=Prompt)
+        prompt.name = "test"
+        prompt.ainvoke = AsyncMock(
+            side_effect=lambda *_args, **_kwargs: AsyncMock(
+                content="test content", response_metadata={"score": 0.999}
+            )
+        )
+
+        model = AgentModel(prompt)
+        response = await model.generate(params, stream=False)
+
+        assert isinstance(response, TextGenModelOutput)
+        assert response.text == "test content"
+        assert response.score == 0.999
