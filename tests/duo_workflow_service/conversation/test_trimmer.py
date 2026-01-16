@@ -12,6 +12,7 @@ from langchain_core.messages import (
 )
 
 from duo_workflow_service.conversation.trimmer import (
+    _build_tool_call_indices,
     _deduplicate_additional_context,
     _pretrim_large_messages,
     _restore_message_consistency,
@@ -495,6 +496,150 @@ def test_trim_conversation_history_error_handling(mock_trim_messages):
     assert any(isinstance(msg, SystemMessage) for msg in result)
     # Should keep some recent messages
     assert any(isinstance(msg, HumanMessage) for msg in result)
+
+
+def test_build_tool_call_indices_with_valid_tool_calls():
+    """Test that _build_tool_call_indices correctly tracks valid tool calls."""
+    messages = [
+        SystemMessage(content="system message"),
+        AIMessage(
+            content="ai message with tool call",
+            tool_calls=[
+                {"id": "tool-call-1", "name": "test_tool", "args": {"arg1": "value1"}},
+                {
+                    "id": "tool-call-2",
+                    "name": "another_tool",
+                    "args": {"arg2": "value2"},
+                },
+            ],
+        ),
+        AIMessage(
+            content="another ai message",
+            tool_calls=[
+                {"id": "tool-call-3", "name": "third_tool", "args": {"arg3": "value3"}},
+            ],
+        ),
+    ]
+
+    indices = _build_tool_call_indices(messages)
+
+    assert indices == {
+        "tool-call-1": 1,
+        "tool-call-2": 1,
+        "tool-call-3": 2,
+    }
+
+
+def test_build_tool_call_indices_with_invalid_tool_calls():
+    """Test that _build_tool_call_indices correctly tracks invalid tool calls."""
+    messages = [
+        SystemMessage(content="system message"),
+        AIMessage(
+            content="ai message with invalid tool calls",
+            invalid_tool_calls=[
+                {
+                    "id": "invalid-call-1",
+                },
+                {
+                    "id": "invalid-call-2",
+                },
+            ],
+        ),
+        AIMessage(
+            content="another ai message",
+            invalid_tool_calls=[
+                {
+                    "id": "invalid-call-3",
+                },
+            ],
+        ),
+    ]
+
+    indices = _build_tool_call_indices(messages)
+
+    assert indices == {
+        "invalid-call-1": 1,
+        "invalid-call-2": 1,
+        "invalid-call-3": 2,
+    }
+
+
+def test_build_tool_call_indices_with_mixed_tool_calls():
+    """Test that _build_tool_call_indices handles both valid and invalid tool calls."""
+    messages = [
+        SystemMessage(content="system message"),
+        AIMessage(
+            content="ai message with both valid and invalid tool calls",
+            tool_calls=[
+                {"id": "valid-call-1", "name": "test_tool", "args": {"arg1": "value1"}},
+            ],
+            invalid_tool_calls=[
+                {
+                    "id": "invalid-call-1",
+                },
+            ],
+        ),
+    ]
+
+    indices = _build_tool_call_indices(messages)
+
+    assert indices == {
+        "valid-call-1": 1,
+        "invalid-call-1": 1,
+    }
+
+
+def test_restore_message_consistency_with_invalid_tool_call_responses():
+    """Test that ToolMessages from invalid tool calls are preserved when they have valid parents."""
+    messages = [
+        SystemMessage(content="system message"),
+        HumanMessage(content="human message"),
+        AIMessage(
+            content="ai message with invalid tool call",
+            invalid_tool_calls=[{"id": "invalid-call-1"}],
+        ),
+        ToolMessage(
+            content="Invalid or unparsable tool call received.",
+            tool_call_id="invalid-call-1",
+        ),
+    ]
+
+    result = _restore_message_consistency(messages)
+
+    # All messages should be preserved since the ToolMessage has a valid parent
+    assert len(result) == 4
+    assert isinstance(result[0], SystemMessage)
+    assert isinstance(result[1], HumanMessage)
+    assert isinstance(result[2], AIMessage)
+    assert isinstance(result[3], ToolMessage)
+
+    # The ToolMessage should be preserved as-is
+    assert result[3].content == "Invalid or unparsable tool call received."
+    assert result[3].tool_call_id == "invalid-call-1"
+
+
+def test_restore_message_consistency_with_orphaned_invalid_tool_response():
+    """Test that orphaned ToolMessages from invalid tool calls are converted to HumanMessages."""
+    messages = [
+        SystemMessage(content="system message"),
+        HumanMessage(content="human message"),
+        # No AIMessage with invalid_tool_calls - this makes the ToolMessage orphaned
+        ToolMessage(
+            content="Invalid or unparsable tool call received.",
+            tool_call_id="missing-invalid-call",
+        ),
+    ]
+
+    result = _restore_message_consistency(messages)
+
+    # The orphaned ToolMessage should be converted to HumanMessage
+    assert len(result) == 3
+    assert isinstance(result[0], SystemMessage)
+    assert isinstance(result[1], HumanMessage)
+    assert isinstance(result[2], HumanMessage)  # Converted from ToolMessage
+
+    # The converted message should have the same content
+    assert result[2].content == "Invalid or unparsable tool call received."
 
 
 @patch("duo_workflow_service.conversation.trimmer.trim_messages")

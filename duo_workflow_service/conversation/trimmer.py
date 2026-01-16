@@ -15,7 +15,6 @@ from duo_workflow_service.tracking.errors import log_exception
 
 logger = structlog.stdlib.get_logger("conversation_trimmer")
 
-
 LEGACY_MAX_CONTEXT_TOKENS = 400_000  # old default for backwards compatibility
 
 
@@ -101,13 +100,7 @@ def _restore_message_consistency(messages: List[BaseMessage]) -> List[BaseMessag
         return []
 
     # Identify all AIMessages with tool calls
-    tool_call_indices = {}
-    for i, msg in enumerate(messages):
-        if isinstance(msg, AIMessage) and hasattr(msg, "tool_calls") and msg.tool_calls:
-            for tool_call in msg.tool_calls:
-                tool_call_id = tool_call.get("id")
-                if tool_call_id:
-                    tool_call_indices[tool_call_id] = i
+    tool_call_indices = _build_tool_call_indices(messages)
 
     # Process the messages to ensure consistency
     result: List[BaseMessage] = []
@@ -130,6 +123,29 @@ def _restore_message_consistency(messages: List[BaseMessage]) -> List[BaseMessag
             result.append(msg)
 
     return result
+
+
+def _build_tool_call_indices(messages: List[BaseMessage]) -> dict:
+    tool_call_indices = {}
+
+    for i, msg in enumerate(messages):
+        if not isinstance(msg, AIMessage):
+            continue
+
+        if hasattr(msg, "tool_calls") and msg.tool_calls:
+            for tool_call in msg.tool_calls:
+                tool_call_id = tool_call.get("id")
+                if tool_call_id:
+                    tool_call_indices[tool_call_id] = i
+
+        # Tool calls can end up in `invalid_tool_calls` instead of `tool_calls`
+        if hasattr(msg, "invalid_tool_calls") and msg.invalid_tool_calls:
+            for invalid_tool_call in msg.invalid_tool_calls:
+                tool_call_id = invalid_tool_call.get("id")
+                if tool_call_id:
+                    tool_call_indices[tool_call_id] = i
+
+    return tool_call_indices
 
 
 def get_messages_profile(

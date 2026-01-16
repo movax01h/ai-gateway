@@ -6,7 +6,7 @@ from typing import Any, Dict, List, Optional
 
 import structlog
 from dependency_injector.wiring import Provide, inject
-from langchain_core.messages import AIMessage, BaseMessage, ToolMessage
+from langchain_core.messages import AIMessage, BaseMessage, InvalidToolCall, ToolMessage
 from langchain_core.messages.tool import ToolCall
 from langchain_core.output_parsers.string import StrOutputParser
 from langchain_core.tools import ToolException
@@ -83,6 +83,9 @@ class ToolsExecutor:
     async def run(self, state: DuoWorkflowStateType):
         last_message = state["conversation_history"][self._tools_agent_name][-1]
         tool_calls: list[ToolCall] = getattr(last_message, "tool_calls", [])
+        invalid_tool_calls: list[InvalidToolCall] = getattr(
+            last_message, "invalid_tool_calls", []
+        )
         state_updates = {}
         responses: list[dict[str, Any] | Command] = []
         ui_chat_logs: List[UiChatLog] = []
@@ -163,6 +166,32 @@ class ToolsExecutor:
             if result.get("status") == WorkflowStatusEnum.ERROR:
                 state_updates["status"] = WorkflowStatusEnum.ERROR
                 break
+
+        for invalid_tool_call in invalid_tool_calls:
+            error_content = "Invalid or unparsable tool call received."
+
+            error_response = ToolMessage(
+                content=error_content,
+                tool_call_id=invalid_tool_call["id"],
+            )
+
+            responses.append(
+                {"conversation_history": {self._tools_agent_name: [error_response]}}
+            )
+
+            ui_chat_logs.append(
+                UiChatLog(
+                    message_type=MessageTypeEnum.TOOL,
+                    message_sub_type=None,
+                    content=f"Tool call error: {error_content}",
+                    timestamp=datetime.now(timezone.utc).isoformat(),
+                    status=ToolStatus.FAILURE,
+                    correlation_id=None,
+                    tool_info=None,
+                    additional_context=None,
+                    message_id=invalid_tool_call["id"],
+                )
+            )
 
         responses.append(
             Command(
