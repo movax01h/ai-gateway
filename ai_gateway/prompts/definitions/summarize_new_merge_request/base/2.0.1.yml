@@ -1,9 +1,8 @@
 ---
-name: Claude 3.5 Summarize New Merge Request
+name: Summarize New Merge Request
 model:
   params:
     model_class_provider: anthropic
-    max_tokens: 2_000
 unit_primitives:
   - summarize_new_merge_request
 prompt_template:
