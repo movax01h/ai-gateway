@@ -156,6 +156,7 @@ class LLMFinishReason(str, Enum):
     TOOL_CALLS = "tool_calls"
     TOOL_USE = "tool_use"
     CONTENT_FILTER = "content_filter"
+    MODEL_CONTEXT_WINDOW_EXCEEDED = "model_context_window_exceeded"
 
     @classmethod
     def values(cls):
@@ -165,7 +166,12 @@ class LLMFinishReason(str, Enum):
     @classmethod
     def abnormal_values(cls):
         """Return abnormal finish reason values as a list."""
-        abnormal = [cls.LENGTH, cls.CONTENT_FILTER]
+        abnormal = [
+            cls.LENGTH,
+            cls.CONTENT_FILTER,
+            cls.MAX_TOKENS,
+            cls.MODEL_CONTEXT_WINDOW_EXCEEDED,
+        ]
         return [e.value for e in abnormal]
 
 
