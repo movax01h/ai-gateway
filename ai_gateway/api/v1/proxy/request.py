@@ -148,7 +148,11 @@ def track_billing_event(func):
 
 
 def verify_project_namespace_metadata():
-    """Verify that project and namespace headers matches the claims from the token."""
+    """Verify that project and namespace headers matches the claims from the token.
+
+    For SaaS instances, verifies project, namespace, and root namespace IDs. For self-managed instances, verifies only
+    the instance UID.
+    """
 
     def decorator(func: typing.Callable) -> typing.Callable:
         @functools.wraps(func)
@@ -162,29 +166,40 @@ def verify_project_namespace_metadata():
 
             extra_claims = user_claims.extra or {}
 
-            if str(internal_context.project_id) != str(
-                extra_claims.get("gitlab_project_id", None)
-            ):
-                raise HTTPException(
-                    status_code=status.HTTP_403_FORBIDDEN,
-                    detail="Gitlab project id mismatch",
-                )
+            # For self-managed instances, verify instance UID only
+            if user_claims.gitlab_realm == "self-managed":
+                if str(internal_context.instance_id) != str(
+                    extra_claims.get("gitlab_instance_uid", None)
+                ):
+                    raise HTTPException(
+                        status_code=status.HTTP_403_FORBIDDEN,
+                        detail="Gitlab instance uid mismatch",
+                    )
+            # For SaaS instances, verify project, namespace, and root namespace IDs
+            else:
+                if str(internal_context.project_id) != str(
+                    extra_claims.get("gitlab_project_id", None)
+                ):
+                    raise HTTPException(
+                        status_code=status.HTTP_403_FORBIDDEN,
+                        detail="Gitlab project id mismatch",
+                    )
 
-            if str(internal_context.namespace_id) != str(
-                extra_claims.get("gitlab_namespace_id", None)
-            ):
-                raise HTTPException(
-                    status_code=status.HTTP_403_FORBIDDEN,
-                    detail="Gitlab namespace id mismatch",
-                )
+                if str(internal_context.namespace_id) != str(
+                    extra_claims.get("gitlab_namespace_id", None)
+                ):
+                    raise HTTPException(
+                        status_code=status.HTTP_403_FORBIDDEN,
+                        detail="Gitlab namespace id mismatch",
+                    )
 
-            if str(internal_context.ultimate_parent_namespace_id) != str(
-                extra_claims.get("gitlab_root_namespace_id", None)
-            ):
-                raise HTTPException(
-                    status_code=status.HTTP_403_FORBIDDEN,
-                    detail="Gitlab root namespace id mismatch",
-                )
+                if str(internal_context.ultimate_parent_namespace_id) != str(
+                    extra_claims.get("gitlab_root_namespace_id", None)
+                ):
+                    raise HTTPException(
+                        status_code=status.HTTP_403_FORBIDDEN,
+                        detail="Gitlab root namespace id mismatch",
+                    )
 
             return await func(request, *args, **kwargs)
 
