@@ -169,7 +169,7 @@ def verify_project_namespace_metadata():
             # For self-managed instances, verify instance UID only
             if user_claims.gitlab_realm == "self-managed":
                 if str(internal_context.instance_id) != str(
-                    extra_claims.get("gitlab_instance_uid", None)
+                    user_claims.gitlab_instance_uid
                 ):
                     raise HTTPException(
                         status_code=status.HTTP_403_FORBIDDEN,

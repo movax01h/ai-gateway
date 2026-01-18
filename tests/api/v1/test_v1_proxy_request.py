@@ -3,7 +3,6 @@ import json
 import pytest
 from fastapi import HTTPException, Response
 from gitlab_cloud_connector import CloudConnectorUser, UserClaims
-from gitlab_cloud_connector.auth import UserClaims as UserClaimsAuth
 
 from ai_gateway.api.auth_utils import StarletteUser
 from ai_gateway.api.v1.proxy.request import (
@@ -508,6 +507,7 @@ async def test_verify_project_namespace_metadata_self_managed_success(mock_reque
             authenticated=True,
             claims=UserClaims(
                 gitlab_realm="self-managed",
+                gitlab_instance_uid="instance-uid-123",
                 extra={"gitlab_instance_uid": "instance-uid-123"},
             ),
         )
@@ -535,6 +535,7 @@ async def test_verify_project_namespace_metadata_self_managed_instance_mismatch(
             authenticated=True,
             claims=UserClaims(
                 gitlab_realm="self-managed",
+                gitlab_instance_uid="wrong-instance-uid",
                 extra={"gitlab_instance_uid": "wrong-instance-uid"},
             ),
         )
@@ -565,6 +566,7 @@ async def test_verify_project_namespace_metadata_self_managed_ignores_project_id
             authenticated=True,
             claims=UserClaims(
                 gitlab_realm="self-managed",
+                gitlab_instance_uid="instance-uid-123",
                 extra={
                     "gitlab_instance_uid": "instance-uid-123",
                     "gitlab_project_id": "999",  # Should be ignored
