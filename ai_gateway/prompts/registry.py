@@ -15,6 +15,7 @@ from ai_gateway.model_metadata import (
     create_model_metadata,
 )
 from ai_gateway.prompts.base import BasePromptRegistry, Prompt
+from ai_gateway.prompts.bind_tools_cache import BindToolsCacheProtocol
 from ai_gateway.prompts.config import BaseModelConfig, ModelClassProvider, PromptConfig
 from ai_gateway.prompts.typing import TypeModelFactory, TypePromptTemplateFactory
 from lib.internal_events.client import InternalEventsClient
@@ -199,6 +200,7 @@ class LocalPromptRegistry(BasePromptRegistry):
         model_limits: ConfigModelLimits,
         custom_models_enabled: bool,
         disable_streaming: bool = False,
+        bind_tools_cache: Optional[BindToolsCacheProtocol] = None,
     ):
         self.prompt_template_factories = prompt_template_factories
         self.model_factories = model_factories
@@ -206,6 +208,7 @@ class LocalPromptRegistry(BasePromptRegistry):
         self.model_limits = model_limits
         self.custom_models_enabled = custom_models_enabled
         self.disable_streaming = disable_streaming
+        self.bind_tools_cache = bind_tools_cache
 
     def _resolve_id(
         self,
@@ -402,6 +405,7 @@ class LocalPromptRegistry(BasePromptRegistry):
             disable_streaming=self.disable_streaming,
             tools=tools,
             tool_choice=tool_choice,
+            bind_tools_cache=self.bind_tools_cache,
             **kwargs,
         )
 
@@ -414,6 +418,7 @@ class LocalPromptRegistry(BasePromptRegistry):
         model_limits: ConfigModelLimits,
         custom_models_enabled: bool = False,
         disable_streaming: bool = False,
+        bind_tools_cache: Optional[BindToolsCacheProtocol] = None,
     ) -> "LocalPromptRegistry":
         """Create a LocalPromptRegistry with lazy loading enabled.
 
@@ -432,6 +437,7 @@ class LocalPromptRegistry(BasePromptRegistry):
             model_limits,
             custom_models_enabled,
             disable_streaming,
+            bind_tools_cache,
         )
 
     @classmethod

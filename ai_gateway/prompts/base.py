@@ -31,6 +31,7 @@ from ai_gateway.model_metadata import (
     current_model_metadata_context,
 )
 from ai_gateway.model_selection import ModelSelectionConfig, PromptParams
+from ai_gateway.prompts.bind_tools_cache import BindToolsCacheProtocol
 from ai_gateway.prompts.caching import (
     CACHE_CONTROL_INJECTION_POINTS_KEY,
     CacheControlInjectionPointsConverter,
@@ -125,6 +126,7 @@ class Prompt(RunnableBinding[Any, BaseMessage]):
         disable_streaming: bool = False,
         tools: Optional[List[BaseTool]] = None,
         tool_choice: Optional[str] = None,
+        bind_tools_cache: Optional[BindToolsCacheProtocol] = None,
         **kwargs: Any,
     ):
         model_provider = config.model.params.model_class_provider
@@ -134,7 +136,19 @@ class Prompt(RunnableBinding[Any, BaseMessage]):
         )
 
         if tools and isinstance(model, BaseChatModel):
-            model = model.bind_tools(tools, tool_choice=tool_choice)  # type: ignore[assignment]
+            if bind_tools_cache:
+                # Use cached bind_tools to avoid expensive repeated operations
+                model_id = f"{model_provider}:{config.model.params.model}"
+                model = bind_tools_cache.get_or_bind(  # type: ignore[assignment]
+                    model=model,
+                    model_id=model_id,
+                    tools=tools,
+                    tool_choice=tool_choice,
+                    model_provider=model_provider,
+                )
+            else:
+                # Fallback for tests without DI
+                model = model.bind_tools(tools, tool_choice=tool_choice)  # type: ignore[assignment]
 
         prompt = (
             prompt_template_factory(config)

@@ -2,6 +2,7 @@ from dependency_injector import containers, providers
 
 from ai_gateway.chat import agents as chat
 from ai_gateway.config import ConfigModelLimits
+from ai_gateway.prompts.bind_tools_cache import BindToolsCache, NoOpBindToolsCache
 from ai_gateway.prompts.config import ModelClassProvider
 from ai_gateway.prompts.registry import LocalPromptRegistry
 
@@ -14,6 +15,28 @@ class ContainerPrompts(containers.DeclarativeContainer):
     config = providers.Configuration(strict=True)
     models = providers.DependenciesContainer()
     internal_event = providers.DependenciesContainer()
+
+    # Selector to convert boolean to string for bind_tools_cache
+    _bind_tools_cache_selector = providers.Callable(
+        lambda enabled: "enabled" if enabled else "disabled",
+        config.bind_tools_cache.enabled,
+    )
+
+    # Conditionally create cache implementation based on enabled flag
+    _bind_tools_cache_enabled = providers.Singleton(
+        BindToolsCache,
+        max_size=config.bind_tools_cache.max_size,
+    )
+
+    _bind_tools_cache_disabled = providers.Singleton(
+        NoOpBindToolsCache,
+    )
+
+    bind_tools_cache = providers.Selector(
+        _bind_tools_cache_selector,
+        enabled=_bind_tools_cache_enabled,
+        disabled=_bind_tools_cache_disabled,
+    )
 
     prompt_registry = providers.Singleton(
         LocalPromptRegistry.from_local_yaml,
@@ -43,4 +66,5 @@ class ContainerPrompts(containers.DeclarativeContainer):
         model_limits=providers.Factory(ConfigModelLimits, config.model_engine_limits),
         custom_models_enabled=config.custom_models.enabled,
         disable_streaming=config.custom_models.disable_streaming,
+        bind_tools_cache=bind_tools_cache,
     )
