@@ -712,11 +712,16 @@ configurable_unit_primitives:
 
         with mock.patch.object(FakeModel, "bind_tools") as mock_bind_tool:
             mock_bind_tool.return_value = model
+            # Create a proper mock with name attribute for cache signature computation
+            mock_tool = mock.Mock(spec=BaseTool)
+            mock_tool.name = "test_tool"
+            mock_tool.description = "Test tool description"
+
             Prompt(
                 model_factory=model_factory,
                 config=prompt_config,
                 model_metadata=model_metadata,
-                tools=[mock.Mock(spec=BaseTool)],
+                tools=[mock_tool],
                 tool_choice=tool_choice,
             )
 

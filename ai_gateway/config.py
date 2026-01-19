@@ -174,6 +174,11 @@ class ConfigAmazonQ(BaseModel):
     endpoint_url: str = ""
 
 
+class ConfigBindToolsCache(BaseModel):
+    enabled: bool = True
+    max_size: int = 128
+
+
 class ConfigFeatureFlags(BaseModel):
     disallowed_flags: dict[str, Set[str]] = {}
     excl_post_process: list[str] = []
@@ -264,6 +269,9 @@ class Config(BaseSettings):
     abuse_detection: Annotated[
         ConfigAbuseDetection, Field(default_factory=ConfigAbuseDetection)
     ] = ConfigAbuseDetection()
+    bind_tools_cache: Annotated[
+        ConfigBindToolsCache, Field(default_factory=ConfigBindToolsCache)
+    ] = ConfigBindToolsCache()
     feature_flags: Annotated[
         ConfigFeatureFlags, Field(default_factory=ConfigFeatureFlags)
     ] = ConfigFeatureFlags()
