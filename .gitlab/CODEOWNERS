@@ -4,11 +4,11 @@
 # https://gitlab.com/groups/gitlab-org/maintainers/ai-gateway/-/group_members?with_inherited_permissions=exclude
 * @gitlab-org/maintainers/ai-gateway
 
-^[Duo Workflow Service] @gitlab-org/maintainers/ai-gateway
+^[Duo Workflow Service] @gitlab-org/maintainers/duo-workflow-service
 duo_workflow_service/
 clients/
 contract/
-lib/
+tests/duo_workflow_service/
 
 ^[Model Configuration] @gitlab-org/maintainers/ai-gateway
 ai_gateway/model_selection/models.yml @gitlab-org/fulfillment/utilization

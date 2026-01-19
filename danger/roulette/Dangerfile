@@ -62,6 +62,18 @@ CATEGORY_LABELS = {
 
 }.freeze
 
+DWS_CODE_REVIEW_GUIDELINES_MESSAGE = <<MARKDOWN
+
+This MR includes changes to [Flow Registry](https://gitlab.com/gitlab-org/modelops/applied-ml/code-suggestions/ai-assist/-/tree/main/docs/flow_registry)
+please  refer to [contribution guidelines page](https://gitlab.com/gitlab-org/modelops/applied-ml/code-suggestions/ai-assist/-/blob/main/docs/flow_registry/contribution_guidelines.md)
+for guidance on how to safely modify existing features or implement new ones.
+
+Place extra care and attention to follow
+[backwards compatibility requirements](https://gitlab.com/gitlab-org/modelops/applied-ml/code-suggestions/ai-assist/-/blob/main/docs/flow_registry/contribution_guidelines.md#versioning-and-breaking-changes)
+to assure that Duo Agent Platform will continue to operate for the current, but also for the older releases of GitLab
+
+MARKDOWN
+
 def note_for_spin_role(spin, role, category)
   template = NOT_AVAILABLE_TEMPLATES[category] || NOT_AVAILABLE_TEMPLATES[:default]
 
@@ -97,6 +109,7 @@ if changes.any?
     markdown(NO_SUGGESTIONS)
   else
     markdown(CATEGORY_TABLE + rows.join("\n"))
+    markdown(DWS_CODE_REVIEW_GUIDELINES_MESSAGE) if categories.include?(:duo_workflow_service)
     markdown(POST_TABLE_MESSAGE)
   end
 
