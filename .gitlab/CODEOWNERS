@@ -4,7 +4,7 @@
 # https://gitlab.com/groups/gitlab-org/maintainers/ai-gateway/-/group_members?with_inherited_permissions=exclude
 * @gitlab-org/maintainers/ai-gateway
 
-^[Duo Workflow Service] @gitlab-org/maintainers/duo-workflow-service
+[Duo Workflow Service] @gitlab-org/maintainers/duo-workflow-service
 duo_workflow_service/
 clients/
 contract/
