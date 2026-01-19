@@ -33,6 +33,15 @@ include:
     - cd /app && make ingest
   environment: ingest/prod
 
+.ingest-leg-prod:
+  variables:
+    GCP_PROJECT_NAME: $INGEST_GCP_PROJECT_NAME
+    GCP_OIDC_WORKLOAD_ID_POOL_PROVIDER_NAME: $INGEST_WORKLOAD_IDENTITY_PROVIDER
+    GCP_OIDC_SERVICE_ACCOUNT_EMAIL: $INGEST_SERVICE_ACCOUNT
+  script:
+    - cd /app && make ingest
+  environment: ingest/leg-prod
+
 ingest:dev:
   stage: ingest
   extends: [.ingest-base, .oidc_base_gcp, .ingest-dev]
@@ -62,6 +71,21 @@ ingest:prod:trigger:
   extends: [.ingest-base, .oidc_base_gcp, .ingest-prod]
   rules:
     - if: $GITLAB_INGEST_TRIGGER == "prod"
+
+ingest:leg-prod:
+  stage: ingest
+  extends: [.ingest-base, .oidc_base_gcp, .ingest-leg-prod]
+  needs: [ingest:dev]
+  rules:
+    - if: $CI_COMMIT_BRANCH != $CI_DEFAULT_BRANCH
+      when: never
+    - if: $CI_PIPELINE_SOURCE == "schedule" && $SCHEDULE_TYPE == "ingest"
+
+ingest:leg-prod:trigger:
+  stage: ingest
+  extends: [.ingest-base, .oidc_base_gcp, .ingest-leg-prod]
+  rules:
+    - if: $GITLAB_INGEST_TRIGGER == "leg-prod"
 
 ingest:dry-run:
   stage: ingest
