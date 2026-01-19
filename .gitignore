@@ -304,7 +304,6 @@ dmypy.json
 .pytype/
 cython_debug/
 .test-reports/
-.llm_cache.db
 
 # Load test output
 results/

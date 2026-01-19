@@ -19,8 +19,6 @@ from gitlab_cloud_connector import (
 )
 from google.protobuf import struct_pb2
 from google.protobuf.json_format import MessageToDict
-from langchain.globals import get_llm_cache
-from langchain_community.cache import SQLiteCache
 
 from ai_gateway.config import Config, ConfigCustomModels, ConfigGoogleCloudPlatform
 from ai_gateway.container import ContainerApplication
@@ -32,7 +30,6 @@ from duo_workflow_service.interceptors.authentication_interceptor import current
 from duo_workflow_service.server import (
     DuoWorkflowService,
     clean_start_request,
-    configure_cache,
     next_client_event,
     run,
     serve,
@@ -76,20 +73,6 @@ def create_mock_internal_event_client():
     mock_client = MagicMock()
     mock_client.track_event = MagicMock()
     return mock_client
-
-
-def test_configure_cache_disabled():
-    with patch.dict(os.environ, {"LLM_CACHE": "false"}):
-        configure_cache()
-        assert get_llm_cache() is None
-
-
-def test_configure_cache_enabled():
-    with patch.dict(os.environ, {"LLM_CACHE": "true"}):
-        configure_cache()
-        cache = get_llm_cache()
-        assert isinstance(cache, SQLiteCache)
-        assert cache is not None
 
 
 @pytest.mark.parametrize(

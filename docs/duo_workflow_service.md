@@ -178,21 +178,6 @@ Example output:
 }
 ```
 
-## LLM Caching
-
-Real calls to LLMs tend to be slow and expensive. Often during development we
-are just testing the same prompt over and over while iterating on other parts
-of the workflow. To speed up development and save money on LLM tokens, you can
-add the following to `.env`:
-
-```shell
-LLM_CACHE=true
-```
-
-When enabled all queries will be cached to a local SQLite file at
-`.llm_cache.db`. You can delete this file at any time to clear the
-cache.
-
 ## Architecture
 
 <https://handbook.gitlab.com/handbook/engineering/architecture/design-documents/duo_workflow/>
