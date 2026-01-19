@@ -1,6 +1,8 @@
 import httpx
 import pytest
 from anthropic import Anthropic, AsyncAnthropic
+from langchain_core.runnables import Runnable
+from langchain_core.tools import BaseTool
 
 from ai_gateway.models.v2 import ChatAnthropic
 
@@ -124,3 +126,34 @@ class TestChatAnthropic:
             "anthropic-beta": "beta1,beta2",
         }
         assert headers_with_betas == expected_headers
+
+    @pytest.mark.parametrize(
+        ("bind_tools_params", "expected_tools"),
+        [
+            (
+                {"web_search_options": {}},
+                [
+                    {"name": "get_issue", "input_schema": []},
+                    {"type": "web_search_20250305", "name": "web_search"},
+                ],
+            ),
+            ({}, [{"name": "get_issue", "input_schema": []}]),
+        ],
+    )
+    def test_bind_tools_with_web_search_options(
+        self, bind_tools_params, expected_tools
+    ):
+        """Test that web search tool is added when web_search_options is in bind_tools_params."""
+        chat = ChatAnthropic(
+            async_client=AsyncAnthropic(),
+            model="claude-3-5-sonnet-20241022",
+        )
+
+        existing_tools = [{"name": "get_issue", "parameters": []}]
+        result = chat.bind_tools(
+            tools=existing_tools,
+            **bind_tools_params,
+        )
+
+        assert isinstance(result, Runnable)
+        assert result.kwargs["tools"] == expected_tools

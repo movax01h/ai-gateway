@@ -1,6 +1,5 @@
 import litellm
 from dependency_injector import containers, providers
-from langchain_openai import ChatOpenAI
 from litellm.llms.custom_httpx.http_handler import AsyncHTTPHandler
 
 from ai_gateway.integrations.amazon_q.chat import ChatAmazonQ
@@ -8,6 +7,7 @@ from ai_gateway.models import mock
 from ai_gateway.models.base import init_anthropic_client, log_request
 from ai_gateway.models.v2.anthropic_claude import ChatAnthropic
 from ai_gateway.models.v2.chat_litellm import ChatLiteLLM
+from ai_gateway.models.v2.openai import ChatOpenAI
 from ai_gateway.prompts.typing import Model
 
 __all__ = [

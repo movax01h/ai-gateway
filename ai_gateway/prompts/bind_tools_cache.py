@@ -152,6 +152,7 @@ class BindToolsCacheProtocol(Protocol):
         tools: Sequence[Union[BaseTool, Type[BaseModel]]],
         tool_choice: Optional[str],
         model_provider: str = "unknown",
+        **kwargs: Any,
     ) -> Runnable[Any, BaseMessage]:
         """Bind tools to model, potentially using cache.
 
@@ -188,6 +189,7 @@ class NoOpBindToolsCache:
         tools: Sequence[Union[BaseTool, Type[BaseModel]]],
         tool_choice: Optional[str],
         model_provider: str = "unknown",
+        **kwargs: Any,
     ) -> Runnable[Any, BaseMessage]:
         """Bind tools to model without caching, with metrics.
 
@@ -203,7 +205,7 @@ class NoOpBindToolsCache:
         """
         start_time = time.perf_counter()
 
-        bound_model = model.bind_tools(tools, tool_choice=tool_choice)
+        bound_model = model.bind_tools(tools, tool_choice=tool_choice, **kwargs)
 
         duration = time.perf_counter() - start_time
         BIND_TOOLS_DURATION.labels(
@@ -267,6 +269,7 @@ class BindToolsCache:
         tools: Sequence[Union[BaseTool, Type[BaseModel]]],
         tool_choice: Optional[str],
         model_provider: str = "unknown",
+        **kwargs: Any,
     ) -> Runnable[Any, BaseMessage]:
         """Get cached bound model or bind tools and cache the result.
 
@@ -314,7 +317,7 @@ class BindToolsCache:
             )
 
             # Perform expensive bind_tools operation
-            bound_model = model.bind_tools(tools, tool_choice=tool_choice)
+            bound_model = model.bind_tools(tools, tool_choice=tool_choice, **kwargs)
 
             self._cache[cache_key] = bound_model
 
