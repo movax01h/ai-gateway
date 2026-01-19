@@ -22,8 +22,6 @@ from gitlab_cloud_connector import (
 from google.protobuf.json_format import MessageToDict
 from google.protobuf.struct_pb2 import Struct
 from grpc_reflection.v1alpha import reflection
-from langchain.globals import set_llm_cache
-from langchain_community.cache import SQLiteCache
 from langchain_core.utils.function_calling import convert_to_openai_tool
 
 import duo_workflow_service.workflows.registry as flow_registry
@@ -790,13 +788,6 @@ def setup_signal_handlers(
         loop.add_signal_handler(sig, functools.partial(handle_shutdown, sig))
 
 
-def configure_cache() -> None:
-    if os.environ.get("LLM_CACHE") == "true":
-        set_llm_cache(SQLiteCache(database_path=".llm_cache.db"))
-    else:
-        set_llm_cache(None)
-
-
 @inject
 def validate_llm_access(
     prompt_registry: BasePromptRegistry = Provide[
@@ -847,7 +838,6 @@ def run(config: Config):
     setup_error_tracking()
     setup_monitoring()
     setup_logging()
-    configure_cache()
     if not self_hosted_mode:
         validate_llm_access()
     port = int(os.environ.get("PORT", "50052"))

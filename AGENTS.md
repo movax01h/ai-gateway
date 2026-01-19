@@ -416,9 +416,6 @@ AIGW_MOCK_MODEL_RESPONSES=true poetry run ai_gateway
 # Enable debug logging
 AIGW_LOGGING__LEVEL=debug poetry run ai_gateway
 
-# Use LLM cache (speeds up development)
-LLM_CACHE=true poetry run duo-workflow-service
-
 # Troubleshoot self-hosted installation
 poetry run troubleshoot
 
