@@ -175,7 +175,7 @@ class ConfigAmazonQ(BaseModel):
 
 
 class ConfigBindToolsCache(BaseModel):
-    enabled: bool = True
+    enabled: bool = False
     max_size: int = 128
 
 
