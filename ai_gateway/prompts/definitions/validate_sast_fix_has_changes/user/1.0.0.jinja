@@ -2,4 +2,12 @@
 {{fix_execution_result}}
 </fix_execution_result>
 
+<validation_instructions>
+1. First, try to parse the fix_execution_result as JSON and check for files_modified
+2. If that doesn't confirm changes, use run_git_command to check:
+   - Run: run_git_command(repository_url="{{repository_url}}", command="diff", args="--name-only")
+   - If empty, also run: run_git_command(repository_url="{{repository_url}}", command="status", args="--porcelain")
+3. Output proceed if any check shows changes, no_changes if all are empty
+</validation_instructions>
+
 Evaluate the above and respond with exactly one word: proceed or no_changes
