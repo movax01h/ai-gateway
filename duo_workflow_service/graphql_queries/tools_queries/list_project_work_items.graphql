@@ -54,6 +54,7 @@ query ListProjectWorkItems(
                 state
                 createdAt
                 updatedAt
+                webUrl
                 workItemType{
                     name
                 }
