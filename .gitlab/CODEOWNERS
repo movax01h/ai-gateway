@@ -5,23 +5,23 @@
 * @gitlab-org/maintainers/ai-gateway
 
 [Duo Workflow Service] @gitlab-org/maintainers/duo-workflow-service
-duo_workflow_service/
-clients/
-contract/
-tests/duo_workflow_service/
+/duo_workflow_service/
+/clients/
+/contract/
+/tests/duo_workflow_service/
 
 ^[Model Configuration] @gitlab-org/maintainers/ai-gateway
-ai_gateway/model_selection/models.yml @gitlab-org/fulfillment/utilization
+/ai_gateway/model_selection/models.yml @gitlab-org/fulfillment/utilization
 
 ^[Security - AppSec Approval Required] @gitlab-org/maintainers/ai-gateway @gitlab-org/security/appsec
 # Security module - all changes require AppSec approval
-duo_workflow_service/security/
+/duo_workflow_service/security/
 
 # Prompt security configuration - requires AppSec approval for changes to:
 # - DEFAULT_SECURITY_FUNCTIONS list
 # - TOOL_SPECIFIC_FUNCTIONS dictionary
 # - TOOL_SECURITY_OVERRIDES dictionary
-duo_workflow_service/security/prompt_security.py
+/duo_workflow_service/security/prompt_security.py
 
 ^[Infrastructure]
 * @gitlab-org/production-engineering @gitlab-org/scalability
