@@ -30,6 +30,7 @@ from duo_workflow_service.tools import RunCommand, Toolset, format_tool_display_
 from duo_workflow_service.tools.planner import PlannerTool
 from duo_workflow_service.tracking.errors import log_exception
 from lib.events import GLReportingEventContext
+from lib.hidden_layer_log import set_hidden_layer_log_context
 from lib.internal_events import InternalEventAdditionalProperties, InternalEventsClient
 from lib.internal_events.event_enum import EventEnum, EventLabelEnum
 
@@ -106,6 +107,7 @@ class ToolsExecutor:
             )
             response = result.get("response")
             if response and hasattr(response, "content"):
+                set_hidden_layer_log_context(tool_name, tool_call.get("args"))
                 try:
                     tool = self._toolset.get(tool_name)
                     trust_level = getattr(tool, "trust_level", None)
@@ -509,7 +511,6 @@ class ToolsExecutor:
         event_name: EventEnum,
         additional_properties: InternalEventAdditionalProperties,
     ) -> None:
-
         if event_name == EventEnum.WORKFLOW_TOOL_FAILURE:
             tool_name = additional_properties.property or "unknown"
             failure_reason = additional_properties.extra.get("error_type", "unknown")

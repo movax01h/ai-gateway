@@ -19,6 +19,7 @@ from duo_workflow_service.security.prompt_security import SecurityException
 from duo_workflow_service.security.scanner_factory import apply_security_scanning
 from duo_workflow_service.tools.toolset import Toolset
 from lib.events import GLReportingEventContext
+from lib.hidden_layer_log import set_hidden_layer_log_context
 from lib.internal_events import InternalEventAdditionalProperties, InternalEventsClient
 from lib.internal_events.event_enum import EventEnum, EventLabelEnum
 
@@ -77,6 +78,7 @@ class ToolNode:
                 )
 
             tool = self._toolset.get(tool_name)
+            set_hidden_layer_log_context(tool_name, tool_call_args)
             sanitized = self._sanitize_response(
                 response=response, tool_name=tool_name, tool=tool
             )
@@ -240,7 +242,6 @@ class ToolNode:
         event_name: EventEnum,
         additional_properties: InternalEventAdditionalProperties,
     ) -> None:
-
         if event_name == EventEnum.WORKFLOW_TOOL_FAILURE:
             tool_name = additional_properties.property or "unknown"
             failure_reason = additional_properties.extra.get("error_type", "unknown")

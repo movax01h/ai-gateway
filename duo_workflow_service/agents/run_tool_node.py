@@ -13,6 +13,7 @@ from duo_workflow_service.security.prompt_security import SecurityException
 from duo_workflow_service.security.scanner_factory import apply_security_scanning
 from duo_workflow_service.tracking.errors import log_exception
 from lib.events import GLReportingEventContext
+from lib.hidden_layer_log import set_hidden_layer_log_context
 
 WorkflowStateT_contra = TypeVar(
     "WorkflowStateT_contra",
@@ -82,6 +83,7 @@ class RunToolNode(Generic[WorkflowStateT]):
                 tool_name=self._tool.name, flow_type=self._flow_type.value
             ):
                 if output := await self._tool._arun(**tool_params):
+                    set_hidden_layer_log_context(self._tool.name, tool_params)
                     try:
                         trust_level = getattr(self._tool, "trust_level", None)
                         output = apply_security_scanning(

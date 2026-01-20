@@ -19,6 +19,7 @@ from duo_workflow_service.security.prompt_scanner import (
     PromptScanner,
     ScanResult,
 )
+from lib.hidden_layer_log import current_hidden_layer_log_context
 
 log = structlog.stdlib.get_logger("hidden_layer_scanner")
 
@@ -282,11 +283,13 @@ class HiddenLayerScanner(PromptScanner):
         if has_detections:
             # Log response only when there is a detection
             if gl_realm in self._config.log_allowed_realms:
+                tool_context = current_hidden_layer_log_context.get()
                 log.warning(
                     "Hidden Layer scan detects threats",
                     gitlab_realm=gl_realm,
                     log_allowed_realms=self._config.log_allowed_realms,
                     response=raw_response,
+                    context=tool_context.to_dict(),
                 )
             detection_type = DetectionType.PROMPT_INJECTION
 

@@ -210,6 +210,17 @@ class TestHiddenLayerScannerLogging:
 
             mock_realm.get.return_value = "saas"
 
+            # Set context with unique test values that should NEVER leak to external API
+            from lib.hidden_layer_log import set_hidden_layer_log_context
+
+            test_tool_name = "xQw8pL2mK"
+            test_tool_arg = "vN4jR9sT"
+            test_tool_args = {"arg_key": test_tool_arg}
+
+            set_hidden_layer_log_context(
+                tool_name=test_tool_name, tool_args=test_tool_args
+            )
+
             # Create scanner and scan
             scanner = HiddenLayerScanner(config=config)
             result = scanner.scan_sync("test prompt")
@@ -217,7 +228,22 @@ class TestHiddenLayerScannerLogging:
             # Verify detection was found
             assert result.detected is True
 
-            # Verify warning was logged - should have at least one warning call
+            # CRITICAL: Verify HiddenLayerLogContext is NOT sent to Hidden Layer API
+            # The context is for internal logging only and should never be in ANY API argument
+            api_call_kwargs = mock_sync_client.interactions.analyze.call_args.kwargs
+            api_call_str = str(api_call_kwargs)
+
+            # Verify our test values don't appear anywhere in the API call
+            assert test_tool_name not in api_call_str, "Tool name must not leak to API"
+            assert test_tool_arg not in api_call_str, "Tool args must not leak to API"
+
+            # Verify expected API structure
+            assert api_call_kwargs.get("metadata") == {
+                "model": "duo",
+                "requester_id": "gitlab-duo-workflow",
+            }, "API metadata must contain only expected fields"
+
+            # Verify warning was logged
             assert (
                 mock_log.warning.called
             ), "Warning should be logged when detection found"
