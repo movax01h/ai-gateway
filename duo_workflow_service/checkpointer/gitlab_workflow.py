@@ -385,7 +385,10 @@ class GitLabWorkflow(
                 - WorkflowStatusEventEnum: The status event (START, RESUME, or RETRY)
                 - EventPropertyEnum: The associated event property for tracking
         """
-        checkpoint_tuple = self._workflow_config["first_checkpoint"]
+        checkpoint_tuple = (
+            self._workflow_config.get("latest_checkpoint", None)
+            or self._workflow_config["first_checkpoint"]
+        )
         status = self._workflow_config["workflow_status"]
 
         if status in [
@@ -601,6 +604,22 @@ class GitLabWorkflow(
                     checkpoint["compressed_checkpoint"]
                 )
         else:
+            if self._workflow_config.get("latest_checkpoint"):
+                checkpoint = self._workflow_config["latest_checkpoint"]
+                if checkpoint:
+                    return self._convert_gitlab_checkpoint_to_checkpoint_tuple(
+                        {
+                            "thread_ts": checkpoint["threadTs"],
+                            "parent_ts": checkpoint["parentTs"],
+                            "checkpoint": json.loads(
+                                checkpoint["checkpoint"], object_hook=checkpoint_decoder
+                            ),
+                            "metadata": json.loads(
+                                checkpoint["metadata"], object_hook=checkpoint_decoder
+                            ),
+                        }
+                    )
+
             endpoint = f"/api/v4/ai/duo_workflows/workflows/{self._workflow_id}/checkpoints?per_page=1"
             endpoint = (
                 add_compression_param(endpoint) if compression_enabled else endpoint

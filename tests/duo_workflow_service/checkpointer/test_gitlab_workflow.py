@@ -99,6 +99,7 @@ def prepare_container(mock_duo_workflow_service_container):
 def workflow_config_fixture():
     return {
         "first_checkpoint": None,
+        "latest_checkpoint": None,
         "workflow_status": "created",
         "agent_privileges_names": ["read_repository"],
         "pre_approved_agent_privileges_names": [],
@@ -1450,3 +1451,48 @@ async def test_aput_with_compression_enabled(
     assert post_call_body["compressed_checkpoint"] == compress_checkpoint(checkpoint)
 
     mock_compress_checkpoint_flag.assert_called_with(FeatureFlag.COMPRESS_CHECKPOINT)
+
+
+@pytest.mark.asyncio
+async def test_aget_tuple_with_latest_checkpoint(
+    http_client,
+    workflow_id,
+    workflow_type,
+    checkpoint_data,
+):
+    """Test aget_tuple uses latestCheckpoint when available."""
+    latest_checkpoint = {
+        "threadTs": "latest-id",
+        "parentTs": None,
+        "checkpoint": json.dumps(checkpoint_data[0]["checkpoint"], cls=CustomEncoder),
+        "metadata": json.dumps(checkpoint_data[0]["metadata"], cls=CustomEncoder),
+    }
+
+    workflow_config = {
+        "first_checkpoint": None,
+        "latest_checkpoint": latest_checkpoint,
+        "workflow_status": "created",
+        "agent_privileges_names": ["read_repository"],
+        "pre_approved_agent_privileges_names": [],
+        "mcp_enabled": True,
+        "allow_agent_to_request_user": True,
+    }
+
+    gitlab_workflow = GitLabWorkflow(
+        http_client,
+        workflow_id,
+        workflow_type,
+        workflow_config,
+    )
+
+    config: CustomRunnableConfig = {"configurable": {"thread_id": workflow_id}}
+
+    result = await gitlab_workflow.aget_tuple(config)
+
+    assert result is not None
+    assert isinstance(result, CheckpointTuple)
+    assert result.checkpoint == checkpoint_data[0]["checkpoint"]
+    assert result.metadata == checkpoint_data[0]["metadata"]
+
+    # Should not call the API when latestCheckpoint is available
+    http_client.aget.assert_not_called()

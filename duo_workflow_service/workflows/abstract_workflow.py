@@ -287,7 +287,10 @@ class AbstractWorkflow(ABC):
                 gitlab_status_update_callback=on_gitlab_status_update,
             ) as checkpointer:
                 status_event = getattr(checkpointer, "initial_status_event", None)
-                checkpoint_tuple = self._workflow_config["first_checkpoint"]
+                checkpoint_tuple = (
+                    self._workflow_config.get("latest_checkpoint", None)
+                    or self._workflow_config["first_checkpoint"]
+                )
                 if not status_event:
                     status_event = (
                         "" if checkpoint_tuple else WorkflowStatusEventEnum.START
