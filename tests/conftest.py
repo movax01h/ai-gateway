@@ -18,6 +18,7 @@ from langchain_core.outputs import ChatGeneration, ChatGenerationChunk, ChatResu
 from starlette.middleware import Middleware
 from starlette_context.middleware import RawContextMiddleware
 
+from ai_gateway import structured_logging
 from ai_gateway.api.auth_utils import StarletteUser
 from ai_gateway.api.middleware import (
     AccessLogMiddleware,
@@ -803,6 +804,7 @@ def reset_context_vars():
     llm_operations.set(None)
     current_prompt_cache_context.set(None)
     ModelSelectionConfig._instance = None
+    structured_logging.ENABLE_REQUEST_LOGGING = False
 
 
 @pytest.fixture(autouse=True)
