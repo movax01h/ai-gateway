@@ -108,9 +108,11 @@ async def test_init(user):
     assert workflow._workflow_metadata == metadata
     assert workflow.is_done is False
     assert len(workflow._mcp_tools) == 1
-    tool = workflow._mcp_tools[0](metadata={})
-    assert tool.name == "get_issue"
-    assert tool.description == f"{UNTRUSTED_MCP_WARNING}\n\nTool to get issue"
+    # Tools are now configs (dicts), not classes
+    tool_config = workflow._mcp_tools[0]
+    assert tool_config["llm_name"] == "get_issue"
+    assert tool_config["description"] == f"{UNTRUSTED_MCP_WARNING}\n\nTool to get issue"
+    assert tool_config["original_name"] == "get_issue"
     assert workflow._user == user
 
 
@@ -154,9 +156,7 @@ async def test_set_action_response(workflow):
 @patch(
     "duo_workflow_service.workflows.abstract_workflow.fetch_workflow_and_container_data"
 )
-@patch(
-    "duo_workflow_service.workflows.abstract_workflow.convert_mcp_tools_to_langchain_tool_classes"
-)
+@patch("duo_workflow_service.workflows.abstract_workflow.convert_mcp_tools_to_configs")
 @patch("duo_workflow_service.workflows.abstract_workflow.GitLabWorkflow")
 @patch("duo_workflow_service.workflows.abstract_workflow.ToolsRegistry.configure")
 @pytest.mark.parametrize("mcp_enabled", [True, False])

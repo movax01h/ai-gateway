@@ -1,4 +1,4 @@
-from typing import Optional, Type, TypedDict, Union
+from typing import Optional, Sequence, Type, TypedDict, Union
 
 from langchain.tools import BaseTool
 from pydantic import BaseModel
@@ -20,6 +20,7 @@ from duo_workflow_service.tools.findings.list_security_findings import (
     ListSecurityFindings,
 )
 from duo_workflow_service.tools.gitlab_api_generic import GitLabApiGet, GitLabGraphQL
+from duo_workflow_service.tools.mcp_tools import McpTool, McpToolConfig
 from duo_workflow_service.tools.vulnerabilities.get_vulnerability_details import (
     GetVulnerabilityDetails,
 )
@@ -120,6 +121,9 @@ _GENERIC_GITLAB_API_TOOLS: list[Type[BaseTool]] = [
 _RUN_MCP_TOOLS_PRIVILEGE = "run_mcp_tools"
 _USE_GENERIC_GITLAB_API_TOOLS_PRIVILEGE = "use_generic_gitlab_api_tools"
 
+# Using Sequence instead of list because it's covariant, allowing subclasses
+ToolsOrConfigs = Union[Sequence[Type[BaseTool]], Sequence[McpToolConfig]]
+
 _AGENT_PRIVILEGES: dict[str, list[Type[BaseTool]]] = {
     "read_write_files": [
         tools.ReadFile,
@@ -183,7 +187,7 @@ class ToolsRegistry:
         gl_http_client: GitlabHttpClient,
         outbox: Outbox,
         project: Optional[Project],
-        mcp_tools: Optional[list[type[BaseTool]]] = None,
+        mcp_tools: Optional[list[McpToolConfig]] = None,
         language_server_version: Optional[LanguageServerVersion] = None,
     ):
         if not workflow_config:
@@ -218,10 +222,10 @@ class ToolsRegistry:
         enabled_tools: list[str],
         preapproved_tools: list[str],
         tool_metadata: ToolMetadata,
-        mcp_tools: Optional[list[type[BaseTool]]] = None,
+        mcp_tools: Optional[list[McpToolConfig]] = None,
         language_server_version: Optional[LanguageServerVersion] = None,
     ):
-        tools_for_agent_privileges = _AGENT_PRIVILEGES
+        tools_for_agent_privileges: dict[str, ToolsOrConfigs] = dict(_AGENT_PRIVILEGES)
 
         # Always enable mcp tools until it's reliably passed by clients as an agent privilege
         enabled_tools.append(_RUN_MCP_TOOLS_PRIVILEGE)
@@ -240,11 +244,24 @@ class ToolsRegistry:
         }
 
         self._preapproved_tool_names = set(self._enabled_tools.keys())
-        self._mcp_tool_names = [tool.name for tool in mcp_tools or []]
+        self._mcp_tool_names = [tool["llm_name"] for tool in mcp_tools or []]
 
         for privilege in enabled_tools:
-            for tool_cls in tools_for_agent_privileges.get(privilege, []):
-                tool = tool_cls(metadata=tool_metadata)
+            for tool_cls_or_config in tools_for_agent_privileges.get(privilege, []):
+                # Handle both regular tool classes and MCP tool configs
+                if (
+                    isinstance(tool_cls_or_config, dict)
+                    and "llm_name" in tool_cls_or_config
+                ):
+                    tool = McpTool(
+                        name=tool_cls_or_config["llm_name"],
+                        description=tool_cls_or_config["description"],
+                        args_schema=tool_cls_or_config["args_schema"],
+                        metadata=tool_metadata,  # type: ignore[arg-type]
+                    )
+                    tool._original_mcp_name = tool_cls_or_config["original_name"]
+                else:
+                    tool = tool_cls_or_config(metadata=tool_metadata)  # type: ignore[assignment]
 
                 # If language server client was detected, restrict tool versions
                 if isinstance(tool, DuoBaseTool) and language_server_version:

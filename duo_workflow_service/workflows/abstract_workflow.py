@@ -7,7 +7,6 @@ from typing import Any, Dict, Optional, TypedDict
 import structlog
 from dependency_injector.wiring import Provide, inject
 from gitlab_cloud_connector import CloudConnectorUser
-from langchain.tools import BaseTool
 from langchain_core.runnables import RunnableConfig
 
 # pylint disable are going to be fixed via
@@ -44,7 +43,10 @@ from duo_workflow_service.gitlab.http_client import GitlabHttpClient
 from duo_workflow_service.gitlab.http_client_factory import get_http_client
 from duo_workflow_service.gitlab.url_parser import SESSION_URL_PATH
 from duo_workflow_service.monitoring import duo_workflow_metrics
-from duo_workflow_service.tools import convert_mcp_tools_to_langchain_tool_classes
+from duo_workflow_service.tools.mcp_tools import (
+    McpToolConfig,
+    convert_mcp_tools_to_configs,
+)
 from duo_workflow_service.tracking import (
     MonitoringContext,
     current_monitoring_context,
@@ -93,7 +95,7 @@ class AbstractWorkflow(ABC):
     _workflow_type: GLReportingEventContext
     _stream: bool = False
     _additional_context: list[AdditionalContext] | None
-    _mcp_tools: list[type[BaseTool]]
+    _mcp_tools: list[McpToolConfig]
     _approval: Optional[contract_pb2.Approval]
     _prompt_registry: InMemoryPromptRegistry | LocalPromptRegistry
     _language_server_version: Optional[LanguageServerVersion]
@@ -133,9 +135,7 @@ class AbstractWorkflow(ABC):
         )
         self._workflow_type = workflow_type
         self._additional_context = additional_context
-        self._mcp_tools = convert_mcp_tools_to_langchain_tool_classes(
-            mcp_tools=mcp_tools
-        )
+        self._mcp_tools = convert_mcp_tools_to_configs(mcp_tools=mcp_tools)
         self._approval = approval
         self._prompt_registry = prompt_registry
         self._workflow_config = empty_workflow_config()

@@ -2,21 +2,21 @@ import json
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-from langchain.tools import BaseTool
 
 from contract import contract_pb2
+from duo_workflow_service.tools import DuoBaseTool
 from duo_workflow_service.tools.mcp_tools import (
     UNTRUSTED_MCP_WARNING,
     McpTool,
-    convert_mcp_tools_to_langchain_tool_classes,
+    convert_mcp_tools_to_configs,
     sanitize_llm_name,
     sanitize_python_identifier,
 )
 
 
 @pytest.mark.asyncio
-async def test_convert_mcp_tools_to_langchain_tool_classes():
-    metadata = {"outbox": AsyncMock()}
+async def test_convert_mcp_tools_to_configs():
+    """Test that convert_mcp_tools_to_configs returns correct config dicts."""
     mcp_tools = [
         contract_pb2.McpTool(
             name="tool1", description="Tool 1 description", inputSchema="{}"
@@ -27,39 +27,67 @@ async def test_convert_mcp_tools_to_langchain_tool_classes():
             inputSchema='{"properties":{}}',
         ),
     ]
+
+    result = convert_mcp_tools_to_configs(mcp_tools)
+
+    assert len(result) == 2
+
+    first_config = result[0]
+    second_config = result[1]
+
+    # Check first config
+    assert first_config["llm_name"] == "tool1"
+    assert first_config["original_name"] == "tool1"
+    assert (
+        first_config["description"] == f"{UNTRUSTED_MCP_WARNING}\n\nTool 1 description"
+    )
+    assert first_config["args_schema"] == {}
+
+    # Check second config
+    assert second_config["llm_name"] == "tool2"
+    assert second_config["original_name"] == "tool2"
+    assert (
+        second_config["description"] == f"{UNTRUSTED_MCP_WARNING}\n\nTool 2 description"
+    )
+    assert second_config["args_schema"] == {"properties": {}}
+
+
+@pytest.mark.asyncio
+async def test_mcp_tool_instance_creation_and_execution():
+    """Test that McpTool instances can be created from configs and executed."""
+    metadata = {"outbox": AsyncMock()}
+    mcp_tools = [
+        contract_pb2.McpTool(
+            name="tool1", description="Tool 1 description", inputSchema="{}"
+        ),
+    ]
+
     with patch(
         "duo_workflow_service.tools.mcp_tools._execute_action", new_callable=AsyncMock
     ) as mock_execute_action:
         mock_execute_action.return_value = "Tool execution result"
-        result = convert_mcp_tools_to_langchain_tool_classes(mcp_tools)
 
-        assert len(result) == 2
+        # Convert to configs
+        configs = convert_mcp_tools_to_configs(mcp_tools)
+        config = configs[0]
 
-        first_tool_cls = result[0]
-        second_tool_cls = result[1]
+        # Create instance from config (as ToolsRegistry does)
+        tool = McpTool(
+            name=config["llm_name"],
+            description=config["description"],
+            args_schema=config["args_schema"],
+            metadata=metadata,
+        )
+        tool._original_mcp_name = config["original_name"]
 
-        assert first_tool_cls.name == "tool1"
-        assert second_tool_cls.name == "tool2"
-
-        first_tool = first_tool_cls(metadata=metadata)
-        second_tool = second_tool_cls(metadata=metadata)
-
-        assert first_tool.name == "tool1"
-        assert second_tool.name == "tool2"
-
-        expected_description_1 = f"{UNTRUSTED_MCP_WARNING}\n\nTool 1 description"
-        expected_description_2 = f"{UNTRUSTED_MCP_WARNING}\n\nTool 2 description"
-
-        assert first_tool.description == expected_description_1
-        assert second_tool.description == expected_description_2
-
-        assert first_tool.metadata == metadata
-        assert second_tool.metadata == metadata
-        assert first_tool.args_schema == {}
-        assert second_tool.args_schema == {"properties": {}}
+        assert tool.name == "tool1"
+        assert tool.description == f"{UNTRUSTED_MCP_WARNING}\n\nTool 1 description"
+        assert tool.metadata == metadata
+        assert tool.args_schema == {}
+        assert isinstance(tool, DuoBaseTool)
 
         test_args = {"arg1": "value1"}
-        execution_result = await first_tool._arun(**test_args)
+        execution_result = await tool._arun(**test_args)
         assert execution_result == "Tool execution result"
 
         mock_execute_action.assert_called_once_with(
@@ -125,8 +153,7 @@ async def test_mcp_tool_logging_with_event_context(
     arguments = {"arg1": "value1", "arg2": "value2"}
 
     result = await tool._arun(**arguments)
-
-    # Verify logging was called with expected context
+    assert isinstance(tool, DuoBaseTool)
     mock_logger.info.assert_called_once_with(
         "Executing MCP tool",
         extra={
@@ -139,7 +166,7 @@ async def test_mcp_tool_logging_with_event_context(
             "global_user_id": "user-123",
             "correlation_id": "corr-456",
             "tool_class": "McpTool",
-            "original_mcp_name": None,
+            "original_mcp_name": "test_tool",  # Falls back to self.name when _original_mcp_name is None
         },
     )
 
@@ -167,14 +194,13 @@ async def test_mcp_tool_logging_without_event_context(
     arguments = {"arg1": "value1"}
 
     result = await tool._arun(**arguments)
-
-    # Verify logging was called with basic context only
+    assert isinstance(tool, DuoBaseTool)
     mock_logger.info.assert_called_once_with(
         "Executing MCP tool",
         extra={
             "tool_name": "test_tool",
             "tool_class": "McpTool",
-            "original_mcp_name": None,
+            "original_mcp_name": "test_tool",  # Falls back to self.name when _original_mcp_name is None
             "mcp_tool_args_count": 1,
         },
     )
@@ -185,9 +211,8 @@ async def test_mcp_tool_logging_without_event_context(
 
 
 @pytest.mark.asyncio
-async def test_convert_mcp_tools_handles_name_collisions():
-    """Test that tools with the same name get unique Python class names."""
-    metadata = {"outbox": AsyncMock()}
+async def test_convert_mcp_tools_handles_duplicate_names():
+    """Test that tools with duplicate names are both included in configs."""
     mcp_tools = [
         contract_pb2.McpTool(
             name="search", description="First search tool", inputSchema="{}"
@@ -200,13 +225,19 @@ async def test_convert_mcp_tools_handles_name_collisions():
         ),
     ]
 
-    result = convert_mcp_tools_to_langchain_tool_classes(mcp_tools)
+    result = convert_mcp_tools_to_configs(mcp_tools)
 
     assert len(result) == 3
 
-    assert result[0].__name__ == "McpTool_search"
-    assert result[1].__name__ == "McpTool_delete"
-    assert result[2].__name__ == "McpTool_search_1"
+    # All tools should have their configs, even duplicates
+    assert result[0]["llm_name"] == "search"
+    assert result[0]["description"] == f"{UNTRUSTED_MCP_WARNING}\n\nFirst search tool"
+
+    assert result[1]["llm_name"] == "delete"
+    assert result[1]["description"] == f"{UNTRUSTED_MCP_WARNING}\n\nDelete tool"
+
+    assert result[2]["llm_name"] == "search"
+    assert result[2]["description"] == f"{UNTRUSTED_MCP_WARNING}\n\nSecond search tool"
 
 
 @pytest.mark.parametrize(
