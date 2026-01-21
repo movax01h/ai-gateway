@@ -189,7 +189,10 @@ class Workflow(AbstractWorkflow):
 
         history: List[BaseMessage] = state["conversation_history"][self._agent.name]
         last_message = history[-1]
-        if isinstance(last_message, AIMessage) and len(last_message.tool_calls) > 0:
+        if not isinstance(last_message, AIMessage):
+            return Routes.STOP
+
+        if len(last_message.tool_calls) > 0 or len(last_message.invalid_tool_calls) > 0:
             return Routes.TOOL_USE
 
         return Routes.STOP

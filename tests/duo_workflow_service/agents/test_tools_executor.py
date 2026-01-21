@@ -6,7 +6,12 @@ from unittest.mock import AsyncMock, MagicMock, Mock, call, patch
 
 import pytest
 from langchain.tools import BaseTool
-from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
+from langchain_core.messages import (
+    AIMessage,
+    HumanMessage,
+    InvalidToolCall,
+    ToolMessage,
+)
 from langchain_core.runnables import Runnable
 from langchain_core.tools import ToolException
 from langgraph.graph import StateGraph
@@ -1507,3 +1512,163 @@ async def test_security_exception_creates_failure_ui_chat_log(
     assert tool_log["status"] == ToolStatus.FAILURE
     assert "Security error" in tool_log["content"]
     assert tool_log["tool_info"]["name"] == "test_tool"
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("mock_datetime")
+async def test_invalid_tool_call_handling(
+    workflow_state,
+    internal_event_client: Mock,
+    flow_type: GLReportingEventContext,
+):
+    """Test that invalid tool calls are handled gracefully with error messages and UI logs."""
+    # Create invalid tool calls
+    invalid_tool_calls = [
+        InvalidToolCall(
+            id="invalid-call-1",
+            error="JSON parsing error: unexpected token",
+            name="invalid_tool",
+            args="{}",
+        ),
+    ]
+
+    # Setup workflow state with invalid tool calls
+    workflow_state["conversation_history"]["planner"] = [
+        AIMessage(
+            content=[{"type": "text", "text": "test"}],
+            tool_calls=[],  # No valid tool calls
+            invalid_tool_calls=invalid_tool_calls,
+            id="ai-msg-invalid-tool-test",
+        ),
+    ]
+
+    # Create ToolsExecutor
+    mock_toolset = MagicMock(spec=Toolset)
+    tools_executor = ToolsExecutor(
+        tools_agent_name="planner",
+        toolset=mock_toolset,
+        workflow_id="123",
+        workflow_type=flow_type,
+        internal_event_client=internal_event_client,
+    )
+
+    # Execute
+    result = await tools_executor.run(workflow_state)
+
+    # Verify conversation history contains error response
+    assert len(result) == 2
+    error_response = result[0]["conversation_history"]["planner"][0]
+    assert isinstance(error_response, ToolMessage)
+    assert error_response.tool_call_id == "invalid-call-1"
+    assert "Invalid or unparsable tool call received." in error_response.content
+
+    # Verify UI chat log
+    update = cast(Command, result[-1]).update
+    assert update is not None
+    ui_chat_logs = update["ui_chat_log"]
+
+    # Should have agent message + invalid tool call error message
+    assert len(ui_chat_logs) == 2
+
+    # Verify agent message
+    assert ui_chat_logs[0]["message_type"] == MessageTypeEnum.AGENT
+    assert ui_chat_logs[0]["content"] == "test"
+    assert ui_chat_logs[0]["message_id"] == "ai-msg-invalid-tool-test"
+    assert ui_chat_logs[0]["status"] == ToolStatus.SUCCESS
+    assert ui_chat_logs[0]["timestamp"] == "2025-01-01T12:00:00+00:00"
+
+    # Verify invalid tool call error message
+    assert ui_chat_logs[1]["message_type"] == MessageTypeEnum.TOOL
+    assert ui_chat_logs[1]["status"] == ToolStatus.FAILURE
+    assert "Tool call error" in ui_chat_logs[1]["content"]
+    assert ui_chat_logs[1]["message_id"] == "invalid-call-1"
+    assert ui_chat_logs[1]["tool_info"] is None
+    assert ui_chat_logs[1]["timestamp"] == "2025-01-01T12:00:00+00:00"
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("mock_datetime")
+async def test_invalid_tool_call_with_valid_tool_calls(
+    workflow_state,
+    internal_event_client: Mock,
+    flow_type: GLReportingEventContext,
+):
+    """Test that invalid tool calls are handled alongside valid tool calls."""
+    # Create mock tool
+    tool = mock_tool(name="test_tool", content="test_tool result")
+
+    # Create invalid tool calls
+    invalid_tool_calls = [
+        InvalidToolCall(
+            id="invalid-call-1", error="Malformed JSON", name="invalid_tool", args="{}"
+        ),
+    ]
+
+    # Setup workflow state with both valid and invalid tool calls
+    workflow_state["conversation_history"]["planner"] = [
+        AIMessage(
+            content=[{"type": "text", "text": "test"}],
+            tool_calls=[
+                {
+                    "id": "valid-call-1",
+                    "name": "test_tool",
+                    "args": {"param": "value"},
+                }
+            ],
+            invalid_tool_calls=invalid_tool_calls,
+            id="ai-msg-mixed-tools-test",
+        ),
+    ]
+
+    # Create mock toolset
+    mock_toolset = MagicMock(spec=Toolset)
+    mock_toolset.__contains__ = MagicMock(return_value=True)
+    mock_toolset.__getitem__ = MagicMock(return_value=tool)
+
+    # Create ToolsExecutor
+    tools_executor = ToolsExecutor(
+        tools_agent_name="planner",
+        toolset=mock_toolset,
+        workflow_id="123",
+        workflow_type=flow_type,
+        internal_event_client=internal_event_client,
+    )
+
+    # Execute
+    result = await tools_executor.run(workflow_state)
+
+    # Verify conversation history contains both responses
+    assert len(result) == 3  # valid tool response + invalid tool response + Command
+
+    # Verify valid tool response
+    valid_response = result[0]["conversation_history"]["planner"][0]
+    assert isinstance(valid_response, ToolMessage)
+    # The mock tool returns a hardcoded tool_call_id, so we just verify it's a ToolMessage with content
+    assert valid_response.content == "test_tool result"
+
+    # Verify invalid tool response
+    invalid_response = result[1]["conversation_history"]["planner"][0]
+    assert isinstance(invalid_response, ToolMessage)
+    assert invalid_response.tool_call_id == "invalid-call-1"
+    assert "Invalid or unparsable tool call received." in invalid_response.content
+
+    # Verify UI chat logs
+    update = cast(Command, result[-1]).update
+    assert update is not None
+    ui_chat_logs = update["ui_chat_log"]
+
+    # Should have agent message + valid tool message + invalid tool message
+    assert len(ui_chat_logs) == 3
+
+    # Verify agent message
+    assert ui_chat_logs[0]["message_type"] == MessageTypeEnum.AGENT
+
+    # Verify valid tool message
+    assert ui_chat_logs[1]["message_type"] == MessageTypeEnum.TOOL
+    assert ui_chat_logs[1]["status"] == ToolStatus.SUCCESS
+    assert ui_chat_logs[1]["message_id"] == "valid-call-1"
+
+    # Verify invalid tool message
+    assert ui_chat_logs[2]["message_type"] == MessageTypeEnum.TOOL
+    assert ui_chat_logs[2]["status"] == ToolStatus.FAILURE
+    assert ui_chat_logs[2]["message_id"] == "invalid-call-1"

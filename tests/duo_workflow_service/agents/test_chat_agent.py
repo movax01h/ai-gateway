@@ -3,7 +3,13 @@ from unittest.mock import ANY, AsyncMock, Mock, patch
 
 import pytest
 from anthropic import APIStatusError
-from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
+from langchain_core.messages import (
+    AIMessage,
+    HumanMessage,
+    InvalidToolCall,
+    SystemMessage,
+    ToolMessage,
+)
 
 from duo_workflow_service.agents.chat_agent import ChatAgent
 from duo_workflow_service.agents.prompt_adapter import ChatAgentPromptTemplate
@@ -411,6 +417,56 @@ async def test_chat_agent_invalid_slash_command_error_handling(
         result["ui_chat_log"][0]["content"]
         == "The command '/invalid_command' does not exist."
     )
+
+
+@pytest.mark.asyncio
+async def test_chat_agent_invalid_tool_calls_handling(chat_agent, input):
+    """Test that ChatAgent passes through invalid tool calls to the workflow for ToolsExecutor to handle."""
+    # Create an AIMessage with invalid tool calls
+    invalid_tool_calls = [
+        InvalidToolCall(
+            id="invalid-call-1",
+            error="JSON parsing error: unexpected token",
+            name="invalid_tool",
+            args="{}",
+            type="invalid_tool_call",
+        ),
+    ]
+
+    ai_message_with_invalid_calls = AIMessage(
+        content="I'll try to use a tool",
+        invalid_tool_calls=invalid_tool_calls,
+        id="agent-msg-invalid-id",
+    )
+
+    chat_agent.prompt_adapter.get_response = AsyncMock(
+        return_value=ai_message_with_invalid_calls
+    )
+
+    result = await chat_agent.run(input)
+
+    # Verify the response structure
+    # ChatAgent passes through the AIMessage with invalid_tool_calls to conversation_history
+    assert result["status"] == WorkflowStatusEnum.INPUT_REQUIRED
+    assert len(result["conversation_history"]["Chat Agent"]) == 1
+    assert isinstance(result["conversation_history"]["Chat Agent"][0], AIMessage)
+    assert (
+        result["conversation_history"]["Chat Agent"][0].content
+        == "I'll try to use a tool"
+    )
+    assert (
+        result["conversation_history"]["Chat Agent"][0].invalid_tool_calls
+        == invalid_tool_calls
+    )
+
+    # Verify UI chat log contains agent message
+    assert len(result["ui_chat_log"]) == 1
+
+    # Verify agent message
+    assert result["ui_chat_log"][0]["message_type"] == MessageTypeEnum.AGENT
+    assert result["ui_chat_log"][0]["content"] == "I'll try to use a tool"
+    assert result["ui_chat_log"][0]["status"] == ToolStatus.SUCCESS
+    assert result["ui_chat_log"][0]["message_id"] == "agent-msg-invalid-id"
 
 
 @pytest.mark.parametrize(
