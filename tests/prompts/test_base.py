@@ -617,8 +617,8 @@ configurable_unit_primitives:
     @pytest.mark.parametrize(
         ("model_response", "usage_metadata"),
         [
-            # 2 characters ensures 2 yield before iteration stops
-            ("ab", UsageMetadata(input_tokens=1, output_tokens=1, total_tokens=2)),
+            # first yield for the single character, second yield empty content end of stream
+            ("a", UsageMetadata(input_tokens=1, output_tokens=1, total_tokens=2)),
         ],
     )
     async def test_astream_usage_metadata_before_stream_end(

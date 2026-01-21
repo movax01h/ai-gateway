@@ -84,12 +84,12 @@ from langchain_core.output_parsers import (
 from langchain_core.outputs import ChatGeneration, ChatGenerationChunk, ChatResult
 from langchain_core.runnables import Runnable, RunnablePassthrough
 from langchain_core.tools import BaseTool
-from langchain_core.utils import get_from_dict_or_env, pre_init
+from langchain_core.utils import get_from_dict_or_env
 from langchain_core.utils.function_calling import convert_to_openai_tool
 from langchain_core.utils.pydantic import TypeBaseModel, is_basemodel_subclass
 from litellm.types.utils import Delta
 from litellm.utils import get_valid_models
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 from typing_extensions import is_typeddict
 
 logger = logging.getLogger(__name__)
@@ -511,7 +511,8 @@ class ChatLiteLLM(BaseChatModel):
 
         return await _completion_with_retry(**kwargs)
 
-    @pre_init
+    @model_validator(mode="before")
+    @classmethod
     def validate_environment(cls, values: Dict) -> Dict:
         """Validate api key, python package exists, temperature, top_p, and top_k."""
         try:
@@ -548,13 +549,16 @@ class ChatLiteLLM(BaseChatModel):
         )
         values["client"] = litellm
 
-        if values["temperature"] is not None and not 0 <= values["temperature"] <= 2:
+        if (
+            values.get("temperature") is not None
+            and not 0 <= values["temperature"] <= 2
+        ):
             raise ValueError("temperature must be in the range [0.0, 2.0]")
 
-        if values["top_p"] is not None and not 0 <= values["top_p"] <= 1:
+        if values.get("top_p") is not None and not 0 <= values["top_p"] <= 1:
             raise ValueError("top_p must be in the range [0.0, 1.0]")
 
-        if values["top_k"] is not None and values["top_k"] <= 0:
+        if values.get("top_k") is not None and values["top_k"] <= 0:
             raise ValueError("top_k must be positive")
 
         return values
@@ -806,7 +810,7 @@ class ChatLiteLLM(BaseChatModel):
                     f"Tool choice {tool_choice} was specified, but the only "
                     f"provided tools were {tool_names}."
                 )
-        return super().bind(tools=formatted_tools, tool_choice=tool_choice, **kwargs)  # type: ignore[return-value]
+        return super().bind(tools=formatted_tools, tool_choice=tool_choice, **kwargs)
 
     def with_structured_output(
         self,

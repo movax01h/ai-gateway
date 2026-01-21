@@ -30,7 +30,6 @@ def test_default_with_human_message():
     assert encoded_human == {
         "type": "HumanMessage",
         "content": "This is a human message",
-        "example": False,
         "additional_kwargs": {},
         "response_metadata": {},
         "name": None,
@@ -46,7 +45,6 @@ def test_default_with_ai_message():
     assert encoded_ai == {
         "type": "AIMessage",
         "content": "This is an AI message",
-        "example": False,
         "additional_kwargs": {},
         "response_metadata": {},
         "invalid_tool_calls": [],

@@ -1,9 +1,10 @@
 from typing import Any
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, Mock, patch
 from uuid import uuid4
 
 import pytest
 from langgraph.checkpoint.base import CheckpointTuple
+from langgraph.checkpoint.memory import BaseCheckpointSaver
 
 from duo_workflow_service.components.tools_registry import _AGENT_PRIVILEGES
 from duo_workflow_service.entities import WorkflowStatusEnum
@@ -87,3 +88,8 @@ def checkpoint_tuple_fixture():
 @pytest.fixture(name="scopes")
 def scopes_fixture():
     return ["duo_workflow_execute_workflow"]
+
+
+@pytest.fixture(name="mock_checkpointer")
+def mock_checkpointer_fixture():
+    return Mock(spec=BaseCheckpointSaver)

@@ -5,7 +5,7 @@ from anthropic import AsyncAnthropic
 from langchain_anthropic import ChatAnthropic as _LChatAnthropic
 from langchain_core.callbacks import CallbackManagerForLLMRun
 from langchain_core.language_models import LanguageModelInput
-from langchain_core.messages import BaseMessage
+from langchain_core.messages import AIMessage, BaseMessage
 from langchain_core.outputs import ChatResult
 from langchain_core.runnables import Runnable
 from langchain_core.tools import BaseTool
@@ -94,14 +94,15 @@ class ChatAnthropic(_LChatAnthropic):
 
     def bind_tools(
         self,
-        tools: Sequence[dict[str, Any] | type | Callable | BaseTool],
-        *,
-        tool_choice: Optional[dict[str, str] | str] = None,
+        tools: Sequence[Mapping[str, Any] | type | Callable | BaseTool],
         **kwargs: Any,
-    ) -> Runnable[LanguageModelInput, BaseMessage]:
+    ) -> Runnable[LanguageModelInput, AIMessage]:
         tools_list = list(tools)
         web_search_options = kwargs.pop("web_search_options", None)
         if web_search_options is not None:
             tools_list.append({"type": "web_search_20250305", "name": "web_search"})
 
-        return super().bind_tools(tools_list, tool_choice=tool_choice, **kwargs)
+        return super().bind_tools(
+            tools_list,
+            **kwargs,
+        )

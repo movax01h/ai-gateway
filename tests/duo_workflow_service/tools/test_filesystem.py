@@ -2,7 +2,7 @@ import json
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-from langchain.tools.base import ToolException
+from langchain.tools import ToolException
 
 from contract import contract_pb2
 from duo_workflow_service.gitlab.gitlab_api import Project
