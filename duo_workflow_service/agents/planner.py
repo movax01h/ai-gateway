@@ -13,7 +13,7 @@ class PlanSupervisorAgent:
         self._supervised_agent_name = supervised_agent_name
 
     async def run(
-        self, _state: WorkflowState
+        self, state: WorkflowState  # pylint: disable=unused-argument
     ) -> Dict[str, Dict[str, List[BaseMessage]]]:
         return {
             "conversation_history": {

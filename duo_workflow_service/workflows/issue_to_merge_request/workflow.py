@@ -222,7 +222,7 @@ class Workflow(AbstractWorkflow):
         graph.add_edge(build_context_handover_node, planner_entry_node)
 
         plan_terminator = PlanTerminatorAgent(workflow_id=self._workflow_id)
-        graph.add_node("plan_terminator", plan_terminator.run)
+        graph.add_node("plan_terminator", plan_terminator.run)  # type: ignore[type-var]
         graph.add_edge("plan_terminator", END)
 
         graph.add_node(
