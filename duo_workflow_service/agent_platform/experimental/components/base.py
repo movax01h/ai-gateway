@@ -86,5 +86,7 @@ class EndComponent(BaseComponent):
         graph.add_node(self.__entry_hook__(), self._terminate_flow)
         graph.add_edge(self.__entry_hook__(), END)
 
-    async def _terminate_flow(self, _state: FlowState) -> dict:
+    async def _terminate_flow(
+        self, state: FlowState  # pylint: disable=unused-argument
+    ) -> dict:
         return {FlowStateKeys.STATUS: WorkflowStatusEnum.COMPLETED.value}

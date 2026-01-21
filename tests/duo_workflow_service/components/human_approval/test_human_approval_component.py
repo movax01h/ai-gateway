@@ -1,9 +1,11 @@
 import os
+from typing import cast
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from langchain_core.runnables import Runnable
 from langgraph.graph import END, StateGraph
-from langgraph.utils.runnable import Runnable
+from langgraph.graph.state import CompiledStateGraph
 
 from duo_workflow_service.agents import HumanApprovalCheckExecutor
 from duo_workflow_service.components.human_approval.component import (
@@ -128,7 +130,8 @@ class TestHumanApprovalComponent:
 
             graph.add_edge("first_node", entry_point)
 
-            await graph.compile().ainvoke(input=graph_input, config=graph_config)
+            compiled_graph = cast(CompiledStateGraph[WorkflowState], graph.compile())
+            await compiled_graph.ainvoke(input=graph_input, config=graph_config)
 
             assert entry_point == "continuation"
             mock_check_executor.run.assert_not_called()

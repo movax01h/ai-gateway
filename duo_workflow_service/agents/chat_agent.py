@@ -75,7 +75,7 @@ class ChatAgent:
 
         return approval_required, approval_messages
 
-    def _handle_wrong_messages_order_for_tool_execution(self, input: ChatWorkflowState):
+    def _handle_wrong_messages_order_for_tool_execution(self, state: ChatWorkflowState):
         # A special fix for the following use case:
         #
         # - A user is asked to approve/deny a tool execution
@@ -86,11 +86,11 @@ class ChatAgent:
         # Expected to be refactored in:
         # - https://gitlab.com/gitlab-org/modelops/applied-ml/code-suggestions/ai-assist/-/issues/1461
         if (
-            self.name in input["conversation_history"]
-            and len(input["conversation_history"][self.name]) > 1
+            self.name in state["conversation_history"]
+            and len(state["conversation_history"][self.name]) > 1
         ):
-            tool_call_message = input["conversation_history"][self.name][-2]
-            user_message = input["conversation_history"][self.name][-1]
+            tool_call_message = state["conversation_history"][self.name][-2]
+            user_message = state["conversation_history"][self.name][-1]
 
             if (
                 isinstance(tool_call_message, AIMessage)
@@ -105,16 +105,16 @@ class ChatAgent:
                     for tool_call in getattr(tool_call_message, "tool_calls", [])
                 ]
 
-                input["conversation_history"][self.name][-2:] = [
+                state["conversation_history"][self.name][-2:] = [
                     tool_call_message,
                     *messages,
                     user_message,
                 ]
 
     def _handle_approval_rejection(
-        self, input: ChatWorkflowState, approval_state: ApprovalStateRejection
+        self, state: ChatWorkflowState, approval_state: ApprovalStateRejection
     ) -> list[BaseMessage]:
-        last_message = input["conversation_history"][self.name][-1]
+        last_message = state["conversation_history"][self.name][-1]
 
         # An empty text box for tool cancellation results in a 'null' message. Converting to None
         # todo: remove this line once we have fixed the frontend to return None instead of 'null'
@@ -138,16 +138,16 @@ class ChatAgent:
         ]
 
         # update history
-        input["conversation_history"][self.name].extend(messages)
+        state["conversation_history"][self.name].extend(messages)
         return messages
 
-    async def _get_agent_response(self, input: ChatWorkflowState) -> BaseMessage:
+    async def _get_agent_response(self, state: ChatWorkflowState) -> BaseMessage:
         return await self.prompt_adapter.get_response(
-            input, system_template_override=self.system_template_override
+            state, system_template_override=self.system_template_override
         )
 
     def _build_response(
-        self, agent_response: BaseMessage, input: ChatWorkflowState
+        self, agent_response: BaseMessage, state: ChatWorkflowState
     ) -> Dict[str, Any]:
         result = {
             "conversation_history": {self.name: [agent_response]},
@@ -156,7 +156,7 @@ class ChatAgent:
 
         self._build_text_response(agent_response, result)
         if isinstance(agent_response, AIMessage) and agent_response.tool_calls:
-            self._build_tool_response(agent_response, input, result)
+            self._build_tool_response(agent_response, state, result)
 
         return result
 
@@ -184,12 +184,12 @@ class ChatAgent:
     def _build_tool_response(
         self,
         agent_response: AIMessage,
-        input: ChatWorkflowState,
+        state: ChatWorkflowState,
         result: Dict[str, Any],
     ):
         result["status"] = WorkflowStatusEnum.EXECUTION
 
-        preapproved_tools = input.get("preapproved_tools") or []
+        preapproved_tools = state.get("preapproved_tools") or []
         tools_need_approval, approval_messages = self._get_approvals(
             agent_response, preapproved_tools
         )
@@ -229,29 +229,29 @@ class ChatAgent:
             "ui_chat_log": [ui_chat_log],
         }
 
-    async def run(self, input: ChatWorkflowState) -> Dict[str, Any]:
-        approval_state = input.get("approval", None)
+    async def run(self, state: ChatWorkflowState) -> Dict[str, Any]:
+        approval_state = state.get("approval", None)
 
-        self._handle_wrong_messages_order_for_tool_execution(input)
+        self._handle_wrong_messages_order_for_tool_execution(state)
 
         # Handle approval rejection
         if isinstance(approval_state, ApprovalStateRejection):
-            self._handle_approval_rejection(input, approval_state)
+            self._handle_approval_rejection(state, approval_state)
 
         try:
             with GitLabServiceContext(
                 GitLabInstanceInfoService(),
-                project=input.get("project"),
-                namespace=input.get("namespace"),
+                project=state.get("project"),
+                namespace=state.get("namespace"),
             ):
-                agent_response = await self._get_agent_response(input)
+                agent_response = await self._get_agent_response(state)
 
             # Check for abnormal finish reasons
             finish_reason = agent_response.response_metadata.get("finish_reason")
             if finish_reason in LLMFinishReason.abnormal_values():
                 log.warning(f"LLM stopped abnormally with reason: {finish_reason}")
 
-            return self._build_response(agent_response, input)
+            return self._build_response(agent_response, state)
 
         except SlashCommandValidationError as error:
             log_exception(

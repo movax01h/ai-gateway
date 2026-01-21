@@ -954,7 +954,7 @@ async def test_aput(
     checkpoint = checkpoint_data[0]["checkpoint"]
     checkpoint["channel_values"]["status"] = WorkflowStatusEnum.COMPLETED
 
-    http_client.apatch.return_value = GitLabHttpResponse(status_code=200, body={})
+    http_client.apost.return_value = GitLabHttpResponse(status_code=200, body={})
 
     result = await gitlab_workflow.aput(
         config, checkpoint, checkpoint_metadata, ChannelVersions()
@@ -971,12 +971,6 @@ async def test_aput(
             },
             cls=CustomEncoder,
         ),
-    )
-
-    http_client.apatch.assert_called_once_with(
-        path=f"/api/v4/ai/duo_workflows/workflows/{workflow_id}",
-        body=json.dumps({"status_event": WorkflowStatusEventEnum.FINISH.value}),
-        parse_json=True,
     )
 
     assert result == {
@@ -998,23 +992,19 @@ def test_aput_with_no_status_update(
         workflow_type=workflow_type,
         workflow_config=workflow_config,
     )
-    checkpoint = checkpoint_data[0]["checkpoint"]
 
-    # no status update in checkpoint
-    checkpoint["channel_values"]["status"] = None
-    status_event = workflow._get_workflow_status_event(checkpoint, checkpoint_metadata)
+    # no status update in writes
+    writes: Sequence[tuple[str, Any]] = []
+    status_event = workflow._get_workflow_status_event(writes)
     assert status_event is None
 
-    # no status update in checkpoint metadata
-    checkpoint["channel_values"]["status"] = "Paused"
-    checkpoint_metadata["writes"] = {"execution_handover": {"handover": []}}
-    status_event = workflow._get_workflow_status_event(checkpoint, checkpoint_metadata)
+    # status update in writes but not "status" attribute
+    writes = [("execution_handover", {"handover": []})]
+    status_event = workflow._get_workflow_status_event(writes)
     assert status_event is None
 
 
 def test_aput_with_noop_status_update(
-    checkpoint_data,
-    checkpoint_metadata,
     http_client,
     workflow_id,
     workflow_type,
@@ -1026,17 +1016,14 @@ def test_aput_with_noop_status_update(
         workflow_type=workflow_type,
         workflow_config=workflow_config,
     )
-    checkpoint = checkpoint_data[0]["checkpoint"]
 
-    # no status update in checkpoint
-    checkpoint["channel_values"]["status"] = "approval_error"
-    status_event = workflow._get_workflow_status_event(checkpoint, checkpoint_metadata)
+    # status update with noop status (approval_error)
+    writes: Sequence[tuple[str, Any]] = [("status", WorkflowStatusEnum.APPROVAL_ERROR)]
+    status_event = workflow._get_workflow_status_event(writes)
     assert status_event is None
 
 
 def test_aput_with_no_status_update_and_human_input(
-    checkpoint_data,
-    checkpoint_metadata,
     http_client,
     workflow_id,
     workflow_type,
@@ -1048,21 +1035,17 @@ def test_aput_with_no_status_update_and_human_input(
         workflow_type=workflow_type,
         workflow_config=workflow_config,
     )
-    checkpoint = checkpoint_data[0]["checkpoint"]
 
-    # no status update in checkpoint
-    checkpoint["channel_values"]["status"] = None
-    checkpoint["channel_values"]["last_human_input"] = None
-    status_event = workflow._get_workflow_status_event(checkpoint, checkpoint_metadata)
+    # no status update in writes
+    writes: Sequence[tuple[str, Any]] = []
+    status_event = workflow._get_workflow_status_event(writes)
     assert status_event is None
 
-    # no status update in checkpoint metadata
-    checkpoint["channel_values"]["status"] = "Paused"
-    checkpoint["channel_values"]["last_human_input"] = {"event_type": "pause"}
-    checkpoint_metadata["writes"] = {
-        "planning_check_human_input": {"last_human_input": {"event_type": "resume"}}
-    }
-    status_event = workflow._get_workflow_status_event(checkpoint, checkpoint_metadata)
+    # status update with non-matching attribute
+    writes = [
+        ("planning_check_human_input", {"last_human_input": {"event_type": "resume"}})
+    ]
+    status_event = workflow._get_workflow_status_event(writes)
     assert status_event is None
 
 
@@ -1088,22 +1071,18 @@ def test_aput_with_no_status_update_and_human_input(
 async def test_workflow_status_events(
     gitlab_workflow,
     http_client,
-    checkpoint_metadata,
     workflow_id,
     status,
     expected_event,
 ):
-    checkpoint = {
-        "id": f"checkpoint-{status}",
-        "channel_values": {"status": status},
+    config: RunnableConfig = {
+        "configurable": {"checkpoint_id": "test-id", "thread_id": workflow_id}
     }
-    config: RunnableConfig = {"configurable": {}}
+    writes: Sequence[tuple[str, Any]] = [("status", status)]
 
     http_client.apatch.return_value = GitLabHttpResponse(status_code=200, body={})
 
-    await gitlab_workflow.aput(
-        config, checkpoint, checkpoint_metadata, ChannelVersions()
-    )
+    await gitlab_workflow.aput_writes(config, writes, "task_id")
 
     http_client.apatch.assert_called_once_with(
         path=f"/api/v4/ai/duo_workflows/workflows/{workflow_id}",

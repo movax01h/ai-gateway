@@ -14,17 +14,17 @@ def serializer():
 
 
 @pytest.mark.parametrize(
-    "value,resumable,ns,when",
+    "value",
     [
-        ("Simple workflow", True, ["node1"], "during"),
-        ("Multi-node workflow", False, ["node1", "node2", "node3"], "after"),
-        ("Unicode: 你好 🎉", True, ["planning"], "during"),
-        ("", True, [], "during"),
+        "Simple workflow",
+        "Multi-node workflow",
+        "Unicode: 你好 🎉",
+        "",
     ],
 )
-def test_interrupt_roundtrip(serializer, value, resumable, ns, when):
+def test_interrupt_roundtrip(serializer, value):
     """Interrupt objects serialize and deserialize correctly."""
-    interrupt = Interrupt(value=value, resumable=resumable, ns=ns, when=when)
+    interrupt = Interrupt(value=value)
 
     type_str, data = serializer.dumps_typed(interrupt)
     result = serializer.loads_typed((type_str, data))
@@ -32,25 +32,18 @@ def test_interrupt_roundtrip(serializer, value, resumable, ns, when):
     assert type_str == "msgpack"
     assert isinstance(result, Interrupt)
     assert result.value == value
-    assert result.resumable == resumable
-    assert result.ns == ns
-    assert result.when == when
 
 
 def test_large_checkpoint_data(serializer):
     """Large checkpoint payloads are handled efficiently."""
     interrupt = Interrupt(
         value="x" * 10000,
-        resumable=True,
-        ns=[f"node_{i}" for i in range(100)],
-        when="during",
     )
 
     type_str, data = serializer.dumps_typed(interrupt)
     result = serializer.loads_typed((type_str, data))
 
     assert len(result.value) == 10000
-    assert len(result.ns) == 100
 
 
 @pytest.mark.parametrize(

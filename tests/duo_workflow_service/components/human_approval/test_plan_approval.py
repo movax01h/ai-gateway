@@ -2,8 +2,8 @@ import os
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from langchain_core.runnables import Runnable
 from langgraph.graph import END, StateGraph
-from langgraph.utils.runnable import Runnable
 
 from duo_workflow_service.agents import HumanApprovalCheckExecutor
 from duo_workflow_service.components.human_approval.plan_approval import (

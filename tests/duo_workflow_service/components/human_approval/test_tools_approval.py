@@ -5,8 +5,8 @@ from unittest.mock import AsyncMock, MagicMock, call, patch
 
 import pytest
 from langchain_core.messages import AIMessage, HumanMessage, ToolCall, ToolMessage
+from langchain_core.runnables import Runnable
 from langgraph.graph import END, StateGraph
-from langgraph.utils.runnable import Runnable
 
 from duo_workflow_service.agents import HumanApprovalCheckExecutor
 from duo_workflow_service.components.human_approval.tools_approval import (

@@ -128,14 +128,17 @@ WORKFLOW_STATUS_TO_CHECKPOINT_STATUS = {
 }
 
 
-def _attribute_dirty(attribute: str, metadata: CheckpointMetadata) -> bool:
-    writes = metadata.get("writes")
+def _attribute_dirty(
+    attribute: str, writes: Sequence[Tuple[str, Any]]
+) -> tuple[bool, Any]:
     if not writes:
-        return False
+        return False, None
 
-    return next(
-        (True for node_writes in writes.values() if attribute in node_writes), False
-    )
+    for node_name, node_write in writes:
+        if node_name == attribute:
+            return True, node_write
+
+    return False, None
 
 
 class GitLabWorkflow(
@@ -687,13 +690,6 @@ class GitLabWorkflow(
     ) -> RunnableConfig:
         configurable = config.get("configurable", {})
 
-        status = self._get_workflow_status_event(checkpoint, metadata)
-        if status:
-            self._logger.debug(
-                f"Updating workflow status from checkpoints, with status {status.value}"
-            )
-            await self._update_workflow_status(status)
-
         compression_enabled = is_feature_enabled(FeatureFlag.COMPRESS_CHECKPOINT)
 
         # https://blog.langchain.dev/langgraph-v0-2/
@@ -747,6 +743,13 @@ class GitLabWorkflow(
         task_path: str = "",
         # We are ignoring this parameter for now since we don't care for the order the pending writes are fetched in
     ) -> None:
+        status = self._get_workflow_status_event(writes)
+        if status:
+            self._logger.debug(
+                f"Updating workflow status from checkpoints, with status {status.value}"
+            )
+            await self._update_workflow_status(status)
+
         configurable = config.get("configurable", {})
         checkpoint_id = configurable.get("checkpoint_id")
         workflow_id = configurable.get("thread_id")
@@ -830,8 +833,7 @@ class GitLabWorkflow(
 
     def _get_workflow_status_event(
         self,
-        checkpoint: Checkpoint,
-        metadata: CheckpointMetadata,
+        writes: Sequence[Tuple[str, Any]],
     ) -> Optional[WorkflowStatusEventEnum]:
         """Status events are accepted by GitLab Rails API to change a workflow status from one to another, using a state
         machine.
@@ -842,13 +844,11 @@ class GitLabWorkflow(
         Resume, Retry and start workflow events are handled with  self._get_initial_status_event method
         """
         status_event = None
-        if _attribute_dirty("status", metadata):
-            workflow_status = checkpoint["channel_values"].get("status")
-            if workflow_status is None or workflow_status in NOOP_WORKFLOW_STATUSES:
+        is_changed, value = _attribute_dirty("status", writes)
+        if is_changed:
+            if value is None or value in NOOP_WORKFLOW_STATUSES:
                 return status_event
-            checkpoint_status = WORKFLOW_STATUS_TO_CHECKPOINT_STATUS.get(
-                workflow_status
-            )
+            checkpoint_status = WORKFLOW_STATUS_TO_CHECKPOINT_STATUS.get(value)
             if checkpoint_status:
                 status_event = CheckpointStatusToStatusEvent.get(checkpoint_status)
 
