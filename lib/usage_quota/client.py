@@ -139,6 +139,17 @@ class UsageQuotaClient:
                 ),
             ) as client:
                 url = urljoin(self.customersdot_url, "api/v1/consumers/resolve")
+
+                log.info(
+                    "Making usage quota request to CustomersDot",
+                    extra={
+                        "url": url,
+                        "realm": realm,
+                        "params": params,
+                        "timeout": self.request_timeout,
+                    },
+                )
+
                 with USAGE_QUOTA_CUSTOMERSDOT_LATENCY_SECONDS.labels(
                     realm=realm
                 ).time():
