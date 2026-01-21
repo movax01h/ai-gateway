@@ -5,6 +5,7 @@ from urllib.parse import urljoin
 
 import httpx
 from aiocache import Cache, cached
+from aiocache.plugins import BasePlugin
 from gitlab_cloud_connector import CloudConnectorUser
 
 from ai_gateway.api.auth_utils import StarletteUser
@@ -52,6 +53,27 @@ def usage_quota_cache_key_builder(
     return key
 
 
+class LoggingCachePlugin(BasePlugin):
+    async def pre_get(self, *args, **kwargs):
+        pass
+
+    async def post_get(self, _client, key: str, ret: bool | None = None, **_kwargs):
+        message = (
+            "Cache HIT - value retrieved from usage quota cache"
+            if ret is not None
+            else "Cache MISS - value not found in usage quota cache"
+        )
+
+        log.info(
+            message,
+            extra={
+                "key": key,
+                "value": ret,
+                "cache_hit": ret is not None,
+            },
+        )
+
+
 class UsageQuotaClient:
     """Client for checking usage quota availability via CustomersDot API.
 
@@ -92,6 +114,7 @@ class UsageQuotaClient:
         cache=Cache.MEMORY,
         noself=True,
         key_builder=usage_quota_cache_key_builder,
+        plugins=[LoggingCachePlugin()],
     )
     async def check_quota_available(self, context: UsageQuotaEventContext) -> bool:
         """Check if the consumer has available usage quota.

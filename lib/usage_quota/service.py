@@ -1,5 +1,7 @@
 from enum import StrEnum
 
+import structlog
+
 from ai_gateway.instrumentators.usage_quota import USAGE_QUOTA_CHECK_TOTAL
 from lib.billing_events.context import UsageQuotaEventContext
 from lib.events.base import GLReportingEventContext
@@ -12,6 +14,9 @@ __all__ = [
     "InsufficientCredits",
     "UsageQuotaService",
 ]
+
+
+log = structlog.stdlib.get_logger("usage_quota_service")
 
 
 class UsageQuotaEvent(StrEnum):
@@ -67,10 +72,17 @@ class UsageQuotaService:
             is_quota_available = await self.usage_quota_client.check_quota_available(
                 extended_context
             )
-        except UsageQuotaError:
+        except UsageQuotaError as e:
             USAGE_QUOTA_CHECK_TOTAL.labels(
                 result="fail_open", realm=usage_quota_event_context.realm
             ).inc()
+
+            log.warning(
+                "Usage quota check failed, failing open to allow request",
+                realm=usage_quota_event_context.realm,
+                error_message=e.message,
+            )
+
             return
 
         if not is_quota_available:
