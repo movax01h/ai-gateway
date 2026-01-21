@@ -13,6 +13,7 @@ class FeatureFlag(StrEnum):
     USE_DUO_CHAT_UI_FOR_FLOW = "use_duo_chat_ui_for_flow"
     USE_GENERIC_GITLAB_API_TOOLS = "use_generic_gitlab_api_tools"
     AI_PROMPT_SCANNING = "ai_prompt_scanning"
+    DAP_WEB_SEARCH = "dap_web_search"
 
 
 def is_feature_enabled(feature_name: FeatureFlag | str) -> bool:

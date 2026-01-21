@@ -127,6 +127,7 @@ class Prompt(RunnableBinding[Any, BaseMessage]):
         tools: Optional[List[BaseTool]] = None,
         tool_choice: Optional[str] = None,
         bind_tools_cache: Optional[BindToolsCacheProtocol] = None,
+        bind_tools_params: Optional[dict[str, Any]] = None,
         **kwargs: Any,
     ):
         model_provider = config.model.params.model_class_provider
@@ -145,10 +146,14 @@ class Prompt(RunnableBinding[Any, BaseMessage]):
                     tools=tools,
                     tool_choice=tool_choice,
                     model_provider=model_provider,
+                    **(bind_tools_params or {}),
                 )
             else:
-                # Fallback for tests without DI
-                model = model.bind_tools(tools, tool_choice=tool_choice)  # type: ignore[assignment]
+                model = model.bind_tools(  # type: ignore[assignment]
+                    tools,
+                    tool_choice=tool_choice,
+                    **(bind_tools_params or {}),
+                )
 
         prompt = (
             prompt_template_factory(config)

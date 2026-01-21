@@ -4,6 +4,7 @@ import pytest
 from langchain_core.messages import AIMessageChunk, HumanMessage
 from langchain_core.messages.ai import InputTokenDetails, UsageMetadata
 from langchain_core.outputs import ChatGenerationChunk
+from langchain_core.runnables import Runnable
 
 from ai_gateway.models.v2.chat_litellm import ChatLiteLLM
 from ai_gateway.vendor.langchain_litellm.litellm import _create_usage_metadata
@@ -283,3 +284,27 @@ async def test_fireworks_prompt_caching_disabled():
 )
 async def test_create_usage_metadata(token_usage, expected_usage_metadata):
     assert _create_usage_metadata(token_usage) == expected_usage_metadata
+
+
+@pytest.mark.parametrize(
+    ("bind_tools_params", "expected_tools"),
+    [
+        (
+            {"web_search_options": {}},
+            [{"type": "function", "function": {"name": "get_issue"}}],
+        ),
+        ({}, [{"type": "function", "function": {"name": "get_issue"}}]),
+    ],
+)
+def test_bind_tools_with_web_search_options(bind_tools_params, expected_tools):
+    """Test that web search tool is added when web_search_options is in bind_tools_params."""
+    chat = ChatLiteLLM(model="gpt-3.5-turbo")
+
+    existing_tools = [{"name": "get_issue"}]
+    result = chat.bind_tools(
+        tools=existing_tools,
+        **bind_tools_params,
+    )
+
+    assert isinstance(result, Runnable)
+    assert result.kwargs["tools"] == expected_tools

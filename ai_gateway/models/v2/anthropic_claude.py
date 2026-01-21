@@ -1,10 +1,14 @@
+from collections.abc import Callable, Sequence
 from typing import Any, List, Mapping, Optional, Self
 
 from anthropic import AsyncAnthropic
 from langchain_anthropic import ChatAnthropic as _LChatAnthropic
 from langchain_core.callbacks import CallbackManagerForLLMRun
+from langchain_core.language_models import LanguageModelInput
 from langchain_core.messages import BaseMessage
 from langchain_core.outputs import ChatResult
+from langchain_core.runnables import Runnable
+from langchain_core.tools import BaseTool
 from pydantic import model_validator
 
 __all__ = ["ChatAnthropic"]
@@ -87,3 +91,17 @@ class ChatAnthropic(_LChatAnthropic):
         **kwargs: Any,
     ) -> ChatResult:
         raise NotImplementedError()
+
+    def bind_tools(
+        self,
+        tools: Sequence[dict[str, Any] | type | Callable | BaseTool],
+        *,
+        tool_choice: Optional[dict[str, str] | str] = None,
+        **kwargs: Any,
+    ) -> Runnable[LanguageModelInput, BaseMessage]:
+        tools_list = list(tools)
+        web_search_options = kwargs.pop("web_search_options", None)
+        if web_search_options is not None:
+            tools_list.append({"type": "web_search_20250305", "name": "web_search"})
+
+        return super().bind_tools(tools_list, tool_choice=tool_choice, **kwargs)
