@@ -2227,14 +2227,14 @@ files = [
 
 [[package]]
 name = "hiddenlayer-sdk"
-version = "3.2.0"
+version = "3.2.2"
 description = "The official Python library for the hiddenlayer API"
 optional = false
 python-versions = ">=3.9"
 groups = ["main"]
 files = [
-    {file = "hiddenlayer_sdk-3.2.0-py3-none-any.whl", hash = "sha256:7e6dfce122b7ff85dc2dc3b89235412fd4f44b127445f9e72859863ea353bf61"},
-    {file = "hiddenlayer_sdk-3.2.0.tar.gz", hash = "sha256:8e2f38c8631fa5670c132e7a2c194d1b265420d06bd96dc88639a65313b061b8"},
+    {file = "hiddenlayer_sdk-3.2.2-py3-none-any.whl", hash = "sha256:cb82463e59b10fabb73fa5bcf9e4d4ca3e8b9dab1b115d4ba806c16a0fb16979"},
+    {file = "hiddenlayer_sdk-3.2.2.tar.gz", hash = "sha256:e627b790fa559a81ac1b56e89dfc02c91d0797e2df0a938599c197cbf033db74"},
 ]
 
 [package.dependencies]
