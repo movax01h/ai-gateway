@@ -2805,30 +2805,30 @@ typing-extensions = ">=4.7.0,<5.0.0"
 
 [[package]]
 name = "langchain-google-vertexai"
-version = "2.0.21"
+version = "2.1.2"
 description = "An integration package connecting Google VertexAI and LangChain"
 optional = false
-python-versions = "<4.0,>=3.9"
+python-versions = ">=3.9"
 groups = ["main", "eval"]
 files = [
-    {file = "langchain_google_vertexai-2.0.21-py3-none-any.whl", hash = "sha256:a09ebbe951f467d1095142da033750f71bfd5cd5495f8584e576c456ad7cb831"},
-    {file = "langchain_google_vertexai-2.0.21.tar.gz", hash = "sha256:c602e310890739ac8cfa0b16ff60c6b91ea660a3534f335c0875cc3bbec55f19"},
+    {file = "langchain_google_vertexai-2.1.2-py3-none-any.whl", hash = "sha256:0630738b4d561d34f032649e37a90508ecd2f4c53a3efe07d2d460abe991225c"},
+    {file = "langchain_google_vertexai-2.1.2.tar.gz", hash = "sha256:bed8ab66d3b50503cdf9c21564abfd13f6b5025eabb9c9f0daffadfea71e69d0"},
 ]
 
 [package.dependencies]
-bottleneck = ">=1.4.2,<2.0.0"
-google-cloud-aiplatform = ">=1.89.0,<2.0.0"
-google-cloud-storage = ">=2.18.0,<3.0.0"
-httpx = ">=0.28.0,<0.29.0"
-httpx-sse = ">=0.4.0,<0.5.0"
-langchain-core = ">=0.3.55,<0.4"
-numexpr = ">=2.8.6,<3.0.0"
-pyarrow = ">=19.0.1,<20.0.0"
-pydantic = ">=2.9,<3.0"
-validators = ">=0.22.0,<1"
+bottleneck = ">=1.4,<2"
+google-cloud-aiplatform = ">=1.97.0"
+google-cloud-storage = ">=2.18,<3"
+httpx = ">=0.28,<1"
+httpx-sse = ">=0.4,<1"
+langchain-core = ">=0.3.76"
+numexpr = ">=2.8.6,<3"
+pyarrow = ">=19.0.1,<22"
+pydantic = ">=2.9,<3"
+validators = ">=0.22,<1"
 
 [package.extras]
-anthropic = ["anthropic[vertexai] (>=0.35.0,<1)"]
+anthropic = ["anthropic (>=0.35,<1)"]
 mistral = ["langchain-mistralai (>=0.2.0,<1)"]
 
 [[package]]
