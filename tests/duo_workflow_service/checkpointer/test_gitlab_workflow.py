@@ -857,8 +857,26 @@ async def test_aget_tuple(
 
 @pytest.mark.asyncio
 async def test_aget_tuple_when_config_has_no_checkpoint_id_and_checkpoints_present(
-    gitlab_workflow, http_client, workflow_id, checkpoint_data
+    http_client, workflow_id, checkpoint_data, workflow_type
 ):
+    # Set first_checkpoint to non-None to allow API call
+    workflow_config = {
+        "first_checkpoint": {},
+        "latest_checkpoint": None,
+        "workflow_status": "created",
+        "agent_privileges_names": ["read_repository"],
+        "pre_approved_agent_privileges_names": [],
+        "mcp_enabled": True,
+        "allow_agent_to_request_user": True,
+    }
+
+    gitlab_workflow = GitLabWorkflow(
+        http_client,
+        workflow_id,
+        workflow_type,
+        workflow_config,
+    )
+
     config: CustomRunnableConfig = {"configurable": {"thread_id": workflow_id}}
 
     mock_response = GitLabHttpResponse(
@@ -892,8 +910,26 @@ async def test_aget_tuple_no_checkpoints(gitlab_workflow, http_client, config):
 
 @pytest.mark.asyncio
 async def test_aget_tuple_when_server_returns_non_success_response(
-    gitlab_workflow, workflow_id
+    http_client, workflow_id, workflow_type
 ):
+    # Set first_checkpoint to non-None to allow API call
+    workflow_config = {
+        "first_checkpoint": {},
+        "latest_checkpoint": None,
+        "workflow_status": "created",
+        "agent_privileges_names": ["read_repository"],
+        "pre_approved_agent_privileges_names": [],
+        "mcp_enabled": True,
+        "allow_agent_to_request_user": True,
+    }
+
+    gitlab_workflow = GitLabWorkflow(
+        http_client,
+        workflow_id,
+        workflow_type,
+        workflow_config,
+    )
+
     config: CustomRunnableConfig = {"configurable": {"thread_id": workflow_id}}
 
     mock_response = GitLabHttpResponse(
@@ -1343,15 +1379,34 @@ async def test_aget_tuple_with_compression_enabled(
 
 @pytest.mark.asyncio
 async def test_aget_tuple_per_page_with_compression_enabled(
-    gitlab_workflow,
     http_client,
     workflow_id,
+    workflow_type,
     checkpoint_data,
     compressed_checkpoint_data,
     mock_compress_checkpoint_flag,
 ):
     """Test aget_tuple with per_page query when compression is enabled."""
     mock_compress_checkpoint_flag.return_value = True
+
+    # Set first_checkpoint to non-None to allow API call
+    workflow_config = {
+        "first_checkpoint": {},
+        "latest_checkpoint": None,
+        "workflow_status": "created",
+        "agent_privileges_names": ["read_repository"],
+        "pre_approved_agent_privileges_names": [],
+        "mcp_enabled": True,
+        "allow_agent_to_request_user": True,
+    }
+
+    gitlab_workflow = GitLabWorkflow(
+        http_client,
+        workflow_id,
+        workflow_type,
+        workflow_config,
+    )
+
     config = {"configurable": {"thread_id": workflow_id}}
 
     mock_response = GitLabHttpResponse(
@@ -1495,4 +1550,38 @@ async def test_aget_tuple_with_latest_checkpoint(
     assert result.metadata == checkpoint_data[0]["metadata"]
 
     # Should not call the API when latestCheckpoint is available
+    http_client.aget.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_aget_tuple_returns_none_when_no_first_checkpoint_and_no_latest_checkpoint(
+    http_client,
+    workflow_id,
+    workflow_type,
+):
+    """Test aget_tuple returns None when first_checkpoint is None and latest_checkpoint is not set."""
+    workflow_config = {
+        "first_checkpoint": None,
+        "latest_checkpoint": None,
+        "workflow_status": "created",
+        "agent_privileges_names": ["read_repository"],
+        "pre_approved_agent_privileges_names": [],
+        "mcp_enabled": True,
+        "allow_agent_to_request_user": True,
+    }
+
+    gitlab_workflow = GitLabWorkflow(
+        http_client,
+        workflow_id,
+        workflow_type,
+        workflow_config,
+    )
+
+    config: CustomRunnableConfig = {"configurable": {"thread_id": workflow_id}}
+
+    result = await gitlab_workflow.aget_tuple(config)
+
+    assert result is None
+
+    # Should not call the API when first_checkpoint is None
     http_client.aget.assert_not_called()
