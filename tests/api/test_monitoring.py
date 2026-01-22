@@ -1,8 +1,8 @@
 from typing import cast
-from unittest.mock import Mock, call, patch
+from unittest.mock import AsyncMock, Mock, call, patch
 
 import pytest
-from dependency_injector import containers
+from dependency_injector import containers, providers
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
@@ -11,6 +11,8 @@ from ai_gateway.api.monitoring import validated
 from ai_gateway.config import Config
 from ai_gateway.models import ModelAPIError
 from ai_gateway.prompts.container import ContainerPrompts
+from ai_gateway.searches import Searcher
+from ai_gateway.searches.container import ContainerSearches
 
 
 @pytest.fixture(name="config_values")
@@ -29,6 +31,7 @@ def config_values_fixture():
                 },
             }
         },
+        "vertex_search": {"fallback_datastore_version": "18.0"},
     }
 
 
@@ -52,8 +55,24 @@ def mock_validate_default_models_fixture(
     with patch.object(
         cast(ContainerPrompts, mock_ai_gateway_container.pkg_prompts).prompt_registry(),
         "validate_default_models",
+        return_value=True,
     ) as mock:
         yield mock
+
+
+@pytest.fixture(name="mock_searcher")
+def mock_searcher_fixture(
+    mock_ai_gateway_container: containers.Container,
+):
+    mock_searcher = AsyncMock(spec=Searcher)
+    mock_searcher.search_with_retry = AsyncMock(return_value=[])
+    mock_searcher.search = AsyncMock(return_value=[])
+
+    search_container = cast(ContainerSearches, mock_ai_gateway_container.searches)
+    mock_provider = providers.Factory(lambda: mock_searcher)
+
+    with search_container.search_provider.override(mock_provider):
+        yield mock_searcher
 
 
 # Avoid the global state of checks leaking between tests
@@ -72,6 +91,7 @@ def test_ready(
     client: TestClient,
     mock_validate_default_models: Mock,
     mock_llm_text: Mock,
+    mock_searcher: Mock,
 ):
     with patch("ai_gateway.api.monitoring.cloud_connector_ready", return_value=True):
         response = client.get("/monitoring/ready")
@@ -80,6 +100,7 @@ def test_ready(
 
     mock_validate_default_models.assert_called_once()
     assert mock_llm_text.mock_calls == [call("def hello_world():", None, False)]
+    mock_searcher.search.assert_called_once()
 
 
 def test_ready_failure(
@@ -91,18 +112,42 @@ def test_ready_failure(
         mock_validate_default_models.side_effect = ModelAPIError("test error")
         response = client.get("/monitoring/ready")
 
-    mock_validate_default_models.assert_called_once()
     assert response.status_code == 503
+
+    mock_validate_default_models.assert_called_once()
 
 
 @pytest.mark.usefixtures(
-    "mock_generations", "mock_llm_text", "mock_config", "mock_validate_default_models"
+    "mock_generations",
+    "mock_llm_text",
+    "mock_config",
+    "mock_validate_default_models",
+    "mock_searcher",
 )
 def test_ready_cloud_connector_failure_from_library(client: TestClient):
     with patch("ai_gateway.api.monitoring.cloud_connector_ready", return_value=False):
         response = client.get("/monitoring/ready")
 
     assert response.status_code == 503
+
+
+def test_ready_doc_search_failure(
+    client: TestClient,
+    mock_validate_default_models: Mock,  # pylint: disable=unused-argument
+    mock_llm_text: Mock,  # pylint: disable=unused-argument
+    mock_searcher: Mock,
+):
+    with patch("ai_gateway.api.monitoring.cloud_connector_ready", return_value=True):
+        mock_searcher.search.side_effect = Exception("Unknown error")
+        response = client.get("/monitoring/ready")
+
+    assert response.status_code == 503
+
+    mock_searcher.search.assert_called_once_with(
+        query="can I upload images to GitLab repo?",
+        page_size=1,
+        gl_version="18.0",  # Uses fallback_datastore_version from config
+    )
 
 
 class TestCustomModelEnabled:
@@ -129,6 +174,7 @@ class TestCustomModelEnabled:
         "mock_llm_text",
         "mock_config",
         "mock_validate_default_models",
+        "mock_searcher",
     )
     def test_ready_custom_models_enabled_skips_cloud_connector(
         self,
