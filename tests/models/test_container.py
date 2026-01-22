@@ -63,7 +63,7 @@ def test_anthropic_proxy_client():
 
     mock_httpx_client.assert_called_once_with(
         base_url="https://api.anthropic.com/",
-        timeout=httpx.Timeout(timeout=60.0),
+        timeout=httpx.Timeout(connect=10.0, read=90.0, write=30.0, pool=30.0),
     )
 
 
@@ -102,7 +102,7 @@ def test_vertex_ai_proxy_client():
 
     mock_httpx_client.assert_called_once_with(
         base_url="https://us-central1-aiplatform.googleapis.com/",
-        timeout=httpx.Timeout(timeout=60.0),
+        timeout=httpx.Timeout(connect=10.0, read=90.0, write=30.0, pool=30.0),
     )
 
 
