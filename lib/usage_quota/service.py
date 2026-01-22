@@ -52,6 +52,7 @@ class UsageQuotaService:
         self, gl_context: GLReportingEventContext, event: UsageQuotaEvent
     ):
         if not self.usage_quota_client.enabled:
+            log.warning("Usage quota client is disabled")
             return
 
         event_context = current_event_context.get()
@@ -67,6 +68,8 @@ class UsageQuotaService:
                 "feature_ai_catalog_item": gl_context.feature_ai_catalog_item,
             }
         )
+
+        log.info("Checking usage quota")
 
         try:
             is_quota_available = await self.usage_quota_client.check_quota_available(
