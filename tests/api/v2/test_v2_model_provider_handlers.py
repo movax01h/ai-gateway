@@ -168,7 +168,7 @@ class TestVertexHandler:
                     "max_output_tokens": 64,
                     "context_max_percent": 0.3,
                 },
-                "codestral-2501",
+                "codestral-2508",
             ),
         ],
     )
