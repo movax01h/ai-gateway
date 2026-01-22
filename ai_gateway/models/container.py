@@ -53,21 +53,22 @@ def _init_async_fireworks_client(
 
 def _init_anthropic_proxy_client() -> httpx.AsyncClient:
     return httpx.AsyncClient(
-        base_url="https://api.anthropic.com/", timeout=httpx.Timeout(timeout=60.0)
+        base_url="https://api.anthropic.com/",
+        timeout=httpx.Timeout(connect=10.0, read=90.0, write=30.0, pool=30.0),
     )
 
 
 def _init_vertex_ai_proxy_client(endpoint: str) -> httpx.AsyncClient:
     return httpx.AsyncClient(
         base_url=f"https://{endpoint}/",
-        timeout=httpx.Timeout(timeout=60.0),
+        timeout=httpx.Timeout(connect=10.0, read=90.0, write=30.0, pool=30.0),
     )
 
 
 def _init_openai_proxy_client() -> httpx.AsyncClient:
     return httpx.AsyncClient(
         base_url="https://api.openai.com/",
-        timeout=httpx.Timeout(timeout=60.0),
+        timeout=httpx.Timeout(connect=10.0, read=90.0, write=30.0, pool=30.0),
     )
 
 
