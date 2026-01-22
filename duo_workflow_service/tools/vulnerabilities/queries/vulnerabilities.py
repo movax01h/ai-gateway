@@ -167,6 +167,9 @@ GET_VULNERABILITY_DETAILS_QUERY = """
             }
             title
             state
+            identifiers {
+                name
+            }
             description
             reportType
             reachability
