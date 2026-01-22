@@ -71,7 +71,7 @@ class VertexHandler(BaseModelProviderHandler):
 
         self.payload.model_provider = KindModelProvider.VERTEX_AI
         if not self.payload.model_name:
-            self.payload.model_name = KindLiteLlmModel.CODESTRAL_2501
+            self.payload.model_name = KindLiteLlmModel.CODESTRAL_2508
 
 
 class LegacyHandler(BaseModelProviderHandler):

@@ -60,7 +60,7 @@ from ai_gateway.code_suggestions.processing.post.completions import (
 from ai_gateway.config import Config
 from ai_gateway.instrumentators.base import TelemetryInstrumentator
 from ai_gateway.model_metadata import ModelMetadata, create_model_metadata
-from ai_gateway.models import KindModelProvider
+from ai_gateway.models import KindLiteLlmModel, KindModelProvider
 from ai_gateway.models.base import TokensConsumptionMetadata
 from ai_gateway.prompts import BasePromptRegistry
 from ai_gateway.structured_logging import get_request_logger
@@ -101,7 +101,9 @@ COMPLETIONS_AGENT_ID = "code_suggestions/completions"
 GENERATIONS_AGENT_ID = "code_suggestions/generations"
 
 LEGACY_COMPLETION_MODEL_TO_GITLAB_IDENTIFIER = {
-    "vertex-ai/codestral-2501": "codestral_2501_vertex",
+    "vertex-ai/codestral-2501": "codestral_2508_vertex",  # Codestral 2501 is deprecated on VertexAI
+    # https://gitlab.com/gitlab-org/modelops/applied-ml/code-suggestions/ai-assist/-/work_items/1761
+    "vertex-ai/codestral-2508": "codestral_2508_vertex",  # Set from the model provider handler for default case
     "fireworks_ai/codestral-2501": "codestral_2501_fireworks",
     "anthropic/claude-sonnet-4-20250514": "claude_sonnet_4_20250514",
 }
@@ -514,7 +516,14 @@ def _create_post_processor_for_model(
     """Create the appropriate post processor factory based on model provider and name."""
 
     # Vertex Codestral: apply STRIP_ASTERISKS
-    if model_provider == KindModelProvider.VERTEX_AI and model_name == "codestral-2501":
+    vertex_codestral_models = [
+        KindLiteLlmModel.CODESTRAL_2501,
+        KindLiteLlmModel.CODESTRAL_2508,
+    ]
+    if (
+        model_provider == KindModelProvider.VERTEX_AI
+        and model_name in vertex_codestral_models
+    ):
         return Factory(
             PostProcessor,
             extras=[PostProcessorOperation.STRIP_ASTERISKS],
