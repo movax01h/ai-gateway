@@ -6,15 +6,9 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import httpx
 import pytest
 import pytest_asyncio
-from gitlab_cloud_connector import CloudConnectorUser, UserClaims
 
-from ai_gateway.api.auth_utils import StarletteUser
 from lib.billing_events.context import UsageQuotaEventContext
-from lib.usage_quota.client import (
-    SKIP_USAGE_CUTOFF_CLAIM,
-    UsageQuotaClient,
-    should_skip_usage_quota_for_user,
-)
+from lib.usage_quota.client import UsageQuotaClient
 from lib.usage_quota.errors import (
     UsageQuotaConnectionError,
     UsageQuotaHTTPError,
@@ -93,104 +87,6 @@ def error_response_mock() -> MagicMock:
     mock_response = MagicMock()
     mock_response.status_code = 500
     return mock_response
-
-
-@pytest.mark.parametrize(
-    "user,expected",
-    [
-        # Case 1: User is None - should return False
-        (None, False),
-        # Case 2: User with no claims - should return False
-        (CloudConnectorUser(authenticated=True), False),
-        # Case 3: User with claims but no extra - should return False
-        (CloudConnectorUser(authenticated=True, claims=UserClaims()), False),
-        # Case 4: User with claims and extra but without skip_usage_cutoff - should return False
-        (
-            CloudConnectorUser(
-                authenticated=True,
-                claims=UserClaims(extra={"other_claim": "value"}),
-            ),
-            False,
-        ),
-        # Case 5: User with skip_usage_cutoff claim set to True - should return True
-        (
-            CloudConnectorUser(
-                authenticated=True,
-                claims=UserClaims(extra={SKIP_USAGE_CUTOFF_CLAIM: True}),
-            ),
-            True,
-        ),
-        # Case 6: User with skip_usage_cutoff claim set to False - should return False
-        (
-            CloudConnectorUser(
-                authenticated=True,
-                claims=UserClaims(extra={SKIP_USAGE_CUTOFF_CLAIM: False}),
-            ),
-            False,
-        ),
-        # Case 7: User with skip_usage_cutoff claim set to None - should return False
-        (
-            CloudConnectorUser(
-                authenticated=True,
-                claims=UserClaims(extra={SKIP_USAGE_CUTOFF_CLAIM: None}),
-            ),
-            False,
-        ),
-        # Case 8: User with skip_usage_cutoff claim set to 0 - should return False
-        (
-            CloudConnectorUser(
-                authenticated=True,
-                claims=UserClaims(extra={SKIP_USAGE_CUTOFF_CLAIM: 0}),
-            ),
-            False,
-        ),
-        # Case 9: User with skip_usage_cutoff claim set to empty string - should return False
-        (
-            CloudConnectorUser(
-                authenticated=True,
-                claims=UserClaims(extra={SKIP_USAGE_CUTOFF_CLAIM: ""}),
-            ),
-            False,
-        ),
-        # Case 10: StarletteUser with skip_usage_cutoff claim set to True - should return True
-        (
-            StarletteUser(
-                CloudConnectorUser(
-                    authenticated=True,
-                    claims=UserClaims(extra={SKIP_USAGE_CUTOFF_CLAIM: True}),
-                )
-            ),
-            True,
-        ),
-        # Case 11: StarletteUser without skip_usage_cutoff claim - should return False
-        (
-            StarletteUser(CloudConnectorUser(authenticated=True)),
-            False,
-        ),
-        # Case 12: StarletteUser with skip_usage_cutoff claim set to False - should return False
-        (
-            StarletteUser(
-                CloudConnectorUser(
-                    authenticated=True,
-                    claims=UserClaims(extra={SKIP_USAGE_CUTOFF_CLAIM: False}),
-                )
-            ),
-            False,
-        ),
-    ],
-)
-def test_should_skip_usage_quota_for_user(user, expected):
-    """Test should_skip_usage_quota_for_user with various user configurations.
-
-    Tests that the function correctly identifies users who should skip usage quota checks based on:
-    1. The presence of the skip_usage_cutoff claim in their extra claims
-    2. The claim having a truthy value (not False, None, 0, empty string, etc.)
-    """
-    result = should_skip_usage_quota_for_user(user)
-    if expected:
-        assert result is True
-    else:
-        assert not result
 
 
 class TestCheckQuotaAvailable:
