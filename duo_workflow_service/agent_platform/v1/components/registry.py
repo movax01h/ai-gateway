@@ -101,7 +101,7 @@ class ComponentRegistry(Mapping):
             >>> decorated_class = registry.register(MyComponent, [inject_decorator])
             >>> # Component is now available as registry["MyComponent"]
         """
-        if not issubclass(value, BaseComponent):
+        if not isinstance(value, type) or not issubclass(value, BaseComponent):
             raise TypeError(
                 f"Invalid component class '{value.__name__}'. Components must inherit from BaseComponent class"
             )
