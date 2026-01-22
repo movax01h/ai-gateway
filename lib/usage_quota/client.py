@@ -40,7 +40,8 @@ def should_skip_usage_quota_for_user(user: CloudConnectorUser | StarletteUser | 
         user
         and user.claims
         and user.claims.extra
-        and SKIP_USAGE_CUTOFF_CLAIM in user.claims.extra
+        # Returns the value of SKIP_USAGE_CUTOFF_CLAIM or False if it's omitted
+        and user.claims.extra.get(SKIP_USAGE_CUTOFF_CLAIM, False)
     )
 
 

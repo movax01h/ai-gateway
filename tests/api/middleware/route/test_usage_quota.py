@@ -27,12 +27,13 @@ def mock_user_with_skip_usage_cutoff():
 
 
 @pytest.fixture
-def mock_request():
+def mock_request(mock_user):
     """Create a mock request object with usage_quota_service."""
     request = MagicMock(spec=Request)
     request.app = MagicMock()
     request.app.state = MagicMock()
     request.app.state.usage_quota_service = AsyncMock()
+    request.user = mock_user
     return request
 
 
@@ -40,12 +41,8 @@ class TestDecoratorBasics:
     """Tests for basic decorator functionality."""
 
     @pytest.mark.asyncio
-    async def test_decorator_allows_request_on_sufficient_quota(
-        self, mock_request, mock_user
-    ):
+    async def test_decorator_allows_request_on_sufficient_quota(self, mock_request):
         """Test that decorator allows request when quota check passes."""
-
-        mock_request.user = mock_user
 
         async def test_handler(request, *args, **kwargs):
             return JSONResponse({"status": "ok"})
