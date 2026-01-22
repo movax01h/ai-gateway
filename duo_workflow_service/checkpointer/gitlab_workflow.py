@@ -604,6 +604,7 @@ class GitLabWorkflow(
                     checkpoint["compressed_checkpoint"]
                 )
         else:
+            # If the latest checkpoint is fetch, we don't need to refetch it on initialization
             if self._workflow_config.get("latest_checkpoint"):
                 checkpoint = self._workflow_config["latest_checkpoint"]
                 if checkpoint:
@@ -620,6 +621,11 @@ class GitLabWorkflow(
                         }
                     )
 
+            # If the first checkpoint is None, it means that a flow just started and checkpoints are empty anyway
+            if self._workflow_config.get("first_checkpoint") is None:
+                return None
+
+            # If a flow is resumed and the latest checkpoint couldn't be fetched (<18.8 version of GitLab), fetch it
             endpoint = f"/api/v4/ai/duo_workflows/workflows/{self._workflow_id}/checkpoints?per_page=1"
             endpoint = (
                 add_compression_param(endpoint) if compression_enabled else endpoint
