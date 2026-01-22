@@ -204,8 +204,7 @@ async def test_create_merge_request(gitlab_client_mock, metadata):
 
     expected_response = json.dumps(
         {
-            "status": "success",
-            "merge_request": {
+            "created_merge_request": {
                 "id": 1,
                 "title": "New Feature",
                 "source_branch": "feature",
@@ -269,8 +268,7 @@ async def test_create_merge_request_with_url_success(
 
     expected_response = json.dumps(
         {
-            "status": "success",
-            "merge_request": {
+            "created_merge_request": {
                 "id": 1,
                 "title": "Test Merge Request",
                 "source_branch": "feature",
@@ -367,8 +365,7 @@ async def test_create_merge_request_with_labels(gitlab_client_mock, metadata):
 
     expected_response = json.dumps(
         {
-            "status": "success",
-            "merge_request": {
+            "created_merge_request": {
                 "id": 1,
                 "title": "Bug Fix",
                 "source_branch": "bugfix",
@@ -418,8 +415,7 @@ async def test_create_merge_request_minimal_params(gitlab_client_mock, metadata)
 
     expected_response = json.dumps(
         {
-            "status": "success",
-            "merge_request": {
+            "created_merge_request": {
                 "id": 1,
                 "title": "New Feature",
                 "source_branch": "feature",
@@ -454,7 +450,6 @@ async def test_create_merge_request_with_server_error(gitlab_client_mock, metada
     }
 
     response = await tool.arun(input_data)
-    expected_response = json.dumps({"error": "Failed to create merge request"})
 
     expected_data = {
         "source_branch": "feature",
@@ -462,7 +457,9 @@ async def test_create_merge_request_with_server_error(gitlab_client_mock, metada
         "title": "New Feature",
     }
 
-    assert response == expected_response
+    response_json = json.loads(response)
+    assert "HTTP 409" in response_json["error"]
+    assert "{'status': 409, 'message': 'Duplicate request'}" in response_json["error"]
 
     gitlab_client_mock.apost.assert_called_once_with(
         path="/api/v4/projects/1/merge_requests",
@@ -706,9 +703,7 @@ async def test_create_merge_request_note(gitlab_client_mock, metadata):
 
     expected_response = json.dumps(
         {
-            "status": "success",
-            "body": "Test note",
-            "response": {"id": 1, "body": "Test note"},
+            "created_merge_request_note": {"id": 1, "body": "Test note"},
         }
     )
     assert response == expected_response
@@ -754,9 +749,7 @@ async def test_create_merge_request_note_with_note_id_reply(
 
     expected_response = json.dumps(
         {
-            "status": "success",
-            "body": "This is a reply",
-            "response": {
+            "created_merge_request_note": {
                 "id": 2,
                 "body": "This is a reply",
                 "discussion_id": "gid://gitlab/Discussion/789",
@@ -820,9 +813,7 @@ async def test_create_merge_request_note_with_url_success(
 
     expected_response = json.dumps(
         {
-            "status": "success",
-            "body": "Test note",
-            "response": {
+            "created_merge_request_note": {
                 "id": 1,
                 "body": "Test note",
                 "created_at": "2024-01-01T12:00:00Z",
@@ -904,9 +895,7 @@ async def test_create_merge_request_note_with_url_and_note_id_success(
 
     expected_response = json.dumps(
         {
-            "status": "success",
-            "body": "This is a reply",
-            "response": {
+            "created_merge_request_note": {
                 "id": 2,
                 "body": "This is a reply",
                 "created_at": "2024-01-01T13:00:00Z",
@@ -977,9 +966,7 @@ async def test_create_merge_request_note_allows_regular_notes(
 
     expected_response = json.dumps(
         {
-            "status": "success",
-            "body": note,
-            "response": {"id": 1, "body": note},
+            "created_merge_request_note": {"id": 1, "body": note},
         }
     )
 
@@ -1249,8 +1236,8 @@ async def test_update_merge_request_http_error_status_code(
 
     response_json = json.loads(response)
     assert "error" in response_json
-    assert "Unexpected status code: 404" in response_json["error"]
-    assert "body: {'message': '404 Merge Request Not Found'}" in response_json["error"]
+    assert "HTTP 404" in response_json["error"]
+    assert "{'message': '404 Merge Request Not Found'}" in response_json["error"]
 
     gitlab_client_mock.aput.assert_called_once_with(
         path="/api/v4/projects/1/merge_requests/999",

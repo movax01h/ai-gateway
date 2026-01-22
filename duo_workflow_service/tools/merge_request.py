@@ -14,6 +14,9 @@ from duo_workflow_service.tools.gitlab_resource_input import ProjectResourceInpu
 
 log = structlog.stdlib.get_logger("workflow")
 
+# API endpoint for merge requests
+MERGE_REQUESTS_API_PATH = "/api/v4/projects/{project_id}/merge_requests"
+
 # editorconfig-checker-disable
 PROJECT_IDENTIFICATION_DESCRIPTION = """To identify the project you must provide either:
 - project_id parameter, or
@@ -114,20 +117,18 @@ class CreateMergeRequest(DuoBaseTool):
         data.update({k: kwargs[k] for k in optional_params if k in kwargs})
 
         try:
+            path = MERGE_REQUESTS_API_PATH.format(project_id=project_id)
             response = await self.gitlab_client.apost(
-                path=f"/api/v4/projects/{project_id}/merge_requests",
+                path=path,
                 body=json.dumps(data),
             )
 
-            if not response.is_success():
-                log.error(
-                    "Failed to create merge request: status_code=%s, response=%s",
-                    response.status_code,
-                    response.body,
-                )
-                return json.dumps({"error": "Failed to create merge request"})
+            response = self._process_http_response(
+                identifier=path,
+                response=response,
+            )
 
-            return json.dumps({"status": "success", "merge_request": response.body})
+            return json.dumps({"created_merge_request": response})
         except Exception as e:
             return json.dumps({"error": str(e)})
 
@@ -169,9 +170,12 @@ class GetMergeRequest(DuoBaseTool):
             return json.dumps({"error": "; ".join(validation_result.errors)})
 
         try:
+            path = (
+                f"{MERGE_REQUESTS_API_PATH.format(project_id=validation_result.project_id)}/"
+                f"{validation_result.merge_request_iid}"
+            )
             response = await self.gitlab_client.aget(
-                path=f"/api/v4/projects/{validation_result.project_id}/merge_requests/"
-                f"{validation_result.merge_request_iid}",
+                path=path,
                 parse_json=False,
             )
 
@@ -223,9 +227,12 @@ class ListMergeRequestDiffs(DuoBaseTool):
             return json.dumps({"error": "; ".join(validation_result.errors)})
 
         try:
+            path = (
+                f"{MERGE_REQUESTS_API_PATH.format(project_id=validation_result.project_id)}/"
+                f"{validation_result.merge_request_iid}/diffs"
+            )
             response = await self.gitlab_client.aget(
-                path=f"/api/v4/projects/{validation_result.project_id}/merge_requests/"
-                f"{validation_result.merge_request_iid}/diffs",
+                path=path,
                 parse_json=False,
             )
 
@@ -329,16 +336,14 @@ The body parameter is always required.
                 return json.dumps(discussion_result)
             discussion_id = discussion_result.get("discussionId")
 
+        base_path = (
+            f"{MERGE_REQUESTS_API_PATH.format(project_id=validation_result.project_id)}/"
+            f"{validation_result.merge_request_iid}"
+        )
         if discussion_id:
-            path = (
-                f"/api/v4/projects/{validation_result.project_id}/merge_requests/"
-                f"{validation_result.merge_request_iid}/discussions/{discussion_id}/notes"
-            )
+            path = f"{base_path}/discussions/{discussion_id}/notes"
         else:
-            path = (
-                f"/api/v4/projects/{validation_result.project_id}/merge_requests/"
-                f"{validation_result.merge_request_iid}/notes"
-            )
+            path = f"{base_path}/notes"
 
         payload = {"body": body}
 
@@ -348,16 +353,9 @@ The body parameter is always required.
                 body=json.dumps(payload),
             )
 
-            if not response.is_success():
-                log.error(
-                    "Failed to create merge request note: status_code=%s, response=%s",
-                    response.status_code,
-                    response.body,
-                )
+            response = self._process_http_response(identifier=path, response=response)
 
-            return json.dumps(
-                {"status": "success", "body": body, "response": response.body}
-            )
+            return json.dumps({"created_merge_request_note": response})
         except Exception as e:
             return json.dumps({"error": str(e)})
 
@@ -396,9 +394,12 @@ class ListAllMergeRequestNotes(DuoBaseTool):
             return json.dumps({"error": "; ".join(validation_result.errors)})
 
         try:
+            path = (
+                f"{MERGE_REQUESTS_API_PATH.format(project_id=validation_result.project_id)}/"
+                f"{validation_result.merge_request_iid}/notes"
+            )
             response = await self.gitlab_client.aget(
-                path=f"/api/v4/projects/{validation_result.project_id}/merge_requests/"
-                f"{validation_result.merge_request_iid}/notes",
+                path=path,
                 parse_json=False,
             )
 
@@ -576,8 +577,9 @@ class ListMergeRequest(DuoBaseTool):
                 params[param] = kwargs[param]
 
         try:
+            path = MERGE_REQUESTS_API_PATH.format(project_id=project_id)
             response = await self.gitlab_client.aget(
-                path=f"/api/v4/projects/{project_id}/merge_requests",
+                path=path,
                 params=params,
                 parse_json=False,
             )
@@ -656,20 +658,21 @@ For example:
         data = {k: v for k, v in kwargs.items() if v is not None}
 
         try:
+            path = (
+                f"{MERGE_REQUESTS_API_PATH.format(project_id=validation_result.project_id)}/"
+                f"{validation_result.merge_request_iid}"
+            )
             response = await self.gitlab_client.aput(
-                path=f"/api/v4/projects/{validation_result.project_id}/merge_requests/"
-                f"{validation_result.merge_request_iid}",
+                path=path,
                 body=json.dumps(data),
             )
 
-            if not response.is_success():
-                return json.dumps(
-                    {
-                        "error": f"Unexpected status code: {response.status_code} body: {response.body}"
-                    }
-                )
+            response = self._process_http_response(
+                identifier=path,
+                response=response,
+            )
 
-            return json.dumps({"updated_merge_request": response.body})
+            return json.dumps({"updated_merge_request": response})
         except Exception as e:
             return json.dumps({"error": str(e)})
 
