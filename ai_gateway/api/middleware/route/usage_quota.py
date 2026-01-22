@@ -4,10 +4,8 @@ from typing import Any, Callable, Optional
 from starlette.requests import Request
 from starlette.responses import JSONResponse
 
-from ai_gateway.api.auth_utils import StarletteUser
 from lib.events import FeatureQualifiedNameStatic, GLReportingEventContext
 from lib.usage_quota import InsufficientCredits, UsageQuotaEvent
-from lib.usage_quota.client import should_skip_usage_quota_for_user
 
 
 def has_sufficient_usage_quota(
@@ -86,11 +84,6 @@ def _process_route(
         *args: Any,
         **kwargs: Any,
     ) -> Any:
-        current_user: StarletteUser = request.user
-
-        if should_skip_usage_quota_for_user(current_user):
-            return await func(request, *args, **kwargs)
-
         service = request.app.state.usage_quota_service
         resolved_event = await _resolve_event_type_from_request(
             event_type_resolver, kwargs
