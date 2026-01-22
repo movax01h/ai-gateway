@@ -134,6 +134,22 @@ components:
       - "on_tool_execution_success"
       - "on_tool_execution_failed"
       - "on_agent_final_answer"
+
+  - name: "add_plan_comment"
+    type: OneOffComponent
+    prompt_id: "developer_add_plan_comment"
+    prompt_version: "^1.0.0"
+    inputs:
+      - from: "context:planning_agent.final_answer"
+        as: "plan_text"
+      - from: "context:draft_merge_request_creator.tool_responses"
+        as: "merge_request_details"
+    toolset:
+      - "create_merge_request_note"
+    ui_log_events:
+      - "on_tool_execution_success"
+      - "on_tool_execution_failed"
+
   - name: "programming_agent"
     type: AgentComponent
     prompt_id: "programming_agent"
@@ -215,6 +231,8 @@ routers:
   - from: "tool_listing_agent"
     to: "planning_agent"
   - from: "planning_agent"
+    to: "add_plan_comment"
+  - from: "add_plan_comment"
     to: "programming_agent"
   - from: "programming_agent"
     to: "git_actions"
