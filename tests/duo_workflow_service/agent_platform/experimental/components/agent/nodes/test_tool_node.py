@@ -93,17 +93,31 @@ class TestToolNode:
         ui_history,
     ):
         """Test successful run with single tool call."""
+        # Get existing history
+        existing_history = flow_state_with_tool_calls[
+            FlowStateKeys.CONVERSATION_HISTORY
+        ][component_name]
+
         result = await tool_node.run(flow_state_with_tool_calls)
 
         # Verify result structure
         assert FlowStateKeys.CONVERSATION_HISTORY in result
         assert component_name in result[FlowStateKeys.CONVERSATION_HISTORY]
 
-        tool_messages = result[FlowStateKeys.CONVERSATION_HISTORY][component_name]
-        assert len(tool_messages) == 1
-        assert isinstance(tool_messages[0], ToolMessage)
-        assert tool_messages[0].tool_call_id == mock_tool_call["id"]
-        assert tool_messages[0].content == "Sanitized response"
+        # Verify component appends tool response to existing conversation history
+        result_messages = result[FlowStateKeys.CONVERSATION_HISTORY][component_name]
+        assert (
+            len(result_messages) == len(existing_history) + 1
+        ), "Expected existing messages plus tool response"
+        assert (
+            result_messages[:-1] == existing_history
+        ), "Existing history must be preserved"
+
+        # Verify tool response properties
+        tool_message = result_messages[-1]
+        assert isinstance(tool_message, ToolMessage)
+        assert tool_message.tool_call_id == mock_tool_call["id"]
+        assert tool_message.content == "Sanitized response"
 
         # Verify tool execution was called
         mock_tool.arun.assert_called_once_with(mock_tool_call["args"])
@@ -160,9 +174,14 @@ class TestToolNode:
 
         result = await tool_node.run(state)
 
-        # Verify result structure
-        tool_messages = result[FlowStateKeys.CONVERSATION_HISTORY][component_name]
-        assert len(tool_messages) == 2
+        # Verify all tool responses are appended to conversation history
+        result_messages = result[FlowStateKeys.CONVERSATION_HISTORY][component_name]
+        assert (
+            len(result_messages) == 3
+        ), "Expected AI message with 2 tool calls plus 2 tool responses"
+        assert result_messages[0] == mock_ai_message_with_multiple_tool_calls
+        assert isinstance(result_messages[1], ToolMessage)
+        assert isinstance(result_messages[2], ToolMessage)
 
         # Verify both tools were called
         mock_tool_1.arun.assert_called_once_with({"param1": "value1"})
@@ -187,10 +206,12 @@ class TestToolNode:
         # Verify result structure
         secutiry_harness_args = mock_prompt_security.call_args
         assert "Tool test_tool not found" in secutiry_harness_args[1]["response"]
-        tool_messages = result[FlowStateKeys.CONVERSATION_HISTORY][component_name]
-        assert len(tool_messages) == 1
-        assert isinstance(tool_messages[0], ToolMessage)
-        assert tool_messages[0].content == "Sanitized response"
+
+        # Verify error response is appended to conversation history
+        result_messages = result[FlowStateKeys.CONVERSATION_HISTORY][component_name]
+        assert len(result_messages) == 2, "Expected AI message plus error response"
+        assert isinstance(result_messages[1], ToolMessage)
+        assert result_messages[1].content == "Sanitized response"
 
     @pytest.mark.asyncio
     async def test_run_type_error_handling(
@@ -226,10 +247,10 @@ class TestToolNode:
             in secutiry_harness_args[1]["response"]
         )
         assert "The schema is:" in secutiry_harness_args[1]["response"]
-        tool_messages = result[FlowStateKeys.CONVERSATION_HISTORY][component_name]
-        assert len(tool_messages) == 1
-        assert isinstance(tool_messages[0], ToolMessage)
-        assert tool_messages[0].content == "Sanitized response"
+        result_messages = result[FlowStateKeys.CONVERSATION_HISTORY][component_name]
+        assert len(result_messages) == 2, "Expected AI message plus tool response"
+        assert isinstance(result_messages[1], ToolMessage)
+        assert result_messages[1].content == "Sanitized response"
 
         # Verify internal event tracking for failure
         mock_internal_event_client.track_event.assert_called_once()
@@ -285,10 +306,10 @@ class TestToolNode:
             "Tool test_tool raised validation error"
             in secutiry_harness_args[1]["response"]
         )
-        tool_messages = result[FlowStateKeys.CONVERSATION_HISTORY][component_name]
-        assert len(tool_messages) == 1
-        assert isinstance(tool_messages[0], ToolMessage)
-        assert tool_messages[0].content == "Sanitized response"
+        result_messages = result[FlowStateKeys.CONVERSATION_HISTORY][component_name]
+        assert len(result_messages) == 2, "Expected AI message plus tool response"
+        assert isinstance(result_messages[1], ToolMessage)
+        assert result_messages[1].content == "Sanitized response"
 
         # Verify internal event tracking for failure
         mock_internal_event_client.track_event.assert_called_once()
@@ -345,10 +366,10 @@ class TestToolNode:
             "Tool runtime exception due to Generic error"
             in secutiry_harness_args[1]["response"]
         )
-        tool_messages = result[FlowStateKeys.CONVERSATION_HISTORY][component_name]
-        assert len(tool_messages) == 1
-        assert isinstance(tool_messages[0], ToolMessage)
-        assert tool_messages[0].content == "Sanitized response"
+        result_messages = result[FlowStateKeys.CONVERSATION_HISTORY][component_name]
+        assert len(result_messages) == 2, "Expected AI message plus tool response"
+        assert isinstance(result_messages[1], ToolMessage)
+        assert result_messages[1].content == "Sanitized response"
 
         # Verify internal event tracking for failure
         mock_internal_event_client.track_event.assert_called_once()
@@ -389,12 +410,15 @@ class TestToolNode:
 
         result = await tool_node.run(state)
 
-        # Verify result structure with empty tool messages
+        # Verify conversation history unchanged when no tool calls present
         assert FlowStateKeys.CONVERSATION_HISTORY in result
         assert component_name in result[FlowStateKeys.CONVERSATION_HISTORY]
 
-        tool_messages = result[FlowStateKeys.CONVERSATION_HISTORY][component_name]
-        assert len(tool_messages) == 0
+        result_messages = result[FlowStateKeys.CONVERSATION_HISTORY][component_name]
+        assert (
+            len(result_messages) == 1
+        ), "Expected original AI message with no tool responses"
+        assert result_messages[0] == mock_ai_message_no_tool_calls
 
     @pytest.mark.asyncio
     async def test_run_tool_call_without_args(
@@ -425,10 +449,11 @@ class TestToolNode:
         # Verify tool was called with empty args
         mock_tool.arun.assert_called_once_with({})
 
-        # Verify result structure
-        tool_messages = result[FlowStateKeys.CONVERSATION_HISTORY][component_name]
-        assert len(tool_messages) == 1
-        assert isinstance(tool_messages[0], ToolMessage)
+        # Verify tool response is appended despite missing args
+        result_messages = result[FlowStateKeys.CONVERSATION_HISTORY][component_name]
+        assert len(result_messages) == 2, "Expected AI message plus tool response"
+        assert result_messages[0] == mock_message
+        assert isinstance(result_messages[1], ToolMessage)
 
 
 class TestToolNodeSecurity:
@@ -463,10 +488,13 @@ class TestToolNodeSecurity:
             )
 
             # Verify error message is in the response
+            # Index 0 is the original AI message, index 1 is the tool response
             tool_messages = result[FlowStateKeys.CONVERSATION_HISTORY][component_name]
+            assert len(tool_messages) == 2, "Expected AI message plus tool response"
+            assert isinstance(tool_messages[1], ToolMessage)
             assert (
                 "Security scan detected potentially malicious content"
-                in tool_messages[0].content
+                in tool_messages[1].content
             )
 
     @pytest.mark.asyncio
@@ -491,9 +519,11 @@ class TestToolNodeSecurity:
                 mock_security, "Tool execution result", mock_tool.name
             )
 
-            # Verify sanitized response in result
-            tool_messages = result[FlowStateKeys.CONVERSATION_HISTORY][component_name]
-            assert tool_messages[0].content == "Sanitized safe response"
+            # Verify sanitized content in tool response
+            result_messages = result[FlowStateKeys.CONVERSATION_HISTORY][component_name]
+            assert len(result_messages) == 2, "Expected AI message plus tool response"
+            assert isinstance(result_messages[1], ToolMessage)
+            assert result_messages[1].content == "Sanitized safe response"
 
 
 class TestToolNodeMonitoring:

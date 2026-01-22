@@ -29,13 +29,14 @@ class FetchNode(BaseModel):
     output: IOKey
     ui_history: UIHistory
 
-    async def run(
-        self, state: FlowState  # pylint: disable=unused-argument
-    ) -> dict[str, Any]:
+    async def run(self, state: FlowState) -> dict[str, Any]:
         """Execute the fetch node - interrupt for user input and create HumanMessage."""
         # Interrupt workflow to wait for user input
         event: FlowEvent = interrupt("Workflow interrupted; waiting for user input.")
 
+        existing_history = state[FlowStateKeys.CONVERSATION_HISTORY].get(
+            self.sends_response_to, []
+        )
         # Handle different event types
         if event["event_type"] in (FlowEventType.APPROVE, FlowEventType.REJECT):
             # Handle approval/rejection events
@@ -54,16 +55,18 @@ class FetchNode(BaseModel):
                     event=UILogEventsHumanInput.ON_USER_RESPONSE,
                 )
 
+                # Append user rejection message to target component's history for replace-based reducer.
+                # The reducer will replace the target component's conversation history with this list.
                 human_message = HumanMessage(content=event["message"])
                 result[FlowStateKeys.CONVERSATION_HISTORY] = {
-                    self.sends_response_to: [human_message]
+                    self.sends_response_to: existing_history + [human_message]
                 }
 
             result.update(self.ui_history.pop_state_updates())
 
             return result
 
-        if event["event_type"] == FlowEventType.RESPONSE:
+        if event["event_type"] == FlowEventType.RESPONSE and "message" in event:
             # Extract user message from event
             user_message = event["message"]
 
@@ -80,7 +83,7 @@ class FetchNode(BaseModel):
                 **self.ui_history.pop_state_updates(),
                 FlowStateKeys.STATUS: WorkflowStatusEnum.EXECUTION.value,
                 FlowStateKeys.CONVERSATION_HISTORY: {
-                    self.sends_response_to: [human_message]
+                    self.sends_response_to: existing_history + [human_message]
                 },
             }
 

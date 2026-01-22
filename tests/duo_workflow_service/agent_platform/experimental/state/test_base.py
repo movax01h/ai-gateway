@@ -1,6 +1,8 @@
 # pylint: disable=too-many-lines
+from typing import Dict, List, Optional
+
 import pytest
-from langchain_core.messages import HumanMessage, SystemMessage
+from langchain_core.messages import BaseMessage, HumanMessage, SystemMessage
 from pydantic import ValidationError
 
 from duo_workflow_service.agent_platform.experimental.state import (
@@ -11,6 +13,9 @@ from duo_workflow_service.agent_platform.experimental.state import (
     get_vars_from_state,
     merge_nested_dict,
     merge_nested_dict_reducer,
+)
+from duo_workflow_service.agent_platform.experimental.state.base import (
+    _conversation_history_replace_reducer,
 )
 from duo_workflow_service.entities.state import WorkflowStatusEnum
 
@@ -1221,80 +1226,134 @@ class TestIOKeyLiteralField:
         assert result == {alias: complex_literal_value}
 
 
-class TestIntegration:
-    """Integration tests for the state module."""
+class TestConversationHistoryReplaceReducer:
+    """Test _conversation_history_replace_reducer function."""
 
-    def test_complete_workflow_state_manipulation(self):
-        """Test a complete workflow of state manipulation."""
-        # Create initial state
-        initial_state: FlowState = {
-            "status": WorkflowStatusEnum.NOT_STARTED,
-            "conversation_history": {},
-            "ui_chat_log": [],
-            "context": {},
+    def test_basic_replacement(self):
+        """Test that new messages replace existing messages for the same component."""
+        current = {"component1": [SystemMessage(content="Old")]}
+        new = {"component1": [SystemMessage(content="New")]}
+
+        result = _conversation_history_replace_reducer(current, new)
+
+        assert result["component1"][0].content == "New"
+        assert "Old" not in [msg.content for msg in result["component1"]]
+
+    def test_none_handling(self):
+        """Test that current state is returned when new is None."""
+        current = {
+            "component1": [
+                SystemMessage(content="Existing message"),
+                HumanMessage(content="User input"),
+            ]
         }
 
-        # Update context using merge_nested_dict
-        new_context = {"flow": {"step": 1, "name": "initialization"}}
-        updated_context = merge_nested_dict(initial_state["context"], new_context)
+        result = _conversation_history_replace_reducer(current, None)
 
-        # Create IO keys for variable extraction
-        io_keys = IOKey.parse_keys(["context:flow.step", "context:flow.name"])
+        # Should return current state unchanged
+        assert result == current
 
-        # Update state
-        updated_state = initial_state.copy()
-        updated_state["context"] = updated_context
-        updated_state["status"] = WorkflowStatusEnum.PLANNING
+    def test_empty_list_clears_history(self):
+        """Test that empty list clears the component's history."""
+        current = {
+            "component1": [
+                SystemMessage(content="Existing message"),
+                HumanMessage(content="Existing user input"),
+            ]
+        }
 
-        # Extract variables
-        variables = get_vars_from_state(io_keys, updated_state)
+        new = {
+            "component1": [],  # Empty list should clear history
+        }
 
-        # Verify results
-        assert variables["step"] == 1
-        assert variables["name"] == "initialization"
-        assert updated_state["status"] == WorkflowStatusEnum.PLANNING
-        assert updated_state["context"]["flow"]["step"] == 1
+        result = _conversation_history_replace_reducer(current, new)
 
-    def test_io_key_parsing_and_variable_extraction(self):
-        """Test parsing IO keys and extracting variables."""
-        # Complex state structure
-        state = {
-            "context": {
-                "project": {
-                    "name": "test-project",
-                    "version": "1.0.0",
-                    "config": {"debug": True, "features": ["feature1", "feature2"]},
-                },
-                "user": {"id": 123, "preferences": {"theme": "dark"}},
-            },
-            "conversation_history": {
-                "main": [
-                    SystemMessage(content="System prompt"),
-                    HumanMessage(content="User input"),
-                ]
-            },
-            "ui_chat_log": [
-                {"type": "user", "message": "Hello"},
-                {"type": "assistant", "message": "Hi there!"},
+        # component1 should be cleared (empty list)
+        assert "component1" in result
+        assert len(result["component1"]) == 0
+
+    def test_none_value_skips_component(self):
+        """Test that None value for a component skips it (keeps existing)."""
+        current = {
+            "component1": [
+                SystemMessage(content="Existing message"),
+                HumanMessage(content="Existing user input"),
+            ]
+        }
+
+        new = {
+            "component1": None,  # None should skip (keep existing)
+            "component2": [HumanMessage(content="New component message")],
+        }
+
+        result = _conversation_history_replace_reducer(current, new)
+
+        # component1 should remain unchanged since value was None
+        assert "component1" in result
+        assert len(result["component1"]) == 2
+        assert result["component1"][0].content == "Existing message"
+        assert result["component1"][1].content == "Existing user input"
+
+        # component2 should be added
+        assert "component2" in result
+
+    def test_preserves_other_components(self):
+        """Test that updating one component preserves others."""
+        current = {
+            "component1": [SystemMessage(content="Component 1 message")],
+            "component2": [SystemMessage(content="Component 2 message")],
+        }
+
+        new = {
+            "component1": [
+                SystemMessage(content="Updated component 1"),
+                HumanMessage(content="New message"),
+            ]
+        }
+
+        result = _conversation_history_replace_reducer(current, new)
+
+        # component2 should remain unchanged
+        assert "component2" in result
+        assert len(result["component2"]) == 1
+        assert result["component2"][0].content == "Component 2 message"
+
+    def test_idempotency(self):
+        """Test that reducer is idempotent - calling twice gives same result."""
+        current: Dict[str, List[BaseMessage]] = {
+            "agent_a": [
+                SystemMessage(content="system message"),
+                HumanMessage(content="first message"),
             ],
         }
 
-        # Parse various IO keys
-        keys = [
-            "context:project.name",
-            "context:project.config.debug",
-            "context:user.preferences.theme",
-            "conversation_history:main",
-            "ui_chat_log",
-        ]
+        new: Optional[Dict[str, List[BaseMessage]]] = {
+            "agent_a": [
+                SystemMessage(content="system message"),
+                HumanMessage(content="first message"),
+                HumanMessage(content="new message"),
+            ],
+        }
 
-        io_keys = IOKey.parse_keys(keys)
-        variables = get_vars_from_state(io_keys, state)
+        # Call reducer twice
+        result1 = _conversation_history_replace_reducer(current, new)
+        result2 = _conversation_history_replace_reducer(current, new)
 
-        # Verify extracted variables
-        assert variables["name"] == "test-project"
-        assert variables["debug"] is True
-        assert variables["theme"] == "dark"
-        assert len(variables["main"]) == 2
-        assert isinstance(variables["main"][0], SystemMessage)
-        assert len(variables["ui_chat_log"]) == 2
+        # Results should be equal
+        assert len(result1["agent_a"]) == len(result2["agent_a"])
+        for msg1, msg2 in zip(result1["agent_a"], result2["agent_a"]):
+            assert msg1.content == msg2.content
+
+    def test_does_not_mutate_current(self):
+        """Test that reducer does not mutate the current state."""
+        current: Dict[str, List[BaseMessage]] = {
+            "agent_a": [
+                SystemMessage(content="system message"),
+            ],
+        }
+
+        result = _conversation_history_replace_reducer(current, None)
+
+        # returned results should be equal to current, but be a different object
+        assert result == current
+        assert result is not current

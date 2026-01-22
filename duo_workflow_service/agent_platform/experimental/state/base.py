@@ -13,16 +13,23 @@ from typing import (
     get_origin,
 )
 
+import structlog
 from langchain_core.messages import BaseMessage
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-# TODO: Remove dependency on legacy duo workflow packages
+from ai_gateway.model_metadata import current_model_metadata_context
+from duo_workflow_service.conversation.trimmer import (
+    LEGACY_MAX_CONTEXT_TOKENS,
+    trim_conversation_history,
+)
 from duo_workflow_service.entities.state import (
     UiChatLog,
     WorkflowStatusEnum,
-    _conversation_history_reducer,
     _ui_chat_log_reducer,
 )
+from lib.feature_flags import FeatureFlag, is_feature_enabled
+
+logger = structlog.stdlib.get_logger("experimental_state")
 
 __all__ = [
     "FlowEvent",
@@ -35,6 +42,7 @@ __all__ = [
     "IOKey",
     "IOKeyTemplate",
     "get_vars_from_state",
+    "_conversation_history_replace_reducer",
 ]
 
 
@@ -93,6 +101,41 @@ def merge_nested_dict_reducer(
     return merge_nested_dict(left or {}, right or {})
 
 
+def _conversation_history_replace_reducer(
+    current: dict[str, list[BaseMessage]], new: Optional[dict[str, list[BaseMessage]]]
+) -> dict[str, list[BaseMessage]]:
+    """Replace-based conversation history reducer for experimental flows."""
+    reduced = {**current}
+
+    if new is None:
+        return reduced
+
+    for agent_name, new_messages in new.items():
+        if new_messages is None:
+            continue
+
+        if new_messages == []:
+            reduced[agent_name] = []
+            continue
+
+        model_metadata = current_model_metadata_context.get()
+        max_context_tokens = (
+            model_metadata.llm_definition.max_context_tokens
+            if is_feature_enabled(FeatureFlag.AI_PER_MODEL_CONTEXT_WINDOW)
+            and model_metadata is not None
+            else LEGACY_MAX_CONTEXT_TOKENS
+        )
+
+        # Delegate to the centralized trimming function
+        reduced[agent_name] = trim_conversation_history(
+            messages=new_messages,
+            component_name=agent_name,
+            max_context_tokens=max_context_tokens,
+        )
+
+    return reduced
+
+
 class FlowStateKeys:
     STATUS: Literal["status"] = "status"
     CONVERSATION_HISTORY: Literal["conversation_history"] = "conversation_history"
@@ -103,7 +146,7 @@ class FlowStateKeys:
 class FlowState(TypedDict):
     status: WorkflowStatusEnum
     conversation_history: Annotated[
-        dict[str, list[BaseMessage]], _conversation_history_reducer
+        dict[str, list[BaseMessage]], _conversation_history_replace_reducer
     ]
     ui_chat_log: Annotated[list[UiChatLog], _ui_chat_log_reducer]
     context: Annotated[dict[str, Any], merge_nested_dict_reducer]

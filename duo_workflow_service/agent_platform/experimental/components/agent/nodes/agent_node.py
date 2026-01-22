@@ -104,9 +104,12 @@ class AgentNode:
                     history = [*history, *updates]
                     continue
 
+                # Append new completion to existing history for replace-based reducer.
+                # The reducer will replace this component's conversation history with
+                # the complete list returned here.
                 return {
                     FlowStateKeys.CONVERSATION_HISTORY: {
-                        self._component_name: [completion]
+                        self._component_name: history + [completion]
                     },
                 }
             except APIStatusError as e:

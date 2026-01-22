@@ -89,10 +89,13 @@ class ToolNode:
                 )
             )
 
+        # Append tool responses to existing history for replace-based reducer.
+        # The reducer will replace this component's conversation history with
+        # the complete list returned here.
         return {
             **self._ui_history.pop_state_updates(),
             FlowStateKeys.CONVERSATION_HISTORY: {
-                self._component_name: tools_responses,
+                self._component_name: conversation_history + tools_responses,
             },
         }
 

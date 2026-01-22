@@ -107,14 +107,26 @@ class TestAgentNode:
     ):
         """Test successful run with existing conversation history."""
 
+        # Get the existing history from the state
+        existing_history = flow_state_with_history[FlowStateKeys.CONVERSATION_HISTORY][
+            component_name
+        ]
+
         result = await agent_node.run(flow_state_with_history)
 
         # Verify result structure
         assert FlowStateKeys.CONVERSATION_HISTORY in result
         assert component_name in result[FlowStateKeys.CONVERSATION_HISTORY]
-        assert result[FlowStateKeys.CONVERSATION_HISTORY][component_name] == [
-            mock_ai_message
-        ]
+
+        # Verify component appends to existing conversation history
+        result_history = result[FlowStateKeys.CONVERSATION_HISTORY][component_name]
+        assert (
+            len(result_history) == len(existing_history) + 1
+        ), "Expected existing messages plus new completion"
+        assert (
+            result_history[:-1] == existing_history
+        ), "Existing history must be preserved"
+        assert result_history[-1] == mock_ai_message, "New completion must be appended"
 
         mock_get_vars_from_state.assert_called_once_with(
             inputs,
@@ -273,12 +285,19 @@ class TestAgentNode:
             ]
         )
 
-        # Verify the method retried and returned successful result
+        # Verify retry mechanism preserves full conversation history
         assert FlowStateKeys.CONVERSATION_HISTORY in result
         assert component_name in result[FlowStateKeys.CONVERSATION_HISTORY]
-        assert result[FlowStateKeys.CONVERSATION_HISTORY][component_name] == [
-            mock_ai_message
-        ]
+
+        # Expected: invalid attempt + 2 validation error responses + successful retry
+        result_history = result[FlowStateKeys.CONVERSATION_HISTORY][component_name]
+        assert len(result_history) == 4, "Retry history must be preserved for debugging"
+        assert result_history[0] == mock_ai_message_invalid
+        assert isinstance(result_history[1], ToolMessage)
+        assert result_history[1].tool_call_id == "call_1"
+        assert isinstance(result_history[2], ToolMessage)
+        assert result_history[2].tool_call_id == "call_2"
+        assert result_history[3] == mock_ai_message
 
     @pytest.mark.asyncio
     async def test_run_valid_final_answer_tool(
@@ -340,12 +359,16 @@ class TestAgentNode:
 
         result = await agent_node.run(base_flow_state)
 
-        # Verify the method retried and returned successful result
+        # Verify retry mechanism preserves full conversation history
         assert FlowStateKeys.CONVERSATION_HISTORY in result
         assert component_name in result[FlowStateKeys.CONVERSATION_HISTORY]
-        assert result[FlowStateKeys.CONVERSATION_HISTORY][component_name] == [
-            mock_ai_message
-        ]
+
+        # Expected: invalid attempt + validation error response + successful retry
+        result_history = result[FlowStateKeys.CONVERSATION_HISTORY][component_name]
+        assert len(result_history) == 3, "Retry history must be preserved for debugging"
+        assert result_history[0] == mock_ai_message_invalid
+        assert isinstance(result_history[1], ToolMessage)
+        assert result_history[2] == mock_ai_message
 
         # Verify prompt was called twice (first failed validation, second succeeded)
         assert mock_prompt.ainvoke.call_count == 2
