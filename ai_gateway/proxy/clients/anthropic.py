@@ -21,9 +21,10 @@ class AnthropicProxyClient(BaseProxyClient):
         "accept",
         "content-type",
         "anthropic-version",
+        "anthropic-beta",
     ]
 
-    ALLOWED_HEADERS_TO_DOWNSTREAM = ["content-type"]
+    ALLOWED_HEADERS_TO_DOWNSTREAM = ["content-type", "anthropic-beta"]
 
     PROVIDER_NAME = "anthropic"
 
