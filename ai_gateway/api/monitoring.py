@@ -10,11 +10,13 @@ from ai_gateway.async_dependency_resolver import (
     get_code_suggestions_completions_litellm_factory_provider,
     get_config,
     get_prompt_registry,
+    get_search_factory_provider,
 )
 from ai_gateway.code_suggestions.completions import CodeCompletions
 from ai_gateway.models.base import KindModelProvider
 from ai_gateway.models.litellm import KindLiteLlmModel
 from ai_gateway.prompts.base import BasePromptRegistry
+from ai_gateway.searches import Searcher
 
 __all__ = [
     "router",
@@ -101,6 +103,26 @@ async def validate_cloud_connector_ready(
     return cloud_connector_ready(provider)
 
 
+async def validate_doc_search_available(
+    search_factory: Annotated[Factory[Searcher], Depends(get_search_factory_provider)],
+    config: Annotated[Configuration, Depends(get_config)],
+) -> bool:
+    try:
+        searcher = search_factory()
+        fallback_version = config.vertex_search.fallback_datastore_version()
+
+        await searcher.search(
+            query="can I upload images to GitLab repo?",
+            page_size=1,
+            gl_version=fallback_version,
+        )
+
+        return True
+    except Exception:
+        # Returning False to allow the health check to return 503 instead of 500.
+        return False
+
+
 router.add_api_route("/healthz", health([]))
 router.add_api_route(
     "/ready",
@@ -109,6 +131,7 @@ router.add_api_route(
             validate_fireworks_available,
             validate_default_models_available,
             validate_cloud_connector_ready,
+            validate_doc_search_available,
         ]
     ),
 )
