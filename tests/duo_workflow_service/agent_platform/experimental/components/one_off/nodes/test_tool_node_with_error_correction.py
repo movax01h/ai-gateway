@@ -183,16 +183,18 @@ class TestToolNodeWithErrorCorrectionRun:
         conversation_messages = result[FlowStateKeys.CONVERSATION_HISTORY][
             component_name
         ]
-        assert len(conversation_messages) == 2  # ToolMessage + success message
+        assert (
+            len(conversation_messages) == 3
+        ), "Expected AI message, tool response, and completion message"
 
-        # Check ToolMessage
-        tool_message = conversation_messages[0]
+        # Verify tool response at index 1
+        tool_message = conversation_messages[1]
         assert isinstance(tool_message, ToolMessage)
         assert tool_message.tool_call_id == mock_tool_call["id"]
         assert tool_message.content == "Sanitized response"
 
-        # Check success message
-        success_message = conversation_messages[1]
+        # Verify completion message at index 2
+        success_message = conversation_messages[2]
         assert isinstance(success_message, HumanMessage)
         assert "completed successfully" in success_message.content
 
@@ -248,11 +250,14 @@ class TestToolNodeWithErrorCorrectionRun:
             flow_state_with_tool_calls_one_off
         )
 
-        # Verify error handling
+        # Verify error response appended to conversation history
         conversation_messages = result[FlowStateKeys.CONVERSATION_HISTORY][
             component_name
         ]
-        tool_message = conversation_messages[0]
+        assert (
+            len(conversation_messages) == 3
+        ), "Expected AI message, tool error response, and error feedback"
+        tool_message = conversation_messages[1]
         assert isinstance(tool_message, ToolMessage)
 
         security_args = mock_prompt_security.call_args
@@ -340,11 +345,14 @@ class TestToolNodeWithErrorCorrectionRun:
             flow_state_with_tool_calls_one_off
         )
 
-        # Verify error handling
+        # Verify error response appended to conversation history
         conversation_messages = result[FlowStateKeys.CONVERSATION_HISTORY][
             component_name
         ]
-        tool_message = conversation_messages[0]
+        assert (
+            len(conversation_messages) == 3
+        ), "Expected AI message, tool error response, and error feedback"
+        tool_message = conversation_messages[1]
         assert isinstance(tool_message, ToolMessage)
 
         # Verify internal event tracking
@@ -381,13 +389,16 @@ class TestToolNodeWithErrorCorrectionRun:
         call_args = mock_internal_event_client.track_event.call_args
         assert call_args[1]["event_name"] == EventEnum.WORKFLOW_TOOL_FAILURE.value
 
-        # Verify the error message format
+        # Verify error message format in tool response
         conversation_messages = result[FlowStateKeys.CONVERSATION_HISTORY][
             component_name
         ]
-        tool_message = conversation_messages[0]
+        assert (
+            len(conversation_messages) == 3
+        ), "Expected AI message, tool error response, and error feedback"
+        tool_message = conversation_messages[1]
         assert isinstance(tool_message, ToolMessage)
-        # Should contain our specific ToolException format
+        # Verify ToolException format is preserved
         assert "tool exception occurred" in tool_message.content.lower()
 
     @pytest.mark.asyncio
@@ -406,14 +417,16 @@ class TestToolNodeWithErrorCorrectionRun:
 
         result = await tool_node_with_error_correction.run(state)
 
-        # Verify result structure with no tool messages
+        # Verify completion message appended even without tool calls
         conversation_messages = result[FlowStateKeys.CONVERSATION_HISTORY][
             component_name
         ]
-        # Should have success message even with no tool calls
-        assert len(conversation_messages) == 1
-        assert isinstance(conversation_messages[0], HumanMessage)
-        assert "completed successfully" in conversation_messages[0].content
+        assert (
+            len(conversation_messages) == 2
+        ), "Expected AI message plus completion message"
+        assert conversation_messages[0] == mock_ai_message_no_tool_calls
+        assert isinstance(conversation_messages[1], HumanMessage)
+        assert "completed successfully" in conversation_messages[1].content
 
     @pytest.mark.asyncio
     async def test_run_empty_conversation_history(
@@ -553,7 +566,7 @@ class TestToolNodeWithErrorCorrectionSecurity:
             tool_messages = result[FlowStateKeys.CONVERSATION_HISTORY][component_name]
             assert (
                 "Security scan detected potentially malicious content"
-                in tool_messages[0].content
+                in tool_messages[1].content
             )
 
     def test_sanitize_response_success(self, tool_node_with_error_correction):

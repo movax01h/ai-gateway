@@ -75,12 +75,13 @@ class FinalResponseNode:
             event=UILogEventsAgent.ON_AGENT_FINAL_ANSWER,
         )
 
+        # Append ToolMessage completion response to existing history for replace-based reducer.
+        # The reducer will replace this component's conversation history with the complete list.
         updates: dict = {
             **self._ui_history.pop_state_updates(),
             FlowStateKeys.CONVERSATION_HISTORY: {
-                self._component_name: [
-                    ToolMessage(content="", tool_call_id=final_response_call["id"])
-                ]
+                self._component_name: history
+                + [ToolMessage(content="", tool_call_id=final_response_call["id"])]
             },
         }
 

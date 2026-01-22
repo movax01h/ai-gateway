@@ -106,10 +106,12 @@ class ToolNodeWithErrorCorrection:
                 )
             )
 
+        # Append tool responses to existing history for replace-based reducer.
+        # The reducer will replace this component's conversation history with the complete list.
         result = {
             **self._ui_history.pop_state_updates(),
             FlowStateKeys.CONVERSATION_HISTORY: {
-                self._component_name: tool_responses,
+                self._component_name: conversation_history + tool_responses,
             },
         }
 
@@ -131,9 +133,12 @@ class ToolNodeWithErrorCorrection:
                 errors, tool_calls, attempts + 1
             )
 
-            # Update conversation_history while preserving context
+            # Append error feedback to history for retry loop. The reducer replaces
+            # this component's conversation history with the complete list.
             result[FlowStateKeys.CONVERSATION_HISTORY] = {
-                self._component_name: tool_responses + [error_feedback]
+                self._component_name: conversation_history
+                + tool_responses
+                + [error_feedback]
             }
 
             # If we are out of attempts then update execution status to failed
@@ -150,9 +155,12 @@ class ToolNodeWithErrorCorrection:
                 content=f"Tool execution completed successfully after {attempts} correction attempts."
             )
 
-            # Update conversation_history while preserving context
+            # Append success message to history. The reducer replaces this component's
+            # conversation history with the complete list.
             result[FlowStateKeys.CONVERSATION_HISTORY] = {
-                self._component_name: tool_responses + [success_message]
+                self._component_name: conversation_history
+                + tool_responses
+                + [success_message]
             }
 
             # Add success to execution status key

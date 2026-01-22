@@ -40,6 +40,11 @@ class TestFinalResponseNode:
             ui_history=ui_history,
         )
 
+        # Get existing history
+        existing_history = flow_state_with_message[FlowStateKeys.CONVERSATION_HISTORY][
+            component_name
+        ]
+
         # Execute
         result = await node.run(flow_state_with_message)
 
@@ -47,12 +52,13 @@ class TestFinalResponseNode:
         assert FlowStateKeys.CONVERSATION_HISTORY in result
         assert component_name in result[FlowStateKeys.CONVERSATION_HISTORY]
 
-        # Check that a ToolMessage was created
-        tool_messages = result[FlowStateKeys.CONVERSATION_HISTORY][component_name]
-        assert len(tool_messages) == 1
-        assert isinstance(tool_messages[0], ToolMessage)
-        assert tool_messages[0].content == ""
-        assert tool_messages[0].tool_call_id == tool_call_id
+        # Verify component appends completion marker to existing conversation history
+        result_messages = result[FlowStateKeys.CONVERSATION_HISTORY][component_name]
+        assert len(result_messages) == len(existing_history) + 1
+        assert result_messages[:-1] == existing_history
+        assert isinstance(result_messages[-1], ToolMessage)
+        assert result_messages[-1].content == ""
+        assert result_messages[-1].tool_call_id == tool_call_id
 
         # Check that output was set in context
         assert "context" in result
@@ -79,6 +85,11 @@ class TestFinalResponseNode:
             ui_history=ui_history,
         )
 
+        # Get existing history
+        existing_history = flow_state_with_message[FlowStateKeys.CONVERSATION_HISTORY][
+            component_name
+        ]
+
         # Execute
         result = await node.run(flow_state_with_message)
 
@@ -86,12 +97,13 @@ class TestFinalResponseNode:
         assert FlowStateKeys.CONVERSATION_HISTORY in result
         assert component_name in result[FlowStateKeys.CONVERSATION_HISTORY]
 
-        # Check that a ToolMessage was created
-        tool_messages = result[FlowStateKeys.CONVERSATION_HISTORY][component_name]
-        assert len(tool_messages) == 1
-        assert isinstance(tool_messages[0], ToolMessage)
-        assert tool_messages[0].content == ""
-        assert tool_messages[0].tool_call_id == tool_call_id
+        # Verify component appends completion marker to existing conversation history
+        result_messages = result[FlowStateKeys.CONVERSATION_HISTORY][component_name]
+        assert len(result_messages) == len(existing_history) + 1
+        assert result_messages[:-1] == existing_history
+        assert isinstance(result_messages[-1], ToolMessage)
+        assert result_messages[-1].content == ""
+        assert result_messages[-1].tool_call_id == tool_call_id
 
         # Check that no output was set in context (since output is None)
         assert "context" not in result
@@ -336,7 +348,13 @@ class TestFinalResponseNode:
         # Execute
         result = await node.run(state)
 
-        # Verify last message was used
-        tool_messages = result[FlowStateKeys.CONVERSATION_HISTORY][component_name]
-        assert tool_messages[0].tool_call_id == "last_tool_id"
+        # Verify all prior messages preserved and completion marker appended
+        result_messages = result[FlowStateKeys.CONVERSATION_HISTORY][component_name]
+        assert (
+            len(result_messages) == 3
+        ), "Expected 2 AI messages plus completion marker"
+        assert result_messages[0] == first_message
+        assert result_messages[1] == last_message
+        assert isinstance(result_messages[2], ToolMessage)
+        assert result_messages[2].tool_call_id == "last_tool_id"
         assert result["context"]["result"] == "Last response"
