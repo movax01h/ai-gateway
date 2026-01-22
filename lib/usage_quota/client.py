@@ -189,10 +189,7 @@ class UsageQuotaClient:
 
                 status = response.status_code
 
-                if status in (
-                    httpx.codes.PAYMENT_REQUIRED,
-                    httpx.codes.FORBIDDEN,
-                ):
+                if status == httpx.codes.PAYMENT_REQUIRED:
                     USAGE_QUOTA_CUSTOMERSDOT_REQUESTS_TOTAL.labels(
                         outcome="denied", status=str(status)
                     ).inc()
