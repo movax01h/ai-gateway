@@ -1,3 +1,4 @@
+#!/usr/bin/env python
 """Validate GraphQL query files for syntax errors."""
 
 import sys
