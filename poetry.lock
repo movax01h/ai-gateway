@@ -4643,14 +4643,14 @@ yaml = ["pyyaml (>=6.0.1)"]
 
 [[package]]
 name = "pyfakefs"
-version = "5.9.2"
+version = "5.10.2"
 description = "Implements a fake file system that mocks the Python file system modules."
 optional = false
 python-versions = ">=3.7"
 groups = ["test"]
 files = [
-    {file = "pyfakefs-5.9.2-py3-none-any.whl", hash = "sha256:8fcea36051d5b8827d49f5e2d242e91a51c5af6b78eeffa8e7adb899a6763e99"},
-    {file = "pyfakefs-5.9.2.tar.gz", hash = "sha256:66c5c6ccd4097b484f8782f9a5078fee0533d465e0d9caf594c9157d54382553"},
+    {file = "pyfakefs-5.10.2-py3-none-any.whl", hash = "sha256:6ff0e84653a71efc6a73f9ee839c3141e3a7cdf4e1fb97666f82ac5b24308d64"},
+    {file = "pyfakefs-5.10.2.tar.gz", hash = "sha256:8ae0e5421e08de4e433853a4609a06a1835f4bc2a3ce13b54f36713a897474ba"},
 ]
 
 [[package]]
