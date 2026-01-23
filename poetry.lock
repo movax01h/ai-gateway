@@ -2135,19 +2135,19 @@ protobuf = ["grpcio-tools (>=1.76.0)"]
 
 [[package]]
 name = "grpcio-reflection"
-version = "1.73.1"
+version = "1.76.0"
 description = "Standard Protobuf Reflection Service for gRPC"
 optional = false
 python-versions = ">=3.9"
 groups = ["main"]
 files = [
-    {file = "grpcio_reflection-1.73.1-py3-none-any.whl", hash = "sha256:a6b7680d4e3f0b9969183fd4af7611fd57c8cdc333037064d1a7f2d4ecbb3cc8"},
-    {file = "grpcio_reflection-1.73.1.tar.gz", hash = "sha256:2d6a420264e31e83e81114dd2586b5cd05a6c689b01dd5e2121d91f2b4e167f2"},
+    {file = "grpcio_reflection-1.76.0-py3-none-any.whl", hash = "sha256:d7c43f2047a2a9c9320a5905aa7133c677977436b5f63e6a868e507864a11c73"},
+    {file = "grpcio_reflection-1.76.0.tar.gz", hash = "sha256:e0e7e49921c2ee951e5ddff0bdbacbd1ac1a70888beb61d567f3d01b799decb1"},
 ]
 
 [package.dependencies]
-grpcio = ">=1.73.1"
-protobuf = ">=6.30.0,<7.0.0"
+grpcio = ">=1.76.0"
+protobuf = ">=6.31.1,<7.0.0"
 
 [[package]]
 name = "grpcio-status"
