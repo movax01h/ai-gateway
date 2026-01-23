@@ -432,7 +432,10 @@ class CreateWorkItemInput(ParentResourceInput):
         default=None, description="IDs of users to assign"
     )
     label_ids: Optional[List[str]] = Field(
-        default=None, description="IDs of labels to assign"
+        default=None,
+        description="""Label global IDs or numeric IDs to add to the work item..
+        Do not use label names like 'bug' - you must use numeric IDs (e.g., 123)
+        To find label IDs: First fetch the project labels, then pass the numeric IDs from the response.""",
     )
     confidential: Optional[bool] = Field(
         default=None, description="Set to true to create a confidential work item."
@@ -527,11 +530,13 @@ class UpdateWorkItemInput(WorkItemResourceInput):
     )
     add_label_ids: Optional[List[str]] = Field(
         default=None,
-        description="Label global IDs or numeric IDs to add to the work item.",
+        description="""Label global IDs or numeric IDs to add to the work item.
+        Do not use label names like 'bug' - you must use numeric IDs (e.g., 123)""",
     )
     remove_label_ids: Optional[List[str]] = Field(
         default=None,
-        description="Label global IDs or numeric IDs to remove from the work item.",
+        description="""Label global IDs or numeric IDs to add to the work item.
+        Do not use label names like 'bug' - you must use numeric IDs (e.g., 123).""",
     )
     hierarchy_widget: Optional[Dict[Literal["parent_id"], str]] = Field(
         default=None,
