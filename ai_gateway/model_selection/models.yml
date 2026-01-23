@@ -284,6 +284,7 @@ models:
     description: "OpenAI's best general-purpose model, part of the GPT-5 flagship model family."
     cost_indicator: "$$$"
     max_context_tokens: 400000 # https://platform.openai.com/docs/models/gpt-5
+    proxy_provider: openai
     family:
       - gpt_5
       - litellm
