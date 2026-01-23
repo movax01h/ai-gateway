@@ -4798,14 +4798,14 @@ pytest = "*"
 
 [[package]]
 name = "pytest-watcher"
-version = "0.4.3"
+version = "0.6.3"
 description = "Automatically rerun your tests on file modifications"
 optional = false
-python-versions = "<4.0.0,>=3.7.0"
+python-versions = ">=3.9"
 groups = ["test"]
 files = [
-    {file = "pytest_watcher-0.4.3-py3-none-any.whl", hash = "sha256:d59b1e1396f33a65ea4949b713d6884637755d641646960056a90b267c3460f9"},
-    {file = "pytest_watcher-0.4.3.tar.gz", hash = "sha256:0cb0e4661648c8c0ff2b2d25efa5a8e421784b9e4c60fcecbf9b7c30b2d731b3"},
+    {file = "pytest_watcher-0.6.3-py3-none-any.whl", hash = "sha256:83e7748c933087e8276edb6078663e6afa9926434b4fd8b85cf6b32b1d5bec89"},
+    {file = "pytest_watcher-0.6.3.tar.gz", hash = "sha256:842dc904264df0ad2d5264153a66bb452fccfa46598cd6e0a5ef1d19afed9b13"},
 ]
 
 [package.dependencies]
@@ -7551,4 +7551,4 @@ cffi = ["cffi (>=1.11)"]
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.12.0,<3.13.0"
-content-hash = "420a935457b0112047bdc5ee363f4a439f41932a836f06ffc2ccd7d6b21467f9"
+content-hash = "c884720a632d9f2d20166c66ecbcf79a444e0d971636fd2b0bec23b5df18ca9c"
