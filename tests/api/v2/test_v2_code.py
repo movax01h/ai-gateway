@@ -950,7 +950,7 @@ class TestCodeCompletions:
         assert response.text == expected_response
         assert response.headers["content-type"] == "text/event-stream; charset=utf-8"
 
-        completions_args = {
+        completions_args: dict[str, Any] = {
             "prefix": current_file["content_above_cursor"],
             "suffix": current_file["content_below_cursor"],
             "file_name": current_file["file_name"],
