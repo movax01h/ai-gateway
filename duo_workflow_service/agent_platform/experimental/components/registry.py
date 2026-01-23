@@ -30,7 +30,7 @@ class ComponentRegistry(Mapping):
 
     _instance: Optional[Self] = None
 
-    def __new__(cls, force_new: bool = False):
+    def __new__(cls, force_new: bool = False) -> Self:
         """Create a new instance or return singleton based on usage."""
         if force_new:
             # Return new instance without storing it
