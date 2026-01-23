@@ -30,8 +30,7 @@ MYPY_LINT_TODO_DIR ?= --exclude "ai_gateway/models/litellm.py" \
 	--exclude "ai_gateway/proxy/clients/anthropic.py" \
 	--exclude "ai_gateway/proxy/clients/openai.py" \
 	--exclude "tests/code_suggestions/test_completions.py" \
-	--exclude "tests/code_suggestions/test_container.py" \
-	--exclude "scripts/validate_graphql.py"
+	--exclude "tests/code_suggestions/test_container.py"
 
 EDITORCONFIG_LINT_WORKING_DIR ?=
 CODESPELL_LINT_WORKING_DIR ?= ${ROOT_DIR}
