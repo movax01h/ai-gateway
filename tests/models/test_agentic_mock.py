@@ -3,6 +3,7 @@ from unittest.mock import AsyncMock, Mock
 
 import pytest
 from langchain_core.messages import AIMessage, AIMessageChunk, HumanMessage
+from langchain_core.messages.tool import ToolCall
 from langchain_core.outputs import ChatGeneration, ChatGenerationChunk, ChatResult
 
 from ai_gateway.models.agentic_mock import AgenticFakeModel, ResponseHandler
@@ -11,7 +12,7 @@ from ai_gateway.models.agentic_mock import AgenticFakeModel, ResponseHandler
 class TestAgenticFakeModel:  # pylint: disable=too-many-public-methods
     @pytest.fixture
     def model(self):
-        return AgenticFakeModel()
+        return AgenticFakeModel(auto_tool_approval=False, use_last_human_message=False)
 
     @pytest.fixture
     def latency_messages(self):
@@ -102,6 +103,7 @@ class TestAgenticFakeModel:  # pylint: disable=too-many-public-methods
         assert model._llm_type == "agentic-fake-provider"
         assert model._identifying_params == {"model": "agentic-fake-model"}
         assert model._is_agentic_mock_model is True
+        assert model._is_auto_approved_by_agentic_mock_model is False
 
     def test_bind_tools_returns_self(self, model):
         result = model.bind_tools()
@@ -330,19 +332,23 @@ class TestAgenticFakeModel:  # pylint: disable=too-many-public-methods
 
 
 class TestResponseHandler:  # pylint: disable=too-many-public-methods
-    def test_response_handler_simple_response(self):
+    @pytest.mark.parametrize("use_last_human_message", [True, False])
+    def test_response_handler_simple_response(self, use_last_human_message):
         messages = [
             HumanMessage(content="Task: <response>Simple response text</response>")
         ]
 
-        handler = ResponseHandler(messages)
+        handler = ResponseHandler(
+            messages, use_last_human_message=use_last_human_message
+        )
         response = handler.get_next_response()
 
         assert response.content == "Simple response text"
         assert not response.tool_calls
         assert response.latency_ms == 0
 
-    def test_response_handler_with_tool_calls(self):
+    @pytest.mark.parametrize("use_last_human_message", [True, False])
+    def test_response_handler_with_tool_calls(self, use_last_human_message):
         messages = [
             HumanMessage(
                 content="Task: <response>Response with "
@@ -350,7 +356,9 @@ class TestResponseHandler:  # pylint: disable=too-many-public-methods
             )
         ]
 
-        handler = ResponseHandler(messages)
+        handler = ResponseHandler(
+            messages, use_last_human_message=use_last_human_message
+        )
         response = handler.get_next_response()
 
         assert response.content == "Response with tool call"
@@ -358,7 +366,8 @@ class TestResponseHandler:  # pylint: disable=too-many-public-methods
         assert response.tool_calls[0]["name"] == "search"
         assert response.tool_calls[0]["args"] == {"q": "test"}
 
-    def test_response_handler_prevents_infinite_loop(self):
+    @pytest.mark.parametrize("use_last_human_message", [True, False])
+    def test_response_handler_prevents_infinite_loop(self, use_last_human_message):
         messages = [
             HumanMessage(
                 content="<response>Task with tool call "
@@ -366,7 +375,9 @@ class TestResponseHandler:  # pylint: disable=too-many-public-methods
             )
         ]
 
-        handler = ResponseHandler(messages)
+        handler = ResponseHandler(
+            messages, use_last_human_message=use_last_human_message
+        )
 
         # First call returns the response with tool call
         response = handler.get_next_response()
@@ -378,7 +389,8 @@ class TestResponseHandler:  # pylint: disable=too-many-public-methods
         assert "all scripted responses exhausted" in response.content
         assert not response.tool_calls
 
-    def test_response_handler_multiple_latencies(self):
+    @pytest.mark.parametrize("use_last_human_message", [True, False])
+    def test_response_handler_multiple_latencies(self, use_last_human_message):
         messages = [
             HumanMessage(
                 content="""
@@ -389,7 +401,9 @@ class TestResponseHandler:  # pylint: disable=too-many-public-methods
             )
         ]
 
-        handler = ResponseHandler(messages)
+        handler = ResponseHandler(
+            messages, use_last_human_message=use_last_human_message
+        )
 
         response1 = handler.get_next_response()
         assert response1.content == "Fast response"
@@ -431,13 +445,13 @@ class TestResponseHandler:  # pylint: disable=too-many-public-methods
     ):
         messages = [HumanMessage(content=content)]
         with pytest.raises(ValueError, match=expected_error):
-            ResponseHandler(messages)
+            ResponseHandler(messages, use_last_human_message=False)
 
     def test_response_handler_latency_parsing_edge_cases(self):
         messages = [
             HumanMessage(content="<response latency_ms='invalid'>Test</response>")
         ]
-        handler = ResponseHandler(messages)
+        handler = ResponseHandler(messages, use_last_human_message=False)
         response = handler.get_next_response()
         assert response.latency_ms == 0
 
@@ -449,10 +463,101 @@ class TestResponseHandler:  # pylint: disable=too-many-public-methods
         ],
     )
     def test_response_handler_invalid_xml_returns_error_response(self, messages):
-        handler = ResponseHandler(messages)
+        handler = ResponseHandler(messages, use_last_human_message=False)
         response = handler.get_next_response()
 
         assert "invalid xml" in response.content.lower()
+
+    @pytest.mark.parametrize(
+        "messages,use_last_human_message,expected_content",
+        [
+            (
+                [
+                    HumanMessage(content="<response>test1</response>"),
+                    HumanMessage(content="<response>test2</response>"),
+                ],
+                False,
+                "test1",
+            ),
+            (
+                [
+                    HumanMessage(content="<response>test1</response>"),
+                    HumanMessage(content="<response>test2</response>"),
+                ],
+                True,
+                "test2",
+            ),
+        ],
+    )
+    def test_response_handler_with_use_last_human_message(
+        self, messages, use_last_human_message, expected_content
+    ):
+        handler = ResponseHandler(
+            messages, use_last_human_message=use_last_human_message
+        )
+        response = handler.get_next_response()
+
+        assert expected_content in response.content.lower()
+
+    @pytest.mark.parametrize(
+        "messages,expected_response",
+        [
+            (
+                [
+                    HumanMessage(
+                        content="""
+            <responses>
+                <response>
+                    Create an issue for an awesome feature.
+                    <tool_calls>[{"name": "create_work_item", "args": {"project_id": 1000000, "title": "Implement feature", "type_name": "Issue"}}]</tool_calls>
+                </response>
+                <response>Issue created</response>
+            </responses>
+                                """
+                    ),
+                ],
+                "Create an issue for an awesome feature.",
+            ),
+            (
+                [
+                    HumanMessage(
+                        content="""
+<responses>
+    <response>
+        Create an issue for an awesome feature.
+        <tool_calls>[{"name": "create_work_item", "args": {"project_id": 1000000, "title": "Implement feature", "type_name": "Issue"}}]</tool_calls>
+    </response>
+    <response>Issue created</response>
+</responses>
+                                """
+                    ),
+                    AIMessage(
+                        content="Create an issue for an awesome feature.",
+                        tool_calls=[
+                            ToolCall(
+                                name="create_work_item",
+                                args={
+                                    "project_id": 1000000,
+                                    "title": "Implement feature",
+                                    "type_name": "Issue",
+                                },
+                                id="call_1",
+                                type="tool_call",
+                            )
+                        ],
+                    ),
+                ],
+                "Issue created",
+            ),
+        ],
+    )
+    def test_response_handler_ignore_already_responded(
+        self, messages, expected_response
+    ):
+        handler = ResponseHandler(messages, use_last_human_message=True)
+        response = handler.get_next_response()
+
+        assert expected_response == response.content
 
     @pytest.mark.parametrize(
         "messages",
@@ -466,7 +571,7 @@ class TestResponseHandler:  # pylint: disable=too-many-public-methods
         ],
     )
     def test_response_handler_no_response_tags_in_user_input(self, messages):
-        handler = ResponseHandler(messages)
+        handler = ResponseHandler(messages, use_last_human_message=False)
 
         response = handler.get_next_response()
         assert response.content == "mock response (no response tag specified)"
@@ -483,7 +588,7 @@ class TestResponseHandler:  # pylint: disable=too-many-public-methods
             )
         ]
 
-        handler = ResponseHandler(messages)
+        handler = ResponseHandler(messages, use_last_human_message=False)
 
         response1 = handler.get_next_response()
         assert response1.content == "Streaming response"
@@ -506,7 +611,7 @@ class TestResponseHandler:  # pylint: disable=too-many-public-methods
 
         messages = [HumanMessage(content=f'<response file="{response_file}" />')]
 
-        handler = ResponseHandler(messages)
+        handler = ResponseHandler(messages, use_last_human_message=False)
         response = handler.get_next_response()
 
         assert response.content == "Response from file"
@@ -521,7 +626,7 @@ class TestResponseHandler:  # pylint: disable=too-many-public-methods
 
         messages = [HumanMessage(content=f'<response file="{response_file}" />')]
 
-        handler = ResponseHandler(messages)
+        handler = ResponseHandler(messages, use_last_human_message=False)
         response = handler.get_next_response()
 
         assert response.content == "I will search for information."
@@ -537,7 +642,7 @@ class TestResponseHandler:  # pylint: disable=too-many-public-methods
 
         # First handler loads the file
         messages1 = [HumanMessage(content=f'<response file="{response_file}" />')]
-        handler1 = ResponseHandler(messages1)
+        handler1 = ResponseHandler(messages1, use_last_human_message=False)
         response1 = handler1.get_next_response()
 
         assert str(response_file) in ResponseHandler._file_cache
@@ -547,7 +652,7 @@ class TestResponseHandler:  # pylint: disable=too-many-public-methods
 
         # Second handler should use cached content
         messages2 = [HumanMessage(content=f'<response file="{response_file}" />')]
-        handler2 = ResponseHandler(messages2)
+        handler2 = ResponseHandler(messages2, use_last_human_message=False)
         response2 = handler2.get_next_response()
 
         # Should still have original cached content
@@ -561,7 +666,7 @@ class TestResponseHandler:  # pylint: disable=too-many-public-methods
         messages = [HumanMessage(content='<response file="nonexistent_file.txt" />')]
 
         with pytest.raises(FileNotFoundError, match="Response file not found"):
-            ResponseHandler(messages)
+            ResponseHandler(messages, use_last_human_message=False)
 
     def test_response_handler_template_variables(self, tmp_path):
         content_file = tmp_path / "template_vars.txt"
@@ -584,7 +689,7 @@ class TestResponseHandler:  # pylint: disable=too-many-public-methods
             )
         ]
 
-        handler = ResponseHandler(messages)
+        handler = ResponseHandler(messages, use_last_human_message=False)
 
         response = handler.get_next_response()
         assert response.content == "Project ID is 1000001 in test-namespace"
@@ -601,7 +706,7 @@ class TestResponseHandler:  # pylint: disable=too-many-public-methods
             )
         ]
 
-        handler = ResponseHandler(messages)
+        handler = ResponseHandler(messages, use_last_human_message=False)
         response = handler.get_next_response()
 
         assert response.content == "Delayed streaming response"
@@ -623,7 +728,7 @@ class TestResponseHandler:  # pylint: disable=too-many-public-methods
 
         messages = [HumanMessage(content=f'<response file="{response_file}" />')]
 
-        handler = ResponseHandler(messages)
+        handler = ResponseHandler(messages, use_last_human_message=False)
         response = handler.get_next_response()
 
         assert response.content.startswith("Creating a Python function.")
@@ -642,7 +747,7 @@ class TestResponseHandler:  # pylint: disable=too-many-public-methods
                 """
             )
         ]
-        handler = ResponseHandler(messages)
+        handler = ResponseHandler(messages, use_last_human_message=False)
         # Should still create handler with empty template_vars
         assert handler.template_vars == {}
         response = handler.get_next_response()
@@ -660,7 +765,7 @@ class TestResponseHandler:  # pylint: disable=too-many-public-methods
                 """
             )
         ]
-        handler = ResponseHandler(messages)
+        handler = ResponseHandler(messages, use_last_human_message=False)
         response = handler.get_next_response()
         # Should return content as-is when rendering fails
         assert "Project" in response.content
@@ -671,7 +776,7 @@ class TestResponseHandler:  # pylint: disable=too-many-public-methods
 
         messages = [HumanMessage(content=f'<response file="{response_file}" />')]
 
-        handler = ResponseHandler(messages)
+        handler = ResponseHandler(messages, use_last_human_message=False)
         response = handler.get_next_response()
         # Should extract text before the unclosed tag
         assert "Text before" in response.content
@@ -679,7 +784,7 @@ class TestResponseHandler:  # pylint: disable=too-many-public-methods
         assert len(response.tool_calls) == 0
 
     def test_stream_tool_calls_with_large_json(self):
-        model = AgenticFakeModel()
+        model = AgenticFakeModel(auto_tool_approval=False, use_last_human_message=False)
         # Create a tool call with large args to trigger multiple chunks (chunk_size is 100)
         large_data = "x" * 150
 
@@ -728,7 +833,7 @@ class TestResponseHandler:  # pylint: disable=too-many-public-methods
             )
         ]
 
-        handler = ResponseHandler(messages)
+        handler = ResponseHandler(messages, use_last_human_message=False)
         response = handler.get_next_response()
         # Should extract all text including nested elements
         assert "Text before" in response.content

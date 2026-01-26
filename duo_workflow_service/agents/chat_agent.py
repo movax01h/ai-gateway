@@ -55,7 +55,9 @@ class ChatAgent:
                 and self.tools_registry.approval_required(call["name"])
                 and call["name"] not in preapproved_tools
                 and not getattr(
-                    self.prompt_adapter.get_model(), "_is_agentic_mock_model", False
+                    self.prompt_adapter.get_model(),
+                    "_is_auto_approved_by_agentic_mock_model",
+                    False,
                 )
             ):
                 approval_required = True
