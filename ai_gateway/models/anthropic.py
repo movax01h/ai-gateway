@@ -239,7 +239,7 @@ class AnthropicChatModel(ChatModelBase):
     }
 
     OPTS_MODEL = {
-        "timeout": httpx.Timeout(30.0, connect=5.0),
+        "timeout": httpx.Timeout(90.0, connect=5.0),
         "max_tokens": 4096,
         "stop_sequences": NOT_GIVEN,
         "temperature": 0.2,

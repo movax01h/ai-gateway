@@ -21,7 +21,7 @@ class ChatAnthropic(_LChatAnthropic):
     async_client: AsyncAnthropic
     """Anthropic async HTTP client."""
 
-    default_request_timeout: float | None = 60.0
+    default_request_timeout: float | None = 90.0
     """Timeout for requests to Anthropic Completion API."""
 
     # sdk default = 2: https://github.com/anthropics/anthropic-sdk-python?tab=readme-ov-file#retries
