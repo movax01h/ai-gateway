@@ -170,9 +170,11 @@ class ToolsExecutor:
         for invalid_tool_call in invalid_tool_calls:
             error_content = "Invalid or unparsable tool call received."
 
+            tool_call_id = invalid_tool_call["id"]
+
             error_response = ToolMessage(
                 content=error_content,
-                tool_call_id=invalid_tool_call["id"],
+                tool_call_id=tool_call_id,
             )
 
             responses.append(
@@ -189,8 +191,26 @@ class ToolsExecutor:
                     correlation_id=None,
                     tool_info=None,
                     additional_context=None,
-                    message_id=invalid_tool_call["id"],
+                    message_id=tool_call_id,
                 )
+            )
+
+            # Log invalid tool calls for debugging. Check if the invalid tool call ID also appears
+            # in valid tool_calls (which would indicate an issue with a valid tool call structure)
+            # and may cause error tracking issues.
+            is_in_tool_calls = tool_call_id in {
+                tool_call["id"] for tool_call in tool_calls
+            }
+            tool_present_message = (
+                "Invalid tool is not present in the list of tool calls"
+            )
+            if is_in_tool_calls:
+                tool_present_message = (
+                    "Invalid tool is also present in the list of tool calls"
+                )
+
+            self._logger.error(
+                f"invalid tool call with id {tool_call_id}. {tool_present_message}"
             )
 
         responses.append(
