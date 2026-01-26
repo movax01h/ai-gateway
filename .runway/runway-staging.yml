@@ -18,7 +18,7 @@ spec:
     - europe-west9
   deployment:
     strategy: "expedited"
-  request_timeout: 60
+  request_timeout: 90
   observability:
     scrape_targets:
       - "localhost:8082"
