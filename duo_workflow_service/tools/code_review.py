@@ -9,6 +9,7 @@ from typing import Any, Dict, List, Optional, Type
 from urllib.parse import quote
 
 import yaml
+from jinja2 import Template
 from pydantic import BaseModel, Field
 
 from duo_workflow_service.policies.diff_exclusion_policy import DiffExclusionPolicy
@@ -170,24 +171,29 @@ class BuildReviewMergeRequestContext(DuoBaseTool):
             validation_result.project_id, target_branch, diff_file_paths
         )
 
+        renamed_files = {}
+        for diff in diffs_data:
+            if diff.get("renamed_file", False):
+                renamed_files[diff.get("new_path")] = diff.get("old_path")
+
+        mr_context_data = {
+            "mr_data": mr_data,
+            "diffs_and_paths": diffs_and_paths,
+            "custom_instructions": custom_instructions,
+            "renamed_files": renamed_files,
+        }
+
         # If only_diffs is True, skip fetching original files and custom instructions
         if only_diffs:
-            return {
-                "mr_data": mr_data,
-                "diffs_and_paths": diffs_and_paths,
-                "custom_instructions": custom_instructions,
-            }
+            return mr_context_data
 
         files_content = await self._fetch_original_files(
             validation_result.project_id, target_branch, modified_files
         )
 
-        return {
-            "mr_data": mr_data,
-            "diffs_and_paths": diffs_and_paths,
-            "files_content": files_content,
-            "custom_instructions": custom_instructions,
-        }
+        mr_context_data["files_content"] = files_content
+
+        return mr_context_data
 
     async def _fetch_mr_data(self, validation_result) -> Dict[str, Any]:
         """Fetch merge request metadata."""
@@ -411,7 +417,10 @@ class BuildReviewMergeRequestContext(DuoBaseTool):
         custom_instructions_section = self._format_custom_instructions(
             context.get("custom_instructions", [])
         )
-        diff_section = self._format_diffs(context["diffs_and_paths"])
+
+        diff_section = self._format_diffs(
+            context["diffs_and_paths"], context["renamed_files"]
+        )
         files_section = self._format_original_files(context.get("files_content", {}))
 
         # Unique delimiters per request - unpredictable to attackers
@@ -478,17 +487,37 @@ Example: "According to custom instructions in 'Security Best Practices' (validat
 This formatting is only required for custom instruction comments. Regular review comments based on standard review criteria should NOT include this prefix.
 </custom_instructions>"""
 
-    def _format_diffs(self, diffs_and_paths: Dict[str, str]) -> str:
+    def _format_diffs(
+        self, diffs_and_paths: Dict[str, str], renamed_files: Dict[str, str]
+    ) -> str:
         """Format diffs section with structured line format."""
-        formatted_diffs = []
 
+        file_paths_formatted_diffs = {}
         for file_path, diff_content in diffs_and_paths.items():
-            formatted_lines = self._parse_and_format_diff(diff_content)
-            formatted_diffs.append(
-                f'<file_diff filename="{file_path}">\n{formatted_lines}\n</file_diff>'
+            file_paths_formatted_diffs[file_path] = self._parse_and_format_diff(
+                diff_content
             )
 
-        return "\n\n".join(formatted_diffs)
+            template = Template(
+                """{% for file_path, formatted_lines in file_paths_formatted_diffs.items() -%}
+<file_diff filename="{{ file_path }}">
+{{ formatted_lines }}
+</file_diff>
+
+{% endfor -%}
+{% if renamed_files -%}
+<renamed_files>
+{% for new_path, old_path in renamed_files.items() -%}
+<file old_path="{{ old_path }}" new_path="{{ new_path }}"></file>
+{% endfor -%}
+</renamed_files>
+{% endif -%}"""
+            )
+
+        return template.render(
+            file_paths_formatted_diffs=file_paths_formatted_diffs,
+            renamed_files=renamed_files,
+        )
 
     def _parse_and_format_diff(self, raw_diff: str) -> str:
         """Parse raw diff and format each line with type and line numbers."""

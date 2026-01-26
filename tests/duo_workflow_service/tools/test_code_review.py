@@ -60,6 +60,7 @@ def diffs_data_fixture():
             "new_path": "calculator.rb",
             "new_file": False,
             "generated_file": False,
+            "renamed_file": False,
             "diff": "@@ -4,7 +4,7 @@ class Calculator\n   end\n \n   def subtract(a, b)\n-    # TODO: Implement\n+    a + b\n   end\n end",
         },
         {
@@ -67,6 +68,7 @@ def diffs_data_fixture():
             "new_path": "app.log",
             "new_file": False,
             "generated_file": False,
+            "renamed_file": False,
             "diff": "@@ -1,3 +1,3 @@\n-old log\n+new log",
         },
         {
@@ -74,7 +76,46 @@ def diffs_data_fixture():
             "new_path": "generated.js",
             "new_file": False,
             "generated_file": True,
+            "renamed_file": False,
             "diff": "@@ -1,3 +1,3 @@\n-old\n+new",
+        },
+    ]
+
+
+@pytest.fixture(name="diffs_data_with_renames")
+def diffs_data_with_renames_fixture():
+    return [
+        {
+            "old_path": "todo.rb",
+            "new_path": "calculator.rb",
+            "new_file": False,
+            "generated_file": False,
+            "renamed_file": True,
+            "diff": "@@ -4,7 +4,7 @@ class Calculator\n   end\n \n   def subtract(a, b)\n-    # TODO: Implement\n+    a + b\n   end\n end",
+        },
+        {
+            "old_path": "app.log",
+            "new_path": "app.log",
+            "new_file": False,
+            "generated_file": False,
+            "renamed_file": False,
+            "diff": "@@ -1,3 +1,3 @@\n-old log\n+new log",
+        },
+        {
+            "old_path": "generated.js",
+            "new_path": "generated.js",
+            "new_file": False,
+            "generated_file": True,
+            "renamed_file": False,
+            "diff": "@@ -1,3 +1,3 @@\n-old\n+new",
+        },
+        {
+            "old_path": "README.md",
+            "new_path": "Calculator.md",
+            "new_file": False,
+            "generated_file": True,
+            "renamed_file": True,
+            "diff": "",  # This is a renamed file that has no content change
         },
     ]
 
@@ -296,6 +337,67 @@ async def test_build_review_context_basic_success(
     assert '<line type="deleted"' in response
     assert '<line type="added"' in response
     assert "</file_diff>" in response
+
+    # Verify excluded files are not present
+    assert "app.log" not in response
+    assert "generated.js" not in response
+
+    assert "<original_files>" in response
+    assert "</input>" in response
+
+
+@pytest.mark.asyncio
+async def test_build_review_context_with_renames(
+    gitlab_client_mock,
+    metadata,
+    mr_data,
+    diffs_data_with_renames,
+):
+    original_file_content = {
+        "content": base64.b64encode(
+            b"class Calculator\n  def subtract(a, b)\n    # TODO: Implement\n  end\nend"
+        ).decode("utf-8")
+    }
+    gitlab_client_mock.aget = AsyncMock(
+        side_effect=[
+            GitLabHttpResponse(status_code=200, body=json.dumps(mr_data)),
+            GitLabHttpResponse(
+                status_code=200, body=json.dumps(diffs_data_with_renames)
+            ),
+            Exception("Custom instructions not found"),
+            GitLabHttpResponse(status_code=200, body=json.dumps(original_file_content)),
+        ]
+    )
+    tool = BuildReviewMergeRequestContext(metadata=metadata)
+    response = await tool._arun(project_id="test%2Fproject", merge_request_iid=123)
+
+    # Check for BOUNDARY_ID and unique delimiters
+    assert "BOUNDARY_ID:" in response
+    assert "═══UNTRUSTED_CONTENT_START_" in response
+    assert "═══UNTRUSTED_CONTENT_END_" in response
+
+    assert "Here are the merge request details for you to review:" in response
+    assert "<input>" in response
+    assert "<mr_title>" in response
+    assert "Implement calculator method" in response
+    assert "<mr_description>" in response
+    assert "Add subtract method to calculator" in response
+    assert "<git_diffs>" in response
+
+    # Check new structured diff format
+    assert '<file_diff filename="calculator.rb">' in response
+    assert "<chunk_header>" in response
+    assert '<line type="context"' in response
+    assert '<line type="deleted"' in response
+    assert '<line type="added"' in response
+    assert "</file_diff>" in response
+
+    assert "<renamed_files>" in response
+    assert "</renamed_files>" in response
+
+    # Check renamed files
+    assert '<file old_path="README.md" new_path="Calculator.md"></file>' in response
+    assert '<file old_path="todo.rb" new_path="calculator.rb"></file>' in response
 
     # Verify excluded files are not present
     assert "app.log" not in response
