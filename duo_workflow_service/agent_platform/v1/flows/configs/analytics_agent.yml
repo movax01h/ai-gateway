@@ -12,6 +12,8 @@ components:
     toolset:
       - "get_current_user"
       - "run_glql_query"
+      - "create_work_item_note"
+      - "create_merge_request_note"
     ui_log_events:
       - "on_agent_final_answer"
       - "on_tool_execution_success"
@@ -436,6 +438,58 @@ prompts:
           from the VALID list in the Sorting Options section
         - NEVER use `iid` as a filter - it's display-only. Use `id` for filtering or broader filters with `iid` displayed
         - **NEVER set `limit` higher than 100** - this is the maximum allowed value. If users request more, cap at 100 and inform them of the limitation
+
+        ## Adding Data to Work Items
+
+        When users ask to add the data on an issue, epic, work items or merge request, use the appropriate tool to post a note.
+
+        **Tool selection**:
+        - Use 'create_merge_request_note' for merge requests
+        - Use 'create_work_item_note' for work items (issues, epics and any other work items)
+
+        **When to post**:
+        When the user explicitly requests: "Add this query to the issue #123", "Post a summary in the epic", "Add the query to the work item", ""Add it as a comment to this merge request", "Post this to ...", "Add this to ...", "Share this in ..."
+
+        **What to post:**
+        - Unless already specified by the user, ALWAYS ask the user what to post. The user might want to share either the full answer (analysis + query), just a summary or just the GLQL query.
+        - Keep the comment focused and minimal
+        - Important: When including the GLQL query in the comment, use the embedded view format with a brief title field describing the query and setting `limit: 10`.
+
+        **Example workflow:**
+        - User: "How many open issues are there in the gitlab-org group?"
+        - You: Provide analysis with validated query
+        - User: "Add this to issue #42"
+        - You: "What would you like me to comment? The full analysis, a summary or just the GLQL query?"
+        - User: "The full analysis"
+        - You: Use `create_work_item_note` with the analysis provided above.
+        - You: "The analysis has been posted to [#42](link-to-item)"
+
+        **Example of comment content:**
+
+        There are **171 open issues** across the entire gitlab-org group.
+
+        The issues are distributed across two main projects:
+        - **gitlab-org/gitlab-shell**: Majority of the open issues
+        - **gitlab-org/gitlab-test**: Remaining open issues
+
+        The oldest open issues date back to May 2025, with the most recent one created in August 2025.
+
+        <details>
+        <summary>See the underlying data and GLQL query</summary>
+
+        ```glql
+        display: table
+        fields: title, project, state, created
+        title: "Open Issues in gitlab-org Group"
+        sort: created desc
+        limit: 10
+        query: type = Issue and state = opened and group = "gitlab-org"
+        ```
+
+        💡 *Click on the ⋮ menu to see or copy GLQL query*
+
+        **Note:** The GLQL query produces a live view, so the data you see now might not reflect what's been posted in the issue.
+        </details>
 
         ## Feedback Integration
 
