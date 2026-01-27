@@ -17,6 +17,7 @@ from ai_gateway.config import (
     ConfigLogging,
     ConfigModelEndpoints,
     ConfigModelLimits,
+    ConfigProcessLevelFeatureFlags,
     ConfigSnowplow,
     ConfigVertexSearch,
     ConfigVertexTextModel,
@@ -133,6 +134,27 @@ def test_config_auth_bypass_external(values: dict, expected: ConfigAuth):
         config = Config(_env_file=None)
 
         assert config.auth == expected
+
+
+@pytest.mark.parametrize(
+    ("values", "expected"),
+    [
+        ({}, ConfigProcessLevelFeatureFlags()),
+        (
+            {
+                "AIGW_PROCESS_LEVEL_FEATURE_FLAGS__DUO_CLASSIC_CHAT_DUO_CORE_CUTOFF": "yes"
+            },
+            ConfigProcessLevelFeatureFlags(duo_classic_chat_duo_core_cutoff=True),
+        ),
+    ],
+)
+def test_config_process_level_feature_flags(
+    values: dict, expected: ConfigProcessLevelFeatureFlags
+):
+    with mock.patch.dict(os.environ, values, clear=True):
+        config = Config(_env_file=None)
+
+        assert config.process_level_feature_flags == expected
 
 
 @pytest.mark.parametrize(
