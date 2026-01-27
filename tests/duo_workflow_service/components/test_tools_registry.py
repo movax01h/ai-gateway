@@ -24,9 +24,7 @@ from duo_workflow_service.tools.findings.list_security_findings import (
     ListSecurityFindings,
 )
 from duo_workflow_service.tools.gitlab_api_generic import GitLabApiGet, GitLabGraphQL
-from duo_workflow_service.tools.mcp_tools import (
-    convert_mcp_tools_to_langchain_tool_classes,
-)
+from duo_workflow_service.tools.mcp_tools import convert_mcp_tools_to_configs
 from duo_workflow_service.tools.vulnerabilities.get_vulnerability_details import (
     GetVulnerabilityDetails,
 )
@@ -49,9 +47,9 @@ def mcp_tools_fixture():
     mcp_tool_mock = MagicMock()
     mcp_tool_mock.name = "extra_tool"
     mcp_tool_mock.description = "extra tool description"
-    mcp_tool_mock.inputSchema = ""
+    mcp_tool_mock.inputSchema = "{}"
 
-    return convert_mcp_tools_to_langchain_tool_classes(mcp_tools=[mcp_tool_mock])
+    return convert_mcp_tools_to_configs(mcp_tools=[mcp_tool_mock])
 
 
 _outbox = MagicMock(spec=Outbox)
