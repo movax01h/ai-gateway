@@ -149,7 +149,7 @@ async def test_list_tools(
     mock_readonly_tools,
     mock_default_tools,
 ):
-    ## avoid duplicated mock tool with the same tool name
+    # avoid duplicated mock tool with the same tool name
     _tool_class_cache = {}
 
     def create_mock_tool(name: str, eval_prompts: Optional[List[str]] = None):
@@ -1264,6 +1264,166 @@ async def test_next_client_event_client_streaming_closed():
     mock_iterator.__next__.side_effect = StopAsyncIteration
     result = await next_client_event(mock_iterator)
     assert result is None
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "request_ids,expected_action_ids",
+    [
+        (
+            ["request-1", "request-2", "request-3"],
+            ["request-1", "request-2", "request-3"],
+        ),
+        (["single-request"], ["single-request"]),
+        ([], []),
+        (
+            ["req-a", "req-b", "req-c", "req-d", "req-e"],
+            ["req-a", "req-b", "req-c", "req-d", "req-e"],
+        ),
+    ],
+)
+async def test_self_hosted_execute_workflow(request_ids, expected_action_ids):
+    """Test that TrackSelfHostedExecuteWorkflow echoes back client events with matching requestID."""
+    user = CloudConnectorUser(
+        authenticated=True,
+        claims=UserClaims(
+            issuer="gitlab.com",
+            scopes=["duo_agent_platform"],
+        ),
+    )
+    user.can = MagicMock(return_value=True)
+    current_user.set(user)
+
+    async def mock_request_iterator() -> (
+        AsyncIterable[contract_pb2.TrackSelfHostedClientEvent]
+    ):
+        for request_id in request_ids:
+            yield contract_pb2.TrackSelfHostedClientEvent(
+                requestID=request_id,
+                workflowID="test-workflow",
+                featureQualifiedName="test_feature",
+                featureAiCatalogItem=True,
+            )
+
+    mock_context = MagicMock(spec=grpc.ServicerContext)
+    servicer = DuoWorkflowService()
+
+    result = servicer.TrackSelfHostedExecuteWorkflow(
+        mock_request_iterator(),
+        mock_context,
+        billing_event_client=MagicMock(),
+    )
+
+    assert isinstance(result, AsyncIterable)
+
+    received_action_ids = []
+    async for action in result:
+        assert isinstance(action, contract_pb2.TrackSelfHostedAction)
+        received_action_ids.append(action.requestID)
+
+    assert received_action_ids == expected_action_ids
+
+
+@pytest.mark.asyncio
+@patch.dict(os.environ, {"CLOUD_CONNECTOR_SERVICE_NAME": "gitlab-duo-workflow-service"})
+async def test_track_self_hosted_execute_workflow_unauthorized():
+    user = CloudConnectorUser(
+        authenticated=True,
+        is_debug=False,
+        claims=UserClaims(
+            issuer="gitlab.com",
+            scopes=["duo_chat"],
+        ),
+    )
+    user.can = MagicMock(return_value=False)
+    current_user.set(user)
+
+    mock_context = MagicMock(spec=grpc.ServicerContext)
+    mock_context.abort = AsyncMock(side_effect=grpc.RpcError("Aborted"))
+
+    async def mock_request_iterator() -> (
+        AsyncIterable[contract_pb2.TrackSelfHostedClientEvent]
+    ):
+        yield contract_pb2.TrackSelfHostedClientEvent(
+            requestID="test-req",
+            workflowID="test-workflow",
+            featureQualifiedName="test_feature",
+            featureAiCatalogItem=True,
+        )
+
+    servicer = DuoWorkflowService()
+    result_generator = servicer.TrackSelfHostedExecuteWorkflow(
+        mock_request_iterator(),
+        mock_context,
+        billing_event_client=MagicMock(),
+    )
+
+    with pytest.raises(grpc.RpcError):
+        _ = [action async for action in result_generator]
+
+    user.can.assert_called_once_with(
+        unit_primitive=GitLabUnitPrimitive.DUO_AGENT_PLATFORM,
+        disallowed_issuers=[CloudConnectorConfig().service_name],
+    )
+
+    mock_context.abort.assert_called_once_with(
+        grpc.StatusCode.PERMISSION_DENIED,
+        "Unauthorized to track self-hosted workflow execution",
+    )
+
+
+@pytest.mark.asyncio
+async def test_track_self_hosted_execute_workflow_billing_event():
+    user = CloudConnectorUser(
+        authenticated=True,
+        claims=UserClaims(
+            issuer="gitlab.com",
+            scopes=["duo_agent_platform"],
+        ),
+    )
+    user.can = MagicMock(return_value=True)
+    current_user.set(user)
+
+    mock_context = MagicMock(spec=grpc.ServicerContext)
+    mock_billing_client = MagicMock()
+
+    async def mock_request_iterator() -> (
+        AsyncIterable[contract_pb2.TrackSelfHostedClientEvent]
+    ):
+        yield contract_pb2.TrackSelfHostedClientEvent(
+            requestID="test-req-id",
+            workflowID="test-workflow-id",
+            featureQualifiedName="test_feature",
+            featureAiCatalogItem=True,
+        )
+
+    servicer = DuoWorkflowService()
+    result = servicer.TrackSelfHostedExecuteWorkflow(
+        mock_request_iterator(),
+        mock_context,
+        billing_event_client=mock_billing_client,
+    )
+
+    actions = [action async for action in result]
+    assert len(actions) == 1
+    assert actions[0].requestID == "test-req-id"
+
+    mock_billing_client.track_billing_event.assert_called_once()
+    call_args = mock_billing_client.track_billing_event.call_args
+    assert call_args.kwargs["user"] == user
+    assert call_args.kwargs["category"] == "DuoWorkflowService"
+    assert call_args.kwargs["unit_of_measure"] == "request"
+    assert call_args.kwargs["quantity"] == 1
+
+    metadata = call_args.kwargs["metadata"]
+    assert metadata["workflow_id"] == "test-workflow-id"
+    assert metadata["feature_qualified_name"] == "test_feature"
+    assert metadata["feature_ai_catalog_item"] is True
+    assert metadata["execution_environment"] == "duo_agent_platform"
+    assert "llm_operations" in metadata
+    assert len(metadata["llm_operations"]) == 1
+    assert metadata["llm_operations"][0]["model_id"] == "self-hosted-model"
+    assert metadata["llm_operations"][0]["token_count"] == 1
 
 
 @pytest.mark.asyncio

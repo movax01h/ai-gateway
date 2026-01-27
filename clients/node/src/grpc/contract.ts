@@ -94,6 +94,13 @@ export interface Action {
   mkdir?: Mkdir | undefined;
   runReadFiles?: ReadFiles | undefined;
   runShellCommand?: RunShellCommand | undefined;
+  trackLlmCallForSelfHosted?: TrackLlmCallForSelfHosted | undefined;
+}
+
+export interface TrackLlmCallForSelfHosted {
+  workflowID: string;
+  featureQualifiedName: string;
+  featureAiCatalogItem: boolean;
 }
 
 export interface RunShellCommand {
@@ -241,6 +248,17 @@ export interface ShellInformationContext {
   shell_environment?: string | undefined;
   ssh_session?: boolean | undefined;
   cwd?: string | undefined;
+}
+
+export interface TrackSelfHostedClientEvent {
+  requestID: string;
+  workflowID: string;
+  featureQualifiedName: string;
+  featureAiCatalogItem: boolean;
+}
+
+export interface TrackSelfHostedAction {
+  requestID: string;
 }
 
 function createBaseClientEvent(): ClientEvent {
@@ -1144,6 +1162,7 @@ function createBaseAction(): Action {
     mkdir: undefined,
     runReadFiles: undefined,
     runShellCommand: undefined,
+    trackLlmCallForSelfHosted: undefined,
   };
 }
 
@@ -1193,6 +1212,9 @@ export const Action: MessageFns<Action> = {
     }
     if (message.runShellCommand !== undefined) {
       RunShellCommand.encode(message.runShellCommand, writer.uint32(122).fork()).join();
+    }
+    if (message.trackLlmCallForSelfHosted !== undefined) {
+      TrackLlmCallForSelfHosted.encode(message.trackLlmCallForSelfHosted, writer.uint32(130).fork()).join();
     }
     return writer;
   },
@@ -1324,6 +1346,14 @@ export const Action: MessageFns<Action> = {
           message.runShellCommand = RunShellCommand.decode(reader, reader.uint32());
           continue;
         }
+        case 16: {
+          if (tag !== 130) {
+            break;
+          }
+
+          message.trackLlmCallForSelfHosted = TrackLlmCallForSelfHosted.decode(reader, reader.uint32());
+          continue;
+        }
       }
       if ((tag & 7) === 4 || tag === 0) {
         break;
@@ -1350,6 +1380,9 @@ export const Action: MessageFns<Action> = {
       mkdir: isSet(object.mkdir) ? Mkdir.fromJSON(object.mkdir) : undefined,
       runReadFiles: isSet(object.runReadFiles) ? ReadFiles.fromJSON(object.runReadFiles) : undefined,
       runShellCommand: isSet(object.runShellCommand) ? RunShellCommand.fromJSON(object.runShellCommand) : undefined,
+      trackLlmCallForSelfHosted: isSet(object.trackLlmCallForSelfHosted)
+        ? TrackLlmCallForSelfHosted.fromJSON(object.trackLlmCallForSelfHosted)
+        : undefined,
     };
   },
 
@@ -1400,6 +1433,9 @@ export const Action: MessageFns<Action> = {
     if (message.runShellCommand !== undefined) {
       obj.runShellCommand = RunShellCommand.toJSON(message.runShellCommand);
     }
+    if (message.trackLlmCallForSelfHosted !== undefined) {
+      obj.trackLlmCallForSelfHosted = TrackLlmCallForSelfHosted.toJSON(message.trackLlmCallForSelfHosted);
+    }
     return obj;
   },
 
@@ -1447,6 +1483,104 @@ export const Action: MessageFns<Action> = {
     message.runShellCommand = (object.runShellCommand !== undefined && object.runShellCommand !== null)
       ? RunShellCommand.fromPartial(object.runShellCommand)
       : undefined;
+    message.trackLlmCallForSelfHosted =
+      (object.trackLlmCallForSelfHosted !== undefined && object.trackLlmCallForSelfHosted !== null)
+        ? TrackLlmCallForSelfHosted.fromPartial(object.trackLlmCallForSelfHosted)
+        : undefined;
+    return message;
+  },
+};
+
+function createBaseTrackLlmCallForSelfHosted(): TrackLlmCallForSelfHosted {
+  return { workflowID: "", featureQualifiedName: "", featureAiCatalogItem: false };
+}
+
+export const TrackLlmCallForSelfHosted: MessageFns<TrackLlmCallForSelfHosted> = {
+  encode(message: TrackLlmCallForSelfHosted, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
+    if (message.workflowID !== "") {
+      writer.uint32(10).string(message.workflowID);
+    }
+    if (message.featureQualifiedName !== "") {
+      writer.uint32(18).string(message.featureQualifiedName);
+    }
+    if (message.featureAiCatalogItem !== false) {
+      writer.uint32(24).bool(message.featureAiCatalogItem);
+    }
+    return writer;
+  },
+
+  decode(input: BinaryReader | Uint8Array, length?: number): TrackLlmCallForSelfHosted {
+    const reader = input instanceof BinaryReader ? input : new BinaryReader(input);
+    const end = length === undefined ? reader.len : reader.pos + length;
+    const message = createBaseTrackLlmCallForSelfHosted();
+    while (reader.pos < end) {
+      const tag = reader.uint32();
+      switch (tag >>> 3) {
+        case 1: {
+          if (tag !== 10) {
+            break;
+          }
+
+          message.workflowID = reader.string();
+          continue;
+        }
+        case 2: {
+          if (tag !== 18) {
+            break;
+          }
+
+          message.featureQualifiedName = reader.string();
+          continue;
+        }
+        case 3: {
+          if (tag !== 24) {
+            break;
+          }
+
+          message.featureAiCatalogItem = reader.bool();
+          continue;
+        }
+      }
+      if ((tag & 7) === 4 || tag === 0) {
+        break;
+      }
+      reader.skip(tag & 7);
+    }
+    return message;
+  },
+
+  fromJSON(object: any): TrackLlmCallForSelfHosted {
+    return {
+      workflowID: isSet(object.workflowID) ? globalThis.String(object.workflowID) : "",
+      featureQualifiedName: isSet(object.featureQualifiedName) ? globalThis.String(object.featureQualifiedName) : "",
+      featureAiCatalogItem: isSet(object.featureAiCatalogItem)
+        ? globalThis.Boolean(object.featureAiCatalogItem)
+        : false,
+    };
+  },
+
+  toJSON(message: TrackLlmCallForSelfHosted): unknown {
+    const obj: any = {};
+    if (message.workflowID !== "") {
+      obj.workflowID = message.workflowID;
+    }
+    if (message.featureQualifiedName !== "") {
+      obj.featureQualifiedName = message.featureQualifiedName;
+    }
+    if (message.featureAiCatalogItem !== false) {
+      obj.featureAiCatalogItem = message.featureAiCatalogItem;
+    }
+    return obj;
+  },
+
+  create<I extends Exact<DeepPartial<TrackLlmCallForSelfHosted>, I>>(base?: I): TrackLlmCallForSelfHosted {
+    return TrackLlmCallForSelfHosted.fromPartial(base ?? ({} as any));
+  },
+  fromPartial<I extends Exact<DeepPartial<TrackLlmCallForSelfHosted>, I>>(object: I): TrackLlmCallForSelfHosted {
+    const message = createBaseTrackLlmCallForSelfHosted();
+    message.workflowID = object.workflowID ?? "";
+    message.featureQualifiedName = object.featureQualifiedName ?? "";
+    message.featureAiCatalogItem = object.featureAiCatalogItem ?? false;
     return message;
   },
 };
@@ -3681,6 +3815,174 @@ export const ShellInformationContext: MessageFns<ShellInformationContext> = {
   },
 };
 
+function createBaseTrackSelfHostedClientEvent(): TrackSelfHostedClientEvent {
+  return { requestID: "", workflowID: "", featureQualifiedName: "", featureAiCatalogItem: false };
+}
+
+export const TrackSelfHostedClientEvent: MessageFns<TrackSelfHostedClientEvent> = {
+  encode(message: TrackSelfHostedClientEvent, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
+    if (message.requestID !== "") {
+      writer.uint32(10).string(message.requestID);
+    }
+    if (message.workflowID !== "") {
+      writer.uint32(18).string(message.workflowID);
+    }
+    if (message.featureQualifiedName !== "") {
+      writer.uint32(26).string(message.featureQualifiedName);
+    }
+    if (message.featureAiCatalogItem !== false) {
+      writer.uint32(32).bool(message.featureAiCatalogItem);
+    }
+    return writer;
+  },
+
+  decode(input: BinaryReader | Uint8Array, length?: number): TrackSelfHostedClientEvent {
+    const reader = input instanceof BinaryReader ? input : new BinaryReader(input);
+    const end = length === undefined ? reader.len : reader.pos + length;
+    const message = createBaseTrackSelfHostedClientEvent();
+    while (reader.pos < end) {
+      const tag = reader.uint32();
+      switch (tag >>> 3) {
+        case 1: {
+          if (tag !== 10) {
+            break;
+          }
+
+          message.requestID = reader.string();
+          continue;
+        }
+        case 2: {
+          if (tag !== 18) {
+            break;
+          }
+
+          message.workflowID = reader.string();
+          continue;
+        }
+        case 3: {
+          if (tag !== 26) {
+            break;
+          }
+
+          message.featureQualifiedName = reader.string();
+          continue;
+        }
+        case 4: {
+          if (tag !== 32) {
+            break;
+          }
+
+          message.featureAiCatalogItem = reader.bool();
+          continue;
+        }
+      }
+      if ((tag & 7) === 4 || tag === 0) {
+        break;
+      }
+      reader.skip(tag & 7);
+    }
+    return message;
+  },
+
+  fromJSON(object: any): TrackSelfHostedClientEvent {
+    return {
+      requestID: isSet(object.requestID) ? globalThis.String(object.requestID) : "",
+      workflowID: isSet(object.workflowID) ? globalThis.String(object.workflowID) : "",
+      featureQualifiedName: isSet(object.featureQualifiedName) ? globalThis.String(object.featureQualifiedName) : "",
+      featureAiCatalogItem: isSet(object.featureAiCatalogItem)
+        ? globalThis.Boolean(object.featureAiCatalogItem)
+        : false,
+    };
+  },
+
+  toJSON(message: TrackSelfHostedClientEvent): unknown {
+    const obj: any = {};
+    if (message.requestID !== "") {
+      obj.requestID = message.requestID;
+    }
+    if (message.workflowID !== "") {
+      obj.workflowID = message.workflowID;
+    }
+    if (message.featureQualifiedName !== "") {
+      obj.featureQualifiedName = message.featureQualifiedName;
+    }
+    if (message.featureAiCatalogItem !== false) {
+      obj.featureAiCatalogItem = message.featureAiCatalogItem;
+    }
+    return obj;
+  },
+
+  create<I extends Exact<DeepPartial<TrackSelfHostedClientEvent>, I>>(base?: I): TrackSelfHostedClientEvent {
+    return TrackSelfHostedClientEvent.fromPartial(base ?? ({} as any));
+  },
+  fromPartial<I extends Exact<DeepPartial<TrackSelfHostedClientEvent>, I>>(object: I): TrackSelfHostedClientEvent {
+    const message = createBaseTrackSelfHostedClientEvent();
+    message.requestID = object.requestID ?? "";
+    message.workflowID = object.workflowID ?? "";
+    message.featureQualifiedName = object.featureQualifiedName ?? "";
+    message.featureAiCatalogItem = object.featureAiCatalogItem ?? false;
+    return message;
+  },
+};
+
+function createBaseTrackSelfHostedAction(): TrackSelfHostedAction {
+  return { requestID: "" };
+}
+
+export const TrackSelfHostedAction: MessageFns<TrackSelfHostedAction> = {
+  encode(message: TrackSelfHostedAction, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
+    if (message.requestID !== "") {
+      writer.uint32(10).string(message.requestID);
+    }
+    return writer;
+  },
+
+  decode(input: BinaryReader | Uint8Array, length?: number): TrackSelfHostedAction {
+    const reader = input instanceof BinaryReader ? input : new BinaryReader(input);
+    const end = length === undefined ? reader.len : reader.pos + length;
+    const message = createBaseTrackSelfHostedAction();
+    while (reader.pos < end) {
+      const tag = reader.uint32();
+      switch (tag >>> 3) {
+        case 1: {
+          if (tag !== 10) {
+            break;
+          }
+
+          message.requestID = reader.string();
+          continue;
+        }
+      }
+      if ((tag & 7) === 4 || tag === 0) {
+        break;
+      }
+      reader.skip(tag & 7);
+    }
+    return message;
+  },
+
+  fromJSON(object: any): TrackSelfHostedAction {
+    return { requestID: isSet(object.requestID) ? globalThis.String(object.requestID) : "" };
+  },
+
+  toJSON(message: TrackSelfHostedAction): unknown {
+    const obj: any = {};
+    if (message.requestID !== "") {
+      obj.requestID = message.requestID;
+    }
+    return obj;
+  },
+
+  create<I extends Exact<DeepPartial<TrackSelfHostedAction>, I>>(base?: I): TrackSelfHostedAction {
+    return TrackSelfHostedAction.fromPartial(base ?? ({} as any));
+  },
+  fromPartial<I extends Exact<DeepPartial<TrackSelfHostedAction>, I>>(object: I): TrackSelfHostedAction {
+    const message = createBaseTrackSelfHostedAction();
+    message.requestID = object.requestID ?? "";
+    return message;
+  },
+};
+
 export type DuoWorkflowService = typeof DuoWorkflowService;
 export const DuoWorkflowService = {
   executeWorkflow: {
@@ -3720,6 +4022,17 @@ export const DuoWorkflowService = {
     responseSerialize: (value: ListFlowsResponse): Buffer => Buffer.from(ListFlowsResponse.encode(value).finish()),
     responseDeserialize: (value: Buffer): ListFlowsResponse => ListFlowsResponse.decode(value),
   },
+  trackSelfHostedExecuteWorkflow: {
+    path: "/DuoWorkflow/TrackSelfHostedExecuteWorkflow",
+    requestStream: true,
+    responseStream: true,
+    requestSerialize: (value: TrackSelfHostedClientEvent): Buffer =>
+      Buffer.from(TrackSelfHostedClientEvent.encode(value).finish()),
+    requestDeserialize: (value: Buffer): TrackSelfHostedClientEvent => TrackSelfHostedClientEvent.decode(value),
+    responseSerialize: (value: TrackSelfHostedAction): Buffer =>
+      Buffer.from(TrackSelfHostedAction.encode(value).finish()),
+    responseDeserialize: (value: Buffer): TrackSelfHostedAction => TrackSelfHostedAction.decode(value),
+  },
 } as const;
 
 export interface DuoWorkflowServer extends UntypedServiceImplementation {
@@ -3727,6 +4040,7 @@ export interface DuoWorkflowServer extends UntypedServiceImplementation {
   generateToken: handleUnaryCall<GenerateTokenRequest, GenerateTokenResponse>;
   listTools: handleUnaryCall<ListToolsRequest, ListToolsResponse>;
   listFlows: handleUnaryCall<ListFlowsRequest, ListFlowsResponse>;
+  trackSelfHostedExecuteWorkflow: handleBidiStreamingCall<TrackSelfHostedClientEvent, TrackSelfHostedAction>;
 }
 
 export interface DuoWorkflowClient extends Client {
@@ -3778,6 +4092,14 @@ export interface DuoWorkflowClient extends Client {
     options: Partial<CallOptions>,
     callback: (error: ServiceError | null, response: ListFlowsResponse) => void,
   ): ClientUnaryCall;
+  trackSelfHostedExecuteWorkflow(): ClientDuplexStream<TrackSelfHostedClientEvent, TrackSelfHostedAction>;
+  trackSelfHostedExecuteWorkflow(
+    options: Partial<CallOptions>,
+  ): ClientDuplexStream<TrackSelfHostedClientEvent, TrackSelfHostedAction>;
+  trackSelfHostedExecuteWorkflow(
+    metadata: Metadata,
+    options?: Partial<CallOptions>,
+  ): ClientDuplexStream<TrackSelfHostedClientEvent, TrackSelfHostedAction>;
 }
 
 export const DuoWorkflowClient = makeGenericClientConstructor(DuoWorkflowService, "DuoWorkflow") as unknown as {

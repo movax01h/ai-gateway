@@ -19,10 +19,11 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
-	DuoWorkflow_ExecuteWorkflow_FullMethodName = "/DuoWorkflow/ExecuteWorkflow"
-	DuoWorkflow_GenerateToken_FullMethodName   = "/DuoWorkflow/GenerateToken"
-	DuoWorkflow_ListTools_FullMethodName       = "/DuoWorkflow/ListTools"
-	DuoWorkflow_ListFlows_FullMethodName       = "/DuoWorkflow/ListFlows"
+	DuoWorkflow_ExecuteWorkflow_FullMethodName                = "/DuoWorkflow/ExecuteWorkflow"
+	DuoWorkflow_GenerateToken_FullMethodName                  = "/DuoWorkflow/GenerateToken"
+	DuoWorkflow_ListTools_FullMethodName                      = "/DuoWorkflow/ListTools"
+	DuoWorkflow_ListFlows_FullMethodName                      = "/DuoWorkflow/ListFlows"
+	DuoWorkflow_TrackSelfHostedExecuteWorkflow_FullMethodName = "/DuoWorkflow/TrackSelfHostedExecuteWorkflow"
 )
 
 // DuoWorkflowClient is the client API for DuoWorkflow service.
@@ -33,6 +34,7 @@ type DuoWorkflowClient interface {
 	GenerateToken(ctx context.Context, in *GenerateTokenRequest, opts ...grpc.CallOption) (*GenerateTokenResponse, error)
 	ListTools(ctx context.Context, in *ListToolsRequest, opts ...grpc.CallOption) (*ListToolsResponse, error)
 	ListFlows(ctx context.Context, in *ListFlowsRequest, opts ...grpc.CallOption) (*ListFlowsResponse, error)
+	TrackSelfHostedExecuteWorkflow(ctx context.Context, opts ...grpc.CallOption) (grpc.BidiStreamingClient[TrackSelfHostedClientEvent, TrackSelfHostedAction], error)
 }
 
 type duoWorkflowClient struct {
@@ -86,6 +88,19 @@ func (c *duoWorkflowClient) ListFlows(ctx context.Context, in *ListFlowsRequest,
 	return out, nil
 }
 
+func (c *duoWorkflowClient) TrackSelfHostedExecuteWorkflow(ctx context.Context, opts ...grpc.CallOption) (grpc.BidiStreamingClient[TrackSelfHostedClientEvent, TrackSelfHostedAction], error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	stream, err := c.cc.NewStream(ctx, &DuoWorkflow_ServiceDesc.Streams[1], DuoWorkflow_TrackSelfHostedExecuteWorkflow_FullMethodName, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	x := &grpc.GenericClientStream[TrackSelfHostedClientEvent, TrackSelfHostedAction]{ClientStream: stream}
+	return x, nil
+}
+
+// This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
+type DuoWorkflow_TrackSelfHostedExecuteWorkflowClient = grpc.BidiStreamingClient[TrackSelfHostedClientEvent, TrackSelfHostedAction]
+
 // DuoWorkflowServer is the server API for DuoWorkflow service.
 // All implementations must embed UnimplementedDuoWorkflowServer
 // for forward compatibility.
@@ -94,6 +109,7 @@ type DuoWorkflowServer interface {
 	GenerateToken(context.Context, *GenerateTokenRequest) (*GenerateTokenResponse, error)
 	ListTools(context.Context, *ListToolsRequest) (*ListToolsResponse, error)
 	ListFlows(context.Context, *ListFlowsRequest) (*ListFlowsResponse, error)
+	TrackSelfHostedExecuteWorkflow(grpc.BidiStreamingServer[TrackSelfHostedClientEvent, TrackSelfHostedAction]) error
 	mustEmbedUnimplementedDuoWorkflowServer()
 }
 
@@ -115,6 +131,9 @@ func (UnimplementedDuoWorkflowServer) ListTools(context.Context, *ListToolsReque
 }
 func (UnimplementedDuoWorkflowServer) ListFlows(context.Context, *ListFlowsRequest) (*ListFlowsResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method ListFlows not implemented")
+}
+func (UnimplementedDuoWorkflowServer) TrackSelfHostedExecuteWorkflow(grpc.BidiStreamingServer[TrackSelfHostedClientEvent, TrackSelfHostedAction]) error {
+	return status.Errorf(codes.Unimplemented, "method TrackSelfHostedExecuteWorkflow not implemented")
 }
 func (UnimplementedDuoWorkflowServer) mustEmbedUnimplementedDuoWorkflowServer() {}
 func (UnimplementedDuoWorkflowServer) testEmbeddedByValue()                     {}
@@ -198,6 +217,13 @@ func _DuoWorkflow_ListFlows_Handler(srv interface{}, ctx context.Context, dec fu
 	return interceptor(ctx, in, info, handler)
 }
 
+func _DuoWorkflow_TrackSelfHostedExecuteWorkflow_Handler(srv interface{}, stream grpc.ServerStream) error {
+	return srv.(DuoWorkflowServer).TrackSelfHostedExecuteWorkflow(&grpc.GenericServerStream[TrackSelfHostedClientEvent, TrackSelfHostedAction]{ServerStream: stream})
+}
+
+// This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
+type DuoWorkflow_TrackSelfHostedExecuteWorkflowServer = grpc.BidiStreamingServer[TrackSelfHostedClientEvent, TrackSelfHostedAction]
+
 // DuoWorkflow_ServiceDesc is the grpc.ServiceDesc for DuoWorkflow service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -222,6 +248,12 @@ var DuoWorkflow_ServiceDesc = grpc.ServiceDesc{
 		{
 			StreamName:    "ExecuteWorkflow",
 			Handler:       _DuoWorkflow_ExecuteWorkflow_Handler,
+			ServerStreams: true,
+			ClientStreams: true,
+		},
+		{
+			StreamName:    "TrackSelfHostedExecuteWorkflow",
+			Handler:       _DuoWorkflow_TrackSelfHostedExecuteWorkflow_Handler,
 			ServerStreams: true,
 			ClientStreams: true,
 		},

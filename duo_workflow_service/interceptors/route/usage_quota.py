@@ -26,6 +26,12 @@ def has_sufficient_usage_quota(
                 return _process_execute_workflow_stream(func, service, event)
             case contract_pb2_grpc.DuoWorkflowServicer.GenerateToken.__name__:
                 return _process_generate_token_unary(func, service, event)
+            case (
+                contract_pb2_grpc.DuoWorkflowServicer.TrackSelfHostedExecuteWorkflow.__name__
+            ):
+                return _process_track_self_hosted_execute_workflow_stream(
+                    func, service, event
+                )
             case _:
                 raise TypeError(
                     f"unsupported method to intercept '{func.__qualname__}'"
@@ -46,7 +52,7 @@ def _process_execute_workflow_stream(
 ):
     if event is not event.DAP_FLOW_ON_EXECUTE:
         raise ValueError(
-            f"Unsupported event type '{event.value}'. Expected to be '{event.DAP_FLOW_ON_EXECUTE}"
+            f"Unsupported event type '{event.value}'. Expected to be '{event.DAP_FLOW_ON_EXECUTE}'"
         )
 
     @functools.wraps(func)
@@ -62,6 +68,53 @@ def _process_execute_workflow_stream(
             gl_events_context = GLReportingEventContext.from_workflow_definition(
                 message.startRequest.workflowDefinition,
                 is_ai_catalog_item=bool(message.startRequest.flowConfig),
+            )
+
+            async def _chained():
+                yield message
+                async for _item in request:
+                    yield _item
+
+            await service.execute(gl_events_context, event)
+
+            async for item in func(obj, _chained(), grpc_context, *args, **kwargs):
+                yield item
+
+        except InsufficientCredits as e:
+            await abort_route_interceptor(
+                grpc_context,
+                StatusCode.RESOURCE_EXHAUSTED,
+                f"{str(e).rstrip('.')}. Error code: USAGE_QUOTA_EXCEEDED",
+            )
+
+    return wrapper
+
+
+def _process_track_self_hosted_execute_workflow_stream(
+    func: Callable, service: UsageQuotaService, event: UsageQuotaEvent
+):
+    if event is not event.DAP_FLOW_ON_EXECUTE:
+        raise ValueError(
+            f"Unsupported event type '{event.value}'. Expected to be '{event.DAP_FLOW_ON_EXECUTE}'"
+        )
+
+    @functools.wraps(func)
+    async def wrapper(
+        obj,
+        request: AsyncIterable[contract_pb2.TrackSelfHostedClientEvent],
+        grpc_context: ServicerContext,
+        *args,
+        **kwargs,
+    ):
+        try:
+            message = await anext(aiter(request))
+        except StopAsyncIteration:
+            return
+
+        try:
+            gl_events_context = GLReportingEventContext.from_workflow_definition(
+                message.featureQualifiedName,
+                is_ai_catalog_item=message.featureAiCatalogItem,
             )
 
             async def _chained():
