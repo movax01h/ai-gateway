@@ -215,6 +215,15 @@ class ToolsExecutor:
                 model_name=last_message.response_metadata.get("model_name", "unknown"),
             )
 
+            self._track_internal_event(
+                event_name=EventEnum.WORKFLOW_TOOL_FAILURE,
+                tool_name=invalid_tool_call.get("name", "unknown"),
+                extra={
+                    "error": invalid_tool_call.get("error", "Unknown tool call error"),
+                    "error_type": "InvalidToolCall",
+                },
+            )
+
         responses.append(
             Command(
                 update={
