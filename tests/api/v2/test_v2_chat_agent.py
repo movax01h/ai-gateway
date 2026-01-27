@@ -44,7 +44,7 @@ def fast_api_router_fixture():
 def auth_user_fixture():
     return CloudConnectorUser(
         authenticated=True,
-        claims=UserClaims(scopes=["duo_chat", "amazon_q_integration"]),
+        claims=UserClaims(scopes=["duo_classic_chat", "amazon_q_integration"]),
     )
 
 
@@ -104,7 +104,9 @@ def mocked_tools_fixture():
 
 @pytest.fixture(name="config_values")
 def config_values_fixture():
-    return {"custom_models": {"enabled": True}}
+    return {
+        "custom_models": {"enabled": True},
+    }
 
 
 def chunk_to_model(chunk: str, klass: Type[AgentBaseEvent]) -> AgentBaseEvent:
@@ -488,7 +490,7 @@ class TestReActAgentStream:
         mock_create_event_stream.assert_called_once()
 
         mock_track_internal_event.assert_called_once_with(
-            "request_duo_chat",
+            "request_duo_classic_chat",
             category="ai_gateway.api.v2.chat.agent",
         )
 
@@ -498,12 +500,17 @@ class TestReActAgentStream:
         [
             (
                 CloudConnectorUser(
-                    authenticated=True, claims=UserClaims(scopes=["duo_chat"])
+                    authenticated=True, claims=UserClaims(scopes=["duo_classic_chat"])
                 ),
                 AgentRequest(messages=[Message(role=Role.USER, content="Hi")]),
                 200,
                 "",
-                [call("request_duo_chat", category="ai_gateway.api.v2.chat.agent")],
+                [
+                    call(
+                        "request_duo_classic_chat",
+                        category="ai_gateway.api.v2.chat.agent",
+                    )
+                ],
                 None,
             ),
             (
@@ -519,7 +526,9 @@ class TestReActAgentStream:
             (
                 CloudConnectorUser(
                     authenticated=True,
-                    claims=UserClaims(scopes=["duo_chat", "include_file_context"]),
+                    claims=UserClaims(
+                        scopes=["duo_classic_chat", "include_file_context"]
+                    ),
                 ),
                 AgentRequest(
                     messages=[
@@ -543,7 +552,9 @@ class TestReActAgentStream:
             (
                 CloudConnectorUser(
                     authenticated=True,
-                    claims=UserClaims(scopes=["duo_chat", "include_terminal_context"]),
+                    claims=UserClaims(
+                        scopes=["duo_classic_chat", "include_terminal_context"]
+                    ),
                 ),
                 AgentRequest(
                     messages=[
@@ -562,14 +573,19 @@ class TestReActAgentStream:
                 ),
                 200,
                 "",
-                [call("request_duo_chat", category="ai_gateway.api.v2.chat.agent")],
+                [
+                    call(
+                        "request_duo_classic_chat",
+                        category="ai_gateway.api.v2.chat.agent",
+                    )
+                ],
                 None,
             ),
             (
                 CloudConnectorUser(
                     authenticated=True,
                     claims=UserClaims(
-                        scopes=["duo_chat", "include_repository_context"]
+                        scopes=["duo_classic_chat", "include_repository_context"]
                     ),
                 ),
                 AgentRequest(
@@ -589,13 +605,20 @@ class TestReActAgentStream:
                 ),
                 200,
                 "",
-                [call("request_duo_chat", category="ai_gateway.api.v2.chat.agent")],
+                [
+                    call(
+                        "request_duo_classic_chat",
+                        category="ai_gateway.api.v2.chat.agent",
+                    )
+                ],
                 None,
             ),
             (
                 CloudConnectorUser(
                     authenticated=True,
-                    claims=UserClaims(scopes=["duo_chat", "include_directory_context"]),
+                    claims=UserClaims(
+                        scopes=["duo_classic_chat", "include_directory_context"]
+                    ),
                 ),
                 AgentRequest(
                     messages=[
@@ -614,12 +637,17 @@ class TestReActAgentStream:
                 ),
                 200,
                 "",
-                [call("request_duo_chat", category="ai_gateway.api.v2.chat.agent")],
+                [
+                    call(
+                        "request_duo_classic_chat",
+                        category="ai_gateway.api.v2.chat.agent",
+                    )
+                ],
                 None,
             ),
             (
                 CloudConnectorUser(
-                    authenticated=True, claims=UserClaims(scopes=["duo_chat"])
+                    authenticated=True, claims=UserClaims(scopes=["duo_classic_chat"])
                 ),
                 AgentRequest(
                     messages=[
@@ -632,12 +660,17 @@ class TestReActAgentStream:
                 ),
                 200,
                 "",
-                [call("request_duo_chat", category="ai_gateway.api.v2.chat.agent")],
+                [
+                    call(
+                        "request_duo_classic_chat",
+                        category="ai_gateway.api.v2.chat.agent",
+                    )
+                ],
                 None,
             ),
             (
                 CloudConnectorUser(
-                    authenticated=True, claims=UserClaims(scopes=["duo_chat"])
+                    authenticated=True, claims=UserClaims(scopes=["duo_classic_chat"])
                 ),
                 AgentRequest(
                     messages=[
@@ -650,7 +683,12 @@ class TestReActAgentStream:
                 ),
                 200,
                 "",
-                [call("request_duo_chat", category="ai_gateway.api.v2.chat.agent")],
+                [
+                    call(
+                        "request_duo_classic_chat",
+                        category="ai_gateway.api.v2.chat.agent",
+                    )
+                ],
                 None,
             ),
             (
@@ -707,7 +745,7 @@ class TestReActAgentStream:
             ),
             (
                 CloudConnectorUser(
-                    authenticated=True, claims=UserClaims(scopes=["duo_chat"])
+                    authenticated=True, claims=UserClaims(scopes=["duo_classic_chat"])
                 ),
                 AgentRequest(
                     messages=[
@@ -751,6 +789,117 @@ class TestReActAgentStream:
                 "Authorization": "Bearer 12345",
                 "X-Gitlab-Authentication-Type": "oidc",
             },
+            json=json_params,
+        )
+
+        assert response.status_code == expected_status_code
+
+        if expected_error:
+            assert response.text == expected_error
+        else:
+            mock_track_internal_event.assert_has_calls(expected_internal_events)
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        "auth_user,agent_request,expected_status_code,expected_error,expected_internal_events,model_metadata,config_values,feature_enablement_type",
+        [
+            (
+                CloudConnectorUser(
+                    authenticated=True,
+                    claims=UserClaims(scopes=["duo_classic_chat"]),
+                ),
+                AgentRequest(messages=[Message(role=Role.USER, content="Hi")]),
+                200,
+                "",
+                [
+                    call(
+                        "request_duo_classic_chat",
+                        category="ai_gateway.api.v2.chat.agent",
+                    )
+                ],
+                None,
+                {
+                    "custom_models": {"enabled": True},
+                    "process_level_feature_flags": {
+                        "duo_classic_chat_duo_core_cutoff": False
+                    },
+                },
+                "duo_core",
+            ),
+            (
+                CloudConnectorUser(
+                    authenticated=True,
+                    claims=UserClaims(scopes=["duo_classic_chat"]),
+                ),
+                AgentRequest(messages=[Message(role=Role.USER, content="Hi")]),
+                403,
+                '{"detail":"Duo Core no longer authorized to access Duo Classic Chat"}',
+                [],
+                None,
+                {
+                    "custom_models": {"enabled": True},
+                    "process_level_feature_flags": {
+                        "duo_classic_chat_duo_core_cutoff": True
+                    },
+                },
+                "duo_core",
+            ),
+            (
+                CloudConnectorUser(
+                    authenticated=True,
+                    claims=UserClaims(scopes=["duo_classic_chat"]),
+                ),
+                AgentRequest(messages=[Message(role=Role.USER, content="Hi")]),
+                200,
+                "",
+                [
+                    call(
+                        "request_duo_classic_chat",
+                        category="ai_gateway.api.v2.chat.agent",
+                    )
+                ],
+                None,
+                {
+                    "custom_models": {"enabled": True},
+                    "process_level_feature_flags": {
+                        "duo_classic_chat_duo_core_cutoff": True
+                    },
+                },
+                "duo_classic",
+            ),
+        ],
+    )
+    async def test_authorization_with_duo_core_cutoff(
+        self,
+        auth_user: CloudConnectorUser,
+        agent_request: AgentRequest,
+        mock_client: TestClient,
+        mock_model: Mock,
+        expected_status_code: int,
+        expected_error: str,
+        expected_internal_events,
+        mock_track_internal_event: Mock,
+        model_metadata,
+        config_values,
+        feature_enablement_type: str,
+    ):
+        json_params = agent_request.model_dump(mode="json")
+
+        if model_metadata:
+            json_params["model_metadata"] = model_metadata.model_dump(
+                exclude={"llm_definition", "family", "friendly_name"},
+                mode="json",
+            )
+
+        headers = {
+            "Authorization": "Bearer 12345",
+            "X-Gitlab-Authentication-Type": "oidc",
+            "X-Gitlab-Feature-Enablement-Type": feature_enablement_type,
+        }
+
+        response = mock_client.post(
+            "/chat/agent",
+            headers=headers,
             json=json_params,
         )
 
@@ -844,6 +993,6 @@ class TestChatAgent:
         assert actual_actions == expected_actions
 
         mock_track_internal_event.assert_called_once_with(
-            "request_duo_chat",
+            "request_duo_classic_chat",
             category="ai_gateway.api.v2.chat.agent",
         )

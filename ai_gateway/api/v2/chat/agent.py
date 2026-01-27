@@ -12,9 +12,13 @@ from starlette.responses import StreamingResponse
 
 from ai_gateway.api.auth_utils import StarletteUser, get_current_user
 from ai_gateway.api.feature_category import feature_category
-from ai_gateway.api.middleware import X_GITLAB_VERSION_HEADER
+from ai_gateway.api.middleware import (
+    X_GITLAB_FEATURE_ENABLEMENT_TYPE_HEADER,
+    X_GITLAB_VERSION_HEADER,
+)
 from ai_gateway.api.v2.chat.typing import AgentRequest
 from ai_gateway.async_dependency_resolver import (
+    get_config,
     get_container_application,
     get_internal_event_client,
     get_prompt_registry,
@@ -47,6 +51,20 @@ router = APIRouter()
 
 async def get_gl_agent_remote_executor_factory():
     yield get_container_application().chat.gl_agent_remote_executor_factory
+
+
+def authorize_duo_core(
+    request: Request,
+    config: providers.Configuration,
+):
+    if (
+        request.headers.get(X_GITLAB_FEATURE_ENABLEMENT_TYPE_HEADER) == "duo_core"
+        and config.process_level_feature_flags.duo_classic_chat_duo_core_cutoff()
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Duo Core no longer authorized to access Duo Classic Chat",
+        )
 
 
 def authorize_additional_context(
@@ -167,9 +185,11 @@ async def chat(
     internal_event_client: Annotated[
         InternalEventsClient, Depends(get_internal_event_client)
     ],
+    config: Annotated[providers.Configuration, Depends(get_config)],
 ):
     agent = get_agent(current_user, prompt_registry)
 
+    authorize_duo_core(request, config)
     authorize_additional_context(current_user, agent_request, internal_event_client)
 
     async def _stream_handler(stream_events: AsyncIterator[TypeAgentEvent]):

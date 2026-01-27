@@ -11,6 +11,7 @@ __all__ = [
     "ConfigLogging",
     "ConfigFastApi",
     "ConfigAuth",
+    "ConfigProcessLevelFeatureFlags",
     "ConfigGoogleCloudProfiler",
     "ConfigSnowplow",
     "ConfigInstrumentator",
@@ -54,6 +55,10 @@ class ConfigAuth(BaseModel):
     bypass_external: bool = False
     bypass_external_with_header: bool = False
     bypass_jwt_signature: bool = False
+
+
+class ConfigProcessLevelFeatureFlags(BaseModel):
+    duo_classic_chat_duo_core_cutoff: bool = False
 
 
 class ConfigGoogleCloudProfiler(BaseModel):
@@ -227,6 +232,10 @@ class Config(BaseSettings):
         ConfigFastApi()
     )
     auth: Annotated[ConfigAuth, Field(default_factory=ConfigAuth)] = ConfigAuth()
+    process_level_feature_flags: Annotated[
+        ConfigProcessLevelFeatureFlags,
+        Field(default_factory=ConfigProcessLevelFeatureFlags),
+    ] = ConfigProcessLevelFeatureFlags()
     google_cloud_profiler: Annotated[
         ConfigGoogleCloudProfiler, Field(default_factory=ConfigGoogleCloudProfiler)
     ] = ConfigGoogleCloudProfiler()

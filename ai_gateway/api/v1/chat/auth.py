@@ -1,9 +1,13 @@
 import functools
 import typing
 
-from fastapi import HTTPException, Request, status
+from dependency_injector import providers
+from fastapi import Depends, HTTPException, Request, status
 from gitlab_cloud_connector import GitLabUnitPrimitive
 from pydantic import BaseModel
+
+from ai_gateway.api.middleware import X_GITLAB_FEATURE_ENABLEMENT_TYPE_HEADER
+from ai_gateway.async_dependency_resolver import get_config
 
 __all__ = ["ChatInvokable", "authorize_with_unit_primitive"]
 
@@ -21,7 +25,10 @@ def authorize_with_unit_primitive(
 
         @functools.wraps(func)
         async def wrapper(
-            request: Request, *args: typing.Any, **kwargs: typing.Any
+            request: Request,
+            config: typing.Annotated[providers.Configuration, Depends(get_config)],
+            *args: typing.Any,
+            **kwargs: typing.Any,
         ) -> typing.Any:
             request_param_val = request.path_params[request_param]
 
@@ -37,6 +44,16 @@ def authorize_with_unit_primitive(
                 raise HTTPException(
                     status_code=status.HTTP_403_FORBIDDEN,
                     detail=f"Unauthorized to access {unit_primitive}",
+                )
+
+            if (
+                request.headers.get(X_GITLAB_FEATURE_ENABLEMENT_TYPE_HEADER)
+                == "duo_core"
+                and config.process_level_feature_flags.duo_classic_chat_duo_core_cutoff()
+            ):
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="Duo Core no longer authorized to access Duo Classic Chat",
                 )
 
             return await func(request, *args, **kwargs)

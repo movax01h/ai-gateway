@@ -25,7 +25,7 @@ from lib.feature_flags import (
 def auth_user_fixture():
     return CloudConnectorUser(
         authenticated=True,
-        claims=UserClaims(scopes=["duo_chat", "amazon_q_integration"]),
+        claims=UserClaims(scopes=["duo_classic_chat", "amazon_q_integration"]),
     )
 
 
@@ -149,3 +149,73 @@ def stub_executor_factory_fixture():
         return_value=lambda agent: _StubExecutor(),
     ):
         yield
+
+
+class TestDuoCoreAuthorizationCutoff:
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        "cutoff_enabled,feature_enablement_type,should_raise",
+        [
+            (True, "duo_core", True),
+            (False, "duo_core", False),
+            (True, "duo_pro", False),
+        ],
+        ids=[
+            "duo_core_blocked_when_cutoff_enabled",
+            "duo_core_allowed_when_cutoff_disabled",
+            "non_duo_core_not_affected_by_cutoff",
+        ],
+    )
+    async def test_duo_core_authorization_cutoff(
+        self, cutoff_enabled, feature_enablement_type, should_raise
+    ):
+        from unittest.mock import AsyncMock, Mock
+
+        from fastapi import HTTPException
+        from gitlab_cloud_connector import GitLabUnitPrimitive
+
+        from ai_gateway.api.v1.chat.auth import (
+            ChatInvokable,
+            authorize_with_unit_primitive,
+        )
+
+        # Create a mock endpoint function
+        mock_endpoint = AsyncMock(return_value={"status": "ok"})
+
+        # Create the decorator
+        chat_invokables = [
+            ChatInvokable(
+                name="explain_code", unit_primitive=GitLabUnitPrimitive.DUO_CHAT
+            )
+        ]
+        decorated_func = authorize_with_unit_primitive(
+            "chat_invokable", chat_invokables=chat_invokables
+        )(mock_endpoint)
+
+        # Create mock request with necessary attributes
+        mock_request = Mock()
+        mock_request.path_params = {"chat_invokable": "explain_code"}
+        mock_request.user = Mock()
+        mock_request.user.can = Mock(return_value=True)
+        mock_request.headers = {
+            "X-Gitlab-Feature-Enablement-Type": feature_enablement_type
+        }
+
+        # Create mock config
+        mock_config = Mock()
+        mock_config.process_level_feature_flags.duo_classic_chat_duo_core_cutoff = Mock(
+            return_value=cutoff_enabled
+        )
+
+        if should_raise:
+            with pytest.raises(HTTPException) as exc_info:
+                await decorated_func(mock_request, mock_config)
+            assert exc_info.value.status_code == 403
+            assert (
+                "Duo Core no longer authorized to access Duo Classic Chat"
+                in exc_info.value.detail
+            )
+        else:
+            result = await decorated_func(mock_request, mock_config)
+            assert result == {"status": "ok"}
+            mock_endpoint.assert_called_once()

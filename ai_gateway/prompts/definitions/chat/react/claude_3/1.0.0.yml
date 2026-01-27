@@ -4,7 +4,7 @@ model:
   params:
     model_class_provider: litellm
 unit_primitives:
-  - duo_chat
+  - duo_classic_chat
 prompt_template:
   system: |
     {% include 'chat/react/system/1.0.0.jinja' %}
