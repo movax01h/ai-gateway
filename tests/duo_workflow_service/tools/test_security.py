@@ -267,6 +267,53 @@ class TestListVulnerabilities:
         body = json.loads(call_args.kwargs["body"])
         assert body["variables"]["reportType"] == ["SAST", "DAST"]
 
+    async def test_fp_detection_status_in_response(self, gitlab_client_mock, metadata):
+        """Test that latestFlag is included in vulnerability response."""
+        vulnerability_with_fp_flag = {
+            "id": "gid://gitlab/Vulnerability/1",
+            "title": "SQL Injection",
+            "reportType": "SAST",
+            "severity": "CRITICAL",
+            "state": "DETECTED",
+            "location": {
+                "file": "app/controllers/users_controller.rb",
+                "startLine": 42,
+            },
+            "latestFlag": {
+                "id": "gid://gitlab/VulnerabilityFlag/1",
+                "status": "DETECTED_AS_FP",
+                "confidenceScore": 0.95,
+                "origin": "AI_DETECTION",
+                "description": "Likely false positive based on context analysis",
+                "createdAt": "2023-10-01T12:00:00Z",
+                "updatedAt": "2023-10-01T12:00:00Z",
+            },
+        }
+
+        gitlab_client_mock.apost = AsyncMock(
+            return_value={
+                "data": {
+                    "project": {
+                        "vulnerabilities": {
+                            "pageInfo": {"hasNextPage": False, "endCursor": None},
+                            "nodes": [vulnerability_with_fp_flag],
+                        }
+                    }
+                }
+            }
+        )
+
+        tool = ListVulnerabilities(metadata=metadata)
+        response = await tool.arun({"project_full_path": "namespace/project"})
+        result = json.loads(response)
+
+        assert len(result["vulnerabilities"]) == 1
+        vuln = result["vulnerabilities"][0]
+        assert "latestFlag" in vuln
+        assert vuln["latestFlag"]["status"] == "DETECTED_AS_FP"
+        assert vuln["latestFlag"]["confidenceScore"] == 0.95
+        assert vuln["latestFlag"]["origin"] == "AI_DETECTION"
+
     async def test_pagination(self, gitlab_client_mock, metadata, vulnerability_data):
         """Test pagination with multiple pages."""
         first_page_response = {

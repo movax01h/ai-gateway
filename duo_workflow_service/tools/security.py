@@ -9,6 +9,9 @@ from pydantic import BaseModel, Field, field_validator
 from ai_gateway.instrumentators.model_requests import gitlab_version
 from duo_workflow_service.security.tool_output_security import ToolTrustLevel
 from duo_workflow_service.tools.duo_base_tool import DuoBaseTool
+from duo_workflow_service.tools.vulnerabilities.queries.vulnerabilities import (
+    LIST_VULNERABILITIES_QUERY,
+)
 from duo_workflow_service.tracking.errors import log_exception
 
 PROJECT_IDENTIFICATION_DESCRIPTION = """
@@ -40,6 +43,16 @@ class VulnerabilityReportType(StrEnum):
     CLUSTER_IMAGE_SCANNING = "CLUSTER_IMAGE_SCANNING"
     CONTAINER_SCANNING_FOR_REGISTRY = "CONTAINER_SCANNING_FOR_REGISTRY"
     GENERIC = "GENERIC"
+
+
+class FpDetectionStatus(StrEnum):
+    """Valid FP detection status values."""
+
+    NOT_STARTED = "NOT_STARTED"
+    IN_PROGRESS = "IN_PROGRESS"
+    DETECTED_AS_FP = "DETECTED_AS_FP"
+    DETECTED_AS_NOT_FP = "DETECTED_AS_NOT_FP"
+    FAILED = "FAILED"
 
 
 __all__ = [
@@ -115,6 +128,11 @@ class ListVulnerabilities(DuoBaseTool):
     - Severity levels (can specify multiple: CRITICAL, HIGH, MEDIUM, LOW, INFO, UNKNOWN)
     - Report type (SAST, DAST, DEPENDENCY_SCANNING, etc.)
 
+    The tool exposes FP detection metadata in the latestFlag field including:
+    - Detection status and confidence scores
+    - AI reasoning for FP detection
+    - Detection service origin and timestamps
+
     **Do NOT use this tool to list security findings from a specific pipeline; to list security findings from a specific pipeline, use the 'list_security_findings' tool.**
 
     For example:
@@ -151,58 +169,6 @@ class ListVulnerabilities(DuoBaseTool):
             severity = kwargs.pop("severity", None)
             report_type = kwargs.pop("report_type", None)
 
-            # editorconfig-checker-disable
-            # Build GraphQL query with enhanced location details
-            query = """
-            query($projectFullPath: ID!, $first: Int, $after: String, $severity: [VulnerabilitySeverity!], $reportType: [VulnerabilityReportType!]) {
-                project(fullPath: $projectFullPath) {
-                    vulnerabilities(first: $first, after: $after, severity: $severity, reportType: $reportType) {
-                        pageInfo {
-                            hasNextPage
-                            endCursor
-                        }
-                        nodes {
-                            id
-                            title
-                            reportType
-                            severity
-                            state
-                            location{
-                                ... on VulnerabilityLocationSast {
-                                    file
-                                    startLine
-                                }
-                                ... on VulnerabilityLocationDependencyScanning {
-                                    file
-                                    dependency {
-                                        package {
-                                            name
-                                        }
-                                        version
-                                    }
-                                }
-                                ... on VulnerabilityLocationContainerScanning {
-                                    image
-                                    operatingSystem
-                                    dependency {
-                                        package {
-                                            name
-                                        }
-                                        version
-                                    }
-                                }
-                                ... on VulnerabilityLocationSecretDetection {
-                                    file
-                                    startLine
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-            """
-            # editorconfig-checker-enable
-
             all_vulnerabilities: list[dict[str, Any]] = []
             cursor = None
 
@@ -223,12 +189,18 @@ class ListVulnerabilities(DuoBaseTool):
 
                 response = await self.gitlab_client.apost(
                     path="/api/graphql",
-                    body=json.dumps({"query": query, "variables": variables}),
+                    body=json.dumps(
+                        {"query": LIST_VULNERABILITIES_QUERY, "variables": variables}
+                    ),
                 )
 
                 response = self._process_http_response(
                     identifier="query", response=response
                 )
+
+                # Parse JSON if response is a string
+                if isinstance(response, str):
+                    response = json.loads(response)
 
                 if not response or "data" not in response:
                     raise ValueError("Invalid GraphQL response")
