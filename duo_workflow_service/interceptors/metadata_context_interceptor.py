@@ -21,6 +21,10 @@ from lib.prompts.caching import (
     X_GITLAB_MODEL_PROMPT_CACHE_ENABLED,
     set_prompt_caching_enabled_to_current_request,
 )
+from lib.self_hosted_dap_billing_context import (
+    X_GITLAB_SELF_HOSTED_DAP_BILLING_ENABLED,
+    set_self_hosted_dap_billing_enabled,
+)
 from lib.verbose_ai_logs import VERBOSE_AI_LOGS_HEADER, current_verbose_ai_logs_context
 
 
@@ -78,6 +82,11 @@ class MetadataContextInterceptor(grpc.aio.ServerInterceptor):
         # Prompt caching (always called)
         set_prompt_caching_enabled_to_current_request(
             metadata.get(X_GITLAB_MODEL_PROMPT_CACHE_ENABLED.lower())
+        )
+
+        # Self-hosted DAP billing enabled flag
+        set_self_hosted_dap_billing_enabled(
+            metadata.get(X_GITLAB_SELF_HOSTED_DAP_BILLING_ENABLED, "").lower()
         )
 
         # MCP server tools
