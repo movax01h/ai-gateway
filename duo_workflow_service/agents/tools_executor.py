@@ -210,7 +210,9 @@ class ToolsExecutor:
                 )
 
             self._logger.error(
-                f"invalid tool call with id {tool_call_id}. {tool_present_message}"
+                f"invalid tool call with id {tool_call_id}. {tool_present_message}",
+                tool_name=invalid_tool_call.get("name", "unknown"),
+                model_name=last_message.response_metadata.get("model_name", "unknown"),
             )
 
         responses.append(
