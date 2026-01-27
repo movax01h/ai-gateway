@@ -10,6 +10,7 @@ service DuoWorkflow {
     rpc GenerateToken (GenerateTokenRequest) returns (GenerateTokenResponse);
     rpc ListTools (ListToolsRequest) returns (ListToolsResponse);
     rpc ListFlows (ListFlowsRequest) returns (ListFlowsResponse);
+    rpc TrackSelfHostedExecuteWorkflow (stream TrackSelfHostedClientEvent) returns (stream TrackSelfHostedAction);
 }
 
 message ClientEvent {
@@ -83,7 +84,14 @@ message Action {
         Mkdir mkdir = 13;
         ReadFiles runReadFiles = 14;
         RunShellCommand runShellCommand = 15;
+        TrackLlmCallForSelfHosted trackLlmCallForSelfHosted = 16;
     };
+}
+
+message TrackLlmCallForSelfHosted {
+    string workflowID = 1;
+    string featureQualifiedName = 2;
+    bool featureAiCatalogItem = 3;
 }
 
 message RunShellCommand {
@@ -238,4 +246,15 @@ message ShellInformationContext {
     optional string shell_environment = 4 [json_name = "shell_environment"];
     optional bool ssh_session = 5 [json_name = "ssh_session"];
     optional string cwd = 6;
+}
+
+message TrackSelfHostedClientEvent {
+    string requestID = 1;
+    string workflowID = 2;
+    string featureQualifiedName = 3;
+    bool featureAiCatalogItem = 4;
+}
+
+message TrackSelfHostedAction {
+    string requestID = 1;
 }

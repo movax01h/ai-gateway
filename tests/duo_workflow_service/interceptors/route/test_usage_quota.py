@@ -51,6 +51,18 @@ async def mock_request_generator() -> AsyncIterator[contract_pb2.ClientEvent]:
     )
 
 
+async def mock_track_self_hosted_request_generator() -> (
+    AsyncIterator[contract_pb2.TrackSelfHostedClientEvent]
+):
+    """Helper to generate mock TrackSelfHostedClientEvent stream."""
+    yield contract_pb2.TrackSelfHostedClientEvent(
+        requestID="test-request-id",
+        workflowID="test-workflow-id",
+        featureQualifiedName="test_feature",
+        featureAiCatalogItem=True,
+    )
+
+
 @pytest.mark.asyncio
 async def test_execute_workflow_with_sufficient_quota(mock_service) -> None:
     """Test ExecuteWorkflow with sufficient quota."""
@@ -230,3 +242,120 @@ def test_unsupported_method_raises_type_error() -> None:
             _self: Any, _request: Any, _context: ServicerContext
         ) -> AsyncIterator[str]:
             yield "item"
+
+
+@pytest.mark.asyncio
+async def test_track_self_hosted_execute_workflow_with_sufficient_quota(
+    mock_service,
+) -> None:
+    """Test TrackSelfHostedExecuteWorkflow with sufficient quota."""
+
+    @has_sufficient_usage_quota(
+        UsageQuotaEvent.DAP_FLOW_ON_EXECUTE, "https://customers.example.com"
+    )
+    async def TrackSelfHostedExecuteWorkflow(
+        _self: Any,
+        request: AsyncIterator[contract_pb2.TrackSelfHostedClientEvent],
+        _context: ServicerContext,
+    ) -> AsyncIterator[contract_pb2.TrackSelfHostedAction]:
+        async for item in request:
+            yield contract_pb2.TrackSelfHostedAction(requestID=item.requestID)
+
+    result = [
+        item
+        async for item in TrackSelfHostedExecuteWorkflow(
+            None, mock_track_self_hosted_request_generator(), MagicMock()
+        )
+    ]
+
+    assert len(result) == 1
+    assert result[0].requestID == "test-request-id"
+    mock_service.execute.assert_called_once()
+
+    gl_context = mock_service.execute.call_args[0][0]
+    assert isinstance(gl_context, GLReportingEventContext)
+    assert gl_context.feature_qualified_name == "test_feature"
+    assert gl_context.value == "test_feature"
+    assert gl_context.feature_ai_catalog_item is True
+
+
+@pytest.mark.asyncio
+async def test_track_self_hosted_execute_workflow_with_insufficient_credits(
+    mock_service, mock_context
+) -> None:
+    """Test TrackSelfHostedExecuteWorkflow with insufficient credits."""
+    mock_service.execute.side_effect = InsufficientCredits("Insufficient credits")
+
+    @has_sufficient_usage_quota(
+        UsageQuotaEvent.DAP_FLOW_ON_EXECUTE, "https://customers.example.com"
+    )
+    async def TrackSelfHostedExecuteWorkflow(
+        _self: Any,
+        request: AsyncIterator[contract_pb2.TrackSelfHostedClientEvent],
+        _context: ServicerContext,
+    ) -> AsyncIterator[contract_pb2.TrackSelfHostedAction]:
+        async for item in request:
+            yield contract_pb2.TrackSelfHostedAction(requestID=item.requestID)
+
+    _ = [
+        _
+        async for _ in TrackSelfHostedExecuteWorkflow(
+            None, mock_track_self_hosted_request_generator(), mock_context
+        )
+    ]
+
+    mock_context.abort.assert_called_once_with(
+        StatusCode.RESOURCE_EXHAUSTED,
+        "Insufficient credits. Error code: USAGE_QUOTA_EXCEEDED",
+    )
+
+
+@pytest.mark.asyncio
+async def test_track_self_hosted_execute_workflow_with_empty_stream(
+    mock_service,
+) -> None:
+    """Test TrackSelfHostedExecuteWorkflow with empty request stream."""
+
+    async def empty_request_generator() -> (
+        AsyncIterator[contract_pb2.TrackSelfHostedClientEvent]
+    ):
+        return
+        yield
+
+    @has_sufficient_usage_quota(
+        UsageQuotaEvent.DAP_FLOW_ON_EXECUTE, "https://customers.example.com"
+    )
+    async def TrackSelfHostedExecuteWorkflow(
+        _self: Any,
+        request: AsyncIterator[contract_pb2.TrackSelfHostedClientEvent],
+        _context: ServicerContext,
+    ) -> AsyncIterator[contract_pb2.TrackSelfHostedAction]:
+        async for item in request:
+            yield contract_pb2.TrackSelfHostedAction(requestID=item.requestID)
+
+    result = [
+        item
+        async for item in TrackSelfHostedExecuteWorkflow(
+            None, empty_request_generator(), MagicMock()
+        )
+    ]
+
+    assert len(result) == 0
+    mock_service.execute.assert_not_called()
+
+
+def test_track_self_hosted_execute_workflow_with_wrong_event_type() -> None:
+    """Test TrackSelfHostedExecuteWorkflow with wrong event type raises ValueError."""
+
+    with pytest.raises(ValueError, match="Unsupported event type.*Expected to be"):
+
+        @has_sufficient_usage_quota(
+            UsageQuotaEvent.DAP_FLOW_ON_GENERATE_TOKEN, "https://customers.example.com"
+        )
+        async def TrackSelfHostedExecuteWorkflow(
+            _self: Any,
+            request: AsyncIterator[contract_pb2.TrackSelfHostedClientEvent],
+            _context: ServicerContext,
+        ) -> AsyncIterator[contract_pb2.TrackSelfHostedAction]:
+            async for item in request:
+                yield contract_pb2.TrackSelfHostedAction(requestID=item.requestID)
