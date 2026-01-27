@@ -6,6 +6,10 @@ from duo_workflow_service.interceptors.metadata_context_interceptor import (
     MetadataContextInterceptor,
 )
 from lib.mcp_server_tools.context import current_mcp_server_tools_context
+from lib.self_hosted_dap_billing_context import (
+    X_GITLAB_SELF_HOSTED_DAP_BILLING_ENABLED,
+    current_self_hosted_dap_billing_enabled,
+)
 
 
 @pytest.mark.asyncio
@@ -250,6 +254,9 @@ async def test_missing_headers():
         patch(
             "duo_workflow_service.interceptors.metadata_context_interceptor.set_prompt_caching_enabled_to_current_request"
         ) as mock_prompt_caching,
+        patch(
+            "duo_workflow_service.interceptors.metadata_context_interceptor.set_self_hosted_dap_billing_enabled"
+        ) as mock_self_hosted_billing,
     ):
         result = await interceptor.intercept_service(continuation, handler_call_details)
 
@@ -262,10 +269,31 @@ async def test_missing_headers():
         mock_verbose_logs.set.assert_called_once_with(False)
         # Prompt caching is always called (with None)
         mock_prompt_caching.assert_called_once_with(None)
+        # Self-hosted DAP billing is always called (with None)
+        mock_self_hosted_billing.assert_called_once_with("")
         # MCP server tools should be empty set when header is missing
         assert current_mcp_server_tools_context.get() == set()
         continuation.assert_called_once_with(handler_call_details)
         assert result == "mocked_response"
+
+
+@pytest.mark.asyncio
+async def test_self_hosted_dap_billing_header():
+    """Test that self-hosted DAP billing header is properly stored in context."""
+    interceptor = MetadataContextInterceptor()
+    handler_call_details = MagicMock()
+    handler_call_details.invocation_metadata = [
+        (X_GITLAB_SELF_HOSTED_DAP_BILLING_ENABLED, "true"),
+    ]
+
+    continuation = AsyncMock()
+    continuation.return_value = "mocked_response"
+
+    result = await interceptor.intercept_service(continuation, handler_call_details)
+
+    assert current_self_hosted_dap_billing_enabled.get() is True
+    continuation.assert_called_once_with(handler_call_details)
+    assert result == "mocked_response"
 
 
 @pytest.mark.asyncio
