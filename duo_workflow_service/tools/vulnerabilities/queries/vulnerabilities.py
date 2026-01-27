@@ -185,6 +185,15 @@ GET_VULNERABILITY_DETAILS_QUERY = """
                 name
                 createdAt
             }
+            latestFlag {
+                id
+                status
+                confidenceScore
+                origin
+                description
+                createdAt
+                updatedAt
+            }
             location {
                 __typename
                 ... on VulnerabilityLocationClusterImageScanning {
@@ -244,3 +253,60 @@ GET_VULNERABILITY_DETAILS_QUERY = """
         }
     }
     """
+
+LIST_VULNERABILITIES_QUERY = """query($projectFullPath: ID!, $first: Int, $after: String, $severity: [VulnerabilitySeverity!], $reportType: [VulnerabilityReportType!]) {
+    project(fullPath: $projectFullPath) {
+        vulnerabilities(first: $first, after: $after, severity: $severity, reportType: $reportType) {
+            pageInfo {
+                hasNextPage
+                endCursor
+            }
+            nodes {
+                id
+                title
+                reportType
+                severity
+                state
+                location{
+                    ... on VulnerabilityLocationSast {
+                        file
+                        startLine
+                    }
+                    ... on VulnerabilityLocationDependencyScanning {
+                        file
+                        dependency {
+                            package {
+                                name
+                            }
+                            version
+                        }
+                    }
+                    ... on VulnerabilityLocationContainerScanning {
+                        image
+                        operatingSystem
+                        dependency {
+                            package {
+                                name
+                            }
+                            version
+                        }
+                    }
+                    ... on VulnerabilityLocationSecretDetection {
+                        file
+                        startLine
+                    }
+                }
+                latestFlag {
+                    id
+                    status
+                    confidenceScore
+                    origin
+                    description
+                    createdAt
+                    updatedAt
+                }
+            }
+        }
+    }
+}
+"""
