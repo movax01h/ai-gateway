@@ -14,7 +14,7 @@ class TestChatAnthropic:
             (
                 {},
                 {
-                    "default_request_timeout": 90.0,
+                    "default_request_timeout": 60.0,
                     "max_retries": 1,
                     "default_headers": {"anthropic-version": "2023-06-01"},
                 },
