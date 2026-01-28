@@ -361,9 +361,9 @@ class Workflow(AbstractWorkflow):
                 + _NON_GITLAB_TOOLS
             )
 
-        # Check if gitlab_search MCP tool is enabled
+        # Check if search MCP tool is enabled
         enabled_mcp_tools = get_enabled_mcp_server_tools()
-        if "gitlab_search" in enabled_mcp_tools:
+        if "search" in enabled_mcp_tools:
             # Filter out all search tools when MCP search is enabled
             read_only_tools = [
                 tool for tool in read_only_tools if tool not in _SEARCH_TOOLS
