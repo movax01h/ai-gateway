@@ -212,4 +212,100 @@ def test_tool_properties():
     assert tool.name == "run_glql_query"
     assert "GLQL" in tool.description
     assert "GitLab Query Language" in tool.description
+    assert "pagination" in tool.description.lower()
     assert tool.args_schema == GLQLQueryInput
+
+
+@pytest.mark.asyncio
+async def test_pagination_with_after_cursor(
+    glql_tool, mock_gitlab_client, mock_version_18_6, sample_glql_query
+):
+    """Test that pagination cursor is correctly passed to API."""
+    expected_data = {
+        "data": {
+            "count": 200,
+            "nodes": [
+                {"id": "gid://gitlab/Issue/201", "title": "Test Issue 201"},
+                {"id": "gid://gitlab/Issue/202", "title": "Test Issue 202"},
+            ],
+            "pageInfo": {
+                "endCursor": "next_cursor_value",
+                "hasNextPage": False,
+                "hasPreviousPage": True,
+                "startCursor": "current_cursor_value",
+            },
+        }
+    }
+    mock_gitlab_client.apost.return_value = GitLabHttpResponse(
+        status_code=200, body=expected_data
+    )
+
+    response = await glql_tool.arun(
+        {"glql_yaml": sample_glql_query, "after": "previous_cursor_value"}
+    )
+    parsed = json.loads(response)
+
+    # Verify the request included the after parameter
+    body = json.loads(mock_gitlab_client.apost.call_args.kwargs["body"])
+    assert body["after"] == "previous_cursor_value"
+    assert body["glql_yaml"] == sample_glql_query
+
+    # Verify response includes pagination info
+    assert parsed["data"]["pageInfo"]["hasNextPage"] is False
+    assert parsed["data"]["pageInfo"]["hasPreviousPage"] is True
+    assert parsed["data"]["pageInfo"]["endCursor"] == "next_cursor_value"
+
+
+@pytest.mark.asyncio
+async def test_pagination_without_after_cursor(
+    glql_tool, mock_gitlab_client, mock_version_18_6, sample_glql_query
+):
+    """Test that request without after parameter doesn't include it in body."""
+    expected_data = {
+        "data": {
+            "count": 200,
+            "nodes": [
+                {"id": "gid://gitlab/Issue/1", "title": "Test Issue 1"},
+            ],
+            "pageInfo": {
+                "endCursor": "first_page_cursor",
+                "hasNextPage": True,
+                "hasPreviousPage": False,
+                "startCursor": "first_page_cursor",
+            },
+        }
+    }
+    mock_gitlab_client.apost.return_value = GitLabHttpResponse(
+        status_code=200, body=expected_data
+    )
+
+    response = await glql_tool.arun({"glql_yaml": sample_glql_query})
+    parsed = json.loads(response)
+
+    # Verify the request does not include after parameter
+    body = json.loads(mock_gitlab_client.apost.call_args.kwargs["body"])
+    assert "after" not in body
+    assert body["glql_yaml"] == sample_glql_query
+
+    # Verify response indicates first page
+    assert parsed["data"]["pageInfo"]["hasNextPage"] is True
+    assert parsed["data"]["pageInfo"]["hasPreviousPage"] is False
+
+
+@pytest.mark.asyncio
+async def test_pagination_display_message_with_cursor(mock_gitlab_client):
+    """Test display message shows pagination status."""
+    tool = RunGLQLQuery(metadata={"gitlab_client": mock_gitlab_client})
+
+    # Without cursor
+    query_without_cursor = GLQLQueryInput(glql_yaml="query: type = Issue")
+    assert tool.format_display_message(query_without_cursor) == "Execute GLQL query"
+
+    # With cursor
+    query_with_cursor = GLQLQueryInput(
+        glql_yaml="query: type = Issue", after="some_cursor"
+    )
+    assert (
+        tool.format_display_message(query_with_cursor)
+        == "Execute GLQL query (fetching next page)"
+    )

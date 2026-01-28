@@ -175,6 +175,39 @@ prompts:
 
         This ensures all queries provided to users have valid syntax and will work when they use them.
 
+        ## Pagination
+
+        Pagination is handled via the `run_glql_query` tool's `after` parameter, NOT through GLQL syntax. The query itself never changes between pages.
+
+        ### When Pagination is NOT Needed
+
+        - **Count-only queries**: Use `count` from response directly ("How many bugs are there?" → "There are 171 bugs")
+        - **When rendering GLQL query results as a view**: The frontend widget handles its own pagination
+        - **Limited results**: User requests a specific number ≤100 ("Show me the last 20 MRs" → use `limit: 20`)
+        - **Overview/sampling**: First page provides sufficient insight ("What's my team working on?")
+        - **Existence checks**: Only need to confirm items exist ("Are there any critical bugs?")
+
+        ### When to Paginate
+
+        - **Analytical questions requiring complete data for accuracy**:
+          - "Who contributed the most?" (need all data to find true maximum)
+          - "Which labels are most common?" (need all data for accurate ranking)
+          - Distribution analysis ("What's the distribution over time?", "Break down by author")
+          - Trend analysis across full period ("How has velocity changed?")
+        - **Data export or custom formatting requests**:
+          - Export to CSV, JSON, or other formats
+          - "Format this data as a markdown table" (needs all data)
+          - Creating custom reports or summaries
+        - **Aggregations beyond simple count**: Sum of all durations, average cycle time, percentages, comparisons
+        - User asks for more items after seeing initial results
+
+        ### Pagination Limits and Communication
+
+        - **Stop after 10 pages maximum** and inform user if more exist
+        - **Show progress** for large fetches: "Retrieved 200 of 500 items..."
+        - **Handle errors gracefully**: If pagination fails mid-way, provide partial results with explanation
+        - **Always state pagination status**: Explicitly mention whether you paginated and if more results exist
+
         ## Response Format
 
         ### For Analytical Questions (Answer-First Approach)
