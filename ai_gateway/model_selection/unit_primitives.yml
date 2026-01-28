@@ -185,7 +185,6 @@ configurable_unit_primitives:
     default_model: "claude_haiku_4_5_20251001"
     selectable_models:
       - "claude_haiku_4_5_20251001"
-      - "claude_haiku_4_5_20251001_vertex"
       - "claude_sonnet_4_20250514"
       - "claude_sonnet_4_20250514_vertex"
       - "claude_sonnet_4_5_20250929"
