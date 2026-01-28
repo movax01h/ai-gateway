@@ -1,5 +1,7 @@
+import time
 from unittest.mock import AsyncMock, patch
 
+import litellm
 import pytest
 from langchain_core.messages import AIMessageChunk, HumanMessage
 from langchain_core.messages.ai import InputTokenDetails, UsageMetadata
@@ -308,3 +310,170 @@ def test_bind_tools_with_web_search_options(bind_tools_params, expected_tools):
 
     assert isinstance(result, Runnable)
     assert result.kwargs["tools"] == expected_tools
+
+
+@pytest.mark.asyncio
+async def test_fireworks_503_retries_with_exponential_backoff():
+    """Verify 503 errors trigger retries with exponential backoff for Fireworks."""
+    message = HumanMessage(content="test")
+
+    # Mock to fail twice with 503, then succeed
+    call_count = 0
+
+    async def mock_acompletion(*args, **kwargs):
+        nonlocal call_count
+        call_count += 1
+        if call_count <= 2:
+            raise litellm.ServiceUnavailableError(
+                message="Service temporarily unavailable",
+                llm_provider="fireworks_ai",
+                model="test-model",
+            )
+        return {
+            "choices": [
+                {
+                    "message": {"content": "success", "role": "assistant"},
+                    "finish_reason": "stop",
+                    "index": 0,
+                }
+            ],
+            "usage": {"prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15},
+        }
+
+    chat = ChatLiteLLM(
+        model="test-model", custom_llm_provider="fireworks_ai", max_retries=3
+    )
+
+    with patch.object(
+        chat.client, "acompletion", new=AsyncMock(side_effect=mock_acompletion)
+    ):
+        result = await chat._agenerate(messages=[message])
+
+        assert call_count == 3  # Failed twice, succeeded on third
+        assert result.generations[0].message.content == "success"
+
+
+@pytest.mark.asyncio
+async def test_non_fireworks_503_fails_immediately():
+    """Verify 503 errors do NOT trigger retries for non-Fireworks providers."""
+    message = HumanMessage(content="test")
+
+    call_count = 0
+
+    async def mock_acompletion(*args, **kwargs):
+        nonlocal call_count
+        call_count += 1
+        raise litellm.ServiceUnavailableError(
+            message="Service temporarily unavailable",
+            llm_provider="anthropic",
+            model="test-model",
+        )
+
+    chat = ChatLiteLLM(
+        model="test-model", custom_llm_provider="anthropic", max_retries=3
+    )
+
+    with patch.object(
+        chat.client, "acompletion", new=AsyncMock(side_effect=mock_acompletion)
+    ):
+        with pytest.raises(litellm.ServiceUnavailableError):
+            await chat._agenerate(messages=[message])
+
+        # Should fail on first attempt without retrying ServiceUnavailableError
+        assert call_count == 1
+
+
+@pytest.mark.asyncio
+@pytest.mark.skip(reason="Slow test - takes ~120 seconds")
+async def test_fireworks_retry_respects_120s_timeout():
+    """Verify retries stop after 120 second timeout."""
+    message = HumanMessage(content="test")
+
+    start_time = time.time()
+
+    async def mock_acompletion(*args, **kwargs):
+        raise litellm.ServiceUnavailableError(
+            message="Service temporarily unavailable",
+            llm_provider="fireworks_ai",
+            model="test-model",
+        )
+
+    chat = ChatLiteLLM(
+        model="test-model",
+        custom_llm_provider="fireworks_ai",
+        max_retries=100,  # Set high to test timeout, not max_retries
+    )
+
+    with patch.object(
+        chat.client, "acompletion", new=AsyncMock(side_effect=mock_acompletion)
+    ):
+        with pytest.raises(litellm.ServiceUnavailableError):
+            await chat._agenerate(messages=[message])
+
+        elapsed = time.time() - start_time
+
+        # Should stop around 120 seconds (allow some tolerance)
+        assert 115 <= elapsed <= 125, f"Expected ~120s timeout, got {elapsed}s"
+
+
+@pytest.mark.asyncio
+@pytest.mark.skip(reason="Slow test - tests precise timing over 15+ seconds")
+async def test_fireworks_exponential_backoff_timing():
+    """Verify backoff follows 1s, 2s, 4s, 8s, 10s, 10s...
+
+    pattern.
+    """
+    message = HumanMessage(content="test")
+
+    call_times = []
+
+    async def mock_acompletion(*args, **kwargs):
+        call_times.append(time.time())
+        raise litellm.ServiceUnavailableError(
+            message="Service temporarily unavailable",
+            llm_provider="fireworks_ai",
+            model="test-model",
+        )
+
+    chat = ChatLiteLLM(
+        model="test-model", custom_llm_provider="fireworks_ai", max_retries=5
+    )
+
+    with patch.object(
+        chat.client, "acompletion", new=AsyncMock(side_effect=mock_acompletion)
+    ):
+        with pytest.raises(litellm.ServiceUnavailableError):
+            await chat._agenerate(messages=[message])
+
+        # Calculate delays between calls
+        delays = [call_times[i + 1] - call_times[i] for i in range(len(call_times) - 1)]
+
+        # Expected delays: ~1s, ~2s, ~4s, ~8s (with some tolerance)
+        # Note: First 4 retries should follow exponential pattern
+        if len(delays) >= 4:
+            assert (
+                0.8 <= delays[0] <= 1.5
+            ), f"First delay should be ~1s, got {delays[0]}"
+            assert (
+                1.8 <= delays[1] <= 2.5
+            ), f"Second delay should be ~2s, got {delays[1]}"
+            assert (
+                3.5 <= delays[2] <= 4.5
+            ), f"Third delay should be ~4s, got {delays[2]}"
+            assert (
+                7.0 <= delays[3] <= 9.0
+            ), f"Fourth delay should be ~8s, got {delays[3]}"
+
+
+def test_fireworks_max_retries_set_via_params():
+    """Verify that max_retries can be set via initialization params for Fireworks."""
+    chat = ChatLiteLLM(
+        model="test-model", custom_llm_provider="fireworks_ai", max_retries=10
+    )
+    assert chat.max_retries == 10
+
+
+def test_non_fireworks_max_retries_uses_default():
+    """Verify that non-Fireworks providers use default max_retries."""
+    chat = ChatLiteLLM(model="test-model", custom_llm_provider="anthropic")
+    assert chat.max_retries == 1

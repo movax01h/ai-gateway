@@ -379,3 +379,22 @@ def test_get_proxy_models_for_provider(fs: FakeFilesystem):
     # Test unknown provider returns empty list
     unknown_models = config.get_proxy_models_for_provider("unknown")
     assert not unknown_models
+
+
+def test_fireworks_models_have_max_retries_10():
+    """Test that all Fireworks models have max_retries set to 10 for exponential backoff."""
+    config = ModelSelectionConfig()
+    llm_definitions = config.get_llm_definitions()
+
+    fireworks_models = [
+        (identifier, definition)
+        for identifier, definition in llm_definitions.items()
+        if definition.params.get("custom_llm_provider") == "fireworks_ai"
+    ]
+
+    assert len(fireworks_models) > 0, "No Fireworks models found in models.yml"
+
+    for identifier, definition in fireworks_models:
+        assert (
+            definition.params.get("max_retries") == 10
+        ), f"Fireworks model '{identifier}' should have max_retries=10, got {definition.params.get('max_retries')}"
