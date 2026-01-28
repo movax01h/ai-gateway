@@ -166,6 +166,8 @@ models:
       max_tokens: 4_096
       max_retries: 1
       model_class_provider: litellm
+      extra_headers:
+        anthropic-beta: fine-grained-tool-streaming-2025-05-14,context-1m-2025-08-07
     prompt_params:
       vertex_location: global
 
@@ -184,7 +186,7 @@ models:
       max_tokens: 4_096
       model_class_provider: anthropic
 
-  - name: "Claude Haiku 4.5 20251001 - Vertex"
+  - name: "Claude Haiku 4.5 - Vertex"
     provider: "Vertex"
     gitlab_identifier: "claude_haiku_4_5_20251001_vertex"
     description: "Fast, cost-effective responses."
@@ -201,6 +203,8 @@ models:
       max_tokens: 4_096
       max_retries: 1
       model_class_provider: litellm
+      extra_headers:
+        anthropic-beta: fine-grained-tool-streaming-2025-05-14
     prompt_params:
       vertex_location: global
 
@@ -234,6 +238,8 @@ models:
       max_tokens: 4_096
       max_retries: 1
       model_class_provider: litellm
+      extra_headers:
+        anthropic-beta: fine-grained-tool-streaming-2025-05-14,context-1m-2025-08-07
     prompt_params:
       vertex_location: global
 
