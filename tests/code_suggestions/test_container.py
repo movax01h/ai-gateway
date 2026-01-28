@@ -1,15 +1,24 @@
+from typing import cast
+
 from dependency_injector import containers
 
 from ai_gateway.code_suggestions.completions import CodeCompletions
+from ai_gateway.code_suggestions.container import (
+    ContainerCodeCompletions,
+    ContainerCodeGenerations,
+    ContainerCodeSuggestions,
+)
 from ai_gateway.code_suggestions.generations import CodeGenerations
 from ai_gateway.models.anthropic import KindAnthropicModel
 from ai_gateway.models.litellm import KindLiteLlmModel
 
 
 def test_container(mock_ai_gateway_container: containers.DeclarativeContainer):
-    code_suggestions = mock_ai_gateway_container.code_suggestions
-    completions = code_suggestions.completions
-    generations = code_suggestions.generations
+    code_suggestions = cast(
+        ContainerCodeSuggestions, mock_ai_gateway_container.code_suggestions
+    )
+    completions = cast(ContainerCodeCompletions, code_suggestions.completions)
+    generations = cast(ContainerCodeGenerations, code_suggestions.generations)
 
     assert isinstance(
         completions.anthropic(model__name=KindAnthropicModel.CLAUDE_3_5_SONNET),

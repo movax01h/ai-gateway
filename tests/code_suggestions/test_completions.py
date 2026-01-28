@@ -1,11 +1,14 @@
+# pylint: disable=too-many-lines
+
 from contextlib import contextmanager
-from typing import Any, Type
+from typing import Any, AsyncIterator, Type, cast
 from unittest.mock import AsyncMock, Mock, PropertyMock, patch
 
 import pytest
 from gitlab_cloud_connector import CloudConnectorUser
 
 from ai_gateway.code_suggestions import CodeCompletions
+from ai_gateway.code_suggestions.base import CodeSuggestionsChunk, CodeSuggestionsOutput
 from ai_gateway.code_suggestions.processing.post.completions import PostProcessor
 from ai_gateway.code_suggestions.processing.pre import PromptBuilderPrefixBased
 from ai_gateway.code_suggestions.processing.typing import (
@@ -222,7 +225,7 @@ class TestCodeCompletions:
         expected_language_id: LanguageId,
         expected_output: str,
     ):
-        use_case.model.generate = AsyncMock(
+        mock_generate = AsyncMock(
             return_value=TextGenModelOutput(
                 text=expected_output,
                 score=0,
@@ -231,7 +234,7 @@ class TestCodeCompletions:
             )
         )
 
-        use_case.prompt_builder.build.return_value = Prompt(
+        mock_prompt = Prompt(
             prefix="test_prefix",
             suffix="test_suffix",
             metadata=MetadataPromptBuilder(
@@ -246,18 +249,25 @@ class TestCodeCompletions:
                 ),
             ),
         )
+        mock_build = Mock(return_value=mock_prompt)
+        mock_add_content = Mock()
 
-        actual = await use_case.execute(
-            prefix=prefix,
-            suffix=suffix,
-            file_name=file_name,
-            editor_lang=editor_lang,
-            stream=stream,
-            code_context=code_context,
-            context_max_percent=context_max_percent,
-        )
+        with (
+            patch.object(use_case.model, "generate", mock_generate),
+            patch.object(use_case.prompt_builder, "build", mock_build),
+            patch.object(use_case.prompt_builder, "add_content", mock_add_content),
+        ):
+            actual = await use_case.execute(
+                prefix=prefix,
+                suffix=suffix,
+                file_name=file_name,
+                editor_lang=editor_lang,
+                stream=stream,
+                code_context=code_context,
+                context_max_percent=context_max_percent,
+            )
 
-        use_case.prompt_builder.add_content.assert_called_with(
+        mock_add_content.assert_called_with(
             prefix,
             suffix=suffix,
             suffix_reserved_percent=CodeCompletions.SUFFIX_RESERVED_PERCENT,
@@ -265,8 +275,11 @@ class TestCodeCompletions:
             code_context=code_context,
         )
 
+        actual = cast(CodeSuggestionsOutput, actual)
+
         assert expected_output == actual.text
         assert expected_language_id == actual.lang_id
+        assert actual.metadata is not None
         assert isinstance(
             actual.metadata.tokens_consumption_metadata, TokensConsumptionMetadata
         )
@@ -278,9 +291,9 @@ class TestCodeCompletions:
         assert actual.metadata.tokens_consumption_metadata.context_tokens_sent == 4
         assert actual.metadata.tokens_consumption_metadata.context_tokens_used == 3
 
-        use_case.model.generate.assert_called_with(
-            use_case.prompt_builder.build().prefix,
-            use_case.prompt_builder.build().suffix,
+        mock_generate.assert_called_with(
+            mock_prompt.prefix,
+            mock_prompt.suffix,
             stream,
         )
 
@@ -312,27 +325,29 @@ class TestCodeCompletions:
             for chunk in model_chunks:
                 yield chunk
 
-        use_case.model.generate = AsyncMock(side_effect=_stream_generator)
+        mock_generate = AsyncMock(side_effect=_stream_generator)
 
-        actual = await use_case.execute(
-            prefix="any",
-            suffix="how",
-            file_name="bar.py",
-            editor_lang=LanguageId.PYTHON,
-            stream=True,
-        )
+        with patch.object(use_case.model, "generate", mock_generate):
+            actual = await use_case.execute(
+                prefix="any",
+                suffix="how",
+                file_name="bar.py",
+                editor_lang="python",
+                stream=True,
+            )
 
-        chunks = []
-        async for content in actual:
-            chunks.append(content.text)
+            chunks = []
+            actual_stream = cast(AsyncIterator[CodeSuggestionsChunk], actual)
+            async for content in actual_stream:
+                chunks.append(content.text)
 
-        assert chunks == expected_chunks
+            assert chunks == expected_chunks
 
-        use_case.model.generate.assert_called_with(
-            use_case.prompt_builder.build().prefix,
-            use_case.prompt_builder.build().suffix,
-            True,
-        )
+            mock_generate.assert_called_with(
+                use_case.prompt_builder.build().prefix,
+                use_case.prompt_builder.build().suffix,
+                True,
+            )
 
     @pytest.mark.parametrize(
         (
@@ -370,7 +385,7 @@ class TestCodeCompletions:
         expected_language_id: LanguageId,
         expected_output: str,
     ):
-        use_case.model.generate = AsyncMock(
+        mock_generate = AsyncMock(
             return_value=TextGenModelOutput(
                 text=expected_output,
                 score=0,
@@ -393,14 +408,23 @@ class TestCodeCompletions:
             post=Mock(spec=MetadataCodeContent, length_tokens=3),
         )
 
-        use_case.prompt_builder.wrap.return_value = mock_prompt
+        mock_wrap = Mock(return_value=mock_prompt)
 
-        actual = await use_case.execute(
-            prefix, suffix, file_name, editor_lang=editor_lang, raw_prompt=prompt
-        )
+        with (
+            patch.object(use_case.model, "generate", mock_generate),
+            patch.object(use_case.prompt_builder, "wrap", mock_wrap),
+        ):
+
+            actual = await use_case.execute(
+                prefix, suffix, file_name, editor_lang=editor_lang, raw_prompt=prompt
+            )
+
+        # Since stream=False, actual should be CodeSuggestionsOutput, not AsyncIterator
+        actual = cast(CodeSuggestionsOutput, actual)
 
         assert expected_output == actual.text
         assert expected_language_id == actual.lang_id
+        assert actual.metadata is not None
         assert isinstance(
             actual.metadata.tokens_consumption_metadata, TokensConsumptionMetadata
         )
@@ -412,13 +436,13 @@ class TestCodeCompletions:
         assert actual.metadata.tokens_consumption_metadata.context_tokens_sent == 4
         assert actual.metadata.tokens_consumption_metadata.context_tokens_used == 3
 
-        use_case.model.generate.assert_called_with(
+        mock_generate.assert_called_with(
             mock_prompt.prefix,
             mock_prompt.suffix,
             stream,
         )
 
-        use_case.prompt_builder.wrap.assert_called_with(prompt)
+        mock_wrap.assert_called_with(prompt)
 
     @pytest.mark.parametrize(
         (
@@ -461,18 +485,33 @@ class TestCodeCompletions:
         def _side_effect(*_args, **_kwargs):
             raise exception
 
-        use_case.model.generate = AsyncMock(side_effect=_side_effect)
+        mock_generate = AsyncMock(side_effect=_side_effect)
 
-        with pytest.raises(model_exception_type):
-            _ = await use_case.execute(prefix, suffix, file_name, editor_lang)
+        mock_context_manager = Mock()
+        mock_context_manager.register_model_exception = Mock()
+        mock_enter = Mock(return_value=mock_context_manager)
+        mock_exit = Mock(return_value=None)
+        mock_watch = Mock()
+        mock_watch.return_value.__enter__ = mock_enter
+        mock_watch.return_value.__exit__ = mock_exit
 
-        code = (
-            model_exception_type.code if hasattr(model_exception_type, "code") else -1
-        )
+        with (
+            patch.object(use_case.model, "generate", mock_generate),
+            patch.object(use_case.instrumentator, "watch", mock_watch),
+        ):
 
-        use_case.instrumentator.watcher.register_model_exception.assert_called_with(
-            str(exception), code
-        )
+            with pytest.raises(model_exception_type):
+                _ = await use_case.execute(prefix, suffix, file_name, editor_lang)
+
+            code = (
+                model_exception_type.code
+                if hasattr(model_exception_type, "code")
+                else -1
+            )
+
+            mock_context_manager.register_model_exception.assert_called_with(
+                str(exception), code
+            )
 
     async def test_execute_with_post_processor(
         self, completions_with_post_processing: Mock
@@ -567,17 +606,26 @@ class TestCodeCompletions:
         model = Mock(spec=AmazonQModel)
         model.input_token_limit = 16
         if expected_output:
-            model.generate = AsyncMock(
-                return_value=TextGenModelOutput(
-                    text=expected_output,
-                    score=0,
-                    safety_attributes=SafetyAttributes(),
-                    metadata=Mock(output_tokens=10, spec_set=["output_tokens"]),
+            if stream:
+
+                async def _stream_generator(*_args, **_kwargs):
+                    yield TextGenModelChunk(text=expected_output)
+
+                model.generate = AsyncMock(side_effect=_stream_generator)
+            else:
+                model.generate = AsyncMock(
+                    return_value=TextGenModelOutput(
+                        text=expected_output,
+                        score=0,
+                        safety_attributes=SafetyAttributes(),
+                        metadata=Mock(output_tokens=10, spec_set=["output_tokens"]),
+                    )
                 )
-            )
 
         # Create use case with AmazonQModel
-        use_case = CodeCompletions(model, Mock(spec=TokenStrategyBase))
+        tokenization_strategy = Mock(spec=TokenStrategyBase)
+        tokenization_strategy.estimate_length = Mock(return_value=[10, 0])
+        use_case = CodeCompletions(model, tokenization_strategy)
         use_case.instrumentator = InstrumentorMock(spec=TextGenModelInstrumentator)
 
         # Mock prompt builder
@@ -604,8 +652,17 @@ class TestCodeCompletions:
 
         # Verify results
         if expected_output:
-            assert actual.text == expected_output
-            assert actual.lang_id == expected_language_id
+            if stream:
+                chunks = []
+                actual_stream = cast(AsyncIterator[CodeSuggestionsChunk], actual)
+                async for content in actual_stream:
+                    chunks.append(content.text)
+
+                assert chunks == [expected_output]
+            else:
+                actual = cast(CodeSuggestionsOutput, actual)
+                assert actual.text == expected_output
+                assert actual.lang_id == expected_language_id
 
             # Verify model.generate was called with correct parameters
             model.generate.assert_called_once_with(
@@ -616,6 +673,7 @@ class TestCodeCompletions:
                 stream,
             )
         else:
+            actual = cast(CodeSuggestionsOutput, actual)
             assert actual.text == ""
 
     async def test_execute_agent_model(self):
@@ -661,6 +719,7 @@ class TestCodeCompletions:
             stream=stream,
         )
 
+        actual = cast(CodeSuggestionsOutput, actual)
         assert actual.text == "world()"
         assert actual.lang_id == LanguageId.PYTHON
 
@@ -954,6 +1013,8 @@ class TestCodeCompletions:
             )
 
             # Should return empty result when language cannot be determined
+            actual = cast(CodeSuggestionsOutput, actual)
+
             assert actual.text == ""
             assert actual.score == 0
             assert actual.lang_id is None
