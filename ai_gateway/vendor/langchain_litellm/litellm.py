@@ -119,6 +119,53 @@ def _create_retry_decorator(
     )
 
 
+def _create_fireworks_retry_decorator(
+    llm: ChatLiteLLM,
+    run_manager: Optional[
+        Union[AsyncCallbackManagerForLLMRun, CallbackManagerForLLMRun]
+    ] = None,
+) -> Callable[[Any], Any]:
+    """Returns a tenacity retry decorator with exponential backoff for Fireworks 503 errors.
+
+    Fireworks.ai instances may return 503 when becoming available. This decorator
+    implements exponential backoff to handle cold starts gracefully.
+
+    Configuration:
+    - Initial wait: 1 second
+    - Max wait: 10 seconds
+    - Total timeout: 120 seconds
+    - Backoff: Exponential (multiplier: 2)
+    """
+    import litellm
+    from tenacity import (
+        before_sleep_log,
+        retry,
+        retry_if_exception_type,
+        stop_after_delay,
+        wait_exponential,
+    )
+
+    errors = [
+        litellm.Timeout,
+        litellm.APIError,
+        litellm.APIConnectionError,
+        litellm.RateLimitError,
+        litellm.ServiceUnavailableError,  # 503 errors for Fireworks instance cold starts
+    ]
+
+    def _create_fireworks_retry_decorator_factory(f: Callable) -> Callable:
+        decorator = retry(
+            reraise=True,
+            stop=stop_after_delay(120),
+            wait=wait_exponential(multiplier=1, min=1, max=10),
+            retry=retry_if_exception_type(tuple(errors)),
+            before_sleep=before_sleep_log(logger, logging.WARNING),
+        )
+        return decorator(f)
+
+    return _create_fireworks_retry_decorator_factory
+
+
 def _convert_dict_to_message(_dict: Mapping[str, Any]) -> BaseMessage:
     role = _dict["role"]
     if role == "user":
@@ -446,7 +493,17 @@ class ChatLiteLLM(BaseChatModel):
         self, run_manager: Optional[AsyncCallbackManagerForLLMRun] = None, **kwargs: Any
     ) -> Any:
         """Use tenacity to retry the async completion call."""
-        retry_decorator = _create_retry_decorator(self, run_manager=run_manager)
+        # Use Fireworks-specific retry decorator with exponential backoff for 503s
+        if self.custom_llm_provider == "fireworks_ai":
+            retry_decorator = _create_fireworks_retry_decorator(
+                self, run_manager=run_manager
+            )
+            logger.debug(
+                "Using Fireworks retry decorator with exponential backoff",
+                extra={"provider": "fireworks_ai", "max_retries": self.max_retries},
+            )
+        else:
+            retry_decorator = _create_retry_decorator(self, run_manager=run_manager)
 
         @retry_decorator
         async def _completion_with_retry(**kwargs: Any) -> Any:
