@@ -1141,8 +1141,8 @@ class TestMcpServerToolsFiltering:
         """Test that search tools are filtered when MCP search is enabled."""
         from lib.mcp_server_tools.context import set_enabled_mcp_server_tools
 
-        # Enable gitlab_search MCP tool
-        set_enabled_mcp_server_tools({"gitlab_search"})
+        # Enable search MCP tool
+        set_enabled_mcp_server_tools({"search"})
 
         tools = workflow_with_project._get_tools()
 
@@ -1163,7 +1163,7 @@ class TestMcpServerToolsFiltering:
         """Test that other MCP tools don't affect search tools."""
         from lib.mcp_server_tools.context import set_enabled_mcp_server_tools
 
-        # Enable some other MCP tool (not gitlab_search)
+        # Enable some other MCP tool (not search)
         set_enabled_mcp_server_tools({"some_other_tool", "another_tool"})
 
         tools = workflow_with_project._get_tools()
@@ -1181,10 +1181,8 @@ class TestMcpServerToolsFiltering:
         """Test filtering when multiple MCP tools are enabled including search."""
         from lib.mcp_server_tools.context import set_enabled_mcp_server_tools
 
-        # Enable multiple MCP tools including gitlab_search
-        set_enabled_mcp_server_tools(
-            {"gitlab_search", "some_other_tool", "another_tool"}
-        )
+        # Enable multiple MCP tools including search
+        set_enabled_mcp_server_tools({"search", "some_other_tool", "another_tool"})
 
         tools = workflow_with_project._get_tools()
 
