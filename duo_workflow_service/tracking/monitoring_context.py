@@ -3,7 +3,7 @@ from typing import Optional
 
 from pydantic import BaseModel
 
-from duo_workflow_service.gitlab.gitlab_api import PromptInjectionProtectionLevel
+from duo_workflow_service.gitlab.schema import PromptInjectionProtectionLevel
 
 __all__ = ["MonitoringContext", "current_monitoring_context"]
 

@@ -1,0 +1,31 @@
+tool_name: gitlab_issue_search
+cases:
+  - messages:
+      - type: human
+        content: Show me open issues about database in group 789
+    expected_tool_input:
+      id: "789"
+      search_type: groups
+      search: database
+      state: opened
+  - messages:
+      - type: human
+        content: Search closed confidential issues about security in project backend-team?
+    expected_tool_input:
+      id: backend-team
+      search_type: projects
+      search: security
+      state: closed
+      confidential: true
+  - messages:
+      - type: human
+        content: |
+          Search for closed public issues mentioning 'user authentication failure' in project devops-team, oldest first
+    expected_tool_input:
+      id: devops-team
+      search_type: projects
+      search: user authentication failure
+      state: closed
+      confidential: false
+      order_by: created_at
+      sort: asc

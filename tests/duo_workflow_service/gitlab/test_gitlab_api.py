@@ -6,11 +6,11 @@ from duo_workflow_service.gitlab.gitlab_api import (
     GITLAB_18_2_QUERY,
     GITLAB_18_3_OR_ABOVE_QUERY,
     GITLAB_18_8_OR_ABOVE_QUERY,
-    PromptInjectionProtectionLevel,
     extract_id_from_global_id,
     fetch_workflow_and_container_data,
     fetch_workflow_and_container_query,
 )
+from duo_workflow_service.gitlab.schema import PromptInjectionProtectionLevel
 
 
 @pytest.fixture(name="workflow_and_project_data")

@@ -12,7 +12,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from duo_workflow_service.gitlab.gitlab_api import PromptInjectionProtectionLevel
+from duo_workflow_service.gitlab.schema import PromptInjectionProtectionLevel
 from duo_workflow_service.security.prompt_scanner import DetectionType, ScanResult
 from duo_workflow_service.security.scanner_factory import PromptInjectionDetectedError
 from duo_workflow_service.security.tool_output_security import ToolTrustLevel
