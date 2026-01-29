@@ -37,6 +37,7 @@ query GetGroupWorkItem(
                             nodes {
                                 linkType
                                 workItem {
+                                    webUrl
                                     iid
                                     namespace {
                                         id

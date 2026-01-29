@@ -37,6 +37,7 @@ query GetProjectWorkItem(
                             nodes {
                                 linkType
                                 workItem {
+                                    webUrl
                                     iid
                                     namespace {
                                         id
