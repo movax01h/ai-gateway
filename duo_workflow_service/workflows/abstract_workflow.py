@@ -34,13 +34,13 @@ from duo_workflow_service.gitlab.events import get_event
 from duo_workflow_service.gitlab.gitlab_api import (
     Namespace,
     Project,
-    PromptInjectionProtectionLevel,
     WorkflowConfig,
     empty_workflow_config,
     fetch_workflow_and_container_data,
 )
 from duo_workflow_service.gitlab.http_client import GitlabHttpClient
 from duo_workflow_service.gitlab.http_client_factory import get_http_client
+from duo_workflow_service.gitlab.schema import PromptInjectionProtectionLevel
 from duo_workflow_service.gitlab.url_parser import SESSION_URL_PATH
 from duo_workflow_service.monitoring import duo_workflow_metrics
 from duo_workflow_service.tools.mcp_tools import (

@@ -1,0 +1,29 @@
+tool_name: gitlab_blob_search
+cases:
+  - messages:
+      - type: human
+        content: |
+          Find all spec files for the UserController in remote repos under project 520
+    expected_tool_input:
+      id: "520"
+      search_type: projects
+      search: UserController filename:spec
+  - messages:
+      - type: human
+        content: |
+          Find all the python files that contains 'redis' in the develop branch of project 77
+    expected_tool_input:
+      id: "77"
+      search: redis extension:py
+      search_type: projects
+      ref: develop
+  - messages:
+      - type: human
+        content: |
+          Look for test files containing 'user validation' in the src/tests directory of project 99, show newest first
+    expected_tool_input:
+      id: "99"
+      search: user validation path:src/tests
+      search_type: projects
+      order_by: created_at
+      sort: desc
