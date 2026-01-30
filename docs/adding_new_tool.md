@@ -137,7 +137,159 @@ To update the protocol buffer definitions:
    make gen-proto
    ```
 
-### 4. Register the Tool
+### 4. Tool Supersession (Optional)
+
+If you're creating a new implementation of an existing tool that should replace it, you can use the **supersession mechanism**.
+This ensures that when the new tool implementation is available, the old tool's implementation is replaced while the tool name be the same. This will avoid introducing breaking changes.
+
+#### When to Use Supersession
+
+Use supersession when:
+
+- Creating a backward-compatible replacement for an existing tool
+- The new tool provides the same functionality with improvements
+- You want to gradually migrate users from the old tool to the new one
+
+#### How to Implement Supersession
+
+1. **Add the `supersedes` class variable** to your new tool:
+
+   ```python
+   from typing import ClassVar, Optional, Type
+   from duo_workflow_service.tools.duo_base_tool import DuoBaseTool
+
+   class NewTool(DuoBaseTool):
+       name: str = "old_tool_name"  # The tool name should be the same as the superseded to avoid breaking changes
+       description: str = "Improved version of the old tool"
+       supersedes: ClassVar[Optional[Type[DuoBaseTool]]] = OldTool  # Reference the old tool class
+
+       async def _execute(self, ...):
+           # Implementation
+           pass
+   ```
+
+1. **Preapproval and Privilege Inheritance**:
+   - The new tool automatically inherits the **preapproval status** from the superseded tool
+   - The new tool inherits the **privilege requirements** from the superseded tool
+   - This means if the old tool was preapproved, the new tool will be too
+   - No additional configuration is needed in `tools_registry.py`
+
+1. **What changes?**:
+   - Only the tool implementation is replaced, all the other keep the same.
+
+#### Example: ShellCommand Superseding RunCommand
+
+See `duo_workflow_service/tools/command.py` for a real example:
+
+```python
+class ShellCommand(DuoBaseTool):
+    name: str = "run_command" # keep the name the same as `RunCommand`
+    description: str = "Runs a shell command and returns its output."
+    args_schema: Type[BaseModel] = ShellCommandInput
+    supersedes: ClassVar[Optional[Type[DuoBaseTool]]] = RunCommand  # Declares it supersedes RunCommand
+    required_capability: ClassVar[str] = "shell_command"  # Also capability-dependent (see next section)
+
+    async def _execute(self, command: str) -> str:
+        # Implementation
+        pass
+```
+
+In this case:
+
+- `ShellCommand` replaces `RunCommand`
+- Tool name keep the same
+- If `RunCommand` was preapproved, `ShellCommand` will be too
+- Only one of these tools will be available at runtime
+
+### 5. Capability-Dependent Tools (Optional)
+
+For backward compatibility with older clients, you can make a tool **capability-dependent**. This means the tool is only
+enabled when the client explicitly declares support for it via `clientCapabilities` in the gRPC request.
+
+#### When to Use Capability-Dependent Tools
+
+Use this pattern when:
+
+- Adding a new tool that older clients don't support
+- You want to ensure clients have the necessary executor support before enabling the tool
+
+#### How to Implement Capability-Dependent Tools
+
+1. **Add the `required_capability` class variable** to your tool:
+
+   ```python
+   from typing import ClassVar
+   from duo_workflow_service.tools.duo_base_tool import DuoBaseTool
+
+   class YourNewTool(DuoBaseTool):
+       name: str = "your_new_tool"
+       description: str = "A new tool that requires client support"
+       required_capability: ClassVar[str] = "your_capability_name"  # Capability name
+
+       async def _execute(self, ...):
+           # Implementation
+           pass
+   ```
+
+1. **Add the tool to `_CAPABILITY_DEPENDENT_TOOLS`** in `duo_workflow_service/components/tools_registry.py`:
+
+   ```python
+   _CAPABILITY_DEPENDENT_TOOLS: list[Type[BaseTool]] = [
+       YourNewTool,
+       # Other capability-dependent tools...
+   ]
+   ```
+
+1. **Client Declaration**:
+   - Clients declare their capabilities in the gRPC request via `clientCapabilities`
+   - The server checks if the client has the required capability using `is_client_capable()`
+   - The tool is only added to the registry if the capability is present
+   - **Important**: When adding a new capability, ensure all clients that will use it declare support:
+      - If requests come through **workhorse** (e.g., GitLab LSP with WebSocket connection): Update
+        `ClientCapabilities` in workhorse (
+        `ee/app/assets/javascripts/ai/duo_agentic_chat/utils/workflow_socket_utils.js`) and in GitLab LSP. As
+        documented in the workhorse code: "We intersect the capabilities of all parties and then new behavior can only
+        depend on that behavior if it makes it all the way through."
+      - For other clients: Ensure they include the capability in their `clientCapabilities` when making gRPC requests
+   - Current capabilities include: `"shell_command"`, `"incremental_streaming"`
+
+#### Important Notes
+
+- **Capability name doesn't have to match tool name**: The `required_capability` string is independent of the tool name.
+  For example, `ShellCommand` tool requires the `"shell_command"` capability, but they could have different names.
+- **Preapproval inheritance**: If your capability-dependent tool supersedes another tool, it inherits the preapproval
+  status from the superseded tool
+- **Error handling**: If a tool in `_CAPABILITY_DEPENDENT_TOOLS` doesn't define `required_capability`, the registry will
+  raise a `RuntimeError` during initialization
+
+#### Example: ShellCommand with Capability Requirement
+
+From `duo_workflow_service/tools/command.py`:
+
+```python
+class ShellCommand(DuoBaseTool):
+    name: str = "run_command"
+    description: str = "Runs a shell command and returns its output."
+    args_schema: Type[BaseModel] = ShellCommandInput
+    supersedes: ClassVar[Optional[Type[DuoBaseTool]]] = RunCommand
+    required_capability: ClassVar[str] = "shell_command"  # Client must support this
+
+    async def _execute(self, command: str) -> str:
+        return await _execute_action(
+            self.metadata,
+            contract_pb2.Action(
+                runShellCommand=contract_pb2.RunShellCommand(command=command)
+            ),
+        )
+```
+
+In this case:
+
+- The tool is only enabled if the client sends `clientCapabilities` containing `"shell_command"`
+- It also supersedes `RunCommand`, so `RunCommand`'s implementation will be replaced when `ShellCommand` is enabled
+- It inherits preapproval status from `RunCommand`
+
+### 6. Register the Tool
 
 It is critical for security that tools are categorized by their capabilities. These categories are not for code
 organization but for security and safety purposes. Our `read_write_files` and `read_only_gitlab` are the only tools that
@@ -178,7 +330,7 @@ _AGENT_PRIVILEGES: dict[str, list[Type[BaseTool]]] = {
 }
 ```
 
-### 5. Add the Tool to Workflows
+### 7. Add the Tool to Workflows
 
 Add your tool to the appropriate workflow tool lists in:
 

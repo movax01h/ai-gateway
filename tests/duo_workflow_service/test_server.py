@@ -22,9 +22,9 @@ from google.protobuf.json_format import MessageToDict
 
 from ai_gateway.config import Config, ConfigCustomModels, ConfigGoogleCloudPlatform
 from ai_gateway.container import ContainerApplication
+from ai_gateway.instrumentators.model_requests import client_capabilities
 from ai_gateway.prompts import BasePromptRegistry
 from contract import contract_pb2
-from duo_workflow_service.client_capabilities import client_capabilities
 from duo_workflow_service.executor.outbox import OutboxSignal
 from duo_workflow_service.interceptors.authentication_interceptor import current_user
 from duo_workflow_service.server import (

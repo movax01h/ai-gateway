@@ -314,3 +314,8 @@ infrastructure/ai-assist/charts
 # Docker Compose
 docker-compose.override.yaml
 tmp/
+
+# duo settings
+.gitlab/duo/*
+
+.llm_cache.db

@@ -6,6 +6,7 @@ from langchain_core.messages import HumanMessage, ToolMessage
 from langchain_core.tools import BaseTool, ToolException
 from pydantic_core import ValidationError
 
+from ai_gateway.instrumentators.model_requests import client_capabilities
 from duo_workflow_service.agent_platform.v1.components.one_off.ui_log import (
     UILogEventsOneOff,
     UILogWriterOneOffTools,
@@ -233,8 +234,12 @@ class ToolNodeWithErrorCorrection:
         extra=None,
     ):
         """Track internal events for monitoring."""
-        if extra is None:
-            extra = {}
+        # Add client capabilities to additional properties
+        extra = {
+            **(extra or {}),
+            "client_capabilities": list(client_capabilities.get()),
+        }
+
         additional_properties = InternalEventAdditionalProperties(
             label=EventLabelEnum.WORKFLOW_TOOL_CALL_LABEL.value,
             property=tool_name,
