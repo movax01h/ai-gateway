@@ -1,6 +1,7 @@
 from dependency_injector import containers, providers
 
 from lib.billing_events.client import BillingEventsClient
+from lib.billing_events.service import BillingEventService
 
 __all__ = [
     "ContainerBillingEvent",
@@ -21,4 +22,9 @@ class ContainerBillingEvent(containers.DeclarativeContainer):
         app_id=config.app_id,
         namespace=config.namespace,
         internal_event_client=internal_event.client,
+    )
+
+    service = providers.Factory(
+        BillingEventService,
+        client=client,
     )
