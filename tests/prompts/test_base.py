@@ -544,6 +544,84 @@ configurable_unit_primitives:
                     output_tokens=2,
                     total_tokens=3,
                     input_token_details=InputTokenDetails(
+                        audio=0, cache_creation=0, cache_read=0
+                    ),
+                ),
+                InternalEventAdditionalProperties(
+                    label="cache_details",
+                    property=None,
+                    value=None,
+                    cache_read=0,
+                    cache_creation=0,
+                    ephemeral_5m_input_tokens=0,
+                    ephemeral_1h_input_tokens=0,
+                ),
+            ),
+            (
+                UsageMetadata(
+                    input_tokens=1,
+                    output_tokens=2,
+                    total_tokens=3,
+                    input_token_details=InputTokenDetails(
+                        audio=0,
+                        cache_creation=0,
+                        cache_read=0,
+                        ephemeral_5m_input_tokens=8,  # type: ignore[typeddict-unknown-key]
+                    ),
+                ),
+                InternalEventAdditionalProperties(
+                    label="cache_details",
+                    property=None,
+                    value=None,
+                    cache_read=0,
+                    cache_creation=0,
+                    ephemeral_5m_input_tokens=8,
+                    ephemeral_1h_input_tokens=0,
+                ),
+            ),
+        ],
+    )
+    async def test_atransform_model_instrumentator_callbacks(
+        self,
+        mock_watch: mock.Mock,
+        internal_event_client: mock.Mock,
+        prompt: Prompt,
+        usage_metadata: UsageMetadata,
+        expected_additional_properties: InternalEventAdditionalProperties,
+    ):
+        mock_watcher = mock_watch.return_value.__enter__.return_value
+
+        prompt.internal_event_client = internal_event_client
+
+        async def input():
+            yield {"name": "Duo", "content": "What's up?"}
+
+        with (
+            self._mock_usage_metadata(prompt.model_name, usage_metadata),
+            capture_logs() as cap_logs,
+        ):
+            async for message in prompt.atransform(input()):
+                mock_watcher.register_message.assert_any_call(message)
+
+        _assert_usage_metadata_handling(
+            mock_watcher,
+            internal_event_client,
+            prompt,
+            usage_metadata,
+            cap_logs,
+            expected_additional_properties,
+        )
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        ("usage_metadata", "expected_additional_properties"),
+        [
+            (
+                UsageMetadata(
+                    input_tokens=1,
+                    output_tokens=2,
+                    total_tokens=3,
+                    input_token_details=InputTokenDetails(
                         audio=0, cache_creation=4, cache_read=0
                     ),
                 ),
