@@ -3,6 +3,7 @@ import time
 import grpc
 from gitlab_cloud_connector.auth import X_GITLAB_REALM_HEADER, X_GITLAB_VERSION_HEADER
 
+from ai_gateway import Config
 from ai_gateway.instrumentators.model_requests import (
     client_type,
     gitlab_realm,
@@ -12,6 +13,10 @@ from ai_gateway.instrumentators.model_requests import (
     language_server_version as language_server_version_context,
 )
 from duo_workflow_service.tracking.duo_workflow_metrics import workflow_start_time
+from lib.events.contextvar import (
+    X_GITLAB_SELF_HOSTED_DAP_BILLING_ENABLED,
+    set_self_hosted_dap_billing_enabled,
+)
 from lib.language_server import LanguageServerVersion
 from lib.mcp_server_tools.context import (
     X_GITLAB_ENABLED_MCP_SERVER_TOOLS,
@@ -20,10 +25,6 @@ from lib.mcp_server_tools.context import (
 from lib.prompts.caching import (
     X_GITLAB_MODEL_PROMPT_CACHE_ENABLED,
     set_prompt_caching_enabled_to_current_request,
-)
-from lib.self_hosted_dap_billing_context import (
-    X_GITLAB_SELF_HOSTED_DAP_BILLING_ENABLED,
-    set_self_hosted_dap_billing_enabled,
 )
 from lib.verbose_ai_logs import VERBOSE_AI_LOGS_HEADER, current_verbose_ai_logs_context
 
@@ -46,6 +47,9 @@ class MetadataContextInterceptor(grpc.aio.ServerInterceptor):
 
     X_GITLAB_CLIENT_TYPE_HEADER = "x-gitlab-client-type"
     X_GITLAB_LANGUAGE_SERVER_VERSION = "x-gitlab-language-server-version"
+
+    def __init__(self, config: Config):
+        self.config = config
 
     async def intercept_service(
         self,
@@ -85,9 +89,10 @@ class MetadataContextInterceptor(grpc.aio.ServerInterceptor):
         )
 
         # Self-hosted DAP billing enabled flag
-        set_self_hosted_dap_billing_enabled(
-            metadata.get(X_GITLAB_SELF_HOSTED_DAP_BILLING_ENABLED, "").lower()
-        )
+        if self.config.custom_models.enabled:
+            set_self_hosted_dap_billing_enabled(
+                str(metadata.get(X_GITLAB_SELF_HOSTED_DAP_BILLING_ENABLED, ""))
+            )
 
         # MCP server tools
         enabled_tools = metadata.get(X_GITLAB_ENABLED_MCP_SERVER_TOOLS, "").split(",")

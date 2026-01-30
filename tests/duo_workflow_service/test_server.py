@@ -1016,7 +1016,8 @@ async def test_grpc_server(mock_setup_signal_handlers):
         mock_connection_pool.__aenter__ = AsyncMock(return_value=mock_connection_pool)
         mock_connection_pool.__aexit__ = AsyncMock(return_value=None)
 
-        await serve(50052)
+        mock_config = MagicMock(spec=Config)
+        await serve(mock_config, 50052)
 
     mock_server.add_insecure_port.assert_called_once_with("[::]:50052")
     mock_server.start.assert_called_once()

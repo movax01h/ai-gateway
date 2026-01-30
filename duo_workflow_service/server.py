@@ -782,7 +782,7 @@ async def next_client_event(
     return event
 
 
-async def serve(port: int) -> None:
+async def serve(config: Config, port: int) -> None:
     """grpc.keepalive_time_ms: The period (in milliseconds) after which a keepalive ping is sent on the transport.
 
     grpc.keepalive_timeout_ms: The amount of time (in milliseconds) the sender of the keepalive     ping waits for an
@@ -821,7 +821,7 @@ async def serve(port: int) -> None:
 
         server = grpc.aio.server(
             interceptors=[
-                MetadataContextInterceptor(),
+                MetadataContextInterceptor(config),
                 CorrelationIdInterceptor(),
                 AuthenticationInterceptor(),
                 FeatureFlagInterceptor(),
@@ -923,7 +923,7 @@ def run(config: Config):
     if not self_hosted_mode:
         validate_llm_access()
     port = int(os.environ.get("PORT", "50052"))
-    asyncio.get_event_loop().run_until_complete(serve(port))
+    asyncio.get_event_loop().run_until_complete(serve(config, port))
 
 
 def run_app():
