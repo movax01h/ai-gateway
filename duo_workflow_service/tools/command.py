@@ -1,6 +1,6 @@
 import shlex
 import textwrap
-from typing import Any, List, Optional, Type
+from typing import Any, ClassVar, List, Optional, Type
 
 from pydantic import BaseModel, Field
 
@@ -73,6 +73,49 @@ Instead of '{disallowed_operator}' please use {self.name} multiple times consecu
     ) -> str:
         command = f"{args.program} {args.args}".strip()
         message = f"Run command: {command}"
+        if _tool_response is not None:
+            return f"{message} {textwrap.shorten(_tool_response, max_len)}"
+        return message
+
+
+class ShellCommandInput(BaseModel):
+    command: str = Field(
+        description="The shell script to execute in the user's default shell"
+    )
+
+
+class ShellCommand(DuoBaseTool):
+    name: str = "run_command"
+    description: str = (
+        "Execute a shell command in the current project directory. "
+        "Do not prefix command with 'cd' as the working directory is already set."
+    )
+    args_schema: Type[BaseModel] = ShellCommandInput
+    supersedes: ClassVar[Optional[Type[DuoBaseTool]]] = (
+        RunCommand  # Declares it supersedes RunCommand
+    )
+    required_capability: ClassVar[str] = (
+        "shell_command"  # Client capability required to use this tool
+    )
+
+    async def _execute(
+        self,
+        command: str,
+    ) -> str:
+        return await _execute_action(
+            self.metadata,  # type: ignore
+            contract_pb2.Action(
+                runShellCommand=contract_pb2.RunShellCommand(command=command)
+            ),
+        )
+
+    def format_display_message(
+        self,
+        args: ShellCommandInput,
+        _tool_response: Any = None,
+        max_len: int = 100,
+    ) -> str:
+        message = f"Run shell command: {args.command}"
         if _tool_response is not None:
             return f"{message} {textwrap.shorten(_tool_response, max_len)}"
         return message

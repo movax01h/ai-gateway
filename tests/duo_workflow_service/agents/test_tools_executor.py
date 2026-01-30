@@ -2,7 +2,7 @@
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Type, cast
-from unittest.mock import AsyncMock, MagicMock, Mock, call, patch
+from unittest.mock import ANY, AsyncMock, MagicMock, Mock, call, patch
 
 import pytest
 from langchain.tools import BaseTool
@@ -18,6 +18,7 @@ from langgraph.graph import StateGraph
 from langgraph.types import Command
 from pydantic import BaseModel, Field, ValidationError
 
+from ai_gateway.instrumentators.model_requests import client_capabilities
 from contract import contract_pb2
 from duo_workflow_service.agents import ToolsExecutor
 from duo_workflow_service.entities.state import (
@@ -256,6 +257,8 @@ async def test_run(
     # Create mock toolset
     mock_toolset = MagicMock(spec=Toolset)
 
+    client_capabilities.set({"feature_a", "shell_command"})
+
     # Configure the mock toolset to behave like a dictionary
     def mock_contains(key):
         for tool in test_case.tools.keys():
@@ -341,11 +344,20 @@ async def test_run(
                             label=EventLabelEnum.WORKFLOW_TOOL_CALL_LABEL.value,
                             property=mock_tool().name,
                             value="123",
+                            client_capabilities=ANY,
                         ),
                         category=flow_type.value,
                     ),
                 ]
             )
+            assert set(
+                internal_event_client.track_event.call_args.kwargs[
+                    "additional_properties"
+                ].extra["client_capabilities"]
+            ) == {
+                "feature_a",
+                "shell_command",
+            }
         else:
             tool.ainvoke.assert_not_called()
 
@@ -987,6 +999,7 @@ async def test_run_error_handling(
     expected_extra_log,
     flow_type: GLReportingEventContext,
 ):
+    client_capabilities.set({"feature_a", "shell_command"})
     tool = mock_tool(side_effect=tool_side_effect, args_schema=tool_args_schema)
 
     mock_toolset = MagicMock(spec=Toolset)
@@ -1023,11 +1036,22 @@ async def test_run_error_handling(
                     value="123",
                     error=str(tool_side_effect),
                     error_type=type(tool_side_effect).__name__,
+                    client_capabilities=ANY,
                 ),
                 category=flow_type.value,
             ),
         ]
     )
+
+    assert set(
+        internal_event_client.track_event.call_args.kwargs[
+            "additional_properties"
+        ].extra["client_capabilities"]
+    ) == {
+        "feature_a",
+        "shell_command",
+    }
+
     assert len(result) == 2
     assert result[0]["conversation_history"]["planner"][0].content.startswith(
         expected_response
@@ -1077,6 +1101,7 @@ async def test_run_error_max_tokens(
     flow_type: GLReportingEventContext,
 ):
     mock_toolset = MagicMock(spec=Toolset)
+    client_capabilities.set({"feature_a", "shell_command"})
 
     mock_toolset.__contains__ = MagicMock(return_value=True)
     mock_toolset.__getitem__ = MagicMock(return_value=None)
@@ -1116,11 +1141,20 @@ async def test_run_error_max_tokens(
                     value="123",
                     error="Max tokens reached for tool read_file. Try a simpler request or using a different tool.",
                     error_type="IncompleteToolCallDueToMaxTokens",
+                    client_capabilities=ANY,
                 ),
                 category=flow_type.value,
             ),
         ]
     )
+    assert set(
+        internal_event_client.track_event.call_args.kwargs[
+            "additional_properties"
+        ].extra["client_capabilities"]
+    ) == {
+        "feature_a",
+        "shell_command",
+    }
     assert len(result) == 2
     assert result[0]["conversation_history"]["planner"][0].content.startswith(
         "Tool read_file raised ToolException: Max tokens reached for tool read_file. "
@@ -1671,4 +1705,5 @@ async def test_invalid_tool_call_with_valid_tool_calls(
     # Verify invalid tool message
     assert ui_chat_logs[2]["message_type"] == MessageTypeEnum.TOOL
     assert ui_chat_logs[2]["status"] == ToolStatus.FAILURE
+    assert ui_chat_logs[2]["message_id"] == "invalid-call-1"
     assert ui_chat_logs[2]["message_id"] == "invalid-call-1"

@@ -14,6 +14,7 @@ from langgraph.types import Command
 from pydantic import ValidationError
 
 from ai_gateway.container import ContainerApplication
+from ai_gateway.instrumentators.model_requests import client_capabilities
 from duo_workflow_service.entities import WorkflowStatusEnum
 from duo_workflow_service.entities.state import (
     DuoWorkflowStateType,
@@ -473,8 +474,12 @@ class ToolsExecutor:
         tool_name,
         extra=None,
     ):
-        if extra is None:
-            extra = {}
+        # Add client capabilities to additional properties
+        extra = {
+            **(extra or {}),
+            "client_capabilities": list(client_capabilities.get()),
+        }
+
         additional_properties = InternalEventAdditionalProperties(
             label=EventLabelEnum.WORKFLOW_TOOL_CALL_LABEL.value,
             property=tool_name,

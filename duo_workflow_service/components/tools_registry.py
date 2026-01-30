@@ -4,6 +4,7 @@ from langchain.tools import BaseTool
 from pydantic import BaseModel
 
 from duo_workflow_service import tools
+from duo_workflow_service.client_capabilities import is_client_capable
 from duo_workflow_service.executor.outbox import Outbox
 from duo_workflow_service.gitlab.gitlab_api import Project, WorkflowConfig
 from duo_workflow_service.gitlab.http_client import GitlabHttpClient
@@ -61,6 +62,12 @@ _DEFAULT_TOOLS: list[Type[BaseTool]] = [
 NO_OP_TOOLS: list[Type[BaseModel]] = [
     tools.HandoverTool,
     tools.RequestUserClarificationTool,
+]
+
+# These tools require specific client capabilities to function properly.
+# They are only enabled when the required capability is present.
+_CAPABILITY_DEPENDENT_TOOLS: list[Type[BaseTool]] = [
+    tools.ShellCommand,
 ]
 
 _READ_ONLY_GITLAB_TOOLS: list[Type[BaseTool]] = [
@@ -234,9 +241,11 @@ class ToolsRegistry:
             tools_for_agent_privileges[_RUN_MCP_TOOLS_PRIVILEGE] = mcp_tools or []
 
         # Conditionally enable generic GitLab API tools based on feature flag
-        if is_feature_enabled(FeatureFlag.USE_GENERIC_GITLAB_API_TOOLS):
-            if _USE_GENERIC_GITLAB_API_TOOLS_PRIVILEGE not in enabled_tools:
-                enabled_tools.append(_USE_GENERIC_GITLAB_API_TOOLS_PRIVILEGE)
+        if (
+            is_feature_enabled(FeatureFlag.USE_GENERIC_GITLAB_API_TOOLS)
+            and _USE_GENERIC_GITLAB_API_TOOLS_PRIVILEGE not in enabled_tools
+        ):
+            enabled_tools.append(_USE_GENERIC_GITLAB_API_TOOLS_PRIVILEGE)
 
         self._enabled_tools = {
             **{tool_cls.tool_title: tool_cls for tool_cls in NO_OP_TOOLS},  # type: ignore
@@ -264,13 +273,44 @@ class ToolsRegistry:
                     tool = tool_cls_or_config(metadata=tool_metadata)  # type: ignore[assignment]
 
                 # If language server client was detected, restrict tool versions
-                if isinstance(tool, DuoBaseTool) and language_server_version:
-                    if not language_server_version.supports_node_executor_tools():
-                        continue
+                if (
+                    isinstance(tool, DuoBaseTool)
+                    and language_server_version
+                    and not language_server_version.supports_node_executor_tools()
+                ):
+                    continue
 
                 self._enabled_tools[tool.name] = tool
                 if privilege in preapproved_tools:
                     self._preapproved_tool_names.add(tool.name)
+
+        # Add capability-dependent tools if condition is met
+        for tool_cls in _CAPABILITY_DEPENDENT_TOOLS:
+            # Access required_capability as a class variable (ClassVar)
+            required_capability = getattr(tool_cls, "required_capability", None)
+            if not required_capability:
+                error_msg = (
+                    f"Tool {tool_cls.__name__} is in "
+                    "_CAPABILITY_DEPENDENT_TOOLS but does not define "
+                    "'required_capability'"
+                )
+                raise RuntimeError(error_msg)
+
+            # Don't add capability dependent tool if it supersedes another tool
+            # and agent privilege for the superseded tool is missing
+            supersedes = getattr(tool_cls, "supersedes", None)
+            if (
+                supersedes
+                and supersedes.model_fields["name"].default not in self._enabled_tools
+            ):
+                continue
+
+            if is_client_capable(required_capability):
+                # replace the superseded tool to supersedes' tool instance
+                # pre-approval status will not be changed
+                self._enabled_tools[tool_cls.model_fields["name"].default] = tool_cls(
+                    metadata=tool_metadata
+                )
 
     def get(self, tool_name: str) -> Optional[ToolType]:
         return self._enabled_tools.get(tool_name)

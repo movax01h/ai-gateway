@@ -4,6 +4,7 @@ import structlog
 from langchain_core.tools import BaseTool
 from pydantic_core import ValidationError
 
+from ai_gateway.instrumentators.model_requests import client_capabilities
 from duo_workflow_service.agent_platform.experimental.components.deterministic_step.ui_log import (
     UILogEventsDeterministicStep,
     UILogWriterDeterministicStep,
@@ -157,8 +158,12 @@ class DeterministicStepNode:
         tool_name,
         extra=None,
     ):
-        if extra is None:
-            extra = {}
+        # Add client capabilities to additional properties
+        extra = {
+            **(extra or {}),
+            "client_capabilities": list(client_capabilities.get()),
+        }
+
         additional_properties = InternalEventAdditionalProperties(
             label=EventLabelEnum.WORKFLOW_TOOL_CALL_LABEL.value,
             property=tool_name,

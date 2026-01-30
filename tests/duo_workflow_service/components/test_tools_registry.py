@@ -1,10 +1,14 @@
+from typing import ClassVar
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from gitlab_cloud_connector import CloudConnectorUser
+from langchain.tools import BaseTool
+from pydantic import Field
 
 from duo_workflow_service import tools
 from duo_workflow_service.components.tools_registry import (
+    _CAPABILITY_DEPENDENT_TOOLS,
     _DEFAULT_TOOLS,
     NO_OP_TOOLS,
     Toolset,
@@ -17,6 +21,8 @@ from duo_workflow_service.tools.code_review import (
     BuildReviewMergeRequestContext,
     PostDuoCodeReview,
 )
+from duo_workflow_service.tools.command import RunCommand, ShellCommand
+from duo_workflow_service.tools.duo_base_tool import DuoBaseTool
 from duo_workflow_service.tools.findings.get_security_finding_details import (
     GetSecurityFindingDetails,
 )
@@ -836,3 +842,100 @@ class TestGenericGitLabAPITools:
 
         assert "gitlab_api_get" in toolset._all_tools
         assert "gitlab_graphql" in toolset._all_tools
+
+
+class TestCapabilityDependentTools:
+    """Tests for capability-dependent tools functionality."""
+
+    @patch("duo_workflow_service.components.tools_registry.is_client_capable")
+    def test_capability_dependent_tool_enabled_when_capable(
+        self, mock_is_client_capable, tool_metadata
+    ):
+        """Test that capability-dependent tools are enabled when client has the capability."""
+        mock_is_client_capable.return_value = True
+
+        registry = ToolsRegistry(
+            enabled_tools=["run_commands"],
+            preapproved_tools=[],
+            tool_metadata=tool_metadata,
+        )
+
+        # Instance of ShellCommand instead of RunCommand should be in enabled tools when capability is present
+        assert "run_command" in registry._enabled_tools
+        assert isinstance(registry._enabled_tools["run_command"], ShellCommand)
+
+    @patch("duo_workflow_service.components.tools_registry.is_client_capable")
+    def test_capability_dependent_tool_disabled_when_not_capable(
+        self, mock_is_client_capable, tool_metadata
+    ):
+        """Test that capability-dependent tools are disabled when client lacks the capability."""
+        mock_is_client_capable.return_value = False
+
+        registry = ToolsRegistry(
+            enabled_tools=["run_commands"],
+            preapproved_tools=[],
+            tool_metadata=tool_metadata,
+        )
+
+        # Instance RunCommand instead of ShellCommand should be in enabled tools when capability is present
+        assert "run_command" in registry._enabled_tools
+        assert isinstance(registry._enabled_tools["run_command"], RunCommand)
+
+    @patch("duo_workflow_service.components.tools_registry.is_client_capable")
+    def test_capability_dependent_tool_disabled_when_enabled_but_missing_privilege(
+        self, mock_is_client_capable, tool_metadata
+    ):
+        """Even if frontend sends capability, if agent privilege is missing, don't add it."""
+        mock_is_client_capable.return_value = True
+
+        registry = ToolsRegistry(
+            enabled_tools=[],
+            preapproved_tools=[],
+            tool_metadata=tool_metadata,
+        )
+
+        assert "run_command" not in registry._enabled_tools
+
+    def test_capability_dependent_tool_missing_required_capability_raises_error(
+        self, tool_metadata
+    ):
+        """Test that missing required_capability attribute raises RuntimeError."""
+        mock_tool_cls = MagicMock(spec=BaseTool)
+        mock_tool_cls.__name__ = "MockTool"
+        (
+            delattr(mock_tool_cls, "required_capability")
+            if hasattr(mock_tool_cls, "required_capability")
+            else None
+        )
+
+        with patch(
+            "duo_workflow_service.components.tools_registry._CAPABILITY_DEPENDENT_TOOLS",
+            [mock_tool_cls],
+        ):
+            with pytest.raises(
+                RuntimeError,
+                match="Tool MockTool is in _CAPABILITY_DEPENDENT_TOOLS but does not define 'required_capability'",
+            ):
+                ToolsRegistry(
+                    enabled_tools=[],
+                    preapproved_tools=[],
+                    tool_metadata=tool_metadata,
+                )
+
+    @patch("duo_workflow_service.components.tools_registry.is_client_capable")
+    def test_capability_dependent_tool_inherits_preapproval(
+        self, mock_is_client_capable, tool_metadata
+    ):
+        """Test that capability-dependent tools are enabled when client has the capability."""
+        mock_is_client_capable.return_value = True
+
+        registry = ToolsRegistry(
+            enabled_tools=["run_commands"],
+            preapproved_tools=["run_commands"],
+            tool_metadata=tool_metadata,
+        )
+
+        # Instance of ShellCommand instead of RunCommand should be in enabled tools when capability is present
+        assert "run_command" in registry._enabled_tools
+        assert "run_command" in registry._preapproved_tool_names
+        assert isinstance(registry._enabled_tools["run_command"], ShellCommand)
