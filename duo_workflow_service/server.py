@@ -77,7 +77,12 @@ from duo_workflow_service.workflows.type_definitions import (
     OUTGOING_MESSAGE_TOO_LARGE,
     AdditionalContext,
 )
-from lib.billing_events import BillingEvent, BillingEventsClient
+from lib.billing_events import (
+    BillingEvent,
+    BillingEventService,
+    ExecutionEnvironment,
+    SelfHostedBilling,
+)
 from lib.events import GLReportingEventContext
 from lib.internal_events import InternalEventsClient
 from lib.internal_events.context import (
@@ -684,8 +689,8 @@ class DuoWorkflowService(contract_pb2_grpc.DuoWorkflowServicer):
         self,
         request_iterator: AsyncIterable[contract_pb2.TrackSelfHostedClientEvent],
         context: grpc.ServicerContext,
-        billing_event_client: BillingEventsClient = Provide[
-            ContainerApplication.billing_event.client
+        billing_service: BillingEventService = Provide[
+            ContainerApplication.billing_event.service
         ],
     ) -> AsyncIterator[contract_pb2.TrackSelfHostedAction]:
         user: CloudConnectorUser = current_user_context_var.get()
@@ -708,36 +713,32 @@ class DuoWorkflowService(contract_pb2_grpc.DuoWorkflowServicer):
                 workflow_id=client_event.workflowID,
             )
 
+            gl_context = GLReportingEventContext.from_workflow_definition(
+                client_event.featureQualifiedName,
+                is_ai_catalog_item=client_event.featureAiCatalogItem,
+            )
+
             try:
-                billing_metadata = {
-                    "workflow_id": client_event.workflowID,
-                    "feature_qualified_name": client_event.featureQualifiedName,
-                    "feature_ai_catalog_item": client_event.featureAiCatalogItem,
-                    "execution_environment": "duo_agent_platform",
-                    "llm_operations": [
-                        {
-                            "token_count": 1,
-                            "model_id": "self-hosted-model",
-                            "model_engine": "litellm",
-                            "model_provider": "litellm",
-                            "prompt_tokens": 1,
-                            "completion_tokens": 1,
-                        }
-                    ],
-                }
-                billing_event_client.track_billing_event(
-                    user=user,
+                with billing_service.start_billing(
+                    user,
+                    gl_context,
                     event=BillingEvent.DAP_FLOW_ON_COMPLETION,
+                    execution_env=ExecutionEnvironment.DAP,
                     category=self.__class__.__name__,
                     unit_of_measure="request",
                     quantity=1,
-                    metadata=billing_metadata,
-                )
-                log.info(
-                    "Successfully sent billing event for self-hosted LLM auth",
-                    request_id=client_event.requestID,
-                    workflow_id=client_event.workflowID,
-                )
+                ) as track_operations:
+                    track_operations(
+                        client_event.workflowID,
+                        ai_model_metadata=SelfHostedBilling.ai_model_metadata(),
+                        llm_token_usage=SelfHostedBilling.llm_token_usage(),
+                    )
+
+                    log.info(
+                        "Successfully sent billing event for self-hosted LLM auth",
+                        request_id=client_event.requestID,
+                        workflow_id=client_event.workflowID,
+                    )
             except Exception as e:
                 log_exception(
                     e,
