@@ -65,6 +65,7 @@ from duo_workflow_service.gitlab.gitlab_api import Project
 from duo_workflow_service.server import CONTAINER_APPLICATION_PACKAGES
 from duo_workflow_service.workflows.type_definitions import AdditionalContext
 from lib.billing_events.client import BillingEventsClient
+from lib.events.contextvar import self_hosted_dap_billing_enabled
 from lib.feature_flags.context import current_feature_flag_context
 from lib.internal_events.client import InternalEventsClient
 from lib.prompts.caching import current_prompt_cache_context
@@ -805,6 +806,7 @@ def reset_context_vars():
     current_prompt_cache_context.set(None)
     ModelSelectionConfig._instance = None
     structured_logging.ENABLE_REQUEST_LOGGING = False
+    self_hosted_dap_billing_enabled.set(False)
 
 
 @pytest.fixture(autouse=True)

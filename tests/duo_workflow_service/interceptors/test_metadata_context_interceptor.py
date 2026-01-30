@@ -2,20 +2,30 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from ai_gateway.config import Config
 from duo_workflow_service.interceptors.metadata_context_interceptor import (
     MetadataContextInterceptor,
 )
-from lib.mcp_server_tools.context import current_mcp_server_tools_context
-from lib.self_hosted_dap_billing_context import (
+from lib.events.contextvar import (
     X_GITLAB_SELF_HOSTED_DAP_BILLING_ENABLED,
-    current_self_hosted_dap_billing_enabled,
+    self_hosted_dap_billing_enabled,
 )
+from lib.mcp_server_tools.context import current_mcp_server_tools_context
+
+
+@pytest.fixture
+def mock_config():
+    """Create a properly configured mock Config for tests."""
+    config = MagicMock(spec=Config)
+    config.custom_models = MagicMock()
+    config.custom_models.enabled = False
+    return config
 
 
 @pytest.mark.asyncio
-async def test_client_type_header():
+async def test_client_type_header(mock_config):
     """Test that client type header is properly set."""
-    interceptor = MetadataContextInterceptor()
+    interceptor = MetadataContextInterceptor(mock_config)
     handler_call_details = MagicMock()
     handler_call_details.invocation_metadata = [
         ("x-gitlab-client-type", "node-grpc"),
@@ -35,9 +45,9 @@ async def test_client_type_header():
 
 
 @pytest.mark.asyncio
-async def test_gitlab_realm_header():
+async def test_gitlab_realm_header(mock_config):
     """Test that GitLab realm header is properly set."""
-    interceptor = MetadataContextInterceptor()
+    interceptor = MetadataContextInterceptor(mock_config)
     handler_call_details = MagicMock()
     handler_call_details.invocation_metadata = [
         ("x-gitlab-realm", "saas"),
@@ -57,9 +67,9 @@ async def test_gitlab_realm_header():
 
 
 @pytest.mark.asyncio
-async def test_gitlab_version_header():
+async def test_gitlab_version_header(mock_config):
     """Test that GitLab version header is properly set."""
-    interceptor = MetadataContextInterceptor()
+    interceptor = MetadataContextInterceptor(mock_config)
     handler_call_details = MagicMock()
     handler_call_details.invocation_metadata = [
         ("x-gitlab-version", "16.5.0"),
@@ -79,9 +89,9 @@ async def test_gitlab_version_header():
 
 
 @pytest.mark.asyncio
-async def test_language_server_version_header():
+async def test_language_server_version_header(mock_config):
     """Test that language server version header is properly set with transformation."""
-    interceptor = MetadataContextInterceptor()
+    interceptor = MetadataContextInterceptor(mock_config)
     handler_call_details = MagicMock()
     handler_call_details.invocation_metadata = [
         ("x-gitlab-language-server-version", "1.2.3"),
@@ -119,9 +129,9 @@ async def test_language_server_version_header():
         ("", False),
     ],
 )
-async def test_verbose_ai_logs_header(header_value, expected_bool):
+async def test_verbose_ai_logs_header(mock_config, header_value, expected_bool):
     """Test that verbose AI logs header is properly converted to boolean."""
-    interceptor = MetadataContextInterceptor()
+    interceptor = MetadataContextInterceptor(mock_config)
     handler_call_details = MagicMock()
     handler_call_details.invocation_metadata = [
         ("x-gitlab-enabled-instance-verbose-ai-logs", header_value),
@@ -141,9 +151,9 @@ async def test_verbose_ai_logs_header(header_value, expected_bool):
 
 
 @pytest.mark.asyncio
-async def test_prompt_caching_header():
+async def test_prompt_caching_header(mock_config):
     """Test that prompt caching header calls the setter function."""
-    interceptor = MetadataContextInterceptor()
+    interceptor = MetadataContextInterceptor(mock_config)
     handler_call_details = MagicMock()
     handler_call_details.invocation_metadata = [
         ("x-gitlab-model-prompt-cache-enabled", "true"),
@@ -163,9 +173,9 @@ async def test_prompt_caching_header():
 
 
 @pytest.mark.asyncio
-async def test_all_headers_together():
+async def test_all_headers_together(mock_config):
     """Test that all headers are processed correctly when present together."""
-    interceptor = MetadataContextInterceptor()
+    interceptor = MetadataContextInterceptor(mock_config)
     handler_call_details = MagicMock()
     handler_call_details.invocation_metadata = [
         ("x-gitlab-client-type", "node-grpc"),
@@ -224,9 +234,9 @@ async def test_all_headers_together():
 
 
 @pytest.mark.asyncio
-async def test_missing_headers():
+async def test_missing_headers(mock_config):
     """Test that missing headers don't cause errors."""
-    interceptor = MetadataContextInterceptor()
+    interceptor = MetadataContextInterceptor(mock_config)
     handler_call_details = MagicMock()
     handler_call_details.invocation_metadata = [
         ("other-header", "other-value"),
@@ -254,9 +264,6 @@ async def test_missing_headers():
         patch(
             "duo_workflow_service.interceptors.metadata_context_interceptor.set_prompt_caching_enabled_to_current_request"
         ) as mock_prompt_caching,
-        patch(
-            "duo_workflow_service.interceptors.metadata_context_interceptor.set_self_hosted_dap_billing_enabled"
-        ) as mock_self_hosted_billing,
     ):
         result = await interceptor.intercept_service(continuation, handler_call_details)
 
@@ -269,8 +276,8 @@ async def test_missing_headers():
         mock_verbose_logs.set.assert_called_once_with(False)
         # Prompt caching is always called (with None)
         mock_prompt_caching.assert_called_once_with(None)
-        # Self-hosted DAP billing is always called (with None)
-        mock_self_hosted_billing.assert_called_once_with("")
+        # Self-hosted DAP billing is only called when custom_models.enabled is True
+        # Since mock_config has custom_models.enabled = False, it won't be called
         # MCP server tools should be empty set when header is missing
         assert current_mcp_server_tools_context.get() == set()
         continuation.assert_called_once_with(handler_call_details)
@@ -278,28 +285,54 @@ async def test_missing_headers():
 
 
 @pytest.mark.asyncio
-async def test_self_hosted_dap_billing_header():
-    """Test that self-hosted DAP billing header is properly stored in context."""
-    interceptor = MetadataContextInterceptor()
+@pytest.mark.parametrize(
+    ("custom_models_enabled", "header_present", "header_value", "expected_result"),
+    [
+        # When custom_models.enabled is True and header is present with "true"
+        (True, True, "true", True),
+        # When custom_models.enabled is True and header is present with "false"
+        (True, True, "false", False),
+        # When custom_models.enabled is True and header is not present
+        (True, False, None, False),
+        # When custom_models.enabled is False and header is present (should not process)
+        (False, True, "true", False),
+        # When custom_models.enabled is False and header is not present
+        (False, False, None, False),
+    ],
+)
+async def test_self_hosted_dap_billing_header(
+    mock_config, custom_models_enabled, header_present, header_value, expected_result
+):
+    """Test that self-hosted DAP billing header is properly handled based on config and header presence."""
+    # Configure custom models setting
+    mock_config.custom_models.enabled = custom_models_enabled
+
+    interceptor = MetadataContextInterceptor(mock_config)
     handler_call_details = MagicMock()
-    handler_call_details.invocation_metadata = [
-        (X_GITLAB_SELF_HOSTED_DAP_BILLING_ENABLED, "true"),
-    ]
+
+    # Set up metadata based on whether header should be present
+    if header_present:
+        handler_call_details.invocation_metadata = [
+            (X_GITLAB_SELF_HOSTED_DAP_BILLING_ENABLED, header_value),
+        ]
+    else:
+        handler_call_details.invocation_metadata = []
 
     continuation = AsyncMock()
     continuation.return_value = "mocked_response"
 
     result = await interceptor.intercept_service(continuation, handler_call_details)
 
-    assert current_self_hosted_dap_billing_enabled.get() is True
+    # Verify the context value matches expected result
+    assert self_hosted_dap_billing_enabled.get() is expected_result
     continuation.assert_called_once_with(handler_call_details)
     assert result == "mocked_response"
 
 
 @pytest.mark.asyncio
-async def test_empty_header_values():
+async def test_empty_header_values(mock_config):
     """Test that empty header values are handled correctly."""
-    interceptor = MetadataContextInterceptor()
+    interceptor = MetadataContextInterceptor(mock_config)
     handler_call_details = MagicMock()
     handler_call_details.invocation_metadata = [
         ("x-gitlab-client-type", ""),
@@ -335,9 +368,9 @@ async def test_empty_header_values():
 
 
 @pytest.mark.asyncio
-async def test_mcp_server_tools_header():
+async def test_mcp_server_tools_header(mock_config):
     """Test that MCP server tools header is properly parsed."""
-    interceptor = MetadataContextInterceptor()
+    interceptor = MetadataContextInterceptor(mock_config)
     handler_call_details = MagicMock()
     handler_call_details.invocation_metadata = [
         ("x-gitlab-enabled-mcp-server-tools", "tool1,tool2,tool3"),
