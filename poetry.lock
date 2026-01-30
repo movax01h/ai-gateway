@@ -5059,7 +5059,7 @@ files = [
 
 [[package]]
 name = "q-developer-boto3"
-version = "1.11.0"
+version = "1.12.0"
 description = "boto3 fork which includes q developer clients"
 optional = false
 python-versions = ">=3.9"
