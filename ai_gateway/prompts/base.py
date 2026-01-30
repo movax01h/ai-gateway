@@ -329,6 +329,27 @@ class Prompt(RunnableBinding[Any, BaseMessage]):
             await watcher.afinish()
         # pylint: enable=contextmanager-generator-missing-cleanup,line-too-long
 
+    async def atransform(
+        self,
+        input: AsyncIterator[Any],
+        config: Optional[RunnableConfig] = None,
+        **kwargs: Optional[Any],
+    ) -> AsyncIterator[BaseMessage]:
+        # See note in `astream` about the cleanup pylint suppression
+        with (  # pylint: disable=contextmanager-generator-missing-cleanup
+            self.instrumentator.watch(
+                stream=True, unit_primitives=self.unit_primitives
+            ) as watcher,
+            get_usage_metadata_callback() as cb,
+        ):
+            async for item in super().atransform(input, config, **kwargs):
+                watcher.register_message(item)
+                yield item
+
+            self.handle_usage_metadata(watcher, cb.usage_metadata)
+
+            await watcher.afinish()
+
     def handle_usage_metadata(
         self,
         watcher: ModelRequestInstrumentator.WatchContainer,
