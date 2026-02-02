@@ -6,6 +6,7 @@ from fastapi import status
 
 from ai_gateway.model_selection import ModelSelectionConfig
 from ai_gateway.proxy.clients.base import BaseProxyClient
+from ai_gateway.proxy.clients.token_usage import TokenUsage
 
 
 class OpenAIProxyClient(BaseProxyClient):
@@ -26,9 +27,6 @@ class OpenAIProxyClient(BaseProxyClient):
     ALLOWED_HEADERS_TO_DOWNSTREAM = ["content-type"]
 
     PROVIDER_NAME = "openai"
-
-    def _base_url(self) -> str:
-        return "https://api.openai.com"
 
     def _allowed_upstream_paths(self) -> list[str]:
         return OpenAIProxyClient.ALLOWED_UPSTREAM_PATHS
@@ -57,6 +55,61 @@ class OpenAIProxyClient(BaseProxyClient):
 
     def _extract_stream_flag(self, upstream_path: str, json_body: typing.Any) -> bool:
         return json_body.get("stream", False)
+
+    def _extract_token_usage(
+        self, upstream_path: str, json_body: typing.Any
+    ) -> TokenUsage:
+        """Extract token usage from OpenAI response.
+
+        OpenAI response format:
+        {
+            "usage": {
+                "prompt_tokens": 10,
+                "completion_tokens": 20,
+                "total_tokens": 30,
+                "prompt_tokens_details": {
+                    "cached_tokens": 5
+                },
+                "completion_tokens_details": {
+                    "reasoning_tokens": 15
+                }
+            }
+        }
+
+        Note: For reasoning models (e.g., gpt-5), completion_tokens includes
+        reasoning_tokens, which are also broken out separately in
+        completion_tokens_details.reasoning_tokens.
+        """
+        try:
+            if not isinstance(json_body, dict):
+                raise ValueError("Response body must be a dictionary")
+
+            usage = json_body.get("usage", {})
+            if not isinstance(usage, dict):
+                raise ValueError("Usage field must be a dictionary")
+
+            prompt_tokens_details = usage.get("prompt_tokens_details", {})
+            cached_tokens = 0
+            if isinstance(prompt_tokens_details, dict):
+                cached_tokens = prompt_tokens_details.get("cached_tokens", 0)
+
+            completion_tokens_details = usage.get("completion_tokens_details", {})
+            reasoning_tokens = 0
+            if isinstance(completion_tokens_details, dict):
+                reasoning_tokens = completion_tokens_details.get("reasoning_tokens", 0)
+
+            return TokenUsage(
+                input_tokens=usage.get("prompt_tokens", 0),
+                output_tokens=usage.get("completion_tokens", 0),
+                total_tokens=usage.get("total_tokens"),
+                cache_read_input_tokens=cached_tokens,
+                reasoning_tokens=reasoning_tokens,
+            )
+        except (KeyError, TypeError, ValueError, AttributeError):
+            raise fastapi.HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Failed to extract token usage from response",
+            )
 
     def _update_headers_to_upstream(self, headers_to_upstream: typing.Any) -> None:
         try:

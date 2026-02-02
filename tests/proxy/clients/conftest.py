@@ -20,15 +20,11 @@ def async_client_factory_fixture():
         response_json: dict = {"response": "mocked"},
     ):
         client = Mock(spec=httpx.AsyncClient)
-        response = httpx.Response(
+        client.send.return_value = httpx.Response(
             status_code=response_status_code,
             headers=response_headers,
             json=response_json,
-            request=Mock(),
-            content='{"response":"mocked"}',
         )
-        client.send.return_value = response
-        client.request.return_value = response
         return client
 
     return create

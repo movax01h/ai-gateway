@@ -54,7 +54,7 @@ tree-sitter-languages = "^1.10.2"
 jinja2 = "^3.1.3"
 pyyaml = "^6.0.2"
 google-cloud-discoveryengine = "^0.13.0"
-litellm = {version = "^1.80.12", extras = ["proxy"]}
+litellm = "^1.35.20"
 langgraph = "^1.0.2"
 langchain-anthropic = "^1.3.0"
 langchain-community = "^0.4.1"
@@ -94,11 +94,6 @@ priority = "supplemental"
 name = "cef"
 url = "https://gitlab.com/api/v4/projects/46678122/packages/pypi/simple"
 priority = "supplemental"
-
-[[tool.poetry.source]]
-name = "litellm"
-url = "https://gitlab.com/api/v4/projects/78063949/packages/pypi/simple"
-priority = "primary"
 
 [tool.poetry.group.eval]
 optional = true
@@ -247,7 +242,6 @@ python_version = "3.12"
 ignore_missing_imports = true
 check_untyped_defs = true
 warn_unused_ignores = true
-disable_error_code = "method-assign"
 
 [[tool.mypy.overrides]]
 module = "tests.*"

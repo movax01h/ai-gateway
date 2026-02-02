@@ -17,11 +17,6 @@ memcached = ["aiomcache (>=0.5.2)"]
 msgpack = ["msgpack (>=0.5.5)"]
 redis = ["redis (>=4.2.0)"]
 
-[package.source]
-type = "legacy"
-url = "https://gitlab.com/api/v4/projects/78063949/packages/pypi/simple"
-reference = "litellm"
-
 [[package]]
 name = "aiohappyeyeballs"
 version = "2.6.1"
@@ -33,11 +28,6 @@ files = [
     {file = "aiohappyeyeballs-2.6.1-py3-none-any.whl", hash = "sha256:f349ba8f4b75cb25c99c5c2d84e997e485204d2902a9597802b0371f09331fb8"},
     {file = "aiohappyeyeballs-2.6.1.tar.gz", hash = "sha256:c3f9d0113123803ccadfdf3f0faa505bc78e6a72d1cc4806cbd719826e943558"},
 ]
-
-[package.source]
-type = "legacy"
-url = "https://gitlab.com/api/v4/projects/78063949/packages/pypi/simple"
-reference = "litellm"
 
 [[package]]
 name = "aiohttp"
@@ -142,11 +132,6 @@ yarl = ">=1.17.0,<2.0"
 [package.extras]
 speedups = ["Brotli ; platform_python_implementation == \"CPython\"", "aiodns (>=3.2.0) ; sys_platform == \"linux\" or sys_platform == \"darwin\"", "brotlicffi ; platform_python_implementation != \"CPython\""]
 
-[package.source]
-type = "legacy"
-url = "https://gitlab.com/api/v4/projects/78063949/packages/pypi/simple"
-reference = "litellm"
-
 [[package]]
 name = "aiosignal"
 version = "1.3.1"
@@ -162,11 +147,6 @@ files = [
 [package.dependencies]
 frozenlist = ">=1.1.0"
 
-[package.source]
-type = "legacy"
-url = "https://gitlab.com/api/v4/projects/78063949/packages/pypi/simple"
-reference = "litellm"
-
 [[package]]
 name = "annotated-doc"
 version = "0.0.4"
@@ -179,11 +159,6 @@ files = [
     {file = "annotated_doc-0.0.4.tar.gz", hash = "sha256:fbcda96e87e9c92ad167c2e53839e57503ecfda18804ea28102353485033faa4"},
 ]
 
-[package.source]
-type = "legacy"
-url = "https://gitlab.com/api/v4/projects/78063949/packages/pypi/simple"
-reference = "litellm"
-
 [[package]]
 name = "annotated-types"
 version = "0.7.0"
@@ -195,11 +170,6 @@ files = [
     {file = "annotated_types-0.7.0-py3-none-any.whl", hash = "sha256:1f02e8b43a8fbbc3f3e0d4f0f4bfc8131bcb4eebe8849b8e5c773f3a1c582a53"},
     {file = "annotated_types-0.7.0.tar.gz", hash = "sha256:aff07c09a53a08bc8cfccb9c85b05f1aa9a2a6f23728d790723543408344ce89"},
 ]
-
-[package.source]
-type = "legacy"
-url = "https://gitlab.com/api/v4/projects/78063949/packages/pypi/simple"
-reference = "litellm"
 
 [[package]]
 name = "anthropic"
@@ -228,11 +198,6 @@ aiohttp = ["aiohttp", "httpx-aiohttp (>=0.1.9)"]
 bedrock = ["boto3 (>=1.28.57)", "botocore (>=1.31.57)"]
 vertex = ["google-auth[requests] (>=2,<3)"]
 
-[package.source]
-type = "legacy"
-url = "https://gitlab.com/api/v4/projects/78063949/packages/pypi/simple"
-reference = "litellm"
-
 [[package]]
 name = "anyio"
 version = "4.8.0"
@@ -255,11 +220,6 @@ doc = ["Sphinx (>=7.4,<8.0)", "packaging", "sphinx-autodoc-typehints (>=1.2.0)",
 test = ["anyio[trio]", "coverage[toml] (>=7)", "exceptiongroup (>=1.2.0)", "hypothesis (>=4.0)", "psutil (>=5.9)", "pytest (>=7.0)", "trustme", "truststore (>=0.9.1) ; python_version >= \"3.10\"", "uvloop (>=0.21) ; platform_python_implementation == \"CPython\" and platform_system != \"Windows\" and python_version < \"3.14\""]
 trio = ["trio (>=0.26.1)"]
 
-[package.source]
-type = "legacy"
-url = "https://gitlab.com/api/v4/projects/78063949/packages/pypi/simple"
-reference = "litellm"
-
 [[package]]
 name = "appdirs"
 version = "1.4.4"
@@ -272,50 +232,12 @@ files = [
     {file = "appdirs-1.4.4.tar.gz", hash = "sha256:7d5d0167b2b1ba821647616af46a749d1c653740dd0d2415100fe26e27afdf41"},
 ]
 
-[package.source]
-type = "legacy"
-url = "https://gitlab.com/api/v4/projects/78063949/packages/pypi/simple"
-reference = "litellm"
-
-[[package]]
-name = "apscheduler"
-version = "3.11.2"
-description = "In-process task scheduler with Cron-like capabilities"
-optional = false
-python-versions = ">=3.8"
-groups = ["main"]
-files = [
-    {file = "apscheduler-3.11.2-py3-none-any.whl", hash = "sha256:ce005177f741409db4e4dd40a7431b76feb856b9dd69d57e0da49d6715bfd26d"},
-    {file = "apscheduler-3.11.2.tar.gz", hash = "sha256:2a9966b052ec805f020c8c4c3ae6e6a06e24b1bf19f2e11d91d8cca0473eef41"},
-]
-
-[package.dependencies]
-tzlocal = ">=3.0"
-
-[package.extras]
-doc = ["packaging", "sphinx", "sphinx-rtd-theme (>=1.3.0)"]
-etcd = ["etcd3", "protobuf (<=3.21.0)"]
-gevent = ["gevent"]
-mongodb = ["pymongo (>=3.0)"]
-redis = ["redis (>=3.0)"]
-rethinkdb = ["rethinkdb (>=2.4.0)"]
-sqlalchemy = ["sqlalchemy (>=1.4)"]
-test = ["APScheduler[etcd,mongodb,redis,rethinkdb,sqlalchemy,tornado,zookeeper]", "PySide6 ; platform_python_implementation == \"CPython\" and python_version < \"3.14\"", "anyio (>=4.5.2)", "gevent ; python_version < \"3.14\"", "pytest", "pytest-timeout", "pytz", "twisted ; python_version < \"3.14\""]
-tornado = ["tornado (>=4.3)"]
-twisted = ["twisted"]
-zookeeper = ["kazoo"]
-
-[package.source]
-type = "legacy"
-url = "https://gitlab.com/api/v4/projects/78063949/packages/pypi/simple"
-reference = "litellm"
-
 [[package]]
 name = "asgi-correlation-id"
 version = "4.3.4"
 description = "Middleware correlating project logs to individual requests"
 optional = false
-python-versions = ">=3.8,<4.0"
+python-versions = "<4.0,>=3.8"
 groups = ["main"]
 files = [
     {file = "asgi_correlation_id-4.3.4-py3-none-any.whl", hash = "sha256:36ce69b06c7d96b4acb89c7556a4c4f01a972463d3d49c675026cbbd08e9a0a2"},
@@ -329,11 +251,6 @@ starlette = ">=0.18"
 [package.extras]
 celery = ["celery"]
 
-[package.source]
-type = "legacy"
-url = "https://gitlab.com/api/v4/projects/78063949/packages/pypi/simple"
-reference = "litellm"
-
 [[package]]
 name = "astroid"
 version = "3.3.11"
@@ -345,11 +262,6 @@ files = [
     {file = "astroid-3.3.11-py3-none-any.whl", hash = "sha256:54c760ae8322ece1abd213057c4b5bba7c49818853fc901ef09719a60dbf9dec"},
     {file = "astroid-3.3.11.tar.gz", hash = "sha256:1e5a5011af2920c7c67a53f65d536d65bfa7116feeaf2354d8b94f29573bb0ce"},
 ]
-
-[package.source]
-type = "legacy"
-url = "https://gitlab.com/api/v4/projects/78063949/packages/pypi/simple"
-reference = "litellm"
 
 [[package]]
 name = "attrs"
@@ -371,102 +283,17 @@ tests = ["attrs[tests-no-zope]", "zope-interface"]
 tests-mypy = ["mypy (>=1.6) ; platform_python_implementation == \"CPython\" and python_version >= \"3.8\"", "pytest-mypy-plugins ; platform_python_implementation == \"CPython\" and python_version >= \"3.8\""]
 tests-no-zope = ["attrs[tests-mypy]", "cloudpickle ; platform_python_implementation == \"CPython\"", "hypothesis", "pympler", "pytest (>=4.3.0)", "pytest-xdist[psutil]"]
 
-[package.source]
-type = "legacy"
-url = "https://gitlab.com/api/v4/projects/78063949/packages/pypi/simple"
-reference = "litellm"
-
-[[package]]
-name = "azure-core"
-version = "1.38.0"
-description = "Microsoft Azure Core Library for Python"
-optional = false
-python-versions = ">=3.9"
-groups = ["main"]
-files = [
-    {file = "azure_core-1.38.0-py3-none-any.whl", hash = "sha256:ab0c9b2cd71fecb1842d52c965c95285d3cfb38902f6766e4a471f1cd8905335"},
-    {file = "azure_core-1.38.0.tar.gz", hash = "sha256:8194d2682245a3e4e3151a667c686464c3786fed7918b394d035bdcd61bb5993"},
-]
-
-[package.dependencies]
-requests = ">=2.21.0"
-typing-extensions = ">=4.6.0"
-
-[package.extras]
-aio = ["aiohttp (>=3.0)"]
-tracing = ["opentelemetry-api (>=1.26,<2.0)"]
-
-[package.source]
-type = "legacy"
-url = "https://gitlab.com/api/v4/projects/78063949/packages/pypi/simple"
-reference = "litellm"
-
-[[package]]
-name = "azure-identity"
-version = "1.25.1"
-description = "Microsoft Azure Identity Library for Python"
-optional = false
-python-versions = ">=3.9"
-groups = ["main"]
-files = [
-    {file = "azure_identity-1.25.1-py3-none-any.whl", hash = "sha256:e9edd720af03dff020223cd269fa3a61e8f345ea75443858273bcb44844ab651"},
-    {file = "azure_identity-1.25.1.tar.gz", hash = "sha256:87ca8328883de6036443e1c37b40e8dc8fb74898240f61071e09d2e369361456"},
-]
-
-[package.dependencies]
-azure-core = ">=1.31.0"
-cryptography = ">=2.5"
-msal = ">=1.30.0"
-msal-extensions = ">=1.2.0"
-typing-extensions = ">=4.0.0"
-
-[package.source]
-type = "legacy"
-url = "https://gitlab.com/api/v4/projects/78063949/packages/pypi/simple"
-reference = "litellm"
-
-[[package]]
-name = "azure-storage-blob"
-version = "12.28.0"
-description = "Microsoft Azure Blob Storage Client Library for Python"
-optional = false
-python-versions = ">=3.9"
-groups = ["main"]
-files = [
-    {file = "azure_storage_blob-12.28.0-py3-none-any.whl", hash = "sha256:00fb1db28bf6a7b7ecaa48e3b1d5c83bfadacc5a678b77826081304bd87d6461"},
-    {file = "azure_storage_blob-12.28.0.tar.gz", hash = "sha256:e7d98ea108258d29aa0efbfd591b2e2075fa1722a2fae8699f0b3c9de11eff41"},
-]
-
-[package.dependencies]
-azure-core = ">=1.30.0"
-cryptography = ">=2.1.4"
-isodate = ">=0.6.1"
-typing-extensions = ">=4.6.0"
-
-[package.extras]
-aio = ["azure-core[aio] (>=1.30.0)"]
-
-[package.source]
-type = "legacy"
-url = "https://gitlab.com/api/v4/projects/78063949/packages/pypi/simple"
-reference = "litellm"
-
 [[package]]
 name = "backoff"
 version = "2.2.1"
 description = "Function decoration for backoff and retry"
 optional = false
 python-versions = ">=3.7,<4.0"
-groups = ["main", "eval"]
+groups = ["eval"]
 files = [
     {file = "backoff-2.2.1-py3-none-any.whl", hash = "sha256:63579f9a0628e06278f7e47b7d7d5b6ce20dc65c5e96a6f3ca99a6adca0396e8"},
     {file = "backoff-2.2.1.tar.gz", hash = "sha256:03f829f5bb1923180821643f8753b0502c3b682293992485b0eef2807afa5cba"},
 ]
-
-[package.source]
-type = "legacy"
-url = "https://gitlab.com/api/v4/projects/78063949/packages/pypi/simple"
-reference = "litellm"
 
 [[package]]
 name = "black"
@@ -519,11 +346,6 @@ d = ["aiohttp (>=3.10)"]
 jupyter = ["ipython (>=7.8.0)", "tokenize-rt (>=3.2.0)"]
 uvloop = ["uvloop (>=0.15.2)"]
 
-[package.source]
-type = "legacy"
-url = "https://gitlab.com/api/v4/projects/78063949/packages/pypi/simple"
-reference = "litellm"
-
 [[package]]
 name = "bleach"
 version = "6.3.0"
@@ -542,46 +364,36 @@ webencodings = "*"
 [package.extras]
 css = ["tinycss2 (>=1.1.0,<1.5)"]
 
-[package.source]
-type = "legacy"
-url = "https://gitlab.com/api/v4/projects/78063949/packages/pypi/simple"
-reference = "litellm"
-
 [[package]]
 name = "boto3"
-version = "1.36.0"
+version = "1.42.38"
 description = "The AWS SDK for Python"
 optional = false
-python-versions = ">= 3.8"
+python-versions = ">=3.9"
 groups = ["main", "eval"]
 files = [
-    {file = "boto3-1.36.0-py3-none-any.whl", hash = "sha256:d0ca7a58ce25701a52232cc8df9d87854824f1f2964b929305722ebc7959d5a9"},
-    {file = "boto3-1.36.0.tar.gz", hash = "sha256:159898f51c2997a12541c0e02d6e5a8fe2993ddb307b9478fd9a339f98b57e00"},
+    {file = "boto3-1.42.38-py3-none-any.whl", hash = "sha256:b5a748b3fdddba8aa2988af0e462996ef72dc2760b0eab30329b9d201d4b38f2"},
+    {file = "boto3-1.42.38.tar.gz", hash = "sha256:af2e5c08972d35fa4b4bc457031794343a6ddb1df5692db43302d5b5feaac23e"},
 ]
 
 [package.dependencies]
-botocore = ">=1.36.0,<1.37.0"
+botocore = ">=1.42.38,<1.43.0"
 jmespath = ">=0.7.1,<2.0.0"
-s3transfer = ">=0.11.0,<0.12.0"
+s3transfer = ">=0.16.0,<0.17.0"
 
 [package.extras]
 crt = ["botocore[crt] (>=1.21.0,<2.0a0)"]
 
-[package.source]
-type = "legacy"
-url = "https://gitlab.com/api/v4/projects/78063949/packages/pypi/simple"
-reference = "litellm"
-
 [[package]]
 name = "botocore"
-version = "1.36.26"
+version = "1.42.38"
 description = "Low-level, data-driven core of boto 3."
 optional = false
-python-versions = ">= 3.8"
+python-versions = ">=3.9"
 groups = ["main", "eval"]
 files = [
-    {file = "botocore-1.36.26-py3-none-any.whl", hash = "sha256:4e3f19913887a58502e71ef8d696fe7eaa54de7813ff73390cd5883f837dfa6e"},
-    {file = "botocore-1.36.26.tar.gz", hash = "sha256:4a63bcef7ecf6146fd3a61dc4f9b33b7473b49bdaf1770e9aaca6eee0c9eab62"},
+    {file = "botocore-1.42.38-py3-none-any.whl", hash = "sha256:b67e0c4989a6bdd459cb49274df05003179165567b7789d8d920cdbdc6c2661f"},
+    {file = "botocore-1.42.38.tar.gz", hash = "sha256:eb36d09b5c61b3ede6129f7b54630049f3eeeccf1327a32cf8944563027a4002"},
 ]
 
 [package.dependencies]
@@ -590,12 +402,7 @@ python-dateutil = ">=2.1,<3.0.0"
 urllib3 = {version = ">=1.25.4,<2.2.0 || >2.2.0,<3", markers = "python_version >= \"3.10\""}
 
 [package.extras]
-crt = ["awscrt (==0.23.8)"]
-
-[package.source]
-type = "legacy"
-url = "https://gitlab.com/api/v4/projects/78063949/packages/pypi/simple"
-reference = "litellm"
+crt = ["awscrt (==0.29.2)"]
 
 [[package]]
 name = "bottleneck"
@@ -648,11 +455,6 @@ numpy = "*"
 
 [package.extras]
 doc = ["gitpython", "numpydoc", "sphinx"]
-
-[package.source]
-type = "legacy"
-url = "https://gitlab.com/api/v4/projects/78063949/packages/pypi/simple"
-reference = "litellm"
 
 [[package]]
 name = "cef"
@@ -731,11 +533,6 @@ pydantic = ">=1.9.0,<3"
 sniffio = "*"
 typing-extensions = ">=4.10,<5"
 
-[package.source]
-type = "legacy"
-url = "https://gitlab.com/api/v4/projects/78063949/packages/pypi/simple"
-reference = "litellm"
-
 [[package]]
 name = "certifi"
 version = "2024.7.4"
@@ -747,11 +544,6 @@ files = [
     {file = "certifi-2024.7.4-py3-none-any.whl", hash = "sha256:c198e21b1289c2ab85ee4e67bb4b4ef3ead0892059901a8d5b622f24a1101e90"},
     {file = "certifi-2024.7.4.tar.gz", hash = "sha256:5a1e7645bc0ec61a09e26c36f6106dd4cf40c6db3a1fb6352b0244e7fb057c7b"},
 ]
-
-[package.source]
-type = "legacy"
-url = "https://gitlab.com/api/v4/projects/78063949/packages/pypi/simple"
-reference = "litellm"
 
 [[package]]
 name = "cffi"
@@ -817,11 +609,6 @@ files = [
 
 [package.dependencies]
 pycparser = "*"
-
-[package.source]
-type = "legacy"
-url = "https://gitlab.com/api/v4/projects/78063949/packages/pypi/simple"
-reference = "litellm"
 
 [[package]]
 name = "charset-normalizer"
@@ -923,11 +710,6 @@ files = [
     {file = "charset_normalizer-3.3.2-py3-none-any.whl", hash = "sha256:3e4d1f6587322d2788836a99c69062fbb091331ec940e02d12d179c1d53e25fc"},
 ]
 
-[package.source]
-type = "legacy"
-url = "https://gitlab.com/api/v4/projects/78063949/packages/pypi/simple"
-reference = "litellm"
-
 [[package]]
 name = "click"
 version = "8.1.7"
@@ -942,11 +724,6 @@ files = [
 
 [package.dependencies]
 colorama = {version = "*", markers = "platform_system == \"Windows\""}
-
-[package.source]
-type = "legacy"
-url = "https://gitlab.com/api/v4/projects/78063949/packages/pypi/simple"
-reference = "litellm"
 
 [[package]]
 name = "codespell"
@@ -966,11 +743,6 @@ hard-encoding-detection = ["chardet"]
 toml = ["tomli ; python_version < \"3.11\""]
 types = ["chardet (>=5.1.0)", "mypy", "pytest", "pytest-cov", "pytest-dependency"]
 
-[package.source]
-type = "legacy"
-url = "https://gitlab.com/api/v4/projects/78063949/packages/pypi/simple"
-reference = "litellm"
-
 [[package]]
 name = "colorama"
 version = "0.4.6"
@@ -983,11 +755,6 @@ files = [
     {file = "colorama-0.4.6.tar.gz", hash = "sha256:08695f5cb7ed6e0531a20572697297273c47b8cae5a63ffc6d6ed5c201be6e44"},
 ]
 markers = {main = "platform_system == \"Windows\" or sys_platform == \"win32\"", eval = "platform_system == \"Windows\"", lint = "platform_system == \"Windows\" or sys_platform == \"win32\"", test = "sys_platform == \"win32\""}
-
-[package.source]
-type = "legacy"
-url = "https://gitlab.com/api/v4/projects/78063949/packages/pypi/simple"
-reference = "litellm"
 
 [[package]]
 name = "coverage"
@@ -1054,32 +821,6 @@ files = [
 [package.extras]
 toml = ["tomli ; python_full_version <= \"3.11.0a6\""]
 
-[package.source]
-type = "legacy"
-url = "https://gitlab.com/api/v4/projects/78063949/packages/pypi/simple"
-reference = "litellm"
-
-[[package]]
-name = "croniter"
-version = "6.0.0"
-description = "croniter provides iteration for datetime object with cron like format"
-optional = false
-python-versions = ">=2.6, !=3.0.*, !=3.1.*, !=3.2.*, !=3.3.*"
-groups = ["main"]
-files = [
-    {file = "croniter-6.0.0-py2.py3-none-any.whl", hash = "sha256:2f878c3856f17896979b2a4379ba1f09c83e374931ea15cc835c5dd2eee9b368"},
-    {file = "croniter-6.0.0.tar.gz", hash = "sha256:37c504b313956114a983ece2c2b07790b1f1094fe9d81cc94739214748255577"},
-]
-
-[package.dependencies]
-python-dateutil = "*"
-pytz = ">2021.1"
-
-[package.source]
-type = "legacy"
-url = "https://gitlab.com/api/v4/projects/78063949/packages/pypi/simple"
-reference = "litellm"
-
 [[package]]
 name = "cryptography"
 version = "43.0.3"
@@ -1130,17 +871,12 @@ ssh = ["bcrypt (>=3.1.5)"]
 test = ["certifi", "cryptography-vectors (==43.0.3)", "pretend", "pytest (>=6.2.0)", "pytest-benchmark", "pytest-cov", "pytest-xdist"]
 test-randomorder = ["pytest-randomly"]
 
-[package.source]
-type = "legacy"
-url = "https://gitlab.com/api/v4/projects/78063949/packages/pypi/simple"
-reference = "litellm"
-
 [[package]]
 name = "dataclasses-json"
 version = "0.6.7"
 description = "Easily serialize dataclasses to and from JSON."
 optional = false
-python-versions = ">=3.7,<4.0"
+python-versions = "<4.0,>=3.7"
 groups = ["main", "eval"]
 files = [
     {file = "dataclasses_json-0.6.7-py3-none-any.whl", hash = "sha256:0dbf33f26c8d5305befd61b39d2b3414e8a407bedc2834dea9b8d642666fb40a"},
@@ -1150,11 +886,6 @@ files = [
 [package.dependencies]
 marshmallow = ">=3.18.0,<4.0.0"
 typing-inspect = ">=0.4.0,<1"
-
-[package.source]
-type = "legacy"
-url = "https://gitlab.com/api/v4/projects/78063949/packages/pypi/simple"
-reference = "litellm"
 
 [[package]]
 name = "datasets"
@@ -1197,11 +928,6 @@ tests = ["Pillow (>=9.4.0)", "absl-py", "aiohttp", "decorator", "elasticsearch (
 tests-numpy2 = ["Pillow (>=9.4.0)", "absl-py", "aiohttp", "decorator", "elasticsearch (>=7.17.12,<8.0.0)", "jax (>=0.3.14) ; sys_platform != \"win32\"", "jaxlib (>=0.3.14) ; sys_platform != \"win32\"", "joblib (<1.3.0)", "joblibspark", "lz4", "moto[server]", "numba (>=0.56.4)", "polars[timezone] (>=0.20.0)", "protobuf (<4.0.0)", "py7zr", "pyspark (>=3.4)", "pytest", "pytest-datadir", "pytest-xdist", "rarfile (>=4.0)", "soundfile (>=0.12.1)", "soundfile (>=0.12.1)", "sqlalchemy", "tiktoken", "torch (>=2.0.0)", "torchcodec (>=0.4.0) ; sys_platform != \"win32\"", "torchdata", "transformers (>=4.42.0)", "zstandard"]
 torch = ["torch"]
 vision = ["Pillow (>=9.4.0)"]
-
-[package.source]
-type = "legacy"
-url = "https://gitlab.com/api/v4/projects/78063949/packages/pypi/simple"
-reference = "litellm"
 
 [[package]]
 name = "dependency-injector"
@@ -1253,11 +979,6 @@ pydantic = ["pydantic"]
 pydantic2 = ["pydantic-settings"]
 yaml = ["pyyaml"]
 
-[package.source]
-type = "legacy"
-url = "https://gitlab.com/api/v4/projects/78063949/packages/pypi/simple"
-reference = "litellm"
-
 [[package]]
 name = "dill"
 version = "0.3.8"
@@ -1274,11 +995,6 @@ files = [
 graph = ["objgraph (>=1.7.2)"]
 profile = ["gprof2dot (>=2022.7.29)"]
 
-[package.source]
-type = "legacy"
-url = "https://gitlab.com/api/v4/projects/78063949/packages/pypi/simple"
-reference = "litellm"
-
 [[package]]
 name = "diskcache"
 version = "5.6.3"
@@ -1290,11 +1006,6 @@ files = [
     {file = "diskcache-5.6.3-py3-none-any.whl", hash = "sha256:5e31b2d5fbad117cc363ebaf6b689474db18a1f6438bc82358b024abd4c2ca19"},
     {file = "diskcache-5.6.3.tar.gz", hash = "sha256:2c3a3fa2743d8535d832ec61c2054a1641f41775aa7c556758a109941e33e4fc"},
 ]
-
-[package.source]
-type = "legacy"
-url = "https://gitlab.com/api/v4/projects/78063949/packages/pypi/simple"
-reference = "litellm"
 
 [[package]]
 name = "distro"
@@ -1308,43 +1019,12 @@ files = [
     {file = "distro-1.9.0.tar.gz", hash = "sha256:2fa77c6fd8940f116ee1d6b94a2f90b13b5ea8d019b98bc8bafdcabcdd9bdbed"},
 ]
 
-[package.source]
-type = "legacy"
-url = "https://gitlab.com/api/v4/projects/78063949/packages/pypi/simple"
-reference = "litellm"
-
-[[package]]
-name = "dnspython"
-version = "2.8.0"
-description = "DNS toolkit"
-optional = false
-python-versions = ">=3.10"
-groups = ["main"]
-files = [
-    {file = "dnspython-2.8.0-py3-none-any.whl", hash = "sha256:01d9bbc4a2d76bf0db7c1f729812ded6d912bd318d3b1cf81d30c0f845dbf3af"},
-    {file = "dnspython-2.8.0.tar.gz", hash = "sha256:181d3c6996452cb1189c4046c61599b84a5a86e099562ffde77d26984ff26d0f"},
-]
-
-[package.extras]
-dev = ["black (>=25.1.0)", "coverage (>=7.0)", "flake8 (>=7)", "hypercorn (>=0.17.0)", "mypy (>=1.17)", "pylint (>=3)", "pytest (>=8.4)", "pytest-cov (>=6.2.0)", "quart-trio (>=0.12.0)", "sphinx (>=8.2.0)", "sphinx-rtd-theme (>=3.0.0)", "twine (>=6.1.0)", "wheel (>=0.45.0)"]
-dnssec = ["cryptography (>=45)"]
-doh = ["h2 (>=4.2.0)", "httpcore (>=1.0.0)", "httpx (>=0.28.0)"]
-doq = ["aioquic (>=1.2.0)"]
-idna = ["idna (>=3.10)"]
-trio = ["trio (>=0.30)"]
-wmi = ["wmi (>=1.5.1) ; platform_system == \"Windows\""]
-
-[package.source]
-type = "legacy"
-url = "https://gitlab.com/api/v4/projects/78063949/packages/pypi/simple"
-reference = "litellm"
-
 [[package]]
 name = "docformatter"
 version = "1.7.7"
 description = "Formats docstrings to follow PEP 257"
 optional = false
-python-versions = ">=3.9,<4.0"
+python-versions = "<4.0,>=3.9"
 groups = ["lint"]
 files = [
     {file = "docformatter-1.7.7-py3-none-any.whl", hash = "sha256:7af49f8a46346a77858f6651f431b882c503c2f4442c8b4524b920c863277834"},
@@ -1358,11 +1038,6 @@ untokenize = ">=0.1.1,<0.2.0"
 [package.extras]
 tomli = ["tomli (>=2.0.0,<3.0.0) ; python_version < \"3.11\""]
 
-[package.source]
-type = "legacy"
-url = "https://gitlab.com/api/v4/projects/78063949/packages/pypi/simple"
-reference = "litellm"
-
 [[package]]
 name = "docstring-parser"
 version = "0.16"
@@ -1375,17 +1050,12 @@ files = [
     {file = "docstring_parser-0.16.tar.gz", hash = "sha256:538beabd0af1e2db0146b6bd3caa526c35a34d61af9fd2887f3a8a27a739aa6e"},
 ]
 
-[package.source]
-type = "legacy"
-url = "https://gitlab.com/api/v4/projects/78063949/packages/pypi/simple"
-reference = "litellm"
-
 [[package]]
 name = "ecdsa"
 version = "0.19.0"
 description = "ECDSA cryptographic signature library (pure python)"
 optional = false
-python-versions = ">=2.6, !=3.0.*, !=3.1.*, !=3.2.*, !=3.3.*, !=3.4.*"
+python-versions = "!=3.0.*,!=3.1.*,!=3.2.*,!=3.3.*,!=3.4.*,>=2.6"
 groups = ["main"]
 files = [
     {file = "ecdsa-0.19.0-py2.py3-none-any.whl", hash = "sha256:2cea9b88407fdac7bbeca0833b189e4c9c53f2ef1e1eaa29f6224dbc809b707a"},
@@ -1399,11 +1069,6 @@ six = ">=1.9.0"
 gmpy = ["gmpy"]
 gmpy2 = ["gmpy2"]
 
-[package.source]
-type = "legacy"
-url = "https://gitlab.com/api/v4/projects/78063949/packages/pypi/simple"
-reference = "litellm"
-
 [[package]]
 name = "editorconfig-checker"
 version = "3.6.0"
@@ -1414,32 +1079,6 @@ groups = ["lint"]
 files = [
     {file = "editorconfig_checker-3.6.0.tar.gz", hash = "sha256:dcaf0248ad7e8539fda03857c300267a4af004e0c2aaa195485e6be85034f6d0"},
 ]
-
-[package.source]
-type = "legacy"
-url = "https://gitlab.com/api/v4/projects/78063949/packages/pypi/simple"
-reference = "litellm"
-
-[[package]]
-name = "email-validator"
-version = "2.3.0"
-description = "A robust email address syntax and deliverability validation library."
-optional = false
-python-versions = ">=3.8"
-groups = ["main"]
-files = [
-    {file = "email_validator-2.3.0-py3-none-any.whl", hash = "sha256:80f13f623413e6b197ae73bb10bf4eb0908faf509ad8362c5edeb0be7fd450b4"},
-    {file = "email_validator-2.3.0.tar.gz", hash = "sha256:9fc05c37f2f6cf439ff414f8fc46d917929974a82244c20eb10231ba60c54426"},
-]
-
-[package.dependencies]
-dnspython = ">=2.0.0"
-idna = ">=2.0.0"
-
-[package.source]
-type = "legacy"
-url = "https://gitlab.com/api/v4/projects/78063949/packages/pypi/simple"
-reference = "litellm"
 
 [[package]]
 name = "execnet"
@@ -1455,11 +1094,6 @@ files = [
 
 [package.extras]
 testing = ["hatch", "pre-commit", "pytest", "tox"]
-
-[package.source]
-type = "legacy"
-url = "https://gitlab.com/api/v4/projects/78063949/packages/pypi/simple"
-reference = "litellm"
 
 [[package]]
 name = "fastapi"
@@ -1484,11 +1118,6 @@ all = ["email-validator (>=2.0.0)", "fastapi-cli[standard] (>=0.0.8)", "httpx (>
 standard = ["email-validator (>=2.0.0)", "fastapi-cli[standard] (>=0.0.8)", "httpx (>=0.23.0,<1.0.0)", "jinja2 (>=3.1.5)", "pydantic-extra-types (>=2.0.0)", "pydantic-settings (>=2.0.0)", "python-multipart (>=0.0.18)", "uvicorn[standard] (>=0.12.0)"]
 standard-no-fastapi-cloud-cli = ["email-validator (>=2.0.0)", "fastapi-cli[standard-no-fastapi-cloud-cli] (>=0.0.8)", "httpx (>=0.23.0,<1.0.0)", "jinja2 (>=3.1.5)", "pydantic-extra-types (>=2.0.0)", "pydantic-settings (>=2.0.0)", "python-multipart (>=0.0.18)", "uvicorn[standard] (>=0.12.0)"]
 
-[package.source]
-type = "legacy"
-url = "https://gitlab.com/api/v4/projects/78063949/packages/pypi/simple"
-reference = "litellm"
-
 [[package]]
 name = "fastapi-health"
 version = "0.4.0"
@@ -1503,35 +1132,6 @@ files = [
 
 [package.dependencies]
 fastapi = ">=0.63.0"
-
-[package.source]
-type = "legacy"
-url = "https://gitlab.com/api/v4/projects/78063949/packages/pypi/simple"
-reference = "litellm"
-
-[[package]]
-name = "fastapi-sso"
-version = "0.19.0"
-description = "FastAPI plugin to enable SSO to most common providers (such as Facebook login, Google login and login via Microsoft Office 365 Account)"
-optional = false
-python-versions = ">=3.9,<4.0"
-groups = ["main"]
-files = [
-    {file = "fastapi_sso-0.19.0-py3-none-any.whl", hash = "sha256:d958c46cd9996234c7b162e192168b4c0807a248224a55b0f877d3a82a16a930"},
-    {file = "fastapi_sso-0.19.0.tar.gz", hash = "sha256:629f00581f72ea7e57f7b8775f8d2c425629c428c194359a2b4ebaa6bcb8e12b"},
-]
-
-[package.dependencies]
-fastapi = ">=0.80"
-httpx = ">=0.23.0"
-oauthlib = ">=3.1.0"
-pydantic = {version = ">=1.8.0", extras = ["email"]}
-pyjwt = ">=2.10.1,<3.0.0"
-
-[package.source]
-type = "legacy"
-url = "https://gitlab.com/api/v4/projects/78063949/packages/pypi/simple"
-reference = "litellm"
 
 [[package]]
 name = "fastuuid"
@@ -1621,11 +1221,6 @@ files = [
     {file = "fastuuid-0.14.0.tar.gz", hash = "sha256:178947fc2f995b38497a74172adee64fdeb8b7ec18f2a5934d037641ba265d26"},
 ]
 
-[package.source]
-type = "legacy"
-url = "https://gitlab.com/api/v4/projects/78063949/packages/pypi/simple"
-reference = "litellm"
-
 [[package]]
 name = "filelock"
 version = "3.15.4"
@@ -1642,11 +1237,6 @@ files = [
 docs = ["furo (>=2023.9.10)", "sphinx (>=7.2.6)", "sphinx-autodoc-typehints (>=1.25.2)"]
 testing = ["covdefaults (>=2.3)", "coverage (>=7.3.2)", "diff-cover (>=8.0.1)", "pytest (>=7.4.3)", "pytest-asyncio (>=0.21)", "pytest-cov (>=4.1)", "pytest-mock (>=3.12)", "pytest-timeout (>=2.2)", "virtualenv (>=20.26.2)"]
 typing = ["typing-extensions (>=4.8) ; python_version < \"3.11\""]
-
-[package.source]
-type = "legacy"
-url = "https://gitlab.com/api/v4/projects/78063949/packages/pypi/simple"
-reference = "litellm"
 
 [[package]]
 name = "fireworks-ai"
@@ -1670,11 +1260,6 @@ pydantic = "*"
 [package.extras]
 flumina = ["fastapi", "gitignore-parser", "openapi-spec-validator", "prance", "safetensors", "tabulate", "torch", "tqdm"]
 
-[package.source]
-type = "legacy"
-url = "https://gitlab.com/api/v4/projects/78063949/packages/pypi/simple"
-reference = "litellm"
-
 [[package]]
 name = "flake8"
 version = "7.3.0"
@@ -1691,11 +1276,6 @@ files = [
 mccabe = ">=0.7.0,<0.8.0"
 pycodestyle = ">=2.14.0,<2.15.0"
 pyflakes = ">=3.4.0,<3.5.0"
-
-[package.source]
-type = "legacy"
-url = "https://gitlab.com/api/v4/projects/78063949/packages/pypi/simple"
-reference = "litellm"
 
 [[package]]
 name = "frozenlist"
@@ -1784,11 +1364,6 @@ files = [
     {file = "frozenlist-1.4.1.tar.gz", hash = "sha256:c037a86e8513059a2613aaba4d817bb90b9d9b6b69aace3ce9c877e8c8ed402b"},
 ]
 
-[package.source]
-type = "legacy"
-url = "https://gitlab.com/api/v4/projects/78063949/packages/pypi/simple"
-reference = "litellm"
-
 [[package]]
 name = "fsspec"
 version = "2024.6.1"
@@ -1832,11 +1407,6 @@ test-downstream = ["aiobotocore (>=2.5.4,<3.0.0)", "dask-expr", "dask[dataframe,
 test-full = ["adlfs", "aiohttp (!=4.0.0a0,!=4.0.0a1)", "cloudpickle", "dask", "distributed", "dropbox", "dropboxdrivefs", "fastparquet", "fusepy", "gcsfs", "jinja2", "kerchunk", "libarchive-c", "lz4", "notebook", "numpy", "ocifs", "pandas", "panel", "paramiko", "pyarrow", "pyarrow (>=1)", "pyftpdlib", "pygit2", "pytest", "pytest-asyncio (!=0.22.0)", "pytest-benchmark", "pytest-cov", "pytest-mock", "pytest-recording", "pytest-rerunfailures", "python-snappy", "requests", "smbprotocol", "tqdm", "urllib3", "zarr", "zstandard"]
 tqdm = ["tqdm"]
 
-[package.source]
-type = "legacy"
-url = "https://gitlab.com/api/v4/projects/78063949/packages/pypi/simple"
-reference = "litellm"
-
 [[package]]
 name = "genson"
 version = "1.3.0"
@@ -1848,11 +1418,6 @@ files = [
     {file = "genson-1.3.0-py3-none-any.whl", hash = "sha256:468feccd00274cc7e4c09e84b08704270ba8d95232aa280f65b986139cec67f7"},
     {file = "genson-1.3.0.tar.gz", hash = "sha256:e02db9ac2e3fd29e65b5286f7135762e2cd8a986537c075b06fc5f1517308e37"},
 ]
-
-[package.source]
-type = "legacy"
-url = "https://gitlab.com/api/v4/projects/78063949/packages/pypi/simple"
-reference = "litellm"
 
 [[package]]
 name = "gitdb"
@@ -1868,11 +1433,6 @@ files = [
 
 [package.dependencies]
 smmap = ">=3.0.1,<6"
-
-[package.source]
-type = "legacy"
-url = "https://gitlab.com/api/v4/projects/78063949/packages/pypi/simple"
-reference = "litellm"
 
 [[package]]
 name = "gitlab-cloud-connector"
@@ -1909,11 +1469,6 @@ files = [
     {file = "gitmatch-0.2.1.tar.gz", hash = "sha256:46d2c5e25d579580ebed15632ceaaae696fa437f8b52634fb042d1b4fa432f52"},
 ]
 
-[package.source]
-type = "legacy"
-url = "https://gitlab.com/api/v4/projects/78063949/packages/pypi/simple"
-reference = "litellm"
-
 [[package]]
 name = "gitpython"
 version = "3.1.45"
@@ -1932,11 +1487,6 @@ gitdb = ">=4.0.1,<5"
 [package.extras]
 doc = ["sphinx (>=7.1.2,<7.2)", "sphinx-autodoc-typehints", "sphinx_rtd_theme"]
 test = ["coverage[toml]", "ddt (>=1.1.1,!=1.4.3)", "mock ; python_version < \"3.8\"", "mypy", "pre-commit", "pytest (>=7.3.1)", "pytest-cov", "pytest-instafail", "pytest-mock", "pytest-sugar", "typing-extensions ; python_version < \"3.11\""]
-
-[package.source]
-type = "legacy"
-url = "https://gitlab.com/api/v4/projects/78063949/packages/pypi/simple"
-reference = "litellm"
 
 [[package]]
 name = "google-api-core"
@@ -1965,11 +1515,6 @@ grpc = ["grpcio (>=1.33.2,<2.0.0)", "grpcio (>=1.49.1,<2.0.0) ; python_version >
 grpcgcp = ["grpcio-gcp (>=0.2.2,<1.0.0)"]
 grpcio-gcp = ["grpcio-gcp (>=0.2.2,<1.0.0)"]
 
-[package.source]
-type = "legacy"
-url = "https://gitlab.com/api/v4/projects/78063949/packages/pypi/simple"
-reference = "litellm"
-
 [[package]]
 name = "google-api-python-client"
 version = "2.137.0"
@@ -1988,11 +1533,6 @@ google-auth = ">=1.32.0,<2.24.0 || >2.24.0,<2.25.0 || >2.25.0,<3.0.0.dev0"
 google-auth-httplib2 = ">=0.2.0,<1.0.0"
 httplib2 = ">=0.19.0,<1.dev0"
 uritemplate = ">=3.0.1,<5"
-
-[package.source]
-type = "legacy"
-url = "https://gitlab.com/api/v4/projects/78063949/packages/pypi/simple"
-reference = "litellm"
 
 [[package]]
 name = "google-auth"
@@ -2022,11 +1562,6 @@ requests = ["requests (>=2.20.0,<3.0.0)"]
 testing = ["aiohttp (<3.10.0)", "aiohttp (>=3.6.2,<4.0.0)", "aioresponses", "flask", "freezegun", "grpcio", "oauth2client", "packaging", "pyjwt (>=2.0)", "pyopenssl (<24.3.0)", "pyopenssl (>=20.0.0)", "pytest", "pytest-asyncio", "pytest-cov", "pytest-localserver", "pyu2f (>=0.1.5)", "requests (>=2.20.0,<3.0.0)", "responses", "urllib3"]
 urllib3 = ["packaging", "urllib3"]
 
-[package.source]
-type = "legacy"
-url = "https://gitlab.com/api/v4/projects/78063949/packages/pypi/simple"
-reference = "litellm"
-
 [[package]]
 name = "google-auth-httplib2"
 version = "0.2.0"
@@ -2042,11 +1577,6 @@ files = [
 [package.dependencies]
 google-auth = "*"
 httplib2 = ">=0.19.0"
-
-[package.source]
-type = "legacy"
-url = "https://gitlab.com/api/v4/projects/78063949/packages/pypi/simple"
-reference = "litellm"
 
 [[package]]
 name = "google-cloud-aiplatform"
@@ -2104,11 +1634,6 @@ tokenization = ["sentencepiece (>=0.2.0)"]
 vizier = ["google-vizier (>=0.1.6)"]
 xai = ["tensorflow (>=2.3.0,<3.0.0)"]
 
-[package.source]
-type = "legacy"
-url = "https://gitlab.com/api/v4/projects/78063949/packages/pypi/simple"
-reference = "litellm"
-
 [[package]]
 name = "google-cloud-bigquery"
 version = "3.25.0"
@@ -2141,11 +1666,6 @@ opentelemetry = ["opentelemetry-api (>=1.1.0)", "opentelemetry-instrumentation (
 pandas = ["db-dtypes (>=0.3.0,<2.0.0.dev0)", "importlib-metadata (>=1.0.0) ; python_version < \"3.8\"", "pandas (>=1.1.0)", "pyarrow (>=3.0.0)"]
 tqdm = ["tqdm (>=4.7.4,<5.0.0.dev0)"]
 
-[package.source]
-type = "legacy"
-url = "https://gitlab.com/api/v4/projects/78063949/packages/pypi/simple"
-reference = "litellm"
-
 [[package]]
 name = "google-cloud-core"
 version = "2.4.1"
@@ -2165,11 +1685,6 @@ google-auth = ">=1.25.0,<3.0.dev0"
 [package.extras]
 grpc = ["grpcio (>=1.38.0,<2.0.dev0)", "grpcio-status (>=1.38.0,<2.0.dev0)"]
 
-[package.source]
-type = "legacy"
-url = "https://gitlab.com/api/v4/projects/78063949/packages/pypi/simple"
-reference = "litellm"
-
 [[package]]
 name = "google-cloud-discoveryengine"
 version = "0.13.11"
@@ -2187,11 +1702,6 @@ google-api-core = {version = ">=1.34.1,<2.0.dev0 || >=2.11.dev0,<3.0.0", extras 
 google-auth = ">=2.14.1,<2.24.0 || >2.24.0,<2.25.0 || >2.25.0,<3.0.0"
 proto-plus = ">=1.22.3,<2.0.0"
 protobuf = ">=3.20.2,<4.21.0 || >4.21.0,<4.21.1 || >4.21.1,<4.21.2 || >4.21.2,<4.21.3 || >4.21.3,<4.21.4 || >4.21.4,<4.21.5 || >4.21.5,<7.0.0"
-
-[package.source]
-type = "legacy"
-url = "https://gitlab.com/api/v4/projects/78063949/packages/pypi/simple"
-reference = "litellm"
 
 [[package]]
 name = "google-cloud-profiler"
@@ -2211,11 +1721,6 @@ google-auth-httplib2 = "*"
 protobuf = ">=3.20"
 requests = "*"
 
-[package.source]
-type = "legacy"
-url = "https://gitlab.com/api/v4/projects/78063949/packages/pypi/simple"
-reference = "litellm"
-
 [[package]]
 name = "google-cloud-resource-manager"
 version = "1.14.2"
@@ -2234,11 +1739,6 @@ google-auth = ">=2.14.1,<2.24.0 || >2.24.0,<2.25.0 || >2.25.0,<3.0.0"
 grpc-google-iam-v1 = ">=0.14.0,<1.0.0"
 proto-plus = ">=1.22.3,<2.0.0"
 protobuf = ">=3.20.2,<4.21.0 || >4.21.0,<4.21.1 || >4.21.1,<4.21.2 || >4.21.2,<4.21.3 || >4.21.3,<4.21.4 || >4.21.4,<4.21.5 || >4.21.5,<7.0.0"
-
-[package.source]
-type = "legacy"
-url = "https://gitlab.com/api/v4/projects/78063949/packages/pypi/simple"
-reference = "litellm"
 
 [[package]]
 name = "google-cloud-storage"
@@ -2263,11 +1763,6 @@ requests = ">=2.18.0,<3.0.0.dev0"
 [package.extras]
 protobuf = ["protobuf (<6.0.0.dev0)"]
 tracing = ["opentelemetry-api (>=1.1.0)"]
-
-[package.source]
-type = "legacy"
-url = "https://gitlab.com/api/v4/projects/78063949/packages/pypi/simple"
-reference = "litellm"
 
 [[package]]
 name = "google-crc32c"
@@ -2350,11 +1845,6 @@ files = [
 [package.extras]
 testing = ["pytest"]
 
-[package.source]
-type = "legacy"
-url = "https://gitlab.com/api/v4/projects/78063949/packages/pypi/simple"
-reference = "litellm"
-
 [[package]]
 name = "google-genai"
 version = "1.20.0"
@@ -2379,17 +1869,12 @@ websockets = ">=13.0.0,<15.1.0"
 [package.extras]
 aiohttp = ["aiohttp (<4.0.0)"]
 
-[package.source]
-type = "legacy"
-url = "https://gitlab.com/api/v4/projects/78063949/packages/pypi/simple"
-reference = "litellm"
-
 [[package]]
 name = "google-resumable-media"
 version = "2.7.1"
 description = "Utilities for Google Media Downloads and Resumable Uploads"
 optional = false
-python-versions = ">= 3.7"
+python-versions = ">=3.7"
 groups = ["main", "eval"]
 files = [
     {file = "google-resumable-media-2.7.1.tar.gz", hash = "sha256:eae451a7b2e2cdbaaa0fd2eb00cc8a1ee5e95e16b55597359cbc3d27d7d90e33"},
@@ -2402,11 +1887,6 @@ google-crc32c = ">=1.0,<2.0.dev0"
 [package.extras]
 aiohttp = ["aiohttp (>=3.6.2,<4.0.0.dev0)", "google-auth (>=1.22.0,<2.0.dev0)"]
 requests = ["requests (>=2.18.0,<3.0.0.dev0)"]
-
-[package.source]
-type = "legacy"
-url = "https://gitlab.com/api/v4/projects/78063949/packages/pypi/simple"
-reference = "litellm"
 
 [[package]]
 name = "googleapis-common-protos"
@@ -2426,11 +1906,6 @@ protobuf = ">=3.20.2,<4.21.1 || >4.21.1,<4.21.2 || >4.21.2,<4.21.3 || >4.21.3,<4
 
 [package.extras]
 grpc = ["grpcio (>=1.44.0,<2.0.0)"]
-
-[package.source]
-type = "legacy"
-url = "https://gitlab.com/api/v4/projects/78063949/packages/pypi/simple"
-reference = "litellm"
 
 [[package]]
 name = "gql"
@@ -2462,27 +1937,17 @@ test = ["aiofiles", "aiohttp (>=3.8.0,<4) ; python_version <= \"3.11\"", "aiohtt
 test-no-transport = ["aiofiles", "mock (==4.0.2)", "parse (==1.15.0)", "pytest (==7.4.2)", "pytest-asyncio (==0.21.1)", "pytest-console-scripts (==1.3.1)", "pytest-cov (==3.0.0)", "vcrpy (==4.4.0) ; python_version <= \"3.8\"", "vcrpy (==7.0.0) ; python_version > \"3.8\""]
 websockets = ["websockets (>=10,<12)"]
 
-[package.source]
-type = "legacy"
-url = "https://gitlab.com/api/v4/projects/78063949/packages/pypi/simple"
-reference = "litellm"
-
 [[package]]
 name = "graphql-core"
 version = "3.2.4"
 description = "GraphQL implementation for Python, a port of GraphQL.js, the JavaScript reference implementation for GraphQL."
 optional = false
-python-versions = ">=3.6,<4"
+python-versions = "<4,>=3.6"
 groups = ["main", "eval"]
 files = [
     {file = "graphql-core-3.2.4.tar.gz", hash = "sha256:acbe2e800980d0e39b4685dd058c2f4042660b89ebca38af83020fd872ff1264"},
     {file = "graphql_core-3.2.4-py3-none-any.whl", hash = "sha256:1604f2042edc5f3114f49cac9d77e25863be51b23a54a61a23245cf32f6476f0"},
 ]
-
-[package.source]
-type = "legacy"
-url = "https://gitlab.com/api/v4/projects/78063949/packages/pypi/simple"
-reference = "litellm"
 
 [[package]]
 name = "greenlet"
@@ -2557,11 +2022,6 @@ files = [
 docs = ["Sphinx", "furo"]
 test = ["objgraph", "psutil"]
 
-[package.source]
-type = "legacy"
-url = "https://gitlab.com/api/v4/projects/78063949/packages/pypi/simple"
-reference = "litellm"
-
 [[package]]
 name = "groq"
 version = "1.0.0"
@@ -2585,11 +2045,6 @@ typing-extensions = ">=4.10,<5"
 [package.extras]
 aiohttp = ["aiohttp", "httpx-aiohttp (>=0.1.9)"]
 
-[package.source]
-type = "legacy"
-url = "https://gitlab.com/api/v4/projects/78063949/packages/pypi/simple"
-reference = "litellm"
-
 [[package]]
 name = "grpc-google-iam-v1"
 version = "0.14.2"
@@ -2606,11 +2061,6 @@ files = [
 googleapis-common-protos = {version = ">=1.56.0,<2.0.0", extras = ["grpc"]}
 grpcio = ">=1.44.0,<2.0.0"
 protobuf = ">=3.20.2,<4.21.1 || >4.21.1,<4.21.2 || >4.21.2,<4.21.3 || >4.21.3,<4.21.4 || >4.21.4,<4.21.5 || >4.21.5,<7.0.0"
-
-[package.source]
-type = "legacy"
-url = "https://gitlab.com/api/v4/projects/78063949/packages/pypi/simple"
-reference = "litellm"
 
 [[package]]
 name = "grpcio"
@@ -2689,11 +2139,6 @@ typing-extensions = ">=4.12,<5.0"
 [package.extras]
 protobuf = ["grpcio-tools (>=1.76.0)"]
 
-[package.source]
-type = "legacy"
-url = "https://gitlab.com/api/v4/projects/78063949/packages/pypi/simple"
-reference = "litellm"
-
 [[package]]
 name = "grpcio-reflection"
 version = "1.76.0"
@@ -2709,11 +2154,6 @@ files = [
 [package.dependencies]
 grpcio = ">=1.76.0"
 protobuf = ">=6.31.1,<7.0.0"
-
-[package.source]
-type = "legacy"
-url = "https://gitlab.com/api/v4/projects/78063949/packages/pypi/simple"
-reference = "litellm"
 
 [[package]]
 name = "grpcio-status"
@@ -2731,11 +2171,6 @@ files = [
 googleapis-common-protos = ">=1.5.5"
 grpcio = ">=1.62.2"
 protobuf = ">=4.21.6"
-
-[package.source]
-type = "legacy"
-url = "https://gitlab.com/api/v4/projects/78063949/packages/pypi/simple"
-reference = "litellm"
 
 [[package]]
 name = "grpcio-tools"
@@ -2803,38 +2238,6 @@ grpcio = ">=1.73.1"
 protobuf = ">=6.30.0,<7.0.0"
 setuptools = "*"
 
-[package.source]
-type = "legacy"
-url = "https://gitlab.com/api/v4/projects/78063949/packages/pypi/simple"
-reference = "litellm"
-
-[[package]]
-name = "gunicorn"
-version = "23.0.0"
-description = "WSGI HTTP Server for UNIX"
-optional = false
-python-versions = ">=3.7"
-groups = ["main"]
-files = [
-    {file = "gunicorn-23.0.0-py3-none-any.whl", hash = "sha256:ec400d38950de4dfd418cff8328b2c8faed0edb0d517d3394e457c317908ca4d"},
-    {file = "gunicorn-23.0.0.tar.gz", hash = "sha256:f014447a0101dc57e294f6c18ca6b40227a4c90e9bdb586042628030cba004ec"},
-]
-
-[package.dependencies]
-packaging = "*"
-
-[package.extras]
-eventlet = ["eventlet (>=0.24.1,!=0.36.0)"]
-gevent = ["gevent (>=1.4.0)"]
-setproctitle = ["setproctitle"]
-testing = ["coverage", "eventlet", "gevent", "pytest", "pytest-cov"]
-tornado = ["tornado (>=0.2)"]
-
-[package.source]
-type = "legacy"
-url = "https://gitlab.com/api/v4/projects/78063949/packages/pypi/simple"
-reference = "litellm"
-
 [[package]]
 name = "h11"
 version = "0.16.0"
@@ -2846,11 +2249,6 @@ files = [
     {file = "h11-0.16.0-py3-none-any.whl", hash = "sha256:63cf8bbe7522de3bf65932fda1d9c2772064ffb3dae62d55932da54b31cb6c86"},
     {file = "h11-0.16.0.tar.gz", hash = "sha256:4e35b956cf45792e4caa5885e69fba00bdbc6ffafbfa020300e549b208ee5ff1"},
 ]
-
-[package.source]
-type = "legacy"
-url = "https://gitlab.com/api/v4/projects/78063949/packages/pypi/simple"
-reference = "litellm"
 
 [[package]]
 name = "hiddenlayer-sdk"
@@ -2878,11 +2276,6 @@ typing-extensions = ">=4.10,<5"
 [package.extras]
 aiohttp = ["aiohttp", "httpx-aiohttp (>=0.1.9)"]
 
-[package.source]
-type = "legacy"
-url = "https://gitlab.com/api/v4/projects/78063949/packages/pypi/simple"
-reference = "litellm"
-
 [[package]]
 name = "httpcore"
 version = "1.0.9"
@@ -2905,11 +2298,6 @@ http2 = ["h2 (>=3,<5)"]
 socks = ["socksio (==1.*)"]
 trio = ["trio (>=0.22.0,<1.0)"]
 
-[package.source]
-type = "legacy"
-url = "https://gitlab.com/api/v4/projects/78063949/packages/pypi/simple"
-reference = "litellm"
-
 [[package]]
 name = "httplib2"
 version = "0.22.0"
@@ -2924,11 +2312,6 @@ files = [
 
 [package.dependencies]
 pyparsing = {version = ">=2.4.2,<3.0.0 || >3.0.0,<3.0.1 || >3.0.1,<3.0.2 || >3.0.2,<3.0.3 || >3.0.3,<4", markers = "python_version > \"3.0\""}
-
-[package.source]
-type = "legacy"
-url = "https://gitlab.com/api/v4/projects/78063949/packages/pypi/simple"
-reference = "litellm"
 
 [[package]]
 name = "httptools"
@@ -2986,11 +2369,6 @@ files = [
 [package.extras]
 test = ["Cython (>=0.29.24)"]
 
-[package.source]
-type = "legacy"
-url = "https://gitlab.com/api/v4/projects/78063949/packages/pypi/simple"
-reference = "litellm"
-
 [[package]]
 name = "httpx"
 version = "0.28.1"
@@ -3016,11 +2394,6 @@ http2 = ["h2 (>=3,<5)"]
 socks = ["socksio (==1.*)"]
 zstd = ["zstandard (>=0.18.0)"]
 
-[package.source]
-type = "legacy"
-url = "https://gitlab.com/api/v4/projects/78063949/packages/pypi/simple"
-reference = "litellm"
-
 [[package]]
 name = "httpx-sse"
 version = "0.4.0"
@@ -3032,11 +2405,6 @@ files = [
     {file = "httpx-sse-0.4.0.tar.gz", hash = "sha256:1e81a3a3070ce322add1d3529ed42eb5f70817f45ed6ec915ab753f961139721"},
     {file = "httpx_sse-0.4.0-py3-none-any.whl", hash = "sha256:f329af6eae57eaa2bdfd962b42524764af68075ea87370a2de920af5341e318f"},
 ]
-
-[package.source]
-type = "legacy"
-url = "https://gitlab.com/api/v4/projects/78063949/packages/pypi/simple"
-reference = "litellm"
 
 [[package]]
 name = "httpx-ws"
@@ -3055,11 +2423,6 @@ anyio = ">=4"
 httpcore = ">=1.0.4"
 httpx = ">=0.23.1"
 wsproto = "*"
-
-[package.source]
-type = "legacy"
-url = "https://gitlab.com/api/v4/projects/78063949/packages/pypi/simple"
-reference = "litellm"
 
 [[package]]
 name = "huggingface-hub"
@@ -3097,11 +2460,6 @@ testing = ["InquirerPy (==0.3.4)", "Jinja2", "Pillow", "aiohttp", "fastapi", "gr
 torch = ["safetensors[torch]", "torch"]
 typing = ["types-PyYAML", "types-requests", "types-simplejson", "types-toml", "types-tqdm", "types-urllib3", "typing-extensions (>=4.8.0)"]
 
-[package.source]
-type = "legacy"
-url = "https://gitlab.com/api/v4/projects/78063949/packages/pypi/simple"
-reference = "litellm"
-
 [[package]]
 name = "idna"
 version = "3.7"
@@ -3113,11 +2471,6 @@ files = [
     {file = "idna-3.7-py3-none-any.whl", hash = "sha256:82fee1fc78add43492d3a1898bfa6d8a904cc97d8427f683ed8e798d07761aa0"},
     {file = "idna-3.7.tar.gz", hash = "sha256:028ff3aadf0609c1fd278d8ea3089299412a7a8b9bd005dd08b9f8285bcb5cfc"},
 ]
-
-[package.source]
-type = "legacy"
-url = "https://gitlab.com/api/v4/projects/78063949/packages/pypi/simple"
-reference = "litellm"
 
 [[package]]
 name = "importlib-metadata"
@@ -3139,11 +2492,6 @@ doc = ["furo", "jaraco.packaging (>=9.3)", "jaraco.tidelift (>=1.4)", "rst.linke
 perf = ["ipython"]
 test = ["flufl.flake8", "importlib-resources (>=1.3) ; python_version < \"3.9\"", "jaraco.test (>=5.4)", "packaging", "pyfakefs", "pytest (>=6,!=8.1.*)", "pytest-checkdocs (>=2.4)", "pytest-cov", "pytest-enabler (>=2.2)", "pytest-mypy", "pytest-perf (>=0.9.2)", "pytest-ruff (>=0.2.1)"]
 
-[package.source]
-type = "legacy"
-url = "https://gitlab.com/api/v4/projects/78063949/packages/pypi/simple"
-reference = "litellm"
-
 [[package]]
 name = "iniconfig"
 version = "2.0.0"
@@ -3155,11 +2503,6 @@ files = [
     {file = "iniconfig-2.0.0-py3-none-any.whl", hash = "sha256:b6a85871a79d2e3b22d2d1b94ac2824226a63c6b741c88f7ae975f18b6778374"},
     {file = "iniconfig-2.0.0.tar.gz", hash = "sha256:2d91e135bf72d31a410b17c16da610a82cb55f6b0477d1a902134b24a455b8b3"},
 ]
-
-[package.source]
-type = "legacy"
-url = "https://gitlab.com/api/v4/projects/78063949/packages/pypi/simple"
-reference = "litellm"
 
 [[package]]
 name = "instructor"
@@ -3211,28 +2554,6 @@ vertexai = ["google-cloud-aiplatform (>=1.53.0,<2.0.0)", "jsonref (>=1.1.0,<2.0.
 writer = ["writer-sdk (>=2.2.0,<3.0.0)"]
 xai = ["python-dotenv (>=1.0.0)", "xai-sdk (>=0.2.0) ; python_version >= \"3.10\""]
 
-[package.source]
-type = "legacy"
-url = "https://gitlab.com/api/v4/projects/78063949/packages/pypi/simple"
-reference = "litellm"
-
-[[package]]
-name = "isodate"
-version = "0.7.2"
-description = "An ISO 8601 date/time/duration parser and formatter"
-optional = false
-python-versions = ">=3.7"
-groups = ["main"]
-files = [
-    {file = "isodate-0.7.2-py3-none-any.whl", hash = "sha256:28009937d8031054830160fce6d409ed342816b543597cece116d966c6d99e15"},
-    {file = "isodate-0.7.2.tar.gz", hash = "sha256:4cd1aa0f43ca76f4a6c6c0292a85f40b35ec2e43e315b59f06e6d32171a953e6"},
-]
-
-[package.source]
-type = "legacy"
-url = "https://gitlab.com/api/v4/projects/78063949/packages/pypi/simple"
-reference = "litellm"
-
 [[package]]
 name = "isort"
 version = "5.13.2"
@@ -3247,11 +2568,6 @@ files = [
 
 [package.extras]
 colors = ["colorama (>=0.4.6)"]
-
-[package.source]
-type = "legacy"
-url = "https://gitlab.com/api/v4/projects/78063949/packages/pypi/simple"
-reference = "litellm"
 
 [[package]]
 name = "jinja2"
@@ -3270,11 +2586,6 @@ MarkupSafe = ">=2.0"
 
 [package.extras]
 i18n = ["Babel (>=2.7)"]
-
-[package.source]
-type = "legacy"
-url = "https://gitlab.com/api/v4/projects/78063949/packages/pypi/simple"
-reference = "litellm"
 
 [[package]]
 name = "jiter"
@@ -3388,11 +2699,6 @@ files = [
     {file = "jiter-0.11.1.tar.gz", hash = "sha256:849dcfc76481c0ea0099391235b7ca97d7279e0fa4c86005457ac7c88e8b76dc"},
 ]
 
-[package.source]
-type = "legacy"
-url = "https://gitlab.com/api/v4/projects/78063949/packages/pypi/simple"
-reference = "litellm"
-
 [[package]]
 name = "jmespath"
 version = "1.0.1"
@@ -3404,11 +2710,6 @@ files = [
     {file = "jmespath-1.0.1-py3-none-any.whl", hash = "sha256:02e2e4cc71b5bcab88332eebf907519190dd9e6e82107fa7f83b1003a6252980"},
     {file = "jmespath-1.0.1.tar.gz", hash = "sha256:90261b206d6defd58fdd5e85f478bf633a2901798906be2ad389150c5c60edbe"},
 ]
-
-[package.source]
-type = "legacy"
-url = "https://gitlab.com/api/v4/projects/78063949/packages/pypi/simple"
-reference = "litellm"
 
 [[package]]
 name = "joblib"
@@ -3422,15 +2723,10 @@ files = [
     {file = "joblib-1.5.3.tar.gz", hash = "sha256:8561a3269e6801106863fd0d6d84bb737be9e7631e33aaed3fb9ce5953688da3"},
 ]
 
-[package.source]
-type = "legacy"
-url = "https://gitlab.com/api/v4/projects/78063949/packages/pypi/simple"
-reference = "litellm"
-
 [[package]]
 name = "jsonpatch"
 version = "1.33"
-description = "Apply JSON-Patches (RFC 6902) "
+description = "Apply JSON-Patches (RFC 6902)"
 optional = false
 python-versions = ">=2.7, !=3.0.*, !=3.1.*, !=3.2.*, !=3.3.*, !=3.4.*, !=3.5.*, !=3.6.*"
 groups = ["main", "eval"]
@@ -3442,15 +2738,10 @@ files = [
 [package.dependencies]
 jsonpointer = ">=1.9"
 
-[package.source]
-type = "legacy"
-url = "https://gitlab.com/api/v4/projects/78063949/packages/pypi/simple"
-reference = "litellm"
-
 [[package]]
 name = "jsonpointer"
 version = "3.0.0"
-description = "Identify specific nodes in a JSON document (RFC 6901) "
+description = "Identify specific nodes in a JSON document (RFC 6901)"
 optional = false
 python-versions = ">=3.7"
 groups = ["main", "eval"]
@@ -3458,11 +2749,6 @@ files = [
     {file = "jsonpointer-3.0.0-py2.py3-none-any.whl", hash = "sha256:13e088adc14fca8b6aa8177c044e12701e6ad4b28ff10e65f2267a90109c9942"},
     {file = "jsonpointer-3.0.0.tar.gz", hash = "sha256:2b2d729f2091522d61c3b31f82e11870f60b68f43fbc705cb76bf4b832af59ef"},
 ]
-
-[package.source]
-type = "legacy"
-url = "https://gitlab.com/api/v4/projects/78063949/packages/pypi/simple"
-reference = "litellm"
 
 [[package]]
 name = "jsonschema"
@@ -3486,11 +2772,6 @@ rpds-py = ">=0.7.1"
 format = ["fqdn", "idna", "isoduration", "jsonpointer (>1.13)", "rfc3339-validator", "rfc3987", "uri-template", "webcolors (>=1.11)"]
 format-nongpl = ["fqdn", "idna", "isoduration", "jsonpointer (>1.13)", "rfc3339-validator", "rfc3986-validator (>0.1.0)", "uri-template", "webcolors (>=24.6.0)"]
 
-[package.source]
-type = "legacy"
-url = "https://gitlab.com/api/v4/projects/78063949/packages/pypi/simple"
-reference = "litellm"
-
 [[package]]
 name = "jsonschema-specifications"
 version = "2023.12.1"
@@ -3505,11 +2786,6 @@ files = [
 
 [package.dependencies]
 referencing = ">=0.31.0"
-
-[package.source]
-type = "legacy"
-url = "https://gitlab.com/api/v4/projects/78063949/packages/pypi/simple"
-reference = "litellm"
 
 [[package]]
 name = "langchain"
@@ -3546,11 +2822,6 @@ perplexity = ["langchain-perplexity"]
 together = ["langchain-together"]
 xai = ["langchain-xai"]
 
-[package.source]
-type = "legacy"
-url = "https://gitlab.com/api/v4/projects/78063949/packages/pypi/simple"
-reference = "litellm"
-
 [[package]]
 name = "langchain-anthropic"
 version = "1.3.1"
@@ -3567,11 +2838,6 @@ files = [
 anthropic = ">=0.75.0,<1.0.0"
 langchain-core = ">=1.2.6,<2.0.0"
 pydantic = ">=2.7.4,<3.0.0"
-
-[package.source]
-type = "legacy"
-url = "https://gitlab.com/api/v4/projects/78063949/packages/pypi/simple"
-reference = "litellm"
 
 [[package]]
 name = "langchain-classic"
@@ -3610,11 +2876,6 @@ perplexity = ["langchain-perplexity"]
 together = ["langchain-together"]
 xai = ["langchain-xai"]
 
-[package.source]
-type = "legacy"
-url = "https://gitlab.com/api/v4/projects/78063949/packages/pypi/simple"
-reference = "litellm"
-
 [[package]]
 name = "langchain-community"
 version = "0.4.1"
@@ -3641,11 +2902,6 @@ requests = ">=2.32.5,<3.0.0"
 SQLAlchemy = ">=1.4.0,<3.0.0"
 tenacity = ">=8.1.0,<8.4.0 || >8.4.0,<10.0.0"
 
-[package.source]
-type = "legacy"
-url = "https://gitlab.com/api/v4/projects/78063949/packages/pypi/simple"
-reference = "litellm"
-
 [[package]]
 name = "langchain-core"
 version = "1.2.7"
@@ -3667,11 +2923,6 @@ pyyaml = ">=5.3.0,<7.0.0"
 tenacity = ">=8.1.0,<8.4.0 || >8.4.0,<10.0.0"
 typing-extensions = ">=4.7.0,<5.0.0"
 uuid-utils = ">=0.12.0,<1.0"
-
-[package.source]
-type = "legacy"
-url = "https://gitlab.com/api/v4/projects/78063949/packages/pypi/simple"
-reference = "litellm"
 
 [[package]]
 name = "langchain-google-vertexai"
@@ -3701,11 +2952,6 @@ validators = ">=0.22.0,<1.0.0"
 anthropic = ["anthropic (>=0.35.0,<1.0.0)"]
 mistral = ["langchain-mistralai (>=0.2.0,<2.0.0)"]
 
-[package.source]
-type = "legacy"
-url = "https://gitlab.com/api/v4/projects/78063949/packages/pypi/simple"
-reference = "litellm"
-
 [[package]]
 name = "langchain-openai"
 version = "1.1.7"
@@ -3723,11 +2969,6 @@ langchain-core = ">=1.2.6,<2.0.0"
 openai = ">=1.109.1,<3.0.0"
 tiktoken = ">=0.7.0,<1.0.0"
 
-[package.source]
-type = "legacy"
-url = "https://gitlab.com/api/v4/projects/78063949/packages/pypi/simple"
-reference = "litellm"
-
 [[package]]
 name = "langchain-text-splitters"
 version = "1.1.0"
@@ -3743,17 +2984,12 @@ files = [
 [package.dependencies]
 langchain-core = ">=1.2.0,<2.0.0"
 
-[package.source]
-type = "legacy"
-url = "https://gitlab.com/api/v4/projects/78063949/packages/pypi/simple"
-reference = "litellm"
-
 [[package]]
 name = "langchainhub"
 version = "0.1.21"
 description = "The LangChain Hub API client"
 optional = false
-python-versions = ">=3.8.1,<4.0"
+python-versions = "<4.0,>=3.8.1"
 groups = ["eval"]
 files = [
     {file = "langchainhub-0.1.21-py3-none-any.whl", hash = "sha256:1cc002dc31e0d132a776afd044361e2b698743df5202618cf2bad399246b895f"},
@@ -3764,11 +3000,6 @@ files = [
 packaging = ">=23.2,<25"
 requests = ">=2,<3"
 types-requests = ">=2.31.0.2,<3.0.0.0"
-
-[package.source]
-type = "legacy"
-url = "https://gitlab.com/api/v4/projects/78063949/packages/pypi/simple"
-reference = "litellm"
 
 [[package]]
 name = "langgraph"
@@ -3790,11 +3021,6 @@ langgraph-sdk = ">=0.3.0,<0.4.0"
 pydantic = ">=2.7.4"
 xxhash = ">=3.5.0"
 
-[package.source]
-type = "legacy"
-url = "https://gitlab.com/api/v4/projects/78063949/packages/pypi/simple"
-reference = "litellm"
-
 [[package]]
 name = "langgraph-checkpoint"
 version = "2.1.2"
@@ -3810,11 +3036,6 @@ files = [
 [package.dependencies]
 langchain-core = ">=0.2.38"
 ormsgpack = ">=1.10.0"
-
-[package.source]
-type = "legacy"
-url = "https://gitlab.com/api/v4/projects/78063949/packages/pypi/simple"
-reference = "litellm"
 
 [[package]]
 name = "langgraph-prebuilt"
@@ -3832,11 +3053,6 @@ files = [
 langchain-core = ">=1.0.0"
 langgraph-checkpoint = ">=2.1.0,<5.0.0"
 
-[package.source]
-type = "legacy"
-url = "https://gitlab.com/api/v4/projects/78063949/packages/pypi/simple"
-reference = "litellm"
-
 [[package]]
 name = "langgraph-sdk"
 version = "0.3.3"
@@ -3852,11 +3068,6 @@ files = [
 [package.dependencies]
 httpx = ">=0.25.2"
 orjson = ">=3.10.1"
-
-[package.source]
-type = "legacy"
-url = "https://gitlab.com/api/v4/projects/78063949/packages/pypi/simple"
-reference = "litellm"
 
 [[package]]
 name = "langsmith"
@@ -3888,11 +3099,6 @@ otel = ["opentelemetry-api (>=1.30.0)", "opentelemetry-exporter-otlp-proto-http 
 pytest = ["pytest (>=7.0.0)", "rich (>=13.9.4)", "vcrpy (>=7.0.0)"]
 vcr = ["vcrpy (>=7.0.0)"]
 
-[package.source]
-type = "legacy"
-url = "https://gitlab.com/api/v4/projects/78063949/packages/pypi/simple"
-reference = "litellm"
-
 [[package]]
 name = "linkify-it-py"
 version = "2.0.3"
@@ -3914,108 +3120,39 @@ dev = ["black", "flake8", "isort", "pre-commit", "pyproject-flake8"]
 doc = ["myst-parser", "sphinx", "sphinx-book-theme"]
 test = ["coverage", "pytest", "pytest-cov"]
 
-[package.source]
-type = "legacy"
-url = "https://gitlab.com/api/v4/projects/78063949/packages/pypi/simple"
-reference = "litellm"
-
 [[package]]
 name = "litellm"
-version = "1.81.0"
+version = "1.80.0"
 description = "Library to easily interface with LLM API providers"
 optional = false
-python-versions = ">=3.9,<4.0"
+python-versions = "!=2.7.*,!=3.0.*,!=3.1.*,!=3.2.*,!=3.3.*,!=3.4.*,!=3.5.*,!=3.6.*,!=3.7.*,>=3.8"
 groups = ["main", "eval"]
 files = [
-    {file = "litellm-1.81.0-py3-none-any.whl", hash = "sha256:2b972c46027d06267cd447524c0f3b217d7b318da5a64064a9fff05bc66a1318"},
-    {file = "litellm-1.81.0.tar.gz", hash = "sha256:c7c06b95bf141e0adc27eb651969e112230a5552f693c2b9ee8af1cfab291776"},
+    {file = "litellm-1.80.0-py3-none-any.whl", hash = "sha256:fd0009758f4772257048d74bf79bb64318859adb4ea49a8b66fdbc718cd80b6e"},
+    {file = "litellm-1.80.0.tar.gz", hash = "sha256:eeac733eb6b226f9e5fb020f72fe13a32b3354b001dc62bcf1bc4d9b526d6231"},
 ]
 
 [package.dependencies]
 aiohttp = ">=3.10"
-apscheduler = {version = ">=3.10.4,<4.0.0", optional = true, markers = "extra == \"proxy\""}
-azure-identity = {version = ">=1.15.0,<2.0.0", optional = true, markers = "python_version >= \"3.9\" and (extra == \"proxy\" or extra == \"extra-proxy\")"}
-azure-storage-blob = {version = ">=12.25.1,<13.0.0", optional = true, markers = "extra == \"proxy\""}
-backoff = {version = "*", optional = true, markers = "extra == \"proxy\""}
-boto3 = {version = "1.36.0", optional = true, markers = "extra == \"proxy\""}
 click = "*"
-cryptography = {version = "*", optional = true, markers = "extra == \"proxy\""}
-fastapi = {version = ">=0.120.1", optional = true, markers = "extra == \"proxy\""}
-fastapi-sso = {version = ">=0.16,<0.20", optional = true, markers = "extra == \"proxy\""}
 fastuuid = ">=0.13.0"
-grpcio = {version = ">=1.62.3,<1.68.dev0 || >1.71.0,<1.71.1 || >1.71.1,<1.72.0 || >1.72.0,<1.72.1 || >1.72.1,<1.73.0 || >1.73.0", markers = "python_version < \"3.14\""}
-gunicorn = {version = ">=23.0.0,<24.0.0", optional = true, markers = "extra == \"proxy\""}
 httpx = ">=0.23.0"
 importlib-metadata = ">=6.8.0"
 jinja2 = ">=3.1.2,<4.0.0"
-jsonschema = ">=4.23.0,<5.0.0"
-litellm-enterprise = {version = "0.1.27", optional = true, markers = "extra == \"proxy\""}
-litellm-proxy-extras = {version = "0.4.23", optional = true, markers = "extra == \"proxy\""}
-mcp = {version = ">=1.21.2,<2.0.0", optional = true, markers = "python_version >= \"3.10\" and extra == \"proxy\""}
-openai = ">=2.8.0"
-orjson = {version = ">=3.9.7,<4.0.0", optional = true, markers = "extra == \"proxy\""}
-polars = {version = ">=1.31.0,<2.0.0", optional = true, markers = "python_version >= \"3.10\" and extra == \"proxy\""}
+jsonschema = ">=4.22.0,<5.0.0"
+openai = ">=1.99.5"
 pydantic = ">=2.5.0,<3.0.0"
-PyJWT = {version = ">=2.10.1,<3.0.0", optional = true, markers = "python_version >= \"3.9\" and extra == \"proxy\""}
-pynacl = {version = ">=1.5.0,<2.0.0", optional = true, markers = "extra == \"proxy\""}
 python-dotenv = ">=0.2.0"
-python-multipart = {version = ">=0.0.18,<0.0.19", optional = true, markers = "extra == \"proxy\""}
-pyyaml = {version = ">=6.0.1,<7.0.0", optional = true, markers = "extra == \"proxy\""}
-rich = {version = "13.7.1", optional = true, markers = "extra == \"proxy\""}
-rq = {version = "*", optional = true, markers = "extra == \"proxy\""}
-soundfile = {version = ">=0.12.1,<0.13.0", optional = true, markers = "extra == \"proxy\""}
 tiktoken = ">=0.7.0"
 tokenizers = "*"
-uvicorn = {version = ">=0.31.1,<0.32.0", optional = true, markers = "extra == \"proxy\""}
-uvloop = {version = ">=0.21.0,<0.22.0", optional = true, markers = "sys_platform != \"win32\" and extra == \"proxy\""}
-websockets = {version = ">=15.0.1,<16.0.0", optional = true, markers = "extra == \"proxy\""}
 
 [package.extras]
 caching = ["diskcache (>=5.6.1,<6.0.0)"]
-extra-proxy = ["azure-identity (>=1.15.0,<2.0.0) ; python_version >= \"3.9\"", "azure-keyvault-secrets (>=4.8.0,<5.0.0)", "google-cloud-iam (>=2.19.1,<3.0.0)", "google-cloud-kms (>=2.21.3,<3.0.0)", "prisma (==0.11.0)", "redisvl (>=0.4.1,<0.5.0) ; python_version >= \"3.9\" and python_version < \"3.14\"", "resend (>=0.8.0)"]
+extra-proxy = ["azure-identity (>=1.15.0,<2.0.0)", "azure-keyvault-secrets (>=4.8.0,<5.0.0)", "google-cloud-iam (>=2.19.1,<3.0.0)", "google-cloud-kms (>=2.21.3,<3.0.0)", "prisma (==0.11.0)", "redisvl (>=0.4.1,<0.5.0) ; python_version >= \"3.9\" and python_version < \"3.14\"", "resend (>=0.8.0,<0.9.0)"]
 mlflow = ["mlflow (>3.1.4) ; python_version >= \"3.10\""]
-proxy = ["PyJWT (>=2.10.1,<3.0.0) ; python_version >= \"3.9\"", "apscheduler (>=3.10.4,<4.0.0)", "azure-identity (>=1.15.0,<2.0.0) ; python_version >= \"3.9\"", "azure-storage-blob (>=12.25.1,<13.0.0)", "backoff", "boto3 (==1.36.0)", "cryptography", "fastapi (>=0.120.1)", "fastapi-sso (>=0.16,<0.20)", "gunicorn (>=23.0.0,<24.0.0)", "litellm-enterprise (==0.1.27)", "litellm-proxy-extras (==0.4.23)", "mcp (>=1.21.2,<2.0.0) ; python_version >= \"3.10\"", "orjson (>=3.9.7,<4.0.0)", "polars (>=1.31.0,<2.0.0) ; python_version >= \"3.10\"", "pynacl (>=1.5.0,<2.0.0)", "python-multipart (>=0.0.18,<0.0.19)", "pyyaml (>=6.0.1,<7.0.0)", "rich (==13.7.1)", "rq", "soundfile (>=0.12.1,<0.13.0)", "uvicorn (>=0.31.1,<0.32.0)", "uvloop (>=0.21.0,<0.22.0) ; sys_platform != \"win32\"", "websockets (>=15.0.1,<16.0.0)"]
-semantic-router = ["semantic-router (>=0.1.12) ; python_version >= \"3.9\" and python_version < \"3.14\""]
+proxy = ["PyJWT (>=2.8.0,<3.0.0)", "apscheduler (>=3.10.4,<4.0.0)", "azure-identity (>=1.15.0,<2.0.0)", "azure-storage-blob (>=12.25.1,<13.0.0)", "backoff", "boto3 (==1.36.0)", "cryptography", "fastapi (>=0.120.1)", "fastapi-sso (>=0.16.0,<0.17.0)", "gunicorn (>=23.0.0,<24.0.0)", "litellm-enterprise (==0.1.21)", "litellm-proxy-extras (==0.4.5)", "mcp (>=1.10.0,<2.0.0) ; python_version >= \"3.10\"", "orjson (>=3.9.7,<4.0.0)", "polars (>=1.31.0,<2.0.0) ; python_version >= \"3.10\"", "pynacl (>=1.5.0,<2.0.0)", "python-multipart (>=0.0.18,<0.0.19)", "pyyaml (>=6.0.1,<7.0.0)", "rich (==13.7.1)", "rq", "soundfile (>=0.12.1,<0.13.0)", "uvicorn (>=0.29.0,<0.30.0)", "uvloop (>=0.21.0,<0.22.0) ; sys_platform != \"win32\"", "websockets (>=13.1.0,<14.0.0)"]
+semantic-router = ["semantic-router ; python_version >= \"3.9\""]
 utils = ["numpydoc"]
-
-[package.source]
-type = "legacy"
-url = "https://gitlab.com/api/v4/projects/78063949/packages/pypi/simple"
-reference = "litellm"
-
-[[package]]
-name = "litellm-enterprise"
-version = "0.1.27"
-description = "Package for LiteLLM Enterprise features"
-optional = false
-python-versions = ">=3.8, !=2.7.*, !=3.0.*, !=3.1.*, !=3.2.*, !=3.3.*, !=3.4.*, !=3.5.*, !=3.6.*, !=3.7.*"
-groups = ["main"]
-files = [
-    {file = "litellm_enterprise-0.1.27-py3-none-any.whl", hash = "sha256:41b9d41d04123f492060a742091006dc1d182b54ce3a1c0e18ee75d623c63e91"},
-    {file = "litellm_enterprise-0.1.27.tar.gz", hash = "sha256:aa40c87f7c8df64beb79e75f71e1b5c0a458350efa68527e3491e6f27f2cbd57"},
-]
-
-[package.source]
-type = "legacy"
-url = "https://gitlab.com/api/v4/projects/78063949/packages/pypi/simple"
-reference = "litellm"
-
-[[package]]
-name = "litellm-proxy-extras"
-version = "0.4.23"
-description = "Additional files for the LiteLLM Proxy. Reduces the size of the main litellm package."
-optional = false
-python-versions = ">=3.8, !=2.7.*, !=3.0.*, !=3.1.*, !=3.2.*, !=3.3.*, !=3.4.*, !=3.5.*, !=3.6.*, !=3.7.*"
-groups = ["main"]
-files = [
-    {file = "litellm_proxy_extras-0.4.23-py3-none-any.whl", hash = "sha256:2ded82fbd2940246bb7ddf9fbc72e15f4f9c742975c78c5b59bfcb7e65a5f06b"},
-    {file = "litellm_proxy_extras-0.4.23.tar.gz", hash = "sha256:8e3f95576dc2a296e7f73d8c87e73628bd899b4644c45863960fe3c3762d8f64"},
-]
-
-[package.source]
-type = "legacy"
-url = "https://gitlab.com/api/v4/projects/78063949/packages/pypi/simple"
-reference = "litellm"
 
 [[package]]
 name = "lxml"
@@ -4173,18 +3310,13 @@ html-clean = ["lxml_html_clean"]
 html5 = ["html5lib"]
 htmlsoup = ["BeautifulSoup4"]
 
-[package.source]
-type = "legacy"
-url = "https://gitlab.com/api/v4/projects/78063949/packages/pypi/simple"
-reference = "litellm"
-
 [[package]]
 name = "markdown-it-py"
 version = "3.0.0"
 description = "Python port of markdown-it. Markdown parsing, done right!"
 optional = false
 python-versions = ">=3.8"
-groups = ["main", "eval", "test"]
+groups = ["eval", "test"]
 files = [
     {file = "markdown-it-py-3.0.0.tar.gz", hash = "sha256:e3f60a94fa066dc52ec76661e37c851cb232d92f9886b15cb560aaada2df8feb"},
     {file = "markdown_it_py-3.0.0-py3-none-any.whl", hash = "sha256:355216845c60bd96232cd8d8c40e8f9765cc86f46880e43a8fd22dc1a1a8cab1"},
@@ -4204,11 +3336,6 @@ plugins = ["mdit-py-plugins"]
 profiling = ["gprof2dot"]
 rtd = ["jupyter_sphinx", "mdit-py-plugins", "myst-parser", "pyyaml", "sphinx", "sphinx-copybutton", "sphinx-design", "sphinx_book_theme"]
 testing = ["coverage", "pytest", "pytest-cov", "pytest-regressions"]
-
-[package.source]
-type = "legacy"
-url = "https://gitlab.com/api/v4/projects/78063949/packages/pypi/simple"
-reference = "litellm"
 
 [[package]]
 name = "markupsafe"
@@ -4280,11 +3407,6 @@ files = [
     {file = "MarkupSafe-2.1.5.tar.gz", hash = "sha256:d283d37a890ba4c1ae73ffadf8046435c76e7bc2247bbb63c00bd1a709c6544b"},
 ]
 
-[package.source]
-type = "legacy"
-url = "https://gitlab.com/api/v4/projects/78063949/packages/pypi/simple"
-reference = "litellm"
-
 [[package]]
 name = "marshmallow"
 version = "3.21.3"
@@ -4305,11 +3427,6 @@ dev = ["marshmallow[tests]", "pre-commit (>=3.5,<4.0)", "tox"]
 docs = ["alabaster (==0.7.16)", "autodocsumm (==0.2.12)", "sphinx (==7.3.7)", "sphinx-issues (==4.1.0)", "sphinx-version-warning (==1.1.2)"]
 tests = ["pytest", "pytz", "simplejson"]
 
-[package.source]
-type = "legacy"
-url = "https://gitlab.com/api/v4/projects/78063949/packages/pypi/simple"
-reference = "litellm"
-
 [[package]]
 name = "mccabe"
 version = "0.7.0"
@@ -4321,49 +3438,6 @@ files = [
     {file = "mccabe-0.7.0-py2.py3-none-any.whl", hash = "sha256:6c2d30ab6be0e4a46919781807b4f0d834ebdd6c6e3dca0bda5a15f863427b6e"},
     {file = "mccabe-0.7.0.tar.gz", hash = "sha256:348e0240c33b60bbdf4e523192ef919f28cb2c3d7d5c7794f74009290f236325"},
 ]
-
-[package.source]
-type = "legacy"
-url = "https://gitlab.com/api/v4/projects/78063949/packages/pypi/simple"
-reference = "litellm"
-
-[[package]]
-name = "mcp"
-version = "1.26.0"
-description = "Model Context Protocol SDK"
-optional = false
-python-versions = ">=3.10"
-groups = ["main"]
-files = [
-    {file = "mcp-1.26.0-py3-none-any.whl", hash = "sha256:904a21c33c25aa98ddbeb47273033c435e595bbacfdb177f4bd87f6dceebe1ca"},
-    {file = "mcp-1.26.0.tar.gz", hash = "sha256:db6e2ef491eecc1a0d93711a76f28dec2e05999f93afd48795da1c1137142c66"},
-]
-
-[package.dependencies]
-anyio = ">=4.5"
-httpx = ">=0.27.1"
-httpx-sse = ">=0.4"
-jsonschema = ">=4.20.0"
-pydantic = ">=2.11.0,<3.0.0"
-pydantic-settings = ">=2.5.2"
-pyjwt = {version = ">=2.10.1", extras = ["crypto"]}
-python-multipart = ">=0.0.9"
-pywin32 = {version = ">=310", markers = "sys_platform == \"win32\""}
-sse-starlette = ">=1.6.1"
-starlette = ">=0.27"
-typing-extensions = ">=4.9.0"
-typing-inspection = ">=0.4.1"
-uvicorn = {version = ">=0.31.1", markers = "sys_platform != \"emscripten\""}
-
-[package.extras]
-cli = ["python-dotenv (>=1.0.0)", "typer (>=0.16.0)"]
-rich = ["rich (>=13.9.4)"]
-ws = ["websockets (>=15.0.1)"]
-
-[package.source]
-type = "legacy"
-url = "https://gitlab.com/api/v4/projects/78063949/packages/pypi/simple"
-reference = "litellm"
 
 [[package]]
 name = "mdit-py-plugins"
@@ -4385,27 +3459,17 @@ code-style = ["pre-commit"]
 rtd = ["myst-parser", "sphinx-book-theme"]
 testing = ["coverage", "pytest", "pytest-cov", "pytest-regressions"]
 
-[package.source]
-type = "legacy"
-url = "https://gitlab.com/api/v4/projects/78063949/packages/pypi/simple"
-reference = "litellm"
-
 [[package]]
 name = "mdurl"
 version = "0.1.2"
 description = "Markdown URL utilities"
 optional = false
 python-versions = ">=3.7"
-groups = ["main", "eval", "test"]
+groups = ["eval", "test"]
 files = [
     {file = "mdurl-0.1.2-py3-none-any.whl", hash = "sha256:84008a41e51615a49fc9966191ff91509e3c40b939176e643fd50a5c2196b8f8"},
     {file = "mdurl-0.1.2.tar.gz", hash = "sha256:bb413d29f5eea38f31dd4754dd7377d4465116fb207585f97bf925588687c1ba"},
 ]
-
-[package.source]
-type = "legacy"
-url = "https://gitlab.com/api/v4/projects/78063949/packages/pypi/simple"
-reference = "litellm"
 
 [[package]]
 name = "memray"
@@ -4477,59 +3541,6 @@ dev = ["Cython", "IPython", "asv", "black", "bump2version", "check-manifest", "f
 docs = ["IPython", "bump2version", "furo", "sphinx", "sphinx-argparse", "towncrier"]
 lint = ["black", "check-manifest", "flake8", "isort", "mypy"]
 test = ["Cython", "greenlet ; python_version < \"3.14\"", "ipython", "packaging", "pytest", "pytest-cov", "pytest-textual-snapshot", "setuptools", "textual (>=0.43,!=0.65.2,!=0.66)"]
-
-[package.source]
-type = "legacy"
-url = "https://gitlab.com/api/v4/projects/78063949/packages/pypi/simple"
-reference = "litellm"
-
-[[package]]
-name = "msal"
-version = "1.34.0"
-description = "The Microsoft Authentication Library (MSAL) for Python library enables your app to access the Microsoft Cloud by supporting authentication of users with Microsoft Azure Active Directory accounts (AAD) and Microsoft Accounts (MSA) using industry standard OAuth2 and OpenID Connect."
-optional = false
-python-versions = ">=3.8"
-groups = ["main"]
-files = [
-    {file = "msal-1.34.0-py3-none-any.whl", hash = "sha256:f669b1644e4950115da7a176441b0e13ec2975c29528d8b9e81316023676d6e1"},
-    {file = "msal-1.34.0.tar.gz", hash = "sha256:76ba83b716ea5a6d75b0279c0ac353a0e05b820ca1f6682c0eb7f45190c43c2f"},
-]
-
-[package.dependencies]
-cryptography = ">=2.5,<49"
-PyJWT = {version = ">=1.0.0,<3", extras = ["crypto"]}
-requests = ">=2.0.0,<3"
-
-[package.extras]
-broker = ["pymsalruntime (>=0.14,<0.19) ; python_version >= \"3.6\" and platform_system == \"Windows\"", "pymsalruntime (>=0.17,<0.19) ; python_version >= \"3.8\" and platform_system == \"Darwin\"", "pymsalruntime (>=0.18,<0.19) ; python_version >= \"3.8\" and platform_system == \"Linux\""]
-
-[package.source]
-type = "legacy"
-url = "https://gitlab.com/api/v4/projects/78063949/packages/pypi/simple"
-reference = "litellm"
-
-[[package]]
-name = "msal-extensions"
-version = "1.3.1"
-description = "Microsoft Authentication Library extensions (MSAL EX) provides a persistence API that can save your data on disk, encrypted on Windows, macOS and Linux. Concurrent data access will be coordinated by a file lock mechanism."
-optional = false
-python-versions = ">=3.9"
-groups = ["main"]
-files = [
-    {file = "msal_extensions-1.3.1-py3-none-any.whl", hash = "sha256:96d3de4d034504e969ac5e85bae8106c8373b5c6568e4c8fa7af2eca9dbe6bca"},
-    {file = "msal_extensions-1.3.1.tar.gz", hash = "sha256:c5b0fd10f65ef62b5f1d62f4251d51cbcaf003fcedae8c91b040a488614be1a4"},
-]
-
-[package.dependencies]
-msal = ">=1.29,<2"
-
-[package.extras]
-portalocker = ["portalocker (>=1.4,<4)"]
-
-[package.source]
-type = "legacy"
-url = "https://gitlab.com/api/v4/projects/78063949/packages/pypi/simple"
-reference = "litellm"
 
 [[package]]
 name = "multidict"
@@ -4631,11 +3642,6 @@ files = [
     {file = "multidict-6.0.5.tar.gz", hash = "sha256:f7e301075edaf50500f0b341543c41194d8df3ae5caf4702f2095f3ca73dd8da"},
 ]
 
-[package.source]
-type = "legacy"
-url = "https://gitlab.com/api/v4/projects/78063949/packages/pypi/simple"
-reference = "litellm"
-
 [[package]]
 name = "multiprocess"
 version = "0.70.16"
@@ -4660,11 +3666,6 @@ files = [
 
 [package.dependencies]
 dill = ">=0.3.8"
-
-[package.source]
-type = "legacy"
-url = "https://gitlab.com/api/v4/projects/78063949/packages/pypi/simple"
-reference = "litellm"
 
 [[package]]
 name = "mypy"
@@ -4726,11 +3727,6 @@ install-types = ["pip"]
 mypyc = ["setuptools (>=50)"]
 reports = ["lxml"]
 
-[package.source]
-type = "legacy"
-url = "https://gitlab.com/api/v4/projects/78063949/packages/pypi/simple"
-reference = "litellm"
-
 [[package]]
 name = "mypy-extensions"
 version = "1.0.0"
@@ -4743,11 +3739,6 @@ files = [
     {file = "mypy_extensions-1.0.0.tar.gz", hash = "sha256:75dbf8955dc00442a438fc4d0666508a9a97b6bd41aa2f0ffe9d2f2725af0782"},
 ]
 
-[package.source]
-type = "legacy"
-url = "https://gitlab.com/api/v4/projects/78063949/packages/pypi/simple"
-reference = "litellm"
-
 [[package]]
 name = "nest-asyncio"
 version = "1.6.0"
@@ -4759,11 +3750,6 @@ files = [
     {file = "nest_asyncio-1.6.0-py3-none-any.whl", hash = "sha256:87af6efd6b5e897c81050477ef65c62e2b2f35d51703cae01aff2905b1852e1c"},
     {file = "nest_asyncio-1.6.0.tar.gz", hash = "sha256:6f172d5449aca15afd6c646851f4e31e02c598d553a667e38cafa997cfec55fe"},
 ]
-
-[package.source]
-type = "legacy"
-url = "https://gitlab.com/api/v4/projects/78063949/packages/pypi/simple"
-reference = "litellm"
 
 [[package]]
 name = "networkx"
@@ -4785,11 +3771,6 @@ example = ["cairocffi (>=1.7)", "contextily (>=1.6)", "igraph (>=0.11)", "momepy
 extra = ["lxml (>=4.6)", "pydot (>=3.0.1)", "pygraphviz (>=1.14)", "sympy (>=1.10)"]
 test = ["pytest (>=7.2)", "pytest-cov (>=4.0)", "pytest-xdist (>=3.0)"]
 test-extras = ["pytest-mpl", "pytest-randomly"]
-
-[package.source]
-type = "legacy"
-url = "https://gitlab.com/api/v4/projects/78063949/packages/pypi/simple"
-reference = "litellm"
 
 [[package]]
 name = "numexpr"
@@ -4839,11 +3820,6 @@ files = [
 
 [package.dependencies]
 numpy = ">=1.23.0"
-
-[package.source]
-type = "legacy"
-url = "https://gitlab.com/api/v4/projects/78063949/packages/pypi/simple"
-reference = "litellm"
 
 [[package]]
 name = "numpy"
@@ -4927,33 +3903,6 @@ files = [
     {file = "numpy-2.4.1.tar.gz", hash = "sha256:a1ceafc5042451a858231588a104093474c6a5c57dcc724841f5c888d237d690"},
 ]
 
-[package.source]
-type = "legacy"
-url = "https://gitlab.com/api/v4/projects/78063949/packages/pypi/simple"
-reference = "litellm"
-
-[[package]]
-name = "oauthlib"
-version = "3.3.1"
-description = "A generic, spec-compliant, thorough implementation of the OAuth request-signing logic"
-optional = false
-python-versions = ">=3.8"
-groups = ["main"]
-files = [
-    {file = "oauthlib-3.3.1-py3-none-any.whl", hash = "sha256:88119c938d2b8fb88561af5f6ee0eec8cc8d552b7bb1f712743136eb7523b7a1"},
-    {file = "oauthlib-3.3.1.tar.gz", hash = "sha256:0f0f8aa759826a193cf66c12ea1af1637f87b9b4622d46e866952bb022e538c9"},
-]
-
-[package.extras]
-rsa = ["cryptography (>=3.0.0)"]
-signals = ["blinker (>=1.4.0)"]
-signedtoken = ["cryptography (>=3.0.0)", "pyjwt (>=2.0.0,<3)"]
-
-[package.source]
-type = "legacy"
-url = "https://gitlab.com/api/v4/projects/78063949/packages/pypi/simple"
-reference = "litellm"
-
 [[package]]
 name = "openai"
 version = "2.15.0"
@@ -4981,11 +3930,6 @@ aiohttp = ["aiohttp", "httpx-aiohttp (>=0.1.9)"]
 datalib = ["numpy (>=1)", "pandas (>=1.2.3)", "pandas-stubs (>=1.1.0.11)"]
 realtime = ["websockets (>=13,<16)"]
 voice-helpers = ["numpy (>=2.0.2)", "sounddevice (>=0.5.1)"]
-
-[package.source]
-type = "legacy"
-url = "https://gitlab.com/api/v4/projects/78063949/packages/pypi/simple"
-reference = "litellm"
 
 [[package]]
 name = "orjson"
@@ -5050,11 +3994,6 @@ files = [
     {file = "orjson-3.10.6.tar.gz", hash = "sha256:e54b63d0a7c6c54a5f5f726bc93a2078111ef060fec4ecbf34c5db800ca3b3a7"},
 ]
 
-[package.source]
-type = "legacy"
-url = "https://gitlab.com/api/v4/projects/78063949/packages/pypi/simple"
-reference = "litellm"
-
 [[package]]
 name = "ormsgpack"
 version = "1.12.1"
@@ -5113,11 +4052,6 @@ files = [
     {file = "ormsgpack-1.12.1.tar.gz", hash = "sha256:a3877fde1e4f27a39f92681a0aab6385af3a41d0c25375d33590ae20410ea2ac"},
 ]
 
-[package.source]
-type = "legacy"
-url = "https://gitlab.com/api/v4/projects/78063949/packages/pypi/simple"
-reference = "litellm"
-
 [[package]]
 name = "packaging"
 version = "24.1"
@@ -5129,11 +4063,6 @@ files = [
     {file = "packaging-24.1-py3-none-any.whl", hash = "sha256:5b8f2217dbdbd2f7f384c41c628544e6d52f2d0f53c6d0c3ea61aa5d1d7ff124"},
     {file = "packaging-24.1.tar.gz", hash = "sha256:026ed72c8ed3fcce5bf8950572258698927fd1dbda10a5e981cdf0ac37f4f002"},
 ]
-
-[package.source]
-type = "legacy"
-url = "https://gitlab.com/api/v4/projects/78063949/packages/pypi/simple"
-reference = "litellm"
 
 [[package]]
 name = "pandas"
@@ -5218,11 +4147,6 @@ sql-other = ["SQLAlchemy (>=2.0.0)", "adbc-driver-postgresql (>=0.8.0)", "adbc-d
 test = ["hypothesis (>=6.46.1)", "pytest (>=7.3.2)", "pytest-xdist (>=2.2.0)"]
 xml = ["lxml (>=4.9.2)"]
 
-[package.source]
-type = "legacy"
-url = "https://gitlab.com/api/v4/projects/78063949/packages/pypi/simple"
-reference = "litellm"
-
 [[package]]
 name = "pathspec"
 version = "0.12.1"
@@ -5234,11 +4158,6 @@ files = [
     {file = "pathspec-0.12.1-py3-none-any.whl", hash = "sha256:a0d503e138a4c123b27490a4f7beda6a01c6f288df0e4a8b79c7eb0dc7b4cc08"},
     {file = "pathspec-0.12.1.tar.gz", hash = "sha256:a482d51503a1ab33b1c67a6c3813a26953dbdc71c31dacaef9a838c4e29f5712"},
 ]
-
-[package.source]
-type = "legacy"
-url = "https://gitlab.com/api/v4/projects/78063949/packages/pypi/simple"
-reference = "litellm"
 
 [[package]]
 name = "pillow"
@@ -5329,11 +4248,6 @@ tests = ["check-manifest", "coverage (>=7.4.2)", "defusedxml", "markdown2", "ole
 typing = ["typing-extensions ; python_version < \"3.10\""]
 xmp = ["defusedxml"]
 
-[package.source]
-type = "legacy"
-url = "https://gitlab.com/api/v4/projects/78063949/packages/pypi/simple"
-reference = "litellm"
-
 [[package]]
 name = "platformdirs"
 version = "4.2.2"
@@ -5351,11 +4265,6 @@ docs = ["furo (>=2023.9.10)", "proselint (>=0.13)", "sphinx (>=7.2.6)", "sphinx-
 test = ["appdirs (==1.4.4)", "covdefaults (>=2.3)", "pytest (>=7.4.3)", "pytest-cov (>=4.1)", "pytest-mock (>=3.12)"]
 type = ["mypy (>=1.8)"]
 
-[package.source]
-type = "legacy"
-url = "https://gitlab.com/api/v4/projects/78063949/packages/pypi/simple"
-reference = "litellm"
-
 [[package]]
 name = "pluggy"
 version = "1.5.0"
@@ -5372,100 +4281,17 @@ files = [
 dev = ["pre-commit", "tox"]
 testing = ["pytest", "pytest-benchmark"]
 
-[package.source]
-type = "legacy"
-url = "https://gitlab.com/api/v4/projects/78063949/packages/pypi/simple"
-reference = "litellm"
-
 [[package]]
 name = "poetry-core"
 version = "2.1.3"
 description = "Poetry PEP 517 Build Backend"
 optional = false
-python-versions = ">=3.9, <4.0"
+python-versions = "<4.0,>=3.9"
 groups = ["main"]
 files = [
     {file = "poetry_core-2.1.3-py3-none-any.whl", hash = "sha256:2c704f05016698a54ca1d327f46ce2426d72eaca6ff614132c8477c292266771"},
     {file = "poetry_core-2.1.3.tar.gz", hash = "sha256:0522a015477ed622c89aad56a477a57813cace0c8e7ff2a2906b7ef4a2e296a4"},
 ]
-
-[package.source]
-type = "legacy"
-url = "https://gitlab.com/api/v4/projects/78063949/packages/pypi/simple"
-reference = "litellm"
-
-[[package]]
-name = "polars"
-version = "1.37.1"
-description = "Blazingly fast DataFrame library"
-optional = false
-python-versions = ">=3.10"
-groups = ["main"]
-files = [
-    {file = "polars-1.37.1-py3-none-any.whl", hash = "sha256:377fed8939a2f1223c1563cfabdc7b4a3d6ff846efa1f2ddeb8644fafd9b1aff"},
-    {file = "polars-1.37.1.tar.gz", hash = "sha256:0309e2a4633e712513401964b4d95452f124ceabf7aec6db50affb9ced4a274e"},
-]
-
-[package.dependencies]
-polars-runtime-32 = "1.37.1"
-
-[package.extras]
-adbc = ["adbc-driver-manager[dbapi]", "adbc-driver-sqlite[dbapi]"]
-all = ["polars[async,cloudpickle,database,deltalake,excel,fsspec,graph,iceberg,numpy,pandas,plot,pyarrow,pydantic,style,timezone]"]
-async = ["gevent"]
-calamine = ["fastexcel (>=0.9)"]
-cloudpickle = ["cloudpickle"]
-connectorx = ["connectorx (>=0.3.2)"]
-database = ["polars[adbc,connectorx,sqlalchemy]"]
-deltalake = ["deltalake (>=1.0.0)"]
-excel = ["polars[calamine,openpyxl,xlsx2csv,xlsxwriter]"]
-fsspec = ["fsspec"]
-gpu = ["cudf-polars-cu12"]
-graph = ["matplotlib"]
-iceberg = ["pyiceberg (>=0.7.1)"]
-numpy = ["numpy (>=1.16.0)"]
-openpyxl = ["openpyxl (>=3.0.0)"]
-pandas = ["pandas", "polars[pyarrow]"]
-plot = ["altair (>=5.4.0)"]
-polars-cloud = ["polars_cloud (>=0.4.0)"]
-pyarrow = ["pyarrow (>=7.0.0)"]
-pydantic = ["pydantic"]
-rt64 = ["polars-runtime-64 (==1.37.1)"]
-rtcompat = ["polars-runtime-compat (==1.37.1)"]
-sqlalchemy = ["polars[pandas]", "sqlalchemy"]
-style = ["great-tables (>=0.8.0)"]
-timezone = ["tzdata ; platform_system == \"Windows\""]
-xlsx2csv = ["xlsx2csv (>=0.8.0)"]
-xlsxwriter = ["xlsxwriter"]
-
-[package.source]
-type = "legacy"
-url = "https://gitlab.com/api/v4/projects/78063949/packages/pypi/simple"
-reference = "litellm"
-
-[[package]]
-name = "polars-runtime-32"
-version = "1.37.1"
-description = "Blazingly fast DataFrame library"
-optional = false
-python-versions = ">=3.10"
-groups = ["main"]
-files = [
-    {file = "polars_runtime_32-1.37.1-cp310-abi3-macosx_10_12_x86_64.whl", hash = "sha256:0b8d4d73ea9977d3731927740e59d814647c5198bdbe359bcf6a8bfce2e79771"},
-    {file = "polars_runtime_32-1.37.1-cp310-abi3-macosx_11_0_arm64.whl", hash = "sha256:c682bf83f5f352e5e02f5c16c652c48ca40442f07b236f30662b22217320ce76"},
-    {file = "polars_runtime_32-1.37.1-cp310-abi3-manylinux_2_17_aarch64.manylinux2014_aarch64.whl", hash = "sha256:fc82b5bbe70ca1a4b764eed1419f6336752d6ba9fc1245388d7f8b12438afa2c"},
-    {file = "polars_runtime_32-1.37.1-cp310-abi3-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:a8362d11ac5193b994c7e9048ffe22ccfb976699cfbf6e128ce0302e06728894"},
-    {file = "polars_runtime_32-1.37.1-cp310-abi3-musllinux_1_2_aarch64.whl", hash = "sha256:04f5d5a2f013dca7391b7d8e7672fa6d37573a87f1d45d3dd5f0d9b5565a4b0f"},
-    {file = "polars_runtime_32-1.37.1-cp310-abi3-musllinux_1_2_x86_64.whl", hash = "sha256:fbfde7c0ca8209eeaed546e4a32cca1319189aa61c5f0f9a2b4494262bd0c689"},
-    {file = "polars_runtime_32-1.37.1-cp310-abi3-win_amd64.whl", hash = "sha256:da3d3642ae944e18dd17109d2a3036cb94ce50e5495c5023c77b1599d4c861bc"},
-    {file = "polars_runtime_32-1.37.1-cp310-abi3-win_arm64.whl", hash = "sha256:55f2c4847a8d2e267612f564de7b753a4bde3902eaabe7b436a0a4abf75949a0"},
-    {file = "polars_runtime_32-1.37.1.tar.gz", hash = "sha256:68779d4a691da20a5eb767d74165a8f80a2bdfbde4b54acf59af43f7fa028d8f"},
-]
-
-[package.source]
-type = "legacy"
-url = "https://gitlab.com/api/v4/projects/78063949/packages/pypi/simple"
-reference = "litellm"
 
 [[package]]
 name = "prometheus-client"
@@ -5482,11 +4308,6 @@ files = [
 [package.extras]
 twisted = ["twisted"]
 
-[package.source]
-type = "legacy"
-url = "https://gitlab.com/api/v4/projects/78063949/packages/pypi/simple"
-reference = "litellm"
-
 [[package]]
 name = "prometheus-fastapi-instrumentator"
 version = "7.1.0"
@@ -5502,11 +4323,6 @@ files = [
 [package.dependencies]
 prometheus-client = ">=0.8.0,<1.0.0"
 starlette = ">=0.30.0,<1.0.0"
-
-[package.source]
-type = "legacy"
-url = "https://gitlab.com/api/v4/projects/78063949/packages/pypi/simple"
-reference = "litellm"
 
 [[package]]
 name = "propcache"
@@ -5616,11 +4432,6 @@ files = [
     {file = "propcache-0.3.1.tar.gz", hash = "sha256:40d980c33765359098837527e18eddefc9a24cea5b45e078a7f3bb5b032c6ecf"},
 ]
 
-[package.source]
-type = "legacy"
-url = "https://gitlab.com/api/v4/projects/78063949/packages/pypi/simple"
-reference = "litellm"
-
 [[package]]
 name = "proto-plus"
 version = "1.26.1"
@@ -5638,11 +4449,6 @@ protobuf = ">=3.19.0,<7.0.0"
 
 [package.extras]
 testing = ["google-api-core (>=1.31.5)"]
-
-[package.source]
-type = "legacy"
-url = "https://gitlab.com/api/v4/projects/78063949/packages/pypi/simple"
-reference = "litellm"
 
 [[package]]
 name = "protobuf"
@@ -5663,11 +4469,6 @@ files = [
     {file = "protobuf-6.31.1.tar.gz", hash = "sha256:d8cac4c982f0b957a4dc73a80e2ea24fab08e679c0de9deb835f4a12d69aca9a"},
 ]
 
-[package.source]
-type = "legacy"
-url = "https://gitlab.com/api/v4/projects/78063949/packages/pypi/simple"
-reference = "litellm"
-
 [[package]]
 name = "py-grpc-prometheus"
 version = "0.8.0"
@@ -5684,11 +4485,6 @@ files = [
 grpcio = ">=1.10.0"
 prometheus-client = ">=0.3.0"
 setuptools = ">=39.0.1"
-
-[package.source]
-type = "legacy"
-url = "https://gitlab.com/api/v4/projects/78063949/packages/pypi/simple"
-reference = "litellm"
 
 [[package]]
 name = "pyarrow"
@@ -5745,11 +4541,6 @@ files = [
 [package.extras]
 test = ["cffi", "hypothesis", "pandas", "pytest", "pytz"]
 
-[package.source]
-type = "legacy"
-url = "https://gitlab.com/api/v4/projects/78063949/packages/pypi/simple"
-reference = "litellm"
-
 [[package]]
 name = "pyasn1"
 version = "0.6.1"
@@ -5761,11 +4552,6 @@ files = [
     {file = "pyasn1-0.6.1-py3-none-any.whl", hash = "sha256:0d632f46f2ba09143da3a8afe9e33fb6f92fa2320ab7e886e2d0f7672af84629"},
     {file = "pyasn1-0.6.1.tar.gz", hash = "sha256:6f580d2bdd84365380830acf45550f2511469f673cb4a5ae3857a3170128b034"},
 ]
-
-[package.source]
-type = "legacy"
-url = "https://gitlab.com/api/v4/projects/78063949/packages/pypi/simple"
-reference = "litellm"
 
 [[package]]
 name = "pyasn1-modules"
@@ -5782,11 +4568,6 @@ files = [
 [package.dependencies]
 pyasn1 = ">=0.4.6,<0.7.0"
 
-[package.source]
-type = "legacy"
-url = "https://gitlab.com/api/v4/projects/78063949/packages/pypi/simple"
-reference = "litellm"
-
 [[package]]
 name = "pycodestyle"
 version = "2.14.0"
@@ -5799,11 +4580,6 @@ files = [
     {file = "pycodestyle-2.14.0.tar.gz", hash = "sha256:c4b5b517d278089ff9d0abdec919cd97262a3367449ea1c8b49b91529167b783"},
 ]
 
-[package.source]
-type = "legacy"
-url = "https://gitlab.com/api/v4/projects/78063949/packages/pypi/simple"
-reference = "litellm"
-
 [[package]]
 name = "pycparser"
 version = "2.22"
@@ -5815,11 +4591,6 @@ files = [
     {file = "pycparser-2.22-py3-none-any.whl", hash = "sha256:c3702b6d3dd8c7abc1afa565d7e63d53a1d0bd86cdc24edd75470f4de499cfcc"},
     {file = "pycparser-2.22.tar.gz", hash = "sha256:491c8be9c040f5390f5bf44a5b07752bd07f56edf992381b05c701439eec10f6"},
 ]
-
-[package.source]
-type = "legacy"
-url = "https://gitlab.com/api/v4/projects/78063949/packages/pypi/simple"
-reference = "litellm"
 
 [[package]]
 name = "pydantic"
@@ -5835,7 +4606,6 @@ files = [
 
 [package.dependencies]
 annotated-types = ">=0.6.0"
-email-validator = {version = ">=2.0.0", optional = true, markers = "extra == \"email\""}
 pydantic-core = "2.33.2"
 typing-extensions = ">=4.12.2"
 typing-inspection = ">=0.4.0"
@@ -5843,11 +4613,6 @@ typing-inspection = ">=0.4.0"
 [package.extras]
 email = ["email-validator (>=2.0.0)"]
 timezone = ["tzdata ; python_version >= \"3.9\" and platform_system == \"Windows\""]
-
-[package.source]
-type = "legacy"
-url = "https://gitlab.com/api/v4/projects/78063949/packages/pypi/simple"
-reference = "litellm"
 
 [[package]]
 name = "pydantic-core"
@@ -5961,11 +4726,6 @@ files = [
 [package.dependencies]
 typing-extensions = ">=4.6.0,<4.7.0 || >4.7.0"
 
-[package.source]
-type = "legacy"
-url = "https://gitlab.com/api/v4/projects/78063949/packages/pypi/simple"
-reference = "litellm"
-
 [[package]]
 name = "pydantic-settings"
 version = "2.12.0"
@@ -5990,11 +4750,6 @@ gcp-secret-manager = ["google-cloud-secret-manager (>=2.23.1)"]
 toml = ["tomli (>=2.0.1)"]
 yaml = ["pyyaml (>=6.0.1)"]
 
-[package.source]
-type = "legacy"
-url = "https://gitlab.com/api/v4/projects/78063949/packages/pypi/simple"
-reference = "litellm"
-
 [[package]]
 name = "pyfakefs"
 version = "5.10.2"
@@ -6006,11 +4761,6 @@ files = [
     {file = "pyfakefs-5.10.2-py3-none-any.whl", hash = "sha256:6ff0e84653a71efc6a73f9ee839c3141e3a7cdf4e1fb97666f82ac5b24308d64"},
     {file = "pyfakefs-5.10.2.tar.gz", hash = "sha256:8ae0e5421e08de4e433853a4609a06a1835f4bc2a3ce13b54f36713a897474ba"},
 ]
-
-[package.source]
-type = "legacy"
-url = "https://gitlab.com/api/v4/projects/78063949/packages/pypi/simple"
-reference = "litellm"
 
 [[package]]
 name = "pyflakes"
@@ -6024,18 +4774,13 @@ files = [
     {file = "pyflakes-3.4.0.tar.gz", hash = "sha256:b24f96fafb7d2ab0ec5075b7350b3d2d2218eab42003821c06344973d3ea2f58"},
 ]
 
-[package.source]
-type = "legacy"
-url = "https://gitlab.com/api/v4/projects/78063949/packages/pypi/simple"
-reference = "litellm"
-
 [[package]]
 name = "pygments"
 version = "2.19.1"
 description = "Pygments is a syntax highlighting package written in Python."
 optional = false
 python-versions = ">=3.8"
-groups = ["main", "eval", "test"]
+groups = ["eval", "test"]
 files = [
     {file = "pygments-2.19.1-py3-none-any.whl", hash = "sha256:9ea1544ad55cecf4b8242fab6dd35a93bbce657034b0611ee383099054ab6d8c"},
     {file = "pygments-2.19.1.tar.gz", hash = "sha256:61c16d2a8576dc0649d9f39e089b5f02bcd27fba10d8fb4dcc28173f7a45151f"},
@@ -6043,37 +4788,6 @@ files = [
 
 [package.extras]
 windows-terminal = ["colorama (>=0.4.6)"]
-
-[package.source]
-type = "legacy"
-url = "https://gitlab.com/api/v4/projects/78063949/packages/pypi/simple"
-reference = "litellm"
-
-[[package]]
-name = "pyjwt"
-version = "2.11.0"
-description = "JSON Web Token implementation in Python"
-optional = false
-python-versions = ">=3.9"
-groups = ["main"]
-files = [
-    {file = "pyjwt-2.11.0-py3-none-any.whl", hash = "sha256:94a6bde30eb5c8e04fee991062b534071fd1439ef58d2adc9ccb823e7bcd0469"},
-    {file = "pyjwt-2.11.0.tar.gz", hash = "sha256:35f95c1f0fbe5d5ba6e43f00271c275f7a1a4db1dab27bf708073b75318ea623"},
-]
-
-[package.dependencies]
-cryptography = {version = ">=3.4.0", optional = true, markers = "extra == \"crypto\""}
-
-[package.extras]
-crypto = ["cryptography (>=3.4.0)"]
-dev = ["coverage[toml] (==7.10.7)", "cryptography (>=3.4.0)", "pre-commit", "pytest (>=8.4.2,<9.0.0)", "sphinx", "sphinx-rtd-theme", "zope.interface"]
-docs = ["sphinx", "sphinx-rtd-theme", "zope.interface"]
-tests = ["coverage[toml] (==7.10.7)", "pytest (>=8.4.2,<9.0.0)"]
-
-[package.source]
-type = "legacy"
-url = "https://gitlab.com/api/v4/projects/78063949/packages/pypi/simple"
-reference = "litellm"
 
 [[package]]
 name = "pylint"
@@ -6100,60 +4814,6 @@ tomlkit = ">=0.10.1"
 spelling = ["pyenchant (>=3.2,<4.0)"]
 testutils = ["gitpython (>3)"]
 
-[package.source]
-type = "legacy"
-url = "https://gitlab.com/api/v4/projects/78063949/packages/pypi/simple"
-reference = "litellm"
-
-[[package]]
-name = "pynacl"
-version = "1.6.0"
-description = "Python binding to the Networking and Cryptography (NaCl) library"
-optional = false
-python-versions = ">=3.8"
-groups = ["main"]
-files = [
-    {file = "pynacl-1.6.0-cp314-cp314t-macosx_10_10_universal2.whl", hash = "sha256:f46386c24a65383a9081d68e9c2de909b1834ec74ff3013271f1bca9c2d233eb"},
-    {file = "pynacl-1.6.0-cp314-cp314t-manylinux2014_aarch64.manylinux_2_17_aarch64.whl", hash = "sha256:dea103a1afcbc333bc0e992e64233d360d393d1e63d0bc88554f572365664348"},
-    {file = "pynacl-1.6.0-cp314-cp314t-manylinux2014_x86_64.manylinux_2_17_x86_64.whl", hash = "sha256:04f20784083014e265ad58c1b2dd562c3e35864b5394a14ab54f5d150ee9e53e"},
-    {file = "pynacl-1.6.0-cp314-cp314t-manylinux_2_26_aarch64.manylinux_2_28_aarch64.whl", hash = "sha256:bbcc4452a1eb10cd5217318c822fde4be279c9de8567f78bad24c773c21254f8"},
-    {file = "pynacl-1.6.0-cp314-cp314t-manylinux_2_26_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:51fed9fe1bec9e7ff9af31cd0abba179d0e984a2960c77e8e5292c7e9b7f7b5d"},
-    {file = "pynacl-1.6.0-cp314-cp314t-manylinux_2_34_aarch64.whl", hash = "sha256:10d755cf2a455d8c0f8c767a43d68f24d163b8fe93ccfaabfa7bafd26be58d73"},
-    {file = "pynacl-1.6.0-cp314-cp314t-manylinux_2_34_x86_64.whl", hash = "sha256:536703b8f90e911294831a7fbcd0c062b837f3ccaa923d92a6254e11178aaf42"},
-    {file = "pynacl-1.6.0-cp314-cp314t-musllinux_1_2_aarch64.whl", hash = "sha256:6b08eab48c9669d515a344fb0ef27e2cbde847721e34bba94a343baa0f33f1f4"},
-    {file = "pynacl-1.6.0-cp314-cp314t-musllinux_1_2_x86_64.whl", hash = "sha256:5789f016e08e5606803161ba24de01b5a345d24590a80323379fc4408832d290"},
-    {file = "pynacl-1.6.0-cp314-cp314t-win32.whl", hash = "sha256:4853c154dc16ea12f8f3ee4b7e763331876316cc3a9f06aeedf39bcdca8f9995"},
-    {file = "pynacl-1.6.0-cp314-cp314t-win_amd64.whl", hash = "sha256:347dcddce0b4d83ed3f32fd00379c83c425abee5a9d2cd0a2c84871334eaff64"},
-    {file = "pynacl-1.6.0-cp314-cp314t-win_arm64.whl", hash = "sha256:2d6cd56ce4998cb66a6c112fda7b1fdce5266c9f05044fa72972613bef376d15"},
-    {file = "pynacl-1.6.0-cp38-abi3-macosx_10_10_universal2.whl", hash = "sha256:f4b3824920e206b4f52abd7de621ea7a44fd3cb5c8daceb7c3612345dfc54f2e"},
-    {file = "pynacl-1.6.0-cp38-abi3-manylinux2014_aarch64.manylinux_2_17_aarch64.whl", hash = "sha256:16dd347cdc8ae0b0f6187a2608c0af1c8b7ecbbe6b4a06bff8253c192f696990"},
-    {file = "pynacl-1.6.0-cp38-abi3-manylinux2014_x86_64.manylinux_2_17_x86_64.whl", hash = "sha256:16c60daceee88d04f8d41d0a4004a7ed8d9a5126b997efd2933e08e93a3bd850"},
-    {file = "pynacl-1.6.0-cp38-abi3-manylinux_2_26_aarch64.manylinux_2_28_aarch64.whl", hash = "sha256:25720bad35dfac34a2bcdd61d9e08d6bfc6041bebc7751d9c9f2446cf1e77d64"},
-    {file = "pynacl-1.6.0-cp38-abi3-manylinux_2_26_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:8bfaa0a28a1ab718bad6239979a5a57a8d1506d0caf2fba17e524dbb409441cf"},
-    {file = "pynacl-1.6.0-cp38-abi3-manylinux_2_34_aarch64.whl", hash = "sha256:ef214b90556bb46a485b7da8258e59204c244b1b5b576fb71848819b468c44a7"},
-    {file = "pynacl-1.6.0-cp38-abi3-manylinux_2_34_x86_64.whl", hash = "sha256:49c336dd80ea54780bcff6a03ee1a476be1612423010472e60af83452aa0f442"},
-    {file = "pynacl-1.6.0-cp38-abi3-musllinux_1_1_aarch64.whl", hash = "sha256:f3482abf0f9815e7246d461fab597aa179b7524628a4bc36f86a7dc418d2608d"},
-    {file = "pynacl-1.6.0-cp38-abi3-musllinux_1_1_x86_64.whl", hash = "sha256:140373378e34a1f6977e573033d1dd1de88d2a5d90ec6958c9485b2fd9f3eb90"},
-    {file = "pynacl-1.6.0-cp38-abi3-musllinux_1_2_aarch64.whl", hash = "sha256:6b393bc5e5a0eb86bb85b533deb2d2c815666665f840a09e0aa3362bb6088736"},
-    {file = "pynacl-1.6.0-cp38-abi3-musllinux_1_2_x86_64.whl", hash = "sha256:4a25cfede801f01e54179b8ff9514bd7b5944da560b7040939732d1804d25419"},
-    {file = "pynacl-1.6.0-cp38-abi3-win32.whl", hash = "sha256:dcdeb41c22ff3c66eef5e63049abf7639e0db4edee57ba70531fc1b6b133185d"},
-    {file = "pynacl-1.6.0-cp38-abi3-win_amd64.whl", hash = "sha256:cf831615cc16ba324240de79d925eacae8265b7691412ac6b24221db157f6bd1"},
-    {file = "pynacl-1.6.0-cp38-abi3-win_arm64.whl", hash = "sha256:84709cea8f888e618c21ed9a0efdb1a59cc63141c403db8bf56c469b71ad56f2"},
-    {file = "pynacl-1.6.0.tar.gz", hash = "sha256:cb36deafe6e2bce3b286e5d1f3e1c246e0ccdb8808ddb4550bb2792f2df298f2"},
-]
-
-[package.dependencies]
-cffi = {version = ">=1.4.1", markers = "platform_python_implementation != \"PyPy\" and python_version < \"3.14\""}
-
-[package.extras]
-docs = ["sphinx (<7)", "sphinx_rtd_theme"]
-tests = ["hypothesis (>=3.27.0)", "pytest (>=7.4.0)", "pytest-cov (>=2.10.1)", "pytest-xdist (>=3.5.0)"]
-
-[package.source]
-type = "legacy"
-url = "https://gitlab.com/api/v4/projects/78063949/packages/pypi/simple"
-reference = "litellm"
-
 [[package]]
 name = "pyparsing"
 version = "3.1.2"
@@ -6168,11 +4828,6 @@ files = [
 
 [package.extras]
 diagrams = ["jinja2", "railroad-diagrams"]
-
-[package.source]
-type = "legacy"
-url = "https://gitlab.com/api/v4/projects/78063949/packages/pypi/simple"
-reference = "litellm"
 
 [[package]]
 name = "pytest"
@@ -6196,11 +4851,6 @@ pygments = ">=2.7.2"
 [package.extras]
 dev = ["argcomplete", "attrs (>=19.2)", "hypothesis (>=3.56)", "mock", "requests", "setuptools", "xmlschema"]
 
-[package.source]
-type = "legacy"
-url = "https://gitlab.com/api/v4/projects/78063949/packages/pypi/simple"
-reference = "litellm"
-
 [[package]]
 name = "pytest-asyncio"
 version = "1.1.0"
@@ -6219,11 +4869,6 @@ pytest = ">=8.2,<9"
 [package.extras]
 docs = ["sphinx (>=5.3)", "sphinx-rtd-theme (>=1)"]
 testing = ["coverage (>=6.2)", "hypothesis (>=5.7.1)"]
-
-[package.source]
-type = "legacy"
-url = "https://gitlab.com/api/v4/projects/78063949/packages/pypi/simple"
-reference = "litellm"
 
 [[package]]
 name = "pytest-cov"
@@ -6245,11 +4890,6 @@ pytest = ">=6.2.5"
 [package.extras]
 testing = ["fields", "hunter", "process-tests", "pytest-xdist", "virtualenv"]
 
-[package.source]
-type = "legacy"
-url = "https://gitlab.com/api/v4/projects/78063949/packages/pypi/simple"
-reference = "litellm"
-
 [[package]]
 name = "pytest-randomly"
 version = "3.16.0"
@@ -6265,11 +4905,6 @@ files = [
 [package.dependencies]
 pytest = "*"
 
-[package.source]
-type = "legacy"
-url = "https://gitlab.com/api/v4/projects/78063949/packages/pypi/simple"
-reference = "litellm"
-
 [[package]]
 name = "pytest-watcher"
 version = "0.6.3"
@@ -6284,11 +4919,6 @@ files = [
 
 [package.dependencies]
 watchdog = ">=2.0.0"
-
-[package.source]
-type = "legacy"
-url = "https://gitlab.com/api/v4/projects/78063949/packages/pypi/simple"
-reference = "litellm"
 
 [[package]]
 name = "pytest-xdist"
@@ -6311,11 +4941,6 @@ psutil = ["psutil (>=3.0)"]
 setproctitle = ["setproctitle"]
 testing = ["filelock"]
 
-[package.source]
-type = "legacy"
-url = "https://gitlab.com/api/v4/projects/78063949/packages/pypi/simple"
-reference = "litellm"
-
 [[package]]
 name = "python-dateutil"
 version = "2.9.0.post0"
@@ -6331,11 +4956,6 @@ files = [
 [package.dependencies]
 six = ">=1.5"
 
-[package.source]
-type = "legacy"
-url = "https://gitlab.com/api/v4/projects/78063949/packages/pypi/simple"
-reference = "litellm"
-
 [[package]]
 name = "python-dotenv"
 version = "1.1.1"
@@ -6350,11 +4970,6 @@ files = [
 
 [package.extras]
 cli = ["click (>=5.0)"]
-
-[package.source]
-type = "legacy"
-url = "https://gitlab.com/api/v4/projects/78063949/packages/pypi/simple"
-reference = "litellm"
 
 [[package]]
 name = "python-gitlab"
@@ -6377,11 +4992,6 @@ requests-toolbelt = ">=1.0.0"
 autocompletion = ["argcomplete (>=1.10.0,<3)"]
 graphql = ["gql[httpx] (>=3.5.0,<4)"]
 yaml = ["PyYaml (>=6.0.1)"]
-
-[package.source]
-type = "legacy"
-url = "https://gitlab.com/api/v4/projects/78063949/packages/pypi/simple"
-reference = "litellm"
 
 [[package]]
 name = "python-jose"
@@ -6406,28 +5016,6 @@ cryptography = ["cryptography (>=3.4.0)"]
 pycrypto = ["pycrypto (>=2.6.0,<2.7.0)"]
 pycryptodome = ["pycryptodome (>=3.3.1,<4.0.0)"]
 test = ["pytest", "pytest-cov"]
-
-[package.source]
-type = "legacy"
-url = "https://gitlab.com/api/v4/projects/78063949/packages/pypi/simple"
-reference = "litellm"
-
-[[package]]
-name = "python-multipart"
-version = "0.0.18"
-description = "A streaming multipart parser for Python"
-optional = false
-python-versions = ">=3.8"
-groups = ["main"]
-files = [
-    {file = "python_multipart-0.0.18-py3-none-any.whl", hash = "sha256:efe91480f485f6a361427a541db4796f9e1591afc0fb8e7a4ba06bfbc6708996"},
-    {file = "python_multipart-0.0.18.tar.gz", hash = "sha256:7a68db60c8bfb82e460637fa4750727b45af1d5e2ed215593f917f64694d34fe"},
-]
-
-[package.source]
-type = "legacy"
-url = "https://gitlab.com/api/v4/projects/78063949/packages/pypi/simple"
-reference = "litellm"
 
 [[package]]
 name = "pytokens"
@@ -6484,63 +5072,17 @@ files = [
 [package.extras]
 dev = ["black", "build", "mypy", "pytest", "pytest-cov", "setuptools", "tox", "twine", "wheel"]
 
-[package.source]
-type = "legacy"
-url = "https://gitlab.com/api/v4/projects/78063949/packages/pypi/simple"
-reference = "litellm"
-
 [[package]]
 name = "pytz"
 version = "2025.1"
 description = "World timezone definitions, modern and historical"
 optional = false
 python-versions = "*"
-groups = ["main", "eval"]
+groups = ["eval"]
 files = [
     {file = "pytz-2025.1-py2.py3-none-any.whl", hash = "sha256:89dd22dca55b46eac6eda23b2d72721bf1bdfef212645d81513ef5d03038de57"},
     {file = "pytz-2025.1.tar.gz", hash = "sha256:c2db42be2a2518b28e65f9207c4d05e6ff547d1efa4086469ef855e4ab70178e"},
 ]
-
-[package.source]
-type = "legacy"
-url = "https://gitlab.com/api/v4/projects/78063949/packages/pypi/simple"
-reference = "litellm"
-
-[[package]]
-name = "pywin32"
-version = "311"
-description = "Python for Window Extensions"
-optional = false
-python-versions = "*"
-groups = ["main"]
-markers = "sys_platform == \"win32\""
-files = [
-    {file = "pywin32-311-cp310-cp310-win32.whl", hash = "sha256:d03ff496d2a0cd4a5893504789d4a15399133fe82517455e78bad62efbb7f0a3"},
-    {file = "pywin32-311-cp310-cp310-win_amd64.whl", hash = "sha256:797c2772017851984b97180b0bebe4b620bb86328e8a884bb626156295a63b3b"},
-    {file = "pywin32-311-cp310-cp310-win_arm64.whl", hash = "sha256:0502d1facf1fed4839a9a51ccbcc63d952cf318f78ffc00a7e78528ac27d7a2b"},
-    {file = "pywin32-311-cp311-cp311-win32.whl", hash = "sha256:184eb5e436dea364dcd3d2316d577d625c0351bf237c4e9a5fabbcfa5a58b151"},
-    {file = "pywin32-311-cp311-cp311-win_amd64.whl", hash = "sha256:3ce80b34b22b17ccbd937a6e78e7225d80c52f5ab9940fe0506a1a16f3dab503"},
-    {file = "pywin32-311-cp311-cp311-win_arm64.whl", hash = "sha256:a733f1388e1a842abb67ffa8e7aad0e70ac519e09b0f6a784e65a136ec7cefd2"},
-    {file = "pywin32-311-cp312-cp312-win32.whl", hash = "sha256:750ec6e621af2b948540032557b10a2d43b0cee2ae9758c54154d711cc852d31"},
-    {file = "pywin32-311-cp312-cp312-win_amd64.whl", hash = "sha256:b8c095edad5c211ff31c05223658e71bf7116daa0ecf3ad85f3201ea3190d067"},
-    {file = "pywin32-311-cp312-cp312-win_arm64.whl", hash = "sha256:e286f46a9a39c4a18b319c28f59b61de793654af2f395c102b4f819e584b5852"},
-    {file = "pywin32-311-cp313-cp313-win32.whl", hash = "sha256:f95ba5a847cba10dd8c4d8fefa9f2a6cf283b8b88ed6178fa8a6c1ab16054d0d"},
-    {file = "pywin32-311-cp313-cp313-win_amd64.whl", hash = "sha256:718a38f7e5b058e76aee1c56ddd06908116d35147e133427e59a3983f703a20d"},
-    {file = "pywin32-311-cp313-cp313-win_arm64.whl", hash = "sha256:7b4075d959648406202d92a2310cb990fea19b535c7f4a78d3f5e10b926eeb8a"},
-    {file = "pywin32-311-cp314-cp314-win32.whl", hash = "sha256:b7a2c10b93f8986666d0c803ee19b5990885872a7de910fc460f9b0c2fbf92ee"},
-    {file = "pywin32-311-cp314-cp314-win_amd64.whl", hash = "sha256:3aca44c046bd2ed8c90de9cb8427f581c479e594e99b5c0bb19b29c10fd6cb87"},
-    {file = "pywin32-311-cp314-cp314-win_arm64.whl", hash = "sha256:a508e2d9025764a8270f93111a970e1d0fbfc33f4153b388bb649b7eec4f9b42"},
-    {file = "pywin32-311-cp38-cp38-win32.whl", hash = "sha256:6c6f2969607b5023b0d9ce2541f8d2cbb01c4f46bc87456017cf63b73f1e2d8c"},
-    {file = "pywin32-311-cp38-cp38-win_amd64.whl", hash = "sha256:c8015b09fb9a5e188f83b7b04de91ddca4658cee2ae6f3bc483f0b21a77ef6cd"},
-    {file = "pywin32-311-cp39-cp39-win32.whl", hash = "sha256:aba8f82d551a942cb20d4a83413ccbac30790b50efb89a75e4f586ac0bb8056b"},
-    {file = "pywin32-311-cp39-cp39-win_amd64.whl", hash = "sha256:e0c4cfb0621281fe40387df582097fd796e80430597cb9944f0ae70447bacd91"},
-    {file = "pywin32-311-cp39-cp39-win_arm64.whl", hash = "sha256:62ea666235135fee79bb154e695f3ff67370afefd71bd7fea7512fc70ef31e3d"},
-]
-
-[package.source]
-type = "legacy"
-url = "https://gitlab.com/api/v4/projects/78063949/packages/pypi/simple"
-reference = "litellm"
 
 [[package]]
 name = "pyyaml"
@@ -6625,11 +5167,6 @@ files = [
     {file = "pyyaml-6.0.3.tar.gz", hash = "sha256:d76623373421df22fb4cf8817020cbb7ef15c725b9d5e45f17e189bfc384190f"},
 ]
 
-[package.source]
-type = "legacy"
-url = "https://gitlab.com/api/v4/projects/78063949/packages/pypi/simple"
-reference = "litellm"
-
 [[package]]
 name = "q-developer-boto3"
 version = "1.12.0"
@@ -6690,11 +5227,6 @@ gdrive = ["google-api-python-client (>=2.178.0)", "google-auth (>=2.40.3)", "goo
 oci = ["oci (>=2.160.1)"]
 test = ["scipy"]
 tracing = ["langfuse (>=3.2.4)", "mlflow (>=3.1.4)"]
-
-[package.source]
-type = "legacy"
-url = "https://gitlab.com/api/v4/projects/78063949/packages/pypi/simple"
-reference = "litellm"
 
 [[package]]
 name = "rapidfuzz"
@@ -6803,11 +5335,6 @@ files = [
 [package.extras]
 all = ["numpy"]
 
-[package.source]
-type = "legacy"
-url = "https://gitlab.com/api/v4/projects/78063949/packages/pypi/simple"
-reference = "litellm"
-
 [[package]]
 name = "ratelimit"
 version = "2.2.1"
@@ -6818,34 +5345,6 @@ groups = ["eval"]
 files = [
     {file = "ratelimit-2.2.1.tar.gz", hash = "sha256:af8a9b64b821529aca09ebaf6d8d279100d766f19e90b5059ac6a718ca6dee42"},
 ]
-
-[package.source]
-type = "legacy"
-url = "https://gitlab.com/api/v4/projects/78063949/packages/pypi/simple"
-reference = "litellm"
-
-[[package]]
-name = "redis"
-version = "7.1.0"
-description = "Python client for Redis database and key-value store"
-optional = false
-python-versions = ">=3.10"
-groups = ["main"]
-files = [
-    {file = "redis-7.1.0-py3-none-any.whl", hash = "sha256:23c52b208f92b56103e17c5d06bdc1a6c2c0b3106583985a76a18f83b265de2b"},
-    {file = "redis-7.1.0.tar.gz", hash = "sha256:b1cc3cfa5a2cb9c2ab3ba700864fb0ad75617b41f01352ce5779dabf6d5f9c3c"},
-]
-
-[package.extras]
-circuit-breaker = ["pybreaker (>=1.4.0)"]
-hiredis = ["hiredis (>=3.2.0)"]
-jwt = ["pyjwt (>=2.9.0)"]
-ocsp = ["cryptography (>=36.0.1)", "pyopenssl (>=20.0.1)", "requests (>=2.31.0)"]
-
-[package.source]
-type = "legacy"
-url = "https://gitlab.com/api/v4/projects/78063949/packages/pypi/simple"
-reference = "litellm"
 
 [[package]]
 name = "referencing"
@@ -6862,11 +5361,6 @@ files = [
 [package.dependencies]
 attrs = ">=22.2.0"
 rpds-py = ">=0.7.0"
-
-[package.source]
-type = "legacy"
-url = "https://gitlab.com/api/v4/projects/78063949/packages/pypi/simple"
-reference = "litellm"
 
 [[package]]
 name = "regex"
@@ -6957,11 +5451,6 @@ files = [
     {file = "regex-2024.5.15.tar.gz", hash = "sha256:d3ee02d9e5f482cc8309134a91eeaacbdd2261ba111b0fef3748eeb4913e6a2c"},
 ]
 
-[package.source]
-type = "legacy"
-url = "https://gitlab.com/api/v4/projects/78063949/packages/pypi/simple"
-reference = "litellm"
-
 [[package]]
 name = "requests"
 version = "2.32.5"
@@ -6984,11 +5473,6 @@ urllib3 = ">=1.21.1,<3"
 socks = ["PySocks (>=1.5.6,!=1.5.7)"]
 use-chardet-on-py3 = ["chardet (>=3.0.2,<6)"]
 
-[package.source]
-type = "legacy"
-url = "https://gitlab.com/api/v4/projects/78063949/packages/pypi/simple"
-reference = "litellm"
-
 [[package]]
 name = "requests-auth"
 version = "8.0.0"
@@ -7007,11 +5491,6 @@ requests = "==2.*"
 [package.extras]
 testing = ["pyjwt (==2.*)", "pytest-cov (==5.*)", "pytest-responses (==0.5.*)"]
 
-[package.source]
-type = "legacy"
-url = "https://gitlab.com/api/v4/projects/78063949/packages/pypi/simple"
-reference = "litellm"
-
 [[package]]
 name = "requests-toolbelt"
 version = "1.0.0"
@@ -7027,11 +5506,6 @@ files = [
 [package.dependencies]
 requests = ">=2.0.1,<3.0.0"
 
-[package.source]
-type = "legacy"
-url = "https://gitlab.com/api/v4/projects/78063949/packages/pypi/simple"
-reference = "litellm"
-
 [[package]]
 name = "result"
 version = "0.17.0"
@@ -7044,21 +5518,16 @@ files = [
     {file = "result-0.17.0.tar.gz", hash = "sha256:b73da420c0cb1a3bf741dbd41ff96dedafaad6a1b3ef437a9e33e380bb0d91cf"},
 ]
 
-[package.source]
-type = "legacy"
-url = "https://gitlab.com/api/v4/projects/78063949/packages/pypi/simple"
-reference = "litellm"
-
 [[package]]
 name = "rich"
-version = "13.7.1"
+version = "13.9.4"
 description = "Render rich text, tables, progress bars, syntax highlighting, markdown and more to the terminal"
 optional = false
-python-versions = ">=3.7.0"
-groups = ["main", "eval", "test"]
+python-versions = ">=3.8.0"
+groups = ["eval", "test"]
 files = [
-    {file = "rich-13.7.1-py3-none-any.whl", hash = "sha256:4edbae314f59eb482f54e9e30bf00d33350aaa94f4bfcd4e9e3110e64d0d7222"},
-    {file = "rich-13.7.1.tar.gz", hash = "sha256:9be308cb1fe2f1f57d67ce99e95af38a1e2bc71ad9813b0e247cf7ffbcc3a432"},
+    {file = "rich-13.9.4-py3-none-any.whl", hash = "sha256:6049d5e6ec054bf2779ab3358186963bac2ea89175919d699e378b99738c2a90"},
+    {file = "rich-13.9.4.tar.gz", hash = "sha256:439594978a49a09530cff7ebc4b5c7103ef57baf48d5ea3184f21d9a2befa098"},
 ]
 
 [package.dependencies]
@@ -7067,11 +5536,6 @@ pygments = ">=2.13.0,<3.0.0"
 
 [package.extras]
 jupyter = ["ipywidgets (>=7.5.1,<9)"]
-
-[package.source]
-type = "legacy"
-url = "https://gitlab.com/api/v4/projects/78063949/packages/pypi/simple"
-reference = "litellm"
 
 [[package]]
 name = "rpds-py"
@@ -7182,33 +5646,6 @@ files = [
     {file = "rpds_py-0.19.0.tar.gz", hash = "sha256:4fdc9afadbeb393b4bbbad75481e0ea78e4469f2e1d713a90811700830b553a9"},
 ]
 
-[package.source]
-type = "legacy"
-url = "https://gitlab.com/api/v4/projects/78063949/packages/pypi/simple"
-reference = "litellm"
-
-[[package]]
-name = "rq"
-version = "2.6.1"
-description = "RQ is a simple, lightweight, library for creating background jobs, and processing them."
-optional = false
-python-versions = ">=3.9"
-groups = ["main"]
-files = [
-    {file = "rq-2.6.1-py3-none-any.whl", hash = "sha256:5cc88d3bb5263a407fb2ba2dc6fe8dc710dae94b6f74396cdfe1b32beded9408"},
-    {file = "rq-2.6.1.tar.gz", hash = "sha256:db5c0d125ac9dbd4438f9a5225ea3e64050542b416fd791d424e2ab5b2853289"},
-]
-
-[package.dependencies]
-click = ">=5"
-croniter = "*"
-redis = ">=3.5,<6 || >6"
-
-[package.source]
-type = "legacy"
-url = "https://gitlab.com/api/v4/projects/78063949/packages/pypi/simple"
-reference = "litellm"
-
 [[package]]
 name = "rsa"
 version = "4.9"
@@ -7224,33 +5661,23 @@ files = [
 [package.dependencies]
 pyasn1 = ">=0.1.3"
 
-[package.source]
-type = "legacy"
-url = "https://gitlab.com/api/v4/projects/78063949/packages/pypi/simple"
-reference = "litellm"
-
 [[package]]
 name = "s3transfer"
-version = "0.11.3"
+version = "0.16.0"
 description = "An Amazon S3 Transfer Manager"
 optional = false
-python-versions = ">= 3.8"
+python-versions = ">=3.9"
 groups = ["main", "eval"]
 files = [
-    {file = "s3transfer-0.11.3-py3-none-any.whl", hash = "sha256:ca855bdeb885174b5ffa95b9913622459d4ad8e331fc98eb01e6d5eb6a30655d"},
-    {file = "s3transfer-0.11.3.tar.gz", hash = "sha256:edae4977e3a122445660c7c114bba949f9d191bae3b34a096f18a1c8c354527a"},
+    {file = "s3transfer-0.16.0-py3-none-any.whl", hash = "sha256:18e25d66fed509e3868dc1572b3f427ff947dd2c56f844a5bf09481ad3f3b2fe"},
+    {file = "s3transfer-0.16.0.tar.gz", hash = "sha256:8e990f13268025792229cd52fa10cb7163744bf56e719e0b9cb925ab79abf920"},
 ]
 
 [package.dependencies]
-botocore = ">=1.36.0,<2.0a0"
+botocore = ">=1.37.4,<2.0a0"
 
 [package.extras]
-crt = ["botocore[crt] (>=1.36.0,<2.0a0)"]
-
-[package.source]
-type = "legacy"
-url = "https://gitlab.com/api/v4/projects/78063949/packages/pypi/simple"
-reference = "litellm"
+crt = ["botocore[crt] (>=1.37.4,<2.0a0)"]
 
 [[package]]
 name = "safetensors"
@@ -7375,11 +5802,6 @@ tensorflow = ["safetensors[numpy]", "tensorflow (>=2.11.0)"]
 testing = ["h5py (>=3.7.0)", "huggingface-hub (>=0.12.1)", "hypothesis (>=6.70.2)", "pytest (>=7.2.0)", "pytest-benchmark (>=4.0.0)", "safetensors[numpy]", "setuptools-rust (>=1.5.2)"]
 torch = ["safetensors[numpy]", "torch (>=1.10)"]
 
-[package.source]
-type = "legacy"
-url = "https://gitlab.com/api/v4/projects/78063949/packages/pypi/simple"
-reference = "litellm"
-
 [[package]]
 name = "scikit-learn"
 version = "1.8.0"
@@ -7442,11 +5864,6 @@ install = ["joblib (>=1.3.0)", "numpy (>=1.24.1)", "scipy (>=1.10.0)", "threadpo
 maintenance = ["conda-lock (==3.0.1)"]
 tests = ["matplotlib (>=3.6.1)", "mypy (>=1.15)", "numpydoc (>=1.2.0)", "pandas (>=1.5.0)", "polars (>=0.20.30)", "pooch (>=1.8.0)", "pyamg (>=5.0.0)", "pyarrow (>=12.0.0)", "pytest (>=7.1.2)", "pytest-cov (>=2.9.0)", "ruff (>=0.11.7)"]
 
-[package.source]
-type = "legacy"
-url = "https://gitlab.com/api/v4/projects/78063949/packages/pypi/simple"
-reference = "litellm"
-
 [[package]]
 name = "scikit-network"
 version = "0.33.3"
@@ -7489,11 +5906,6 @@ scipy = ">=1.7.3"
 
 [package.extras]
 test = ["note", "pluggy (>=0.7.1)", "pytest"]
-
-[package.source]
-type = "legacy"
-url = "https://gitlab.com/api/v4/projects/78063949/packages/pypi/simple"
-reference = "litellm"
 
 [[package]]
 name = "scipy"
@@ -7574,11 +5986,6 @@ dev = ["cython-lint (>=0.12.2)", "doit (>=0.36.0)", "mypy (==1.10.0)", "pycodest
 doc = ["intersphinx_registry", "jupyterlite-pyodide-kernel", "jupyterlite-sphinx (>=0.19.1)", "jupytext", "linkify-it-py", "matplotlib (>=3.5)", "myst-nb (>=1.2.0)", "numpydoc", "pooch", "pydata-sphinx-theme (>=0.15.2)", "sphinx (>=5.0.0,<8.2.0)", "sphinx-copybutton", "sphinx-design (>=0.4.0)"]
 test = ["Cython", "array-api-strict (>=2.3.1)", "asv", "gmpy2", "hypothesis (>=6.30)", "meson", "mpmath", "ninja ; sys_platform != \"emscripten\"", "pooch", "pytest (>=8.0.0)", "pytest-cov", "pytest-timeout", "pytest-xdist", "scikit-umfpack", "threadpoolctl"]
 
-[package.source]
-type = "legacy"
-url = "https://gitlab.com/api/v4/projects/78063949/packages/pypi/simple"
-reference = "litellm"
-
 [[package]]
 name = "sentry-sdk"
 version = "2.50.0"
@@ -7642,11 +6049,6 @@ statsig = ["statsig (>=0.55.3)"]
 tornado = ["tornado (>=6)"]
 unleash = ["UnleashClient (>=6.0.1)"]
 
-[package.source]
-type = "legacy"
-url = "https://gitlab.com/api/v4/projects/78063949/packages/pypi/simple"
-reference = "litellm"
-
 [[package]]
 name = "setuptools"
 version = "78.1.1"
@@ -7667,11 +6069,6 @@ doc = ["furo", "jaraco.packaging (>=9.3)", "jaraco.tidelift (>=1.4)", "pygments-
 enabler = ["pytest-enabler (>=2.2)"]
 test = ["build[virtualenv] (>=1.0.3)", "filelock (>=3.4.0)", "ini2toml[lite] (>=0.14)", "jaraco.develop (>=7.21) ; python_version >= \"3.9\" and sys_platform != \"cygwin\"", "jaraco.envs (>=2.2)", "jaraco.path (>=3.7.2)", "jaraco.test (>=5.5)", "packaging (>=24.2)", "pip (>=19.1)", "pyproject-hooks (!=1.1)", "pytest (>=6,!=8.1.*)", "pytest-home (>=0.5)", "pytest-perf ; sys_platform != \"cygwin\"", "pytest-subprocess", "pytest-timeout", "pytest-xdist (>=3)", "tomli-w (>=1.0.0)", "virtualenv (>=13.0.0)", "wheel (>=0.44.0)"]
 type = ["importlib_metadata (>=7.0.2) ; python_version < \"3.10\"", "jaraco.develop (>=7.21) ; sys_platform != \"cygwin\"", "mypy (==1.14.*)", "pytest-mypy"]
-
-[package.source]
-type = "legacy"
-url = "https://gitlab.com/api/v4/projects/78063949/packages/pypi/simple"
-reference = "litellm"
 
 [[package]]
 name = "shapely"
@@ -7726,11 +6123,6 @@ numpy = ">=1.14,<3"
 docs = ["matplotlib", "numpydoc (==1.1.*)", "sphinx", "sphinx-book-theme", "sphinx-remove-toctrees"]
 test = ["pytest", "pytest-cov"]
 
-[package.source]
-type = "legacy"
-url = "https://gitlab.com/api/v4/projects/78063949/packages/pypi/simple"
-reference = "litellm"
-
 [[package]]
 name = "shellingham"
 version = "1.5.4"
@@ -7742,11 +6134,6 @@ files = [
     {file = "shellingham-1.5.4-py2.py3-none-any.whl", hash = "sha256:7ecfff8f2fd72616f7481040475a65b2bf8af90a56c89140852d1120324e8686"},
     {file = "shellingham-1.5.4.tar.gz", hash = "sha256:8dbca0739d487e5bd35ab3ca4b36e11c4078f3a234bfce294b0a0291363404de"},
 ]
-
-[package.source]
-type = "legacy"
-url = "https://gitlab.com/api/v4/projects/78063949/packages/pypi/simple"
-reference = "litellm"
 
 [[package]]
 name = "six"
@@ -7760,11 +6147,6 @@ files = [
     {file = "six-1.16.0.tar.gz", hash = "sha256:1e61c37477a1626458e36f7b1d82aa5c9b094fa4802892072e49de9c60c4c926"},
 ]
 
-[package.source]
-type = "legacy"
-url = "https://gitlab.com/api/v4/projects/78063949/packages/pypi/simple"
-reference = "litellm"
-
 [[package]]
 name = "smmap"
 version = "5.0.2"
@@ -7776,11 +6158,6 @@ files = [
     {file = "smmap-5.0.2-py3-none-any.whl", hash = "sha256:b30115f0def7d7531d22a0fb6502488d879e75b260a9db4d0819cfb25403af5e"},
     {file = "smmap-5.0.2.tar.gz", hash = "sha256:26ea65a03958fa0c8a1c7e8c7a58fdc77221b8910f6be2131affade476898ad5"},
 ]
-
-[package.source]
-type = "legacy"
-url = "https://gitlab.com/api/v4/projects/78063949/packages/pypi/simple"
-reference = "litellm"
 
 [[package]]
 name = "snakeviz"
@@ -7797,11 +6174,6 @@ files = [
 [package.dependencies]
 tornado = ">=2.0"
 
-[package.source]
-type = "legacy"
-url = "https://gitlab.com/api/v4/projects/78063949/packages/pypi/simple"
-reference = "litellm"
-
 [[package]]
 name = "sniffio"
 version = "1.3.1"
@@ -7813,11 +6185,6 @@ files = [
     {file = "sniffio-1.3.1-py3-none-any.whl", hash = "sha256:2f6da418d1f1e0fddd844478f41680e794e6051915791a034ff65e5f100525a2"},
     {file = "sniffio-1.3.1.tar.gz", hash = "sha256:f4324edc670a0f49750a81b895f35c3adb843cca46f0530f79fc1babb23789dc"},
 ]
-
-[package.source]
-type = "legacy"
-url = "https://gitlab.com/api/v4/projects/78063949/packages/pypi/simple"
-reference = "litellm"
 
 [[package]]
 name = "snowplow-tracker"
@@ -7837,40 +6204,6 @@ typing-extensions = ">=3.7.4"
 
 [package.extras]
 typing = ["mypy (>=0.971)", "types-requests (>=2.25.1,<3.0)"]
-
-[package.source]
-type = "legacy"
-url = "https://gitlab.com/api/v4/projects/78063949/packages/pypi/simple"
-reference = "litellm"
-
-[[package]]
-name = "soundfile"
-version = "0.12.1"
-description = "An audio library based on libsndfile, CFFI and NumPy"
-optional = false
-python-versions = "*"
-groups = ["main"]
-files = [
-    {file = "soundfile-0.12.1-py2.py3-none-any.whl", hash = "sha256:828a79c2e75abab5359f780c81dccd4953c45a2c4cd4f05ba3e233ddf984b882"},
-    {file = "soundfile-0.12.1-py2.py3-none-macosx_10_9_x86_64.whl", hash = "sha256:d922be1563ce17a69582a352a86f28ed8c9f6a8bc951df63476ffc310c064bfa"},
-    {file = "soundfile-0.12.1-py2.py3-none-macosx_11_0_arm64.whl", hash = "sha256:bceaab5c4febb11ea0554566784bcf4bc2e3977b53946dda2b12804b4fe524a8"},
-    {file = "soundfile-0.12.1-py2.py3-none-manylinux_2_17_x86_64.whl", hash = "sha256:2dc3685bed7187c072a46ab4ffddd38cef7de9ae5eb05c03df2ad569cf4dacbc"},
-    {file = "soundfile-0.12.1-py2.py3-none-manylinux_2_31_x86_64.whl", hash = "sha256:074247b771a181859d2bc1f98b5ebf6d5153d2c397b86ee9e29ba602a8dfe2a6"},
-    {file = "soundfile-0.12.1-py2.py3-none-win32.whl", hash = "sha256:59dfd88c79b48f441bbf6994142a19ab1de3b9bb7c12863402c2bc621e49091a"},
-    {file = "soundfile-0.12.1-py2.py3-none-win_amd64.whl", hash = "sha256:0d86924c00b62552b650ddd28af426e3ff2d4dc2e9047dae5b3d8452e0a49a77"},
-    {file = "soundfile-0.12.1.tar.gz", hash = "sha256:e8e1017b2cf1dda767aef19d2fd9ee5ebe07e050d430f77a0a7c66ba08b8cdae"},
-]
-
-[package.dependencies]
-cffi = ">=1.0"
-
-[package.extras]
-numpy = ["numpy"]
-
-[package.source]
-type = "legacy"
-url = "https://gitlab.com/api/v4/projects/78063949/packages/pypi/simple"
-reference = "litellm"
 
 [[package]]
 name = "sqlalchemy"
@@ -7938,7 +6271,7 @@ typing-extensions = ">=4.6.0"
 [package.extras]
 aiomysql = ["aiomysql (>=0.2.0)", "greenlet (!=0.4.17)"]
 aioodbc = ["aioodbc", "greenlet (!=0.4.17)"]
-aiosqlite = ["aiosqlite", "greenlet (!=0.4.17)", "typing-extensions (!=3.10.0.1)"]
+aiosqlite = ["aiosqlite", "greenlet (!=0.4.17)", "typing_extensions (!=3.10.0.1)"]
 asyncio = ["greenlet (!=0.4.17)"]
 asyncmy = ["asyncmy (>=0.2.3,!=0.2.4,!=0.2.6)", "greenlet (!=0.4.17)"]
 mariadb-connector = ["mariadb (>=1.0.1,!=1.1.2,!=1.1.5)"]
@@ -7948,7 +6281,7 @@ mssql-pyodbc = ["pyodbc"]
 mypy = ["mypy (>=0.910)"]
 mysql = ["mysqlclient (>=1.4.0)"]
 mysql-connector = ["mysql-connector-python"]
-oracle = ["cx-oracle (>=8)"]
+oracle = ["cx_oracle (>=8)"]
 oracle-oracledb = ["oracledb (>=1.0.1)"]
 postgresql = ["psycopg2 (>=2.7)"]
 postgresql-asyncpg = ["asyncpg", "greenlet (!=0.4.17)"]
@@ -7958,12 +6291,7 @@ postgresql-psycopg2binary = ["psycopg2-binary"]
 postgresql-psycopg2cffi = ["psycopg2cffi"]
 postgresql-psycopgbinary = ["psycopg[binary] (>=3.0.7)"]
 pymysql = ["pymysql"]
-sqlcipher = ["sqlcipher3-binary"]
-
-[package.source]
-type = "legacy"
-url = "https://gitlab.com/api/v4/projects/78063949/packages/pypi/simple"
-reference = "litellm"
+sqlcipher = ["sqlcipher3_binary"]
 
 [[package]]
 name = "sse-starlette"
@@ -7986,11 +6314,6 @@ examples = ["aiosqlite (>=0.21.0)", "fastapi (>=0.115.12)", "sqlalchemy[asyncio,
 granian = ["granian (>=2.3.1)"]
 uvicorn = ["uvicorn (>=0.34.0)"]
 
-[package.source]
-type = "legacy"
-url = "https://gitlab.com/api/v4/projects/78063949/packages/pypi/simple"
-reference = "litellm"
-
 [[package]]
 name = "starlette"
 version = "0.47.3"
@@ -8010,17 +6333,12 @@ typing-extensions = {version = ">=4.10.0", markers = "python_version < \"3.13\""
 [package.extras]
 full = ["httpx (>=0.27.0,<0.29.0)", "itsdangerous", "jinja2", "python-multipart (>=0.0.18)", "pyyaml"]
 
-[package.source]
-type = "legacy"
-url = "https://gitlab.com/api/v4/projects/78063949/packages/pypi/simple"
-reference = "litellm"
-
 [[package]]
 name = "starlette-context"
 version = "0.4.0"
 description = "Middleware for Starlette that allows you to store and access the context data of a request. Can be used with logging so logs automatically use request headers such as x-request-id or x-correlation-id."
 optional = false
-python-versions = ">=3.9,<4.0"
+python-versions = "<4.0,>=3.9"
 groups = ["main"]
 files = [
     {file = "starlette_context-0.4.0-py3-none-any.whl", hash = "sha256:dbcc11006587f901edd3d0a989a69a628fccf9d00c1ca3c28fab23ab88bd0093"},
@@ -8029,11 +6347,6 @@ files = [
 
 [package.dependencies]
 starlette = ">=0.27.0"
-
-[package.source]
-type = "legacy"
-url = "https://gitlab.com/api/v4/projects/78063949/packages/pypi/simple"
-reference = "litellm"
 
 [[package]]
 name = "structlog"
@@ -8046,11 +6359,6 @@ files = [
     {file = "structlog-25.5.0-py3-none-any.whl", hash = "sha256:a8453e9b9e636ec59bd9e79bbd4a72f025981b3ba0f5837aebf48f02f37a7f9f"},
     {file = "structlog-25.5.0.tar.gz", hash = "sha256:098522a3bebed9153d4570c6d0288abf80a031dfdb2048d59a49e9dc2190fc98"},
 ]
-
-[package.source]
-type = "legacy"
-url = "https://gitlab.com/api/v4/projects/78063949/packages/pypi/simple"
-reference = "litellm"
 
 [[package]]
 name = "tenacity"
@@ -8068,17 +6376,12 @@ files = [
 doc = ["reno", "sphinx"]
 test = ["pytest", "tornado (>=4.5)", "typeguard"]
 
-[package.source]
-type = "legacy"
-url = "https://gitlab.com/api/v4/projects/78063949/packages/pypi/simple"
-reference = "litellm"
-
 [[package]]
 name = "textual"
 version = "4.0.0"
 description = "Modern Text User Interface framework"
 optional = false
-python-versions = ">=3.8.1,<4.0.0"
+python-versions = "<4.0.0,>=3.8.1"
 groups = ["test"]
 files = [
     {file = "textual-4.0.0-py3-none-any.whl", hash = "sha256:214051640f890676a670aa7d29cd2a37d27cfe6b2cf866e9d5abc3b6c89c5800"},
@@ -8094,11 +6397,6 @@ typing-extensions = ">=4.4.0,<5.0.0"
 [package.extras]
 syntax = ["tree-sitter (>=0.23.0) ; python_version >= \"3.9\"", "tree-sitter-bash (>=0.23.0) ; python_version >= \"3.9\"", "tree-sitter-css (>=0.23.0) ; python_version >= \"3.9\"", "tree-sitter-go (>=0.23.0) ; python_version >= \"3.9\"", "tree-sitter-html (>=0.23.0) ; python_version >= \"3.9\"", "tree-sitter-java (>=0.23.0) ; python_version >= \"3.9\"", "tree-sitter-javascript (>=0.23.0) ; python_version >= \"3.9\"", "tree-sitter-json (>=0.24.0) ; python_version >= \"3.9\"", "tree-sitter-markdown (>=0.3.0) ; python_version >= \"3.9\"", "tree-sitter-python (>=0.23.0) ; python_version >= \"3.9\"", "tree-sitter-regex (>=0.24.0) ; python_version >= \"3.9\"", "tree-sitter-rust (>=0.23.0,<=0.23.2) ; python_version >= \"3.9\"", "tree-sitter-sql (>=0.3.0,<0.3.8) ; python_version >= \"3.9\"", "tree-sitter-toml (>=0.6.0) ; python_version >= \"3.9\"", "tree-sitter-xml (>=0.7.0) ; python_version >= \"3.9\"", "tree-sitter-yaml (>=0.6.0) ; python_version >= \"3.9\""]
 
-[package.source]
-type = "legacy"
-url = "https://gitlab.com/api/v4/projects/78063949/packages/pypi/simple"
-reference = "litellm"
-
 [[package]]
 name = "threadpoolctl"
 version = "3.6.0"
@@ -8110,11 +6408,6 @@ files = [
     {file = "threadpoolctl-3.6.0-py3-none-any.whl", hash = "sha256:43a0b8fd5a2928500110039e43a5eed8480b918967083ea48dc3ab9f13c4a7fb"},
     {file = "threadpoolctl-3.6.0.tar.gz", hash = "sha256:8ab8b4aa3491d812b623328249fab5302a68d2d71745c8a4c719a2fcaba9f44e"},
 ]
-
-[package.source]
-type = "legacy"
-url = "https://gitlab.com/api/v4/projects/78063949/packages/pypi/simple"
-reference = "litellm"
 
 [[package]]
 name = "tiktoken"
@@ -8190,11 +6483,6 @@ requests = ">=2.26.0"
 [package.extras]
 blobfile = ["blobfile (>=2)"]
 
-[package.source]
-type = "legacy"
-url = "https://gitlab.com/api/v4/projects/78063949/packages/pypi/simple"
-reference = "litellm"
-
 [[package]]
 name = "tokenizers"
 version = "0.21.0"
@@ -8228,11 +6516,6 @@ dev = ["tokenizers[testing]"]
 docs = ["setuptools-rust", "sphinx", "sphinx-rtd-theme"]
 testing = ["black (==22.3)", "datasets", "numpy", "pytest", "requests", "ruff"]
 
-[package.source]
-type = "legacy"
-url = "https://gitlab.com/api/v4/projects/78063949/packages/pypi/simple"
-reference = "litellm"
-
 [[package]]
 name = "tomlkit"
 version = "0.13.0"
@@ -8245,17 +6528,12 @@ files = [
     {file = "tomlkit-0.13.0.tar.gz", hash = "sha256:08ad192699734149f5b97b45f1f18dad7eb1b6d16bc72ad0c2335772650d7b72"},
 ]
 
-[package.source]
-type = "legacy"
-url = "https://gitlab.com/api/v4/projects/78063949/packages/pypi/simple"
-reference = "litellm"
-
 [[package]]
 name = "tornado"
 version = "6.5.2"
 description = "Tornado is a Python web framework and asynchronous networking library, originally developed at FriendFeed."
 optional = false
-python-versions = ">= 3.9"
+python-versions = ">=3.9"
 groups = ["dev"]
 files = [
     {file = "tornado-6.5.2-cp39-abi3-macosx_10_9_universal2.whl", hash = "sha256:2436822940d37cde62771cff8774f4f00b3c8024fe482e16ca8387b8a2724db6"},
@@ -8271,11 +6549,6 @@ files = [
     {file = "tornado-6.5.2-cp39-abi3-win_arm64.whl", hash = "sha256:d6c33dc3672e3a1f3618eb63b7ef4683a7688e7b9e6e8f0d9aa5726360a004af"},
     {file = "tornado-6.5.2.tar.gz", hash = "sha256:ab53c8f9a0fa351e2c0741284e06c7a45da86afb544133201c5cc8578eb076a0"},
 ]
-
-[package.source]
-type = "legacy"
-url = "https://gitlab.com/api/v4/projects/78063949/packages/pypi/simple"
-reference = "litellm"
 
 [[package]]
 name = "tqdm"
@@ -8298,11 +6571,6 @@ discord = ["requests"]
 notebook = ["ipywidgets (>=6)"]
 slack = ["slack-sdk"]
 telegram = ["requests"]
-
-[package.source]
-type = "legacy"
-url = "https://gitlab.com/api/v4/projects/78063949/packages/pypi/simple"
-reference = "litellm"
 
 [[package]]
 name = "transformers"
@@ -8376,11 +6644,6 @@ torchhub = ["filelock", "huggingface-hub (>=0.30.0,<1.0)", "importlib-metadata",
 video = ["av"]
 vision = ["Pillow (>=10.0.1,<=15.0)"]
 
-[package.source]
-type = "legacy"
-url = "https://gitlab.com/api/v4/projects/78063949/packages/pypi/simple"
-reference = "litellm"
-
 [[package]]
 name = "tree-sitter"
 version = "0.21.3"
@@ -8426,11 +6689,6 @@ files = [
     {file = "tree_sitter-0.21.3-cp39-cp39-musllinux_1_1_x86_64.whl", hash = "sha256:c4ac87735e6f98fe085244c7c020f0177d13d4c117db72ba041faa980d25d69d"},
     {file = "tree_sitter-0.21.3-cp39-cp39-win_amd64.whl", hash = "sha256:fbbd137f7d9a5309fb4cb82e2c3250ba101b0dd08a8abdce815661e6cf2cbc19"},
 ]
-
-[package.source]
-type = "legacy"
-url = "https://gitlab.com/api/v4/projects/78063949/packages/pypi/simple"
-reference = "litellm"
 
 [[package]]
 name = "tree-sitter-languages"
@@ -8504,11 +6762,6 @@ files = [
 [package.dependencies]
 tree-sitter = "*"
 
-[package.source]
-type = "legacy"
-url = "https://gitlab.com/api/v4/projects/78063949/packages/pypi/simple"
-reference = "litellm"
-
 [[package]]
 name = "typer"
 version = "0.21.1"
@@ -8527,11 +6780,6 @@ rich = ">=10.11.0"
 shellingham = ">=1.3.0"
 typing-extensions = ">=3.7.4.3"
 
-[package.source]
-type = "legacy"
-url = "https://gitlab.com/api/v4/projects/78063949/packages/pypi/simple"
-reference = "litellm"
-
 [[package]]
 name = "types-bleach"
 version = "6.2.0.20250809"
@@ -8547,11 +6795,6 @@ files = [
 [package.dependencies]
 types-html5lib = "*"
 
-[package.source]
-type = "legacy"
-url = "https://gitlab.com/api/v4/projects/78063949/packages/pypi/simple"
-reference = "litellm"
-
 [[package]]
 name = "types-cachetools"
 version = "5.5.0.20240820"
@@ -8563,11 +6806,6 @@ files = [
     {file = "types-cachetools-5.5.0.20240820.tar.gz", hash = "sha256:b888ab5c1a48116f7799cd5004b18474cd82b5463acb5ffb2db2fc9c7b053bc0"},
     {file = "types_cachetools-5.5.0.20240820-py3-none-any.whl", hash = "sha256:efb2ed8bf27a4b9d3ed70d33849f536362603a90b8090a328acf0cd42fda82e2"},
 ]
-
-[package.source]
-type = "legacy"
-url = "https://gitlab.com/api/v4/projects/78063949/packages/pypi/simple"
-reference = "litellm"
 
 [[package]]
 name = "types-html5lib"
@@ -8581,11 +6819,6 @@ files = [
     {file = "types_html5lib-1.1.11.20250809.tar.gz", hash = "sha256:7976ec7426bb009997dc5e072bca3ed988dd747d0cbfe093c7dfbd3d5ec8bf57"},
 ]
 
-[package.source]
-type = "legacy"
-url = "https://gitlab.com/api/v4/projects/78063949/packages/pypi/simple"
-reference = "litellm"
-
 [[package]]
 name = "types-protobuf"
 version = "4.25.0.20240417"
@@ -8598,11 +6831,6 @@ files = [
     {file = "types_protobuf-4.25.0.20240417-py3-none-any.whl", hash = "sha256:e9b613227c2127e3d4881d75d93c93b4d6fd97b5f6a099a0b654a05351c8685d"},
 ]
 
-[package.source]
-type = "legacy"
-url = "https://gitlab.com/api/v4/projects/78063949/packages/pypi/simple"
-reference = "litellm"
-
 [[package]]
 name = "types-pyyaml"
 version = "6.0.12.20240311"
@@ -8614,11 +6842,6 @@ files = [
     {file = "types-PyYAML-6.0.12.20240311.tar.gz", hash = "sha256:a9e0f0f88dc835739b0c1ca51ee90d04ca2a897a71af79de9aec5f38cb0a5342"},
     {file = "types_PyYAML-6.0.12.20240311-py3-none-any.whl", hash = "sha256:b845b06a1c7e54b8e5b4c683043de0d9caf205e7434b3edc678ff2411979b8f6"},
 ]
-
-[package.source]
-type = "legacy"
-url = "https://gitlab.com/api/v4/projects/78063949/packages/pypi/simple"
-reference = "litellm"
 
 [[package]]
 name = "types-requests"
@@ -8635,11 +6858,6 @@ files = [
 [package.dependencies]
 urllib3 = ">=2"
 
-[package.source]
-type = "legacy"
-url = "https://gitlab.com/api/v4/projects/78063949/packages/pypi/simple"
-reference = "litellm"
-
 [[package]]
 name = "typing-extensions"
 version = "4.12.2"
@@ -8651,11 +6869,6 @@ files = [
     {file = "typing_extensions-4.12.2-py3-none-any.whl", hash = "sha256:04e5ca0351e0f3f85c6853954072df659d0d13fac324d0072316b67d7794700d"},
     {file = "typing_extensions-4.12.2.tar.gz", hash = "sha256:1a7ead55c7e559dd4dee8856e3a88b41225abfe1ce8df57b7c13915fe121ffb8"},
 ]
-
-[package.source]
-type = "legacy"
-url = "https://gitlab.com/api/v4/projects/78063949/packages/pypi/simple"
-reference = "litellm"
 
 [[package]]
 name = "typing-inspect"
@@ -8673,30 +6886,20 @@ files = [
 mypy-extensions = ">=0.3.0"
 typing-extensions = ">=3.7.4"
 
-[package.source]
-type = "legacy"
-url = "https://gitlab.com/api/v4/projects/78063949/packages/pypi/simple"
-reference = "litellm"
-
 [[package]]
 name = "typing-inspection"
-version = "0.4.2"
+version = "0.4.0"
 description = "Runtime typing introspection tools"
 optional = false
 python-versions = ">=3.9"
 groups = ["main", "eval"]
 files = [
-    {file = "typing_inspection-0.4.2-py3-none-any.whl", hash = "sha256:4ed1cacbdc298c220f1bd249ed5287caa16f34d44ef4e9c3d0cbad5b521545e7"},
-    {file = "typing_inspection-0.4.2.tar.gz", hash = "sha256:ba561c48a67c5958007083d386c3295464928b01faa735ab8547c5692e87f464"},
+    {file = "typing_inspection-0.4.0-py3-none-any.whl", hash = "sha256:50e72559fcd2a6367a19f7a7e610e6afcb9fac940c650290eed893d61386832f"},
+    {file = "typing_inspection-0.4.0.tar.gz", hash = "sha256:9765c87de36671694a67904bf2c96e395be9c6439bb6c87b5142569dcdd65122"},
 ]
 
 [package.dependencies]
 typing-extensions = ">=4.12.0"
-
-[package.source]
-type = "legacy"
-url = "https://gitlab.com/api/v4/projects/78063949/packages/pypi/simple"
-reference = "litellm"
 
 [[package]]
 name = "tzdata"
@@ -8704,40 +6907,11 @@ version = "2025.1"
 description = "Provider of IANA time zone data"
 optional = false
 python-versions = ">=2"
-groups = ["main", "eval"]
+groups = ["eval"]
 files = [
     {file = "tzdata-2025.1-py2.py3-none-any.whl", hash = "sha256:7e127113816800496f027041c570f50bcd464a020098a3b6b199517772303639"},
     {file = "tzdata-2025.1.tar.gz", hash = "sha256:24894909e88cdb28bd1636c6887801df64cb485bd593f2fd83ef29075a81d694"},
 ]
-markers = {main = "platform_system == \"Windows\""}
-
-[package.source]
-type = "legacy"
-url = "https://gitlab.com/api/v4/projects/78063949/packages/pypi/simple"
-reference = "litellm"
-
-[[package]]
-name = "tzlocal"
-version = "5.3.1"
-description = "tzinfo object for the local timezone"
-optional = false
-python-versions = ">=3.9"
-groups = ["main"]
-files = [
-    {file = "tzlocal-5.3.1-py3-none-any.whl", hash = "sha256:eb1a66c3ef5847adf7a834f1be0800581b683b5608e74f86ecbcef8ab91bb85d"},
-    {file = "tzlocal-5.3.1.tar.gz", hash = "sha256:cceffc7edecefea1f595541dbd6e990cb1ea3d19bf01b2809f362a03dd7921fd"},
-]
-
-[package.dependencies]
-tzdata = {version = "*", markers = "platform_system == \"Windows\""}
-
-[package.extras]
-devenv = ["check-manifest", "pytest (>=4.3)", "pytest-cov", "pytest-mock (>=3.3)", "zest.releaser"]
-
-[package.source]
-type = "legacy"
-url = "https://gitlab.com/api/v4/projects/78063949/packages/pypi/simple"
-reference = "litellm"
 
 [[package]]
 name = "uc-micro-py"
@@ -8754,11 +6928,6 @@ files = [
 [package.extras]
 test = ["coverage", "pytest", "pytest-cov"]
 
-[package.source]
-type = "legacy"
-url = "https://gitlab.com/api/v4/projects/78063949/packages/pypi/simple"
-reference = "litellm"
-
 [[package]]
 name = "unidiff"
 version = "0.7.5"
@@ -8771,11 +6940,6 @@ files = [
     {file = "unidiff-0.7.5.tar.gz", hash = "sha256:2e5f0162052248946b9f0970a40e9e124236bf86c82b70821143a6fc1dea2574"},
 ]
 
-[package.source]
-type = "legacy"
-url = "https://gitlab.com/api/v4/projects/78063949/packages/pypi/simple"
-reference = "litellm"
-
 [[package]]
 name = "untokenize"
 version = "0.1.1"
@@ -8786,11 +6950,6 @@ groups = ["lint"]
 files = [
     {file = "untokenize-0.1.1.tar.gz", hash = "sha256:3865dbbbb8efb4bb5eaa72f1be7f3e0be00ea8b7f125c69cbd1f5fda926f37a2"},
 ]
-
-[package.source]
-type = "legacy"
-url = "https://gitlab.com/api/v4/projects/78063949/packages/pypi/simple"
-reference = "litellm"
 
 [[package]]
 name = "uritemplate"
@@ -8803,11 +6962,6 @@ files = [
     {file = "uritemplate-4.1.1-py2.py3-none-any.whl", hash = "sha256:830c08b8d99bdd312ea4ead05994a38e8936266f84b9a7878232db50b044e02e"},
     {file = "uritemplate-4.1.1.tar.gz", hash = "sha256:4346edfc5c3b79f694bccd6d6099a322bbeb628dbf2cd86eea55a456ce5124f0"},
 ]
-
-[package.source]
-type = "legacy"
-url = "https://gitlab.com/api/v4/projects/78063949/packages/pypi/simple"
-reference = "litellm"
 
 [[package]]
 name = "urllib3"
@@ -8826,11 +6980,6 @@ brotli = ["brotli (>=1.0.9) ; platform_python_implementation == \"CPython\"", "b
 h2 = ["h2 (>=4,<5)"]
 socks = ["pysocks (>=1.5.6,!=1.5.7,<2.0)"]
 zstd = ["zstandard (>=0.18.0)"]
-
-[package.source]
-type = "legacy"
-url = "https://gitlab.com/api/v4/projects/78063949/packages/pypi/simple"
-reference = "litellm"
 
 [[package]]
 name = "uuid-utils"
@@ -8864,11 +7013,6 @@ files = [
     {file = "uuid_utils-0.14.0.tar.gz", hash = "sha256:fc5bac21e9933ea6c590433c11aa54aaca599f690c08069e364eb13a12f670b4"},
 ]
 
-[package.source]
-type = "legacy"
-url = "https://gitlab.com/api/v4/projects/78063949/packages/pypi/simple"
-reference = "litellm"
-
 [[package]]
 name = "uvicorn"
 version = "0.31.1"
@@ -8895,68 +7039,51 @@ websockets = {version = ">=10.4", optional = true, markers = "extra == \"standar
 [package.extras]
 standard = ["colorama (>=0.4) ; sys_platform == \"win32\"", "httptools (>=0.5.0)", "python-dotenv (>=0.13)", "pyyaml (>=5.1)", "uvloop (>=0.14.0,!=0.15.0,!=0.15.1) ; sys_platform != \"win32\" and sys_platform != \"cygwin\" and platform_python_implementation != \"PyPy\"", "watchfiles (>=0.13)", "websockets (>=10.4)"]
 
-[package.source]
-type = "legacy"
-url = "https://gitlab.com/api/v4/projects/78063949/packages/pypi/simple"
-reference = "litellm"
-
 [[package]]
 name = "uvloop"
-version = "0.21.0"
+version = "0.19.0"
 description = "Fast implementation of asyncio event loop on top of libuv"
 optional = false
 python-versions = ">=3.8.0"
 groups = ["main"]
-markers = "sys_platform != \"win32\""
+markers = "sys_platform != \"win32\" and sys_platform != \"cygwin\" and platform_python_implementation != \"PyPy\""
 files = [
-    {file = "uvloop-0.21.0-cp310-cp310-macosx_10_9_universal2.whl", hash = "sha256:ec7e6b09a6fdded42403182ab6b832b71f4edaf7f37a9a0e371a01db5f0cb45f"},
-    {file = "uvloop-0.21.0-cp310-cp310-macosx_10_9_x86_64.whl", hash = "sha256:196274f2adb9689a289ad7d65700d37df0c0930fd8e4e743fa4834e850d7719d"},
-    {file = "uvloop-0.21.0-cp310-cp310-manylinux_2_17_aarch64.manylinux2014_aarch64.whl", hash = "sha256:f38b2e090258d051d68a5b14d1da7203a3c3677321cf32a95a6f4db4dd8b6f26"},
-    {file = "uvloop-0.21.0-cp310-cp310-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:87c43e0f13022b998eb9b973b5e97200c8b90823454d4bc06ab33829e09fb9bb"},
-    {file = "uvloop-0.21.0-cp310-cp310-musllinux_1_2_aarch64.whl", hash = "sha256:10d66943def5fcb6e7b37310eb6b5639fd2ccbc38df1177262b0640c3ca68c1f"},
-    {file = "uvloop-0.21.0-cp310-cp310-musllinux_1_2_x86_64.whl", hash = "sha256:67dd654b8ca23aed0a8e99010b4c34aca62f4b7fce88f39d452ed7622c94845c"},
-    {file = "uvloop-0.21.0-cp311-cp311-macosx_10_9_universal2.whl", hash = "sha256:c0f3fa6200b3108919f8bdabb9a7f87f20e7097ea3c543754cabc7d717d95cf8"},
-    {file = "uvloop-0.21.0-cp311-cp311-macosx_10_9_x86_64.whl", hash = "sha256:0878c2640cf341b269b7e128b1a5fed890adc4455513ca710d77d5e93aa6d6a0"},
-    {file = "uvloop-0.21.0-cp311-cp311-manylinux_2_17_aarch64.manylinux2014_aarch64.whl", hash = "sha256:b9fb766bb57b7388745d8bcc53a359b116b8a04c83a2288069809d2b3466c37e"},
-    {file = "uvloop-0.21.0-cp311-cp311-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:8a375441696e2eda1c43c44ccb66e04d61ceeffcd76e4929e527b7fa401b90fb"},
-    {file = "uvloop-0.21.0-cp311-cp311-musllinux_1_2_aarch64.whl", hash = "sha256:baa0e6291d91649c6ba4ed4b2f982f9fa165b5bbd50a9e203c416a2797bab3c6"},
-    {file = "uvloop-0.21.0-cp311-cp311-musllinux_1_2_x86_64.whl", hash = "sha256:4509360fcc4c3bd2c70d87573ad472de40c13387f5fda8cb58350a1d7475e58d"},
-    {file = "uvloop-0.21.0-cp312-cp312-macosx_10_13_universal2.whl", hash = "sha256:359ec2c888397b9e592a889c4d72ba3d6befba8b2bb01743f72fffbde663b59c"},
-    {file = "uvloop-0.21.0-cp312-cp312-macosx_10_13_x86_64.whl", hash = "sha256:f7089d2dc73179ce5ac255bdf37c236a9f914b264825fdaacaded6990a7fb4c2"},
-    {file = "uvloop-0.21.0-cp312-cp312-manylinux_2_17_aarch64.manylinux2014_aarch64.whl", hash = "sha256:baa4dcdbd9ae0a372f2167a207cd98c9f9a1ea1188a8a526431eef2f8116cc8d"},
-    {file = "uvloop-0.21.0-cp312-cp312-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:86975dca1c773a2c9864f4c52c5a55631038e387b47eaf56210f873887b6c8dc"},
-    {file = "uvloop-0.21.0-cp312-cp312-musllinux_1_2_aarch64.whl", hash = "sha256:461d9ae6660fbbafedd07559c6a2e57cd553b34b0065b6550685f6653a98c1cb"},
-    {file = "uvloop-0.21.0-cp312-cp312-musllinux_1_2_x86_64.whl", hash = "sha256:183aef7c8730e54c9a3ee3227464daed66e37ba13040bb3f350bc2ddc040f22f"},
-    {file = "uvloop-0.21.0-cp313-cp313-macosx_10_13_universal2.whl", hash = "sha256:bfd55dfcc2a512316e65f16e503e9e450cab148ef11df4e4e679b5e8253a5281"},
-    {file = "uvloop-0.21.0-cp313-cp313-macosx_10_13_x86_64.whl", hash = "sha256:787ae31ad8a2856fc4e7c095341cccc7209bd657d0e71ad0dc2ea83c4a6fa8af"},
-    {file = "uvloop-0.21.0-cp313-cp313-manylinux_2_17_aarch64.manylinux2014_aarch64.whl", hash = "sha256:5ee4d4ef48036ff6e5cfffb09dd192c7a5027153948d85b8da7ff705065bacc6"},
-    {file = "uvloop-0.21.0-cp313-cp313-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:f3df876acd7ec037a3d005b3ab85a7e4110422e4d9c1571d4fc89b0fc41b6816"},
-    {file = "uvloop-0.21.0-cp313-cp313-musllinux_1_2_aarch64.whl", hash = "sha256:bd53ecc9a0f3d87ab847503c2e1552b690362e005ab54e8a48ba97da3924c0dc"},
-    {file = "uvloop-0.21.0-cp313-cp313-musllinux_1_2_x86_64.whl", hash = "sha256:a5c39f217ab3c663dc699c04cbd50c13813e31d917642d459fdcec07555cc553"},
-    {file = "uvloop-0.21.0-cp38-cp38-macosx_10_9_universal2.whl", hash = "sha256:17df489689befc72c39a08359efac29bbee8eee5209650d4b9f34df73d22e414"},
-    {file = "uvloop-0.21.0-cp38-cp38-macosx_10_9_x86_64.whl", hash = "sha256:bc09f0ff191e61c2d592a752423c767b4ebb2986daa9ed62908e2b1b9a9ae206"},
-    {file = "uvloop-0.21.0-cp38-cp38-manylinux_2_17_aarch64.manylinux2014_aarch64.whl", hash = "sha256:f0ce1b49560b1d2d8a2977e3ba4afb2414fb46b86a1b64056bc4ab929efdafbe"},
-    {file = "uvloop-0.21.0-cp38-cp38-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:e678ad6fe52af2c58d2ae3c73dc85524ba8abe637f134bf3564ed07f555c5e79"},
-    {file = "uvloop-0.21.0-cp38-cp38-musllinux_1_2_aarch64.whl", hash = "sha256:460def4412e473896ef179a1671b40c039c7012184b627898eea5072ef6f017a"},
-    {file = "uvloop-0.21.0-cp38-cp38-musllinux_1_2_x86_64.whl", hash = "sha256:10da8046cc4a8f12c91a1c39d1dd1585c41162a15caaef165c2174db9ef18bdc"},
-    {file = "uvloop-0.21.0-cp39-cp39-macosx_10_9_universal2.whl", hash = "sha256:c097078b8031190c934ed0ebfee8cc5f9ba9642e6eb88322b9958b649750f72b"},
-    {file = "uvloop-0.21.0-cp39-cp39-macosx_10_9_x86_64.whl", hash = "sha256:46923b0b5ee7fc0020bef24afe7836cb068f5050ca04caf6b487c513dc1a20b2"},
-    {file = "uvloop-0.21.0-cp39-cp39-manylinux_2_17_aarch64.manylinux2014_aarch64.whl", hash = "sha256:53e420a3afe22cdcf2a0f4846e377d16e718bc70103d7088a4f7623567ba5fb0"},
-    {file = "uvloop-0.21.0-cp39-cp39-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:88cb67cdbc0e483da00af0b2c3cdad4b7c61ceb1ee0f33fe00e09c81e3a6cb75"},
-    {file = "uvloop-0.21.0-cp39-cp39-musllinux_1_2_aarch64.whl", hash = "sha256:221f4f2a1f46032b403bf3be628011caf75428ee3cc204a22addf96f586b19fd"},
-    {file = "uvloop-0.21.0-cp39-cp39-musllinux_1_2_x86_64.whl", hash = "sha256:2d1f581393673ce119355d56da84fe1dd9d2bb8b3d13ce792524e1607139feff"},
-    {file = "uvloop-0.21.0.tar.gz", hash = "sha256:3bf12b0fda68447806a7ad847bfa591613177275d35b6724b1ee573faa3704e3"},
+    {file = "uvloop-0.19.0-cp310-cp310-macosx_10_9_universal2.whl", hash = "sha256:de4313d7f575474c8f5a12e163f6d89c0a878bc49219641d49e6f1444369a90e"},
+    {file = "uvloop-0.19.0-cp310-cp310-macosx_10_9_x86_64.whl", hash = "sha256:5588bd21cf1fcf06bded085f37e43ce0e00424197e7c10e77afd4bbefffef428"},
+    {file = "uvloop-0.19.0-cp310-cp310-manylinux_2_17_aarch64.manylinux2014_aarch64.whl", hash = "sha256:7b1fd71c3843327f3bbc3237bedcdb6504fd50368ab3e04d0410e52ec293f5b8"},
+    {file = "uvloop-0.19.0-cp310-cp310-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:5a05128d315e2912791de6088c34136bfcdd0c7cbc1cf85fd6fd1bb321b7c849"},
+    {file = "uvloop-0.19.0-cp310-cp310-musllinux_1_1_aarch64.whl", hash = "sha256:cd81bdc2b8219cb4b2556eea39d2e36bfa375a2dd021404f90a62e44efaaf957"},
+    {file = "uvloop-0.19.0-cp310-cp310-musllinux_1_1_x86_64.whl", hash = "sha256:5f17766fb6da94135526273080f3455a112f82570b2ee5daa64d682387fe0dcd"},
+    {file = "uvloop-0.19.0-cp311-cp311-macosx_10_9_universal2.whl", hash = "sha256:4ce6b0af8f2729a02a5d1575feacb2a94fc7b2e983868b009d51c9a9d2149bef"},
+    {file = "uvloop-0.19.0-cp311-cp311-macosx_10_9_x86_64.whl", hash = "sha256:31e672bb38b45abc4f26e273be83b72a0d28d074d5b370fc4dcf4c4eb15417d2"},
+    {file = "uvloop-0.19.0-cp311-cp311-manylinux_2_17_aarch64.manylinux2014_aarch64.whl", hash = "sha256:570fc0ed613883d8d30ee40397b79207eedd2624891692471808a95069a007c1"},
+    {file = "uvloop-0.19.0-cp311-cp311-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:5138821e40b0c3e6c9478643b4660bd44372ae1e16a322b8fc07478f92684e24"},
+    {file = "uvloop-0.19.0-cp311-cp311-musllinux_1_1_aarch64.whl", hash = "sha256:91ab01c6cd00e39cde50173ba4ec68a1e578fee9279ba64f5221810a9e786533"},
+    {file = "uvloop-0.19.0-cp311-cp311-musllinux_1_1_x86_64.whl", hash = "sha256:47bf3e9312f63684efe283f7342afb414eea4d3011542155c7e625cd799c3b12"},
+    {file = "uvloop-0.19.0-cp312-cp312-macosx_10_9_universal2.whl", hash = "sha256:da8435a3bd498419ee8c13c34b89b5005130a476bda1d6ca8cfdde3de35cd650"},
+    {file = "uvloop-0.19.0-cp312-cp312-macosx_10_9_x86_64.whl", hash = "sha256:02506dc23a5d90e04d4f65c7791e65cf44bd91b37f24cfc3ef6cf2aff05dc7ec"},
+    {file = "uvloop-0.19.0-cp312-cp312-manylinux_2_17_aarch64.manylinux2014_aarch64.whl", hash = "sha256:2693049be9d36fef81741fddb3f441673ba12a34a704e7b4361efb75cf30befc"},
+    {file = "uvloop-0.19.0-cp312-cp312-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:7010271303961c6f0fe37731004335401eb9075a12680738731e9c92ddd96ad6"},
+    {file = "uvloop-0.19.0-cp312-cp312-musllinux_1_1_aarch64.whl", hash = "sha256:5daa304d2161d2918fa9a17d5635099a2f78ae5b5960e742b2fcfbb7aefaa593"},
+    {file = "uvloop-0.19.0-cp312-cp312-musllinux_1_1_x86_64.whl", hash = "sha256:7207272c9520203fea9b93843bb775d03e1cf88a80a936ce760f60bb5add92f3"},
+    {file = "uvloop-0.19.0-cp38-cp38-macosx_10_9_universal2.whl", hash = "sha256:78ab247f0b5671cc887c31d33f9b3abfb88d2614b84e4303f1a63b46c046c8bd"},
+    {file = "uvloop-0.19.0-cp38-cp38-macosx_10_9_x86_64.whl", hash = "sha256:472d61143059c84947aa8bb74eabbace30d577a03a1805b77933d6bd13ddebbd"},
+    {file = "uvloop-0.19.0-cp38-cp38-manylinux_2_17_aarch64.manylinux2014_aarch64.whl", hash = "sha256:45bf4c24c19fb8a50902ae37c5de50da81de4922af65baf760f7c0c42e1088be"},
+    {file = "uvloop-0.19.0-cp38-cp38-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:271718e26b3e17906b28b67314c45d19106112067205119dddbd834c2b7ce797"},
+    {file = "uvloop-0.19.0-cp38-cp38-musllinux_1_1_aarch64.whl", hash = "sha256:34175c9fd2a4bc3adc1380e1261f60306344e3407c20a4d684fd5f3be010fa3d"},
+    {file = "uvloop-0.19.0-cp38-cp38-musllinux_1_1_x86_64.whl", hash = "sha256:e27f100e1ff17f6feeb1f33968bc185bf8ce41ca557deee9d9bbbffeb72030b7"},
+    {file = "uvloop-0.19.0-cp39-cp39-macosx_10_9_universal2.whl", hash = "sha256:13dfdf492af0aa0a0edf66807d2b465607d11c4fa48f4a1fd41cbea5b18e8e8b"},
+    {file = "uvloop-0.19.0-cp39-cp39-macosx_10_9_x86_64.whl", hash = "sha256:6e3d4e85ac060e2342ff85e90d0c04157acb210b9ce508e784a944f852a40e67"},
+    {file = "uvloop-0.19.0-cp39-cp39-manylinux_2_17_aarch64.manylinux2014_aarch64.whl", hash = "sha256:8ca4956c9ab567d87d59d49fa3704cf29e37109ad348f2d5223c9bf761a332e7"},
+    {file = "uvloop-0.19.0-cp39-cp39-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:f467a5fd23b4fc43ed86342641f3936a68ded707f4627622fa3f82a120e18256"},
+    {file = "uvloop-0.19.0-cp39-cp39-musllinux_1_1_aarch64.whl", hash = "sha256:492e2c32c2af3f971473bc22f086513cedfc66a130756145a931a90c3958cb17"},
+    {file = "uvloop-0.19.0-cp39-cp39-musllinux_1_1_x86_64.whl", hash = "sha256:2df95fca285a9f5bfe730e51945ffe2fa71ccbfdde3b0da5772b4ee4f2e770d5"},
+    {file = "uvloop-0.19.0.tar.gz", hash = "sha256:0246f4fd1bf2bf702e06b0d45ee91677ee5c31242f39aab4ea6fe0c51aedd0fd"},
 ]
 
 [package.extras]
-dev = ["Cython (>=3.0,<4.0)", "setuptools (>=60)"]
 docs = ["Sphinx (>=4.1.2,<4.2.0)", "sphinx-rtd-theme (>=0.5.2,<0.6.0)", "sphinxcontrib-asyncio (>=0.3.0,<0.4.0)"]
-test = ["aiohttp (>=3.10.5)", "flake8 (>=5.0,<6.0)", "mypy (>=0.800)", "psutil", "pyOpenSSL (>=23.0.0,<23.1.0)", "pycodestyle (>=2.9.0,<2.10.0)"]
-
-[package.source]
-type = "legacy"
-url = "https://gitlab.com/api/v4/projects/78063949/packages/pypi/simple"
-reference = "litellm"
+test = ["Cython (>=0.29.36,<0.30.0)", "aiohttp (==3.9.0b0) ; python_version >= \"3.12\"", "aiohttp (>=3.8.1) ; python_version < \"3.12\"", "flake8 (>=5.0,<6.0)", "mypy (>=0.800)", "psutil", "pyOpenSSL (>=23.0.0,<23.1.0)", "pycodestyle (>=2.9.0,<2.10.0)"]
 
 [[package]]
 name = "validators"
@@ -8972,11 +7099,6 @@ files = [
 
 [package.extras]
 crypto-eth-addresses = ["eth-hash[pycryptodome] (>=0.7.0)"]
-
-[package.source]
-type = "legacy"
-url = "https://gitlab.com/api/v4/projects/78063949/packages/pypi/simple"
-reference = "litellm"
 
 [[package]]
 name = "watchdog"
@@ -9022,11 +7144,6 @@ files = [
 
 [package.extras]
 watchmedo = ["PyYAML (>=3.10)"]
-
-[package.source]
-type = "legacy"
-url = "https://gitlab.com/api/v4/projects/78063949/packages/pypi/simple"
-reference = "litellm"
 
 [[package]]
 name = "watchfiles"
@@ -9116,11 +7233,6 @@ files = [
 [package.dependencies]
 anyio = ">=3.0.0"
 
-[package.source]
-type = "legacy"
-url = "https://gitlab.com/api/v4/projects/78063949/packages/pypi/simple"
-reference = "litellm"
-
 [[package]]
 name = "webencodings"
 version = "0.5.1"
@@ -9132,11 +7244,6 @@ files = [
     {file = "webencodings-0.5.1-py2.py3-none-any.whl", hash = "sha256:a0af1213f3c2226497a97e2b3aa01a7e4bee4f403f95be16fc9acd2947514a78"},
     {file = "webencodings-0.5.1.tar.gz", hash = "sha256:b36a1c245f2d304965eb4e0a82848379241dc04b865afcc4aab16748587e1923"},
 ]
-
-[package.source]
-type = "legacy"
-url = "https://gitlab.com/api/v4/projects/78063949/packages/pypi/simple"
-reference = "litellm"
 
 [[package]]
 name = "websockets"
@@ -9217,11 +7324,6 @@ files = [
     {file = "websockets-15.0.1.tar.gz", hash = "sha256:82544de02076bafba038ce055ee6412d68da13ab47f0c60cab827346de828dee"},
 ]
 
-[package.source]
-type = "legacy"
-url = "https://gitlab.com/api/v4/projects/78063949/packages/pypi/simple"
-reference = "litellm"
-
 [[package]]
 name = "wsproto"
 version = "1.2.0"
@@ -9236,11 +7338,6 @@ files = [
 
 [package.dependencies]
 h11 = ">=0.9.0,<1"
-
-[package.source]
-type = "legacy"
-url = "https://gitlab.com/api/v4/projects/78063949/packages/pypi/simple"
-reference = "litellm"
 
 [[package]]
 name = "xxhash"
@@ -9375,11 +7472,6 @@ files = [
     {file = "xxhash-3.5.0.tar.gz", hash = "sha256:84f2caddf951c9cbf8dc2e22a89d4ccf5d86391ac6418fe81e3c67d0cf60b45f"},
 ]
 
-[package.source]
-type = "legacy"
-url = "https://gitlab.com/api/v4/projects/78063949/packages/pypi/simple"
-reference = "litellm"
-
 [[package]]
 name = "yappi"
 version = "1.6.10"
@@ -9449,11 +7541,6 @@ files = [
 
 [package.extras]
 test = ["gevent (>=20.6.2)"]
-
-[package.source]
-type = "legacy"
-url = "https://gitlab.com/api/v4/projects/78063949/packages/pypi/simple"
-reference = "litellm"
 
 [[package]]
 name = "yarl"
@@ -9574,11 +7661,6 @@ idna = ">=2.0"
 multidict = ">=4.0"
 propcache = ">=0.2.1"
 
-[package.source]
-type = "legacy"
-url = "https://gitlab.com/api/v4/projects/78063949/packages/pypi/simple"
-reference = "litellm"
-
 [[package]]
 name = "zipp"
 version = "3.19.2"
@@ -9594,11 +7676,6 @@ files = [
 [package.extras]
 doc = ["furo", "jaraco.packaging (>=9.3)", "jaraco.tidelift (>=1.4)", "rst.linker (>=1.9)", "sphinx (>=3.5)", "sphinx-lint"]
 test = ["big-O", "importlib-resources ; python_version < \"3.9\"", "jaraco.functools", "jaraco.itertools", "jaraco.test", "more-itertools", "pytest (>=6,!=8.1.*)", "pytest-checkdocs (>=2.4)", "pytest-cov", "pytest-enabler (>=2.2)", "pytest-ignore-flaky", "pytest-mypy", "pytest-ruff (>=0.2.1)"]
-
-[package.source]
-type = "legacy"
-url = "https://gitlab.com/api/v4/projects/78063949/packages/pypi/simple"
-reference = "litellm"
 
 [[package]]
 name = "zstandard"
@@ -9713,12 +7790,7 @@ cffi = {version = ">=1.11", markers = "platform_python_implementation == \"PyPy\
 [package.extras]
 cffi = ["cffi (>=1.11)"]
 
-[package.source]
-type = "legacy"
-url = "https://gitlab.com/api/v4/projects/78063949/packages/pypi/simple"
-reference = "litellm"
-
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.12.0,<3.13.0"
-content-hash = "1b0f36ea796c399b9b408405901007f257affed0a6a088eacfe33de9fc5cb10d"
+content-hash = "c9a98b8e341e826cf9b39f77cf1a591e19484d10e665ef3540511873224f12f9"

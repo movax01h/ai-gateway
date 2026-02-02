@@ -56,8 +56,6 @@ class ContainerApplication(containers.DeclarativeContainer):
         ContainerModels,
         config=config,
         integrations=integrations,
-        internal_event=internal_event,
-        billing_event=billing_event,
     )
     pkg_models_v2 = providers.Container(
         ContainerModelsV2,
