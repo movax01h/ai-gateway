@@ -51,6 +51,7 @@ def request_factory_fixture():
         request = Mock(spec=fastapi.Request)
         request.url = URL(request_url)
         request.method = "POST"
+        request.query_params = {}
         mock_request_body = AsyncMock()
         mock_request_body.return_value = request_body
         request.body = mock_request_body

@@ -114,7 +114,13 @@ class CreateMergeRequest(DuoBaseTool):
             "squash",
             "labels",
         ]
-        data.update({k: kwargs[k] for k in optional_params if k in kwargs})
+        data.update(
+            {
+                k: kwargs[k]
+                for k in optional_params
+                if k in kwargs and kwargs[k] is not None
+            }
+        )
 
         try:
             path = MERGE_REQUESTS_API_PATH.format(project_id=project_id)

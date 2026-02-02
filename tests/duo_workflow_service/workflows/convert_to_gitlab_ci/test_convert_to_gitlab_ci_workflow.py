@@ -33,12 +33,6 @@ def tools_registry_with_all_privileges_fixture(tool_metadata):
     )
 
 
-@pytest.fixture(name="mock_checkpointer")
-def mock_checkpointer_fixture():
-    """Create a mock checkpointer."""
-    return Mock()
-
-
 @pytest.fixture(name="mock_build_agent")
 def mock_build_agent():
     with patch(

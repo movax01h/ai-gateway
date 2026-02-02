@@ -4,7 +4,7 @@ from typing import Any, List, Type
 
 import gitmatch
 import structlog
-from langchain.tools.base import ToolException
+from langchain_core.tools.base import ToolException
 from pydantic import BaseModel, Field
 
 from contract import contract_pb2

@@ -27,7 +27,7 @@ fetch-foundational-agents = "duo_workflow_service.scripts.fetch_foundational_age
 [tool.poetry.dependencies]
 fastapi = "^0.128.0"
 dependency-injector = "^4.41.0"
-uvicorn = { extras = ["standard"], version = "^0.35.0" }
+uvicorn = { extras = ["standard"], version = "^0.31.0" }
 requests = "^2.32.3"
 numpy = "^2.2.3"
 python-dotenv = "^1.0.1"
@@ -55,12 +55,12 @@ jinja2 = "^3.1.3"
 pyyaml = "^6.0.2"
 google-cloud-discoveryengine = "^0.13.0"
 litellm = "^1.35.20"
-langgraph = "0.6.11"
-langchain-anthropic = ">=0.3.19,<0.4.0"
-langchain-community = "^0.3.5"
+langgraph = "^1.0.2"
+langchain-anthropic = "^1.3.0"
+langchain-community = "^0.4.1"
 boto3 = "^1.35.37"
-python-gitlab = "^6.0.0"
-langchain-google-vertexai = "^2.0.8"
+python-gitlab = "^7.0.0"
+langchain-google-vertexai = "^3.2.0"
 gitlab-cloud-connector = {version = "^3.19.0", source = "gitlab_cloud_connector"}
 sse-starlette = "^2.1.3"
 q_developer_boto3 = { path = "./vendor/q_developer_boto3-1.12.0-py3-none-any.whl" }
@@ -73,7 +73,7 @@ sentry-sdk = "^2.17.0"
 websockets = "^15.0.1"
 langgraph-checkpoint = "2.1.2"
 gitmatch = "^0.2.1"
-langchain-openai = "^0.3.30"
+langchain-openai = "^1.1.6"
 bleach = "^6.2.0"
 setuptools = "^78.1.1"
 h11 = "^0.16.0"
@@ -83,6 +83,7 @@ aiocache = "^0.12.3"
 lxml = "^6.0.2"
 graphql-core = "^3.2.0"
 hiddenlayer-sdk = "^3.2.0"
+langchain = "^1.2.7"
 
 [[tool.poetry.source]]
 name = "gitlab_cloud_connector"
@@ -98,8 +99,8 @@ priority = "supplemental"
 optional = true
 
 [tool.poetry.group.eval.dependencies]
-cef = { version = "^0.6.0", source = "cef" }
-typer = "^0.17.4"
+cef = { version = "^0.7.1", source = "cef" }
+typer = "^0.21.0"
 
 [tool.poetry.group.test]
 optional = true

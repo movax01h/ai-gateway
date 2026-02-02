@@ -16,7 +16,7 @@ from typing import Any
 from zipfile import ZipFile
 
 import requests
-from langchain.docstore.document import Document
+from langchain_community.docstore.document import Document
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)

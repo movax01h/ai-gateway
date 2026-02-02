@@ -1559,6 +1559,7 @@ async def test_invalid_tool_call_handling(
     # Create invalid tool calls
     invalid_tool_calls = [
         InvalidToolCall(
+            type="invalid_tool_call",
             id="invalid-call-1",
             error="JSON parsing error: unexpected token",
             name="invalid_tool",
@@ -1634,7 +1635,11 @@ async def test_invalid_tool_call_with_valid_tool_calls(
     # Create invalid tool calls
     invalid_tool_calls = [
         InvalidToolCall(
-            id="invalid-call-1", error="Malformed JSON", name="invalid_tool", args="{}"
+            type="invalid_tool_call",
+            id="invalid-call-1",
+            error="Malformed JSON",
+            name="invalid_tool",
+            args="{}",
         ),
     ]
 

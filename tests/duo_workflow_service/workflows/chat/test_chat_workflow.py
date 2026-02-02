@@ -543,6 +543,7 @@ def test_tools_registry_interaction(
     workflow_config,
     expected_tools,
     workflow_with_project,
+    mock_checkpointer,
 ):
     current_feature_flag_context.set(set(feature_flags))
 
@@ -551,9 +552,8 @@ def test_tools_registry_interaction(
     workflow = workflow_with_project
     workflow._workflow_config = workflow_config
     tools_registry = MagicMock(spec=ToolsRegistry)
-    checkpointer = MagicMock()
 
-    workflow._compile("Test goal", tools_registry, checkpointer)
+    workflow._compile("Test goal", tools_registry, mock_checkpointer)
 
     assert tools_registry.toolset.called
 
@@ -1049,6 +1049,7 @@ async def test_compile_with_tools_override_and_flow_config(
     mock_get_tools,
     mock_duo_workflow_service_container,
     flow_type: GLReportingEventContext,
+    mock_checkpointer,
 ):
     mock_get_tools.return_value = ["default_tool1", "default_tool2"]
 
@@ -1058,7 +1059,6 @@ async def test_compile_with_tools_override_and_flow_config(
 
     tools_registry = MagicMock()
     tools_registry.toolset.return_value = mock_agents_toolset
-    checkpointer = MagicMock()
 
     user = CloudConnectorUser(
         authenticated=True,
@@ -1079,7 +1079,7 @@ async def test_compile_with_tools_override_and_flow_config(
     mock_graph = MagicMock()
     mock_state_graph.return_value = mock_graph
 
-    workflow._compile("Test goal", tools_registry, checkpointer)
+    workflow._compile("Test goal", tools_registry, mock_checkpointer)
 
     tools_registry.toolset.assert_called_once_with(["tool1", "tool2"])
     mock_get_tools.assert_not_called()
@@ -1089,7 +1089,7 @@ async def test_compile_with_tools_override_and_flow_config(
 @patch.object(Workflow, "_get_tools")
 @patch("duo_workflow_service.components.tools_registry.ToolsRegistry.toolset")
 async def test_compile_without_overrides(
-    mock_toolset, mock_get_tools, workflow_with_project
+    mock_toolset, mock_get_tools, workflow_with_project, mock_checkpointer
 ):
     mock_get_tools.return_value = ["default_tool1", "default_tool2"]
 
@@ -1099,9 +1099,8 @@ async def test_compile_without_overrides(
 
     tools_registry = MagicMock()
     tools_registry.toolset.return_value = mock_agents_toolset
-    checkpointer = MagicMock()
 
-    workflow_with_project._compile("Test goal", tools_registry, checkpointer)
+    workflow_with_project._compile("Test goal", tools_registry, mock_checkpointer)
 
     # Verify _get_tools was called since no tools_override
     mock_get_tools.assert_called_once()

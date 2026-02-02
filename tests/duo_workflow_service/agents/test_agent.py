@@ -186,7 +186,7 @@ Human message"""
             assert len(result["ui_chat_log"]) == 1
             assert result["ui_chat_log"][0]["message_type"] == MessageTypeEnum.AGENT
             assert result["ui_chat_log"][0]["content"] == expected_content
-            assert result["ui_chat_log"][0]["message_id"].startswith("run--")
+            assert result["ui_chat_log"][0]["message_id"].startswith("lc_run--")
         else:
             assert len(result["ui_chat_log"]) == 0
 
