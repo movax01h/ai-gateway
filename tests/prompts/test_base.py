@@ -10,7 +10,7 @@ import pytest
 from anthropic import APITimeoutError, AsyncAnthropic
 from gitlab_cloud_connector import GitLabUnitPrimitive, WrongUnitPrimitives
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
-from langchain_core.messages.ai import UsageMetadata
+from langchain_core.messages.ai import InputTokenDetails, UsageMetadata
 from langchain_core.prompt_values import ChatPromptValue
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 from langchain_core.runnables import Runnable, RunnableConfig
@@ -40,6 +40,7 @@ from ai_gateway.prompts.config.models import (
 )
 from ai_gateway.prompts.typing import TypeModelFactory, TypePromptTemplateFactory
 from ai_gateway.vendor.langchain_litellm.litellm import ChatLiteLLM
+from lib.internal_events.context import InternalEventAdditionalProperties
 from tests.conftest import FakeModel
 
 
@@ -54,7 +55,7 @@ def mock_watch_fixture() -> Generator[mock.MagicMock, None, None]:
         yield mock_watch
 
 
-class TestPrompt:  # pylint: disable=too-many-public-methods
+class TestPrompt:
     # editorconfig-checker-disable
     @pytest.fixture(autouse=True)
     def mock_fs(self, fs: FakeFilesystem):
@@ -203,9 +204,7 @@ configurable_unit_primitives:
         assert mock_logger.info.mock_calls[0] == expected_call
 
         mock_watch.assert_called_with(
-            stream=False,
-            unit_primitives=prompt.unit_primitives,
-            internal_event_client=prompt.internal_event_client,
+            stream=False, unit_primitives=prompt.unit_primitives
         )
 
     @pytest.mark.asyncio
@@ -243,9 +242,7 @@ configurable_unit_primitives:
         assert mock_logger.info.mock_calls[0] == expected_call
 
         mock_watch.assert_called_with(
-            stream=False,
-            unit_primitives=prompt.unit_primitives,
-            internal_event_client=prompt.internal_event_client,
+            stream=False, unit_primitives=prompt.unit_primitives
         )
 
     @pytest.mark.asyncio
@@ -282,9 +279,7 @@ configurable_unit_primitives:
         assert response == model_response
 
         mock_watch.assert_called_with(
-            stream=True,
-            unit_primitives=prompt.unit_primitives,
-            internal_event_client=prompt.internal_event_client,
+            stream=True, unit_primitives=prompt.unit_primitives
         )
 
         mock_watcher.afinish.assert_awaited_once()
@@ -331,149 +326,268 @@ configurable_unit_primitives:
         assert response == model_response
 
         mock_watch.assert_called_with(
-            stream=True,
-            unit_primitives=prompt.unit_primitives,
-            internal_event_client=prompt.internal_event_client,
+            stream=True, unit_primitives=prompt.unit_primitives
         )
 
         mock_watcher.afinish.assert_awaited_once()
 
     @pytest.mark.asyncio
-    @mock.patch("ai_gateway.prompts.base.get_request_logger")
-    @pytest.mark.parametrize("runnable_config", [None, RunnableConfig(callbacks=None)])
-    async def test_atransform(
-        self,
-        mock_get_logger: mock.Mock,
-        runnable_config: Optional[RunnableConfig],
-        mock_watch: mock.Mock,
-        prompt: Prompt,
-        model_response: str,
-    ):
-        response = ""
-
-        mock_watcher = mock_watch.return_value.__enter__.return_value
-        mock_logger = mock.MagicMock()
-        mock_get_logger.return_value = mock_logger
-
-        async def input():
-            yield {"name": "Duo", "content": "What's up?"}
-
-        async for c in prompt.atransform(input(), runnable_config):
-            response += str(c.content)
-
-            # Make sure we don't finish prematurely
-            mock_watcher.afinish.assert_not_awaited()
-
-        expected_call = mock.call(
-            "Performing LLM request",
-            prompt="System: Hi, I'm Duo\nHuman: What's up?",
-        )
-        assert mock_logger.info.mock_calls[0] == expected_call
-
-        assert response == model_response
-
-        mock_watch.assert_called_with(
-            stream=True,
-            unit_primitives=prompt.unit_primitives,
-            internal_event_client=prompt.internal_event_client,
-        )
-
-        mock_watcher.afinish.assert_awaited_once()
-
-    @pytest.mark.asyncio
-    @mock.patch("ai_gateway.prompts.base.get_request_logger")
     @pytest.mark.parametrize(
-        "prompt_template", [{"with_messages_placeholder": True}], indirect=True
+        ("usage_metadata", "internal_event_extra", "expected_additional_properties"),
+        [
+            (
+                UsageMetadata(
+                    input_tokens=1,
+                    output_tokens=2,
+                    total_tokens=3,
+                    input_token_details=InputTokenDetails(
+                        audio=0, cache_creation=0, cache_read=0
+                    ),
+                ),
+                {},
+                InternalEventAdditionalProperties(
+                    label="cache_details",
+                    property=None,
+                    value=None,
+                    cache_read=0,
+                    cache_creation=0,
+                    ephemeral_5m_input_tokens=0,
+                    ephemeral_1h_input_tokens=0,
+                ),
+            ),
+            (
+                UsageMetadata(
+                    input_tokens=1,
+                    output_tokens=2,
+                    total_tokens=3,
+                    input_token_details=InputTokenDetails(
+                        audio=0,
+                        cache_creation=0,
+                        cache_read=0,
+                        ephemeral_5m_input_tokens=10,  # type: ignore[typeddict-unknown-key]
+                    ),
+                ),
+                {"test_key": "test_value"},
+                InternalEventAdditionalProperties(
+                    label="cache_details",
+                    property=None,
+                    value=None,
+                    cache_read=0,
+                    cache_creation=0,
+                    ephemeral_5m_input_tokens=10,
+                    ephemeral_1h_input_tokens=0,
+                    test_key="test_value",
+                ),
+            ),
+            (
+                UsageMetadata(
+                    input_tokens=1,
+                    output_tokens=2,
+                    total_tokens=3,
+                    input_token_details=InputTokenDetails(
+                        audio=0,
+                        cache_creation=0,
+                        cache_read=0,
+                        ephemeral_1h_input_tokens=25,  # type: ignore[typeddict-unknown-key]
+                    ),
+                ),
+                {},
+                InternalEventAdditionalProperties(
+                    label="cache_details",
+                    property=None,
+                    value=None,
+                    cache_read=0,
+                    cache_creation=0,
+                    ephemeral_5m_input_tokens=0,
+                    ephemeral_1h_input_tokens=25,
+                ),
+            ),
+            (
+                UsageMetadata(
+                    input_tokens=1,
+                    output_tokens=2,
+                    total_tokens=3,
+                    input_token_details=InputTokenDetails(
+                        audio=0,
+                        cache_creation=5,
+                        cache_read=15,
+                        ephemeral_5m_input_tokens=10,
+                        ephemeral_1h_input_tokens=25,  # type: ignore[typeddict-unknown-key]
+                    ),
+                ),
+                {},
+                InternalEventAdditionalProperties(
+                    label="cache_details",
+                    property=None,
+                    value=None,
+                    cache_read=15,
+                    cache_creation=5,
+                    ephemeral_5m_input_tokens=10,
+                    ephemeral_1h_input_tokens=25,
+                ),
+            ),
+        ],
     )
-    async def test_atransform_with_messages_placeholder(
-        self,
-        mock_get_logger: mock.Mock,
-        mock_watch: mock.Mock,
-        prompt: Prompt,
-        model_response: str,
-    ):
-        response = ""
-
-        mock_watcher = mock_watch.return_value.__enter__.return_value
-        mock_logger = mock.MagicMock()
-        mock_get_logger.return_value = mock_logger
-
-        async def input():
-            yield {
-                "name": "Duo",
-                "content": "What's up?",
-                "messages": [
-                    AIMessage(content="Fine, you?"),
-                    HumanMessage(content="Good."),
-                ],
-            }
-
-        async for c in prompt.atransform(input()):
-            response += str(c.content)
-
-            # Make sure we don't finish prematurely
-            mock_watcher.afinish.assert_not_awaited()
-
-        expected_call = mock.call(
-            "Performing LLM request",
-            prompt="System: Hi, I'm Duo\nHuman: What's up?\nAI: Fine, you?\nHuman: Good.",
-        )
-        assert mock_logger.info.mock_calls[0] == expected_call
-
-        assert response == model_response
-
-        mock_watch.assert_called_with(
-            stream=True,
-            unit_primitives=prompt.unit_primitives,
-            internal_event_client=prompt.internal_event_client,
-        )
-
-        mock_watcher.afinish.assert_awaited_once()
-
-    @pytest.mark.asyncio
     async def test_ainvoke_model_instrumentator_callbacks(
         self,
         mock_watch: mock.Mock,
+        internal_event_client: mock.Mock,
         prompt: Prompt,
         usage_metadata: UsageMetadata,
+        expected_additional_properties: InternalEventAdditionalProperties,
     ):
         mock_watcher = mock_watch.return_value.__enter__.return_value
 
-        with self._mock_usage_metadata(prompt.model_name, usage_metadata):
+        prompt.internal_event_client = internal_event_client
+
+        with (
+            self._mock_usage_metadata(prompt.model_name, usage_metadata),
+            capture_logs() as cap_logs,
+        ):
             result = await prompt.ainvoke({"name": "Duo", "content": "What's up?"})
 
         mock_watcher.register_message.assert_called_once_with(result)
 
-        mock_watcher.register_token_usage.assert_called_once_with(
-            prompt.model_name, usage_metadata, prompt.internal_event_extra
+        _assert_usage_metadata_handling(
+            mock_watcher,
+            internal_event_client,
+            prompt,
+            usage_metadata,
+            cap_logs,
+            expected_additional_properties,
         )
 
     @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        ("usage_metadata", "expected_additional_properties"),
+        [
+            (
+                UsageMetadata(
+                    input_tokens=1,
+                    output_tokens=2,
+                    total_tokens=3,
+                    input_token_details=InputTokenDetails(
+                        audio=0, cache_creation=0, cache_read=0
+                    ),
+                ),
+                InternalEventAdditionalProperties(
+                    label="cache_details",
+                    property=None,
+                    value=None,
+                    cache_read=0,
+                    cache_creation=0,
+                    ephemeral_5m_input_tokens=0,
+                    ephemeral_1h_input_tokens=0,
+                ),
+            ),
+            (
+                UsageMetadata(
+                    input_tokens=1,
+                    output_tokens=2,
+                    total_tokens=3,
+                    input_token_details=InputTokenDetails(
+                        audio=0,
+                        cache_creation=0,
+                        cache_read=0,
+                        ephemeral_5m_input_tokens=8,  # type: ignore[typeddict-unknown-key]
+                    ),
+                ),
+                InternalEventAdditionalProperties(
+                    label="cache_details",
+                    property=None,
+                    value=None,
+                    cache_read=0,
+                    cache_creation=0,
+                    ephemeral_5m_input_tokens=8,
+                    ephemeral_1h_input_tokens=0,
+                ),
+            ),
+        ],
+    )
     async def test_astream_model_instrumentator_callbacks(
         self,
         mock_watch: mock.Mock,
+        internal_event_client: mock.Mock,
         prompt: Prompt,
         usage_metadata: UsageMetadata,
+        expected_additional_properties: InternalEventAdditionalProperties,
     ):
         mock_watcher = mock_watch.return_value.__enter__.return_value
 
-        with self._mock_usage_metadata(prompt.model_name, usage_metadata):
+        prompt.internal_event_client = internal_event_client
+
+        with (
+            self._mock_usage_metadata(prompt.model_name, usage_metadata),
+            capture_logs() as cap_logs,
+        ):
             async for message in prompt.astream(
                 {"name": "Duo", "content": "What's up?"}
             ):
                 mock_watcher.register_message.assert_any_call(message)
 
-        mock_watcher.register_token_usage.assert_called_once_with(
-            prompt.model_name, usage_metadata, prompt.internal_event_extra
+        _assert_usage_metadata_handling(
+            mock_watcher,
+            internal_event_client,
+            prompt,
+            usage_metadata,
+            cap_logs,
+            expected_additional_properties,
         )
 
     @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        ("usage_metadata", "expected_additional_properties"),
+        [
+            (
+                UsageMetadata(
+                    input_tokens=1,
+                    output_tokens=2,
+                    total_tokens=3,
+                    input_token_details=InputTokenDetails(
+                        audio=0, cache_creation=0, cache_read=0
+                    ),
+                ),
+                InternalEventAdditionalProperties(
+                    label="cache_details",
+                    property=None,
+                    value=None,
+                    cache_read=0,
+                    cache_creation=0,
+                    ephemeral_5m_input_tokens=0,
+                    ephemeral_1h_input_tokens=0,
+                ),
+            ),
+            (
+                UsageMetadata(
+                    input_tokens=1,
+                    output_tokens=2,
+                    total_tokens=3,
+                    input_token_details=InputTokenDetails(
+                        audio=0,
+                        cache_creation=0,
+                        cache_read=0,
+                        ephemeral_5m_input_tokens=8,  # type: ignore[typeddict-unknown-key]
+                    ),
+                ),
+                InternalEventAdditionalProperties(
+                    label="cache_details",
+                    property=None,
+                    value=None,
+                    cache_read=0,
+                    cache_creation=0,
+                    ephemeral_5m_input_tokens=8,
+                    ephemeral_1h_input_tokens=0,
+                ),
+            ),
+        ],
+    )
     async def test_atransform_model_instrumentator_callbacks(
         self,
         mock_watch: mock.Mock,
         internal_event_client: mock.Mock,
         prompt: Prompt,
         usage_metadata: UsageMetadata,
+        expected_additional_properties: InternalEventAdditionalProperties,
     ):
         mock_watcher = mock_watch.return_value.__enter__.return_value
 
@@ -482,12 +596,99 @@ configurable_unit_primitives:
         async def input():
             yield {"name": "Duo", "content": "What's up?"}
 
-        with self._mock_usage_metadata(prompt.model_name, usage_metadata):
+        with (
+            self._mock_usage_metadata(prompt.model_name, usage_metadata),
+            capture_logs() as cap_logs,
+        ):
             async for message in prompt.atransform(input()):
                 mock_watcher.register_message.assert_any_call(message)
 
-        mock_watcher.register_token_usage.assert_called_once_with(
-            prompt.model_name, usage_metadata, prompt.internal_event_extra
+        _assert_usage_metadata_handling(
+            mock_watcher,
+            internal_event_client,
+            prompt,
+            usage_metadata,
+            cap_logs,
+            expected_additional_properties,
+        )
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        ("usage_metadata", "expected_additional_properties"),
+        [
+            (
+                UsageMetadata(
+                    input_tokens=1,
+                    output_tokens=2,
+                    total_tokens=3,
+                    input_token_details=InputTokenDetails(
+                        audio=0, cache_creation=4, cache_read=0
+                    ),
+                ),
+                InternalEventAdditionalProperties(
+                    label="cache_details",
+                    property=None,
+                    value=None,
+                    cache_read=0,
+                    cache_creation=4,
+                    ephemeral_5m_input_tokens=0,
+                    ephemeral_1h_input_tokens=0,
+                ),
+            ),
+            (
+                UsageMetadata(
+                    input_tokens=4,
+                    output_tokens=6,
+                    total_tokens=3,
+                    input_token_details=InputTokenDetails(
+                        audio=0,
+                        cache_creation=5,
+                        cache_read=0,
+                        ephemeral_1h_input_tokens=3,  # type: ignore[typeddict-unknown-key]
+                    ),
+                ),
+                InternalEventAdditionalProperties(
+                    label="cache_details",
+                    property=None,
+                    value=None,
+                    cache_read=0,
+                    cache_creation=5,
+                    ephemeral_5m_input_tokens=0,
+                    ephemeral_1h_input_tokens=3,
+                ),
+            ),
+        ],
+    )
+    async def test_astream_handle_usage_metadata_with_cache_control(
+        self,
+        mock_watch: mock.Mock,
+        internal_event_client: mock.Mock,
+        prompt: Prompt,
+        usage_metadata: UsageMetadata,
+        expected_additional_properties: InternalEventAdditionalProperties,
+    ):
+        mock_watcher = mock_watch.return_value.__enter__.return_value
+
+        prompt.internal_event_client = internal_event_client
+
+        with (
+            self._mock_usage_metadata(prompt.model_name, usage_metadata),
+            capture_logs() as cap_logs,
+        ):
+            # Consume stream with cache control for Anthropic
+            async for _ in prompt.astream(
+                {"name": "Duo", "content": "What's up?"},
+                cache_control={"type": "ephemeral"},
+            ):
+                pass
+
+        _assert_usage_metadata_handling(
+            mock_watcher,
+            internal_event_client,
+            prompt,
+            usage_metadata,
+            cap_logs,
+            expected_additional_properties,
         )
 
     @pytest.mark.asyncio
@@ -505,37 +706,6 @@ configurable_unit_primitives:
         prompt.internal_event_client = internal_event_client
 
         iterator = prompt.astream({"name": "Duo", "content": "What's up?"})
-
-        # While the stream is being consumed, token usage is not registered yet
-        await anext(iterator)
-        mock_watcher.register_token_usage.assert_not_called()
-
-        # When the last message is yield, but before iteration stops, token usage is registered
-        await anext(iterator)
-        mock_watcher.register_token_usage.assert_called_once()
-
-        # Iteration ends
-        with pytest.raises(StopAsyncIteration):
-            await anext(iterator)
-
-    @pytest.mark.asyncio
-    @pytest.mark.parametrize(
-        ("model_response", "usage_metadata"),
-        [
-            # first yield for the single character, second yield empty content end of stream
-            ("a", UsageMetadata(input_tokens=1, output_tokens=1, total_tokens=2)),
-        ],
-    )
-    async def test_atransform_usage_metadata_before_stream_end(
-        self, mock_watch: mock.Mock, internal_event_client: mock.Mock, prompt: Prompt
-    ):
-        mock_watcher = mock_watch.return_value.__enter__.return_value
-        prompt.internal_event_client = internal_event_client
-
-        async def input():
-            yield {"name": "Duo", "content": "What's up?"}
-
-        iterator = prompt.atransform(input())
 
         # While the stream is being consumed, token usage is not registered yet
         await anext(iterator)
@@ -636,6 +806,46 @@ configurable_unit_primitives:
         kwargs = mock_bind_tool.call_args.kwargs
 
         assert kwargs["tool_choice"] == tool_choice
+
+
+def _assert_usage_metadata_handling(
+    mock_watcher: mock.Mock,
+    internal_event_client: mock.Mock,
+    prompt: Prompt,
+    usage_metadata: UsageMetadata,
+    cap_logs,
+    additional_properties: Optional[InternalEventAdditionalProperties] = None,
+):
+    mock_watcher.register_token_usage.assert_called_once_with(
+        prompt.model_name, usage_metadata
+    )
+    for unit_primitive in prompt.unit_primitives:
+
+        internal_event_client.track_event.assert_any_call(
+            f"token_usage_{unit_primitive}",
+            category="ai_gateway.prompts.base",
+            input_tokens=usage_metadata["input_tokens"],
+            output_tokens=usage_metadata["output_tokens"],
+            total_tokens=usage_metadata["total_tokens"],
+            model_engine=prompt.llm_provider,
+            model_name=prompt.model_name,
+            model_provider=prompt.model_provider,
+            additional_properties=additional_properties,
+        )
+
+    assert cap_logs[0]["model_engine"] == prompt.llm_provider
+    assert cap_logs[0]["model_name"] == prompt.model_name
+    assert cap_logs[0]["model_provider"] == prompt.model_provider
+    assert cap_logs[0]["input_tokens"] == usage_metadata["input_tokens"]
+    assert cap_logs[0]["output_tokens"] == usage_metadata["output_tokens"]
+    assert cap_logs[0]["total_tokens"] == usage_metadata["total_tokens"]
+    assert (
+        cap_logs[0]["cache_read"] == usage_metadata["input_token_details"]["cache_read"]
+    )
+    assert (
+        cap_logs[0]["cache_creation"]
+        == usage_metadata["input_token_details"]["cache_creation"]
+    )
 
 
 @pytest.mark.skipif(

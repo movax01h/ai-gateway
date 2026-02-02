@@ -1,23 +1,15 @@
-from unittest.mock import ANY, AsyncMock
+from unittest.mock import ANY
 
 import fastapi
-import litellm
 import pytest
 from starlette.datastructures import URL
 
-from ai_gateway.proxy.clients.base import (
-    BaseProxyClient,
-    current_proxy_client,
-    litellm_async_success_callback,
-)
-from lib.billing_events import BillingEvent
+from ai_gateway.proxy.clients.base import BaseProxyClient
+from ai_gateway.proxy.clients.token_usage import TokenUsage
 
 
 class TestProxyClient(BaseProxyClient):
     __test__ = False
-
-    def _base_url(self):
-        return "https://api.example.com"
 
     def _allowed_upstream_paths(self):
         return ["/valid_path"]
@@ -40,103 +32,25 @@ class TestProxyClient(BaseProxyClient):
     def _extract_stream_flag(self, upstream_path, json_body):
         return json_body.get("stream", False)
 
+    def _extract_token_usage(self, upstream_path, json_body):
+        usage = json_body.get("usage", {})
+        return TokenUsage(
+            input_tokens=usage.get("input_tokens", 0),
+            output_tokens=usage.get("output_tokens", 0),
+        )
+
     def _update_headers_to_upstream(self, headers):
         headers.update({"X-Test-Header": "test"})
 
 
-@pytest.fixture(name="proxy_client")
-def proxy_client_fixture(
-    async_client_factory,
-    limits,
-    internal_event_client,
-    billing_event_client,
-):
-    """Fixture providing a TestProxyClient instance."""
-    return TestProxyClient(
-        async_client_factory(), limits, internal_event_client, billing_event_client
-    )
-
-
 @pytest.mark.asyncio
-async def test_valid_proxy_request(
-    proxy_client,
-    request_factory,
-):
+async def test_valid_proxy_request(async_client_factory, limits, request_factory):
+    proxy_client = TestProxyClient(async_client_factory(), limits)
+
     response = await proxy_client.proxy(request_factory())
 
     assert isinstance(response, fastapi.Response)
     assert response.status_code == 200
-
-
-@pytest.mark.asyncio
-async def test_valid_proxy_request_billing_event_callback(
-    request_factory,
-    proxy_client,
-    billing_event_client,
-):
-    """Test that the litellm callback tracks billing events with correct parameters."""
-
-    # Set up the proxy client context and watcher
-    current_proxy_client.set(proxy_client)
-    proxy_client.user = request_factory().user
-
-    # Create a mock watcher
-    mock_watcher = AsyncMock()
-    proxy_client.watcher = mock_watcher
-
-    # Simulate a completion object from litellm
-    completion_obj = {
-        "usage": {"prompt_tokens": 10, "completion_tokens": 5},
-        "model": "test-model",
-    }
-
-    # Call the callback
-    await litellm_async_success_callback(
-        _kwargs={},
-        completion_obj=completion_obj,
-        _start_time=0,
-        _end_time=1,
-    )
-
-    # Verify billing event was tracked with correct parameters
-    billing_event_client.track_billing_event.assert_called_once()
-    call_args = billing_event_client.track_billing_event.call_args
-
-    # Check positional arguments
-    assert call_args[0][0] == proxy_client.user  # user argument
-
-    # Check keyword arguments
-    assert call_args[1]["event"] == BillingEvent.AIGW_PROXY_USE
-    assert call_args[1]["category"] == "ai_gateway.proxy.clients.base"
-    assert call_args[1]["unit_of_measure"] == "request"
-    assert call_args[1]["quantity"] == 1
-    assert isinstance(call_args[1]["metadata"], dict)
-    assert "llm_operations" in call_args[1]["metadata"]
-    assert "feature_qualified_name" in call_args[1]["metadata"]
-    assert "feature_ai_catalog_item" in call_args[1]["metadata"]
-
-
-def test_litellm_callback_registered():
-    assert litellm_async_success_callback in litellm._async_success_callback
-
-
-def test_current_proxy_client_context_var_set_on_init(
-    async_client_factory,
-    limits,
-    internal_event_client,
-    billing_event_client,
-):
-    """Test that current_proxy_client context var is set when initializing a proxy client."""
-    # Reset context var to None before test
-    current_proxy_client.set(None)
-
-    # Create a proxy client
-    proxy_client = TestProxyClient(
-        async_client_factory(), limits, internal_event_client, billing_event_client
-    )
-
-    # Verify the context var is set to the proxy client instance
-    assert current_proxy_client.get() is proxy_client
 
 
 @pytest.mark.asyncio
@@ -153,11 +67,14 @@ def test_current_proxy_client_context_var_set_on_init(
     ],
 )
 async def test_request_url(
-    proxy_client,
+    async_client_factory,
+    limits,
     request_factory,
     request_url,
     expected_error,
 ):
+    proxy_client = TestProxyClient(async_client_factory(), limits)
+
     if expected_error:
         with pytest.raises(fastapi.HTTPException, match=expected_error):
             await proxy_client.proxy(request_factory(request_url=request_url))
@@ -176,11 +93,14 @@ async def test_request_url(
     ],
 )
 async def test_request_body(
-    proxy_client,
+    async_client_factory,
+    limits,
     request_factory,
     request_body,
     expected_error,
 ):
+    proxy_client = TestProxyClient(async_client_factory(), limits)
+
     if expected_error:
         with pytest.raises(fastapi.HTTPException, match=expected_error):
             await proxy_client.proxy(request_factory(request_body=request_body))
@@ -200,11 +120,14 @@ async def test_request_body(
     ],
 )
 async def test_model_names(
-    proxy_client,
+    async_client_factory,
+    limits,
     request_factory,
     request_body,
     expected_error,
 ):
+    proxy_client = TestProxyClient(async_client_factory(), limits)
+
     if expected_error:
         with pytest.raises(fastapi.HTTPException, match=expected_error):
             await proxy_client.proxy(request_factory(request_body=request_body))
@@ -241,21 +164,16 @@ async def test_upstream_headers(
     request_factory,
     request_headers,
     expected_headers,
-    internal_event_client,
-    billing_event_client,
 ):
     async_client = async_client_factory()
-    proxy_client = TestProxyClient(
-        async_client, limits, internal_event_client, billing_event_client
-    )
+    proxy_client = TestProxyClient(async_client, limits)
 
     await proxy_client.proxy(request_factory(request_headers=request_headers))
 
-    async_client.request.assert_called_once_with(
-        method="POST",
-        url=URL("https://api.example.com/valid_path"),
+    async_client.build_request.assert_called_once_with(
+        "POST",
+        URL("/valid_path"),
         headers=expected_headers,
-        params={},
         json={"model": "model1"},
     )
 
@@ -274,21 +192,17 @@ async def test_streaming(
     request_factory,
     request_body,
     expected_streaming,
-    internal_event_client,
-    billing_event_client,
 ):
     async_client = async_client_factory()
-    proxy_client = TestProxyClient(
-        async_client, limits, internal_event_client, billing_event_client
-    )
+    proxy_client = TestProxyClient(async_client, limits)
 
     response = await proxy_client.proxy(request_factory(request_body=request_body))
 
+    async_client.send.assert_called_once_with(ANY, stream=expected_streaming)
+
     if expected_streaming:
-        async_client.send.assert_called_once_with(ANY, stream=expected_streaming)
         assert isinstance(response, fastapi.responses.StreamingResponse)
     else:
-        async_client.request.assert_called_once
         assert isinstance(response, fastapi.Response)
 
 
@@ -316,13 +230,9 @@ async def test_downstream_headers(
     request_factory,
     response_headers,
     expected_headers,
-    internal_event_client,
-    billing_event_client,
 ):
     async_client = async_client_factory(response_headers=response_headers)
-    proxy_client = TestProxyClient(
-        async_client, limits, internal_event_client, billing_event_client
-    )
+    proxy_client = TestProxyClient(async_client, limits)
 
     response = await proxy_client.proxy(request_factory())
 

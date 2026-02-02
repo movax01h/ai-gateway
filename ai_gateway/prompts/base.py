@@ -42,6 +42,7 @@ from ai_gateway.prompts.config.models import ModelClassProvider, TypeModelParams
 from ai_gateway.prompts.typing import Model, TypeModelFactory, TypePromptTemplateFactory
 from ai_gateway.structured_logging import get_request_logger
 from lib.internal_events.client import InternalEventsClient
+from lib.internal_events.context import InternalEventAdditionalProperties
 
 __all__ = [
     "Prompt",
@@ -273,9 +274,7 @@ class Prompt(RunnableBinding[Any, BaseMessage]):
     ) -> BaseMessage:
         with (
             self.instrumentator.watch(
-                stream=False,
-                unit_primitives=self.unit_primitives,
-                internal_event_client=self.internal_event_client,
+                stream=False, unit_primitives=self.unit_primitives
             ) as watcher,
             get_usage_metadata_callback() as cb,
         ):
@@ -301,9 +300,7 @@ class Prompt(RunnableBinding[Any, BaseMessage]):
         # See https://pylint.readthedocs.io/en/latest/user_guide/messages/warning/contextmanager-generator-missing-cleanup.html
         with (
             self.instrumentator.watch(
-                stream=True,
-                unit_primitives=self.unit_primitives,
-                internal_event_client=self.internal_event_client,
+                stream=True, unit_primitives=self.unit_primitives
             ) as watcher,
             get_usage_metadata_callback() as cb,
         ):
@@ -341,26 +338,15 @@ class Prompt(RunnableBinding[Any, BaseMessage]):
         # See note in `astream` about the cleanup pylint suppression
         with (  # pylint: disable=contextmanager-generator-missing-cleanup
             self.instrumentator.watch(
-                stream=True,
-                unit_primitives=self.unit_primitives,
-                internal_event_client=self.internal_event_client,
+                stream=True, unit_primitives=self.unit_primitives
             ) as watcher,
             get_usage_metadata_callback() as cb,
         ):
-            # See `astream` comments for why we yield off by one
-            previous_item: BaseMessage | None = None
-
             async for item in super().atransform(input, config, **kwargs):
                 watcher.register_message(item)
-
-                if previous_item:
-                    yield previous_item
-                previous_item = item
+                yield item
 
             self.handle_usage_metadata(watcher, cb.usage_metadata)
-
-            if previous_item:
-                yield previous_item
 
             await watcher.afinish()
 
@@ -370,7 +356,58 @@ class Prompt(RunnableBinding[Any, BaseMessage]):
         usage_metadata: dict[str, UsageMetadata],
     ) -> None:
         for model, usage in usage_metadata.items():
-            watcher.register_token_usage(model, usage, self.internal_event_extra)
+            watcher.register_token_usage(model, usage)
+
+            # Access langchain usage_metadata for optional cache
+            # specific token details
+            input_token_details = usage.get("input_token_details", {})
+            cache_creation = input_token_details.get("cache_creation", 0)
+            cache_read = input_token_details.get("cache_read", 0)
+
+            # Optional event tracking for TTL prompt caching
+            ephemeral_5m_input_tokens = input_token_details.get(
+                "ephemeral_5m_input_tokens", 0
+            )
+            ephemeral_1h_input_tokens = input_token_details.get(
+                "ephemeral_1h_input_tokens", 0
+            )
+
+            token_usage_data = {
+                "model_engine": self.llm_provider,
+                "model_name": model,
+                "model_provider": self.model_provider,
+                "input_tokens": usage["input_tokens"],
+                "output_tokens": usage["output_tokens"],
+                "total_tokens": usage["total_tokens"],
+            }
+
+            token_cache_usage_data = {
+                "cache_read": cache_read,
+                "cache_creation": cache_creation,
+                "ephemeral_5m_input_tokens": ephemeral_5m_input_tokens,
+                "ephemeral_1h_input_tokens": ephemeral_1h_input_tokens,
+            }
+
+            log.info(
+                "LLM call finished with token usage",
+                **token_usage_data,
+                **token_cache_usage_data,
+            )
+
+            for unit_primitive in self.unit_primitives:
+                additional_properties = InternalEventAdditionalProperties(
+                    label="cache_details",
+                    **token_cache_usage_data,
+                    **self.internal_event_extra,
+                )
+
+                if self.internal_event_client:
+                    self.internal_event_client.track_event(
+                        f"token_usage_{unit_primitive}",
+                        category=__name__,
+                        additional_properties=additional_properties,
+                        **token_usage_data,
+                    )
 
     @classmethod
     def _build_prompt_template(cls, config: PromptConfig) -> Runnable[Any, PromptValue]:

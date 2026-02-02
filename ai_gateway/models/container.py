@@ -53,18 +53,21 @@ def _init_async_fireworks_client(
 
 def _init_anthropic_proxy_client() -> httpx.AsyncClient:
     return httpx.AsyncClient(
+        base_url="https://api.anthropic.com/",
         timeout=httpx.Timeout(connect=10.0, read=90.0, write=30.0, pool=30.0),
     )
 
 
-def _init_vertex_ai_proxy_client() -> httpx.AsyncClient:
+def _init_vertex_ai_proxy_client(endpoint: str) -> httpx.AsyncClient:
     return httpx.AsyncClient(
+        base_url=f"https://{endpoint}/",
         timeout=httpx.Timeout(connect=10.0, read=90.0, write=30.0, pool=30.0),
     )
 
 
 def _init_openai_proxy_client() -> httpx.AsyncClient:
     return httpx.AsyncClient(
+        base_url="https://api.openai.com/",
         timeout=httpx.Timeout(connect=10.0, read=90.0, write=30.0, pool=30.0),
     )
 
@@ -75,8 +78,6 @@ class ContainerModels(containers.DeclarativeContainer):
 
     config = providers.Configuration(strict=True)
     integrations = providers.DependenciesContainer()
-    internal_event = providers.DependenciesContainer()
-    billing_event = providers.DependenciesContainer()
 
     _mock_selector = providers.Callable(
         lambda mock_model_responses: "mocked" if mock_model_responses else "original",
@@ -100,7 +101,10 @@ class ContainerModels(containers.DeclarativeContainer):
 
     http_client_anthropic_proxy = providers.Singleton(_init_anthropic_proxy_client)
 
-    http_client_vertex_ai_proxy = providers.Singleton(_init_vertex_ai_proxy_client)
+    http_client_vertex_ai_proxy = providers.Singleton(
+        _init_vertex_ai_proxy_client,
+        endpoint=config.vertex_text_model.endpoint,
+    )
 
     http_client_openai_proxy = providers.Singleton(_init_openai_proxy_client)
 
@@ -198,8 +202,6 @@ class ContainerModels(containers.DeclarativeContainer):
             AnthropicProxyClient,
             client=http_client_anthropic_proxy,
             limits=providers.Factory(ConfigModelLimits, config.model_engine_limits),
-            internal_event_client=internal_event.client,
-            billing_event_client=billing_event.client,
         ),
         mocked=providers.Factory(mock.ProxyClient),
     )
@@ -209,12 +211,9 @@ class ContainerModels(containers.DeclarativeContainer):
         original=providers.Factory(
             VertexAIProxyClient,
             client=http_client_vertex_ai_proxy,
-            endpoint=config.vertex_text_model.endpoint,
             project=config.vertex_text_model.project,
             location=config.vertex_text_model.location,
             limits=providers.Factory(ConfigModelLimits, config.model_engine_limits),
-            internal_event_client=internal_event.client,
-            billing_event_client=billing_event.client,
         ),
         mocked=providers.Factory(mock.ProxyClient),
     )
@@ -225,8 +224,6 @@ class ContainerModels(containers.DeclarativeContainer):
             OpenAIProxyClient,
             client=http_client_openai_proxy,
             limits=providers.Factory(ConfigModelLimits, config.model_engine_limits),
-            internal_event_client=internal_event.client,
-            billing_event_client=billing_event.client,
         ),
         mocked=providers.Factory(mock.ProxyClient),
     )

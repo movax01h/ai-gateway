@@ -9,6 +9,7 @@ from ai_gateway.api.middleware.route import has_sufficient_usage_quota
 from ai_gateway.api.v1.proxy.request import (
     EXTENDED_FEATURE_CATEGORIES_FOR_PROXY_ENDPOINTS,
     authorize_with_unit_primitive_header,
+    track_billing_event,
     verify_project_namespace_metadata,
 )
 from ai_gateway.async_dependency_resolver import (
@@ -35,6 +36,7 @@ router = APIRouter()
 
 @router.post(f"/{KindModelProvider.VERTEX_AI.value}" + "/{path:path}")
 @authorize_with_unit_primitive_header()
+@track_billing_event
 @verify_project_namespace_metadata()
 @feature_categories(EXTENDED_FEATURE_CATEGORIES_FOR_PROXY_ENDPOINTS)
 @has_sufficient_usage_quota(
