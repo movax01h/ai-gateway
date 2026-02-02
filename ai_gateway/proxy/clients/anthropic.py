@@ -7,7 +7,6 @@ from fastapi import status
 from ai_gateway.model_selection import ModelSelectionConfig
 from ai_gateway.models.base import KindModelProvider
 from ai_gateway.proxy.clients.base import BaseProxyClient
-from ai_gateway.proxy.clients.token_usage import TokenUsage
 
 
 class AnthropicProxyClient(BaseProxyClient):
@@ -27,6 +26,9 @@ class AnthropicProxyClient(BaseProxyClient):
     ALLOWED_HEADERS_TO_DOWNSTREAM = ["content-type", "anthropic-beta"]
 
     PROVIDER_NAME = "anthropic"
+
+    def _base_url(self) -> str:
+        return "https://api.anthropic.com"
 
     def _allowed_upstream_paths(self) -> list[str]:
         return self.ALLOWED_UPSTREAM_PATHS
@@ -55,41 +57,6 @@ class AnthropicProxyClient(BaseProxyClient):
 
     def _extract_stream_flag(self, upstream_path: str, json_body: typing.Any) -> bool:
         return json_body.get("stream", False)
-
-    def _extract_token_usage(
-        self, upstream_path: str, json_body: typing.Any
-    ) -> TokenUsage:
-        """Extract token usage from Anthropic response.
-
-        Anthropic response format:
-        {
-            "usage": {
-                "input_tokens": 10,
-                "output_tokens": 20,
-                "cache_creation_input_tokens": 5,
-                "cache_read_input_tokens": 3
-            }
-        }
-        """
-        try:
-            if not isinstance(json_body, dict):
-                raise ValueError("Response body must be a dictionary")
-
-            usage = json_body.get("usage", {})
-            if not isinstance(usage, dict):
-                raise ValueError("Usage field must be a dictionary")
-
-            return TokenUsage(
-                input_tokens=usage.get("input_tokens", 0),
-                output_tokens=usage.get("output_tokens", 0),
-                cache_creation_input_tokens=usage.get("cache_creation_input_tokens", 0),
-                cache_read_input_tokens=usage.get("cache_read_input_tokens", 0),
-            )
-        except (KeyError, TypeError, ValueError, AttributeError):
-            raise fastapi.HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail="Failed to extract token usage from response",
-            )
 
     def _update_headers_to_upstream(self, headers_to_upstream: typing.Any) -> None:
         try:

@@ -5,14 +5,21 @@ import pytest
 from fastapi import status
 
 from ai_gateway.proxy.clients.openai import OpenAIProxyClient
-from ai_gateway.proxy.clients.token_usage import TokenUsage
 
 
 @pytest.fixture(name="openai_client")
-def openai_client_fixture(async_client_factory, limits, monkeypatch):
+def openai_client_fixture(
+    async_client_factory,
+    limits,
+    monkeypatch,
+    internal_event_client,
+    billing_event_client,
+):
     """Fixture to create an OpenAIProxyClient instance."""
     monkeypatch.setenv("OPENAI_API_KEY", "test")
-    return OpenAIProxyClient(async_client_factory(), limits)
+    return OpenAIProxyClient(
+        async_client_factory(), limits, internal_event_client, billing_event_client
+    )
 
 
 @pytest.fixture(name="request_params")
@@ -198,12 +205,16 @@ async def test_missing_api_key(
     request_params,
     request_headers,
     monkeypatch,
+    internal_event_client,
+    billing_event_client,
 ):
     """Test request with missing API key."""
     # Remove the API key from environment
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
 
-    openai_client_local = OpenAIProxyClient(async_client_factory(), limits)
+    openai_client_local = OpenAIProxyClient(
+        async_client_factory(), limits, internal_event_client, billing_event_client
+    )
 
     with pytest.raises(fastapi.HTTPException) as excinfo:
         await openai_client_local.proxy(
@@ -279,248 +290,3 @@ async def test_invalid_json_body(
 
     assert excinfo.value.status_code == status.HTTP_400_BAD_REQUEST
     assert excinfo.value.detail == "Invalid JSON"
-
-
-class TestOpenAITokenUsageExtraction:
-
-    @pytest.fixture(name="openai_client_for_usage")
-    def openai_usage_client(self, async_client_factory, limits, monkeypatch):
-        """Fixture to create an OpenAIProxyClient instance for usage tests."""
-        monkeypatch.setenv("OPENAI_API_KEY", "test")
-        return OpenAIProxyClient(async_client_factory(), limits)
-
-    @pytest.mark.parametrize(
-        (
-            "endpoint,response_body,expected_input,expected_output,"
-            "expected_total,expected_cache_read,expected_cache_creation"
-        ),
-        [
-            (
-                "/v1/chat/completions",
-                {
-                    "id": "chatcmpl-123",
-                    "object": "chat.completion",
-                    "usage": {
-                        "prompt_tokens": 10,
-                        "completion_tokens": 20,
-                        "total_tokens": 30,
-                    },
-                },
-                10,
-                20,
-                30,
-                0,
-                0,
-            ),
-            (
-                "/v1/chat/completions",
-                {"usage": {"prompt_tokens": 15, "completion_tokens": 25}},
-                15,
-                25,
-                40,
-                0,
-                0,
-            ),
-            (
-                "/v1/chat/completions",
-                {"id": "chatcmpl-123", "object": "chat.completion"},
-                0,
-                0,
-                0,
-                0,
-                0,
-            ),
-            (
-                "/v1/chat/completions",
-                {
-                    "usage": {
-                        "prompt_tokens": 0,
-                        "completion_tokens": 0,
-                        "total_tokens": 0,
-                    }
-                },
-                0,
-                0,
-                0,
-                0,
-                0,
-            ),
-            (
-                "/v1/chat/completions",
-                {"usage": {"prompt_tokens": 100}},
-                100,
-                0,
-                100,
-                0,
-                0,
-            ),
-            (
-                "/v1/completions",
-                {
-                    "id": "cmpl-123",
-                    "object": "text_completion",
-                    "usage": {
-                        "prompt_tokens": 5,
-                        "completion_tokens": 10,
-                        "total_tokens": 15,
-                    },
-                },
-                5,
-                10,
-                15,
-                0,
-                0,
-            ),
-            (
-                "/v1/embeddings",
-                {
-                    "object": "list",
-                    "data": [],
-                    "usage": {"prompt_tokens": 8, "total_tokens": 8},
-                },
-                8,
-                0,
-                8,
-                0,
-                0,
-            ),
-            (
-                "/v1/chat/completions",
-                {
-                    "usage": {
-                        "prompt_tokens": 100,
-                        "completion_tokens": 50,
-                        "total_tokens": 150,
-                        "prompt_tokens_details": {"cached_tokens": 30},
-                    }
-                },
-                100,
-                50,
-                150,
-                30,
-                0,
-            ),
-            (
-                "/v1/chat/completions",
-                {
-                    "usage": {
-                        "prompt_tokens": 100,
-                        "completion_tokens": 50,
-                        "total_tokens": 150,
-                    }
-                },
-                100,
-                50,
-                150,
-                0,
-                0,
-            ),
-            (
-                "/v1/chat/completions",
-                {
-                    "usage": {
-                        "prompt_tokens": 100,
-                        "completion_tokens": 50,
-                        "prompt_tokens_details": {},
-                    }
-                },
-                100,
-                50,
-                150,
-                0,
-                0,
-            ),
-            (
-                "/v1/chat/completions",
-                {
-                    "usage": {
-                        "prompt_tokens": 100,
-                        "completion_tokens": 50,
-                        "prompt_tokens_details": "invalid",
-                    }
-                },
-                100,
-                50,
-                150,
-                0,
-                0,
-            ),
-            (
-                "/v1/chat/completions",
-                {
-                    "id": "chatcmpl-CdJZaJTA6UgqxTVQIWH3N8itNUq9Z",
-                    "object": "chat.completion",
-                    "model": "gpt-5-2025-08-07",
-                    "usage": {
-                        "prompt_tokens": 38,
-                        "completion_tokens": 1024,
-                        "total_tokens": 1062,
-                        "prompt_tokens_details": {"cached_tokens": 0},
-                        "completion_tokens_details": {
-                            "reasoning_tokens": 1024,
-                            "accepted_prediction_tokens": 0,
-                            "rejected_prediction_tokens": 0,
-                        },
-                    },
-                },
-                38,
-                1024,
-                1062,
-                0,
-                0,
-            ),
-        ],
-        ids=[
-            "Complete response with all fields",
-            "Missing total_tokens (auto-computed)",
-            "Missing usage field entirely",
-            "Zero tokens",
-            "Partial fields (only prompt_tokens)",
-            "Completions endpoint",
-            "Embeddings endpoint (no completion tokens)",
-            "With cached tokens",
-            "Without cached tokens",
-            "Empty prompt_tokens_details",
-            "Invalid prompt_tokens_details (ignored gracefully)",
-            "With reasoning tokens (gpt-5 model)",
-        ],
-    )
-    def test_extract_token_usage(
-        self,
-        openai_client_for_usage,
-        endpoint,
-        response_body,
-        expected_input,
-        expected_output,
-        expected_total,
-        expected_cache_read,
-        expected_cache_creation,
-    ):
-        usage = openai_client_for_usage._extract_token_usage(endpoint, response_body)
-
-        assert isinstance(usage, TokenUsage)
-        assert usage.input_tokens == expected_input
-        assert usage.output_tokens == expected_output
-        assert usage.total_tokens == expected_total
-        assert usage.cache_read_input_tokens == expected_cache_read
-        assert usage.cache_creation_input_tokens == expected_cache_creation
-
-    @pytest.mark.parametrize(
-        "response_body",
-        [
-            None,
-            {"usage": None},
-            {"usage": "invalid"},
-        ],
-    )
-    def test_extract_token_usage_invalid_response(
-        self, openai_client_for_usage, response_body
-    ):
-        """Test extracting token usage from invalid response raises exception."""
-        with pytest.raises(fastapi.HTTPException) as excinfo:
-            openai_client_for_usage._extract_token_usage(
-                "/v1/chat/completions", response_body
-            )
-
-        assert excinfo.value.status_code == status.HTTP_500_INTERNAL_SERVER_ERROR
-        assert "Failed to extract token usage" in excinfo.value.detail

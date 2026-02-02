@@ -4,6 +4,7 @@ from unittest import mock
 import pytest
 from gitlab_cloud_connector import GitLabUnitPrimitive
 from langchain_core.messages import AIMessage
+from langchain_core.messages.ai import InputTokenDetails, UsageMetadata
 from structlog.testing import capture_logs
 
 from ai_gateway.instrumentators.model_requests import (
@@ -15,6 +16,8 @@ from ai_gateway.instrumentators.model_requests import (
     llm_operations,
     token_usage,
 )
+from lib.internal_events.client import InternalEventsClient
+from lib.internal_events.context import InternalEventAdditionalProperties
 
 DEFAULT_ARGS = {
     "model_engine": "test_engine",
@@ -32,15 +35,24 @@ DEFAULT_ARGS = {
 }
 
 
+@pytest.fixture(name="unit_primitives")
+def unit_primitives_fixture() -> list[GitLabUnitPrimitive] | None:
+    return None
+
+
 @pytest.fixture(name="container")
-def container_fixture() -> ModelRequestInstrumentator.WatchContainer:
+def container_fixture(
+    unit_primitives: list[GitLabUnitPrimitive] | None,
+    internal_event_client: InternalEventsClient,
+) -> ModelRequestInstrumentator.WatchContainer:
     return ModelRequestInstrumentator.WatchContainer(
         llm_provider="test_llm_provider",
         model_provider="test_provider",
         labels={"model_engine": "test_engine", "model_name": "test_model"},
         streaming=False,
         limits=None,
-        unit_primitives=None,
+        unit_primitives=unit_primitives,
+        internal_event_client=internal_event_client,
     )
 
 
@@ -135,6 +147,65 @@ class TestWatchContainer:
                 "completion_tokens": 2,
             },
         ]
+
+    @pytest.mark.parametrize(
+        "unit_primitives",
+        [[GitLabUnitPrimitive.DUO_CHAT, GitLabUnitPrimitive.CODE_SUGGESTIONS]],
+    )
+    def test_register_token_usage_track_usage(
+        self, container, unit_primitives, internal_event_client
+    ):
+        with capture_logs() as cap_logs:
+            container.register_token_usage(
+                "test_model",
+                UsageMetadata(
+                    input_tokens=1,
+                    output_tokens=2,
+                    total_tokens=3,
+                    input_token_details=InputTokenDetails(
+                        cache_read=4,
+                        cache_creation=5,
+                        ephemeral_5m_input_tokens=6,
+                        ephemeral_1h_input_tokens=7,
+                    ),
+                ),
+                {"extra_key": "val"},
+            )
+
+        assert cap_logs[0] == {
+            **container.labels,
+            "event": "LLM call finished with token usage",
+            "log_level": "info",
+            "model_provider": container.model_provider,
+            "input_tokens": 1,
+            "output_tokens": 2,
+            "total_tokens": 3,
+            "cache_read": 4,
+            "cache_creation": 5,
+            "ephemeral_5m_input_tokens": 6,
+            "ephemeral_1h_input_tokens": 7,
+        }
+
+        for unit_primitive in unit_primitives:
+            internal_event_client.track_event.assert_any_call(
+                f"token_usage_{unit_primitive}",
+                category="ai_gateway.instrumentators.model_requests",
+                input_tokens=1,
+                output_tokens=2,
+                total_tokens=3,
+                **container.labels,
+                model_provider=container.model_provider,
+                additional_properties=InternalEventAdditionalProperties(
+                    label="cache_details",
+                    property=None,
+                    value=None,
+                    cache_read=4,
+                    cache_creation=5,
+                    ephemeral_5m_input_tokens=6,
+                    ephemeral_1h_input_tokens=7,
+                    extra_key="val",
+                ),
+            )
 
     def test_register_token_usage_without_init(self, container):
         container.register_token_usage(
