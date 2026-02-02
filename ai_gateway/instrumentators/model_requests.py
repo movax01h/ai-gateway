@@ -2,7 +2,7 @@ import time
 from contextlib import contextmanager
 from contextvars import ContextVar
 from enum import Enum
-from typing import List, Optional
+from typing import Any, List, Optional
 
 import structlog
 from gitlab_cloud_connector import GitLabUnitPrimitive
@@ -14,6 +14,8 @@ from prometheus_client import Counter, Gauge, Histogram
 from ai_gateway.api.feature_category import current_feature_category
 from ai_gateway.config import ModelLimits
 from ai_gateway.tracking.errors import log_exception
+from lib.internal_events.client import InternalEventsClient
+from lib.internal_events.context import InternalEventAdditionalProperties
 from lib.language_server import LanguageServerVersion
 
 # Error type constants
@@ -235,7 +237,7 @@ def get_llm_operations() -> LlmOperations | None:
 
 
 class ModelRequestInstrumentator:
-    class WatchContainer:
+    class WatchContainer:  # pylint: disable=too-many-instance-attributes
         def __init__(
             self,
             llm_provider: str,
@@ -244,6 +246,7 @@ class ModelRequestInstrumentator:
             limits: Optional[ModelLimits],
             streaming: bool,
             unit_primitives: Optional[List[GitLabUnitPrimitive]] = None,
+            internal_event_client: Optional[InternalEventsClient] = None,
         ):
             self.llm_provider = llm_provider
             self.model_provider = model_provider
@@ -254,6 +257,7 @@ class ModelRequestInstrumentator:
             self.streaming = streaming
             self.start_time = None
             self.unit_primitives = unit_primitives
+            self.internal_event_client = internal_event_client
             self.finish_reason = "unknown"
 
         def start(self):
@@ -320,12 +324,18 @@ class ModelRequestInstrumentator:
 
             self.error_type = status_code_map.get(status_code, ERROR_TYPE_OTHER)
 
-        def register_token_usage(self, model: str, usage: UsageMetadata):
+        def register_token_usage(
+            self,
+            model: str,
+            usage: UsageMetadata,
+            internal_event_extra: dict[str, Any] | None = None,
+        ):
             token_usage_labels = {**self._detail_labels(), "model_name": model}
 
             _update_token_usage(model, usage)
 
             self._update_llm_operations(model, usage)
+            self._track_usage(model, usage, internal_event_extra or {})
 
             INFERENCE_INPUT_TOKENS.labels(**token_usage_labels).inc(
                 usage["input_tokens"]
@@ -368,6 +378,59 @@ class ModelRequestInstrumentator:
 
         async def afinish(self):
             self.finish()
+
+        def _track_usage(
+            self, model: str, usage: UsageMetadata, internal_event_extra: dict[str, Any]
+        ):
+            # Access langchain usage_metadata for optional cache
+            # specific token details
+            input_token_details = usage.get("input_token_details", {})
+            cache_creation = input_token_details.get("cache_creation", 0)
+            cache_read = input_token_details.get("cache_read", 0)
+
+            # Optional event tracking for TTL prompt caching
+            ephemeral_5m_input_tokens = input_token_details.get(
+                "ephemeral_5m_input_tokens", 0
+            )
+            ephemeral_1h_input_tokens = input_token_details.get(
+                "ephemeral_1h_input_tokens", 0
+            )
+
+            token_usage_data = {
+                **self.labels,
+                "model_name": model,
+                "model_provider": self.model_provider,
+                "input_tokens": usage["input_tokens"],
+                "output_tokens": usage["output_tokens"],
+                "total_tokens": usage["total_tokens"],
+            }
+
+            token_cache_usage_data = {
+                "cache_read": cache_read,
+                "cache_creation": cache_creation,
+                "ephemeral_5m_input_tokens": ephemeral_5m_input_tokens,
+                "ephemeral_1h_input_tokens": ephemeral_1h_input_tokens,
+            }
+
+            logger.info(
+                "LLM call finished with token usage",
+                **token_usage_data,
+                **token_cache_usage_data,
+            )
+
+            if self.internal_event_client and self.unit_primitives:
+                for unit_primitive in self.unit_primitives:
+                    additional_properties = InternalEventAdditionalProperties(
+                        label="cache_details",
+                        **token_cache_usage_data,
+                        **internal_event_extra,
+                    )
+                    self.internal_event_client.track_event(
+                        f"token_usage_{unit_primitive}",
+                        category=__name__,
+                        additional_properties=additional_properties,
+                        **token_usage_data,
+                    )
 
         def _update_llm_operations(self, model: str, usage: UsageMetadata):
             current_llm_operations = llm_operations.get()
@@ -418,7 +481,7 @@ class ModelRequestInstrumentator:
         self.model_provider = model_provider
 
     @contextmanager
-    def watch(self, stream=False, unit_primitives=None):
+    def watch(self, stream=False, unit_primitives=None, internal_event_client=None):
         watcher = ModelRequestInstrumentator.WatchContainer(
             llm_provider=self.llm_provider,
             model_provider=self.model_provider,
@@ -426,6 +489,7 @@ class ModelRequestInstrumentator:
             limits=self.limits,
             streaming=stream,
             unit_primitives=unit_primitives,
+            internal_event_client=internal_event_client,
         )
         watcher.start()
         try:
