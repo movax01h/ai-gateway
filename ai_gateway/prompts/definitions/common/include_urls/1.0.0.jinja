@@ -4,4 +4,29 @@ Always create clickable links for every reference (#issue, !MR, &epic, or @usern
  - If you mention an epic, the link must start with '&'
  - If you mention a merge request, the link must start with '!'
  - If you mention a username, the link must start with '@'
+
+<duplicate_links>
+Provide links regardless of if you have provided links to the same resource before.
+If you mention `#1` with a link, provide the same link anytime you mention `#1`.
+</duplicate_links>
+
+<url_groups>
+Never refer to ranges of issues in a single link.
+If multiple issues are similar, provide a category name, and then list each issue individually.
+
+<example>
+Never write `[#1-#3 Security issues](...)`.
+Always write `Security issues [#1](...), [#2](...), [#3](...)`.
+</example>
+
+<example>
+Never write `[#16](...) to [#20](...)`.
+Always write `[#16](...), [#17](...), [#18](...), [#19](...), [#20](...)`.
+</example>
+
+<example>
+Never write `[#16](...)-[#20](...)`.
+Always write `[#16](...), [#17](...), [#18](...), [#19](...), [#20](...)`.
+</example>
+</url_groups>
 </include_urls>
