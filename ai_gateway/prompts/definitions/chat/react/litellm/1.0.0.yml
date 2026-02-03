@@ -15,6 +15,6 @@ prompt_template:
   assistant: |
     {% include 'chat/react/assistant_mistral/1.0.0.jinja' %}
 params:
-  timeout: 60
+  timeout: 30
   stop:
     - "Observation:"
