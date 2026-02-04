@@ -1,0 +1,21 @@
+---
+name: Codestral 22B Code Completions
+model:
+  params:
+    model_class_provider: litellm_completion
+    completion_type: fim
+    fim_format: "</s>[SUFFIX]{suffix}[PREFIX]{prefix}[MIDDLE]"
+    custom_llm_provider: fireworks_ai
+    temperature: 0.32
+    max_tokens: 64
+unit_primitives:
+  - complete_code
+prompt_template:
+  user: "{{prefix}}"
+params:
+  timeout: 60
+  stop:
+    - "[PREFIX]"
+    - "[MIDDLE]"
+    - "[SUFFIX]"
+    - "</s>[SUFFIX]"

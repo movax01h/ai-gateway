@@ -16,7 +16,9 @@ from ai_gateway.model_metadata import (
 )
 from ai_gateway.prompts.base import BasePromptRegistry, Prompt
 from ai_gateway.prompts.bind_tools_cache import BindToolsCacheProtocol
+from ai_gateway.prompts.completion import completion_prompt_template_factory
 from ai_gateway.prompts.config import BaseModelConfig, ModelClassProvider, PromptConfig
+from ai_gateway.prompts.config.models import CompletionLiteLLMParams
 from ai_gateway.prompts.typing import TypeModelFactory, TypePromptTemplateFactory
 from lib.internal_events.client import InternalEventsClient
 from lib.internal_events.context import current_event_context
@@ -383,6 +385,10 @@ class LocalPromptRegistry(BasePromptRegistry):
         )
 
         prompt_template_override = self.prompt_template_factories.get(prompt_id, None)
+        if not prompt_template_override and isinstance(
+            config.model.params, CompletionLiteLLMParams
+        ):
+            prompt_template_override = completion_prompt_template_factory
         prompt_template_factory: TypePromptTemplateFactory | None
         if isinstance(prompt_template_override, str):
             prompt_template_factory = cast(

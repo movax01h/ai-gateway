@@ -9,8 +9,7 @@ from dependency_injector import containers
 from fastapi import status
 from fastapi.testclient import TestClient
 from gitlab_cloud_connector import CloudConnectorUser, UserClaims
-from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
-from langchain_core.prompt_values import ChatPromptValue
+from langchain_core.messages import AIMessage
 from snowplow_tracker import Snowplow
 from starlette.datastructures import CommaSeparatedStrings
 from structlog.testing import capture_logs
@@ -20,7 +19,6 @@ from ai_gateway.api.v2 import api_router
 from ai_gateway.api.v2.code.completions import _track_code_suggestions_event
 from ai_gateway.model_selection import LLMDefinition
 from ai_gateway.models.base_chat import Message, Role
-from ai_gateway.models.mock import FakeModel
 from ai_gateway.tracking.container import ContainerTracking
 from ai_gateway.tracking.instrumentator import SnowplowInstrumentator
 from ai_gateway.tracking.snowplow import SnowplowEvent, SnowplowEventContext
@@ -108,7 +106,7 @@ def mock_post_processor_fixture():
 def mock_prompt_ainvoke_fixture():
     """Mock Prompt.ainvoke to return test completions."""
 
-    with patch.object(FakeModel, "ainvoke") as mock:
+    with patch("ai_gateway.prompts.base.Prompt.ainvoke") as mock:
         mock.return_value = AIMessage(content="whatever")
         yield mock
 
@@ -1293,7 +1291,7 @@ class TestCodeCompletions:
             or "whatever"
         )
 
-    @pytest.mark.parametrize("mock_model_responses", [True])
+    @pytest.mark.parametrize("mock_model_responses", [False])
     @pytest.mark.parametrize(
         ("cache_header_value", "expected_using_cache"),
         [
@@ -1306,11 +1304,11 @@ class TestCodeCompletions:
     def test_fireworks_prompt_cache_behavior(
         self,
         mock_client: Mock,
+        mock_litellm_atext_completion: Mock,
         cache_header_value: str,
         expected_using_cache: str,
-        mock_prompt_ainvoke: Mock,
     ):
-        """Test that X-Gitlab-Model-Prompt-Cache-Enabled header affects using_cache in Fireworks calls."""
+        """Test that X-Gitlab-Model-Prompt-Cache-Enabled affects Fireworks cache control."""
         params = {
             "prompt_version": 2,
             "project_path": "gitlab-org/gitlab",
@@ -1342,21 +1340,31 @@ class TestCodeCompletions:
 
         assert response.status_code == 200
 
-        # Verify that the prompt was called with the correct using_cache parameter
-        mock_prompt_ainvoke.assert_called_once()
-        call_kwargs = mock_prompt_ainvoke.call_args.kwargs
-        assert call_kwargs["using_cache"] == expected_using_cache
+        mock_litellm_atext_completion.assert_called_once()
+        call_kwargs = mock_litellm_atext_completion.call_args.kwargs
+        if expected_using_cache == "False":
+            assert call_kwargs["prompt_cache_max_len"] == 0
+        else:
+            assert "prompt_cache_max_len" not in call_kwargs
 
     @pytest.mark.parametrize("mock_model_responses", [True])
     @pytest.mark.parametrize(
-        ("gcp_location", "model_details", "expected_model", "expected_content"),
+        (
+            "gcp_location",
+            "model_details",
+            "expected_model",
+            "expected_content",
+        ),
         [
+            # Codestral FIM models use the new fim_fireworks prompt which passes only prefix
+            # as user message. The FIM formatting is done internally by CompletionLiteLLM.
             (
                 "asia-mock-location",
                 {"model_provider": "vertex-ai", "model_name": "codestral-2501"},
                 "codestral-2501",
-                "<s>[SUFFIX]\n[PREFIX]foo",
+                "foo",
             ),
+            # Qwen models still use the chat-based prompt with system message
             (
                 "asia-mock-location",
                 {},
@@ -1369,6 +1377,7 @@ class TestCodeCompletions:
         self,
         mock_client: Mock,
         mock_litellm_acompletion: Mock,
+        mock_litellm_atext_completion: Mock,
         model_details: Dict[str, str],
         expected_model: str,
         expected_content: str,
@@ -1389,29 +1398,42 @@ class TestCodeCompletions:
 
         self._send_code_completions_request(mock_client, params)
 
-        mock_prompt_ainvoke.assert_called_once_with(
-            ChatPromptValue(
-                messages=[
-                    SystemMessage(
-                        content="As a python code completion assistant that generates only python syntax, your responsibility is to fill in the precise missing python code that seamlessly bridges a provided 'prefix' and 'suffix'.\n\n### Requirements:\n1. Complete the functionality with exact python code adhering to the given prefix and suffix.\n2. Provide only the missing code snippet essential for functionality, strictly conforming to python syntax.\n3. Exclude repetition, formatting, or explanatory text.\n\n- prefix: Code before the missing part.\n- suffix: Code continuing after the gap.\n\nCRITICAL INSTRUCTIONS:\n\n1. Output only the requested code.\n2. Exclusion of all non-code content.\n3. Concise and deployable code.\n4. Return an empty response if necessary.\n\nRespond exclusively with code—avoid adding any human-readable content intros, explanations, closings, markdown formatting or instructions.",
-                        additional_kwargs={},
-                        response_metadata={},
-                    ),
-                    HumanMessage(
-                        content=expected_content,
-                        additional_kwargs={},
-                        response_metadata={},
-                    ),
-                ]
-            ),
-            {"tags": [], "metadata": {}, "callbacks": ANY, "configurable": {}},
-            stop=ANY,
-            timeout=60.0,
-            model=expected_model,
-            api_key="mock_fireworks_key",
-            api_base="https://fireworks.endpoint",
-            using_cache="False",
-        )
+        expected_input = {
+            "prefix": "foo",
+            "suffix": "\n",
+            "file_name": "main.py",
+            "language": "python",
+        }
+
+        mock_prompt_ainvoke.assert_called_once_with(expected_input)
+
+    @pytest.mark.parametrize("mock_model_responses", [False])
+    def test_codestral_uses_text_completion_api(
+        self,
+        mock_client: Mock,
+        mock_litellm_acompletion: Mock,
+        mock_litellm_atext_completion: Mock,
+        mock_post_processor: Mock,
+    ):
+        params = {
+            "prompt_version": 2,
+            "project_path": "gitlab-org/gitlab",
+            "project_id": 278964,
+            "current_file": {
+                "file_name": "main.py",
+                "content_above_cursor": "foo",
+                "content_below_cursor": "\n",
+            },
+            "model_provider": "vertex-ai",
+            "model_name": "codestral-2501",
+        }
+
+        response = self._send_code_completions_request(mock_client, params)
+
+        assert response.status_code == 200
+        mock_litellm_atext_completion.assert_called()
+        mock_litellm_acompletion.assert_not_called()
+        mock_post_processor.assert_called()
 
     @pytest.mark.asyncio
     @capture_validation_errors()

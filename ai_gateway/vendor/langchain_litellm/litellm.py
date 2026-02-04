@@ -92,6 +92,11 @@ from litellm.utils import get_valid_models
 from pydantic import BaseModel, Field, model_validator
 from typing_extensions import is_typeddict
 
+from ai_gateway.models.fireworks_retry import (
+    DEFAULT_FIREWORKS_ERRORS,
+    create_fireworks_retry_decorator,
+)
+
 logger = logging.getLogger(__name__)
 
 
@@ -125,45 +130,11 @@ def _create_fireworks_retry_decorator(
         Union[AsyncCallbackManagerForLLMRun, CallbackManagerForLLMRun]
     ] = None,
 ) -> Callable[[Any], Any]:
-    """Returns a tenacity retry decorator with exponential backoff for Fireworks 503 errors.
-
-    Fireworks.ai instances may return 503 when becoming available. This decorator
-    implements exponential backoff to handle cold starts gracefully.
-
-    Configuration:
-    - Initial wait: 1 second
-    - Max wait: 10 seconds
-    - Total timeout: 120 seconds
-    - Backoff: Exponential (multiplier: 2)
-    """
-    import litellm
-    from tenacity import (
-        before_sleep_log,
-        retry,
-        retry_if_exception_type,
-        stop_after_delay,
-        wait_exponential,
+    """Returns a tenacity retry decorator with exponential backoff for Fireworks 503 errors."""
+    return create_fireworks_retry_decorator(
+        logger,
+        error_types=DEFAULT_FIREWORKS_ERRORS,
     )
-
-    errors = [
-        litellm.Timeout,
-        litellm.APIError,
-        litellm.APIConnectionError,
-        litellm.RateLimitError,
-        litellm.ServiceUnavailableError,  # 503 errors for Fireworks instance cold starts
-    ]
-
-    def _create_fireworks_retry_decorator_factory(f: Callable) -> Callable:
-        decorator = retry(
-            reraise=True,
-            stop=stop_after_delay(120),
-            wait=wait_exponential(multiplier=1, min=1, max=10),
-            retry=retry_if_exception_type(tuple(errors)),
-            before_sleep=before_sleep_log(logger, logging.WARNING),
-        )
-        return decorator(f)
-
-    return _create_fireworks_retry_decorator_factory
 
 
 def _convert_dict_to_message(_dict: Mapping[str, Any]) -> BaseMessage:

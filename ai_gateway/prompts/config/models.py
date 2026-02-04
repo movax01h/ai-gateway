@@ -1,7 +1,7 @@
 from enum import StrEnum
 from typing import Annotated, Literal, Mapping
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 __all__ = [
     "ModelClassProvider",
@@ -11,14 +11,22 @@ __all__ = [
     "ChatAnthropicParams",
     "ChatAmazonQParams",
     "ChatOpenAIParams",
+    "CompletionLiteLLMParams",
+    "CompletionType",
 ]
 
 
 class ModelClassProvider(StrEnum):
     LITE_LLM = "litellm"
+    LITE_LLM_COMPLETION = "litellm_completion"
     ANTHROPIC = "anthropic"
     AMAZON_Q = "amazon_q"
     OPENAI = "openai"
+
+
+class CompletionType(StrEnum):
+    FIM = "fim"
+    TEXT = "text"
 
 
 class BaseModelParams(BaseModel):
@@ -55,7 +63,24 @@ class ChatOpenAIParams(BaseModelParams):
     model_class_provider: Literal[ModelClassProvider.OPENAI]
 
 
+class CompletionLiteLLMParams(BaseModelParams):
+    model_class_provider: Literal[ModelClassProvider.LITE_LLM_COMPLETION]
+    completion_type: CompletionType
+    fim_format: str | None = None
+    custom_llm_provider: str | None = None
+
+    @model_validator(mode="after")
+    def validate_fim_format(self) -> "CompletionLiteLLMParams":
+        if self.completion_type == CompletionType.FIM and not self.fim_format:
+            raise ValueError("fim_format is required when completion_type is 'fim'")
+        return self
+
+
 TypeModelParams = Annotated[
-    ChatLiteLLMParams | ChatAnthropicParams | ChatAmazonQParams | ChatOpenAIParams,
+    ChatLiteLLMParams
+    | ChatAnthropicParams
+    | ChatAmazonQParams
+    | ChatOpenAIParams
+    | CompletionLiteLLMParams,
     Field(discriminator="model_class_provider"),
 ]
