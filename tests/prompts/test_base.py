@@ -31,7 +31,7 @@ from ai_gateway.model_metadata import (
 )
 from ai_gateway.model_selection import LLMDefinition, PromptParams
 from ai_gateway.models.v2.anthropic_claude import ChatAnthropic
-from ai_gateway.prompts import BasePromptRegistry, Prompt
+from ai_gateway.prompts import BasePromptCallbackHandler, BasePromptRegistry, Prompt
 from ai_gateway.prompts.config.base import PromptConfig
 from ai_gateway.prompts.config.models import (
     ChatAnthropicParams,
@@ -180,7 +180,7 @@ configurable_unit_primitives:
 
     @pytest.mark.asyncio
     @mock.patch("ai_gateway.prompts.base.get_request_logger")
-    @pytest.mark.parametrize("runnable_config", [None, RunnableConfig(callbacks=None)])
+    @pytest.mark.parametrize("runnable_config", [None, RunnableConfig(callbacks=[])])
     async def test_ainvoke(
         self,
         mock_get_logger: mock.Mock,
@@ -247,7 +247,7 @@ configurable_unit_primitives:
 
     @pytest.mark.asyncio
     @mock.patch("ai_gateway.prompts.base.get_request_logger")
-    @pytest.mark.parametrize("runnable_config", [None, RunnableConfig(callbacks=None)])
+    @pytest.mark.parametrize("runnable_config", [None, RunnableConfig(callbacks=[])])
     async def test_astream(
         self,
         mock_get_logger: mock.Mock,
@@ -1185,6 +1185,196 @@ class TestBaseRegistry:
         )
 
         assert result == prompt
+
+
+class TestPromptCallbacks:
+    """Test callback execution in Prompt class."""
+
+    @pytest.mark.asyncio
+    async def test_callbacks_executed_on_ainvoke(self, prompt: Prompt):
+        """Test that internal callbacks are executed during ainvoke."""
+        call_log = []
+
+        class TestCallback(BasePromptCallbackHandler):
+            async def on_before_llm_call(self):
+                call_log.append("ainvoke_callback")
+
+        # Set internal_callbacks directly on the prompt instance
+        prompt.internal_callbacks = [TestCallback()]
+
+        await prompt.ainvoke({"name": "Duo", "content": "What's up?"})
+
+        # Callback should have been executed
+        assert "ainvoke_callback" in call_log
+
+    @pytest.mark.asyncio
+    async def test_callbacks_executed_on_astream(self, prompt: Prompt):
+        """Test that internal callbacks are executed during astream."""
+        call_log = []
+
+        class TestCallback(BasePromptCallbackHandler):
+            async def on_before_llm_call(self):
+                call_log.append("astream_callback")
+
+        prompt.internal_callbacks = [TestCallback()]
+
+        async for _ in prompt.astream({"name": "Duo", "content": "What's up?"}):
+            pass
+
+        # Callback should have been executed
+        assert "astream_callback" in call_log
+
+    @pytest.mark.asyncio
+    async def test_multiple_callbacks_execution_order(self, prompt: Prompt):
+        """Test that multiple callbacks are executed in registration order."""
+        call_log = []
+
+        class Callback1(BasePromptCallbackHandler):
+            async def on_before_llm_call(self):
+                call_log.append("first")
+
+        class Callback2(BasePromptCallbackHandler):
+            async def on_before_llm_call(self):
+                call_log.append("second")
+
+        class Callback3(BasePromptCallbackHandler):
+            async def on_before_llm_call(self):
+                call_log.append("third")
+
+        prompt.internal_callbacks = [Callback1(), Callback2(), Callback3()]
+
+        await prompt.ainvoke({"name": "Duo", "content": "What's up?"})
+
+        # Callbacks should execute in order
+        assert call_log == ["first", "second", "third"]
+
+    @pytest.mark.asyncio
+    async def test_callback_exception_propagates(self, prompt: Prompt):
+        """Test that exceptions in callbacks are propagated and stop execution."""
+
+        class FailingCallback(BasePromptCallbackHandler):
+            async def on_before_llm_call(self):
+                raise RuntimeError("Callback error")
+
+        prompt.internal_callbacks = [FailingCallback()]
+
+        with pytest.raises(RuntimeError, match="Callback error"):
+            await prompt.ainvoke({"name": "Duo", "content": "What's up?"})
+
+    @pytest.mark.asyncio
+    async def test_callbacks_with_runnable_config(self, prompt: Prompt):
+        """Test that callbacks work correctly when RunnableConfig is provided."""
+        call_log = []
+
+        class TestCallback(BasePromptCallbackHandler):
+            async def on_before_llm_call(self):
+                call_log.append("config_callback")
+
+        prompt.internal_callbacks = [TestCallback()]
+
+        config = RunnableConfig(callbacks=[])
+        await prompt.ainvoke({"name": "Duo", "content": "What's up?"}, config)
+
+        # Callback should still execute
+        assert "config_callback" in call_log
+
+    @pytest.mark.asyncio
+    async def test_empty_callback_list(self, prompt: Prompt):
+        """Test that empty callback list doesn't cause errors."""
+        prompt.internal_callbacks = []
+
+        # Should execute without errors
+        result = await prompt.ainvoke({"name": "Duo", "content": "What's up?"})
+        assert result is not None
+
+    @pytest.mark.asyncio
+    async def test_callback_with_state(self, prompt: Prompt):
+        """Test that callbacks can maintain state across calls."""
+
+        class StatefulCallback(BasePromptCallbackHandler):
+            def __init__(self):
+                self.call_count = 0
+
+            async def on_before_llm_call(self):
+                self.call_count += 1
+
+        callback = StatefulCallback()
+        prompt.internal_callbacks = [callback]
+
+        await prompt.ainvoke({"name": "Duo", "content": "First call"})
+        assert callback.call_count == 1
+
+        await prompt.ainvoke({"name": "Duo", "content": "Second call"})
+        assert callback.call_count == 2
+
+    @pytest.mark.asyncio
+    async def test_callback_receives_context(self, prompt: Prompt):
+        """Test that callbacks can access prompt context."""
+        captured_data = {}
+
+        class ContextCallback(BasePromptCallbackHandler):
+            def __init__(self, prompt_instance: Prompt):
+                self.prompt = prompt_instance
+
+            async def on_before_llm_call(self):
+                captured_data["model_name"] = self.prompt.model_name
+                captured_data["llm_provider"] = self.prompt.llm_provider
+
+        prompt.internal_callbacks = [ContextCallback(prompt)]
+
+        await prompt.ainvoke({"name": "Duo", "content": "What's up?"})
+
+        assert "model_name" in captured_data
+        assert "llm_provider" in captured_data
+        assert captured_data["model_name"] == prompt.model_name
+        assert captured_data["llm_provider"] == prompt.llm_provider
+
+    @pytest.mark.asyncio
+    async def test_callbacks_execute_before_llm_call(self, prompt: Prompt):
+        """Test that callbacks execute before the actual LLM call."""
+        execution_order = []
+
+        class OrderTrackingCallback(BasePromptCallbackHandler):
+            async def on_before_llm_call(self):
+                execution_order.append("callback")
+
+        prompt.internal_callbacks = [OrderTrackingCallback()]
+
+        with mock.patch.object(FakeModel, "ainvoke") as mock_ainvoke:
+            mock_ainvoke.side_effect = lambda *args, **kwargs: (
+                execution_order.append("llm_call"),  # type: ignore[func-returns-value]
+                AIMessage(content="response"),
+            )[1]
+
+            await prompt.ainvoke({"name": "Duo", "content": "What's up?"})
+
+        # Callback should execute before LLM call
+        assert execution_order == ["callback", "llm_call"]
+
+    @pytest.mark.asyncio
+    async def test_multiple_callbacks_all_execute_on_exception(self, prompt: Prompt):
+        """Test that all callbacks execute even if one raises an exception."""
+        call_log = []
+
+        class FailingCallback(BasePromptCallbackHandler):
+            async def on_before_llm_call(self):
+                call_log.append("failing")
+                raise RuntimeError("Callback error")
+
+        class SuccessCallback(BasePromptCallbackHandler):
+            async def on_before_llm_call(self):
+                call_log.append("success")
+
+        # asyncio.gather will execute all callbacks concurrently
+        prompt.internal_callbacks = [SuccessCallback(), FailingCallback()]
+
+        with pytest.raises(RuntimeError, match="Callback error"):
+            await prompt.ainvoke({"name": "Duo", "content": "What's up?"})
+
+        # Both callbacks should have started execution
+        # (asyncio.gather runs them concurrently)
+        assert "success" in call_log
+        assert "failing" in call_log
 
 
 class TestValidateDefaultModels:
