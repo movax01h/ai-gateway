@@ -256,8 +256,8 @@ class LiteLlmChatModel(ChatModelBase):
         try:
             async for chunk in response:
                 yield TextGenModelChunk(text=(chunk.choices[0].delta.content or ""))
-        except Exception:
-            error_callback()
+        except Exception as ex:
+            error_callback(ex)
             raise
         finally:
             after_callback()
@@ -411,8 +411,8 @@ class LiteLlmTextGenModel(TextGenModelBase):
         try:
             async for chunk in response:
                 yield TextGenModelChunk(text=(chunk.choices[0].delta.content or ""))
-        except Exception:
-            error_callback()
+        except Exception as ex:
+            error_callback(ex)
             raise
         finally:
             after_callback()

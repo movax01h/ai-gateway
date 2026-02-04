@@ -1234,3 +1234,45 @@ class TestLiteLlmTextGenModel:
             mock_watch.assert_called_once_with(stream=True)
             watcher.register_error.assert_called_once()
             watcher.finish.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_generate_stream_instrumented_with_overloaded_error(
+        self, lite_llm_text_model
+    ):
+        """Test that overloaded errors during streaming are properly instrumented."""
+
+        class OverloadedError(Exception):
+            """Simulates LiteLLM MidStreamFallbackError with overloaded message."""
+
+        async def mock_stream(*_args, **_kwargs):
+            raise OverloadedError(
+                "litellm.MidStreamFallbackError: AnthropicError - Overloaded"
+            )
+            yield  # pylint: disable=unreachable
+
+        with (
+            patch("ai_gateway.models.litellm.acompletion") as mock_acompletion,
+            patch(
+                "ai_gateway.instrumentators.model_requests.ModelRequestInstrumentator.watch"
+            ) as mock_watch,
+        ):
+            watcher = Mock()
+            mock_watch.return_value.__enter__.return_value = watcher
+
+            mock_acompletion.side_effect = AsyncMock(side_effect=mock_stream)
+
+            response = await lite_llm_text_model.generate(
+                prefix="Test message", stream=True
+            )
+
+            with pytest.raises(OverloadedError):
+                _ = [item async for item in response]
+
+            mock_watch.assert_called_once_with(stream=True)
+            watcher.register_error.assert_called_once()
+            call_args = watcher.register_error.call_args
+            assert call_args is not None
+            passed_exception = call_args[0][0]
+            assert isinstance(passed_exception, OverloadedError)
+            assert "Overloaded" in str(passed_exception)
+            watcher.finish.assert_called_once()
