@@ -35,6 +35,7 @@ from duo_workflow_service.entities.state import (
     UiChatLog,
     WorkflowStatusEnum,
 )
+from duo_workflow_service.interceptors.route import support_self_hosted_billing
 from duo_workflow_service.tracking.errors import log_exception
 from duo_workflow_service.workflows.abstract_workflow import (
     AbstractWorkflow,
@@ -59,6 +60,7 @@ class UserDecision(StrEnum):
     REJECT = "rejection"
 
 
+@support_self_hosted_billing(class_schema="flow/v1")
 class Flow(AbstractWorkflow):
     _config: FlowConfig
     _flow_prompt_registry: InMemoryPromptRegistry | LocalPromptRegistry

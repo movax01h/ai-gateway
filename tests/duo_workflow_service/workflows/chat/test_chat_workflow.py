@@ -23,6 +23,9 @@ from duo_workflow_service.entities.state import (
     ApprovalStateRejection,
     ChatWorkflowState,
 )
+from duo_workflow_service.interceptors.route.usage_billing import (
+    PromptRegistrySelfHostedBillingSupport,
+)
 from duo_workflow_service.workflows.chat.workflow import (
     CHAT_GITLAB_MUTATION_TOOLS,
     CHAT_MUTATION_TOOLS,
@@ -33,6 +36,7 @@ from duo_workflow_service.workflows.chat.workflow import (
 )
 from duo_workflow_service.workflows.type_definitions import AdditionalContext
 from lib.events import GLReportingEventContext
+from lib.events.contextvar import self_hosted_dap_billing_enabled
 from lib.feature_flags import current_feature_flag_context
 
 

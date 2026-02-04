@@ -47,6 +47,7 @@ from lib.internal_events.context import InternalEventAdditionalProperties
 __all__ = [
     "Prompt",
     "BasePromptRegistry",
+    "BasePromptCallbackHandler",
     "jinja2_formatter",
     "prompt_template_to_messages",
 ]
@@ -106,6 +107,31 @@ class PromptLoggingHandler(BaseCallbackHandler):
         )
 
 
+class BasePromptCallbackHandler:
+    """Base class for defining custom prompt callbacks without LangChain dependencies.
+
+    This class provides a LangChain-agnostic interface for implementing callbacks.
+    Developers should extend this class to define custom callbacks outside of the prompt package,
+    avoiding the need to spread LangChain dependencies across the codebase.
+
+    Example:
+        class MyCustomCallback(BasePromptCallbackHandler):
+            async def on_before_llm_call(self):
+                # Custom logic before LLM call
+                print("About to call LLM")
+
+        # Register with a prompt
+        prompt.register_internal_callbacks([MyCustomCallback()])
+    """
+
+    async def on_before_llm_call(self):
+        """Called before an LLM request is made.
+
+        Override this method to implement custom logic that should execute before the LLM is invoked (e.g., logging,
+        metrics, billing tracking).
+        """
+
+
 class Prompt(RunnableBinding[Any, BaseMessage]):
     name: str
     llm_provider: str
@@ -116,6 +142,7 @@ class Prompt(RunnableBinding[Any, BaseMessage]):
     internal_event_client: Optional[InternalEventsClient] = None
     limits: Optional[ModelLimits] = None
     internal_event_extra: dict[str, Any] = {}
+    internal_callbacks: list[BasePromptCallbackHandler] = []
 
     def __init__(
         self,
@@ -278,6 +305,10 @@ class Prompt(RunnableBinding[Any, BaseMessage]):
             ) as watcher,
             get_usage_metadata_callback() as cb,
         ):
+            await asyncio.gather(
+                *[cb.on_before_llm_call() for cb in self.internal_callbacks]
+            )
+
             result = await super().ainvoke(
                 input,
                 config,
@@ -308,6 +339,10 @@ class Prompt(RunnableBinding[Any, BaseMessage]):
             # yield the last stream item _after_ that event. Otherwise we'd need to yield an extra event just for the
             # usage metadata. To do this, we yield with a 1-item offset.
             previous_item: BaseMessage | None = None
+
+            await asyncio.gather(
+                *[cb.on_before_llm_call() for cb in self.internal_callbacks]
+            )
 
             async for item in super().astream(
                 input,

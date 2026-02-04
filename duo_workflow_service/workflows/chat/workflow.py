@@ -30,6 +30,7 @@ from duo_workflow_service.entities.state import (
     UiChatLog,
     WorkflowStatusEnum,
 )
+from duo_workflow_service.interceptors.route import support_self_hosted_billing
 from duo_workflow_service.tracking.errors import log_exception
 from duo_workflow_service.workflows.abstract_workflow import (
     AbstractWorkflow,
@@ -128,6 +129,7 @@ CHAT_MUTATION_TOOLS = [
 RUN_COMMAND_TOOLS = ["run_command"]
 
 
+@support_self_hosted_billing(class_schema="legacy")
 class Workflow(AbstractWorkflow):
     _stream: bool = True
     _agent: ChatAgent

@@ -45,6 +45,7 @@ from duo_workflow_service.entities.agent_user_environment import (
     process_agent_user_environment,
     process_agents_dot_md,
 )
+from duo_workflow_service.interceptors.route import support_self_hosted_billing
 from duo_workflow_service.tools.handover import HandoverTool
 from duo_workflow_service.tracking.errors import log_exception
 from duo_workflow_service.workflows.abstract_workflow import AbstractWorkflow
@@ -175,6 +176,7 @@ def _should_continue(
     return Routes.BUILD_CONTEXT
 
 
+@support_self_hosted_billing(class_schema="legacy")
 class Workflow(AbstractWorkflow):
     async def _handle_workflow_failure(
         self, error: BaseException, compiled_graph, graph_config
