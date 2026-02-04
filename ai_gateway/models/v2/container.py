@@ -7,8 +7,8 @@ from ai_gateway.models import mock
 from ai_gateway.models.base import init_anthropic_client, log_request
 from ai_gateway.models.v2.anthropic_claude import ChatAnthropic
 from ai_gateway.models.v2.chat_litellm import ChatLiteLLM
+from ai_gateway.models.v2.completion_litellm import CompletionLiteLLM
 from ai_gateway.models.v2.openai import ChatOpenAI
-from ai_gateway.prompts.typing import Model
 
 __all__ = [
     "ContainerModels",
@@ -17,7 +17,7 @@ __all__ = [
 litellm.module_level_aclient = AsyncHTTPHandler(event_hooks={"request": [log_request]})
 
 
-def _litellm_factory(*args, **kwargs) -> Model:
+def _litellm_factory(*args, **kwargs) -> ChatLiteLLM:
     if kwargs.get("custom_llm_provider", "") == "vertex_ai":
         if kwargs.get("model", "").lower().startswith("claude"):
             kwargs["model_kwargs"] = kwargs.get("model_kwargs", {}) or {}
@@ -85,4 +85,15 @@ class ContainerModels(containers.DeclarativeContainer):
     amazon_q_chat_fn = providers.Factory(
         ChatAmazonQ,
         amazon_q_client_factory=integrations.amazon_q_client_factory,
+    )
+
+    lite_llm_completion_fn = providers.Selector(
+        _mock_selector,
+        original=providers.Factory(
+            CompletionLiteLLM,
+            model_keys=config.model_keys,
+            model_endpoints=config.model_endpoints,
+        ),
+        mocked=providers.Factory(mock.FakeCompletionModel),
+        agentic=providers.Factory(mock.AgenticFakeModel),
     )

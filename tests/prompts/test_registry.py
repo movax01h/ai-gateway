@@ -8,7 +8,12 @@ from langchain.tools import BaseTool
 from langchain_anthropic import ChatAnthropic
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.prompts.chat import MessageLikeRepresentation
-from langchain_core.runnables import Runnable, RunnableBinding, RunnableSequence
+from langchain_core.runnables import (
+    Runnable,
+    RunnableBinding,
+    RunnableLambda,
+    RunnableSequence,
+)
 from pydantic import BaseModel, HttpUrl
 from pyfakefs.fake_filesystem import FakeFilesystem
 
@@ -19,6 +24,7 @@ from ai_gateway.integrations.amazon_q.client import AmazonQClientFactory
 from ai_gateway.model_metadata import ModelMetadata, create_model_metadata
 from ai_gateway.model_selection import LLMDefinition
 from ai_gateway.models.litellm import KindLiteLlmModel
+from ai_gateway.models.v2.completion_litellm import CompletionLiteLLM
 from ai_gateway.prompts import LocalPromptRegistry, Prompt
 from ai_gateway.prompts.config import ModelClassProvider
 from ai_gateway.prompts.config.base import PromptConfig
@@ -77,6 +83,13 @@ models:
     max_context_tokens: 200000
     params:
         model: codestral
+  - name: Completion Test
+    gitlab_identifier: completion_test
+    max_context_tokens: 200000
+    family:
+        - completion_fim
+    params:
+        model: completion_test
   - name: Custom
     gitlab_identifier: custom
     max_context_tokens: 200000
@@ -172,6 +185,36 @@ unit_primitives:
   - explain_code
 prompt_template:
   system: Template1
+""",
+    )
+    fs.create_file(
+        prompts_definitions_dir
+        / "code_suggestions"
+        / "completions"
+        / "completion_fim"
+        / "1.0.0.yml",
+        contents="""
+---
+name: Completion prompt
+model:
+  params:
+    model_class_provider: litellm_completion
+    completion_type: fim
+    fim_format: "</s>[SUFFIX]{suffix}[PREFIX]{prefix}[MIDDLE]"
+    custom_llm_provider: fireworks_ai
+    temperature: 0.32
+    max_tokens: 64
+unit_primitives:
+  - complete_code
+prompt_template:
+  user: "{{prefix}}"
+params:
+  timeout: 60
+  stop:
+    - "[PREFIX]"
+    - "[MIDDLE]"
+    - "[SUFFIX]"
+    - "</s>[SUFFIX]"
 """,
     )
     fs.create_file(
@@ -405,6 +448,9 @@ def model_factories_fixture():
             amazon_q_client_factory=Mock(spec=AmazonQClientFactory),
             **kwargs,
         ),
+        ModelClassProvider.LITE_LLM_COMPLETION: lambda model, **kwargs: CompletionLiteLLM(
+            model=model, **kwargs
+        ),
     }
 
 
@@ -420,6 +466,7 @@ def disable_streaming_fixture():
 
 @pytest.fixture(name="registry")
 def registry_fixture(
+    mock_fs: None,  # pylint: disable=unused-argument
     model_factories: dict[ModelClassProvider, TypeModelFactory],
     internal_event_client: Mock,
     model_limits: ConfigModelLimits,
@@ -1213,6 +1260,21 @@ prompt_template:
         # tool_choice should be converted from 'any' to 'required'
         assert kwargs.get("tool_choice") == "required"
         assert kwargs.get("tools") == tools
+
+    def test_completion_prompt_uses_passthrough_template(
+        self,
+        registry: LocalPromptRegistry,
+    ):
+        prompt = registry.get(
+            "code_suggestions/completions",
+            "^1.0.0",
+            model_metadata=create_model_metadata(
+                {"provider": "gitlab", "identifier": "completion_test"}
+            ),
+        )
+
+        assert isinstance(prompt, Prompt)
+        assert isinstance(prompt.prompt_tpl, RunnableLambda)
 
     @pytest.mark.usefixtures("mock_fs")
     def test_get_with_azure_model_adjusts_tool_choice(

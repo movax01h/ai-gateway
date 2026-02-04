@@ -1,0 +1,17 @@
+---
+name: Codestral 22B Code Completions
+model:
+  params:
+    model_class_provider: litellm_completion
+    completion_type: text
+    custom_llm_provider: vertex_ai
+    temperature: 0.32
+    max_tokens: 64
+unit_primitives:
+  - complete_code
+prompt_template:
+  user: "{{prefix}}"
+params:
+  timeout: 60
+  stop:
+    - "\n\n"

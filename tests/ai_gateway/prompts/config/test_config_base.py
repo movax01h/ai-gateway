@@ -4,6 +4,11 @@ import pytest
 from gitlab_cloud_connector import GitLabUnitPrimitive
 
 from ai_gateway.prompts.config.base import InMemoryPromptConfig, PromptConfig
+from ai_gateway.prompts.config.models import (
+    CompletionLiteLLMParams,
+    CompletionType,
+    ModelClassProvider,
+)
 
 
 class TestInMemoryPromptConfig:
@@ -88,3 +93,23 @@ class TestInMemoryPromptConfig:
 
         # Should not have prompt_id field
         assert not hasattr(prompt_config, "prompt_id")
+
+
+class TestCompletionLiteLLMParams:
+    def test_validate_fim_format_requires_format(self):
+        with pytest.raises(ValueError, match="fim_format is required"):
+            CompletionLiteLLMParams(
+                model="codestral-2501",
+                model_class_provider=ModelClassProvider.LITE_LLM_COMPLETION,
+                completion_type=CompletionType.FIM,
+            )
+
+    def test_validate_fim_format_accepts_format(self):
+        params = CompletionLiteLLMParams(
+            model="codestral-2501",
+            model_class_provider=ModelClassProvider.LITE_LLM_COMPLETION,
+            completion_type=CompletionType.FIM,
+            fim_format="</s>[SUFFIX]{suffix}[PREFIX]{prefix}[MIDDLE]",
+        )
+
+        assert params.fim_format == "</s>[SUFFIX]{suffix}[PREFIX]{prefix}[MIDDLE]"

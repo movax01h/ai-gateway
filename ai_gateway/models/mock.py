@@ -7,7 +7,8 @@ import fastapi
 from fastapi import status
 from langchain_core.callbacks import CallbackManagerForLLMRun
 from langchain_core.language_models.chat_models import SimpleChatModel
-from langchain_core.messages import BaseMessage
+from langchain_core.messages import AIMessage, AIMessageChunk, BaseMessage
+from langchain_core.runnables import RunnableLambda
 
 from ai_gateway.models.agentic_mock import AgenticFakeModel
 from ai_gateway.models.base import ModelMetadata
@@ -24,6 +25,7 @@ __all__ = [
     "LLM",
     "ChatModel",
     "FakeModel",
+    "FakeCompletionModel",
     "AgenticFakeModel",
 ]
 
@@ -139,6 +141,35 @@ class FakeModel(SimpleChatModel):
         self, *args: Any, **kwargs: Any  # pylint: disable=unused-argument
     ) -> Any:
         return self
+
+
+class FakeCompletionModel:
+    disable_streaming: bool = False
+
+    def __init__(self, *_args: Any, **_kwargs: Any):
+        pass
+
+    @property
+    def _llm_type(self) -> str:
+        return "fake-provider"
+
+    @property
+    def _identifying_params(self) -> dict[str, Any]:
+        return {"model": "fake-model"}
+
+    def bind(self, **_kwargs: Any) -> RunnableLambda:
+        return RunnableLambda(self._ainvoke)
+
+    async def _ainvoke(self, _input: dict[str, Any]) -> AIMessage:
+        return AIMessage(content="mock completion")
+
+    async def ainvoke(self, _input: dict[str, Any], **_kwargs: Any) -> AIMessage:
+        return AIMessage(content="mock completion")
+
+    async def astream(
+        self, _input: dict[str, Any], **_kwargs: Any
+    ) -> AsyncIterator[AIMessageChunk]:
+        yield AIMessageChunk(content="mock completion")
 
 
 class ChatModel(ChatModelBase):

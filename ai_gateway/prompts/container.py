@@ -61,6 +61,9 @@ class ContainerPrompts(containers.DeclarativeContainer):
             ),
             ModelClassProvider.LITE_LLM: providers.Factory(models.lite_llm_chat_fn),
             ModelClassProvider.AMAZON_Q: providers.Factory(models.amazon_q_chat_fn),
+            ModelClassProvider.LITE_LLM_COMPLETION: providers.Factory(
+                models.lite_llm_completion_fn
+            ),
         },
         internal_event_client=internal_event.client,
         model_limits=providers.Factory(ConfigModelLimits, config.model_engine_limits),
