@@ -40,6 +40,7 @@ Git diff structure explanation:
   - `old_line`: line number before changes (empty for added lines)
   - `new_line`: line number after changes (empty for deleted lines)
 - `<chunk_header>` tags indicate change locations (e.g., "@@ -13,6 +16,7 @@")
+- When files are renamed, an optional `<renamed_files>` section lists each rename with `<file old_path="..." new_path="...">` tags
 </diff_structure>
 
 <critical_diff_interpretation>
