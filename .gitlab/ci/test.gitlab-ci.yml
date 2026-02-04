@@ -101,23 +101,6 @@ regression-tests:
     <<: *test-variables
     LS_DATASET_SPLIT: "validation_stratified_b06f4db4_p30"
 
-# DAP feature tests in core feature pages
-# See https://docs.gitlab.com/development/testing_guide/testing_ai_features/ for more information.
-feature-tests:
-  stage: test
-  needs: []
-  trigger:
-    project: gitlab-org/gitlab
-    branch: aigw/test-branch
-    strategy: depend
-  variables:
-    TRIGGERED_BY_AI_GATEWAY_PROJECT: "true"
-    TEST_AI_GATEWAY_REPO_BRANCH: $CI_COMMIT_REF_NAME
-    # Overriding the poetry version because the variable is conflicted with the one in gitlab-rails/gitlab-build-image
-    POETRY_VERSION: "2.2"
-  rules:
-    - if: $CI_PIPELINE_SOURCE == "merge_request_event" && $CI_PROJECT_PATH == "gitlab-org/modelops/applied-ml/code-suggestions/ai-assist"
-
 .proto-variables:
   variables:
     DEBIAN_VERSION: "bookworm"
