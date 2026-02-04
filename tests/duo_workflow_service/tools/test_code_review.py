@@ -120,6 +120,20 @@ def diffs_data_with_renames_fixture():
     ]
 
 
+@pytest.fixture(name="diffs_data_with_renames_only")
+def diffs_data_with_renames_only_fixture():
+    return [
+        {
+            "old_path": "todo.rb",
+            "new_path": "calculator.rb",
+            "new_file": False,
+            "generated_file": False,
+            "renamed_file": True,
+            "diff": "",  # This is a renamed file that has no content change
+        },
+    ]
+
+
 @pytest.fixture(name="custom_instructions_yaml")
 def custom_instructions_yaml_fixture():
     yaml_content = """---
@@ -404,6 +418,57 @@ async def test_build_review_context_with_renames(
     assert "generated.js" not in response
 
     assert "<original_files>" in response
+    assert "</input>" in response
+
+
+@pytest.mark.asyncio
+async def test_build_review_context_with_renames_only(
+    gitlab_client_mock,
+    metadata,
+    mr_data,
+    diffs_data_with_renames_only,
+):
+    original_file_content = {
+        "content": base64.b64encode(
+            b"class Calculator\n  def subtract(a, b)\n    # TODO: Implement\n  end\nend"
+        ).decode("utf-8")
+    }
+    gitlab_client_mock.aget = AsyncMock(
+        side_effect=[
+            GitLabHttpResponse(status_code=200, body=json.dumps(mr_data)),
+            GitLabHttpResponse(
+                status_code=200, body=json.dumps(diffs_data_with_renames_only)
+            ),
+            Exception("Custom instructions not found"),
+            GitLabHttpResponse(status_code=200, body=json.dumps(original_file_content)),
+        ]
+    )
+    tool = BuildReviewMergeRequestContext(metadata=metadata)
+    response = await tool._arun(project_id="test%2Fproject", merge_request_iid=123)
+
+    # Check for BOUNDARY_ID and unique delimiters
+    assert "BOUNDARY_ID:" in response
+    assert "═══UNTRUSTED_CONTENT_START_" in response
+    assert "═══UNTRUSTED_CONTENT_END_" in response
+
+    assert "Here are the merge request details for you to review:" in response
+    assert "<input>" in response
+    assert "<mr_title>" in response
+    assert "Implement calculator method" in response
+    assert "<mr_description>" in response
+    assert "Add subtract method to calculator" in response
+    assert "<git_diffs>" in response
+
+    assert "<renamed_files>" in response
+    assert "</renamed_files>" in response
+
+    # Check renamed files
+    assert '<file old_path="todo.rb" new_path="calculator.rb"></file>' in response
+
+    # Verify excluded files are not present
+    assert "app.log" not in response
+    assert "generated.js" not in response
+
     assert "</input>" in response
 
 
