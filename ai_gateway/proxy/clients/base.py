@@ -8,7 +8,9 @@ import fastapi
 import litellm
 from fastapi import status
 from gitlab_cloud_connector import GitLabUnitPrimitive
-from litellm.proxy.pass_through_endpoints import pass_through_endpoints
+from litellm.proxy.pass_through_endpoints.pass_through_endpoints import (
+    create_pass_through_route,
+)
 from litellm.proxy.proxy_server import UserAPIKeyAuth
 from starlette.background import BackgroundTask
 
@@ -71,7 +73,7 @@ class BaseProxyClient(ABC):
                 self.user = request.user
                 init_llm_operations()
 
-                endpoint_func = pass_through_endpoints.create_pass_through_route(
+                endpoint_func = create_pass_through_route(
                     endpoint="",  # This is unused in the litellm code
                     target=f"{self._base_url()}{upstream_path}",
                     custom_headers=headers_to_upstream,
@@ -187,29 +189,6 @@ class BaseProxyClient(ABC):
 
 current_proxy_client: ContextVar[BaseProxyClient | None] = ContextVar(
     "current_proxy_client", default=None
-)
-
-
-# Monkey-patches to support calling litellm-proxy's code without it handling fastapi routing
-def _is_registered_pass_through_route(
-    route: str,
-) -> bool:  # pylint: disable=unused-argument
-    return True
-
-
-pass_through_endpoints.InitPassThroughEndpointHelpers.is_registered_pass_through_route = (
-    _is_registered_pass_through_route
-)
-
-
-def _get_registered_pass_through_route(
-    route: str,
-) -> dict[str, typing.Any]:  # pylint: disable=unused-argument
-    return {}
-
-
-pass_through_endpoints.InitPassThroughEndpointHelpers.get_registered_pass_through_route = (
-    _get_registered_pass_through_route
 )
 
 
