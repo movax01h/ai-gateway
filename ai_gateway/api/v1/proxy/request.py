@@ -7,13 +7,12 @@ from gitlab_cloud_connector import (
     UNIT_PRIMITIVE_AND_DESCRIPTION_MAPPING,
     GitLabFeatureCategory,
     GitLabUnitPrimitive,
+    UserClaims,
 )
 
 from ai_gateway.abuse_detection import AbuseDetector
 from ai_gateway.api.auth_utils import StarletteUser
 from ai_gateway.api.feature_category import X_GITLAB_UNIT_PRIMITIVE
-from lib.billing_events import BillingEvent, BillingEventsClient
-from lib.events import FeatureQualifiedNameStatic, GLReportingEventContext
 from lib.internal_events.context import EventContext, current_event_context
 
 # It's implemented here, because eventually we want to restrict this endpoint to
@@ -93,60 +92,6 @@ async def _validate_request(
         background_tasks.add_task(abuse_detector.detect, request, body, description)
 
 
-def track_billing_event(func):
-    gl_event_context = GLReportingEventContext.from_static_name(
-        FeatureQualifiedNameStatic.AIGW_PROXY_USE, is_ai_catalog_item=False
-    )
-
-    @functools.wraps(func)
-    async def wrapper(
-        request: Request,
-        *args: typing.Any,
-        billing_event_client: BillingEventsClient,
-        **kwargs: typing.Any,
-    ) -> typing.Any:
-        response = await func(
-            request, *args, billing_event_client=billing_event_client, **kwargs
-        )
-
-        metadata = None
-        if hasattr(response, "body") and response.status_code == 200:
-            try:
-                # Check if the proxy client stored TokenUsage in request state
-                if hasattr(request.state, "proxy_token_usage") and hasattr(
-                    request.state, "proxy_model_name"
-                ):
-                    token_usage = request.state.proxy_token_usage
-                    model_id = request.state.proxy_model_name
-
-                    llm_operation = {
-                        "model_id": model_id,
-                        **token_usage.to_billing_metadata(),
-                    }
-                    metadata = {
-                        "llm_operations": [llm_operation],
-                        "feature_qualified_name": gl_event_context.feature_qualified_name,
-                        "feature_ai_catalog_item": gl_event_context.feature_ai_catalog_item,
-                    }
-            except KeyError:
-                # If we can't parse the response, continue without metadata
-                pass
-
-        # Track event only after `func` returns so we don't trigger a billable event if an exception occurred
-        billing_event_client.track_billing_event(
-            request.user,
-            event=BillingEvent.AIGW_PROXY_USE,
-            category=__name__,
-            unit_of_measure="request",
-            quantity=1,
-            metadata=metadata,
-        )
-
-        return response
-
-    return wrapper
-
-
 def verify_project_namespace_metadata():
     """Verify that project and namespace headers matches the claims from the token.
 
@@ -162,7 +107,7 @@ def verify_project_namespace_metadata():
             **kwargs: typing.Any,
         ) -> typing.Any:
             internal_context: EventContext = current_event_context.get()
-            user_claims = request.user.claims
+            user_claims = request.user.claims or UserClaims()
 
             extra_claims = user_claims.extra or {}
 

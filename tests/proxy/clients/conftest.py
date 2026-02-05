@@ -1,33 +1,43 @@
-from unittest.mock import AsyncMock, Mock
+from unittest.mock import AsyncMock, Mock, patch
 
 import fastapi
 import httpx
 import pytest
+from litellm.llms.custom_httpx.http_handler import AsyncHTTPHandler
 from starlette.datastructures import URL
 
 from ai_gateway.config import ConfigModelLimits
 
 
-@pytest.fixture(name="async_client_factory")
-def async_client_factory_fixture():
-    def create(
-        response_status_code: int = 200,
-        response_headers: dict = {
-            "Content-Type": "application/json",
-            "date": "2024",
-            "transfer-encoding": "chunked",
-        },
-        response_json: dict = {"response": "mocked"},
-    ):
-        client = Mock(spec=httpx.AsyncClient)
-        client.send.return_value = httpx.Response(
-            status_code=response_status_code,
-            headers=response_headers,
-            json=response_json,
-        )
-        return client
+@pytest.fixture(name="response_headers")
+def response_headers_fixture() -> dict:
+    return {
+        "Content-Type": "application/json",
+        "date": "2024",
+        "transfer-encoding": "chunked",
+    }
 
-    return create
+
+@pytest.fixture(name="async_client")
+def async_client_fixture(response_headers: dict):
+    client = Mock(spec=httpx.AsyncClient)
+    response = httpx.Response(
+        status_code=200,
+        headers=response_headers,
+        json={"response": "mocked"},
+        request=Mock(),
+        content='{"response":"mocked"}',
+    )
+    client.send.return_value = response
+    client.request.return_value = response
+
+    http_handler = Mock(spec=AsyncHTTPHandler, client=client)
+
+    with patch(
+        "litellm.proxy.pass_through_endpoints.pass_through_endpoints.get_async_httpx_client",
+        return_value=http_handler,
+    ):
+        yield client
 
 
 @pytest.fixture(name="limits")
