@@ -87,3 +87,18 @@ def test_large_string_chunking():
     result = counter.count_string_content(large_content)
     # Should complete without error and return reasonable count
     assert result > 50_000
+
+
+def test_claude_safety_factor():
+    """Test that Claude models apply higher safety factor than OpenAI."""
+    counter_claude = TikTokenCounter("some_name", model="claude-3-haiku")
+    counter_openai = TikTokenCounter("some_name", model="gpt-4o")
+
+    content = "This is a test message"
+    claude_count = counter_claude.count_string_content(content)
+    openai_count = counter_openai.count_string_content(content)
+
+    # Claude (1.40x) should count more tokens than OpenAI (1.10x)
+    assert claude_count > openai_count
+    # Ratio should be between 1.2 and 1.5 (accounting for rounding)
+    assert 1.2 < claude_count / openai_count < 1.5

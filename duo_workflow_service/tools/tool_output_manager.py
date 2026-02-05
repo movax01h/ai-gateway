@@ -16,7 +16,8 @@ from duo_workflow_service.token_counter.tiktoken_counter import TikTokenCounter
 
 logger = structlog.get_logger("tools_executor")
 
-token_counter = TikTokenCounter("planner")
+# Let's assume Claude usage for safer token counting (~+30%)
+token_counter = TikTokenCounter("planner", "claude")
 
 
 class TruncationDirection(str, Enum):

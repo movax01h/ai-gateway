@@ -21,10 +21,22 @@ class TikTokenCounter:
         "Chat Agent": 2500,
     }
 
+    # Claude safety factor source: https://gitlab.com/gitlab-org/modelops/applied-ml/code-suggestions/ai-assist/-/issues/1758#note_2965539134
+    OPENAI_SAFETY_FACTOR = 1.10
+    CLAUDE_SAFETY_FACTOR = 1.50
+
     def __init__(self, agent_name: str, model: str = "gpt-4o"):
         self.tool_tokens = self.AGENT_TOKEN_MAP.get(agent_name, 0)
         self._logger = structlog.stdlib.get_logger("tiktoken_counter")
-        self._encoding = tiktoken.encoding_for_model(model)
+
+        if "claude" in model.lower():
+            # Claude: use cl100k_base
+            self._encoding = tiktoken.get_encoding("cl100k_base")
+            self._safety_factor = self.CLAUDE_SAFETY_FACTOR
+        else:
+            # Non-Claude models: default to gpt-4o encoding
+            self._encoding = tiktoken.encoding_for_model("gpt-4o")
+            self._safety_factor = self.OPENAI_SAFETY_FACTOR
 
     def count_string_content(
         self, content: str, n_samples: int = 30, sample_size: int = 300
@@ -32,7 +44,7 @@ class TikTokenCounter:
         threshold = n_samples * sample_size
 
         if len(content) <= threshold:
-            return len(self._encoding.encode(content))
+            return int(len(self._encoding.encode(content)) * self._safety_factor)
 
         # Divide file into n_samples equal cells, sample from center of each
         cell_size = len(content) // n_samples
@@ -53,8 +65,8 @@ class TikTokenCounter:
         else:
             avg_density = sum(trimmed_densities) / len(trimmed_densities)
 
-        # Add 10% safety buffer to prevent undercounts
-        return int(len(content) * avg_density * 1.10)
+        # Add model family specific safety buffer to prevent undercounts
+        return int(len(content) * avg_density * self._safety_factor)
 
     def count_tokens_in_list(self, content_list: list) -> int:
         result = 0
