@@ -2,21 +2,40 @@ import json
 import re
 import typing
 from abc import ABC, abstractmethod
+from contextvars import ContextVar
 
 import fastapi
-import httpx
+import litellm
 from fastapi import status
+from gitlab_cloud_connector import GitLabUnitPrimitive
+from litellm.proxy.pass_through_endpoints import pass_through_endpoints
+from litellm.proxy.proxy_server import UserAPIKeyAuth
 from starlette.background import BackgroundTask
 
 from ai_gateway.config import ConfigModelLimits
-from ai_gateway.instrumentators.model_requests import ModelRequestInstrumentator
-from ai_gateway.proxy.clients.token_usage import TokenUsage
+from ai_gateway.instrumentators.model_requests import (
+    ModelRequestInstrumentator,
+    get_llm_operations,
+    init_llm_operations,
+)
+from ai_gateway.vendor.langchain_litellm.litellm import _create_usage_metadata
+from lib.billing_events import BillingEvent, BillingEventsClient
+from lib.events import FeatureQualifiedNameStatic, GLReportingEventContext
+from lib.internal_events.client import InternalEventsClient
 
 
 class BaseProxyClient(ABC):
-    def __init__(self, client: httpx.AsyncClient, limits: ConfigModelLimits):
-        self.client = client
+    def __init__(
+        self,
+        limits: ConfigModelLimits,
+        internal_event_client: InternalEventsClient,
+        billing_event_client: BillingEventsClient,
+    ):
         self.limits = limits
+        self.internal_event_client = internal_event_client
+        self.billing_event_client = billing_event_client
+        self.watcher = None
+        current_proxy_client.set(self)
 
     async def proxy(self, request: fastapi.Request) -> fastapi.Response:
         upstream_path = self._extract_upstream_path(request.url.__str__())
@@ -31,24 +50,36 @@ class BaseProxyClient(ABC):
         stream = self._extract_stream_flag(upstream_path, json_body)
         headers_to_upstream = self._create_headers_to_upstream(request.headers)
         self._update_headers_to_upstream(headers_to_upstream)
-
-        request_to_upstream = self.client.build_request(
-            request.method,
-            httpx.URL(upstream_path),
-            headers=headers_to_upstream,
-            json=json_body,
-        )
+        upstream_service = self._upstream_service()
 
         try:
             with ModelRequestInstrumentator(
-                model_engine=self._upstream_service(),
+                llm_provider=upstream_service,
+                model_engine=upstream_service,
+                model_provider=upstream_service,
                 model_name=model_name,
                 limits=self.limits.for_model(
                     engine=self._upstream_service(), name=model_name
                 ),
-            ).watch(stream=stream) as watcher:
-                response_from_upstream = await self.client.send(
-                    request_to_upstream, stream=stream
+            ).watch(
+                stream=stream,
+                unit_primitives=[GitLabUnitPrimitive.AI_GATEWAY_MODEL_PROVIDER_PROXY],
+                internal_event_client=self.internal_event_client,
+            ) as watcher:
+                # Setup token tracking
+                self.watcher = watcher
+                self.user = request.user
+                init_llm_operations()
+
+                endpoint_func = pass_through_endpoints.create_pass_through_route(
+                    endpoint="",  # This is unused in the litellm code
+                    target=f"{self._base_url()}{upstream_path}",
+                    custom_headers=headers_to_upstream,
+                )
+                response_from_upstream = await endpoint_func(
+                    request,
+                    None,  # FastAPI response object, to inject litellm headers into it, which we don't need
+                    UserAPIKeyAuth(),  # LiteLLM-Proxy auth, which we don't use
                 )
         except Exception:
             raise fastapi.HTTPException(
@@ -59,33 +90,23 @@ class BaseProxyClient(ABC):
             response_from_upstream.headers
         )
 
-        # Extract token usage from response for billing tracking
-        # Only extract for non-streaming responses
-        if not stream and response_from_upstream.status_code == 200:
-            try:
-                response_json = response_from_upstream.json()
-                token_usage = self._extract_token_usage(upstream_path, response_json)
-                # Store in request state for billing event tracking
-                request.state.proxy_token_usage = token_usage
-                request.state.proxy_model_name = model_name
-            except Exception:
-                # If token extraction fails, continue without it
-                # The billing event will still be tracked without token details
-                pass
-
-        if stream:
+        if isinstance(response_from_upstream, fastapi.responses.StreamingResponse):
             return fastapi.responses.StreamingResponse(
-                response_from_upstream.aiter_text(),
+                response_from_upstream.body_iterator,
                 status_code=response_from_upstream.status_code,
                 headers=headers_to_downstream,
                 background=BackgroundTask(func=watcher.afinish),
             )
-
         return fastapi.Response(
-            content=response_from_upstream.content,
+            content=response_from_upstream.body,
             status_code=response_from_upstream.status_code,
             headers=headers_to_downstream,
         )
+
+    @abstractmethod
+    def _base_url(self) -> str:
+        """Base URL of the upstream service."""
+        pass
 
     @abstractmethod
     def _allowed_upstream_paths(self) -> list[str]:
@@ -120,13 +141,6 @@ class BaseProxyClient(ABC):
     @abstractmethod
     def _extract_stream_flag(self, upstream_path: str, json_body: typing.Any) -> bool:
         """Extract stream flag from the request."""
-        pass
-
-    @abstractmethod
-    def _extract_token_usage(
-        self, upstream_path: str, json_body: typing.Any
-    ) -> TokenUsage:
-        """Extract the proxy clients token usage per path request."""
         pass
 
     @abstractmethod
@@ -169,3 +183,86 @@ class BaseProxyClient(ABC):
             for key in self._allowed_headers_to_downstream()
             if key in headers_from_upstream
         }
+
+
+current_proxy_client: ContextVar[BaseProxyClient | None] = ContextVar(
+    "current_proxy_client", default=None
+)
+
+
+# Monkey-patches to support calling litellm-proxy's code without it handling fastapi routing
+def _is_registered_pass_through_route(
+    route: str,
+) -> bool:  # pylint: disable=unused-argument
+    return True
+
+
+pass_through_endpoints.InitPassThroughEndpointHelpers.is_registered_pass_through_route = (
+    _is_registered_pass_through_route
+)
+
+
+def _get_registered_pass_through_route(
+    route: str,
+) -> dict[str, typing.Any]:  # pylint: disable=unused-argument
+    return {}
+
+
+pass_through_endpoints.InitPassThroughEndpointHelpers.get_registered_pass_through_route = (
+    _get_registered_pass_through_route
+)
+
+
+async def litellm_async_success_callback(
+    _kwargs, completion_obj, _start_time, _end_time
+):
+    proxy_client = current_proxy_client.get()
+    if not proxy_client:
+        return
+
+    if usage := completion_obj.get("usage"):
+        # LiteLLM supported model, get parsed data
+        usage_metadata = _create_usage_metadata(usage)
+        model = completion_obj.get("model")
+    elif response := completion_obj.get("response"):
+        # Raw response, fallback to simple parsing
+        response_json = json.loads(response)
+        usage_metadata = response_json.get("usage")
+        model = response_json.get("model")
+
+    if not usage_metadata:
+        return
+
+    # Reset proxy client so the callback doesn't try to process other requests
+    current_proxy_client.set(None)
+
+    watcher = proxy_client.watcher
+    # Only track token usage if we are indeed in the middle of an instrumentation call
+    if not watcher:
+        return
+
+    gl_event_context = GLReportingEventContext.from_static_name(
+        FeatureQualifiedNameStatic.AIGW_PROXY_USE, is_ai_catalog_item=False
+    )
+    proxy_client.watcher.register_token_usage(model, usage_metadata)
+
+    metadata = {
+        "llm_operations": get_llm_operations(),
+        "feature_qualified_name": gl_event_context.feature_qualified_name,
+        "feature_ai_catalog_item": gl_event_context.feature_ai_catalog_item,
+    }
+
+    # Track event only after `func` returns so we don't trigger a billable event if an exception occurred
+    proxy_client.billing_event_client.track_billing_event(
+        proxy_client.user,
+        event=BillingEvent.AIGW_PROXY_USE,
+        category=__name__,
+        unit_of_measure="request",
+        quantity=1,
+        metadata=metadata,
+    )
+
+
+litellm.logging_callback_manager.add_litellm_async_success_callback(
+    litellm_async_success_callback
+)
