@@ -18,8 +18,7 @@ from langgraph.types import Command
 from langsmith import traceable, tracing_context
 
 from ai_gateway.container import ContainerApplication
-from ai_gateway.prompts import InMemoryPromptRegistry
-from ai_gateway.prompts.registry import LocalPromptRegistry
+from ai_gateway.prompts import BasePromptRegistry
 from contract import contract_pb2
 from duo_workflow_service.checkpointer.gitlab_workflow import GitLabWorkflow
 from duo_workflow_service.checkpointer.gitlab_workflow_utils import (
@@ -97,7 +96,7 @@ class AbstractWorkflow(ABC):
     _additional_context: list[AdditionalContext] | None
     _mcp_tools: list[McpToolConfig]
     _approval: Optional[contract_pb2.Approval]
-    _prompt_registry: InMemoryPromptRegistry | LocalPromptRegistry
+    _prompt_registry: BasePromptRegistry
     _language_server_version: Optional[LanguageServerVersion]
 
     @inject
@@ -114,7 +113,7 @@ class AbstractWorkflow(ABC):
         mcp_tools: list[contract_pb2.McpTool] = [],
         additional_context: Optional[list[AdditionalContext]] = None,
         approval: Optional[contract_pb2.Approval] = None,
-        prompt_registry: LocalPromptRegistry = Provide[
+        prompt_registry: BasePromptRegistry = Provide[
             ContainerApplication.pkg_prompts.prompt_registry
         ],
         internal_event_client: InternalEventsClient = Provide[

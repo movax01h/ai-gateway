@@ -1,9 +1,6 @@
-from typing import Union
-
 from gitlab_cloud_connector import CloudConnectorUser
 
-from ai_gateway.prompts import InMemoryPromptRegistry, Prompt
-from ai_gateway.prompts.registry import LocalPromptRegistry
+from ai_gateway.prompts import BasePromptRegistry, Prompt
 from duo_workflow_service.agents.chat_agent import ChatAgent
 from duo_workflow_service.agents.prompt_adapter import DefaultPromptAdapter
 from duo_workflow_service.client_capabilities import is_client_capable
@@ -17,7 +14,7 @@ def create_agent(
     tools_registry: ToolsRegistry,
     internal_event_category: str,
     tools: Toolset,
-    prompt_registry: Union[LocalPromptRegistry, InMemoryPromptRegistry],
+    prompt_registry: BasePromptRegistry,
     workflow_id: str,
     workflow_type: GLReportingEventContext,
     system_template_override: str | None,

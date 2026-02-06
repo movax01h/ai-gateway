@@ -5,7 +5,7 @@ from langgraph.graph import StateGraph
 from pydantic import Field
 
 from ai_gateway.container import ContainerApplication
-from ai_gateway.prompts import LocalPromptRegistry
+from ai_gateway.prompts import BasePromptRegistry
 from duo_workflow_service.agent_platform.experimental.components.base import (
     BaseComponent,
     RouterProtocol,
@@ -76,7 +76,7 @@ class HumanInputComponent(BaseComponent):
     prompt_id: Optional[str] = None
     prompt_version: Optional[str] = None
 
-    prompt_registry: LocalPromptRegistry = Provide[
+    prompt_registry: BasePromptRegistry = Provide[
         ContainerApplication.pkg_prompts.prompt_registry
     ]
 
