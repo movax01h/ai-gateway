@@ -176,7 +176,6 @@ def trim_conversation_history(
     messages: List[BaseMessage],
     component_name: str,
     max_context_tokens: int,
-    model_name: str = "claude",
 ) -> List[BaseMessage]:
     """Trim conversation history to fit within the model's context window.
 
@@ -198,9 +197,9 @@ def trim_conversation_history(
     if not messages:
         return []
 
-    max_context_tokens = int(0.9 * max_context_tokens)  # 10% buffer to max capacity
+    max_context_tokens = int(0.7 * max_context_tokens)
 
-    token_counter = TikTokenCounter(agent_name=component_name, model=model_name)
+    token_counter = TikTokenCounter(component_name)
     max_single_message_tokens = int(max_context_tokens * 0.65)
 
     # Log initial state
