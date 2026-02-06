@@ -9,6 +9,7 @@ from unittest.mock import Mock, call
 import pytest
 from anthropic import APITimeoutError, AsyncAnthropic
 from gitlab_cloud_connector import GitLabUnitPrimitive, WrongUnitPrimitives
+from jinja2.exceptions import SecurityError
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 from langchain_core.messages.ai import UsageMetadata
 from langchain_core.prompt_values import ChatPromptValue
@@ -31,7 +32,12 @@ from ai_gateway.model_metadata import (
 )
 from ai_gateway.model_selection import LLMDefinition, PromptParams
 from ai_gateway.models.v2.anthropic_claude import ChatAnthropic
-from ai_gateway.prompts import BasePromptCallbackHandler, BasePromptRegistry, Prompt
+from ai_gateway.prompts import (
+    BasePromptCallbackHandler,
+    BasePromptRegistry,
+    Prompt,
+    jinja2_formatter,
+)
 from ai_gateway.prompts.config.base import PromptConfig
 from ai_gateway.prompts.config.models import (
     ChatAnthropicParams,
@@ -155,6 +161,39 @@ configurable_unit_primitives:
             ],
             template_format="jinja2",
         )
+
+    @pytest.mark.parametrize(
+        ("template", "kwargs", "should_raise"),
+        [
+            ("{{ user.name }}", {"user": object()}, False),
+            ("{{ user.method() }}", {"user": object()}, True),
+            ("{{ array.append(1) }}", {"array": []}, True),
+            ("{{ value * 2 }}", {"value": 2}, True),
+            ("{{ value ** 2 }}", {"value": 2}, True),
+            ("{{ value + 2 }}", {"value": 2}, False),
+            ("{{ value / 2 }}", {"value": 2}, False),
+            ("{{ text|split }}", {"text": "a b"}, False),
+            ('{{ text|split(":", 1) }}', {"text": "a:b"}, False),
+            ('{{ text|split("", 1) }}', {"text": "oops"}, True),
+        ],
+    )
+    def test_jinja2_formatter_security_constraints(
+        self, template: str, kwargs: dict[str, Any], should_raise: bool
+    ):
+        class Dummy:
+            name = "secure"
+
+            def method(self):
+                return "unsafe"
+
+        if "user" in kwargs:
+            kwargs["user"] = Dummy()
+
+        if should_raise:
+            with pytest.raises(SecurityError):
+                jinja2_formatter(template, **kwargs)
+        else:
+            jinja2_formatter(template, **kwargs)
 
     @pytest.mark.parametrize(
         "prompt_template", [{"with_messages_placeholder": True}], indirect=True

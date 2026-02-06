@@ -6,13 +6,13 @@ Please use existing functions from these files and code snippets if possible whe
 
 {%- if related_files %}
 <related_files>
-{{("\n").join(related_files)}}
+{{ related_files | join("\n") }}
 </related_files>
 {%- endif %}
 
 {%- if related_snippets %}
 <related_snippets>
-{{("\n").join(related_snippets)}}
+{{ related_snippets | join("\n") }}
 </related_snippets>
 {%- endif %}
 
