@@ -49,6 +49,7 @@ class UsageQuotaEventContext(BaseModel):
         "root_namespace_id",
         "unique_instance_id",
         "feature_enablement_type",
+        "feature_qualified_name",
     )
 
     model_config: ClassVar[ConfigDict] = ConfigDict(frozen=True)
