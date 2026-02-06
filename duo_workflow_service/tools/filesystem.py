@@ -293,7 +293,6 @@ class FindFiles(DuoBaseTool):
     Uses bash filename expansion syntax. Searches recursively and respects .gitignore rules.
     """
     args_schema: Type[BaseModel] = FindFilesInput
-    trust_level: ToolTrustLevel = ToolTrustLevel.TRUSTED_INTERNAL
 
     async def _execute(
         self,
@@ -511,7 +510,6 @@ class ListDir(DuoBaseTool):
     Use this instead of trying to run 'ls' commands.
     """
     args_schema: Type[BaseModel] = ListDirInput
-    trust_level: ToolTrustLevel = ToolTrustLevel.TRUSTED_INTERNAL
 
     async def _execute(self, directory: str) -> str:
         # Check file exclusion policy before executing action
