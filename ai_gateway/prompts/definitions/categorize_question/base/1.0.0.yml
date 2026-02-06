@@ -34,4 +34,4 @@ prompt_template:
     User question:
     <question>{{question}}</question>
 params:
-  timeout: 5
+  timeout: 15
