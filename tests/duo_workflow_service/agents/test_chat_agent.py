@@ -620,7 +620,7 @@ class TestChatAgentGitLabInstanceInfo:
 @pytest.mark.asyncio
 async def test_agentic_fake_model_bypasses_tool_approval(input):
     mock_model = Mock()
-    mock_model._is_agentic_mock_model = True
+    mock_model._is_auto_approved_by_agentic_mock_model = True
 
     mock_prompt_adapter = Mock()
     mock_prompt_adapter.get_model.return_value = mock_model

@@ -66,7 +66,11 @@ class ContainerModels(containers.DeclarativeContainer):
             ],
         ),
         mocked=providers.Factory(mock.FakeModel),
-        agentic=providers.Factory(mock.AgenticFakeModel),
+        agentic=providers.Factory(
+            mock.AgenticFakeModel,
+            auto_tool_approval=config.agentic_mock.auto_tool_approval,
+            use_last_human_message=config.agentic_mock.use_last_human_message,
+        ),
     )
 
     openai_chat_fn = providers.Factory(ChatOpenAI, output_version="responses/v1")
@@ -79,7 +83,11 @@ class ContainerModels(containers.DeclarativeContainer):
             model_endpoints=config.model_endpoints,
         ),
         mocked=providers.Factory(mock.FakeModel),
-        agentic=providers.Factory(mock.AgenticFakeModel),
+        agentic=providers.Factory(
+            mock.AgenticFakeModel,
+            auto_tool_approval=config.agentic_mock.auto_tool_approval,
+            use_last_human_message=config.agentic_mock.use_last_human_message,
+        ),
     )
 
     amazon_q_chat_fn = providers.Factory(

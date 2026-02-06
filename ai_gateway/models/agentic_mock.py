@@ -96,29 +96,64 @@ class ResponseHandler:
     # Class-level cache for file contents to ensure each file is only loaded once
     _file_cache: dict[str, str] = {}
 
-    def __init__(self, messages: list[BaseMessage]):
-        self.content = self._get_user_input(messages)
+    def __init__(self, messages: list[BaseMessage], use_last_human_message: bool):
+        self.content, ai_messages = self._get_user_input(
+            messages, use_last_human_message
+        )
         if self.content:
             self.content = self._strip_additional_context(self.content)
         self.template_vars = self._extract_template_variables()
         self.jinja_env = self._create_jinja_environment()
-        self.responses: list[Response] = (
-            self._parse_all_responses() if self.content else []
-        )
+        all_responses = self._parse_all_responses() if self.content else []
+        self.responses: list[Response] = [
+            response
+            for response in all_responses
+            if not self._is_responded_already(response, ai_messages)
+        ]
+
         self.current_index = 0
 
-    def _get_user_input(self, messages: list[BaseMessage]) -> Optional[str]:
+    def _get_user_input(
+        self, messages: list[BaseMessage], use_last_human_message: bool
+    ) -> tuple[Optional[str], Optional[list[AIMessage]]]:
         if not messages:
-            return None
+            return None, None
 
-        user_message = next(
-            (msg for msg in messages if isinstance(msg, HumanMessage)), None
-        )
+        ai_messages: list[AIMessage] = []
+
+        if use_last_human_message:
+            user_message = None
+
+            for msg in messages:
+                if isinstance(msg, HumanMessage):
+                    user_message = msg
+                    ai_messages = []
+                elif isinstance(msg, AIMessage):
+                    ai_messages.append(msg)
+        else:
+            user_message = next(
+                (msg for msg in messages if isinstance(msg, HumanMessage)), None
+            )
 
         if not user_message or not user_message.content:
-            return None
+            return None, None
 
-        return user_message.text()
+        return user_message.text(), ai_messages
+
+    def _is_responded_already(
+        self, response: Response, ai_messages: Optional[list[AIMessage]]
+    ):
+        if not ai_messages:
+            return False
+
+        for msg in ai_messages:
+            if (
+                msg.content == response.content
+                and msg.tool_calls == response.tool_calls
+            ):
+                return True
+
+        return False
 
     def _parse_all_responses(self) -> list[Response]:
         """Parse all defined responses from the user input content, return as a list."""
@@ -493,13 +528,21 @@ class AgenticFakeModel(BaseChatModel):
     # first response will be handled.
     cache: bool = False
 
-    def __init__(self, **kwargs):
+    def __init__(
+        self, auto_tool_approval: bool, use_last_human_message: bool, **kwargs
+    ):
         super().__init__(**kwargs)
         self._response_handler: Optional[ResponseHandler] = None
+        self._auto_tool_approval = auto_tool_approval
+        self._use_last_human_message = use_last_human_message
 
     @property
     def _is_agentic_mock_model(self) -> bool:
         return True
+
+    @property
+    def _is_auto_approved_by_agentic_mock_model(self) -> bool:
+        return self._auto_tool_approval
 
     @property
     def _llm_type(self) -> str:
@@ -511,7 +554,9 @@ class AgenticFakeModel(BaseChatModel):
 
     async def _generate_with_latency(self, messages: list[BaseMessage]) -> ChatResult:
         if self._response_handler is None:
-            self._response_handler = ResponseHandler(messages)
+            self._response_handler = ResponseHandler(
+                messages, use_last_human_message=self._use_last_human_message
+            )
 
         response = self._response_handler.get_next_response()
 
@@ -665,7 +710,9 @@ class AgenticFakeModel(BaseChatModel):
     ) -> Iterator[ChatGenerationChunk]:
         """Stream the response synchronously."""
         if self._response_handler is None:
-            self._response_handler = ResponseHandler(messages)
+            self._response_handler = ResponseHandler(
+                messages, use_last_human_message=self._use_last_human_message
+            )
         response = self._response_handler.get_next_response()
 
         log.debug(
@@ -694,7 +741,9 @@ class AgenticFakeModel(BaseChatModel):
     ) -> AsyncIterator[ChatGenerationChunk]:
         """Stream the response asynchronously."""
         if self._response_handler is None:
-            self._response_handler = ResponseHandler(messages)
+            self._response_handler = ResponseHandler(
+                messages, use_last_human_message=self._use_last_human_message
+            )
         response = self._response_handler.get_next_response()
 
         log.debug(

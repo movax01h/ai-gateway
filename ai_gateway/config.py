@@ -114,6 +114,11 @@ class ConfigCustomersDot(BaseModel):
     api_token: Optional[str] = None
 
 
+class ConfigAgenticMock(BaseModel):
+    auto_tool_approval: Optional[bool] = False
+    use_last_human_message: Optional[bool] = True
+
+
 class ConfigModelKeys(BaseModel):
     mistral_api_key: Optional[str] = None
     fireworks_api_key: Optional[str] = None
@@ -287,6 +292,9 @@ class Config(BaseSettings):
     customersdot: Annotated[
         ConfigCustomersDot, Field(default_factory=ConfigCustomersDot)
     ] = ConfigCustomersDot()
+    agentic_mock: Annotated[
+        ConfigAgenticMock, Field(default_factory=ConfigAgenticMock)
+    ] = ConfigAgenticMock()
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
