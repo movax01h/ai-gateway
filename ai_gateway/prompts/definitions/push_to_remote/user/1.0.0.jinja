@@ -1,27 +1,27 @@
-GitLab Project details:
 <project>
-    repository_url: {{ repository_url }}
-    issue_url: {{ issue_url }}
+  repository_url: {{ repository_url }}
+  issue_url: {{ issue_url }}
 </project>
 
 <programming_agent_handover>
-  Here's a handover summary from the programming agent
-  {{ programming_agent_handover}}
+{{ programming_agent_handover}}
 </programming_agent_handover>
-Prepare all the required `run_git_command` and `update_merge_request` tool calls.
-
-Use `run_git_command` tool to push the unstaged changes in current branch.
-    **Follow this exact sequence for pushing changes to remote:**
-        - Use `add` command with `-A` args to stage the local changes
-        - Use `commit` command with args `-m {commit_message}` to commit. For commit message:
-        {% include 'common/commit_message_guidelines/1.0.0.jinja' %}
-        - Use `git fetch --unshallow` to speed up the next step
-        - Use `git push origin <current-branch>:<current-branch>` to finally push changes to the remote repository
 
 <merge_request_details>
-  {{ merge_request_details }}
+{{ merge_request_details }}
 </merge_request_details>
-Use merge request iid from merge_request_details to form a single `update_merge_request` tool call to update the merge request description and reviewer, while following these guidelines:
-  - Assign user id {{ reviewer_id }} as the reviewer for the merge request
-  - Add this text to the beginning of the description: "Relates to issue {{ issue_url }}"
-  - Create a merge request description based on the key changes: create a "##Changes" section that contains key changes based on `programming_agent_handover`
+
+Generate ALL 5 tool calls below in a SINGLE response. Do NOT stop after one call.
+
+**Git commands** (all use repository_url: `{{ repository_url }}`):
+1. `run_git_command`: command=`add`, args=`-A`
+2. `run_git_command`: command=`commit`, args=`-m {commit_message}`
+   {% include 'common/commit_message_guidelines/1.0.0.jinja' %}
+3. `run_git_command`: command=`fetch`, args=`--unshallow`
+4. `run_git_command`: command=`push`, args=`origin <current-branch>:<current-branch>`
+
+**Merge request update**:
+5. `update_merge_request` using iid from merge_request_details:
+   - reviewer: user id {{ reviewer_id }}
+   - description prefix: "Relates to issue {{ issue_url }}"
+   - add "## Changes" section based on programming_agent_handover
