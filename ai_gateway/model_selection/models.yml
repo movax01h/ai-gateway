@@ -138,6 +138,21 @@ models:
       max_tokens: 4_096
       model_class_provider: anthropic
 
+  - name: "Claude Opus 4.6 - Anthropic"
+    provider: "Anthropic"
+    gitlab_identifier: "claude_opus_4_6_20260205"
+    description: "Anthropic's most intelligent model, combining maximum capability with practical performance."
+    cost_indicator: "$$$$"
+    max_context_tokens: 200000
+    proxy_provider: anthropic
+    family:
+      - claude_4_5
+    params:
+      model: "claude-opus-4-6"
+      temperature: 0.0
+      max_tokens: 4_096
+      model_class_provider: anthropic
+
   - name: "Claude Sonnet 4.5 - Anthropic"
     provider: "Anthropic"
     gitlab_identifier: "claude_sonnet_4_5_20250929"
