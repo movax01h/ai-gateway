@@ -7,6 +7,7 @@ from gitlab_cloud_connector import CloudConnectorUser, CompositeProvider, UserCl
 from jose import jwt
 
 from ai_gateway.api.v1 import api_router
+from lib.usage_quota.client import SKIP_USAGE_CUTOFF_CLAIM
 
 # JSON Web Key can be generated via https://mkjwk.org/
 # Private key: X.509 PEM format
@@ -368,6 +369,7 @@ class TestSaasExtraClaims:
             scopes=["complete_code", "ai_gateway_model_provider_proxy"],
             gitlab_realm="saas",
             gitlab_instance_id="1234",
+            extra={SKIP_USAGE_CUTOFF_CLAIM: "true"},
         )
         return CloudConnectorUser(authenticated=True, claims=claims)
 
@@ -399,6 +401,7 @@ class TestSaasExtraClaims:
         assert decoded_token["gitlab_project_id"] == "5678"
         assert decoded_token["gitlab_namespace_id"] == "9012"
         assert decoded_token["gitlab_root_namespace_id"] == "3456"
+        assert decoded_token["skip_usage_cutoff"] == "true"
 
     def test_user_access_token_saas_without_extra_claims(self, mock_client: TestClient):
         headers = {
