@@ -246,8 +246,7 @@ Use this pattern when:
    - The tool is only added to the registry if the capability is present
    - **Important**: When adding a new capability, ensure all clients that will use it declare support:
       - If requests come through **workhorse** (e.g., GitLab LSP with WebSocket connection): Update
-        `ClientCapabilities` in workhorse (
-        `ee/app/assets/javascripts/ai/duo_agentic_chat/utils/workflow_socket_utils.js`) and in GitLab LSP. As
+        `ClientCapabilities` in workhorse (`workhorse/internal/ai_assist/duoworkflow/runner.go`) and in GitLab LSP. As
         documented in the workhorse code: "We intersect the capabilities of all parties and then new behavior can only
         depend on that behavior if it makes it all the way through."
       - For other clients: Ensure they include the capability in their `clientCapabilities` when making gRPC requests
