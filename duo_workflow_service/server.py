@@ -1,5 +1,4 @@
 # pylint: disable=direct-environment-variable-reference,invalid-overridden-method,too-many-branches,too-many-statements
-
 import asyncio
 import functools
 import json
@@ -931,7 +930,3 @@ def run(config: Config):
 
 def run_app():
     run(get_config())
-
-
-if __name__ == "__main__":
-    run_app()

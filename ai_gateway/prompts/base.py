@@ -9,7 +9,8 @@ from gitlab_cloud_connector import (
     WrongUnitPrimitives,
 )
 from jinja2 import PackageLoader, meta
-from jinja2.sandbox import SandboxedEnvironment
+from jinja2.exceptions import SecurityError
+from jinja2.sandbox import ImmutableSandboxedEnvironment
 from langchain_core.callbacks import BaseCallbackHandler, get_usage_metadata_callback
 from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import BaseMessage
@@ -52,8 +53,52 @@ __all__ = [
     "prompt_template_to_messages",
 ]
 
+
+# cspell:ignore binops, binop, Sandboxed
+class PromptSandboxedEnvironment(ImmutableSandboxedEnvironment):
+    """Sandboxed environment that forbids method access on bound objects."""
+
+    intercepted_binops = frozenset(["*", "**"])
+
+    def is_safe_attribute(self, obj: Any, attr: str, value: Any) -> bool:
+        if callable(value):
+            log.warning(
+                "Blocked callable attribute access in prompt template",
+                object_type=type(obj).__name__,
+                attribute=attr,
+            )
+            return False
+        return super().is_safe_attribute(obj, attr, value)
+
+    def is_safe_callable(self, obj: Any) -> bool:
+        return False
+
+    def call_binop(self, context: Any, operator: str, left: Any, right: Any) -> Any:
+        if operator in self.intercepted_binops:
+            raise SecurityError(
+                "Multiplication operators are not allowed in prompt templates"
+            )
+        return super().call_binop(context, operator, left, right)
+
+
+def split_filter(
+    value: Any,
+    delimiter: str = " ",
+    maxsplit: Optional[int] = None,
+) -> list[str]:
+    """Safe string split filter exposed to prompt templates."""
+
+    if delimiter == "":
+        raise SecurityError("Empty delimiter is not allowed for split filter")
+
+    split_limit = maxsplit if maxsplit is not None else -1
+
+    return str(value).split(delimiter, split_limit)
+
+
 jinja_loader = PackageLoader("ai_gateway.prompts", "definitions")
-jinja_env = SandboxedEnvironment(loader=jinja_loader)
+jinja_env = PromptSandboxedEnvironment(loader=jinja_loader)
+jinja_env.filters["split"] = split_filter
 
 log = structlog.stdlib.get_logger("prompts")
 
