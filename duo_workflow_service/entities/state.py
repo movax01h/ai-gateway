@@ -150,7 +150,6 @@ def _conversation_history_reducer(
         # If feature flag is enabled, trim to max context window for the specific model
         # Otherwise trim to the old 400K context window size for all models.
         model_metadata = current_model_metadata_context.get()
-
         reduced[agent_name] = trim_conversation_history(
             messages=combined_messages,
             component_name=agent_name,
@@ -159,11 +158,6 @@ def _conversation_history_reducer(
                 if is_feature_enabled(FeatureFlag.AI_PER_MODEL_CONTEXT_WINDOW)
                 and model_metadata is not None
                 else LEGACY_MAX_CONTEXT_TOKENS
-            ),
-            model_name=(
-                model_metadata.llm_definition.name
-                if model_metadata is not None
-                else "claude"  # Claude for safer token counting (~+30%)
             ),
         )
 
