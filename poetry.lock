@@ -1876,14 +1876,14 @@ reference = "litellm"
 
 [[package]]
 name = "gitlab-cloud-connector"
-version = "3.21.0"
+version = "3.23.0"
 description = "Cloud Connector library for Python backends"
 optional = false
 python-versions = ">=3.11,<4.0"
 groups = ["main"]
 files = [
-    {file = "gitlab_cloud_connector-3.21.0-py3-none-any.whl", hash = "sha256:9c9b5d3030509e9bc3807502674ab98fc15292bcc490a28fc0fb68568a09b4c8"},
-    {file = "gitlab_cloud_connector-3.21.0.tar.gz", hash = "sha256:5dd84db77cf4e9c0c974ada4cacddfa4d0251831c7c64833803f2440dbe7475f"},
+    {file = "gitlab_cloud_connector-3.23.0-py3-none-any.whl", hash = "sha256:9ca86012c2f2a767a2c84a1b875df2b7cb2e87d8f9d0bad58ceb5c9e4b863cf8"},
+    {file = "gitlab_cloud_connector-3.23.0.tar.gz", hash = "sha256:0e520cc8f8c24852082392acca538e682544183e8ebf90ea240a69c16ee3ac7c"},
 ]
 
 [package.dependencies]
