@@ -9,7 +9,6 @@ from typing import Any, Dict, List, Optional, Type
 from urllib.parse import quote
 
 import yaml
-from jinja2 import Template
 from pydantic import BaseModel, Field
 
 from duo_workflow_service.policies.diff_exclusion_policy import DiffExclusionPolicy
@@ -418,9 +417,12 @@ class BuildReviewMergeRequestContext(DuoBaseTool):
             context.get("custom_instructions", [])
         )
 
-        diff_section = self._format_diffs(
-            context["diffs_and_paths"], context["renamed_files"]
+        file_diffs_section = self._format_diffs(context["diffs_and_paths"])
+        renamed_files_section = self._format_renamed_files(context["renamed_files"])
+        diff_section = "\n\n".join(
+            list(filter(None, [file_diffs_section, renamed_files_section]))
         )
+
         files_section = self._format_original_files(context.get("files_content", {}))
 
         # Unique delimiters per request - unpredictable to attackers
@@ -487,37 +489,31 @@ Example: "According to custom instructions in 'Security Best Practices' (validat
 This formatting is only required for custom instruction comments. Regular review comments based on standard review criteria should NOT include this prefix.
 </custom_instructions>"""
 
-    def _format_diffs(
-        self, diffs_and_paths: Dict[str, str], renamed_files: Dict[str, str]
-    ) -> str:
+    def _format_diffs(self, diffs_and_paths: Dict[str, str]) -> str:
         """Format diffs section with structured line format."""
 
-        file_paths_formatted_diffs = {}
+        formatted_diffs = []
         for file_path, diff_content in diffs_and_paths.items():
-            file_paths_formatted_diffs[file_path] = self._parse_and_format_diff(
-                diff_content
+            formatted_lines = self._parse_and_format_diff(diff_content)
+            formatted_diffs.append(
+                f'<file_diff filename="{file_path}">\n{formatted_lines}\n</file_diff>'
             )
 
-            template = Template(
-                """{% for file_path, formatted_lines in file_paths_formatted_diffs.items() -%}
-<file_diff filename="{{ file_path }}">
-{{ formatted_lines }}
-</file_diff>
+        return "\n\n".join(formatted_diffs)
 
-{% endfor -%}
-{% if renamed_files -%}
-<renamed_files>
-{% for new_path, old_path in renamed_files.items() -%}
-<file old_path="{{ old_path }}" new_path="{{ new_path }}"></file>
-{% endfor -%}
-</renamed_files>
-{% endif -%}"""
+    def _format_renamed_files(self, renamed_files: Dict[str, str]) -> str:
+        """Format diffs section with structured line format."""
+        if not renamed_files:
+            return ""
+
+        formatted_renamed_files = ["<renamed_files>"]
+        for new_path, old_path in renamed_files.items():
+            formatted_renamed_files.append(
+                f'<file old_path="{old_path}" new_path="{new_path}"></file>'
             )
+        formatted_renamed_files += ["</renamed_files>"]
 
-        return template.render(
-            file_paths_formatted_diffs=file_paths_formatted_diffs,
-            renamed_files=renamed_files,
-        )
+        return "\n".join(formatted_renamed_files)
 
     def _parse_and_format_diff(self, raw_diff: str) -> str:
         """Parse raw diff and format each line with type and line numbers."""
