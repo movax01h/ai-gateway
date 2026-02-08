@@ -169,7 +169,12 @@ class ToolsExecutor:
                 break
 
         for invalid_tool_call in invalid_tool_calls:
-            error_content = "Invalid or unparsable tool call received."
+            tool_name = invalid_tool_call.get("name") or "unknown"
+            error_content = (
+                f"While processing your request, GitLab Duo Chat encountered a problem making a call to the "
+                f"{tool_name} tool. Try again, or rephrase your request. If the problem "
+                f"persists, start a new chat, and/or select a different model for your request."
+            )
 
             tool_call_id = invalid_tool_call["id"]
 

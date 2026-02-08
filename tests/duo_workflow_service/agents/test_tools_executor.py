@@ -1595,7 +1595,10 @@ async def test_invalid_tool_call_handling(
     error_response = result[0]["conversation_history"]["planner"][0]
     assert isinstance(error_response, ToolMessage)
     assert error_response.tool_call_id == "invalid-call-1"
-    assert "Invalid or unparsable tool call received." in error_response.content
+    assert (
+        "While processing your request, GitLab Duo Chat encountered a problem making a call to the invalid_tool tool"
+        in error_response.content
+    )
 
     # Verify UI chat log
     update = cast(Command, result[-1]).update
@@ -1689,7 +1692,10 @@ async def test_invalid_tool_call_with_valid_tool_calls(
     invalid_response = result[1]["conversation_history"]["planner"][0]
     assert isinstance(invalid_response, ToolMessage)
     assert invalid_response.tool_call_id == "invalid-call-1"
-    assert "Invalid or unparsable tool call received." in invalid_response.content
+    assert (
+        "While processing your request, GitLab Duo Chat encountered a problem making a call to the invalid_tool tool"
+        in invalid_response.content
+    )
 
     # Verify UI chat logs
     update = cast(Command, result[-1]).update
