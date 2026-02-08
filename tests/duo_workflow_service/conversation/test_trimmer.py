@@ -22,6 +22,13 @@ from duo_workflow_service.conversation.trimmer import (
 from duo_workflow_service.token_counter.tiktoken_counter import TikTokenCounter
 from duo_workflow_service.workflows.type_definitions import AdditionalContext
 
+# Error message for invalid tool call responses
+INVALID_TOOL_ERROR_MESSAGE = (
+    "While processing your request, GitLab Duo Chat encountered a problem making a call to the "
+    "invalid_tool tool. Try again, or rephrase your request. If the problem "
+    "persists, start a new chat, and/or select a different model for your request."
+)
+
 
 def test_pretrim_large_messages():
     token_counter = MagicMock()
@@ -599,7 +606,7 @@ def test_restore_message_consistency_with_invalid_tool_call_responses():
             invalid_tool_calls=[{"id": "invalid-call-1"}],
         ),
         ToolMessage(
-            content="Invalid or unparsable tool call received.",
+            content=INVALID_TOOL_ERROR_MESSAGE,
             tool_call_id="invalid-call-1",
         ),
     ]
@@ -614,7 +621,7 @@ def test_restore_message_consistency_with_invalid_tool_call_responses():
     assert isinstance(result[3], ToolMessage)
 
     # The ToolMessage should be preserved as-is
-    assert result[3].content == "Invalid or unparsable tool call received."
+    assert result[3].content == INVALID_TOOL_ERROR_MESSAGE
     assert result[3].tool_call_id == "invalid-call-1"
 
 
@@ -625,7 +632,7 @@ def test_restore_message_consistency_with_orphaned_invalid_tool_response():
         HumanMessage(content="human message"),
         # No AIMessage with invalid_tool_calls - this makes the ToolMessage orphaned
         ToolMessage(
-            content="Invalid or unparsable tool call received.",
+            content=INVALID_TOOL_ERROR_MESSAGE,
             tool_call_id="missing-invalid-call",
         ),
     ]
@@ -639,7 +646,7 @@ def test_restore_message_consistency_with_orphaned_invalid_tool_response():
     assert isinstance(result[2], HumanMessage)  # Converted from ToolMessage
 
     # The converted message should have the same content
-    assert result[2].content == "Invalid or unparsable tool call received."
+    assert result[2].content == INVALID_TOOL_ERROR_MESSAGE
 
 
 @patch("duo_workflow_service.conversation.trimmer.trim_messages")
