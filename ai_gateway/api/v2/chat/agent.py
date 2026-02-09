@@ -10,7 +10,6 @@ from gitlab_cloud_connector import (
 )
 from starlette.responses import StreamingResponse
 
-from ai_gateway.api.auth_utils import StarletteUser, get_current_user
 from ai_gateway.api.feature_category import feature_category
 from ai_gateway.api.middleware import (
     X_GITLAB_FEATURE_ENABLEMENT_TYPE_HEADER,
@@ -32,10 +31,10 @@ from ai_gateway.chat.agents import (
 )
 from ai_gateway.chat.agents.react import ReActAgent
 from ai_gateway.chat.executor import GLAgentRemoteExecutor
-from ai_gateway.model_metadata import current_model_metadata_context
 from ai_gateway.models import Role
 from ai_gateway.prompts import BasePromptRegistry
 from ai_gateway.structured_logging import get_request_logger
+from lib.context import StarletteUser, current_model_metadata_context, get_current_user
 from lib.internal_events import InternalEventsClient
 
 __all__ = [

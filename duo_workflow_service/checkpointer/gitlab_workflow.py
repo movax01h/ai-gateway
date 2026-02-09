@@ -33,10 +33,6 @@ from langgraph.checkpoint.base import (
 from langgraph.checkpoint.memory import MemorySaver
 
 from ai_gateway.container import ContainerApplication
-from ai_gateway.instrumentators.model_requests import (
-    get_llm_operations,
-    init_llm_operations,
-)
 from duo_workflow_service.checkpointer.gitlab_workflow_utils import (
     STATUS_TO_EVENT_PROPERTY,
     WorkflowStatusEventEnum,
@@ -68,6 +64,7 @@ from duo_workflow_service.workflows.type_definitions import (
     AIO_CANCEL_STOP_WORKFLOW_REQUEST,
 )
 from lib.billing_events import BillingEvent, BillingEventsClient
+from lib.context import get_llm_operations, init_llm_operations
 from lib.events import GLReportingEventContext
 from lib.feature_flags import FeatureFlag, is_feature_enabled
 from lib.internal_events import InternalEventAdditionalProperties, InternalEventsClient

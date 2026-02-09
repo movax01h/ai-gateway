@@ -1,9 +1,6 @@
 from packaging.version import InvalidVersion, Version
 
-from ai_gateway.instrumentators.model_requests import (
-    client_capabilities,
-    gitlab_version,
-)
+from lib.context import client_capabilities, gitlab_version
 
 
 def is_client_capable(capability: str) -> bool:

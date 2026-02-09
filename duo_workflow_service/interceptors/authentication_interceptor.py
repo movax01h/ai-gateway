@@ -16,7 +16,7 @@ from gitlab_cloud_connector import (
 from gitlab_cloud_connector.auth import AUTH_HEADER, PREFIX_BEARER_HEADER
 from grpc.aio import ServicerContext
 
-from ai_gateway.auth.glgo import cloud_connector_token_context_var
+from lib.context import cloud_connector_token_context_var
 
 current_user: contextvars.ContextVar = contextvars.ContextVar("current_user")
 

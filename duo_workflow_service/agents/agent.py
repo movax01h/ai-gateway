@@ -11,8 +11,6 @@ from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.runnables import Runnable, RunnableConfig
 from langchain_core.tools import BaseTool
 
-from ai_gateway.api.auth_utils import StarletteUser
-from ai_gateway.instrumentators.model_requests import LLMFinishReason
 from ai_gateway.prompts import BasePromptRegistry, prompt_template_to_messages
 from ai_gateway.prompts.config.base import PromptConfig
 from duo_workflow_service.agents.base import BaseAgent
@@ -29,6 +27,7 @@ from duo_workflow_service.gitlab.http_client import GitlabHttpClient
 from duo_workflow_service.monitoring import duo_workflow_metrics
 from duo_workflow_service.tools.handover import HandoverTool
 from duo_workflow_service.tracking.errors import log_exception
+from lib.context import LLMFinishReason, StarletteUser
 from lib.events import GLReportingEventContext
 
 log = structlog.stdlib.get_logger("agent_v2")

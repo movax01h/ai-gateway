@@ -7,8 +7,8 @@ from langchain_core.messages import AIMessage
 from langchain_core.messages.ai import InputTokenDetails, UsageMetadata
 from structlog.testing import capture_logs
 
-from ai_gateway.instrumentators.model_requests import (
-    ModelRequestInstrumentator,
+from ai_gateway.instrumentators.model_requests import ModelRequestInstrumentator
+from lib.context import (
     get_llm_operations,
     get_token_usage,
     init_llm_operations,
@@ -486,7 +486,6 @@ class TestDetailLabels:
             labels = watcher._detail_labels()
             assert labels["unit_primitive"] == expected_unit_primitive
             assert labels["feature_category"] == expected_feature_category
-            GitLabUnitPrimitive.CODE_SUGGESTIONS,
 
     def test_detail_labels_without_unit_primitive(self, instrumentator):
         with instrumentator.watch(unit_primitives=None) as watcher:

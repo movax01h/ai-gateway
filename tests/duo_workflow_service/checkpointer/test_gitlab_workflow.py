@@ -6,7 +6,6 @@ from unittest.mock import AsyncMock, Mock, call, patch
 
 import pytest
 from gitlab_cloud_connector import CloudConnectorUser, UserClaims
-from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 from langchain_core.runnables import RunnableConfig
 from langgraph.checkpoint.base import (
     ChannelVersions,
@@ -15,15 +14,11 @@ from langgraph.checkpoint.base import (
 )
 from langgraph.checkpoint.memory import MemorySaver
 
-from ai_gateway.instrumentators.model_requests import llm_operations
 from duo_workflow_service.checkpointer.gitlab_workflow import (
     GitLabWorkflow,
     WorkflowStatusEventEnum,
 )
-from duo_workflow_service.checkpointer.gitlab_workflow_utils import (
-    compress_checkpoint,
-    uncompress_checkpoint,
-)
+from duo_workflow_service.checkpointer.gitlab_workflow_utils import compress_checkpoint
 from duo_workflow_service.entities.state import WorkflowStatusEnum
 from duo_workflow_service.gitlab.http_client import (
     GitLabHttpResponse,
@@ -35,6 +30,7 @@ from duo_workflow_service.status_updater.gitlab_status_updater import (
     UnsupportedStatusEvent,
 )
 from lib.billing_events import BillingEvent
+from lib.context import llm_operations
 from lib.feature_flags.context import FeatureFlag
 from lib.internal_events import InternalEventAdditionalProperties
 from lib.internal_events.event_enum import EventEnum, EventLabelEnum, EventPropertyEnum
@@ -1177,7 +1173,7 @@ async def test_aput_writes_with_interrupt(gitlab_workflow, http_client):
     await gitlab_workflow.aput_writes(config, writes, "task_id")
 
     http_client.apost.assert_called_once_with(
-        path=f"/api/v4/ai/duo_workflows/workflows/123/checkpoint_writes_batch",
+        path="/api/v4/ai/duo_workflows/workflows/123/checkpoint_writes_batch",
         body=json.dumps(
             {
                 "thread_ts": "id",
@@ -1493,7 +1489,7 @@ async def test_aput_with_compression_enabled(
     http_client.apatch.return_value = GitLabHttpResponse(status_code=200, body={})
     http_client.apost.return_value = GitLabHttpResponse(status_code=200, body={})
 
-    result = await gitlab_workflow.aput(
+    await gitlab_workflow.aput(
         config, checkpoint, checkpoint_metadata, ChannelVersions()
     )
 

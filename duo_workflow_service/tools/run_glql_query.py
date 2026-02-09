@@ -4,9 +4,9 @@ from typing import Any, Type
 from packaging.version import InvalidVersion, Version
 from pydantic import BaseModel, Field
 
-from ai_gateway.instrumentators.model_requests import gitlab_version
 from duo_workflow_service.tools.duo_base_tool import DuoBaseTool
 from duo_workflow_service.tracking.errors import log_exception
+from lib.context import gitlab_version
 
 
 class GLQLQueryInput(BaseModel):

@@ -1,22 +1,36 @@
 import time
 from contextlib import contextmanager
-from contextvars import ContextVar
-from enum import Enum
 from typing import Any, List, Optional
 
 import structlog
 from gitlab_cloud_connector import GitLabUnitPrimitive
 from langchain_core.messages import BaseMessage
 from langchain_core.messages.ai import UsageMetadata
-from packaging.version import InvalidVersion, Version
 from prometheus_client import Counter, Gauge, Histogram
 
 from ai_gateway.api.feature_category import current_feature_category
 from ai_gateway.config import ModelLimits
 from ai_gateway.tracking.errors import log_exception
+from lib.context import (
+    METADATA_LABELS,
+    LLMFinishReason,
+    LlmOperations,
+    TokenUsage,
+    build_metadata_labels,
+    client_capabilities,
+    client_type,
+    get_llm_operations,
+    get_token_usage,
+    gitlab_realm,
+    gitlab_version,
+    init_llm_operations,
+    init_token_usage,
+    language_server_version,
+    llm_operations,
+    token_usage,
+)
 from lib.internal_events.client import InternalEventsClient
 from lib.internal_events.context import InternalEventAdditionalProperties
-from lib.language_server import LanguageServerVersion
 
 # Error type constants
 ERROR_TYPE_NONE = "none"
@@ -27,47 +41,6 @@ ERROR_TYPE_PERMISSION_ERROR = "permission_error"
 ERROR_TYPE_SERVICE_UNAVAILABLE = "service_unavailable"
 ERROR_TYPE_OTHER = "other"
 
-
-def _language_server_version_label():
-    lsp_version = language_server_version.get()
-    if lsp_version:
-        return str(lsp_version.version)
-
-    return "unknown"
-
-
-def _gitlab_version_label():
-    try:
-        gl_version = Version(gitlab_version.get() or "")
-        return str(gl_version)
-    except (InvalidVersion, TypeError):
-        return "unknown"
-
-
-def _client_type_label():
-    client_type_value = client_type.get()
-    if client_type_value:
-        return str(client_type_value)
-
-    return "unknown"
-
-
-def _gitlab_realm_label():
-    gitlab_realm_value = gitlab_realm.get()
-    if gitlab_realm_value:
-        return str(gitlab_realm_value)
-
-    return "unknown"
-
-
-_METADATA_LABEL_GETTERS = {
-    "lsp_version": _language_server_version_label,
-    "gitlab_version": _gitlab_version_label,
-    "client_type": _client_type_label,
-    "gitlab_realm": _gitlab_realm_label,
-}
-
-METADATA_LABELS = list(_METADATA_LABEL_GETTERS.keys())
 
 METRIC_LABELS = ["model_engine", "model_name"]
 INFERENCE_DETAILS = (
@@ -134,76 +107,6 @@ INFERENCE_OUTPUT_TOKENS = Counter(
     INFERENCE_DETAILS,
 )
 
-type TokenUsage = dict[str, dict[str, int]]
-type LlmOperations = list[dict[str, str | int]]
-
-token_usage: ContextVar[TokenUsage | None] = ContextVar("token_usage", default=None)
-llm_operations: ContextVar[LlmOperations | None] = ContextVar(
-    "llm_operations", default=None
-)
-client_type: ContextVar[Optional[str]] = ContextVar("client_type", default=None)
-gitlab_realm: ContextVar[Optional[str]] = ContextVar("gitlab_realm", default=None)
-gitlab_version: ContextVar[Optional[str]] = ContextVar("gitlab_version", default=None)
-language_server_version: ContextVar[Optional[LanguageServerVersion]] = ContextVar(
-    "language_server_version", default=None
-)
-# client_capabilities is used to make backwards compatible changes to our
-# communication protocol. This is needed usually when we're adding new
-# protobuf fields and changing behaviour of the gRPC communication in
-# non-backwards compatible ways.
-#
-# It is passed through the original client (e.g.
-# `gitlab-lsp`) through workhorse and all the way to Duo Workflow Service.
-# Each client in the chain intersects their capabilities such that when
-# Duo Workflow Service receives this we know that all clients in the chain
-# definitely support this capability.
-client_capabilities: ContextVar[set[str]] = ContextVar(
-    "client_capabilities", default=set()
-)
-
-
-class LLMFinishReason(str, Enum):
-    STOP = "stop"
-    END_TURN = "end_turn"
-    LENGTH = "length"  # Hit max_tokens limit
-    MAX_TOKENS = "max_tokens"
-    STOP_SEQUENCE = "stop_sequence"
-    TOOL_CALLS = "tool_calls"
-    TOOL_USE = "tool_use"
-    CONTENT_FILTER = "content_filter"
-    MODEL_CONTEXT_WINDOW_EXCEEDED = "model_context_window_exceeded"
-
-    @classmethod
-    def values(cls):
-        """Return all enum values as a list."""
-        return [e.value for e in cls]
-
-    @classmethod
-    def abnormal_values(cls):
-        """Return abnormal finish reason values as a list."""
-        abnormal = [
-            cls.LENGTH,
-            cls.CONTENT_FILTER,
-            cls.MAX_TOKENS,
-            cls.MODEL_CONTEXT_WINDOW_EXCEEDED,
-        ]
-        return [e.value for e in abnormal]
-
-
-def build_metadata_labels():
-    return {key: getter() for key, getter in _METADATA_LABEL_GETTERS.items()}
-
-
-logger = structlog.get_logger()
-
-
-def init_token_usage() -> None:
-    token_usage.set({})
-
-
-def init_llm_operations() -> None:
-    llm_operations.set([])
-
 
 def _update_token_usage(model: str, usage: UsageMetadata) -> None:
     current_usage = token_usage.get()
@@ -218,22 +121,7 @@ def _update_token_usage(model: str, usage: UsageMetadata) -> None:
     token_usage.set(current_usage)
 
 
-def get_token_usage() -> TokenUsage | None:
-    current_usage = token_usage.get()
-
-    # Reset the usage so multiple requests don't return the same values
-    token_usage.set(None)
-
-    return current_usage
-
-
-def get_llm_operations() -> LlmOperations | None:
-    current_operations = llm_operations.get()
-
-    # Reset the operations so multiple requests don't return the same values
-    llm_operations.set(None)
-
-    return current_operations
+logger = structlog.get_logger()
 
 
 class ModelRequestInstrumentator:
@@ -292,7 +180,8 @@ class ModelRequestInstrumentator:
 
             error_message = str(exception)
 
-            # Check for prompt too long in error message (case-insensitive, works across multiple providers)
+            # Check for prompt too long in error message (case-insensitive, works
+            # across multiple providers)
             # Vertex: "Prompt is too long"
             # Anthropic: "prompt is too long: X tokens > Y maximum"
             # LiteLLM: "Prompt is too long"
@@ -306,7 +195,8 @@ class ModelRequestInstrumentator:
                 self.error_type = ERROR_TYPE_OVERLOADED
                 return
 
-            # Check if exception has a status_code or code attribute (works across providers)
+            # Check if exception has a status_code or code attribute (works across
+            # providers)
             # Anthropic/OpenAI use status_code, LiteLLM uses code
             status_code = getattr(exception, "status_code", None) or getattr(
                 exception, "code", None
@@ -502,3 +392,27 @@ class ModelRequestInstrumentator:
 
         if not stream:
             watcher.finish()
+
+
+# Re-export for backward compatibility during transition
+# These will be removed once all imports are updated to use lib.context directly
+__all__ = [
+    "ModelRequestInstrumentator",
+    # Re-exports from lib.context
+    "METADATA_LABELS",
+    "LLMFinishReason",
+    "TokenUsage",
+    "LlmOperations",
+    "build_metadata_labels",
+    "client_capabilities",
+    "client_type",
+    "gitlab_realm",
+    "gitlab_version",
+    "language_server_version",
+    "token_usage",
+    "llm_operations",
+    "init_token_usage",
+    "init_llm_operations",
+    "get_token_usage",
+    "get_llm_operations",
+]

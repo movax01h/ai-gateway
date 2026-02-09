@@ -10,7 +10,6 @@ from gitlab_cloud_connector import (
     UserClaims,
 )
 
-from ai_gateway.api.auth_utils import StarletteUser, get_current_user
 from ai_gateway.api.feature_category import feature_category
 from ai_gateway.api.middleware.route import has_sufficient_usage_quota
 from ai_gateway.api.v1.code.typing import Token
@@ -18,6 +17,7 @@ from ai_gateway.async_dependency_resolver import (
     get_internal_event_client,
     get_token_authority,
 )
+from lib.context import StarletteUser, get_current_user
 from lib.events import FeatureQualifiedNameStatic
 from lib.internal_events import InternalEventsClient
 from lib.usage_quota import UsageQuotaEvent

@@ -2,13 +2,11 @@ import json
 
 import grpc
 
-from ai_gateway.model_metadata import (
-    create_model_metadata,
-    current_model_metadata_context,
-)
+from ai_gateway.model_metadata import create_model_metadata
 from duo_workflow_service.interceptors.authentication_interceptor import (
     current_user as current_user_context_var,
 )
+from lib.context import current_model_metadata_context
 
 
 class ModelMetadataInterceptor(grpc.aio.ServerInterceptor):

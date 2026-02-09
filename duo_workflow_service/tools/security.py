@@ -6,13 +6,13 @@ from typing import Any, Optional, Type
 from packaging.version import InvalidVersion, Version
 from pydantic import BaseModel, Field, field_validator
 
-from ai_gateway.instrumentators.model_requests import gitlab_version
 from duo_workflow_service.security.tool_output_security import ToolTrustLevel
 from duo_workflow_service.tools.duo_base_tool import DuoBaseTool
 from duo_workflow_service.tools.vulnerabilities.queries.vulnerabilities import (
     LIST_VULNERABILITIES_QUERY,
 )
 from duo_workflow_service.tracking.errors import log_exception
+from lib.context import gitlab_version
 
 PROJECT_IDENTIFICATION_DESCRIPTION = """
 The project must be specified using its full path (e.g., 'namespace/project' or 'group/subgroup/project').

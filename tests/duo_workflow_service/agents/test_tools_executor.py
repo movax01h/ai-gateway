@@ -18,7 +18,6 @@ from langgraph.graph import StateGraph
 from langgraph.types import Command
 from pydantic import BaseModel, Field, ValidationError
 
-from ai_gateway.instrumentators.model_requests import client_capabilities
 from contract import contract_pb2
 from duo_workflow_service.agents import ToolsExecutor
 from duo_workflow_service.entities.state import (
@@ -42,6 +41,7 @@ from duo_workflow_service.tools.planner import (
     UpdateTaskDescription,
 )
 from duo_workflow_service.tools.toolset import ToolType
+from lib.context import client_capabilities
 from lib.events import GLReportingEventContext
 from lib.internal_events import InternalEventAdditionalProperties
 from lib.internal_events.event_enum import CategoryEnum, EventEnum, EventLabelEnum

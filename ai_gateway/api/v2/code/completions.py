@@ -11,7 +11,6 @@ from gitlab_cloud_connector import (
     WrongUnitPrimitives,
 )
 
-from ai_gateway.api.auth_utils import StarletteUser, get_current_user
 from ai_gateway.api.error_utils import capture_validation_errors
 from ai_gateway.api.feature_category import feature_category
 from ai_gateway.api.middleware.route import has_sufficient_usage_quota
@@ -67,6 +66,7 @@ from ai_gateway.structured_logging import get_request_logger
 from ai_gateway.tracking import SnowplowEvent, SnowplowEventContext
 from ai_gateway.tracking.errors import log_exception
 from ai_gateway.tracking.instrumentator import SnowplowInstrumentator
+from lib.context import StarletteUser, get_current_user
 from lib.events import FeatureQualifiedNameStatic
 from lib.feature_flags.context import current_feature_flag_context
 from lib.internal_events import InternalEventsClient

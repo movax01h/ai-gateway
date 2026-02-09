@@ -22,14 +22,9 @@ from langchain_core.runnables import Runnable, RunnableBinding, RunnableConfig
 from langchain_core.tools import BaseTool
 from langsmith import tracing_context
 
-from ai_gateway.api.auth_utils import StarletteUser
 from ai_gateway.config import ConfigModelLimits, ModelLimits
 from ai_gateway.instrumentators.model_requests import ModelRequestInstrumentator
-from ai_gateway.model_metadata import (
-    TypeModelMetadata,
-    create_model_metadata,
-    current_model_metadata_context,
-)
+from ai_gateway.model_metadata import TypeModelMetadata, create_model_metadata
 from ai_gateway.model_selection import ModelSelectionConfig, PromptParams
 from ai_gateway.prompts.bind_tools_cache import BindToolsCacheProtocol
 from ai_gateway.prompts.caching import (
@@ -41,6 +36,7 @@ from ai_gateway.prompts.config.base import ModelConfig, PromptConfig
 from ai_gateway.prompts.config.models import ModelClassProvider, TypeModelParams
 from ai_gateway.prompts.typing import Model, TypeModelFactory, TypePromptTemplateFactory
 from ai_gateway.structured_logging import get_request_logger
+from lib.context import StarletteUser, current_model_metadata_context
 from lib.internal_events.client import InternalEventsClient
 
 __all__ = [

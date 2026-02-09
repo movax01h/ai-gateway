@@ -12,7 +12,6 @@ from langchain_core.runnables import Runnable, RunnableBinding, RunnableSequence
 from pydantic import BaseModel, HttpUrl
 from pyfakefs.fake_filesystem import FakeFilesystem
 
-from ai_gateway.api.auth_utils import StarletteUser
 from ai_gateway.config import ConfigModelLimits
 from ai_gateway.integrations.amazon_q.chat import ChatAmazonQ
 from ai_gateway.integrations.amazon_q.client import AmazonQClientFactory
@@ -24,6 +23,7 @@ from ai_gateway.prompts.config import ModelClassProvider
 from ai_gateway.prompts.config.base import PromptConfig
 from ai_gateway.prompts.typing import Model, TypeModelFactory, TypePromptTemplateFactory
 from ai_gateway.vendor.langchain_litellm.litellm import ChatLiteLLM
+from lib.context import StarletteUser
 
 
 class MockPromptTemplateClass(Runnable):

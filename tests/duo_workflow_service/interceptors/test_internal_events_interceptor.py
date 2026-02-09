@@ -3,14 +3,11 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 from gitlab_cloud_connector import CloudConnectorUser, UserClaims
 
-from ai_gateway.instrumentators.model_requests import (
-    gitlab_version,
-    language_server_version,
-)
 from duo_workflow_service.interceptors.authentication_interceptor import current_user
 from duo_workflow_service.interceptors.internal_events_interceptor import (
     InternalEventsInterceptor,
 )
+from lib.context import gitlab_version, language_server_version
 from lib.internal_events import current_event_context
 from lib.language_server import LanguageServerVersion
 

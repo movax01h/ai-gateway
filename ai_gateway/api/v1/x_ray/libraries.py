@@ -8,7 +8,6 @@ from gitlab_cloud_connector import (
     GitLabUnitPrimitive,
 )
 
-from ai_gateway.api.auth_utils import StarletteUser, get_current_user
 from ai_gateway.api.feature_category import feature_category
 from ai_gateway.api.v1.x_ray.typing import XRayRequest, XRayResponse
 from ai_gateway.async_dependency_resolver import (
@@ -16,6 +15,7 @@ from ai_gateway.async_dependency_resolver import (
     get_x_ray_anthropic_claude,
 )
 from ai_gateway.models import AnthropicModel
+from lib.context import StarletteUser, get_current_user
 from lib.internal_events import InternalEventsClient
 
 __all__ = [

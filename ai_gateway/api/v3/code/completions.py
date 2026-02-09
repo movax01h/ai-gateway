@@ -10,7 +10,6 @@ from gitlab_cloud_connector import (
     GitLabUnitPrimitive,
 )
 
-from ai_gateway.api.auth_utils import StarletteUser, get_current_user
 from ai_gateway.api.feature_category import feature_category
 from ai_gateway.api.middleware import X_GITLAB_LANGUAGE_SERVER_VERSION
 from ai_gateway.api.middleware.route import has_sufficient_usage_quota
@@ -39,15 +38,12 @@ from ai_gateway.code_suggestions import (
 from ai_gateway.code_suggestions.base import SAAS_PROMPT_MODEL_MAP
 from ai_gateway.config import Config
 from ai_gateway.container import ContainerApplication
-from ai_gateway.model_metadata import (
-    TypeModelMetadata,
-    create_model_metadata,
-    current_model_metadata_context,
-)
+from ai_gateway.model_metadata import TypeModelMetadata, create_model_metadata
 from ai_gateway.models import KindModelProvider
 from ai_gateway.prompts import BasePromptRegistry
 from ai_gateway.structured_logging import get_request_logger
 from ai_gateway.tracking import SnowplowEventContext
+from lib.context import StarletteUser, current_model_metadata_context, get_current_user
 from lib.events import FeatureQualifiedNameStatic
 from lib.feature_flags.context import current_feature_flag_context
 from lib.usage_quota import UsageQuotaEvent

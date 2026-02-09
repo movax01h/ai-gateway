@@ -7,7 +7,6 @@ import pytest
 from fastapi import status
 
 from ai_gateway.proxy.clients.anthropic import AnthropicProxyClient
-from ai_gateway.proxy.clients.token_usage import TokenUsage
 
 
 @pytest.fixture(name="anthropic_client")

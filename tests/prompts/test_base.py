@@ -20,14 +20,12 @@ from pydantic import AnyUrl
 from pyfakefs.fake_filesystem import FakeFilesystem
 from structlog.testing import capture_logs
 
-from ai_gateway.api.auth_utils import StarletteUser
 from ai_gateway.config import ConfigModelLimits
 from ai_gateway.instrumentators.model_requests import ModelRequestInstrumentator
 from ai_gateway.model_metadata import (
     AmazonQModelMetadata,
     ModelMetadata,
     TypeModelMetadata,
-    current_model_metadata_context,
 )
 from ai_gateway.model_selection import LLMDefinition, PromptParams
 from ai_gateway.models.v2.anthropic_claude import ChatAnthropic
@@ -40,6 +38,7 @@ from ai_gateway.prompts.config.models import (
 )
 from ai_gateway.prompts.typing import TypeModelFactory, TypePromptTemplateFactory
 from ai_gateway.vendor.langchain_litellm.litellm import ChatLiteLLM
+from lib.context import StarletteUser, current_model_metadata_context
 from tests.conftest import FakeModel
 
 

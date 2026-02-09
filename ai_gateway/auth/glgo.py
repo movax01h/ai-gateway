@@ -1,5 +1,4 @@
 import base64
-import contextvars
 import hashlib
 import json
 import uuid
@@ -9,10 +8,6 @@ from typing import Optional
 import requests
 from gitlab_cloud_connector import CompositeProvider
 from jose import jwk, jwt
-
-cloud_connector_token_context_var: contextvars.ContextVar = contextvars.ContextVar(
-    "cloud_connector_token"
-)
 
 
 class GlgoAuthority:

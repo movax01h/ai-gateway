@@ -5,7 +5,6 @@ from gitlab_cloud_connector import GitLabFeatureCategory
 from langchain_core.messages import BaseMessage
 from pydantic import BaseModel, Field
 
-from ai_gateway.api.auth_utils import StarletteUser, get_current_user
 from ai_gateway.api.feature_category import feature_category
 from ai_gateway.api.v1.prompts.invoke import PromptRequest, _invoke
 from ai_gateway.async_dependency_resolver import get_prompt_registry
@@ -15,6 +14,7 @@ from ai_gateway.instrumentators.model_requests import (
     init_token_usage,
 )
 from ai_gateway.prompts.base import BasePromptRegistry
+from lib.context import StarletteUser, get_current_user
 
 
 class PromptResponse(BaseModel):

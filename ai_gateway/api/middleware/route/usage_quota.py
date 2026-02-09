@@ -4,7 +4,7 @@ from typing import Any, Callable, Optional
 from starlette.requests import Request
 from starlette.responses import JSONResponse
 
-from ai_gateway.api.auth_utils import StarletteUser
+from lib.context import StarletteUser
 from lib.events import FeatureQualifiedNameStatic, GLReportingEventContext
 from lib.usage_quota import InsufficientCredits, UsageQuotaEvent
 from lib.usage_quota.client import should_skip_usage_quota_for_user

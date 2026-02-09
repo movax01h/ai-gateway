@@ -4,7 +4,6 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from ai_gateway.instrumentators.model_requests import gitlab_version
 from duo_workflow_service.tools.documentation_search import (
     DocumentationSearch,
     SearchInput,

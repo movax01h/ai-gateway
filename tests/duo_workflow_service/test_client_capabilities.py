@@ -1,10 +1,7 @@
 import pytest
 
-from ai_gateway.instrumentators.model_requests import (
-    client_capabilities,
-    gitlab_version,
-)
 from duo_workflow_service.client_capabilities import is_client_capable
+from lib.context import client_capabilities, gitlab_version
 
 
 @pytest.fixture(name="gl_version_supported")

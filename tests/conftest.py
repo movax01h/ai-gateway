@@ -19,7 +19,6 @@ from starlette.middleware import Middleware
 from starlette_context.middleware import RawContextMiddleware
 
 from ai_gateway import structured_logging
-from ai_gateway.api.auth_utils import StarletteUser
 from ai_gateway.api.middleware import (
     AccessLogMiddleware,
     MiddlewareAuthentication,
@@ -31,12 +30,7 @@ from ai_gateway.code_suggestions.base import CodeSuggestionsChunk, CodeSuggestio
 from ai_gateway.code_suggestions.processing.typing import LanguageId
 from ai_gateway.config import Config, ConfigModelLimits
 from ai_gateway.container import ContainerApplication
-from ai_gateway.instrumentators.model_requests import llm_operations, token_usage
-from ai_gateway.model_metadata import (
-    ModelMetadata,
-    TypeModelMetadata,
-    current_model_metadata_context,
-)
+from ai_gateway.model_metadata import ModelMetadata, TypeModelMetadata
 from ai_gateway.model_selection.model_selection_config import (
     LLMDefinition,
     ModelSelectionConfig,
@@ -65,6 +59,12 @@ from duo_workflow_service.gitlab.gitlab_api import Project
 from duo_workflow_service.server import CONTAINER_APPLICATION_PACKAGES
 from duo_workflow_service.workflows.type_definitions import AdditionalContext
 from lib.billing_events.client import BillingEventsClient
+from lib.context import (
+    StarletteUser,
+    current_model_metadata_context,
+    llm_operations,
+    token_usage,
+)
 from lib.events.contextvar import self_hosted_dap_billing_enabled
 from lib.feature_flags.context import current_feature_flag_context
 from lib.internal_events.client import InternalEventsClient

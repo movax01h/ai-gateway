@@ -12,8 +12,8 @@ from langchain_core.messages import (
 from langchain_core.outputs import ChatGeneration, ChatGenerationChunk, ChatResult
 from pydantic import BaseModel
 
-from ai_gateway.api.auth_utils import StarletteUser
 from ai_gateway.integrations.amazon_q.client import AmazonQClientFactory
+from lib.context import StarletteUser
 
 __all__ = [
     "ChatAmazonQ",

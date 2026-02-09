@@ -5,7 +5,6 @@ from dependency_injector.providers import Factory, FactoryAggregate
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from gitlab_cloud_connector import GitLabUnitPrimitive
 
-from ai_gateway.api.auth_utils import StarletteUser, get_current_user
 from ai_gateway.api.feature_category import track_metadata
 from ai_gateway.api.v1.chat.auth import ChatInvokable, authorize_with_unit_primitive
 from ai_gateway.api.v1.chat.typing import (
@@ -29,6 +28,7 @@ from ai_gateway.models import (
 )
 from ai_gateway.models.base_text import TextGenModelChunk, TextGenModelOutput
 from ai_gateway.tracking import log_exception
+from lib.context import StarletteUser, get_current_user
 from lib.internal_events import InternalEventsClient
 
 __all__ = [

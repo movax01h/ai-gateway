@@ -3,9 +3,9 @@ from contextlib import contextmanager
 from fastapi import HTTPException, status
 from gitlab_cloud_connector import GitLabUnitPrimitive
 
-from ai_gateway.api.auth_utils import StarletteUser
 from ai_gateway.integrations.amazon_q.client import AmazonQClientFactory
 from ai_gateway.integrations.amazon_q.errors import AWSException
+from lib.context import StarletteUser
 from lib.internal_events.client import InternalEventsClient
 
 

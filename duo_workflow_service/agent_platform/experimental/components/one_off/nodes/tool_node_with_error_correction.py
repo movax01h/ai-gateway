@@ -6,7 +6,6 @@ from langchain_core.messages import HumanMessage, ToolMessage
 from langchain_core.tools import BaseTool, ToolException
 from pydantic_core import ValidationError
 
-from ai_gateway.instrumentators.model_requests import client_capabilities
 from duo_workflow_service.agent_platform.experimental.components.one_off.ui_log import (
     UILogEventsOneOff,
     UILogWriterOneOffTools,
@@ -22,6 +21,7 @@ from duo_workflow_service.monitoring import duo_workflow_metrics
 from duo_workflow_service.security.prompt_security import SecurityException
 from duo_workflow_service.security.scanner_factory import apply_security_scanning
 from duo_workflow_service.tools.toolset import Toolset
+from lib.context import client_capabilities
 from lib.events import GLReportingEventContext
 from lib.hidden_layer_log import set_hidden_layer_log_context
 from lib.internal_events import InternalEventAdditionalProperties, InternalEventsClient

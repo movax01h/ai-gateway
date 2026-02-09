@@ -2,11 +2,11 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from ai_gateway.api.auth_utils import StarletteUser
 from ai_gateway.integrations.amazon_q.client import AmazonQClientFactory
 from ai_gateway.models.amazon_q import AmazonQModel, KindAmazonQModel
 from ai_gateway.models.base_text import TextGenModelChunk, TextGenModelOutput
 from ai_gateway.safety_attributes import SafetyAttributes
+from lib.context import StarletteUser
 
 
 def test_amazon_q_model_init():

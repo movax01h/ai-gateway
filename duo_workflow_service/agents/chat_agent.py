@@ -6,7 +6,6 @@ import structlog
 from anthropic import APIStatusError
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, ToolMessage
 
-from ai_gateway.instrumentators.model_requests import LLMFinishReason
 from duo_workflow_service.agents.prompt_adapter import BasePromptAdapter
 from duo_workflow_service.components.tools_registry import ToolsRegistry
 from duo_workflow_service.entities.state import (
@@ -26,6 +25,7 @@ from duo_workflow_service.slash_commands.error_handler import (
     SlashCommandValidationError,
 )
 from duo_workflow_service.tracking.errors import log_exception
+from lib.context import LLMFinishReason
 
 log = structlog.stdlib.get_logger("chat_agent")
 
