@@ -22,7 +22,6 @@ from google.protobuf.json_format import MessageToDict
 
 from ai_gateway.config import Config, ConfigCustomModels, ConfigGoogleCloudPlatform
 from ai_gateway.container import ContainerApplication
-from ai_gateway.instrumentators.model_requests import client_capabilities
 from ai_gateway.prompts import BasePromptRegistry
 from contract import contract_pb2
 from duo_workflow_service.executor.outbox import OutboxSignal
@@ -43,6 +42,7 @@ from duo_workflow_service.workflows.type_definitions import (
     AdditionalContext,
 )
 from lib.billing_events import BillingEvent, ExecutionEnvironment
+from lib.context import client_capabilities
 from lib.events import GLReportingEventContext
 from lib.internal_events.context import InternalEventAdditionalProperties
 from lib.internal_events.event_enum import (

@@ -7,7 +7,6 @@ from langchain_core.runnables import Runnable
 from pydantic import AnyUrl
 from starlette_context import context, request_cycle_context
 
-from ai_gateway.api.auth_utils import StarletteUser
 from ai_gateway.chat import GLAgentRemoteExecutor
 from ai_gateway.chat.agents import (
     AgentError,
@@ -24,6 +23,7 @@ from ai_gateway.model_metadata import (
 )
 from ai_gateway.model_selection import LLMDefinition
 from ai_gateway.models.base_chat import Role
+from lib.context import StarletteUser
 
 
 @pytest.fixture(name="agent_events")

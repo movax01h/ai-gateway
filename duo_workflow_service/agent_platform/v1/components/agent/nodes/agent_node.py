@@ -6,7 +6,6 @@ from langchain_core.messages import AIMessage, ToolMessage
 from pydantic import BaseModel, ConfigDict, Field
 from pydantic_core import ValidationError
 
-from ai_gateway.instrumentators.model_requests import LLMFinishReason
 from ai_gateway.prompts import Prompt
 from duo_workflow_service.agent_platform.v1.state import (
     FlowState,
@@ -15,6 +14,7 @@ from duo_workflow_service.agent_platform.v1.state import (
     get_vars_from_state,
 )
 from duo_workflow_service.errors.error_handler import ModelError, ModelErrorHandler
+from lib.context import LLMFinishReason
 from lib.events import GLReportingEventContext
 from lib.internal_events import InternalEventsClient
 

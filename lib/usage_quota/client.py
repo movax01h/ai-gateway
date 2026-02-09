@@ -8,12 +8,12 @@ from aiocache import Cache, cached
 from aiocache.plugins import BasePlugin
 from gitlab_cloud_connector import CloudConnectorUser
 
-from ai_gateway.api.auth_utils import StarletteUser
 from ai_gateway.instrumentators.usage_quota import (
     USAGE_QUOTA_CUSTOMERSDOT_LATENCY_SECONDS,
     USAGE_QUOTA_CUSTOMERSDOT_REQUESTS_TOTAL,
 )
 from lib.billing_events.context import UsageQuotaEventContext
+from lib.context import StarletteUser
 from lib.usage_quota.errors import (
     UsageQuotaConnectionError,
     UsageQuotaHTTPError,

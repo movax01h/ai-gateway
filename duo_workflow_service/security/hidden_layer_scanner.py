@@ -13,12 +13,12 @@ from typing import Any, Dict, Literal, Optional, cast, get_args
 
 import structlog
 
-from ai_gateway.instrumentators.model_requests import gitlab_realm
 from duo_workflow_service.security.prompt_scanner import (
     DetectionType,
     PromptScanner,
     ScanResult,
 )
+from lib.context import gitlab_realm
 from lib.hidden_layer_log import current_hidden_layer_log_context
 
 log = structlog.stdlib.get_logger("hidden_layer_scanner")

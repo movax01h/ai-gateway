@@ -3,7 +3,6 @@ from typing import AsyncIterator, Optional
 
 import structlog
 
-from ai_gateway.api.auth_utils import StarletteUser
 from ai_gateway.integrations.amazon_q.client import AmazonQClientFactory
 from ai_gateway.integrations.amazon_q.errors import AWSException
 from ai_gateway.models.base import ModelMetadata
@@ -13,6 +12,7 @@ from ai_gateway.models.base_text import (
     TextGenModelOutput,
 )
 from ai_gateway.safety_attributes import SafetyAttributes
+from lib.context import StarletteUser
 
 __all__ = [
     "AmazonQModel",

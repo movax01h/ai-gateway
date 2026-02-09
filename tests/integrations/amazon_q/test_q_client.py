@@ -6,10 +6,10 @@ from botocore.exceptions import ClientError
 from fastapi import HTTPException
 from pydantic import BaseModel
 
-from ai_gateway.api.auth_utils import StarletteUser
-from ai_gateway.auth.glgo import GlgoAuthority, cloud_connector_token_context_var
+from ai_gateway.auth.glgo import GlgoAuthority
 from ai_gateway.integrations.amazon_q.client import AmazonQClient, AmazonQClientFactory
 from ai_gateway.integrations.amazon_q.errors import AWSException
+from lib.context import StarletteUser, cloud_connector_token_context_var
 
 
 # Create a custom ClientError subclass with the name "AccessDeniedException"
@@ -40,7 +40,9 @@ class TestAmazonQClientFactory:
             yield mock_boto3
 
     @pytest.fixture(name="amazon_q_client_factory")
-    def amazon_q_client_factory_fixture(self, mock_glgo_authority, mock_boto3):
+    def amazon_q_client_factory_fixture(
+        self, mock_glgo_authority, mock_boto3  # pylint: disable=unused-argument
+    ):
         return AmazonQClientFactory(
             glgo_authority=mock_glgo_authority,
             endpoint_url="https://mock.endpoint",
@@ -68,9 +70,8 @@ class TestAmazonQClientFactory:
         )
         assert token == "mock-token"
 
-    def test_missing_user_id_for_glgo_token(
-        self, amazon_q_client_factory, mock_user, mock_glgo_authority
-    ):
+    @pytest.mark.usefixtures("mock_glgo_authority")
+    def test_missing_user_id_for_glgo_token(self, amazon_q_client_factory, mock_user):
         mock_user.global_user_id = None
 
         with pytest.raises(HTTPException) as exc:
@@ -239,7 +240,9 @@ class TestAmazonQClient:
             yield mock_client.return_value
 
     @pytest.fixture(name="q_client")
-    def q_client_fixture(self, mock_credentials, mock_q_client):
+    def q_client_fixture(
+        self, mock_credentials, mock_q_client  # pylint: disable=unused-argument
+    ):
         return AmazonQClient(
             url="https://q-api.example.com",
             region="us-west-2",
@@ -248,12 +251,12 @@ class TestAmazonQClient:
 
     @pytest.fixture(name="params")
     def params_fixture(self):
-        return dict(
-            clientId="test-client-id",
-            clientSecret="test-secret",
-            instanceUrl="https://test.example.com",
-            redirectUrl="https://test.example.com/callback",
-        )
+        return {
+            "clientId": "test-client-id",
+            "clientSecret": "test-secret",
+            "instanceUrl": "https://test.example.com",
+            "redirectUrl": "https://test.example.com/callback",
+        }
 
     def test_init_creates_client_with_correct_params(self, mock_credentials):
         with patch(
@@ -383,9 +386,8 @@ class TestAmazonQClient:
                 # Verify normal _send_event was called
                 q_client._send_event.assert_called_once_with(event_id, payload)
 
-    def test_generate_code_recommendations(
-        self, q_client, mock_q_client, mock_event_request
-    ):
+    @pytest.mark.usefixtures("mock_event_request")
+    def test_generate_code_recommendations(self, q_client, mock_q_client):
         q_client.generate_code_recommendations(
             {"fileContext": {"context": "content"}, "maxResults": 1}
         )
@@ -398,9 +400,8 @@ class TestAmazonQClient:
         q_client.delete_o_auth_app_connection()
         mock_q_client.delete_o_auth_app_connection.assert_called_once_with()
 
-    def test_delete_o_auth_app_connection_on_conflict(
-        self, q_client, mock_q_client, mock_application_request, params
-    ):
+    @pytest.mark.usefixtures("mock_application_request", "params")
+    def test_delete_o_auth_app_connection_on_conflict(self, q_client, mock_q_client):
         error_response = {
             "Error": {"Code": "ConflictException", "Message": "A conflict occurred"}
         }
@@ -412,8 +413,9 @@ class TestAmazonQClient:
 
         mock_q_client.delete_o_auth_app_connection.assert_called_once_with()
 
+    @pytest.mark.usefixtures("mock_application_request")
     def test_delete_o_auth_app_connection_raises_non_conflict_aws_errors(
-        self, q_client, mock_q_client, mock_application_request
+        self, q_client, mock_q_client
     ):
         error_response = {
             "Error": {"Code": "ValidationException", "Message": "invalid message"}
@@ -512,8 +514,9 @@ class TestAmazonQClient:
             ),
         ],
     )
+    @pytest.mark.usefixtures("mock_q_client")
     def test_verify_oauth_connection(
-        self, q_client, mock_q_client, client_error, expected_result, expected_exception
+        self, q_client, client_error, expected_result, expected_exception
     ):
         """Tests OAuth connection verification with various scenarios."""
         # Setup mock request

@@ -16,14 +16,14 @@ from gitlab_cloud_connector.auth import (
 from grpc.aio import ServerInterceptor
 from prometheus_client import REGISTRY, Counter
 
-from ai_gateway.instrumentators.model_requests import (
+from duo_workflow_service.tracking import MonitoringContext, current_monitoring_context
+from duo_workflow_service.tracking.errors import log_exception
+from lib.context import (
     METADATA_LABELS,
     build_metadata_labels,
     client_type,
     language_server_version,
 )
-from duo_workflow_service.tracking import MonitoringContext, current_monitoring_context
-from duo_workflow_service.tracking.errors import log_exception
 from lib.feature_flags import current_feature_flag_context
 
 log = structlog.stdlib.get_logger("grpc")

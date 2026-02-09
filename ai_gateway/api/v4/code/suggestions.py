@@ -4,7 +4,6 @@ from fastapi import APIRouter, Depends, Request
 from gitlab_cloud_connector import GitLabFeatureCategory
 from sse_starlette.sse import EventSourceResponse
 
-from ai_gateway.api.auth_utils import StarletteUser, get_current_user
 from ai_gateway.api.feature_category import feature_category
 from ai_gateway.api.middleware.route import has_sufficient_usage_quota
 from ai_gateway.api.v3.code.completions import code_suggestions as v3_code_suggestions
@@ -23,6 +22,7 @@ from ai_gateway.async_dependency_resolver import get_config, get_container_appli
 from ai_gateway.code_suggestions import CodeSuggestionsChunk
 from ai_gateway.config import Config
 from ai_gateway.prompts import BasePromptRegistry
+from lib.context import StarletteUser, get_current_user
 from lib.events import FeatureQualifiedNameStatic
 from lib.usage_quota import UsageQuotaEvent
 

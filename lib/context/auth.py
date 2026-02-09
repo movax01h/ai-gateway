@@ -1,11 +1,24 @@
+"""Authentication context variables and user classes shared between services.
+
+Provides the cloud connector token context variable and the StarletteUser wrapper class used for request authentication.
+"""
+
+import contextvars
 from typing import Optional
 
 from fastapi import Request
 from gitlab_cloud_connector import CloudConnectorUser, GitLabUnitPrimitive, UserClaims
 from starlette.authentication import BaseUser
 
+# Context variable for cloud connector token
+cloud_connector_token_context_var: contextvars.ContextVar = contextvars.ContextVar(
+    "cloud_connector_token"
+)
+
 
 class StarletteUser(BaseUser):
+    """Wrapper around CloudConnectorUser for Starlette authentication."""
+
     def __init__(
         self,
         cloud_connector_user: CloudConnectorUser,
@@ -47,4 +60,5 @@ class StarletteUser(BaseUser):
 
 
 async def get_current_user(request: Request) -> StarletteUser:
+    """Get the current authenticated user from the request."""
     return request.user

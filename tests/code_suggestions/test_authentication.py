@@ -7,8 +7,8 @@ from gitlab_cloud_connector import CloudConnectorUser, UserClaims
 from starlette.responses import JSONResponse
 from structlog.testing import capture_logs
 
-from ai_gateway.api.auth_utils import StarletteUser, get_current_user
 from ai_gateway.api.middleware import MiddlewareAuthentication
+from lib.context import StarletteUser, get_current_user
 
 router = APIRouter(
     prefix="",

@@ -5,7 +5,6 @@ from dependency_injector.providers import Factory
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from gitlab_cloud_connector import GitLabFeatureCategory, GitLabUnitPrimitive
 
-from ai_gateway.api.auth_utils import StarletteUser, get_current_user
 from ai_gateway.api.feature_category import feature_category
 from ai_gateway.api.v1.search.typing import (
     SearchRequest,
@@ -22,6 +21,7 @@ from ai_gateway.async_dependency_resolver import (
 from ai_gateway.config import Config
 from ai_gateway.searches import Searcher
 from ai_gateway.structured_logging import get_request_logger
+from lib.context import StarletteUser, get_current_user
 from lib.internal_events import InternalEventsClient
 
 __all__ = [

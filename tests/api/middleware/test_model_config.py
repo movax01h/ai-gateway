@@ -4,7 +4,7 @@ from fastapi.testclient import TestClient
 from starlette.middleware import Middleware
 
 from ai_gateway.api.middleware.model_config import ModelConfigMiddleware
-from ai_gateway.model_metadata import current_model_metadata_context
+from lib.context import current_model_metadata_context
 
 
 @pytest.fixture(name="model_metadata_context")

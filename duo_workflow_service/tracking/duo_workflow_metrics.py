@@ -6,11 +6,7 @@ from typing import Optional
 import structlog
 from prometheus_client import REGISTRY, Counter, Histogram
 
-from ai_gateway.instrumentators.model_requests import (
-    METADATA_LABELS,
-    LLMFinishReason,
-    build_metadata_labels,
-)
+from lib.context import METADATA_LABELS, LLMFinishReason, build_metadata_labels
 
 session_type_context: ContextVar[Optional[str]] = ContextVar(
     "session_type", default="unknown"

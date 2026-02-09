@@ -271,7 +271,7 @@ class TestDuoWorkflowMetrics(unittest.TestCase):
             failure_reason="test_error",
         )
 
-    @patch("ai_gateway.instrumentators.model_requests.language_server_version")
+    @patch("lib.context.request_metadata.language_server_version")
     def test_agent_platform_tool_failure_counter_with_lsp_version(
         self, mock_language_server_version
     ):
@@ -295,7 +295,7 @@ class TestDuoWorkflowMetrics(unittest.TestCase):
             failure_reason="test_error",
         )
 
-    @patch("ai_gateway.instrumentators.model_requests.gitlab_version")
+    @patch("lib.context.request_metadata.gitlab_version")
     def test_agent_platform_tool_failure_counter_with_gitlab_version(
         self, mock_gitlab_version
     ):
@@ -318,7 +318,7 @@ class TestDuoWorkflowMetrics(unittest.TestCase):
             failure_reason="test_error",
         )
 
-    @patch("ai_gateway.instrumentators.model_requests.client_type")
+    @patch("lib.context.request_metadata.client_type")
     def test_agent_platform_tool_failure_counter_with_client_type(
         self, mock_client_type
     ):
@@ -340,7 +340,7 @@ class TestDuoWorkflowMetrics(unittest.TestCase):
             failure_reason="test_error",
         )
 
-    @patch("ai_gateway.instrumentators.model_requests.gitlab_realm")
+    @patch("lib.context.request_metadata.gitlab_realm")
     def test_agent_platform_tool_failure_counter_with_gitlab_realm(
         self, mock_gitlab_realm
     ):

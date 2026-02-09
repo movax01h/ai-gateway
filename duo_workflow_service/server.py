@@ -27,10 +27,6 @@ import duo_workflow_service.workflows.registry as flow_registry
 from ai_gateway.app import get_config
 from ai_gateway.config import Config, setup_litellm
 from ai_gateway.container import ContainerApplication
-from ai_gateway.instrumentators.model_requests import (
-    client_capabilities,
-    language_server_version,
-)
 from ai_gateway.prompts import BasePromptRegistry
 from contract import contract_pb2, contract_pb2_grpc
 from duo_workflow_service.components import tools_registry
@@ -84,6 +80,7 @@ from lib.billing_events import (
     ExecutionEnvironment,
     SelfHostedBilling,
 )
+from lib.context import client_capabilities, language_server_version
 from lib.events import GLReportingEventContext
 from lib.internal_events import InternalEventsClient
 from lib.internal_events.context import (

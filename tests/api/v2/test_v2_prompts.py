@@ -7,13 +7,13 @@ from gitlab_cloud_connector import CloudConnectorUser, UserClaims
 from pydantic import AnyUrl
 
 from ai_gateway.api.v2 import api_router
-from ai_gateway.instrumentators.model_requests import TokenUsage
 from ai_gateway.model_metadata import (
     AmazonQModelMetadata,
     ModelMetadata,
     TypeModelMetadata,
 )
 from ai_gateway.model_selection import LLMDefinition
+from lib.context import TokenUsage
 
 
 @pytest.fixture(name="fast_api_router", scope="class")

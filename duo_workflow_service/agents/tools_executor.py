@@ -14,7 +14,6 @@ from langgraph.types import Command
 from pydantic import ValidationError
 
 from ai_gateway.container import ContainerApplication
-from ai_gateway.instrumentators.model_requests import client_capabilities
 from duo_workflow_service.entities import WorkflowStatusEnum
 from duo_workflow_service.entities.state import (
     DuoWorkflowStateType,
@@ -30,6 +29,7 @@ from duo_workflow_service.security.scanner_factory import apply_security_scannin
 from duo_workflow_service.tools import RunCommand, Toolset, format_tool_display_message
 from duo_workflow_service.tools.planner import PlannerTool
 from duo_workflow_service.tracking.errors import log_exception
+from lib.context import client_capabilities
 from lib.events import GLReportingEventContext
 from lib.hidden_layer_log import set_hidden_layer_log_context
 from lib.internal_events import InternalEventAdditionalProperties, InternalEventsClient

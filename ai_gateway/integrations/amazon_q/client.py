@@ -5,8 +5,7 @@ from botocore.exceptions import ClientError
 from fastapi import HTTPException, status
 from q_developer_boto3 import boto3 as q_boto3
 
-from ai_gateway.api.auth_utils import StarletteUser
-from ai_gateway.auth.glgo import GlgoAuthority, cloud_connector_token_context_var
+from ai_gateway.auth.glgo import GlgoAuthority
 from ai_gateway.integrations.amazon_q.errors import (
     AccessDeniedExceptionReason,
     AWSException,
@@ -14,6 +13,7 @@ from ai_gateway.integrations.amazon_q.errors import (
 )
 from ai_gateway.structured_logging import get_request_logger
 from ai_gateway.tracking import log_exception
+from lib.context import StarletteUser, cloud_connector_token_context_var
 
 request_log = get_request_logger("amazon_q")
 

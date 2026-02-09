@@ -2,8 +2,8 @@ import pytest
 from fastapi import HTTPException, Response
 from gitlab_cloud_connector import CloudConnectorUser, UserClaims
 
-from ai_gateway.api.auth_utils import StarletteUser
 from ai_gateway.api.v1.proxy.request import verify_project_namespace_metadata
+from lib.context import StarletteUser
 from lib.internal_events.context import EventContext, current_event_context
 
 

@@ -1,11 +1,10 @@
 from abc import abstractmethod
-from contextvars import ContextVar
 from typing import Annotated, Any, Dict, Literal, Optional
 
 from pydantic import AnyUrl, BaseModel, StringConstraints, UrlConstraints
 
-from ai_gateway.api.auth_utils import StarletteUser
 from ai_gateway.model_selection import LLMDefinition, ModelSelectionConfig
+from lib.context import StarletteUser
 
 
 class BaseModelMetadata(BaseModel):
@@ -196,8 +195,3 @@ def create_model_metadata(
         friendly_name=llm_definition.name,
         **data,
     )
-
-
-current_model_metadata_context: ContextVar[Optional[TypeModelMetadata]] = ContextVar(
-    "current_model_metadata_context", default=None
-)

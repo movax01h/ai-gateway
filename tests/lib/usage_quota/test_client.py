@@ -8,8 +8,8 @@ import pytest
 import pytest_asyncio
 from gitlab_cloud_connector import CloudConnectorUser, UserClaims
 
-from ai_gateway.api.auth_utils import StarletteUser
 from lib.billing_events.context import UsageQuotaEventContext
+from lib.context import StarletteUser
 from lib.usage_quota.client import (
     SKIP_USAGE_CUTOFF_CLAIM,
     UsageQuotaClient,

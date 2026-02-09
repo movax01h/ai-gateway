@@ -17,7 +17,6 @@ import structlog
 from langchain_core.messages import BaseMessage
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-from ai_gateway.model_metadata import current_model_metadata_context
 from duo_workflow_service.conversation.trimmer import (
     LEGACY_MAX_CONTEXT_TOKENS,
     trim_conversation_history,
@@ -27,6 +26,7 @@ from duo_workflow_service.entities.state import (
     WorkflowStatusEnum,
     _ui_chat_log_reducer,
 )
+from lib.context import current_model_metadata_context
 from lib.feature_flags import FeatureFlag, is_feature_enabled
 
 logger = structlog.stdlib.get_logger("experimental_state")

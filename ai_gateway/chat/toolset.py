@@ -1,4 +1,3 @@
-from ai_gateway.api.auth_utils import StarletteUser
 from ai_gateway.chat.base import BaseToolsRegistry
 from ai_gateway.chat.tools import BaseTool
 from ai_gateway.chat.tools.gitlab import (
@@ -11,6 +10,7 @@ from ai_gateway.chat.tools.gitlab import (
     SelfHostedGitlabDocumentation,
     WorkItemReader,
 )
+from lib.context import StarletteUser
 
 __all__ = ["DuoChatToolsRegistry"]
 

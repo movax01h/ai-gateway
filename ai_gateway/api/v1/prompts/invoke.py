@@ -9,10 +9,10 @@ from poetry.core.constraints.version.exceptions import ParseConstraintError
 from pydantic import BaseModel, RootModel, model_validator
 from starlette.responses import StreamingResponse
 
-from ai_gateway.api.auth_utils import StarletteUser, get_current_user
 from ai_gateway.api.feature_category import feature_category
 from ai_gateway.async_dependency_resolver import get_prompt_registry
 from ai_gateway.prompts import BasePromptRegistry, Prompt
+from lib.context import StarletteUser, get_current_user
 
 
 class PromptInputs(RootModel):

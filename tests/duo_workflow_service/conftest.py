@@ -5,7 +5,6 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from gitlab_cloud_connector import CloudConnectorUser, UserClaims
 
-from ai_gateway.instrumentators.model_requests import gitlab_version
 from duo_workflow_service.components.tools_registry import ToolMetadata, ToolsRegistry
 from duo_workflow_service.entities.state import (
     Plan,
@@ -16,6 +15,7 @@ from duo_workflow_service.entities.state import (
 from duo_workflow_service.executor.outbox import Outbox
 from duo_workflow_service.gitlab.gitlab_api import Project
 from duo_workflow_service.gitlab.http_client import GitlabHttpClient
+from lib.context import gitlab_version
 from lib.events import GLReportingEventContext
 
 

@@ -3,7 +3,6 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, Request, Response, status
 from gitlab_cloud_connector import GitLabFeatureCategory
 
-from ai_gateway.api.auth_utils import StarletteUser, get_current_user
 from ai_gateway.api.feature_category import feature_category
 from ai_gateway.api.v1.amazon_q.typing import EventRequest
 from ai_gateway.api.v1.amazon_q.utils import authorized_q_client
@@ -12,6 +11,7 @@ from ai_gateway.async_dependency_resolver import (
     get_internal_event_client,
 )
 from ai_gateway.integrations.amazon_q.client import AmazonQClientFactory
+from lib.context import StarletteUser, get_current_user
 from lib.internal_events import InternalEventsClient
 
 __all__ = [

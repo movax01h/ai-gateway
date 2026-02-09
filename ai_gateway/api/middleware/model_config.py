@@ -2,10 +2,8 @@ import json
 
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
-from ai_gateway.model_metadata import (
-    create_model_metadata,
-    current_model_metadata_context,
-)
+from ai_gateway.model_metadata import create_model_metadata
+from lib.context import current_model_metadata_context
 
 
 class ModelConfigMiddleware:

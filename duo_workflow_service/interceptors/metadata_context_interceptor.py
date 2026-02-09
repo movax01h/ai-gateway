@@ -4,15 +4,9 @@ import grpc
 from gitlab_cloud_connector.auth import X_GITLAB_REALM_HEADER, X_GITLAB_VERSION_HEADER
 
 from ai_gateway import Config
-from ai_gateway.instrumentators.model_requests import (
-    client_type,
-    gitlab_realm,
-    gitlab_version,
-)
-from ai_gateway.instrumentators.model_requests import (
-    language_server_version as language_server_version_context,
-)
 from duo_workflow_service.tracking.duo_workflow_metrics import workflow_start_time
+from lib.context import client_type, gitlab_realm, gitlab_version
+from lib.context import language_server_version as language_server_version_context
 from lib.events.contextvar import (
     X_GITLAB_SELF_HOSTED_DAP_BILLING_ENABLED,
     set_self_hosted_dap_billing_enabled,

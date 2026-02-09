@@ -8,10 +8,10 @@ from typing import Any, List, Type
 from google.cloud import discoveryengine
 from pydantic import BaseModel, Field
 
-from ai_gateway.instrumentators.model_requests import gitlab_version
 from ai_gateway.searches import VertexAISearch
 from duo_workflow_service.security.tool_output_security import ToolTrustLevel
 from duo_workflow_service.tools.duo_base_tool import DuoBaseTool
+from lib.context import gitlab_version
 
 DEFAULT_PAGE_SIZE = 4
 DEFAULT_GL_VERSION = "18.0.0"

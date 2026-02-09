@@ -3,8 +3,8 @@
 import structlog
 from packaging.version import InvalidVersion, Version
 
-from ai_gateway.instrumentators.model_requests import gitlab_version
 from duo_workflow_service.tracking.errors import log_exception
+from lib.context import gitlab_version
 
 log = structlog.stdlib.get_logger(__name__)
 
