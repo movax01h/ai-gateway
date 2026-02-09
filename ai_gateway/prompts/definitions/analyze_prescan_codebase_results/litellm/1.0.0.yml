@@ -1,0 +1,16 @@
+---
+name: Analyze Prescan Codebase Results
+model:
+  params:
+    model_class_provider: litellm
+    max_tokens: 8_192
+unit_primitives:
+  - duo_agent_platform
+prompt_template:
+  system: |
+    {% include 'analyze_prescan_codebase_results/system/1.0.0.jinja' %}
+  user: |
+    {% include 'analyze_prescan_codebase_results/user/1.0.0.jinja' %}
+  placeholder: history
+params:
+  timeout: 60

@@ -1,7 +1,7 @@
 version: "v1"
 environment: ambient
 components:
-  # Step 1: Fetch and format all MR data
+  # Step 1: Fetch complete MR context with full file contents for final review
   - name: "build_review_context"
     type: DeterministicStepComponent
     tool_name: "build_review_merge_request_context"
@@ -14,9 +14,43 @@ components:
       - "on_tool_execution_success"
       - "on_tool_execution_failed"
 
-  # Step 2: Pre-scan codebase for additional context
+  # Step 2: Fetch lightweight MR diffs for prescan analysis
+  - name: "fetch_mr_diffs"
+    type: DeterministicStepComponent
+    tool_name: "build_review_merge_request_context"
+    inputs:
+      - from: "context:project_id"
+        as: "project_id"
+      - from: "context:goal"
+        as: "merge_request_iid"
+      - from: "true"
+        as: "only_diffs"
+        literal: true
+    ui_log_events:
+      - "on_tool_execution_success"
+      - "on_tool_execution_failed"
+
+  # Step 3: Generate targeted directory tree exploration calls based on changed files
+  - name: "explore_relevant_directories"
+    type: OneOffComponent
+    prompt_id: "explore_directories_for_prescan"
+    prompt_version: "^1.0.0"
+    inputs:
+      - from: "context:project_id"
+        as: "project_id"
+      - from: "context:fetch_mr_diffs.tool_responses"
+        as: "mr_diffs"
+    toolset:
+      - "list_repository_tree"
+    max_correction_attempts: 3
+    ui_log_events:
+      - "on_tool_call_input"
+      - "on_tool_execution_success"
+      - "on_tool_execution_failed"
+
+  # Step 4: Batch read additional context files (tests, dependencies, custom instructions)
   - name: "prescan_codebase"
-    type: AgentComponent
+    type: OneOffComponent
     prompt_id: "code_review_prescan"
     prompt_version: "^1.0.0"
     inputs:
@@ -24,19 +58,36 @@ components:
         as: "project_id"
       - from: "context:goal"
         as: "merge_request_iid"
+      - from: "context:fetch_mr_diffs.tool_responses"
+        as: "mr_context"
+      - from: "context:explore_relevant_directories.tool_responses"
+        as: "directory_trees"
+        optional: True
     toolset:
-      - "build_review_merge_request_context"
-      - "list_repository_tree"
       - "get_repository_file"
       - "read_file"
-      - "find_files"
-      - "blob_search"
+    max_correction_attempts: 3
     ui_log_events:
+      - "on_tool_call_input"
       - "on_tool_execution_success"
       - "on_tool_execution_failed"
+
+  # Step 5: Transform prescan results into structured JSON for review consumption
+  - name: "analyze_prescan_results"
+    type: AgentComponent
+    prompt_id: "analyze_prescan_codebase_results"
+    prompt_version: "^1.0.0"
+    inputs:
+      - from: "context:fetch_mr_diffs.tool_responses"
+        as: "mr_context"
+      - from: "context:prescan_codebase.tool_responses"
+        as: "prescan_tool_responses"
+        optional: True
+    toolset: []
+    ui_log_events:
       - "on_agent_final_answer"
 
-  # Step 3: Perform code review and publish
+  # Step 6: Execute code review with complete context and publish results
   - name: "perform_code_review_and_publish"
     type: OneOffComponent
     prompt_id: "review_merge_request"
@@ -44,7 +95,7 @@ components:
     inputs:
       - from: "context:build_review_context.tool_responses"
         as: "mr_data"
-      - from: "context:prescan_codebase.final_answer"
+      - from: "context:analyze_prescan_results.final_answer"
         as: "codebase_context"
       - from: "context:current_date"
         as: "current_date"
@@ -62,8 +113,14 @@ components:
 
 routers:
   - from: "build_review_context"
+    to: "fetch_mr_diffs"
+  - from: "fetch_mr_diffs"
+    to: "explore_relevant_directories"
+  - from: "explore_relevant_directories"
     to: "prescan_codebase"
   - from: "prescan_codebase"
+    to: "analyze_prescan_results"
+  - from: "analyze_prescan_results"
     to: "perform_code_review_and_publish"
   - from: "perform_code_review_and_publish"
     to: "end"

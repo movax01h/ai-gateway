@@ -10,6 +10,5 @@ prompt_template:
     {% include 'code_review_prescan/system/1.0.0.jinja' %}
   user: |
     {% include 'code_review_prescan/user/1.0.0.jinja' %}
-  placeholder: history
 params:
   timeout: 30

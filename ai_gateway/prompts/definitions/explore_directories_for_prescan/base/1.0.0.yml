@@ -1,5 +1,5 @@
 ---
-name: Code Review Prescan
+name: Explore Directories For Prescan
 model:
   params:
     model_class_provider: anthropic
@@ -8,8 +8,8 @@ unit_primitives:
   - duo_agent_platform
 prompt_template:
   system: |
-    {% include 'code_review_prescan/system/1.0.0.jinja' %}
+    {% include 'explore_directories_for_prescan/system/1.0.0.jinja' %}
   user: |
-    {% include 'code_review_prescan/user/1.0.0.jinja' %}
+    {% include 'explore_directories_for_prescan/user/1.0.0.jinja' %}
 params:
   timeout: 30

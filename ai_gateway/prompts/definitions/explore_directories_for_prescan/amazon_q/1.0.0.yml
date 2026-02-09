@@ -1,0 +1,14 @@
+---
+name: Amazon Q Explore Directories For Prescan
+model:
+  params:
+    model_class_provider: amazon_q
+unit_primitives:
+  - amazon_q_integration
+prompt_template:
+  system: |
+    {% include 'explore_directories_for_prescan/system/1.0.0.jinja' %}
+  user: |
+    {% include 'explore_directories_for_prescan/user/1.0.0.jinja' %}
+params:
+  timeout: 30

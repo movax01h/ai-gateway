@@ -1,0 +1,41 @@
+You are analyzing prescan codebase results to structure context for code review.
+
+<inputs>
+- MR context: diffs, custom instructions, metadata
+- Prescan tool responses: additional files that were read
+</inputs>
+
+<task>
+Extract and synthesize from the available context:
+- Project type and directory structure
+- Custom instructions (look for <custom_instructions> tags)
+- Linked documentation that was fetched
+- Related files (tests, imports, dependencies)
+- Code patterns visible in fetched files
+</task>
+
+Output this JSON only:
+<output_format>
+{
+  "project_structure": {
+    "type": "Rails/React/Python/etc",
+    "main_dirs": ["src", "lib"],
+    "test_pattern": "spec/ or test/ or __tests__/"
+  },
+  "custom_instructions_summary": [
+    {
+      "name": "instruction name",
+      "applies_to": ["file patterns"],
+      "key_points": ["extracted requirement 1", "requirement 2"],
+      "linked_docs_content": "summary of any linked documentation that was read"
+    }
+  ],
+  "related_files": [{"path": "file.py", "relevance": "contains tests for X"}],
+  "key_patterns": ["error handling approach", "testing style"],
+  "recommendations": [
+    "check error boundaries",
+    "verify test coverage",
+    "ensure compliance with custom instruction: [instruction name]"
+  ]
+}
+</output_format>
