@@ -6,7 +6,7 @@ from langgraph.graph import StateGraph
 from pydantic import Field
 
 from ai_gateway.container import ContainerApplication
-from ai_gateway.prompts import InMemoryPromptRegistry, LocalPromptRegistry
+from ai_gateway.prompts import BasePromptRegistry
 from duo_workflow_service.agent_platform.experimental.components.agent.nodes import (
     AgentFinalOutput,
     AgentNode,
@@ -65,7 +65,7 @@ class AgentComponent(BaseComponent):
     prompt_version: Optional[str] = None
     toolset: Toolset
 
-    prompt_registry: LocalPromptRegistry | InMemoryPromptRegistry = Provide[
+    prompt_registry: BasePromptRegistry = Provide[
         ContainerApplication.pkg_prompts.prompt_registry
     ]
     internal_event_client: InternalEventsClient = Provide[

@@ -1,4 +1,4 @@
-from typing import Any, Optional
+from typing import Any, Optional, cast
 
 from langchain_core.tools import BaseTool
 
@@ -31,9 +31,12 @@ class InMemoryPromptRegistry(BasePromptRegistry):
 
     _DEFAULT_VERSION = None
 
-    def __init__(self, shared_registry: LocalPromptRegistry):
+    def __init__(self, shared_registry: BasePromptRegistry):
+        if not isinstance(shared_registry, LocalPromptRegistry):
+            raise TypeError("only LocalPromptRegistry is supported at this moment")
+
         # Shared singleton to avoid duplication
-        self.shared_registry = shared_registry
+        self.shared_registry = cast(LocalPromptRegistry, shared_registry)
         self._raw_prompt_data: dict[str, dict] = {}
         # Abstract attributes from shared registry
         self.internal_event_client = shared_registry.internal_event_client

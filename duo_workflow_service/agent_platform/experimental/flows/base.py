@@ -11,8 +11,7 @@ from langgraph.graph import StateGraph
 from langgraph.types import Command
 
 from ai_gateway.container import ContainerApplication
-from ai_gateway.prompts import InMemoryPromptRegistry
-from ai_gateway.prompts.registry import LocalPromptRegistry
+from ai_gateway.prompts import BasePromptRegistry, InMemoryPromptRegistry
 from contract import contract_pb2
 from duo_workflow_service.agent_platform.experimental.components.base import (
     BaseComponent,
@@ -66,7 +65,7 @@ class UserDecision(StrEnum):
 @support_self_hosted_billing(class_schema="flow/experimental")
 class Flow(AbstractWorkflow):
     _config: FlowConfig
-    _flow_prompt_registry: InMemoryPromptRegistry | LocalPromptRegistry
+    _flow_prompt_registry: BasePromptRegistry
 
     # pylint: disable=dangerous-default-value
     @inject
@@ -84,7 +83,7 @@ class Flow(AbstractWorkflow):
         user: Optional[CloudConnectorUser] = None,
         additional_context: Optional[list[AdditionalContext]] = None,
         approval: Optional[contract_pb2.Approval] = None,
-        prompt_registry: LocalPromptRegistry = Provide[
+        prompt_registry: BasePromptRegistry = Provide[
             ContainerApplication.pkg_prompts.prompt_registry
         ],
         internal_event_client: InternalEventsClient = Provide[
