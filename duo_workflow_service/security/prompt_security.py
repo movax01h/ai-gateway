@@ -225,15 +225,33 @@ class PromptSecurity:
         """
         if tool_name in PromptSecurity.TOOL_SECURITY_OVERRIDES:
             security_functions = PromptSecurity.TOOL_SECURITY_OVERRIDES[tool_name]
+            config_type = "override"
+            log.info(
+                "Applying security override configuration",
+                tool_name=tool_name,
+                security_functions=[func.__name__ for func in security_functions],
+                config_type=config_type,
+            )
         else:
             security_functions = list(PromptSecurity.DEFAULT_SECURITY_FUNCTIONS)
-            security_functions += PromptSecurity.TOOL_SPECIFIC_FUNCTIONS.get(
-                tool_name, []
+            tool_specific = PromptSecurity.TOOL_SPECIFIC_FUNCTIONS.get(tool_name, [])
+            security_functions += tool_specific
+            config_type = "default+tool_specific" if tool_specific else "default"
+            log.info(
+                "Applying security configuration",
+                tool_name=tool_name,
+                security_functions=[func.__name__ for func in security_functions],
+                config_type=config_type,
             )
 
         result = response
+        original_hash, original_length = compute_response_hash_with_length(response)
+        functions_that_modified = []
+
         for func in security_functions:
             try:
+                before_hash, before_length = compute_response_hash_with_length(result)
+
                 processed = func(result)
 
                 if validate_only:
@@ -245,11 +263,52 @@ class PromptSecurity:
                         )
                 else:
                     result = processed
-            except SecurityException:
+
+                after_hash, after_length = compute_response_hash_with_length(result)
+                if before_hash != after_hash:
+                    functions_that_modified.append(
+                        {
+                            "function": func.__name__,
+                            "chars_removed": before_length - after_length,
+                        }
+                    )
+
+            except SecurityException as e:
+                log.error(
+                    "Security validation failed",
+                    tool_name=tool_name,
+                    security_function=func.__name__,
+                    error=str(e),
+                )
                 raise
             except Exception as e:
+                log.error(
+                    "Security function execution failed",
+                    tool_name=tool_name,
+                    security_function=func.__name__,
+                    error=str(e),
+                    error_type=type(e).__name__,
+                )
                 raise SecurityException(
                     f"Security function {func.__name__} failed for tool '{tool_name}': {e}"
                 ) from e
+
+        secured_hash, _ = compute_response_hash_with_length(result)
+        response_modified = original_hash != secured_hash
+
+        if response_modified:
+            log.warning(
+                "Security functions modified the tool response",
+                tool_name=tool_name,
+                functions_applied=len(security_functions),
+                modification_details=functions_that_modified,
+                original_length=original_length,
+            )
+        else:
+            log.info(
+                "Security validation completed, no modifications needed",
+                tool_name=tool_name,
+                functions_applied=len(security_functions),
+            )
 
         return result
