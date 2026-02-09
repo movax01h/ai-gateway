@@ -7,7 +7,9 @@ from contextvars import ContextVar
 import fastapi
 import litellm
 from fastapi import status
+from fastapi.responses import JSONResponse
 from gitlab_cloud_connector import GitLabUnitPrimitive
+from litellm.proxy._types import ProxyException
 from litellm.proxy.pass_through_endpoints.pass_through_endpoints import (
     create_pass_through_route,
 )
@@ -83,6 +85,13 @@ class BaseProxyClient(ABC):
                     None,  # FastAPI response object, to inject litellm headers into it, which we don't need
                     UserAPIKeyAuth(),  # LiteLLM-Proxy auth, which we don't use
                 )
+        except ProxyException as e:
+            error_content = json.loads(e.message)
+            # Return api.anthropic.com response for Anthropic error codes invalid_request_error
+            return JSONResponse(
+                status_code=int(e.code),
+                content=error_content,
+            )
         except Exception:
             raise fastapi.HTTPException(
                 status_code=status.HTTP_502_BAD_GATEWAY, detail="Bad Gateway"
