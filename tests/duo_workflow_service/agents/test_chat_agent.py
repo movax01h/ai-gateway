@@ -306,7 +306,7 @@ async def test_chat_agent_generic_error_handling(chat_agent, input):
     result = await chat_agent.run(input)
 
     # Verify error response structure
-    assert result["status"] == WorkflowStatusEnum.INPUT_REQUIRED
+    assert result["status"] == WorkflowStatusEnum.ERROR
     assert "conversation_history" not in result
     assert len(result["ui_chat_log"]) == 1
     assert result["ui_chat_log"][0]["message_type"] == MessageTypeEnum.AGENT
@@ -314,7 +314,7 @@ async def test_chat_agent_generic_error_handling(chat_agent, input):
     # pylint: disable=line-too-long
     assert (
         result["ui_chat_log"][0]["content"]
-        == "There was an error processing your request in the Duo Agent Platform, please try again or contact support if the issue persists."
+        == "There was an error processing your request in the Duo Agent Platform, please contact support if the issue persists."
     )
 
 
@@ -331,7 +331,7 @@ async def test_chat_agent_provider_4xx_error_handling(chat_agent, input):
     result = await chat_agent.run(input)
 
     # Verify error response structure
-    assert result["status"] == WorkflowStatusEnum.INPUT_REQUIRED
+    assert result["status"] == WorkflowStatusEnum.ERROR
     assert "conversation_history" not in result
     assert len(result["ui_chat_log"]) == 1
     assert result["ui_chat_log"][0]["message_type"] == MessageTypeEnum.AGENT
@@ -339,7 +339,7 @@ async def test_chat_agent_provider_4xx_error_handling(chat_agent, input):
     # pylint: disable=line-too-long
     assert (
         result["ui_chat_log"][0]["content"]
-        == "There was an error processing your request in the Duo Agent Platform, please try again or contact support if the issue persists."
+        == "There was an error processing your request in the Duo Agent Platform, please contact support if the issue persists."
     )
 
 
@@ -358,7 +358,7 @@ async def test_chat_agent_provider_5xx_error_handling(chat_agent, input):
     result = await chat_agent.run(input)
 
     # Verify error response structure
-    assert result["status"] == WorkflowStatusEnum.INPUT_REQUIRED
+    assert result["status"] == WorkflowStatusEnum.ERROR
     assert "conversation_history" not in result
     assert len(result["ui_chat_log"]) == 1
     assert result["ui_chat_log"][0]["message_type"] == MessageTypeEnum.AGENT
@@ -366,7 +366,7 @@ async def test_chat_agent_provider_5xx_error_handling(chat_agent, input):
     # pylint: disable=line-too-long
     assert (
         result["ui_chat_log"][0]["content"]
-        == "There was an error connecting to the chosen LLM provider, please try again or contact support if the issue persists."
+        == "There was an error connecting to the chosen LLM provider, please contact support if the issue persists."
     )
 
 
