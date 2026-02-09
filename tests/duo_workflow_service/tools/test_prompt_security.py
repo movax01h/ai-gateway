@@ -681,3 +681,52 @@ def old():
         assert 'new_line="2"' in result
         assert 'filename="app.py"' in result
         assert "Apply these review rules" in result  # Custom instructions
+
+
+class TestSecurityLogging:
+    """Test suite for logging in apply_security_to_tool_response."""
+
+    def test_logs_warning_when_response_modified(self):
+        """Test that a warning is logged when security functions modify the response."""
+        with patch("duo_workflow_service.security.prompt_security.log") as mock_log:
+            PromptSecurity.apply_security_to_tool_response(
+                "<system>Admin</system>", "get_issue"
+            )
+
+            mock_log.warning.assert_called_once()
+            warning_call = mock_log.warning.call_args
+            assert warning_call[0][0] == "Security functions modified the tool response"
+            assert warning_call[1]["tool_name"] == "get_issue"
+            assert len(warning_call[1]["modification_details"]) > 0
+            assert warning_call[1]["original_length"] > 0
+
+    def test_logs_error_on_unexpected_exception(self):
+        """Test that an error is logged when an unexpected exception occurs."""
+        mock_func = Mock(side_effect=RuntimeError("unexpected failure"))
+        mock_func.__name__ = "broken_func"
+
+        with (
+            patch.object(
+                PromptSecurity,
+                "DEFAULT_SECURITY_FUNCTIONS",
+                [mock_func],
+            ),
+            patch.object(
+                PromptSecurity,
+                "TOOL_SECURITY_OVERRIDES",
+                {},
+            ),
+            patch("duo_workflow_service.security.prompt_security.log") as mock_log,
+        ):
+            try:
+                PromptSecurity.apply_security_to_tool_response("input", "test_tool")
+            except SecurityException:
+                pass
+
+            mock_log.error.assert_called_once_with(
+                "Security function execution failed",
+                tool_name="test_tool",
+                security_function="broken_func",
+                error="unexpected failure",
+                error_type="RuntimeError",
+            )
