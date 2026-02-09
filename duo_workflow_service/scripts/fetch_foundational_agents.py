@@ -2,13 +2,15 @@
 """Script to sync foundational agents from GitLab AI Catalog.
 
 Usage:
-    python fetch_foundational_agents.py <gitlab_url> <gitlab_token> <foundational_agent_ids> [--output-path <path>]
+    python fetch_foundational_agents.py <gitlab_url> <gitlab_token> <foundational_agent_ids>
+    [--flow-registry-version VERSION] [--dry-run]
 
 Arguments:
     gitlab_url: GitLab GraphQL API URL (e.g., http://gdk.test:3000/api/graphql)
     gitlab_token: GitLab API token for authentication
     foundational_agent_ids: Comma-separated list of foundational agent IDs (e.g., "348,349,350")
-    --output-path: Optional directory path to save YAML files. If not provided, prints to stdout.
+    --flow-registry-version: Flow Registry syntax version to fetch (experimental or v1). Required.
+    --dry-run: If provided, prints to stdout instead of saving YAML files.
 """
 
 import argparse
@@ -16,7 +18,13 @@ import os
 import sys
 from typing import Any, Dict, List, Optional, Tuple
 
+import yaml
 from requests import request
+
+from duo_workflow_service.agent_platform.experimental.flows import (
+    FlowConfig as ExperimentalFlowConfig,
+)
+from duo_workflow_service.agent_platform.v1.flows import FlowConfig as V1FlowConfig
 
 FETCH_AGENT_OPERATION_NAME = "aiCatalogAgent"
 FETCH_AGENT_QUERY = """
@@ -97,13 +105,22 @@ def fetch_foundational_agent(
     return file_name, flow_config
 
 
-def save_workflow_to_file(agent_id: str, flow_def: str, output_path: str) -> str:
+def save_workflow_to_file(
+    agent_id: str,
+    flow_def: str,
+    flow_config_model: type[V1FlowConfig] | type[ExperimentalFlowConfig],
+) -> str:
     """Save a workflow definition to a YAML file."""
     filename: str = f"{agent_id}.yml"
-    filepath: str = os.path.join(output_path, filename)
+    filepath: str = os.path.join(flow_config_model.DIRECTORY_PATH, filename)
 
     if os.path.exists(filepath):
         raise FileExistsError(f"File {filepath} already exists")
+    # parse yaml string to a dictionary
+
+    flow_config_dict = yaml.safe_load(flow_def)
+    # validate the dictionary against the pydantic model
+    flow_config_model.model_validate(flow_config_dict)
 
     with open(filepath, "w") as f:
         f.write(flow_def)
@@ -123,8 +140,13 @@ def parse_arguments() -> argparse.Namespace:
         "foundational_agent_ids", help="Comma-separated list of agent IDs"
     )
     parser.add_argument(
-        "--output-path",
-        help="Directory path to save YAML files. If not provided, prints to stdout.",
+        "--flow-registry-version",
+        required=True,
+        help="Flow Registry syntax version to fetch. Allowed values: 'experimental' or 'v1'.",
+    )
+    parser.add_argument(
+        "--dry-run",
+        help="If provided, prints to stdout instead of saving YAML files",
     )
 
     return parser.parse_args()
@@ -136,22 +158,33 @@ def fetch_agents() -> None:
 
     agent_ids: List[str] = args.foundational_agent_ids.split(",")
 
-    # Validate output path if provided
-    if args.output_path:
-        if not os.path.exists(args.output_path):
-            raise ValueError(
-                f"Output path does not exist: {args.output_path}",
-            )
+    # Validate flow registry version
+    if args.flow_registry_version not in ["experimental", "v1"]:
+        raise ValueError(
+            f"Flow Registry version '{args.flow_registry_version}' is not supported. Allowed values: experimental, v1"
+        )
+
+    # Map version string to its corresponding class
+    version_to_class: dict[str, type[ExperimentalFlowConfig] | type[V1FlowConfig]] = {
+        "experimental": ExperimentalFlowConfig,
+        "v1": V1FlowConfig,
+    }
+    flow_config_class = version_to_class[args.flow_registry_version]
 
     workflow_definitions: list[tuple[str, str]] = [
         fetch_foundational_agent(args.gitlab_url, args.gitlab_token, agent_id)
         for agent_id in agent_ids
     ]
 
-    if args.output_path:
+    if args.dry_run:
+        for flow_name, flow_def in workflow_definitions:
+            print("-----")
+            print(flow_name)
+            print(flow_def)
+    else:
         # Save to file
         saved_files: List[str] = [
-            save_workflow_to_file(file_name, flow_definition, args.output_path)
+            save_workflow_to_file(file_name, flow_definition, flow_config_class)
             for (file_name, flow_definition) in workflow_definitions
         ]
 
@@ -159,11 +192,6 @@ def fetch_agents() -> None:
             f"Successfully saved workflow definition(s): {saved_files}",
             file=sys.stderr,
         )
-    else:
-        for flow_name, flow_def in workflow_definitions:
-            print("-----")
-            print(flow_name)
-            print(flow_def)
 
 
 if __name__ == "__main__":

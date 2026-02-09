@@ -104,6 +104,16 @@ MAX_MESSAGE_SIZE = 4 * 1024 * 1024
 # https://docs.aiohttp.org/en/stable/client_reference.html
 MAX_METADATA_SIZE = 24 * 1024
 
+# Mapping as in some versions of GitLab.com these are hard-coded as `experimental`
+# even though the flows were built upon v1 architecture.
+# References:
+# - https://gitlab.com/gitlab-org/gitlab/blob/master/ee/lib/ai/foundational_chat_agents_definitions.rb#L20
+# - https://gitlab.com/gitlab-org/modelops/applied-ml/code-suggestions/ai-assist/-/merge_requests/4413#note_3040240202
+_FLOW_VERSION_MAPPING = [
+    "duo_planner/experimental",
+    "security_analyst_agent/experimental",
+]
+
 log = structlog.stdlib.get_logger("server")
 
 catalog = data_model.load_catalog()
@@ -228,7 +238,9 @@ class DuoWorkflowService(contract_pb2_grpc.DuoWorkflowServicer):
             set(start_workflow_request.startRequest.clientCapabilities)
         )
 
-        workflow_definition = start_workflow_request.startRequest.workflowDefinition
+        workflow_definition = map_workflow_definition(
+            start_workflow_request.startRequest.workflowDefinition
+        )
         unit_primitive = choose_unit_primitive(workflow_definition)
         legacy_unit_primitive = choose_legacy_unit_primitive(workflow_definition)
 
@@ -629,7 +641,7 @@ class DuoWorkflowService(contract_pb2_grpc.DuoWorkflowServicer):
     ) -> contract_pb2.GenerateTokenResponse:
         user: CloudConnectorUser = current_user_context_var.get()
 
-        workflow_definition = request.workflowDefinition
+        workflow_definition = map_workflow_definition(request.workflowDefinition)
         unit_primitive = choose_unit_primitive(workflow_definition)
         legacy_unit_primitive = choose_legacy_unit_primitive(workflow_definition)
 
@@ -888,6 +900,17 @@ def setup_cloud_connector():
         "DUO_WORKFLOW_CLOUD_CONNECTOR_SERVICE_NAME", "gitlab-duo-workflow-service"
     )
     os.environ["CLOUD_CONNECTOR_SERVICE_NAME"] = cloud_connector_service_name
+
+
+def map_workflow_definition(value: str) -> str:
+    """For mapping workflow definitions from experimental to v1."""
+
+    if value in _FLOW_VERSION_MAPPING:
+        updated_flow_definition = value.replace("experimental", "v1")
+        log.info(f"Updating mapping for {value} to {updated_flow_definition}")
+        return updated_flow_definition
+
+    return value
 
 
 def choose_unit_primitive(workflow_definition: str) -> GitLabUnitPrimitive:
