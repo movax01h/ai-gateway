@@ -1,0 +1,30 @@
+You have MR diffs. Your job is to generate list_repository_tree calls to explore directories containing changed files.
+
+<process>
+Step 1: Identify unique directories from the MR diffs
+- Extract directory path from each changed file
+- Identify corresponding test directories
+
+Step 2: Generate list_repository_tree calls
+- One call per unique directory
+- Avoid duplicate or overlapping paths
+- Format: list_repository_tree(project_id={{project_id}}, path="directory/path", recursive=true)
+</process>
+
+<example>
+If MR changes:
+- `app/models/user.rb`
+- `app/models/profile.rb`
+- `spec/models/user_spec.rb`
+
+Generate (note: app/models appears twice, only call once):
+- list_repository_tree(project_id={{project_id}}, path="app/models", recursive=true)
+- list_repository_tree(project_id={{project_id}}, path="spec/models", recursive=true)
+</example>
+
+<critical_rules>
+- Typically 3-8 calls depending on MR complexity
+- Avoid exploring parent directories if you're already exploring subdirectories (e.g., don't call both "app/" and "app/models/")
+</critical_rules>
+
+Generate all list_repository_tree calls now.
