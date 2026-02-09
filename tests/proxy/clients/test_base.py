@@ -1,8 +1,11 @@
-from unittest.mock import ANY, AsyncMock
+import json
+from unittest.mock import ANY
 
 import fastapi
 import litellm
 import pytest
+from fastapi.responses import JSONResponse
+from litellm.proxy._types import ProxyException
 from starlette.datastructures import URL
 
 from ai_gateway.instrumentators.model_requests import (
@@ -352,3 +355,34 @@ async def test_downstream_headers(
     response = await proxy_client.proxy(request_factory())
 
     assert response.headers.items() == expected_headers
+
+
+@pytest.mark.asyncio
+async def test_proxy_exception_code(
+    async_client,
+    limits,
+    request_factory,
+    internal_event_client,
+    billing_event_client,
+):
+
+    error_content = {
+        "type": "error",
+        "error": {
+            "type": "invalid_request_error",
+            "message": "prompt is too long: 200076 tokens > 200000 maximum",
+        },
+    }
+
+    http_exception = fastapi.HTTPException(
+        status_code=400, detail=json.dumps(error_content)
+    )
+
+    async_client.request.side_effect = http_exception
+
+    proxy_client = TestProxyClient(limits, internal_event_client, billing_event_client)
+    response = await proxy_client.proxy(request_factory())
+
+    assert isinstance(response, JSONResponse)
+    assert response.status_code == 400
+    assert json.loads(response.body) == error_content
