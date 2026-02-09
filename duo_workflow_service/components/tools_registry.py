@@ -23,6 +23,7 @@ from duo_workflow_service.tools.findings.list_security_findings import (
 from duo_workflow_service.tools.gitlab_api_generic import GitLabApiGet, GitLabGraphQL
 from duo_workflow_service.tools.mcp_tools import McpTool, McpToolConfig
 from duo_workflow_service.tools.vulnerabilities.get_vulnerability_details import (
+    EvaluateVulnerabilityFalsePositiveStatus,
     GetVulnerabilityDetails,
 )
 from duo_workflow_service.tools.vulnerabilities.post_sast_fp_analysis_to_gitlab import (
@@ -111,6 +112,7 @@ _READ_ONLY_GITLAB_TOOLS: list[Type[BaseTool]] = [
     tools.ListProjectAuditEvents,
     tools.GetCurrentUser,
     GetVulnerabilityDetails,
+    EvaluateVulnerabilityFalsePositiveStatus,
     tools.ExtractLinesFromText,
     tools.RunGLQLQuery,
     BuildReviewMergeRequestContext,
