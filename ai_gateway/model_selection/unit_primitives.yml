@@ -503,14 +503,6 @@ configurable_unit_primitives:
       - "claude_sonnet_4_20250514"
       - "claude_sonnet_4_20250514_vertex"
       - "claude_sonnet_4_5_20250929"
-  - feature_setting: "check_sast_false_positive_status"
-    unit_primitives:
-      - "duo_agent_platform"
-    default_model: "claude_sonnet_4_20250514_vertex"
-    selectable_models:
-      - "claude_sonnet_4_20250514"
-      - "claude_sonnet_4_20250514_vertex"
-      - "claude_sonnet_4_5_20250929"
   - feature_setting: "ensure_clean_git_state"
     unit_primitives:
       - "duo_agent_platform"
