@@ -258,7 +258,12 @@ class TestSaveWorkflowToFile:
         flow_def = "version: v1\ncomponents:\n  - name: test_agent"
 
         with tempfile.TemporaryDirectory() as temp_dir:
-            filepath = save_workflow_to_file(agent_id, flow_def, temp_dir)
+            # Create a mock flow config model
+            mock_flow_config_model = Mock()
+            mock_flow_config_model.DIRECTORY_PATH = temp_dir
+            mock_flow_config_model.model_validate = Mock(return_value=None)
+
+            filepath = save_workflow_to_file(agent_id, flow_def, mock_flow_config_model)
 
             expected_filepath = os.path.join(temp_dir, "test_agent.yml")
             assert filepath == expected_filepath
@@ -269,6 +274,8 @@ class TestSaveWorkflowToFile:
                 saved_content = f.read()
 
             assert saved_content == flow_def
+            # Verify model validation was called
+            mock_flow_config_model.model_validate.assert_called_once()
 
     def test_save_workflow_to_file_if_file_exists(self):
         """Test saving workflow definition when file already exists."""
@@ -280,21 +287,43 @@ class TestSaveWorkflowToFile:
             with open(filepath, "w") as f:
                 f.write("existing content")
 
+            # Create a mock flow config model
+            mock_flow_config_model = Mock()
+            mock_flow_config_model.DIRECTORY_PATH = temp_dir
+
             with pytest.raises(
                 FileExistsError, match=f"File {filepath} already exists"
             ):
-                save_workflow_to_file(agent_id, flow_def, temp_dir)
+                save_workflow_to_file(agent_id, flow_def, mock_flow_config_model)
+
+    def test_save_workflow_to_file_validates_config(self):
+        """Test that save_workflow_to_file validates the flow config."""
+        agent_id = "test_agent"
+        flow_def = "version: v1\ncomponents:\n  - name: test_agent"
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            # Create a mock flow config model that raises validation error
+            mock_flow_config_model = Mock()
+            mock_flow_config_model.DIRECTORY_PATH = temp_dir
+            mock_flow_config_model.model_validate.side_effect = ValueError(
+                "Invalid flow config"
+            )
+
+            with pytest.raises(ValueError, match="Invalid flow config"):
+                save_workflow_to_file(agent_id, flow_def, mock_flow_config_model)
 
 
 class TestParseArguments:
     """Test cases for parse_arguments function."""
 
     def test_parse_required_arguments(self):
-        """Test parsing with only required arguments."""
+        """Test parsing with required arguments."""
         test_args = [
             "http://test.com/graphql",
             "test-token",
             "agent_1:123,agent_2:456,agent_3:789",
+            "--flow-registry-version",
+            "v1",
         ]
 
         with patch("sys.argv", ["script.py"] + test_args):
@@ -303,16 +332,17 @@ class TestParseArguments:
         assert args.gitlab_url == "http://test.com/graphql"
         assert args.gitlab_token == "test-token"
         assert args.foundational_agent_ids == "agent_1:123,agent_2:456,agent_3:789"
-        assert args.output_path is None
+        assert args.flow_registry_version == "v1"
+        assert args.dry_run is None
 
-    def test_parse_with_output_path(self):
-        """Test parsing with optional output path."""
+    def test_parse_with_experimental_version(self):
+        """Test parsing with experimental flow registry version."""
         test_args = [
             "http://test.com/graphql",
             "test-token",
             "agent_1:123,agent_2:456,agent_3:789",
-            "--output-path",
-            "/tmp/output",
+            "--flow-registry-version",
+            "experimental",
         ]
 
         with patch("sys.argv", ["script.py"] + test_args):
@@ -321,7 +351,28 @@ class TestParseArguments:
         assert args.gitlab_url == "http://test.com/graphql"
         assert args.gitlab_token == "test-token"
         assert args.foundational_agent_ids == "agent_1:123,agent_2:456,agent_3:789"
-        assert args.output_path == "/tmp/output"
+        assert args.flow_registry_version == "experimental"
+
+    def test_parse_with_dry_run(self):
+        """Test parsing with dry-run flag."""
+        test_args = [
+            "http://test.com/graphql",
+            "test-token",
+            "agent_1:123,agent_2:456,agent_3:789",
+            "--flow-registry-version",
+            "v1",
+            "--dry-run",
+            "true",
+        ]
+
+        with patch("sys.argv", ["script.py"] + test_args):
+            args = parse_arguments()
+
+        assert args.gitlab_url == "http://test.com/graphql"
+        assert args.gitlab_token == "test-token"
+        assert args.foundational_agent_ids == "agent_1:123,agent_2:456,agent_3:789"
+        assert args.flow_registry_version == "v1"
+        assert args.dry_run == "true"
 
 
 class TestFetchAgents:
@@ -332,16 +383,17 @@ class TestFetchAgents:
         "duo_workflow_service.scripts.fetch_foundational_agents.fetch_foundational_agent"
     )
     @patch("builtins.print")
-    def test_fetch_agents_stdout_output(
+    def test_fetch_agents_dry_run_output(
         self, mock_print, mock_fetch_agent, mock_parse_args
     ):
-        """Test fetch_agents with stdout output (no output path)."""
+        """Test fetch_agents with dry-run output."""
         # Mock arguments
         mock_args = Mock()
         mock_args.gitlab_url = "http://test.com"
         mock_args.gitlab_token = "token"
         mock_args.foundational_agent_ids = "agent_1:123,agent_2:456"
-        mock_args.output_path = None
+        mock_args.flow_registry_version = "v1"
+        mock_args.dry_run = True
         mock_parse_args.return_value = mock_args
 
         # Mock workflow definitions - now returns tuples (name, flow_config)
@@ -376,10 +428,8 @@ class TestFetchAgents:
         "duo_workflow_service.scripts.fetch_foundational_agents.save_workflow_to_file"
     )
     @patch("builtins.print")
-    @patch("os.path.exists")
     def test_fetch_agents_file_output(
         self,
-        mock_exists,
         mock_print,
         mock_save_workflow,
         mock_fetch_agent,
@@ -391,11 +441,9 @@ class TestFetchAgents:
         mock_args.gitlab_url = "http://test.com"
         mock_args.gitlab_token = "token"
         mock_args.foundational_agent_ids = "agent_1:123"
-        mock_args.output_path = "/tmp/output"
+        mock_args.flow_registry_version = "v1"
+        mock_args.dry_run = None
         mock_parse_args.return_value = mock_args
-
-        # Mock path exists
-        mock_exists.return_value = True
 
         # Mock workflow definition - now returns tuple (name, flow_config)
         mock_fetch_agent.return_value = (
@@ -406,13 +454,32 @@ class TestFetchAgents:
 
         fetch_agents()
 
-        # Verify save_workflow_to_file was called with correct parameters
-        mock_save_workflow.assert_called_once_with(
-            "agent_1", "version: v1\ncomponents:\n  - name: agent1", "/tmp/output"
-        )
+        # Verify save_workflow_to_file was called once
+        assert mock_save_workflow.call_count == 1
+        call_args = mock_save_workflow.call_args
+        assert call_args[0][0] == "agent_1"
+        assert call_args[0][1] == "version: v1\ncomponents:\n  - name: agent1"
+        # Third argument should be the V1FlowConfig class (imported as FlowConfig from v1.flows)
+        assert call_args[0][2].__name__ == "FlowConfig"
 
         # Verify success message printed to stderr
         mock_print.assert_called_once_with(
             "Successfully saved workflow definition(s): ['/tmp/output/agent_1.yml']",
             file=sys.stderr,
         )
+
+    @patch("duo_workflow_service.scripts.fetch_foundational_agents.parse_arguments")
+    def test_fetch_agents_invalid_flow_registry_version(self, mock_parse_args):
+        """Test fetch_agents raises error for invalid flow registry version."""
+        # Mock arguments with invalid flow_registry_version
+        mock_args = Mock()
+        mock_args.gitlab_url = "http://test.com"
+        mock_args.gitlab_token = "token"
+        mock_args.foundational_agent_ids = "agent_1:123"
+        mock_args.flow_registry_version = "invalid"
+        mock_parse_args.return_value = mock_args
+
+        with pytest.raises(
+            ValueError, match="Flow Registry version 'invalid' is not supported"
+        ):
+            fetch_agents()

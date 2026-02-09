@@ -60,7 +60,7 @@ RUN poetry run python scripts/bootstrap.py
 
 # Pull foundational agents from the catalog
 RUN poetry run fetch-foundational-agents "https://gitlab.com" "$GITLAB_API_TOKEN" "duo_planner:348,security_analyst_agent:356" \
-    --output-path  duo_workflow_service/agent_platform/experimental/flows/configs
+    --flow-registry-version v1
 
 EXPOSE 5052
 

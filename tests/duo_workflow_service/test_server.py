@@ -1679,3 +1679,72 @@ async def test_send_events_sends_skips_checkpoint_if_already_sent():
 
     assert len(yielded) == 1
     assert yielded[0].newCheckpoint.checkpoint == '{"checkpoint":1}'
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "workflow_definition, expected_mapped_definition",
+    [
+        ("duo_planner/experimental", "duo_planner/v1"),
+        ("security_analyst_agent/experimental", "security_analyst_agent/v1"),
+        ("duo_planner/v1", "duo_planner/v1"),
+        ("security_analyst_agent/v1", "security_analyst_agent/v1"),
+        ("chat", "chat"),
+        ("software_development", "software_development"),
+        ("", ""),
+    ],
+)
+@patch("duo_workflow_service.server.AbstractWorkflow")
+@patch("duo_workflow_service.server.resolve_workflow_class")
+async def test_workflow_definition_mapping(
+    mock_resolve_workflow,
+    mock_abstract_workflow_class,
+    workflow_definition,
+    expected_mapped_definition,
+):
+    """Integration test: verify workflow definitions are mapped before resolution in ExecuteWorkflow."""
+    # Setup mocks
+    mock_workflow = mock_abstract_workflow_class.return_value
+    mock_workflow.is_done = True
+    mock_workflow.run = AsyncMock()
+    mock_workflow.cleanup = AsyncMock()
+    mock_workflow.get_from_outbox = AsyncMock(
+        return_value=OutboxSignal.NO_MORE_OUTBOUND_REQUESTS
+    )
+    mock_resolve_workflow.return_value = mock_abstract_workflow_class
+
+    async def mock_request_iterator() -> AsyncIterable[contract_pb2.ClientEvent]:
+        yield contract_pb2.ClientEvent(
+            startRequest=contract_pb2.StartWorkflowRequest(
+                workflowID="test-workflow-123",
+                workflowDefinition=workflow_definition,
+            )
+        )
+
+    # Setup user and context
+    user = CloudConnectorUser(authenticated=True, is_debug=True)
+    current_user.set(user)
+    mock_context = MagicMock(spec=grpc.ServicerContext)
+    mock_context.invocation_metadata.return_value = []
+
+    # Setup servicer
+    servicer = DuoWorkflowService()
+    mock_internal_event_client = create_mock_internal_event_client()
+
+    result = servicer.ExecuteWorkflow(
+        mock_request_iterator(),
+        mock_context,
+        internal_event_client=mock_internal_event_client,
+    )
+
+    # Consume the async iterator
+    with pytest.raises(StopAsyncIteration):
+        await anext(result)
+
+    # Verify resolve_workflow_class was called with the MAPPED definition
+    mock_resolve_workflow.assert_called_once()
+    called_workflow_def = mock_resolve_workflow.call_args[0][0]
+    assert called_workflow_def == expected_mapped_definition, (
+        f"Expected workflow definition '{workflow_definition}' to be mapped to "
+        f"'{expected_mapped_definition}', but resolve_workflow_class was called with '{called_workflow_def}'"
+    )
