@@ -203,13 +203,13 @@ class ChatAgent:
 
         if isinstance(error, APIStatusError) and 500 <= error.status_code < 600:
             ui_content = (
-                "There was an error connecting to the chosen LLM provider, please try again or contact support "
+                "There was an error connecting to the chosen LLM provider, please contact support "
                 "if the issue persists."
             )
         else:
             ui_content = (
-                "There was an error processing your request in the Duo Agent Platform, please try again or "
-                "contact support if the issue persists."
+                "There was an error processing your request in the Duo Agent Platform, please contact support "
+                "if the issue persists."
             )
 
         ui_chat_log = UiChatLog(
@@ -225,7 +225,7 @@ class ChatAgent:
         )
 
         return {
-            "status": WorkflowStatusEnum.INPUT_REQUIRED,
+            "status": WorkflowStatusEnum.ERROR,
             "ui_chat_log": [ui_chat_log],
         }
 
