@@ -6,6 +6,7 @@ from langchain_core.tools import ToolException
 
 from duo_workflow_service.gitlab.http_client import GitLabHttpResponse
 from duo_workflow_service.tools.pipeline import (
+    GetDownstreamPipelines,
     GetPipelineFailingJobs,
     GetPipelineFailingJobsInput,
 )
@@ -705,3 +706,341 @@ async def test_get_pipeline_failing_jobs_jobs_pagination_with_pipeline_url(
     ]
 
     assert gitlab_client_mock.aget.call_args_list == expected_calls
+
+
+@pytest.mark.asyncio
+async def test_get_downstream_pipelines_success(gitlab_client_mock, metadata):
+    """Test successful retrieval of downstream pipelines."""
+    bridges_response = [
+        {
+            "id": 1001,
+            "name": "downstream_job_1",
+            "status": "success",
+            "downstream_pipeline": {
+                "id": 2001,
+                "status": "failed",
+                "web_url": "https://gitlab.com/namespace/project/-/pipelines/1233",
+            },
+        },
+        {
+            "id": 1002,
+            "name": "downstream_job_2",
+            "status": "success",
+            "downstream_pipeline": {
+                "id": 2002,
+                "status": "failed",
+                "web_url": "https://gitlab.com/namespace/project/-/pipelines/1232",
+            },
+        },
+    ]
+
+    mock_response = GitLabHttpResponse(status_code=200, body=bridges_response)
+    gitlab_client_mock.aget = AsyncMock(return_value=mock_response)
+
+    tool = GetDownstreamPipelines(metadata=metadata)
+
+    response = await tool._arun(
+        url="https://gitlab.com/namespace/project/-/pipelines/123"
+    )
+    response_json = json.loads(response)
+
+    assert isinstance(response_json, list)
+    assert response_json == [
+        {"url": "https://gitlab.com/namespace/project/-/pipelines/1233"},
+        {"url": "https://gitlab.com/namespace/project/-/pipelines/1232"},
+    ]
+
+    gitlab_client_mock.aget.assert_called_once_with(
+        path="/api/v4/projects/namespace%2Fproject/pipelines/123/bridges"
+    )
+
+
+@pytest.mark.asyncio
+async def test_get_downstream_pipelines_invalid_downstream_url(
+    gitlab_client_mock, metadata
+):
+    """Test unsuccessful retrieval of invalid downstream pipeline url."""
+    bridges_response = [
+        {
+            "id": 1001,
+            "name": "downstream_job_1",
+            "status": "success",
+            "downstream_pipeline": {
+                "id": 2001,
+                "status": "failed",
+                "web_url": "https://gitlab.com/",
+            },
+        }
+    ]
+
+    mock_response = GitLabHttpResponse(status_code=200, body=bridges_response)
+    gitlab_client_mock.aget = AsyncMock(return_value=mock_response)
+
+    tool = GetDownstreamPipelines(metadata=metadata)
+
+    response = await tool._arun(
+        url="https://gitlab.com/namespace/project/-/pipelines/123"
+    )
+    response_json = json.loads(response)
+
+    assert response_json == {
+        "error": "Failed to parse URL: Could not parse pipeline URL: https://gitlab.com/"
+    }
+
+    gitlab_client_mock.aget.assert_called_once_with(
+        path="/api/v4/projects/namespace%2Fproject/pipelines/123/bridges"
+    )
+
+
+@pytest.mark.asyncio
+async def test_get_downstream_pipelines_no_multi_project(gitlab_client_mock, metadata):
+    """Test does not return multi-project downstream pipelines."""
+    bridges_response = [
+        {
+            "id": 1001,
+            "name": "downstream_job_1",
+            "status": "success",
+            "downstream_pipeline": {
+                "id": 2001,
+                "status": "failed",
+                "web_url": "https://gitlab.com/namespace/different_project/-/pipelines/1233",
+            },
+        },
+        {
+            "id": 1002,
+            "name": "downstream_job_2",
+            "status": "success",
+            "downstream_pipeline": {
+                "id": 2002,
+                "status": "failed",
+                "web_url": "https://gitlab.com/different_namespace/project/-/pipelines/1232",
+            },
+        },
+    ]
+
+    mock_response = GitLabHttpResponse(status_code=200, body=bridges_response)
+    gitlab_client_mock.aget = AsyncMock(return_value=mock_response)
+
+    tool = GetDownstreamPipelines(metadata=metadata)
+
+    response = await tool._arun(
+        url="https://gitlab.com/namespace/project/-/pipelines/123"
+    )
+    response_json = json.loads(response)
+
+    assert isinstance(response_json, list)
+    assert response_json == []
+
+    gitlab_client_mock.aget.assert_called_once_with(
+        path="/api/v4/projects/namespace%2Fproject/pipelines/123/bridges"
+    )
+
+
+@pytest.mark.asyncio
+async def test_get_downstream_pipelines_no_downstream_pipelines(
+    gitlab_client_mock, metadata
+):
+    """Test when there are no downstream pipelines."""
+    bridges_response = []
+
+    mock_response = GitLabHttpResponse(status_code=200, body=bridges_response)
+    gitlab_client_mock.aget = AsyncMock(return_value=mock_response)
+
+    tool = GetDownstreamPipelines(metadata=metadata)
+
+    response = await tool._arun(
+        url="https://gitlab.com/namespace/project/-/pipelines/123"
+    )
+    response_json = json.loads(response)
+
+    assert isinstance(response_json, list)
+    assert len(response_json) == 0
+
+    gitlab_client_mock.aget.assert_called_once_with(
+        path="/api/v4/projects/namespace%2Fproject/pipelines/123/bridges"
+    )
+
+
+@pytest.mark.asyncio
+async def test_get_downstream_pipelines_invalid_url(gitlab_client_mock, metadata):
+    """Test with invalid pipeline URL."""
+    tool = GetDownstreamPipelines(metadata=metadata)
+
+    response = await tool._arun(url="https://gitlab.com/namespace/project")
+    response_json = json.loads(response)
+
+    assert "error" in response_json
+    assert "Failed to parse URL" in response_json["error"]
+    gitlab_client_mock.aget.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_get_downstream_pipelines_missing_url(gitlab_client_mock, metadata):
+    """Test when URL is not provided."""
+    tool = GetDownstreamPipelines(metadata=metadata)
+
+    with pytest.raises(TypeError) as exc_info:
+        await tool._arun()
+
+    assert "missing 1 required positional argument: 'url'" in str(exc_info.value)
+    gitlab_client_mock.aget.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_get_downstream_pipelines_api_error(gitlab_client_mock, metadata):
+    """Test when GitLab API returns an error."""
+    mock_response = GitLabHttpResponse(
+        status_code=404,
+        body={"status": 404, "message": "Pipeline not found"},
+    )
+    gitlab_client_mock.aget = AsyncMock(return_value=mock_response)
+
+    tool = GetDownstreamPipelines(metadata=metadata)
+
+    with pytest.raises(ToolException) as exc_info:
+        await tool._arun(url="https://gitlab.com/namespace/project/-/pipelines/999")
+
+    assert "Pipeline not found" in str(exc_info.value)
+
+    gitlab_client_mock.aget.assert_called_once_with(
+        path="/api/v4/projects/namespace%2Fproject/pipelines/999/bridges"
+    )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "url,expected_project_id,expected_pipeline_id,downstream_url",
+    [
+        (
+            "https://gitlab.com/namespace/project/-/pipelines/123",
+            "namespace%2Fproject",
+            123,
+            "https://gitlab.com/namespace/project/-/pipelines/1234",
+        ),
+        (
+            "https://gitlab.com/group/subgroup/project/-/pipelines/456",
+            "group%2Fsubgroup%2Fproject",
+            456,
+            "https://gitlab.com/group/subgroup/project/-/pipelines/4567",
+        ),
+    ],
+)
+async def test_get_downstream_pipelines_url_parsing(
+    url,
+    expected_project_id,
+    expected_pipeline_id,
+    downstream_url,
+    gitlab_client_mock,
+    metadata,
+):
+    """Test correct parsing of various pipeline URL formats."""
+    bridges_response = [
+        {
+            "id": 1001,
+            "name": "downstream_job",
+            "status": "success",
+            "downstream_pipeline": {
+                "id": 2002,
+                "status": "failed",
+                "web_url": downstream_url,
+            },
+        },
+    ]
+
+    mock_response = GitLabHttpResponse(status_code=200, body=bridges_response)
+    gitlab_client_mock.aget = AsyncMock(return_value=mock_response)
+
+    tool = GetDownstreamPipelines(metadata=metadata)
+
+    response = await tool._arun(url=url)
+    response_json = json.loads(response)
+
+    assert isinstance(response_json, list)
+    assert response_json == [{"url": downstream_url}]
+
+    gitlab_client_mock.aget.assert_called_once_with(
+        path=f"/api/v4/projects/{expected_project_id}/pipelines/{expected_pipeline_id}/bridges"
+    )
+
+
+@pytest.mark.asyncio
+async def test_get_downstream_pipelines_format_display_message():
+    """Test the format_display_message method."""
+    from duo_workflow_service.tools.gitlab_resource_input import GitLabResourceInput
+
+    tool = GetDownstreamPipelines(description="Get downstream pipelines description")
+    input_data = GitLabResourceInput(
+        url="https://gitlab.com/namespace/project/-/pipelines/42"
+    )
+    message = tool.format_display_message(input_data)
+
+    assert (
+        message
+        == "Get downstream pipelines for https://gitlab.com/namespace/project/-/pipelines/42"
+    )
+
+
+@pytest.mark.asyncio
+async def test_get_downstream_pipelines_network_error(gitlab_client_mock, metadata):
+    """Test handling of network errors."""
+    gitlab_client_mock.aget = AsyncMock(
+        side_effect=Exception("Network connection error")
+    )
+
+    tool = GetDownstreamPipelines(metadata=metadata)
+
+    with pytest.raises(Exception) as exc_info:
+        await tool._arun(url="https://gitlab.com/namespace/project/-/pipelines/123")
+
+    assert "Network connection error" in str(exc_info.value)
+
+    gitlab_client_mock.aget.assert_called_once_with(
+        path="/api/v4/projects/namespace%2Fproject/pipelines/123/bridges"
+    )
+
+
+@pytest.mark.asyncio
+async def test_get_downstream_pipelines_invalid_response_format(
+    gitlab_client_mock, metadata
+):
+    """Test handling of invalid response format from API."""
+    # API returns a dict instead of a list
+    mock_response = GitLabHttpResponse(
+        status_code=200,
+        body={"error": "Invalid response"},
+    )
+    gitlab_client_mock.aget = AsyncMock(return_value=mock_response)
+
+    tool = GetDownstreamPipelines(metadata=metadata)
+
+    with pytest.raises(ToolException) as exc_info:
+        await tool._arun(url="https://gitlab.com/namespace/project/-/pipelines/123")
+
+    assert "Failed to fetch downstream pipelines for url" in str(exc_info.value)
+
+    gitlab_client_mock.aget.assert_called_once_with(
+        path="/api/v4/projects/namespace%2Fproject/pipelines/123/bridges"
+    )
+
+
+@pytest.mark.asyncio
+async def test_get_downstream_pipelines_with_malformed_url(
+    gitlab_client_mock, metadata
+):
+    """Test with various malformed URLs."""
+    tool = GetDownstreamPipelines(metadata=metadata)
+
+    malformed_urls = [
+        "https://gitlab.com/namespace/project/-/pipelines/",
+        "https://gitlab.com/namespace/project/-/pipelines/abc",
+        "invalid-url",
+        "https://gitlab.com/namespace/project/-/merge_requests/123",
+    ]
+
+    for url in malformed_urls:
+        response = await tool._arun(url=url)
+        response_json = json.loads(response)
+        assert "error" in response_json
+        assert "Failed to parse URL" in response_json["error"]
+
+    gitlab_client_mock.aget.assert_not_called()

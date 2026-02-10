@@ -109,6 +109,7 @@ _outbox = MagicMock(spec=Outbox)
                 "list_merge_request_diffs",
                 "list_all_merge_request_notes",
                 "get_pipeline_failing_jobs",
+                "get_downstream_pipelines",
                 "get_project",
                 "gitlab_group_project_search",
                 "gitlab_issue_search",
@@ -175,6 +176,7 @@ _outbox = MagicMock(spec=Outbox)
                 "list_all_merge_request_notes",
                 "update_merge_request",
                 "get_pipeline_failing_jobs",
+                "get_downstream_pipelines",
                 "get_project",
                 "gitlab_group_project_search",
                 "gitlab_issue_search",
@@ -345,6 +347,9 @@ def test_registry_initialization_initialises_tools_with_correct_attributes(
         ),
         "update_merge_request": tools.UpdateMergeRequest(metadata=tool_metadata),
         "get_pipeline_failing_jobs": tools.GetPipelineFailingJobs(
+            metadata=tool_metadata
+        ),
+        "get_downstream_pipelines": tools.GetDownstreamPipelines(
             metadata=tool_metadata
         ),
         "get_project": tools.GetProject(metadata=tool_metadata),
