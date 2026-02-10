@@ -154,6 +154,7 @@ class AbstractWorkflow(ABC):
                 "git_url": self._workflow_metadata.get("git_url", ""),
                 "git_sha": self._workflow_metadata.get("git_sha", ""),
                 "workflow_type": self._workflow_type.value,
+                "thread_id": self._workflow_id,
             }
 
             # By default, tracing follows extended_logging. Only disable if LANGSMITH_TRACING_V2 is explicitly "false"

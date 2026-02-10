@@ -360,6 +360,7 @@ async def test_run_passes_correct_metadata_to_langsmith_extra(
     assert metadata["git_url"] == "https://example.com"
     assert metadata["git_sha"] == "abc123"
     assert metadata["workflow_type"] == CategoryEnum.WORKFLOW_SOFTWARE_DEVELOPMENT.value
+    assert metadata["thread_id"] == workflow._workflow_id
 
 
 @pytest.mark.asyncio
