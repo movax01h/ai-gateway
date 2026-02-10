@@ -1220,11 +1220,19 @@ async def test_execute_workflow_valid_workflow_metadata(
 
 
 def test_clean_start_request():
-    # Create a test request with workflow metadata
+    # Create a test request with workflow metadata and additional_context
     start_request = contract_pb2.StartWorkflowRequest(
         workflowID="test-id",
         goal="test-goal",
         workflowMetadata=json.dumps({"key": "value"}),
+        additional_context=[
+            contract_pb2.AdditionalContext(
+                category="file",
+                id="1",
+                content="/home/johndoe/projects/app.py",
+                metadata="{}",
+            ),
+        ],
     )
     client_event = contract_pb2.ClientEvent(startRequest=start_request)
 
@@ -1234,13 +1242,15 @@ def test_clean_start_request():
     # Verify that the cleaned request is a new object (not the same instance)
     assert cleaned_request is not client_event
 
-    # Verify that the original request still has its metadata
+    # Verify that the original request still has its metadata and additional_context
     assert client_event.startRequest.workflowMetadata == json.dumps({"key": "value"})
+    assert len(client_event.startRequest.additional_context) == 1
 
     # Verify that the cleaned request has no metadata but retains other fields
     assert cleaned_request.startRequest.workflowMetadata == ""
     assert cleaned_request.startRequest.workflowID == "test-id"
     assert cleaned_request.startRequest.goal == ""
+    assert len(cleaned_request.startRequest.additional_context) == 0
 
 
 @pytest.mark.asyncio
