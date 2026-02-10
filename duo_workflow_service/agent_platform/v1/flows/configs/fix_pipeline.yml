@@ -20,6 +20,7 @@ components:
         as: "agents_dot_md"
         optional: True
     toolset:
+      - get_downstream_pipelines
       - get_pipeline_failing_jobs
       - get_job_logs
       - list_merge_request_diffs

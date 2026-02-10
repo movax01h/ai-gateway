@@ -11,7 +11,10 @@ from duo_workflow_service.tools.duo_base_tool import (
     MergeRequestValidationResult,
     PipelineValidationResult,
 )
-from duo_workflow_service.tools.gitlab_resource_input import ProjectResourceInput
+from duo_workflow_service.tools.gitlab_resource_input import (
+    GitLabResourceInput,
+    ProjectResourceInput,
+)
 from duo_workflow_service.tools.merge_request import (
     MERGE_REQUEST_IDENTIFICATION_DESCRIPTION,
 )
@@ -201,3 +204,74 @@ class GetPipelineFailingJobs(DuoBaseTool):
         if args.url:
             return f"Get pipeline failing jobs for {args.url}"
         return f"Get pipeline failing jobs for merge request !{args.merge_request_iid} in project {args.project_id}"
+
+
+class GetDownstreamPipelines(DuoBaseTool):
+    name: str = "get_downstream_pipelines"
+    description: str = """Get the URLs for downstream pipelines.
+    This tool can be used when you have a pipeline URL.
+
+    Be careful to differentiate between a pipeline_id and a job_id when using this tool.
+
+    To identify a pipeline you must provide:
+    - A GitLab URL like:
+        - https://gitlab.com/namespace/project/-/pipelines/33
+        - https://gitlab.com/group/subgroup/project/-/pipelines/42
+
+    For example:
+    - Given a pipeline URL https://gitlab.com/namespace/project/-/pipelines/33, the tool call would be:
+        get_downstream_pipelines(url="https://gitlab.com/namespace/project/-/pipelines/33")
+    """
+    args_schema: Type[BaseModel] = GitLabResourceInput
+
+    async def _execute(self, url: str) -> str:
+        validation_result = self._validate_pipeline_url(url)
+
+        if validation_result.errors:
+            return json.dumps({"error": "; ".join(validation_result.errors)})
+
+        project_id = validation_result.project_id
+        pipeline_iid = validation_result.pipeline_iid
+        response = await self.gitlab_client.aget(
+            path=f"/api/v4/projects/{project_id}/pipelines/{pipeline_iid}/bridges",
+        )
+
+        if not response.is_success():
+            error_str = (
+                f"Failed to fetch downstream pipelines: status_code={response.status_code}, "
+                f"response={response.body}"
+            )
+            raise ToolException(error_str)
+
+        downstream_pipelines = response.body
+        if not isinstance(downstream_pipelines, list):
+            raise ToolException(
+                f"Failed to fetch downstream pipelines for url: {url}: {downstream_pipelines}"
+            )
+
+        downstream_pipeline_urls: list[dict] = []
+        for pipeline in downstream_pipelines:
+            downstream_pipeline = pipeline.get("downstream_pipeline", None)
+
+            if downstream_pipeline:
+                # Only handle parent/child pipelines for now, and do not return
+                # downstream pipelines across different projects:
+                # https://docs.gitlab.com/ci/pipelines/downstream_pipelines/#multi-project-pipelines
+                downstream_url = downstream_pipeline["web_url"]
+                downstream_validation_result = self._validate_pipeline_url(
+                    downstream_url
+                )
+                if downstream_validation_result.errors:
+                    return json.dumps(
+                        {"error": "; ".join(downstream_validation_result.errors)}
+                    )
+
+                if downstream_validation_result.project_id == project_id:
+                    downstream_pipeline_urls.append({"url": downstream_url})
+
+        return json.dumps(downstream_pipeline_urls)
+
+    def format_display_message(
+        self, args: GitLabResourceInput, _tool_response: Any = None
+    ) -> str:
+        return f"Get downstream pipelines for {args.url}"

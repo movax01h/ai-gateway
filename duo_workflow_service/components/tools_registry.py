@@ -80,6 +80,7 @@ _READ_ONLY_GITLAB_TOOLS: list[Type[BaseTool]] = [
     tools.ListMergeRequestDiffs,
     tools.ListAllMergeRequestNotes,
     tools.GetPipelineFailingJobs,
+    tools.GetDownstreamPipelines,
     tools.GetProject,
     tools.DocumentationSearch,
     tools.GroupProjectSearch,
