@@ -593,17 +593,60 @@ async def test_get_graph_input_start(mock_uuid, workflow_with_project):
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize(
-    "status", [WorkflowStatusEventEnum.RETRY, WorkflowStatusEventEnum.RESUME]
-)
 @patch("duo_workflow_service.workflows.chat.workflow.uuid4")
-async def test_get_graph_input(mock_uuid, workflow_with_project, status):
+async def test_get_graph_input_retry_no_checkpoint(mock_uuid, workflow_with_project):
     mock_uuid.return_value = UUID("11111111-2222-3333-4444-555555555555")
 
-    result = await workflow_with_project.get_graph_input("New input", status, None)
+    result = await workflow_with_project.get_graph_input(
+        "New input", WorkflowStatusEventEnum.RETRY, None
+    )
+
+    assert result["status"] == WorkflowStatusEnum.NOT_STARTED
+    assert result["goal"] == "New input"
+    assert result["conversation_history"]["test_prompt"][0].content == "New input"
+
+
+@pytest.mark.asyncio
+async def test_get_graph_input_retry_with_checkpoint(workflow_with_project):
+    mock_checkpoint = ("fake_checkpoint_ns", "fake_checkpoint_id")
+
+    result = await workflow_with_project.get_graph_input(
+        "", WorkflowStatusEventEnum.RETRY, mock_checkpoint
+    )
+
+    assert result.update == {"status": WorkflowStatusEnum.EXECUTION}
+    assert not result.goto
+
+
+@pytest.mark.asyncio
+async def test_get_graph_input_retry_with_checkpoint_ignores_goal(
+    workflow_with_project,
+):
+    mock_checkpoint = ("fake_checkpoint_ns", "fake_checkpoint_id")
+
+    result = await workflow_with_project.get_graph_input(
+        "Original user goal", WorkflowStatusEventEnum.RETRY, mock_checkpoint
+    )
+
+    assert result.update == {"status": WorkflowStatusEnum.EXECUTION}
+    assert not result.goto
+
+
+@pytest.mark.asyncio
+@patch("duo_workflow_service.workflows.chat.workflow.uuid4")
+async def test_get_graph_input_resume(mock_uuid, workflow_with_project):
+    """Test RESUME status event handling."""
+    mock_uuid.return_value = UUID("11111111-2222-3333-4444-555555555555")
+
+    result = await workflow_with_project.get_graph_input(
+        "New input", WorkflowStatusEventEnum.RESUME, None
+    )
 
     assert result.goto == "agent"
     assert result.update["status"] == WorkflowStatusEnum.EXECUTION
+    assert (
+        result.update["preapproved_tools"] == workflow_with_project._preapproved_tools
+    )
     assert (
         result.update["conversation_history"]["test_prompt"][0].content == "New input"
     )
@@ -613,14 +656,27 @@ async def test_get_graph_input(mock_uuid, workflow_with_project, status):
         ]
         == workflow_with_project._additional_context
     )
-    assert result.update["ui_chat_log"][-1]["message_type"] == MessageTypeEnum.USER
-    assert result.update["ui_chat_log"][-1]["content"] == "New input"
+    assert result.update["ui_chat_log"][0]["message_type"] == MessageTypeEnum.USER
+    assert result.update["ui_chat_log"][0]["content"] == "New input"
     assert (
-        result.update["ui_chat_log"][-1]["message_id"]
+        result.update["ui_chat_log"][0]["message_id"]
         == "user-11111111-2222-3333-4444-555555555555"
     )
-    assert len(result.update["ui_chat_log"][-1]["additional_context"]) == 1
-    assert result.update["ui_chat_log"][-1]["additional_context"][0].category == "file"
+    assert len(result.update["ui_chat_log"][0]["additional_context"]) == 1
+    assert result.update["ui_chat_log"][0]["additional_context"][0].category == "file"
+
+
+@pytest.mark.asyncio
+async def test_get_graph_input_resume_with_empty_goal_no_approval(
+    workflow_with_project,
+):
+    """Test RESUME with empty goal and no approval resumes from checkpoint."""
+    result = await workflow_with_project.get_graph_input(
+        "", WorkflowStatusEventEnum.RESUME, None
+    )
+
+    assert result.update == {"status": WorkflowStatusEnum.EXECUTION}
+    assert not result.goto
 
 
 @pytest.mark.asyncio
@@ -938,9 +994,9 @@ async def test_agent_resume_with_updated_preapproved_tools(workflow_with_project
         "tool_3",
     ]
 
-    # Resume the workflow
+    # Resume the workflow with a new user message
     result = await workflow_with_project.get_graph_input(
-        "", WorkflowStatusEventEnum.RESUME, None
+        "Continue with new tools", WorkflowStatusEventEnum.RESUME, None
     )
 
     # Verify the state update includes the new preapproved_tools
