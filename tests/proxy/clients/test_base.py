@@ -386,3 +386,26 @@ async def test_proxy_exception_code(
     assert isinstance(response, JSONResponse)
     assert response.status_code == 400
     assert json.loads(response.body) == error_content
+
+
+@pytest.mark.asyncio
+async def test_proxy_exception_code_with_malformed_json_message(
+    async_client,
+    limits,
+    request_factory,
+    internal_event_client,
+    billing_event_client,
+):
+
+    error_content = "type: invalid_request_error, message: prompt is too long: 200076 tokens > 200000 maximum"
+
+    http_exception = fastapi.HTTPException(status_code=400, detail=error_content)
+
+    async_client.request.side_effect = http_exception
+
+    proxy_client = TestProxyClient(limits, internal_event_client, billing_event_client)
+    response = await proxy_client.proxy(request_factory())
+
+    assert isinstance(response, JSONResponse)
+    assert response.status_code == 400
+    assert json.loads(response.body) == {"message": error_content}

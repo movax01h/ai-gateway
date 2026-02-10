@@ -86,7 +86,10 @@ class BaseProxyClient(ABC):
                     UserAPIKeyAuth(),  # LiteLLM-Proxy auth, which we don't use
                 )
         except ProxyException as e:
-            error_content = json.loads(e.message)
+            try:
+                error_content = json.loads(e.message)
+            except json.decoder.JSONDecodeError:
+                error_content = {"message": e.message}
             # Return api.anthropic.com response for Anthropic error codes invalid_request_error
             return JSONResponse(
                 status_code=int(e.code),
