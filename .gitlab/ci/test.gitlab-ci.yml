@@ -116,7 +116,11 @@ feature-tests:
     # Overriding the poetry version because the variable is conflicted with the one in gitlab-rails/gitlab-build-image
     POETRY_VERSION: "2.2"
   rules:
-    - if: $CI_PIPELINE_SOURCE == "merge_request_event" && $CI_PROJECT_PATH == "gitlab-org/modelops/applied-ml/code-suggestions/ai-assist"
+    - if: $CI_PROJECT_PATH != "gitlab-org/modelops/applied-ml/code-suggestions/ai-assist"
+      when: never
+    - if: $CI_MERGE_REQUEST_EVENT_TYPE == "merge_train"
+    - when: manual
+      allow_failure: true
 
 .proto-variables:
   variables:
