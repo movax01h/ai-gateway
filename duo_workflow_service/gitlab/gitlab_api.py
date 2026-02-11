@@ -306,11 +306,10 @@ def extract_default_branch_from_project_repository(workflow: dict) -> Optional[s
         workflow.get("project", {}).get("statisticsDetailsPaths") or {}
     ).get("repository", "")
 
-    default_branch = None
     if repository_str and isinstance(repository_str, str):
-        default_branch = str(repository_str.split("/")[-1])
+        return repository_str.split("/-/tree/", 1)[1]
 
-    return default_branch
+    return None
 
 
 def extract_id_from_global_id(global_id: str):

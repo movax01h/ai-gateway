@@ -6,6 +6,7 @@ from duo_workflow_service.gitlab.gitlab_api import (
     GITLAB_18_2_QUERY,
     GITLAB_18_3_OR_ABOVE_QUERY,
     GITLAB_18_8_OR_ABOVE_QUERY,
+    extract_default_branch_from_project_repository,
     extract_id_from_global_id,
     fetch_workflow_and_container_data,
     fetch_workflow_and_container_query,
@@ -653,3 +654,24 @@ async def test_protection_level_defaults_to_log_only_when_ai_settings_missing():
         workflow_config["prompt_injection_protection_level"]
         == PromptInjectionProtectionLevel.LOG_ONLY
     )
+
+
+@pytest.mark.parametrize(
+    "repository_str, expected",
+    [
+        ("https://example.com/project/-/tree/main", "main"),
+        ("https://example.com/project/-/tree/develop", "develop"),
+        ("https://example.com/project/-/tree/feature/my-branch", "feature/my-branch"),
+        # Empty / missing
+        ("", None),
+        (None, None),
+    ],
+)
+def test_extract_default_branch_from_project_repository(repository_str, expected):
+    workflow = {}
+    if repository_str is not None:
+        workflow = {
+            "project": {"statisticsDetailsPaths": {"repository": repository_str}}
+        }
+
+    assert extract_default_branch_from_project_repository(workflow) == expected

@@ -630,6 +630,11 @@ class LinkVulnerabilityToMergeRequestInput(BaseModel):
         description="ID of the merge request to link to the vulnerability"
     )
 
+    @field_validator("vulnerability_id", "merge_request_id", mode="before")
+    @classmethod
+    def coerce_to_string(cls, v):
+        return str(v)
+
 
 class LinkVulnerabilityToMergeRequest(DuoBaseTool):
     name: str = "link_vulnerability_to_merge_request"
@@ -668,8 +673,8 @@ class LinkVulnerabilityToMergeRequest(DuoBaseTool):
         if gl_version < version_18_5:
             return json.dumps({"error": "This tool is not available"})
 
-        vulnerability_id = kwargs.pop("vulnerability_id")
-        merge_request_id = kwargs.pop("merge_request_id")
+        vulnerability_id = str(kwargs.pop("vulnerability_id"))
+        merge_request_id = str(kwargs.pop("merge_request_id"))
 
         # Ensure vulnerability_id has proper GraphQL format
         if not vulnerability_id.startswith("gid://gitlab/Vulnerability/"):

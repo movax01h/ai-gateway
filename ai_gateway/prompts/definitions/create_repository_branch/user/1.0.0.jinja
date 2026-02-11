@@ -1,18 +1,27 @@
 GitLab Project details:
 <project>
     project_id: {{ project_id }}
+    repository_url: {{ repository_url }}
+    workflow_id: {{ workflow_id }}
     ref: {{ ref }}
-    repository url: {{ repository_url }}
 </project>
 
 Name your branch based on this context:
+<naming_context>
 {{ naming_context }}
+</naming_context>
 
-Use the `create_branch` tool to create a new repository branch.
+<branch_handling_strategy>
+1. Generate a branch name following the system prompt rules
+2. Include the workflow_id as suffix: duo/<type>/<identifier>-<description>-<workflow_id>
+3. Call `create_branch` with ref={{ ref }}
+4. On success: fetch and checkout the new branch
+5. On failure (other): retry with a modified description (max 2 total attempts)
+6. Call `final_response_tool` with the result
+</branch_handling_strategy>
 
-If branch name is invalid/already exists, retry creating branch with a different branch name.
-
-After the successful branch creation, use `run_git_command` to:
-    - fetch the new remote branch
-    - checkout to the new branch.
-Finally call `final_response_tool` with the new branch name.
+<final_response_format>
+Call `final_response_tool` with EXACTLY one of:
+- Success: just the branch name (e.g., "duo/fix/123-description-w42")
+- Failure: "FAILED: <error_summary>"
+</final_response_format>
