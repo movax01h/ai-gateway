@@ -1,3 +1,4 @@
+import json
 import re
 from typing import Any
 
@@ -125,6 +126,26 @@ class ToolNodeWithErrorCorrection:
 
         # Check for errors in tool responses
         errors = self._extract_errors_from_responses(tool_responses)
+
+        # Store parsed responses for deterministic downstream access
+        if tool_responses and not errors:
+            parsed = {}
+            for resp in tool_responses:
+                try:
+                    content = (
+                        json.loads(resp.content)
+                        if isinstance(resp.content, str)
+                        else resp.content
+                    )
+                    if isinstance(content, dict):
+                        parsed.update(content)
+                except (json.JSONDecodeError, TypeError):
+                    pass
+            if parsed:
+                parsed_key = IOKey(
+                    target="context", subkeys=[self._component_name, "parsed_responses"]
+                )
+                result = merge_nested_dict(result, parsed_key.to_nested_dict(parsed))
 
         if errors:
             # Create error feedback message for LLM
