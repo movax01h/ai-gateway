@@ -363,7 +363,6 @@ async def test_chat_agent_provider_5xx_error_handling(chat_agent, input):
     assert len(result["ui_chat_log"]) == 1
     assert result["ui_chat_log"][0]["message_type"] == MessageTypeEnum.AGENT
     assert result["ui_chat_log"][0]["status"] == ToolStatus.FAILURE
-    # pylint: disable=line-too-long
     assert (
         result["ui_chat_log"][0]["content"]
         == "There was an error connecting to the chosen LLM provider, please contact support if the issue persists."

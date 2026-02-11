@@ -11,7 +11,7 @@ from duo_workflow_service.agent_platform.v1.components import (
     ComponentRegistry,
 )
 
-__all__ = ["FlowConfig", "load_component_class", "list_configs"]
+__all__ = ["FlowConfig", "PartialFlowConfig", "load_component_class", "list_configs"]
 
 
 _PREFIX_BLOCLIST = (
@@ -106,6 +106,11 @@ class FlowConfig(BaseModel):
             raise FileNotFoundError(f"{path} file not found in {cls.DIRECTORY_PATH}")
         except yaml.YAMLError as e:
             raise yaml.YAMLError(f"Error parsing YAML file: {e}") from e
+
+
+class PartialFlowConfig(FlowConfig):
+    flow: Optional[FlowConfigMetadata] = None  # type: ignore[assignment]
+    routers: Optional[list[dict]] = None  # type: ignore[assignment]
 
 
 def load_component_class(
