@@ -23,6 +23,9 @@ from duo_workflow_service.agent_platform.experimental.flows import (
 from duo_workflow_service.agent_platform.experimental.flows import (
     FlowConfig as ExperimentalFlowConfig,
 )
+from duo_workflow_service.agent_platform.experimental.flows import (
+    PartialFlowConfig as ExperimentalPartialFlowConfig,
+)
 from duo_workflow_service.agent_platform.experimental.flows.flow_config import (
     list_configs as experimental_list_configs,
 )
@@ -30,6 +33,9 @@ from duo_workflow_service.agent_platform.utils import parse_workflow_definition
 from duo_workflow_service.agent_platform.v1 import list_configs as v1_list_configs
 from duo_workflow_service.agent_platform.v1.flows import Flow as V1Flow
 from duo_workflow_service.agent_platform.v1.flows import FlowConfig as V1FlowConfig
+from duo_workflow_service.agent_platform.v1.flows import (
+    PartialFlowConfig as V1PartialFlowConfig,
+)
 from duo_workflow_service.security.exceptions import SecurityException
 from duo_workflow_service.security.prompt_security import PromptSecurity
 from duo_workflow_service.workflows import (
@@ -66,10 +72,19 @@ CHAT_AGENT_COMPONENT_ENVIRONMENT = "chat-partial"
 FlowFactory: TypeAlias = Callable[..., AbstractWorkflow]
 
 _FLOW_BY_VERSIONS: Dict[
-    str, Tuple[Type[Union[ExperimentalFlowConfig, V1FlowConfig]], Any]
+    str,
+    Tuple[
+        Type[Union[ExperimentalFlowConfig, V1FlowConfig]],
+        Type[Union[ExperimentalPartialFlowConfig, V1PartialFlowConfig]],
+        Any,
+    ],
 ] = {
-    "experimental": (ExperimentalFlowConfig, ExperimentalFlow),
-    "v1": (V1FlowConfig, V1Flow),
+    "experimental": (
+        ExperimentalFlowConfig,
+        ExperimentalPartialFlowConfig,
+        ExperimentalFlow,
+    ),
+    "v1": (V1FlowConfig, V1PartialFlowConfig, V1Flow),
 }
 
 _FLOW_CONFIGS_BY_VERSION = {
@@ -97,8 +112,20 @@ def _convert_struct_to_flow_config(
 def _convert_struct_to_flow_config(
     struct: struct_pb2.Struct,
     flow_config_schema_version: str,
-    flow_config_cls: Type[Union[ExperimentalFlowConfig, V1FlowConfig]],
-) -> Union[ExperimentalFlowConfig, V1FlowConfig]:
+    flow_config_cls: Type[
+        Union[
+            ExperimentalFlowConfig,
+            ExperimentalPartialFlowConfig,
+            V1FlowConfig,
+            V1PartialFlowConfig,
+        ]
+    ],
+) -> Union[
+    ExperimentalFlowConfig,
+    V1FlowConfig,
+    ExperimentalPartialFlowConfig,
+    V1PartialFlowConfig,
+]:
     try:
         _FLOW_BY_VERSIONS[flow_config_schema_version]
     except KeyError:
@@ -120,7 +147,12 @@ def _convert_struct_to_flow_config(
 
 
 def _validate_flow_config_prompts(
-    config: Union[ExperimentalFlowConfig, V1FlowConfig],
+    config: Union[
+        ExperimentalFlowConfig,
+        ExperimentalPartialFlowConfig,
+        V1FlowConfig,
+        V1PartialFlowConfig,
+    ],
 ) -> None:
     """Validate all prompts in flow config for security issues.
 
@@ -194,7 +226,12 @@ def _validate_flow_config_prompts(
 
 def _flow_factory(
     flow_cls: FlowFactory,
-    config: Union[ExperimentalFlowConfig, V1FlowConfig],
+    config: Union[
+        ExperimentalFlowConfig,
+        ExperimentalPartialFlowConfig,
+        V1FlowConfig,
+        V1PartialFlowConfig,
+    ],
 ) -> FlowFactory:
     # Validate all prompts for security issues before creating the flow
     _validate_flow_config_prompts(config)
@@ -246,6 +283,30 @@ def _flow_factory(
     return partial(chat.Workflow, **args)
 
 
+def _get_flow_classes(
+    flow_config_schema_version: str, environment: Optional[str] = None
+) -> Tuple[
+    Type[
+        Union[
+            ExperimentalFlowConfig,
+            ExperimentalPartialFlowConfig,
+            V1FlowConfig,
+            V1PartialFlowConfig,
+        ]
+    ],
+    Any,
+]:
+
+    if environment == CHAT_AGENT_COMPONENT_ENVIRONMENT:
+        _, partial_flow_config_cls, flow_cls = _FLOW_BY_VERSIONS[
+            flow_config_schema_version
+        ]
+        return partial_flow_config_cls, flow_cls
+
+    flow_config_cls, _, flow_cls = _FLOW_BY_VERSIONS[flow_config_schema_version]
+    return flow_config_cls, flow_cls
+
+
 def resolve_workflow_class(
     workflow_definition: Optional[str],
     flow_config: Optional[struct_pb2.Struct] = None,
@@ -267,7 +328,10 @@ def resolve_workflow_class(
     """
     if flow_config and flow_config_schema_version:
         try:
-            flow_config_cls, flow_cls = _FLOW_BY_VERSIONS[flow_config_schema_version]
+            config_dict: Dict[str, Any] = MessageToDict(flow_config)
+            flow_config_cls, flow_cls = _get_flow_classes(
+                flow_config_schema_version, config_dict.get("environment", None)
+            )
             config = _convert_struct_to_flow_config(
                 struct=flow_config,
                 flow_config_schema_version=flow_config_schema_version,
@@ -292,8 +356,7 @@ def resolve_workflow_class(
         raise ValueError(f"Unknown Flow version: {flow_version}")
 
     try:
-        flow_config_cls, flow_cls = _FLOW_BY_VERSIONS[flow_version]
-
+        flow_config_cls, flow_cls = _get_flow_classes(flow_version)
         config = flow_config_cls.from_yaml_config(flow_config_path)
 
         return _flow_factory(flow_cls, config)

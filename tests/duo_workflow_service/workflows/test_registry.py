@@ -3,9 +3,13 @@ from unittest.mock import Mock, patch
 
 import pytest
 from google.protobuf import struct_pb2
+from pydantic import ValidationError
 
 from duo_workflow_service.agent_platform import experimental, v1
-from duo_workflow_service.agent_platform.v1.flows.flow_config import FlowConfig
+from duo_workflow_service.agent_platform.v1.flows.flow_config import (
+    FlowConfig,
+    PartialFlowConfig,
+)
 from duo_workflow_service.workflows import chat
 from duo_workflow_service.workflows.abstract_workflow import AbstractWorkflow
 from duo_workflow_service.workflows.registry import (
@@ -19,6 +23,7 @@ from duo_workflow_service.workflows.software_development import Workflow
 @pytest.fixture
 def simple_flow_config():
     mock_flow_config_cls = Mock()
+    mock_partial_flow_config_cls = Mock()
     mock_config_instance = Mock()
     mock_flow_config_cls.return_value = mock_config_instance
 
@@ -44,6 +49,7 @@ def simple_flow_config():
 
     return {
         "flow_config_cls": mock_flow_config_cls,
+        "partial_flow_config_cls": mock_partial_flow_config_cls,
         "flow_cls": mock_flow_cls,
         "struct": struct,
         "config_instance": mock_config_instance,
@@ -52,7 +58,13 @@ def simple_flow_config():
 
 
 def build_chat_flow_config(
-    components=None, prompts=None, version=None, routers=None, flow=None
+    components=None,
+    prompts=None,
+    version=None,
+    routers=None,
+    flow=None,
+    partial=False,
+    environment=CHAT_AGENT_COMPONENT_ENVIRONMENT,
 ):
     mock_flow_cls = Mock()
 
@@ -73,13 +85,13 @@ def build_chat_flow_config(
                 "prompt_template": {"user": "test"},
             }
         ]
-    if routers is None:
+    if routers is None and not partial:
         routers = []
-    if flow is None:
+    if flow is None and not partial:
         flow = {}
 
     struct_data = {
-        "environment": CHAT_AGENT_COMPONENT_ENVIRONMENT,
+        "environment": environment,
         "components": components,
         "routers": routers,
         "flow": flow,
@@ -87,7 +99,7 @@ def build_chat_flow_config(
 
     expected_data = {
         "version": "v1",
-        "environment": CHAT_AGENT_COMPONENT_ENVIRONMENT,
+        "environment": environment,
         "components": components,
         "routers": routers,
         "flow": flow,
@@ -104,6 +116,7 @@ def build_chat_flow_config(
 
     return {
         "flow_config_cls": FlowConfig,
+        "partial_flow_config_cls": PartialFlowConfig,
         "flow_cls": mock_flow_cls,
         "struct": struct,
         "expected_dict": expected_data,
@@ -173,7 +186,7 @@ def test_registry_resolve_flow_config_error():
 
     with patch(
         "duo_workflow_service.workflows.registry._FLOW_BY_VERSIONS",
-        {"experimental": (mock_flow_config_cls, Mock())},
+        {"experimental": (mock_flow_config_cls, Mock(), Mock())},
     ):
         with pytest.raises(ValueError, match="Unknown Flow"):
             resolve_workflow_class("nonexistent/experimental")
@@ -186,7 +199,13 @@ def test_resolve_workflow_class_with_flow_config(simple_flow_config):
     with (
         patch(
             "duo_workflow_service.workflows.registry._FLOW_BY_VERSIONS",
-            {"experimental": (mocks["flow_config_cls"], mocks["flow_cls"])},
+            {
+                "experimental": (
+                    mocks["flow_config_cls"],
+                    mocks["partial_flow_config_cls"],
+                    mocks["flow_cls"],
+                )
+            },
         ),
         patch(
             "duo_workflow_service.workflows.registry.MessageToDict",
@@ -225,7 +244,13 @@ def test_resolve_workflow_class_with_chat_flow_config_success(config_params):
     with (
         patch(
             "duo_workflow_service.workflows.registry._FLOW_BY_VERSIONS",
-            {"v1": (mocks["flow_config_cls"], mocks["flow_cls"])},
+            {
+                "v1": (
+                    mocks["flow_config_cls"],
+                    mocks["partial_flow_config_cls"],
+                    mocks["flow_cls"],
+                )
+            },
         ),
         patch(
             "duo_workflow_service.workflows.registry.MessageToDict",
@@ -264,7 +289,13 @@ def test_resolve_workflow_class_with_chat_flow_config_extracts_agent_name():
     with (
         patch(
             "duo_workflow_service.workflows.registry._FLOW_BY_VERSIONS",
-            {"v1": (mocks["flow_config_cls"], mocks["flow_cls"])},
+            {
+                "v1": (
+                    mocks["flow_config_cls"],
+                    mocks["partial_flow_config_cls"],
+                    mocks["flow_cls"],
+                )
+            },
         ),
         patch(
             "duo_workflow_service.workflows.registry.MessageToDict",
@@ -350,7 +381,13 @@ def test_resolve_workflow_class_with_chat_flow_config_failure(
     with (
         patch(
             "duo_workflow_service.workflows.registry._FLOW_BY_VERSIONS",
-            {"v1": (mocks["flow_config_cls"], mocks["flow_cls"])},
+            {
+                "v1": (
+                    mocks["flow_config_cls"],
+                    mocks["partial_flow_config_cls"],
+                    mocks["flow_cls"],
+                )
+            },
         ),
         patch(
             "duo_workflow_service.workflows.registry.MessageToDict",
@@ -361,6 +398,65 @@ def test_resolve_workflow_class_with_chat_flow_config_failure(
             resolve_workflow_class(
                 workflow_definition=None,
                 flow_config=mocks["struct"],
+                flow_config_schema_version="v1",
+            )
+
+
+def test_routers_and_flow_required_for_chat_optional_for_chat_partial():
+    """Test that routers and flow are required for 'chat' but optional for 'chat-partial'."""
+
+    # Test 1: chat-partial with missing routers and flow should succeed
+    chat_partial_config = build_chat_flow_config(
+        partial=True, environment="chat-partial"
+    )
+
+    with (
+        patch(
+            "duo_workflow_service.workflows.registry._FLOW_BY_VERSIONS",
+            {
+                "v1": (
+                    chat_partial_config["flow_config_cls"],
+                    chat_partial_config["partial_flow_config_cls"],
+                    chat_partial_config["flow_cls"],
+                )
+            },
+        ),
+        patch(
+            "duo_workflow_service.workflows.registry.MessageToDict",
+            return_value=chat_partial_config["expected_dict"],
+        ),
+    ):
+        result = resolve_workflow_class(
+            workflow_definition=None,
+            flow_config=chat_partial_config["struct"],
+            flow_config_schema_version="v1",
+        )
+        assert isinstance(result, partial)
+
+    # Test 2: chat environment with missing routers and flow should fail
+    chat_config = build_chat_flow_config(partial=True, environment="chat")
+
+    with (
+        patch(
+            "duo_workflow_service.workflows.registry._FLOW_BY_VERSIONS",
+            {
+                "v1": (
+                    chat_config["flow_config_cls"],
+                    chat_config["partial_flow_config_cls"],
+                    chat_config["flow_cls"],
+                )
+            },
+        ),
+        patch(
+            "duo_workflow_service.workflows.registry.MessageToDict",
+            return_value=chat_config["expected_dict"],
+        ),
+    ):
+        # Should raise ValidationError because routers and flow are required for FlowConfig
+        with pytest.raises((ValueError, ValidationError)):
+            resolve_workflow_class(
+                workflow_definition=None,
+                flow_config=chat_config["struct"],
                 flow_config_schema_version="v1",
             )
 
