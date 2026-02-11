@@ -1,6 +1,6 @@
 # pylint: disable=file-naming-for-tests
 import json
-from unittest.mock import AsyncMock, Mock
+from unittest.mock import AsyncMock, Mock, patch
 
 import pytest
 
@@ -327,6 +327,25 @@ async def test_list_work_items_with_graphql_error(gitlab_client_mock, metadata):
     assert response == expected_response
 
     gitlab_client_mock.graphql.assert_called_once()
+
+
+@pytest.mark.asyncio
+@patch("duo_workflow_service.tools.work_item.get_query_variables_for_version")
+async def test_list_work_items_calls_version_compatibility(
+    mock_get_query_variables,
+    gitlab_client_mock,
+    metadata,
+):
+    mock_get_query_variables.return_value = {"includeHierarchyWidget": True}
+    tool = ListWorkItems(description="list work items", metadata=metadata)
+
+    await tool._arun(project_id="namespace/project")
+
+    mock_get_query_variables.assert_called_once_with("includeHierarchyWidget")
+    gitlab_client_mock.graphql.assert_called_once()
+    call_args = gitlab_client_mock.graphql.call_args
+    query_variables = call_args[0][1]
+    assert query_variables["includeHierarchyWidget"] is True
 
 
 @pytest.mark.parametrize(
