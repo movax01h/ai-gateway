@@ -376,7 +376,9 @@ def test_restore_message_consistency_tool_message_before_tool_call():
     ],
 )
 @patch("duo_workflow_service.conversation.trimmer.trim_messages")
+@patch("duo_workflow_service.conversation.trimmer.TikTokenCounter")
 def test_trim_conversation_history_with_tool_messages(
+    mock_token_counter_cls,
     mock_trim_messages,
     trim_result,
     expected_result,
@@ -386,6 +388,11 @@ def test_trim_conversation_history_with_tool_messages(
     This test verifies the integration between trim_messages and _restore_message_consistency to ensure tool messages
     are handled correctly.
     """
+    # Return a high token count so the lazy path doesn't skip trimming
+    mock_counter = MagicMock()
+    mock_counter.count_tokens.return_value = 999_999
+    mock_token_counter_cls.return_value = mock_counter
+
     mock_trim_messages.return_value = trim_result
 
     messages = [
@@ -460,17 +467,20 @@ def test_trim_conversation_history_with_tool_messages_exceeding_context_limit_fo
 
 def test_trim_conversation_history_single_message_too_large():
     """Test that single oversized messages are replaced with placeholder."""
+    large_content = "This is a very large message. " * 5000  # ~30k tokens
     messages = [
         SystemMessage(content="system message"),
         HumanMessage(content="first a message"),
         HumanMessage(content="second a message"),
-        HumanMessage(content="This is a very large message" * 100),
+        HumanMessage(content=large_content),
     ]
 
+    # Budget = 0.7 * 50_000 = 35_000; single message limit = 0.65 * 35_000 = 22_750
+    # The large message (~30k tokens) exceeds the single message limit
     result = trim_conversation_history(
         messages=messages,
         component_name="agent_a",
-        max_context_tokens=1_000,
+        max_context_tokens=50_000,
     )
 
     # The very large message should be replaced with placeholder
@@ -483,8 +493,16 @@ def test_trim_conversation_history_single_message_too_large():
 
 
 @patch("duo_workflow_service.conversation.trimmer.trim_messages")
-def test_trim_conversation_history_error_handling(mock_trim_messages):
+@patch("duo_workflow_service.conversation.trimmer.TikTokenCounter")
+def test_trim_conversation_history_error_handling(
+    mock_token_counter_cls, mock_trim_messages
+):
     """Test fallback mechanism when trim_messages raises an exception."""
+    # Force the expensive path by reporting high token count
+    mock_counter = MagicMock()
+    mock_counter.count_tokens.return_value = 999_999
+    mock_token_counter_cls.return_value = mock_counter
+
     mock_trim_messages.side_effect = ValueError("Simulated error in trim_messages")
 
     messages = [
@@ -497,11 +515,13 @@ def test_trim_conversation_history_error_handling(mock_trim_messages):
         messages=messages, component_name="agent_a", max_context_tokens=400_000
     )
 
+    # trim_messages should have been called (and raised)
+    mock_trim_messages.assert_called_once()
     # Verify the fallback mechanism worked
     assert len(result) > 0
     # System message should be retained
     assert any(isinstance(msg, SystemMessage) for msg in result)
-    # Should keep some recent messages
+    # Should keep some recent messages (fallback uses min_recent=5)
     assert any(isinstance(msg, HumanMessage) for msg in result)
 
 
@@ -650,8 +670,16 @@ def test_restore_message_consistency_with_orphaned_invalid_tool_response():
 
 
 @patch("duo_workflow_service.conversation.trimmer.trim_messages")
-def test_trim_conversation_history_empty_result_handling(mock_trim_messages):
+@patch("duo_workflow_service.conversation.trimmer.TikTokenCounter")
+def test_trim_conversation_history_empty_result_handling(
+    mock_token_counter_cls, mock_trim_messages
+):
     """Test fallback when trim_messages returns empty list."""
+    # Force the expensive path by reporting high token count
+    mock_counter = MagicMock()
+    mock_counter.count_tokens.return_value = 999_999
+    mock_token_counter_cls.return_value = mock_counter
+
     mock_trim_messages.return_value = []
 
     messages = [
@@ -664,11 +692,13 @@ def test_trim_conversation_history_empty_result_handling(mock_trim_messages):
         messages=messages, component_name="agent_a", max_context_tokens=400_000
     )
 
+    # trim_messages should have been called (and returned [])
+    mock_trim_messages.assert_called_once()
     # Verify the fallback mechanism worked
     assert len(result) > 0
     # At minimum should have system message
     assert any(isinstance(msg, SystemMessage) for msg in result)
-    # Should have at least one recent message
+    # Should have at least one recent message (fallback uses min_recent=3)
     assert any(msg.content == "new message" for msg in result)
 
 
@@ -761,3 +791,168 @@ def test_get_messages_profile():
     roles, tokens = get_messages_profile(messages, token_counter=token_counter)
     assert roles == ["human", "ai", "tool"]
     assert tokens == pytest.approx(4742, abs=50)
+
+
+@patch("duo_workflow_service.conversation.trimmer.logger")
+def test_trim_conversation_history_skips_when_under_budget(mock_logger):
+    """Verify that when messages are well under budget, expensive trimming is skipped but the function still returns the
+    messages (with maintenance applied)."""
+    messages = cast(
+        List[BaseMessage],
+        [
+            SystemMessage(content="system message"),
+            HumanMessage(content="hello"),
+            AIMessage(content="hi there"),
+        ],
+    )
+
+    result = trim_conversation_history(
+        messages=messages, component_name="agent_a", max_context_tokens=400_000
+    )
+
+    # All messages should be returned
+    assert len(result) == 3
+    assert result[0].content == "system message"
+    assert result[1].content == "hello"
+    assert result[2].content == "hi there"
+
+    # Should log the skip message with utilization info
+    skip_calls = [
+        call
+        for call in mock_logger.info.call_args_list
+        if "Skipping trimming" in str(call)
+    ]
+    assert len(skip_calls) == 1
+
+    # Should NOT have logged "Starting trimming" (the expensive path)
+    start_calls = [
+        call
+        for call in mock_logger.info.call_args_list
+        if "Starting trimming" in str(call)
+    ]
+    assert len(start_calls) == 0
+
+
+@patch("duo_workflow_service.conversation.trimmer.trim_messages")
+@patch("duo_workflow_service.conversation.trimmer.TikTokenCounter")
+def test_trim_conversation_history_trims_when_over_threshold(
+    mock_token_counter_cls,
+    mock_trim_messages,
+):
+    """Verify full trimming kicks in when token utilization exceeds TRIM_THRESHOLD."""
+    # Make the token counter report high utilization (over 80% of budget)
+    mock_counter = MagicMock()
+    mock_counter.count_tokens.return_value = 999_999
+    mock_token_counter_cls.return_value = mock_counter
+
+    input_messages = cast(
+        List[BaseMessage],
+        [
+            SystemMessage(content="system message"),
+            HumanMessage(content="hello"),
+            AIMessage(content="response"),
+        ],
+    )
+
+    trimmed = cast(
+        List[BaseMessage],
+        [
+            SystemMessage(content="system message"),
+            HumanMessage(content="hello"),
+        ],
+    )
+    mock_trim_messages.return_value = trimmed
+
+    result = trim_conversation_history(
+        messages=input_messages, component_name="agent_a", max_context_tokens=400_000
+    )
+
+    # trim_messages should have been called (the expensive path ran)
+    mock_trim_messages.assert_called_once()
+    # Verify the token budget (0.7 * max_context_tokens) was passed, not raw max_context_tokens
+    assert mock_trim_messages.call_args.kwargs["max_tokens"] == int(0.7 * 400_000)
+    assert len(result) == 2
+
+
+def test_trim_conversation_history_under_budget_returns_messages_unchanged():
+    """Verify messages are returned unchanged when under budget.
+
+    Uses a realistic conversation: system prompt, user message, AI with tool_calls,
+    tool response, and a trailing HumanMessage (as produced by ToolNodeWithErrorCorrection).
+    The expensive trimming pipeline is skipped when within the token budget.
+    """
+    messages = cast(
+        List[BaseMessage],
+        [
+            SystemMessage(content="You are a helpful assistant."),
+            HumanMessage(content="Please help me with this task."),
+            AIMessage(
+                content="I'll use a tool to help.",
+                tool_calls=[{"id": "call_1", "name": "search", "args": {"q": "test"}}],
+            ),
+            ToolMessage(content="search result data", tool_call_id="call_1"),
+            HumanMessage(
+                content="Tool execution completed successfully after 0 correction attempts."
+            ),
+        ],
+    )
+
+    result = trim_conversation_history(
+        messages=messages, component_name="agent_a", max_context_tokens=400_000
+    )
+
+    # Under budget: no trimming applied, messages pass through as-is
+    assert len(result) == 5
+    assert isinstance(result[0], SystemMessage)
+    assert isinstance(result[1], HumanMessage)
+    assert isinstance(result[2], AIMessage)
+    assert isinstance(result[3], ToolMessage)
+    assert isinstance(result[4], HumanMessage)
+    assert result[3].tool_call_id == "call_1"
+    assert "completed successfully" in result[4].content
+
+
+@pytest.mark.parametrize(
+    "token_count, expect_trim_called",
+    [
+        # Just under budget (0.7 * 100_000 = 70_000) → fast path, no trimming
+        (69_999, False),
+        # Just over budget → expensive path, trimming runs
+        (70_001, True),
+    ],
+)
+@patch("duo_workflow_service.conversation.trimmer.trim_messages")
+@patch("duo_workflow_service.conversation.trimmer.TikTokenCounter")
+def test_trim_conversation_history_threshold_boundary(
+    mock_token_counter_cls,
+    mock_trim_messages,
+    token_count,
+    expect_trim_called,
+):
+    """Verify trimming triggers exactly at the TRIM_THRESHOLD boundary."""
+    mock_counter = MagicMock()
+    mock_counter.count_tokens.return_value = token_count
+    mock_token_counter_cls.return_value = mock_counter
+
+    mock_trim_messages.return_value = [
+        SystemMessage(content="system"),
+        HumanMessage(content="hello"),
+    ]
+
+    messages = cast(
+        List[BaseMessage],
+        [
+            SystemMessage(content="system"),
+            HumanMessage(content="hello"),
+            AIMessage(content="response"),
+        ],
+    )
+
+    trim_conversation_history(
+        messages=messages, component_name="agent_a", max_context_tokens=100_000
+    )
+
+    if expect_trim_called:
+        mock_trim_messages.assert_called_once()
+    else:
+        mock_trim_messages.assert_not_called()

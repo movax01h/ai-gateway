@@ -1,3 +1,4 @@
+import time
 from typing import List, Tuple
 
 import structlog
@@ -16,6 +17,8 @@ from duo_workflow_service.tracking.errors import log_exception
 logger = structlog.stdlib.get_logger("conversation_trimmer")
 
 LEGACY_MAX_CONTEXT_TOKENS = 400_000  # old default for backwards compatibility
+TRIM_THRESHOLD = 0.7  # Only run expensive trimming when utilization exceeds this
+MAX_SINGLE_MESSAGE_TOKEN_SHARE = 0.65  # If a single message exceeds this percentage of the context window, pre-trim it
 
 
 def _pretrim_large_messages(
@@ -39,7 +42,7 @@ def _pretrim_large_messages(
         if msg_token > max_single_message_tokens:
             logger.info(
                 f"Message with role: {message.type} token size: {msg_token} "
-                f"exceeds the single message token limit: {max_single_message_tokens}."
+                f"exceeds the single message token limit: {max_single_message_tokens}. "
                 f"Replacing its content with a placeholder."
             )
             message_copy = message.model_copy()
@@ -172,6 +175,18 @@ def get_messages_profile(
     return roles, token_size
 
 
+def _fallback_messages(
+    messages: List[BaseMessage], min_recent: int = 3
+) -> List[BaseMessage]:
+    """Build a minimal fallback: all system messages + the last `min_recent` non-system messages."""
+    system_messages = [msg for msg in messages if isinstance(msg, SystemMessage)]
+    non_system_messages = [
+        msg for msg in messages if not isinstance(msg, SystemMessage)
+    ]
+    n = min(min_recent, len(non_system_messages))
+    return system_messages + non_system_messages[-n:]
+
+
 def trim_conversation_history(
     messages: List[BaseMessage],
     component_name: str,
@@ -179,17 +194,19 @@ def trim_conversation_history(
 ) -> List[BaseMessage]:
     """Trim conversation history to fit within the model's context window.
 
-    This function performs the following steps:
-    1. Pre-trims oversized single messages
-    2. Deduplicates additional context
-    3. Trims the conversation to max_context_tokens using LangChain's trim_messages
-    4. Restores message consistency (ensures tool messages have corresponding AI messages)
-    5. Falls back to minimal context if trimming results in empty messages
+    Always runs (cheap, no token counting):
+    1. Deduplicates additional context tags
+    2. Restores message consistency (converts orphaned tool messages to human messages)
+
+    Only when token count exceeds the token budget to avoid unnecessary computation (token counting is expensive):
+    3. Replaces oversized single messages with placeholders
+    4. Trims conversation to fit budget using LangChain's trim_messages (strategy="last")
+    5. Falls back to system + recent messages if trimming produces empty/invalid results
 
     Args:
         messages: List of messages to trim
-        max_context_tokens: Maximum number of tokens allowed in the context window
         component_name: Name of the component/agent (used for token counting and logging)
+        max_context_tokens: Maximum number of tokens allowed in the context window
 
     Returns:
         Trimmed list of messages that fits within the context window
@@ -197,37 +214,55 @@ def trim_conversation_history(
     if not messages:
         return []
 
-    max_context_tokens = int(0.7 * max_context_tokens)
+    token_budget = int(TRIM_THRESHOLD * max_context_tokens)
+    max_single_message_tokens = int(token_budget * MAX_SINGLE_MESSAGE_TOKEN_SHARE)
 
+    # Always run: cheap maintenance (no token counting)
+    messages = _deduplicate_additional_context(messages)
+
+    # Quick token check — skip expensive trimming if under budget
     token_counter = TikTokenCounter(component_name)
-    max_single_message_tokens = int(max_context_tokens * 0.65)
-
-    # Log initial state
     initial_roles, initial_tokens = get_messages_profile(
         messages=messages,
         token_counter=token_counter,
-        include_tool_tokens=False,
+        include_tool_tokens=True,
     )
 
+    if initial_tokens < token_budget:
+        logger.info(
+            "Skipping trimming since under budget threshold.",
+            component_name=component_name,
+            message_roles=initial_roles,
+            current_tokens=initial_tokens,
+            max_context_tokens=max_context_tokens,
+            token_budget=token_budget,
+            budget_utilization_pct=(
+                round(initial_tokens / token_budget * 100, 1) if token_budget > 0 else 0
+            ),
+        )
+        return messages
+
+    # Costly trimming pipeline — only runs when over budget
+    t_start = time.perf_counter()
+
     logger.info(
-        f"Starting trimming for {component_name} with "
-        f"messages roles: {initial_roles}, token size: {initial_tokens}, "
-        f"max_context_tokens: {max_context_tokens}",
+        "Starting trimming",
         component_name=component_name,
+        message_roles=initial_roles,
         initial_tokens=initial_tokens,
         max_context_tokens=max_context_tokens,
+        token_budget=token_budget,
+        budget_utilization_pct=round(initial_tokens / token_budget * 100, 1),
     )
 
     processed_messages = _pretrim_large_messages(
         messages, token_counter, max_single_message_tokens
     )
 
-    deduplicated_messages = _deduplicate_additional_context(processed_messages)
-
     try:
-        trimmed_messages = trim_messages(
-            deduplicated_messages,
-            max_tokens=max_context_tokens,
+        result = trim_messages(
+            processed_messages,
+            max_tokens=token_budget,
             strategy="last",
             token_counter=token_counter.count_tokens,
             start_on="human",
@@ -235,44 +270,12 @@ def trim_conversation_history(
             allow_partial=False,
         )
 
-        result = _restore_message_consistency(trimmed_messages)
-
-        # Step 5: Fallback if trimming resulted in empty or invalid messages
         if not result or (len(result) == 1 and isinstance(result[0], SystemMessage)):
             logger.warning(
-                "Trim resulted in empty messages/invalid messages - falling back to minimal context",
+                "Trim resulted in empty/invalid messages - falling back to minimal context",
                 component_name=component_name,
             )
-
-            system_messages = [
-                msg for msg in messages if isinstance(msg, SystemMessage)
-            ]
-            non_system_messages = [
-                msg for msg in messages if not isinstance(msg, SystemMessage)
-            ]
-
-            min_non_system = min(3, len(non_system_messages))
-            fallback_messages = system_messages + non_system_messages[-min_non_system:]
-
-            result = _restore_message_consistency(fallback_messages)
-
-        # Log final state
-        final_roles, final_tokens = get_messages_profile(
-            messages=result,
-            token_counter=token_counter,
-            include_tool_tokens=False,
-        )
-
-        logger.info(
-            f"Finished trimming for {component_name} with "
-            f"messages roles: {final_roles}, token size: {final_tokens}",
-            component_name=component_name,
-            initial_tokens=initial_tokens,
-            final_tokens=final_tokens,
-            max_context_tokens=max_context_tokens,
-        )
-
-        return result
+            result = _fallback_messages(messages, min_recent=3)
 
     except Exception as e:
         log_exception(
@@ -282,17 +285,31 @@ def trim_conversation_history(
                 "component_name": component_name,
             },
         )
-
-        # Fallback: Keep system messages plus a few recent messages
         logger.warning(
             "Exception during trimming - falling back to minimal context",
             component_name=component_name,
         )
+        result = _fallback_messages(messages, min_recent=5)
 
-        system_messages = [msg for msg in messages if isinstance(msg, SystemMessage)]
-        non_system_messages = [
-            msg for msg in messages if not isinstance(msg, SystemMessage)
-        ]
+    duration_ms = round((time.perf_counter() - t_start) * 1000, 2)
+    final_roles, final_tokens = get_messages_profile(
+        messages=result,
+        token_counter=token_counter,
+        include_tool_tokens=True,
+    )
 
-        fallback_messages = system_messages + non_system_messages[-5:]
-        return _restore_message_consistency(fallback_messages)
+    logger.info(
+        "Finished trimming",
+        message_roles=final_roles,
+        component_name=component_name,
+        initial_tokens=initial_tokens,
+        final_tokens=final_tokens,
+        max_context_tokens=max_context_tokens,
+        token_budget=token_budget,
+        budget_utilization_pct=(
+            round(final_tokens / token_budget * 100, 1) if token_budget > 0 else 0
+        ),
+        duration_ms=duration_ms,
+    )
+
+    return _restore_message_consistency(result)

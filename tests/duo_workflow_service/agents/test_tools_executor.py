@@ -1306,8 +1306,8 @@ async def test_multiple_tool_calls(workflow_state, graph):
     result = await graph.ainvoke(workflow_state)
 
     assert result["conversation_history"]["planner"][-2:] == [
-        HumanMessage(content="a" * 10000),
-        HumanMessage(content="tool b"),
+        ToolMessage(content="a" * 10000, name="a", tool_call_id="fake-call-1"),
+        ToolMessage(content="tool b", name="b", tool_call_id="fake-call-1"),
     ]
 
     # Verify we have agent message + 2 tool messages

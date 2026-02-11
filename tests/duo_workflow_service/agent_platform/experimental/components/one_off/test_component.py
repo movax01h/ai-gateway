@@ -3,7 +3,7 @@
 from unittest.mock import ANY, Mock, patch
 
 import pytest
-from langchain_core.messages import AIMessage, ToolMessage
+from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 from langgraph.graph import END, StateGraph
 
 from duo_workflow_service.agent_platform.experimental.components.one_off.component import (
@@ -322,14 +322,18 @@ class TestOneOffComponentToolsRouter:
         }
 
         # Mock tool node to simulate successful completion
+        # Matches real ToolNodeWithErrorCorrection: tool_responses + [HumanMessage]
         mock_tool_node = mock_tool_node_cls.return_value
         mock_tool_node.run.return_value = {
             **base_flow_state,
             FlowStateKeys.CONVERSATION_HISTORY: {
                 component_name: [
                     ToolMessage(
-                        content="Tool execution completed successfully",
+                        content="result data",
                         tool_call_id="123",
+                    ),
+                    HumanMessage(
+                        content="Tool execution completed successfully after 0 correction attempts."
                     ),
                 ]
             },
@@ -415,6 +419,7 @@ class TestOneOffComponentToolsRouter:
         ]
 
         # Mock tool node to simulate error then success
+        # Matches real ToolNodeWithErrorCorrection: tool_responses + [HumanMessage]
         mock_tool_node = mock_tool_node_cls.return_value
         mock_tool_node.run.side_effect = [
             # First call - error with retry
@@ -423,8 +428,11 @@ class TestOneOffComponentToolsRouter:
                 FlowStateKeys.CONVERSATION_HISTORY: {
                     component_name: [
                         ToolMessage(
-                            content="Error occurred. 2 attempts remaining",
+                            content="Tool exception occurred due to error",
                             tool_call_id="123",
+                        ),
+                        HumanMessage(
+                            content="The previous tool calls failed. You have 2 attempts remaining."
                         ),
                     ]
                 },
@@ -435,8 +443,11 @@ class TestOneOffComponentToolsRouter:
                 FlowStateKeys.CONVERSATION_HISTORY: {
                     component_name: [
                         ToolMessage(
-                            content="Tool execution completed successfully",
+                            content="result data",
                             tool_call_id="123",
+                        ),
+                        HumanMessage(
+                            content="Tool execution completed successfully after 1 correction attempts."
                         ),
                     ]
                 },
@@ -508,14 +519,18 @@ class TestOneOffComponentToolsRouter:
         }
 
         # Mock tool node to simulate max attempts reached
+        # Matches real ToolNodeWithErrorCorrection: tool_responses + [HumanMessage]
         mock_tool_node = mock_tool_node_cls.return_value
         mock_tool_node.run.return_value = {
             **base_flow_state,
             FlowStateKeys.CONVERSATION_HISTORY: {
                 component_name: [
                     ToolMessage(
-                        content="Error occurred. 0 attempts remaining",
+                        content="Tool exception occurred due to error",
                         tool_call_id="123",
+                    ),
+                    HumanMessage(
+                        content="The previous tool calls failed. You have 0 attempts remaining."
                     ),
                 ]
             },
@@ -585,14 +600,18 @@ class TestOneOffComponentToolsRouter:
         }
 
         # Mock tool node to update state further
+        # Matches real ToolNodeWithErrorCorrection: tool_responses + [HumanMessage]
         mock_tool_node = mock_tool_node_cls.return_value
         mock_tool_node.run.return_value = {
             **base_flow_state,
             FlowStateKeys.CONVERSATION_HISTORY: {
                 component_name: [
                     ToolMessage(
-                        content="Tool execution completed successfully",
+                        content="result data",
                         tool_call_id="123",
+                    ),
+                    HumanMessage(
+                        content="Tool execution completed successfully after 0 correction attempts."
                     ),
                 ]
             },
