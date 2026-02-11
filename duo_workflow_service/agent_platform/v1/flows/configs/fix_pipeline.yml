@@ -83,6 +83,8 @@ components:
         as: "repository_url"
       - from: "context:fix_pipeline_context.final_answer"
         as: "naming_context"
+      - from: "context:workflow_id"
+        as: "workflow_id"
     ui_log_events:
       - "on_tool_execution_success"
       - "on_tool_execution_failed"
