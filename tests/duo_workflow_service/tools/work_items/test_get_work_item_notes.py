@@ -1,6 +1,6 @@
 # pylint: disable=file-naming-for-tests
 import json
-from unittest.mock import AsyncMock, Mock
+from unittest.mock import AsyncMock, Mock, patch
 
 import pytest
 
@@ -49,10 +49,25 @@ def work_item_notes_fixture():
     ]
 
 
+@pytest.fixture(name="version_variables")
+def version_variables_default_fixture():
+    """Fixture for note-specific version variables."""
+    return {
+        "includeNoteResolvedAndResolvableFields": True,
+        "includeDiscussionIdField": True,
+    }
+
+
 @pytest.mark.asyncio
+@patch("duo_workflow_service.tools.work_item.get_query_variables_for_version")
 async def test_get_work_item_notes_with_group_id(
-    gitlab_client_mock, metadata, work_item_notes
+    mock_get_query_variables,
+    gitlab_client_mock,
+    metadata,
+    work_item_notes,
+    version_variables,
 ):
+    mock_get_query_variables.return_value = version_variables
     graphql_response = {
         "namespace": {
             "workItems": {
@@ -69,13 +84,50 @@ async def test_get_work_item_notes_with_group_id(
     expected_response = json.dumps({"notes": work_item_notes}, indent=2)
     assert response == expected_response
 
+    mock_get_query_variables.assert_called_once_with(
+        "includeNoteResolvedAndResolvableFields", "includeDiscussionIdField"
+    )
     gitlab_client_mock.graphql.assert_called_once()
+
+    # Verify version-specific variables are passed to GraphQL query
+    call_args = gitlab_client_mock.graphql.call_args
+    query_variables = call_args[0][1]
+    assert query_variables["fullPath"] == "namespace/group"
+    assert query_variables["workItemIid"] == "42"
+    assert query_variables["includeNoteResolvedAndResolvableFields"] is True
+    assert query_variables["includeDiscussionIdField"] is True
 
 
 @pytest.mark.asyncio
-async def test_get_work_item_notes_with_project_id(
-    gitlab_client_mock, metadata, work_item_notes
+@patch("duo_workflow_service.tools.work_item.get_query_variables_for_version")
+async def test_get_work_item_notes_calls_version_compatibility(
+    mock_get_query_variables,
+    metadata,
 ):
+    mock_get_query_variables.return_value = {
+        "includeNoteResolvedAndResolvableFields": False,
+        "includeDiscussionIdField": True,
+    }
+
+    tool = GetWorkItemNotes(description="get work item notes", metadata=metadata)
+
+    await tool._arun(group_id="namespace/group", work_item_iid=42)
+
+    mock_get_query_variables.assert_called_once_with(
+        "includeNoteResolvedAndResolvableFields", "includeDiscussionIdField"
+    )
+
+
+@pytest.mark.asyncio
+@patch("duo_workflow_service.tools.work_item.get_query_variables_for_version")
+async def test_get_work_item_notes_with_project_id(
+    mock_get_query_variables,
+    gitlab_client_mock,
+    metadata,
+    work_item_notes,
+    version_variables,
+):
+    mock_get_query_variables.return_value = version_variables
     graphql_response = {
         "project": {
             "workItems": {
@@ -92,13 +144,30 @@ async def test_get_work_item_notes_with_project_id(
     expected_response = json.dumps({"notes": work_item_notes}, indent=2)
     assert response == expected_response
 
+    mock_get_query_variables.assert_called_once_with(
+        "includeNoteResolvedAndResolvableFields", "includeDiscussionIdField"
+    )
     gitlab_client_mock.graphql.assert_called_once()
+
+    # Verify version-specific variables are passed to GraphQL query
+    call_args = gitlab_client_mock.graphql.call_args
+    query_variables = call_args[0][1]
+    assert query_variables["fullPath"] == "namespace/project"
+    assert query_variables["workItemIid"] == "42"
+    assert query_variables["includeNoteResolvedAndResolvableFields"] is True
+    assert query_variables["includeDiscussionIdField"] is True
 
 
 @pytest.mark.asyncio
+@patch("duo_workflow_service.tools.work_item.get_query_variables_for_version")
 async def test_get_work_item_notes_with_group_url(
-    gitlab_client_mock, metadata, work_item_notes
+    mock_get_query_variables,
+    gitlab_client_mock,
+    metadata,
+    work_item_notes,
+    version_variables,
 ):
+    mock_get_query_variables.return_value = version_variables
     # Mock the _validate_work_item_url method
     resolved_work_item = ResolvedWorkItem(
         parent=ResolvedParent(type="group", full_path="namespace/group"),
@@ -123,13 +192,22 @@ async def test_get_work_item_notes_with_group_url(
     expected_response = json.dumps({"notes": work_item_notes}, indent=2)
     assert response == expected_response
 
+    mock_get_query_variables.assert_called_once_with(
+        "includeNoteResolvedAndResolvableFields", "includeDiscussionIdField"
+    )
     gitlab_client_mock.graphql.assert_called_once()
 
 
 @pytest.mark.asyncio
+@patch("duo_workflow_service.tools.work_item.get_query_variables_for_version")
 async def test_get_work_item_notes_with_project_url(
-    gitlab_client_mock, metadata, work_item_notes
+    mock_get_query_variables,
+    gitlab_client_mock,
+    metadata,
+    work_item_notes,
+    version_variables,
 ):
+    mock_get_query_variables.return_value = version_variables
     graphql_response = {
         "project": {
             "workItems": {
@@ -148,11 +226,18 @@ async def test_get_work_item_notes_with_project_url(
     expected_response = json.dumps({"notes": work_item_notes}, indent=2)
     assert response == expected_response
 
+    mock_get_query_variables.assert_called_once_with(
+        "includeNoteResolvedAndResolvableFields", "includeDiscussionIdField"
+    )
     gitlab_client_mock.graphql.assert_called_once()
 
 
 @pytest.mark.asyncio
-async def test_get_work_item_notes_with_no_widgets(gitlab_client_mock, metadata):
+@patch("duo_workflow_service.tools.work_item.get_query_variables_for_version")
+async def test_get_work_item_notes_with_no_widgets(
+    mock_get_query_variables, gitlab_client_mock, metadata, version_variables
+):
+    mock_get_query_variables.return_value = version_variables
     graphql_response = {"project": {"workItems": {"nodes": [{"widgets": []}]}}}
     gitlab_client_mock.graphql = AsyncMock(return_value=graphql_response)
 
@@ -163,11 +248,18 @@ async def test_get_work_item_notes_with_no_widgets(gitlab_client_mock, metadata)
     expected_response = json.dumps({"notes": []})
     assert response == expected_response
 
+    mock_get_query_variables.assert_called_once_with(
+        "includeNoteResolvedAndResolvableFields", "includeDiscussionIdField"
+    )
     gitlab_client_mock.graphql.assert_called_once()
 
 
 @pytest.mark.asyncio
-async def test_get_work_item_notes_with_empty_notes(gitlab_client_mock, metadata):
+@patch("duo_workflow_service.tools.work_item.get_query_variables_for_version")
+async def test_get_work_item_notes_with_empty_notes(
+    mock_get_query_variables, gitlab_client_mock, metadata, version_variables
+):
+    mock_get_query_variables.return_value = version_variables
     graphql_response = {
         "project": {"workItems": {"nodes": [{"widgets": [{"notes": {"nodes": []}}]}]}}
     }
@@ -180,11 +272,18 @@ async def test_get_work_item_notes_with_empty_notes(gitlab_client_mock, metadata
     expected_response = json.dumps({"notes": []}, indent=2)
     assert response == expected_response
 
+    mock_get_query_variables.assert_called_once_with(
+        "includeNoteResolvedAndResolvableFields", "includeDiscussionIdField"
+    )
     gitlab_client_mock.graphql.assert_called_once()
 
 
 @pytest.mark.asyncio
-async def test_get_work_item_notes_not_found(gitlab_client_mock, metadata):
+@patch("duo_workflow_service.tools.work_item.get_query_variables_for_version")
+async def test_get_work_item_notes_not_found(
+    mock_get_query_variables, gitlab_client_mock, metadata, version_variables
+):
+    mock_get_query_variables.return_value = version_variables
     graphql_response = {"project": {"workItems": {"nodes": []}}}
     gitlab_client_mock.graphql = AsyncMock(return_value=graphql_response)
 
@@ -195,11 +294,18 @@ async def test_get_work_item_notes_not_found(gitlab_client_mock, metadata):
     expected_response = json.dumps({"error": "No work item found."})
     assert response == expected_response
 
+    mock_get_query_variables.assert_called_once_with(
+        "includeNoteResolvedAndResolvableFields", "includeDiscussionIdField"
+    )
     gitlab_client_mock.graphql.assert_called_once()
 
 
 @pytest.mark.asyncio
-async def test_get_work_item_notes_with_graphql_error(gitlab_client_mock, metadata):
+@patch("duo_workflow_service.tools.work_item.get_query_variables_for_version")
+async def test_get_work_item_notes_with_graphql_error(
+    mock_get_query_variables, gitlab_client_mock, metadata, version_variables
+):
+    mock_get_query_variables.return_value = version_variables
     gitlab_client_mock.graphql = AsyncMock(side_effect=Exception("GraphQL error"))
 
     tool = GetWorkItemNotes(description="get work item notes", metadata=metadata)
@@ -209,6 +315,9 @@ async def test_get_work_item_notes_with_graphql_error(gitlab_client_mock, metada
     expected_response = json.dumps({"error": "GraphQL error"})
     assert response == expected_response
 
+    mock_get_query_variables.assert_called_once_with(
+        "includeNoteResolvedAndResolvableFields", "includeDiscussionIdField"
+    )
     gitlab_client_mock.graphql.assert_called_once()
 
 

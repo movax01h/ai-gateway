@@ -1,4 +1,9 @@
-query GetProjectWorkItemNotes($fullPath: ID!, $workItemIid: String!) {
+query GetProjectWorkItemNotes(
+    $fullPath: ID!,
+    $workItemIid: String!,
+    $includeNoteResolvedAndResolvableFields: Boolean!,
+    $includeDiscussionIdField: Boolean!
+) {
     project(fullPath: $fullPath) {
         workItems(iid: $workItemIid) {
             nodes {
@@ -9,6 +14,11 @@ query GetProjectWorkItemNotes($fullPath: ID!, $workItemIid: String!) {
                                 id
                                 body
                                 createdAt
+                                resolvable @include(if: $includeNoteResolvedAndResolvableFields)
+                                resolved @include(if: $includeNoteResolvedAndResolvableFields)
+                                discussion @include(if: $includeDiscussionIdField) {
+                                    id
+                                }
                                 author {
                                     username
                                     name

@@ -253,7 +253,9 @@ class ListWorkItems(WorkItemBaseTool):
                 )
 
         # Add version-specific variables
-        query_variables.update(get_query_variables_for_version())
+        query_variables.update(
+            get_query_variables_for_version("includeHierarchyWidget")
+        )
 
         try:
             response = await self.gitlab_client.graphql(query, query_variables)
@@ -389,6 +391,9 @@ class GetWorkItemNotes(WorkItemBaseTool):
         query_variables = {
             "fullPath": resolved.parent.full_path,
             "workItemIid": str(resolved.work_item_iid),
+            **get_query_variables_for_version(
+                "includeNoteResolvedAndResolvableFields", "includeDiscussionIdField"
+            ),
         }
 
         try:

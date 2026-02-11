@@ -1,13 +1,16 @@
-"""Tests for base validation methods shared across work item tools."""
+"""Tests for base tool methods shared across work item tools."""
 
 # pylint: disable=file-naming-for-tests
 
-from unittest.mock import AsyncMock, Mock
+from unittest.mock import AsyncMock, Mock, patch
 
 import pytest
 
-from duo_workflow_service.tools.work_item import GetWorkItem
-from duo_workflow_service.tools.work_items.base_tool import ResolvedParent
+from duo_workflow_service.tools.work_item import GetWorkItem, UpdateWorkItem
+from duo_workflow_service.tools.work_items.base_tool import (
+    ResolvedParent,
+    ResolvedWorkItem,
+)
 
 
 @pytest.fixture(name="gitlab_client_mock")
@@ -183,3 +186,37 @@ async def test_validate_work_item_url_with_invalid_url_without_work_item_iid(met
     )
     assert isinstance(result, str)
     assert "Failed to parse work item URL" in result
+
+
+@pytest.mark.asyncio
+@patch(
+    "duo_workflow_service.tools.work_items.base_tool.get_query_variables_for_version"
+)
+async def test_fetch_work_item_data_calls_version_compatibility(
+    mock_get_query_variables,
+    gitlab_client_mock,
+    metadata,
+):
+    mock_get_query_variables.return_value = {"includeHierarchyWidget": True}
+    work_item_data = {
+        "id": "gid://gitlab/WorkItem/123",
+        "iid": "42",
+        "title": "Test Work Item",
+    }
+    graphql_response = {"project": {"workItems": {"nodes": [work_item_data]}}}
+    gitlab_client_mock.graphql = AsyncMock(return_value=graphql_response)
+
+    tool = UpdateWorkItem(description="update work item", metadata=metadata)
+
+    resolved = ResolvedWorkItem(
+        parent=ResolvedParent(type="project", full_path="namespace/project"),
+        work_item_iid=42,
+    )
+
+    await tool._fetch_work_item_data(resolved)
+
+    mock_get_query_variables.assert_called_once_with("includeHierarchyWidget")
+    gitlab_client_mock.graphql.assert_called_once()
+    call_args = gitlab_client_mock.graphql.call_args
+    query_variables = call_args[0][1]
+    assert query_variables["includeHierarchyWidget"] is True
