@@ -41,24 +41,12 @@ async def get_x_ray_anthropic_claude():
     yield get_container_application().x_ray.anthropic_claude()
 
 
-async def get_code_suggestions_completions_anthropic_provider():
-    yield get_container_application().code_suggestions.completions.anthropic
-
-
 async def get_code_suggestions_completions_litellm_factory_provider():
     yield get_container_application().code_suggestions.completions.litellm_factory
 
 
-async def get_code_suggestions_completions_fireworks_factory_provider():
-    yield get_container_application().code_suggestions.completions.fireworks_factory
-
-
 async def get_code_suggestions_completions_amazon_q_factory_provider():
     yield get_container_application().code_suggestions.completions.amazon_q_factory
-
-
-async def get_code_suggestions_completions_litellm_vertex_codestral_factory_provider():
-    yield get_container_application().code_suggestions.completions.litellm_vertex_codestral_factory
 
 
 async def get_code_suggestions_completions_agent_factory_provider():

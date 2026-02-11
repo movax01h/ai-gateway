@@ -31,10 +31,6 @@ from ai_gateway.api.v2.code.typing import (
 from ai_gateway.async_dependency_resolver import (
     get_code_suggestions_completions_agent_factory_provider,
     get_code_suggestions_completions_amazon_q_factory_provider,
-    get_code_suggestions_completions_anthropic_provider,
-    get_code_suggestions_completions_fireworks_factory_provider,
-    get_code_suggestions_completions_litellm_factory_provider,
-    get_code_suggestions_completions_litellm_vertex_codestral_factory_provider,
     get_code_suggestions_generations_agent_factory_provider,
     get_code_suggestions_generations_anthropic_chat_factory_provider,
     get_code_suggestions_generations_litellm_factory_provider,
@@ -82,7 +78,6 @@ __all__ = [
 class CompletionConfig:
     """Configuration for code completion providers."""
 
-    factory: Factory[CodeCompletions]
     handler_class: Optional[type] = None
     requires_prompt_registry: bool = False
     extra_kwargs: Optional[Dict[str, Any]] = None
@@ -127,27 +122,9 @@ async def completions(
     current_user: Annotated[StarletteUser, Depends(get_current_user)],
     prompt_registry: Annotated[BasePromptRegistry, Depends(get_prompt_registry)],
     config: Annotated[Config, Depends(get_config)],
-    completions_anthropic_factory: Annotated[
-        Factory[CodeCompletions],
-        Depends(get_code_suggestions_completions_anthropic_provider),
-    ],
-    completions_litellm_factory: Annotated[
-        Factory[CodeCompletions],
-        Depends(get_code_suggestions_completions_litellm_factory_provider),
-    ],
-    completions_fireworks_factory: Annotated[
-        Factory[CodeCompletions],
-        Depends(get_code_suggestions_completions_fireworks_factory_provider),
-    ],
     completions_amazon_q_factory: Annotated[
         Factory[CodeCompletions],
         Depends(get_code_suggestions_completions_amazon_q_factory_provider),
-    ],
-    completions_litellm_vertex_codestral_factory: Annotated[
-        Factory[CodeCompletions],
-        Depends(
-            get_code_suggestions_completions_litellm_vertex_codestral_factory_provider
-        ),
     ],
     completions_agent_factory: Annotated[
         Factory[CodeCompletions],
@@ -168,12 +145,8 @@ async def completions(
         payload,
         current_user,
         prompt_registry,
-        completions_anthropic_factory,
-        completions_litellm_factory,
-        completions_fireworks_factory,
         completions_agent_factory,
         completions_amazon_q_factory,
-        completions_litellm_vertex_codestral_factory,
         internal_event_client,
         region,
         config.model_keys(),
@@ -549,11 +522,6 @@ def _create_post_processor_for_model(
 
 def _get_provider_config(
     provider: KindModelProvider,
-    completions_anthropic_factory: Factory[CodeCompletions],
-    completions_litellm_factory: Factory[CodeCompletions],
-    completions_fireworks_factory: Factory[CodeCompletions],
-    completions_amazon_q_factory: Factory[CodeCompletions],
-    completions_litellm_vertex_codestral_factory: Factory[CodeCompletions],
     region: str,
     payload: CompletionsRequestWithVersion,
 ) -> CompletionConfig:
@@ -573,7 +541,6 @@ def _get_provider_config(
 
     if provider == KindModelProvider.ANTHROPIC:
         return CompletionConfig(
-            factory=completions_anthropic_factory,
             requires_prompt_registry=True,
             handler_class=AnthropicHandler,
             extra_kwargs=_get_context_kwargs(provider),
@@ -581,7 +548,6 @@ def _get_provider_config(
 
     if provider in (KindModelProvider.LITELLM, KindModelProvider.MISTRALAI):
         return CompletionConfig(
-            factory=completions_litellm_factory,
             handler_class=LiteLlmHandler,
             requires_prompt_registry=True,
             extra_kwargs=_get_context_kwargs(provider),
@@ -589,21 +555,18 @@ def _get_provider_config(
 
     if provider == KindModelProvider.AMAZON_Q:
         return CompletionConfig(
-            factory=completions_amazon_q_factory,
             unit_primitive=GitLabUnitPrimitive.AMAZON_Q_INTEGRATION,
             extra_kwargs=_get_context_kwargs(provider),
         )
 
     if provider == KindModelProvider.FIREWORKS or not _allow_vertex_codestral(region):
         return CompletionConfig(
-            factory=completions_fireworks_factory,
             handler_class=FireworksHandler,
             requires_prompt_registry=True,
             extra_kwargs=_get_context_kwargs(provider),
         )
 
     return CompletionConfig(
-        factory=completions_litellm_vertex_codestral_factory,
         handler_class=VertexHandler,
         requires_prompt_registry=True,
         extra_kwargs=_get_context_kwargs(provider),
@@ -615,12 +578,8 @@ def _build_code_completions(
     payload: CompletionsRequestWithVersion,
     current_user: StarletteUser,
     prompt_registry: BasePromptRegistry,
-    completions_anthropic_factory: Factory[CodeCompletions],
-    completions_litellm_factory: Factory[CodeCompletions],
-    completions_fireworks_factory: Factory[CodeCompletions],
     completions_agent_factory: Factory[CodeCompletions],
     completions_amazon_q_factory: Factory[CodeCompletions],
-    completions_litellm_vertex_codestral_factory: Factory[CodeCompletions],
     internal_event_client: InternalEventsClient,
     region: str,
     model_keys: dict,
@@ -672,11 +631,6 @@ def _build_code_completions(
 
     provider_config = _get_provider_config(
         payload.model_provider,
-        completions_anthropic_factory,
-        completions_litellm_factory,
-        completions_fireworks_factory,
-        completions_amazon_q_factory,
-        completions_litellm_vertex_codestral_factory,
         region,
         payload,
     )
@@ -704,15 +658,11 @@ def _build_code_completions(
         _track_code_suggestions_event(tracking_event, internal_event_client)
         return code_completions, kwargs
 
-    if payload.model_provider == KindModelProvider.AMAZON_Q:
-        code_completions = provider_config.factory(
-            model__current_user=current_user,
-            model__role_arn=payload.role_arn,
-        )
-    elif payload.model_provider == KindModelProvider.ANTHROPIC:
-        code_completions = provider_config.factory(model__name=payload.model_name)
-    else:
-        code_completions = provider_config.factory()
+    # This is now only hit with Amazon Q
+    code_completions = completions_amazon_q_factory(
+        model__current_user=current_user,
+        model__role_arn=payload.role_arn,
+    )
 
     kwargs.update(provider_config.extra_kwargs)
 
@@ -729,19 +679,6 @@ def _build_code_completions(
     _track_code_suggestions_event(tracking_event, internal_event_client)
 
     return code_completions, kwargs
-
-
-def _resolve_code_completions_vertex_codestral(
-    payload: SuggestionsRequest,
-    completions_litellm_vertex_codestral_factory: Factory[CodeCompletions],
-) -> CodeCompletions:
-    if payload.prompt_version == 2 and payload.prompt is not None:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="You cannot specify a prompt with the given provider and model combination",
-        )
-
-    return completions_litellm_vertex_codestral_factory()
 
 
 def _resolve_agent_code_completions(
