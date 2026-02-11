@@ -27,6 +27,8 @@ components:
         as: "repository_url"
       - from: "context:issue_parser.tool_responses"
         as: "naming_context"
+      - from: "context:workflow_id"
+        as: "workflow_id"
     ui_log_events:
       - "on_tool_execution_success"
       - "on_tool_execution_failed"
