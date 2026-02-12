@@ -207,7 +207,7 @@ components:
       - from: "context:fix_pipeline_execution.final_answer"
         as: "execution_results"
       - from: "context:inputs.agent_platform_standard_context.session_owner_id"
-        as: "reviewer_id"
+        as: "assignee_id"
     toolset:
       - "update_merge_request"
     ui_log_events:
@@ -288,4 +288,3 @@ flow:
         session_owner_id:
           type: string
           description: Human user's ID that initiated the flow
-
