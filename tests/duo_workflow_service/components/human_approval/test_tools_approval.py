@@ -103,118 +103,6 @@ class TestToolsApprovalComponent:
         )
 
     @pytest.mark.asyncio
-    async def test_tools_approval_with_multiple_tools(
-        self,
-        component: ToolsApprovalComponent,
-        mock_toolset,
-        mock_tool,
-        graph_config,
-        graph_input: WorkflowState,
-        mock_check_executor,
-    ):
-        """Test combined message format when use_duo_chat_ui_for_flow feature flag is disabled."""
-
-        with (
-            patch(
-                "duo_workflow_service.components.human_approval.component.HumanApprovalCheckExecutor",
-                return_value=mock_check_executor,
-            ),
-            patch(
-                "duo_workflow_service.components.human_approval.tools_approval.format_tool_display_message",
-                side_effect=[
-                    "Using mock tool1: {'arg1': 'value1'}",
-                    "Using mock tool2: {'arg2': 'value2'}",
-                ],
-            ) as mock_format_tool_msg,
-            patch(
-                "duo_workflow_service.components.human_approval.tools_approval.is_feature_enabled",
-                return_value=False,
-            ),
-            patch.dict(os.environ, {"WORKFLOW_INTERRUPT": "True"}),
-        ):
-            tool1_call = {
-                "id": "1",
-                "name": "tool1",
-                "args": {"arg1": "value1"},
-                "type": "tool_call",
-            }
-            tool2_call = {
-                "id": "2",
-                "name": "tool2",
-                "args": {"arg2": "value2"},
-                "type": "tool_call",
-            }
-            pre_approved_tool_call = {
-                "id": "3",
-                "name": "pre_approved_tool",
-                "args": {"arg3": "value3"},
-                "type": "tool_call",
-            }
-
-            mock_toolset.approved.side_effect = [False, False, True]
-
-            node_resp = [
-                node_return_value(
-                    messages=[
-                        AIMessage(
-                            content="Testing tools",
-                            tool_calls=[
-                                tool1_call,
-                                tool2_call,
-                                pre_approved_tool_call,
-                            ],
-                        )
-                    ]
-                )
-            ]
-
-            graph, mock_entry_node, mock_continuation_node, mock_termination_node = (
-                set_up_graph(node_resp, component)
-            )
-
-            mock_check_executor.run.return_value = {
-                "last_human_input": {
-                    "event_type": WorkflowEventType.RESUME,
-                }
-            }
-
-            response = await graph.ainvoke(input=graph_input, config=graph_config)
-
-            assert response["status"] == WorkflowStatusEnum.PLANNING
-            assert "ui_chat_log" in response
-            assert len(response["ui_chat_log"]) == 1
-            chat_log = response["ui_chat_log"][0]
-            assert chat_log["correlation_id"] is None
-            assert chat_log["message_type"] == MessageTypeEnum.REQUEST
-            assert chat_log["message_id"].startswith("request-")
-            assert "Using mock tool1: {'arg1': 'value1'}" in chat_log["content"]
-            assert "Using mock tool2: {'arg2': 'value2'}" in chat_log["content"]
-            assert "In order to complete the current task" in chat_log["content"]
-            assert chat_log["timestamp"] is not None
-            assert chat_log["status"] == ToolStatus.SUCCESS
-            assert chat_log["tool_info"] is None
-
-            assert mock_toolset.validate_tool_call.call_count == 3
-            mock_toolset.validate_tool_call.assert_has_calls(
-                [
-                    call(tool1_call),
-                    call(tool2_call),
-                    call(pre_approved_tool_call),
-                ]
-            )
-
-            mock_format_tool_msg.assert_has_calls(
-                [
-                    call(mock_tool, tool1_call["args"]),
-                    call(mock_tool, tool2_call["args"]),
-                ]
-            )
-            mock_check_executor.run.assert_called_once()
-            mock_entry_node.assert_called_once()
-            mock_continuation_node.assert_called_once()
-            mock_termination_node.assert_not_called()
-
-    @pytest.mark.asyncio
     async def test_tools_approval_with_no_tools(
         self,
         component: ToolsApprovalComponent,
@@ -593,10 +481,10 @@ class TestToolsApprovalComponent:
             assert chat_log["message_type"] == MessageTypeEnum.REQUEST
             assert chat_log["message_id"].startswith("request-")
             assert "Using mock tool1: {'arg1': 'value1'}" in chat_log["content"]
-            assert "In order to complete the current task" in chat_log["content"]
             assert chat_log["timestamp"] is not None
             assert chat_log["status"] == ToolStatus.SUCCESS
-            assert chat_log["tool_info"] is None
+            assert chat_log["tool_info"]["args"]["arg1"] == "value1"
+            assert chat_log["tool_info"]["name"] == "tool1"
 
             mock_format_tool_msg.assert_has_calls(
                 [
@@ -609,7 +497,7 @@ class TestToolsApprovalComponent:
             mock_termination_node.assert_not_called()
 
     @pytest.mark.asyncio
-    async def test_tools_approval_inline_format_when_feature_flag_enabled(
+    async def test_tools_approval_inline_format(
         self,
         component: ToolsApprovalComponent,
         mock_toolset,
@@ -618,8 +506,7 @@ class TestToolsApprovalComponent:
         graph_input: WorkflowState,
         mock_check_executor,
     ):
-        """Test inline approval format (individual messages with tool_info) when use_duo_chat_ui_for_flow feature flag
-        is enabled."""
+        """Test inline approval format (individual messages with tool_info)."""
 
         with (
             patch(
@@ -633,10 +520,6 @@ class TestToolsApprovalComponent:
                     "Using mock tool2: {'arg2': 'value2'}",
                 ],
             ) as mock_format_tool_msg,
-            patch(
-                "duo_workflow_service.components.human_approval.tools_approval.is_feature_enabled",
-                return_value=True,  # Feature flag ENABLED = new inline format
-            ),
             patch.dict(os.environ, {"WORKFLOW_INTERRUPT": "True"}),
         ):
             tool1_call = {

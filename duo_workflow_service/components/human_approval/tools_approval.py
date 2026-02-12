@@ -1,5 +1,5 @@
 from datetime import datetime, timezone
-from typing import Literal
+from typing import Literal, override
 
 from langchain_core.messages import AIMessage, HumanMessage, ToolCall, ToolMessage
 
@@ -19,8 +19,6 @@ from duo_workflow_service.tools import (
     Toolset,
     format_tool_display_message,
 )
-from lib import Result, result
-from lib.feature_flags import FeatureFlag, is_feature_enabled
 
 
 class ToolsApprovalComponent(HumanApprovalComponent):
@@ -89,20 +87,12 @@ class ToolsApprovalComponent(HumanApprovalComponent):
                 },
             }
 
-        # Check if inline tool approval UI is enabled via feature flag
-        if is_feature_enabled(FeatureFlag.USE_DUO_CHAT_UI_FOR_FLOW):
-            approval_required, approval_messages = self._get_approvals(last_message)
+        approval_messages = self._build_approval_request(state)
 
-            if not approval_required:
-                raise RuntimeError("No valid tool calls were found to display.")
-
-            return {
-                "status": self._approval_req_workflow_state,
-                "ui_chat_log": approval_messages,
-            }
-
-        # Fall back to old combined message format
-        return super()._request_approval(state)
+        return {
+            "status": self._approval_req_workflow_state,
+            "ui_chat_log": approval_messages,
+        }
 
     def _filter_valid_tool_calls(
         self, tool_calls: list[ToolCall]
@@ -119,54 +109,18 @@ class ToolsApprovalComponent(HumanApprovalComponent):
                 invalid_tool_calls.append(e)
         return valid_tool_calls, invalid_tool_calls
 
-    def _build_approval_request(
-        self, state: WorkflowState
-    ) -> Result[str, RuntimeError]:
+    @override
+    def _build_approval_request(self, state: WorkflowState) -> list[UiChatLog]:  # type: ignore[override]
+        """Overwritten build_approval_request to bring in-line with chat implementation."""
         conversation = state["conversation_history"][self._approved_agent_name]
         last_message = conversation[-1]
 
-        tool_call_messages: list[str] = []
-        for idx, call in enumerate(last_message.tool_calls):  # type: ignore[attr-defined]
-            try:
-                if self._toolset.approved(call["name"]):
-                    continue
+        if not isinstance(last_message, AIMessage) or not last_message.tool_calls:
+            return []
 
-                tool = self._toolset[call["name"]]
-                if (msg := format_tool_display_message(tool, call["args"])) is None:
-                    continue
-
-                tool_call_messages.append(f"{idx + 1}. {msg}")
-            except KeyError:
-                # tool call referred to NO-OP tool like HandOver tool which does not
-                # require approvals
-                continue
-
-        if len(tool_call_messages) == 0:
-            raise RuntimeError("No valid tool calls were found to display.")
-
-        tool_calls_msgs = "\n".join(tool_call_messages)
-
-        return result.Ok(
-            "In order to complete the current task I would like to run following tools:\n\n"
-            f"{tool_calls_msgs}\n\n"
-            "In order to approve the execution, select Approve, "
-            "select Deny to reject requested tool runs,"
-            "otherwise provide your feedback via chat UI"
-        )
-
-    def _get_approvals(self, message: AIMessage) -> tuple[bool, list[UiChatLog]]:
-        """Build approval request UI messages for tools requiring approval.
-
-        Args:
-            message: The AIMessage containing tool calls
-
-        Returns:
-            Tuple of (approval_required, approval_messages)
-        """
-        approval_required = False
         approval_messages = []
 
-        for call in message.tool_calls:
+        for call in last_message.tool_calls:
             # Skip pre-approved tools
             if self._toolset.approved(call["name"]):
                 continue
@@ -182,7 +136,6 @@ class ToolsApprovalComponent(HumanApprovalComponent):
             if msg is None:
                 continue
 
-            approval_required = True
             approval_messages.append(
                 UiChatLog(
                     correlation_id=None,
@@ -197,4 +150,7 @@ class ToolsApprovalComponent(HumanApprovalComponent):
                 )
             )
 
-        return approval_required, approval_messages
+        if len(approval_messages) == 0:
+            raise RuntimeError("No valid tool calls were found to display.")
+
+        return approval_messages
