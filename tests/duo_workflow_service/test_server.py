@@ -24,6 +24,7 @@ from ai_gateway.config import Config, ConfigCustomModels, ConfigGoogleCloudPlatf
 from ai_gateway.container import ContainerApplication
 from ai_gateway.prompts import BasePromptRegistry
 from contract import contract_pb2
+from duo_workflow_service import server as server_module
 from duo_workflow_service.executor.outbox import OutboxSignal
 from duo_workflow_service.interceptors.authentication_interceptor import current_user
 from duo_workflow_service.server import (
@@ -87,6 +88,25 @@ def create_mock_billing_service():
         return_value=None
     )
     return mock_billing_service
+
+
+@pytest.fixture(autouse=True)
+def mock_usage_quota_service(mock_duo_workflow_service_container):
+    """Auto-use fixture to properly wire DI container and mock UsageQuotaService.
+
+    This ensures the @has_sufficient_usage_quota decorator works correctly.
+    """
+
+    service_instance = MagicMock()
+    service_instance.execute = AsyncMock()
+    service_instance.aclose = AsyncMock()
+
+    mock_duo_workflow_service_container.wire(modules=[server_module])
+    mock_duo_workflow_service_container.usage_quota.service.override(service_instance)
+
+    yield service_instance
+
+    mock_duo_workflow_service_container.usage_quota.service.reset_override()
 
 
 @pytest.mark.parametrize(
@@ -172,7 +192,6 @@ async def test_list_tools(
             return _tool_class_cache[cache_key]
 
         class MockTool(DuoBaseTool):
-
             def __init__(self):
                 super().__init__(
                     name=name,
@@ -293,9 +312,11 @@ async def test_list_flows(mock_list_configs):
         (
             {"flow_identifier": ["flow1"], "environment": ["prod"]},
             1,
-            lambda configs: len(configs) == 1
-            and configs[0]["flow_identifier"] == "flow1"
-            and configs[0]["environment"] == "prod",
+            lambda configs: (
+                len(configs) == 1
+                and configs[0]["flow_identifier"] == "flow1"
+                and configs[0]["environment"] == "prod"
+            ),
         ),
         # Filter that matches no flows
         (

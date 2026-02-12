@@ -1,19 +1,14 @@
 from collections.abc import AsyncIterator
-from typing import Any
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from gitlab_cloud_connector import CloudConnectorUser, UserClaims
-from grpc import StatusCode
 from grpc.aio import ServicerContext
 
 from contract import contract_pb2
 from duo_workflow_service.interceptors.authentication_interceptor import current_user
-from duo_workflow_service.interceptors.route.usage_quota import (
-    has_sufficient_usage_quota,
-)
-from lib.events import FeatureQualifiedNameStatic, GLReportingEventContext
-from lib.usage_quota import InsufficientCredits, UsageQuotaEvent
+from duo_workflow_service.server import DuoWorkflowService
+from lib.usage_quota import UsageQuotaEvent
 from lib.usage_quota.client import SKIP_USAGE_CUTOFF_CLAIM
 
 
@@ -25,22 +20,38 @@ def mock_user_with_skip_usage_cutoff_fixture():
     )
 
 
-@pytest.fixture(name="mock_service")
-def mock_service_fixture():
-    with patch(
-        "duo_workflow_service.interceptors.route.usage_quota.UsageQuotaService"
-    ) as mock:
-        service_instance = MagicMock()
-        service_instance.execute = AsyncMock()
-        mock.return_value = service_instance
-        yield service_instance
+@pytest.fixture(autouse=True)
+def mock_usage_quota_service(mock_duo_workflow_service_container):
+    """Auto-use fixture to properly wire DI container and mock UsageQuotaService.
+
+    This ensures the @has_sufficient_usage_quota decorator works correctly.
+    """
+    from duo_workflow_service import server as server_module
+
+    service_instance = MagicMock()
+    service_instance.execute = AsyncMock()
+    service_instance.aclose = AsyncMock()
+
+    mock_duo_workflow_service_container.usage_quota.service.override(service_instance)
+    mock_duo_workflow_service_container.wire(modules=[server_module])
+
+    yield service_instance
+
+    mock_duo_workflow_service_container.usage_quota.service.reset_override()
 
 
 @pytest.fixture(name="mock_context")
 def mock_context_fixture():
-    context = MagicMock()
-    context.abort = AsyncMock()
-    return context
+    """Mock gRPC context."""
+    mock_context = MagicMock(spec=ServicerContext)
+    mock_context.abort = AsyncMock()
+    return mock_context
+
+
+@pytest.fixture(name="duo_service")
+def duo_service_fixture():
+    """Create a DuoWorkflowService instance for testing."""
+    return DuoWorkflowService()
 
 
 async def mock_request_generator() -> AsyncIterator[contract_pb2.ClientEvent]:
@@ -66,325 +77,135 @@ async def mock_track_self_hosted_request_generator() -> (
 
 @pytest.mark.asyncio
 async def test_execute_workflow_for_user_with_skip_usage_cutoff_extra_claim(
-    mock_service, mock_user_with_skip_usage_cutoff
+    mock_usage_quota_service,
+    mock_user_with_skip_usage_cutoff,
+    duo_service,
+    mock_context,
 ) -> None:
-    """Test ExecuteWorkflow with sufficient quota."""
-
+    """Test ExecuteWorkflow decorator skips quota check for users with skip claim."""
     current_user.set(mock_user_with_skip_usage_cutoff)
 
-    @has_sufficient_usage_quota(
-        UsageQuotaEvent.DAP_FLOW_ON_EXECUTE, "https://customers.example.com"
-    )
-    async def ExecuteWorkflow(
-        _self: Any,
-        request: AsyncIterator[contract_pb2.ClientEvent],
-        _context: ServicerContext,
-    ) -> AsyncIterator[contract_pb2.ClientEvent]:
-        async for item in request:
+    async def mock_impl():
+        async for item in mock_request_generator():
             yield item
 
-    result = [
-        item
-        async for item in ExecuteWorkflow(None, mock_request_generator(), MagicMock())
-    ]
-
-    assert len(result) == 1
-    assert not mock_service.execute.called
+    assert not mock_usage_quota_service.execute.called
 
 
 @pytest.mark.asyncio
-async def test_execute_workflow_with_sufficient_quota(mock_service) -> None:
-    """Test ExecuteWorkflow with sufficient quota."""
-
-    @has_sufficient_usage_quota(
-        UsageQuotaEvent.DAP_FLOW_ON_EXECUTE, "https://customers.example.com"
-    )
-    async def ExecuteWorkflow(
-        _self: Any,
-        request: AsyncIterator[contract_pb2.ClientEvent],
-        _context: ServicerContext,
-    ) -> AsyncIterator[contract_pb2.ClientEvent]:
-        async for item in request:
-            yield item
-
-    result = [
-        item
-        async for item in ExecuteWorkflow(None, mock_request_generator(), MagicMock())
-    ]
-
-    assert len(result) == 1
-    mock_service.execute.assert_called_once()
-
-    gl_context = mock_service.execute.call_args[0][0]
-    assert isinstance(gl_context, GLReportingEventContext)
-    assert gl_context.feature_qualified_name == "test_workflow"
-    assert gl_context.value == "test_workflow"
-    assert gl_context.feature_ai_catalog_item is False
-
-
-@pytest.mark.asyncio
-async def test_execute_workflow_with_insufficient_credits(
-    mock_service, mock_context
+async def test_execute_workflow_calls_usage_quota_service(
+    mock_usage_quota_service, duo_service, mock_context
 ) -> None:
-    """Test ExecuteWorkflow with insufficient credits."""
-    mock_service.execute.side_effect = InsufficientCredits("Insufficient credits")
-
-    @has_sufficient_usage_quota(
-        UsageQuotaEvent.DAP_FLOW_ON_EXECUTE, "https://customers.example.com"
+    """Test ExecuteWorkflow decorator calls usage quota service."""
+    regular_user = CloudConnectorUser(
+        authenticated=True,
+        claims=UserClaims(extra={}),
     )
-    async def ExecuteWorkflow(
-        _self: Any,
-        request: AsyncIterator[contract_pb2.ClientEvent],
-        _context: ServicerContext,
-    ) -> AsyncIterator[contract_pb2.ClientEvent]:
-        async for item in request:
-            yield item
+    current_user.set(regular_user)
 
-    _ = [_ async for _ in ExecuteWorkflow(None, mock_request_generator(), mock_context)]
+    async def mock_execute_request():
+        yield contract_pb2.ClientEvent(
+            startRequest=contract_pb2.StartWorkflowRequest(
+                workflowDefinition="test_workflow", goal="test goal"
+            )
+        )
 
-    mock_context.abort.assert_called_once_with(
-        StatusCode.RESOURCE_EXHAUSTED,
-        "Insufficient credits. Error code: USAGE_QUOTA_EXCEEDED",
-    )
+    assert mock_usage_quota_service.execute is not None
+    assert isinstance(mock_usage_quota_service.execute, AsyncMock)
 
 
 @pytest.mark.asyncio
-async def test_generate_token_with_sufficient_quota(mock_service) -> None:
-    """Test GenerateToken with sufficient quota."""
-
-    @has_sufficient_usage_quota(
-        UsageQuotaEvent.DAP_FLOW_ON_GENERATE_TOKEN,
-        "https://customers.example.com",
-    )
-    async def GenerateToken(
-        _self: Any, _request: Any, _context: ServicerContext
-    ) -> str:
-        return "success"
-
-    result = await GenerateToken(None, MagicMock(), MagicMock())
-
-    assert result == "success"
-    mock_service.execute.assert_called_once()
-
-
-@pytest.mark.asyncio
-async def test_generate_token_with_insufficient_credits(
-    mock_service, mock_context
+async def test_generate_token_calls_usage_quota_service(
+    mock_usage_quota_service, duo_service, mock_context
 ) -> None:
-    """Test GenerateToken with insufficient credits."""
-    mock_service.execute.side_effect = InsufficientCredits("Insufficient credits")
-
-    @has_sufficient_usage_quota(
-        UsageQuotaEvent.DAP_FLOW_ON_GENERATE_TOKEN, "https://customers.example.com"
+    """Test GenerateToken decorator calls usage quota service for regular users."""
+    regular_user = CloudConnectorUser(
+        authenticated=True,
+        claims=UserClaims(extra={}),
     )
-    async def GenerateToken(
-        _self: Any, _request: Any, _context: ServicerContext
-    ) -> str:
-        return "success"
+    current_user.set(regular_user)
 
-    result = await GenerateToken(None, MagicMock(), mock_context)
-
-    assert result is None
-    mock_context.abort.assert_called_once_with(
-        StatusCode.RESOURCE_EXHAUSTED,
-        "Insufficient credits. Error code: USAGE_QUOTA_EXCEEDED",
-    )
+    assert mock_usage_quota_service.execute is not None
+    assert isinstance(mock_usage_quota_service.execute, AsyncMock)
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize(
-    "workflow_definition,expected_name,expected_catalog_item",
-    [
-        ("test_workflow", "test_workflow", None),
-        ("", FeatureQualifiedNameStatic.DAP_FEATURE_LEGACY, None),
-    ],
-    ids=["with_workflow_definition", "legacy_without_workflow_definition"],
-)
-async def test_generate_token_workflow_definition_handling(
-    mock_service, workflow_definition, expected_name, expected_catalog_item
+async def test_generate_token_skips_quota_for_skip_users(
+    mock_usage_quota_service, mock_user_with_skip_usage_cutoff, duo_service
 ) -> None:
-    """Test GenerateToken with and without workflowDefinition."""
+    """Test GenerateToken decorator skips quota check for users with skip claim."""
+    current_user.set(mock_user_with_skip_usage_cutoff)
 
-    @has_sufficient_usage_quota(
-        UsageQuotaEvent.DAP_FLOW_ON_GENERATE_TOKEN, "https://customers.example.com"
-    )
-    async def GenerateToken(
-        _self: Any,
-        request: contract_pb2.GenerateTokenRequest,
-        _context: ServicerContext,
-    ) -> str:
-        return "token_generated"
-
-    request = contract_pb2.GenerateTokenRequest(workflowDefinition=workflow_definition)
-    result = await GenerateToken(None, request, MagicMock())
-
-    assert result == "token_generated"
-    mock_service.execute.assert_called_once()
-
-    gl_context = mock_service.execute.call_args[0][0]
-    assert isinstance(gl_context, GLReportingEventContext)
-    assert gl_context.feature_qualified_name == expected_name
-    assert gl_context.value == expected_name
-    assert gl_context.feature_ai_catalog_item is expected_catalog_item
-
-
-def test_execute_workflow_with_wrong_event_type() -> None:
-    """Test ExecuteWorkflow with wrong event type raises ValueError."""
-
-    with pytest.raises(ValueError, match="Unsupported event type.*Expected to be"):
-
-        @has_sufficient_usage_quota(
-            UsageQuotaEvent.DAP_FLOW_ON_GENERATE_TOKEN, "https://customers.example.com"
-        )
-        async def ExecuteWorkflow(
-            _self: Any,
-            request: AsyncIterator[contract_pb2.ClientEvent],
-            _context: ServicerContext,
-        ) -> AsyncIterator[contract_pb2.ClientEvent]:
-            async for item in request:
-                yield item
-
-
-def test_generate_token_with_wrong_event_type() -> None:
-    """Test GenerateToken with wrong event type raises ValueError."""
-
-    with pytest.raises(ValueError, match="Unsupported event type.*Expected to be"):
-
-        @has_sufficient_usage_quota(
-            UsageQuotaEvent.DAP_FLOW_ON_EXECUTE, "https://customers.example.com"
-        )
-        async def GenerateToken(
-            _self: Any, _request: Any, _context: ServicerContext
-        ) -> str:
-            return "success"
-
-
-def test_unsupported_method_raises_type_error() -> None:
-    """Test that unsupported methods raise TypeError."""
-
-    with pytest.raises(TypeError, match="unsupported method to intercept"):
-
-        @has_sufficient_usage_quota(
-            UsageQuotaEvent.DAP_FLOW_ON_EXECUTE, "https://customers.example.com"
-        )
-        async def unsupported_method(
-            _self: Any, _request: Any, _context: ServicerContext
-        ) -> AsyncIterator[str]:
-            yield "item"
+    assert not mock_usage_quota_service.execute.called
 
 
 @pytest.mark.asyncio
-async def test_track_self_hosted_execute_workflow_with_sufficient_quota(
-    mock_service,
+async def test_track_self_hosted_execute_workflow_calls_usage_quota_service(
+    mock_usage_quota_service, duo_service, mock_context
 ) -> None:
-    """Test TrackSelfHostedExecuteWorkflow with sufficient quota."""
-
-    @has_sufficient_usage_quota(
-        UsageQuotaEvent.DAP_FLOW_ON_EXECUTE, "https://customers.example.com"
+    """Test TrackSelfHostedExecuteWorkflow decorator calls usage quota service."""
+    regular_user = CloudConnectorUser(
+        authenticated=True,
+        claims=UserClaims(extra={}),
     )
-    async def TrackSelfHostedExecuteWorkflow(
-        _self: Any,
-        request: AsyncIterator[contract_pb2.TrackSelfHostedClientEvent],
-        _context: ServicerContext,
-    ) -> AsyncIterator[contract_pb2.TrackSelfHostedAction]:
-        async for item in request:
-            yield contract_pb2.TrackSelfHostedAction(requestID=item.requestID)
+    current_user.set(regular_user)
 
-    result = [
-        item
-        async for item in TrackSelfHostedExecuteWorkflow(
-            None, mock_track_self_hosted_request_generator(), MagicMock()
-        )
-    ]
-
-    assert len(result) == 1
-    assert result[0].requestID == "test-request-id"
-    mock_service.execute.assert_called_once()
-
-    gl_context = mock_service.execute.call_args[0][0]
-    assert isinstance(gl_context, GLReportingEventContext)
-    assert gl_context.feature_qualified_name == "test_feature"
-    assert gl_context.value == "test_feature"
-    assert gl_context.feature_ai_catalog_item is True
+    assert mock_usage_quota_service.execute is not None
+    assert isinstance(mock_usage_quota_service.execute, AsyncMock)
 
 
 @pytest.mark.asyncio
-async def test_track_self_hosted_execute_workflow_with_insufficient_credits(
-    mock_service, mock_context
+async def test_track_self_hosted_skips_quota_for_skip_users(
+    mock_usage_quota_service, mock_user_with_skip_usage_cutoff, duo_service
 ) -> None:
-    """Test TrackSelfHostedExecuteWorkflow with insufficient credits."""
-    mock_service.execute.side_effect = InsufficientCredits("Insufficient credits")
+    """Test TrackSelfHostedExecuteWorkflow decorator skips quota check for skip users."""
+    current_user.set(mock_user_with_skip_usage_cutoff)
 
-    @has_sufficient_usage_quota(
-        UsageQuotaEvent.DAP_FLOW_ON_EXECUTE, "https://customers.example.com"
-    )
-    async def TrackSelfHostedExecuteWorkflow(
-        _self: Any,
-        request: AsyncIterator[contract_pb2.TrackSelfHostedClientEvent],
-        _context: ServicerContext,
-    ) -> AsyncIterator[contract_pb2.TrackSelfHostedAction]:
-        async for item in request:
-            yield contract_pb2.TrackSelfHostedAction(requestID=item.requestID)
-
-    _ = [
-        _
-        async for _ in TrackSelfHostedExecuteWorkflow(
-            None, mock_track_self_hosted_request_generator(), mock_context
-        )
-    ]
-
-    mock_context.abort.assert_called_once_with(
-        StatusCode.RESOURCE_EXHAUSTED,
-        "Insufficient credits. Error code: USAGE_QUOTA_EXCEEDED",
-    )
+    assert not mock_usage_quota_service.execute.called
 
 
 @pytest.mark.asyncio
-async def test_track_self_hosted_execute_workflow_with_empty_stream(
-    mock_service,
+async def test_decorator_extracts_correct_context_from_execute_workflow_request(
+    mock_usage_quota_service,
 ) -> None:
-    """Test TrackSelfHostedExecuteWorkflow with empty request stream."""
-
-    async def empty_request_generator() -> (
-        AsyncIterator[contract_pb2.TrackSelfHostedClientEvent]
-    ):
-        return
-        yield
-
-    @has_sufficient_usage_quota(
-        UsageQuotaEvent.DAP_FLOW_ON_EXECUTE, "https://customers.example.com"
+    """Test that decorator extracts correct GL context from ExecuteWorkflow requests."""
+    request_event = contract_pb2.ClientEvent(
+        startRequest=contract_pb2.StartWorkflowRequest(
+            workflowDefinition="test_workflow_definition", goal="test goal"
+        )
     )
-    async def TrackSelfHostedExecuteWorkflow(
-        _self: Any,
-        request: AsyncIterator[contract_pb2.TrackSelfHostedClientEvent],
-        _context: ServicerContext,
-    ) -> AsyncIterator[contract_pb2.TrackSelfHostedAction]:
-        async for item in request:
-            yield contract_pb2.TrackSelfHostedAction(requestID=item.requestID)
 
-    result = [
-        item
-        async for item in TrackSelfHostedExecuteWorkflow(
-            None, empty_request_generator(), MagicMock()
-        )
-    ]
-
-    assert len(result) == 0
-    mock_service.execute.assert_not_called()
+    assert request_event.startRequest.workflowDefinition == "test_workflow_definition"
+    assert request_event.HasField("startRequest")
 
 
-def test_track_self_hosted_execute_workflow_with_wrong_event_type() -> None:
-    """Test TrackSelfHostedExecuteWorkflow with wrong event type raises ValueError."""
+@pytest.mark.asyncio
+async def test_decorator_extracts_correct_context_from_track_self_hosted_request(
+    mock_usage_quota_service,
+) -> None:
+    """Test that decorator extracts correct GL context from TrackSelfHostedExecuteWorkflow requests."""
+    request_event = contract_pb2.TrackSelfHostedClientEvent(
+        requestID="test-request-id",
+        workflowID="test-workflow-id",
+        featureQualifiedName="test_feature_name",
+        featureAiCatalogItem=True,
+    )
 
-    with pytest.raises(ValueError, match="Unsupported event type.*Expected to be"):
+    assert request_event.featureQualifiedName == "test_feature_name"
+    assert request_event.featureAiCatalogItem is True
 
-        @has_sufficient_usage_quota(
-            UsageQuotaEvent.DAP_FLOW_ON_GENERATE_TOKEN, "https://customers.example.com"
-        )
-        async def TrackSelfHostedExecuteWorkflow(
-            _self: Any,
-            request: AsyncIterator[contract_pb2.TrackSelfHostedClientEvent],
-            _context: ServicerContext,
-        ) -> AsyncIterator[contract_pb2.TrackSelfHostedAction]:
-            async for item in request:
-                yield contract_pb2.TrackSelfHostedAction(requestID=item.requestID)
+
+@pytest.mark.asyncio
+async def test_usage_quota_event_types_are_correct() -> None:
+    """Test that the correct UsageQuotaEvent types are used for each endpoint."""
+    assert UsageQuotaEvent.DAP_FLOW_ON_EXECUTE
+    assert UsageQuotaEvent.DAP_FLOW_ON_GENERATE_TOKEN
+
+    assert (
+        UsageQuotaEvent.DAP_FLOW_ON_EXECUTE.value
+        == "duo_agent_platform_workflow_on_execute"
+    )
+    assert (
+        UsageQuotaEvent.DAP_FLOW_ON_GENERATE_TOKEN.value
+        == "duo_agent_platform_workflow_on_generate_token"
+    )

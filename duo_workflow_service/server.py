@@ -5,7 +5,7 @@ import json
 import os
 import signal
 from itertools import chain
-from typing import AsyncIterable, AsyncIterator, Callable, Optional
+from typing import AsyncIterable, AsyncIterator, Optional
 
 import aiohttp
 import grpc
@@ -56,9 +56,7 @@ from duo_workflow_service.interceptors.model_metadata_interceptor import (
 from duo_workflow_service.interceptors.monitoring_interceptor import (
     MonitoringInterceptor,
 )
-from duo_workflow_service.interceptors.route import (
-    has_sufficient_usage_quota as _has_sufficient_usage_quota,
-)
+from duo_workflow_service.interceptors.route import has_sufficient_usage_quota
 from duo_workflow_service.monitoring import duo_workflow_metrics, setup_monitoring
 from duo_workflow_service.profiling import setup_profiling
 from duo_workflow_service.security.exceptions import SecurityException
@@ -129,23 +127,6 @@ CUSTOMERSDOT_URL: str | None = (
         "https://customers.gitlab.com",
     )
 )
-
-
-# TODO: move the creation process to the DI container
-def has_sufficient_usage_quota(event: UsageQuotaEvent):
-    def wrapper(func: Callable):
-        return _has_sufficient_usage_quota(
-            customersdot_url=CUSTOMERSDOT_URL or "",
-            user=os.environ.get(
-                "CUSTOMER_PORTAL_USAGE_QUOTA_API_USER", None
-            ),  # pylint: enable=direct-environment-variable-reference
-            token=os.environ.get(
-                "CUSTOMER_PORTAL_USAGE_QUOTA_API_TOKEN", None
-            ),  # pylint: enable=direct-environment-variable-reference
-            event=event,
-        )(func)
-
-    return wrapper
 
 
 def clean_start_request(start_workflow_request: contract_pb2.ClientEvent):

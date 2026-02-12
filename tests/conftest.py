@@ -25,6 +25,7 @@ from ai_gateway.api.middleware import (
     ModelConfigMiddleware,
 )
 from ai_gateway.api.middleware.internal_event import InternalEventMiddleware
+from ai_gateway.api.middleware.route import usage_quota
 from ai_gateway.api.server import CONTAINER_APPLICATION_MODULES
 from ai_gateway.code_suggestions.base import CodeSuggestionsChunk, CodeSuggestionsOutput
 from ai_gateway.code_suggestions.processing.typing import LanguageId
@@ -209,7 +210,8 @@ def mock_container_fixture(
 def mock_ai_gateway_container_fixture(
     mock_container: ContainerApplication,
 ) -> ContainerApplication:
-    mock_container.wire(modules=CONTAINER_APPLICATION_MODULES)
+
+    mock_container.wire(modules=CONTAINER_APPLICATION_MODULES + [usage_quota])
 
     return mock_container
 

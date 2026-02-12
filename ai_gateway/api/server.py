@@ -45,7 +45,6 @@ from ai_gateway.models import ModelAPIError
 from ai_gateway.models.base import ModelAPICallError
 from ai_gateway.profiling import setup_profiling
 from ai_gateway.structured_logging import can_log_request_data, setup_app_logging
-from lib.usage_quota import UsageQuotaService
 
 __all__ = [
     "create_fast_api_server",
@@ -67,6 +66,7 @@ CONTAINER_APPLICATION_MODULES = [
     "ai_gateway.api.server",
     "ai_gateway.api.monitoring",
     "ai_gateway.async_dependency_resolver",
+    "ai_gateway.api.middleware.route.usage_quota",
 ]
 
 ExceptionHandler = Callable[[Request, Exception], Awaitable[Response]]
@@ -91,6 +91,8 @@ async def lifespan(app: FastAPI):
 
     yield
 
+    await container_application.usage_quota.service().aclose()
+
 
 def create_fast_api_server(config: Config):
     auth_provider = CompositeProvider(
@@ -111,15 +113,6 @@ def create_fast_api_server(config: Config):
         structlog,
         bypass_auth_jwt_signature=config.auth.bypass_jwt_signature,
     )
-
-    # Initialize usage quota service for route decorator
-    # pylint: disable=direct-environment-variable-reference
-    usage_quota_service = UsageQuotaService(
-        customersdot_url=config.customer_portal_url,
-        customersdot_api_user=os.environ.get("CUSTOMER_PORTAL_USAGE_QUOTA_API_USER"),
-        customersdot_api_token=os.environ.get("CUSTOMER_PORTAL_USAGE_QUOTA_API_TOKEN"),
-    )
-    # pylint: enable=direct-environment-variable-reference
 
     fastapi_app = FastAPI(
         title="GitLab AI Gateway",
@@ -173,7 +166,6 @@ def create_fast_api_server(config: Config):
     fastapi_app.state.cloud_connector_auth_provider = (
         auth_provider  # For readiness check
     )
-    fastapi_app.state.usage_quota_service = usage_quota_service
     setup_custom_exception_handlers(fastapi_app)
     setup_router(fastapi_app)
     setup_app_logging(fastapi_app)

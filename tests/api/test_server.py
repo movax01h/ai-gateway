@@ -3,7 +3,7 @@ import os
 import socket
 from typing import cast
 from unittest import mock
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import litellm
 import pytest
@@ -183,6 +183,11 @@ async def test_lifespan(config, app, unused_port, monkeypatch, vertex_project):
     monkeypatch.setattr("google.auth.default", mock_default)
 
     mock_container_app = MagicMock(spec=ContainerApplication)
+    # Mock the usage_quota service chain for cleanup
+    mock_service = MagicMock()
+    mock_service.aclose = AsyncMock()
+    mock_container_app.return_value.usage_quota.service.return_value = mock_service
+
     monkeypatch.setattr(
         "ai_gateway.api.server.ContainerApplication", mock_container_app
     )
@@ -202,6 +207,9 @@ async def test_lifespan(config, app, unused_port, monkeypatch, vertex_project):
             asyncio.get_running_loop.assert_called_once()
 
         assert litellm.vertex_project == vertex_project
+
+    # Verify cleanup was called after lifespan exits
+    mock_service.aclose.assert_called_once()
 
 
 def test_cloud_connector_auth_provider_in_app_state():
