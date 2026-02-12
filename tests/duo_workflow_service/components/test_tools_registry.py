@@ -1,3 +1,5 @@
+import hashlib
+import json
 from typing import ClassVar
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -293,6 +295,7 @@ def test_registry_initialization(
     registry = ToolsRegistry(
         enabled_tools=config,
         preapproved_tools=[],
+        tool_call_approvals={},
         tool_metadata=tool_metadata,
         mcp_tools=None,
     )
@@ -316,6 +319,7 @@ def test_registry_initialization_initialises_tools_with_correct_attributes(
             "read_write_files",
         ],
         preapproved_tools=[],
+        tool_call_approvals={},
         tool_metadata=tool_metadata,
         mcp_tools=None,
     )
@@ -509,6 +513,7 @@ def test_get_tool(tool_metadata, tool_name, expected_tool, config):
     registry = ToolsRegistry(
         enabled_tools=config,
         preapproved_tools=[],
+        tool_call_approvals={},
         tool_metadata=tool_metadata,
     )
 
@@ -532,6 +537,7 @@ def test_get_batch_tools(tool_metadata, requested_tools, expected_tools, config)
     registry = ToolsRegistry(
         enabled_tools=config,
         preapproved_tools=[],
+        tool_call_approvals={},
         tool_metadata=tool_metadata,
     )
 
@@ -556,6 +562,7 @@ def test_get_handlers(tool_metadata, requested_tools, expected_tools, config):
     registry = ToolsRegistry(
         enabled_tools=config,
         preapproved_tools=[],
+        tool_call_approvals={},
         tool_metadata=tool_metadata,
     )
 
@@ -568,6 +575,7 @@ def test_preapproved_tools_initialization(tool_metadata):
     registry = ToolsRegistry(
         enabled_tools=["read_write_files", "read_only_gitlab"],
         preapproved_tools=["read_write_files"],
+        tool_call_approvals={},
         tool_metadata=tool_metadata,
     )
 
@@ -605,6 +613,7 @@ def test_approval_required(tool_metadata):
         preapproved_tools=[
             "read_write_files"
         ],  # Only read_write_files tools are preapproved
+        tool_call_approvals={},
         tool_metadata=tool_metadata,
     )
 
@@ -733,6 +742,7 @@ def test_toolset_method(
     registry = ToolsRegistry(
         enabled_tools=privileges,
         preapproved_tools=["read_write_files"],
+        tool_call_approvals={},
         tool_metadata=tool_metadata,
         mcp_tools=mcp_tools,
     )
@@ -773,6 +783,7 @@ class TestGenericGitLabAPITools:
         registry = ToolsRegistry(
             enabled_tools=["read_only_gitlab"],
             preapproved_tools=[],
+            tool_call_approvals={},
             tool_metadata=tool_metadata,
         )
 
@@ -792,6 +803,7 @@ class TestGenericGitLabAPITools:
         registry = ToolsRegistry(
             enabled_tools=["read_only_gitlab"],
             preapproved_tools=[],
+            tool_call_approvals={},
             tool_metadata=tool_metadata,
         )
 
@@ -804,6 +816,7 @@ class TestGenericGitLabAPITools:
         registry = ToolsRegistry(
             enabled_tools=["read_write_files"],
             preapproved_tools=[],
+            tool_call_approvals={},
             tool_metadata=tool_metadata,
         )
 
@@ -822,6 +835,7 @@ class TestGenericGitLabAPITools:
         registry_preapproved = ToolsRegistry(
             enabled_tools=["use_generic_gitlab_api_tools"],
             preapproved_tools=["use_generic_gitlab_api_tools"],
+            tool_call_approvals={},
             tool_metadata=tool_metadata,
         )
         assert not registry_preapproved.approval_required("gitlab_api_get")
@@ -831,6 +845,7 @@ class TestGenericGitLabAPITools:
         registry_not_preapproved = ToolsRegistry(
             enabled_tools=["use_generic_gitlab_api_tools"],
             preapproved_tools=[],
+            tool_call_approvals={},
             tool_metadata=tool_metadata,
         )
         assert registry_not_preapproved.approval_required("gitlab_api_get")
@@ -846,6 +861,7 @@ class TestGenericGitLabAPITools:
         registry = ToolsRegistry(
             enabled_tools=["read_only_gitlab"],
             preapproved_tools=[],
+            tool_call_approvals={},
             tool_metadata=tool_metadata,
         )
 
@@ -868,6 +884,7 @@ class TestCapabilityDependentTools:
         registry = ToolsRegistry(
             enabled_tools=["run_commands"],
             preapproved_tools=[],
+            tool_call_approvals={},
             tool_metadata=tool_metadata,
         )
 
@@ -885,6 +902,7 @@ class TestCapabilityDependentTools:
         registry = ToolsRegistry(
             enabled_tools=["run_commands"],
             preapproved_tools=[],
+            tool_call_approvals={},
             tool_metadata=tool_metadata,
         )
 
@@ -902,6 +920,7 @@ class TestCapabilityDependentTools:
         registry = ToolsRegistry(
             enabled_tools=[],
             preapproved_tools=[],
+            tool_call_approvals={},
             tool_metadata=tool_metadata,
         )
 
@@ -930,6 +949,7 @@ class TestCapabilityDependentTools:
                 ToolsRegistry(
                     enabled_tools=[],
                     preapproved_tools=[],
+                    tool_call_approvals={},
                     tool_metadata=tool_metadata,
                 )
 
@@ -943,6 +963,7 @@ class TestCapabilityDependentTools:
         registry = ToolsRegistry(
             enabled_tools=["run_commands"],
             preapproved_tools=["run_commands"],
+            tool_call_approvals={},
             tool_metadata=tool_metadata,
         )
 
@@ -950,3 +971,210 @@ class TestCapabilityDependentTools:
         assert "run_command" in registry._enabled_tools
         assert "run_command" in registry._preapproved_tool_names
         assert isinstance(registry._enabled_tools["run_command"], ShellCommand)
+
+
+class TestToolCallApprovals:
+    """Tests for per-tool-call approval functionality."""
+
+    @staticmethod
+    def _hash_call_args(call_args: dict) -> str:
+        call_args_json = json.dumps(call_args, separators=(",", ":"))
+        return hashlib.sha256(call_args_json.encode()).hexdigest()
+
+    def test_tool_call_approvals_basic_match(self, tool_metadata):
+        """Test that tool calls with matching arguments don't require approval."""
+        approved_args = {"path": "/tmp/test.txt"}
+        tool_call_approvals = {
+            "read_file": {"call_args": [self._hash_call_args(approved_args)]},
+        }
+
+        registry = ToolsRegistry(
+            enabled_tools=["read_write_files"],
+            preapproved_tools=[],
+            tool_call_approvals=tool_call_approvals,
+            tool_metadata=tool_metadata,
+        )
+
+        # Matching arguments should not require approval
+        assert not registry.approval_required("read_file", approved_args)
+
+        # Non-matching arguments should require approval
+        assert registry.approval_required("read_file", {"path": "/tmp/other.txt"})
+
+        # Different tool should require approval (not in tool_call_approvals)
+        assert registry.approval_required("edit_file", {"path": "/tmp/test.txt"})
+
+    def test_tool_call_approvals_multiple_approved_combinations(self, tool_metadata):
+        """Test that multiple approved argument combinations work correctly."""
+        approved_args_list = [
+            {"path": "/tmp/test.txt"},
+            {"path": "/tmp/allowed.txt"},
+            {"path": "/home/user/file.txt"},
+        ]
+        tool_call_approvals = {
+            "read_file": {
+                "call_args": [self._hash_call_args(args) for args in approved_args_list]
+            },
+        }
+
+        registry = ToolsRegistry(
+            enabled_tools=["read_write_files"],
+            preapproved_tools=[],
+            tool_call_approvals=tool_call_approvals,
+            tool_metadata=tool_metadata,
+        )
+
+        # All approved combinations should not require approval
+        for approved_args in approved_args_list:
+            assert not registry.approval_required("read_file", approved_args)
+
+        # Non-approved path should require approval
+        assert registry.approval_required("read_file", {"path": "/tmp/unapproved.txt"})
+
+    def test_tool_call_approvals_invalid_format_logs_warning_and_requires_approval(
+        self, tool_metadata
+    ):
+        """Test invalid format: a warning is logged and approval is still required."""
+        tool_call_approvals = {
+            "read_file": {"path": "/tmp/test.txt"},
+        }
+
+        registry = ToolsRegistry(
+            enabled_tools=["read_write_files"],
+            preapproved_tools=[],
+            tool_call_approvals=tool_call_approvals,
+            tool_metadata=tool_metadata,
+        )
+
+        # Invalid format should require approval
+        assert registry.approval_required("read_file", {"path": "/tmp/test.txt"})
+
+    def test_tool_call_approvals_with_preapproved_tools(self, tool_metadata):
+        """Test that preapproved tools always skip approval, regardless of tool_call_approvals."""
+        approved_args = {"path": "/tmp/test.txt"}
+        tool_call_approvals = {
+            "read_file": {"call_args": [self._hash_call_args(approved_args)]},
+        }
+
+        registry = ToolsRegistry(
+            enabled_tools=["read_write_files"],
+            preapproved_tools=[
+                "read_write_files"
+            ],  # All read_write_files tools preapproved
+            tool_call_approvals=tool_call_approvals,
+            tool_metadata=tool_metadata,
+        )
+
+        # Preapproved tools should never require approval, even for non-approved args
+        assert not registry.approval_required("read_file", {"path": "/tmp/test.txt"})
+        assert not registry.approval_required("read_file", {"path": "/tmp/other.txt"})
+        assert not registry.approval_required("read_file", {"path": "/any/path.txt"})
+
+    def test_tool_call_approvals_empty_args(self, tool_metadata):
+        """Test tool call approvals with empty arguments."""
+        tool_call_approvals = {
+            "list_issues": {
+                "call_args": [self._hash_call_args({})]
+            },  # Approve calls with no arguments
+        }
+
+        registry = ToolsRegistry(
+            enabled_tools=["read_only_gitlab"],
+            preapproved_tools=[],
+            tool_call_approvals=tool_call_approvals,
+            tool_metadata=tool_metadata,
+        )
+
+        # Empty args should match approved empty dict
+        assert not registry.approval_required("list_issues", {})
+        assert not registry.approval_required(
+            "list_issues", None
+        )  # None converts to {}
+
+        # Args with values should require approval
+        assert registry.approval_required("list_issues", {"some_key": "value"})
+
+    def test_tool_call_approvals_complex_arguments(self, tool_metadata):
+        """Test tool call approvals with complex nested arguments."""
+        approved_args = {
+            "title": "Bug report",
+            "description": "Test description",
+            "labels": ["bug", "high-priority"],
+        }
+        tool_call_approvals = {
+            "create_issue": {"call_args": [self._hash_call_args(approved_args)]},
+        }
+
+        registry = ToolsRegistry(
+            enabled_tools=["read_write_gitlab"],
+            preapproved_tools=[],
+            tool_call_approvals=tool_call_approvals,
+            tool_metadata=tool_metadata,
+        )
+
+        # Exact match should not require approval
+        assert not registry.approval_required("create_issue", approved_args)
+
+        # Different labels should require approval
+        assert registry.approval_required(
+            "create_issue",
+            {
+                "title": "Bug report",
+                "description": "Test description",
+                "labels": ["bug"],  # Different labels
+            },
+        )
+
+        # Different title should require approval
+        assert registry.approval_required(
+            "create_issue",
+            {
+                "title": "Different title",
+                "description": "Test description",
+                "labels": ["bug", "high-priority"],
+            },
+        )
+
+    def test_tool_call_approvals_not_in_approvals_dict(self, tool_metadata):
+        """Test that tools not in tool_call_approvals require approval by default."""
+        approved_args = {"path": "/tmp/test.txt"}
+        tool_call_approvals = {
+            "read_file": {"call_args": [self._hash_call_args(approved_args)]},
+        }
+
+        registry = ToolsRegistry(
+            enabled_tools=["read_write_files"],
+            preapproved_tools=[],
+            tool_call_approvals=tool_call_approvals,
+            tool_metadata=tool_metadata,
+        )
+
+        # Tools not in tool_call_approvals should require approval
+        assert registry.approval_required("edit_file", {"path": "/tmp/test.txt"})
+        assert registry.approval_required("list_dir", {"path": "/tmp"})
+        assert registry.approval_required("grep", {"pattern": "test"})
+
+    def test_tool_call_approvals_integration_with_toolset(self, tool_metadata):
+        """Test that tool_call_approvals work correctly with toolset method."""
+        read_file_args = {"path": "/tmp/test.txt"}
+        edit_file_args = {"path": "/tmp/edit.txt"}
+        tool_call_approvals = {
+            "read_file": {"call_args": [self._hash_call_args(read_file_args)]},
+            "edit_file": {"call_args": [self._hash_call_args(edit_file_args)]},
+        }
+
+        registry = ToolsRegistry(
+            enabled_tools=["read_write_files"],
+            preapproved_tools=[],
+            tool_call_approvals=tool_call_approvals,
+            tool_metadata=tool_metadata,
+        )
+
+        # Create toolset with tools
+        toolset = registry.toolset(["read_file", "edit_file", "list_dir"])
+
+        # Verify that approval checks work through toolset
+        assert not registry.approval_required("read_file", read_file_args)
+        assert registry.approval_required("read_file", {"path": "/tmp/other.txt"})
+        assert not registry.approval_required("edit_file", edit_file_args)
+        assert registry.approval_required("list_dir", {"path": "/tmp"})

@@ -50,26 +50,29 @@ class ChatAgent:
         approval_messages = []
 
         for call in message.tool_calls:
-            if (
+            tool_name = call["name"]
+            tool_args = call["args"]
+            is_agentic_mock = getattr(
+                self.prompt_adapter.get_model(), "_is_agentic_mock_model", False
+            )
+            needs_approval = (
                 self.tools_registry
-                and self.tools_registry.approval_required(call["name"])
-                and call["name"] not in preapproved_tools
-                and not getattr(
-                    self.prompt_adapter.get_model(),
-                    "_is_auto_approved_by_agentic_mock_model",
-                    False,
-                )
-            ):
+                and self.tools_registry.approval_required(tool_name, tool_args)
+                and tool_name not in preapproved_tools
+                and not is_agentic_mock
+            )
+
+            if needs_approval:
                 approval_required = True
                 approval_messages.append(
                     UiChatLog(
                         message_type=MessageTypeEnum.REQUEST,
                         message_sub_type=None,
-                        content=f"Tool {call['name']} requires approval. Please confirm if you want to proceed.",
+                        content=f"Tool {tool_name} requires approval. Please confirm if you want to proceed.",
                         timestamp=datetime.now(timezone.utc).isoformat(),
                         status=ToolStatus.SUCCESS,
                         correlation_id=None,
-                        tool_info=ToolInfo(name=call["name"], args=call["args"]),
+                        tool_info=ToolInfo(name=tool_name, args=tool_args),
                         additional_context=None,
                         message_id=f'request-{call["id"]}',
                     )

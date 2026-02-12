@@ -42,6 +42,7 @@ class Checkpoint(TypedDict, total=False):
 class WorkflowConfig(TypedDict):
     agent_privileges_names: list
     pre_approved_agent_privileges_names: list
+    tool_call_approvals: dict
     workflow_status: str
     mcp_enabled: bool
     allow_agent_to_request_user: bool
@@ -182,9 +183,67 @@ query($workflowId: AiDuoWorkflowsWorkflowID!) {
 }
 """
 
+# This query adds per session tool approvals in GitLab 18.9+.
+GITLAB_18_9_OR_ABOVE_QUERY = """
+query($workflowId: AiDuoWorkflowsWorkflowID!) {
+    duoWorkflowWorkflows(workflowId: $workflowId) {
+        nodes {
+            statusName
+            projectId
+            project {
+                id
+                name
+                description
+                httpUrlToRepo
+                languages {
+                    name
+                    share
+                }
+                webUrl
+                statisticsDetailsPaths {
+                    repository
+                }
+                duoContextExclusionSettings {
+                    exclusionRules
+                }
+                rootGroup {
+                    aiSettings {
+                        promptInjectionProtectionLevel
+                    }
+                }
+            }
+            namespaceId
+            namespace {
+                id
+                name
+                description
+                webUrl
+                rootNamespace {
+                    aiSettings {
+                        promptInjectionProtectionLevel
+                    }
+                }
+            }
+            agentPrivilegesNames
+            preApprovedAgentPrivilegesNames
+            toolCallApprovals
+            mcpEnabled
+            allowAgentToRequestUser
+            latestCheckpoint {
+                threadTs
+                parentTs
+                metadata
+                checkpoint
+            }
+        }
+    }
+}
+"""
+
 version_18_2 = Version("18.2.0")
 version_18_3 = Version("18.3.0")
 version_18_8 = Version("18.8.0")
+version_18_9 = Version("18.9.0")
 FALLBACK_VERSION = version_18_2
 
 
@@ -199,6 +258,9 @@ def fetch_workflow_and_container_query():
     except (InvalidVersion, TypeError) as ex:
         log_exception(ex)
         gl_version = FALLBACK_VERSION
+
+    if version_18_9 <= gl_version:
+        return GITLAB_18_9_OR_ABOVE_QUERY
 
     if version_18_8 <= gl_version:
         return GITLAB_18_8_OR_ABOVE_QUERY
@@ -283,12 +345,12 @@ async def fetch_workflow_and_container_data(
             f"Failed to extract gitlab host from web_url for workflow {workflow_id}"
         )
 
-    # Build workflow config from the response
     workflow_config = WorkflowConfig(
         agent_privileges_names=workflow.get("agentPrivilegesNames", []),
         pre_approved_agent_privileges_names=workflow.get(
             "preApprovedAgentPrivilegesNames", []
         ),
+        tool_call_approvals=workflow.get("toolCallApprovals", {}),
         workflow_status=workflow.get("statusName", ""),
         mcp_enabled=workflow.get("mcpEnabled", False),
         allow_agent_to_request_user=workflow.get("allowAgentToRequestUser", False),
@@ -326,6 +388,7 @@ def empty_workflow_config() -> WorkflowConfig:
     return {
         "agent_privileges_names": [],
         "pre_approved_agent_privileges_names": [],
+        "tool_call_approvals": {},
         "allow_agent_to_request_user": False,
         "mcp_enabled": False,
         "first_checkpoint": None,

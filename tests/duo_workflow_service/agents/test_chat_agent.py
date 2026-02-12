@@ -619,7 +619,7 @@ class TestChatAgentGitLabInstanceInfo:
 @pytest.mark.asyncio
 async def test_agentic_fake_model_bypasses_tool_approval(input):
     mock_model = Mock()
-    mock_model._is_auto_approved_by_agentic_mock_model = True
+    mock_model._is_agentic_mock_model = True
 
     mock_prompt_adapter = Mock()
     mock_prompt_adapter.get_model.return_value = mock_model
@@ -654,3 +654,81 @@ async def test_agentic_fake_model_bypasses_tool_approval(input):
     result = await chat_agent.run(input)
 
     assert result["status"] == WorkflowStatusEnum.EXECUTION
+
+
+@pytest.mark.asyncio
+async def test_mixed_tool_calls_approval_only_for_requiring_tools(input):
+    """Test that approval messages are only added for tools that actually require approval.
+
+    This test verifies the fix for the bug where approval_required flag was checked outside the loop, causing approval
+    messages to be added for all tools after the first tool requiring approval.
+    """
+    mock_model = Mock()
+    mock_model._is_agentic_mock_model = False
+
+    mock_prompt_adapter = Mock()
+    mock_prompt_adapter.get_model.return_value = mock_model
+
+    mock_tools_registry = Mock(spec=ToolsRegistry)
+
+    # Configure approval_required to return different values for different tools
+    def approval_side_effect(
+        tool_name, tool_args=None
+    ):  # pylint: disable=unused-argument
+        # preapproved_tool: no approval needed
+        # tool_requiring_approval: approval needed
+        # another_preapproved_tool: no approval needed
+        return tool_name == "tool_requiring_approval"
+
+    mock_tools_registry.approval_required.side_effect = approval_side_effect
+
+    chat_agent = ChatAgent(
+        name="Chat Agent",
+        prompt_adapter=mock_prompt_adapter,
+        tools_registry=mock_tools_registry,
+        system_template_override=None,
+    )
+
+    # Create an AI message with multiple tool calls: preapproved, requiring approval, preapproved
+    ai_message_with_mixed_tools = AIMessage(
+        content="I need to use multiple tools",
+        tool_calls=[
+            {
+                "name": "preapproved_tool",
+                "args": {"param": "value1"},
+                "id": "call_1",
+                "type": "tool_call",
+            },
+            {
+                "name": "tool_requiring_approval",
+                "args": {"param": "value2"},
+                "id": "call_2",
+                "type": "tool_call",
+            },
+            {
+                "name": "another_preapproved_tool",
+                "args": {"param": "value3"},
+                "id": "call_3",
+                "type": "tool_call",
+            },
+        ],
+    )
+
+    chat_agent.prompt_adapter.get_response = AsyncMock(
+        return_value=ai_message_with_mixed_tools
+    )
+
+    result = await chat_agent.run(input)
+
+    # Should require approval because one tool needs it
+    assert result["status"] == WorkflowStatusEnum.TOOL_CALL_APPROVAL_REQUIRED
+
+    # Should have exactly ONE approval message (only for tool_requiring_approval)
+    approval_messages = [
+        msg
+        for msg in result["ui_chat_log"]
+        if msg["message_type"] == MessageTypeEnum.REQUEST
+    ]
+    assert len(approval_messages) == 1
+    assert approval_messages[0]["tool_info"]["name"] == "tool_requiring_approval"
+    assert approval_messages[0]["tool_info"]["args"] == {"param": "value2"}

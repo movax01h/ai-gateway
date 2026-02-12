@@ -1,4 +1,7 @@
-from typing import Optional, Sequence, Type, TypedDict, Union
+import hashlib
+import json
+import logging
+from typing import Any, Optional, Sequence, Type, TypedDict, Union
 
 from langchain.tools import BaseTool
 from pydantic import BaseModel
@@ -34,6 +37,8 @@ from duo_workflow_service.tools.vulnerabilities.post_secret_fp_analysis_to_gitla
 )
 from lib.feature_flags.context import FeatureFlag, is_feature_enabled
 from lib.language_server import LanguageServerVersion
+
+logger = logging.getLogger(__name__)
 
 
 class ToolMetadata(TypedDict):
@@ -189,6 +194,7 @@ class ToolsRegistry:
     _enabled_tools: dict[str, Union[BaseTool, Type[BaseModel]]]
     _preapproved_tool_names: set[str]
     _mcp_tool_names: list[str]
+    _tool_call_approvals: dict
 
     @classmethod
     async def configure(
@@ -225,12 +231,14 @@ class ToolsRegistry:
             tool_metadata=tool_metadata,
             mcp_tools=mcp_tools,
             language_server_version=language_server_version,
+            tool_call_approvals=workflow_config.get("tool_call_approvals", {}),
         )
 
     def __init__(
         self,
         enabled_tools: list[str],
         preapproved_tools: list[str],
+        tool_call_approvals: dict,
         tool_metadata: ToolMetadata,
         mcp_tools: Optional[list[McpToolConfig]] = None,
         language_server_version: Optional[LanguageServerVersion] = None,
@@ -257,6 +265,8 @@ class ToolsRegistry:
 
         self._preapproved_tool_names = set(self._enabled_tools.keys())
         self._mcp_tool_names = [tool["llm_name"] for tool in mcp_tools or []]
+
+        self._tool_call_approvals = tool_call_approvals
 
         for privilege in enabled_tools:
             for tool_cls_or_config in tools_for_agent_privileges.get(privilege, []):
@@ -334,17 +344,58 @@ class ToolsRegistry:
 
         return tool_handlers
 
-    def approval_required(self, tool_name: str) -> bool:
+    def approval_required(
+        self, tool_name: str, tool_args: dict[Any, Any] | None = None
+    ) -> bool:
         """Check if a tool requires human approval before execution.
 
         Args:
             tool_name: The name of the tool to check
+            tool_args: The arguments passed to the tool
 
         Returns:
             False if the tool is in the preapproved list,
             True otherwise.
         """
-        return tool_name not in self._preapproved_tool_names
+        if tool_args is None:
+            tool_args = {}
+
+        if tool_name in self._preapproved_tool_names:
+            return False
+
+        approved_tool_calls_config = self._tool_call_approvals.get(tool_name, None)
+        if approved_tool_calls_config is None:
+            return True
+
+        if "call_args" not in approved_tool_calls_config:
+            logger.warning(
+                "Approved tool calls do not comply with expected format",
+                extra={
+                    "approved_tool_calls": approved_tool_calls_config,
+                },
+            )
+            return True
+
+        approved_tool_calls = approved_tool_calls_config["call_args"]
+
+        # Convert tool_args to SHA256 hexdigest for comparison
+        # Match Rails JSON serialization: compact format
+        tool_args_json = json.dumps(tool_args, separators=(",", ":"))
+        tool_args_hash = hashlib.sha256(tool_args_json.encode()).hexdigest()
+
+        logger.debug(
+            "Searching for tool call approval",
+            extra={
+                "tool_name": tool_name,
+                "tool_args_hash": tool_args_hash,
+                "tool_call_approvals": approved_tool_calls,
+            },
+        )
+
+        return not any(
+            tool_args_hash == approved_call_hash
+            for approved_call_hash in approved_tool_calls
+        )
 
     def toolset(self, tool_names: list[str]) -> Toolset:
         """Create a Toolset instance representing complete collection of tools available to an agent.
