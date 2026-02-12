@@ -40,6 +40,7 @@ async def usage_quota_client_fixture() -> AsyncGenerator[UsageQuotaClient, None]
 
     yield usage_quota_client
 
+    await usage_quota_client.aclose()
     await UsageQuotaClient.check_quota_available.cache.clear()
 
 
@@ -696,3 +697,39 @@ class TestConnectionPoolConfiguration:
             limits = call_args[1]["limits"]
             assert limits.max_keepalive_connections == 20
             assert limits.max_connections == 100
+
+    @pytest.mark.asyncio
+    async def test_aclose_cleanup(self):
+        """Should properly cleanup HTTP client resources."""
+        client = UsageQuotaClient(
+            customersdot_url="https://customers.gitlab.local/",
+            customersdot_api_user="aigw@gitlab.local",
+            customersdot_api_token="customersdot_api_token",
+            request_timeout=1.0,
+        )
+
+        # Initialize client by calling _get_client
+        http_client = await client._get_client()
+        assert client._http_client is not None
+        assert client._http_client is http_client
+
+        # Cleanup
+        await client.aclose()
+        assert client._http_client is None
+
+    @pytest.mark.asyncio
+    async def test_aclose_when_client_not_initialized(self):
+        """Should handle aclose gracefully when client never initialized."""
+        client = UsageQuotaClient(
+            customersdot_url="https://customers.gitlab.local/",
+            customersdot_api_user="aigw@gitlab.local",
+            customersdot_api_token="customersdot_api_token",
+            request_timeout=1.0,
+        )
+
+        # Client never initialized
+        assert client._http_client is None
+
+        # Should not raise any errors
+        await client.aclose()
+        assert client._http_client is None

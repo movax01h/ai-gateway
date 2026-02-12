@@ -14,6 +14,7 @@ from ai_gateway.tracking.container import ContainerTracking
 from ai_gateway.x_ray.container import ContainerXRay
 from lib.billing_events import ContainerBillingEvent
 from lib.internal_events import ContainerInternalEvent
+from lib.usage_quota import ContainerUsageQuota
 
 __all__ = [
     "ContainerApplication",
@@ -97,4 +98,7 @@ class ContainerApplication(containers.DeclarativeContainer):
         ContainerAbuseDetection,
         config=config.abuse_detection,
         models=pkg_models,
+    )
+    usage_quota = providers.Container(
+        ContainerUsageQuota,
     )

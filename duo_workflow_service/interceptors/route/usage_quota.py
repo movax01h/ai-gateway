@@ -2,10 +2,12 @@ import functools
 from collections.abc import AsyncIterable
 from typing import Callable
 
+from dependency_injector.wiring import Provide, inject
 from gitlab_cloud_connector.user import CloudConnectorUser
 from grpc import StatusCode
 from grpc.aio import ServicerContext
 
+from ai_gateway.container import ContainerApplication
 from contract import contract_pb2, contract_pb2_grpc
 from duo_workflow_service.interceptors.authentication_interceptor import (
     current_user as current_user_context_var,
@@ -17,26 +19,17 @@ from lib.usage_quota.client import should_skip_usage_quota_for_user
 
 def has_sufficient_usage_quota(
     event: UsageQuotaEvent,
-    customersdot_url: str,
-    user: str | None = None,
-    token: str | None = None,
 ):
     def decorator(func: Callable):
-        service = UsageQuotaService(
-            customersdot_url, customersdot_api_user=user, customersdot_api_token=token
-        )
-
         match func.__name__:
             case contract_pb2_grpc.DuoWorkflowServicer.ExecuteWorkflow.__name__:
-                return _process_execute_workflow_stream(func, service, event)
+                return _process_execute_workflow_stream(func, event)
             case contract_pb2_grpc.DuoWorkflowServicer.GenerateToken.__name__:
-                return _process_generate_token_unary(func, service, event)
+                return _process_generate_token_unary(func, event)
             case (
                 contract_pb2_grpc.DuoWorkflowServicer.TrackSelfHostedExecuteWorkflow.__name__
             ):
-                return _process_track_self_hosted_execute_workflow_stream(
-                    func, service, event
-                )
+                return _process_track_self_hosted_execute_workflow_stream(func, event)
             case _:
                 raise TypeError(
                     f"unsupported method to intercept '{func.__qualname__}'"
@@ -49,23 +42,22 @@ async def abort_route_interceptor(
     context: ServicerContext, code: StatusCode, message: str
 ):
     await context.abort(code, message)
-    return
 
 
-def _process_execute_workflow_stream(
-    func: Callable, service: UsageQuotaService, event: UsageQuotaEvent
-):
+def _process_execute_workflow_stream(func: Callable, event: UsageQuotaEvent):
     if event is not event.DAP_FLOW_ON_EXECUTE:
         raise ValueError(
             f"Unsupported event type '{event.value}'. Expected to be '{event.DAP_FLOW_ON_EXECUTE}'"
         )
 
     @functools.wraps(func)
+    @inject
     async def wrapper(
         obj,
         request: AsyncIterable[contract_pb2.ClientEvent],
         grpc_context: ServicerContext,
         *args,
+        service: UsageQuotaService = Provide[ContainerApplication.usage_quota.service],
         **kwargs,
     ):
         try:
@@ -99,7 +91,7 @@ def _process_execute_workflow_stream(
 
 
 def _process_track_self_hosted_execute_workflow_stream(
-    func: Callable, service: UsageQuotaService, event: UsageQuotaEvent
+    func: Callable, event: UsageQuotaEvent
 ):
     if event is not event.DAP_FLOW_ON_EXECUTE:
         raise ValueError(
@@ -107,11 +99,13 @@ def _process_track_self_hosted_execute_workflow_stream(
         )
 
     @functools.wraps(func)
+    @inject
     async def wrapper(
         obj,
         request: AsyncIterable[contract_pb2.TrackSelfHostedClientEvent],
         grpc_context: ServicerContext,
         *args,
+        service: UsageQuotaService = Provide[ContainerApplication.usage_quota.service],
         **kwargs,
     ):
         try:
@@ -145,20 +139,20 @@ def _process_track_self_hosted_execute_workflow_stream(
     return wrapper
 
 
-def _process_generate_token_unary(
-    func: Callable, service: UsageQuotaService, event: UsageQuotaEvent
-):
+def _process_generate_token_unary(func: Callable, event: UsageQuotaEvent):
     if event is not event.DAP_FLOW_ON_GENERATE_TOKEN:
         raise ValueError(
             f"Unsupported event type '{event.value}'. Expected to be {event.DAP_FLOW_ON_GENERATE_TOKEN}"
         )
 
     @functools.wraps(func)
+    @inject
     async def wrapper(
         obj,
         request: contract_pb2.GenerateTokenRequest,
         grpc_context: ServicerContext,
         *args,
+        service: UsageQuotaService = Provide[ContainerApplication.usage_quota.service],
         **kwargs,
     ):
         try:

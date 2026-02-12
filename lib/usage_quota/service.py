@@ -16,7 +16,7 @@ __all__ = [
 ]
 
 
-log = structlog.stdlib.get_logger("usage_quota_service")
+log = structlog.stdlib.get_logger("usage_quota")
 
 
 class UsageQuotaEvent(StrEnum):
@@ -52,7 +52,12 @@ class UsageQuotaService:
         self, gl_context: GLReportingEventContext, event: UsageQuotaEvent
     ):
         if not self.usage_quota_client.enabled:
-            log.warning("Usage quota client is disabled")
+            log.warning(
+                "Usage quota client is disabled",
+                correlation_id=getattr(
+                    current_event_context.get(), "correlation_id", None
+                ),
+            )
             return
 
         event_context = current_event_context.get()
@@ -69,7 +74,12 @@ class UsageQuotaService:
             }
         )
 
-        log.info("Checking usage quota")
+        log.info(
+            "Checking usage quota",
+            event_type=event.value,
+            feature_qualified_name=gl_context.feature_qualified_name,
+            correlation_id=getattr(event_context, "correlation_id", None),
+        )
 
         try:
             is_quota_available = await self.usage_quota_client.check_quota_available(
@@ -84,6 +94,8 @@ class UsageQuotaService:
                 "Usage quota check failed, failing open to allow request",
                 realm=usage_quota_event_context.realm,
                 error_message=e.message,
+                error_type=type(e).__name__,
+                correlation_id=getattr(event_context, "correlation_id", None),
             )
 
             return
@@ -98,3 +110,8 @@ class UsageQuotaService:
         USAGE_QUOTA_CHECK_TOTAL.labels(
             result="allow", realm=usage_quota_event_context.realm
         ).inc()
+
+    async def aclose(self):
+        """Cleanup underlying client resources."""
+        log.debug("Closing usage quota service")
+        await self.usage_quota_client.aclose()

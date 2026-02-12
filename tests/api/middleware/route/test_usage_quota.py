@@ -9,6 +9,7 @@ from ai_gateway.api.middleware.route.usage_quota import has_sufficient_usage_quo
 from lib.events import FeatureQualifiedNameStatic
 from lib.usage_quota import InsufficientCredits, UsageQuotaEvent
 from lib.usage_quota.client import SKIP_USAGE_CUTOFF_CLAIM
+from lib.usage_quota.service import UsageQuotaService
 
 
 @pytest.fixture
@@ -27,21 +28,28 @@ def mock_user_with_skip_usage_cutoff():
 
 
 @pytest.fixture
-def mock_request(mock_user):
+def mock_usage_quota_service():
+    """Create a mock usage quota service."""
+    return AsyncMock(spec=UsageQuotaService)
+
+
+@pytest.fixture
+def mock_request(mock_user, mock_ai_gateway_container, mock_usage_quota_service):
     """Create a mock request object with usage_quota_service."""
+    mock_ai_gateway_container.usage_quota.service.override(mock_usage_quota_service)
     request = MagicMock(spec=Request)
-    request.app = MagicMock()
-    request.app.state = MagicMock()
-    request.app.state.usage_quota_service = AsyncMock()
-    request.user = mock_user
-    return request
+    request.user = mock_user  # Set default user to avoid skip logic
+    yield request
+    mock_ai_gateway_container.usage_quota.service.reset_override()
 
 
 class TestDecoratorBasics:
     """Tests for basic decorator functionality."""
 
     @pytest.mark.asyncio
-    async def test_decorator_allows_request_on_sufficient_quota(self, mock_request):
+    async def test_decorator_allows_request_on_sufficient_quota(
+        self, mock_request, mock_usage_quota_service
+    ):
         """Test that decorator allows request when quota check passes."""
 
         async def test_handler(request, *args, **kwargs):
@@ -52,7 +60,7 @@ class TestDecoratorBasics:
             event=UsageQuotaEvent.CODE_SUGGESTIONS_CODE_COMPLETIONS,
         )(test_handler)
 
-        mock_request.app.state.usage_quota_service.execute = AsyncMock()
+        mock_usage_quota_service.execute = AsyncMock()
 
         response = await decorated(mock_request)
 
@@ -60,7 +68,10 @@ class TestDecoratorBasics:
 
     @pytest.mark.asyncio
     async def test_decorator_allows_request_for_user_with_skip_usage_cutoff_extra_claim(
-        self, mock_request, mock_user_with_skip_usage_cutoff: CloudConnectorUser
+        self,
+        mock_request,
+        mock_usage_quota_service,
+        mock_user_with_skip_usage_cutoff: CloudConnectorUser,
     ):
         """Test that decorator allows request when the user has `skip_usage_cutoff` extra claim."""
 
@@ -74,15 +85,17 @@ class TestDecoratorBasics:
             event=UsageQuotaEvent.CODE_SUGGESTIONS_CODE_COMPLETIONS,
         )(test_handler)
 
-        mock_request.app.state.usage_quota_service.execute = AsyncMock()
+        mock_usage_quota_service.execute = AsyncMock()
 
         response = await decorated(mock_request)
 
-        assert not mock_request.app.state.usage_quota_service.called
+        assert not mock_usage_quota_service.called
         assert response.status_code == 200
 
     @pytest.mark.asyncio
-    async def test_decorator_returns_402_on_insufficient_credits(self, mock_request):
+    async def test_decorator_returns_402_on_insufficient_credits(
+        self, mock_request, mock_usage_quota_service
+    ):
         """Test that decorator returns 402 when quota is exhausted."""
 
         async def test_handler(request, *args, **kwargs):
@@ -93,7 +106,7 @@ class TestDecoratorBasics:
             event=UsageQuotaEvent.CODE_SUGGESTIONS_CODE_COMPLETIONS,
         )(test_handler)
 
-        mock_request.app.state.usage_quota_service.execute = AsyncMock(
+        mock_usage_quota_service.execute = AsyncMock(
             side_effect=InsufficientCredits("Insufficient credits")
         )
 
@@ -102,7 +115,9 @@ class TestDecoratorBasics:
         assert response.status_code == 402
 
     @pytest.mark.asyncio
-    async def test_decorator_returns_402_response_format(self, mock_request):
+    async def test_decorator_returns_402_response_format(
+        self, mock_request, mock_usage_quota_service
+    ):
         """Test that 402 response has correct JSON format."""
 
         async def test_handler(request, *args, **kwargs):
@@ -113,7 +128,7 @@ class TestDecoratorBasics:
             event=UsageQuotaEvent.CODE_SUGGESTIONS_CODE_COMPLETIONS,
         )(test_handler)
 
-        mock_request.app.state.usage_quota_service.execute = AsyncMock(
+        mock_usage_quota_service.execute = AsyncMock(
             side_effect=InsufficientCredits("Insufficient credits")
         )
 
@@ -129,7 +144,7 @@ class TestEventTypeResolution:
     """Tests for event type resolution."""
 
     @pytest.mark.asyncio
-    async def test_uses_static_event_type(self, mock_request):
+    async def test_uses_static_event_type(self, mock_request, mock_usage_quota_service):
         """Test that decorator uses static EventType when provided."""
 
         async def test_handler(request, *args, **kwargs):
@@ -140,16 +155,18 @@ class TestEventTypeResolution:
             event=UsageQuotaEvent.CODE_SUGGESTIONS_CODE_COMPLETIONS,
         )(test_handler)
 
-        mock_request.app.state.usage_quota_service.execute = AsyncMock()
+        mock_usage_quota_service.execute = AsyncMock()
 
         response = await decorated(mock_request)
 
         # Verify execute was called with correct event_type
-        call_args = mock_request.app.state.usage_quota_service.execute.call_args
+        call_args = mock_usage_quota_service.execute.call_args
         assert call_args[0][1] == UsageQuotaEvent.CODE_SUGGESTIONS_CODE_COMPLETIONS
 
     @pytest.mark.asyncio
-    async def test_uses_dynamic_event_type_resolver(self, mock_request):
+    async def test_uses_dynamic_event_type_resolver(
+        self, mock_request, mock_usage_quota_service
+    ):
         """Test that decorator uses callable resolver when provided."""
 
         async def resolve_event_type(payload):
@@ -167,16 +184,18 @@ class TestEventTypeResolution:
         mock_payload = MagicMock()
         mock_payload.model_dump = MagicMock()
 
-        mock_request.app.state.usage_quota_service.execute = AsyncMock()
+        mock_usage_quota_service.execute = AsyncMock()
 
         response = await decorated(mock_request, payload=mock_payload)
 
         # Verify execute was called with resolved event_type
-        call_args = mock_request.app.state.usage_quota_service.execute.call_args
+        call_args = mock_usage_quota_service.execute.call_args
         assert call_args[0][1] == UsageQuotaEvent.CODE_SUGGESTIONS_CODE_GENERATIONS
 
     @pytest.mark.asyncio
-    async def test_resolver_falls_back_to_none_on_error(self, mock_request):
+    async def test_resolver_falls_back_to_none_on_error(
+        self, mock_request, mock_usage_quota_service
+    ):
         """Test that resolver errors are caught and None is returned."""
 
         async def failing_resolver(payload):
@@ -193,19 +212,22 @@ class TestEventTypeResolution:
         mock_payload = MagicMock()
         mock_payload.model_dump = MagicMock()
 
-        mock_request.app.state.usage_quota_service.execute = AsyncMock()
+        mock_usage_quota_service.execute = AsyncMock()
 
         response = await decorated(mock_request, payload=mock_payload)
 
-        # Should still execute but with None as event (which will fail)
-        assert mock_request.app.state.usage_quota_service.execute.called
+        # Resolver failure yields no event; decorator returns without calling service.
+        assert not mock_usage_quota_service.execute.called
+        assert response.status_code == 200
 
 
 class TestFeatureQualifiedName:
     """Tests for feature qualified name handling."""
 
     @pytest.mark.asyncio
-    async def test_passes_feature_qualified_name_to_service(self, mock_request):
+    async def test_passes_feature_qualified_name_to_service(
+        self, mock_request, mock_usage_quota_service
+    ):
         """Test that feature_qualified_name is passed to service."""
 
         async def test_handler(request, *args, **kwargs):
@@ -218,12 +240,12 @@ class TestFeatureQualifiedName:
             event=UsageQuotaEvent.CODE_SUGGESTIONS_CODE_COMPLETIONS,
         )(test_handler)
 
-        mock_request.app.state.usage_quota_service.execute = AsyncMock()
+        mock_usage_quota_service.execute = AsyncMock()
 
         response = await decorated(mock_request)
 
         # Verify execute was called with correct feature name
-        call_args = mock_request.app.state.usage_quota_service.execute.call_args
+        call_args = mock_usage_quota_service.execute.call_args
         assert call_args[0][0].feature_qualified_name == feature_name.value
 
 
@@ -231,7 +253,9 @@ class TestErrorHandling:
     """Tests for error handling."""
 
     @pytest.mark.asyncio
-    async def test_allows_request_on_generic_exception(self, mock_request):
+    async def test_allows_request_on_generic_exception(
+        self, mock_request, mock_usage_quota_service
+    ):
         """Test that decorator allows request when unexpected error occurs (fail-open)."""
 
         async def test_handler(request, *args, **kwargs):
@@ -242,7 +266,7 @@ class TestErrorHandling:
             event=UsageQuotaEvent.CODE_SUGGESTIONS_CODE_COMPLETIONS,
         )(test_handler)
 
-        mock_request.app.state.usage_quota_service.execute = AsyncMock(
+        mock_usage_quota_service.execute = AsyncMock(
             side_effect=Exception("Unexpected error")
         )
 
@@ -251,7 +275,9 @@ class TestErrorHandling:
             await decorated(mock_request)
 
     @pytest.mark.asyncio
-    async def test_handler_receives_all_arguments(self, mock_request):
+    async def test_handler_receives_all_arguments(
+        self, mock_request, mock_usage_quota_service
+    ):
         """Test that decorated handler receives all arguments correctly."""
 
         async def test_handler(request, arg1, arg2, kwarg1=None, **kwargs):
@@ -268,9 +294,14 @@ class TestErrorHandling:
             event=UsageQuotaEvent.CODE_SUGGESTIONS_CODE_COMPLETIONS,
         )(test_handler)
 
-        mock_request.app.state.usage_quota_service.execute = AsyncMock()
+        mock_usage_quota_service.execute = AsyncMock()
 
-        response = await decorated(mock_request, "value1", "value2", kwarg1="kwvalue")
+        response = await decorated(
+            mock_request,
+            "value1",
+            "value2",
+            kwarg1="kwvalue",
+        )
 
         assert response.status_code == 200
 
@@ -279,7 +310,9 @@ class TestEventTypeEnum:
     """Tests for different EventType enum values."""
 
     @pytest.mark.asyncio
-    async def test_supports_code_completions_event(self, mock_request):
+    async def test_supports_code_completions_event(
+        self, mock_request, mock_usage_quota_service
+    ):
         """Test decorator with CODE_COMPLETIONS event type."""
 
         async def test_handler(request, *args, **kwargs):
@@ -290,16 +323,18 @@ class TestEventTypeEnum:
             event=UsageQuotaEvent.CODE_SUGGESTIONS_CODE_COMPLETIONS,
         )(test_handler)
 
-        mock_request.app.state.usage_quota_service.execute = AsyncMock()
+        mock_usage_quota_service.execute = AsyncMock()
 
         response = await decorated(mock_request)
 
         assert response.status_code == 200
-        call_args = mock_request.app.state.usage_quota_service.execute.call_args
+        call_args = mock_usage_quota_service.execute.call_args
         assert call_args[0][1] == UsageQuotaEvent.CODE_SUGGESTIONS_CODE_COMPLETIONS
 
     @pytest.mark.asyncio
-    async def test_supports_code_generations_event(self, mock_request):
+    async def test_supports_code_generations_event(
+        self, mock_request, mock_usage_quota_service
+    ):
         """Test decorator with CODE_GENERATIONS event type."""
 
         async def test_handler(request, *args, **kwargs):
@@ -310,16 +345,18 @@ class TestEventTypeEnum:
             event=UsageQuotaEvent.CODE_SUGGESTIONS_CODE_GENERATIONS,
         )(test_handler)
 
-        mock_request.app.state.usage_quota_service.execute = AsyncMock()
+        mock_usage_quota_service.execute = AsyncMock()
 
         response = await decorated(mock_request)
 
         assert response.status_code == 200
-        call_args = mock_request.app.state.usage_quota_service.execute.call_args
+        call_args = mock_usage_quota_service.execute.call_args
         assert call_args[0][1] == UsageQuotaEvent.CODE_SUGGESTIONS_CODE_GENERATIONS
 
     @pytest.mark.asyncio
-    async def test_supports_amazon_q_integration_event(self, mock_request):
+    async def test_supports_amazon_q_integration_event(
+        self, mock_request, mock_usage_quota_service
+    ):
         """Test decorator with AMAZON_Q_INTEGRATION event type."""
 
         async def test_handler(request, *args, **kwargs):
@@ -330,10 +367,10 @@ class TestEventTypeEnum:
             event=UsageQuotaEvent.AMAZON_Q_INTEGRATION,
         )(test_handler)
 
-        mock_request.app.state.usage_quota_service.execute = AsyncMock()
+        mock_usage_quota_service.execute = AsyncMock()
 
         response = await decorated(mock_request)
 
         assert response.status_code == 200
-        call_args = mock_request.app.state.usage_quota_service.execute.call_args
+        call_args = mock_usage_quota_service.execute.call_args
         assert call_args[0][1] == UsageQuotaEvent.AMAZON_Q_INTEGRATION

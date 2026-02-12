@@ -9,6 +9,7 @@ import pytest
 from gitlab_cloud_connector import CloudConnectorUser
 
 from contract import contract_pb2
+from duo_workflow_service import server as server_module
 from duo_workflow_service.executor.outbox import OutboxSignal
 from duo_workflow_service.interceptors.authentication_interceptor import current_user
 from duo_workflow_service.server import DuoWorkflowService
@@ -19,6 +20,25 @@ def create_mock_internal_event_client():
     mock_client = MagicMock()
     mock_client.track_event = MagicMock()
     return mock_client
+
+
+@pytest.fixture(autouse=True)
+def mock_usage_quota_service(mock_duo_workflow_service_container):
+    """Auto-use fixture to properly wire DI container and mock UsageQuotaService.
+
+    This ensures the @has_sufficient_usage_quota decorator works correctly.
+    """
+
+    service_instance = MagicMock()
+    service_instance.execute = AsyncMock()
+    service_instance.aclose = AsyncMock()
+
+    mock_duo_workflow_service_container.wire(modules=[server_module])
+    mock_duo_workflow_service_container.usage_quota.service.override(service_instance)
+
+    yield service_instance
+
+    mock_duo_workflow_service_container.usage_quota.service.reset_override()
 
 
 @pytest.mark.asyncio

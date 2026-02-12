@@ -314,3 +314,16 @@ class TestInsufficientCreditsException:
         """Test that InsufficientCredits is an Exception."""
         exc = InsufficientCredits()
         assert isinstance(exc, Exception)
+
+
+class TestServiceCleanup:
+    """Tests for UsageQuotaService resource cleanup."""
+
+    @pytest.mark.asyncio
+    async def test_aclose_calls_client_aclose(self, service):
+        """Test that service.aclose() properly delegates to client.aclose()."""
+        with patch.object(
+            service.usage_quota_client, "aclose", new_callable=AsyncMock
+        ) as mock_aclose:
+            await service.aclose()
+            mock_aclose.assert_called_once()
