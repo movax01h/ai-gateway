@@ -208,7 +208,7 @@ components:
       - from: "context:draft_merge_request_creator.tool_responses"
         as: "merge_request_details"
       - from: "context:inputs.agent_platform_standard_context.session_owner_id"
-        as: "reviewer_id"
+        as: "assignee_id"
       - from: "context:goal"
         as: "issue_url"
       - from: "context:inputs.user_rule"
