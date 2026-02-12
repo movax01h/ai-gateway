@@ -286,19 +286,6 @@ models:
       max_tokens: 4_096
       model_class_provider: anthropic
 
-  - name: "Claude Sonnet 3 - Anthropic" # used by troubleshoot only
-    provider: "Anthropic"
-    gitlab_identifier: "claude_3_sonnet_20240229"
-    description: "Earlier generation model known for its computer use capability."
-    cost_indicator: "$$$"
-    max_context_tokens: 200000 # https://www.keywordsai.co/llm-library/claude-3-sonnet-20240229
-    proxy_provider: anthropic
-    params:
-      model: "claude-3-sonnet-20240229"
-      temperature: 0.1
-      max_tokens: 2_048
-      model_class_provider: anthropic
-
   - name: "GPT-5.2 - OpenAI"
     provider: "OpenAI"
     gitlab_identifier: "gpt_5_2"

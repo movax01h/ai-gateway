@@ -106,7 +106,7 @@ LEGACY_MODEL_MAPPING = {
     },
     "chat/troubleshoot_job": {
         "0.0.1-dev": "claude_sonnet_4_20250514",
-        "1.0.0": "claude_3_sonnet_20240229",
+        "1.0.0": "claude_sonnet_4_20250514",
         "1.0.1-alpha": "claude_sonnet_4_20250514",
         "1.0.2": "claude_sonnet_4_20250514",
         "1.1.0-dev": "claude_sonnet_4_20250514",

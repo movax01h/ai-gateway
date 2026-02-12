@@ -134,7 +134,6 @@ configurable_unit_primitives:
       - "troubleshoot_job"
     default_model: "claude_sonnet_4_20250514_vertex"
     selectable_models:
-      - "claude_3_sonnet_20240229"
       - "claude_sonnet_4_20250514"
       - "claude_sonnet_4_20250514_vertex"
       - "claude_sonnet_4_5_20250929"
