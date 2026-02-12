@@ -165,7 +165,10 @@ class BillingEventsClient:
 
         try:
             self.snowplow_tracker.track(structured_event)
-            self._logger.debug("Successfully called snowplow_tracker.track()")
+            self._logger.debug(
+                "Successfully called snowplow_tracker.track()",
+                event_id=event_id,
+            )
 
             additional_properties = InternalEventAdditionalProperties(
                 label=event_id,
@@ -175,6 +178,10 @@ class BillingEventsClient:
                 event_name="usage_billing_event",
                 additional_properties=additional_properties,
                 category=category,
+            )
+            self._logger.debug(
+                "Successfully called internal_event_client.track_event()",
+                event_id=event_id,
             )
         except Exception as e:
             self._logger.error(
