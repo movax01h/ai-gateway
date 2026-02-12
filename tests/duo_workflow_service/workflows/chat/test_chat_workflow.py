@@ -871,7 +871,7 @@ async def test_agent_run_with_tool_approval_required(workflow_with_project):
 
     # Mock the model to NOT be an agentic mock model so approval is required
     mock_model = Mock()
-    mock_model._is_auto_approved_by_agentic_mock_model = False
+    mock_model._is_agentic_mock_model = False
     workflow_with_project._agent.prompt_adapter.get_model.return_value = mock_model
 
     with patch.object(
@@ -1278,7 +1278,7 @@ async def test_agent_returns_content_and_tool_calls_with_approval_required(
     workflow_with_project._agent.tools_registry.approval_required.return_value = True
 
     mock_model = Mock()
-    mock_model._is_auto_approved_by_agentic_mock_model = False
+    mock_model._is_agentic_mock_model = False
     workflow_with_project._agent.prompt_adapter.get_model.return_value = mock_model
 
     with patch.object(

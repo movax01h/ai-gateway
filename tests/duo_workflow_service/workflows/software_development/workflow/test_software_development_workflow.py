@@ -509,6 +509,7 @@ def tools_registry_fixture(tool_metadata):
     return ToolsRegistry(
         enabled_tools=list(_AGENT_PRIVILEGES.keys()),
         preapproved_tools=list(_AGENT_PRIVILEGES.keys()),
+        tool_call_approvals={},
         tool_metadata=tool_metadata,
     )
 
