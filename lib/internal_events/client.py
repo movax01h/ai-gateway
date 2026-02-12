@@ -1,5 +1,5 @@
 from dataclasses import asdict
-from typing import Optional
+from typing import Any, Dict, List, Optional
 
 import structlog
 from snowplow_tracker import AsyncEmitter, SelfDescribingJson, StructuredEvent, Tracker
@@ -38,6 +38,8 @@ class InternalEventsClient:
                 batch_size=batch_size,
                 thread_count=thread_count,
                 endpoint=endpoint,
+                on_success=self._on_success,
+                on_failure=self._on_failure,
             )
 
             self.snowplow_tracker = Tracker(
@@ -45,6 +47,41 @@ class InternalEventsClient:
                 namespace=namespace,
                 emitters=[emitter],
             )
+
+    def _on_success(self, sent_events: List[Dict[str, Any]]) -> None:
+        self._logger.info(
+            "Successfully sent internal events",
+            sent_count=len(sent_events),
+        )
+
+        for event in sent_events:
+            self._log_event(event, success=True)
+
+    def _on_failure(
+        self, succeeded_count: int, failed_events: List[Dict[str, Any]]
+    ) -> None:
+        self._logger.warning(
+            "Failed to track internal events",
+            succeeded_count=succeeded_count,
+            failed_count=len(failed_events),
+        )
+
+        for event in failed_events:
+            self._log_event(event, success=False)
+
+    def _log_event(self, event_payload: Dict[str, Any], success: bool) -> None:
+        log_method = self._logger.info if success else self._logger.error
+        message = (
+            "Internal event sent successfully"
+            if success
+            else "Internal event failed to send"
+        )
+        log_method(
+            message,
+            event_name=event_payload.get("se_ac"),
+            label=event_payload.get("se_la"),
+            property=event_payload.get("se_pr"),
+        )
 
     def track_event(
         self,
@@ -83,6 +120,8 @@ class InternalEventsClient:
         self._logger.info(
             "Building AIContext",
             event_name=event_name,
+            label=additional_properties.label,
+            property=additional_properties.property,
             session_id=session_id,
             workflow_id=extra.get("workflow_id"),
             flow_type=extra.get("workflow_type"),
