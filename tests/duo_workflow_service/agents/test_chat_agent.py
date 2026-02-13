@@ -664,7 +664,7 @@ async def test_mixed_tool_calls_approval_only_for_requiring_tools(input):
     messages to be added for all tools after the first tool requiring approval.
     """
     mock_model = Mock()
-    mock_model._is_agentic_mock_model = False
+    mock_model._is_auto_approved_by_agentic_mock_model = False
 
     mock_prompt_adapter = Mock()
     mock_prompt_adapter.get_model.return_value = mock_model
