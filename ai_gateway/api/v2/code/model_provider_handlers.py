@@ -1,10 +1,8 @@
 from fastapi import Request
 
-from ai_gateway.api.middleware import X_GITLAB_LANGUAGE_SERVER_VERSION
 from ai_gateway.api.v2.code.typing import CompletionsRequestWithVersion
 from ai_gateway.models.base import KindModelProvider
 from ai_gateway.models.litellm import KindLiteLlmModel
-from lib.language_server import LanguageServerVersion
 
 
 class BaseModelProviderHandler:
@@ -72,18 +70,3 @@ class VertexHandler(BaseModelProviderHandler):
         self.payload.model_provider = KindModelProvider.VERTEX_AI
         if not self.payload.model_name:
             self.payload.model_name = KindLiteLlmModel.CODESTRAL_2508
-
-
-class LegacyHandler(BaseModelProviderHandler):
-    def update_completion_params(self):
-        choices_count = self.payload.choices_count
-
-        if choices_count is not None and choices_count > 0:
-            self.completion_params.update({"candidate_count": choices_count})
-
-        language_server_version = LanguageServerVersion.from_string(
-            self.request.headers.get(X_GITLAB_LANGUAGE_SERVER_VERSION, None)
-        )
-
-        if language_server_version.supports_advanced_context() and self.payload.context:
-            self._update_code_context()
