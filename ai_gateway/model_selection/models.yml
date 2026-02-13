@@ -45,6 +45,7 @@ models:
       max_tokens: 48
       max_retries: 10
 
+  # Not listed in the model selection menu. But it's kept here to keep the deprecation message
   - name: "Codestral 25.01 - Vertex"
     provider: "Vertex"
     gitlab_identifier: "codestral_2501_vertex"
@@ -61,7 +62,7 @@ models:
       max_tokens: 64
     deprecation:
       deprecation_date: "2025-10-23"
-      removal_version: "18.9"
+      removal_version: "18.9" # Already removed from `unit_primitives.yml`
 
   - name: "Gemini 1.5 Flash - Vertex"
     provider: "Vertex"
