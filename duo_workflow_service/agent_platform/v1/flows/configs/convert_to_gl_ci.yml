@@ -53,6 +53,8 @@ components:
       - from: "Duo Agent: Convert to GitLab CI"
         as: "naming_context"
         literal: True
+      - from: "context:workflow_id"
+        as: "workflow_id"
     ui_log_events:
       - "on_tool_execution_success"
       - "on_tool_execution_failed"
