@@ -52,7 +52,7 @@ class ChatAgent:
         for call in message.tool_calls:
             tool_name = call["name"]
             tool_args = call["args"]
-            is_agentic_mock = getattr(
+            auto_approved_by_agentic_mock_model = getattr(
                 self.prompt_adapter.get_model(),
                 "_is_auto_approved_by_agentic_mock_model",
                 False,
@@ -61,7 +61,7 @@ class ChatAgent:
                 self.tools_registry
                 and self.tools_registry.approval_required(tool_name, tool_args)
                 and tool_name not in preapproved_tools
-                and not is_agentic_mock
+                and not auto_approved_by_agentic_mock_model
             )
 
             if needs_approval:
