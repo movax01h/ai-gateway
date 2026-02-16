@@ -62,16 +62,24 @@ class InternalEventMiddleware:
             unique_instance_id = user.claims.gitlab_instance_uid
 
         project_id_str = request.headers.get(X_GITLAB_PROJECT_ID)
-        project_id = int(project_id_str) if project_id_str else None
+        project_id = (
+            int(project_id_str) if project_id_str and project_id_str != "null" else None
+        )
 
         namespace_id_str = request.headers.get(
             X_GITLAB_NAMESPACE_ID,
         )
-        namespace_id = int(namespace_id_str) if namespace_id_str else None
+        namespace_id = (
+            int(namespace_id_str)
+            if namespace_id_str and namespace_id_str != "null"
+            else None
+        )
 
         root_namespace_id_str = request.headers.get(X_GITLAB_ROOT_NAMESPACE_ID)
         root_namespace_id = (
-            int(root_namespace_id_str) if root_namespace_id_str else None
+            int(root_namespace_id_str)
+            if root_namespace_id_str and root_namespace_id_str != "null"
+            else None
         )
 
         # EventContext uses Pydantic which coerces int and string to boolean type
