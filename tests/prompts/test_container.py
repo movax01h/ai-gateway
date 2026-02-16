@@ -168,10 +168,10 @@ def test_container_openai_model_factory_exists(
 def test_prompt_family_configs_are_valid():
     """Test that all prompt family YAML files are valid PromptConfig objects.
 
-    Prompt families (like claude_4_5, claude_vertex_4_5) are directories that contain prompt definitions but aren't
-    directly instantiable as models. They're used by models that have them in their 'family' field. The main
-    test_container skips these because it can't create model_metadata for them, so we test them separately here by
-    directly validating their YAML files against the PromptConfig schema.
+    Prompt families (like claude_4_5) are directories that contain prompt definitions but aren't directly instantiable
+    as models. They're used by models that have them in their 'family' field. The main test_container skips these
+    because it can't create model_metadata for them, so we test them separately here by directly validating their YAML
+    files against the PromptConfig schema.
     """
     prompts_dir = Path(
         sys.modules[LocalPromptRegistry.__module__].__file__ or ""
@@ -182,7 +182,6 @@ def test_prompt_family_configs_are_valid():
     # These are directories that contain prompts but aren't standalone model identifiers
     prompt_families_to_test = [
         "claude_4_5",
-        "claude_vertex_4_5",
         "gpt_5",
     ]
 
