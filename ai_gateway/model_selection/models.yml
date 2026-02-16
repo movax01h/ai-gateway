@@ -177,7 +177,7 @@ models:
     max_context_tokens: 200000 # https://console.cloud.google.com/vertex-ai/publishers/anthropic/model-garden/claude-sonnet-4-5
     # Note: max context window tokens of 1M are supported in Beta
     family:
-      - claude_vertex_4_5
+      - claude_4_5
       - vertex
       - litellm
     params:
@@ -189,6 +189,23 @@ models:
       model_class_provider: litellm
     prompt_params:
       vertex_location: global
+
+  - name: "Claude Sonnet 4.5 - Bedrock"
+    provider: "Bedrock"
+    gitlab_identifier: "claude_sonnet_4_5_20250929_bedrock"
+    description: "Anthropic's flagship model for real-world coding, reasoning, and agentic workflows."
+    cost_indicator: "$$$"
+    max_context_tokens: 200000 # https://console.aws.amazon.com/bedrock/home#/model-catalog/serverless/anthropic.claude-sonnet-4-5-20250929-v1:0
+    family:
+      - claude_4_5
+      - litellm
+    params:
+      model: bedrock/us.anthropic.claude-sonnet-4-5-20250929-v1:0
+      custom_llm_provider: bedrock
+      temperature: 0.0
+      max_tokens: 4_096
+      max_retries: 1
+      model_class_provider: litellm
 
   - name: "Claude Haiku 4.5 - Anthropic"
     provider: "Anthropic"
@@ -212,7 +229,7 @@ models:
     cost_indicator: "$"
     max_context_tokens: 200000 # https://console.cloud.google.com/vertex-ai/publishers/anthropic/model-garden/claude-haiku-4-5
     family:
-      - claude_vertex_4_5
+      - claude_4_5
       - vertex
       - litellm
     params:
@@ -224,6 +241,23 @@ models:
       model_class_provider: litellm
     prompt_params:
       vertex_location: global
+
+  - name: "Claude Haiku 4.5 - Bedrock"
+    provider: "Bedrock"
+    gitlab_identifier: "claude_haiku_4_5_20251001_bedrock"
+    description: "Fast, cost-effective responses."
+    cost_indicator: "$"
+    max_context_tokens: 200000 # https://console.aws.amazon.com/bedrock/home#/model-catalog/serverless/anthropic.claude-haiku-4-5-20251001-v1:0
+    family:
+      - claude_4_5
+      - litellm
+    params:
+      model: bedrock/us.anthropic.claude-haiku-4-5-20251001-v1:0
+      custom_llm_provider: bedrock
+      temperature: 0.0
+      max_tokens: 4_096
+      max_retries: 1
+      model_class_provider: litellm
 
   - name: "Claude Sonnet 4.0 - Anthropic"
     provider: "Anthropic"
@@ -257,6 +291,22 @@ models:
       model_class_provider: litellm
     prompt_params:
       vertex_location: global
+
+  - name: "Claude Sonnet 4.0 - Bedrock"
+    provider: "Bedrock"
+    gitlab_identifier: "claude_sonnet_4_20250514_bedrock"
+    description: "Earlier generation model for coding, reasoning, and agentic workflows."
+    cost_indicator: "$$$"
+    max_context_tokens: 200000 # https://console.aws.amazon.com/bedrock/home#/model-catalog/serverless/anthropic.claude-sonnet-4-20250514-v1:0
+    family:
+      - litellm
+    params:
+      model: bedrock/us.anthropic.claude-sonnet-4-20250514-v1:0
+      custom_llm_provider: bedrock
+      temperature: 0.0
+      max_tokens: 4_096
+      max_retries: 1
+      model_class_provider: litellm
 
   - name: "Claude Sonnet 3.5 20241022 - Vertex"
     provider: "Vertex"
