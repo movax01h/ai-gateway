@@ -179,50 +179,149 @@ The JSON should contain:
 {% endraw %}
 Where:
   - false_positive_likelihood: 0 = definitely true positive, 100 = definitely false positive
-  - explanation: A comprehensive analysis structured as follows:
-**For FALSE POSITIVES (false_positive_likelihood >= 61):**
-The explanation should include:
-  - Summary of the finding and why it's a false positive
-  - **Complete data flow path analyzed (Source → Intermediate Steps → Sink)**
-  - **Cross-file/cross-function validation or sanitization found**
-  - Code references and context that prove it's not exploitable
-  - Security controls or mitigations in place (specify which files/functions)
-  - Why the SAST tool flagged this incorrectly
-**For TRUE POSITIVES (false_positive_likelihood < 61):**
-The explanation should include ALL of the following sections:
-1. **Vulnerability Analysis**
-  - Summary of the vulnerability and why it's a true positive
-  - **Complete data flow path: Entry Point → Function Chain → Sink**
-  - **Cross-file analysis showing no validation at any step**
-  - Code references showing the vulnerable code path
-  - Data flow analysis demonstrating exploitability
-  - Missing security controls
-2. **Severity Assessment**
-  - Original severity: [Critical/High/Medium/Low]
-  - Recommended severity: [Critical/High/Medium/Low]
-  - Justification: Explain based on exploitability, impact, scope, and attack complexity
-  - Note any discrepancies and why adjustment is warranted
-3. **CVSS Score Recommendation**
-  - Original CVSS score: [if available]
-  - Recommended CVSS score: [calculated score]
-  - Vector string: CVSS:3.1/AV:_/AC:_/PR:_/UI:_/S:_/C:_/I:_/A:_
-  - Metric justification: Explain each metric based on contextual analysis
-     * Attack Vector: [justification]
-     * Attack Complexity: [justification]
-     * Privileges Required: [justification]
-     * User Interaction: [justification]
-     * Scope: [justification]
-     * Confidentiality/Integrity/Availability Impact: [justification]
-4. **Remediation Guidance**
-  - Priority: [Critical/High/Medium/Low]
-  - Specific remediation steps with code examples where applicable
-  - Framework-specific security features to use
-  - Compensating controls if immediate fix isn't possible
-  - Validation and testing recommendations
-  - Relevant references (OWASP, CWE, security standards)
-5. **Contextual Factors**
-  - Prerequisites for exploitation
-  - Mitigating circumstances that affect risk
-  - Environmental or deployment considerations
-  - Defense-in-depth opportunities
-Provide detailed reasoning for your conclusion and create the analysis result JSON.
+  - explanation: A comprehensive analysis structured using the following template:
+
+<template>
+# SAST False Positive Detection - Analysis Report
+
+## Executive Summary
+
+| Attribute | Value |
+|-----------|-------|
+| **Classification** | TRUE POSITIVE / FALSE POSITIVE |
+| **Confidence** | XX% |
+| **Severity** | Critical/High/Medium/Low |
+| **CVSS Score** | X.X |
+| **Priority** | Critical/High/Medium/Low |
+| **Location** | file.ext:line |
+
+---
+
+## 1. Vulnerability Analysis
+
+### Classification: TRUE POSITIVE / FALSE POSITIVE
+
+### Key Findings
+
+- Finding 1: Main security concern identified
+- Finding 2: Supporting evidence or additional vulnerability aspect
+- Finding 3: Context or broader implications
+
+### Evidence
+
+| Attribute | Details |
+|-----------|---------|
+| **File Path** | path/to/file.ext |
+| **Line Number** | line number |
+| **Vulnerable Pattern** | Specific code pattern identified (e.g., "app.config['DEBUG'] = True") |
+| **CWE** | CWE-XXX: Description |
+| **OWASP** | OWASP Top 10 category |
+
+### Concrete Evidence
+
+Explanation of what the code actually does that creates the vulnerability or why the pattern was flagged. Include:
+- The specific code construct or function call that triggered the finding
+- What this code does at runtime
+- How data flows through this code path
+- Why this particular pattern is considered risky (or why it's actually safe)
+
+### Analysis
+
+2-3 paragraph explanation of why this is classified as TP or FP:
+- **What the code does:** Technical explanation of the functionality
+- **Why it is/isn't a security risk:** Security implications of the pattern
+- **Context and conditions:** Specific conditions that make it exploitable or safe
+- **Mitigating factors:** Any existing protections or limitations
+
+---
+
+## 2. Risk Assessment
+
+### Severity
+
+| Assessment | Level | Rationale |
+|------------|-------|-----------|
+| **Recommended** | Low/Medium/High/Critical | Analysis-based assessment |
+
+### Impact
+
+| Factor | Level | Description |
+|--------|-------|-------------|
+| **Confidentiality** | None/Low/High | Impact on data confidentiality |
+| **Integrity** | None/Low/High | Impact on data integrity |
+| **Availability** | None/Low/High | Impact on system availability |
+
+### CVSS v3.1
+
+**Vector:** CVSS:3.1/AV:_/AC:_/PR:_/UI:_/S:_/C:_/I:_/A:_
+
+**Score:** X.X (Severity)
+
+| Metric | Value | Justification |
+|--------|-------|---------------|
+| **Attack Vector** | Network/Adjacent/Local/Physical | Consider: Can this be exploited remotely (Network), from adjacent network (Adjacent), requires local access (Local), or physical access (Physical)? |
+| **Attack Complexity** | Low/High | Exploitation difficulty assessment |
+| **Privileges Required** | None/Low/High | Authentication level requirements |
+| **User Interaction** | None/Required | Whether user action is needed |
+| **Scope | None/Low/High | Impact boundary determination |
+| **Confidentiality** | None/Low/High | Impact level assessment |
+| **Integrity** | None/Low/High | Impact level assessment |
+| **Availability** | None/Low/High | Impact level assessment |
+
+---
+
+## 3. Contextual Factors
+
+<if the vulnerability is a true positive>
+
+**Exploitation Requirements:**
+- Requirement 1: What attacker needs to exploit this
+- Requirement 2: Access level or capability needed
+- Requirement 3: Environmental conditions required
+
+**Mitigating Circumstances:**
+- Factor 1: Existing controls that reduce risk
+- Factor 2: Environmental protections in place
+- Factor 3: Configuration limitations
+
+<else if the vulnerability is a false positive>
+
+**Why This Is Not Exploitable:**
+- Reason 1: Specific condition that prevents exploitation
+- Reason 2: Environmental context that makes it safe
+- Reason 3: Code pattern that neutralizes the risk
+
+**Environmental Context:**
+- Context 1: Test/dev environment details
+- Context 2: Security controls in place
+- Context 3: Isolation or protection mechanisms
+</end>
+
+---
+
+## 4. Recommendations
+
+<if the vulnerability is a true positive>
+
+**Immediate Actions:**
+1. Action 1: Most critical fix
+2. Action 2: Short-term mitigation
+3. Action 3: Verification step
+
+**Recommended Fix:**
+
+Brief description of how to fix the vulnerability, with specific guidance on what changes are needed.
+
+<else if the vulnerability is a false positive>
+
+**Best Practices:**
+- Practice 1: Recommended improvement even though not vulnerable
+- Practice 2: Security hardening suggestion
+- Practice 3: Future-proofing recommendation
+</end>
+
+**Suppression Guidance:**
+- How to suppress this finding in the scanner
+- Justification text to use
+- Documentation for audit trail
+</template>
