@@ -54,8 +54,6 @@ class KindGitLabModel(StrEnum):
     CODESTRAL_2508_FIREWORKS = "codestral_2508_fireworks"
     CODESTRAL_2501_VERTEX = "codestral_2501_vertex"
     CODESTRAL_2508_VERTEX = "codestral_2508_vertex"
-    CLAUDE_SONNET_3_7 = "claude_sonnet_3_7_20250219"
-    CLAUDE_SONNET_3_7_VERTEX = "claude_sonnet_3_7_20250219_vertex"
     CLAUDE_3_5_SONNET = "claude_3_5_sonnet_20240620"
     CLAUDE_3_5_HAIKU = "claude_3_5_haiku_20241022"
     CLAUDE_4_SONNET = "claude_sonnet_4_20250514"
