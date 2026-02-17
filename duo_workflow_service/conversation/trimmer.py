@@ -1,5 +1,5 @@
 import time
-from typing import List, Tuple
+from typing import List
 
 import structlog
 from langchain_core.messages import (
@@ -19,6 +19,69 @@ logger = structlog.stdlib.get_logger("conversation_trimmer")
 LEGACY_MAX_CONTEXT_TOKENS = 400_000  # old default for backwards compatibility
 TRIM_THRESHOLD = 0.7  # Only run expensive trimming when utilization exceeds this
 MAX_SINGLE_MESSAGE_TOKEN_SHARE = 0.65  # If a single message exceeds this percentage of the context window, pre-trim it
+
+
+def _find_last_ai_with_usage(
+    messages: list[BaseMessage],
+) -> tuple[int, int] | None:
+    """Find the last AIMessage that has usage_metadata and returns its usage and index."""
+    for i, msg in reversed(list(enumerate(messages))):
+        if (
+            isinstance(msg, AIMessage)
+            and msg.usage_metadata
+            and msg.usage_metadata.get("total_tokens")
+        ):
+            return msg.usage_metadata["total_tokens"], i
+    return None
+
+
+def _estimate_tokens_from_history(
+    messages: list[BaseMessage], token_counter: TikTokenCounter
+) -> int:
+    """Estimate total tokens for a full conversation history.
+
+    Uses the cumulative token count from the last AIMessage's usage_metadata
+    as a baseline, then estimates only trailing messages (after that AIMessage)
+    using TikTokenCounter.
+
+    IMPORTANT: Requires the FULL conversation history. Passing a slice will
+    return incorrect results since total_tokens from usage_metadata is cumulative.
+
+    Args:
+        messages: Full conversation history as sent to the LLM.
+        token_counter: TikTokenCounter instance for counting trailing message tokens.
+
+    Known limitations:
+        - The system prompt will always be included in the usage_metadata even if the system message is not
+            part of the history.
+        - Up to the last AI message with usage metadata we will have accurate counts.
+            NOTE: This includes the final rendered prompt templates' content.
+            However, the trailing messages will only get a rough estimation based on their content.
+            This means, if prompt templates are used (e.g. to render additional_context in message.additional_kwargs)
+            based on the message.content, the token count will be underestimated.
+    """
+    if not messages:
+        return 0
+
+    result = _find_last_ai_with_usage(messages)
+    if result:
+        base_tokens, last_ai_idx = result
+        trailing_messages = messages[last_ai_idx + 1 :]
+    else:
+        base_tokens = 0
+        trailing_messages = messages
+
+    trailing_tokens = (
+        token_counter.count_tokens(
+            trailing_messages,
+            # We don't count agent tool tokens - they're included in the AI message's total_tokens already
+            include_tool_tokens=False,
+        )
+        if trailing_messages
+        else 0
+    )
+
+    return base_tokens + trailing_tokens
 
 
 def _pretrim_large_messages(
@@ -151,28 +214,9 @@ def _build_tool_call_indices(messages: List[BaseMessage]) -> dict:
     return tool_call_indices
 
 
-def get_messages_profile(
-    messages: List[BaseMessage],
-    token_counter: TikTokenCounter,
-    include_tool_tokens: bool = True,
-) -> Tuple[List[str], int]:
-    """Get the roles and token count for a list of messages.
-
-    Args:
-        messages: List of messages to profile
-        token_counter: Token counter for the component
-        include_tool_tokens: Whether to include tool specification tokens in the count
-
-    Returns:
-        Tuple of (list of message roles, total token count)
-    """
-    roles = [msg.type for msg in messages]
-    token_size = (
-        token_counter.count_tokens(messages, include_tool_tokens=include_tool_tokens)
-        if messages
-        else 0
-    )
-    return roles, token_size
+def _get_message_roles(messages: List[BaseMessage]) -> List[str]:
+    """Get the roles for a list of messages."""
+    return [msg.type for msg in messages]
 
 
 def _fallback_messages(
@@ -220,13 +264,11 @@ def trim_conversation_history(
     # Always run: cheap maintenance (no token counting)
     messages = _deduplicate_additional_context(messages)
 
-    # Quick token check — skip expensive trimming if under budget
     token_counter = TikTokenCounter(component_name)
-    initial_roles, initial_tokens = get_messages_profile(
-        messages=messages,
-        token_counter=token_counter,
-        include_tool_tokens=True,
+    initial_tokens = _estimate_tokens_from_history(
+        messages=messages, token_counter=token_counter
     )
+    initial_roles = _get_message_roles(messages)
 
     if initial_tokens < token_budget:
         logger.info(
@@ -244,6 +286,11 @@ def trim_conversation_history(
 
     # Costly trimming pipeline — only runs when over budget
     t_start = time.perf_counter()
+    # Use TikTokenCounter for trimming - it supports slicing which is needed
+    # by LangChain's trim_messages binary search
+    token_counter = TikTokenCounter(component_name)
+    # We count once more to be able to compare before and after counts derived from the same method
+    initial_tokens = token_counter.count_tokens(messages, include_tool_tokens=True)
 
     logger.info(
         "Starting trimming",
@@ -292,11 +339,8 @@ def trim_conversation_history(
         result = _fallback_messages(messages, min_recent=5)
 
     duration_ms = round((time.perf_counter() - t_start) * 1000, 2)
-    final_roles, final_tokens = get_messages_profile(
-        messages=result,
-        token_counter=token_counter,
-        include_tool_tokens=True,
-    )
+    final_roles = _get_message_roles(result)
+    final_tokens = token_counter.count_tokens(result, include_tool_tokens=True)
 
     logger.info(
         "Finished trimming",
