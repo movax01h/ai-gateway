@@ -154,6 +154,22 @@ models:
       max_tokens: 4_096
       model_class_provider: anthropic
 
+  - name: "Claude Sonnet 4.6 - Anthropic"
+    provider: "Anthropic"
+    gitlab_identifier: "claude_sonnet_4_6"
+    max_context_tokens: 200000 # https://docs.claude.com/en/docs/about-claude/models/overview#latest-models-comparison
+    # Note: Claude Sonnet 4.6 supports a 1M token context window **only** when using the context-1m-2025-08-07 beta header
+    proxy_provider: anthropic
+    family:
+      - claude_4_5
+    description: "Anthropic's flagship model for real-world coding, reasoning, and agentic workflows."
+    cost_indicator: "$$$"
+    params:
+      model: "claude-sonnet-4-6"
+      temperature: 0.0
+      max_tokens: 4_096
+      model_class_provider: anthropic
+
   - name: "Claude Sonnet 4.5 - Anthropic"
     provider: "Anthropic"
     gitlab_identifier: "claude_sonnet_4_5_20250929"
