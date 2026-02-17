@@ -5,7 +5,7 @@ models:
     gitlab_identifier: "codestral_2501_fireworks"
     description: "Fast code generation and assistance."
     cost_indicator: "$"
-    max_context_tokens: 256000 # https://mistral.ai/news/codestral-2501
+    max_context_tokens: 32767 # Fireworks has limited the max tokens to 32k to avoid OOM errors
     family:
       - completion_fim
       - codestral
@@ -34,7 +34,7 @@ models:
     gitlab_identifier: "codestral_2508_fireworks"
     description: "Fast code generation and assistance."
     cost_indicator: "$"
-    max_context_tokens: 128000 # https://docs.mistral.ai/models/codestral-25-08
+    max_context_tokens: 32767 # Fireworks has limited the max tokens to 32k to avoid OOM errors
     family:
       - completion_fim
       - codestral
