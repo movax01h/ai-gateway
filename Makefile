@@ -274,6 +274,13 @@ test-integration: install-test-deps
 	@echo "Running integration tests..."
 	@poetry run pytest integration_tests/ -n auto
 
+.PHONY: test-agents
+test-agents: install-test-deps
+	@echo "Running agent tests..."
+	@poetry run pytest agent_tests/$(AGENT_TEST_DIR) -n 4 -v --tb=short \
+		$(if $(EXECUTION_MODEL),--execution-model=$(EXECUTION_MODEL)) \
+		$(if $(VALIDATION_MODEL),--validation-model=$(VALIDATION_MODEL))
+
 .PHONY: lint-doc
 lint-doc: vale markdownlint
 

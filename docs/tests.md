@@ -87,6 +87,67 @@ export AI_GATEWAY_URL=http://localhost:5052
 make test-integration
 ```
 
+## Agent tests
+
+Agent tests validate Duo Workflow Service agent behavior by executing against a real Anthropic LLM.
+Unlike integration tests, agent tests exercise the agent classes directly (for example, `ChatAgent` and `PromptAdapter`)
+rather than sending requests through the DWS server API.
+Tests can use deterministic assertions (tool calls, response structure) and, optionally,
+an LLM-as-judge for semantic validation of response quality.
+
+Here is an example of an agent test:
+
+```python
+@pytest.mark.asyncio
+async def test_how_many_open_issues(analytics_agent, initial_state, mock_gitlab_client):
+    mock_glql_response(mock_gitlab_client, glql_response(SAMPLE_ISSUES, count=42))
+
+    result = await ask_agent(
+        analytics_agent, initial_state,
+        "How many open issues are there in the gitlab-org group?",
+    )
+
+    # Deterministic assertions on tool usage
+    result.assert_has_tool_calls().assert_called_tool("run_glql_query")
+
+    # Optional: LLM-as-judge semantic validation
+    await result.assert_llm_validates(["Response says 42 open issues"])
+```
+
+- Agent tests are located in the `agent_tests/` directory.
+- Shared fixtures and helpers (LLM setup, `ask_agent`, LLM-as-judge validator) live at the `agent_tests/` root.
+- Agent-specific test suites live in subdirectories (for example, `agent_tests/analytics_agent/`).
+- Agent tests require the `ANTHROPIC_API_KEY` environment variable.
+- The execution and validation models are configurable via `--execution-model` and `--validation-model` CLI options
+  (Anthropic models only).
+
+### Run agent tests locally
+
+Run all agent tests:
+
+```shell
+export ANTHROPIC_API_KEY=<your-key>
+make test-agents
+```
+
+Run tests for a specific agent by setting `AGENT_TEST_DIR`:
+
+```shell
+AGENT_TEST_DIR=analytics_agent/ make test-agents
+```
+
+To override the models used for execution and validation:
+
+```shell
+EXECUTION_MODEL=claude-haiku-4-5-20251001 VALIDATION_MODEL=claude-haiku-4-5-20251001 make test-agents
+```
+
+### CI
+
+Agent tests run as manual jobs in CI (for example, `tests:agents:analytics`).
+Each agent has its own CI job extending the `.tests:agents` base template.
+The jobs require the `ANTHROPIC_API_KEY` CI variable to be configured.
+
 ## Code guidelines
 
 - Avoid using [provider overriding](https://python-dependency-injector.ets-labs.org/providers/overriding.html),
