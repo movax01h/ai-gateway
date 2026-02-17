@@ -134,7 +134,7 @@ feature-tests:
     strategy: depend
   variables:
     TRIGGERED_BY_AI_GATEWAY_PROJECT: "true"
-    TEST_AI_GATEWAY_REPO_BRANCH: $CI_COMMIT_REF_NAME
+    TEST_AI_GATEWAY_REPO_REF: $CI_COMMIT_SHA
     # Overriding the poetry version because the variable is conflicted with the one in gitlab-rails/gitlab-build-image
     POETRY_VERSION: "2.2"
   rules:
