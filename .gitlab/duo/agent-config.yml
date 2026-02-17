@@ -1,7 +1,7 @@
 # Agent environment config, see: https://docs.gitlab.com/user/duo_agent_platform/flows/execution/
 
 # Use pre-built image
-image: $CI_REGISTRY_IMAGE/duo-agent:latest
+image: registry.gitlab.com/gitlab-org/modelops/applied-ml/code-suggestions/ai-assist/duo-agent:latest
 
 setup_script:
   # Install AI Gateway project
