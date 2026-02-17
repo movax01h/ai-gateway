@@ -227,12 +227,31 @@ class AbstractWorkflow(ABC):
             )
             self._first_response_metric_recorded = True
 
+    def _extract_trace_output(self, state: dict | None) -> str | None:
+        """Extract the final response content from ui_chat_log for LangSmith tracing.
+
+        Args:
+            state: The final state dictionary from the graph execution
+
+        Returns:
+            The content of the last ui_chat_log entry, or None if not available
+        """
+        if not state:
+            return None
+
+        ui_chat_log = state.get("ui_chat_log", [])
+        if not ui_chat_log:
+            return None
+
+        return ui_chat_log[-1].get("content")
+
     @traceable
-    async def _compile_and_run_graph(self, goal: str) -> None:
+    async def _compile_and_run_graph(self, goal: str) -> str | None:
         graph_config: RunnableConfig = {
             "recursion_limit": self._recursion_limit(),
             "configurable": {"thread_id": self._workflow_id},
         }
+        last_state = None
         compiled_graph = None
         self.checkpoint_notifier = UserInterface(outbox=self._outbox, goal=goal)
 
@@ -313,6 +332,7 @@ class AbstractWorkflow(ABC):
                 ):
                     if type == "values":
                         self._record_first_response_metric()
+                        last_state = state
 
                     if type == "updates":
                         for step in state:
@@ -321,6 +341,8 @@ class AbstractWorkflow(ABC):
                         await self.checkpoint_notifier.send_event(
                             type=type, state=state, stream=self._stream
                         )
+
+                return self._extract_trace_output(last_state)
         except BaseException as e:
             self.last_error = e
             if str(e) == AIO_CANCEL_STOP_WORKFLOW_REQUEST:

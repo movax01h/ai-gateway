@@ -5,6 +5,7 @@ from unittest.mock import AsyncMock, MagicMock, Mock, patch
 import pytest
 
 from contract import contract_pb2
+from duo_workflow_service.entities.state import WorkflowStatusEnum
 from duo_workflow_service.tools import UNTRUSTED_MCP_WARNING
 from duo_workflow_service.workflows.abstract_workflow import (
     AbstractWorkflow,
@@ -21,6 +22,18 @@ from lib.internal_events.event_enum import CategoryEnum, EventEnum
 class MockGraph:
     async def astream(self, input, config, stream_mode):
         yield "updates", {"step1": {"key": "value"}}
+
+
+class MockGraphWithUiChatLog:
+    async def astream(self, input, config, stream_mode):
+        yield "values", {
+            "status": WorkflowStatusEnum.COMPLETED,
+            "ui_chat_log": [
+                {"content": "First message"},
+                {"content": "Second message"},
+                {"content": "Final response"},
+            ],
+        }
 
 
 class MockWorkflow(AbstractWorkflow):
@@ -40,6 +53,47 @@ class MockWorkflow(AbstractWorkflow):
 @pytest.fixture(autouse=True)
 def prepare_container(mock_duo_workflow_service_container):
     pass
+
+
+def test_extract_trace_output_with_valid_state(user):
+    workflow = MockWorkflow(
+        "test-id",
+        {},
+        CategoryEnum.WORKFLOW_SOFTWARE_DEVELOPMENT,
+        user,
+    )
+    state = {
+        "ui_chat_log": [
+            {"content": "First message"},
+            {"content": "Second message"},
+            {"content": "Final response"},
+        ]
+    }
+    result = workflow._extract_trace_output(state)
+    assert result == "Final response"
+
+
+def test_extract_trace_output_with_empty_ui_chat_log(user):
+    workflow = MockWorkflow(
+        "test-id",
+        {},
+        CategoryEnum.WORKFLOW_SOFTWARE_DEVELOPMENT,
+        user,
+    )
+    state = {"ui_chat_log": []}
+    result = workflow._extract_trace_output(state)
+    assert result is None
+
+
+def test_extract_trace_output_with_none_state(user):
+    workflow = MockWorkflow(
+        "test-id",
+        {},
+        CategoryEnum.WORKFLOW_SOFTWARE_DEVELOPMENT,
+        user,
+    )
+    result = workflow._extract_trace_output(None)
+    assert result is None
 
 
 @pytest.fixture(name="workflow")
@@ -508,3 +562,104 @@ async def test_compile_and_run_graph_records_first_response_on_first_graph_updat
 
     assert mock_metrics.record_time_to_first_response.call_count == 1
     assert workflow._first_response_metric_recorded is True
+
+
+@pytest.mark.asyncio
+@patch(
+    "duo_workflow_service.workflows.abstract_workflow.fetch_workflow_and_container_data"
+)
+@patch("duo_workflow_service.workflows.abstract_workflow.GitLabWorkflow")
+@patch("duo_workflow_service.workflows.abstract_workflow.ToolsRegistry.configure")
+async def test_compile_and_run_graph_returns_final_response_content(
+    mock_tools_registry,
+    mock_gitlab_workflow,
+    mock_fetch_workflow,
+    mock_project,
+    user,
+):
+    """Test that _compile_and_run_graph returns the final response content from ui_chat_log."""
+    mock_tools_registry.return_value = MagicMock()
+    mock_checkpointer = AsyncMock()
+    mock_checkpointer.aget_tuple = AsyncMock(return_value=None)
+    mock_checkpointer.initial_status_event = "START"
+    mock_gitlab_workflow.return_value.__aenter__.return_value = mock_checkpointer
+    mock_fetch_workflow.return_value = (
+        mock_project,
+        None,
+        {
+            "project_id": 1,
+            "agent_privileges_names": [],
+            "pre_approved_agent_privileges_names": [],
+            "allow_agent_to_request_user": False,
+            "mcp_enabled": False,
+            "first_checkpoint": None,
+            "workflow_status": "",
+            "gitlab_host": "example.com",
+        },
+    )
+
+    workflow = MockWorkflow(
+        "id",
+        {},
+        CategoryEnum.WORKFLOW_SOFTWARE_DEVELOPMENT,
+        user,
+    )
+
+    workflow._compile = MagicMock(return_value=MockGraphWithUiChatLog())
+
+    result = await workflow._compile_and_run_graph("Test goal")
+
+    assert result == "Final response"
+
+
+@pytest.mark.asyncio
+@patch(
+    "duo_workflow_service.workflows.abstract_workflow.fetch_workflow_and_container_data"
+)
+@patch("duo_workflow_service.workflows.abstract_workflow.GitLabWorkflow")
+@patch("duo_workflow_service.workflows.abstract_workflow.ToolsRegistry.configure")
+async def test_compile_and_run_graph_returns_none_when_no_ui_chat_log(
+    mock_tools_registry,
+    mock_gitlab_workflow,
+    mock_fetch_workflow,
+    mock_project,
+    user,
+):
+    """Test that _compile_and_run_graph returns None when ui_chat_log is empty."""
+
+    class MockGraphWithEmptyUiChatLog:
+        async def astream(self, input, config, stream_mode):
+            yield "values", {"status": WorkflowStatusEnum.COMPLETED, "ui_chat_log": []}
+
+    mock_tools_registry.return_value = MagicMock()
+    mock_checkpointer = AsyncMock()
+    mock_checkpointer.aget_tuple = AsyncMock(return_value=None)
+    mock_checkpointer.initial_status_event = "START"
+    mock_gitlab_workflow.return_value.__aenter__.return_value = mock_checkpointer
+    mock_fetch_workflow.return_value = (
+        mock_project,
+        None,
+        {
+            "project_id": 1,
+            "agent_privileges_names": [],
+            "pre_approved_agent_privileges_names": [],
+            "allow_agent_to_request_user": False,
+            "mcp_enabled": False,
+            "first_checkpoint": None,
+            "workflow_status": "",
+            "gitlab_host": "example.com",
+        },
+    )
+
+    workflow = MockWorkflow(
+        "id",
+        {},
+        CategoryEnum.WORKFLOW_SOFTWARE_DEVELOPMENT,
+        user,
+    )
+
+    workflow._compile = MagicMock(return_value=MockGraphWithEmptyUiChatLog())
+
+    result = await workflow._compile_and_run_graph("Test goal")
+
+    assert result is None
