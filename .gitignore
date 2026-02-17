@@ -317,5 +317,6 @@ tmp/
 
 # duo settings
 .gitlab/duo/*
+!.gitlab/duo/agent-config.yml
 
 .llm_cache.db

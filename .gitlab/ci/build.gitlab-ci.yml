@@ -22,6 +22,21 @@ build:ingest-image:
     KANIKO_BUILD_FILE: scripts/ingest/Dockerfile
     KANIKO_DESTINATION: "${INGEST_IMAGE}"
 
+build:duo-agent-image:
+  stage: build
+  extends:
+    - .kaniko_base
+  variables:
+    KANIKO_BUILD_FILE: docker/agent/Dockerfile
+    KANIKO_DESTINATION: "$CI_REGISTRY_IMAGE/duo-agent:latest"
+  # Rebuild only when Dockerfile or dependencies change
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event" || $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH || $CI_COMMIT_TAG
+      changes:
+        - docker/agent/Dockerfile
+        - poetry.lock
+        - pyproject.toml
+
 build:self-hosted-ai-gateway-image:
   stage: build
   extends:

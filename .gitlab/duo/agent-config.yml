@@ -1,0 +1,10 @@
+# Agent environment config, see: https://docs.gitlab.com/user/duo_agent_platform/flows/execution/
+
+# Use pre-built image
+image: $CI_REGISTRY_IMAGE/duo-agent:latest
+
+setup_script:
+  # Install AI Gateway project
+  - poetry install --only-root --no-interaction --no-ansi
+  - poetry --version && python --version && git --version && npm --version
+  - echo "Setup complete"
