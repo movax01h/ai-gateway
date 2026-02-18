@@ -57,39 +57,6 @@ def _router(state: WorkflowState) -> str:
     if tool_name == "read_file":
         return Routes.AGENT
 
-    if tool_name == "ci_linter":
-        last_msg = str(agent_messages[-1].content) if agent_messages else ""
-        try:
-            result = json.loads(last_msg)
-        except (json.JSONDecodeError, TypeError) as e:
-            log_exception(
-                e,
-                extra={
-                    "tool_name": "ci_linter",
-                    "last_msg": last_msg,
-                    "error_type": "json_parsing_error",
-                },
-            )
-            return Routes.AGENT
-
-        if result.get("valid") is True:
-            return Routes.COMMIT_CHANGES
-
-        validation_count = len(
-            [
-                msg
-                for msg in agent_messages
-                if hasattr(msg, "tool_calls")
-                and msg.tool_calls
-                and any(call.get("name") == "ci_linter" for call in msg.tool_calls)
-            ]
-        )
-
-        if validation_count >= 3:
-            return Routes.COMMIT_CHANGES
-
-        return Routes.AGENT
-
     if tool_name == "create_file_with_contents":
         create_count = len(
             [
@@ -221,7 +188,7 @@ class Workflow(AbstractWorkflow):
 
     def _setup_translator_nodes(self, tools_registry: ToolsRegistry):
         translator_agent: Any
-        translation_tools = ["create_file_with_contents", "read_file", "ci_linter"]
+        translation_tools = ["create_file_with_contents", "read_file"]
         agents_toolset = tools_registry.toolset(translation_tools)
 
         translator_agent = build_agent(
