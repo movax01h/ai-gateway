@@ -371,3 +371,50 @@ curl -X POST \
   each node.
 - You can analyze time spent in each node's execution, system prompts, human input and AI response, tool calls and
   output within the IDE.
+
+### Running Flows with Duo CLI Headless Mode
+
+For a simpler alternative to the full GDK + Agent Platform setup, you can use the Duo CLI in headless mode to run and test flows directly from the command line.
+
+#### Prerequisites
+
+- Install the [Duo CLI](https://gitlab.com/gitlab-org/editor-extensions/gitlab-lsp/-/tree/main/packages/cli?ref_type=heads)
+
+#### Running a Flow
+
+Use the `duo run` command with the `--flow-config` flag pointing to your flow YAML file:
+
+```shell
+duo run \
+  --flow-config duo_workflow_service/agent_platform/v1/flows/configs/your_flow.yml \
+  --flow-config-schema-version v1 \
+  -g "Your goal description here"
+```
+
+#### Passing Additional Context
+
+If your flow defines `inputs` in the `flow` section, pass them via the `DUO_WORKFLOW_ADDITIONAL_CONTEXT_CONTENT` environment variable as a JSON array:
+
+```shell
+export DUO_WORKFLOW_ADDITIONAL_CONTEXT_CONTENT='[{"Category":"your_category","Content":"{\"key\":\"value\",\"another_key\":\"another_value\"}"}]'
+```
+
+```shell
+duo run \
+  --flow-config duo_workflow_service/agent_platform/v1/flows/configs/your_flow.yml \
+  --flow-config-schema-version v1 \
+  -g "Your goal description here"
+```
+
+The `Category` must match a category defined in your flow's `flow.inputs` section, and the `Content` must be a JSON-serialized string matching the `input_schema`.
+
+#### When to Use Headless Mode
+
+This method is particularly useful for:
+
+- Quick iteration on flow configurations
+- Testing flow logic without full infrastructure
+- Debugging specific flow components in isolation
+- Rapid prototyping of new flows
+
+For more advanced options, including a Docker wrapper for reproducible testing, see the [Duo CLI headless mode documentation](https://gitlab.com/gitlab-org/editor-extensions/gitlab-lsp/-/tree/main/packages/cli?ref_type=heads#headless-mode).

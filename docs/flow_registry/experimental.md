@@ -132,11 +132,6 @@ components:
 
 prompts:
     - prompt_id: "my_local_prompt"
-      model:
-        params:
-            model_class_provider: anthropic
-            model: claude-sonnet-4-20250514
-            max_tokens: 32_768
       prompt_template:
           system: "You are a helpful assistant specialized in code analysis"
           user: "Task: {{goal}}"
