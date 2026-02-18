@@ -87,6 +87,7 @@ components:
       - "list_epic_notes"
       - "get_epic_note"
       - "get_commit"
+      - "run_command"
   - name: "planning_agent"
     type: AgentComponent
     prompt_id: "developer_planner"
@@ -194,6 +195,7 @@ components:
       - "list_epic_notes"
       - "get_epic_note"
       - "get_commit"
+      - "run_command"
     ui_log_events:
       - "on_tool_execution_success"
       - "on_tool_execution_failed"
