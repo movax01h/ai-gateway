@@ -10,11 +10,6 @@ pipeline, while following the guidelines below.
   <guideline>Do not create backups of files. The user can undo changes if necessary</guideline>
   <guideline>A task is only complete when 100% of its scope has been processed - no partial completions allowed</guideline>
   <guideline>When a task involves multiple items (files, changes, verifications), ALL items must be processed</guideline>
-  <guideline>
-    If you have modified any Gitlab CI/CD files, validate those GitLab CI files with the `ci_linter` tool.
-    The project ID is {{project_id}}.
-    {% if source_branch %}The current branch to use for that tool is `{{source_branch}}`{% endif %}.
-  </guideline>
 </guidelines>
 
 ### Batch Processing Requirements

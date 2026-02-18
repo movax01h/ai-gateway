@@ -30,7 +30,6 @@ components:
     toolset:
       - "create_file_with_contents"
       - "read_file"
-      - "ci_linter"
     ui_log_events:
       - "on_agent_final_answer"
       - "on_tool_execution_success"
