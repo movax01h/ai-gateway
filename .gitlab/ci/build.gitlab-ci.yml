@@ -67,7 +67,7 @@ build:self-hosted-ai-gateway-latest-image:
   needs:
     - build-docker-model-gateway
 
-build:ai-gateway-fips-base-image:
+.build-fips-base-image:
   stage: build
   extends:
     - .docker
@@ -80,12 +80,20 @@ build:ai-gateway-fips-base-image:
         --build-context hardening=https://gitlab.com/gitlab-org/build/CNG.git#v18.3.5:hardening
         .
     - docker push "$TARGET_IMAGE"
-  rules:
-    - if: $CI_COMMIT_TAG =~ /-fips$/
   needs:
     - build-docker-model-gateway
 
-build:self-hosted-ai-gateway-fips-image:
+build:ai-gateway-fips-base-image:
+  extends: .build-fips-base-image
+  rules:
+    - if: $CI_COMMIT_TAG =~ /^self-hosted-/
+
+build:ai-gateway-fips-base-image-latest:
+  extends: .build-fips-base-image
+  rules:
+    - if: $CI_COMMIT_BRANCH && $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+
+.build-self-hosted-fips-base-image:
   stage: build
   extends:
     - .docker
@@ -95,11 +103,25 @@ build:self-hosted-ai-gateway-fips-image:
     - docker buildx build
         --file docker/self_hosted/Dockerfile.fips
         --tag "$TARGET_IMAGE"
-        --build-arg TAG=${CI_COMMIT_TAG%-fips}
+        --build-arg TAG=${FIPS_TAG}
         --build-arg SRC_IMAGE="${FIPS_TARGET_IMAGE}"
         .
     - docker push "$TARGET_IMAGE"
+
+build:self-hosted-ai-gateway-fips-image:
+  extends: .build-self-hosted-fips-base-image
+  variables:
+    FIPS_TAG: "$CI_COMMIT_TAG"
   rules:
-    - if: $CI_COMMIT_TAG =~ /-fips$/
+    - if: $CI_COMMIT_TAG =~ /^self-hosted-/
   needs:
     - build:ai-gateway-fips-base-image
+
+build:self-hosted-ai-gateway-fips-image-latest:
+  extends: .build-self-hosted-fips-base-image
+  variables:
+    FIPS_TAG: "master"
+  rules:
+    - if: $CI_COMMIT_BRANCH && $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+  needs:
+    - build:ai-gateway-fips-base-image-latest

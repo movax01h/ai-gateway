@@ -41,6 +41,15 @@ release-docker-hub-image:self-managed-tag:
   rules:
     - if: $CI_COMMIT_TAG =~ /^self-hosted-/
 
+release-docker-fips-image:tag:
+  stage: release
+  extends: .docker-release
+  variables:
+    TARGET_IMAGE: "$FIPS_TARGET_IMAGE"
+    RELEASE_VERSION: "$DOCKER_MODEL_GATEWAY:$CI_COMMIT_TAG"
+  rules:
+    - if: $CI_COMMIT_TAG =~ /^self-hosted-/
+
 release-docker-hub-image:self-managed-nightly:
   stage: release
   extends: .docker-hub-release
@@ -48,6 +57,26 @@ release-docker-hub-image:self-managed-nightly:
     RELEASE_VERSION: "gitlab/model-gateway-self-hosted:$CI_COMMIT_SHORT_SHA"
   rules:
     - if: $CI_COMMIT_BRANCH && $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+
+release-docker-hub-self-hosted-fips-image:tag:
+  stage: release
+  extends: .docker-hub-release
+  variables:
+    TARGET_IMAGE: "$SELF_HOSTED_FIPS_TARGET_IMAGE"
+    RELEASE_VERSION: "gitlab/model-gateway-self-hosted-fips:$CI_COMMIT_TAG"
+  rules:
+    - if: $CI_COMMIT_TAG =~ /^self-hosted-/
+
+release-docker-hub-self-hosted-fips-image:latest:
+  stage: release
+  extends: .docker-hub-release
+  variables:
+    TARGET_IMAGE: "$SELF_HOSTED_FIPS_TARGET_IMAGE"
+    RELEASE_VERSION: "gitlab/model-gateway-self-hosted-fips:latest"
+  rules:
+    - if: $CI_COMMIT_BRANCH && $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+  needs:
+    - build:self-hosted-ai-gateway-fips-image-latest
 
 publish-node-client:
   stage: release
@@ -83,21 +112,3 @@ publish-node-client:
     - if: $CI_COMMIT_BRANCH == "main"
       changes:
         - clients/node/**/*
-
-release-docker-fips-image:tag:
-  stage: release
-  extends: .docker-release
-  variables:
-    TARGET_IMAGE: "$FIPS_TARGET_IMAGE"
-    RELEASE_VERSION: "$DOCKER_MODEL_GATEWAY:$CI_COMMIT_TAG"
-  rules:
-    - if: $CI_COMMIT_TAG =~ /-fips$/
-
-release-docker-hub-self-hosted-fips-image:tag:
-  stage: release
-  extends: .docker-hub-release
-  variables:
-    TARGET_IMAGE: "$SELF_HOSTED_FIPS_TARGET_IMAGE"
-    RELEASE_VERSION: "gitlab/model-gateway-self-hosted-fips:${CI_COMMIT_TAG%-fips}"
-  rules:
-    - if: $CI_COMMIT_TAG =~ /-fips$/
