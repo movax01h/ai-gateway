@@ -18,7 +18,7 @@ def response_headers_fixture() -> dict:
     }
 
 
-@pytest.fixture(name="async_client")
+@pytest.fixture(name="async_client", autouse=True)
 def async_client_fixture(response_headers: dict):
     client = Mock(spec=httpx.AsyncClient)
     response = httpx.Response(
@@ -33,11 +33,13 @@ def async_client_fixture(response_headers: dict):
 
     http_handler = Mock(spec=AsyncHTTPHandler, client=client)
 
-    with patch(
+    patcher = patch(
         "litellm.proxy.pass_through_endpoints.pass_through_endpoints.get_async_httpx_client",
         return_value=http_handler,
-    ):
-        yield client
+    )
+    patcher.start()
+    yield client
+    patcher.stop()
 
 
 @pytest.fixture(name="limits")
@@ -58,6 +60,8 @@ def request_factory_fixture():
         request_body: bytes = b'{"model": "model1"}',
         request_headers: dict = {"Content-Type": "application/json"},
     ):
+        from gitlab_cloud_connector import CloudConnectorUser, UserClaims
+
         request = Mock(spec=fastapi.Request)
         request.url = URL(request_url)
         request.method = "POST"
@@ -66,6 +70,10 @@ def request_factory_fixture():
         mock_request_body.return_value = request_body
         request.body = mock_request_body
         request.headers = request_headers
+        request.user = CloudConnectorUser(
+            authenticated=True,
+            claims=UserClaims(gitlab_instance_uid="test-instance"),
+        )
         return request
 
     return create

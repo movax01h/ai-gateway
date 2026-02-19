@@ -5,7 +5,12 @@ import pytest
 from lib.billing_events.context import UsageQuotaEventContext
 from lib.events.base import GLReportingEventContext
 from lib.internal_events.context import EventContext
-from lib.usage_quota import InsufficientCredits, UsageQuotaEvent, UsageQuotaService
+from lib.usage_quota import (
+    InsufficientCredits,
+    ModelMetadata,
+    UsageQuotaEvent,
+    UsageQuotaService,
+)
 from lib.usage_quota.errors import (
     UsageQuotaConnectionError,
     UsageQuotaHTTPError,
@@ -327,3 +332,52 @@ class TestServiceCleanup:
         ) as mock_aclose:
             await service.aclose()
             mock_aclose.assert_called_once()
+
+
+class TestModelMetadata:
+    """Tests for ModelMetadata handling in UsageQuotaService."""
+
+    @pytest.mark.asyncio
+    async def test_passes_model_id_to_client_when_metadata_provided(
+        self, service, gl_context
+    ):
+        """Test that model_id is passed to client when ModelMetadata is provided."""
+
+        model_metadata = ModelMetadata(name="claude-3-5-sonnet-20241022")
+
+        with patch.object(
+            service.usage_quota_client,
+            "check_quota_available",
+            new_callable=AsyncMock,
+            return_value=True,
+        ) as mock_check:
+            await service.execute(
+                gl_context,
+                UsageQuotaEvent.AIGW_PROXY_USE,
+                model_metadata=model_metadata,
+            )
+
+            call_args = mock_check.call_args
+            extended_context = call_args[0][0]
+            assert extended_context.model_id == "claude-3-5-sonnet-20241022"
+
+    @pytest.mark.asyncio
+    async def test_passes_none_model_id_when_metadata_not_provided(
+        self, service, gl_context
+    ):
+        """Test that model_id is None when ModelMetadata is not provided."""
+        with patch.object(
+            service.usage_quota_client,
+            "check_quota_available",
+            new_callable=AsyncMock,
+            return_value=True,
+        ) as mock_check:
+            await service.execute(
+                gl_context,
+                UsageQuotaEvent.CODE_SUGGESTIONS_CODE_COMPLETIONS,
+                model_metadata=None,
+            )
+
+            call_args = mock_check.call_args
+            extended_context = call_args[0][0]
+            assert extended_context.model_id is None
