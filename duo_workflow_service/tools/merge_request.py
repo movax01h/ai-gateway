@@ -576,6 +576,7 @@ class ListMergeRequest(DuoBaseTool):
             "labels",
             "search",
             "scope",
+            "updated_after",
         ]
 
         for param in optional_params:

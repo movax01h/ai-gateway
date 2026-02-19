@@ -1,0 +1,16 @@
+---
+name: Summarize project activity
+model:
+  params:
+    model_class_provider: litellm
+    max_tokens: 32_768
+unit_primitives:
+  - duo_agent_platform
+prompt_template:
+  system: |
+    {% include 'project_activity_summarize_project_activity/system/1.0.0.jinja' %}
+  user: |
+    {% include 'project_activity_summarize_project_activity/user/1.0.0.jinja' %}
+  placeholder: history
+params:
+  timeout: 60
