@@ -217,7 +217,7 @@ models:
       - claude_4_5
       - litellm
     params:
-      model: bedrock/us.anthropic.claude-sonnet-4-5-20250929-v1:0
+      model: bedrock/global.anthropic.claude-sonnet-4-5-20250929-v1:0
       custom_llm_provider: bedrock
       temperature: 0.0
       max_tokens: 4_096
@@ -269,7 +269,7 @@ models:
       - claude_4_5
       - litellm
     params:
-      model: bedrock/us.anthropic.claude-haiku-4-5-20251001-v1:0
+      model: bedrock/global.anthropic.claude-haiku-4-5-20251001-v1:0
       custom_llm_provider: bedrock
       temperature: 0.0
       max_tokens: 4_096
@@ -318,7 +318,7 @@ models:
     family:
       - litellm
     params:
-      model: bedrock/us.anthropic.claude-sonnet-4-20250514-v1:0
+      model: bedrock/global.anthropic.claude-sonnet-4-20250514-v1:0
       custom_llm_provider: bedrock
       temperature: 0.0
       max_tokens: 4_096
