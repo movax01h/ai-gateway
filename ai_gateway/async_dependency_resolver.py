@@ -90,28 +90,37 @@ async def get_chat_anthropic_claude_factory_provider():
 
 
 @inject
-async def get_anthropic_proxy_client(
-    anthropic_proxy_client=Provide[
-        ContainerApplication.pkg_models.anthropic_proxy_client
+async def get_anthropic_proxy_model_factory(
+    anthropic_proxy_model_factory=Provide[
+        ContainerApplication.pkg_models.anthropic_proxy_model_factory
     ],
 ):
-    return anthropic_proxy_client
+    return anthropic_proxy_model_factory
 
 
 @inject
-async def get_vertex_ai_proxy_client(
-    vertex_ai_proxy_client=Provide[
-        ContainerApplication.pkg_models.vertex_ai_proxy_client
+async def get_vertexai_proxy_model_factory(
+    vertexai_proxy_model_factory=Provide[
+        ContainerApplication.pkg_models.vertexai_proxy_model_factory
     ],
 ):
-    return vertex_ai_proxy_client
+    return vertexai_proxy_model_factory
 
 
 @inject
-async def get_openai_proxy_client(
-    openai_proxy_client=Provide[ContainerApplication.pkg_models.openai_proxy_client],
+async def get_openai_proxy_model_factory(
+    openai_proxy_model_factory=Provide[
+        ContainerApplication.pkg_models.openai_proxy_model_factory
+    ],
 ):
-    return openai_proxy_client
+    return openai_proxy_model_factory
+
+
+@inject
+async def get_proxy_client(
+    proxy_client=Provide[ContainerApplication.pkg_models.proxy_client],
+):
+    return proxy_client
 
 
 async def get_internal_event_client():

@@ -5,43 +5,47 @@ import fastapi
 import pytest
 from starlette.datastructures import URL
 
-from ai_gateway.proxy.clients.vertex_ai import VertexAIProxyClient
+from ai_gateway.proxy.clients import ProxyClient, VertexAIProxyModelFactory
 
 
-@pytest.fixture(name="proxy_client")
-def proxy_client_fixture(
-    async_client, limits, internal_event_client, billing_event_client
-):
-    """Fixture to create a VertexAIProxyClient instance for usage tests."""
-    return VertexAIProxyClient(
+@pytest.fixture(name="vertex_factory")
+def vertex_factory_fixture():
+    """Fixture to create a VertexAIProxyModelFactory instance for usage tests."""
+    return VertexAIProxyModelFactory(
         endpoint="my-location-aiplatform.googleapis.com",
         project="my-project",
         location="my-location",
-        limits=limits,
-        internal_event_client=internal_event_client,
-        billing_event_client=billing_event_client,
     )
 
 
+@pytest.fixture(name="proxy_client")
+def proxy_client_fixture(limits, internal_event_client, billing_event_client):
+    """Fixture to create a ProxyClient instance."""
+    return ProxyClient(limits, internal_event_client, billing_event_client)
+
+
 @pytest.mark.asyncio
-async def test_valid_proxy_request_text_embedding(proxy_client, request_factory):
+async def test_valid_proxy_request_text_embedding(
+    vertex_factory, proxy_client, request_factory
+):
     request_params = {
         "instances": [{"content": "Hello world"}],
     }
 
     with patch("ai_gateway.proxy.clients.vertex_ai.access_token") as mock_access_token:
-        response = await proxy_client.proxy(
-            request_factory(
-                request_url=(
-                    "http://0.0.0.0:5052/v1/proxy/vertex-ai/v1/projects/PROJECT/"
-                    "locations/LOCATION/publishers/google/models/text-embedding-005:predict"
-                ),
-                request_body=json.dumps(request_params).encode("utf-8"),
-                request_headers={
-                    "content-type": "application/json",
-                },
-            )
+        request = request_factory(
+            request_url=(
+                "http://0.0.0.0:5052/v1/proxy/vertex-ai/v1/projects/PROJECT/"
+                "locations/LOCATION/publishers/google/models/text-embedding-005:predict"
+            ),
+            request_body=json.dumps(request_params).encode("utf-8"),
+            request_headers={
+                "content-type": "application/json",
+            },
         )
+
+        model = await vertex_factory.factory(request)
+        response = await proxy_client.proxy(request, model)
 
         mock_access_token.assert_called_once()
 
@@ -108,6 +112,7 @@ async def test_valid_proxy_request_text_embedding(proxy_client, request_factory)
 )
 async def test_request_url(
     async_client,
+    vertex_factory,
     proxy_client,
     request_factory,
     request_url,
@@ -117,14 +122,15 @@ async def test_request_url(
 
     if expected_error:
         with pytest.raises(fastapi.HTTPException, match=expected_error):
-            await proxy_client.proxy(request_factory(request_url=request_url))
+            request = request_factory(request_url=request_url)
+            await vertex_factory.factory(request)
     else:
         with patch(
             "ai_gateway.proxy.clients.vertex_ai.access_token"
         ) as mock_access_token:
-            response = await proxy_client.proxy(
-                request_factory(request_url=request_url)
-            )
+            request = request_factory(request_url=request_url)
+            model = await vertex_factory.factory(request)
+            response = await proxy_client.proxy(request, model)
 
             mock_access_token.assert_called_once()
 
@@ -139,10 +145,18 @@ async def test_request_url(
         )
 
 
-def test_allowed_upstream_models_includes_anthropic(proxy_client):
+def test_allowed_upstream_models_includes_anthropic():
     """Test allowed models include text-embeddings and Claude models."""
-    allowed_models = proxy_client._allowed_upstream_models()
+    vertex_factory = VertexAIProxyModelFactory(
+        endpoint="test-endpoint",
+        project="test-project",
+        location="test-location",
+    )
+
+    # Access the private method for testing
+    from ai_gateway.proxy.clients.vertex_ai import _load_allowed_upstream_models
+
+    allowed_models = _load_allowed_upstream_models()
 
     assert "text-embedding-005" in allowed_models
-
     assert "claude-sonnet-4-5@20250929" in allowed_models

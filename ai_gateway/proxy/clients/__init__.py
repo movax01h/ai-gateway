@@ -7,10 +7,11 @@ from litellm.proxy.pass_through_endpoints import pass_through_endpoints
 from litellm.responses.utils import ResponseAPILoggingUtils
 from litellm.types.utils import ModelResponseStream
 
-from ai_gateway.proxy.clients.anthropic import AnthropicProxyClient
-from ai_gateway.proxy.clients.openai import OpenAIProxyClient
+from ai_gateway.proxy.clients.anthropic import AnthropicProxyModelFactory
+from ai_gateway.proxy.clients.base import ProxyClient, ProxyModel
+from ai_gateway.proxy.clients.openai import OpenAIProxyModelFactory
 from ai_gateway.proxy.clients.token_usage import TokenUsage
-from ai_gateway.proxy.clients.vertex_ai import VertexAIProxyClient
+from ai_gateway.proxy.clients.vertex_ai import VertexAIProxyModelFactory
 
 
 # Monkey-patches to support calling litellm-proxy's code without it handling fastapi routing

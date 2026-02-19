@@ -733,3 +733,56 @@ class TestConnectionPoolConfiguration:
         # Should not raise any errors
         await client.aclose()
         assert client._http_client is None
+
+
+class TestModelIdParameter:
+    """Tests for model_id parameter in usage quota context."""
+
+    @pytest.mark.asyncio
+    async def test_includes_model_id_in_request_params(
+        self,
+        usage_quota_client: UsageQuotaClient,
+        mock_http_client: AsyncMock,
+        mock_success_response: MagicMock,
+    ):
+        """Should include model_id in query parameters when provided."""
+        context = UsageQuotaEventContext(
+            environment="production",
+            realm="saas",
+            model_id="claude-3-5-sonnet-20241022",
+        )
+
+        with patch("httpx.AsyncClient") as mock_client_class:
+            mock_http_client.head = AsyncMock(return_value=mock_success_response)
+            mock_client_class.return_value = mock_http_client
+
+            await usage_quota_client.check_quota_available(context)
+
+            call_args = mock_http_client.head.call_args
+            params = call_args[1]["params"]
+            assert "model_id" in params
+            assert params["model_id"] == "claude-3-5-sonnet-20241022"
+
+    @pytest.mark.asyncio
+    async def test_excludes_model_id_when_none(
+        self,
+        usage_quota_client: UsageQuotaClient,
+        mock_http_client: AsyncMock,
+        mock_success_response: MagicMock,
+    ):
+        """Should exclude model_id from params when None."""
+        context = UsageQuotaEventContext(
+            environment="production",
+            realm="saas",
+            model_id=None,
+        )
+
+        with patch("httpx.AsyncClient") as mock_client_class:
+            mock_http_client.head = AsyncMock(return_value=mock_success_response)
+            mock_client_class.return_value = mock_http_client
+
+            await usage_quota_client.check_quota_available(context)
+
+            call_args = mock_http_client.head.call_args
+            params = call_args[1]["params"]
+            assert "model_id" not in params

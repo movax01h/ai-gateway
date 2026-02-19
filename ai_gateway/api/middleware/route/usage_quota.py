@@ -9,7 +9,7 @@ from starlette.responses import JSONResponse
 from ai_gateway.container import ContainerApplication
 from lib.context import StarletteUser
 from lib.events import FeatureQualifiedNameStatic, GLReportingEventContext
-from lib.usage_quota import InsufficientCredits, UsageQuotaEvent
+from lib.usage_quota import InsufficientCredits, ModelMetadata, UsageQuotaEvent
 from lib.usage_quota.client import should_skip_usage_quota_for_user
 from lib.usage_quota.service import UsageQuotaService
 
@@ -19,6 +19,7 @@ log = structlog.stdlib.get_logger("usage_quota")
 def has_sufficient_usage_quota(
     feature_qualified_name: FeatureQualifiedNameStatic,
     event: UsageQuotaEvent | Callable[[Any], Any],
+    model_name: str | None = None,
 ):
     """Decorator to enforce usage quota checks on API routes.
 
@@ -32,6 +33,7 @@ def has_sufficient_usage_quota(
         event: Either a UsageQuotaEvent enum value or a callable that resolves
             the event type from the request payload. The callable can be
             sync or async and should return a UsageQuotaEvent.
+        model_name: Optional model name to include in usage quota metadata.
 
     Returns:
         A decorator function that wraps the route handler
@@ -41,7 +43,7 @@ def has_sufficient_usage_quota(
         event_type_resolver = event if callable(event) else None
         static_event: Optional[UsageQuotaEvent] = event if not callable(event) else None
         return _process_route(
-            func, feature_qualified_name, static_event, event_type_resolver
+            func, feature_qualified_name, static_event, event_type_resolver, model_name
         )
 
     return decorator
@@ -88,6 +90,7 @@ async def _usage_quota_wrapper(
     feature_qualified_name: FeatureQualifiedNameStatic,
     event: Optional[UsageQuotaEvent],
     event_type_resolver: Optional[Callable[[Any], Any]],
+    model_name: Optional[str],
     usage_quota_service: UsageQuotaService = Provide[
         ContainerApplication.usage_quota.service
     ],
@@ -110,7 +113,11 @@ async def _usage_quota_wrapper(
     )
 
     try:
-        await usage_quota_service.execute(gl_reporting_context, event_to_use)
+        await usage_quota_service.execute(
+            gl_reporting_context,
+            event_to_use,
+            model_metadata=ModelMetadata(name=model_name) if model_name else None,
+        )
     except InsufficientCredits:
         return _insufficient_credits_response()
 
@@ -122,6 +129,7 @@ def _process_route(
     feature_qualified_name: FeatureQualifiedNameStatic,
     event: Optional[UsageQuotaEvent],
     event_type_resolver: Optional[Callable[[Any], Any]],
+    model_name: Optional[str],
 ) -> Callable:
     @functools.wraps(func)
     async def wrapper(
@@ -136,6 +144,7 @@ def _process_route(
             feature_qualified_name=feature_qualified_name,
             event=event,
             event_type_resolver=event_type_resolver,
+            model_name=model_name,
             **kwargs,
         )
 

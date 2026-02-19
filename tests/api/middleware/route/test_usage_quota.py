@@ -374,3 +374,79 @@ class TestEventTypeEnum:
         assert response.status_code == 200
         call_args = mock_usage_quota_service.execute.call_args
         assert call_args[0][1] == UsageQuotaEvent.AMAZON_Q_INTEGRATION
+
+
+class TestModelNameParameter:
+    """Tests for model_name parameter handling."""
+
+    @pytest.mark.asyncio
+    async def test_passes_model_name_to_service(
+        self, mock_request, mock_usage_quota_service
+    ):
+        """Test that model_name is passed to service as ModelMetadata."""
+
+        async def test_handler(request, *args, **kwargs):
+            return JSONResponse({"status": "ok"})
+
+        decorated = has_sufficient_usage_quota(
+            feature_qualified_name=FeatureQualifiedNameStatic.AIGW_PROXY_USE,
+            event=UsageQuotaEvent.AIGW_PROXY_USE,
+            model_name="claude-3-5-sonnet-20241022",
+        )(test_handler)
+
+        mock_usage_quota_service.execute = AsyncMock()
+
+        response = await decorated(mock_request)
+
+        assert response.status_code == 200
+        call_args = mock_usage_quota_service.execute.call_args
+        model_metadata = call_args[1]["model_metadata"]
+        assert model_metadata is not None
+        assert model_metadata.name == "claude-3-5-sonnet-20241022"
+
+    @pytest.mark.asyncio
+    async def test_passes_none_when_model_name_not_provided(
+        self, mock_request, mock_usage_quota_service
+    ):
+        """Test that model_metadata is None when model_name is not provided."""
+
+        async def test_handler(request, *args, **kwargs):
+            return JSONResponse({"status": "ok"})
+
+        decorated = has_sufficient_usage_quota(
+            feature_qualified_name=FeatureQualifiedNameStatic.CODE_SUGGESTIONS,
+            event=UsageQuotaEvent.CODE_SUGGESTIONS_CODE_COMPLETIONS,
+        )(test_handler)
+
+        mock_usage_quota_service.execute = AsyncMock()
+
+        response = await decorated(mock_request)
+
+        assert response.status_code == 200
+        call_args = mock_usage_quota_service.execute.call_args
+        model_metadata = call_args[1]["model_metadata"]
+        assert model_metadata is None
+
+    @pytest.mark.asyncio
+    async def test_passes_none_when_model_name_is_none(
+        self, mock_request, mock_usage_quota_service
+    ):
+        """Test that model_metadata is None when model_name is explicitly None."""
+
+        async def test_handler(request, *args, **kwargs):
+            return JSONResponse({"status": "ok"})
+
+        decorated = has_sufficient_usage_quota(
+            feature_qualified_name=FeatureQualifiedNameStatic.AIGW_PROXY_USE,
+            event=UsageQuotaEvent.AIGW_PROXY_USE,
+            model_name=None,
+        )(test_handler)
+
+        mock_usage_quota_service.execute = AsyncMock()
+
+        response = await decorated(mock_request)
+
+        assert response.status_code == 200
+        call_args = mock_usage_quota_service.execute.call_args
+        model_metadata = call_args[1]["model_metadata"]
+        assert model_metadata is None

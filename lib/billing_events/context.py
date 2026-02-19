@@ -74,6 +74,7 @@ class UsageQuotaEventContext(BaseModel):
     event_type: Optional[str] = None
     feature_qualified_name: Optional[str] = None
     feature_ai_catalog_item: Optional[bool] = None
+    model_id: Optional[str] = None
 
     @classmethod
     def from_internal_event(cls, internal_event_context: EventContext) -> Self:

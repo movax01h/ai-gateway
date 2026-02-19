@@ -1,4 +1,4 @@
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 import pytest
 from gitlab_cloud_connector import CloudConnectorUser, GitLabUnitPrimitive, UserClaims
@@ -7,6 +7,7 @@ from ai_gateway.api.v1 import api_router
 from ai_gateway.api.v1.proxy.request import (
     EXTENDED_FEATURE_CATEGORIES_FOR_PROXY_ENDPOINTS,
 )
+from ai_gateway.proxy.clients import ProxyModel
 
 
 @pytest.fixture(name="fast_api_router", scope="class")
@@ -43,6 +44,23 @@ def proxy_headers_fixture():
     }
 
 
+@pytest.fixture(name="mock_proxy_model")
+def mock_proxy_model_fixture():
+    """Mock ProxyModel for testing."""
+    return ProxyModel(
+        base_url="https://api.openai.com",
+        model_name="gpt-5",
+        upstream_path="/v1/chat/completions",
+        stream=False,
+        upstream_service="openai",
+        headers_to_upstream={"Authorization": "Bearer test"},
+        allowed_upstream_paths=[],
+        allowed_upstream_models=["gpt-5"],
+        allowed_headers_to_upstream=[],
+        allowed_headers_to_downstream=[],
+    )
+
+
 class TestProxyOpenAI:
     @pytest.mark.parametrize(
         "unit_primitive", EXTENDED_FEATURE_CATEGORIES_FOR_PROXY_ENDPOINTS.keys()
@@ -54,10 +72,18 @@ class TestProxyOpenAI:
         mock_detect_abuse,
         unit_primitive,
         proxy_headers,
+        mock_proxy_model,
     ):
-        with patch(
-            "ai_gateway.proxy.clients.OpenAIProxyClient.proxy",
-            return_value={"response": "test"},
+        with (
+            patch(
+                "ai_gateway.proxy.clients.ProxyClient.proxy",
+                return_value={"response": "test"},
+            ),
+            patch(
+                "ai_gateway.proxy.clients.OpenAIProxyModelFactory.factory",
+                new_callable=AsyncMock,
+                return_value=mock_proxy_model,
+            ),
         ):
             headers = {**proxy_headers, "X-Gitlab-Unit-Primitive": unit_primitive}
             response = mock_client.post(
@@ -89,10 +115,18 @@ class TestProxyOpenAI:
         mock_detect_abuse,
         unit_primitive,
         proxy_headers,
+        mock_proxy_model,
     ):
-        with patch(
-            "ai_gateway.proxy.clients.OpenAIProxyClient.proxy",
-            return_value={"response": "completion test"},
+        with (
+            patch(
+                "ai_gateway.proxy.clients.ProxyClient.proxy",
+                return_value={"response": "completion test"},
+            ),
+            patch(
+                "ai_gateway.proxy.clients.OpenAIProxyModelFactory.factory",
+                new_callable=AsyncMock,
+                return_value=mock_proxy_model,
+            ),
         ):
             headers = {**proxy_headers, "X-Gitlab-Unit-Primitive": unit_primitive}
             response = mock_client.post(
@@ -124,10 +158,18 @@ class TestProxyOpenAI:
         mock_detect_abuse,
         unit_primitive,
         proxy_headers,
+        mock_proxy_model,
     ):
-        with patch(
-            "ai_gateway.proxy.clients.OpenAIProxyClient.proxy",
-            return_value={"data": [{"embedding": [0.1, 0.2, 0.3]}]},
+        with (
+            patch(
+                "ai_gateway.proxy.clients.ProxyClient.proxy",
+                return_value={"data": [{"embedding": [0.1, 0.2, 0.3]}]},
+            ),
+            patch(
+                "ai_gateway.proxy.clients.OpenAIProxyModelFactory.factory",
+                new_callable=AsyncMock,
+                return_value=mock_proxy_model,
+            ),
         ):
             headers = {**proxy_headers, "X-Gitlab-Unit-Primitive": unit_primitive}
             response = mock_client.post(
@@ -148,13 +190,25 @@ class TestProxyOpenAI:
         )
 
     def test_successful_models_request(
-        self, mock_client, mock_track_internal_event, mock_detect_abuse, proxy_headers
+        self,
+        mock_client,
+        mock_track_internal_event,
+        mock_detect_abuse,
+        proxy_headers,
+        mock_proxy_model,
     ):
         unit_primitive = list(EXTENDED_FEATURE_CATEGORIES_FOR_PROXY_ENDPOINTS.keys())[0]
 
-        with patch(
-            "ai_gateway.proxy.clients.OpenAIProxyClient.proxy",
-            return_value={"data": [{"id": "gpt-5", "object": "model"}]},
+        with (
+            patch(
+                "ai_gateway.proxy.clients.ProxyClient.proxy",
+                return_value={"data": [{"id": "gpt-5", "object": "model"}]},
+            ),
+            patch(
+                "ai_gateway.proxy.clients.OpenAIProxyModelFactory.factory",
+                new_callable=AsyncMock,
+                return_value=mock_proxy_model,
+            ),
         ):
             headers = {**proxy_headers, "X-Gitlab-Unit-Primitive": unit_primitive}
             response = mock_client.post(
@@ -183,10 +237,18 @@ class TestProxyOpenAI:
         mock_detect_abuse,
         unit_primitive,
         proxy_headers,
+        mock_proxy_model,
     ):
-        with patch(
-            "ai_gateway.proxy.clients.OpenAIProxyClient.proxy",
-            return_value={"response": "responses test"},
+        with (
+            patch(
+                "ai_gateway.proxy.clients.ProxyClient.proxy",
+                return_value={"response": "responses test"},
+            ),
+            patch(
+                "ai_gateway.proxy.clients.OpenAIProxyModelFactory.factory",
+                new_callable=AsyncMock,
+                return_value=mock_proxy_model,
+            ),
         ):
             headers = {**proxy_headers, "X-Gitlab-Unit-Primitive": unit_primitive}
             response = mock_client.post(
@@ -207,13 +269,25 @@ class TestProxyOpenAI:
         )
 
     def test_streaming_request(
-        self, mock_client, mock_track_internal_event, mock_detect_abuse, proxy_headers
+        self,
+        mock_client,
+        mock_track_internal_event,
+        mock_detect_abuse,
+        proxy_headers,
+        mock_proxy_model,
     ):
         unit_primitive = list(EXTENDED_FEATURE_CATEGORIES_FOR_PROXY_ENDPOINTS.keys())[0]
 
-        with patch(
-            "ai_gateway.proxy.clients.OpenAIProxyClient.proxy",
-            return_value={"response": "streaming test"},
+        with (
+            patch(
+                "ai_gateway.proxy.clients.ProxyClient.proxy",
+                return_value={"response": "streaming test"},
+            ),
+            patch(
+                "ai_gateway.proxy.clients.OpenAIProxyModelFactory.factory",
+                new_callable=AsyncMock,
+                return_value=mock_proxy_model,
+            ),
         ):
             headers = {**proxy_headers, "X-Gitlab-Unit-Primitive": unit_primitive}
             response = mock_client.post(
@@ -244,7 +318,7 @@ class TestUnauthorizedScopes:
         )
 
     def test_failed_authorization_scope(self, mock_client, proxy_headers):
-        with patch("ai_gateway.proxy.clients.OpenAIProxyClient.proxy"):
+        with patch("ai_gateway.proxy.clients.ProxyClient.proxy"):
             headers = {
                 **proxy_headers,
                 "X-Gitlab-Unit-Primitive": GitLabUnitPrimitive.EXPLAIN_VULNERABILITY,
@@ -267,7 +341,7 @@ class TestUnauthorizedScopes:
 
     def test_missing_unit_primitive_header(self, mock_client, proxy_headers):
         """Test request missing the required X-Gitlab-Unit-Primitive header."""
-        with patch("ai_gateway.proxy.clients.OpenAIProxyClient.proxy"):
+        with patch("ai_gateway.proxy.clients.ProxyClient.proxy"):
             # Remove X-Gitlab-Unit-Primitive from headers
             headers = {
                 k: v for k, v in proxy_headers.items() if k != "X-Gitlab-Unit-Primitive"
@@ -324,7 +398,7 @@ class TestDataMismatch:
         expected_detail,
     ):
         """Test that mismatched headers are rejected with appropriate status codes."""
-        with patch("ai_gateway.proxy.clients.OpenAIProxyClient.proxy"):
+        with patch("ai_gateway.proxy.clients.ProxyClient.proxy"):
             headers = {
                 **proxy_headers,
                 "X-Gitlab-Unit-Primitive": GitLabUnitPrimitive.ASK_BUILD,
@@ -368,3 +442,74 @@ class TestInvalidRoutes:
 
         # This should result in a 404 or 500 depending on how the proxy handles it
         assert response.status_code in [404, 500, 502]
+
+
+class TestUsageQuotaWithModelName:
+    """Tests for usage quota integration with model_name parameter."""
+
+    @pytest.mark.parametrize(
+        "model_name",
+        [
+            "gpt-4o",
+            "gpt-4-turbo-2024-04-09",
+            "gpt-3.5-turbo",
+            "text-embedding-ada-002",
+        ],
+    )
+    def test_passes_model_name_to_usage_quota_service(
+        self,
+        mock_client,
+        mock_track_internal_event,
+        mock_detect_abuse,
+        proxy_headers,
+        model_name,
+    ):
+        """Test that model_name from ProxyModel is passed to usage quota service."""
+        unit_primitive = list(EXTENDED_FEATURE_CATEGORIES_FOR_PROXY_ENDPOINTS.keys())[0]
+
+        mock_proxy_model = ProxyModel(
+            base_url="https://api.openai.com",
+            model_name=model_name,
+            upstream_path="/v1/chat/completions",
+            stream=False,
+            upstream_service="openai",
+            headers_to_upstream={"Authorization": "Bearer test"},
+            allowed_upstream_paths=[],
+            allowed_upstream_models=[model_name],
+            allowed_headers_to_upstream=[],
+            allowed_headers_to_downstream=[],
+        )
+
+        with (
+            patch(
+                "ai_gateway.proxy.clients.ProxyClient.proxy",
+                return_value={"response": "test"},
+            ),
+            patch(
+                "ai_gateway.proxy.clients.OpenAIProxyModelFactory.factory",
+                new_callable=AsyncMock,
+                return_value=mock_proxy_model,
+            ),
+            patch(
+                "lib.usage_quota.service.UsageQuotaService.execute",
+                new_callable=AsyncMock,
+            ) as mock_usage_quota_execute,
+        ):
+            headers = {**proxy_headers, "X-Gitlab-Unit-Primitive": unit_primitive}
+            response = mock_client.post(
+                "/proxy/openai/v1/chat/completions",
+                headers=headers,
+                json={
+                    "model": model_name,
+                    "messages": [{"role": "user", "content": "Hello"}],
+                },
+            )
+
+            assert response.status_code == 200
+
+            # Verify usage quota service was called with model metadata
+            mock_usage_quota_execute.assert_called_once()
+            call_args = mock_usage_quota_execute.call_args
+            model_metadata = call_args[1]["model_metadata"]
+            assert model_metadata is not None
+            assert model_metadata.name == model_name

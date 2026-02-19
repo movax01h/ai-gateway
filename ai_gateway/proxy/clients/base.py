@@ -1,8 +1,7 @@
 import json
-import re
-import typing
 from abc import ABC, abstractmethod
 from contextvars import ContextVar
+from typing import Any, Mapping
 
 import fastapi
 import litellm
@@ -14,6 +13,7 @@ from litellm.proxy.pass_through_endpoints.pass_through_endpoints import (
     create_pass_through_route,
 )
 from litellm.proxy.proxy_server import UserAPIKeyAuth
+from pydantic import BaseModel
 from starlette.background import BackgroundTask
 
 from ai_gateway.config import ConfigModelLimits
@@ -28,7 +28,75 @@ from lib.events import FeatureQualifiedNameStatic, GLReportingEventContext
 from lib.internal_events.client import InternalEventsClient
 
 
-class BaseProxyClient(ABC):
+async def extract_json_body(request: fastapi.Request) -> Any:
+    body = await request.body()
+
+    try:
+        json_body = json.loads(body)
+    except json.JSONDecodeError:
+        raise fastapi.HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid JSON"
+        )
+
+    return json_body
+
+
+def _create_headers_to_upstream(
+    headers_from_downstream: Mapping[str, str], allowed_headers_to_upstream: list[str]
+) -> dict[str, str]:
+    return {
+        key: headers_from_downstream[key]
+        for key in allowed_headers_to_upstream
+        if key in headers_from_downstream
+    }
+
+
+def _create_headers_to_downstream(
+    headers_from_upstream: dict[str, str], allowed_headers_to_downstream: list[str]
+) -> dict[str, str]:
+    return {
+        key: headers_from_upstream[key]
+        for key in allowed_headers_to_downstream
+        if key in headers_from_upstream
+    }
+
+
+class ProxyModel(BaseModel):
+    base_url: str
+    """Base URL of the upstream service."""
+
+    model_name: str
+    """Model name from the request."""
+
+    upstream_path: str
+    """Upstream target path from the request."""
+
+    stream: bool
+    """Stream flag from the request."""
+
+    upstream_service: str
+    """Name of the upstream service."""
+
+    headers_to_upstream: dict[str, str]
+    """Update headers for vendor specific requirements."""
+
+    allowed_upstream_models: list[str]
+    """Allowed models to the upstream service."""
+
+    allowed_headers_to_upstream: list[str]
+    """Allowed request headers to the upstream service."""
+
+    allowed_headers_to_downstream: list[str]
+    """Allowed response headers to the downstream service."""
+
+
+class BaseProxyModelFactory(ABC):
+    @abstractmethod
+    async def factory(self, request: fastapi.Request) -> ProxyModel:
+        pass
+
+
+class ProxyClient:
     def __init__(
         self,
         limits: ConfigModelLimits,
@@ -39,22 +107,19 @@ class BaseProxyClient(ABC):
         self.internal_event_client = internal_event_client
         self.billing_event_client = billing_event_client
         self.watcher = None
+        self.user = None
         current_proxy_client.set(self)
 
-    async def proxy(self, request: fastapi.Request) -> fastapi.Response:
-        upstream_path = self._extract_upstream_path(request.url.__str__())
-        json_body = await self._extract_json_body(request)
-        model_name = self._extract_model_name(upstream_path, json_body)
+    async def proxy(
+        self, request: fastapi.Request, model: ProxyModel
+    ) -> fastapi.Response:
+        headers_to_upstream = _create_headers_to_upstream(
+            request.headers, model.allowed_headers_to_upstream
+        )
+        headers_to_upstream.update(model.headers_to_upstream)
 
-        if model_name not in self._allowed_upstream_models():
-            raise fastapi.HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST, detail="Unsupported model"
-            )
-
-        stream = self._extract_stream_flag(upstream_path, json_body)
-        headers_to_upstream = self._create_headers_to_upstream(request.headers)
-        self._update_headers_to_upstream(headers_to_upstream)
-        upstream_service = self._upstream_service()
+        upstream_service = model.upstream_service
+        model_name = model.model_name
 
         try:
             with ModelRequestInstrumentator(
@@ -62,11 +127,9 @@ class BaseProxyClient(ABC):
                 model_engine=upstream_service,
                 model_provider=upstream_service,
                 model_name=model_name,
-                limits=self.limits.for_model(
-                    engine=self._upstream_service(), name=model_name
-                ),
+                limits=self.limits.for_model(engine=upstream_service, name=model_name),
             ).watch(
-                stream=stream,
+                stream=model.stream,
                 unit_primitives=[GitLabUnitPrimitive.AI_GATEWAY_MODEL_PROVIDER_PROXY],
                 internal_event_client=self.internal_event_client,
             ) as watcher:
@@ -77,7 +140,7 @@ class BaseProxyClient(ABC):
 
                 endpoint_func = create_pass_through_route(
                     endpoint="",  # This is unused in the litellm code
-                    target=f"{self._base_url()}{upstream_path}",
+                    target=f"{model.base_url}{model.upstream_path}",
                     custom_headers=headers_to_upstream,
                 )
                 response_from_upstream = await endpoint_func(
@@ -100,8 +163,9 @@ class BaseProxyClient(ABC):
                 status_code=status.HTTP_502_BAD_GATEWAY, detail="Bad Gateway"
             )
 
-        headers_to_downstream = self._create_headers_to_downstream(
-            response_from_upstream.headers
+        headers_to_downstream = _create_headers_to_downstream(
+            response_from_upstream.headers,
+            model.allowed_headers_to_downstream,
         )
 
         if isinstance(response_from_upstream, fastapi.responses.StreamingResponse):
@@ -117,89 +181,8 @@ class BaseProxyClient(ABC):
             headers=headers_to_downstream,
         )
 
-    @abstractmethod
-    def _base_url(self) -> str:
-        """Base URL of the upstream service."""
-        pass
 
-    @abstractmethod
-    def _allowed_upstream_paths(self) -> list[str]:
-        """Allowed paths to the upstream service."""
-        pass
-
-    @abstractmethod
-    def _allowed_headers_to_upstream(self) -> list[str]:
-        """Allowed request headers to the upstream service."""
-        pass
-
-    @abstractmethod
-    def _allowed_headers_to_downstream(self) -> list[str]:
-        """Allowed response headers to the downstream service."""
-        pass
-
-    @abstractmethod
-    def _upstream_service(self) -> str:
-        """Name of the upstream service."""
-        pass
-
-    @abstractmethod
-    def _allowed_upstream_models(self) -> list[str]:
-        """Allowed models to the upstream service."""
-        pass
-
-    @abstractmethod
-    def _extract_model_name(self, upstream_path: str, json_body: typing.Any) -> str:
-        """Extract model name from the request."""
-        pass
-
-    @abstractmethod
-    def _extract_stream_flag(self, upstream_path: str, json_body: typing.Any) -> bool:
-        """Extract stream flag from the request."""
-        pass
-
-    @abstractmethod
-    def _update_headers_to_upstream(self, headers: dict[str, str]) -> None:
-        """Update headers for vendor specific requirements."""
-        pass
-
-    def _extract_upstream_path(self, request_path: str) -> str:
-        path = re.sub(f"^(.*?)/{self._upstream_service()}/", "/", request_path)
-
-        if path not in self._allowed_upstream_paths():
-            raise fastapi.HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND, detail="Not found"
-            )
-
-        return path
-
-    async def _extract_json_body(self, request: fastapi.Request) -> typing.Any:
-        body = await request.body()
-
-        try:
-            json_body = json.loads(body)
-        except json.JSONDecodeError:
-            raise fastapi.HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid JSON"
-            )
-
-        return json_body
-
-    def _create_headers_to_upstream(self, headers_from_downstream) -> dict[str, str]:
-        return {
-            key: headers_from_downstream[key]
-            for key in self._allowed_headers_to_upstream()
-            if key in headers_from_downstream
-        }
-
-    def _create_headers_to_downstream(self, headers_from_upstream) -> dict[str, str]:
-        return {
-            key: headers_from_upstream.get(key)
-            for key in self._allowed_headers_to_downstream()
-            if key in headers_from_upstream
-        }
-
-
-current_proxy_client: ContextVar[BaseProxyClient | None] = ContextVar(
+current_proxy_client: ContextVar[ProxyClient | None] = ContextVar(
     "current_proxy_client", default=None
 )
 

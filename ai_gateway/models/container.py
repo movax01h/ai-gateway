@@ -16,9 +16,10 @@ from ai_gateway.models.vertex_text import (
     PalmTextBisonModel,
 )
 from ai_gateway.proxy.clients import (
-    AnthropicProxyClient,
-    OpenAIProxyClient,
-    VertexAIProxyClient,
+    AnthropicProxyModelFactory,
+    OpenAIProxyModelFactory,
+    ProxyClient,
+    VertexAIProxyModelFactory,
 )
 
 __all__ = [
@@ -168,10 +169,10 @@ class ContainerModels(containers.DeclarativeContainer):
         mocked=providers.Factory(mock.LLM),
     )
 
-    anthropic_proxy_client = providers.Selector(
+    proxy_client = providers.Selector(
         _mock_selector,
         original=providers.Factory(
-            AnthropicProxyClient,
+            ProxyClient,
             limits=providers.Factory(ConfigModelLimits, config.model_engine_limits),
             internal_event_client=internal_event.client,
             billing_event_client=billing_event.client,
@@ -179,27 +180,11 @@ class ContainerModels(containers.DeclarativeContainer):
         mocked=providers.Factory(mock.ProxyClient),
     )
 
-    vertex_ai_proxy_client = providers.Selector(
-        _mock_selector,
-        original=providers.Factory(
-            VertexAIProxyClient,
-            endpoint=config.vertex_text_model.endpoint,
-            project=config.vertex_text_model.project,
-            location=config.vertex_text_model.location,
-            limits=providers.Factory(ConfigModelLimits, config.model_engine_limits),
-            internal_event_client=internal_event.client,
-            billing_event_client=billing_event.client,
-        ),
-        mocked=providers.Factory(mock.ProxyClient),
+    anthropic_proxy_model_factory = providers.Factory(AnthropicProxyModelFactory)
+    vertexai_proxy_model_factory = providers.Factory(
+        VertexAIProxyModelFactory,
+        endpoint=config.vertex_text_model.endpoint,
+        project=config.vertex_text_model.project,
+        location=config.vertex_text_model.location,
     )
-
-    openai_proxy_client = providers.Selector(
-        _mock_selector,
-        original=providers.Factory(
-            OpenAIProxyClient,
-            limits=providers.Factory(ConfigModelLimits, config.model_engine_limits),
-            internal_event_client=internal_event.client,
-            billing_event_client=billing_event.client,
-        ),
-        mocked=providers.Factory(mock.ProxyClient),
-    )
+    openai_proxy_model_factory = providers.Factory(OpenAIProxyModelFactory)

@@ -6,20 +6,20 @@ import httpx
 import pytest
 from fastapi import status
 
-from ai_gateway.proxy.clients.anthropic import AnthropicProxyClient
+from ai_gateway.proxy.clients import AnthropicProxyModelFactory, ProxyClient
 
 
-@pytest.fixture(name="anthropic_client")
-def anthropic_client_fixture(
-    async_client,
-    limits,
-    monkeypatch,
-    internal_event_client,
-    billing_event_client,
-):
-    """Fixture to create an AnthropicProxyClient instance."""
-    monkeypatch.setenv("ANTHROPIC_API_KEY", "test")
-    return AnthropicProxyClient(limits, internal_event_client, billing_event_client)
+@pytest.fixture(name="anthropic_factory")
+def anthropic_factory_fixture(monkeypatch):
+    """Fixture to create an AnthropicProxyModelFactory instance."""
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
+    return AnthropicProxyModelFactory()
+
+
+@pytest.fixture(name="proxy_client")
+def proxy_client_fixture(limits, internal_event_client, billing_event_client):
+    """Fixture to create a ProxyClient instance."""
+    return ProxyClient(limits, internal_event_client, billing_event_client)
 
 
 @pytest.fixture(name="request_params")
@@ -56,7 +56,8 @@ def request_headers_fixture():
     ],
 )
 async def test_valid_proxy_requests(
-    anthropic_client,
+    anthropic_factory,
+    proxy_client,
     request_factory,
     request_params,
     request_headers,
@@ -64,13 +65,14 @@ async def test_valid_proxy_requests(
     expected_status,
 ):
     """Test valid proxy requests with different URLs."""
-    response = await anthropic_client.proxy(
-        request_factory(
-            request_url=request_url,
-            request_body=json.dumps(request_params).encode("utf-8"),
-            request_headers=request_headers,
-        )
+    request = request_factory(
+        request_url=request_url,
+        request_body=json.dumps(request_params).encode("utf-8"),
+        request_headers=request_headers,
     )
+
+    model = await anthropic_factory.factory(request)
+    response = await proxy_client.proxy(request, model)
 
     assert isinstance(response, fastapi.Response)
     assert response.status_code == expected_status
@@ -88,7 +90,7 @@ async def test_valid_proxy_requests(
     ],
 )
 async def test_invalid_proxy_requests(
-    anthropic_client,
+    anthropic_factory,
     request_factory,
     request_params,
     request_headers,
@@ -97,14 +99,14 @@ async def test_invalid_proxy_requests(
     expected_detail,
 ):
     """Test invalid proxy requests that should raise exceptions."""
+    request = request_factory(
+        request_url=request_url,
+        request_body=json.dumps(request_params).encode("utf-8"),
+        request_headers=request_headers,
+    )
+
     with pytest.raises(fastapi.HTTPException) as excinfo:
-        await anthropic_client.proxy(
-            request_factory(
-                request_url=request_url,
-                request_body=json.dumps(request_params).encode("utf-8"),
-                request_headers=request_headers,
-            )
-        )
+        await anthropic_factory.factory(request)
 
     assert excinfo.value.status_code == expected_status
     assert excinfo.value.detail == expected_detail
@@ -112,7 +114,8 @@ async def test_invalid_proxy_requests(
 
 @pytest.mark.asyncio
 async def test_count_tokens_endpoint(
-    anthropic_client,
+    anthropic_factory,
+    proxy_client,
     request_factory,
     request_headers,
 ):
@@ -121,13 +124,14 @@ async def test_count_tokens_endpoint(
         "messages": [{"role": "user", "content": "Hi, how are you?"}],
     }
 
-    response = await anthropic_client.proxy(
-        request_factory(
-            request_url="http://0.0.0.0:5052/v1/proxy/anthropic/v1/messages/count_tokens?beta=true",
-            request_body=json.dumps(count_tokens_request_body).encode("utf-8"),
-            request_headers=request_headers,
-        )
+    request = request_factory(
+        request_url="http://0.0.0.0:5052/v1/proxy/anthropic/v1/messages/count_tokens?beta=true",
+        request_body=json.dumps(count_tokens_request_body).encode("utf-8"),
+        request_headers=request_headers,
     )
+
+    model = await anthropic_factory.factory(request)
+    response = await proxy_client.proxy(request, model)
 
     assert isinstance(response, fastapi.Response)
     assert response.status_code == 200
@@ -228,22 +232,22 @@ async def test_anthropic_beta_header_handling(
     mock_client.send.return_value = mock_response
     mock_client.build_request = httpx.AsyncClient().build_request
 
-    anthropic_client = AnthropicProxyClient(
-        limits, internal_event_client, billing_event_client
-    )
+    anthropic_factory = AnthropicProxyModelFactory()
+    proxy_client = ProxyClient(limits, internal_event_client, billing_event_client)
 
     with patch(
         "litellm.proxy.pass_through_endpoints.pass_through_endpoints.get_async_httpx_client",
         return_value=Mock(client=mock_client),
     ):
         # Make request
-        response = await anthropic_client.proxy(
-            request_factory(
-                request_url="http://0.0.0.0:5052/v1/proxy/anthropic/v1/messages",
-                request_body=json.dumps(request_params).encode("utf-8"),
-                request_headers=request_headers,
-            )
+        request = request_factory(
+            request_url="http://0.0.0.0:5052/v1/proxy/anthropic/v1/messages",
+            request_body=json.dumps(request_params).encode("utf-8"),
+            request_headers=request_headers,
         )
+
+        model = await anthropic_factory.factory(request)
+        response = await proxy_client.proxy(request, model)
 
     # Verify upstream request headers
     mock_client.send.assert_called_once()
@@ -284,14 +288,10 @@ class TestAnthropicTokenUsageExtraction:
     """Test cases for Anthropic token usage extraction."""
 
     @pytest.fixture
-    def anthropic_client_for_usage(
+    def anthropic_factory_for_usage(
         self,
-        async_client,
-        limits,
         monkeypatch,
-        internal_event_client,
-        billing_event_client,
     ):
-        """Fixture to create an AnthropicProxyClient instance for usage tests."""
+        """Fixture to create an AnthropicProxyModelFactory instance for usage tests."""
         monkeypatch.setenv("ANTHROPIC_API_KEY", "test")
-        return AnthropicProxyClient(limits, internal_event_client, billing_event_client)
+        return AnthropicProxyModelFactory()

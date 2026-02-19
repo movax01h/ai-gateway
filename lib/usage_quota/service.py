@@ -1,4 +1,5 @@
 from enum import StrEnum
+from typing import NamedTuple
 
 import structlog
 
@@ -12,6 +13,7 @@ from lib.usage_quota.errors import UsageQuotaError
 __all__ = [
     "UsageQuotaEvent",
     "InsufficientCredits",
+    "ModelMetadata",
     "UsageQuotaService",
 ]
 
@@ -35,6 +37,10 @@ class InsufficientCredits(Exception):
         super().__init__(message)
 
 
+class ModelMetadata(NamedTuple):
+    name: str
+
+
 class UsageQuotaService:
     def __init__(
         self,
@@ -49,7 +55,10 @@ class UsageQuotaService:
         )
 
     async def execute(
-        self, gl_context: GLReportingEventContext, event: UsageQuotaEvent
+        self,
+        gl_context: GLReportingEventContext,
+        event: UsageQuotaEvent,
+        model_metadata: ModelMetadata | None = None,
     ):
         if not self.usage_quota_client.enabled:
             log.warning(
@@ -71,6 +80,7 @@ class UsageQuotaService:
                 "event_type": event.value,
                 "feature_qualified_name": gl_context.feature_qualified_name,
                 "feature_ai_catalog_item": gl_context.feature_ai_catalog_item,
+                "model_id": model_metadata.name if model_metadata else None,
             }
         )
 
