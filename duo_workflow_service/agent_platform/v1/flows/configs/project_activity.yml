@@ -1,0 +1,192 @@
+name: "Project Activity"
+description: |
+  Summarize the issue and MR activity in a project for a given timeframe.
+product_group: agent_foundations
+version: "v1"
+environment: ambient
+
+components:
+  - name: "fetch_new_issues"
+    type: AgentComponent
+    prompt_id: "project_activity_fetch_issues_new"
+    prompt_version: "^1.0.0"
+    toolset:
+      - "list_issues"
+      - "gitlab_api_get"
+      - "gitlab_issue_search"
+      - "get_issue"
+      - "list_issue_notes"
+      - "get_issue_note"
+    inputs:
+      - from: "context:project_id"
+        as: "project_id"
+      - from: "context:goal"
+        as: "date_range"
+    ui_log_events:
+      - "on_tool_execution_success"
+      - "on_tool_execution_failed"
+      - "on_agent_final_answer"
+  - name: "fetch_closed_issues"
+    type: AgentComponent
+    prompt_id: "project_activity_fetch_issues_closed"
+    prompt_version: "^1.0.0"
+    toolset:
+      - "list_issues"
+      - "gitlab_api_get"
+      - "gitlab_issue_search"
+      - "get_issue"
+      - "list_issue_notes"
+      - "get_issue_note"
+    inputs:
+      - from: "context:project_id"
+        as: "project_id"
+      - from: "context:goal"
+        as: "date_range"
+    ui_log_events:
+      - "on_tool_execution_success"
+      - "on_tool_execution_failed"
+      - "on_agent_final_answer"
+  - name: "fetch_updated_issues"
+    type: AgentComponent
+    prompt_id: "project_activity_fetch_issues_updated"
+    prompt_version: "^1.0.0"
+    toolset:
+      - "list_issues"
+      - "gitlab_api_get"
+      - "gitlab_issue_search"
+      - "get_issue"
+      - "list_issue_notes"
+      - "get_issue_note"
+    inputs:
+      - from: "context:project_id"
+        as: "project_id"
+      - from: "context:goal"
+        as: "date_range"
+    ui_log_events:
+      - "on_tool_execution_success"
+      - "on_tool_execution_failed"
+      - "on_agent_final_answer"
+  - name: "fetch_new_merge_requests"
+    type: AgentComponent
+    prompt_id: "project_activity_fetch_merge_requests_new"
+    prompt_version: "^1.0.0"
+    toolset:
+      - "gitlab_merge_request_search"
+      - "gitlab_api_get"
+      - "get_merge_request"
+      - "list_all_merge_request_notes"
+      - "list_merge_request_diffs"
+    inputs:
+      - from: "context:project_id"
+        as: "project_id"
+      - from: "context:goal"
+        as: "date_range"
+    ui_log_events:
+      - "on_tool_execution_success"
+      - "on_tool_execution_failed"
+      - "on_agent_final_answer"
+  - name: "fetch_closed_merge_requests"
+    type: AgentComponent
+    prompt_id: "project_activity_fetch_merge_requests_closed"
+    prompt_version: "^1.0.0"
+    toolset:
+      - "gitlab_merge_request_search"
+      - "gitlab_api_get"
+      - "get_merge_request"
+      - "list_all_merge_request_notes"
+      - "list_merge_request_diffs"
+    inputs:
+      - from: "context:project_id"
+        as: "project_id"
+      - from: "context:goal"
+        as: "date_range"
+    ui_log_events:
+      - "on_tool_execution_success"
+      - "on_tool_execution_failed"
+      - "on_agent_final_answer"
+  - name: "fetch_updated_merge_requests"
+    type: AgentComponent
+    prompt_id: "project_activity_fetch_merge_requests_updated"
+    prompt_version: "^1.0.0"
+    toolset:
+      - "gitlab_merge_request_search"
+      - "gitlab_api_get"
+      - "get_merge_request"
+      - "list_all_merge_request_notes"
+      - "list_merge_request_diffs"
+    inputs:
+      - from: "context:project_id"
+        as: "project_id"
+      - from: "context:goal"
+        as: "date_range"
+    ui_log_events:
+      - "on_tool_execution_success"
+      - "on_tool_execution_failed"
+      - "on_agent_final_answer"
+  - name: "summarize_activity"
+    type: AgentComponent
+    prompt_id: "project_activity_summarize_project_activity"
+    prompt_version: "^1.0.0"
+    toolset: []
+    inputs:
+      - from: "context:project_id"
+        as: "project_id"
+      - from: "context:goal"
+        as: "date_range"
+      - from: "context:fetch_new_issues.final_answer"
+        as: "new_issues_data"
+      - from: "context:fetch_closed_issues.final_answer"
+        as: "closed_issues_data"
+      - from: "context:fetch_updated_issues.final_answer"
+        as: "updated_issues_data"
+      - from: "context:fetch_new_merge_requests.final_answer"
+        as: "new_merge_requests_data"
+      - from: "context:fetch_closed_merge_requests.final_answer"
+        as: "closed_merge_requests_data"
+      - from: "context:fetch_updated_merge_requests.final_answer"
+        as: "updated_merge_requests_data"
+    ui_log_events:
+      - "on_tool_execution_success"
+      - "on_tool_execution_failed"
+      - "on_agent_final_answer"
+  - name: "create_summary_issue"
+    type: AgentComponent
+    prompt_id: "project_activity_create_summary_issue"
+    prompt_version: "^1.0.0"
+    toolset:
+      - "create_issue"
+      - "gitlab_api_post"
+    inputs:
+      - from: "context:project_id"
+        as: "project_id"
+      - from: "context:goal"
+        as: "date_range"
+      - from: "context:summarize_activity.final_answer"
+        as: "summary"
+    ui_log_events:
+      - "on_tool_execution_success"
+      - "on_tool_execution_failed"
+      - "on_agent_final_answer"
+
+routers:
+  - from: "fetch_new_issues"
+    to: "fetch_closed_issues"
+  - from: "fetch_closed_issues"
+    to: "fetch_updated_issues"
+  - from: "fetch_updated_issues"
+    to: "fetch_new_merge_requests"
+  - from: "fetch_new_merge_requests"
+    to: "fetch_closed_merge_requests"
+  - from: "fetch_closed_merge_requests"
+    to: "fetch_updated_merge_requests"
+  - from: "fetch_updated_merge_requests"
+    to: "summarize_activity"
+  - from: "summarize_activity"
+    to: "create_summary_issue"
+  - from: "create_summary_issue"
+    to: "end"
+
+flow:
+  entry_point: "fetch_new_issues"
+  inputs: []
+

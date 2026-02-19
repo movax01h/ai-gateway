@@ -372,6 +372,40 @@ graph TD;
     classDef last fill:#bfb6fc;
 ```
 
+## Graph: `project_activity/v1` (Flow Registry)
+
+```mermaid
+
+---
+config:
+    flowchart:
+        curve: linear
+---
+graph TD;
+    __start__(__start__):::first;
+    __end__(__end__):::last;
+    __start__ --> fetch_new_issues;
+    fetch_new_issues(fetch_new_issues<br>#91;AgentComponent#93;);
+    fetch_closed_issues(fetch_closed_issues<br>#91;AgentComponent#93;);
+    fetch_updated_issues(fetch_updated_issues<br>#91;AgentComponent#93;);
+    fetch_new_merge_requests(fetch_new_merge_requests<br>#91;AgentComponent#93;);
+    fetch_closed_merge_requests(fetch_closed_merge_requests<br>#91;AgentComponent#93;);
+    fetch_updated_merge_requests(fetch_updated_merge_requests<br>#91;AgentComponent#93;);
+    summarize_activity(summarize_activity<br>#91;AgentComponent#93;);
+    create_summary_issue(create_summary_issue<br>#91;AgentComponent#93;);
+    fetch_new_issues --> fetch_closed_issues;
+    fetch_closed_issues --> fetch_updated_issues;
+    fetch_updated_issues --> fetch_new_merge_requests;
+    fetch_new_merge_requests --> fetch_closed_merge_requests;
+    fetch_closed_merge_requests --> fetch_updated_merge_requests;
+    fetch_updated_merge_requests --> summarize_activity;
+    summarize_activity --> create_summary_issue;
+    create_summary_issue --> __end__;
+    classDef default fill:#f2f0ff,line-height:1.2;
+    classDef first fill-opacity: 0;
+    classDef last fill:#bfb6fc;
+```
+
 ## Graph: `resolve_sast_vulnerability/v1` (Flow Registry)
 
 ```mermaid

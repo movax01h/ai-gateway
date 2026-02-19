@@ -592,3 +592,75 @@ configurable_unit_primitives:
       - "claude_sonnet_4_20250514_vertex"
       - "claude_sonnet_4_20250514_bedrock"
       - "claude_sonnet_4_5_20250929"
+  - feature_setting: "project_activity_fetch_issues_new"
+    unit_primitives:
+      - "duo_agent_platform"
+    default_model: "claude_sonnet_4_20250514_vertex"
+    selectable_models:
+      - "claude_sonnet_4_20250514"
+      - "claude_sonnet_4_20250514_vertex"
+      - "claude_sonnet_4_20250514_bedrock"
+      - "claude_sonnet_4_5_20250929"
+  - feature_setting: "project_activity_fetch_issues_updated"
+    unit_primitives:
+      - "duo_agent_platform"
+    default_model: "claude_sonnet_4_20250514_vertex"
+    selectable_models:
+      - "claude_sonnet_4_20250514"
+      - "claude_sonnet_4_20250514_vertex"
+      - "claude_sonnet_4_20250514_bedrock"
+      - "claude_sonnet_4_5_20250929"
+  - feature_setting: "project_activity_fetch_issues_closed"
+    unit_primitives:
+      - "duo_agent_platform"
+    default_model: "claude_sonnet_4_20250514_vertex"
+    selectable_models:
+      - "claude_sonnet_4_20250514"
+      - "claude_sonnet_4_20250514_vertex"
+      - "claude_sonnet_4_20250514_bedrock"
+      - "claude_sonnet_4_5_20250929"
+  - feature_setting: "project_activity_summarize_project_activity"
+    unit_primitives:
+      - "duo_agent_platform"
+    default_model: "claude_sonnet_4_20250514_vertex"
+    selectable_models:
+      - "claude_sonnet_4_20250514"
+      - "claude_sonnet_4_20250514_vertex"
+      - "claude_sonnet_4_20250514_bedrock"
+      - "claude_sonnet_4_5_20250929"
+  - feature_setting: "project_activity_fetch_merge_requests_new"
+    unit_primitives:
+      - "duo_agent_platform"
+    default_model: "claude_sonnet_4_20250514_vertex"
+    selectable_models:
+      - "claude_sonnet_4_20250514"
+      - "claude_sonnet_4_20250514_vertex"
+      - "claude_sonnet_4_20250514_bedrock"
+      - "claude_sonnet_4_5_20250929"
+  - feature_setting: "project_activity_fetch_merge_requests_updated"
+    unit_primitives:
+      - "duo_agent_platform"
+    default_model: "claude_sonnet_4_20250514_vertex"
+    selectable_models:
+      - "claude_sonnet_4_20250514"
+      - "claude_sonnet_4_20250514_vertex"
+      - "claude_sonnet_4_20250514_bedrock"
+      - "claude_sonnet_4_5_20250929"
+  - feature_setting: "project_activity_fetch_merge_requests_closed"
+    unit_primitives:
+      - "duo_agent_platform"
+    default_model: "claude_sonnet_4_20250514_vertex"
+    selectable_models:
+      - "claude_sonnet_4_20250514"
+      - "claude_sonnet_4_20250514_vertex"
+      - "claude_sonnet_4_20250514_bedrock"
+      - "claude_sonnet_4_5_20250929"
+  - feature_setting: "project_activity_create_summary_issue"
+    unit_primitives:
+      - "duo_agent_platform"
+    default_model: "claude_sonnet_4_20250514_vertex"
+    selectable_models:
+      - "claude_sonnet_4_20250514"
+      - "claude_sonnet_4_20250514_vertex"
+      - "claude_sonnet_4_20250514_bedrock"
+      - "claude_sonnet_4_5_20250929"
