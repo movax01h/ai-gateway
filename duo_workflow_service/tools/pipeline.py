@@ -196,6 +196,10 @@ class GetPipelineFailingJobs(DuoBaseTool):
 
             next_page = jobs_response.headers.get("X-Next-Page", "")
 
+            # Add an info log (debug logs are not available in prod) to debug the issue
+            # https://gitlab.com/gitlab-org/gitlab/-/work_items/589467
+            log.info(f"next page for pipeline {pipeline_id} is {next_page}")
+
         return failing_jobs
 
     def format_display_message(
