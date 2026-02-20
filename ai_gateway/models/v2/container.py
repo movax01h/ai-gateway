@@ -17,18 +17,6 @@ __all__ = [
 litellm.module_level_aclient = AsyncHTTPHandler(event_hooks={"request": [log_request]})
 
 
-def _litellm_factory(*args, **kwargs) -> ChatLiteLLM:
-    if kwargs.get("custom_llm_provider", "") == "vertex_ai":
-        if kwargs.get("model", "").lower().startswith("claude"):
-            kwargs["model_kwargs"] = kwargs.get("model_kwargs", {}) or {}
-            kwargs["model_kwargs"]["extra_headers"] = {
-                **kwargs["model_kwargs"].get("extra_headers", {}),
-                "anthropic-beta": "fine-grained-tool-streaming-2025-05-14,context-1m-2025-08-07",
-            }
-
-    return ChatLiteLLM(*args, **kwargs)
-
-
 def _mock_selector(mock_model_responses: bool, use_agentic_mock: bool) -> str:
     if mock_model_responses and use_agentic_mock:
         return "agentic"
@@ -78,7 +66,7 @@ class ContainerModels(containers.DeclarativeContainer):
     lite_llm_chat_fn = providers.Selector(
         _mock_selector,
         original=providers.Factory(
-            _litellm_factory,
+            ChatLiteLLM,
             model_keys=config.model_keys,
             model_endpoints=config.model_endpoints,
         ),
