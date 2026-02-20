@@ -213,6 +213,9 @@ Unit primitive groups are defined in `ai_gateway/model_selection/unit_primitives
 - `dev`: optional nested configuration for developer-only models with the following fields:
   - `selectable_models`: models only visible to users in groups specified by `group_ids`
   - `group_ids`: GitLab group IDs that can access the developer models (e.g., `[9970]` for `gitlab-org`)
+- `deprecation`: optional nested configuration for model deprecations with the following fields:
+  - `deprecation_date`: indicates when the model becomes deprecated (e.g., `2025-10-08`)
+  - `removal_version`: specifies the GitLab version after which the model will no longer be supported (e.g., `18.8`)
 
 Example:
 
@@ -243,3 +246,11 @@ This prevents accidentally making "internal-only" models available to everyone.
 
 The actual access control happens in the client (GitLab Rails), which checks whether the user is a GitLab team member and belongs to any of the groups in `dev.group_ids`.
 Users in those groups see both the regular and developer models, while everyone else only sees the regular ones.
+
+## Model deprecations
+
+To mark a model as deprecated, add a deprecation block to the model's entry with two required fields: `deprecation.deprecation_date` (the date the model is considered deprecated, in YYYY-MM-DD format) and `deprecation.removal_version` (the GitLab version in which the model will be removed).
+
+The deprecation field is optional and defaults to `null` when omitted, meaning the model is active and not deprecated. When set, the deprecation information is automatically exposed through the `GET /v1/models` API endpoint, allowing downstream consumers (such as GitLab Rails) to detect and handle deprecated models accordingly.
+
+In GitLab Rails, a deprecation banner appears at the page level on the GitLab Duo settings page, both for SaaS (group settings, visible to top-level group owners) and self-managed (admin settings). It only renders when the user has actively selected a model that carries a deprecation field from the AI Gateway.
