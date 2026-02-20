@@ -83,8 +83,8 @@ class TestEditorContentCompletionStream:
         )
 
         expected_model_metadata = {
-            "engine": "anthropic",
-            "name": "claude-sonnet-4-5-20250929",
+            "engine": "agent",
+            "name": "Code Completions",
         }
 
         expected_feature_flags = {"flag_a", "flag_b"}

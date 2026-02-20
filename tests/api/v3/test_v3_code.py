@@ -199,81 +199,20 @@ class TestEditorContentCompletion:
         )
 
     @pytest.mark.parametrize(
-        ("model_provider", "expected_code", "expected_response", "expected_model"),
+        ("model_provider", "expected_code"),
         [
-            (
-                "vertex-ai",
-                200,
-                {
-                    "choices": [
-                        {
-                            "text": "Test text completion response",
-                            "index": 0,
-                            "finish_reason": "length",
-                        }
-                    ]
-                },
-                {
-                    "engine": "vertex-ai",
-                    "name": "vertex_ai/codestral-2501",
-                    "lang": "python",
-                },
-            ),
-            (
-                "anthropic",
-                200,
-                {
-                    "choices": [
-                        {
-                            "text": "test completion",
-                            "index": 0,
-                            "finish_reason": "length",
-                        }
-                    ]
-                },
-                {
-                    "engine": "anthropic",
-                    "name": "claude-sonnet-4-5-20250929",
-                    "lang": "python",
-                },
-            ),
-            # default provider
-            (
-                "",
-                200,
-                {
-                    "choices": [
-                        {
-                            "text": "Test text completion response",
-                            "index": 0,
-                            "finish_reason": "length",
-                        }
-                    ]
-                },
-                {
-                    "engine": "vertex-ai",
-                    "name": "vertex_ai/codestral-2501",
-                    "lang": "python",
-                },
-            ),
-            # unknown provider
-            (
-                "some-provider",
-                422,
-                "",
-                {},
-            ),
+            ("vertex-ai", 200),
+            ("anthropic", 200),
+            ("", 200),
+            ("some-provider", 422),
         ],
     )
     def test_model_provider(
         self,
-        mock_litellm_acompletion: Mock,
         mock_client: TestClient,
-        mock_anthropic_chat: Mock,
+        mock_completions: Mock,
         model_provider: str,
         expected_code: int,
-        expected_response: dict,
-        expected_model: dict,
         route: str,
     ):
         payload = {
@@ -283,16 +222,6 @@ class TestEditorContentCompletion:
             "language_identifier": "python",
             "model_provider": model_provider or None,
             "model_name": "claude-sonnet-4-5-20250929",
-            "prompt": [
-                {
-                    "role": "system",
-                    "content": "You are a code completion tool that performs Fill-in-the-middle",
-                },
-                {
-                    "role": "user",
-                    "content": "<SUFFIX>\n// a function to find the max\n for \n</SUFFIX>\n<PREFIX>\n\n\treturn min\n}\n</PREFIX>",
-                },
-            ],
         }
 
         prompt_component = {
@@ -304,36 +233,63 @@ class TestEditorContentCompletion:
             "prompt_components": [prompt_component],
         }
 
-        response = mock_client.post(
-            route,
-            headers={
-                "Authorization": "Bearer 12345",
-                "X-Gitlab-Authentication-Type": "oidc",
-                "X-GitLab-Instance-Id": "1234",
-                "X-GitLab-Realm": "self-managed",
-            },
-            json=data,
-        )
+        with patch("ai_gateway.prompts.registry.LocalPromptRegistry.get_on_behalf"):
+            response = mock_client.post(
+                route,
+                headers={
+                    "Authorization": "Bearer 12345",
+                    "X-Gitlab-Authentication-Type": "oidc",
+                    "X-GitLab-Instance-Id": "1234",
+                    "X-GitLab-Realm": "self-managed",
+                },
+                json=data,
+            )
 
         assert response.status_code == expected_code
 
         if expected_code >= 400:
-            # if we want 400+ status we don't need check the response
             return
 
-        body = response.json()
+        mock_completions.assert_called_once()
 
-        assert body["choices"] == expected_response["choices"]
+    def test_completion_uses_prompt_registry(
+        self,
+        mock_client: TestClient,
+        mock_completions: Mock,
+        route: str,
+    ):
+        data = {
+            "prompt_components": [
+                {
+                    "type": "code_editor_completion",
+                    "payload": {
+                        "file_name": "main.py",
+                        "content_above_cursor": "# Create a fast binary search\n",
+                        "content_below_cursor": "\n",
+                        "language_identifier": "python",
+                    },
+                }
+            ],
+        }
 
-        assert body["metadata"]["model"] == expected_model
+        with patch(
+            "ai_gateway.prompts.registry.LocalPromptRegistry.get_on_behalf"
+        ) as mock_registry_get:
+            response = mock_client.post(
+                route,
+                headers={
+                    "Authorization": "Bearer 12345",
+                    "X-Gitlab-Authentication-Type": "oidc",
+                    "X-GitLab-Instance-Id": "1234",
+                    "X-GitLab-Realm": "self-managed",
+                },
+                json=data,
+            )
 
-        mock = (
-            mock_anthropic_chat
-            if model_provider == "anthropic"
-            else mock_litellm_acompletion
-        )
-
-        mock.assert_called_once()
+        assert response.status_code == 200
+        mock_registry_get.assert_called_once()
+        call_args = mock_registry_get.call_args
+        assert call_args.args[1] == "code_suggestions/completions"
 
 
 class TestEditorContentCompletionStream:
@@ -349,9 +305,7 @@ class TestEditorContentCompletionStream:
             "content_above_cursor": "# Create a fast binary search\n",
             "content_below_cursor": "\n",
             "language_identifier": "python",
-            "model_provider": "anthropic",
             "stream": True,
-            "model_name": "claude-sonnet-4-5-20250929",
         }
 
         prompt_component = {
@@ -401,7 +355,6 @@ class TestEditorContentCompletionStream:
             code_context=None,
             user=mock_completions_stream.call_args.kwargs["user"],
             snowplow_event_context=expected_snowplow_event,
-            raw_prompt=None,
         )
 
 
