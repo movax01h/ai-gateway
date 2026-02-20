@@ -1,9 +1,11 @@
 import json
+import re
 from abc import abstractmethod
 from textwrap import dedent
-from typing import Any, Literal, Optional, Type
+from typing import Any, ClassVar, Literal, Optional, Type
 
 import structlog
+from langchain.tools import ToolException
 from pydantic import BaseModel, Field
 
 from duo_workflow_service.policies.file_exclusion_policy import FileExclusionPolicy
@@ -391,6 +393,129 @@ class BlobSearch(GitLabSearchBase):
             return json.dumps({"search_results": filtered_response})
         except Exception as e:
             return json.dumps({"error": str(e)})
+
+
+class AdvanceBlobSearchInput(BaseModel):
+    search: str = Field(description="The search term")
+    api_url: str = Field(
+        description=r"Search endpoint. Use '/api/v4/projects/{id}/search' for project-level search, "
+        "'/api/v4/groups/{id}/search' for group-level search, or '/api/v4/search' for instance-wide search. "
+        "{id} accepts the numeric ID or URL-encoded full path of the target project or group."
+    )
+    order_by: Optional[str] = Field(
+        description="Sort results. Allowed value is created_at", default=None
+    )
+    sort: Optional[str] = Field(
+        description="Sort order. Allowed values are asc or desc", default=None
+    )
+    ref: Optional[str] = Field(
+        description="The name of a repository branch or tag to search on (only applicable for project searches)",
+        default=None,
+    )
+
+
+class AdvanceBlobSearch(GitLabSearchBase):
+    name: str = "gitlab_blob_search"
+    description: str = dedent(
+        """
+        Search file content in remote GitLab projects.
+
+        Syntax for `search` parameter: keyword [filename:pattern] [path:dir/] [extension:type]
+        - keyword: required, case-insensitive
+        - filters: optional, space-separated, support `-` prefix excludes, exact literal matching only
+
+        Valid examples:
+        - rails filename:gemfile.lock
+        - request filename:server -extension:rb path:src/core
+
+        Invalid examples (DO NOT USE):
+        - await run filename:*server* (WRONG - contains wildcards)
+        """
+    )
+    args_schema: Type[BaseModel] = AdvanceBlobSearchInput
+
+    supersedes: ClassVar[Optional[Type[DuoBaseTool]]] = (
+        BlobSearch  # Declares it supersedes BlobSearch
+    )
+    required_capability: ClassVar[str] = (
+        "advanced_search"  # Client capability required to use this tool
+    )
+
+    def _filter_blob_results(self, results: list) -> list:
+        """Filter blob search results using FileExclusionPolicy."""
+        if not results:
+            return results
+
+        # Apply file exclusion policy and filter results
+        policy = FileExclusionPolicy(self.project)
+        filtered_results = []
+        for result in results:
+            file_path = result.get("path") or result.get("filename")
+            if not file_path or policy.is_allowed(file_path):
+                filtered_results.append(result)
+
+        return filtered_results
+
+    def _validate_and_normalize_api_url(self, api_url: str) -> str:
+        """Validate api_url matches allowed patterns and return normalized path."""
+        url = api_url.lstrip("/")
+
+        if url == "api/v4/search":
+            return "/api/v4/search"
+
+        # regex to match api/v4/(projects|groups)/<resource_id>/search
+        # not allowed url traversal like `.` or `../..`
+        match = re.match(
+            r"^api/v4/(projects|groups)/(?!\.\.?/|\.\.?$)([^/]+)/search$", url
+        )
+        if match:
+            scope, resource_id = match.groups()
+            return f"/api/v4/{scope}/{resource_id}/search"
+
+        raise ToolException(
+            "Invalid api_url. Use '/api/v4/projects/{id}/search', "
+            "'/api/v4/groups/{id}/search', or '/api/v4/search'. "
+            "Note: {id} must be a numeric ID or URL-encoded full path."
+        )
+
+    async def _execute(
+        self,
+        *,
+        search: str,
+        api_url: str,
+        ref: Optional[str] = None,
+        order_by: Optional[str] = None,
+        sort: Optional[str] = None,
+    ) -> str:
+        api_url = self._validate_and_normalize_api_url(api_url)
+
+        params = {
+            "scope": "blobs",
+            "search": search,
+        }
+        if ref and "projects" in api_url:
+            params["ref"] = ref
+        if order_by:
+            params["order_by"] = order_by
+        if sort:
+            params["sort"] = sort
+
+        response = await self.gitlab_client.aget(
+            path=api_url, params=params, parse_json=True
+        )
+
+        if not response.is_success():
+            log.error(
+                "Advance Blob search request failed",
+                status_code=response.status_code,
+                error=response.body,
+            )
+            raise ToolException(
+                f"Advance Blob search request failed with status {response.status_code}: {response.body}"
+            )
+        # Filter blob results using FileExclusionPolicy
+        filtered_response = self._filter_blob_results(response.body)
+        return json.dumps({"search_results": filtered_response})
 
 
 class CommitSearch(GitLabSearchBase):

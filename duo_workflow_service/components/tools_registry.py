@@ -75,6 +75,7 @@ NO_OP_TOOLS: list[Type[BaseModel]] = [
 # They are only enabled when the required capability is present.
 _CAPABILITY_DEPENDENT_TOOLS: list[Type[BaseTool]] = [
     tools.ShellCommand,
+    tools.AdvanceBlobSearch,
 ]
 
 _READ_ONLY_GITLAB_TOOLS: list[Type[BaseTool]] = [

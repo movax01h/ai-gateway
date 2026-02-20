@@ -6,6 +6,7 @@ import pytest
 from duo_workflow_service.gitlab.http_client import GitLabHttpResponse
 from duo_workflow_service.policies.file_exclusion_policy import FileExclusionPolicy
 from duo_workflow_service.tools.search import (
+    AdvanceBlobSearch,
     BaseSearchInput,
     BlobSearch,
     CommitSearch,
@@ -604,12 +605,9 @@ class TestBlobSearchFileExclusion:
     async def test_blob_search_logs_error_on_failed_response(
         self, gitlab_client_mock, metadata_with_project
     ):
-        """Test that BlobSearch logs error details when response fails."""
+        """Test that BlobSearch logs error and returns empty results on failure."""
         from structlog.testing import capture_logs
 
-        from duo_workflow_service.gitlab.http_client import GitLabHttpResponse
-
-        # Mock a failed response
         failed_response = GitLabHttpResponse(
             status_code=404,
             body={"message": "404 Project Not Found"},
@@ -627,20 +625,480 @@ class TestBlobSearchFileExclusion:
                 ref="main",
             )
 
-        # Verify the response returns empty results
         response_data = json.loads(response)
         assert response_data == {"search_results": []}
 
-        # Verify error was logged
         assert len(captured_logs) == 1
         log_entry = captured_logs[0]
         assert log_entry["event"] == "Blob search request failed"
         assert log_entry["status_code"] == 404
         assert log_entry["error"] == {"message": "404 Project Not Found"}
 
-        # Verify the API was called correctly
         gitlab_client_mock.aget.assert_called_once_with(
             path="/api/v4/projects/999/search",
             params={"scope": "blobs", "search": "test search", "ref": "main"},
             parse_json=True,
         )
+
+
+class TestAdvanceBlobSearch:
+    """Test suite for AdvanceBlobSearch tool."""
+
+    @pytest.fixture(name="gitlab_client_mock")
+    def gitlab_client_mock_fixture(self):
+        return AsyncMock()
+
+    @pytest.fixture(name="project_with_exclusions")
+    def project_with_exclusions_fixture(self):
+        return {"exclusion_rules": ["*.log", "secrets/*", "*.secret"]}
+
+    @pytest.fixture(name="metadata_with_project")
+    def metadata_with_project_fixture(
+        self, gitlab_client_mock, project_with_exclusions
+    ):
+        return {
+            "gitlab_client": gitlab_client_mock,
+            "project": project_with_exclusions,
+        }
+
+    @pytest.fixture(name="blob_search_results")
+    def blob_search_results_fixture(self):
+        return [
+            {
+                "basename": "main",
+                "data": "def main():\n print('hello')",
+                "path": "src/main.py",
+                "filename": "src/main.py",
+                "id": None,
+                "ref": "main",
+                "startline": 1,
+                "project_id": 6,
+            },
+            {
+                "basename": "debug",
+                "data": "DEBUG: Application started",
+                "path": "logs/debug.log",
+                "filename": "logs/debug.log",
+                "id": None,
+                "ref": "main",
+                "startline": 1,
+                "project_id": 6,
+            },
+            {
+                "basename": "config",
+                "data": "api_key = secret123",
+                "path": "secrets/config.secret",
+                "filename": "secrets/config.secret",
+                "id": None,
+                "ref": "main",
+                "startline": 1,
+                "project_id": 6,
+            },
+            {
+                "basename": "readme",
+                "data": "# Project README",
+                "path": "README.md",
+                "filename": "README.md",
+                "id": None,
+                "ref": "main",
+                "startline": 1,
+                "project_id": 6,
+            },
+        ]
+
+    @pytest.mark.asyncio
+    async def test_project_level_search(
+        self, gitlab_client_mock, metadata_with_project, blob_search_results
+    ):
+        """Test AdvanceBlobSearch with project-level API endpoint."""
+        gitlab_client_mock.aget.side_effect = create_mock_aget(blob_search_results)
+
+        tool = AdvanceBlobSearch(metadata=metadata_with_project)
+
+        response = await tool._arun(
+            search="def main",
+            api_url="/api/v4/projects/123/search",
+            ref="main",
+        )
+
+        response_data = json.loads(response)
+        search_results = response_data["search_results"]
+
+        assert len(search_results) == 2
+        included_paths = [result["path"] for result in search_results]
+        assert "src/main.py" in included_paths
+        assert "README.md" in included_paths
+
+        gitlab_client_mock.aget.assert_called_once_with(
+            path="/api/v4/projects/123/search",
+            params={"scope": "blobs", "search": "def main", "ref": "main"},
+            parse_json=True,
+        )
+
+    @pytest.mark.asyncio
+    async def test_group_level_search(
+        self, gitlab_client_mock, metadata_with_project, blob_search_results
+    ):
+        """Test AdvanceBlobSearch with group-level API endpoint."""
+        gitlab_client_mock.aget.side_effect = create_mock_aget(blob_search_results)
+
+        tool = AdvanceBlobSearch(metadata=metadata_with_project)
+
+        response = await tool._arun(
+            search="config",
+            api_url="/api/v4/groups/456/search",
+        )
+
+        response_data = json.loads(response)
+        search_results = response_data["search_results"]
+
+        assert len(search_results) == 2
+
+        gitlab_client_mock.aget.assert_called_once_with(
+            path="/api/v4/groups/456/search",
+            params={"scope": "blobs", "search": "config"},
+            parse_json=True,
+        )
+
+    @pytest.mark.asyncio
+    async def test_instance_level_search(
+        self, gitlab_client_mock, metadata_with_project, blob_search_results
+    ):
+        """Test AdvanceBlobSearch with instance-wide API endpoint."""
+        gitlab_client_mock.aget.side_effect = create_mock_aget(blob_search_results)
+
+        tool = AdvanceBlobSearch(metadata=metadata_with_project)
+
+        response = await tool._arun(
+            search="rails",
+            api_url="/api/v4/search",
+        )
+
+        response_data = json.loads(response)
+        assert "search_results" in response_data
+
+        gitlab_client_mock.aget.assert_called_once_with(
+            path="/api/v4/search",
+            params={"scope": "blobs", "search": "rails"},
+            parse_json=True,
+        )
+
+    @pytest.mark.asyncio
+    async def test_invalid_api_url_raises_exception(
+        self, gitlab_client_mock, metadata_with_project
+    ):
+        """Test that AdvanceBlobSearch raises ToolException for invalid API URLs."""
+        from langchain_core.tools.base import ToolException
+
+        tool = AdvanceBlobSearch(metadata=metadata_with_project)
+
+        with pytest.raises(ToolException) as exc_info:
+            await tool._arun(
+                search="test",
+                api_url="/api/v4/invalid/endpoint",
+            )
+
+        assert "Invalid api_url" in str(exc_info.value)
+        gitlab_client_mock.aget.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_ref_only_applied_to_project_search(
+        self, gitlab_client_mock, metadata_with_project, blob_search_results
+    ):
+        """Test that ref parameter is only applied for project-level searches."""
+        gitlab_client_mock.aget.side_effect = create_mock_aget(blob_search_results)
+
+        tool = AdvanceBlobSearch(metadata=metadata_with_project)
+
+        await tool._arun(
+            search="test",
+            api_url="/api/v4/groups/123/search",
+            ref="main",
+        )
+
+        gitlab_client_mock.aget.assert_called_once_with(
+            path="/api/v4/groups/123/search",
+            params={"scope": "blobs", "search": "test"},
+            parse_json=True,
+        )
+
+    @pytest.mark.asyncio
+    async def test_order_by_and_sort_params(
+        self, gitlab_client_mock, metadata_with_project, blob_search_results
+    ):
+        """Test that order_by and sort parameters are passed correctly."""
+        gitlab_client_mock.aget.side_effect = create_mock_aget(blob_search_results)
+
+        tool = AdvanceBlobSearch(metadata=metadata_with_project)
+
+        await tool._arun(
+            search="test",
+            api_url="/api/v4/projects/123/search",
+            order_by="created_at",
+            sort="desc",
+        )
+
+        gitlab_client_mock.aget.assert_called_once_with(
+            path="/api/v4/projects/123/search",
+            params={
+                "scope": "blobs",
+                "search": "test",
+                "order_by": "created_at",
+                "sort": "desc",
+            },
+            parse_json=True,
+        )
+
+    @pytest.mark.asyncio
+    async def test_filters_excluded_files(
+        self, gitlab_client_mock, metadata_with_project, blob_search_results
+    ):
+        """Test that AdvanceBlobSearch filters out files matching exclusion patterns."""
+        gitlab_client_mock.aget.side_effect = create_mock_aget(blob_search_results)
+
+        tool = AdvanceBlobSearch(metadata=metadata_with_project)
+
+        response = await tool._arun(
+            search="test",
+            api_url="/api/v4/projects/123/search",
+        )
+
+        response_data = json.loads(response)
+        search_results = response_data["search_results"]
+
+        assert len(search_results) == 2
+        included_paths = [result["path"] for result in search_results]
+        assert "src/main.py" in included_paths
+        assert "README.md" in included_paths
+        assert "logs/debug.log" not in included_paths
+        assert "secrets/config.secret" not in included_paths
+
+    @pytest.mark.asyncio
+    async def test_no_exclusions_when_no_project(
+        self, gitlab_client_mock, blob_search_results
+    ):
+        """Test that AdvanceBlobSearch doesn't filter when no project is available."""
+        gitlab_client_mock.aget.side_effect = create_mock_aget(blob_search_results)
+        metadata_no_project = {"gitlab_client": gitlab_client_mock, "project": None}
+
+        tool = AdvanceBlobSearch(metadata=metadata_no_project)
+
+        response = await tool._arun(
+            search="test",
+            api_url="/api/v4/projects/123/search",
+        )
+
+        response_data = json.loads(response)
+        search_results = response_data["search_results"]
+
+        assert len(search_results) == 4
+
+    @pytest.mark.asyncio
+    async def test_empty_results(self, gitlab_client_mock, metadata_with_project):
+        """Test that AdvanceBlobSearch handles empty results correctly."""
+        gitlab_client_mock.aget.side_effect = create_mock_aget([])
+
+        tool = AdvanceBlobSearch(metadata=metadata_with_project)
+
+        response = await tool._arun(
+            search="nonexistent",
+            api_url="/api/v4/projects/123/search",
+        )
+
+        response_data = json.loads(response)
+        assert response_data == {"search_results": []}
+
+    @pytest.mark.asyncio
+    async def test_raises_exception_on_failed_response(
+        self, gitlab_client_mock, metadata_with_project
+    ):
+        """Test that AdvanceBlobSearch raises ToolException when response fails."""
+        from langchain_core.tools.base import ToolException
+        from structlog.testing import capture_logs
+
+        failed_response = GitLabHttpResponse(
+            status_code=500,
+            body={"message": "Internal Server Error"},
+            headers={"content-type": "application/json"},
+        )
+        gitlab_client_mock.aget.return_value = failed_response
+
+        tool = AdvanceBlobSearch(metadata=metadata_with_project)
+
+        with capture_logs() as captured_logs:
+            with pytest.raises(ToolException) as exc_info:
+                await tool._arun(
+                    search="test",
+                    api_url="/api/v4/projects/123/search",
+                )
+
+        assert "500" in str(exc_info.value)
+        assert "Internal Server Error" in str(exc_info.value)
+
+        assert len(captured_logs) == 1
+        error_log = [
+            log
+            for log in captured_logs
+            if log["event"] == "Advance Blob search request failed"
+        ][0]
+        assert error_log["status_code"] == 500
+
+    @pytest.mark.asyncio
+    async def test_url_encoded_project_path(
+        self, gitlab_client_mock, metadata_with_project, blob_search_results
+    ):
+        """Test AdvanceBlobSearch with URL-encoded project path."""
+        gitlab_client_mock.aget.side_effect = create_mock_aget(blob_search_results)
+
+        tool = AdvanceBlobSearch(metadata=metadata_with_project)
+
+        await tool._arun(
+            search="test",
+            api_url="/api/v4/projects/group%2Fsubgroup%2Fproject/search",
+        )
+
+        gitlab_client_mock.aget.assert_called_once_with(
+            path="/api/v4/projects/group%2Fsubgroup%2Fproject/search",
+            params={"scope": "blobs", "search": "test"},
+            parse_json=True,
+        )
+
+    @pytest.mark.asyncio
+    async def test_api_url_without_leading_slash(
+        self, gitlab_client_mock, metadata_with_project, blob_search_results
+    ):
+        """Test AdvanceBlobSearch accepts API URL without leading slash."""
+        gitlab_client_mock.aget.side_effect = create_mock_aget(blob_search_results)
+
+        tool = AdvanceBlobSearch(metadata=metadata_with_project)
+
+        response = await tool._arun(
+            search="test",
+            api_url="api/v4/projects/123/search",
+        )
+
+        response_data = json.loads(response)
+        assert "search_results" in response_data
+
+    @pytest.mark.asyncio
+    async def test_handles_missing_path_fields(
+        self, gitlab_client_mock, metadata_with_project
+    ):
+        """Test that AdvanceBlobSearch handles results with missing path/filename."""
+        results_with_missing_paths = [
+            {
+                "basename": "main",
+                "data": "def main():",
+                "path": "src/main.py",
+                "filename": "src/main.py",
+                "id": None,
+                "ref": "main",
+                "startline": 1,
+                "project_id": 6,
+            },
+            {
+                "basename": "unknown",
+                "data": "some content",
+                "id": None,
+                "ref": "main",
+                "startline": 1,
+                "project_id": 6,
+            },
+        ]
+        gitlab_client_mock.aget.side_effect = create_mock_aget(
+            results_with_missing_paths
+        )
+
+        tool = AdvanceBlobSearch(metadata=metadata_with_project)
+
+        response = await tool._arun(
+            search="test",
+            api_url="/api/v4/projects/123/search",
+        )
+
+        response_data = json.loads(response)
+        search_results = response_data["search_results"]
+
+        assert len(search_results) == 2
+
+    def test_supersedes_blob_search(self):
+        """Test that AdvanceBlobSearch declares it supersedes BlobSearch."""
+        assert AdvanceBlobSearch.supersedes == BlobSearch
+
+    def test_required_capability(self):
+        """Test that AdvanceBlobSearch requires advanced_search capability."""
+        assert AdvanceBlobSearch.required_capability == "advanced_search"
+
+
+class TestValidateAndNormalizeApiUrl:
+    """Test suite for _validate_and_normalize_api_url."""
+
+    @pytest.fixture
+    def tool(self):
+        gitlab_client_mock = AsyncMock()
+        metadata = {"gitlab_client": gitlab_client_mock, "project": None}
+        return AdvanceBlobSearch(metadata=metadata)
+
+    @pytest.mark.parametrize(
+        "input_url,expected",
+        [
+            ("/api/v4/search", "/api/v4/search"),
+            ("api/v4/search", "/api/v4/search"),
+            ("/api/v4/projects/123/search", "/api/v4/projects/123/search"),
+            ("api/v4/projects/123/search", "/api/v4/projects/123/search"),
+            ("/api/v4/groups/456/search", "/api/v4/groups/456/search"),
+            (
+                "/api/v4/projects/gitlab-org%2Fgitlab/search",
+                "/api/v4/projects/gitlab-org%2Fgitlab/search",
+            ),
+            (
+                "/api/v4/projects/gitlab-org%2Fmodelops%2Fai-assist/search",
+                "/api/v4/projects/gitlab-org%2Fmodelops%2Fai-assist/search",
+            ),
+            (
+                "/api/v4/groups/gitlab-org%2Fmodelops/search",
+                "/api/v4/groups/gitlab-org%2Fmodelops/search",
+            ),
+        ],
+    )
+    def test_valid_urls(self, tool, input_url, expected):
+        assert tool._validate_and_normalize_api_url(input_url) == expected
+
+    @pytest.mark.parametrize(
+        "malicious_url",
+        [
+            "/api/v4/projects/1/search/../../../users",
+            "/api/v4/projects/1/search/../../admin",
+            "/api/v4/groups/1/search/../issues",
+            "/api/v4/projects/gitlab-org%2Fmodelops%2Fai-assist/search/../issues",
+            "/api/v4/groups/gitlab-org%2Fmodelops/search/../issues",
+            "/api/v4/projects/../search",
+            "/api/v4/projects/./search",
+            "/api/v4/projects/123/search/extra",
+        ],
+    )
+    def test_path_traversal_rejected(self, tool, malicious_url):
+        from langchain_core.tools.base import ToolException
+
+        with pytest.raises(ToolException) as exc_info:
+            tool._validate_and_normalize_api_url(malicious_url)
+        assert "Invalid api_url" in str(exc_info.value)
+
+    @pytest.mark.parametrize(
+        "invalid_url",
+        [
+            "/api/v4/users",
+            "/api/v4/projects/123",
+            "/api/v4/admin",
+            "/api/v4/projects/123/issues",
+            "/api/v3/search",
+            "/api/v4/projects/gitlab-org/gitlab/search",
+            "/api/v4/groups/gitlab-org/modelops/search",
+        ],
+    )
+    def test_invalid_endpoints_rejected(self, tool, invalid_url):
+        from langchain_core.tools.base import ToolException
+
+        with pytest.raises(ToolException) as exc_info:
+            tool._validate_and_normalize_api_url(invalid_url)
+        assert "Invalid api_url" in str(exc_info.value)
