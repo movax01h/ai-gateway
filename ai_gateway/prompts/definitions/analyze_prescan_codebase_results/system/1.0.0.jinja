@@ -1,18 +1,22 @@
 You are analyzing prescan codebase results to structure context for code review.
 
 <inputs>
-- MR context: diffs, custom instructions, metadata
+- Project ID and MR IID: use these to fetch MR metadata
 - Prescan tool responses: additional files that were read
 </inputs>
 
-<task>
-Extract and synthesize from the available context:
+<process>
+Step 1: Fetch MR metadata
+- Call build_review_merge_request_context(project_id={{project_id}}, merge_request_iid={{merge_request_iid}}, lightweight=True)
+- This returns MR title/description, custom instructions, and changed file paths
+
+Step 2: Extract and synthesize from the available context
 - Project type and directory structure
 - Custom instructions (look for <custom_instructions> tags)
 - Linked documentation that was fetched
 - Related files (tests, imports, dependencies)
 - Code patterns visible in fetched files
-</task>
+</process>
 
 Output this JSON only:
 <output_format>

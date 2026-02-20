@@ -876,3 +876,156 @@ async def test_build_review_context_no_files_content(
     assert "<original_files>" not in response
     assert '<file_diff filename="new_file.rb">' in response
     assert '<line type="added"' in response
+
+
+class TestBuildReviewMergeRequestContextLightweight:
+    """Tests for lightweight mode of BuildReviewMergeRequestContext."""
+
+    @pytest.mark.asyncio
+    @patch("yaml.safe_load")
+    async def test_lightweight_returns_file_paths_and_custom_instructions(
+        self, mock_yaml_load, gitlab_client_mock, metadata
+    ):
+        """Test that lightweight=True returns file paths and custom instructions, without diff content, original files,
+        or MR title/description."""
+        mock_yaml_load.return_value = {
+            "instructions": [
+                {
+                    "name": "Security Review",
+                    "instructions": "Check for SQL injection",
+                    "fileFilters": ["*.py"],
+                }
+            ]
+        }
+        gitlab_client_mock.aget = AsyncMock(
+            side_effect=[
+                GitLabHttpResponse(
+                    status_code=200,
+                    body=json.dumps(
+                        {
+                            "title": "This title should not appear",
+                            "description": "This description should not appear",
+                            "target_branch": "main",
+                        }
+                    ),
+                ),
+                GitLabHttpResponse(
+                    status_code=200,
+                    body=json.dumps(
+                        [
+                            {
+                                "new_path": "app/models/user.py",
+                                "old_path": "app/models/user.py",
+                                "diff": "@@ -1,3 +1,4 @@\n+new line",
+                                "new_file": False,
+                                "generated_file": False,
+                            },
+                            {
+                                "new_path": "app/services/auth.py",
+                                "old_path": "app/services/auth.py",
+                                "diff": "@@ -1,2 +1,3 @@\n+another line",
+                                "new_file": False,
+                                "generated_file": False,
+                            },
+                        ]
+                    ),
+                ),
+                GitLabHttpResponse(
+                    status_code=200,
+                    body=json.dumps(
+                        {"content": base64.b64encode(b"instructions: []").decode()}
+                    ),
+                ),
+            ]
+        )
+
+        tool = BuildReviewMergeRequestContext(metadata=metadata)
+        result = await tool._arun(
+            project_id=123, merge_request_iid=45, lightweight=True
+        )
+
+        # File paths present
+        assert "<changed_files>" in result
+        assert "- app/models/user.py" in result
+        assert "- app/services/auth.py" in result
+        # Custom instructions present
+        assert "<custom_instructions>" in result
+        assert "Security Review" in result
+        # No diff content or original files
+        assert "<file_diff" not in result
+        assert "<line type=" not in result
+        assert "<original_files>" not in result
+        # No MR title/description
+        assert "This title should not appear" not in result
+        assert "This description should not appear" not in result
+
+    @pytest.mark.asyncio
+    async def test_lightweight_without_custom_instructions(
+        self, gitlab_client_mock, metadata
+    ):
+        """Test lightweight mode when no custom instructions file exists."""
+        gitlab_client_mock.aget = AsyncMock(
+            side_effect=[
+                GitLabHttpResponse(
+                    status_code=200,
+                    body=json.dumps(
+                        {
+                            "title": "Test MR",
+                            "description": "Test description",
+                            "target_branch": "main",
+                        }
+                    ),
+                ),
+                GitLabHttpResponse(
+                    status_code=200,
+                    body=json.dumps(
+                        [
+                            {
+                                "new_path": "app/models/user.py",
+                                "old_path": "app/models/user.py",
+                                "diff": "@@ -1,3 +1,4 @@\n+new line",
+                                "new_file": False,
+                                "generated_file": False,
+                            },
+                        ]
+                    ),
+                ),
+                GitLabHttpResponse(
+                    status_code=404, body=json.dumps({"error": "not found"})
+                ),
+            ]
+        )
+
+        tool = BuildReviewMergeRequestContext(metadata=metadata)
+        result = await tool._arun(
+            project_id=123, merge_request_iid=45, lightweight=True
+        )
+
+        assert "<changed_files>" in result
+        assert "- app/models/user.py" in result
+        assert "<custom_instructions>" not in result
+
+
+@pytest.mark.parametrize(
+    "input_data,expected_message",
+    [
+        (
+            BuildReviewMergeRequestContextInput(
+                project_id=42, merge_request_iid=123, lightweight=True
+            ),
+            "Build review context for merge request !123 in project 42 (lightweight)",
+        ),
+        (
+            BuildReviewMergeRequestContextInput(
+                url="https://gitlab.com/namespace/project/-/merge_requests/42",
+                lightweight=True,
+            ),
+            "Build review context for merge request https://gitlab.com/namespace/project/-/merge_requests/42 (lightweight)",
+        ),
+    ],
+)
+def test_build_review_context_format_display_message_lightweight(
+    input_data, expected_message
+):
+    tool = BuildReviewMergeRequestContext(description="Build review context")
+    assert tool.format_display_message(input_data) == expected_message
