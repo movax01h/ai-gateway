@@ -139,6 +139,26 @@ models:
       max_tokens: 4_096
       model_class_provider: anthropic
 
+  - name: "Claude Opus 4.5 - Vertex"
+    provider: "Anthropic"
+    gitlab_identifier: "claude_opus_4_5_20251101_vertex"
+    description: "Claude's most intelligent model, combining maximum capability with practical performance."
+    cost_indicator: "$$$$"
+    max_context_tokens: 200000 # https://platform.claude.com/docs/en/about-claude/models/overview#latest-models-comparison
+    family:
+      - claude_4_5
+      - vertex
+      - litellm
+    params:
+      model: "claude-opus-4-5@20251101"
+      custom_llm_provider: "vertex_ai"
+      temperature: 0.0
+      max_tokens: 4_096
+      max_retries: 1
+      model_class_provider: litellm
+    prompt_params:
+      vertex_location: global
+
   - name: "Claude Opus 4.6 - Anthropic"
     provider: "Anthropic"
     gitlab_identifier: "claude_opus_4_6_20260205"
@@ -153,6 +173,28 @@ models:
       temperature: 0.0
       max_tokens: 4_096
       model_class_provider: anthropic
+
+  - name: "Claude Opus 4.6 - Vertex"
+    provider: "Anthropic"
+    gitlab_identifier: "claude_opus_4_6_vertex"
+    description: "Claude's most intelligent model, combining maximum capability with practical performance."
+    cost_indicator: "$$$$"
+    max_context_tokens: 200000 # https://platform.claude.com/docs/en/about-claude/models/overview#latest-models-comparison
+    family:
+      - claude_4_5
+      - vertex
+      - litellm
+    params:
+      model: "claude-opus-4-6"
+      custom_llm_provider: "vertex_ai"
+      temperature: 0.0
+      max_tokens: 4_096
+      max_retries: 1
+      model_class_provider: litellm
+      extra_headers:
+        anthropic-beta: context-1m-2025-08-07
+    prompt_params:
+      vertex_location: global
 
   - name: "Claude Sonnet 4.6 - Anthropic"
     provider: "Anthropic"
@@ -205,7 +247,7 @@ models:
       max_retries: 1
       model_class_provider: litellm
       extra_headers:
-        anthropic-beta: fine-grained-tool-streaming-2025-05-14,context-1m-2025-08-07
+        anthropic-beta: context-1m-2025-08-07
     prompt_params:
       vertex_location: global
 
@@ -258,8 +300,6 @@ models:
       max_tokens: 4_096
       max_retries: 1
       model_class_provider: litellm
-      extra_headers:
-        anthropic-beta: fine-grained-tool-streaming-2025-05-14
     prompt_params:
       vertex_location: global
 
@@ -311,7 +351,7 @@ models:
       max_retries: 1
       model_class_provider: litellm
       extra_headers:
-        anthropic-beta: fine-grained-tool-streaming-2025-05-14,context-1m-2025-08-07
+        anthropic-beta: context-1m-2025-08-07
     prompt_params:
       vertex_location: global
 
