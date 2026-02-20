@@ -46,7 +46,6 @@ def container_fixture(
     internal_event_client: InternalEventsClient,
 ) -> ModelRequestInstrumentator.WatchContainer:
     return ModelRequestInstrumentator.WatchContainer(
-        llm_provider="test_llm_provider",
         model_provider="test_provider",
         labels={"model_engine": "test_engine", "model_name": "test_model"},
         streaming=False,
@@ -68,7 +67,7 @@ def test_get_llm_operations():
         {
             "token_count": 12,
             "model_id": "test",
-            "model_engine": "test_llm_provider",
+            "model_engine": "test_provider",
             "model_provider": "test_provider",
             "prompt_tokens": 2,
             "completion_tokens": 10,
@@ -125,7 +124,7 @@ class TestWatchContainer:
             {
                 "token_count": 25,
                 "model_id": "test_model",
-                "model_engine": "test_llm_provider",
+                "model_engine": "test_provider",
                 "model_provider": "test_provider",
                 "prompt_tokens": 10,
                 "completion_tokens": 15,
@@ -133,7 +132,7 @@ class TestWatchContainer:
             {
                 "token_count": 15,
                 "model_id": "test_model",
-                "model_engine": "test_llm_provider",
+                "model_engine": "test_provider",
                 "model_provider": "test_provider",
                 "prompt_tokens": 5,
                 "completion_tokens": 10,
@@ -141,7 +140,7 @@ class TestWatchContainer:
             {
                 "token_count": 3,
                 "model_id": "mymodel",
-                "model_engine": "test_llm_provider",
+                "model_engine": "test_provider",
                 "model_provider": "test_provider",
                 "prompt_tokens": 1,
                 "completion_tokens": 2,
@@ -235,7 +234,7 @@ class TestWatchContainer:
                 {
                     "token_count": 25,
                     "model_id": "test_model",
-                    "model_engine": "test_llm_provider",
+                    "model_engine": "test_provider",
                     "model_provider": "test_provider",
                     "prompt_tokens": 10,
                     "completion_tokens": 15,

@@ -1,7 +1,6 @@
 name: GPT Code Completions
 model:
   params:
-    model_class_provider: litellm
     max_tokens: 64
 unit_primitives:
   - complete_code

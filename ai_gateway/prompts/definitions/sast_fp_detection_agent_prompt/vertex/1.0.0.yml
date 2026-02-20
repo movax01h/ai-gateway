@@ -1,7 +1,6 @@
 name: SAST FP detection Agent Prompt
 model:
   params:
-    model_class_provider: litellm
     max_tokens: 32_768
 unit_primitives:
   - duo_agent_platform

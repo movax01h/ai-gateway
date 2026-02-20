@@ -4,8 +4,8 @@ import litellm
 import pytest
 from langchain_core.messages import AIMessage, AIMessageChunk
 
+from ai_gateway.model_selection.models import CompletionType
 from ai_gateway.models.v2.completion_litellm import MODEL_STOP_TOKENS, CompletionLiteLLM
-from ai_gateway.prompts.config.models import CompletionType
 
 
 class TestCompletionLiteLLMInit:

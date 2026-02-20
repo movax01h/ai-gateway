@@ -22,13 +22,9 @@ from ai_gateway.chat.agents.typing import (
 )
 from ai_gateway.chat.context.current_page import Context, IssueContext
 from ai_gateway.chat.tools.gitlab import IssueReader, MergeRequestReader
+from ai_gateway.model_selection.models import ModelClassProvider
 from ai_gateway.models.base_chat import Role
 from ai_gateway.prompts import Prompt
-from ai_gateway.prompts.config.models import (
-    ChatAnthropicParams,
-    ChatLiteLLMParams,
-    ModelClassProvider,
-)
 from lib.feature_flags.context import current_feature_flag_context
 
 
@@ -364,7 +360,7 @@ class TestReActAgent:
     @pytest.mark.parametrize(
         (
             "inputs",
-            "model_params",
+            "model_provider",
             "should_add_anthropic_cache",
         ),
         [
@@ -379,7 +375,7 @@ class TestReActAgent:
                     agent_scratchpad=[],
                     tools=[IssueReader()],
                 ),
-                ChatAnthropicParams(model_class_provider=ModelClassProvider.ANTHROPIC),
+                ModelClassProvider.ANTHROPIC,
                 True,
             ),
             (
@@ -393,7 +389,7 @@ class TestReActAgent:
                     agent_scratchpad=[],
                     tools=[IssueReader()],
                 ),
-                ChatLiteLLMParams(model_class_provider=ModelClassProvider.LITE_LLM),
+                ModelClassProvider.LITE_LLM,
                 False,
             ),
         ],

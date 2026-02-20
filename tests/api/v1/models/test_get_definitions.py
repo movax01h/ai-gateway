@@ -5,7 +5,8 @@ from fastapi.testclient import TestClient
 from gitlab_cloud_connector import GitLabUnitPrimitive
 
 from ai_gateway.api.v1.models.get_definitions import router
-from ai_gateway.model_selection import LLMDefinition, UnitPrimitiveConfig
+from ai_gateway.model_selection import UnitPrimitiveConfig
+from ai_gateway.model_selection.model_selection_config import ChatLiteLLMDefinition
 
 
 @pytest.fixture(name="client")
@@ -25,7 +26,7 @@ def mock_model_config_fixture():
         mock_configs = MagicMock()
         mock.return_value = mock_configs
         mock_configs.get_llm_definitions.return_value = {
-            "model1": LLMDefinition(
+            "model1": ChatLiteLLMDefinition(
                 name="Model 1",
                 gitlab_identifier="model1",
                 provider="Anthropic",
@@ -34,7 +35,7 @@ def mock_model_config_fixture():
                 cost_indicator="$",
                 params={},
             ),
-            "model2": LLMDefinition(
+            "model2": ChatLiteLLMDefinition(
                 name="Model 2",
                 gitlab_identifier="model2",
                 provider="Vertex",
@@ -43,7 +44,7 @@ def mock_model_config_fixture():
                 cost_indicator="$$",
                 params={},
             ),
-            "model3": LLMDefinition(
+            "model3": ChatLiteLLMDefinition(
                 name="Model 3",
                 gitlab_identifier="model3",
                 max_context_tokens=200000,

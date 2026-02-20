@@ -27,6 +27,7 @@ from ai_gateway.config import ConfigModelLimits, ModelLimits
 from ai_gateway.instrumentators.model_requests import ModelRequestInstrumentator
 from ai_gateway.model_metadata import TypeModelMetadata, create_model_metadata
 from ai_gateway.model_selection import ModelSelectionConfig, PromptParams
+from ai_gateway.model_selection.models import ModelClassProvider
 from ai_gateway.prompts.bind_tools_cache import BindToolsCacheProtocol
 from ai_gateway.prompts.caching import (
     CACHE_CONTROL_INJECTION_POINTS_KEY,
@@ -34,7 +35,6 @@ from ai_gateway.prompts.caching import (
     filter_cache_control_injection_points,
 )
 from ai_gateway.prompts.config.base import ModelConfig, PromptConfig
-from ai_gateway.prompts.config.models import ModelClassProvider, TypeModelParams
 from ai_gateway.prompts.typing import Model, TypeModelFactory, TypePromptTemplateFactory
 from ai_gateway.structured_logging import get_request_logger
 from lib.context import StarletteUser, current_model_metadata_context
@@ -174,7 +174,6 @@ class BasePromptCallbackHandler:
 
 class Prompt(RunnableBinding[Any, BaseMessage]):
     name: str
-    llm_provider: str
     model_provider: str
     model: Model
     unit_primitives: list[GitLabUnitPrimitive]
@@ -186,6 +185,7 @@ class Prompt(RunnableBinding[Any, BaseMessage]):
 
     def __init__(
         self,
+        model_provider: ModelClassProvider,
         model_factory: TypeModelFactory,
         config: PromptConfig,
         model_metadata: Optional[TypeModelMetadata] = None,
@@ -197,7 +197,6 @@ class Prompt(RunnableBinding[Any, BaseMessage]):
         bind_tools_params: Optional[dict[str, Any]] = None,
         **kwargs: Any,
     ):
-        model_provider = config.model.params.model_class_provider
         model_kwargs = self._build_model_kwargs(config.params, model_metadata)
         model = self._build_model(
             model_factory, config.model, model_metadata, disable_streaming
@@ -223,12 +222,12 @@ class Prompt(RunnableBinding[Any, BaseMessage]):
                 )
 
         prompt = (
-            prompt_template_factory(config)
+            prompt_template_factory(model_provider, config)
             if prompt_template_factory
             else self._build_prompt_template(config)
         )
         prompt = self._chain_cache_control_injection_points_converter(
-            model_kwargs, prompt, config.model.params
+            model_kwargs, prompt, model_provider
         )
 
         chain = cast(
@@ -241,7 +240,6 @@ class Prompt(RunnableBinding[Any, BaseMessage]):
 
         super().__init__(
             name=config.name,
-            llm_provider=config.model.params.custom_llm_provider or model_provider,
             model_provider=model_provider,
             model=model,
             unit_primitives=config.unit_primitives,
@@ -254,7 +252,7 @@ class Prompt(RunnableBinding[Any, BaseMessage]):
         self,
         model_kwargs: MutableMapping[str, Any],
         prompt: Runnable,
-        model_params: TypeModelParams,
+        model_provider: ModelClassProvider,
     ) -> Runnable[Any, PromptValue]:
         """Convert `cache_control_injection_points` LiteLLM param for non-LiteLLM model clients.
 
@@ -263,13 +261,12 @@ class Prompt(RunnableBinding[Any, BaseMessage]):
 
         if (
             CACHE_CONTROL_INJECTION_POINTS_KEY not in model_kwargs
-            or not model_params.model_class_provider
-            or model_params.model_class_provider == ModelClassProvider.LITE_LLM
+            or model_provider == ModelClassProvider.LITE_LLM
         ):
             return prompt
 
         chain = prompt | CacheControlInjectionPointsConverter().bind(
-            model_class_provider=model_params.model_class_provider,
+            model_class_provider=model_provider,
             cache_control_injection_points=model_kwargs.pop(
                 CACHE_CONTROL_INJECTION_POINTS_KEY
             ),
@@ -300,17 +297,15 @@ class Prompt(RunnableBinding[Any, BaseMessage]):
     ) -> Model:
         # The params in the prompt file have higher precedence than the ones in the model definition
         llm_params = (
-            model_metadata.llm_definition.params.copy() if model_metadata else {}
+            model_metadata.llm_definition.params.model_dump(exclude_none=True)
+            if model_metadata
+            else {}
         )
-        # Exclude model_class_provider as it's used for factory selection, not model instantiation
-        llm_params.pop("model_class_provider", None)
 
         model_factory_args = {
             "disable_streaming": disable_streaming,
             **llm_params,
-            **config.params.model_dump(
-                exclude={"model_class_provider"}, exclude_none=True, by_alias=True
-            ),
+            **config.params.model_dump(exclude_none=True, by_alias=True),
         }
         return model_factory(**model_factory_args)
 
@@ -324,7 +319,6 @@ class Prompt(RunnableBinding[Any, BaseMessage]):
             model_engine=self.model._llm_type,
             model_name=self.model_name,
             limits=self.limits,
-            llm_provider=self.llm_provider,
             model_provider=self.model_provider,
         )
 

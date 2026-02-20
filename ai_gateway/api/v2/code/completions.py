@@ -615,8 +615,8 @@ def _build_code_completions(
         gitlab_identifier = payload.model_name
         # Update payload with legacy model_provider/name for completions code
         payload.model_provider = actual_provider
-        provider_model_name = model_metadata.llm_definition.params.get(
-            "model", payload.model_name
+        provider_model_name = (
+            model_metadata.llm_definition.params.model or payload.model_name
         )
         kwargs = {}
 

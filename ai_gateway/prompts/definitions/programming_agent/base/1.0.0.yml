@@ -1,7 +1,6 @@
 name: programming_agent_prompt
 model:
   params:
-    model_class_provider: anthropic
     max_tokens: 32_768
 unit_primitives:
   - duo_workflow_execute_workflow

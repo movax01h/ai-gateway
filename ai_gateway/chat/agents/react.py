@@ -18,9 +18,9 @@ from ai_gateway.chat.agents.typing import (
     ReActAgentInputs,
     TypeAgentEvent,
 )
+from ai_gateway.model_selection.models import ModelClassProvider
 from ai_gateway.models.base_chat import Role
 from ai_gateway.prompts import Prompt, jinja2_formatter
-from ai_gateway.prompts.config import ModelClassProvider
 from ai_gateway.prompts.config.base import PromptConfig
 from ai_gateway.structured_logging import get_request_logger
 
@@ -117,7 +117,8 @@ class ReActPlainTextParser(BaseCumulativeTransformOutputParser):
 
 
 class ReActPromptTemplate(Runnable[ReActAgentInputs, PromptValue]):
-    def __init__(self, config: PromptConfig):
+    def __init__(self, model_provider: ModelClassProvider, config: PromptConfig):
+        self.model_provider = model_provider
         self.prompt_template = config.prompt_template
         self.model_config = config.model
 
@@ -136,10 +137,7 @@ class ReActPromptTemplate(Runnable[ReActAgentInputs, PromptValue]):
                 unavailable_resources=input.unavailable_resources,
                 current_date=input.current_date,
             )
-            if (
-                self.model_config.params.model_class_provider
-                == ModelClassProvider.ANTHROPIC
-            ):
+            if self.model_provider == ModelClassProvider.ANTHROPIC:
                 content_block: list[Union[str, dict]] = [
                     {
                         "text": content,

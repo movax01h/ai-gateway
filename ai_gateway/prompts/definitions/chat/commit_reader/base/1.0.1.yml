@@ -2,7 +2,6 @@
 name: Commit identifier parser for Duo Chat
 model:
   params:
-    model_class_provider: anthropic
     max_tokens: 2_048
 unit_primitives:
   - duo_chat

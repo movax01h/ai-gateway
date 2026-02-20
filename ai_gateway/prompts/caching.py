@@ -5,7 +5,7 @@ from langchain_core.messages import BaseMessage
 from langchain_core.prompt_values import PromptValue
 from langchain_core.runnables import Runnable, RunnableConfig
 
-from ai_gateway.prompts.config.models import ModelClassProvider
+from ai_gateway.model_selection.models import ModelClassProvider
 from lib.prompts.caching import prompt_caching_enabled_in_current_request
 
 log = structlog.stdlib.get_logger("prompts")

@@ -28,11 +28,9 @@ class ModelMetadataInterceptor(grpc.aio.ServerInterceptor):
             )
 
             model_metadata = create_model_metadata(data)
-            if model_metadata:
-                model_metadata.add_user(current_user_context_var.get())
+            model_metadata.add_user(current_user_context_var.get())
             current_model_metadata_context.set(model_metadata)
-
-        except json.JSONDecodeError:
+        except ValueError:
             pass
 
         return await continuation(handler_call_details)

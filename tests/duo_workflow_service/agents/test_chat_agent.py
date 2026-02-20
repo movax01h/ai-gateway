@@ -531,10 +531,10 @@ class TestChatAgentGitLabInstanceInfo:
         )
 
     def test_static_prompt_contains_gitlab_instance_info(
-        self, prompt_config, input_with_project
+        self, model_provider, prompt_config, input_with_project
     ):
         """Test static prompt contains correct GitLab instance info from context."""
-        template = ChatAgentPromptTemplate(prompt_config)
+        template = ChatAgentPromptTemplate(model_provider, prompt_config)
 
         # Mock the GitLab instance info service
         mock_gitlab_service = Mock()
@@ -584,10 +584,10 @@ class TestChatAgentGitLabInstanceInfo:
         )
 
     def test_static_prompt_without_gitlab_context(
-        self, prompt_config, input_with_project
+        self, model_provider, prompt_config, input_with_project
     ):
         """Test static prompt handles missing GitLab context gracefully."""
-        template = ChatAgentPromptTemplate(prompt_config)
+        template = ChatAgentPromptTemplate(model_provider, prompt_config)
 
         # Call template without GitLab context
         result = template.invoke(

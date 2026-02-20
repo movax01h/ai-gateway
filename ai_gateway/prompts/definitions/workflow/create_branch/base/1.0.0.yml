@@ -2,7 +2,6 @@
 name: create_branch
 model:
   params:
-    model_class_provider: anthropic
     max_tokens: 32_768
     max_retries: 1
 unit_primitives:

@@ -10,7 +10,11 @@ from langchain.tools import BaseTool
 from pydantic import AnyUrl
 
 from ai_gateway.api.v3 import api_router
-from ai_gateway.model_selection import LLMDefinition
+from ai_gateway.model_selection.model_selection_config import (
+    ChatAmazonQDefinition,
+    ChatLiteLLMDefinition,
+)
+from ai_gateway.model_selection.models import ChatLiteLLMParams
 from ai_gateway.models.base import KindModelProvider
 from ai_gateway.tracking import SnowplowEventContext
 from lib.feature_flags.context import current_feature_flag_context
@@ -706,16 +710,16 @@ class TestEditorContentGeneration:
                     endpoint=AnyUrl("http://localhost:4000"),
                     api_key="token",
                     identifier="provider/some-model",
-                    llm_definition=LLMDefinition(
+                    llm_definition=ChatLiteLLMDefinition(
                         name="Mistral",
                         gitlab_identifier="mistral",
                         max_context_tokens=128000,
                         family=["mistral", "litellm"],
-                        params={
-                            "model": "mistral",
-                            "temperature": 0.0,
-                            "max_tokens": 4096,
-                        },
+                        params=ChatLiteLLMParams(
+                            model="mistral",
+                            temperature=0.0,
+                            max_tokens=4096,
+                        ),
                     ),
                     family=["mistral", "litellm"],
                     friendly_name="Mistral",
@@ -1309,7 +1313,7 @@ class TestAmazonQIntegrationV3:
                     provider="amazon_q",
                     name="amazon_q",
                     role_arn="test:role",
-                    llm_definition=LLMDefinition(
+                    llm_definition=ChatAmazonQDefinition(
                         gitlab_identifier="amazon_q",
                         name="Amazon Q",
                         max_context_tokens=100000,
@@ -1343,7 +1347,7 @@ class TestAmazonQIntegrationV3:
                     provider="amazon_q",
                     name="amazon_q",
                     role_arn="test:role",
-                    llm_definition=LLMDefinition(
+                    llm_definition=ChatAmazonQDefinition(
                         gitlab_identifier="amazon_q",
                         name="Amazon Q",
                         max_context_tokens=100000,

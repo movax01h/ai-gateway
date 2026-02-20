@@ -1,11 +1,10 @@
 from enum import StrEnum
-from typing import Annotated, Literal, Mapping
+from typing import Mapping
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, model_validator
 
 __all__ = [
     "ModelClassProvider",
-    "TypeModelParams",
     "BaseModelParams",
     "ChatLiteLLMParams",
     "ChatAnthropicParams",
@@ -39,34 +38,33 @@ class BaseModelParams(BaseModel):
     top_k: int | None = None
     max_tokens: int | None = None
     max_retries: int | None = 1
-    model_class_provider: str | None = None
-    custom_llm_provider: str | None = None
     extra_headers: Mapping[str, str] | None = None
 
 
 class ChatLiteLLMParams(BaseModelParams):
-    model_class_provider: Literal[ModelClassProvider.LITE_LLM]
     custom_llm_provider: str | None = None
     """Easily switch to huggingface, replicate, together ai, sagemaker, etc.
     Example - https://litellm.vercel.app/docs/providers/vllm#batch-completion"""
 
 
 class ChatAnthropicParams(BaseModelParams):
-    model_class_provider: Literal[ModelClassProvider.ANTHROPIC]
     default_headers: Mapping[str, str] | None = None
 
 
 class ChatAmazonQParams(BaseModelParams):
-    model_class_provider: Literal[ModelClassProvider.AMAZON_Q]
     default_headers: Mapping[str, str] | None = None
 
 
 class ChatOpenAIParams(BaseModelParams):
-    model_class_provider: Literal[ModelClassProvider.OPENAI]
+    verbosity: str | None = None
+
+
+class ChatGoogleGenAIParams(BaseModelParams):
+    thinking_level: str = "low"
+    streaming: bool = False
 
 
 class CompletionLiteLLMParams(BaseModelParams):
-    model_class_provider: Literal[ModelClassProvider.LITE_LLM_COMPLETION]
     completion_type: CompletionType
     fim_format: str | None = None
     custom_llm_provider: str | None = None
@@ -76,20 +74,3 @@ class CompletionLiteLLMParams(BaseModelParams):
         if self.completion_type == CompletionType.FIM and not self.fim_format:
             raise ValueError("fim_format is required when completion_type is 'fim'")
         return self
-
-
-class ChatGoogleGenAIParams(BaseModelParams):
-    model_class_provider: Literal[ModelClassProvider.GOOGLE_GENAI]
-    thinking_level: str = "low"
-    streaming: bool = False
-
-
-TypeModelParams = Annotated[
-    ChatLiteLLMParams
-    | ChatAnthropicParams
-    | ChatAmazonQParams
-    | ChatOpenAIParams
-    | CompletionLiteLLMParams
-    | ChatGoogleGenAIParams,
-    Field(discriminator="model_class_provider"),
-]

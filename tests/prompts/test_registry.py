@@ -33,7 +33,7 @@ from lib.context import StarletteUser
 
 
 class MockPromptTemplateClass(Runnable):
-    def __init__(self, config: PromptConfig):
+    def __init__(self, model_provider: ModelClassProvider, config: PromptConfig):
         pass
 
     def invoke(self, *_args, **_kwargs):
@@ -71,28 +71,35 @@ models:
   - name: Test
     gitlab_identifier: test
     max_context_tokens: 200000
+    model_class_provider: litellm
     params:
         model: claude-3-5-sonnet-20241022
   - name: Haiku
     gitlab_identifier: haiku
     max_context_tokens: 200000
+    model_class_provider: anthropic
     params:
         model: claude-3-haiku-20240307
   - name: Codestral
     gitlab_identifier: codestral
     max_context_tokens: 200000
+    model_class_provider: litellm
     params:
         model: codestral
   - name: Completion Test
     gitlab_identifier: completion_test
     max_context_tokens: 200000
+    model_class_provider: litellm_completion
     family:
         - completion_fim
     params:
         model: completion_test
+        completion_type: fim
+        fim_format: "<fim_prefix>{prefix}<fim_suffix>{suffix}<fim_middle>"
   - name: Custom
     gitlab_identifier: custom
     max_context_tokens: 200000
+    model_class_provider: litellm
     family:
         - custom
     params:
@@ -100,6 +107,7 @@ models:
   - name: General
     gitlab_identifier: general
     max_context_tokens: 200000
+    model_class_provider: litellm
     family:
         - claude_3
     params:
@@ -107,6 +115,7 @@ models:
   - name: Amazon Q
     gitlab_identifier: amazon_q
     max_context_tokens: 200000
+    model_class_provider: amazon_q
     family:
         - amazon_q
     params:
@@ -114,6 +123,7 @@ models:
   - name: Multi family
     gitlab_identifier: multi_family
     max_context_tokens: 200000
+    model_class_provider: litellm
     family:
         - non_existing
         - custom
@@ -122,6 +132,7 @@ models:
   - name: Claude Sonnet 4.5
     gitlab_identifier: claude_sonnet_4_5
     max_context_tokens: 200000
+    model_class_provider: litellm
     family:
         - claude_4_5
         - claude_3
@@ -130,6 +141,7 @@ models:
   - name: Claude Sonnet 4.5 Vertex
     gitlab_identifier: claude_sonnet_4_5_vertex
     max_context_tokens: 200000
+    model_class_provider: litellm
     family:
         - claude_vertex_4_5
         - vertex
@@ -175,12 +187,10 @@ configurable_unit_primitives:
 name: Test prompt 0.0.1
 model:
   params:
-    model_class_provider: litellm
     top_p: 0.1
     top_k: 50
     max_tokens: 256
     max_retries: 10
-    custom_llm_provider: vllm
 unit_primitives:
   - explain_code
 prompt_template:
@@ -198,10 +208,6 @@ prompt_template:
 name: Completion prompt
 model:
   params:
-    model_class_provider: litellm_completion
-    completion_type: fim
-    fim_format: "</s>[SUFFIX]{suffix}[PREFIX]{prefix}[MIDDLE]"
-    custom_llm_provider: fireworks_ai
     temperature: 0.32
     max_tokens: 64
 unit_primitives:
@@ -224,12 +230,10 @@ params:
 name: Test prompt 1.0.0
 model:
   params:
-    model_class_provider: litellm
     top_p: 0.1
     top_k: 50
     max_tokens: 256
     max_retries: 10
-    custom_llm_provider: vllm
 unit_primitives:
   - explain_code
 prompt_template:
@@ -243,12 +247,10 @@ prompt_template:
 name: Test prompt 1.0.1
 model:
   params:
-    model_class_provider: litellm
     top_p: 0.1
     top_k: 50
     max_tokens: 256
     max_retries: 10
-    custom_llm_provider: vllm
 unit_primitives:
   - explain_code
 prompt_template:
@@ -262,12 +264,10 @@ prompt_template:
 name: Test prompt 1.0.2-dev
 model:
   params:
-    model_class_provider: litellm
     top_p: 0.1
     top_k: 50
     max_tokens: 256
     max_retries: 10
-    custom_llm_provider: vllm
 unit_primitives:
   - explain_code
 prompt_template:
@@ -281,15 +281,11 @@ prompt_template:
 name: Chat react prompt
 model:
   params:
-    model_class_provider: anthropic
     temperature: 0.1
     top_p: 0.8
     top_k: 40
     max_tokens: 256
     max_retries: 6
-    default_headers:
-      header1: "Header1 value"
-      header2: "Header2 value"
 unit_primitives:
   - duo_chat
 prompt_template:
@@ -307,9 +303,6 @@ params:
         contents="""
 ---
 name: Amazon Q React prompt
-model:
-  params:
-    model_class_provider: amazon_q
 unit_primitives:
   - amazon_q_integration
 prompt_template:
@@ -329,7 +322,6 @@ params:
 name: Chat react custom prompt
 model:
   params:
-    model_class_provider: litellm
     temperature: 0.1
     top_p: 0.8
     top_k: 40
@@ -355,7 +347,6 @@ params:
 name: Chat react claude_3 prompt
 model:
   params:
-    model_class_provider: litellm
     temperature: 0.1
     top_p: 0.8
     top_k: 40
@@ -380,7 +371,6 @@ params:
 name: Chat react claude_4_5 prompt
 model:
   params:
-    model_class_provider: litellm
     temperature: 0.2
     top_p: 0.9
     top_k: 50
@@ -405,7 +395,6 @@ params:
 name: Chat react claude_vertex_4_5 prompt
 model:
   params:
-    model_class_provider: litellm
     temperature: 0.2
     top_p: 0.9
     top_k: 50
@@ -595,7 +584,6 @@ name: TestPrompt No UP
 model:
     params:
         model: test_model
-        model_class_provider: litellm
 unit_primitives: []
 prompt_template:
     system: test
@@ -712,7 +700,9 @@ prompt_template:
             registry.get(
                 "chat/react",
                 "^1.0.0",
-                model_metadata=create_model_metadata(model_metadata),
+                model_metadata=(
+                    create_model_metadata(model_metadata) if model_metadata else None
+                ),
             )
 
             call_dict = mock_log.info.call_args[1]
@@ -822,7 +812,6 @@ prompt_template:
                     "top_k": 50,
                     "max_tokens": 256,
                     "max_retries": 10,
-                    "custom_llm_provider": "vllm",
                 },
                 ChatLiteLLM,
             ),
@@ -840,7 +829,6 @@ prompt_template:
                     "top_k": 50,
                     "max_tokens": 256,
                     "max_retries": 10,
-                    "custom_llm_provider": "vllm",
                 },
                 ChatLiteLLM,
             ),
@@ -858,7 +846,6 @@ prompt_template:
                     "top_k": 50,
                     "max_tokens": 256,
                     "max_retries": 10,
-                    "custom_llm_provider": "vllm",
                 },
                 ChatLiteLLM,
             ),
@@ -876,9 +863,8 @@ prompt_template:
                     "top_k": 50,
                     "max_tokens": 256,
                     "max_retries": 10,
-                    "custom_llm_provider": "vllm",
                 },
-                ChatLiteLLM,
+                ChatAnthropic,
             ),
             (
                 "chat/react",
@@ -895,10 +881,6 @@ prompt_template:
                     "top_k": 40,
                     "max_tokens": 256,
                     "max_retries": 6,
-                    "default_headers": {
-                        "header1": "Header1 value",
-                        "header2": "Header2 value",
-                    },
                 },
                 ChatAnthropic,
             ),
@@ -1111,7 +1093,9 @@ prompt_template:
         prompt = registry.get(
             prompt_id,
             prompt_version=prompt_version,
-            model_metadata=create_model_metadata(model_metadata),
+            model_metadata=(
+                create_model_metadata(model_metadata) if model_metadata else None
+            ),
         )
 
         chain = cast(RunnableSequence, prompt.bound)

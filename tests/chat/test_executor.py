@@ -21,7 +21,10 @@ from ai_gateway.model_metadata import (
     ModelMetadata,
     TypeModelMetadata,
 )
-from ai_gateway.model_selection import LLMDefinition
+from ai_gateway.model_selection.model_selection_config import (
+    ChatAmazonQDefinition,
+    ChatLiteLLMDefinition,
+)
 from ai_gateway.models.base_chat import Role
 from lib.context import StarletteUser
 
@@ -301,7 +304,7 @@ class TestGLAgentRemoteExecutorToolAction:
                     role_arn="role-arn",
                     provider="amazon_q",
                     name="amazon_q",
-                    llm_definition=LLMDefinition(
+                    llm_definition=ChatAmazonQDefinition(
                         gitlab_identifier="amazon_q",
                         name="Amazon Q",
                         max_context_tokens=100000,
@@ -324,7 +327,7 @@ class TestGLAgentRemoteExecutorToolAction:
                     provider="litellm",
                     name="mistral",
                     endpoint=AnyUrl("http://localhost:4000"),
-                    llm_definition=LLMDefinition(
+                    llm_definition=ChatLiteLLMDefinition(
                         gitlab_identifier="mistral",
                         name="Mistral",
                         max_context_tokens=128000,
@@ -347,7 +350,7 @@ class TestGLAgentRemoteExecutorToolAction:
                     role_arn="role-arn",
                     provider="amazon_q",
                     name="amazon_q",
-                    llm_definition=LLMDefinition(
+                    llm_definition=ChatAmazonQDefinition(
                         gitlab_identifier="amazon_q",
                         name="Amazon Q",
                         max_context_tokens=100000,

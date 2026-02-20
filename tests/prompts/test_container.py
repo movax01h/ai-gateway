@@ -151,12 +151,8 @@ def test_container_openai_model_factory_exists(
         temperature=1,
         max_tokens=1_028,
         max_retries=1,
-        model_class_provider=ModelClassProvider.OPENAI,
     )
-    model: ChatOpenAI = factory(
-        model="gpt-4",
-        **params.model_dump(exclude_none=True, exclude={"model_class_provider"}),
-    )
+    model: ChatOpenAI = factory(model="gpt-4", **params.model_dump(exclude_none=True))
 
     assert model.model_name == "gpt-4"
     assert model.temperature == 1.0

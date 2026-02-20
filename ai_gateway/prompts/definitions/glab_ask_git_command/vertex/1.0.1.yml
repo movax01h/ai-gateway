@@ -1,8 +1,5 @@
 ---
 name: Claude Vertex Glab Ask Git Command
-model:
-  params:
-    model_class_provider: litellm
 unit_primitives:
   - write_tests
 prompt_template:

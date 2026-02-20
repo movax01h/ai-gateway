@@ -12,22 +12,23 @@ from ai_gateway.model_metadata import (
     ModelMetadata,
     create_model_metadata,
 )
-from ai_gateway.model_selection import (
-    LLMDefinition,
-    ModelSelectionConfig,
-    UnitPrimitiveConfig,
+from ai_gateway.model_selection import ModelSelectionConfig, UnitPrimitiveConfig
+from ai_gateway.model_selection.model_selection_config import (
+    ChatAmazonQDefinition,
+    ChatAnthropicDefinition,
+    ChatLiteLLMDefinition,
+    ChatOpenAIDefinition,
 )
 
 
 @pytest.fixture(name="gitlab_model1")
 def gitlab_model1_fixture():
-    return LLMDefinition(
+    return ChatLiteLLMDefinition(
         gitlab_identifier="gitlab_model1",
         name="gitlab_model",
         max_context_tokens=200000,
         family=["mixtral"],
         params={
-            "model_class_provider": "provider",
             "model": "model_family",
         },
         prompt_params={"timeout": 10},
@@ -36,12 +37,11 @@ def gitlab_model1_fixture():
 
 @pytest.fixture(name="gitlab_model2")
 def gitlab_model2_fixture():
-    return LLMDefinition(
+    return ChatAnthropicDefinition(
         gitlab_identifier="gitlab_model2",
         name="gitlab_model2",
         max_context_tokens=200000,
         params={
-            "model_class_provider": "provider2",
             "model": "model_family2",
         },
     )
@@ -49,7 +49,7 @@ def gitlab_model2_fixture():
 
 @pytest.fixture(name="amazon_q_model")
 def amazon_q_model_fixture():
-    return LLMDefinition(
+    return ChatAmazonQDefinition(
         gitlab_identifier="amazon_q",
         name="amazon_q",
         max_context_tokens=200000,
@@ -60,7 +60,7 @@ def amazon_q_model_fixture():
 
 @pytest.fixture(name="fireworks_model")
 def fireworks_model_fixture():
-    return LLMDefinition(
+    return ChatLiteLLMDefinition(
         gitlab_identifier="fireworks_ai",
         name="fireworks_ai",
         max_context_tokens=200000,
@@ -277,13 +277,13 @@ class TestModelMetadataToParams:
 
 
 def test_create_model_metadata_with_none_data():
-    result = create_model_metadata(None)
-    assert result is None
+    with pytest.raises(ValueError, match="provider must be present"):
+        create_model_metadata(None)
 
 
 def test_create_model_metadata_without_provider():
-    result = create_model_metadata({"name": "test"})
-    assert result is None
+    with pytest.raises(ValueError, match="provider must be present"):
+        create_model_metadata({"name": "test"})
 
 
 class TestFireworksModelMetadata:
@@ -443,13 +443,12 @@ class TestFriendlyName:
         }
 
         with patch.object(ModelSelectionConfig, "get_model") as mock_get_model:
-            mock_definition = LLMDefinition(
+            mock_definition = ChatLiteLLMDefinition(
                 gitlab_identifier="gitlab_model1",
                 name="GitLab Model One",  # This becomes friendly_name
                 max_context_tokens=200000,
                 family=["mixtral"],
                 params={
-                    "model_class_provider": "provider",
                     "model": "model_family",
                 },
             )
@@ -470,13 +469,12 @@ class TestFriendlyName:
 
         # Mock the model selection config to simulate real models.yml lookup
         with patch.object(ModelSelectionConfig, "get_model") as mock_get_model:
-            mock_definition = LLMDefinition(
+            mock_definition = ChatAnthropicDefinition(
                 gitlab_identifier="claude_sonnet_4_5_20250929",
                 name="Claude Sonnet 4.5 - Anthropic",
                 max_context_tokens=200000,
                 family=["claude_4"],
                 params={
-                    "model_class_provider": "anthropic",
                     "model": "claude-sonnet-4-5-20250929",
                 },
             )
@@ -492,7 +490,7 @@ class TestFriendlyName:
         """Test friendly_name with self-hosted model using mocked models.yml definitions."""
         data = {
             "name": "llama3",  # Maps to gitlab_identifier in models.yml
-            "provider": "custom_openai",
+            "provider": "litellm",
             "endpoint": "http://custom-endpoint.com/v1",
             "api_key": "custom-key",
             "identifier": "custom_openai/Llama-3.1-70B-Instruct",
@@ -500,13 +498,12 @@ class TestFriendlyName:
 
         # Mock the model selection config to simulate llama3 lookup
         with patch.object(ModelSelectionConfig, "get_model") as mock_get_model:
-            mock_definition = LLMDefinition(
+            mock_definition = ChatLiteLLMDefinition(
                 gitlab_identifier="llama3",
                 name="Llama3",
                 max_context_tokens=200000,
                 family=["llama3"],
                 params={
-                    "model_class_provider": "custom_openai",
                     "model": "llama3",
                 },
             )
@@ -516,7 +513,7 @@ class TestFriendlyName:
 
             assert isinstance(result, ModelMetadata)
             assert result.name == "llama3"
-            assert result.provider == "custom_openai"
+            assert result.provider == "litellm"
             assert result.friendly_name == "Llama3"
 
     def test_create_model_metadata_with_gpt_model_friendly_name(self):
@@ -529,13 +526,12 @@ class TestFriendlyName:
 
         # Mock the model selection config to simulate gpt_5 lookup
         with patch.object(ModelSelectionConfig, "get_model") as mock_get_model:
-            mock_definition = LLMDefinition(
+            mock_definition = ChatOpenAIDefinition(
                 gitlab_identifier="gpt_5",
                 name="OpenAI GPT-5",
                 max_context_tokens=200000,
                 family=["gpt_5"],
                 params={
-                    "model_class_provider": "openai",
                     "model": "gpt-5-2025-08-07",
                 },
             )
@@ -556,13 +552,12 @@ class TestFriendlyName:
         }
 
         with patch.object(ModelSelectionConfig, "get_model") as mock_get_model:
-            mock_definition = LLMDefinition(
+            mock_definition = ChatAmazonQDefinition(
                 gitlab_identifier="amazon_q",
                 name="Amazon Q",  # This becomes friendly_name
                 max_context_tokens=200000,
                 family=["amazon_q"],
                 params={
-                    "model_class_provider": "amazon_q",
                     "model": "amazon_q",
                 },
             )
@@ -594,13 +589,12 @@ class TestFriendlyName:
         }
 
         with patch.object(ModelSelectionConfig, "get_model") as mock_get_model:
-            mock_definition = LLMDefinition(
+            mock_definition = ChatLiteLLMDefinition(
                 gitlab_identifier="gitlab_model1",
                 name="GitLab Identifier Model",
                 max_context_tokens=200000,
                 family=["mixtral"],
                 params={
-                    "model_class_provider": "provider",
                     "model": "model_family",
                 },
             )

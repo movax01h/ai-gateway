@@ -2,6 +2,7 @@ from typing import Any, Mapping, Optional, Protocol, TypeAlias, runtime_checkabl
 
 from langchain_core.runnables import Runnable, RunnableBinding
 
+from ai_gateway.model_selection.models import ModelClassProvider
 from ai_gateway.prompts.config.base import PromptConfig
 
 
@@ -36,4 +37,6 @@ class TypeModelFactory(Protocol):
 
 
 class TypePromptTemplateFactory(Protocol):
-    def __call__(self, config: PromptConfig) -> Runnable[Any, Any]: ...
+    def __call__(
+        self, model_provider: ModelClassProvider, config: PromptConfig
+    ) -> Runnable[Any, Any]: ...

@@ -6,6 +6,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
+from ai_gateway.model_selection.models import ChatAnthropicParams, ChatLiteLLMParams
 from scripts.verify_pricing_multipliers import (
     get_pricing_keys,
     get_selectable_models,
@@ -67,7 +68,7 @@ class TestGetSelectableModels:
     def test_extracts_and_normalizes_models(self, monkeypatch):
         """Should extract params.model and normalize @ to -."""
         mock_llm_def = MagicMock()
-        mock_llm_def.params = {"model": "claude-sonnet-4-5@20250929"}
+        mock_llm_def.params = ChatLiteLLMParams(model="claude-sonnet-4-5@20250929")
 
         mock_up_config = MagicMock()
         mock_up_config.feature_setting = "duo_chat"
@@ -93,7 +94,7 @@ class TestGetSelectableModels:
     def test_includes_dev_selectable_models(self, monkeypatch):
         """Dev models should also be checked for pricing."""
         mock_llm_def = MagicMock()
-        mock_llm_def.params = {"model": "experimental-model"}
+        mock_llm_def.params = ChatLiteLLMParams(model="experimental-model")
 
         mock_dev = MagicMock()
         mock_dev.selectable_models = ["experimental_id"]
@@ -119,10 +120,10 @@ class TestGetSelectableModels:
     def test_excludes_code_completions_models(self, monkeypatch):
         """code_completions uses flat rate pricing, not model-based multipliers."""
         mock_codestral = MagicMock()
-        mock_codestral.params = {"model": "codestral-2508"}
+        mock_codestral.params = ChatLiteLLMParams(model="codestral-2508")
 
         mock_claude = MagicMock()
-        mock_claude.params = {"model": "claude-sonnet-4"}
+        mock_claude.params = ChatAnthropicParams(model="claude-sonnet-4")
 
         mock_code_completions_config = MagicMock()
         mock_code_completions_config.feature_setting = "code_completions"

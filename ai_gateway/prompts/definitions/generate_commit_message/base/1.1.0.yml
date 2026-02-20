@@ -1,8 +1,5 @@
 ---
 name: Claude 3.7 Generate Commit Message
-model:
-  params:
-    model_class_provider: anthropic
 unit_primitives:
   - generate_commit_message
 prompt_template:

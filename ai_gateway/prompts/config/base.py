@@ -2,26 +2,22 @@ from gitlab_cloud_connector import GitLabUnitPrimitive
 from pydantic import BaseModel, ConfigDict
 
 from ai_gateway.model_selection import PromptParams
-from ai_gateway.prompts.config.models import BaseModelParams, TypeModelParams
+from ai_gateway.model_selection.models import BaseModelParams
 
-__all__ = ["PromptConfig", "ModelConfig", "BaseModelConfig"]
+__all__ = ["PromptConfig", "ModelConfig"]
 
 
-class BaseModelConfig(BaseModel):
+class ModelConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    params: BaseModelParams
-
-
-class ModelConfig(BaseModelConfig):
-    params: TypeModelParams
+    params: BaseModelParams = BaseModelParams()
 
 
 class PromptConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     name: str
-    model: ModelConfig
+    model: ModelConfig = ModelConfig()
     unit_primitives: list[GitLabUnitPrimitive]
     prompt_template: dict[str, str]
     params: PromptParams | None = None

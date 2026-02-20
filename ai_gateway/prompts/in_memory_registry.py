@@ -74,28 +74,25 @@ class InMemoryPromptRegistry(BasePromptRegistry):
         """
         raw_data = self._process_prompt_data(prompt_id)
 
-        model_data: dict[str, Any]
+        model_params: dict[str, Any]
 
         if model_metadata:
-            model_data = {"params": model_metadata.llm_definition.params}
-        elif model_from_prompt := raw_data.get("model"):
-            model_data = model_from_prompt
+            model_params = {}
+            model_class_provider = model_metadata.llm_definition.model_class_provider
+        elif model_from_prompt := cast(dict, raw_data.get("model")):
+            model_params = model_from_prompt["params"]
+            model_class_provider = model_params.pop("model_class_provider")
         else:
             raise ValueError(f"Model config not provided for prompt {prompt_id}")
 
         prompt_config = PromptConfig(
             name=prompt_id,
-            model=ModelConfig(**model_data),
+            model=ModelConfig(params=model_params),  # type: ignore[arg-type]
             unit_primitives=raw_data.get("unit_primitives", []),
             prompt_template=raw_data["prompt_template"],
             params=raw_data.get("params"),
         )
 
-        model_class_provider = (
-            model_metadata.llm_definition.params.get("model_class_provider")
-            if model_metadata
-            else None
-        ) or prompt_config.model.params.model_class_provider
         model_factory = self.shared_registry.model_factories.get(
             model_class_provider, None
         )
@@ -110,6 +107,7 @@ class InMemoryPromptRegistry(BasePromptRegistry):
         )
 
         return Prompt(
+            model_provider=model_class_provider,
             model_factory=model_factory,
             config=prompt_config,
             model_metadata=model_metadata,

@@ -115,7 +115,6 @@ Each prompt configuration file in `prompts/definitions/` requires the following 
 name: <string>                    # Required. Unique identifier for the prompt
 model:
     params:
-        model_class_provider: litellm # Required. Provider interface
         temperature: <float>          # Optional. 0.0-1.0. Controls randomness (default: 0.7)
         top_p: <float>                # Optional. 0.0-1.0. Controls diversity (default: 1.0)
         top_k: <integer>              # Optional. Token consideration limit (default: 40)
@@ -141,9 +140,7 @@ params: # Optional. Request handling parameters
 ```yaml
 name: Code review prompt
 model:
-    name: claude-sonnet-4-20250514
     params:
-        model_class_provider: litellm
         temperature: 0.2
         max_tokens: 1024
         stop:
@@ -293,7 +290,6 @@ name: New Provider chat prompt
 model:
     name: new-provider-large-202403
     params:
-        model_class_provider: litellm
         temperature: 0.2
         top_p: 0.7
         max_tokens: 300

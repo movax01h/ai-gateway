@@ -1,7 +1,6 @@
 name: create_repository_branch
 model:
   params:
-    model_class_provider: litellm
     max_tokens: 2048
     max_retries: 3
 unit_primitives:

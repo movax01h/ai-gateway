@@ -1,8 +1,5 @@
 ---
 name: Claude 3 Gitlab Documentation agent
-model:
-  params:
-    model_class_provider: litellm
 unit_primitives:
   - documentation_search
 prompt_template:

@@ -125,10 +125,9 @@ logger = structlog.get_logger()
 
 
 class ModelRequestInstrumentator:
-    class WatchContainer:  # pylint: disable=too-many-instance-attributes
+    class WatchContainer:
         def __init__(
             self,
-            llm_provider: str,
             model_provider: str,
             labels: dict[str, str],
             limits: Optional[ModelLimits],
@@ -136,7 +135,6 @@ class ModelRequestInstrumentator:
             unit_primitives: Optional[List[GitLabUnitPrimitive]] = None,
             internal_event_client: Optional[InternalEventsClient] = None,
         ):
-            self.llm_provider = llm_provider
             self.model_provider = model_provider
             self.labels = labels
             self.limits = limits
@@ -332,7 +330,7 @@ class ModelRequestInstrumentator:
                 {
                     "token_count": usage["total_tokens"],
                     "model_id": model,
-                    "model_engine": self.llm_provider,
+                    "model_engine": self.model_provider,
                     "model_provider": self.model_provider,
                     "prompt_tokens": usage["input_tokens"],
                     "completion_tokens": usage["output_tokens"],
@@ -362,18 +360,15 @@ class ModelRequestInstrumentator:
         model_engine: str,
         model_name: str,
         limits: Optional[ModelLimits],
-        llm_provider: str = "",
         model_provider: str = "",
     ):
         self.labels = {"model_engine": model_engine, "model_name": model_name}
         self.limits = limits
-        self.llm_provider = llm_provider
         self.model_provider = model_provider
 
     @contextmanager
     def watch(self, stream=False, unit_primitives=None, internal_event_client=None):
         watcher = ModelRequestInstrumentator.WatchContainer(
-            llm_provider=self.llm_provider,
             model_provider=self.model_provider,
             labels=self.labels,
             limits=self.limits,

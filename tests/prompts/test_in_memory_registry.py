@@ -2,10 +2,10 @@ from unittest.mock import Mock, patch
 
 import pytest
 from langchain_community.chat_models import ChatAnthropic
-from pydantic import ValidationError
 
 from ai_gateway.model_metadata import ModelMetadata
-from ai_gateway.model_selection.model_selection_config import LLMDefinition
+from ai_gateway.model_selection.model_selection_config import ChatLiteLLMDefinition
+from ai_gateway.model_selection.models import ChatLiteLLMParams
 from ai_gateway.prompts.base import Prompt
 from ai_gateway.prompts.config import ModelClassProvider
 from ai_gateway.prompts.in_memory_registry import InMemoryPromptRegistry
@@ -173,8 +173,8 @@ class TestInMemoryPromptRegistry:
         in_memory_registry.register_prompt(prompt_id, invalid_prompt_data)
 
         with pytest.raises(
-            ValidationError,
-            match="Input tag 'invalid_provider' found",
+            ValueError,
+            match="unrecognized model class provider `invalid_provider`",
         ):
             in_memory_registry.get(prompt_id, prompt_version=None)
 
@@ -242,14 +242,13 @@ class TestInMemoryPromptRegistry:
         metadata = ModelMetadata(
             name="self-hosted",
             provider="custom",
-            llm_definition=LLMDefinition(
+            llm_definition=ChatLiteLLMDefinition(
                 gitlab_identifier="litellm_proxy",
                 name="litellm_proxy",
                 max_context_tokens=200000,
-                params={
-                    "model": "bedrock/anthropic.claude-sonnet-4-20250514-v1:0",
-                    "model_class_provider": ModelClassProvider.LITE_LLM,
-                },
+                params=ChatLiteLLMParams(
+                    model="bedrock/anthropic.claude-sonnet-4-20250514-v1:0"
+                ),
             ),
         )
 
@@ -315,14 +314,13 @@ class TestInMemoryPromptRegistry:
             name="bedrock_model",
             provider="custom",
             identifier="bedrock/anthropic.claude-3-sonnet-20240229-v1:0",
-            llm_definition=LLMDefinition(
+            llm_definition=ChatLiteLLMDefinition(
                 gitlab_identifier="bedrock_claude",
                 name="bedrock_claude",
                 max_context_tokens=200000,
-                params={
-                    "model": "bedrock/anthropic.claude-3-sonnet-20240229-v1:0",
-                    "model_class_provider": ModelClassProvider.LITE_LLM,
-                },
+                params=ChatLiteLLMParams(
+                    model="bedrock/anthropic.claude-3-sonnet-20240229-v1:0"
+                ),
             ),
         )
 
@@ -364,14 +362,13 @@ class TestInMemoryPromptRegistry:
                 ModelMetadata(
                     name="test",
                     provider="test",
-                    llm_definition=LLMDefinition(
+                    llm_definition=ChatLiteLLMDefinition(
                         gitlab_identifier="claude",
                         name="claude",
                         max_context_tokens=200000,
-                        params={
-                            "model": "claude-sonnet-4-20250514",
-                            "model_class_provider": ModelClassProvider.LITE_LLM,
-                        },
+                        params=ChatLiteLLMParams(
+                            model="claude-sonnet-4-20250514",
+                        ),
                     ),
                 ),
                 "claude-sonnet-4-20250514",
@@ -387,14 +384,13 @@ class TestInMemoryPromptRegistry:
                 ModelMetadata(
                     name="test",
                     provider="test",
-                    llm_definition=LLMDefinition(
+                    llm_definition=ChatLiteLLMDefinition(
                         gitlab_identifier="claude",
                         name="claude",
                         max_context_tokens=200000,
-                        params={
-                            "model": "claude-sonnet-4-20250514",
-                            "model_class_provider": ModelClassProvider.LITE_LLM,
-                        },
+                        params=ChatLiteLLMParams(
+                            model="claude-sonnet-4-20250514",
+                        ),
                     ),
                 ),
                 "claude-sonnet-4-20250514",

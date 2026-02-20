@@ -17,7 +17,8 @@ from structlog.testing import capture_logs
 from ai_gateway.api.error_utils import capture_validation_errors
 from ai_gateway.api.v2 import api_router
 from ai_gateway.api.v2.code.completions import _track_code_suggestions_event
-from ai_gateway.model_selection import LLMDefinition
+from ai_gateway.model_selection.model_selection_config import ChatLiteLLMDefinition
+from ai_gateway.model_selection.models import ChatLiteLLMParams
 from ai_gateway.models.base_chat import Message, Role
 from ai_gateway.tracking.container import ContainerTracking
 from ai_gateway.tracking.instrumentator import SnowplowInstrumentator
@@ -1536,13 +1537,13 @@ class TestGitLabModelProvider:
     ):
         """Test that v2/completions works with 'gitlab' as the model_provider and different underlying providers."""
 
-        test_model = LLMDefinition(
+        test_model = ChatLiteLLMDefinition(
             name="Test Model",
             gitlab_identifier=gitlab_identifier,
             max_context_tokens=200000,
             description="A model description",
             family=["test-family"],
-            params={"temperature": 0.0, "max_tokens": 4096},
+            params=ChatLiteLLMParams(temperature=0.0, max_tokens=4096),
         )
 
         mock_suggestion = Mock()
@@ -1626,12 +1627,12 @@ class TestGitLabModelProvider:
     ):
         """Test that v2/completions works with 'gitlab' as the model_provider when no model name is provided."""
 
-        test_model = LLMDefinition(
+        test_model = ChatLiteLLMDefinition(
             name="Test Model",
             gitlab_identifier="test-model-id",
             max_context_tokens=200000,
             description="A model description",
-            params={"temperature": 0.0, "max_tokens": 4096},
+            params=ChatLiteLLMParams(temperature=0.0, max_tokens=4096),
         )
 
         mock_suggestion = Mock()
@@ -1699,13 +1700,13 @@ class TestGitLabModelProvider:
     ):
         """Test that v2/completions works with 'gitlab' as the model_provider when an invalid model name is provided."""
 
-        test_model = LLMDefinition(
+        test_model = ChatLiteLLMDefinition(
             name="Test Model",
             gitlab_identifier="test-model-id",
             max_context_tokens=200000,
             description="A model description",
             family=["test-family"],
-            params={"temperature": 0.0, "max_tokens": 4096},
+            params=ChatLiteLLMParams(temperature=0.0, max_tokens=4096),
         )
 
         mock_suggestion = Mock()
@@ -1774,14 +1775,14 @@ class TestGitLabModelProvider:
     ):
         """Test that gitlab_identifier is preserved when model_provider is gitlab."""
 
-        test_model = LLMDefinition(
+        test_model = ChatLiteLLMDefinition(
             name="Test Model",
             gitlab_identifier="claude_sonnet_4_5_20250929_vertex",
             max_context_tokens=200000,
             description="A model description",
             family=["test-family"],
             provider="Vertex",
-            params={"temperature": 0.0, "max_tokens": 4096},
+            params=ChatLiteLLMParams(temperature=0.0, max_tokens=4096),
         )
 
         mock_suggestion = Mock()
@@ -1868,14 +1869,14 @@ class TestGitLabModelProvider:
     ):
         """Test that gitlab_identifier is preserved for different model types."""
 
-        test_model = LLMDefinition(
+        test_model = ChatLiteLLMDefinition(
             name="Test Model",
             gitlab_identifier=gitlab_identifier,
             max_context_tokens=200000,
             description="A model description",
             family=["test-family"],
             provider=provider,
-            params=params,
+            params=ChatLiteLLMParams(**params),
         )
 
         mock_suggestion = Mock()

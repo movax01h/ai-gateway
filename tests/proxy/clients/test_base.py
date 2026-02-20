@@ -69,7 +69,7 @@ async def test_valid_proxy_request(
                 {
                     "token_count": 15,
                     "model_id": "my-model-name",
-                    "model_engine": "my-llm-provider",
+                    "model_engine": "my-model-provider",
                     "model_provider": "my-model-provider",
                     "prompt_tokens": 10,
                     "completion_tokens": 5,
@@ -84,7 +84,7 @@ async def test_valid_proxy_request(
                 {
                     "token_count": 10,
                     "model_id": "my-model-name",
-                    "model_engine": "my-llm-provider",
+                    "model_engine": "my-model-provider",
                     "model_provider": "my-model-provider",
                     "prompt_tokens": 8,
                     "completion_tokens": 2,
@@ -109,7 +109,6 @@ async def test_valid_proxy_request_billing_event_callback(
     proxy_client.user = request_factory().user
 
     proxy_client.watcher = ModelRequestInstrumentator.WatchContainer(
-        llm_provider="my-llm-provider",
         model_provider="my-model-provider",
         labels={"model_engine": "my-model-engine", "model_name": "my-model-name"},
         limits=None,

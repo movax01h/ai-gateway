@@ -2,13 +2,13 @@ import pytest
 from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_core.prompt_values import ChatPromptValue
 
+from ai_gateway.model_selection.models import ModelClassProvider
 from ai_gateway.prompts.caching import (
     CACHE_CONTROL_INJECTION_POINTS_KEY,
     REQUIRE_PROMPT_CACHING_ENABLED_IN_REQUEST,
     CacheControlInjectionPointsConverter,
     filter_cache_control_injection_points,
 )
-from ai_gateway.prompts.config.models import ModelClassProvider
 from lib.prompts.caching import set_prompt_caching_enabled_to_current_request
 
 

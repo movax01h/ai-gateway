@@ -1,8 +1,5 @@
 ---
 name: Fix Pipeline Context
-model:
-  params:
-    model_class_provider: litellm
 unit_primitives:
   - duo_agent_platform
 prompt_template:

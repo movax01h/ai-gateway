@@ -123,7 +123,6 @@ class ProxyClient:
 
         try:
             with ModelRequestInstrumentator(
-                llm_provider=upstream_service,
                 model_engine=upstream_service,
                 model_provider=upstream_service,
                 model_name=model_name,

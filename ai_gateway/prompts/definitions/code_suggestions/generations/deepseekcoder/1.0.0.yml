@@ -2,7 +2,6 @@
 name: DeepSeekCoder Code Generations
 model:
   params:
-    model_class_provider: litellm
     temperature: 0.95
     max_tokens: 512
 unit_primitives:

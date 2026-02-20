@@ -2,7 +2,6 @@
 name: Codestral 22B Code Generations
 model:
   params:
-    model_class_provider: litellm
     temperature: 0.3
     max_tokens: 256
 unit_primitives:

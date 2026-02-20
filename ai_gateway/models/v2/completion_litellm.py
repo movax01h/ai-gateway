@@ -13,11 +13,11 @@ import litellm
 from langchain_core.messages import AIMessage, AIMessageChunk
 from langchain_core.runnables import RunnableConfig, RunnableSerializable
 
+from ai_gateway.model_selection.models import CompletionType
 from ai_gateway.models.fireworks_retry import (
     DEFAULT_FIREWORKS_ERRORS,
     create_fireworks_retry_decorator,
 )
-from ai_gateway.prompts.config.models import CompletionType
 
 __all__ = ["CompletionLiteLLM"]
 

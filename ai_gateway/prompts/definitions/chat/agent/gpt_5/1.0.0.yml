@@ -2,7 +2,6 @@
 name: Chat Agent
 model:
   params:
-    model_class_provider: openai
     max_tokens: 8_192
 unit_primitives:
   - duo_chat

@@ -116,9 +116,9 @@ TypeModelMetadata = AmazonQModelMetadata | ModelMetadata | FireworksModelMetadat
 
 def create_model_metadata(
     data: dict[str, Any] | None, mock_model_responses: bool = False
-) -> Optional[TypeModelMetadata]:
+) -> TypeModelMetadata:
     if not data or "provider" not in data:
-        return None
+        raise ValueError("Argument error: provider must be present.")
 
     configs = ModelSelectionConfig.instance()
 
@@ -145,7 +145,7 @@ def create_model_metadata(
         model_endpoints = data.get("model_endpoints", {})
 
         region_config = model_endpoints.get("fireworks_current_region_endpoint", {})
-        model_config = region_config.get(fireworks_llm_definition.params["model"], {})
+        model_config = region_config.get(fireworks_llm_definition.params.model, {})
 
         model_identifier = model_config.get("identifier")
         if not model_identifier or model_identifier == "":
