@@ -35,6 +35,7 @@ def work_item_data_fixture():
         "title": "Test Work Item",
         "description": "This is a test work item",
         "state": "opened",
+        "confidential": False,
         "createdAt": "2025-04-29T11:35:36.000+02:00",
         "updatedAt": "2025-04-29T12:35:36.000+02:00",
         "author": {"username": "test_user", "name": "Test User"},
