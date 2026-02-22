@@ -78,12 +78,15 @@ components:
     prompt_id: "analyze_prescan_codebase_results"
     prompt_version: "^1.0.0"
     inputs:
-      - from: "context:fetch_mr_diffs.tool_responses"
-        as: "mr_context"
+      - from: "context:project_id"
+        as: "project_id"
+      - from: "context:goal"
+        as: "merge_request_iid"
       - from: "context:prescan_codebase.tool_responses"
         as: "prescan_tool_responses"
         optional: True
-    toolset: []
+    toolset:
+      - "build_review_merge_request_context"
     ui_log_events:
       - "on_agent_final_answer"
 

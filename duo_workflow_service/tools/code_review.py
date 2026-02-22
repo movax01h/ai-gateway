@@ -104,6 +104,13 @@ class BuildReviewMergeRequestContextInput(ProjectResourceInput):
         default=False,
         description="If True, only include diffs without fetching original file contents. Useful for initial scanning.",
     )
+    lightweight: bool = Field(
+        default=False,
+        description=(
+            "If True, return only changed file paths and custom instructions "
+            "(no diff content). Useful for context analysis."
+        ),
+    )
 
 
 class BuildReviewMergeRequestContext(DuoBaseTool):
@@ -114,12 +121,14 @@ class BuildReviewMergeRequestContext(DuoBaseTool):
         "Build comprehensive merge request context for code review.\n"
         "Fetches MR details, AI-reviewable diffs, and original files content.\n"
         "Set only_diffs=True to skip fetching original file contents for faster scanning.\n"
+        "Set lightweight=True to return only changed file paths and custom instructions.\n"
         "Identify merge request with either:\n"
         "- project_id and merge_request_iid\n"
         "- GitLab URL (https://gitlab.com/namespace/project/-/merge_requests/42)\n"
         "Examples:\n"
         "- build_review_merge_request_context(project_id=13, merge_request_iid=9)\n"
         "- build_review_merge_request_context(project_id=13, merge_request_iid=9, only_diffs=True)\n"
+        "- build_review_merge_request_context(project_id=13, merge_request_iid=9, lightweight=True)\n"
         "- build_review_merge_request_context(url='https://gitlab.com/...')"
     )
     args_schema: Type[BaseModel] = BuildReviewMergeRequestContextInput
@@ -141,13 +150,19 @@ class BuildReviewMergeRequestContext(DuoBaseTool):
 
         try:
             only_diffs = kwargs.get("only_diffs", False)
-            context = await self._build_context(validation_result, only_diffs)
+            lightweight = kwargs.get("lightweight", False)
+            context = await self._build_context(
+                validation_result, only_diffs, lightweight
+            )
+
+            if lightweight:
+                return self._format_lightweight_output(context)
             return self._format_output(context)
         except Exception as e:
             return json.dumps({"error": str(e)})
 
     async def _build_context(
-        self, validation_result, only_diffs: bool = False
+        self, validation_result, only_diffs: bool = False, lightweight: bool = False
     ) -> Dict[str, Any]:
         """Build complete merge request context by fetching all necessary data."""
         # Fetch MR metadata
@@ -160,7 +175,7 @@ class BuildReviewMergeRequestContext(DuoBaseTool):
         # Get all diff file paths for instruction matching
         diff_file_paths = list(diffs_and_paths.keys())
 
-        # Fetch original file content
+        # Get target branch
         target_branch = mr_data.get("target_branch")
         if not target_branch:
             raise ValueError("Target branch not found in merge request data")
@@ -169,6 +184,13 @@ class BuildReviewMergeRequestContext(DuoBaseTool):
         custom_instructions = await self._get_custom_instructions(
             validation_result.project_id, target_branch, diff_file_paths
         )
+
+        # Lightweight mode: return only file paths and custom instructions
+        if lightweight:
+            return {
+                "file_paths": diff_file_paths,
+                "custom_instructions": custom_instructions,
+            }
 
         renamed_files = {}
         for diff in diffs_data:
@@ -182,7 +204,7 @@ class BuildReviewMergeRequestContext(DuoBaseTool):
             "renamed_files": renamed_files,
         }
 
-        # If only_diffs is True, skip fetching original files and custom instructions
+        # If only_diffs is True, skip fetching original files
         if only_diffs:
             return mr_context_data
 
@@ -403,6 +425,20 @@ class BuildReviewMergeRequestContext(DuoBaseTool):
 
         return matches_include and not matches_exclude
 
+    def _format_lightweight_output(self, context: dict) -> str:
+        """Format lightweight output with only file paths and custom instructions."""
+        file_paths = "\n".join(f"- {path}" for path in context["file_paths"])
+        custom_instructions_section = self._format_custom_instructions(
+            context.get("custom_instructions", [])
+        )
+
+        output = f"<changed_files>\n{file_paths}\n</changed_files>"
+
+        if custom_instructions_section:
+            output += f"\n\n{custom_instructions_section}"
+
+        return output
+
     def _format_output(self, context: dict) -> str:
         """Format output with unique delimiters and escaped user content."""
 
@@ -617,7 +653,9 @@ This formatting is only required for custom instruction comments. Regular review
                 f"in project {args.project_id}"
             )
 
-        if args.only_diffs:
+        if args.lightweight:
+            base_msg += " (lightweight)"
+        elif args.only_diffs:
             base_msg += " (diffs only)"
 
         if tool_response:
