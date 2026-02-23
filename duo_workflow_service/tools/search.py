@@ -319,11 +319,29 @@ class RefSearchInput(BaseSearchInput):
     )
 
 
+class BlobSearchInput(BaseModel):
+    id: str = Field(
+        description="The numeric ID or URL-encoded full path of the target project"
+    )
+    search: str = Field(description="The search term")
+    order_by: Optional[str] = Field(
+        description="Sort results. Allowed value is created_at", default=None
+    )
+    sort: Optional[str] = Field(
+        description="Sort order. Allowed values are asc or desc", default=None
+    )
+    ref: Optional[str] = Field(
+        description="The name of a repository branch or tag to search on",
+        default=None,
+    )
+
+
 class BlobSearch(GitLabSearchBase):
     name: str = "gitlab_blob_search"
     description: str = dedent(
         """
         Search file content in remote GitLab projects.
+        SCOPE: Project-level only (group and instance-wide search not supported).
 
         Syntax for `search` parameter: keyword [filename:pattern] [path:dir/] [extension:type]
         - keyword: required, case-insensitive
@@ -337,7 +355,7 @@ class BlobSearch(GitLabSearchBase):
         - await run filename:*server* (WRONG - contains wildcards)
         """
     )
-    args_schema: Type[BaseModel] = RefSearchInput
+    args_schema: Type[BaseModel] = BlobSearchInput
 
     def _filter_blob_results(self, results: list) -> list:
         """Filter blob search results using FileExclusionPolicy."""
@@ -359,7 +377,6 @@ class BlobSearch(GitLabSearchBase):
         *,
         id: str,
         search: str,
-        search_type: Literal["projects"],
         ref: Optional[str] = None,
         order_by: Optional[str] = None,
         sort: Optional[str] = None,
@@ -368,31 +385,31 @@ class BlobSearch(GitLabSearchBase):
             "scope": "blobs",
             "search": search,
         }
-        if ref and search_type == "projects":
+        if ref:
             params["ref"] = ref
         if order_by:
             params["order_by"] = order_by
         if sort:
             params["sort"] = sort
 
-        url = f"/api/v4/{search_type}/{id}/search"
-        try:
-            response = await self.gitlab_client.aget(
-                path=url, params=params, parse_json=True
-            )
+        url = f"/api/v4/projects/{id}/search"
 
-            if not response.is_success():
-                log.error(
-                    "Blob search request failed",
-                    status_code=response.status_code,
-                    error=response.body,
-                )
-                return json.dumps({"search_results": []})
-            # Filter blob results using FileExclusionPolicy
-            filtered_response = self._filter_blob_results(response.body)
-            return json.dumps({"search_results": filtered_response})
-        except Exception as e:
-            return json.dumps({"error": str(e)})
+        response = await self.gitlab_client.aget(
+            path=url, params=params, parse_json=True
+        )
+
+        if not response.is_success():
+            log.error(
+                "Blob search request failed",
+                status_code=response.status_code,
+                error=response.body,
+            )
+            raise ToolException(
+                f"Blob search failed with status code: {response.status_code} and body {response.body}"
+            )
+        # Filter blob results using FileExclusionPolicy
+        filtered_response = self._filter_blob_results(response.body)
+        return json.dumps({"search_results": filtered_response})
 
 
 class AdvanceBlobSearchInput(BaseModel):

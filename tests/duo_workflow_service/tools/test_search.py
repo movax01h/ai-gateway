@@ -129,8 +129,9 @@ class TestSearch:
         base_params = {
             "id": "1",
             "search": "test search",
-            "search_type": search_type,
         }
+        if tool_class != BlobSearch:
+            base_params["search_type"] = search_type
 
         all_params = {**base_params, **search_params, **optional_params}
         response = await tool._arun(**all_params)
@@ -141,7 +142,8 @@ class TestSearch:
         expected_params = {"scope": scope, **all_params}
         expected_params = {k: v for k, v in expected_params.items() if v is not None}
         expected_params.pop("id")
-        expected_params.pop("search_type")
+        if tool_class != BlobSearch:
+            expected_params.pop("search_type")
         if "confidential" in expected_params:
             expected_params["confidential"] = str(
                 expected_params["confidential"]
@@ -194,6 +196,8 @@ class TestSearch:
         if tool_class != GroupProjectSearch:
             all_params = {**all_params, **search_type_param}
 
+        if tool_class == BlobSearch:
+            all_params.pop("search_type")
         response = await tool._arun(**all_params)
 
         expected_response = json.dumps({"search_results": []})
@@ -489,7 +493,6 @@ class TestBlobSearchFileExclusion:
         response = await tool._arun(
             id="1",
             search="test search",
-            search_type="projects",
             ref="main",
         )
 
@@ -520,7 +523,6 @@ class TestBlobSearchFileExclusion:
         response = await tool._arun(
             id="1",
             search="test search",
-            search_type="projects",
             ref="main",
         )
 
@@ -544,7 +546,6 @@ class TestBlobSearchFileExclusion:
         response = await tool._arun(
             id="1",
             search="nonexistent",
-            search_type="projects",
             ref="main",
         )
 
@@ -591,7 +592,6 @@ class TestBlobSearchFileExclusion:
         response = await tool._arun(
             id="1",
             search="test search",
-            search_type="projects",
             ref="main",
         )
 
@@ -602,11 +602,14 @@ class TestBlobSearchFileExclusion:
         assert len(search_results) == 2
 
     @pytest.mark.asyncio
-    async def test_blob_search_logs_error_on_failed_response(
+    async def test_blob_search_raises_exception_on_failed_response(
         self, gitlab_client_mock, metadata_with_project
     ):
-        """Test that BlobSearch logs error and returns empty results on failure."""
+        """Test that BlobSearch raises ToolException when response fails."""
+        from langchain_core.tools.base import ToolException
         from structlog.testing import capture_logs
+
+        from duo_workflow_service.gitlab.http_client import GitLabHttpResponse
 
         failed_response = GitLabHttpResponse(
             status_code=404,
@@ -618,15 +621,15 @@ class TestBlobSearchFileExclusion:
         tool = BlobSearch(metadata=metadata_with_project)
 
         with capture_logs() as captured_logs:
-            response = await tool._arun(
-                id="999",
-                search="test search",
-                search_type="projects",
-                ref="main",
-            )
+            with pytest.raises(ToolException) as exc_info:
+                await tool._arun(
+                    id="999",
+                    search="test search",
+                    ref="main",
+                )
 
-        response_data = json.loads(response)
-        assert response_data == {"search_results": []}
+        assert "404" in str(exc_info.value)
+        assert "404 Project Not Found" in str(exc_info.value)
 
         assert len(captured_logs) == 1
         log_entry = captured_logs[0]
