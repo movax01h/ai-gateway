@@ -167,6 +167,11 @@ configurable_unit_primitives:
       - "claude_sonnet_4_20250514_vertex"
       - "claude_sonnet_4_20250514_bedrock"
       - "claude_sonnet_4_5_20250929"
+    dev:
+      selectable_models:
+        - "gpt_5_2"
+      group_ids:
+        - 9970
   - feature_setting: "duo_generate_issue_description"
     unit_primitives:
       - "generate_issue_description"
