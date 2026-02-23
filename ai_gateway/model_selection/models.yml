@@ -399,6 +399,20 @@ models:
       max_tokens: 4_096
       model_class_provider: anthropic
 
+  - name: "Gemini 3.0 Pro Preview - Vertex"
+    provider: "Vertex"
+    gitlab_identifier: "gemini_3_0_pro_preview_vertex"
+    description: "Designed to deliver strong agentic capabilities (near-Pro level) at substantial speed and value."
+    cost_indicator: "$" # To be confirmed
+    max_context_tokens: 1000000
+    family:
+      - google_genai
+    params:
+      model: "gemini-3-pro-preview"
+      temperature: 1
+      max_tokens: 4_096
+      model_class_provider: google_genai
+
   - name: "GPT-5.2 - OpenAI"
     provider: "OpenAI"
     gitlab_identifier: "gpt_5_2"

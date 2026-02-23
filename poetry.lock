@@ -1650,6 +1650,23 @@ url = "https://gitlab.com/api/v4/projects/78063949/packages/pypi/simple"
 reference = "litellm"
 
 [[package]]
+name = "filetype"
+version = "1.2.0"
+description = "Infer file type and MIME type of any file/buffer. No external dependencies."
+optional = false
+python-versions = "*"
+groups = ["main"]
+files = [
+    {file = "filetype-1.2.0-py2.py3-none-any.whl", hash = "sha256:7ce71b6880181241cf7ac8697a2f1eb6a8bd9b429f7ad6d27b8db9ba5f1c2d25"},
+    {file = "filetype-1.2.0.tar.gz", hash = "sha256:66b56cd6474bf41d8c54660347d37afcc3f7d1970648de365c102ef77548aadb"},
+]
+
+[package.source]
+type = "legacy"
+url = "https://gitlab.com/api/v4/projects/78063949/packages/pypi/simple"
+reference = "litellm"
+
+[[package]]
 name = "fireworks-ai"
 version = "0.15.12"
 description = "Python client library for the Fireworks.ai Generative AI Platform"
@@ -2010,6 +2027,7 @@ files = [
 [package.dependencies]
 cryptography = ">=38.0.3"
 pyasn1-modules = ">=0.2.1"
+requests = {version = ">=2.20.0,<3.0.0", optional = true, markers = "extra == \"requests\""}
 rsa = ">=3.1.4,<5"
 
 [package.extras]
@@ -2358,27 +2376,31 @@ reference = "litellm"
 
 [[package]]
 name = "google-genai"
-version = "1.20.0"
+version = "1.63.0"
 description = "GenAI Python SDK"
 optional = false
-python-versions = ">=3.9"
+python-versions = ">=3.10"
 groups = ["main", "eval"]
 files = [
-    {file = "google_genai-1.20.0-py3-none-any.whl", hash = "sha256:ccd61d6ebcb14f5c778b817b8010e3955ae4f6ddfeaabf65f42f6d5e3e5a8125"},
-    {file = "google_genai-1.20.0.tar.gz", hash = "sha256:dccca78f765233844b1bd4f1f7a2237d9a76fe6038cf9aa72c0cd991e3c107b5"},
+    {file = "google_genai-1.63.0-py3-none-any.whl", hash = "sha256:6206c13fc20f332703ca7375bea7c191c82f95d6781c29936c6982d86599b359"},
+    {file = "google_genai-1.63.0.tar.gz", hash = "sha256:dc76cab810932df33cbec6c7ef3ce1538db5bef27aaf78df62ac38666c476294"},
 ]
 
 [package.dependencies]
 anyio = ">=4.8.0,<5.0.0"
-google-auth = ">=2.14.1,<3.0.0"
+distro = ">=1.7.0,<2"
+google-auth = {version = ">=2.47.0,<3.0.0", extras = ["requests"]}
 httpx = ">=0.28.1,<1.0.0"
-pydantic = ">=2.0.0,<3.0.0"
+pydantic = ">=2.9.0,<3.0.0"
 requests = ">=2.28.1,<3.0.0"
+sniffio = "*"
+tenacity = ">=8.2.3,<9.2.0"
 typing-extensions = ">=4.11.0,<5.0.0"
 websockets = ">=13.0.0,<15.1.0"
 
 [package.extras]
-aiohttp = ["aiohttp (<4.0.0)"]
+aiohttp = ["aiohttp (<3.13.3)"]
+local-tokenizer = ["protobuf", "sentencepiece (>=0.2.0)"]
 
 [package.source]
 type = "legacy"
@@ -3712,6 +3734,29 @@ pyyaml = ">=5.3.0,<7.0.0"
 tenacity = ">=8.1.0,<8.4.0 || >8.4.0,<10.0.0"
 typing-extensions = ">=4.7.0,<5.0.0"
 uuid-utils = ">=0.12.0,<1.0"
+
+[package.source]
+type = "legacy"
+url = "https://gitlab.com/api/v4/projects/78063949/packages/pypi/simple"
+reference = "litellm"
+
+[[package]]
+name = "langchain-google-genai"
+version = "4.2.0"
+description = "An integration package connecting Google's genai package and LangChain"
+optional = false
+python-versions = "<4.0.0,>=3.10.0"
+groups = ["main"]
+files = [
+    {file = "langchain_google_genai-4.2.0-py3-none-any.whl", hash = "sha256:856041aaafceff65a4ef0d5acf5731f2db95229ff041132af011aec51e8279d9"},
+    {file = "langchain_google_genai-4.2.0.tar.gz", hash = "sha256:9a8d9bfc35354983ed29079cefff53c3e7c9c2a44b6ba75cc8f13a0cf8b55c33"},
+]
+
+[package.dependencies]
+filetype = ">=1.2.0,<2.0.0"
+google-genai = ">=1.56.0,<2.0.0"
+langchain-core = ">=1.2.5,<2.0.0"
+pydantic = ">=2.0.0,<3.0.0"
 
 [package.source]
 type = "legacy"
@@ -9784,4 +9829,4 @@ reference = "litellm"
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.12.0,<3.13.0"
-content-hash = "47ba6d607c5142cc7665fd09420f431ba56054df34ff4e650858f11f5120bde6"
+content-hash = "d8f05813c1d6fbf1c0420000fce043581fb96feafec56847e4480d7f44175710"
