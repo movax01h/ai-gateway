@@ -1,4 +1,4 @@
-from unittest.mock import Mock
+from unittest.mock import Mock, patch
 
 import pytest
 from langchain_community.chat_models import ChatAnthropic
@@ -217,6 +217,132 @@ class TestInMemoryPromptRegistry:
 
         with pytest.raises(KeyError, match="'prompt_template'"):
             in_memory_registry.get(prompt_id, prompt_version=None)
+
+    def test_model_class_provider_from_metadata_overrides_yaml(
+        self, in_memory_registry
+    ):
+        """When model_metadata provides model_class_provider, it overrides the YAML config."""
+        prompt_id = "test_prompt"
+        prompt_data = {
+            "model": {
+                "params": {
+                    "model_class_provider": ModelClassProvider.ANTHROPIC,
+                    "model": "claude-sonnet-4-20250514",
+                    "max_tokens": 1000,
+                },
+            },
+            "prompt_template": {
+                "system": "You are a helpful assistant",
+                "user": "Task: {{goal}}",
+            },
+        }
+        in_memory_registry.register_prompt(prompt_id, prompt_data)
+
+        # model_metadata says litellm, YAML says anthropic — metadata should win
+        metadata = ModelMetadata(
+            name="self-hosted",
+            provider="custom",
+            llm_definition=LLMDefinition(
+                gitlab_identifier="litellm_proxy",
+                name="litellm_proxy",
+                max_context_tokens=200000,
+                params={
+                    "model": "bedrock/anthropic.claude-sonnet-4-20250514-v1:0",
+                    "model_class_provider": ModelClassProvider.LITE_LLM,
+                },
+            ),
+        )
+
+        result = in_memory_registry.get(
+            prompt_id, prompt_version=None, model_metadata=metadata
+        )
+
+        assert isinstance(result, Prompt)
+        assert isinstance(result.model, ChatLiteLLM)
+
+    def test_model_class_provider_falls_back_to_yaml_when_no_metadata(
+        self, in_memory_registry
+    ):
+        """When model_metadata is None, model_class_provider comes from YAML (anthropic factory from config)."""
+        prompt_id = "test_prompt"
+        prompt_data = {
+            "model": {
+                "params": {
+                    "model_class_provider": ModelClassProvider.ANTHROPIC,
+                    "model": "claude-sonnet-4-20250514",
+                    "max_tokens": 1000,
+                },
+            },
+            "prompt_template": {
+                "system": "You are a helpful assistant",
+                "user": "Task: {{goal}}",
+            },
+        }
+        in_memory_registry.register_prompt(prompt_id, prompt_data)
+
+        with patch("ai_gateway.prompts.in_memory_registry.Prompt") as prompt_class:
+            in_memory_registry.get(prompt_id, prompt_version=None, model_metadata=None)
+
+        # The anthropic factory should have been selected (from YAML), not litellm
+        call_kwargs = prompt_class.call_args.kwargs
+        factory = call_kwargs.get("model_factory")
+        assert (
+            factory
+            is in_memory_registry.shared_registry.model_factories[
+                ModelClassProvider.ANTHROPIC
+            ]
+        )
+
+    def test_tool_choice_adjusted_for_bedrock(self, in_memory_registry):
+        """When model_metadata has a Bedrock identifier, tool_choice='any' becomes 'required'."""
+        prompt_id = "test_prompt"
+        prompt_data = {
+            "model": {
+                "params": {
+                    "model_class_provider": ModelClassProvider.LITE_LLM,
+                    "model": "claude-sonnet-4-20250514",
+                    "max_tokens": 1000,
+                },
+            },
+            "prompt_template": {
+                "system": "You are a helpful assistant",
+                "user": "Task: {{goal}}",
+            },
+        }
+        in_memory_registry.register_prompt(prompt_id, prompt_data)
+
+        bedrock_metadata = ModelMetadata(
+            name="bedrock_model",
+            provider="custom",
+            identifier="bedrock/anthropic.claude-3-sonnet-20240229-v1:0",
+            llm_definition=LLMDefinition(
+                gitlab_identifier="bedrock_claude",
+                name="bedrock_claude",
+                max_context_tokens=200000,
+                params={
+                    "model": "bedrock/anthropic.claude-3-sonnet-20240229-v1:0",
+                    "model_class_provider": ModelClassProvider.LITE_LLM,
+                },
+            ),
+        )
+
+        # Wire in the real method so tool_choice adjustment actually runs
+        in_memory_registry.shared_registry._adjust_tool_choice_for_model = (
+            lambda tc, mm: LocalPromptRegistry._adjust_tool_choice_for_model(
+                in_memory_registry.shared_registry, tc, mm
+            )
+        )
+
+        with patch("ai_gateway.prompts.in_memory_registry.Prompt") as prompt_class:
+            in_memory_registry.get(
+                prompt_id,
+                prompt_version=None,
+                model_metadata=bedrock_metadata,
+                tool_choice="any",
+            )
+
+        kwargs = prompt_class.call_args.kwargs
+        assert kwargs.get("tool_choice") == "required"
 
     @pytest.mark.parametrize(
         "raw_model_data,model_metadata,expected_result",

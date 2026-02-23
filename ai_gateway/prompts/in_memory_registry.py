@@ -91,7 +91,11 @@ class InMemoryPromptRegistry(BasePromptRegistry):
             params=raw_data.get("params"),
         )
 
-        model_class_provider = prompt_config.model.params.model_class_provider
+        model_class_provider = (
+            model_metadata.llm_definition.params.get("model_class_provider")
+            if model_metadata
+            else None
+        ) or prompt_config.model.params.model_class_provider
         model_factory = self.shared_registry.model_factories.get(
             model_class_provider, None
         )
@@ -100,6 +104,10 @@ class InMemoryPromptRegistry(BasePromptRegistry):
             raise ValueError(
                 f"unrecognized model class provider `{model_class_provider}`."
             )
+
+        tool_choice = self.shared_registry._adjust_tool_choice_for_model(
+            tool_choice, model_metadata
+        )
 
         return Prompt(
             model_factory=model_factory,
