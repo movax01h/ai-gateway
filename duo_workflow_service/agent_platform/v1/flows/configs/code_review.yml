@@ -72,25 +72,38 @@ components:
       - "on_tool_execution_success"
       - "on_tool_execution_failed"
 
-  # Step 5: Transform prescan results into structured JSON for review consumption
-  - name: "analyze_prescan_results"
-    type: AgentComponent
-    prompt_id: "analyze_prescan_codebase_results"
-    prompt_version: "^1.0.0"
+  # Step 5: Fetch lightweight MR metadata (file paths + custom instructions)
+  - name: "fetch_mr_metadata"
+    type: DeterministicStepComponent
+    tool_name: "build_review_merge_request_context"
     inputs:
       - from: "context:project_id"
         as: "project_id"
       - from: "context:goal"
         as: "merge_request_iid"
+      - from: "true"
+        as: "lightweight"
+        literal: true
+    ui_log_events:
+      - "on_tool_execution_success"
+      - "on_tool_execution_failed"
+
+  # Step 6: Transform prescan results into structured JSON for review consumption
+  - name: "analyze_prescan_results"
+    type: AgentComponent
+    prompt_id: "analyze_prescan_codebase_results"
+    prompt_version: "^1.0.0"
+    inputs:
+      - from: "context:fetch_mr_metadata.tool_responses"
+        as: "mr_context"
       - from: "context:prescan_codebase.tool_responses"
         as: "prescan_tool_responses"
         optional: True
-    toolset:
-      - "build_review_merge_request_context"
+    toolset: []
     ui_log_events:
       - "on_agent_final_answer"
 
-  # Step 6: Execute code review with complete context and publish results
+  # Step 7: Execute code review with complete context and publish results
   - name: "perform_code_review_and_publish"
     type: OneOffComponent
     prompt_id: "review_merge_request"
@@ -122,6 +135,8 @@ routers:
   - from: "explore_relevant_directories"
     to: "prescan_codebase"
   - from: "prescan_codebase"
+    to: "fetch_mr_metadata"
+  - from: "fetch_mr_metadata"
     to: "analyze_prescan_results"
   - from: "analyze_prescan_results"
     to: "perform_code_review_and_publish"
