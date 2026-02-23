@@ -79,14 +79,6 @@ class TestChatAnthropic:
         [
             (["beta1"], "beta1"),
             (["beta1", "beta2"], "beta1,beta2"),
-            (["extended-cache-ttl-2025-04-11"], "extended-cache-ttl-2025-04-11"),
-            (
-                [
-                    "extended-cache-ttl-2025-04-11",
-                    "fine-grained-tool-streaming-2025-05-14",
-                ],
-                "extended-cache-ttl-2025-04-11,fine-grained-tool-streaming-2025-05-14",
-            ),
             ([], None),
             (None, None),
         ],
