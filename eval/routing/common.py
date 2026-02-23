@@ -16,7 +16,7 @@ from eval.routing.schema import ToolRoutingEvaluation
 CHAT = ChatAnthropic(
     model_name="claude-sonnet-4-20250514",
     temperature=0,
-    betas=["extended-cache-ttl-2025-04-11"],
+    betas=[],
     timeout=30,
     stop=None,
 )
