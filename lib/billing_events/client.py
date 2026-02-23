@@ -93,10 +93,10 @@ class BillingEventsClient:
             metadata: Optional dictionary containing additional key-value pairs for the billing event context.
         """
         if not self.enabled:
-            self._logger.debug("Billing events disabled")
+            self._logger.info("Billing events disabled")
             return
 
-        self._logger.debug("Tracking billing event", event_type=event.value)
+        self._logger.info("Tracking billing event", event_type=event.value)
 
         if quantity <= 0:
             self._logger.warning("Invalid quantity", quantity=quantity)
@@ -165,7 +165,7 @@ class BillingEventsClient:
 
         try:
             self.snowplow_tracker.track(structured_event)
-            self._logger.debug(
+            self._logger.info(
                 "Successfully called snowplow_tracker.track()",
                 event_id=event_id,
             )
@@ -179,7 +179,7 @@ class BillingEventsClient:
                 additional_properties=additional_properties,
                 category=category,
             )
-            self._logger.debug(
+            self._logger.info(
                 "Successfully called internal_event_client.track_event()",
                 event_id=event_id,
             )
