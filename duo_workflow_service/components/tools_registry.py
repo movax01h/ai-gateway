@@ -144,7 +144,6 @@ _GENERIC_GITLAB_API_TOOLS: list[Type[BaseTool]] = [
 ]
 
 _RUN_MCP_TOOLS_PRIVILEGE = "run_mcp_tools"
-_USE_GENERIC_GITLAB_API_TOOLS_PRIVILEGE = "use_generic_gitlab_api_tools"
 
 # Using Sequence instead of list because it's covariant, allowing subclasses
 ToolsOrConfigs = Union[Sequence[Type[BaseTool]], Sequence[McpToolConfig]]
@@ -196,8 +195,18 @@ _AGENT_PRIVILEGES: dict[str, list[Type[BaseTool]]] = {
         tools.RunCommand,
     ],
     _RUN_MCP_TOOLS_PRIVILEGE: [],
-    _USE_GENERIC_GITLAB_API_TOOLS_PRIVILEGE: _GENERIC_GITLAB_API_TOOLS,
 }
+
+
+def _add_generic_api_tools_when_enabled(
+    tools_for_agent_privileges: dict[str, ToolsOrConfigs],
+) -> None:
+    """Add generic API tools to GitLab privileges so they inherit pre-approval from Rails."""
+    if is_feature_enabled(FeatureFlag.USE_GENERIC_GITLAB_API_TOOLS):
+        for privilege in ("read_only_gitlab", "read_write_gitlab"):
+            tools_for_agent_privileges[privilege] = (
+                tools_for_agent_privileges[privilege] + _GENERIC_GITLAB_API_TOOLS  # type: ignore[operator]
+            )
 
 
 class ToolsRegistry:
@@ -261,12 +270,7 @@ class ToolsRegistry:
         if _RUN_MCP_TOOLS_PRIVILEGE in enabled_tools:
             tools_for_agent_privileges[_RUN_MCP_TOOLS_PRIVILEGE] = mcp_tools or []
 
-        # Conditionally enable generic GitLab API tools based on feature flag
-        if (
-            is_feature_enabled(FeatureFlag.USE_GENERIC_GITLAB_API_TOOLS)
-            and _USE_GENERIC_GITLAB_API_TOOLS_PRIVILEGE not in enabled_tools
-        ):
-            enabled_tools.append(_USE_GENERIC_GITLAB_API_TOOLS_PRIVILEGE)
+        _add_generic_api_tools_when_enabled(tools_for_agent_privileges)
 
         self._enabled_tools = {
             **{tool_cls.tool_title: tool_cls for tool_cls in NO_OP_TOOLS},  # type: ignore
