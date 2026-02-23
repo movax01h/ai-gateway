@@ -26,6 +26,17 @@ lint:model_config_files:
   script:
     - make check-model-selection
 
+lint:pricing_multipliers:
+  stage: test
+  extends: .poetry
+  needs:
+    - install
+  rules:
+    - changes:
+        - "ai_gateway/model_selection/*.{yml}"
+  script:
+    - make check-pricing-multipliers
+
 lint:doc:
   stage: test
   image: ${DOCS_LINT_IMAGE}

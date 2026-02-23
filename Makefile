@@ -180,6 +180,12 @@ check-model-selection:
 	@poetry install
 	@poetry run validate-model-selection-config
 
+.PHONY: check-pricing-multipliers
+check-pricing-multipliers:
+	@echo "Verifying pricing multipliers sync with CustomersDot..."
+	@poetry install
+	@poetry run verify-pricing-multipliers
+
 .PHONY: format
 format: codespell black isort docformatter
 
