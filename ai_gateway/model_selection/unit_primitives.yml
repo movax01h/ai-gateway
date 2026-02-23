@@ -211,7 +211,7 @@ configurable_unit_primitives:
       - "gpt_5_2"
     dev:
       selectable_models:
-        - "gemini_3_0_pro_preview_vertex"
+        - "gemini_3_1_pro_preview_vertex"
       group_ids:
         - 9970  # gitlab-org group ID
 
@@ -240,7 +240,7 @@ configurable_unit_primitives:
       - "gpt_5_2"
     dev:
       selectable_models:
-        - "gemini_3_0_pro_preview_vertex"
+        - "gemini_3_1_pro_preview_vertex"
       group_ids:
         - 9970  # gitlab-org group ID
 
