@@ -22,6 +22,7 @@ class ModelClassProvider(StrEnum):
     ANTHROPIC = "anthropic"
     AMAZON_Q = "amazon_q"
     OPENAI = "openai"
+    GOOGLE_GENAI = "google_genai"
 
 
 class CompletionType(StrEnum):
@@ -77,11 +78,18 @@ class CompletionLiteLLMParams(BaseModelParams):
         return self
 
 
+class ChatGoogleGenAIParams(BaseModelParams):
+    model_class_provider: Literal[ModelClassProvider.GOOGLE_GENAI]
+    thinking_level: str = "low"
+    streaming: bool = False
+
+
 TypeModelParams = Annotated[
     ChatLiteLLMParams
     | ChatAnthropicParams
     | ChatAmazonQParams
     | ChatOpenAIParams
-    | CompletionLiteLLMParams,
+    | CompletionLiteLLMParams
+    | ChatGoogleGenAIParams,
     Field(discriminator="model_class_provider"),
 ]

@@ -207,6 +207,11 @@ configurable_unit_primitives:
       - "gpt_5_codex"
       - "gpt_5_mini"
       - "gpt_5_2"
+    dev:
+      selectable_models:
+        - "gemini_3_0_pro_preview_vertex"
+      group_ids:
+        - 9970  # gitlab-org group ID
 
   - feature_setting: "duo_agent_platform_agentic_chat"
     unit_primitives:
@@ -229,6 +234,11 @@ configurable_unit_primitives:
       - "gpt_5_codex"
       - "gpt_5_mini"
       - "gpt_5_2"
+    dev:
+      selectable_models:
+        - "gemini_3_0_pro_preview_vertex"
+      group_ids:
+        - 9970  # gitlab-org group ID
 
   - feature_setting: "categorize_question"
     unit_primitives:

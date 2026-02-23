@@ -1,3 +1,5 @@
+from typing import Any
+
 import litellm
 from dependency_injector import containers, providers
 from litellm.llms.custom_httpx.http_handler import AsyncHTTPHandler
@@ -6,6 +8,10 @@ from ai_gateway.integrations.amazon_q.chat import ChatAmazonQ
 from ai_gateway.models import mock
 from ai_gateway.models.base import init_anthropic_client, log_request
 from ai_gateway.models.v2.anthropic_claude import ChatAnthropic
+from ai_gateway.models.v2.chat_google_genai import (
+    ChatGoogleGenerativeAI,
+    connect_google_gen_vertex_ai,
+)
 from ai_gateway.models.v2.chat_litellm import ChatLiteLLM
 from ai_gateway.models.v2.completion_litellm import CompletionLiteLLM
 from ai_gateway.models.v2.openai import ChatOpenAI
@@ -15,6 +21,12 @@ __all__ = [
 ]
 
 litellm.module_level_aclient = AsyncHTTPHandler(event_hooks={"request": [log_request]})
+
+
+def _init_google_chat_gen_vertex_ai_global_client(config: dict[str, Any]):
+    client = connect_google_gen_vertex_ai(config["project"], "global")
+    yield client
+    client.close()
 
 
 def _mock_selector(mock_model_responses: bool, use_agentic_mock: bool) -> str:
@@ -62,6 +74,14 @@ class ContainerModels(containers.DeclarativeContainer):
     )
 
     openai_chat_fn = providers.Factory(ChatOpenAI, output_version="responses/v1")
+
+    google_chat_gen_vertex_ai_global_fn = providers.Factory(
+        ChatGoogleGenerativeAI,
+        client=providers.Resource(
+            _init_google_chat_gen_vertex_ai_global_client,
+            config.google_cloud_platform,
+        ),
+    )
 
     lite_llm_chat_fn = providers.Selector(
         _mock_selector,

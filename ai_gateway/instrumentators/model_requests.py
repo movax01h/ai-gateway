@@ -242,7 +242,7 @@ class ModelRequestInstrumentator:
             if not finish_reason:
                 return
 
-            if finish_reason in LLMFinishReason.values():
+            if str(finish_reason).lower() in LLMFinishReason:
                 self.finish_reason = finish_reason
             else:
                 logger.error(
