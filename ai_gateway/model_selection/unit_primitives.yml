@@ -590,7 +590,7 @@ configurable_unit_primitives:
       - "claude_sonnet_4_20250514_vertex"
       - "claude_sonnet_4_20250514_bedrock"
       - "claude_sonnet_4_5_20250929"
-  - feature_setting: "push_changes"
+  - feature_setting: "convert_ci_push_changes"
     unit_primitives:
       - "duo_agent_platform"
     default_model: "claude_sonnet_4_20250514"

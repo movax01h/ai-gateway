@@ -73,7 +73,7 @@ components:
 
   - name: "git_push"
     type: AgentComponent
-    prompt_id: "push_changes"
+    prompt_id: "convert_ci_push_changes"
     prompt_version: "^1.0.0"
     inputs:
       - from: "context:project_http_url_to_repo"
