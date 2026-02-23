@@ -6,6 +6,9 @@ from google.protobuf import struct_pb2
 from pydantic import ValidationError
 
 from duo_workflow_service.agent_platform import experimental, v1
+from duo_workflow_service.agent_platform.experimental.flows.flow_config import (
+    FlowConfig as ExperimentalFlowConfig,
+)
 from duo_workflow_service.agent_platform.v1.flows.flow_config import (
     FlowConfig,
     PartialFlowConfig,
@@ -511,3 +514,32 @@ def test_list_configs():
         assert result[2]["version"] == "v1"
         assert result[3]["name"] == "config4"
         assert result[3]["version"] == "v1"
+
+
+def test_all_flow_configs_are_valid():
+    """Test that all flow config YAML files can be resolved to workflow classes.
+
+    This validates that every built-in flow config YAML file in both v1 and experimental directories can be loaded and
+    resolved without errors, catching schema validation issues (like missing required fields) at test time rather than
+    at runtime.
+    """
+    validation_errors = []
+
+    flow_config_directories = {
+        "v1": FlowConfig.DIRECTORY_PATH,
+        "experimental": ExperimentalFlowConfig.DIRECTORY_PATH,
+    }
+
+    for version, directory in flow_config_directories.items():
+        for config_file in directory.glob("*.yml"):
+            workflow_definition = f"{config_file.stem}/{version}"
+            try:
+                resolve_workflow_class(workflow_definition)
+            except (ValueError, ValidationError) as e:
+                validation_errors.append(
+                    f"Validation failed for {workflow_definition}: {e}"
+                )
+
+    if validation_errors:
+        error_message = "\n".join(validation_errors)
+        pytest.fail(f"Flow config validation errors:\n{error_message}")
