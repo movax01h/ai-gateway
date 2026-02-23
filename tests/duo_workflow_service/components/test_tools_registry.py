@@ -831,19 +831,17 @@ class TestGenericGitLabAPITools:
         """Test that generic tools follow the same preapproval rules as other GitLab tools."""
         mock_is_feature_enabled.return_value = True
 
-        # When generic tools privilege is preapproved, generic tools should be too
         registry_preapproved = ToolsRegistry(
-            enabled_tools=["use_generic_gitlab_api_tools"],
-            preapproved_tools=["use_generic_gitlab_api_tools"],
+            enabled_tools=["read_only_gitlab"],
+            preapproved_tools=["read_only_gitlab"],
             tool_call_approvals={},
             tool_metadata=tool_metadata,
         )
         assert not registry_preapproved.approval_required("gitlab_api_get")
         assert not registry_preapproved.approval_required("gitlab_graphql")
 
-        # When generic tools privilege is not preapproved, generic tools should require approval
         registry_not_preapproved = ToolsRegistry(
-            enabled_tools=["use_generic_gitlab_api_tools"],
+            enabled_tools=["read_only_gitlab"],
             preapproved_tools=[],
             tool_call_approvals={},
             tool_metadata=tool_metadata,
