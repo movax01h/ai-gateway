@@ -197,12 +197,10 @@ async def litellm_async_success_callback(
     if usage := completion_obj.get("usage"):
         # LiteLLM supported model, get parsed data
         usage_metadata = _create_usage_metadata(usage)
-        model = completion_obj.get("model")
     elif response := completion_obj.get("response"):
         # Raw response, fallback to simple parsing
         response_json = json.loads(response)
         usage_metadata = response_json.get("usage")
-        model = response_json.get("model")
 
     if not usage_metadata:
         return
@@ -218,7 +216,11 @@ async def litellm_async_success_callback(
     gl_event_context = GLReportingEventContext.from_static_name(
         FeatureQualifiedNameStatic.AIGW_PROXY_USE, is_ai_catalog_item=False
     )
-    proxy_client.watcher.register_token_usage(model, usage_metadata)
+    # We're intentionally not using the model name returned by the upstream provider, because it may differ from the
+    # one in the request (e.g. `gpt-5` vs `gpt-5-2025-08-07`), and for tracking we want to stick to known model values.
+    proxy_client.watcher.register_token_usage(
+        proxy_client.watcher.labels["model_name"], usage_metadata
+    )
 
     metadata = {
         "llm_operations": get_llm_operations(),
