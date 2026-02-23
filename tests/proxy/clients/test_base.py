@@ -68,7 +68,7 @@ async def test_valid_proxy_request(
             [
                 {
                     "token_count": 15,
-                    "model_id": "test-model",
+                    "model_id": "my-model-name",
                     "model_engine": "my-llm-provider",
                     "model_provider": "my-model-provider",
                     "prompt_tokens": 10,
@@ -83,7 +83,7 @@ async def test_valid_proxy_request(
             [
                 {
                     "token_count": 10,
-                    "model_id": "test-model",
+                    "model_id": "my-model-name",
                     "model_engine": "my-llm-provider",
                     "model_provider": "my-model-provider",
                     "prompt_tokens": 8,
