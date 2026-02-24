@@ -177,8 +177,14 @@ class TestInternalEventsClient:
 
         mock_emitter_init.assert_called_once()
         emitter_args = mock_emitter_init.call_args[1]
-        assert emitter_args["on_success"] == client._on_success
-        assert emitter_args["on_failure"] == client._on_failure
+        assert (
+            emitter_args["on_success"]
+            == client._on_success  # pylint: disable=comparison-with-callable
+        )
+        assert (
+            emitter_args["on_failure"]
+            == client._on_failure  # pylint: disable=comparison-with-callable
+        )
 
     @mock.patch("snowplow_tracker.Tracker.__init__")
     @mock.patch("snowplow_tracker.emitters.AsyncEmitter.__init__")

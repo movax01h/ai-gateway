@@ -444,3 +444,161 @@ class TestBillingEventsClient:
         assert billing_data["instance_version"] == instance_version
         assert billing_data["instance_id"] == "instance-123"
         assert billing_data["deployment_type"] == "self-managed"
+
+    @mock.patch("snowplow_tracker.Tracker.__init__")
+    @mock.patch("snowplow_tracker.emitters.AsyncEmitter.__init__")
+    def test_initialization_with_callbacks(self, mock_emitter_init, mock_tracker_init):
+        mock_emitter_init.return_value = None
+        mock_tracker_init.return_value = None
+
+        client = BillingEventsClient(
+            enabled=True,
+            endpoint="https://whitechoc.local",
+            app_id="gitlab_ai_gateway",
+            namespace="gl",
+            batch_size=3,
+            thread_count=2,
+            internal_event_client=MagicMock(spec=InternalEventsClient),
+        )
+
+        mock_emitter_init.assert_called_once()
+        emitter_args = mock_emitter_init.call_args[1]
+        assert emitter_args["on_success"].__func__ is BillingEventsClient._on_success
+        assert emitter_args["on_success"].__self__ is client
+        assert emitter_args["on_failure"].__func__ is BillingEventsClient._on_failure
+        assert emitter_args["on_failure"].__self__ is client
+
+    @mock.patch("snowplow_tracker.Tracker.__init__")
+    @mock.patch("snowplow_tracker.emitters.AsyncEmitter.__init__")
+    def test_on_failure_logs_warning_and_failed_events(
+        self, mock_emitter_init, mock_tracker_init
+    ):
+        mock_emitter_init.return_value = None
+        mock_tracker_init.return_value = None
+
+        client = BillingEventsClient(
+            enabled=True,
+            endpoint="https://whitechoc.local",
+            app_id="gitlab_ai_gateway",
+            namespace="gl",
+            batch_size=3,
+            thread_count=2,
+            internal_event_client=MagicMock(spec=InternalEventsClient),
+        )
+
+        failed_events = [
+            {"se_ac": "test_event_1", "eid": "event-id-1"},
+            {"se_ac": "test_event_2", "eid": "event-id-2"},
+        ]
+
+        with mock.patch.object(client._logger, "warning") as mock_warning:
+            with mock.patch.object(client, "_log_event") as mock_log_event:
+                client._on_failure(succeeded_count=5, failed_events=failed_events)
+
+                mock_warning.assert_called_once_with(
+                    "Failed to track billing events",
+                    succeeded_count=5,
+                    failed_count=2,
+                )
+                assert mock_log_event.call_count == 2
+                mock_log_event.assert_any_call(failed_events[0], success=False)
+                mock_log_event.assert_any_call(failed_events[1], success=False)
+
+    @mock.patch("snowplow_tracker.Tracker.__init__")
+    @mock.patch("snowplow_tracker.emitters.AsyncEmitter.__init__")
+    def test_on_success_logs_info_and_sent_events(
+        self, mock_emitter_init, mock_tracker_init
+    ):
+        mock_emitter_init.return_value = None
+        mock_tracker_init.return_value = None
+
+        client = BillingEventsClient(
+            enabled=True,
+            endpoint="https://whitechoc.local",
+            app_id="gitlab_ai_gateway",
+            namespace="gl",
+            batch_size=3,
+            thread_count=2,
+            internal_event_client=MagicMock(spec=InternalEventsClient),
+        )
+
+        sent_events = [
+            {"se_ac": "test_event_1", "eid": "event-id-1"},
+            {"se_ac": "test_event_2", "eid": "event-id-2"},
+        ]
+
+        with mock.patch.object(client._logger, "info") as mock_info:
+            with mock.patch.object(client, "_log_event") as mock_log_event:
+                client._on_success(sent_events=sent_events)
+
+                mock_info.assert_called_once_with(
+                    "Successfully sent billing events",
+                    sent_count=2,
+                )
+                assert mock_log_event.call_count == 2
+                mock_log_event.assert_any_call(sent_events[0], success=True)
+                mock_log_event.assert_any_call(sent_events[1], success=True)
+
+    @mock.patch("snowplow_tracker.Tracker.__init__")
+    @mock.patch("snowplow_tracker.emitters.AsyncEmitter.__init__")
+    def test_log_event_logs_failure_details(self, mock_emitter_init, mock_tracker_init):
+        mock_emitter_init.return_value = None
+        mock_tracker_init.return_value = None
+
+        client = BillingEventsClient(
+            enabled=True,
+            endpoint="https://whitechoc.local",
+            app_id="gitlab_ai_gateway",
+            namespace="gl",
+            batch_size=3,
+            thread_count=2,
+            internal_event_client=MagicMock(spec=InternalEventsClient),
+        )
+
+        event_payload = {
+            "se_ac": "test_event",
+            "se_la": "test_label",
+            "se_pr": "test_property",
+        }
+
+        with mock.patch.object(client._logger, "error") as mock_error:
+            client._log_event(event_payload, success=False)
+
+            mock_error.assert_called_once_with(
+                "Billing event failed to send",
+                event_name="test_event",
+                label="test_label",
+                property="test_property",
+            )
+
+    @mock.patch("snowplow_tracker.Tracker.__init__")
+    @mock.patch("snowplow_tracker.emitters.AsyncEmitter.__init__")
+    def test_log_event_logs_success_details(self, mock_emitter_init, mock_tracker_init):
+        mock_emitter_init.return_value = None
+        mock_tracker_init.return_value = None
+
+        client = BillingEventsClient(
+            enabled=True,
+            endpoint="https://whitechoc.local",
+            app_id="gitlab_ai_gateway",
+            namespace="gl",
+            batch_size=3,
+            thread_count=2,
+            internal_event_client=MagicMock(spec=InternalEventsClient),
+        )
+
+        event_payload = {
+            "se_ac": "test_event",
+            "se_la": "test_label",
+            "se_pr": "test_property",
+        }
+
+        with mock.patch.object(client._logger, "info") as mock_info:
+            client._log_event(event_payload, success=True)
+
+            mock_info.assert_called_once_with(
+                "Billing event sent successfully",
+                event_name="test_event",
+                label="test_label",
+                property="test_property",
+            )
