@@ -165,7 +165,8 @@ include:
     ref: v4.17.0
     inputs:
       runway_service_id: duo-workflow-svc-eks
-      runway_version: v4.17.0
+      runway_version: jm/enable-grpc
+      runway_chart_version: 4.17.3-49-gf9aa8ed
       runtime: eks
       app_version: "${CI_COMMIT_SHORT_SHA}"
     rules: *skip-if-not-canonical

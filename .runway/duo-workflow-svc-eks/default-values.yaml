@@ -34,7 +34,7 @@ spec:
     PYTHONUNBUFFERED: "1"
     GOOGLE_APPLICATION_CREDENTIALS: '/secrets/gcp-service-account/credentials.json'
   container_port: 5052
-  protocol: http
+  protocol: grpc
   scalability:
     min_instances: 16
     max_instances: 32
@@ -49,15 +49,12 @@ spec:
       memory: "8Gi"
       ephemeral-storage: "8Gi"
   startup_probe:
-    path: "/monitoring/healthz"
     period_seconds: 10
     failure_threshold: 30  # 5 minutes (30 * 10 seconds)
   liveness_probe:
-    path: "/monitoring/healthz"
     period_seconds: 10
     failure_threshold: 6  # 60 seconds
   readiness_probe:
-    path: "/monitoring/ready"
     period_seconds: 30
     timeout_seconds: 5
     failure_threshold: 2  # 60 seconds
