@@ -1,4 +1,4 @@
-from typing import Any, MutableMapping, Optional
+from typing import Any, MutableMapping, Optional, override
 
 import structlog
 from langchain_core.messages import BaseMessage
@@ -50,6 +50,7 @@ class CacheControlInjectionPointsConverter(Runnable[PromptValue, PromptValue]):
 
     ANTHROPIC_DEFAULT_CACHE_CONTROL = {"type": "ephemeral", "ttl": "5m"}
 
+    @override
     def invoke(
         self,
         input: PromptValue,

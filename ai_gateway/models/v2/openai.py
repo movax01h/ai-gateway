@@ -1,5 +1,5 @@
 from collections.abc import Callable, Sequence
-from typing import Any
+from typing import Any, override
 
 from langchain_core.language_models import LanguageModelInput
 from langchain_core.messages import AIMessage
@@ -11,6 +11,7 @@ __all__ = ["ChatOpenAI"]
 
 
 class ChatOpenAI(_LChatOpenAI):
+    @override
     def bind_tools(
         self,
         tools: Sequence[dict[str, Any] | type | Callable | BaseTool],

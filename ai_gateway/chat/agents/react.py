@@ -1,5 +1,5 @@
 import re
-from typing import Any, AsyncIterator, Optional, Union, cast
+from typing import Any, AsyncIterator, Optional, Union, cast, override
 
 import starlette_context
 from langchain_core.exceptions import OutputParserException
@@ -97,6 +97,7 @@ class ReActPlainTextParser(BaseCumulativeTransformOutputParser):
 
         return event
 
+    @override
     def parse_result(
         self, result: list[Generation], *, partial: bool = False
     ) -> Optional[AgentEventType]:
@@ -112,6 +113,7 @@ class ReActPlainTextParser(BaseCumulativeTransformOutputParser):
 
         return event
 
+    @override
     def parse(self, text: str) -> Optional[AgentEventType]:
         return self.parse_result([Generation(text=text)])
 
@@ -121,6 +123,7 @@ class ReActPromptTemplate(Runnable[ReActAgentInputs, PromptValue]):
         self.prompt_template = config.prompt_template
         self.model_config = config.model
 
+    @override
     def invoke(
         self,
         input: ReActAgentInputs,
@@ -198,6 +201,7 @@ class ReActAgent(RunnableBinding[ReActAgentInputs, TypeAgentEvent]):
     def __init__(self, prompt: Prompt) -> None:
         super().__init__(bound=prompt | ReActPlainTextParser())
 
+    @override
     async def astream(
         self,
         input: ReActAgentInputs,

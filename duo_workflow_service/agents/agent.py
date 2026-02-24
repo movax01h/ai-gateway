@@ -1,5 +1,5 @@
 from datetime import datetime, timezone
-from typing import Any, cast
+from typing import Any, cast, override
 from uuid import uuid4
 
 import structlog
@@ -40,6 +40,7 @@ class AgentPromptTemplate(Runnable[dict, PromptValue]):
         self.agent_name = config.name
         self.preamble_messages = prompt_template_to_messages(config.prompt_template)
 
+    @override
     def invoke(
         self,
         input: dict,

@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass, field
-from typing import Any, Dict, Literal, Optional, cast, get_args
+from typing import Any, Dict, Literal, Optional, cast, get_args, override
 
 import structlog
 
@@ -156,10 +156,12 @@ class HiddenLayerScanner(PromptScanner):
             raise HiddenLayerError(f"Failed to initialize Hidden Layer: {e}") from e
 
     @property
+    @override
     def enabled(self) -> bool:
         """Check if the scanner is initialized and ready."""
         return self._initialized
 
+    @override
     async def scan(self, text: str) -> ScanResult:  # type: ignore[override]
         """Scan text for security threats using Hidden Layer SDK.
 

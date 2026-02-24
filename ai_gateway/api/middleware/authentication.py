@@ -1,5 +1,5 @@
 import logging
-from typing import Optional, Tuple
+from typing import Optional, Tuple, override
 
 from fastapi import status
 from fastapi.encoders import jsonable_encoder
@@ -44,6 +44,7 @@ class MiddlewareAuthentication(Middleware):
             self.bypass_auth_with_header = bypass_auth_with_header
             self.path_resolver = path_resolver
 
+        @override
         async def authenticate(
             self, conn: HTTPConnection
         ) -> Optional[Tuple[AuthCredentials, StarletteUser]]:

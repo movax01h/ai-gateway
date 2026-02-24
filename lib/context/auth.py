@@ -4,7 +4,7 @@ Provides the cloud connector token context variable and the StarletteUser wrappe
 """
 
 import contextvars
-from typing import Optional
+from typing import Optional, override
 
 from fastapi import Request
 from gitlab_cloud_connector import CloudConnectorUser, GitLabUnitPrimitive, UserClaims
@@ -27,8 +27,8 @@ class StarletteUser(BaseUser):
         self.cloud_connector_user = cloud_connector_user
         self.cloud_connector_token = cloud_connector_token
 
-    # overriding starlette BaseUser methods
     @property
+    @override
     def is_authenticated(self) -> bool:
         return self.cloud_connector_user.is_authenticated
 

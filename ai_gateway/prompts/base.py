@@ -1,6 +1,15 @@
 import asyncio
 from abc import ABC, abstractmethod
-from typing import Any, AsyncIterator, List, MutableMapping, Optional, Sequence, cast
+from typing import (
+    Any,
+    AsyncIterator,
+    List,
+    MutableMapping,
+    Optional,
+    Sequence,
+    cast,
+    override,
+)
 
 import structlog
 from gitlab_cloud_connector import (
@@ -55,6 +64,7 @@ class PromptSandboxedEnvironment(ImmutableSandboxedEnvironment):
 
     intercepted_binops = frozenset(["*", "**"])
 
+    @override
     def is_safe_attribute(self, obj: Any, attr: str, value: Any) -> bool:
         if callable(value):
             log.warning(
@@ -65,9 +75,11 @@ class PromptSandboxedEnvironment(ImmutableSandboxedEnvironment):
             return False
         return super().is_safe_attribute(obj, attr, value)
 
+    @override
     def is_safe_callable(self, obj: Any) -> bool:
         return False
 
+    @override
     def call_binop(self, context: Any, operator: str, left: Any, right: Any) -> Any:
         if operator in self.intercepted_binops:
             raise SecurityError(
@@ -136,6 +148,7 @@ def prompt_template_to_messages(
 class PromptLoggingHandler(BaseCallbackHandler):
     """Logs the full prompt that is sent to the LLM."""
 
+    @override
     def on_llm_start(
         self,
         serialized: dict[str, Any],
@@ -333,6 +346,7 @@ class Prompt(RunnableBinding[Any, BaseMessage]):
             engine=self.model._llm_type, name=self.model_name
         )
 
+    @override
     async def ainvoke(
         self,
         input: Any,
@@ -362,6 +376,7 @@ class Prompt(RunnableBinding[Any, BaseMessage]):
 
             return result
 
+    @override
     async def astream(
         self,
         input: Any,
@@ -408,6 +423,7 @@ class Prompt(RunnableBinding[Any, BaseMessage]):
             await watcher.afinish()
         # pylint: enable=contextmanager-generator-missing-cleanup,line-too-long
 
+    @override
     async def atransform(
         self,
         input: AsyncIterator[Any],

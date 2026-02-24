@@ -7,7 +7,7 @@ cases.
 from __future__ import annotations
 
 import logging
-from typing import Any, AsyncIterator, Dict, Iterator, List, Mapping, Optional
+from typing import Any, AsyncIterator, Dict, Iterator, List, Mapping, Optional, override
 
 import litellm
 from langchain_core.messages import AIMessage, AIMessageChunk
@@ -188,6 +188,7 @@ class CompletionLiteLLM(RunnableSerializable[Dict[str, Any], AIMessage]):
 
         return completion_args
 
+    @override
     def invoke(
         self,
         input: Dict[str, Any],
@@ -196,6 +197,7 @@ class CompletionLiteLLM(RunnableSerializable[Dict[str, Any], AIMessage]):
     ) -> AIMessage:
         raise NotImplementedError("Sync invocation not implemented. Use ainvoke.")
 
+    @override
     def stream(
         self,
         input: Dict[str, Any],
@@ -216,6 +218,7 @@ class CompletionLiteLLM(RunnableSerializable[Dict[str, Any], AIMessage]):
 
         return await litellm.atext_completion(**completion_args)
 
+    @override
     async def ainvoke(
         self,
         input: Dict[str, Any],
@@ -255,6 +258,7 @@ class CompletionLiteLLM(RunnableSerializable[Dict[str, Any], AIMessage]):
         text = self._extract_text(response)
         return AIMessage(content=text)
 
+    @override
     async def astream(
         self,
         input: Dict[str, Any],

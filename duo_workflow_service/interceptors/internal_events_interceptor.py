@@ -2,7 +2,7 @@
 
 import os
 from datetime import datetime, timezone
-from typing import List, Optional
+from typing import List, Optional, override
 
 import grpc
 
@@ -38,6 +38,7 @@ def convert_feature_enabled_string_to_list(
 
 
 class InternalEventsInterceptor(grpc.aio.ServerInterceptor):
+    @override
     async def intercept_service(
         self, continuation, handler_call_details: grpc.HandlerCallDetails
     ) -> None:

@@ -1,4 +1,4 @@
-from typing import Union
+from typing import Union, override
 
 from starlette.requests import HTTPConnection, Request
 from starlette_context.plugins import Plugin
@@ -9,6 +9,7 @@ from lib.verbose_ai_logs import VERBOSE_AI_LOGS_HEADER, current_verbose_ai_logs_
 class EnabledInstanceVerboseAiLogsHeaderPlugin(Plugin):
     key = "enabled-instance-verbose-ai-logs"
 
+    @override
     async def process_request(self, request: Union[Request, HTTPConnection]) -> bool:
         """Extract the header value and sets in both current_verbose_ai_logs_context and the starlette context.
 

@@ -1,4 +1,4 @@
-from typing import Any, Dict, Iterator, List, Optional
+from typing import Any, Dict, Iterator, List, Optional, override
 
 from langchain_core.callbacks.manager import CallbackManagerForLLMRun
 from langchain_core.language_models.chat_models import BaseChatModel
@@ -72,6 +72,7 @@ class Reference(BaseModel):
 class ChatAmazonQ(BaseChatModel):
     amazon_q_client_factory: AmazonQClientFactory
 
+    @override
     def _generate(
         self,
         *args: Any,
@@ -87,6 +88,7 @@ class ChatAmazonQ(BaseChatModel):
 
         return ChatResult(generations=generations)
 
+    @override
     def _stream(
         self,
         messages: List[BaseMessage],
@@ -256,11 +258,13 @@ class ChatAmazonQ(BaseChatModel):
         return message, history
 
     @property
+    @override
     def _identifying_params(self) -> Dict[str, Any]:
         return {
             "model": "amazon_q",
         }
 
     @property
+    @override
     def _llm_type(self) -> str:
         return "amazon_q"
