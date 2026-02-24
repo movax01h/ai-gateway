@@ -20,6 +20,7 @@ class InternalEventsClient:
 
     STANDARD_CONTEXT_SCHEMA = "iglu:com.gitlab/gitlab_standard/jsonschema/1-1-7"
     AI_CONTEXT_SCHEMA = "iglu:com.gitlab/ai_context/jsonschema/1-0-0"
+    REQUEST_TIMEOUT = (5.0, 10.0)
 
     def __init__(
         self,
@@ -40,6 +41,7 @@ class InternalEventsClient:
                 endpoint=endpoint,
                 on_success=self._on_success,
                 on_failure=self._on_failure,
+                request_timeout=self.REQUEST_TIMEOUT,
             )
 
             self.snowplow_tracker = Tracker(
