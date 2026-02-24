@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime
 from enum import StrEnum
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
 import structlog
 from gitlab_cloud_connector import CloudConnectorUser
@@ -57,7 +57,11 @@ class BillingEventsClient:
         if enabled:
             self._logger.info("Creating AsyncEmitter and Tracker for billing events")
             emitter = AsyncEmitter(
-                batch_size=batch_size, thread_count=thread_count, endpoint=endpoint
+                batch_size=batch_size,
+                thread_count=thread_count,
+                endpoint=endpoint,
+                on_success=self._on_success,
+                on_failure=self._on_failure,
             )
 
             self.snowplow_tracker = Tracker(
@@ -70,6 +74,41 @@ class BillingEventsClient:
             self._logger.info(
                 "Billing events disabled - skipping tracker initialization"
             )
+
+    def _on_success(self, sent_events: List[Dict[str, Any]]) -> None:
+        self._logger.info(
+            "Successfully sent billing events",
+            sent_count=len(sent_events),
+        )
+
+        for event in sent_events:
+            self._log_event(event, success=True)
+
+    def _on_failure(
+        self, succeeded_count: int, failed_events: List[Dict[str, Any]]
+    ) -> None:
+        self._logger.warning(
+            "Failed to track billing events",
+            succeeded_count=succeeded_count,
+            failed_count=len(failed_events),
+        )
+
+        for event in failed_events:
+            self._log_event(event, success=False)
+
+    def _log_event(self, event_payload: Dict[str, Any], success: bool) -> None:
+        log_method = self._logger.info if success else self._logger.error
+        message = (
+            "Billing event sent successfully"
+            if success
+            else "Billing event failed to send"
+        )
+        log_method(
+            message,
+            event_name=event_payload.get("se_ac"),
+            label=event_payload.get("se_la"),
+            property=event_payload.get("se_pr"),
+        )
 
     def track_billing_event(
         self,
