@@ -109,9 +109,11 @@ models:
     cost_indicator: "$"
     max_context_tokens: 1000000 # https://docs.cloud.google.com/vertex-ai/generative-ai/docs/models/gemini/2-5-flash
     model_class_provider: litellm
+    family:
+      - vertex
+      - litellm
     params:
       model: "gemini-2.5-flash"
-      custom_llm_provider: "vertex_ai"
       temperature: 0.7
       max_tokens: 4_096
 
