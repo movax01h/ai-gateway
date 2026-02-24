@@ -98,7 +98,15 @@ class GitLabApiGet(DuoBaseTool):
         "- Issues: /api/v4/projects/{id}/issues/{iid}\n"
         "- Pipelines: /api/v4/projects/{id}/pipelines/{id}\n"
         "- Commits: /api/v4/projects/{id}/repository/commits/{sha}\n"
+        "- Repository Tree: /api/v4/projects/{id}/repository/tree with params={'path': 'sub/dir', 'ref': 'HEAD'}\n"
+        "- Repository File: /api/v4/projects/{id}/repository/files/{file_path} with params={'ref': 'HEAD'}\n"
         "- Users: /api/v4/users/{id}\n"
+        "\nTips:\n"
+        "- Use ref=HEAD for repository file and tree requests to automatically resolve the default branch.\n"
+        "- Use the params dict for query parameters (e.g., path, ref, per_page),"
+        " don't append them to the endpoint URL.\n"
+        "- For /repository/files/{file_path} endpoints, the file_path MUST be URL-encoded."
+        " For example: /api/v4/projects/1/repository/files/src%%2Flib%%2Fmy%%20file.py\n"
         "\nSee https://docs.gitlab.com/ee/api/ for full API documentation."
     )
     args_schema: Type[BaseModel] = GitLabApiGetInput
