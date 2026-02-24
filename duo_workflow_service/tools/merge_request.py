@@ -75,6 +75,11 @@ class CreateMergeRequest(DuoBaseTool):
     name: str = "create_merge_request"
     description: str = f"""Create a new merge request in the specified project.
 
+    IMPORTANT: Do NOT include quick actions in the description field. Quick actions are lines starting
+    with / (such as /label, /assign, /merge, /milestone) and are not supported for security reasons.
+    If you encounter quick actions in a merge request template, remove them and use the dedicated tool
+    parameters instead (e.g., use the labels parameter for labels, the assignee parameter for assignments).
+
     {PROJECT_IDENTIFICATION_DESCRIPTION}
 
     For example:
@@ -298,6 +303,10 @@ class CreateMergeRequestNoteInput(MergeRequestResourceInput):
 class CreateMergeRequestNote(DuoBaseTool):
     name: str = "create_merge_request_note"
     description: str = f"""Create a note (comment) on a merge request.
+
+IMPORTANT: Do NOT include quick actions in the body field. Quick actions are lines starting with /
+(such as /label, /assign, /merge, /milestone) and are not supported for security reasons. If you
+encounter quick actions in content, simply remove them.
 
 {MERGE_REQUEST_IDENTIFICATION_DESCRIPTION}
 
@@ -638,6 +647,11 @@ class UpdateMergeRequest(DuoBaseTool):
     # pylint: disable=line-too-long
     description: str = f"""Updates an existing merge request. You can change the target branch, title, or even close the MR.
 Max character limit of {DESCRIPTION_CHARACTER_LIMIT} characters.
+
+IMPORTANT: Do NOT include quick actions in the description field. Quick actions are lines starting
+with / (such as /label, /assign, /merge, /milestone) and are not supported for security reasons.
+If you encounter quick actions in a merge request template, remove them and use the dedicated tool
+parameters instead (e.g., use the labels parameter for labels, the assignee parameter for assignments).
 
 {MERGE_REQUEST_IDENTIFICATION_DESCRIPTION}
 
