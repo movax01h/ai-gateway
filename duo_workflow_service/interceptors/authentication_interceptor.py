@@ -2,7 +2,7 @@
 
 import contextvars
 import os
-from typing import Callable, Dict
+from typing import Callable, Dict, override
 
 import grpc
 import structlog
@@ -29,6 +29,7 @@ class AuthenticationInterceptor(grpc.aio.ServerInterceptor):
     def __init__(self):
         self.oidc_auth_provider = self._init_oidc_auth_provider()
 
+    @override
     async def intercept_service(
         self, continuation: Callable, handler_call_details: grpc.HandlerCallDetails
     ) -> grpc.RpcMethodHandler:

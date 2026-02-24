@@ -1,5 +1,5 @@
 from collections.abc import Callable, Sequence
-from typing import Any, Literal, Optional, Union
+from typing import Any, Literal, Optional, Union, override
 
 from langchain_core.language_models import LanguageModelInput
 from langchain_core.messages import AIMessage
@@ -13,6 +13,7 @@ __all__ = ["ChatLiteLLM"]
 
 
 class ChatLiteLLM(_LChatLiteLLM):
+    @override
     def bind_tools(
         self,
         tools: Sequence[dict[str, Any] | type[BaseModel] | Callable | BaseTool],

@@ -17,6 +17,7 @@ from typing import (
     Sequence,
     Tuple,
     TypeVar,
+    override,
 )
 
 import structlog
@@ -175,10 +176,12 @@ class GitLabWorkflow(
         self._billing_event_client = billing_event_client
         self.serde = CheckpointSerializer()
 
+    @override
     @not_implemented_sync_method
     def get_tuple(self, config: RunnableConfig) -> Optional[CheckpointTuple]:
         return None
 
+    @override
     @not_implemented_sync_method
     def list(
         self,
@@ -190,6 +193,7 @@ class GitLabWorkflow(
     ) -> Iterator[CheckpointTuple]:
         return iter([])
 
+    @override
     @not_implemented_sync_method
     def put(
         self,
@@ -200,6 +204,7 @@ class GitLabWorkflow(
     ) -> RunnableConfig:
         return RunnableConfig()
 
+    @override
     @not_implemented_sync_method
     def put_writes(
         self,
@@ -288,6 +293,7 @@ class GitLabWorkflow(
                 flow_type=self._workflow_type.value,
             )
 
+    @override
     async def __aenter__(self) -> BaseCheckpointSaver:
         try:
             if self._offline_mode:
@@ -416,6 +422,7 @@ class GitLabWorkflow(
             EventPropertyEnum.WORKFLOW_RESUME_BY_USER,
         )
 
+    @override
     async def __aexit__(self, exc_type, exc_value, trcback):
         """Handle workflow completion and tracking in both success and failure scenarios.
 
@@ -556,6 +563,7 @@ class GitLabWorkflow(
             log_exception(e, extra={"workflow_id": self._workflow_id})
         return False
 
+    @override
     async def aget_tuple(self, config: RunnableConfig) -> Optional[CheckpointTuple]:
         # https://blog.langchain.dev/langgraph-v0-2/
         # thread_ts and parent_ts have been renamed to checkpoint_id and parent_checkpoint_id , respectively
@@ -659,6 +667,7 @@ class GitLabWorkflow(
             return self._convert_gitlab_checkpoint_to_checkpoint_tuple(checkpoint)
         return None
 
+    @override
     async def alist(
         self,
         config: Optional[RunnableConfig],
@@ -699,6 +708,7 @@ class GitLabWorkflow(
                 log_exception(e, extra={"context": "Skipping malformed checkpoint"})
                 continue
 
+    @override
     async def aput(
         self,
         config: RunnableConfig,
@@ -757,6 +767,7 @@ class GitLabWorkflow(
             }
         }
 
+    @override
     async def aput_writes(
         self,
         config: RunnableConfig,

@@ -1,6 +1,6 @@
 import json
 import re
-from typing import Any, AsyncIterator, Callable, List, Optional, TypeVar
+from typing import Any, AsyncIterator, Callable, List, Optional, TypeVar, override
 from unittest.mock import AsyncMock
 
 import fastapi
@@ -37,9 +37,11 @@ class AsyncStream(AsyncIterator[_T]):
         self.chunks = chunks
         self.callback_finish = callback_finish
 
+    @override
     def __aiter__(self) -> "AsyncStream[_T]":
         return self
 
+    @override
     async def __anext__(self) -> _T:
         if len(self.chunks) > 0:
             return self.chunks.pop(0)
@@ -69,9 +71,11 @@ class LLM(TextGenModelBase):
         super().__init__()
 
     @property
+    @override
     def metadata(self) -> ModelMetadata:
         return ModelMetadata(name="llm-mocked", engine="llm-provider-mocked")
 
+    @override
     async def generate(
         self,
         prefix: str,
@@ -121,13 +125,16 @@ class LLM(TextGenModelBase):
 
 class FakeModel(SimpleChatModel):
     @property
+    @override
     def _llm_type(self) -> str:
         return "fake-provider"
 
     @property
+    @override
     def _identifying_params(self) -> dict[str, Any]:
         return {"model": "fake-model"}
 
+    @override
     def _call(
         self,
         messages: List[BaseMessage],
@@ -137,6 +144,7 @@ class FakeModel(SimpleChatModel):
     ) -> str:
         return "mock"
 
+    @override
     def bind_tools(
         self, *args: Any, **kwargs: Any  # pylint: disable=unused-argument
     ) -> Any:
@@ -182,11 +190,13 @@ class ChatModel(ChatModelBase):
         super().__init__()
 
     @property
+    @override
     def metadata(self) -> ModelMetadata:
         return ModelMetadata(
             name="chat-model-mocked", engine="chat-model-provider-mocked"
         )
 
+    @override
     async def generate(
         self,
         messages: list[Message],

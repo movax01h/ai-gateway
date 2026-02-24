@@ -2,7 +2,7 @@ import time
 from contextlib import contextmanager
 from datetime import datetime, timezone
 from enum import StrEnum
-from typing import Awaitable, Callable, Optional
+from typing import Awaitable, Callable, Optional, override
 
 import grpc
 import structlog
@@ -53,6 +53,7 @@ class MonitoringInterceptor(ServerInterceptor):
             registry=registry,
         )
 
+    @override
     async def intercept_service(
         self,
         continuation: Callable[

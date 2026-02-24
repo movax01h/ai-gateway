@@ -1,5 +1,5 @@
 from collections.abc import Callable, Sequence
-from typing import Any, List, Mapping, Optional, Self
+from typing import Any, List, Mapping, Optional, Self, override
 
 from anthropic import AsyncAnthropic
 from langchain_anthropic import ChatAnthropic as _LChatAnthropic
@@ -83,6 +83,7 @@ class ChatAnthropic(_LChatAnthropic):
 
         return self
 
+    @override
     def _generate(
         self,
         messages: List[BaseMessage],
@@ -92,6 +93,7 @@ class ChatAnthropic(_LChatAnthropic):
     ) -> ChatResult:
         raise NotImplementedError()
 
+    @override
     def bind_tools(
         self,
         tools: Sequence[Mapping[str, Any] | type | Callable | BaseTool],

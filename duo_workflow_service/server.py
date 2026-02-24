@@ -5,7 +5,7 @@ import json
 import os
 import signal
 from itertools import chain
-from typing import AsyncIterable, AsyncIterator, Optional
+from typing import AsyncIterable, AsyncIterator, Optional, override
 
 import aiohttp
 import grpc
@@ -196,6 +196,7 @@ class DuoWorkflowService(contract_pb2_grpc.DuoWorkflowServicer):
     # - Not delaying the server response for too long when handling errors
     TASK_CANCELLATION_TIMEOUT = 10.0
 
+    @override
     @has_sufficient_usage_quota(event=UsageQuotaEvent.DAP_FLOW_ON_EXECUTE)
     @inject
     async def ExecuteWorkflow(
@@ -545,6 +546,7 @@ class DuoWorkflowService(contract_pb2_grpc.DuoWorkflowServicer):
                 action_class=item.WhichOneof("action"),
             )
 
+    @override
     async def ListTools(
         self, request: contract_pb2.ListToolsRequest, context: grpc.ServicerContext
     ):
@@ -570,6 +572,7 @@ class DuoWorkflowService(contract_pb2_grpc.DuoWorkflowServicer):
 
         return response
 
+    @override
     async def ListFlows(
         self, request: contract_pb2.ListFlowsRequest, context: grpc.ServicerContext
     ):
@@ -614,6 +617,7 @@ class DuoWorkflowService(contract_pb2_grpc.DuoWorkflowServicer):
 
         return response
 
+    @override
     @has_sufficient_usage_quota(event=UsageQuotaEvent.DAP_FLOW_ON_GENERATE_TOKEN)
     async def GenerateToken(
         self, request: contract_pb2.GenerateTokenRequest, context: grpc.ServicerContext
@@ -675,6 +679,7 @@ class DuoWorkflowService(contract_pb2_grpc.DuoWorkflowServicer):
 
         return contract_pb2.GenerateTokenResponse(token=token, expiresAt=expires_at)
 
+    @override
     @has_sufficient_usage_quota(event=UsageQuotaEvent.DAP_FLOW_ON_EXECUTE)
     @inject
     async def TrackSelfHostedExecuteWorkflow(

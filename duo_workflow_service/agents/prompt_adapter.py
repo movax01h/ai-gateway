@@ -1,6 +1,6 @@
 from abc import ABC, abstractmethod
 from datetime import datetime
-from typing import Any, Optional
+from typing import Any, Optional, override
 
 from langchain_core.messages import BaseMessage, HumanMessage, SystemMessage
 from langchain_core.prompt_values import ChatPromptValue, PromptValue
@@ -37,6 +37,7 @@ class ChatAgentPromptTemplate(Runnable[ChatWorkflowState, PromptValue]):
 
         return True
 
+    @override
     def invoke(
         self,
         input: ChatWorkflowState,

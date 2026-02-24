@@ -1,6 +1,6 @@
 import json
 from abc import abstractmethod
-from typing import Any, ClassVar, List, NamedTuple, Optional, Type, final
+from typing import Any, ClassVar, List, NamedTuple, Optional, Type, final, override
 
 from langchain_core.tools import BaseTool, ToolException
 from pydantic import BaseModel, Field
@@ -87,9 +87,11 @@ class DuoBaseTool(BaseTool):
     def project(self) -> Project:
         return self.metadata and self.metadata.get("project")  # type: ignore
 
+    @override
     def _run(self, *args: Any, **kwargs: Any) -> Any:
         raise NotImplementedError("This tool can only be run asynchronously")
 
+    @override
     def __init_subclass__(cls, **kwargs):
         super().__init_subclass__(**kwargs)
         if "_arun" in cls.__dict__:
@@ -98,6 +100,7 @@ class DuoBaseTool(BaseTool):
                 f"Implement _execute instead."
             )
 
+    @override
     @final
     async def _arun(self, *args: Any, **kwargs: Any) -> Any:
         """Wrapper that applies truncation and security wrapping to all tool results.

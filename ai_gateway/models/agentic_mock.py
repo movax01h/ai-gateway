@@ -61,7 +61,7 @@ import re
 import time
 import xml.etree.ElementTree as ET
 from pathlib import Path
-from typing import Any, AsyncIterator, Iterator, NamedTuple, Optional
+from typing import Any, AsyncIterator, Iterator, NamedTuple, Optional, override
 
 import structlog
 from jinja2 import Environment
@@ -545,10 +545,12 @@ class AgenticFakeModel(BaseChatModel):
         return self._auto_tool_approval
 
     @property
+    @override
     def _llm_type(self) -> str:
         return "agentic-fake-provider"
 
     @property
+    @override
     def _identifying_params(self) -> dict[str, Any]:
         return {"model": "agentic-fake-model"}
 
@@ -577,6 +579,7 @@ class AgenticFakeModel(BaseChatModel):
 
         return ChatResult(generations=[ChatGeneration(message=ai_message)])
 
+    @override
     def _generate(
         self,
         messages: list[BaseMessage],
@@ -593,9 +596,11 @@ class AgenticFakeModel(BaseChatModel):
 
         return result
 
+    @override
     def bind_tools(self, *_args: Any, **_kwargs: Any) -> Any:
         return self
 
+    @override
     async def _agenerate(
         self,
         messages: list[BaseMessage],
@@ -701,6 +706,7 @@ class AgenticFakeModel(BaseChatModel):
             )
             yield chunk_generation, response.content
 
+    @override
     def _stream(
         self,
         messages: list[BaseMessage],
@@ -732,6 +738,7 @@ class AgenticFakeModel(BaseChatModel):
             if response.chunk_delay_ms > 0:
                 time.sleep(response.chunk_delay_ms / 1000.0)
 
+    @override
     async def _astream(
         self,
         messages: list[BaseMessage],

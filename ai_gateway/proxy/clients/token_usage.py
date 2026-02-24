@@ -1,4 +1,4 @@
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Optional, override
 
 from pydantic import BaseModel, Field
 
@@ -42,6 +42,7 @@ class TokenUsage(BaseModel):
         if self.total_tokens is None:
             self.total_tokens = self.input_tokens + self.output_tokens
 
+    @override
     def model_dump(self, **kwargs):
         data = super().model_dump(**kwargs)
         if data.get("total_tokens") is None:

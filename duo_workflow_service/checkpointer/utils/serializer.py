@@ -1,4 +1,4 @@
-from typing import Any, FrozenSet, Tuple
+from typing import Any, FrozenSet, Tuple, override
 
 import ormsgpack
 from langgraph.checkpoint.serde.jsonplus import JsonPlusSerializer, _msgpack_enc
@@ -67,6 +67,7 @@ class CheckpointSerializer(JsonPlusSerializer):
 
         return None
 
+    @override
     def dumps_typed(self, obj: Any) -> Tuple[str, bytes]:
         """Serialize object using msgpack format."""
         try:
@@ -74,6 +75,7 @@ class CheckpointSerializer(JsonPlusSerializer):
         except Exception:
             raise CheckpointValidationError("Cannot serialize checkpoint")
 
+    @override
     def loads_typed(self, data: Tuple[str, bytes]) -> Any:
         """Deserialize checkpoint data with format validation."""
         data_type, data_bytes = data

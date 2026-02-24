@@ -44,6 +44,7 @@ from typing import (
     Type,
     Union,
     cast,
+    override,
 )
 
 from langchain_core.callbacks import (
@@ -534,6 +535,7 @@ class ChatLiteLLM(BaseChatModel):
 
         return values
 
+    @override
     def _generate(
         self,
         messages: List[BaseMessage],
@@ -590,6 +592,7 @@ class ChatLiteLLM(BaseChatModel):
         message_dicts = [_convert_message_to_dict(m) for m in messages]
         return message_dicts, params
 
+    @override
     def _stream(
         self,
         messages: List[BaseMessage],
@@ -622,6 +625,7 @@ class ChatLiteLLM(BaseChatModel):
                 run_manager.on_llm_new_token(chunk.content, chunk=cg_chunk)
             yield cg_chunk
 
+    @override
     async def _astream(
         self,
         messages: List[BaseMessage],
@@ -693,6 +697,7 @@ class ChatLiteLLM(BaseChatModel):
                 await run_manager.on_llm_new_token(cast(str, content), chunk=cg_chunk)
             yield cg_chunk
 
+    @override
     async def _agenerate(
         self,
         messages: List[BaseMessage],
@@ -724,6 +729,7 @@ class ChatLiteLLM(BaseChatModel):
 
         return result
 
+    @override
     def bind_tools(
         self,
         tools: Sequence[Union[Dict[str, Any], Type[BaseModel], Callable, BaseTool]],
@@ -783,6 +789,7 @@ class ChatLiteLLM(BaseChatModel):
                 )
         return super().bind(tools=formatted_tools, tool_choice=tool_choice, **kwargs)
 
+    @override
     def with_structured_output(
         self,
         schema: Union[Dict[str, Any], type, BaseModel],
@@ -871,6 +878,7 @@ class ChatLiteLLM(BaseChatModel):
         return llm | parser
 
     @property
+    @override
     def _identifying_params(self) -> Dict[str, Any]:
         """Get the identifying parameters."""
         set_model_value = self.model
@@ -885,6 +893,7 @@ class ChatLiteLLM(BaseChatModel):
         }
 
     @property
+    @override
     def _llm_type(self) -> str:
         return "litellm-chat"
 

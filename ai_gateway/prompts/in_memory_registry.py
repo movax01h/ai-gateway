@@ -1,4 +1,4 @@
-from typing import Any, Optional, cast
+from typing import Any, Optional, cast, override
 
 from langchain_core.tools import BaseTool
 
@@ -119,6 +119,7 @@ class InMemoryPromptRegistry(BasePromptRegistry):
             **kwargs,
         )
 
+    @override
     def get(
         self,
         prompt_id: str,
