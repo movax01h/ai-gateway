@@ -14,7 +14,7 @@ from ai_gateway.chat.agents.react import ReActAgentInputs
 from ai_gateway.chat.base import BaseToolsRegistry
 from ai_gateway.chat.tools import BaseTool
 from ai_gateway.model_metadata import TypeModelMetadata
-from ai_gateway.prompts.config.models import ModelClassProvider
+from ai_gateway.model_selection.models import ModelClassProvider
 from ai_gateway.structured_logging import get_request_logger
 from lib.context import StarletteUser
 from lib.internal_events import InternalEventsClient

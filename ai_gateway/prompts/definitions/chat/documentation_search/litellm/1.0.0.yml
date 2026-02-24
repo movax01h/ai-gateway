@@ -2,7 +2,6 @@
 name: Gitlab Documentation agent
 model:
   params:
-    model_class_provider: litellm
     temperature: 0.1
     max_tokens: 4_096
 unit_primitives:

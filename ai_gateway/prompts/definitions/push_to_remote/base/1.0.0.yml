@@ -1,7 +1,6 @@
 name: push_to_remote_prompt
 model:
   params:
-    model_class_provider: anthropic
     max_tokens: 2048
     max_retries: 3
 unit_primitives:

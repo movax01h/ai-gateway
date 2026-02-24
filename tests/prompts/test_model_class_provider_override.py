@@ -40,11 +40,11 @@ models:
         name: "OpenAI GPT-5"
         gitlab_identifier: "gpt_5"
         max_context_tokens: 400000
+        model_class_provider: "openai"
         family:
             - gpt_5
         params:
             model: "gpt-5-2025-08-07"
-            model_class_provider: "openai"
             max_tokens: 4096
 """,
     )
@@ -68,9 +68,6 @@ configurable_unit_primitives:
         prompts_dir / "workflow" / "test" / "base" / "1.0.0.yml",
         contents="""---
 name: test
-model:
-    params:
-        model_class_provider: anthropic
 unit_primitives:
     - duo_workflow_execute_workflow
 prompt_template:

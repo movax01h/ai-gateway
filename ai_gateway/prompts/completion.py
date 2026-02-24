@@ -8,12 +8,14 @@ from typing import Any
 
 from langchain_core.runnables import Runnable, RunnableLambda
 
+from ai_gateway.model_selection.models import ModelClassProvider
 from ai_gateway.prompts.config.base import PromptConfig
 
 __all__ = ["completion_prompt_template_factory"]
 
 
 def completion_prompt_template_factory(
+    model_provider: ModelClassProvider,  # pylint: disable=unused-argument
     config: PromptConfig,  # pylint: disable=unused-argument
 ) -> Runnable[Any, dict[str, Any]]:
     """Create a passthrough prompt template for completion models.

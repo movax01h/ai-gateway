@@ -2,7 +2,6 @@
 name: Categorize question
 model:
   params:
-    model_class_provider: litellm
     max_tokens: 500
 unit_primitives:
   - duo_chat

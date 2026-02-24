@@ -110,7 +110,7 @@ def get_selectable_models() -> dict[str, str]:
             print(f"WARNING: '{gitlab_id}' not found in models.yml", file=sys.stderr)
             continue
 
-        model_id = llm_definitions[gitlab_id].params.get("model", "")
+        model_id = llm_definitions[gitlab_id].params.model
         if not model_id:
             print(f"WARNING: No params.model for '{gitlab_id}'", file=sys.stderr)
             continue

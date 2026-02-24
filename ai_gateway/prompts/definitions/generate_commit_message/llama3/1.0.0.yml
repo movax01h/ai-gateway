@@ -2,7 +2,6 @@
 name: Llama3 Generate Commit Message
 model:
   params:
-    model_class_provider: litellm
     max_tokens: 2_048
 unit_primitives:
   - generate_commit_message

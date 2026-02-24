@@ -12,7 +12,11 @@ from ai_gateway.model_metadata import (
     ModelMetadata,
     TypeModelMetadata,
 )
-from ai_gateway.model_selection import LLMDefinition
+from ai_gateway.model_selection.model_selection_config import (
+    ChatAmazonQDefinition,
+    ChatLiteLLMDefinition,
+)
+from ai_gateway.model_selection.models import ChatAmazonQParams, ChatLiteLLMParams
 from lib.context import TokenUsage
 
 
@@ -84,7 +88,7 @@ class TestPrompt:
                     provider="litellm",
                     endpoint=AnyUrl("http://localhost:4000"),
                     api_key="token",
-                    llm_definition=LLMDefinition(
+                    llm_definition=ChatLiteLLMDefinition(
                         gitlab_identifier="mistral",
                         name="Mistral",
                         max_context_tokens=128000,
@@ -99,16 +103,16 @@ class TestPrompt:
                         provider="litellm",
                         endpoint=AnyUrl("http://localhost:4000"),
                         api_key="token",
-                        llm_definition=LLMDefinition(
+                        llm_definition=ChatLiteLLMDefinition(
                             name="Mistral",
                             gitlab_identifier="mistral",
                             max_context_tokens=128000,
                             family=["mistral", "litellm"],
-                            params={
-                                "model": "mistral",
-                                "temperature": 0.0,
-                                "max_tokens": 4096,
-                            },
+                            params=ChatLiteLLMParams(
+                                model="mistral",
+                                temperature=0.0,
+                                max_tokens=4096,
+                            ),
                         ),
                         family=["mistral", "litellm"],
                         friendly_name="Mistral",
@@ -126,7 +130,7 @@ class TestPrompt:
                     name="amazon_q",
                     provider="amazon_q",
                     role_arn="role-arn",
-                    llm_definition=LLMDefinition(
+                    llm_definition=ChatAmazonQDefinition(
                         gitlab_identifier="amazon_q",
                         name="Amazon Q",
                         max_context_tokens=200000,
@@ -140,15 +144,14 @@ class TestPrompt:
                         name="amazon_q",
                         provider="amazon_q",
                         role_arn="role-arn",
-                        llm_definition=LLMDefinition(
+                        llm_definition=ChatAmazonQDefinition(
                             gitlab_identifier="amazon_q",
                             name="Amazon Q",
                             max_context_tokens=200000,
                             family=["amazon_q"],
-                            params={
-                                "model": "amazon_q",
-                                "model_class_provider": "amazon_q",
-                            },
+                            params=ChatAmazonQParams(
+                                model="amazon_q",
+                            ),
                         ),
                         family=["amazon_q"],
                         friendly_name="Amazon Q",

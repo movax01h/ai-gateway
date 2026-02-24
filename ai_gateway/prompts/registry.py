@@ -17,8 +17,7 @@ from ai_gateway.model_metadata import (
 from ai_gateway.prompts.base import BasePromptRegistry, Prompt
 from ai_gateway.prompts.bind_tools_cache import BindToolsCacheProtocol
 from ai_gateway.prompts.completion import completion_prompt_template_factory
-from ai_gateway.prompts.config import BaseModelConfig, ModelClassProvider, PromptConfig
-from ai_gateway.prompts.config.models import CompletionLiteLLMParams
+from ai_gateway.prompts.config import ModelClassProvider, ModelConfig, PromptConfig
 from ai_gateway.prompts.typing import TypeModelFactory, TypePromptTemplateFactory
 from lib.internal_events.client import InternalEventsClient
 from lib.internal_events.context import current_event_context
@@ -278,7 +277,7 @@ class LocalPromptRegistry(BasePromptRegistry):
 
     def _default_model_metadata(
         self, prompt_id: str, prompt_version: str
-    ) -> TypeModelMetadata | None:
+    ) -> TypeModelMetadata:
         # For backwards compatibility with client code that doesn't send model_metadata and would've used the model from
         # the `base` prompt, create model metadata from know version mappings or the feature setting default
         if identifier := LEGACY_MODEL_MAPPING.get(prompt_id, {}).get(
@@ -287,10 +286,9 @@ class LocalPromptRegistry(BasePromptRegistry):
             model_metadata = create_model_metadata(
                 {"provider": "gitlab", "identifier": identifier}
             )
-            if model_metadata:
-                # For these legacy prompt version tied to a model, we always used the `base` prompt, so we override the
-                # `family` in case the current model from models.yml specifies a different value for this property
-                model_metadata.family = [self.key_prompt_type_base]
+            # For these legacy prompt version tied to a model, we always used the `base` prompt, so we override the
+            # `family` in case the current model from models.yml specifies a different value for this property
+            model_metadata.family = [self.key_prompt_type_base]
             return model_metadata
 
         return create_model_metadata(
@@ -352,12 +350,7 @@ class LocalPromptRegistry(BasePromptRegistry):
             ) from e
 
         config = self._get_prompt_config(prompt_registered.versions, prompt_version)  # type: ignore[arg-type]
-        model_class_provider = (
-            # From model definition in models.yml
-            model_metadata.llm_definition.params.get("model_class_provider")
-            if model_metadata
-            else None
-        ) or config.model.params.model_class_provider  # From prompt file
+        model_class_provider = model_metadata.llm_definition.model_class_provider
 
         model_factory = self.model_factories.get(model_class_provider, None)
 
@@ -385,8 +378,9 @@ class LocalPromptRegistry(BasePromptRegistry):
         )
 
         prompt_template_override = self.prompt_template_factories.get(prompt_id, None)
-        if not prompt_template_override and isinstance(
-            config.model.params, CompletionLiteLLMParams
+        if (
+            not prompt_template_override
+            and model_class_provider == ModelClassProvider.LITE_LLM_COMPLETION
         ):
             prompt_template_override = completion_prompt_template_factory
         prompt_template_factory: TypePromptTemplateFactory | None
@@ -404,6 +398,7 @@ class LocalPromptRegistry(BasePromptRegistry):
         tool_choice = self._adjust_tool_choice_for_model(tool_choice, model_metadata)
 
         return Prompt(
+            model_class_provider,
             model_factory,
             config,
             model_metadata,
@@ -455,23 +450,23 @@ class LocalPromptRegistry(BasePromptRegistry):
         return getattr(module, parts[-1])
 
     @classmethod
-    def _parse_base_model(cls, file_name: Path) -> BaseModelConfig:
-        """Parses a YAML file and converts its content to a BaseModelConfig object.
+    def _parse_base_model(cls, file_name: Path) -> ModelConfig:
+        """Parses a YAML file and converts its content to a ModelConfig object.
 
         This method reads the specified YAML file, extracts the configuration
-        parameters, and constructs a BaseModelConfig object. It handles the
+        parameters, and constructs a ModelConfig object. It handles the
         conversion of YAML data types to appropriate Python types.
 
         Args:
             file_name (Path): A Path object pointing to the YAML file to be parsed.
 
         Returns:
-            BaseModelConfig: An instance of BaseModelConfig containing the
+            ModelConfig: An instance of ModelConfig containing the
             parsed configuration data.
         """
 
         with open(file_name, "r") as fp:
-            return BaseModelConfig(**yaml.safe_load(fp))
+            return ModelConfig(**yaml.safe_load(fp))
 
     @classmethod
     def _process_version_file(cls, version_file: Path) -> PromptConfig:

@@ -1,7 +1,6 @@
 name: Claude 4.0 Review Merge Request
 model:
   params:
-    model_class_provider: anthropic
     max_tokens: 8_192
 unit_primitives:
   - duo_agent_platform

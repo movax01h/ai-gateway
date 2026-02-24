@@ -44,6 +44,7 @@ Given the following configuration:
 models:
   - name: Codestral
     gitlab_identifier: codestral
+    model_class_provider: litellm
     family:
       - codestral
       - mistral
@@ -71,7 +72,6 @@ configurable_unit_primitives:
 name: Mistral Code Suggestions
 model:
   params:
-    model_class_provider: litellm
     temperature: 0.1
 unit_primitives:
   - complete_code
@@ -175,8 +175,8 @@ models:
     description: "Earlier generation model for coding, reasoning, and agentic workflows."
     cost_indicator: "$$$"
     gitlab_identifier: "claude_3_5_sonnet_20240620"
+    model_class_provider: "anthropic"
     params:
-      model_class_provider: "anthropic"
       model: "claude-3-5-sonnet-20240620"
       temperature: 0.0
       max_tokens: 4_096

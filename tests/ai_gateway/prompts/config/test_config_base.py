@@ -3,12 +3,12 @@
 import pytest
 from gitlab_cloud_connector import GitLabUnitPrimitive
 
-from ai_gateway.prompts.config.base import InMemoryPromptConfig, PromptConfig
-from ai_gateway.prompts.config.models import (
+from ai_gateway.model_selection.models import (
     CompletionLiteLLMParams,
     CompletionType,
     ModelClassProvider,
 )
+from ai_gateway.prompts.config.base import InMemoryPromptConfig, PromptConfig
 
 
 class TestInMemoryPromptConfig:
@@ -26,7 +26,6 @@ class TestInMemoryPromptConfig:
             "model": {
                 "params": {
                     "model": "claude-3-sonnet",
-                    "model_class_provider": "anthropic",
                 }
             },
             "unit_primitives": [GitLabUnitPrimitive.DUO_CHAT],
@@ -55,7 +54,6 @@ class TestInMemoryPromptConfig:
             "model": {
                 "params": {
                     "model": "claude-3-sonnet",
-                    "model_class_provider": "anthropic",
                 }
             },
             "unit_primitives": [GitLabUnitPrimitive.DUO_CHAT],
@@ -100,14 +98,12 @@ class TestCompletionLiteLLMParams:
         with pytest.raises(ValueError, match="fim_format is required"):
             CompletionLiteLLMParams(
                 model="codestral-2501",
-                model_class_provider=ModelClassProvider.LITE_LLM_COMPLETION,
                 completion_type=CompletionType.FIM,
             )
 
     def test_validate_fim_format_accepts_format(self):
         params = CompletionLiteLLMParams(
             model="codestral-2501",
-            model_class_provider=ModelClassProvider.LITE_LLM_COMPLETION,
             completion_type=CompletionType.FIM,
             fim_format="</s>[SUFFIX]{suffix}[PREFIX]{prefix}[MIDDLE]",
         )

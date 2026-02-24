@@ -1,7 +1,6 @@
 name: fix_pipeline_decide_approach_prompt
 model:
   params:
-    model_class_provider: litellm
     max_tokens: 32_768
     max_retries: 3
 unit_primitives:

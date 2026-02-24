@@ -1,7 +1,6 @@
 name: developer_add_plan_comment
 model:
   params:
-    model_class_provider: litellm
     max_tokens: 4096
 unit_primitives:
   - duo_workflow_execute_workflow

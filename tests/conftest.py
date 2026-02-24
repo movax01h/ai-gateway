@@ -33,10 +33,12 @@ from ai_gateway.config import Config, ConfigModelLimits
 from ai_gateway.container import ContainerApplication
 from ai_gateway.model_metadata import ModelMetadata, TypeModelMetadata
 from ai_gateway.model_selection.model_selection_config import (
+    ChatLiteLLMDefinition,
     LLMDefinition,
     ModelSelectionConfig,
     PromptParams,
 )
+from ai_gateway.model_selection.models import BaseModelParams, ModelClassProvider
 from ai_gateway.models.base import ModelMetadata as LegacyModelMetadata
 from ai_gateway.models.base_text import (
     TextGenModelBase,
@@ -45,7 +47,6 @@ from ai_gateway.models.base_text import (
 )
 from ai_gateway.prompts import Prompt
 from ai_gateway.prompts.config.base import ModelConfig, PromptConfig
-from ai_gateway.prompts.config.models import ChatLiteLLMParams, TypeModelParams
 from ai_gateway.prompts.typing import Model, TypeModelFactory, TypePromptTemplateFactory
 from ai_gateway.safety_attributes import SafetyAttributes
 from duo_workflow_service.entities.event import WorkflowEvent
@@ -617,13 +618,18 @@ def model_factory_fixture(model: Model):
     return lambda *args, **kwargs: model
 
 
+@pytest.fixture(name="model_provider")
+def model_provider_fixture():
+    return ModelClassProvider.LITE_LLM
+
+
 @pytest.fixture(name="model_params")
 def model_params_fixture():
-    return ChatLiteLLMParams(model="test_model", model_class_provider="litellm")
+    return BaseModelParams(model="test_model")
 
 
 @pytest.fixture(name="model_config")
-def model_config_fixture(model_params: TypeModelParams):
+def model_config_fixture(model_params: BaseModelParams):
     return ModelConfig(params=model_params)
 
 
@@ -666,7 +672,7 @@ def prompt_config_fixture(
 
 @pytest.fixture(name="llm_definition")
 def llm_definition_fixture():
-    return LLMDefinition(
+    return ChatLiteLLMDefinition(
         name="Mistral",
         gitlab_identifier="mistral",
         max_context_tokens=128000,
@@ -698,6 +704,7 @@ def internal_event_extra_fixture():
 
 @pytest.fixture(name="prompt")
 def prompt_fixture(
+    model_provider: ModelClassProvider,
     model_factory: TypeModelFactory,
     prompt_config: PromptConfig,
     model_metadata: TypeModelMetadata | None,
@@ -705,6 +712,7 @@ def prompt_fixture(
     internal_event_extra: dict[str, Any],
 ):
     return Prompt(
+        model_provider,
         model_factory,
         prompt_config,
         model_metadata,

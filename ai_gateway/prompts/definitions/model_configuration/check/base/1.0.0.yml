@@ -2,7 +2,6 @@
 name: Model configuration check
 model:
   params:
-    model_class_provider: litellm
     max_tokens: 12
 unit_primitives:
   - complete_code

@@ -1,8 +1,5 @@
 ---
 name: Summarize New Merge Request
-model:
-  params:
-    model_class_provider: anthropic
 unit_primitives:
   - summarize_new_merge_request
 prompt_template:

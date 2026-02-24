@@ -2,7 +2,6 @@
 name: Default configuration for the Duo Chat documentation question answering
 model:
   params:
-    model_class_provider: anthropic
     temperature: 0.1
 unit_primitives:
   - documentation_search

@@ -6,8 +6,9 @@ from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 from langchain_core.prompt_values import ChatPromptValue
 
 from ai_gateway.model_metadata import ModelMetadata
+from ai_gateway.model_selection.models import ModelClassProvider
 from ai_gateway.prompts import Prompt
-from ai_gateway.prompts.config.models import ModelClassProvider
+from ai_gateway.prompts.config.base import PromptConfig
 from duo_workflow_service.agents.prompt_adapter import (
     ChatAgentPromptTemplate,
     DefaultPromptAdapter,
@@ -103,12 +104,13 @@ Here is the project information for the current GitLab project the USER is worki
 class TestChatAgentPromptTemplate:
     def test_split_system_prompts_create_separate_messages(
         self,
-        prompt_config,
+        model_provider: ModelClassProvider,
+        prompt_config: PromptConfig,
         sample_chat_workflow_state: ChatWorkflowState,
         project: Project,
         mock_datetime,
     ):
-        template = ChatAgentPromptTemplate(prompt_config)
+        template = ChatAgentPromptTemplate(model_provider, prompt_config)
 
         mock_gitlab_info = GitLabInstanceInfo(
             instance_type="GitLab.com (SaaS)",
@@ -177,7 +179,7 @@ class TestChatAgentPromptTemplate:
         user_message = messages[2]
         assert isinstance(user_message, HumanMessage)
 
-    def test_conversation_history_processing(self, prompt_config):
+    def test_conversation_history_processing(self, model_provider, prompt_config):
         state_with_history = ChatWorkflowState(
             plan={"steps": []},
             status="execution",
@@ -195,7 +197,7 @@ class TestChatAgentPromptTemplate:
             approval=None,
         )
 
-        template = ChatAgentPromptTemplate(prompt_config)
+        template = ChatAgentPromptTemplate(model_provider, prompt_config)
 
         with patch.object(
             GitLabServiceContext, "get_current_instance_info", return_value=None
@@ -212,7 +214,7 @@ class TestChatAgentPromptTemplate:
         assert messages[3].content == "AI response"
         assert messages[4].content == "Second message"
 
-    def test_slash_command_parsing(self, prompt_config):
+    def test_slash_command_parsing(self, model_provider, prompt_config):
         state_with_slash_command = ChatWorkflowState(
             plan={"steps": []},
             status="execution",
@@ -228,7 +230,7 @@ class TestChatAgentPromptTemplate:
             approval=None,
         )
 
-        template = ChatAgentPromptTemplate(prompt_config)
+        template = ChatAgentPromptTemplate(model_provider, prompt_config)
 
         with patch.object(
             GitLabServiceContext, "get_current_instance_info", return_value=None
@@ -264,16 +266,16 @@ class TestChatAgentPromptTemplate:
         ],
     )
     def test_slash_command_detection(
-        self, prompt_config, message_content, expected_result
+        self, model_provider, prompt_config, message_content, expected_result
     ):
-        template = ChatAgentPromptTemplate(prompt_config)
+        template = ChatAgentPromptTemplate(model_provider, prompt_config)
         message = HumanMessage(content=message_content)
 
         result = template.is_slash_command_format(message)
 
         assert result == expected_result
 
-    def test_invalid_slash_command_raises_error(self, prompt_config):
+    def test_invalid_slash_command_raises_error(self, model_provider, prompt_config):
         """Test that an invalid slash command raises SlashCommandValidationError."""
         state_with_invalid_command = ChatWorkflowState(
             plan={"steps": []},
@@ -290,7 +292,7 @@ class TestChatAgentPromptTemplate:
             approval=None,
         )
 
-        template = ChatAgentPromptTemplate(prompt_config)
+        template = ChatAgentPromptTemplate(model_provider, prompt_config)
 
         with patch.object(
             GitLabServiceContext, "get_current_instance_info", return_value=None
@@ -303,7 +305,9 @@ class TestChatAgentPromptTemplate:
 
         assert "The command '/invalid_command' does not exist." in str(exc_info.value)
 
-    def test_valid_slash_command_does_not_raise_error(self, prompt_config):
+    def test_valid_slash_command_does_not_raise_error(
+        self, model_provider, prompt_config
+    ):
         """Test that a valid slash command does not raise an error."""
         state_with_valid_command = ChatWorkflowState(
             plan={"steps": []},
@@ -320,7 +324,7 @@ class TestChatAgentPromptTemplate:
             approval=None,
         )
 
-        template = ChatAgentPromptTemplate(prompt_config)
+        template = ChatAgentPromptTemplate(model_provider, prompt_config)
 
         with patch.object(
             GitLabServiceContext, "get_current_instance_info", return_value=None
@@ -333,7 +337,7 @@ class TestChatAgentPromptTemplate:
         assert isinstance(result, ChatPromptValue)
 
     def test_valid_command_after_invalid_command_does_not_raise_error(
-        self, prompt_config
+        self, model_provider, prompt_config
     ):
         """Test that a valid command sent after an invalid command does not raise an error.
 
@@ -356,7 +360,7 @@ class TestChatAgentPromptTemplate:
             approval=None,
         )
 
-        template = ChatAgentPromptTemplate(prompt_config)
+        template = ChatAgentPromptTemplate(model_provider, prompt_config)
 
         with patch.object(
             GitLabServiceContext, "get_current_instance_info", return_value=None
@@ -370,7 +374,7 @@ class TestChatAgentPromptTemplate:
         assert isinstance(result, ChatPromptValue)
 
     def test_normal_message_after_invalid_command_does_not_raise_error(
-        self, prompt_config
+        self, model_provider, prompt_config
     ):
         """Test that a normal message sent after an invalid command does not raise an error."""
         state_with_history = ChatWorkflowState(
@@ -390,7 +394,7 @@ class TestChatAgentPromptTemplate:
             approval=None,
         )
 
-        template = ChatAgentPromptTemplate(prompt_config)
+        template = ChatAgentPromptTemplate(model_provider, prompt_config)
 
         with patch.object(
             GitLabServiceContext, "get_current_instance_info", return_value=None
@@ -407,7 +411,9 @@ class TestChatAgentPromptTemplate:
         "valid_command",
         ["/explain", "/refactor", "/tests", "/fix"],
     )
-    def test_all_valid_commands_do_not_raise_error(self, prompt_config, valid_command):
+    def test_all_valid_commands_do_not_raise_error(
+        self, model_provider, prompt_config, valid_command
+    ):
         """Test that all valid slash commands do not raise an error."""
         state_with_command = ChatWorkflowState(
             plan={"steps": []},
@@ -424,7 +430,7 @@ class TestChatAgentPromptTemplate:
             approval=None,
         )
 
-        template = ChatAgentPromptTemplate(prompt_config)
+        template = ChatAgentPromptTemplate(model_provider, prompt_config)
 
         with patch.object(
             GitLabServiceContext, "get_current_instance_info", return_value=None
@@ -475,12 +481,10 @@ class TestChatAgentPromptTemplate:
 
         mock_prompt_caching.return_value = caching_enabled_for_user
 
-        template = ChatAgentPromptTemplate(prompt_config)
+        template = ChatAgentPromptTemplate(model_class_provider, prompt_config)
 
         # Update model_metadata's llm_definition params with the test provider (as string value)
-        model_metadata.llm_definition.params["model_class_provider"] = (
-            model_class_provider.value
-        )
+        model_metadata.llm_definition.model_class_provider = model_class_provider.value
 
         mock_gitlab_info = GitLabInstanceInfo(
             instance_type="GitLab.com (SaaS)",
@@ -584,13 +588,14 @@ class TestPromptAdapterFriendlyName:
         model_metadata: ModelMetadata,
         project,
         namespace,
+        model_provider,
         prompt_config,
     ):
         """Test that ChatAgentPromptTemplate injects friendly_name into template."""
         mock_context.get.return_value = model_metadata
         mock_instance_info.return_value = mock_gitlab_instance_info
 
-        adapter = ChatAgentPromptTemplate(prompt_config)
+        adapter = ChatAgentPromptTemplate(model_provider, prompt_config)
 
         input_data: ChatWorkflowState = {
             "conversation_history": {"test_agent": [HumanMessage(content="Hello")]},
@@ -627,13 +632,14 @@ class TestPromptAdapterFriendlyName:
         mock_context,
         mock_instance_info,
         mock_gitlab_instance_info,
+        model_provider,
         prompt_config,
     ):
         """Test that ChatAgentPromptTemplate handles missing model metadata gracefully."""
         mock_context.get.return_value = None
         mock_instance_info.return_value = mock_gitlab_instance_info
 
-        adapter = ChatAgentPromptTemplate(prompt_config)
+        adapter = ChatAgentPromptTemplate(model_provider, prompt_config)
 
         input_data = {
             "conversation_history": {"test_agent": [HumanMessage(content="Hello")]},
@@ -668,6 +674,7 @@ class TestPromptAdapterFriendlyName:
         mock_context,
         mock_instance_info,
         mock_gitlab_instance_info,
+        model_provider,
         prompt_config,
         model_metadata: ModelMetadata,
         project,
@@ -680,7 +687,7 @@ class TestPromptAdapterFriendlyName:
         mock_context.get.return_value = model_metadata
         mock_instance_info.return_value = mock_gitlab_instance_info
 
-        adapter = ChatAgentPromptTemplate(prompt_config)
+        adapter = ChatAgentPromptTemplate(model_provider, prompt_config)
 
         input_data: ChatWorkflowState = {
             "conversation_history": {"test_agent": [HumanMessage(content="Hello")]},

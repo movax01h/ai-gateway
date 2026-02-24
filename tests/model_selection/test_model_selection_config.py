@@ -7,7 +7,9 @@ from gitlab_cloud_connector import GitLabUnitPrimitive
 from pyfakefs.fake_filesystem import FakeFilesystem
 
 from ai_gateway.model_selection.model_selection_config import (
-    LLMDefinition,
+    ChatAnthropicDefinition,
+    ChatLiteLLMDefinition,
+    CompletionLiteLLMDefinition,
     ModelSelectionConfig,
     UnitPrimitiveConfig,
 )
@@ -27,12 +29,14 @@ def mock_fs_fixture(fs: FakeFilesystem):
             models:
               - name: Model One
                 gitlab_identifier: gitlab-model-1
+                model_class_provider: litellm
                 max_context_tokens: 200000
                 params:
                   model: provider-model-1
-                  param1: value1
+                  custom_llm_provider: value1
               - name: Model Two
                 gitlab_identifier: gitlab-model-2
+                model_class_provider: anthropic
                 max_context_tokens: 200000
                 params:
                   model: provider-model-2
@@ -69,13 +73,13 @@ def selection_config_fixture(mock_fs):  # pylint: disable=unused-argument
 
 def test_load_llm_definitions(selection_config):
     assert selection_config.get_llm_definitions() == {
-        "gitlab-model-1": LLMDefinition(
+        "gitlab-model-1": ChatLiteLLMDefinition(
             name="Model One",
             gitlab_identifier="gitlab-model-1",
             max_context_tokens=200000,
-            params={"model": "provider-model-1", "param1": "value1"},
+            params={"model": "provider-model-1", "custom_llm_provider": "value1"},
         ),
-        "gitlab-model-2": LLMDefinition(
+        "gitlab-model-2": ChatAnthropicDefinition(
             name="Model Two",
             gitlab_identifier="gitlab-model-2",
             max_context_tokens=200000,
@@ -166,11 +170,11 @@ def test_singleton_caches_yaml_loading():
 
 
 def test_get_model(selection_config):
-    assert selection_config.get_model("gitlab-model-1") == LLMDefinition(
+    assert selection_config.get_model("gitlab-model-1") == ChatLiteLLMDefinition(
         name="Model One",
         gitlab_identifier="gitlab-model-1",
         max_context_tokens=200000,
-        params={"model": "provider-model-1", "param1": "value1"},
+        params={"model": "provider-model-1", "custom_llm_provider": "value1"},
     )
 
 
@@ -180,11 +184,13 @@ def test_get_model_missing_key(selection_config):
 
 
 def test_get_model_for_feature(selection_config):
-    assert selection_config.get_model_for_feature("test_config") == LLMDefinition(
+    assert selection_config.get_model_for_feature(
+        "test_config"
+    ) == ChatLiteLLMDefinition(
         name="Model One",
         gitlab_identifier="gitlab-model-1",
         max_context_tokens=200000,
-        params={"model": "provider-model-1", "param1": "value1"},
+        params={"model": "provider-model-1", "custom_llm_provider": "value1"},
     )
 
 
@@ -231,6 +237,7 @@ def test_validate_with_error(fs: FakeFilesystem):
               - name: Model One
                 gitlab_identifier: model_1
                 max_context_tokens: 200000
+                model_class_provider: anthropic
                 params:
                   model: provider-model-1
             """
@@ -262,16 +269,19 @@ def test_validate_default_model_not_in_selectable_models(fs: FakeFilesystem):
               - name: Model One
                 gitlab_identifier: model_1
                 max_context_tokens: 200000
+                model_class_provider: anthropic
                 params:
                   model: provider-model-1
               - name: Model Two
                 gitlab_identifier: model_2
                 max_context_tokens: 200000
+                model_class_provider: anthropic
                 params:
                   model: provider-model-2
               - name: Model Three
                 gitlab_identifier: model_3
                 max_context_tokens: 200000
+                model_class_provider: anthropic
                 params:
                   model: provider-model-3
             """
@@ -330,23 +340,27 @@ def test_get_proxy_models_for_provider(fs: FakeFilesystem):
                 gitlab_identifier: claude_sonnet
                 max_context_tokens: 200000
                 proxy_provider: anthropic
+                model_class_provider: anthropic
                 params:
                   model: claude-sonnet-4-5-20250929
               - name: Claude Opus
                 gitlab_identifier: claude_opus
                 max_context_tokens: 200000
                 proxy_provider: anthropic
+                model_class_provider: anthropic
                 params:
                   model: claude-opus-4-5-20251101
               - name: GPT Model
                 gitlab_identifier: gpt_model
                 max_context_tokens: 128000
                 proxy_provider: openai
+                model_class_provider: openai
                 params:
                   model: gpt-5
               - name: Non-proxy Model
                 gitlab_identifier: non_proxy
                 max_context_tokens: 200000
+                model_class_provider: anthropic
                 params:
                   model: some-model
             """
@@ -389,12 +403,13 @@ def test_fireworks_models_have_max_retries_10():
     fireworks_models = [
         (identifier, definition)
         for identifier, definition in llm_definitions.items()
-        if definition.params.get("custom_llm_provider") == "fireworks_ai"
+        if isinstance(definition, CompletionLiteLLMDefinition)
+        and definition.params.custom_llm_provider == "fireworks_ai"
     ]
 
     assert len(fireworks_models) > 0, "No Fireworks models found in models.yml"
 
     for identifier, definition in fireworks_models:
         assert (
-            definition.params.get("max_retries") == 10
-        ), f"Fireworks model '{identifier}' should have max_retries=10, got {definition.params.get('max_retries')}"
+            definition.params.max_retries == 10
+        ), f"Fireworks model '{identifier}' should have max_retries=10, got {definition.params.max_retries}"

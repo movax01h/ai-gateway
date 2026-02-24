@@ -2,7 +2,6 @@
 name: GPT Code Generations
 model:
   params:
-    model_class_provider: litellm
     temperature: 1.0
     max_tokens: 512
 unit_primitives:

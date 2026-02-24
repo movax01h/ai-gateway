@@ -1,8 +1,5 @@
 ---
 name: Developer Add Plan Comment
-model:
-  params:
-    model_class_provider: litellm
 unit_primitives:
   - duo_workflow_execute_workflow
 prompt_template:

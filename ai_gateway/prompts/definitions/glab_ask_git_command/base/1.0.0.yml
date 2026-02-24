@@ -1,8 +1,5 @@
 ---
 name: Claude Haiku 3 Glab Ask Git Command
-model:
-  params:
-    model_class_provider: anthropic
 unit_primitives:
   - glab_ask_git_command
 prompt_template:

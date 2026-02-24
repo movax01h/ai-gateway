@@ -1,8 +1,5 @@
 ---
 name: Summarize Review
-model:
-  params:
-    model_class_provider: anthropic
 unit_primitives:
   - duo_agent_platform
 prompt_template:

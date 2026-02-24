@@ -2,7 +2,6 @@
 name: Claude 3 Code Generations Agent
 model:
   params:
-    model_class_provider: litellm
     temperature: 0.2
     max_tokens: 2048
 unit_primitives:

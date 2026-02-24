@@ -1,11 +1,21 @@
 from itertools import chain
 from pathlib import Path
-from typing import Any, Iterable, Literal, Optional
+from typing import Annotated, Iterable, Literal, Optional
 
 import yaml
 from gitlab_cloud_connector import GitLabUnitPrimitive
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field, TypeAdapter
 
+from ai_gateway.model_selection.models import (
+    BaseModelParams,
+    ChatAmazonQParams,
+    ChatAnthropicParams,
+    ChatGoogleGenAIParams,
+    ChatLiteLLMParams,
+    ChatOpenAIParams,
+    CompletionLiteLLMParams,
+    ModelClassProvider,
+)
 from ai_gateway.model_selection.types import DeprecationInfo, DevConfig
 
 BASE_PATH = Path(__file__).parent
@@ -25,7 +35,7 @@ class PromptParams(BaseModel):
     cache_control_injection_points: list[dict] | None = None
 
 
-class LLMDefinition(BaseModel):
+class BaseLLMDefinition(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     name: str
@@ -35,10 +45,61 @@ class LLMDefinition(BaseModel):
     provider: Optional[str] = None
     description: str | None = None
     cost_indicator: Literal["$", "$$", "$$$", "$$$$"] | None = None
-    params: dict[str, Any] = {}
+    params: BaseModelParams
     family: list[str] = []
     deprecation: Optional[DeprecationInfo] = None
     proxy_provider: Optional[str] = None
+
+
+class ChatLiteLLMDefinition(BaseLLMDefinition):
+    model_class_provider: Literal[ModelClassProvider.LITE_LLM] = (
+        ModelClassProvider.LITE_LLM
+    )
+    params: ChatLiteLLMParams = ChatLiteLLMParams()
+
+
+class ChatAnthropicDefinition(BaseLLMDefinition):
+    model_class_provider: Literal[ModelClassProvider.ANTHROPIC] = (
+        ModelClassProvider.ANTHROPIC
+    )
+    params: ChatAnthropicParams = ChatAnthropicParams()
+
+
+class ChatAmazonQDefinition(BaseLLMDefinition):
+    model_class_provider: Literal[ModelClassProvider.AMAZON_Q] = (
+        ModelClassProvider.AMAZON_Q
+    )
+    params: ChatAmazonQParams = ChatAmazonQParams()
+
+
+class ChatOpenAIDefinition(BaseLLMDefinition):
+    model_class_provider: Literal[ModelClassProvider.OPENAI] = ModelClassProvider.OPENAI
+    params: ChatOpenAIParams = ChatOpenAIParams()
+
+
+class ChatGoogleGenAIDefinition(BaseLLMDefinition):
+    model_class_provider: Literal[ModelClassProvider.GOOGLE_GENAI] = (
+        ModelClassProvider.GOOGLE_GENAI
+    )
+    params: ChatGoogleGenAIParams = ChatGoogleGenAIParams()
+
+
+class CompletionLiteLLMDefinition(BaseLLMDefinition):
+    model_class_provider: Literal[ModelClassProvider.LITE_LLM_COMPLETION] = (
+        ModelClassProvider.LITE_LLM_COMPLETION
+    )
+    params: CompletionLiteLLMParams
+
+
+LLMDefinition = Annotated[
+    ChatLiteLLMDefinition
+    | ChatAnthropicDefinition
+    | ChatAmazonQDefinition
+    | ChatOpenAIDefinition
+    | ChatGoogleGenAIDefinition
+    | CompletionLiteLLMDefinition,
+    Field(discriminator="model_class_provider"),
+]
 
 
 class UnitPrimitiveConfig(BaseModel):
@@ -75,7 +136,9 @@ class ModelSelectionConfig:
                 config_data = yaml.safe_load(f)
 
             self._llm_definitions = {
-                model_data["gitlab_identifier"]: LLMDefinition(**model_data)
+                model_data["gitlab_identifier"]: TypeAdapter(
+                    LLMDefinition
+                ).validate_python(model_data)
                 for model_data in config_data["models"]
             }
 
@@ -179,9 +242,9 @@ class ModelSelectionConfig:
         """
         llm_definitions = self.get_llm_definitions()
         return [
-            llm_def.params.get("model", "")
+            llm_def.params.model or ""
             for llm_def in llm_definitions.values()
-            if llm_def.proxy_provider == provider and llm_def.params.get("model")
+            if llm_def.proxy_provider == provider and llm_def.params.model
         ]
 
     def get_model(self, model_id: str) -> LLMDefinition:

@@ -1,8 +1,5 @@
 ---
 name: Default configuration for the Duo Chat documentation question answering
-model:
-  params:
-    model_class_provider: anthropic
 unit_primitives:
   - documentation_search
 prompt_template:

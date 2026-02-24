@@ -1,8 +1,5 @@
 ---
 name: Gemini 1.5 Flash Measure Comment Temperature
-model:
-  params:
-    model_class_provider: litellm
 unit_primitives:
   - measure_comment_temperature
 prompt_template:

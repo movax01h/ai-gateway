@@ -2,7 +2,6 @@
 name: Codestral Fix Code agent
 model:
   params:
-    model_class_provider: litellm
     temperature: 0.3
     max_tokens: 2_048
 unit_primitives:

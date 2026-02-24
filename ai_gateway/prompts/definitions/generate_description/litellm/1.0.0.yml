@@ -1,8 +1,5 @@
 ---
 name: Generate Description
-model:
-  params:
-    model_class_provider: litellm
 unit_primitives:
   - generate_issue_description
 prompt_template:

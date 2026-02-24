@@ -1,8 +1,5 @@
 ---
 name: Claude 3 Generate Description
-model:
-  params:
-    model_class_provider: anthropic
 unit_primitives:
   - generate_issue_description
 prompt_template:

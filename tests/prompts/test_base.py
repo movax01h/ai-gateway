@@ -28,7 +28,13 @@ from ai_gateway.model_metadata import (
     ModelMetadata,
     TypeModelMetadata,
 )
-from ai_gateway.model_selection import LLMDefinition, PromptParams
+from ai_gateway.model_selection import PromptParams
+from ai_gateway.model_selection.model_selection_config import (
+    ChatAmazonQDefinition,
+    ChatAnthropicDefinition,
+    ChatLiteLLMDefinition,
+)
+from ai_gateway.model_selection.models import ModelClassProvider
 from ai_gateway.models.v2.anthropic_claude import ChatAnthropic
 from ai_gateway.prompts import (
     BasePromptCallbackHandler,
@@ -37,11 +43,6 @@ from ai_gateway.prompts import (
     jinja2_formatter,
 )
 from ai_gateway.prompts.config.base import PromptConfig
-from ai_gateway.prompts.config.models import (
-    ChatAnthropicParams,
-    ChatLiteLLMParams,
-    ModelClassProvider,
-)
 from ai_gateway.prompts.typing import TypeModelFactory, TypePromptTemplateFactory
 from ai_gateway.vendor.langchain_litellm.litellm import ChatLiteLLM
 from lib.context import StarletteUser, current_model_metadata_context
@@ -124,30 +125,13 @@ configurable_unit_primitives:
 
             yield
 
-    @pytest.mark.parametrize(
-        ("model_params", "expected_llm_provider"),
-        [
-            ({"model_class_provider": "litellm"}, "litellm"),
-            (
-                {
-                    "model_class_provider": "litellm",
-                    "custom_llm_provider": "my_engine",
-                },
-                "my_engine",
-            ),
-        ],
-    )
     def test_initialize(
         self,
         prompt: Prompt,
         unit_primitives: list[GitLabUnitPrimitive],
-        model_params: dict,
-        expected_llm_provider: str,
     ):
         assert prompt.name == "test_prompt"
         assert prompt.unit_primitives == unit_primitives
-        assert prompt.model_provider == model_params["model_class_provider"]
-        assert prompt.llm_provider == expected_llm_provider
         assert isinstance(prompt.bound, Runnable)
 
     def test_build_prompt_template(self, prompt_config: PromptConfig):
@@ -648,6 +632,7 @@ configurable_unit_primitives:
     )
     def test_bind_tools_with_tool_choice(
         self,
+        model_provider: ModelClassProvider,
         prompt_config: PromptConfig,
         model_metadata: TypeModelMetadata,
         model_factory: TypeModelFactory,
@@ -664,6 +649,7 @@ configurable_unit_primitives:
             mock_tool.description = "Test tool description"
 
             Prompt(
+                model_provider=model_provider,
                 model_factory=model_factory,
                 config=prompt_config,
                 model_metadata=model_metadata,
@@ -726,27 +712,25 @@ class TestPromptCaching:
     @mock.patch("ai_gateway.prompts.base.filter_cache_control_injection_points")
     @mock.patch("ai_gateway.prompts.base.CacheControlInjectionPointsConverter")
     @pytest.mark.parametrize(
-        ("prompt_params", "model_params", "expected_to_use_converter"),
+        ("prompt_params", "model_provider", "expected_to_use_converter"),
         [
             (
                 PromptParams(
                     cache_control_injection_points=[{"location": "message", "index": 0}]
                 ),
-                ChatAnthropicParams(model_class_provider=ModelClassProvider.ANTHROPIC),
+                ModelClassProvider.ANTHROPIC,
                 True,
             ),
             (
                 PromptParams(
                     cache_control_injection_points=[{"location": "message", "index": 0}]
                 ),
-                ChatLiteLLMParams(
-                    model="test_model", model_class_provider=ModelClassProvider.LITE_LLM
-                ),
+                ModelClassProvider.LITE_LLM,
                 False,
             ),
             (
                 PromptParams(),
-                ChatAnthropicParams(model_class_provider=ModelClassProvider.ANTHROPIC),
+                ModelClassProvider.ANTHROPIC,
                 False,
             ),
         ],
@@ -755,13 +739,20 @@ class TestPromptCaching:
         self,
         mock_cache_control_injection_points_converter,
         mock_filter_cache_control_injection_points,
+        model_provider: ModelClassProvider,
         model_factory: TypeModelFactory,
         prompt_config: PromptConfig,
         model_metadata: TypeModelMetadata | None,
         prompt_template_factory: TypePromptTemplateFactory | None,
         expected_to_use_converter: bool,
     ):
-        Prompt(model_factory, prompt_config, model_metadata, prompt_template_factory)
+        Prompt(
+            model_provider,
+            model_factory,
+            prompt_config,
+            model_metadata,
+            prompt_template_factory,
+        )
 
         mock_filter_cache_control_injection_points.assert_called_once()
 
@@ -824,7 +815,7 @@ class TestBaseRegistry:
                     provider="litellm",
                     endpoint=AnyUrl("http://localhost:4000"),
                     api_key="token",
-                    llm_definition=LLMDefinition(
+                    llm_definition=ChatLiteLLMDefinition(
                         gitlab_identifier="mistral",
                         name="Mistral",
                         max_context_tokens=128000,
@@ -843,7 +834,7 @@ class TestBaseRegistry:
                     name="amazon_q",
                     provider="amazon_q",
                     role_arn="role-arn",
-                    llm_definition=LLMDefinition(
+                    llm_definition=ChatAmazonQDefinition(
                         gitlab_identifier="amazon_q",
                         name="Amazon Q",
                         max_context_tokens=100000,
@@ -962,7 +953,7 @@ class TestBaseRegistry:
                     provider="litellm",
                     endpoint=AnyUrl("http://localhost:4000"),
                     api_key="token",
-                    llm_definition=LLMDefinition(
+                    llm_definition=ChatLiteLLMDefinition(
                         gitlab_identifier="mistral",
                         name="Mistral",
                         max_context_tokens=128000,
@@ -1146,16 +1137,13 @@ class TestPromptCallbacks:
 
             async def on_before_llm_call(self):
                 captured_data["model_name"] = self.prompt.model_name
-                captured_data["llm_provider"] = self.prompt.llm_provider
 
         prompt.internal_callbacks = [ContextCallback(prompt)]
 
         await prompt.ainvoke({"name": "Duo", "content": "What's up?"})
 
         assert "model_name" in captured_data
-        assert "llm_provider" in captured_data
         assert captured_data["model_name"] == prompt.model_name
-        assert captured_data["llm_provider"] == prompt.llm_provider
 
     @pytest.mark.asyncio
     async def test_callbacks_execute_before_llm_call(self, prompt: Prompt):
@@ -1223,12 +1211,15 @@ class TestValidateDefaultModels:
 models:
   - name: Model A
     gitlab_identifier: model_a
+    model_class_provider: anthropic
     max_context_tokens: 1000
   - name: Model B
     gitlab_identifier: model_b
+    model_class_provider: litellm
     max_context_tokens: 1000
   - name: Model C
     gitlab_identifier: model_c
+    model_class_provider: amazon_q
     max_context_tokens: 1000
 """,
         )
@@ -1362,7 +1353,7 @@ configurable_unit_primitives:
                             provider="gitlab",
                             name="model_a",
                             friendly_name="Model A",
-                            llm_definition=LLMDefinition(
+                            llm_definition=ChatAnthropicDefinition(
                                 name="Model A",
                                 gitlab_identifier="model_a",
                                 max_context_tokens=1000,
@@ -1376,7 +1367,7 @@ configurable_unit_primitives:
                             provider="gitlab",
                             name="model_b",
                             friendly_name="Model B",
-                            llm_definition=LLMDefinition(
+                            llm_definition=ChatLiteLLMDefinition(
                                 name="Model B",
                                 gitlab_identifier="model_b",
                                 max_context_tokens=1000,

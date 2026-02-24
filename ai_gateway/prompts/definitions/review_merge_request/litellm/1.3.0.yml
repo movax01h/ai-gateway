@@ -2,7 +2,6 @@
 name: Review Merge Request
 model:
   params:
-    model_class_provider: litellm
     max_tokens: 8_192
 unit_primitives:
   - review_merge_request

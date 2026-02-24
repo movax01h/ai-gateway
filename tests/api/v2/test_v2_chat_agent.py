@@ -30,7 +30,11 @@ from ai_gateway.model_metadata import (
     ModelMetadata,
     TypeModelMetadata,
 )
-from ai_gateway.model_selection.model_selection_config import LLMDefinition
+from ai_gateway.model_selection.model_selection_config import (
+    ChatAmazonQDefinition,
+    ChatAnthropicDefinition,
+    ChatLiteLLMDefinition,
+)
 from ai_gateway.models.base_chat import Role
 from ai_gateway.prompts.typing import Model
 
@@ -146,7 +150,7 @@ class TestReActAgentStream:
                     name="claude_haiku_4_5_20251001",
                     provider="anthropic",
                     endpoint=AnyUrl("http://localhost:4000"),
-                    llm_definition=LLMDefinition(
+                    llm_definition=ChatAnthropicDefinition(
                         gitlab_identifier="claude",
                         name="claude",
                         max_context_tokens=200000,
@@ -168,7 +172,7 @@ class TestReActAgentStream:
                     name="amazon_q",
                     provider="amazon_q",
                     role_arn="role-arn",
-                    llm_definition=LLMDefinition(
+                    llm_definition=ChatAmazonQDefinition(
                         gitlab_identifier="amazon_q",
                         name="Amazon Q",
                         max_context_tokens=100000,
@@ -216,7 +220,7 @@ class TestReActAgentStream:
                     provider="litellm",
                     endpoint=AnyUrl("http://localhost:4000"),
                     api_key="token",
-                    llm_definition=LLMDefinition(
+                    llm_definition=ChatLiteLLMDefinition(
                         gitlab_identifier="mistral",
                         name="Mistral",
                         max_context_tokens=128000,
@@ -265,7 +269,7 @@ class TestReActAgentStream:
                     provider="litellm",
                     endpoint=AnyUrl("http://localhost:4000"),
                     api_key="token",
-                    llm_definition=LLMDefinition(
+                    llm_definition=ChatLiteLLMDefinition(
                         gitlab_identifier="mistral",
                         name="Mistral",
                         max_context_tokens=128000,
@@ -400,7 +404,7 @@ class TestReActAgentStream:
                     provider="litellm",
                     endpoint=AnyUrl("http://localhost:4000"),
                     api_key="token",
-                    llm_definition=LLMDefinition(
+                    llm_definition=ChatLiteLLMDefinition(
                         gitlab_identifier="mistral",
                         name="Mistral",
                         max_context_tokens=128000,
@@ -736,7 +740,7 @@ class TestReActAgentStream:
                     name="amazon_q",
                     provider="amazon_q",
                     role_arn="role-arn",
-                    llm_definition=LLMDefinition(
+                    llm_definition=ChatAmazonQDefinition(
                         gitlab_identifier="amazon_q",
                         name="Amazon Q",
                         max_context_tokens=100000,

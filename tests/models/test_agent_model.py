@@ -3,6 +3,8 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from ai_gateway.model_selection import LLMDefinition
+from ai_gateway.model_selection.model_selection_config import ChatLiteLLMDefinition
+from ai_gateway.model_selection.models import ChatLiteLLMParams
 from ai_gateway.models.agent_model import AgentModel
 from ai_gateway.models.base_text import TextGenModelOutput
 from ai_gateway.prompts.base import Prompt
@@ -28,11 +30,12 @@ class TestAgentModel:
 
     @pytest.fixture(name="llm_definition")
     def llm_definition_fixture(self) -> LLMDefinition:
-        return LLMDefinition(
+
+        return ChatLiteLLMDefinition(
             name="Test Model",
             gitlab_identifier="test_model",
             max_context_tokens=128000,
-            params={"model": "test-model"},
+            params=ChatLiteLLMParams(model="test-model"),
         )
 
     @pytest.fixture(name="model")

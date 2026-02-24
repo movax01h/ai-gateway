@@ -11,6 +11,7 @@ from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.runnables import Runnable, RunnableConfig
 from langchain_core.tools import BaseTool
 
+from ai_gateway.model_selection.models import ModelClassProvider
 from ai_gateway.prompts import BasePromptRegistry, prompt_template_to_messages
 from ai_gateway.prompts.config.base import PromptConfig
 from duo_workflow_service.agents.base import BaseAgent
@@ -36,7 +37,7 @@ log = structlog.stdlib.get_logger("agent_v2")
 class AgentPromptTemplate(Runnable[dict, PromptValue]):
     messages: list[BaseMessage]
 
-    def __init__(self, config: PromptConfig):
+    def __init__(self, _model_provider: ModelClassProvider, config: PromptConfig):
         self.agent_name = config.name
         self.preamble_messages = prompt_template_to_messages(config.prompt_template)
 
