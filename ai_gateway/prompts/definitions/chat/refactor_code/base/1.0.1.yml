@@ -1,5 +1,5 @@
 ---
-name: Claude 3.7 Refactor Code agent
+name: Refactor Code agent
 model:
   params:
     temperature: 0.1

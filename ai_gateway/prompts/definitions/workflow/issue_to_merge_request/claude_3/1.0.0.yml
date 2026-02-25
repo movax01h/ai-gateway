@@ -1,9 +1,0 @@
----
-name: context_builder
-unit_primitives:
-  - duo_workflow_execute_workflow
-prompt_template:
-  system: |
-    {% include 'workflow/issue_to_merge_request/system/1.0.0.jinja' %}
-  user: |
-    {% include 'workflow/issue_to_merge_request/user/1.0.0.jinja' %}

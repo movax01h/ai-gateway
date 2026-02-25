@@ -676,7 +676,7 @@ def llm_definition_fixture():
         name="Mistral",
         gitlab_identifier="mistral",
         max_context_tokens=128000,
-        family=["mistral", "litellm"],
+        family=["mistral"],
         params={"model": "mistral", "temperature": 0.0, "max_tokens": 4096},
     )
 
@@ -686,7 +686,7 @@ def model_metadata_fixture(llm_definition: LLMDefinition):
     return ModelMetadata(
         provider="gitlab",
         name="mistral",
-        family=["mistral", "litellm"],
+        family=["mistral"],
         llm_definition=llm_definition,
         friendly_name="Mistral",
     )

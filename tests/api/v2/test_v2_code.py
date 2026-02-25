@@ -1250,7 +1250,7 @@ class TestCodeCompletions:
             ),
             (
                 "claude_sonnet_4_20250514",
-                "Claude Code Completions",
+                "Code Completions",
                 False,
             ),
         ],

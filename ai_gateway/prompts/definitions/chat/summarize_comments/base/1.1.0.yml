@@ -1,5 +1,5 @@
 ---
-name: Claude 4.0 Summarize Comments agent
+name: Summarize Comments agent
 model:
   params:
     temperature: 0.1

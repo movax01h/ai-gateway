@@ -1,5 +1,8 @@
 ---
 name: Default configuration for the Duo Chat documentation question answering
+model:
+  params:
+    temperature: 0.1
 unit_primitives:
   - documentation_search
 prompt_template:

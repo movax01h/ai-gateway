@@ -1,5 +1,5 @@
 ---
-name: Gemini 2.0 Flash Measure Comment Temperature
+name: Measure Comment Temperature
 unit_primitives:
   - measure_comment_temperature
 prompt_template:
