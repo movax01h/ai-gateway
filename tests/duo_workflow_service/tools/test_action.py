@@ -233,8 +233,8 @@ async def test__execute_action_and_get_action_response_plaintext_error(
 
 
 @pytest.mark.asyncio
-async def test_execute_action_fallback_to_legacy_response(metadata):
-    """Test that _execute_action falls back to legacy response when response_type is not set."""
+async def test_execute_action_missing_structured_response(metadata):
+    """Test that _execute_action raises a tool exception if both httpResponse and plaintextResponse are missing."""
     action = contract_pb2.Action()
     client_event = contract_pb2.ClientEvent()
 
@@ -249,16 +249,20 @@ async def test_execute_action_fallback_to_legacy_response(metadata):
     with patch(
         "duo_workflow_service.executor.action.structlog.stdlib.get_logger"
     ) as mock_get_logger:
-        mock_logger = mock_get_logger.return_value
+        with pytest.raises(ToolException) as exc_info:
+            mock_logger = mock_get_logger.return_value
 
-        response = await _execute_action(metadata, action)
+            response = await _execute_action(metadata, action)
 
-        assert response == "some legacy response"
+            assert response == "some legacy response"
 
-        # Verify the warning was logged
-        mock_logger.warning.assert_called_once_with(
-            "Executor doesn't return expected response fields, falling back to legacy response"
-        )
+            # Verify the warning was logged
+            mock_logger.error.assert_called_once_with(
+                "Response error, missing plain text or http response"
+            )
+
+    expected_tool_error = "Executor doesn't return expected response fields"
+    assert expected_tool_error in str(exc_info.value)
 
 
 @pytest.mark.asyncio
