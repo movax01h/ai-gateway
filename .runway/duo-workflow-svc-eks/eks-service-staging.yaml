@@ -20,7 +20,7 @@ duo-workflow-svc-eks:
       LANGSMITH_PROJECT: "duo-workflow-staging"
       DUO_WORKFLOW_SERVICE_ENVIRONMENT: "staging"
       DUO_WORKFLOW_DIRECT_CONNECTION_BASE_URL: "https://staging.gitlab.com"
-      AIGW_GOOGLE_CLOUD_PLATFORM__PROJECT: "gitlab-ai-framework-stage"
+      AIGW_GOOGLE_CLOUD_PLATFORM__PROJECT: "gitlab-ai-framework-dev"
     scalability:
       min_instances: 1
       max_instances: 8
