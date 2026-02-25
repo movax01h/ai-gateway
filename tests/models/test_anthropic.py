@@ -45,7 +45,7 @@ from ai_gateway.safety_attributes import SafetyAttributes
 class TestAnthropicModel:
     @pytest.mark.parametrize(
         "model_name_version",
-        ["claude-3-5-sonnet-20241022"],
+        ["claude-sonnet-4-5-20250929"],
     )
     def test_anthropic_model_from_name(self, model_name_version: str):
         model = AnthropicModel.from_model_name(model_name_version, Mock())
@@ -57,19 +57,19 @@ class TestAnthropicModel:
         ("model_name_version", "opts", "opts_client", "opts_model"),
         [
             (
-                "claude-3-5-sonnet-20241022",
+                "claude-sonnet-4-5-20250929",
                 {},
                 AnthropicModel.OPTS_CLIENT,
                 AnthropicModel.OPTS_MODEL,
             ),
             (
-                "claude-3-5-sonnet-20241022",
+                "claude-sonnet-4-5-20250929",
                 {"version": "2020-10-10"},
                 AnthropicModel.OPTS_CLIENT,
                 AnthropicModel.OPTS_MODEL,
             ),
             (
-                "claude-3-5-sonnet-20241022",
+                "claude-sonnet-4-5-20250929",
                 {
                     "timeout": 6,
                     "max_tokens_to_sample": 5,
@@ -125,18 +125,18 @@ class TestAnthropicModel:
     @pytest.mark.parametrize(
         ("model_name_version", "exception", "expected_exception"),
         [
-            ("claude-3-5-sonnet-20241022", BadRequestError, AnthropicAPIStatusError),
+            ("claude-sonnet-4-5-20250929", BadRequestError, AnthropicAPIStatusError),
             (
-                "claude-3-5-sonnet-20241022",
+                "claude-sonnet-4-5-20250929",
                 UnprocessableEntityError,
                 AnthropicAPIStatusError,
             ),
             (
-                "claude-3-5-sonnet-20241022",
+                "claude-sonnet-4-5-20250929",
                 APIConnectionError,
                 AnthropicAPIConnectionError,
             ),
-            ("claude-3-5-sonnet-20241022", APITimeoutError, AnthropicAPITimeoutError),
+            ("claude-sonnet-4-5-20250929", APITimeoutError, AnthropicAPITimeoutError),
         ],
     )
     async def test_anthropic_model_error(
@@ -172,7 +172,7 @@ class TestAnthropicModel:
         ),
         [
             (
-                "claude-3-5-sonnet-20241022",
+                "claude-sonnet-4-5-20250929",
                 "random_prompt",
                 "random_text",
                 {},
@@ -185,7 +185,7 @@ class TestAnthropicModel:
                 ),
             ),
             (
-                "claude-3-5-sonnet-20241022",
+                "claude-sonnet-4-5-20250929",
                 "random_prompt",
                 "random_text",
                 {"top_k": 10},
@@ -198,7 +198,7 @@ class TestAnthropicModel:
                 ),
             ),
             (
-                "claude-3-5-sonnet-20241022",
+                "claude-sonnet-4-5-20250929",
                 "random_prompt",
                 "random_text",
                 {"temperature": 1},
@@ -214,7 +214,7 @@ class TestAnthropicModel:
                 ),
             ),
             (
-                "claude-3-5-sonnet-20241022",
+                "claude-sonnet-4-5-20250929",
                 "random_prompt",
                 "random_text",
                 {"temperature": 1},
@@ -230,7 +230,7 @@ class TestAnthropicModel:
                 ),
             ),
             (
-                "claude-3-5-sonnet-20241022",
+                "claude-sonnet-4-5-20250929",
                 "random_prompt",
                 "random_text",
                 {},
@@ -293,7 +293,7 @@ class TestAnthropicModel:
     @pytest.mark.asyncio
     async def test_anthropic_model_generate_instrumented(self):
         model = AnthropicModel(
-            model_name=KindAnthropicModel.CLAUDE_3_5_SONNET_V2.value,
+            model_name=KindAnthropicModel.CLAUDE_SONNET_4_5.value,
             client=Mock(spec=AsyncAnthropic),
         )
         model.client.completions.create = AsyncMock()
@@ -312,14 +312,14 @@ class TestAnthropicModel:
                 Completion(
                     id="compl_01CtvorJWMstkmATFkR7qVYM",
                     completion="hello",
-                    model=KindAnthropicModel.CLAUDE_3_5_SONNET_V2.value,
+                    model=KindAnthropicModel.CLAUDE_SONNET_4_5.value,
                     stop_reason="stop_sequence",
                     type="completion",
                 ),
                 Completion(
                     id="compl_02CtvorJWMstkmATFkR7qVYM",
                     completion="world",
-                    model=KindAnthropicModel.CLAUDE_3_5_SONNET_V2.value,
+                    model=KindAnthropicModel.CLAUDE_SONNET_4_5.value,
                     stop_reason="stop_sequence",
                     type="completion",
                 ),
@@ -331,7 +331,7 @@ class TestAnthropicModel:
                 yield item
 
         model = AnthropicModel(
-            model_name=KindAnthropicModel.CLAUDE_3_5_SONNET_V2.value,
+            model_name=KindAnthropicModel.CLAUDE_SONNET_4_5.value,
             client=Mock(spec=AsyncAnthropic),
         )
         model.client.completions.create = AsyncMock(side_effect=mock_stream)
@@ -363,21 +363,21 @@ class TestAnthropicModel:
         ),
         [
             (
-                "claude-3-5-sonnet-20241022",
+                "claude-sonnet-4-5-20250929",
                 "random_prompt",
                 [
                     Completion(
                         id="compl_01CtvorJWMstkmATFkR7qVYM",
                         completion="def hello_",
                         stop_reason="stop_sequence",
-                        model="claude-3-5-sonnet-20241022",
+                        model="claude-sonnet-4-5-20250929",
                         type="completion",
                     ),
                     Completion(
                         id="compl_02CtvorJWMstkmATFkR7qVYM",
                         completion="world():",
                         stop_reason="stop_sequence",
-                        model="claude-3-5-sonnet-20241022",
+                        model="claude-sonnet-4-5-20250929",
                         type="completion",
                     ),
                 ],
@@ -425,8 +425,8 @@ class TestAnthropicChatModel:
     @pytest.mark.parametrize(
         "model_name_version",
         [
-            "claude-3-sonnet-20240229",
-            "claude-3-haiku-20240307",
+            "claude-sonnet-4-5-20250929",
+            "claude-haiku-4-5-20251001",
         ],
     )
     def test_anthropic_model_from_name(self, model_name_version: str):
@@ -439,19 +439,19 @@ class TestAnthropicChatModel:
         ("model_name_version", "opts", "opts_client", "opts_model"),
         [
             (
-                "claude-3-haiku-20240307",
+                "claude-haiku-4-5-20251001",
                 {},
                 AnthropicChatModel.OPTS_CLIENT,
                 AnthropicChatModel.OPTS_MODEL,
             ),
             (
-                "claude-3-haiku-20240307",
+                "claude-haiku-4-5-20251001",
                 {"version": "2020-10-10"},
                 AnthropicChatModel.OPTS_CLIENT,
                 AnthropicChatModel.OPTS_MODEL,
             ),
             (
-                "claude-3-haiku-20240307",
+                "claude-haiku-4-5-20251001",
                 {
                     "timeout": 6,
                     "max_tokens": 5,
@@ -507,18 +507,18 @@ class TestAnthropicChatModel:
     @pytest.mark.parametrize(
         ("model_name_version", "exception", "expected_exception"),
         [
-            ("claude-3-haiku-20240307", BadRequestError, AnthropicAPIStatusError),
+            ("claude-haiku-4-5-20251001", BadRequestError, AnthropicAPIStatusError),
             (
-                "claude-3-haiku-20240307",
+                "claude-haiku-4-5-20251001",
                 UnprocessableEntityError,
                 AnthropicAPIStatusError,
             ),
             (
-                "claude-3-haiku-20240307",
+                "claude-haiku-4-5-20251001",
                 APIConnectionError,
                 AnthropicAPIConnectionError,
             ),
-            ("claude-3-haiku-20240307", APITimeoutError, AnthropicAPITimeoutError),
+            ("claude-haiku-4-5-20251001", APITimeoutError, AnthropicAPITimeoutError),
         ],
     )
     async def test_anthropic_model_error(
@@ -559,7 +559,7 @@ class TestAnthropicChatModel:
         ),
         [
             (
-                "claude-3-haiku-20240307",
+                "claude-haiku-4-5-20251001",
                 [
                     Message(role=Role.SYSTEM, content="nice human"),
                     Message(role=Role.USER, content="write code"),
@@ -575,7 +575,7 @@ class TestAnthropicChatModel:
                 ),
             ),
             (
-                "claude-3-haiku-20240307",
+                "claude-haiku-4-5-20251001",
                 [
                     Message(role=Role.SYSTEM, content="nice human"),
                     Message(role=Role.USER, content="write code"),
@@ -591,7 +591,7 @@ class TestAnthropicChatModel:
                 ),
             ),
             (
-                "claude-3-haiku-20240307",
+                "claude-haiku-4-5-20251001",
                 [
                     Message(role=Role.SYSTEM, content="nice human"),
                     Message(role=Role.USER, content="write code"),
@@ -610,7 +610,7 @@ class TestAnthropicChatModel:
                 ),
             ),
             (
-                "claude-3-haiku-20240307",
+                "claude-haiku-4-5-20251001",
                 [
                     Message(role=Role.USER, content="write code"),
                 ],
@@ -628,7 +628,7 @@ class TestAnthropicChatModel:
                 ),
             ),
             (
-                "claude-3-haiku-20240307",
+                "claude-haiku-4-5-20251001",
                 [
                     Message(role=Role.USER, content="write code"),
                     Message(role=Role.ASSISTANT, content="Writing code:"),
@@ -709,7 +709,7 @@ class TestAnthropicChatModel:
     @pytest.mark.asyncio
     async def test_anthropic_model_generate_instrumented(self):
         model = AnthropicChatModel(
-            model_name=KindAnthropicModel.CLAUDE_3_HAIKU.value,
+            model_name=KindAnthropicModel.CLAUDE_HAIKU_4_5.value,
             client=Mock(spec=AsyncAnthropic),
         )
         model.client.messages.create = AsyncMock()
@@ -734,7 +734,7 @@ class TestAnthropicChatModel:
                     message=AMessage(
                         id="msg_01PE3CarfxWEG2taV9AygzH9",
                         content=[],
-                        model=KindAnthropicModel.CLAUDE_3_HAIKU.value,
+                        model=KindAnthropicModel.CLAUDE_HAIKU_4_5.value,
                         role="assistant",
                         stop_reason=None,
                         stop_sequence=None,
@@ -761,7 +761,7 @@ class TestAnthropicChatModel:
                 yield item
 
         model = AnthropicChatModel(
-            model_name=KindAnthropicModel.CLAUDE_3_HAIKU.value,
+            model_name=KindAnthropicModel.CLAUDE_HAIKU_4_5.value,
             client=Mock(spec=AsyncAnthropic),
         )
         model.client.messages.create = AsyncMock(side_effect=mock_stream)
@@ -800,7 +800,7 @@ class TestAnthropicChatModel:
         ),
         [
             (
-                "claude-3-haiku-20240307",
+                "claude-haiku-4-5-20251001",
                 [
                     Message(role=Role.SYSTEM, content="nice human"),
                     Message(role=Role.USER, content="write code"),
@@ -810,7 +810,7 @@ class TestAnthropicChatModel:
                         message=AMessage(
                             id="msg_01PE3CarfxWEG2taV9AygzH9",
                             content=[],
-                            model=KindAnthropicModel.CLAUDE_3_HAIKU,
+                            model=KindAnthropicModel.CLAUDE_HAIKU_4_5,
                             role="assistant",
                             stop_reason=None,
                             stop_sequence=None,

@@ -9,7 +9,7 @@ prompt_template:
     {% if system_template_override %}
     {{system_template_override}}
     {% else %}
-    {% include 'chat/agent/partials/system_static/claude_4_5/1.0.0.jinja' %}
+    {% include 'chat/agent/partials/system_static/1.0.0.jinja' %}
     {% endif %}
   system_dynamic: |
     {% include 'chat/agent/partials/system_dynamic/1.0.0.jinja' %}

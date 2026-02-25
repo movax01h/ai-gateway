@@ -55,9 +55,6 @@ PROVIDERS_MODELS_MAP = {
 USE_CASES_MODELS_MAP = {
     KindUseCase.CODE_COMPLETIONS: {
         KindAnthropicModel.CLAUDE_SONNET_4,
-        KindAnthropicModel.CLAUDE_3_5_SONNET,
-        KindAnthropicModel.CLAUDE_3_5_HAIKU,
-        KindAnthropicModel.CLAUDE_3_5_SONNET_V2,
         KindVertexTextModel.CODE_GECKO_002,
         KindVertexTextModel.CODESTRAL_2501,
         KindLiteLlmModel.CODESTRAL_2501,
@@ -69,7 +66,6 @@ USE_CASES_MODELS_MAP = {
         KindLiteLlmModel.LLAMA3,
         KindLiteLlmModel.MISTRAL,
         KindLiteLlmModel.MIXTRAL,
-        KindLiteLlmModel.CLAUDE_3,
         KindLiteLlmModel.GPT,
         KindLiteLlmModel.QWEN_2_5,
         KindAmazonQModel.AMAZON_Q,
@@ -86,11 +82,7 @@ USE_CASES_MODELS_MAP = {
     KindUseCase.CODE_GENERATIONS: {
         KindVertexTextModel.CODE_BISON_002,
         KindVertexTextModel.GEMINI_2_5_FLASH,
-        KindAnthropicModel.CLAUDE_3_SONNET,
-        KindAnthropicModel.CLAUDE_3_5_SONNET,
-        KindAnthropicModel.CLAUDE_3_HAIKU,
-        KindAnthropicModel.CLAUDE_3_5_HAIKU,
-        KindAnthropicModel.CLAUDE_3_5_SONNET_V2,
+        KindAnthropicModel.CLAUDE_SONNET_4,
         KindLiteLlmModel.CODEGEMMA,
         KindLiteLlmModel.CODELLAMA,
         KindLiteLlmModel.CODESTRAL,
@@ -98,9 +90,7 @@ USE_CASES_MODELS_MAP = {
         KindLiteLlmModel.LLAMA3,
         KindLiteLlmModel.MISTRAL,
         KindLiteLlmModel.MIXTRAL,
-        KindLiteLlmModel.CLAUDE_3,
         KindLiteLlmModel.GPT,
-        KindLiteLlmModel.CLAUDE_3_5,
         KindAmazonQModel.AMAZON_Q,
     },
 }
@@ -108,11 +98,11 @@ USE_CASES_MODELS_MAP = {
 SAAS_PROMPT_MODEL_MAP = {
     "^1.0.0": {
         "model_provider": ModelProvider.ANTHROPIC,
-        "model_version": KindAnthropicModel.CLAUDE_3_5_SONNET_V2,
+        "model_version": KindAnthropicModel.CLAUDE_SONNET_4_5,
     },
     "1.0.0": {
         "model_provider": ModelProvider.ANTHROPIC,
-        "model_version": KindAnthropicModel.CLAUDE_3_5_SONNET,
+        "model_version": KindAnthropicModel.CLAUDE_SONNET_4_5,
     },
     "1.1.0-dev": {
         "model_provider": ModelProvider.ANTHROPIC,
@@ -124,19 +114,19 @@ SAAS_PROMPT_MODEL_MAP = {
     },
     "3.0.2-dev": {
         "model_provider": ModelProvider.ANTHROPIC,
-        "model_version": KindAnthropicModel.CLAUDE_3_7_SONNET,
+        "model_version": KindAnthropicModel.CLAUDE_SONNET_4_5,
     },
     "2.0.0": {
         "model_provider": ModelProvider.VERTEX_AI,
-        "model_version": KindAnthropicModel.CLAUDE_3_5_SONNET,
+        "model_version": KindAnthropicModel.CLAUDE_SONNET_4_5,
     },
     "2.0.1": {
         "model_provider": ModelProvider.VERTEX_AI,
-        "model_version": KindAnthropicModel.CLAUDE_3_5_SONNET_V2,
+        "model_version": KindAnthropicModel.CLAUDE_SONNET_4_5,
     },
     "2.0.2-dev": {
         "model_provider": ModelProvider.VERTEX_AI,
-        "model_version": KindAnthropicModel.CLAUDE_3_5_SONNET_V2,
+        "model_version": KindAnthropicModel.CLAUDE_SONNET_4_5,
     },
 }
 

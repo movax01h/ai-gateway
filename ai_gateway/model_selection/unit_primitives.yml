@@ -121,7 +121,6 @@ configurable_unit_primitives:
       - "explain_vulnerability"
     default_model: "claude_sonnet_4_5_20250929_vertex"
     selectable_models:
-      - "claude_3_haiku_20240307"
       - "claude_sonnet_4_20250514_vertex"
       - "claude_sonnet_4_20250514_bedrock"
       - "claude_sonnet_4_5_20250929"
@@ -144,7 +143,6 @@ configurable_unit_primitives:
     selectable_models:
       - "claude_haiku_4_5_20251001"
       - "claude_haiku_4_5_20251001_bedrock"
-      - "claude_3_haiku_20240307"
       - "claude_sonnet_4_20250514"
       - "claude_sonnet_4_20250514_vertex"
       - "claude_sonnet_4_20250514_bedrock"

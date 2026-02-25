@@ -68,16 +68,6 @@ class AnthropicAPITimeoutError(ModelAPIError):
 class KindAnthropicModel(StrEnum):
     # Avoid using model versions that only specify the major version number.
     # More info - https://docs.anthropic.com/claude/reference/selecting-a-model
-    CLAUDE_2_1 = "claude-2.1"
-    CLAUDE_3_SONNET = "claude-3-sonnet-20240229"
-    CLAUDE_3_5_SONNET = "claude-3-5-sonnet-20240620"
-    CLAUDE_3_5_SONNET_VERTEX = "claude-3-5-sonnet@20240620"
-    CLAUDE_3_HAIKU = "claude-3-haiku-20240307"
-    CLAUDE_3_5_HAIKU = "claude-3-5-haiku-20241022"
-    CLAUDE_3_5_SONNET_V2 = "claude-3-5-sonnet-20241022"
-    CLAUDE_3_5_SONNET_V2_VERTEX = "claude-3-5-sonnet-v2@20241022"
-    CLAUDE_3_7_SONNET = "claude-3-7-sonnet-20250219"
-    CLAUDE_3_7_SONNET_VERTEX = "claude-3-7-sonnet@20250219"
     CLAUDE_SONNET_4 = "claude-sonnet-4-20250514"
     CLAUDE_SONNET_4_VERTEX = "claude-sonnet-4@20250514"
     CLAUDE_SONNET_4_5 = "claude-sonnet-4-5-20250929"
@@ -113,7 +103,7 @@ class AnthropicModel(TextGenModelBase):
         self,
         client: AsyncAnthropic,
         version: str = DEFAULT_VERSION,
-        model_name: str = KindAnthropicModel.CLAUDE_3_5_SONNET_V2.value,
+        model_name: str = KindAnthropicModel.CLAUDE_SONNET_4_5.value,
         **kwargs: Any,
     ):
         client_opts = self._obtain_client_opts(version, **kwargs)
@@ -254,7 +244,7 @@ class AnthropicChatModel(ChatModelBase):
         self,
         client: AsyncAnthropic,
         version: str = DEFAULT_VERSION,
-        model_name: str = KindAnthropicModel.CLAUDE_3_HAIKU.value,
+        model_name: str = KindAnthropicModel.CLAUDE_HAIKU_4_5.value,
         **kwargs: Any,
     ):
         client_opts = self._obtain_client_opts(version, **kwargs)

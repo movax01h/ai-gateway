@@ -372,7 +372,6 @@ prompts/definitions/
 ├── chat/
 │   ├── explain_code/
 │   │   ├── base/1.0.0.yml          # Base config
-│   │   ├── claude_3/1.0.0.yml      # Model-specific override
 │   │   ├── system/1.0.0.jinja      # System prompt template
 │   │   └── user/1.0.0.jinja        # User prompt template
 ```

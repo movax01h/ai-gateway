@@ -86,11 +86,11 @@ async def test_model_params_is_none_when_metadata_is_not_in_body(
 async def test_handles_large_request_body_with_model_metadata(middleware_test_client):
     """Test that model_metadata is extracted from large request bodies (chunked requests)"""
     model_params = {
-        "name": "claude_3",
+        "name": "general",
         "provider": "openai",
         "endpoint": "http://bedrockselfhostedmodel.com/",
         "api_key": "",
-        "identifier": "bedrock/us.anthropic.claude-3-5-sonnet-20241022-v2:0",
+        "identifier": "bedrock/global.anthropic.claude-sonnet-4-5-20250929-v1:0",
     }
 
     # Create a large payload to simulate chunked request

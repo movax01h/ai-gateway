@@ -65,7 +65,7 @@ class TestXRayLibraries:
                         "payload": {
                             "prompt": "Human: Parse Gemfile content: `gem kaminari`. Respond using only valid JSON with list of libraries",
                             "provider": "anthropic",
-                            "model": "claude-3-5-sonnet-20241022",
+                            "model": "claude-sonnet-4-5-20250929",
                         },
                         "metadata": {"scannerVersion": "0.0.1"},
                     }
@@ -116,7 +116,7 @@ class TestUnauthorizedScopes:
                         "payload": {
                             "prompt": "Human: Parse Gemfile content: `gem kaminari`. Respond using only valid JSON with list of libraries",
                             "provider": "anthropic",
-                            "model": "claude-3-5-sonnet-20241022",
+                            "model": "claude-sonnet-4-5-20250929",
                         },
                         "metadata": {"scannerVersion": "0.0.1"},
                     }
@@ -158,7 +158,7 @@ class TestUnauthorizedIssuer:
                         "payload": {
                             "prompt": "Human: Parse Gemfile content: `gem kaminari`. Respond using only valid JSON with list of libraries",
                             "provider": "anthropic",
-                            "model": "claude-3-5-sonnet-20241022",
+                            "model": "claude-sonnet-4-5-20250929",
                         },
                         "metadata": {"scannerVersion": "0.0.1"},
                     }

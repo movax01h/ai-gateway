@@ -1148,7 +1148,7 @@ class TestLiteLlmTextGenModel:
                 None,
             ),
             (
-                "claude_3.5",
+                "deepseekcoder",
                 KindModelProvider.LITELLM,
                 True,
                 None,

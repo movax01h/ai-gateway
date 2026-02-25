@@ -389,31 +389,6 @@ models:
       max_tokens: 4_096
       max_retries: 1
 
-  - name: "Claude Sonnet 3.5 20241022 - Vertex"
-    provider: "Vertex"
-    cost_indicator: "$$$"
-    gitlab_identifier: "vertex" # For backwards compatibility with requests asking for [prompt_id]/vertex
-    max_context_tokens: 200000 # https://www.keywordsai.co/llm-library/claude-3-5-sonnet-20241022
-    model_class_provider: litellm
-    params:
-      model: "claude-3-5-sonnet-v2@20241022"
-      custom_llm_provider: "vertex_ai"
-      temperature: 0.0
-      max_tokens: 4_096
-
-  - name: "Claude 3 Haiku - Anthropic"
-    provider: "Anthropic"
-    gitlab_identifier: "claude_3_haiku_20240307"
-    description: "Earlier generation model for high-volume tasks."
-    cost_indicator: "$"
-    max_context_tokens: 200000 # https://docs.claude.com/en/docs/about-claude/models/overview#legacy-models
-    proxy_provider: anthropic
-    model_class_provider: anthropic
-    params:
-      model: "claude-3-haiku-20240307"
-      temperature: 0.0
-      max_tokens: 4_096
-
   - name: "Gemini 3.1 Pro Preview - Vertex"
     provider: "Vertex"
     gitlab_identifier: "gemini_3_1_pro_preview_vertex"
@@ -443,45 +418,6 @@ models:
     params:
       model: gpt-5.2-2025-12-11
       temperature: 1.0 # this model always requires temperature to be 1
-      max_tokens: 4_096
-
-  # proxy endpoint only
-  - name: "Claude 2.1 - Anthropic"
-    provider: "Anthropic"
-    gitlab_identifier: "claude_2_1"
-    description: "Legacy model, superseded by Claude 3 family."
-    max_context_tokens: 200000
-    proxy_provider: anthropic
-    model_class_provider: anthropic
-    params:
-      model: "claude-2.1"
-      temperature: 0.0
-      max_tokens: 4_096
-
-  # proxy endpoint only
-  - name: "Claude 3.5 Sonnet 20240620 - Anthropic"
-    provider: "Anthropic"
-    gitlab_identifier: "claude_3_5_sonnet_20240620"
-    description: "Earlier Claude 3.5 Sonnet release."
-    max_context_tokens: 200000
-    proxy_provider: anthropic
-    model_class_provider: anthropic
-    params:
-      model: "claude-3-5-sonnet-20240620"
-      temperature: 0.0
-      max_tokens: 4_096
-
-  # proxy endpoint only
-  - name: "Claude 3.5 Sonnet 20241022 - Anthropic"
-    provider: "Anthropic"
-    gitlab_identifier: "claude_3_5_sonnet_20241022"
-    description: "Earlier Claude 3.5 Sonnet release."
-    max_context_tokens: 200000
-    proxy_provider: anthropic
-    model_class_provider: anthropic
-    params:
-      model: "claude-3-5-sonnet-20241022"
-      temperature: 0.0
       max_tokens: 4_096
 
   - name: "GPT-5.1 - OpenAI"
@@ -703,10 +639,7 @@ models:
     gitlab_identifier: "claude_3" # For backwards compatibility with requests asking for [prompt_id]/claude_3
     max_context_tokens: 200000
     model_class_provider: litellm
-    family:
-      - claude_3
     params:
-      model: "claude-3-5-sonnet-20241022" # This will be overridden later by the actual model used
       temperature: 0.0
       max_tokens: 4_096
 
@@ -714,9 +647,6 @@ models:
     gitlab_identifier: "general" # For backwards compatibility with requests asking for [prompt_id]/general
     max_context_tokens: 200000
     model_class_provider: litellm
-    family:
-      - claude_3
     params:
-      model: "claude-3-5-sonnet-20241022"
       temperature: 0.0
       max_tokens: 4_096

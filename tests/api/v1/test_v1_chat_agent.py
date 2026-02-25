@@ -88,7 +88,7 @@ def request_body_fixture(request, content_fixture):
                 "payload": {
                     "content": request.getfixturevalue(content_fixture),
                     "provider": "anthropic",
-                    "model": KindAnthropicModel.CLAUDE_2_1.value,
+                    "model": KindAnthropicModel.CLAUDE_SONNET_4_5.value,
                     "model_endpoint": "https://api.example.com",
                 },
             }
