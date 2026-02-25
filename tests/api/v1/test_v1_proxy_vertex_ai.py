@@ -55,7 +55,6 @@ class TestProxyVertexAI:
         self,
         mock_client,
         mock_track_internal_event,
-        mock_detect_abuse,
         unit_primitive,
         mock_proxy_model,
     ):
@@ -234,7 +233,6 @@ class TestUsageQuotaWithModelName:
         self,
         mock_client,
         mock_track_internal_event,
-        mock_detect_abuse,
         model_name,
     ):
         """Test that model_name from ProxyModel is passed to usage quota service."""

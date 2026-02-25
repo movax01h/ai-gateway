@@ -68,7 +68,6 @@ class TestProxyAnthropic:
         self,
         mock_client,
         mock_track_internal_event,
-        mock_detect_abuse,
         unit_primitive,
         mock_proxy_model,
     ):
@@ -241,7 +240,6 @@ class TestUsageQuotaWithModelName:
         self,
         mock_client,
         mock_track_internal_event,
-        mock_detect_abuse,
         proxy_headers,
         model_name,
     ):
