@@ -1,6 +1,7 @@
 name: fix_pipeline_summarize_changes_prompt
 model:
   params:
+    max_retries: 3
     max_tokens: 32_768
 unit_primitives:
   - duo_agent_platform

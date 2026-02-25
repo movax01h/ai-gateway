@@ -1,5 +1,5 @@
 ---
-name: Claude 4.0 Review Merge Request
+name: Review Merge Request
 model:
   params:
     max_tokens: 8_192

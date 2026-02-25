@@ -1,9 +1,0 @@
----
-name: Claude 3.7 Generate Commit Message
-unit_primitives:
-  - generate_commit_message
-prompt_template:
-  system: |
-    {% include 'generate_commit_message/system/1.0.0.jinja' %}
-  user: |
-    {% include 'generate_commit_message/user/1.0.0.jinja' %}

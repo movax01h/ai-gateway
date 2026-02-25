@@ -1,9 +1,0 @@
----
-name: Claude Vertex Glab Ask Git Command
-unit_primitives:
-  - write_tests
-prompt_template:
-  system: |
-    {% include 'glab_ask_git_command/system/1.0.0.jinja' %}
-  user: |
-    {% include 'glab_ask_git_command//user/1.0.0.jinja' %}

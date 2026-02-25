@@ -107,49 +107,27 @@ class TestEditorContentGenerationStream:
             "prompt_id",
             "model_provider",
             "prompt_version",
-            "expected_model_metadata",
-            "expected_feature_flags",
         ),
         [
             (
                 None,
                 "vertex-ai",
                 None,
-                {
-                    "engine": "agent",
-                    "name": "Code Generations Agent",
-                },
-                {"flag_a", "flag_b"},
             ),
             (
                 None,
                 "anthropic",
                 None,
-                {
-                    "engine": "agent",
-                    "name": "Claude Sonnet 4 Code Generations Agent",
-                },
-                {"flag_a", "flag_b"},
             ),
             (
                 "code_suggestions/generations",
                 None,
                 "1.1.0-dev",
-                {
-                    "engine": "agent",
-                    "name": "Claude Sonnet 4 Code Generations Agent",
-                },
-                {"flag_a", "flag_b"},
             ),
             (
                 "code_suggestions/generations",
                 None,
                 "1.2.0-dev",
-                {
-                    "engine": "agent",
-                    "name": "Gemini 2.5 Flash Code Generations Agent",
-                },
-                {"flag_a", "flag_b"},
             ),
         ],
     )
@@ -162,8 +140,6 @@ class TestEditorContentGenerationStream:
         prompt_id: Optional[str],
         model_provider: Optional[str],
         prompt_version: Optional[str],
-        expected_model_metadata: dict,
-        expected_feature_flags: set,
     ):
         payload = {
             "file_name": "main.py",
@@ -206,8 +182,8 @@ class TestEditorContentGenerationStream:
         _assert_stream_sse_responses(
             response.text,
             mock_suggestions_output_text,
-            expected_model_metadata,
-            expected_feature_flags,
+            {"engine": "agent", "name": "Code Generations Agent"},
+            {"flag_a", "flag_b"},
         )
 
 

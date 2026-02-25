@@ -1,5 +1,5 @@
 ---
-name: Claude 3 Generate Description
+name: Generate Description
 unit_primitives:
   - generate_issue_description
 prompt_template:

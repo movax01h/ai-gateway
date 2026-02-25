@@ -1,5 +1,5 @@
 ---
-name: Claude 3.5 Categorize question
+name: Categorize question
 model:
   params:
     max_tokens: 500

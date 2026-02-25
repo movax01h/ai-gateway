@@ -1,5 +1,5 @@
 ---
-name: Claude Sonnet 4 Code Generations Agent
+name: Code Generations Agent
 model:
   params:
     temperature: 0.2

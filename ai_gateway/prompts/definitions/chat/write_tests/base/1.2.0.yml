@@ -1,5 +1,5 @@
 ---
-name: Claude Sonnet 4 Write Tests agent
+name: Write Tests agent
 model:
   params:
     temperature: 0.1

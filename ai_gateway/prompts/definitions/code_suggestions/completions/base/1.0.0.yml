@@ -1,5 +1,5 @@
 ---
-name: Claude Code Completions
+name: Code Completions
 model:
   params:
     max_tokens: 128

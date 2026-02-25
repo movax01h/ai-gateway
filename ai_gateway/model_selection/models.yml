@@ -109,9 +109,6 @@ models:
     cost_indicator: "$"
     max_context_tokens: 1000000 # https://docs.cloud.google.com/vertex-ai/generative-ai/docs/models/gemini/2-5-flash
     model_class_provider: litellm
-    family:
-      - vertex
-      - litellm
     params:
       model: "gemini-2.5-flash"
       temperature: 0.7
@@ -163,8 +160,6 @@ models:
     model_class_provider: litellm
     family:
       - claude_4_5
-      - vertex
-      - litellm
     params:
       model: "claude-opus-4-5@20251101"
       custom_llm_provider: "vertex_ai"
@@ -198,8 +193,6 @@ models:
     model_class_provider: litellm
     family:
       - claude_4_5
-      - vertex
-      - litellm
     params:
       model: "claude-opus-4-6"
       custom_llm_provider: "vertex_ai"
@@ -252,8 +245,6 @@ models:
     # Note: max context window tokens of 1M are supported in Beta
     family:
       - claude_4_5
-      - vertex
-      - litellm
     model_class_provider: litellm
     params:
       model: "claude-sonnet-4-5@20250929"
@@ -274,7 +265,6 @@ models:
     max_context_tokens: 200000 # https://console.aws.amazon.com/bedrock/home#/model-catalog/serverless/anthropic.claude-sonnet-4-5-20250929-v1:0
     family:
       - claude_4_5
-      - litellm
     model_class_provider: litellm
     params:
       model: bedrock/global.anthropic.claude-sonnet-4-5-20250929-v1:0
@@ -306,8 +296,6 @@ models:
     max_context_tokens: 200000 # https://console.cloud.google.com/vertex-ai/publishers/anthropic/model-garden/claude-haiku-4-5
     family:
       - claude_4_5
-      - vertex
-      - litellm
     model_class_provider: litellm
     params:
       model: "claude-haiku-4-5@20251001"
@@ -326,7 +314,6 @@ models:
     max_context_tokens: 200000 # https://console.aws.amazon.com/bedrock/home#/model-catalog/serverless/anthropic.claude-haiku-4-5-20251001-v1:0
     family:
       - claude_4_5
-      - litellm
     model_class_provider: litellm
     params:
       model: bedrock/global.anthropic.claude-haiku-4-5-20251001-v1:0
@@ -355,9 +342,6 @@ models:
     description: "Earlier generation model for coding, reasoning, and agentic workflows."
     cost_indicator: "$$$"
     max_context_tokens: 200000 # https://console.cloud.google.com/vertex-ai/publishers/anthropic/model-garden/claude-sonnet-4
-    family:
-      - vertex
-      - litellm
     model_class_provider: litellm
     params:
       model: "claude-sonnet-4@20250514"
@@ -376,8 +360,6 @@ models:
     description: "Earlier generation model for coding, reasoning, and agentic workflows."
     cost_indicator: "$$$"
     max_context_tokens: 200000 # https://console.aws.amazon.com/bedrock/home#/model-catalog/serverless/anthropic.claude-sonnet-4-20250514-v1:0
-    family:
-      - litellm
     model_class_provider: litellm
     params:
       model: bedrock/global.anthropic.claude-sonnet-4-20250514-v1:0
@@ -391,9 +373,6 @@ models:
     cost_indicator: "$$$"
     gitlab_identifier: "vertex" # For backwards compatibility with requests asking for [prompt_id]/vertex
     max_context_tokens: 200000 # https://www.keywordsai.co/llm-library/claude-3-5-sonnet-20241022
-    family:
-      - vertex
-      - litellm
     model_class_provider: litellm
     params:
       model: "claude-3-5-sonnet-v2@20241022"
@@ -438,7 +417,6 @@ models:
     model_class_provider: "openai"
     family:
       - gpt_5
-      - litellm
     params:
       model: gpt-5.2-2025-12-11
       temperature: 1.0 # this model always requires temperature to be 1
@@ -493,7 +471,6 @@ models:
     model_class_provider: "openai"
     family:
       - gpt_5
-      - litellm
     params:
       model: gpt-5.1-2025-11-13
       temperature: 1.0 # this model always requires temperature to be 1
@@ -509,7 +486,6 @@ models:
     model_class_provider: "openai"
     family:
       - gpt_5
-      - litellm
     params:
       model: gpt-5-mini-2025-08-07
       max_tokens: 4_096
@@ -524,7 +500,6 @@ models:
     model_class_provider: "openai"
     family:
       - gpt_5
-      - litellm
     params:
       model: gpt-5-codex
       verbosity: "medium"
@@ -592,7 +567,6 @@ models:
     model_class_provider: litellm
     family:
       - mistral
-      - litellm
     params:
       model: mistral
       temperature: 0.0
@@ -606,7 +580,6 @@ models:
     family:
       - mixtral
       - mistral
-      - litellm
     params:
       model: mixtral
       temperature: 0.0
@@ -619,7 +592,6 @@ models:
     family:
       - codestral
       - mistral
-      - litellm
     params:
       model: codestral
       temperature: 0.0
@@ -644,7 +616,6 @@ models:
     model_class_provider: litellm
     family:
       - llama3
-      - litellm
     params:
       model: llama3
       temperature: 0.0
@@ -656,7 +627,6 @@ models:
     model_class_provider: litellm
     family:
       - codellama
-      - litellm
     params:
       model: codellama
       temperature: 0.0
@@ -668,7 +638,6 @@ models:
     model_class_provider: litellm
     family:
       - gpt
-      - litellm
     params:
       model: gpt
       temperature: 0.0
@@ -702,7 +671,6 @@ models:
     model_class_provider: litellm
     family:
       - claude_3
-      - litellm
     params:
       model: "claude-3-5-sonnet-20241022" # This will be overridden later by the actual model used
       temperature: 0.0
@@ -714,7 +682,6 @@ models:
     model_class_provider: litellm
     family:
       - claude_3
-      - litellm
     params:
       model: "claude-3-5-sonnet-20241022"
       temperature: 0.0

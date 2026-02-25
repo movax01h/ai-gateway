@@ -1,5 +1,5 @@
 ---
-name: Claude 3.7 Write Tests agent
+name: Write Tests agent
 model:
   params:
     temperature: 0.1

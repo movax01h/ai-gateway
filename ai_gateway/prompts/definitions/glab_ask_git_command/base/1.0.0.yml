@@ -1,5 +1,5 @@
 ---
-name: Claude Haiku 3 Glab Ask Git Command
+name: Glab Ask Git Command
 unit_primitives:
   - glab_ask_git_command
 prompt_template:

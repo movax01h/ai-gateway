@@ -1,5 +1,5 @@
 ---
-name: Claude 3 Generate Commit Message
+name: Generate Commit Message
 unit_primitives:
   - generate_commit_message
 prompt_template:

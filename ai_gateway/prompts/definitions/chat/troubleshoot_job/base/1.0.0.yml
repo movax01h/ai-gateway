@@ -1,5 +1,5 @@
 ---
-name: Claude 3 Troubleshoot Job agent
+name: Troubleshoot Job agent
 model:
   params:
     temperature: 0.1

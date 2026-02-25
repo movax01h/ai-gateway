@@ -543,7 +543,7 @@ class TestEditorContentGeneration:
             # non-empty suggestions from model
             (
                 "def search",
-                "Claude 3.7 Sonnet Code Generations Agent",
+                "Generations Agent",
                 "agent",
                 {
                     "choices": [
@@ -556,7 +556,7 @@ class TestEditorContentGeneration:
                     "metadata": {
                         "model": {
                             "engine": "agent",
-                            "name": "Claude 3.7 Sonnet Code Generations Agent",
+                            "name": "Generations Agent",
                             "lang": "python",
                         },
                         "enabled_feature_flags": ["flag_a", "flag_b"],
@@ -566,14 +566,14 @@ class TestEditorContentGeneration:
             # empty suggestions from model
             (
                 "",
-                "Claude 3.7 Sonnet Code Generations Agent",
+                "Generations Agent",
                 "agent",
                 {
                     "choices": [],
                     "metadata": {
                         "model": {
                             "engine": "agent",
-                            "name": "Claude 3.7 Sonnet Code Generations Agent",
+                            "name": "Generations Agent",
                             "lang": "python",
                         },
                         "enabled_feature_flags": ["flag_a", "flag_b"],
@@ -714,14 +714,14 @@ class TestEditorContentGeneration:
                         name="Mistral",
                         gitlab_identifier="mistral",
                         max_context_tokens=128000,
-                        family=["mistral", "litellm"],
+                        family=["mistral"],
                         params=ChatLiteLLMParams(
                             model="mistral",
                             temperature=0.0,
                             max_tokens=4096,
                         ),
                     ),
-                    family=["mistral", "litellm"],
+                    family=["mistral"],
                     friendly_name="Mistral",
                 ),
                 None,
@@ -890,7 +890,7 @@ class TestEditorContentGeneration:
                 },
                 {
                     "engine": "agent",
-                    "name": "Claude Sonnet 4 Code Generations Agent",
+                    "name": "Code Generations Agent",
                     "lang": "python",
                 },
             ),
