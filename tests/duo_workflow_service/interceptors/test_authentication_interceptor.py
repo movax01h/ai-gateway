@@ -33,6 +33,19 @@ def interceptor_fixture():
     return AuthenticationInterceptor()
 
 
+@pytest.mark.parametrize(
+    "method",
+    ["/grpc.health.v1.Health/Check", "/grpc.health.v1.Health/Watch"],
+)
+@pytest.mark.asyncio
+async def test_intercept_service_health_check_skips_auth(
+    method, interceptor, mock_continuation, handler_call_details
+):
+    handler_call_details.method = method
+    await interceptor.intercept_service(mock_continuation, handler_call_details)
+    mock_continuation.assert_awaited_once_with(handler_call_details)
+
+
 @patch.dict(os.environ, {"DUO_WORKFLOW_AUTH__ENABLED": "false"})
 @pytest.mark.asyncio
 async def test_intercept_service_auth_disabled(

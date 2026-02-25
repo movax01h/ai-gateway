@@ -26,6 +26,11 @@ class AuthenticationError(Exception):
 
 
 class AuthenticationInterceptor(grpc.aio.ServerInterceptor):
+    ALLOW_UNAUTHENTICATED_METHODS = (
+        "/grpc.health.v1.Health/Check",
+        "/grpc.health.v1.Health/Watch",
+    )
+
     def __init__(self):
         self.oidc_auth_provider = self._init_oidc_auth_provider()
 
@@ -33,6 +38,10 @@ class AuthenticationInterceptor(grpc.aio.ServerInterceptor):
     async def intercept_service(
         self, continuation: Callable, handler_call_details: grpc.HandlerCallDetails
     ) -> grpc.RpcMethodHandler:
+        # Health checks don't require authentication
+        if handler_call_details.method in self.ALLOW_UNAUTHENTICATED_METHODS:
+            return await continuation(handler_call_details)
+
         if os.environ.get("DUO_WORKFLOW_AUTH__ENABLED", True) == "false":
             print("[WARN] Auth is disabled, all users allowed")
             cloud_connector_user, _cloud_connector_error = authenticate(
