@@ -2,9 +2,8 @@ from typing import Annotated
 
 import fastapi
 import structlog
-from fastapi import APIRouter, BackgroundTasks, Depends, Request
+from fastapi import APIRouter, Depends, Request
 
-from ai_gateway.abuse_detection import AbuseDetector
 from ai_gateway.api.feature_category import X_GITLAB_UNIT_PRIMITIVE, feature_categories
 from ai_gateway.api.middleware.route import has_sufficient_usage_quota
 from ai_gateway.api.v1.proxy.request import (
@@ -13,7 +12,6 @@ from ai_gateway.api.v1.proxy.request import (
     verify_project_namespace_metadata,
 )
 from ai_gateway.async_dependency_resolver import (
-    get_abuse_detector,
     get_billing_event_client,
     get_internal_event_client,
     get_openai_proxy_model_factory,
@@ -40,10 +38,6 @@ router = APIRouter()
 @feature_categories(EXTENDED_FEATURE_CATEGORIES_FOR_PROXY_ENDPOINTS)
 async def openai(
     request: Request,
-    background_tasks: BackgroundTasks,  # pylint: disable=unused-argument
-    abuse_detector: Annotated[  # pylint: disable=unused-argument
-        AbuseDetector, Depends(get_abuse_detector)
-    ],
     proxy_client: Annotated[ProxyClient, Depends(get_proxy_client)],
     openai_proxy_model_factory: Annotated[
         OpenAIProxyModelFactory, Depends(get_openai_proxy_model_factory)

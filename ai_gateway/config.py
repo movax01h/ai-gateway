@@ -104,11 +104,6 @@ class ConfigCustomModels(BaseModel):
     disable_streaming: bool = False
 
 
-class ConfigAbuseDetection(BaseModel):
-    enabled: bool = False
-    sampling_rate: float = 0.1  # 1/10 of requests are sampled
-
-
 class ConfigCustomersDot(BaseModel):
     api_user: Optional[str] = None
     api_token: Optional[str] = None
@@ -280,9 +275,6 @@ class Config(BaseSettings):
     model_engine_limits: Annotated[
         ConfigModelLimits, Field(default_factory=ConfigModelLimits)
     ] = ConfigModelLimits()
-    abuse_detection: Annotated[
-        ConfigAbuseDetection, Field(default_factory=ConfigAbuseDetection)
-    ] = ConfigAbuseDetection()
     bind_tools_cache: Annotated[
         ConfigBindToolsCache, Field(default_factory=ConfigBindToolsCache)
     ] = ConfigBindToolsCache()

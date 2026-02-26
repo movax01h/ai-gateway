@@ -141,12 +141,6 @@ def mock_track_internal_event_fixture():
         yield mock
 
 
-@pytest.fixture(name="mock_detect_abuse")
-def mock_detect_abuse_fixture():
-    with patch("ai_gateway.abuse_detection.AbuseDetector.detect") as mock:
-        yield mock
-
-
 @pytest.fixture(name="mock_client")
 def mock_client_fixture(
     test_client,

@@ -1,16 +1,14 @@
 import functools
 import typing
 
-from fastapi import BackgroundTasks, HTTPException, Request, status
+from fastapi import HTTPException, Request, status
 from gitlab_cloud_connector import (
     FEATURE_CATEGORIES_FOR_PROXY_ENDPOINTS,
-    UNIT_PRIMITIVE_AND_DESCRIPTION_MAPPING,
     GitLabFeatureCategory,
     GitLabUnitPrimitive,
     UserClaims,
 )
 
-from ai_gateway.abuse_detection import AbuseDetector
 from ai_gateway.api.feature_category import X_GITLAB_UNIT_PRIMITIVE
 from lib.context import StarletteUser
 from lib.internal_events.context import EventContext, current_event_context
@@ -43,24 +41,18 @@ def authorize_with_unit_primitive_header():
         @functools.wraps(func)
         async def wrapper(
             request: Request,
-            background_tasks: BackgroundTasks,
-            abuse_detector: AbuseDetector,
             *args: typing.Any,
             **kwargs: typing.Any,
         ) -> typing.Any:
-            await _validate_request(request, background_tasks, abuse_detector)
-            return await func(
-                request, background_tasks, abuse_detector, *args, **kwargs
-            )
+            await _validate_request(request)
+            return await func(request, *args, **kwargs)
 
         return wrapper
 
     return decorator
 
 
-async def _validate_request(
-    request: Request, background_tasks: BackgroundTasks, abuse_detector: AbuseDetector
-) -> None:
+async def _validate_request(request: Request) -> None:
     if X_GITLAB_UNIT_PRIMITIVE not in request.headers:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -84,12 +76,6 @@ async def _validate_request(
             status_code=status.HTTP_403_FORBIDDEN,
             detail=f"Unauthorized to access {unit_primitive}",
         )
-
-    if abuse_detector.should_detect():
-        body_bytes = await request.body()
-        body = body_bytes.decode("utf-8", errors="ignore")
-        description = UNIT_PRIMITIVE_AND_DESCRIPTION_MAPPING.get(unit_primitive, "")
-        background_tasks.add_task(abuse_detector.detect, request, body, description)
 
 
 def verify_project_namespace_metadata():
