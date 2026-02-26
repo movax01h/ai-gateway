@@ -1,5 +1,5 @@
 from enum import StrEnum
-from typing import AsyncIterator, Optional
+from typing import AsyncIterator, Optional, override
 
 import structlog
 
@@ -42,13 +42,16 @@ class AmazonQModel(TextGenModelBase):
         )
 
     @property
+    @override
     def input_token_limit(self) -> int:
         return 20480
 
     @property
+    @override
     def metadata(self) -> ModelMetadata:
         return self._metadata
 
+    @override
     async def generate(  # type: ignore[override]
         self,
         prefix: str,

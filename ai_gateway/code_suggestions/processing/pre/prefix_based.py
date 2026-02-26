@@ -1,5 +1,5 @@
 import math
-from typing import Any, Optional
+from typing import Any, Optional, override
 
 from ai_gateway.code_suggestions.processing.pre.base import PromptBuilderBase
 from ai_gateway.code_suggestions.processing.typing import (
@@ -41,6 +41,7 @@ class PromptBuilderPrefixBased(PromptBuilderBase):
         # This prompt builder requires a `prefix` placeholder to be present in the template
         self.tpl_args[self.KEY_PREFIX] = ""
 
+    @override
     def add_content(
         self,
         *text: str,
@@ -57,6 +58,7 @@ class PromptBuilderPrefixBased(PromptBuilderBase):
 
         self.opts.update(opts)
 
+    @override
     def build(self) -> Prompt:
         suffix_reserved_percent = self.opts[self.KEY_SUFFIX_RESERVED_PERCENT]
         context_max_percent = self.opts[self.KEY_CONTEXT_MAX_PERCENT]

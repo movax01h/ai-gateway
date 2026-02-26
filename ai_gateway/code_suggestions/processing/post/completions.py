@@ -2,7 +2,7 @@ import inspect
 from enum import StrEnum
 from functools import partial
 from inspect import iscoroutinefunction
-from typing import Any, Awaitable, Callable, NewType, Optional, Union
+from typing import Any, Awaitable, Callable, NewType, Optional, Union, override
 
 from ai_gateway.code_suggestions.processing.ops import strip_whitespaces
 from ai_gateway.code_suggestions.processing.post.base import PostProcessorBase
@@ -116,6 +116,7 @@ class PostProcessor(PostProcessorBase):
             PostProcessorOperation.CLEAN_IRRELEVANT_KEYWORDS: clean_irrelevant_keywords,
         }
 
+    @override
     async def process(self, completion: str, **kwargs: Any) -> str:
         raw_completion = completion
 

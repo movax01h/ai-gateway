@@ -1,4 +1,4 @@
-from typing import Any
+from typing import Any, override
 
 from ai_gateway.code_suggestions.processing.ops import strip_whitespaces
 from ai_gateway.code_suggestions.processing.post.base import PostProcessorBase
@@ -15,6 +15,7 @@ class PostProcessor(PostProcessorBase):
     def __init__(self, code_context: str):
         self.code_context = code_context
 
+    @override
     async def process(self, completion: str, **kwargs: Any) -> str:
         completion = strip_code_block_markdown(completion)
         completion = prepend_new_line(self.code_context, completion)
@@ -28,6 +29,7 @@ class PostProcessor(PostProcessorBase):
 
 
 class PostProcessorAnthropic(PostProcessor):
+    @override
     async def process(self, completion: str, **kwargs: Any) -> str:
         completion = await strip_whitespaces(completion)
 

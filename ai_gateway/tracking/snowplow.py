@@ -1,6 +1,6 @@
 from abc import ABC, abstractmethod
 from dataclasses import asdict, dataclass
-from typing import Optional
+from typing import Optional, override
 
 from snowplow_tracker import AsyncEmitter, SelfDescribingJson, StructuredEvent, Tracker
 
@@ -99,6 +99,7 @@ class SnowplowClient(Client):
             emitters=[emitter],
         )
 
+    @override
     def track(self, event: SnowplowEvent) -> None:
         """Send event to Snowplow.
 
@@ -123,5 +124,6 @@ class SnowplowClient(Client):
 class SnowplowClientStub(Client):
     """The stub class used when Snowplow is disabled, e.g. development and testing."""
 
+    @override
     def track(self, event: SnowplowEvent) -> None:
         pass

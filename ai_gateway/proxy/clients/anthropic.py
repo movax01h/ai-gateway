@@ -1,6 +1,6 @@
 import os
 import re
-from typing import Any
+from typing import Any, override
 
 import fastapi
 from fastapi import status
@@ -77,6 +77,7 @@ def _build_headers_to_upstream() -> dict[str, str]:
 
 
 class AnthropicProxyModelFactory(BaseProxyModelFactory):
+    @override
     async def factory(self, request: fastapi.Request) -> ProxyModel:
         upstream_path = _extract_upstream_path(
             request.url.__str__(), _UPSTREAM_SERVICE, _ALLOWED_UPSTREAM_PATHS

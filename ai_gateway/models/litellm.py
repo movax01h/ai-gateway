@@ -1,5 +1,5 @@
 from enum import StrEnum
-from typing import AsyncIterator, Callable, Optional, Sequence, Union
+from typing import AsyncIterator, Callable, Optional, Sequence, Union, override
 
 from litellm import CustomStreamWrapper, ModelResponse, acompletion
 from litellm.exceptions import APIConnectionError, InternalServerError
@@ -173,6 +173,7 @@ DEFAULT_TOKEN_LIMIT = 32_768
 
 class LiteLlmChatModel(ChatModelBase):
     @property
+    @override
     def input_token_limit(self) -> int:
         return INPUT_TOKENS_LIMIT.get(self.model_name, DEFAULT_TOKEN_LIMIT)
 
@@ -192,9 +193,11 @@ class LiteLlmChatModel(ChatModelBase):
         self.async_fireworks_client = async_fireworks_client
 
     @property
+    @override
     def metadata(self) -> ModelMetadata:
         return self._metadata
 
+    @override
     async def generate(
         self,
         messages: list[Message],
@@ -320,6 +323,7 @@ class LiteLlmChatModel(ChatModelBase):
 
 class LiteLlmTextGenModel(TextGenModelBase):
     @property
+    @override
     def input_token_limit(self) -> int:
         return INPUT_TOKENS_LIMIT.get(self.model_name, DEFAULT_TOKEN_LIMIT)
 
@@ -344,6 +348,7 @@ class LiteLlmTextGenModel(TextGenModelBase):
         self.using_cache = using_cache
 
     @property
+    @override
     def metadata(self) -> ModelMetadata:
         return self._metadata
 
@@ -351,6 +356,7 @@ class LiteLlmTextGenModel(TextGenModelBase):
     def specifications(self):
         return MODEL_SPECIFICATIONS.get(self.provider, {}).get(self.model_name, {})
 
+    @override
     async def generate(
         self,
         prefix: str,

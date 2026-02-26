@@ -1,4 +1,4 @@
-from typing import List, Optional
+from typing import List, Optional, override
 
 from tree_sitter import Node
 
@@ -21,9 +21,11 @@ class BaseContextVisitor(BaseVisitor):
         self.visited_nodes: List[Node] = []
         self.target_point = target_point
 
+    @override
     def _visit_node(self, node: Node):
         pass
 
+    @override
     def visit(self, node: Node):
         if not node.is_named:
             return

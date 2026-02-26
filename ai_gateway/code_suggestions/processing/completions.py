@@ -1,4 +1,4 @@
-from typing import Any, AsyncIterator, Callable, NamedTuple, Optional
+from typing import Any, AsyncIterator, Callable, NamedTuple, Optional, override
 
 import structlog
 
@@ -142,6 +142,7 @@ class _PromptBuilder(PromptBuilderBase):
         )
         return f"{header}\n{self._prefix}"
 
+    @override
     def build(self) -> Prompt:
         new_prefix = self._prepend_comments()
         components = {}
@@ -183,6 +184,7 @@ class ModelEngineCompletions(ModelEngineBase):
     MAX_TOKENS_SUFFIX_PERCENT = 0.07  # about 126 tokens for code-gecko, if "imports" takes up all the available space
     MAX_TOKENS_CONTEXT_PERCENT = 0.5  # about 1024 tokens for code-gecko
 
+    @override
     async def _generate(
         self,
         prefix: str,

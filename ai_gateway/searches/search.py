@@ -1,6 +1,6 @@
 import re
 from abc import abstractmethod
-from typing import Any, Dict, List
+from typing import Any, Dict, List, override
 
 import structlog
 from fastapi import HTTPException, status
@@ -86,6 +86,7 @@ class VertexAISearch(Searcher):
         self.project = project
         self.fallback_datastore_version = fallback_datastore_version
 
+    @override
     async def search_with_retry(self, *args, **kwargs):
         try:
             try:
@@ -111,6 +112,7 @@ class VertexAISearch(Searcher):
                 detail="Vertex API Search Error.",
             )
 
+    @override
     async def search(
         self,
         query: str,
@@ -156,6 +158,7 @@ class VertexAISearch(Searcher):
 
         return self._parse_response(MessageToDict(response._pb))
 
+    @override
     def provider(self):
         return "vertex-ai"
 

@@ -1,5 +1,5 @@
 from pathlib import Path
-from typing import Any
+from typing import Any, override
 
 from ai_gateway.code_suggestions.prompts.base import PromptTemplateBase
 
@@ -10,6 +10,7 @@ __all__ = [
 
 
 class PromptTemplate(PromptTemplateBase):
+    @override
     def apply(self, **kwargs: Any) -> str:
         return self.tpl_raw.format(**kwargs)
 
@@ -33,6 +34,7 @@ class PromptTemplateFewShot(PromptTemplateBase):
 
         super().__init__(tpl_raw)
 
+    @override
     def apply(self, **kwargs: Any) -> str:
         return self.tpl_raw.format(**kwargs)
 

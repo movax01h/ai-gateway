@@ -1,6 +1,6 @@
 from enum import StrEnum
 from functools import wraps
-from typing import Optional
+from typing import Optional, override
 
 import botocore
 from fastapi import HTTPException, status
@@ -36,6 +36,7 @@ class AWSException(Exception):
         self.exception_str = exception_str
         super().__init__(exception_str)
 
+    @override
     def __str__(self):
         return f"AWSException: {self.error_code} - {self.error_message} (HTTP {self.response_code})"
 

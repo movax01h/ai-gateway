@@ -1,7 +1,7 @@
 import importlib
 from functools import cache
 from pathlib import Path
-from typing import Any, List, NamedTuple, Optional, Type, cast
+from typing import Any, List, NamedTuple, Optional, Type, cast, override
 
 import structlog
 import yaml
@@ -325,6 +325,7 @@ class LocalPromptRegistry(BasePromptRegistry):
 
     # prompt_version is never None when called on LocalPromptRegistry
     # but it must be set to str | None to match the abstract signature
+    @override
     def get(
         self,
         prompt_id: str,

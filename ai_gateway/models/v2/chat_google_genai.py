@@ -1,4 +1,4 @@
-from typing import Self
+from typing import Self, override
 
 from google.genai import Client
 from google.genai.types import HttpOptions
@@ -30,6 +30,7 @@ def connect_google_gen_vertex_ai(
 
 class ChatGoogleGenerativeAI(_LCChatGoogleGenerativeAI):
     @model_validator(mode="after")
+    @override
     def validate_environment(self) -> Self:
         """Overwrite the LangChain model validator to set the client manually in DI."""
 
