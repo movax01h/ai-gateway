@@ -120,7 +120,7 @@ class TestToolNode:
         assert tool_message.content == "Sanitized response"
 
         # Verify tool execution was called
-        mock_tool.arun.assert_called_once_with(mock_tool_call["args"])
+        mock_tool.ainvoke.assert_called_once_with(mock_tool_call["args"])
 
         # Verify security sanitization was called
         assert_security_called_with(
@@ -152,11 +152,11 @@ class TestToolNode:
         # Set up toolset to return different tools
         mock_tool_1 = Mock(spec=BaseTool)
         mock_tool_1.name = "tool_1"
-        mock_tool_1.arun = AsyncMock(return_value="Result 1")
+        mock_tool_1.ainvoke = AsyncMock(return_value="Result 1")
 
         mock_tool_2 = Mock(spec=BaseTool)
         mock_tool_2.name = "tool_2"
-        mock_tool_2.arun = AsyncMock(return_value="Result 2")
+        mock_tool_2.ainvoke = AsyncMock(return_value="Result 2")
 
         def mock_getitem(key):
             if key == "tool_1":
@@ -184,8 +184,8 @@ class TestToolNode:
         assert isinstance(result_messages[2], ToolMessage)
 
         # Verify both tools were called
-        mock_tool_1.arun.assert_called_once_with({"param1": "value1"})
-        mock_tool_2.arun.assert_called_once_with({"param2": "value2"})
+        mock_tool_1.ainvoke.assert_called_once_with({"param1": "value1"})
+        mock_tool_2.ainvoke.assert_called_once_with({"param2": "value2"})
 
     @pytest.mark.asyncio
     async def test_run_tool_not_found(
@@ -230,7 +230,7 @@ class TestToolNode:
         """Test run handles TypeError during tool execution."""
         # Configure tool to raise TypeError
         type_error = TypeError("Invalid argument type")
-        mock_tool.arun = AsyncMock(side_effect=type_error)
+        mock_tool.ainvoke = AsyncMock(side_effect=type_error)
         mock_tool.args_schema = Mock()
         mock_tool.args_schema.model_json_schema.return_value = {
             "type": "object",
@@ -295,7 +295,7 @@ class TestToolNode:
             "ValidationError",
             [{"type": "missing", "loc": ["field"], "msg": "Field required"}],
         )
-        mock_tool.arun = AsyncMock(side_effect=validation_error)
+        mock_tool.ainvoke = AsyncMock(side_effect=validation_error)
 
         result = await tool_node.run(flow_state_with_tool_calls)
 
@@ -355,7 +355,7 @@ class TestToolNode:
         """Test run handles generic exceptions during tool execution."""
         # Configure tool to raise generic exception
         generic_error = Exception("Generic error")
-        mock_tool.arun = AsyncMock(side_effect=generic_error)
+        mock_tool.ainvoke = AsyncMock(side_effect=generic_error)
 
         result = await tool_node.run(flow_state_with_tool_calls)
 
@@ -447,7 +447,7 @@ class TestToolNode:
         result = await tool_node.run(state)
 
         # Verify tool was called with empty args
-        mock_tool.arun.assert_called_once_with({})
+        mock_tool.ainvoke.assert_called_once_with({})
 
         # Verify tool response is appended despite missing args
         result_messages = result[FlowStateKeys.CONVERSATION_HISTORY][component_name]
@@ -556,7 +556,7 @@ class TestToolNodeMonitoring:
     ):
         """Test run method monitoring when tool execution fails."""
         # Configure tool to raise exception
-        mock_tool.arun = AsyncMock(side_effect=Exception("Tool error"))
+        mock_tool.ainvoke = AsyncMock(side_effect=Exception("Tool error"))
 
         await tool_node.run(flow_state_with_tool_calls)
 
@@ -599,7 +599,7 @@ class TestToolNodeEventTracking:
         """Test run method tracks failure event with extra error data."""
         # Configure tool to raise exception
         error_message = "Specific tool error"
-        mock_tool.arun = AsyncMock(side_effect=Exception(error_message))
+        mock_tool.ainvoke = AsyncMock(side_effect=Exception(error_message))
 
         await tool_node.run(flow_state_with_tool_calls)
 

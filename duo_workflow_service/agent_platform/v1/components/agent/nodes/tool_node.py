@@ -101,7 +101,7 @@ class ToolNode:
             with duo_workflow_metrics.time_tool_call(
                 tool_name=tool.name, flow_type=self._flow_type.value
             ):
-                tool_call_result = await tool.arun(tool_call_args)
+                tool_call_result = await tool.ainvoke(tool_call_args)
 
             self._track_internal_event(
                 event_name=EventEnum.WORKFLOW_TOOL_SUCCESS,
