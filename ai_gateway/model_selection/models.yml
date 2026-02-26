@@ -426,7 +426,9 @@ models:
     params:
       model: "gemini-3.1-pro-preview"
       temperature: 1
-      max_tokens: 4_096
+      max_tokens: 32_768
+      thinking_level: "low"
+      streaming: "true"
 
   - name: "GPT-5.2 - OpenAI"
     provider: "OpenAI"
