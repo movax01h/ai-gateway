@@ -1,3 +1,5 @@
+from typing import override
+
 from ai_gateway.chat.base import BaseToolsRegistry
 from ai_gateway.chat.tools import BaseTool
 from ai_gateway.chat.tools.gitlab import (
@@ -40,6 +42,7 @@ class DuoChatToolsRegistry(BaseToolsRegistry):
 
         return tools
 
+    @override
     def get_on_behalf(self, user: StarletteUser, gl_version: str) -> list[BaseTool]:
         _tools = []
 
@@ -54,5 +57,6 @@ class DuoChatToolsRegistry(BaseToolsRegistry):
 
         return _tools
 
+    @override
     def get_all(self) -> list[BaseTool]:
         return self.tools

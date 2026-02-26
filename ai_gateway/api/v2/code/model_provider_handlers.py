@@ -1,3 +1,5 @@
+from typing import override
+
 from fastapi import Request
 
 from ai_gateway.api.v2.code.typing import CompletionsRequestWithVersion
@@ -26,6 +28,7 @@ class BaseModelProviderHandler:
 
 
 class AnthropicHandler(BaseModelProviderHandler):
+    @override
     def update_completion_params(self):
         # We support the prompt version 3 only with the Anthropic models
         if self.payload.prompt_version == 3:
@@ -33,12 +36,14 @@ class AnthropicHandler(BaseModelProviderHandler):
 
 
 class LiteLlmHandler(BaseModelProviderHandler):
+    @override
     def update_completion_params(self):
         if self.payload.context:
             self._update_code_context()
 
 
 class FireworksHandler(BaseModelProviderHandler):
+    @override
     def update_completion_params(self):
         default_model = KindLiteLlmModel.QWEN_2_5
 
@@ -59,6 +64,7 @@ class FireworksHandler(BaseModelProviderHandler):
 
 
 class VertexHandler(BaseModelProviderHandler):
+    @override
     def update_completion_params(self):
         self.completion_params.update(
             {"temperature": 0.7, "max_output_tokens": 64, "context_max_percent": 0.3}

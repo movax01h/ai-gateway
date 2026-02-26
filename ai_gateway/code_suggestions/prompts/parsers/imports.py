@@ -1,4 +1,4 @@
-from typing import List, Optional
+from typing import List, Optional, override
 
 from tree_sitter import Node
 
@@ -23,6 +23,7 @@ class BaseImportVisitor(BaseVisitor):
     def imports(self) -> list[str]:
         return self._imports
 
+    @override
     def _visit_node(self, node: Node):
         self._imports.append(self._bytes_to_str(node.text))
 
@@ -62,6 +63,7 @@ class PythonImportVisitor(BaseImportVisitor):
 class RubyImportVisitor(BaseImportVisitor, RubyParserMixin):
     _TARGET_SYMBOLS = ["call"]
 
+    @override
     def _visit_node(self, node: Node):
         if self.is_import(node):
             self._imports.append(self._bytes_to_str(node.text))

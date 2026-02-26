@@ -1,4 +1,4 @@
-from typing import Optional
+from typing import Optional, override
 
 from tree_sitter import Node
 
@@ -22,6 +22,7 @@ class BaseFunctionSignatureVisitor(BaseVisitor):
     def function_signatures(self) -> list[str]:
         return self._signatures
 
+    @override
     def _visit_node(self, node: Node):
         function_text = self._bytes_to_str(node.text)
 
@@ -78,6 +79,7 @@ class RubyFunctionSignatureVisitor(BaseFunctionSignatureVisitor, RubyParserMixin
     _TARGET_SYMBOLS = ["method"]
     _FUNCTION_BODY_SYMBOL = "body_statement"
 
+    @override
     def _visit_node(self, node: Node):
         function_text = self._bytes_to_str(node.text)
 

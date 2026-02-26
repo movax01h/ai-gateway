@@ -1,5 +1,5 @@
 from abc import abstractmethod
-from typing import Annotated, Any, Dict, Literal, Optional
+from typing import Annotated, Any, Dict, Literal, Optional, override
 
 from pydantic import AnyUrl, BaseModel, StringConstraints, UrlConstraints
 
@@ -29,6 +29,7 @@ class AmazonQModelMetadata(BaseModelMetadata):
     role_arn: Annotated[str, StringConstraints(max_length=255)]
     friendly_name: Optional[Annotated[str, StringConstraints(max_length=255)]] = None
 
+    @override
     def to_params(self) -> Dict[str, Any]:
         return {
             "role_arn": self.role_arn,
@@ -46,6 +47,7 @@ class FireworksModelMetadata(BaseModelMetadata):
     using_cache: Optional[bool] = None
     session_id: Optional[str] = None
 
+    @override
     def to_params(self) -> Dict[str, Any]:
         params = {}
 
@@ -75,6 +77,7 @@ class ModelMetadata(BaseModelMetadata):
     identifier: Optional[Annotated[str, StringConstraints(max_length=1000)]] = None
     friendly_name: Optional[Annotated[str, StringConstraints(max_length=255)]] = None
 
+    @override
     def to_params(self) -> Dict[str, Any]:
         """Retrieve model parameters for a given identifier.
 

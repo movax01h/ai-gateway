@@ -1,7 +1,7 @@
 import json
 from abc import ABC, abstractmethod
 from enum import StrEnum
-from typing import Any, NamedTuple, Optional
+from typing import Any, NamedTuple, Optional, override
 
 import httpx
 import structlog
@@ -61,6 +61,7 @@ class ModelAPIError(Exception):
         self._errors = errors
         self._details = details
 
+    @override
     def __str__(self):
         message = self.message
 

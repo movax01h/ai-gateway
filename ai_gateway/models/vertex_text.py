@@ -1,6 +1,6 @@
 from abc import ABC, abstractmethod
 from enum import StrEnum
-from typing import Any, AsyncIterator, Optional, Sequence, Union
+from typing import Any, AsyncIterator, Optional, Sequence, Union, override
 
 import structlog
 from google.api_core.exceptions import GoogleAPICallError, GoogleAPIError
@@ -64,6 +64,7 @@ class ModelInput(ABC):
     def dict(self) -> dict:
         pass
 
+    @override
     def __eq__(self, obj):
         return self.dict() == obj.dict()
 
@@ -72,9 +73,11 @@ class CodeBisonModelInput(ModelInput):
     def __init__(self, prefix):
         self.prefix = prefix
 
+    @override
     def is_valid(self) -> bool:
         return len(self.prefix) > 0
 
+    @override
     def dict(self) -> dict:
         return {"prefix": self.prefix}
 
@@ -83,9 +86,11 @@ class TextBisonModelInput(ModelInput):
     def __init__(self, prefix):
         self.prefix = prefix
 
+    @override
     def is_valid(self) -> bool:
         return len(self.prefix) > 0
 
+    @override
     def dict(self) -> dict:
         return {"content": self.prefix}
 
@@ -95,9 +100,11 @@ class CodeGeckoModelInput(ModelInput):
         self.prefix = prefix
         self.suffix = suffix
 
+    @override
     def is_valid(self) -> bool:
         return len(self.prefix) > 0
 
+    @override
     def dict(self) -> dict:
         return {"prefix": self.prefix, "suffix": self.suffix}
 
@@ -236,16 +243,19 @@ class PalmCodeGenBaseModel(TextGenModelBase):
         return text_gen_model_outputs
 
     @property
+    @override
     def metadata(self) -> ModelMetadata:
         return self._metadata
 
     @property
+    @override
     def input_token_limit(self) -> int:
         # Max number of tokens the model can handle
         # Source: https://cloud.google.com/vertex-ai/docs/generative-ai/learn/models#foundation_models
         return 2_048
 
     @abstractmethod
+    @override
     async def generate(
         self,
         prefix: str,
@@ -277,9 +287,11 @@ class PalmTextBisonModel(PalmCodeGenBaseModel):
         super().__init__(model_name, client, project, location, *args, **kwargs)
 
     @property
+    @override
     def input_token_limit(self) -> int:
         return 8_192
 
+    @override
     async def generate(
         self,
         prefix: str,
@@ -335,9 +347,11 @@ class PalmCodeBisonModel(PalmCodeGenBaseModel):
         super().__init__(model_name, client, project, location, *args, **kwargs)
 
     @property
+    @override
     def input_token_limit(self) -> int:
         return 4_096
 
+    @override
     async def generate(
         self,
         prefix: str,
@@ -396,9 +410,11 @@ class PalmCodeGeckoModel(PalmCodeGenBaseModel):
         super().__init__(model_name, client, project, location, *args, **kwargs)
 
     @property
+    @override
     def input_token_limit(self) -> int:
         return 2_048
 
+    @override
     async def generate(
         self,
         prefix: str,

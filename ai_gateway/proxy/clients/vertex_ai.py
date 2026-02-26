@@ -1,5 +1,5 @@
 import re
-from typing import Any, Literal, Self
+from typing import Any, Literal, Self, override
 
 import fastapi
 from fastapi import status
@@ -108,6 +108,7 @@ class VertexAIProxyModelFactory(BaseProxyModelFactory):
 
         self._base_url = f"https://{self.endpoint}"
 
+    @override
     async def factory(self, request: fastapi.Request) -> ProxyModel:
         path_params = PathParams.try_from_request(request)
 

@@ -2,7 +2,7 @@ import json
 import os.path
 import re
 import sqlite3
-from typing import Any, Dict, List
+from typing import Any, Dict, List, override
 
 import structlog
 
@@ -16,6 +16,7 @@ class SqliteSearch(Searcher):
     def __init__(self, *_args, **_kwargs):
         self.db_path = os.path.join("tmp", "docs.db")
 
+    @override
     async def search(
         self,
         query: str,
@@ -51,6 +52,7 @@ class SqliteSearch(Searcher):
 
         return results
 
+    @override
     def provider(self):
         return "sqlite"
 

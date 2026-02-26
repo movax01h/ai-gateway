@@ -1,4 +1,4 @@
-from typing import List, Optional
+from typing import List, Optional, override
 
 from tree_sitter import Node
 
@@ -13,6 +13,7 @@ class MinAllowedBlockVisitor(BaseVisitor):
         self.min_block_size = min_block_size
         self.visited_nodes: List[Node] = []
 
+    @override
     def _visit_node(self, node: Node):
         if self._is_block_candidate(node) and self._is_point_included(node):
             self.visited_nodes.append(node)
@@ -39,6 +40,7 @@ class MinAllowedBlockVisitor(BaseVisitor):
         self.visited_nodes.sort(key=lambda node: node.end_point, reverse=True)
         return self.visited_nodes[-1] if self.visited_nodes else None
 
+    @override
     def visit(self, node: Node):
         # override the inherited method to visit all nodes
         self._visit_node(node)
@@ -48,6 +50,7 @@ class ErrorBlocksVisitor(BaseVisitor):
     def __init__(self):
         self.error_nodes = []
 
+    @override
     def _visit_node(self, target_node: Node):
         # Include only low-level errors that do not contain other error nodes.
         # We assume that the visitor called with the DFS algorithm.
@@ -67,6 +70,7 @@ class ErrorBlocksVisitor(BaseVisitor):
     def errors(self) -> list[Node]:
         return self.error_nodes
 
+    @override
     def visit(self, node: Node):
         # override the inherited method to rely on the error property
         # instead of the node name

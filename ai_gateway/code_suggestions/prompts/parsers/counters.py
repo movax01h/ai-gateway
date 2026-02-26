@@ -1,5 +1,5 @@
 from collections import Counter
-from typing import Optional
+from typing import Optional, override
 
 from tree_sitter import Node
 
@@ -21,6 +21,7 @@ class BaseCounterVisitor(BaseVisitor):
     def counts(self) -> dict:
         return dict(self._symbol_counter)
 
+    @override
     def _visit_node(self, node: Node):
         self._symbol_counter.update([node.type])
 
@@ -102,6 +103,7 @@ class RubyCounterVisitor(BaseCounterVisitor, RubyParserMixin):
         "class",
     ]
 
+    @override
     def _visit_node(self, node: Node):
         if node.type == "call":
             if self.is_import(node):

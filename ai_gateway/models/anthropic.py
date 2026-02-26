@@ -1,5 +1,5 @@
 from enum import StrEnum
-from typing import Any, AsyncIterator, Callable, Optional, Union
+from typing import Any, AsyncIterator, Callable, Optional, Union, override
 
 import httpx
 import structlog
@@ -141,14 +141,17 @@ class AnthropicModel(TextGenModelBase):
         return opts
 
     @property
+    @override
     def metadata(self) -> ModelMetadata:
         return self._metadata
 
     @property
+    @override
     def input_token_limit(self) -> int:
         # Ref: https://docs.anthropic.com/en/docs/about-claude/models#legacy-model-comparison
         return 100_000
 
+    @override
     async def generate(
         self,
         prefix: str,
@@ -279,14 +282,17 @@ class AnthropicChatModel(ChatModelBase):
         return opts
 
     @property
+    @override
     def metadata(self) -> ModelMetadata:
         return self._metadata
 
     @property
+    @override
     def input_token_limit(self) -> int:
         # Ref: https://docs.anthropic.com/claude/docs/models-overview#model-comparison
         return 200_000
 
+    @override
     async def generate(
         self,
         messages: list[Message],

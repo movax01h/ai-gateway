@@ -1,4 +1,4 @@
-from typing import Any, AsyncIterator, Optional
+from typing import Any, AsyncIterator, Optional, override
 
 from ai_gateway.model_selection import LLMDefinition
 from ai_gateway.models.base import ModelMetadata
@@ -31,10 +31,12 @@ class AgentModel(TextGenModelBase):
         )
 
     @property
+    @override
     def metadata(self) -> ModelMetadata:
         return self._metadata
 
     @property
+    @override
     def input_token_limit(self) -> int:
         if self._llm_definition:
             return self._llm_definition.max_context_tokens
@@ -42,6 +44,7 @@ class AgentModel(TextGenModelBase):
         # Most modern models support at least 32k tokens
         return 32_768
 
+    @override
     async def generate(  # type: ignore[override]
         self,
         params: dict[str, Any],

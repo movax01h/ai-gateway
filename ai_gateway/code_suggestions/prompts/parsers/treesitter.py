@@ -1,5 +1,5 @@
 import asyncio
-from typing import Optional
+from typing import Optional, override
 
 from tree_sitter import Node, Tree
 from tree_sitter_languages import get_parser
@@ -37,6 +37,7 @@ class CodeParser(BaseCodeParser):
         self.tree = tree
         self.lang_id = lang_id
 
+    @override
     def imports(self) -> list[str]:
         visitor = ImportVisitorFactory.from_language_id(self.lang_id)
         if visitor is None:
@@ -57,6 +58,7 @@ class CodeParser(BaseCodeParser):
 
         return function_signatures
 
+    @override
     def count_symbols(self) -> dict:
         visitor = CounterVisitorFactory.from_language_id(self.lang_id)
         if visitor is None:

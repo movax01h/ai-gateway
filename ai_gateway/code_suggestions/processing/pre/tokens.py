@@ -1,3 +1,5 @@
+from typing import override
+
 from transformers import PreTrainedTokenizer
 
 from ai_gateway.code_suggestions.processing.typing import CodeContent, TokenStrategyBase
@@ -11,6 +13,7 @@ class TokenizerTokenStrategy(TokenStrategyBase):
     def __init__(self, tokenizer: PreTrainedTokenizer):
         self.tokenizer = tokenizer
 
+    @override
     def truncate_content(
         self, text: str, max_length: int, truncation_side: str = "left"
     ) -> CodeContent:
@@ -31,6 +34,7 @@ class TokenizerTokenStrategy(TokenStrategyBase):
             length_tokens=len(tokens["input_ids"]),
         )
 
+    @override
     def estimate_length(self, text: str | list[str]) -> list[int]:
         return self.tokenizer(
             text,
