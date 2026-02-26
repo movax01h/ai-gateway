@@ -552,6 +552,17 @@ models:
       model: gpt-5.2-codex
       max_tokens: 4_096
 
+  - name: "GPT-5.3-Codex - OpenAI"
+    provider: "OpenAI"
+    gitlab_identifier: "gpt_5_3_codex"
+    description: "Latest GPT-5.3 Codex release for coding tasks."
+    max_context_tokens: 400000
+    proxy_provider: openai
+    model_class_provider: "openai"
+    params:
+      model: gpt-5.3-codex
+      max_tokens: 4_096
+
   - name: Amazon Q
     gitlab_identifier: amazon_q
     max_context_tokens: 200000 # https://docs.aws.amazon.com/amazonq/latest/qdeveloper-ug/q-in-ides-chat-models.html
