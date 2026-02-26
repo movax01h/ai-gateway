@@ -20,6 +20,7 @@ from gitlab_cloud_connector import (
 )
 from google.protobuf.json_format import MessageToDict
 from google.protobuf.struct_pb2 import Struct
+from grpc_health.v1 import health, health_pb2, health_pb2_grpc
 from grpc_reflection.v1alpha import reflection
 from langchain_core.utils.function_calling import convert_to_openai_tool
 
@@ -834,14 +835,20 @@ async def serve(config: Config, port: int) -> None:
         contract_pb2_grpc.add_DuoWorkflowServicer_to_server(
             DuoWorkflowService(), server
         )
+        health_servicer = health.HealthServicer()
+        health_servicer.set("", health_pb2.HealthCheckResponse.SERVING)
+        health_pb2_grpc.add_HealthServicer_to_server(health_servicer, server)
         server.add_insecure_port(f"[::]:{port}")
-        # enable reflection for faster local development and debugging
-        # this can be removed when we are closer to production
-        service_names = (
-            contract_pb2.DESCRIPTOR.services_by_name["DuoWorkflow"].full_name,
-            reflection.SERVICE_NAME,
-        )
-        reflection.enable_server_reflection(service_names, server)
+        if (
+            os.environ.get("DUO_WORKFLOW_GRPC_REFLECTION_ENABLED", "false").lower()
+            == "true"
+        ):
+            service_names = (
+                contract_pb2.DESCRIPTOR.services_by_name["DuoWorkflow"].full_name,
+                health_pb2.DESCRIPTOR.services_by_name["Health"].full_name,
+                reflection.SERVICE_NAME,
+            )
+            reflection.enable_server_reflection(service_names, server)
         log.info("Starting gRPC server on port %d", port)
         await server.start()
         log.info("Started server")

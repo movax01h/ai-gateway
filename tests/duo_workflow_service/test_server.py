@@ -1027,15 +1027,26 @@ async def test_generate_token_unauthorized_for_any_flow():
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "reflection_enabled",
+    [False, True],
+)
 @patch("duo_workflow_service.server.setup_signal_handlers")
-async def test_grpc_server(mock_setup_signal_handlers):
+async def test_grpc_server(mock_setup_signal_handlers, reflection_enabled):
     """Test that the gRPC server starts correctly and sets up signal handlers."""
     mock_server = AsyncMock()
     mock_server.add_insecure_port.return_value = None
     mock_server.start.return_value = None
     mock_server.wait_for_termination.return_value = None
 
+    env = {
+        "DUO_WORKFLOW_GRPC_REFLECTION_ENABLED": (
+            "true" if reflection_enabled else "false"
+        )
+    }
+
     with (
+        patch.dict(os.environ, env),
         patch(
             "duo_workflow_service.server.grpc.aio.server",
             return_value=mock_server,
@@ -1046,6 +1057,7 @@ async def test_grpc_server(mock_setup_signal_handlers):
         patch(
             "duo_workflow_service.server.reflection.enable_server_reflection"
         ) as mock_enable_reflection,
+        patch("duo_workflow_service.server.MonitoringInterceptor"),
         patch("duo_workflow_service.server.connection_pool") as mock_connection_pool,
     ):
         mock_connection_pool.__aenter__ = AsyncMock(return_value=mock_connection_pool)
@@ -1058,7 +1070,10 @@ async def test_grpc_server(mock_setup_signal_handlers):
     mock_server.start.assert_called_once()
     mock_server.wait_for_termination.assert_called_once()
     mock_add_servicer.assert_called_once()
-    mock_enable_reflection.assert_called_once()
+    if reflection_enabled:
+        mock_enable_reflection.assert_called_once()
+    else:
+        mock_enable_reflection.assert_not_called()
     mock_setup_signal_handlers.assert_called_once()
 
 

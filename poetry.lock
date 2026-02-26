@@ -2718,6 +2718,27 @@ url = "https://gitlab.com/api/v4/projects/78063949/packages/pypi/simple"
 reference = "litellm"
 
 [[package]]
+name = "grpcio-health-checking"
+version = "1.78.1"
+description = "Standard Health Checking Service for gRPC"
+optional = false
+python-versions = ">=3.9"
+groups = ["main"]
+files = [
+    {file = "grpcio_health_checking-1.78.1-py3-none-any.whl", hash = "sha256:9e9d3f6edbf11ebbf8aaceee1fc7aa831e667419ad567de288312c3d82fa8406"},
+    {file = "grpcio_health_checking-1.78.1.tar.gz", hash = "sha256:563cba3cfa776ae739153dc89b14ddd75d49dba317f82c23eaf20e5b3a01f554"},
+]
+
+[package.dependencies]
+grpcio = ">=1.78.1"
+protobuf = ">=6.31.1,<7.0.0"
+
+[package.source]
+type = "legacy"
+url = "https://gitlab.com/api/v4/projects/78063949/packages/pypi/simple"
+reference = "litellm"
+
+[[package]]
 name = "grpcio-reflection"
 version = "1.78.1"
 description = "Standard Protobuf Reflection Service for gRPC"
@@ -9843,4 +9864,4 @@ reference = "litellm"
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.12.0,<3.13.0"
-content-hash = "75c86c10bd9234b9ef0016c408fc0dc737a57303d6c2a154d5b50e51590059b8"
+content-hash = "97cb3716691141e07a4e493aa42ef85dfc62fb9d7922b62391583013c8e06e82"

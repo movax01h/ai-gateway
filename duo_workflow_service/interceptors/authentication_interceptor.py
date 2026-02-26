@@ -26,20 +26,33 @@ class AuthenticationError(Exception):
 
 
 class AuthenticationInterceptor(grpc.aio.ServerInterceptor):
-    ALLOW_UNAUTHENTICATED_METHODS = (
+    _HEALTH_METHODS = (
         "/grpc.health.v1.Health/Check",
         "/grpc.health.v1.Health/Watch",
+    )
+    _REFLECTION_METHODS = (
+        "/grpc.reflection.v1alpha.ServerReflection/ServerReflectionInfo",
+        "/grpc.reflection.v1.ServerReflection/ServerReflectionInfo",
     )
 
     def __init__(self):
         self.oidc_auth_provider = self._init_oidc_auth_provider()
+        reflection_enabled = (
+            os.environ.get("DUO_WORKFLOW_GRPC_REFLECTION_ENABLED", "false").lower()
+            == "true"
+        )
+        self._allow_unauthenticated_methods = self._HEALTH_METHODS + (
+            self._REFLECTION_METHODS if reflection_enabled else ()
+        )
 
     @override
     async def intercept_service(
         self, continuation: Callable, handler_call_details: grpc.HandlerCallDetails
     ) -> grpc.RpcMethodHandler:
-        # Health checks don't require authentication
-        if handler_call_details.method in self.ALLOW_UNAUTHENTICATED_METHODS:
+        # Health checks (and reflection when enabled) don't require authentication
+        if handler_call_details.method in self._allow_unauthenticated_methods:
+            cloud_connector_user, _ = authenticate({}, None, bypass_auth=True)
+            current_user.set(cloud_connector_user)
             return await continuation(handler_call_details)
 
         if os.environ.get("DUO_WORKFLOW_AUTH__ENABLED", True) == "false":
