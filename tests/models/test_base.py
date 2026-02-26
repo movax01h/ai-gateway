@@ -46,3 +46,33 @@ class TestTextGenBaseModel:
 
         mock_config.for_model.assert_called_with(engine="vertex", name="code-gecko@002")
         assert instrumentator.limits == 7
+
+
+@pytest.mark.parametrize("provider", ["bedrock", "vertex_ai"])
+def test_model_metadata_to_params_removes_api_base_for_specific_providers(provider):
+    class TestClass(TextGenModelBase):
+        def __init__(self, metadata):
+            self._metadata = metadata
+
+        @property
+        def metadata(self):
+            return self._metadata
+
+        async def generate(self, **kwargs):
+            pass
+
+    model = TestClass(
+        ModelMetadata(
+            engine="litellm",
+            name="model-a",
+            endpoint="https://api.example.com",
+            api_key="abcde",
+            identifier=f"{provider}/model/identifier",
+        )
+    )
+
+    assert model.model_metadata_to_params() == {
+        "api_key": "abcde",
+        "model": "model/identifier",
+        "custom_llm_provider": provider,
+    }

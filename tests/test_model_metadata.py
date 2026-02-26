@@ -275,6 +275,24 @@ class TestModelMetadataToParams:
             "timeout": 10,
         }
 
+    def test_with_identifier_with_vertex_ai_provider(self):
+        model_metadata = create_model_metadata(
+            {
+                "name": "gitlab_model1",
+                "provider": "provider",
+                "endpoint": HttpUrl("https://api.example.com"),
+                "api_key": "abcde",
+                "identifier": "vertex_ai/model/identifier",
+            }
+        )
+
+        assert model_metadata.to_params() == {
+            "model": "model/identifier",
+            "api_key": "abcde",
+            "custom_llm_provider": "vertex_ai",
+            "timeout": 10,
+        }
+
 
 def test_create_model_metadata_with_none_data():
     with pytest.raises(ValueError, match="provider must be present"):

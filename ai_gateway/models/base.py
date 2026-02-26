@@ -12,6 +12,7 @@ from pydantic import BaseModel
 
 from ai_gateway.config import Config
 from ai_gateway.instrumentators.model_requests import ModelRequestInstrumentator
+from ai_gateway.model_metadata import PROVIDERS_WITHOUT_API_BASE
 from ai_gateway.structured_logging import can_log_request_data, get_request_logger
 
 # TODO: The instrumentator needs the config here to know what limit needs to be
@@ -141,7 +142,7 @@ class ModelBase(ABC):
             params["custom_llm_provider"] = provider
             params["model"] = model_name
 
-            if provider == "bedrock":
+            if provider in PROVIDERS_WITHOUT_API_BASE:
                 del params["api_base"]
         else:
             params["custom_llm_provider"] = "custom_openai"

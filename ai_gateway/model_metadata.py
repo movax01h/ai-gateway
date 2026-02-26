@@ -6,6 +6,8 @@ from pydantic import AnyUrl, BaseModel, StringConstraints, UrlConstraints
 from ai_gateway.model_selection import LLMDefinition, ModelSelectionConfig
 from lib.context import StarletteUser
 
+PROVIDERS_WITHOUT_API_BASE = frozenset({"bedrock", "vertex_ai"})
+
 
 class BaseModelMetadata(BaseModel):
     llm_definition: LLMDefinition
@@ -97,7 +99,7 @@ class ModelMetadata(BaseModelMetadata):
                 params["custom_llm_provider"] = provider
                 params["model"] = model_name
 
-                if provider == "bedrock":
+                if provider in PROVIDERS_WITHOUT_API_BASE:
                     params.pop("api_base", None)
             else:
                 params["custom_llm_provider"] = "custom_openai"
