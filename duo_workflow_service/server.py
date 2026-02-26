@@ -839,7 +839,7 @@ async def serve(config: Config, port: int) -> None:
         contract_pb2_grpc.add_DuoWorkflowServicer_to_server(
             DuoWorkflowService(), server
         )
-        health_servicer = health.HealthServicer()
+        health_servicer = health.aio.HealthServicer()
         health_servicer.set("", health_pb2.HealthCheckResponse.SERVING)
         health_pb2_grpc.add_HealthServicer_to_server(health_servicer, server)
         server.add_insecure_port(f"[::]:{port}")
