@@ -53,12 +53,11 @@ async def test_intercept_service_health_check_skips_auth(
         "/grpc.reflection.v1.ServerReflection/ServerReflectionInfo",
     ],
 )
-@patch.dict(os.environ, {"DUO_WORKFLOW_GRPC_REFLECTION_ENABLED": "true"})
 @pytest.mark.asyncio
 async def test_intercept_service_reflection_skips_auth_when_enabled(
     method, mock_continuation, handler_call_details
 ):
-    interceptor = AuthenticationInterceptor()
+    interceptor = AuthenticationInterceptor(reflection_enabled=True)
     handler_call_details.method = method
     await interceptor.intercept_service(mock_continuation, handler_call_details)
     mock_continuation.assert_awaited_once_with(handler_call_details)

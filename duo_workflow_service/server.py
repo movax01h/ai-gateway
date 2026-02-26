@@ -820,11 +820,15 @@ async def serve(config: Config, port: int) -> None:
             ),
         ]
 
+        reflection_enabled = (
+            os.environ.get("DUO_WORKFLOW_GRPC_REFLECTION_ENABLED", "false").lower()
+            == "true"
+        )
         server = grpc.aio.server(
             interceptors=[
                 MetadataContextInterceptor(config),
                 CorrelationIdInterceptor(),
-                AuthenticationInterceptor(),
+                AuthenticationInterceptor(reflection_enabled=reflection_enabled),
                 FeatureFlagInterceptor(),
                 InternalEventsInterceptor(),
                 ModelMetadataInterceptor(),
@@ -839,10 +843,7 @@ async def serve(config: Config, port: int) -> None:
         health_servicer.set("", health_pb2.HealthCheckResponse.SERVING)
         health_pb2_grpc.add_HealthServicer_to_server(health_servicer, server)
         server.add_insecure_port(f"[::]:{port}")
-        if (
-            os.environ.get("DUO_WORKFLOW_GRPC_REFLECTION_ENABLED", "false").lower()
-            == "true"
-        ):
+        if reflection_enabled:
             service_names = (
                 contract_pb2.DESCRIPTOR.services_by_name["DuoWorkflow"].full_name,
                 health_pb2.DESCRIPTOR.services_by_name["Health"].full_name,

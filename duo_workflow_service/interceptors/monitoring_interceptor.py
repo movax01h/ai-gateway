@@ -16,6 +16,7 @@ from gitlab_cloud_connector.auth import (
 from grpc.aio import ServerInterceptor
 from prometheus_client import REGISTRY, Counter
 
+from duo_workflow_service.interceptors import GRPC_HEALTH_METHODS
 from duo_workflow_service.tracking import MonitoringContext, current_monitoring_context
 from duo_workflow_service.tracking.errors import log_exception
 from lib.context import (
@@ -38,11 +39,6 @@ class GRPCMethodType(StrEnum):
 
 
 class MonitoringInterceptor(ServerInterceptor):
-    _HEALTH_METHODS = (
-        "/grpc.health.v1.Health/Check",
-        "/grpc.health.v1.Health/Watch",
-    )
-
     def __init__(self, registry=REGISTRY):
         self._requests_counter: Counter = Counter(
             "grpc_server_handled_total",
@@ -67,7 +63,7 @@ class MonitoringInterceptor(ServerInterceptor):
         handler_call_details: grpc.HandlerCallDetails,
     ) -> Optional[grpc.RpcMethodHandler]:
         # Health checks are infrastructure-level calls that don't need application monitoring.
-        if handler_call_details.method in self._HEALTH_METHODS:
+        if handler_call_details.method in GRPC_HEALTH_METHODS:
             return await continuation(handler_call_details)
 
         stream_fn, unary_fn = self._build_behavior_functions(handler_call_details)

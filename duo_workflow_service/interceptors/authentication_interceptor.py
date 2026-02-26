@@ -16,6 +16,7 @@ from gitlab_cloud_connector import (
 from gitlab_cloud_connector.auth import AUTH_HEADER, PREFIX_BEARER_HEADER
 from grpc.aio import ServicerContext
 
+from duo_workflow_service.interceptors import GRPC_HEALTH_METHODS
 from lib.context import cloud_connector_token_context_var
 
 current_user: contextvars.ContextVar = contextvars.ContextVar("current_user")
@@ -26,22 +27,14 @@ class AuthenticationError(Exception):
 
 
 class AuthenticationInterceptor(grpc.aio.ServerInterceptor):
-    _HEALTH_METHODS = (
-        "/grpc.health.v1.Health/Check",
-        "/grpc.health.v1.Health/Watch",
-    )
     _REFLECTION_METHODS = (
         "/grpc.reflection.v1alpha.ServerReflection/ServerReflectionInfo",
         "/grpc.reflection.v1.ServerReflection/ServerReflectionInfo",
     )
 
-    def __init__(self):
+    def __init__(self, reflection_enabled: bool = False):
         self.oidc_auth_provider = self._init_oidc_auth_provider()
-        reflection_enabled = (
-            os.environ.get("DUO_WORKFLOW_GRPC_REFLECTION_ENABLED", "false").lower()
-            == "true"
-        )
-        self._allow_unauthenticated_methods = self._HEALTH_METHODS + (
+        self._allow_unauthenticated_methods = GRPC_HEALTH_METHODS + (
             self._REFLECTION_METHODS if reflection_enabled else ()
         )
 
