@@ -237,8 +237,8 @@ async def code_completion(
         metadata=ResponseMetadataBase(
             timestamp=int(time()),
             model=ModelMetadata(
-                engine=suggestions[0].model.engine,
-                name=suggestions[0].model.name,
+                engine=suggestions[0].model_metadata.engine,
+                name=suggestions[0].model_metadata.name,
                 lang=suggestions[0].lang,
             ),
             enabled_feature_flags=current_feature_flag_context.get(),
@@ -385,8 +385,8 @@ async def code_generation(
         metadata=ResponseMetadataBase(
             timestamp=int(time()),
             model=ModelMetadata(
-                engine=suggestion.model.engine,
-                name=suggestion.model.name,
+                engine=suggestion.model_metadata.engine,
+                name=suggestion.model_metadata.name,
                 lang=suggestion.lang,
             ),
             enabled_feature_flags=current_feature_flag_context.get(),

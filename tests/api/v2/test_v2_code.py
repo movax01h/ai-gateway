@@ -1187,11 +1187,8 @@ class TestCodeCompletions:
         )
 
         result = response.json()
-        assert result["model"]["engine"] == "agent"
-        assert (
-            "Codestral" in result["model"]["name"]
-            or "codestral" in result["model"]["name"]
-        )
+        assert result["model"]["engine"] == "vertex-ai"
+        assert "codestral" in result["model"]["name"]
 
         assert result["choices"][0]["text"] == "Post-processed completion response"
 
@@ -1227,30 +1224,34 @@ class TestCodeCompletions:
         assert response.status_code == 200
 
         body = response.json()
-        assert body["model"]["engine"] == "agent"
-        assert "Codestral" in body["model"]["name"]
+        assert body["model"]["engine"] == "fireworks_ai"
+        assert "codestral" in body["model"]["name"]
 
     @pytest.mark.parametrize("mock_model_responses", [True])
     @pytest.mark.parametrize(
         (
             "gitlab_model_identifier",
             "expected_model_name",
+            "expected_model_engine",
             "expect_post_processed",
         ),
         [
             (
                 "codestral_2508_vertex",
-                "Codestral 22B Code Completions",
+                "codestral_2508_vertex",
+                "vertex-ai",
                 True,
             ),
             (
                 "codestral_2501_fireworks",
-                "Codestral 22B Code Completions",
+                "codestral_2501_fireworks",
+                "fireworks_ai",
                 True,
             ),
             (
                 "claude_sonnet_4_20250514",
-                "Code Completions",
+                "claude_sonnet_4_20250514",
+                "anthropic",
                 False,
             ),
         ],
@@ -1262,6 +1263,7 @@ class TestCodeCompletions:
         mock_post_processor: Mock,
         gitlab_model_identifier: str,
         expected_model_name: str,
+        expected_model_engine: str,
         expect_post_processed: bool,
     ):
         """Test code completions with gitlab model provider and different underlying providers."""
@@ -1284,7 +1286,7 @@ class TestCodeCompletions:
         assert mock_prompt_ainvoke.called, "Should use prompt registry execution"
 
         body = response.json()
-        assert body["model"]["engine"] == "agent"
+        assert body["model"]["engine"] == expected_model_engine
         assert body["model"]["name"] == expected_model_name
         assert (
             body["choices"][0]["text"] == expect_post_processed
@@ -1335,9 +1337,6 @@ class TestCodeCompletions:
 
         # Make the request
         response = mock_client.post("/code/completions", headers=headers, json=params)
-        import json
-
-        print(json.dumps(response.json(), indent=2))
 
         assert response.status_code == 200
 
@@ -1550,10 +1549,10 @@ class TestGitLabModelProvider:
         mock_suggestion.text = "test completion"
         mock_suggestion.score = 1.0
 
-        mock_model = Mock()
-        mock_model.engine = expected_engine
-        mock_model.name = expected_model_name
-        mock_suggestion.model = mock_model
+        mock_model_metadata = Mock()
+        mock_model_metadata.engine = expected_engine
+        mock_model_metadata.name = expected_model_name
+        mock_suggestion.model_metadata = mock_model_metadata
 
         mock_suggestion.lang = "python"
         mock_suggestion.metadata = None
@@ -1638,10 +1637,10 @@ class TestGitLabModelProvider:
         mock_suggestion.text = "test completion"
         mock_suggestion.score = 1.0
 
-        mock_model = Mock()
-        mock_model.engine = "vertex-ai"
-        mock_model.name = "codestral-2508"
-        mock_suggestion.model = mock_model
+        mock_model_metadata = Mock()
+        mock_model_metadata.engine = "vertex-ai"
+        mock_model_metadata.name = "codestral-2508"
+        mock_suggestion.model_metadata = mock_model_metadata
 
         mock_suggestion.lang = "python"
         mock_suggestion.metadata = None
@@ -1788,10 +1787,10 @@ class TestGitLabModelProvider:
         mock_suggestion.text = "test completion"
         mock_suggestion.score = 1.0
 
-        mock_model = Mock()
-        mock_model.engine = "vertex-ai"
-        mock_model.name = "claude-sonnet-4-20250929"
-        mock_suggestion.model = mock_model
+        mock_model_metadata = Mock()
+        mock_model_metadata.engine = "vertex-ai"
+        mock_model_metadata.name = "claude-sonnet-4-20250929"
+        mock_suggestion.model_metadata = mock_model_metadata
 
         mock_suggestion.lang = "python"
         mock_suggestion.metadata = None
@@ -1843,7 +1842,7 @@ class TestGitLabModelProvider:
         ),
         [
             (
-                "codestral_2501_vertex",
+                "codestral_2508_vertex",
                 "Vertex",
                 {"temperature": 0.0, "max_tokens": 4096},
             ),
@@ -1885,7 +1884,7 @@ class TestGitLabModelProvider:
         mock_model = Mock()
         mock_model.engine = "test-engine"
         mock_model.name = "test-model"
-        mock_suggestion.model = mock_model
+        mock_suggestion.model_metadata = mock_model
 
         mock_suggestion.lang = "python"
         mock_suggestion.metadata = None

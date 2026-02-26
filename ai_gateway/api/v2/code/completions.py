@@ -54,7 +54,7 @@ from ai_gateway.code_suggestions.processing.post.completions import (
 )
 from ai_gateway.config import Config
 from ai_gateway.instrumentators.base import TelemetryInstrumentator
-from ai_gateway.model_metadata import ModelMetadata, create_model_metadata
+from ai_gateway.model_metadata import create_model_metadata
 from ai_gateway.models import KindLiteLlmModel, KindModelProvider
 from ai_gateway.models.base import TokensConsumptionMetadata
 from ai_gateway.prompts import BasePromptRegistry
@@ -197,8 +197,8 @@ async def completions(
         id="id",
         created=int(time()),
         model=SuggestionsResponse.Model(
-            engine=suggestions[0].model.engine,
-            name=suggestions[0].model.name,
+            engine=suggestions[0].model_metadata.engine,
+            name=suggestions[0].model_metadata.name,
             lang=suggestions[0].lang,
             tokens_consumption_metadata=tokens_consumption_metadata,
             region=region,
@@ -322,8 +322,8 @@ async def generations(
         id="id",
         created=int(time()),
         model=SuggestionsResponse.Model(
-            engine=suggestion.model.engine,
-            name=suggestion.model.name,
+            engine=suggestion.model_metadata.engine,
+            name=suggestion.model_metadata.name,
             lang=suggestion.lang,
             region=config.google_cloud_platform.location(),
         ),
@@ -424,7 +424,7 @@ def _build_code_generations(
     return generations_vertex_factory()
 
 
-def _resolve_code_completions_litellm(
+def _resolve_agent_code_completions(
     payload: SuggestionsRequest,
     current_user: StarletteUser,
     prompt_registry: BasePromptRegistry,
@@ -464,12 +464,24 @@ def _resolve_code_completions_litellm(
         config,
     )
 
-    return _resolve_agent_code_completions(
-        model_metadata=model_metadata,
-        current_user=current_user,
-        prompt_registry=prompt_registry,
-        completions_agent_factory=completions_agent_factory,
+    try:
+        prompt = prompt_registry.get_on_behalf(
+            current_user,
+            COMPLETIONS_AGENT_ID,
+            model_metadata=model_metadata,
+            internal_event_category=__name__,
+        )
+    except WrongUnitPrimitives:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Unauthorized to access code completions",
+        )
+
+    return completions_agent_factory(
+        model__prompt=prompt,
+        model__llm_definition=model_metadata.llm_definition,
         post_processor=post_processor,
+        model_metadata=model_metadata,
     )
 
 
@@ -643,7 +655,7 @@ def _build_code_completions(
         ).update_completion_params()
 
     if provider_config.requires_prompt_registry:
-        code_completions = _resolve_code_completions_litellm(
+        code_completions = _resolve_agent_code_completions(
             payload=payload,
             current_user=current_user,
             prompt_registry=prompt_registry,
@@ -679,33 +691,6 @@ def _build_code_completions(
     _track_code_suggestions_event(tracking_event, internal_event_client)
 
     return code_completions, kwargs
-
-
-def _resolve_agent_code_completions(
-    model_metadata: ModelMetadata,
-    current_user: StarletteUser,
-    prompt_registry: BasePromptRegistry,
-    completions_agent_factory: Factory[CodeCompletions],
-    post_processor: Optional[Factory] = None,
-) -> CodeCompletions:
-    try:
-        prompt = prompt_registry.get_on_behalf(
-            current_user,
-            COMPLETIONS_AGENT_ID,
-            model_metadata=model_metadata,
-            internal_event_category=__name__,
-        )
-    except WrongUnitPrimitives:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Unauthorized to access code completions",
-        )
-
-    return completions_agent_factory(
-        model__prompt=prompt,
-        model__llm_definition=model_metadata.llm_definition,
-        post_processor=post_processor,
-    )
 
 
 def _completion_suggestion_choices(

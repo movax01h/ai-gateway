@@ -136,7 +136,7 @@ class CodeSuggestionsOutput(NamedTuple):
         tokens_consumption_metadata: Optional[TokensConsumptionMetadata] = None
 
     text: str
-    model: ModelMetadata
+    model_metadata: ModelMetadata
     score: Optional[float] = None
     lang_id: Optional[LanguageId] = None
     metadata: Optional["CodeSuggestionsOutput.Metadata"] = None  # type: ignore[name-defined]
