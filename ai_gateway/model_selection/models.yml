@@ -220,6 +220,27 @@ models:
       temperature: 0.0
       max_tokens: 4_096
 
+  - name: "Claude Sonnet 4.6 - Vertex"
+    provider: "Vertex"
+    gitlab_identifier: "claude_sonnet_4_6_vertex"
+    description: "Anthropic's flagship model for real-world coding, reasoning, and agentic workflows."
+    cost_indicator: "$$$"
+    max_context_tokens: 200000 # https://console.cloud.google.com/vertex-ai/publishers/anthropic/model-garden/claude-sonnet-4-6
+    # Note: max context window tokens of 1M are supported in Beta
+    family:
+      - claude_4_5
+    model_class_provider: litellm
+    params:
+      model: "claude-sonnet-4-6"
+      custom_llm_provider: "vertex_ai"
+      temperature: 0.0
+      max_tokens: 4_096
+      max_retries: 1
+      extra_headers:
+        anthropic-beta: context-1m-2025-08-07
+    prompt_params:
+      vertex_location: global
+
   - name: "Claude Sonnet 4.5 - Anthropic"
     provider: "Anthropic"
     gitlab_identifier: "claude_sonnet_4_5_20250929"
