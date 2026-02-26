@@ -247,7 +247,16 @@ class Workflow(AbstractWorkflow):
         match status_event:
             case WorkflowStatusEventEnum.START:
                 return self.get_workflow_state(goal)
+            case WorkflowStatusEventEnum.RETRY:
+                if checkpoint_tuple is None:
+                    return self.get_workflow_state(goal)
+                return Command(update={"status": WorkflowStatusEnum.EXECUTION})
             case _:
+                if not goal and not (
+                    self._approval and self._approval.WhichOneof("user_decision")
+                ):
+                    return Command(update={"status": WorkflowStatusEnum.EXECUTION})
+
                 state_update: dict[str, Any] = {
                     "status": WorkflowStatusEnum.EXECUTION,
                     "preapproved_tools": self._preapproved_tools,
