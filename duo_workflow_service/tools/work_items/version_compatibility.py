@@ -12,6 +12,7 @@ log = structlog.stdlib.get_logger(__name__)
 HIERARCHY_WIDGET_VERSION = Version("18.7.0")
 NOTE_RESOLVABLE_AND_RESOLVED_FIELDS_VERSION = Version("18.9.0")
 BASE_DISCUSSION_ID_FIELD_VERSION = Version("18.9.0")
+DEVELOPMENT_WIDGET_VERSION = Version("18.9.0")
 DEFAULT_FALLBACK_VERSION = Version("18.6.0")
 
 
@@ -63,6 +64,15 @@ def supports_discussion_id_field() -> bool:
     return get_gitlab_version() >= BASE_DISCUSSION_ID_FIELD_VERSION
 
 
+def supports_development_widget() -> bool:
+    """Check if the current GitLab version supports development widget fields.
+
+    Returns:
+        True if development widget is supported, False otherwise.
+    """
+    return get_gitlab_version() >= DEVELOPMENT_WIDGET_VERSION
+
+
 def get_query_variables_for_version(*requested_keys: str) -> dict:
     """Get GraphQL query variables based on GitLab version.
 
@@ -76,6 +86,7 @@ def get_query_variables_for_version(*requested_keys: str) -> dict:
         "includeHierarchyWidget": supports_hierarchy_widget(),
         "includeNoteResolvedAndResolvableFields": supports_note_resolved_and_resolvable_fields(),
         "includeDiscussionIdField": supports_discussion_id_field(),
+        "includeDevelopmentWidget": supports_development_widget(),
     }
 
     if not requested_keys:

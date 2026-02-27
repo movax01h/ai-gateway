@@ -439,7 +439,9 @@ class WorkItemBaseTool(DuoBaseTool):
         variables = {
             "fullPath": resolved.parent.full_path,
             "iid": str(resolved.work_item_iid),
-            **get_query_variables_for_version("includeHierarchyWidget"),
+            **get_query_variables_for_version(
+                "includeHierarchyWidget", "includeDevelopmentWidget"
+            ),
         }
 
         response = await self.gitlab_client.graphql(query, variables)
@@ -594,7 +596,9 @@ class WorkItemBaseTool(DuoBaseTool):
         query_variables = {
             "fullPath": resolved.parent.full_path,
             "iid": str(resolved.work_item_iid),
-            **get_query_variables_for_version("includeHierarchyWidget"),
+            **get_query_variables_for_version(
+                "includeHierarchyWidget", "includeDevelopmentWidget"
+            ),
         }
 
         response = await self.gitlab_client.graphql(query, query_variables)

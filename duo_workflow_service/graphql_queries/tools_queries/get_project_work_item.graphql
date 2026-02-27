@@ -6,6 +6,7 @@ query GetProjectWorkItem(
     $pageSize: Int
     $endCursor: String
     $includeHierarchyWidget: Boolean!
+    $includeDevelopmentWidget: Boolean!
 ) {
     project(fullPath: $fullPath) {
         workItems(iid: $iid) {
@@ -32,6 +33,16 @@ query GetProjectWorkItem(
                     name
                 }
                 widgets {
+                    ... on WorkItemWidgetDevelopment @include(if: $includeDevelopmentWidget) {
+                        type
+                        relatedMergeRequests {
+                            nodes {
+                                title
+                                webUrl
+                                state
+                            }
+                        }
+                    }
                     ...on WorkItemWidgetLinkedItems {
                         type
                         linkedItems {
