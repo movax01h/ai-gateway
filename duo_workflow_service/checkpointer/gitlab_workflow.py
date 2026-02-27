@@ -97,7 +97,7 @@ BILLABLE_STATUSES = frozenset(
 )
 
 # Maps current checkpoint status to the rails workflow state machine's event (if applicable)
-CheckpointStatusToStatusEvent = {
+CHECKPOINT_STATUS_TO_STATUS_EVENT = {
     "FINISHED": WorkflowStatusEventEnum.FINISH,
     "FAILED": WorkflowStatusEventEnum.DROP,
     "STOPPED": WorkflowStatusEventEnum.STOP,
@@ -883,7 +883,7 @@ class GitLabWorkflow(
                 return status_event
             checkpoint_status = WORKFLOW_STATUS_TO_CHECKPOINT_STATUS.get(value)
             if checkpoint_status:
-                status_event = CheckpointStatusToStatusEvent.get(checkpoint_status)
+                status_event = CHECKPOINT_STATUS_TO_STATUS_EVENT.get(checkpoint_status)
 
         return status_event
 
