@@ -32,10 +32,6 @@ def test_container(mock_ai_gateway_container: containers.DeclarativeContainer):
 
     assert isinstance(generations.vertex(), CodeGenerations)
     assert isinstance(
-        generations.anthropic_factory(model__name=KindAnthropicModel.CLAUDE_3_HAIKU),
-        CodeGenerations,
-    )
-    assert isinstance(
         generations.anthropic_chat_factory(
             model__name=KindAnthropicModel.CLAUDE_3_HAIKU
         ),
@@ -43,11 +39,5 @@ def test_container(mock_ai_gateway_container: containers.DeclarativeContainer):
     )
     assert isinstance(
         generations.litellm_factory(model__name=KindLiteLlmModel.MISTRAL),
-        CodeGenerations,
-    )
-    assert isinstance(
-        generations.anthropic_default(
-            model__name=KindAnthropicModel.CLAUDE_3_5_SONNET_V2
-        ),
         CodeGenerations,
     )
