@@ -153,15 +153,6 @@ include:
     rules: *skip-if-not-canonical
   - project: "gitlab-com/gl-infra/platform/runway/runwayctl"
     file: "ci-tasks/service-project/helm-chart.yml"
-    ref: v4.15.0
-    inputs:
-      runway_service_id: ai-gateway-gke
-      runway_version: v4.15.0
-      runtime: gke
-      app_version: "${CI_COMMIT_SHORT_SHA}"
-    rules: *skip-if-not-canonical
-  - project: "gitlab-com/gl-infra/platform/runway/runwayctl"
-    file: "ci-tasks/service-project/helm-chart.yml"
     ref: v4.18.2
     inputs:
       runway_service_id: duo-workflow-svc-eks
