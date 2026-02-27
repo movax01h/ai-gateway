@@ -2,8 +2,7 @@ name: Secret FP detection Agent Prompt
 model:
   params:
     max_tokens: 32_768
-unit_primitives:
-  - duo_agent_platform
+unit_primitive: duo_agent_platform
 prompt_template:
   system: |
     {% include 'secret_fp_detection_agent_prompt/system/1.0.0.jinja' %}

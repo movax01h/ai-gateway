@@ -3,8 +3,7 @@ name: Chat Agent
 model:
   params:
     max_tokens: 8_192
-unit_primitives:
-  - duo_chat
+unit_primitive: duo_chat
 prompt_template:
   system_static: |
     {% include 'chat/agent/partials/system_static/gpt_5/1.0.0.jinja' %}

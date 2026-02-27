@@ -1,7 +1,6 @@
 ---
 name: create_repository_branch
-unit_primitives:
-  - duo_workflow_execute_workflow
+unit_primitive: duo_workflow_execute_workflow
 prompt_template:
   system: |
     {% include 'create_repository_branch/system/1.0.0.jinja' %}

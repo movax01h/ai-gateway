@@ -189,7 +189,7 @@ class Prompt(RunnableBinding[Any, BaseMessage]):
     name: str
     model_provider: str
     model: Model
-    unit_primitives: list[GitLabUnitPrimitive]
+    unit_primitive: GitLabUnitPrimitive
     prompt_tpl: Runnable[Any, PromptValue]
     internal_event_client: Optional[InternalEventsClient] = None
     limits: Optional[ModelLimits] = None
@@ -255,7 +255,7 @@ class Prompt(RunnableBinding[Any, BaseMessage]):
             name=config.name,
             model_provider=model_provider,
             model=model,
-            unit_primitives=config.unit_primitives,
+            unit_primitive=config.unit_primitive,
             bound=chain,
             prompt_tpl=prompt,
             **kwargs,
@@ -350,7 +350,7 @@ class Prompt(RunnableBinding[Any, BaseMessage]):
         with (
             self.instrumentator.watch(
                 stream=False,
-                unit_primitives=self.unit_primitives,
+                unit_primitive=self.unit_primitive,
                 internal_event_client=self.internal_event_client,
             ) as watcher,
             get_usage_metadata_callback() as cb,
@@ -383,7 +383,7 @@ class Prompt(RunnableBinding[Any, BaseMessage]):
         with (
             self.instrumentator.watch(
                 stream=True,
-                unit_primitives=self.unit_primitives,
+                unit_primitive=self.unit_primitive,
                 internal_event_client=self.internal_event_client,
             ) as watcher,
             get_usage_metadata_callback() as cb,
@@ -428,7 +428,7 @@ class Prompt(RunnableBinding[Any, BaseMessage]):
         with (  # pylint: disable=contextmanager-generator-missing-cleanup
             self.instrumentator.watch(
                 stream=True,
-                unit_primitives=self.unit_primitives,
+                unit_primitive=self.unit_primitive,
                 internal_event_client=self.internal_event_client,
             ) as watcher,
             get_usage_metadata_callback() as cb,
@@ -513,15 +513,13 @@ class BasePromptRegistry(ABC):
         prompt.internal_event_client = self.internal_event_client
         prompt.set_limits(self.model_limits)
 
-        for unit_primitive in prompt.unit_primitives:
-            if not user.can(unit_primitive):
-                raise WrongUnitPrimitives
+        if not user.can(prompt.unit_primitive):
+            raise WrongUnitPrimitives
 
-        # Only record internal events once we know the user has access to all Unit Primitives
-        for unit_primitive in prompt.unit_primitives:
-            self.internal_event_client.track_event(
-                f"request_{unit_primitive}", category=internal_event_category
-            )
+        # Only record internal events once we know the user has access to the Unit Primitive
+        self.internal_event_client.track_event(
+            f"request_{prompt.unit_primitive}", category=internal_event_category
+        )
 
         return prompt
 

@@ -1,6 +1,6 @@
 import time
 from contextlib import contextmanager
-from typing import Any, List, Optional
+from typing import Any, Optional
 
 import structlog
 from gitlab_cloud_connector import GitLabUnitPrimitive
@@ -132,7 +132,7 @@ class ModelRequestInstrumentator:
             labels: dict[str, str],
             limits: Optional[ModelLimits],
             streaming: bool,
-            unit_primitives: Optional[List[GitLabUnitPrimitive]] = None,
+            unit_primitive: Optional[GitLabUnitPrimitive] = None,
             internal_event_client: Optional[InternalEventsClient] = None,
         ):
             self.model_provider = model_provider
@@ -142,7 +142,7 @@ class ModelRequestInstrumentator:
             self.error_type = ERROR_TYPE_NONE
             self.streaming = streaming
             self.start_time = None
-            self.unit_primitives = unit_primitives
+            self.unit_primitive = unit_primitive
             self.internal_event_client = internal_event_client
             self.finish_reason = "unknown"
 
@@ -306,19 +306,18 @@ class ModelRequestInstrumentator:
                 **token_cache_usage_data,
             )
 
-            if self.internal_event_client and self.unit_primitives:
-                for unit_primitive in self.unit_primitives:
-                    additional_properties = InternalEventAdditionalProperties(
-                        label="cache_details",
-                        **token_cache_usage_data,
-                        **internal_event_extra,
-                    )
-                    self.internal_event_client.track_event(
-                        f"token_usage_{unit_primitive}",
-                        category=__name__,
-                        additional_properties=additional_properties,
-                        **token_usage_data,
-                    )
+            if self.internal_event_client and self.unit_primitive:
+                additional_properties = InternalEventAdditionalProperties(
+                    label="cache_details",
+                    **token_cache_usage_data,
+                    **internal_event_extra,
+                )
+                self.internal_event_client.track_event(
+                    f"token_usage_{self.unit_primitive}",
+                    category=__name__,
+                    additional_properties=additional_properties,
+                    **token_usage_data,
+                )
 
         def _update_llm_operations(self, model: str, usage: UsageMetadata):
             current_llm_operations = llm_operations.get()
@@ -341,9 +340,7 @@ class ModelRequestInstrumentator:
 
         def _detail_labels(self) -> dict[str, str]:
             unit_primitive = (
-                self.unit_primitives[0].value
-                if self.unit_primitives and len(self.unit_primitives) > 0
-                else "unknown"
+                self.unit_primitive.value if self.unit_primitive else "unknown"
             )
             detail_labels = {
                 "error": "yes" if self.error else "no",
@@ -367,13 +364,13 @@ class ModelRequestInstrumentator:
         self.model_provider = model_provider
 
     @contextmanager
-    def watch(self, stream=False, unit_primitives=None, internal_event_client=None):
+    def watch(self, stream=False, unit_primitive=None, internal_event_client=None):
         watcher = ModelRequestInstrumentator.WatchContainer(
             model_provider=self.model_provider,
             labels=self.labels,
             limits=self.limits,
             streaming=stream,
-            unit_primitives=unit_primitives,
+            unit_primitive=unit_primitive,
             internal_event_client=internal_event_client,
         )
         watcher.start()

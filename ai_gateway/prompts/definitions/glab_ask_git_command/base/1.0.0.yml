@@ -1,7 +1,6 @@
 ---
 name: Glab Ask Git Command
-unit_primitives:
-  - glab_ask_git_command
+unit_primitive: glab_ask_git_command
 prompt_template:
   system: |
     {% include 'glab_ask_git_command/system/1.0.0.jinja' %}

@@ -3,7 +3,7 @@ from unittest.mock import patch
 
 import pytest
 from fastapi import HTTPException
-from gitlab_cloud_connector import CloudConnectorUser, UserClaims
+from gitlab_cloud_connector import CloudConnectorUser, GitLabUnitPrimitive, UserClaims
 from pydantic import AnyUrl
 
 from ai_gateway.api.v1 import api_router
@@ -171,6 +171,7 @@ class TestPrompt:
         frozen_datetime_now,
         mock_client,
         mock_track_internal_event,
+        unit_primitive: GitLabUnitPrimitive,
         inputs: dict[str, str],
         prompt_version: Optional[str],
         input_model_metadata: Optional[TypeModelMetadata],
@@ -208,7 +209,7 @@ class TestPrompt:
 
         if compatible_versions is not None and len(compatible_versions) > 0:
             mock_track_internal_event.assert_called_once_with(
-                "request_explain_vulnerability",
+                f"request_{unit_primitive.value}",
                 category="ai_gateway.api.v1.prompts.invoke",
             )
         else:

@@ -3,11 +3,7 @@
 import pytest
 from gitlab_cloud_connector import GitLabUnitPrimitive
 
-from ai_gateway.model_selection.models import (
-    CompletionLiteLLMParams,
-    CompletionType,
-    ModelClassProvider,
-)
+from ai_gateway.model_selection.models import CompletionLiteLLMParams, CompletionType
 from ai_gateway.prompts.config.base import InMemoryPromptConfig, PromptConfig
 
 
@@ -46,7 +42,18 @@ class TestInMemoryPromptConfig:
             "user": "{{user_input}}",
         }
 
-    def test_to_prompt_data(self):
+    @pytest.mark.parametrize(
+        "unit_primitives,expected_unit_primitive",
+        [
+            ([GitLabUnitPrimitive.DUO_CHAT], GitLabUnitPrimitive.DUO_CHAT),
+            ([], GitLabUnitPrimitive.DUO_AGENT_PLATFORM),
+        ],
+    )
+    def test_to_prompt_data(
+        self,
+        unit_primitives: list[GitLabUnitPrimitive],
+        expected_unit_primitive: GitLabUnitPrimitive,
+    ):
         """Test converting InMemoryPromptConfig to PromptConfig."""
         config_data = {
             "prompt_id": "test/prompt",
@@ -56,7 +63,7 @@ class TestInMemoryPromptConfig:
                     "model": "claude-3-sonnet",
                 }
             },
-            "unit_primitives": [GitLabUnitPrimitive.DUO_CHAT],
+            "unit_primitives": unit_primitives,
             "prompt_template": {
                 "system": "You are a helpful assistant.",
                 "user": "{{user_input}}",
@@ -67,7 +74,7 @@ class TestInMemoryPromptConfig:
             },
         }
 
-        in_memory_config = InMemoryPromptConfig(**config_data)
+        in_memory_config = InMemoryPromptConfig.model_validate(config_data)
         prompt_data = in_memory_config.to_prompt_data()
 
         assert isinstance(prompt_data, dict)
@@ -78,19 +85,21 @@ class TestInMemoryPromptConfig:
         assert isinstance(prompt_config, PromptConfig)
         assert not isinstance(prompt_config, InMemoryPromptConfig)
 
-        # Should have all fields except prompt_id
+        # Should have all relevant fields
         assert prompt_config.name == "test_prompt"
         assert prompt_config.model.params.model == "claude-3-sonnet"
-        assert prompt_config.unit_primitives == [GitLabUnitPrimitive.DUO_CHAT]
+        assert prompt_config.unit_primitive == expected_unit_primitive
         assert prompt_config.prompt_template == {
             "system": "You are a helpful assistant.",
             "user": "{{user_input}}",
         }
+        assert prompt_config.params
         assert prompt_config.params.stop == ["Human:", "Assistant:"]
         assert prompt_config.params.timeout == 30.0
 
-        # Should not have prompt_id field
+        # Should not have excluded fields
         assert not hasattr(prompt_config, "prompt_id")
+        assert not hasattr(prompt_config, "unit_primitives")
 
 
 class TestCompletionLiteLLMParams:

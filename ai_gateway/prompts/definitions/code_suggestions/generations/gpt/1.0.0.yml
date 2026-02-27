@@ -4,8 +4,7 @@ model:
   params:
     temperature: 1.0
     max_tokens: 512
-unit_primitives:
-  - generate_code
+unit_primitive: generate_code
 prompt_template:
   system: |
     {% include 'code_suggestions/generations/jinja_template/self_hosted/system/1.0.0.jinja' %}

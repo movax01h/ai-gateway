@@ -85,8 +85,8 @@ def config_values_fixture(mock_model_responses, assets_dir, gcp_location) -> Dic
     }
 
 
-@pytest.fixture(name="unit_primitives")
-def unit_primitives_fixture():
+@pytest.fixture(name="scopes")
+def scopes_fixture():
     return ["complete_code", "generate_code"]
 
 

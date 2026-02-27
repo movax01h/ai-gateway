@@ -1,5 +1,6 @@
 from typing import Any, Optional, cast, override
 
+from gitlab_cloud_connector import GitLabUnitPrimitive
 from langchain_core.tools import BaseTool
 
 from ai_gateway.model_metadata import TypeModelMetadata
@@ -85,10 +86,15 @@ class InMemoryPromptRegistry(BasePromptRegistry):
         else:
             raise ValueError(f"Model config not provided for prompt {prompt_id}")
 
+        unit_primitives = raw_data.get("unit_primitives")
         prompt_config = PromptConfig(
             name=prompt_id,
             model=ModelConfig(params=model_params),  # type: ignore[arg-type]
-            unit_primitives=raw_data.get("unit_primitives", []),
+            unit_primitive=(
+                GitLabUnitPrimitive(unit_primitives[0])
+                if unit_primitives
+                else GitLabUnitPrimitive.DUO_AGENT_PLATFORM
+            ),
             prompt_template=raw_data["prompt_template"],
             params=raw_data.get("params"),
         )

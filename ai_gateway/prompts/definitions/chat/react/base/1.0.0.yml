@@ -3,8 +3,7 @@ name: Default configuration for the Duo Chat ReAct Agent
 model:
   params:
     max_tokens: 8_192
-unit_primitives:
-  - duo_classic_chat
+unit_primitive: duo_classic_chat
 prompt_template:
   system: |
     {% include 'chat/react/system/1.0.0.jinja' %}

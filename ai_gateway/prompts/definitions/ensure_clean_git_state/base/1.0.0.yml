@@ -3,8 +3,7 @@ name: Ensure Clean Git State
 model:
   params:
     max_tokens: 4096
-unit_primitives:
-  - duo_agent_platform
+unit_primitive: duo_agent_platform
 prompt_template:
   system: |
     {% include 'ensure_clean_git_state/system/1.0.0.jinja' %}

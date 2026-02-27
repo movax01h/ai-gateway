@@ -632,9 +632,9 @@ def prompt_template_fixture():
     return {"system": "Hi, I'm {{name}}", "user": "{{content}}"}
 
 
-@pytest.fixture(name="unit_primitives")
-def unit_primitives_fixture():
-    return ["complete_code", "generate_code"]
+@pytest.fixture(name="unit_primitive")
+def unit_primitive_fixture():
+    return GitLabUnitPrimitive.COMPLETE_CODE
 
 
 @pytest.fixture(name="prompt_params")
@@ -651,14 +651,14 @@ def prompt_name_fixture():
 def prompt_config_fixture(
     prompt_name: str,
     model_config: ModelConfig,
-    unit_primitives: list[GitLabUnitPrimitive],
+    unit_primitive: GitLabUnitPrimitive,
     prompt_template: dict[str, str],
     prompt_params: PromptParams,
 ):
     return PromptConfig(
         name=prompt_name,
         model=model_config,
-        unit_primitives=unit_primitives,
+        unit_primitive=unit_primitive,
         prompt_template=prompt_template,
         params=prompt_params,
     )
@@ -735,15 +735,18 @@ def user_is_debug_fixture():
     return False
 
 
-@pytest.fixture(name="user")
-def user_fixture(user_is_debug: bool, scopes: list[str]) -> StarletteUser | None:
-    return StarletteUser(
-        CloudConnectorUser(
-            authenticated=True,
-            is_debug=user_is_debug,
-            claims=UserClaims(scopes=scopes, gitlab_instance_uid="unique-instance-uid"),
-        )
+@pytest.fixture(name="auth_user")
+def auth_user_fixture(user_is_debug: bool, scopes: list[str]):
+    return CloudConnectorUser(
+        authenticated=True,
+        is_debug=user_is_debug,
+        claims=UserClaims(scopes=scopes, gitlab_instance_uid="unique-instance-uid"),
     )
+
+
+@pytest.fixture(name="user")
+def user_fixture(auth_user: CloudConnectorUser) -> StarletteUser | None:
+    return StarletteUser(auth_user)
 
 
 @pytest.fixture(name="ui_chat_log")

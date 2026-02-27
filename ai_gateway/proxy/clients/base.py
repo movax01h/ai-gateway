@@ -129,7 +129,7 @@ class ProxyClient:
                 limits=self.limits.for_model(engine=upstream_service, name=model_name),
             ).watch(
                 stream=model.stream,
-                unit_primitives=[GitLabUnitPrimitive.AI_GATEWAY_MODEL_PROVIDER_PROXY],
+                unit_primitive=GitLabUnitPrimitive.AI_GATEWAY_MODEL_PROVIDER_PROXY,
                 internal_event_client=self.internal_event_client,
             ) as watcher:
                 # Setup token tracking

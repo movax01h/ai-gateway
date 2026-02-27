@@ -3,8 +3,7 @@ name: Mistral Build Reader agent
 model:
   params:
     max_tokens: 2_048
-unit_primitives:
-  - ask_build
+unit_primitive: ask_build
 prompt_template:
   system: |
     {% include 'chat/build_reader/system_mistral/1.0.0.jinja' %}

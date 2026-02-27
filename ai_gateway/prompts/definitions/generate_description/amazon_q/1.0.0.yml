@@ -1,7 +1,6 @@
 ---
 name: Amazon Q Generate Description
-unit_primitives:
-  - amazon_q_integration
+unit_primitive: amazon_q_integration
 prompt_template:
   system: |
     {% include 'generate_description/system/1.0.0.jinja' %}
