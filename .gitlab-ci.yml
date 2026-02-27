@@ -129,7 +129,7 @@ include:
     inputs:
       runway_service_id: dws-loadtest
       image: "$CI_REGISTRY_IMAGE/model-gateway:${CI_COMMIT_SHORT_SHA}"
-      runway_version: v4.1.1
+      runway_version: v4.18.3
     rules: *skip-if-not-canonical
   - local: .gitlab/ci/dws-loadtest.gitlab-ci.yml
     rules: *skip-if-not-canonical
