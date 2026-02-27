@@ -552,7 +552,6 @@ models:
       model: gpt-5.1
       max_tokens: 4_096
 
-  # proxy endpoint only
   - name: "GPT-5.1-Codex - OpenAI"
     provider: "OpenAI"
     gitlab_identifier: "gpt_5_1_codex"
@@ -573,6 +572,7 @@ models:
     model_class_provider: "openai"
     params:
       model: gpt-5.2-codex
+      verbosity: "medium"
       max_tokens: 4_096
 
   - name: "GPT-5.3-Codex - OpenAI"
