@@ -17,8 +17,7 @@ You'll need:
 - sqlite development libraries
   - This package is usually called `libsqlite3-dev` or `sqlite-devel` (depending on your platform);
     install this _before_ installing Python so it can compile against these libraries.
-- `mise` (recommended) or `asdf`
-  - [More information](https://gitlab.com/gitlab-org/gitlab-development-kit/-/blob/main/doc/howto/mise.md) on why `mise` is recommended over `asdf`
+- `mise` for version management
   - To install `mise`, see [instructions here](https://mise.jdx.dev/getting-started.html).
 
 ### Google Cloud SDK
@@ -132,7 +131,7 @@ See [Application settings doc](docs/application_settings.md)
 ## How to run the server locally
 
 1. Clone project and change to project directory.
-1. Depending on [the version manager you are using](#prerequisites), run `mise install` or `asdf install`.
+1. Run `mise install` to install all required tools.
 1. [Install the `poetry-plugin-shell`](https://github.com/python-poetry/poetry-plugin-shell?tab=readme-ov-file#installation)
 1. Init shell: `poetry shell`.
 1. [Activate virtualenv](#how-to-manually-activate-the-virtualenv).
