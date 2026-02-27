@@ -258,7 +258,7 @@ class IOKey(BaseModel):
         # thereby state[self.target] will always succeed
         current = state[self.target]  # type: ignore[literal-required]
         if self.subkeys:
-            for key in self.subkeys:  # pylint: disable=not-an-iterable
+            for key in self.subkeys:
                 current = current.get(key) if self.optional else current[key]
         return current
 

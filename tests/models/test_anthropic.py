@@ -10,7 +10,9 @@ from anthropic import (
     BadRequestError,
     UnprocessableEntityError,
 )
-from anthropic.types import Completion
+from anthropic.types import (
+    Completion,
+)
 from anthropic.types import Message as AMessage
 from anthropic.types import (
     MessageDeltaUsage,

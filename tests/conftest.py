@@ -572,7 +572,7 @@ class FakeModel(FakeListChatModel):
             yield c
 
         if self.model_error:
-            raise self.model_error  # pylint: disable=raising-bad-type
+            raise self.model_error
 
     def _set_usage_metadata(self, message: BaseMessage):
         if not self.usage_metadata or not isinstance(message, AIMessage):
