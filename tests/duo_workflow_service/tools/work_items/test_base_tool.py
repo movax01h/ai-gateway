@@ -197,7 +197,10 @@ async def test_fetch_work_item_data_calls_version_compatibility(
     gitlab_client_mock,
     metadata,
 ):
-    mock_get_query_variables.return_value = {"includeHierarchyWidget": True}
+    mock_get_query_variables.return_value = {
+        "includeHierarchyWidget": True,
+        "includeDevelopmentWidget": True,
+    }
     work_item_data = {
         "id": "gid://gitlab/WorkItem/123",
         "iid": "42",
@@ -215,8 +218,51 @@ async def test_fetch_work_item_data_calls_version_compatibility(
 
     await tool._fetch_work_item_data(resolved)
 
-    mock_get_query_variables.assert_called_once_with("includeHierarchyWidget")
+    mock_get_query_variables.assert_called_once_with(
+        "includeHierarchyWidget", "includeDevelopmentWidget"
+    )
     gitlab_client_mock.graphql.assert_called_once()
     call_args = gitlab_client_mock.graphql.call_args
     query_variables = call_args[0][1]
     assert query_variables["includeHierarchyWidget"] is True
+    assert query_variables["includeDevelopmentWidget"] is True
+
+
+@pytest.mark.asyncio
+@patch(
+    "duo_workflow_service.tools.work_items.base_tool.get_query_variables_for_version"
+)
+async def test_get_work_item_data_calls_version_compatibility(
+    mock_get_query_variables,
+    gitlab_client_mock,
+    metadata,
+):
+    mock_get_query_variables.return_value = {
+        "includeHierarchyWidget": True,
+        "includeDevelopmentWidget": True,
+    }
+    work_item_data = {
+        "id": "gid://gitlab/WorkItem/123",
+        "iid": "42",
+        "title": "Test Work Item",
+    }
+    graphql_response = {"project": {"workItems": {"nodes": [work_item_data]}}}
+    gitlab_client_mock.graphql = AsyncMock(return_value=graphql_response)
+
+    tool = GetWorkItem(description="get work item", metadata=metadata)
+
+    resolved = ResolvedWorkItem(
+        parent=ResolvedParent(type="project", full_path="namespace/project"),
+        work_item_iid=42,
+    )
+
+    await tool._get_work_item_data(resolved)
+
+    mock_get_query_variables.assert_called_once_with(
+        "includeHierarchyWidget", "includeDevelopmentWidget"
+    )
+    gitlab_client_mock.graphql.assert_called_once()
+    call_args = gitlab_client_mock.graphql.call_args
+    query_variables = call_args[0][1]
+    assert query_variables["includeHierarchyWidget"] is True
+    assert query_variables["includeDevelopmentWidget"] is True
