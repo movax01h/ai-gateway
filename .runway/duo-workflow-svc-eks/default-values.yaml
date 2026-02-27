@@ -58,6 +58,3 @@ spec:
     period_seconds: 30
     timeout_seconds: 5
     failure_threshold: 2  # 60 seconds
-  load_balancing:
-    cloudflare:
-      enabled: false
