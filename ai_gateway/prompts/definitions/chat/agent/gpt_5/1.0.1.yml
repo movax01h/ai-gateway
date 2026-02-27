@@ -3,8 +3,7 @@ name: Chat Agent
 model:
   params:
     max_tokens: 8_192
-unit_primitives:
-  - duo_chat
+unit_primitive: duo_chat
 prompt_template:
   system_static: |
     {% if system_template_override %}

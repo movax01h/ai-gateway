@@ -2,8 +2,7 @@ name: developer_add_plan_comment
 model:
   params:
     max_tokens: 32_768
-unit_primitives:
-  - duo_workflow_execute_workflow
+unit_primitive: duo_workflow_execute_workflow
 prompt_template:
   system: |
     {% include 'developer_add_plan_comment/system/1.0.0.jinja' %}

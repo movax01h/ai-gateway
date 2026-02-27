@@ -1,7 +1,6 @@
 ---
 name: Amazon Q Explore Directories For Prescan
-unit_primitives:
-  - amazon_q_integration
+unit_primitive: amazon_q_integration
 prompt_template:
   system: |
     {% include 'explore_directories_for_prescan/system/1.0.0.jinja' %}

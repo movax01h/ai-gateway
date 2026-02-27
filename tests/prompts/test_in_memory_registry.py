@@ -1,6 +1,7 @@
 from unittest.mock import Mock, patch
 
 import pytest
+from gitlab_cloud_connector import GitLabUnitPrimitive
 from langchain_community.chat_models import ChatAnthropic
 
 from ai_gateway.model_metadata import ModelMetadata
@@ -126,14 +127,28 @@ class TestInMemoryPromptRegistry:
             assert result.model is not None
             in_memory_registry.shared_registry.get.assert_not_called()
 
-    def test_prompt_config_conversion(self, in_memory_registry, sample_prompt_data):
+    @pytest.mark.parametrize(
+        "unit_primitives,expected_unit_primitive",
+        [
+            (None, GitLabUnitPrimitive.DUO_AGENT_PLATFORM),
+            ([], GitLabUnitPrimitive.DUO_AGENT_PLATFORM),
+            (["duo_chat"], GitLabUnitPrimitive.DUO_CHAT),
+        ],
+    )
+    def test_prompt_config_conversion(
+        self,
+        in_memory_registry,
+        sample_prompt_data,
+        unit_primitives,
+        expected_unit_primitive,
+    ):
         """Test that flow YAML data is correctly converted to PromptConfig."""
         prompt_id = "test_prompt"
 
         # Add optional fields to test defaults
         extended_data = {
             **sample_prompt_data,
-            "unit_primitives": ["duo_chat"],
+            "unit_primitives": unit_primitives,
             "params": {"timeout": 30},
         }
 
@@ -151,6 +166,7 @@ class TestInMemoryPromptRegistry:
 
         # Verify PromptConfig was created correctly
         assert isinstance(result, Prompt)
+        assert result.unit_primitive == expected_unit_primitive
         # Additional assertions would verify the PromptConfig fields
 
     def test_get_local_prompt_invalid_model_provider(self, in_memory_registry):
@@ -420,4 +436,5 @@ class TestInMemoryPromptRegistry:
             prompt_id, prompt_version=None, model_metadata=model_metadata
         )
         assert isinstance(result, Prompt)
+        assert result.unit_primitive == GitLabUnitPrimitive.DUO_AGENT_PLATFORM
         assert result.model.model == expected_result

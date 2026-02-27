@@ -29,7 +29,6 @@ from ai_gateway.prompts.config import ModelClassProvider
 from ai_gateway.prompts.config.base import PromptConfig
 from ai_gateway.prompts.typing import Model, TypeModelFactory, TypePromptTemplateFactory
 from ai_gateway.vendor.langchain_litellm.litellm import ChatLiteLLM
-from lib.context import StarletteUser
 
 
 class MockPromptTemplateClass(Runnable):
@@ -191,8 +190,7 @@ model:
     top_k: 50
     max_tokens: 256
     max_retries: 10
-unit_primitives:
-  - explain_code
+unit_primitive: explain_code
 prompt_template:
   system: Template1
 """,
@@ -210,8 +208,7 @@ model:
   params:
     temperature: 0.32
     max_tokens: 64
-unit_primitives:
-  - complete_code
+unit_primitive: complete_code
 prompt_template:
   user: "{{prefix}}"
 params:
@@ -234,8 +231,7 @@ model:
     top_k: 50
     max_tokens: 256
     max_retries: 10
-unit_primitives:
-  - explain_code
+unit_primitive: explain_code
 prompt_template:
   system: Template1
 """,
@@ -251,8 +247,7 @@ model:
     top_k: 50
     max_tokens: 256
     max_retries: 10
-unit_primitives:
-  - explain_code
+unit_primitive: explain_code
 prompt_template:
   system: Template1
 """,
@@ -268,8 +263,7 @@ model:
     top_k: 50
     max_tokens: 256
     max_retries: 10
-unit_primitives:
-  - explain_code
+unit_primitive: explain_code
 prompt_template:
   system: Template1
 """,
@@ -286,8 +280,7 @@ model:
     top_k: 40
     max_tokens: 256
     max_retries: 6
-unit_primitives:
-  - duo_chat
+unit_primitive: duo_chat
 prompt_template:
   system: Template1
   user: Template2
@@ -303,8 +296,7 @@ params:
         contents="""
 ---
 name: Amazon Q React prompt
-unit_primitives:
-  - amazon_q_integration
+unit_primitive: amazon_q_integration
 prompt_template:
   system: Template1
   user: Template2
@@ -327,8 +319,7 @@ model:
     top_k: 40
     max_tokens: 256
     max_retries: 6
-unit_primitives:
-  - duo_chat
+unit_primitive: duo_chat
 prompt_template:
   system: Template1
   user: Template2
@@ -352,8 +343,7 @@ model:
     top_k: 40
     max_tokens: 256
     max_retries: 6
-unit_primitives:
-  - duo_chat
+unit_primitive: duo_chat
 prompt_template:
   system: Template1
   user: Template2
@@ -376,8 +366,7 @@ model:
     top_k: 50
     max_tokens: 512
     max_retries: 8
-unit_primitives:
-  - duo_chat
+unit_primitive: duo_chat
 prompt_template:
   system: Claude 4.5 Template
   user: Template2
@@ -400,8 +389,7 @@ model:
     top_k: 50
     max_tokens: 512
     max_retries: 8
-unit_primitives:
-  - duo_chat
+unit_primitive: duo_chat
 prompt_template:
   system: Claude Vertex 4.5 Template
   user: Template2
@@ -568,87 +556,6 @@ class TestLocalPromptRegistry:
         assert (
             str(exc_info.value) == "No prompt version found matching the query: 2.0.0"
         )
-
-    @pytest.mark.usefixtures("mock_fs")
-    def test_load_prompt_without_unit_primitive(
-        self,
-        fs: FakeFilesystem,
-        model_factories,
-        internal_event_client: Mock,
-        model_limits: ConfigModelLimits,
-        llm_definition: LLMDefinition,
-    ):
-        yaml_content = """
----
-name: TestPrompt No UP
-model:
-    params:
-        model: test_model
-unit_primitives: []
-prompt_template:
-    system: test
-"""
-
-        prompts_definitions_dir = (
-            Path(__file__).parent.parent.parent
-            / "ai_gateway"
-            / "prompts"
-            / "definitions"
-        )
-        fs.create_file(
-            prompts_definitions_dir / "no_up" / "base" / "1.0.0.yml",
-            contents=yaml_content,
-        )
-
-        registry = LocalPromptRegistry.from_local_yaml(
-            prompt_template_factories={},
-            model_factories=model_factories,
-            custom_models_enabled=True,
-            internal_event_client=internal_event_client,
-            model_limits=model_limits,
-        )
-
-        prompt = registry.get("no_up", "1.0.0")
-        assert prompt.unit_primitives == []
-
-        # Test with model metadata
-        fs.create_file(
-            prompts_definitions_dir / "no_up" / "codestral" / "1.0.0.yml",
-            contents=yaml_content,
-        )
-
-        prompt = registry.get(
-            "no_up",
-            "1.0.0",
-            ModelMetadata(
-                name="codestral",
-                endpoint=HttpUrl("http://localhost:4000/"),
-                provider="custom_openai",
-                llm_definition=llm_definition,
-            ),
-        )
-        assert prompt.unit_primitives == []
-
-    @pytest.mark.usefixtures("mock_fs")
-    def test_get_on_behalf_no_unit_primitive(
-        self,
-        user: StarletteUser,
-        prompt: Prompt,
-        internal_event_client: Mock,
-        model_limits: ConfigModelLimits,
-    ):
-        test_registry = LocalPromptRegistry.from_local_yaml(
-            prompt_template_factories={},
-            model_factories={},
-            internal_event_client=internal_event_client,
-            model_limits=model_limits,
-        )
-        prompt.unit_primitives = []
-
-        with patch.object(test_registry, "get", return_value=prompt):
-            result_prompt = test_registry.get_on_behalf(user, prompt_id="test")
-
-            assert result_prompt == prompt
 
     @pytest.mark.usefixtures("mock_fs")
     @pytest.mark.parametrize(

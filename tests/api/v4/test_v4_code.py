@@ -36,8 +36,8 @@ def fast_api_router_fixture():
     return api_router
 
 
-@pytest.fixture(name="unit_primitives")
-def unit_primitives_fixture():
+@pytest.fixture(name="scopes")
+def scopes_fixture():
     return ["complete_code", "generate_code", "amazon_q_integration"]
 
 

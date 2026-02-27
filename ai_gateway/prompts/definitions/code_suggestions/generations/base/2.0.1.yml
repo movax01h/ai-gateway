@@ -3,8 +3,7 @@ name: Code Generations Agent
 model:
   params:
     max_tokens: 2_048
-unit_primitives:
-  - generate_code
+unit_primitive: generate_code
 prompt_template:
   system: |
     {% include 'code_suggestions/generations/jinja_template/dotcom/system/1.0.0.jinja' %}

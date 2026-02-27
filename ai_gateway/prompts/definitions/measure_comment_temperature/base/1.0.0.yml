@@ -1,7 +1,6 @@
 ---
 name: Measure Comment Temperature
-unit_primitives:
-  - measure_comment_temperature
+unit_primitive: measure_comment_temperature
 prompt_template:
   system: |
     You are an AI assistant tasked with rating comments based on their "temperature" according to

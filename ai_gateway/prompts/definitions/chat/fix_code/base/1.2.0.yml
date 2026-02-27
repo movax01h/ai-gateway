@@ -4,8 +4,7 @@ model:
   params:
     temperature: 0.1
     max_tokens: 2_048
-unit_primitives:
-  - fix_code
+unit_primitive: fix_code
 prompt_template:
   system: |
     {% include 'chat/fix_code/system/1.0.0.jinja' %}

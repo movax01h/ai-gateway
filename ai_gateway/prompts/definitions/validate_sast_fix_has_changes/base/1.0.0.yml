@@ -3,8 +3,7 @@ name: Validate SAST Fix Has Changes
 model:
   params:
     max_tokens: 4096
-unit_primitives:
-  - duo_agent_platform
+unit_primitive: duo_agent_platform
 prompt_template:
   system: |
     {% include 'validate_sast_fix_has_changes/system/1.0.0.jinja' %}

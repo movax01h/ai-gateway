@@ -1,7 +1,6 @@
 ---
 name: Generate Commit Message
-unit_primitives:
-  - generate_commit_message
+unit_primitive: generate_commit_message
 prompt_template:
   system: |
     {% include 'generate_commit_message/system/1.0.0.jinja' %}

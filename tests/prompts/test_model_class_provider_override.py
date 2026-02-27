@@ -68,8 +68,7 @@ configurable_unit_primitives:
         prompts_dir / "workflow" / "test" / "base" / "1.0.0.yml",
         contents="""---
 name: test
-unit_primitives:
-    - duo_workflow_execute_workflow
+unit_primitive: duo_workflow_execute_workflow
 prompt_template:
     system: "Test"
     user: "{{goal}}"

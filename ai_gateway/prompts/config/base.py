@@ -18,7 +18,7 @@ class PromptConfig(BaseModel):
 
     name: str
     model: ModelConfig = ModelConfig()
-    unit_primitives: list[GitLabUnitPrimitive]
+    unit_primitive: GitLabUnitPrimitive
     prompt_template: dict[str, str]
     params: PromptParams | None = None
 
@@ -35,6 +35,11 @@ class InMemoryPromptConfig(BaseModel):
     params: PromptParams | None = None
 
     def to_prompt_data(self) -> dict:
-        params = self.model_dump()
-        params.pop("prompt_id")
+        params = self.model_dump(exclude={"prompt_id", "unit_primitives"})
+
+        # Transform `unit_primitives` (kept for backwards compatibility) into a single value, with a default
+        params["unit_primitive"] = next(
+            iter(self.unit_primitives), GitLabUnitPrimitive.DUO_AGENT_PLATFORM
+        )
+
         return params

@@ -3,8 +3,7 @@ name: Categorize question
 model:
   params:
     max_tokens: 500
-unit_primitives:
-  - duo_chat
+unit_primitive: duo_chat
 prompt_template:
   system: |
     You are helpful assistant, ready to give as accurate answer as possible, in JSON format (i.e. starts with "{" and ends with "}").

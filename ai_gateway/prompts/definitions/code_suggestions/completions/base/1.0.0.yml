@@ -3,8 +3,7 @@ name: Code Completions
 model:
   params:
     max_tokens: 128
-unit_primitives:
-  - complete_code
+unit_primitive: complete_code
 prompt_template:
   system: |
     {% include 'code_suggestions/completions/system/1.0.0.jinja' %}

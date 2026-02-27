@@ -35,14 +35,14 @@ DEFAULT_ARGS = {
 }
 
 
-@pytest.fixture(name="unit_primitives")
-def unit_primitives_fixture() -> list[GitLabUnitPrimitive] | None:
+@pytest.fixture(name="unit_primitive")
+def unit_primitive_fixture() -> GitLabUnitPrimitive | None:
     return None
 
 
 @pytest.fixture(name="container")
 def container_fixture(
-    unit_primitives: list[GitLabUnitPrimitive] | None,
+    unit_primitive: GitLabUnitPrimitive | None,
     internal_event_client: InternalEventsClient,
 ) -> ModelRequestInstrumentator.WatchContainer:
     return ModelRequestInstrumentator.WatchContainer(
@@ -50,7 +50,7 @@ def container_fixture(
         labels={"model_engine": "test_engine", "model_name": "test_model"},
         streaming=False,
         limits=None,
-        unit_primitives=unit_primitives,
+        unit_primitive=unit_primitive,
         internal_event_client=internal_event_client,
     )
 
@@ -148,11 +148,11 @@ class TestWatchContainer:
         ]
 
     @pytest.mark.parametrize(
-        "unit_primitives",
-        [[GitLabUnitPrimitive.DUO_CHAT, GitLabUnitPrimitive.CODE_SUGGESTIONS]],
+        "unit_primitive",
+        [GitLabUnitPrimitive.DUO_CHAT],
     )
     def test_register_token_usage_track_usage(
-        self, container, unit_primitives, internal_event_client
+        self, container, unit_primitive, internal_event_client
     ):
         with capture_logs() as cap_logs:
             container.register_token_usage(
@@ -185,26 +185,25 @@ class TestWatchContainer:
             "ephemeral_1h_input_tokens": 7,
         }
 
-        for unit_primitive in unit_primitives:
-            internal_event_client.track_event.assert_any_call(
-                f"token_usage_{unit_primitive}",
-                category="ai_gateway.instrumentators.model_requests",
-                input_tokens=1,
-                output_tokens=2,
-                total_tokens=3,
-                **container.labels,
-                model_provider=container.model_provider,
-                additional_properties=InternalEventAdditionalProperties(
-                    label="cache_details",
-                    property=None,
-                    value=None,
-                    cache_read=4,
-                    cache_creation=5,
-                    ephemeral_5m_input_tokens=6,
-                    ephemeral_1h_input_tokens=7,
-                    extra_key="val",
-                ),
-            )
+        internal_event_client.track_event.assert_called_once_with(
+            f"token_usage_{unit_primitive}",
+            category="ai_gateway.instrumentators.model_requests",
+            input_tokens=1,
+            output_tokens=2,
+            total_tokens=3,
+            **container.labels,
+            model_provider=container.model_provider,
+            additional_properties=InternalEventAdditionalProperties(
+                label="cache_details",
+                property=None,
+                value=None,
+                cache_read=4,
+                cache_creation=5,
+                ephemeral_5m_input_tokens=6,
+                ephemeral_1h_input_tokens=7,
+                extra_key="val",
+            ),
+        )
 
     def test_register_token_usage_without_init(self, container):
         container.register_token_usage(
@@ -463,31 +462,26 @@ def instrumentator_fixture():
 
 class TestDetailLabels:
     @pytest.mark.parametrize(
-        "unit_primitives,expected_unit_primitive,expected_feature_category",
+        "unit_primitive,expected_unit_primitive,expected_feature_category",
         [
-            ([GitLabUnitPrimitive.SUMMARIZE_COMMENTS], "summarize_comments", "unknown"),
-            (
-                [GitLabUnitPrimitive.DUO_CHAT, GitLabUnitPrimitive.CODE_SUGGESTIONS],
-                "duo_chat",
-                "unknown",
-            ),
+            (GitLabUnitPrimitive.SUMMARIZE_COMMENTS, "summarize_comments", "unknown"),
             (None, "unknown", "unknown"),
         ],
     )
     def test_detail_labels(
         self,
         instrumentator,
-        unit_primitives,
+        unit_primitive,
         expected_unit_primitive,
         expected_feature_category,
     ):
-        with instrumentator.watch(unit_primitives=unit_primitives) as watcher:
+        with instrumentator.watch(unit_primitive=unit_primitive) as watcher:
             labels = watcher._detail_labels()
             assert labels["unit_primitive"] == expected_unit_primitive
             assert labels["feature_category"] == expected_feature_category
 
     def test_detail_labels_without_unit_primitive(self, instrumentator):
-        with instrumentator.watch(unit_primitives=None) as watcher:
+        with instrumentator.watch(unit_primitive=None) as watcher:
             labels = watcher._detail_labels()
             assert labels["unit_primitive"] == "unknown"
 

@@ -1,7 +1,6 @@
 ---
 name: Generate Description
-unit_primitives:
-  - generate_issue_description
+unit_primitive: generate_issue_description
 prompt_template:
   system: |
     {% include 'generate_description/system/1.0.0.jinja' %}

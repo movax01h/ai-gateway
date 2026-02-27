@@ -3,8 +3,7 @@ name: ci_pipelines_manager_agent
 model:
   params:
     max_tokens: 32_768
-unit_primitives:
-  - duo_workflow_execute_workflow
+unit_primitive: duo_workflow_execute_workflow
 prompt_template:
   system: |
     {% include 'workflow/convert_to_gitlab_ci/system/1.0.0.jinja' %}

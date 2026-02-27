@@ -4,8 +4,7 @@ model:
   params:
     temperature: 0.95
     max_tokens: 128
-unit_primitives:
-  - complete_code
+unit_primitive: complete_code
 prompt_template:
   user: |
     <|fim_prefix|>{{prefix}}<|fim_suffix|>{{suffix}}<|fim_middle|>

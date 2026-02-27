@@ -128,10 +128,10 @@ configurable_unit_primitives:
     def test_initialize(
         self,
         prompt: Prompt,
-        unit_primitives: list[GitLabUnitPrimitive],
+        unit_primitive: GitLabUnitPrimitive,
     ):
         assert prompt.name == "test_prompt"
-        assert prompt.unit_primitives == unit_primitives
+        assert prompt.unit_primitive == unit_primitive
         assert isinstance(prompt.bound, Runnable)
 
     def test_build_prompt_template(self, prompt_config: PromptConfig):
@@ -226,7 +226,7 @@ configurable_unit_primitives:
 
         mock_watch.assert_called_with(
             stream=False,
-            unit_primitives=prompt.unit_primitives,
+            unit_primitive=prompt.unit_primitive,
             internal_event_client=prompt.internal_event_client,
         )
 
@@ -266,7 +266,7 @@ configurable_unit_primitives:
 
         mock_watch.assert_called_with(
             stream=False,
-            unit_primitives=prompt.unit_primitives,
+            unit_primitive=prompt.unit_primitive,
             internal_event_client=prompt.internal_event_client,
         )
 
@@ -305,7 +305,7 @@ configurable_unit_primitives:
 
         mock_watch.assert_called_with(
             stream=True,
-            unit_primitives=prompt.unit_primitives,
+            unit_primitive=prompt.unit_primitive,
             internal_event_client=prompt.internal_event_client,
         )
 
@@ -354,7 +354,7 @@ configurable_unit_primitives:
 
         mock_watch.assert_called_with(
             stream=True,
-            unit_primitives=prompt.unit_primitives,
+            unit_primitive=prompt.unit_primitive,
             internal_event_client=prompt.internal_event_client,
         )
 
@@ -396,7 +396,7 @@ configurable_unit_primitives:
 
         mock_watch.assert_called_with(
             stream=True,
-            unit_primitives=prompt.unit_primitives,
+            unit_primitive=prompt.unit_primitive,
             internal_event_client=prompt.internal_event_client,
         )
 
@@ -446,7 +446,7 @@ configurable_unit_primitives:
 
         mock_watch.assert_called_with(
             stream=True,
-            unit_primitives=prompt.unit_primitives,
+            unit_primitive=prompt.unit_primitive,
             internal_event_client=prompt.internal_event_client,
         )
 
@@ -780,7 +780,7 @@ def registry_fixture(
 class TestBaseRegistry:
     @pytest.mark.parametrize(
         (
-            "unit_primitives",
+            "unit_primitive",
             "scopes",
             "input_model_metadata",
             "tools",
@@ -789,7 +789,7 @@ class TestBaseRegistry:
         ),
         [
             (
-                [GitLabUnitPrimitive.COMPLETE_CODE],
+                GitLabUnitPrimitive.COMPLETE_CODE,
                 ["complete_code"],
                 None,
                 None,
@@ -797,18 +797,7 @@ class TestBaseRegistry:
                 [call("request_complete_code", category="ai_gateway.prompts.base")],
             ),
             (
-                [GitLabUnitPrimitive.COMPLETE_CODE, GitLabUnitPrimitive.ASK_BUILD],
-                ["complete_code", "ask_build"],
-                None,
-                None,
-                True,
-                [
-                    call("request_complete_code", category="ai_gateway.prompts.base"),
-                    call("request_ask_build", category="ai_gateway.prompts.base"),
-                ],
-            ),
-            (
-                [GitLabUnitPrimitive.COMPLETE_CODE],
+                GitLabUnitPrimitive.COMPLETE_CODE,
                 ["complete_code"],
                 ModelMetadata(
                     name="mistral",
@@ -828,7 +817,7 @@ class TestBaseRegistry:
                 ],
             ),
             (
-                [GitLabUnitPrimitive.AMAZON_Q_INTEGRATION],
+                GitLabUnitPrimitive.AMAZON_Q_INTEGRATION,
                 ["amazon_q_integration"],
                 AmazonQModelMetadata(
                     name="amazon_q",
@@ -849,20 +838,9 @@ class TestBaseRegistry:
                     ),
                 ],
             ),
-            ([GitLabUnitPrimitive.COMPLETE_CODE], [], None, None, False, []),
+            (GitLabUnitPrimitive.COMPLETE_CODE, [], None, None, False, []),
             (
-                [
-                    GitLabUnitPrimitive.COMPLETE_CODE,
-                    GitLabUnitPrimitive.ASK_BUILD,
-                ],
-                ["complete_code"],
-                None,
-                None,
-                False,
-                [],
-            ),
-            (
-                [GitLabUnitPrimitive.DUO_CHAT],
+                GitLabUnitPrimitive.DUO_CHAT,
                 ["duo_chat"],
                 None,
                 [Mock(spec=BaseTool)],
@@ -913,19 +891,18 @@ class TestBaseRegistry:
 
     @pytest.mark.parametrize(
         (
-            "unit_primitives",
+            "unit_primitive",
             "scopes",
             "internal_event_category",
             "expected_internal_events",
         ),
         [
             (
-                [GitLabUnitPrimitive.COMPLETE_CODE, GitLabUnitPrimitive.ASK_BUILD],
-                ["complete_code", "ask_build"],
+                GitLabUnitPrimitive.COMPLETE_CODE,
+                ["complete_code"],
                 "my_category",
                 [
                     call("request_complete_code", category="my_category"),
-                    call("request_ask_build", category="my_category"),
                 ],
             ),
         ],
@@ -945,7 +922,7 @@ class TestBaseRegistry:
         internal_event_client.track_event.assert_has_calls(expected_internal_events)
 
     @pytest.mark.parametrize(
-        ("model_metadata", "unit_primitives", "scopes"),
+        ("model_metadata", "unit_primitive", "scopes"),
         [
             (
                 ModelMetadata(
@@ -959,7 +936,7 @@ class TestBaseRegistry:
                         max_context_tokens=128000,
                     ),
                 ),
-                [GitLabUnitPrimitive.COMPLETE_CODE],
+                GitLabUnitPrimitive.COMPLETE_CODE,
                 ["complete_code"],
             )
         ],
@@ -976,15 +953,15 @@ class TestBaseRegistry:
         assert registry.get_on_behalf(user, "test", None) == prompt
 
     @pytest.mark.parametrize(
-        ("unit_primitives", "scopes", "prompt_version"),
+        ("unit_primitive", "scopes", "prompt_version"),
         [
             (
-                [GitLabUnitPrimitive.COMPLETE_CODE],
+                GitLabUnitPrimitive.COMPLETE_CODE,
                 ["complete_code"],
                 "^1.0.0",
             ),
             (
-                [GitLabUnitPrimitive.COMPLETE_CODE],
+                GitLabUnitPrimitive.COMPLETE_CODE,
                 ["complete_code"],
                 None,
             ),

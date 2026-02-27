@@ -3,7 +3,7 @@ from typing import Any
 from unittest.mock import patch
 
 import pytest
-from gitlab_cloud_connector import CloudConnectorUser, GitLabUnitPrimitive, UserClaims
+from gitlab_cloud_connector import GitLabUnitPrimitive
 from langchain_core.callbacks import CallbackManagerForLLMRun
 from langchain_core.language_models.chat_models import SimpleChatModel
 from langchain_core.messages import BaseMessage
@@ -77,13 +77,6 @@ def frozen_datetime_now_fixture():
         yield mock_datetime
 
 
-@pytest.fixture(name="unit_primitives")
-def unit_primitives_fixture():
-    return ["explain_vulnerability"]
-
-
-@pytest.fixture(name="auth_user")
-def auth_user_fixture(unit_primitives: list[GitLabUnitPrimitive]):
-    return CloudConnectorUser(
-        authenticated=True, claims=UserClaims(scopes=unit_primitives)
-    )
+@pytest.fixture(name="scopes")
+def scopes_fixture(unit_primitive: GitLabUnitPrimitive):
+    return [unit_primitive.value]

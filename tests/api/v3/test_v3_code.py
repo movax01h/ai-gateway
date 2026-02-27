@@ -16,6 +16,7 @@ from ai_gateway.model_selection.model_selection_config import (
 )
 from ai_gateway.model_selection.models import ChatLiteLLMParams
 from ai_gateway.models.base import KindModelProvider
+from ai_gateway.prompts import Prompt
 from ai_gateway.tracking import SnowplowEventContext
 from lib.feature_flags.context import current_feature_flag_context
 
@@ -45,8 +46,8 @@ def fast_api_router_fixture():
     return api_router
 
 
-@pytest.fixture(name="unit_primitives")
-def unit_primitives_fixture():
+@pytest.fixture(name="scopes")
+def scopes_fixture():
     return ["complete_code", "generate_code", "amazon_q_integration"]
 
 
@@ -741,6 +742,7 @@ class TestEditorContentGeneration:
             mock_client: TestClient,
             mock_generations: Mock,
             route: str,
+            prompt: Prompt,
             test_case: Case,
         ):
             prompt_enhancer = {
@@ -771,7 +773,10 @@ class TestEditorContentGeneration:
                 "model_metadata": test_case.model_metadata,
             }
 
-            with patch("ai_gateway.prompts.registry.LocalPromptRegistry.get") as mock:
+            with patch(
+                "ai_gateway.prompts.registry.LocalPromptRegistry.get",
+                return_value=prompt,
+            ) as mock:
                 response = mock_client.post(
                     route,
                     headers={

@@ -4,8 +4,7 @@ model:
   params:
     temperature: 0.3
     max_tokens: 2_048
-unit_primitives:
-  - refactor_code
+unit_primitive: refactor_code
 prompt_template:
   system: |
     {% include 'chat/refactor_code/system/1.0.0.jinja' %}

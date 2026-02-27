@@ -3,8 +3,7 @@ name: Summarize project activity
 model:
   params:
     max_tokens: 32_768
-unit_primitives:
-  - duo_agent_platform
+unit_primitive: duo_agent_platform
 prompt_template:
   system: |
     {% include 'project_activity_summarize_project_activity/system/1.0.0.jinja' %}

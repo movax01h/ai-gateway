@@ -1,7 +1,6 @@
 ---
 name: Amazon Q Gitlab Documentation agent
-unit_primitives:
-  - amazon_q_integration
+unit_primitive: amazon_q_integration
 prompt_template:
   user: |
     {% include 'chat/documentation_search/user/1.0.0.jinja' %}
