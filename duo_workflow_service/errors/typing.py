@@ -1,0 +1,2 @@
+class NotifiableException(Exception):
+    pass
