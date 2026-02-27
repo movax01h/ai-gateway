@@ -783,6 +783,18 @@ async def next_client_event(
     return event
 
 
+async def set_health_status(
+    health_servicer: health.aio.HealthServicer,
+    status: int,
+) -> None:
+    """Sets the health status as both global and service-specific."""
+    await health_servicer.set("", status)
+    await health_servicer.set(
+        contract_pb2.DESCRIPTOR.services_by_name["DuoWorkflow"].full_name,
+        status,
+    )
+
+
 async def serve(config: Config, port: int) -> None:
     """grpc.keepalive_time_ms: The period (in milliseconds) after which a keepalive ping is sent on the transport.
 
@@ -840,7 +852,7 @@ async def serve(config: Config, port: int) -> None:
             DuoWorkflowService(), server
         )
         health_servicer = health.aio.HealthServicer()
-        health_servicer.set("", health_pb2.HealthCheckResponse.SERVING)
+        await set_health_status(health_servicer, health_pb2.HealthCheckResponse.SERVING)
         health_pb2_grpc.add_HealthServicer_to_server(health_servicer, server)
         server.add_insecure_port(f"[::]:{port}")
         if reflection_enabled:
@@ -856,14 +868,16 @@ async def serve(config: Config, port: int) -> None:
 
         # Set up graceful shutdown
         loop = asyncio.get_running_loop()
-        setup_signal_handlers(server, loop)
+        setup_signal_handlers(server, loop, health_servicer)
 
         await server.wait_for_termination()
         log.info("Server shutdown complete")
 
 
 def setup_signal_handlers(
-    server: grpc.aio.Server, loop: asyncio.AbstractEventLoop
+    server: grpc.aio.Server,
+    loop: asyncio.AbstractEventLoop,
+    health_servicer: health.aio.HealthServicer,
 ) -> None:
     """Set up signal handlers for graceful server shutdown."""
 
@@ -872,6 +886,11 @@ def setup_signal_handlers(
 
     def handle_shutdown(sig):
         log.info(f"Received signal {sig}, initiating graceful shutdown")
+        asyncio.create_task(
+            set_health_status(
+                health_servicer, health_pb2.HealthCheckResponse.NOT_SERVING
+            )
+        )
         asyncio.create_task(server.stop(grace=grace_period))
 
     for sig in (signal.SIGTERM, signal.SIGINT):
