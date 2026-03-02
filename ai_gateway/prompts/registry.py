@@ -352,12 +352,22 @@ class LocalPromptRegistry(BasePromptRegistry):
 
         config = self._get_prompt_config(prompt_registered.versions, prompt_version)  # type: ignore[arg-type]
         model_class_provider = model_metadata.llm_definition.model_class_provider
+        prompt_template_override = self.prompt_template_factories.get(prompt_id, None)
 
-        model_factory = self.model_factories.get(model_class_provider, None)
-
-        if not model_factory:
-            raise ValueError(
-                f"unrecognized model class provider `{model_class_provider}`."
+        if (
+            not prompt_template_override
+            and model_class_provider == ModelClassProvider.LITE_LLM_COMPLETION
+        ):
+            prompt_template_override = completion_prompt_template_factory
+        prompt_template_factory: TypePromptTemplateFactory | None
+        if isinstance(prompt_template_override, str):
+            prompt_template_factory = cast(
+                TypePromptTemplateFactory,
+                self._resolve_string_class_name(prompt_template_override),
+            )
+        else:
+            prompt_template_factory = cast(
+                TypePromptTemplateFactory | None, prompt_template_override
             )
 
         log.info(
@@ -378,21 +388,30 @@ class LocalPromptRegistry(BasePromptRegistry):
             ),
         )
 
-        prompt_template_override = self.prompt_template_factories.get(prompt_id, None)
-        if (
-            not prompt_template_override
-            and model_class_provider == ModelClassProvider.LITE_LLM_COMPLETION
-        ):
-            prompt_template_override = completion_prompt_template_factory
-        prompt_template_factory: TypePromptTemplateFactory | None
-        if isinstance(prompt_template_override, str):
-            prompt_template_factory = cast(
-                TypePromptTemplateFactory,
-                self._resolve_string_class_name(prompt_template_override),
-            )
-        else:
-            prompt_template_factory = cast(
-                TypePromptTemplateFactory | None, prompt_template_override
+        return self._build_prompt(
+            model_class_provider=model_class_provider,
+            config=config,
+            model_metadata=model_metadata,
+            tool_choice=tool_choice,
+            prompt_template_factory=prompt_template_factory,
+            tools=tools,
+            bind_tools_cache=self.bind_tools_cache,
+            **kwargs,
+        )
+
+    def _build_prompt(
+        self,
+        model_class_provider: ModelClassProvider,
+        config: PromptConfig,
+        model_metadata: Optional[TypeModelMetadata],
+        tool_choice: Optional[str],
+        **kwargs,
+    ) -> Prompt:
+        model_factory = self.model_factories.get(model_class_provider, None)
+
+        if not model_factory:
+            raise ValueError(
+                f"unrecognized model class provider `{model_class_provider}`."
             )
 
         # Adjust tool_choice for model-specific requirements
@@ -403,11 +422,9 @@ class LocalPromptRegistry(BasePromptRegistry):
             model_factory,
             config,
             model_metadata,
-            prompt_template_factory,
             disable_streaming=self.disable_streaming,
-            tools=tools,
             tool_choice=tool_choice,
-            bind_tools_cache=self.bind_tools_cache,
+            internal_event_client=self.internal_event_client,
             **kwargs,
         )
 

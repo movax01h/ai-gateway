@@ -510,7 +510,6 @@ class BasePromptRegistry(ABC):
             tools,
             **kwargs,
         )
-        prompt.internal_event_client = self.internal_event_client
         prompt.set_limits(self.model_limits)
 
         if not user.can(prompt.unit_primitive):

@@ -877,7 +877,6 @@ class TestBaseRegistry:
                 )
                 == prompt
             )
-            assert prompt.internal_event_client == internal_event_client
 
             if input_model_metadata:
                 assert input_model_metadata._user == user
