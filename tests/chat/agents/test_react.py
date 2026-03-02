@@ -337,7 +337,6 @@ class TestReActAgent:
     async def test_stream(
         self,
         inputs: ReActAgentInputs,
-        model_response: str,
         expected_actions: list[AgentToolAction | AgentFinalAnswer | AgentUnknownAction],
         agent: ReActAgent,
     ):
@@ -453,12 +452,25 @@ class TestReActAgent:
                     ],
                 ),
                 ValueError(
-                    "litellm.ServiceUnavailableError: litellm.MidStreamFallbackError: litellm.InternalServerError: AnthropicError - Overloaded Original exception: InternalServerError: litellm.InternalServerError: AnthropicError - Overloaded"
+                    "litellm.ServiceUnavailableError: litellm.MidStreamFallbackError: "
+                    "litellm.InternalServerError: AnthropicError - Overloaded "
+                    "Original exception: InternalServerError: "
+                    "litellm.InternalServerError: AnthropicError - Overloaded"
                 ),
-                "litellm.ServiceUnavailableError: litellm.MidStreamFallbackError: litellm.InternalServerError: AnthropicError - Overloaded Original exception: InternalServerError: litellm.InternalServerError: AnthropicError - Overloaded",
+                (
+                    "litellm.ServiceUnavailableError: litellm.MidStreamFallbackError: "
+                    "litellm.InternalServerError: AnthropicError - Overloaded "
+                    "Original exception: InternalServerError: "
+                    "litellm.InternalServerError: AnthropicError - Overloaded"
+                ),
                 [
                     AgentError(
-                        message="litellm.ServiceUnavailableError: litellm.MidStreamFallbackError: litellm.InternalServerError: AnthropicError - Overloaded Original exception: InternalServerError: litellm.InternalServerError: AnthropicError - Overloaded",
+                        message=(
+                            "litellm.ServiceUnavailableError: litellm.MidStreamFallbackError: "
+                            "litellm.InternalServerError: AnthropicError - Overloaded "
+                            "Original exception: InternalServerError: "
+                            "litellm.InternalServerError: AnthropicError - Overloaded"
+                        ),
                         retryable=True,
                     ),
                 ],
