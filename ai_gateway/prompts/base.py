@@ -550,9 +550,15 @@ class BasePromptRegistry(ABC):
 
         # Collect invocations to execute them in parallel
         tasks = []
+        models_visited = set()
 
         for unit_primitive_config in model_selection_config.get_unit_primitive_config():
             model = unit_primitive_config.default_model
+
+            if model in models_visited:
+                continue
+
+            models_visited.add(model)
 
             if model in self.validations or (
                 unit_primitive
