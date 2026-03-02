@@ -349,6 +349,104 @@ class TestGitLabGraphQL:
         assert "error" in result_json
         assert "mutations and subscriptions are not allowed" in result_json["error"]
 
+    @pytest.mark.parametrize(
+        "exploit_query",
+        [
+            pytest.param(
+                "#\rquery{\n"
+                " mutation{\n"
+                'createNote(input: {noteableId: "gid://gitlab/Issue/23101307",'
+                ' body: "testing mutations"}){clientMutationId}}'
+                " \n#\r}",
+                id="cr_wraps_mutation_as_query_field",
+            ),
+            pytest.param(
+                "#\rquery{\n"
+                ' subscription { mergeRequestUpdated(projectPath: "foo") { id } }'
+                " \n#\r}",
+                id="cr_wraps_subscription_as_query_field",
+            ),
+            pytest.param(
+                "#\r\rquery{\n"
+                " mutation{\n"
+                'createNote(input: {noteableId: "gid://gitlab/Issue/1",'
+                ' body: "test"}){clientMutationId}}'
+                " \n#\r\r}",
+                id="multiple_cr_wraps_mutation_as_query_field",
+            ),
+        ],
+    )
+    @pytest.mark.asyncio
+    async def test_graphql_cr_exploit_is_neutralized_via_normalization(
+        self, gitlab_graphql_tool, gitlab_client_mock, exploit_query
+    ):
+        """Test that \\r-based parser-differential exploits are neutralized.
+
+        Python's graphql-core treats \\r as a line terminator, so it parses these payloads as queries (not mutations).
+        The tool normalizes the query via print_ast before sending to Rails, stripping comments and \\r characters. This
+        ensures Ruby's parser sees the same AST as Python — a query with harmless unresolvable field names, not a
+        mutation operation.
+        """
+        response_data = {"data": {"mutation": None}}
+        mock_response = Mock(spec=GitLabHttpResponse)
+        mock_response.is_success.return_value = True
+        mock_response.body = response_data
+        gitlab_client_mock.apost = AsyncMock(return_value=mock_response)
+
+        await gitlab_graphql_tool._execute(query=exploit_query)
+
+        gitlab_client_mock.apost.assert_called_once()
+        sent_payload = json.loads(gitlab_client_mock.apost.call_args[1]["body"])
+        sent_query = sent_payload["query"]
+        assert "\r" not in sent_query
+        assert sent_query != exploit_query
+
+    @pytest.mark.asyncio
+    async def test_graphql_mutation_hidden_by_cr_comment_blocked(
+        self, gitlab_graphql_tool, gitlab_client_mock
+    ):
+        """Test that a mutation hidden behind a \\r-terminated comment is blocked.
+
+        '#\\rmutation {...}' is parsed by Python as comment '#' followed by
+        a real mutation operation. After print_ast normalization the mutation
+        keyword is preserved, and the existing operation-type check blocks it.
+        """
+        exploit_query = (
+            "#\rmutation { createNote(input: "
+            '{noteableId: "gid://gitlab/Issue/1", body: "test"}) '
+            "{ clientMutationId } }"
+        )
+        gitlab_client_mock.apost = AsyncMock()
+        result = await gitlab_graphql_tool._execute(query=exploit_query)
+
+        result_json = json.loads(result)
+        assert "error" in result_json
+        assert "mutations and subscriptions are not allowed" in result_json["error"]
+        gitlab_client_mock.apost.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_graphql_query_with_crlf_line_endings_allowed(
+        self, gitlab_graphql_tool, gitlab_client_mock
+    ):
+        """Test that a legitimate query with \\r\\n (Windows) line endings still works."""
+        query = (
+            'query {\r\n  project(fullPath: "foo/bar")'
+            " {\r\n    id\r\n    title\r\n  }\r\n}"
+        )
+        response_data = {"data": {"project": {"id": "1", "title": "Test"}}}
+        mock_response = Mock(spec=GitLabHttpResponse)
+        mock_response.is_success.return_value = True
+        mock_response.body = response_data
+        gitlab_client_mock.apost = AsyncMock(return_value=mock_response)
+
+        result = await gitlab_graphql_tool._execute(query=query)
+
+        result_json = json.loads(result)
+        assert result_json["status"] == "success"
+        gitlab_client_mock.apost.assert_called_once()
+        sent_payload = json.loads(gitlab_client_mock.apost.call_args[1]["body"])
+        assert "\r" not in sent_payload["query"]
+
     @pytest.mark.asyncio
     async def test_graphql_invalid_query_rejected(self, gitlab_graphql_tool):
         """Test that invalid GraphQL queries are rejected."""
@@ -437,140 +535,3 @@ class TestGitLabGraphQL:
         args = GitLabGraphQLInput(query="query { currentUser { username } }")
         message = gitlab_graphql_tool.format_display_message(args)
         assert "GraphQL query" in message
-
-    def test_strip_query_for_preview_single_line_comment(self, gitlab_graphql_tool):
-        """Test stripping single-line comments from GraphQL query."""
-        query = """
-        # This is a comment
-        query { currentUser { username } }
-        """
-        cleaned = gitlab_graphql_tool._strip_query_for_preview(query)
-        assert cleaned == "query { currentUser { username } }"
-        assert "#" not in cleaned
-
-    def test_strip_query_for_preview_multiple_comments(self, gitlab_graphql_tool):
-        """Test stripping multiple consecutive comment lines from GraphQL query."""
-        query = """
-        # This is the first comment
-        # This is the second comment
-        # This is the third comment
-        query {
-            # Another comment in the middle
-            currentUser {
-                username # inline comment
-            }
-        }
-        """
-        cleaned = gitlab_graphql_tool._strip_query_for_preview(query)
-        assert cleaned == "query { currentUser { username } }"
-        assert "#" not in cleaned
-        assert "first comment" not in cleaned
-        assert "second comment" not in cleaned
-        assert "inline comment" not in cleaned
-
-    def test_strip_query_for_preview_whitespace_collapsing(self, gitlab_graphql_tool):
-        """Test collapsing excess whitespace in GraphQL query."""
-        query = """
-        query    {
-            currentUser     {
-                username
-
-                email
-            }
-        }
-        """
-        cleaned = gitlab_graphql_tool._strip_query_for_preview(query)
-        # All whitespace should be collapsed to single spaces
-        assert "    " not in cleaned
-        assert "     " not in cleaned
-        assert "\n" not in cleaned
-        # Should have single spaces between tokens
-        assert cleaned == "query { currentUser { username email } }"
-
-    def test_strip_query_for_preview_mutation_with_comments(self, gitlab_graphql_tool):
-        """Test stripping comments from a mutation query."""
-        query = """
-        # Update merge request title
-        mutation UpdateMRTitle($projectPath: ID!, $iid: String!, $title: String!) {
-            # Call the mergeRequestUpdate mutation
-            mergeRequestUpdate(
-                input: {
-                    projectPath: $projectPath  # Project path
-                    iid: $iid  # MR IID
-                    title: $title  # New title
-                }
-            ) {
-                mergeRequest {
-                    id
-                    title
-                }
-                errors
-            }
-        }
-        """
-        cleaned = gitlab_graphql_tool._strip_query_for_preview(query)
-        # Should have no comments
-        assert "#" not in cleaned
-        # Should have mutation keyword
-        assert "mutation" in cleaned
-        # Should be collapsed to single line with single spaces
-        assert "\n" not in cleaned
-        assert "  " not in cleaned
-
-    def test_strip_query_for_preview_empty_lines(self, gitlab_graphql_tool):
-        """Test removal of empty lines from GraphQL query."""
-        query = """
-
-        query {
-
-            currentUser {
-
-                username
-
-            }
-
-        }
-
-        """
-        cleaned = gitlab_graphql_tool._strip_query_for_preview(query)
-        assert cleaned == "query { currentUser { username } }"
-        # Verify no extra spaces from empty lines
-        assert cleaned.count("  ") == 0
-
-    def test_strip_query_for_preview_mixed_comments_and_whitespace(
-        self, gitlab_graphql_tool
-    ):
-        """Test comprehensive cleaning with comments, whitespace, and empty lines."""
-        query = """
-        # GraphQL query to fetch project details
-        # Including merge requests and issues
-
-        query GetProjectDetails($projectPath: ID!) {
-            # Fetch the project
-            project(fullPath: $projectPath) {
-                name  # Project name
-                description
-
-                # Get merge requests
-                mergeRequests(first: 10) {
-                    nodes {
-                        title
-                        author {
-                            username  # Author's username
-                        }
-                    }
-                }
-            }
-        }
-        """
-        cleaned = gitlab_graphql_tool._strip_query_for_preview(query)
-        # Should have no comments
-        assert "#" not in cleaned
-        # Should be collapsed
-        assert "\n" not in cleaned
-        # Should have single spaces only
-        assert "  " not in cleaned
-        # Should contain key parts
-        assert "query GetProjectDetails" in cleaned
-        assert "project(fullPath: $projectPath)" in cleaned
-        assert "mergeRequests(first: 10)" in cleaned
