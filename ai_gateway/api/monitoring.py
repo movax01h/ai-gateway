@@ -70,7 +70,7 @@ async def validate_fireworks_available(
     ],
 ) -> bool:
     code_completions = completions_litellm_factory(
-        model__name=KindLiteLlmModel.QWEN_2_5,
+        model__name=KindLiteLlmModel.CODESTRAL_2501,
         model__provider=KindModelProvider.FIREWORKS,
     )
     await code_completions.execute(
