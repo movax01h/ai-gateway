@@ -1,4 +1,3 @@
-import anthropic
 from dependency_injector import containers, providers
 from transformers import PreTrainedTokenizerFast
 
@@ -11,7 +10,7 @@ from ai_gateway.code_suggestions.processing.post.completions import (
     PostProcessorOperation,
 )
 from ai_gateway.code_suggestions.processing.pre import TokenizerTokenStrategy
-from ai_gateway.models import KindAnthropicModel, KindVertexTextModel
+from ai_gateway.models import KindVertexTextModel
 from ai_gateway.models.base import KindModelProvider
 from ai_gateway.models.base_chat import ChatModelBase
 from ai_gateway.models.base_text import TextGenModelBase
@@ -40,21 +39,6 @@ class ContainerCodeGenerations(containers.DeclarativeContainer):
         CodeGenerations,
         model=providers.Factory(
             vertex_code_bison, name=KindVertexTextModel.CODE_BISON_002
-        ),
-        tokenization_strategy=providers.Factory(
-            TokenizerTokenStrategy, tokenizer=tokenizer
-        ),
-        snowplow_instrumentator=snowplow_instrumentator,
-        billing_event_client=billing_event_client,
-    )
-
-    # We need to resolve the model based on model name provided in request payload
-    # Hence, CodeGenerations is only partially applied here.
-    anthropic_factory = providers.Factory(
-        CodeGenerations,
-        model=providers.Factory(
-            anthropic_claude,
-            stop_sequences=["</new_code>", anthropic.HUMAN_PROMPT],
         ),
         tokenization_strategy=providers.Factory(
             TokenizerTokenStrategy, tokenizer=tokenizer
@@ -101,11 +85,6 @@ class ContainerCodeGenerations(containers.DeclarativeContainer):
         ),
         snowplow_instrumentator=snowplow_instrumentator,
         billing_event_client=billing_event_client,
-    )
-
-    anthropic_default = providers.Factory(
-        anthropic_factory,
-        model__name=KindAnthropicModel.CLAUDE_3_5_SONNET_V2,
     )
 
 
