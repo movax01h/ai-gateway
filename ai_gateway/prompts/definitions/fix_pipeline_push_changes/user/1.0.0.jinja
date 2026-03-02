@@ -33,7 +33,7 @@ Follow these exact steps in order:
         project_id={{project_id}},
         source_branch="<current_branch_name>",
         target_branch="{% if source_branch %} {{source_branch}} {% else %} {{default_branch}} {% endif %}",
-        title="Draft: fix failing pipeline",
+        title="Draft: [FixPipeline] {{pipeline_url}}",
         description='Fixes [failing pipeline]({{pipeline_url}}){% if merge_request_url %} on {{merge_request_url}}{% endif %}<br><br>[Session {{ workflow_id }}]({{ session_url }})',
     )
     DO NOT include a "labels" parameter.
