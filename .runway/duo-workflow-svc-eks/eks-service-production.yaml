@@ -20,7 +20,7 @@ duo-workflow-svc-eks:
       LANGSMITH_PROJECT: "duo-workflow-production"
       DUO_WORKFLOW_SERVICE_ENVIRONMENT: "production"
       DUO_WORKFLOW_DIRECT_CONNECTION_BASE_URL: "https://gitlab.com"
-      AIGW_GOOGLE_CLOUD_PLATFORM__PROJECT: "gitlab-ai-framework-prod"
+      AIGW_GOOGLE_CLOUD_PLATFORM__PROJECT: "gitlab-ai-framework-dev"
 
   workloadSecrets:
     - name: env-vars
