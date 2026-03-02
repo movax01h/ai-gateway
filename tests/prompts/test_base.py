@@ -1217,6 +1217,12 @@ configurable_unit_primitives:
     default_model: "model_b"
     selectable_models:
       - "model_b"
+  - feature_setting: "c"
+    unit_primitives:
+      - "complete_code"
+    default_model: "model_b"
+    selectable_models:
+      - "model_b"
 """,
         )
         # editorconfig-checker-enable
