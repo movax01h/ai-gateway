@@ -17,7 +17,7 @@ ENV PYTHONUNBUFFERED=1 \
 # Temp dir for installing dependencies
 WORKDIR /tmp/build
 
-# Install system dependencies including git build requirements
+# Install system dependencies including git build requirements and srt dependencies
 RUN apt-get update && apt-get install -y --no-install-recommends \
     npm \
     build-essential \
@@ -29,6 +29,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     gettext \
     libz-dev \
     libssl-dev \
+    bubblewrap \
+    socat \
+    ripgrep \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 
@@ -47,8 +50,14 @@ COPY vendor/ vendor/
 RUN pip install "poetry==$POETRY_VERSION"
 RUN poetry install --with test,lint,eval --no-root --no-interaction --no-ansi
 
+# Install srt sandboxing with cache clearing and verification
+RUN npm cache clean --force && \
+    npm install -g @anthropic-ai/sandbox-runtime@0.0.20 && \
+    test -s "$(npm root -g)/@anthropic-ai/sandbox-runtime/package.json"
+
 RUN poetry --version && \
     python --version && \
     git --version && \
     npm --version && \
+    srt --version && \
     echo "Duo Agent image build complete"
