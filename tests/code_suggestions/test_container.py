@@ -21,7 +21,7 @@ def test_container(mock_ai_gateway_container: containers.DeclarativeContainer):
     generations = cast(ContainerCodeGenerations, code_suggestions.generations)
 
     assert isinstance(
-        completions.anthropic(model__name=KindAnthropicModel.CLAUDE_3_5_SONNET),
+        completions.anthropic(model__name=KindAnthropicModel.CLAUDE_SONNET_4_5),
         CodeCompletions,
     )
     assert isinstance(
@@ -33,7 +33,7 @@ def test_container(mock_ai_gateway_container: containers.DeclarativeContainer):
     assert isinstance(generations.vertex(), CodeGenerations)
     assert isinstance(
         generations.anthropic_chat_factory(
-            model__name=KindAnthropicModel.CLAUDE_3_HAIKU
+            model__name=KindAnthropicModel.CLAUDE_HAIKU_4_5
         ),
         CodeGenerations,
     )

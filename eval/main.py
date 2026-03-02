@@ -13,7 +13,7 @@ from ai_gateway.prompts.base import BasePromptRegistry
 
 EVALUATORS = {
     # In this iteration, we assume that all evaluators are LLM-based and require an LLM to be configured.
-    # We rely on Claude 3.5 Sonnet (20240620) with the temperature set to 0.
+    # We rely on Claude 4.5 Sonnet (20250929) with the temperature set to 0.
     "correctness": CorrectnessEvaluator,
 }
 
@@ -31,7 +31,7 @@ def eval(
     prompt = prompt_registry.get(prompt_id, prompt_version)
 
     if evaluators:
-        model = ChatAnthropic(model="claude-3-5-sonnet-20240620", temperature=0.0)  # type: ignore[call-arg]
+        model = ChatAnthropic(model="claude-sonnet-4-5-20250929", temperature=0.0)  # type: ignore[call-arg]
         evaluators_instances = [EVALUATORS[name](model=model) for name in evaluators]
     else:
         evaluators_instances = None

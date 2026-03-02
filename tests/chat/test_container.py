@@ -36,14 +36,12 @@ def test_container(
     chat = cast(providers.Container, mock_ai_gateway_container.chat)
 
     assert isinstance(
-        chat.anthropic_claude_factory(
-            "llm", name=KindAnthropicModel.CLAUDE_3_5_SONNET_V2
-        ),
+        chat.anthropic_claude_factory("llm", name=KindAnthropicModel.CLAUDE_SONNET_4_5),
         AnthropicModel,
     )
     assert isinstance(
         chat.anthropic_claude_factory(
-            "chat", name=KindAnthropicModel.CLAUDE_3_5_SONNET_V2
+            "chat", name=KindAnthropicModel.CLAUDE_SONNET_4_5
         ),
         AnthropicChatModel,
     )

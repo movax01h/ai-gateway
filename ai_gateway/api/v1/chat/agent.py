@@ -23,7 +23,6 @@ from ai_gateway.models import (
     AnthropicAPIConnectionError,
     AnthropicAPIStatusError,
     AnthropicAPITimeoutError,
-    KindAnthropicModel,
     KindModelProvider,
 )
 from ai_gateway.models.base_text import TextGenModelChunk, TextGenModelOutput
@@ -173,17 +172,8 @@ async def _generate_completion(
         if "max_tokens" in opts and opts["max_tokens"] > 4096:
             opts["max_tokens"] = 4096
 
-    prompt_model = prompt.model
-    if prompt.model in [
-        KindAnthropicModel.CLAUDE_2_1,
-        KindAnthropicModel.CLAUDE_3_SONNET,
-    ]:
-        # Overriding the model.
-        # See https://gitlab.com/gitlab-org/modelops/applied-ml/code-suggestions/ai-assist/-/issues/1311
-        prompt_model = KindAnthropicModel.CLAUDE_3_5_SONNET
-
     completion = await anthropic_claude_factory(
-        factory_type, name=prompt_model
+        factory_type, name=prompt.model
     ).generate(**opts)
 
     return completion

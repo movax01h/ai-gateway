@@ -56,7 +56,7 @@ class TestEditorContentCompletionStream:
             "language_identifier": "python",
             "model_provider": "anthropic",
             "stream": True,
-            "model_name": "claude-3-5-sonnet-20240620",
+            "model_name": "claude-sonnet-4-5-20250929",
         }
 
         prompt_component = {
@@ -84,7 +84,7 @@ class TestEditorContentCompletionStream:
 
         expected_model_metadata = {
             "engine": "anthropic",
-            "name": "claude-3-5-sonnet-20240620",
+            "name": "claude-sonnet-4-5-20250929",
         }
 
         expected_feature_flags = {"flag_a", "flag_b"}

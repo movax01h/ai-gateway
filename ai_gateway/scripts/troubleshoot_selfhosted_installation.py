@@ -7,7 +7,7 @@ import os
 import boto3
 import requests
 
-SUPPORTED_MODEL_FAMILIES = ["mistral", "mixtral", "gpt", "claude_3", "llama3"]
+SUPPORTED_MODEL_FAMILIES = ["mistral", "mixtral", "gpt", "llama3"]
 
 
 def check_aigw_endpoint(endpoint="localhost:5052"):
@@ -248,7 +248,7 @@ def troubleshoot():
         "--model-identifier",
         required=False,
         help="Identifier of the model."
-        "Example: custom_openai/Mixtral-8x7B-Instruct-v0.1, bedrock/anthropic.claude-3-5-sonnet-20240620-v1:0",
+        "Example: custom_openai/Mixtral-8x7B-Instruct-v0.1, bedrock/anthropic.claude-sonnet-4-20250514-v1:0",
     )
     parser.add_argument("--api-key", help="API key for the model.")
 
@@ -271,7 +271,7 @@ def troubleshoot():
     api_key = args.api_key
 
     # if model_identifier is provided, extract the provider
-    # example: extract `bedrock` from `bedrock/anthropic.claude-3-5-sonnet-20240620-v1:0`
+    # example: extract `bedrock` from `bedrock/anthropic.claude-sonnet-4-20250514-v1:0`
     provider = None
     if model_identifier and "/" in model_identifier:
         provider = model_identifier.split("/")[0]
