@@ -1020,6 +1020,7 @@ class TestLocalPromptRegistry:
         )
         assert prompt.model_name == expected_model
         assert prompt.model.disable_streaming == disable_streaming
+        assert prompt.internal_event_client == registry.internal_event_client
         assert binding.kwargs == expected_kwargs
 
         actual_model_params = {
@@ -1124,9 +1125,10 @@ class TestLocalPromptRegistry:
         assert result == "any"
 
     @pytest.mark.usefixtures("mock_fs")
-    def test_get_with_bedrock_model_adjusts_tool_choice(
+    def test_build_prompt_with_bedrock_model_adjusts_tool_choice(
         self,
         registry: LocalPromptRegistry,
+        prompt_config: PromptConfig,
         tools: list[BaseTool],
         llm_definition: LLMDefinition,
     ):
@@ -1139,7 +1141,9 @@ class TestLocalPromptRegistry:
         )
 
         with patch("ai_gateway.prompts.registry.Prompt") as prompt_class:
-            registry.get(
+            registry._build_prompt(
+                model_class_provider=ModelClassProvider.ANTHROPIC,
+                config=prompt_config,
                 prompt_id="test",
                 prompt_version="^1.0.0",
                 model_metadata=bedrock_metadata,
@@ -1168,9 +1172,10 @@ class TestLocalPromptRegistry:
         assert isinstance(prompt.prompt_tpl, RunnableLambda)
 
     @pytest.mark.usefixtures("mock_fs")
-    def test_get_with_azure_model_adjusts_tool_choice(
+    def test_build_prompt_with_azure_model_adjusts_tool_choice(
         self,
         registry: LocalPromptRegistry,
+        prompt_config: PromptConfig,
         tools: list[BaseTool],
         llm_definition: LLMDefinition,
     ):
@@ -1183,7 +1188,9 @@ class TestLocalPromptRegistry:
         )
 
         with patch("ai_gateway.prompts.registry.Prompt") as prompt_class:
-            registry.get(
+            registry._build_prompt(
+                model_class_provider=ModelClassProvider.ANTHROPIC,
+                config=prompt_config,
                 prompt_id="test",
                 prompt_version="^1.0.0",
                 model_metadata=azure_metadata,
@@ -1195,3 +1202,52 @@ class TestLocalPromptRegistry:
         # tool_choice should be converted from 'any' to 'required'
         assert kwargs.get("tool_choice") == "required"
         assert kwargs.get("tools") == tools
+
+    def test_build_prompt_calls_prompt_initializer_with_expected_params(
+        self,
+        registry: LocalPromptRegistry,
+        prompt_config: PromptConfig,
+        model_metadata: ModelMetadata,
+        model_factories: dict[ModelClassProvider, TypeModelFactory],
+    ):
+        with patch("ai_gateway.prompts.registry.Prompt") as mock_prompt_class:
+            registry._build_prompt(
+                model_class_provider=ModelClassProvider.ANTHROPIC,
+                config=prompt_config,
+                model_metadata=model_metadata,
+                tool_choice="auto",
+                extra_kwarg="value",
+            )
+
+        # Verify Prompt was called with expected parameters
+        mock_prompt_class.assert_called_once_with(
+            ModelClassProvider.ANTHROPIC,
+            model_factories[ModelClassProvider.ANTHROPIC],
+            prompt_config,
+            model_metadata,
+            disable_streaming=registry.disable_streaming,
+            tool_choice="auto",
+            internal_event_client=registry.internal_event_client,
+            extra_kwarg="value",
+        )
+
+    def test_build_prompt_raises_error_for_unrecognized_model_class_provider(
+        self,
+        registry: LocalPromptRegistry,
+        prompt_config: PromptConfig,
+        model_metadata: ModelMetadata,
+    ):
+        """Test that _build_prompt raises ValueError for unrecognized model class provider."""
+        # Create an unrecognized model class provider
+        unrecognized_provider = "unrecognized_provider"
+
+        with pytest.raises(ValueError) as exc_info:
+            registry._build_prompt(
+                model_class_provider=unrecognized_provider,  # type: ignore
+                config=prompt_config,
+                model_metadata=model_metadata,
+                tool_choice=None,
+            )
+
+        assert "unrecognized model class provider" in str(exc_info.value)
+        assert unrecognized_provider in str(exc_info.value)
