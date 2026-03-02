@@ -12,6 +12,7 @@ import structlog
 from gitlab_cloud_connector import GitLabUnitPrimitive
 from graphql import parse as parse_graphql
 from graphql.language.ast import DocumentNode, OperationDefinitionNode, OperationType
+from graphql.language.printer import print_ast
 from pydantic import BaseModel, Field
 
 from duo_workflow_service.tools.duo_base_tool import DuoBaseTool
@@ -333,70 +334,28 @@ class GitLabGraphQL(DuoBaseTool):
     args_schema: Type[BaseModel] = GitLabGraphQLInput
     unit_primitive: Optional[GitLabUnitPrimitive] = None
 
-    def _strip_query_for_preview(self, query: str) -> str:
-        """Strip comments and excess whitespace from a GraphQL query for logging.
+    @staticmethod
+    def _document_contains_mutation_or_subscription(document: DocumentNode) -> bool:
+        """Check if a parsed GraphQL document contains mutation or subscription operations.
 
         Args:
-            query: The GraphQL query string
+            document: The parsed GraphQL AST
 
         Returns:
-            Cleaned query string with comments and excess whitespace removed
+            True if the document contains any mutations or subscriptions, False otherwise
         """
-        lines = query.split("\n")
-        cleaned_lines = []
-
-        for line in lines:
-            # Remove comments (content after #)
-            if "#" in line:
-                line = line[: line.index("#")]
-
-            # Strip leading/trailing whitespace
-            line = line.strip()
-
-            # Skip empty lines
-            if line:
-                cleaned_lines.append(line)
-
-        # Join with single space and collapse multiple spaces
-        cleaned = " ".join(cleaned_lines)
-        cleaned = " ".join(cleaned.split())
-
-        return cleaned
-
-    def _query_contains_mutation_or_subscription(self, query: str) -> bool:
-        """Check if a GraphQL query contains any mutation or subscription operations.
-
-        This method properly parses the GraphQL query to detect mutations and subscriptions,
-        including those hidden behind comments or fragments.
-
-        Args:
-            query: The GraphQL query string to check
-
-        Returns:
-            True if the query contains any mutations or subscriptions, False otherwise
-
-        Raises:
-            Exception: If the query cannot be parsed
-        """
-        # Parse the GraphQL query into an AST
-        document: DocumentNode = parse_graphql(query)
-
-        # Check all operation definitions in the document
         for definition in document.definitions:
             if isinstance(definition, OperationDefinitionNode):
-                # Check if this operation is a mutation or subscription
                 if definition.operation == OperationType.MUTATION:
-                    cleaned_query = self._strip_query_for_preview(query)
                     log.warning(
                         "Blocked GraphQL mutation attempt",
-                        extra={"query_preview": cleaned_query[:200]},
+                        extra={"query_preview": print_ast(document)[:200]},
                     )
                     return True
                 if definition.operation == OperationType.SUBSCRIPTION:
-                    cleaned_query = self._strip_query_for_preview(query)
                     log.warning(
                         "Blocked GraphQL subscription attempt",
-                        extra={"query_preview": cleaned_query[:200]},
+                        extra={"query_preview": print_ast(document)[:200]},
                     )
                     return True
 
@@ -415,21 +374,10 @@ class GitLabGraphQL(DuoBaseTool):
         Returns:
             JSON string with the GraphQL response or error information
         """
-        # Validate that the query is not a mutation or subscription by parsing the GraphQL
+        # Parse the query into an AST. This also rejects malformed input.
         try:
-            if self._query_contains_mutation_or_subscription(query):
-                return json.dumps(
-                    {
-                        "error": "GraphQL mutations and subscriptions are not allowed",
-                        "details": (
-                            "This tool only supports read-only queries. "
-                            "Mutations and subscriptions are not supported. "
-                            "Use specialized tools for write operations."
-                        ),
-                    }
-                )
+            document: DocumentNode = parse_graphql(query)
         except Exception as e:
-            # If we can't parse the query, reject it for safety
             return json.dumps(
                 {
                     "error": "Invalid GraphQL query",
@@ -437,8 +385,27 @@ class GitLabGraphQL(DuoBaseTool):
                 }
             )
 
-        # Build the GraphQL request payload
-        payload: Dict[str, Any] = {"query": query}
+        if self._document_contains_mutation_or_subscription(document):
+            return json.dumps(
+                {
+                    "error": "GraphQL mutations and subscriptions are not allowed",
+                    "details": (
+                        "This tool only supports read-only queries. "
+                        "Mutations and subscriptions are not supported. "
+                        "Use specialized tools for write operations."
+                    ),
+                }
+            )
+
+        # SECURITY: Send the normalized AST, not the raw input, to Rails.
+        # Raw queries can contain \r characters that Python and Ruby GraphQL
+        # parsers treat differently (Python treats \r as a line terminator,
+        # Ruby does not). An attacker can exploit this to craft a query that
+        # Python validates as a read-only query but Ruby executes as a
+        # mutation. print_ast produces a canonical form with no comments or
+        # ambiguous whitespace, eliminating this class of parser-differential
+        # attacks.
+        payload: Dict[str, Any] = {"query": print_ast(document)}
         if variables:
             payload["variables"] = variables
 
