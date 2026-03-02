@@ -6,13 +6,16 @@ from dependency_injector.wiring import Provide, inject
 from gitlab_cloud_connector.user import CloudConnectorUser
 from grpc import StatusCode
 from grpc.aio import ServicerContext
+from packaging.version import InvalidVersion, Version
 
 from ai_gateway.container import ContainerApplication
 from contract import contract_pb2, contract_pb2_grpc
 from duo_workflow_service.interceptors.authentication_interceptor import (
     current_user as current_user_context_var,
 )
+from lib.context import gitlab_version
 from lib.events import FeatureQualifiedNameStatic, GLReportingEventContext
+from lib.internal_events.context import current_event_context
 from lib.usage_quota import InsufficientCredits, UsageQuotaEvent, UsageQuotaService
 from lib.usage_quota.client import should_skip_usage_quota_for_user
 
@@ -171,8 +174,30 @@ def _process_generate_token_unary(func: Callable, event: UsageQuotaEvent):
                 )
 
             current_user: CloudConnectorUser = current_user_context_var.get(None)
+            event_context = current_event_context.get()
 
-            if not should_skip_usage_quota_for_user(current_user):
+            # Only perform usage quota check for self-managed instances on GitLab 18.8 or less
+            # For Self-managed instances with version >= 18.9 and SaaS the check is done in
+            # the Rails /direct_access endpoint
+            deprecated_quota_check = False
+
+            if event_context and event_context.realm == "self-managed":
+                try:
+                    version_str = gitlab_version.get()
+                    if version_str:
+                        instance_version = Version(str(version_str))
+                        if instance_version < Version("18.9.0"):
+                            deprecated_quota_check = False
+                        else:
+                            deprecated_quota_check = True
+                except (InvalidVersion, TypeError):
+                    deprecated_quota_check = False
+            else:
+                deprecated_quota_check = True
+
+            if not deprecated_quota_check and not should_skip_usage_quota_for_user(
+                current_user
+            ):
                 await service.execute(gl_events_context, event)
 
             return await func(obj, request, grpc_context, *args, **kwargs)

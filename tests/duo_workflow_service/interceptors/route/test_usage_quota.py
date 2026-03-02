@@ -1,5 +1,5 @@
 from collections.abc import AsyncIterator
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from gitlab_cloud_connector import CloudConnectorUser, UserClaims
@@ -8,6 +8,8 @@ from grpc.aio import ServicerContext
 from contract import contract_pb2
 from duo_workflow_service.interceptors.authentication_interceptor import current_user
 from duo_workflow_service.server import DuoWorkflowService
+from lib.context import gitlab_version
+from lib.internal_events.context import EventContext, current_event_context
 from lib.usage_quota import UsageQuotaEvent
 from lib.usage_quota.client import SKIP_USAGE_CUTOFF_CLAIM
 
@@ -209,3 +211,193 @@ async def test_usage_quota_event_types_are_correct() -> None:
         UsageQuotaEvent.DAP_FLOW_ON_GENERATE_TOKEN.value
         == "duo_agent_platform_workflow_on_generate_token"
     )
+
+
+class TestGenerateTokenVersionBasedQuotaCheck:
+    """Tests for version-based usage quota check in GenerateToken."""
+
+    @pytest.fixture(name="regular_user")
+    def regular_user_fixture(self):
+        return CloudConnectorUser(
+            authenticated=True,
+            claims=UserClaims(extra={}),
+        )
+
+    @pytest.fixture(name="generate_token_request")
+    def generate_token_request_fixture(self):
+        return contract_pb2.GenerateTokenRequest(
+            workflowDefinition="test_workflow",
+        )
+
+    @pytest.fixture(name="decorated_func")
+    def decorated_func_fixture(self, mock_usage_quota_service):
+        from duo_workflow_service.interceptors.route.usage_quota import (
+            has_sufficient_usage_quota,
+        )
+
+        inner = AsyncMock(return_value="ok")
+        inner.__name__ = "GenerateToken"
+        inner.__qualname__ = "DuoWorkflowServicer.GenerateToken"
+
+        decorated = has_sufficient_usage_quota(
+            event=UsageQuotaEvent.DAP_FLOW_ON_GENERATE_TOKEN
+        )(inner)
+
+        return decorated, inner, mock_usage_quota_service
+
+    @pytest.fixture(autouse=True)
+    def setup_user(self, regular_user):
+        token = current_user.set(regular_user)
+        yield
+        current_user.reset(token)
+
+    @pytest.mark.asyncio
+    async def test_self_managed_below_18_9_runs_quota_check(
+        self,
+        mock_context,
+        generate_token_request,
+        decorated_func,
+    ):
+        """Quota check should run for self-managed instances with version < 18.9."""
+        decorated, inner, service = decorated_func
+        event_token = current_event_context.set(EventContext(realm="self-managed"))
+        version_token = gitlab_version.set("18.8.0")
+
+        try:
+            await decorated(None, generate_token_request, mock_context, service=service)
+
+            service.execute.assert_called_once()
+            inner.assert_called_once()
+        finally:
+            current_event_context.reset(event_token)
+            gitlab_version.reset(version_token)
+
+    @pytest.mark.asyncio
+    async def test_self_managed_at_18_9_skips_quota_check(
+        self,
+        mock_context,
+        generate_token_request,
+        decorated_func,
+    ):
+        """Quota check should be skipped for self-managed instances with version >= 18.9."""
+        decorated, inner, service = decorated_func
+        event_token = current_event_context.set(EventContext(realm="self-managed"))
+        version_token = gitlab_version.set("18.9.0")
+
+        try:
+            await decorated(None, generate_token_request, mock_context, service=service)
+
+            service.execute.assert_not_called()
+            inner.assert_called_once()
+        finally:
+            current_event_context.reset(event_token)
+            gitlab_version.reset(version_token)
+
+    @pytest.mark.asyncio
+    async def test_saas_skips_quota_check(
+        self,
+        mock_context,
+        generate_token_request,
+        decorated_func,
+    ):
+        """Quota check should be skipped for SaaS (non-self-managed) instances."""
+        decorated, inner, service = decorated_func
+        event_token = current_event_context.set(EventContext(realm="saas"))
+        version_token = gitlab_version.set("18.8.0")
+
+        try:
+            await decorated(None, generate_token_request, mock_context, service=service)
+
+            service.execute.assert_not_called()
+            inner.assert_called_once()
+        finally:
+            current_event_context.reset(event_token)
+            gitlab_version.reset(version_token)
+
+    @pytest.mark.asyncio
+    async def test_no_realm_skips_quota_check(
+        self,
+        mock_context,
+        generate_token_request,
+        decorated_func,
+    ):
+        """Quota check should be skipped when realm is None."""
+        decorated, inner, service = decorated_func
+        event_token = current_event_context.set(EventContext(realm=None))
+
+        try:
+            await decorated(None, generate_token_request, mock_context, service=service)
+
+            service.execute.assert_not_called()
+            inner.assert_called_once()
+        finally:
+            current_event_context.reset(event_token)
+
+    @pytest.mark.asyncio
+    async def test_self_managed_no_version_runs_quota_check(
+        self,
+        mock_context,
+        generate_token_request,
+        decorated_func,
+    ):
+        """Quota check should run when self-managed but version is not set."""
+        decorated, inner, service = decorated_func
+        event_token = current_event_context.set(EventContext(realm="self-managed"))
+        version_token = gitlab_version.set(None)
+
+        try:
+            await decorated(None, generate_token_request, mock_context, service=service)
+
+            service.execute.assert_called_once()
+            inner.assert_called_once()
+        finally:
+            current_event_context.reset(event_token)
+            gitlab_version.reset(version_token)
+
+    @pytest.mark.asyncio
+    async def test_self_managed_invalid_version_runs_quota_check(
+        self,
+        mock_context,
+        generate_token_request,
+        decorated_func,
+    ):
+        """Quota check should run when self-managed but version is invalid."""
+        decorated, inner, service = decorated_func
+        event_token = current_event_context.set(EventContext(realm="self-managed"))
+        version_token = gitlab_version.set("not-a-version")
+
+        try:
+            await decorated(None, generate_token_request, mock_context, service=service)
+
+            service.execute.assert_called_once()
+            inner.assert_called_once()
+        finally:
+            current_event_context.reset(event_token)
+            gitlab_version.reset(version_token)
+
+    @pytest.mark.asyncio
+    async def test_self_managed_below_18_9_with_skip_user_skips_quota_check(
+        self,
+        mock_context,
+        generate_token_request,
+        decorated_func,
+    ):
+        """Quota check should be skipped even for old self-managed if user has skip claim."""
+        decorated, inner, service = decorated_func
+        skip_user = CloudConnectorUser(
+            authenticated=True,
+            claims=UserClaims(extra={SKIP_USAGE_CUTOFF_CLAIM: True}),
+        )
+        current_user.set(skip_user)
+
+        event_token = current_event_context.set(EventContext(realm="self-managed"))
+        version_token = gitlab_version.set("18.7.0")
+
+        try:
+            await decorated(None, generate_token_request, mock_context, service=service)
+
+            service.execute.assert_not_called()
+            inner.assert_called_once()
+        finally:
+            current_event_context.reset(event_token)
+            gitlab_version.reset(version_token)
