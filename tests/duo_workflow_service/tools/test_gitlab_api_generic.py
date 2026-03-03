@@ -3,6 +3,7 @@ from unittest.mock import AsyncMock, Mock
 from urllib.parse import urlencode
 
 import pytest
+from langchain_core.tools import ToolException
 
 from duo_workflow_service.gitlab.http_client import GitLabHttpResponse
 from duo_workflow_service.tools.gitlab_api_generic import (
@@ -10,6 +11,7 @@ from duo_workflow_service.tools.gitlab_api_generic import (
     GitLabApiGetInput,
     GitLabGraphQL,
     GitLabGraphQLInput,
+    validate_api_endpoint,
 )
 
 
@@ -104,12 +106,29 @@ class TestGitLabApiGet:
         assert "The 'endpoint' parameter must be provided" in result_json["error"]
 
     @pytest.mark.asyncio
-    async def test_get_error_invalid_endpoint_format(self, gitlab_api_get_tool):
-        """Test error when endpoint doesn't start with /api/v4/."""
-        result = await gitlab_api_get_tool._execute(endpoint="/invalid/endpoint")
+    @pytest.mark.parametrize(
+        "valid_endpoint",
+        [
+            "/api/v4/projects/13/merge_requests/42",
+            "/api/v4/projects/13/issues",
+            "/api/v4/users/1",
+            "/api/v4/projects/namespace%2Fproject",
+            "/api/v4/projects/13/repository/files/src%2Ftest.py",
+            "/api/v4/projects/my.project/merge_requests/42",
+        ],
+    )
+    async def test_get_valid_endpoints_accepted(
+        self, gitlab_api_get_tool, gitlab_client_mock, valid_endpoint
+    ):
+        """Test that legitimate endpoints are accepted."""
+        mock_response = Mock(spec=GitLabHttpResponse)
+        mock_response.is_success.return_value = True
+        mock_response.body = {"status": "ok"}
+        gitlab_client_mock.aget = AsyncMock(return_value=mock_response)
+
+        result = await gitlab_api_get_tool._execute(endpoint=valid_endpoint)
         result_json = json.loads(result)
-        assert "error" in result_json
-        assert "Invalid endpoint format" in result_json["error"]
+        assert result_json["status"] == "success"
 
     @pytest.mark.asyncio
     async def test_get_error_api_failure(self, gitlab_api_get_tool, gitlab_client_mock):
@@ -154,6 +173,87 @@ class TestGitLabApiGet:
         args = GitLabApiGetInput(endpoint="/api/v4/projects/13/merge_requests/42")
         message = gitlab_api_get_tool.format_display_message(args)
         assert "/api/v4/projects/13/merge_requests/42" in message
+
+
+class TestValidateApiEndpoint:
+    """Tests for the validate_api_endpoint function."""
+
+    @pytest.mark.parametrize(
+        "valid_endpoint",
+        [
+            "/api/v4/projects/13/merge_requests/42",
+            "/api/v4/projects/13/issues",
+            "/api/v4/users/1",
+            "/api/v4/projects/namespace%2Fproject",
+            "/api/v4/projects/13/repository/files/src%2Ftest.py",
+            "/api/v4/projects/my.project/merge_requests/42",
+            "/api/v4/projects/joernchen%2Fnothing_to_see_here/repository/files/j%C3%B6rn.txt",
+            "/api/v4/projects/13/repository/files/%E4%B8%AD%E6%96%87.txt",
+            "/api/v4/projects/joernchen%2Fnothing_to_see_here/repository/files/%23does%20this%20work%3F.txt",
+        ],
+    )
+    def test_accepts_valid_endpoints(self, valid_endpoint):
+        """Test that legitimate endpoints pass validation with original encoding preserved."""
+        assert validate_api_endpoint(valid_endpoint) == valid_endpoint
+
+    @pytest.mark.parametrize(
+        "malicious_endpoint",
+        [
+            "/api/v4/../../admin/users",
+            "/api/v4/../../../etc/passwd",
+            "/api/v4/%2e%2e/%2e%2e/admin/users",
+            "/api/v4/%2E%2E/%2E%2E/admin/users",
+            "/api/v4/..%2f..%2fadmin/users",
+            "/api/v4/..\\..\\admin\\users",
+            "/api/v4/..\\admin\\users",
+            "/api/v4/projects/13/../../../../../../admin/users",
+            "/api/v4/projects/%2e%2e/../../admin/users",
+            "/api/v4/\u002e\u002e/admin/users",
+            "/invalid/endpoint",
+            "/api/v4admin/users",
+        ],
+    )
+    def test_rejects_path_traversal(self, malicious_endpoint):
+        """Test that path traversal attempts raise ToolException."""
+        with pytest.raises(ToolException, match="Invalid endpoint"):
+            validate_api_endpoint(malicious_endpoint)
+
+    @pytest.mark.parametrize(
+        "payload",
+        [
+            "/api/v4/projects/1\n/admin/users",
+            "/api/v4/projects/1\r\n/admin/users",
+        ],
+    )
+    def test_rejects_newline_injection(self, payload):
+        """Test that newline/CRLF injection raises ToolException."""
+        with pytest.raises(ToolException, match="Invalid endpoint"):
+            validate_api_endpoint(payload)
+
+    @pytest.mark.parametrize(
+        "payload",
+        [
+            "/api/v4/projects/1\x00/admin",
+            "/api/v4/projects/1%00/admin",
+        ],
+    )
+    def test_rejects_null_bytes(self, payload):
+        """Test that null bytes (literal and percent-encoded) raise ToolException."""
+        with pytest.raises(ToolException, match="Invalid endpoint"):
+            validate_api_endpoint(payload)
+
+    @pytest.mark.parametrize(
+        "payload",
+        [
+            "/api/v4/projects/13?state=opened",
+            "/api/v4/projects/13#fragment",
+            "/api/v4/projects/13/issues?state=opened&per_page=20",
+        ],
+    )
+    def test_rejects_query_string_and_fragment(self, payload):
+        """Test that query strings and fragments raise ToolException."""
+        with pytest.raises(ToolException, match="path only"):
+            validate_api_endpoint(payload)
 
 
 class TestGitLabGraphQL:
