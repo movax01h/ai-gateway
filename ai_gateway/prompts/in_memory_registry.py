@@ -39,6 +39,9 @@ class InMemoryPromptRegistry(BasePromptRegistry):
         # Shared singleton to avoid duplication
         self.shared_registry = cast(LocalPromptRegistry, shared_registry)
         self._raw_prompt_data: dict[str, dict] = {}
+        # Abstract attributes from shared registry
+        self.internal_event_client = shared_registry.internal_event_client
+        self.model_limits = shared_registry.model_limits
 
     def register_prompt(self, prompt_id: str, prompt_data: dict) -> None:
         """Register a prompt from flow yaml data.
@@ -96,12 +99,27 @@ class InMemoryPromptRegistry(BasePromptRegistry):
             params=raw_data.get("params"),
         )
 
-        return self.shared_registry._build_prompt(
-            model_class_provider=model_class_provider,
+        model_factory = self.shared_registry.model_factories.get(
+            model_class_provider, None
+        )
+
+        if not model_factory:
+            raise ValueError(
+                f"unrecognized model class provider `{model_class_provider}`."
+            )
+
+        tool_choice = self.shared_registry._adjust_tool_choice_for_model(
+            tool_choice, model_metadata
+        )
+
+        return Prompt(
+            model_provider=model_class_provider,
+            model_factory=model_factory,
             config=prompt_config,
             model_metadata=model_metadata,
-            tool_choice=tool_choice,
+            disable_streaming=self.shared_registry.disable_streaming,
             tools=tools,
+            tool_choice=tool_choice,
             **kwargs,
         )
 
