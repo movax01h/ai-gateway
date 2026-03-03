@@ -53,27 +53,6 @@ models:
       max_tokens: 48
       max_retries: 10
 
-  # Not listed in the model selection menu. But it's kept here to keep the deprecation message
-  - name: "Codestral 25.01 - Vertex"
-    provider: "Vertex"
-    gitlab_identifier: "codestral_2501_vertex"
-    description: "Fast code generation and assistance."
-    cost_indicator: "$"
-    max_context_tokens: 256000 # https://mistral.ai/news/codestral-2501
-    model_class_provider: litellm_completion
-    family:
-      - completion_text
-      - codestral
-    params:
-      model: "codestral-2501"
-      custom_llm_provider: "vertex_ai"
-      completion_type: text
-      temperature: 0.7
-      max_tokens: 64
-    deprecation:
-      deprecation_date: "2025-10-23"
-      removal_version: "18.9" # Already removed from `unit_primitives.yml`
-
   - name: "Gemini 1.5 Flash - Vertex"
     provider: "Vertex"
     gitlab_identifier: "gemini_1_5_flash_vertex"
@@ -574,7 +553,7 @@ models:
     family:
       - qwen2p5-coder-7b
     params:
-      model: 'qwen2p5-coder-7b'
+      model: "qwen2p5-coder-7b"
       custom_llm_provider: fireworks_ai
       temperature: 0.0
       max_tokens: 4_096

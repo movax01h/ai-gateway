@@ -666,7 +666,7 @@ class TestCodeCompletions:
                 None,
                 [],
                 "vertex-ai",
-                "codestral-2501",
+                "codestral-2508",
                 None,
                 None,
                 None,
@@ -687,7 +687,7 @@ class TestCodeCompletions:
                 None,
                 [],
                 "vertex-ai",
-                "codestral-2501",
+                "codestral-2508",
                 None,
                 None,
                 None,
@@ -729,7 +729,7 @@ class TestCodeCompletions:
                 "foo",
                 [],
                 "gitlab",
-                "codestral_2501_vertex",
+                "codestral_2508_vertex",
                 None,
                 None,
                 None,
@@ -885,7 +885,7 @@ class TestCodeCompletions:
             (
                 "def search",
                 "vertex-ai",
-                "codestral-2501",
+                "codestral-2508",
                 {
                     "temperature": 0.7,
                     "max_output_tokens": 64,
@@ -896,7 +896,7 @@ class TestCodeCompletions:
             (
                 "def search",
                 "vertex-ai",
-                "codestral-2501",
+                "codestral-2508",
                 {
                     "temperature": 0.7,
                     "max_output_tokens": 64,
@@ -1152,7 +1152,7 @@ class TestCodeCompletions:
     @pytest.mark.parametrize("mock_model_responses", [True])
     @pytest.mark.parametrize(
         "model_details",
-        [{"model_provider": "vertex-ai", "model_name": "codestral-2501"}, {}],
+        [{"model_provider": "vertex-ai", "model_name": "codestral-2508"}, {}],
     )
     def test_vertex_codestral(
         self,
@@ -1239,7 +1239,7 @@ class TestCodeCompletions:
         ),
         [
             (
-                "codestral_2501_vertex",
+                "codestral_2508_vertex",
                 "Codestral 22B Code Completions",
                 True,
             ),
@@ -1361,8 +1361,8 @@ class TestCodeCompletions:
             # as user message. The FIM formatting is done internally by CompletionLiteLLM.
             (
                 "asia-mock-location",
-                {"model_provider": "vertex-ai", "model_name": "codestral-2501"},
-                "codestral-2501",
+                {"model_provider": "vertex-ai", "model_name": "codestral-2508"},
+                "codestral-2508",
                 "foo",
             ),
             # Qwen models still use the chat-based prompt with system message
@@ -1426,7 +1426,7 @@ class TestCodeCompletions:
                 "content_below_cursor": "\n",
             },
             "model_provider": "vertex-ai",
-            "model_name": "codestral-2501",
+            "model_name": "codestral-2508",
         }
 
         response = self._send_code_completions_request(mock_client, params)
@@ -1507,8 +1507,8 @@ class TestGitLabModelProvider:
             ),
             (
                 "gitlab",
-                "codestral_2501_vertex",
-                "codestral-2501",
+                "codestral_2508_vertex",
+                "codestral-2508",
                 "vertex-ai",
                 {
                     "temperature": 0.7,
@@ -1580,7 +1580,6 @@ class TestGitLabModelProvider:
                 side_effect=_mock_build_side_effect,
             ) as mock_build,
         ):
-
             mock_get_model.return_value = test_model
             mock_execute.return_value = [mock_suggestion]
 
@@ -1641,7 +1640,7 @@ class TestGitLabModelProvider:
 
         mock_model = Mock()
         mock_model.engine = "vertex-ai"
-        mock_model.name = "codestral-2501"
+        mock_model.name = "codestral-2508"
         mock_suggestion.model = mock_model
 
         mock_suggestion.lang = "python"
@@ -1692,7 +1691,7 @@ class TestGitLabModelProvider:
 
             body = response.json()
             assert body["model"]["engine"] == "vertex-ai"
-            assert body["model"]["name"] == "codestral-2501"
+            assert body["model"]["name"] == "codestral-2508"
             assert body["choices"][0]["text"] == "test completion"
 
     def test_gitlab_model_provider_with_invalid_model_name(
@@ -1715,7 +1714,7 @@ class TestGitLabModelProvider:
 
         mock_model = Mock()
         mock_model.engine = "vertex-ai"
-        mock_model.name = "codestral-2501"
+        mock_model.name = "codestral-2508"
         mock_suggestion.model = mock_model
 
         mock_suggestion.lang = "python"

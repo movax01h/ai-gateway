@@ -123,7 +123,10 @@ class KindVertexTextModel(StrEnum):
     TEXTEMBEDDING_005 = "text-embedding-005"
 
     # Mistral AI
+    # codestral-2501 is redirected to codestral-2508.
+    # check LEGACY_COMPLETION_MODEL_TO_GITLAB_IDENTIFIER in ai_gateway/api/v2/code/completions.py
     CODESTRAL_2501 = "codestral-2501"
+    CODESTRAL_2508 = "codestral-2508"
 
     # Gemini
     GEMINI_2_5_FLASH = "gemini-2.5-flash"
