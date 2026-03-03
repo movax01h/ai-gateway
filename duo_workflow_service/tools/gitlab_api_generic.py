@@ -6,13 +6,14 @@ and maintenance overhead compared to specialized tools.
 
 import json
 from typing import Any, Dict, Optional, Type
-from urllib.parse import urlencode
+from urllib.parse import unquote, urlencode, urlsplit
 
 import structlog
 from gitlab_cloud_connector import GitLabUnitPrimitive
 from graphql import parse as parse_graphql
 from graphql.language.ast import DocumentNode, OperationDefinitionNode, OperationType
 from graphql.language.printer import print_ast
+from langchain_core.tools import ToolException
 from pydantic import BaseModel, Field
 
 from duo_workflow_service.tools.duo_base_tool import DuoBaseTool
@@ -53,6 +54,32 @@ class GitLabGraphQLInput(BaseModel):
         default=None,
         description="Optional variables for the GraphQL query as a dictionary.",
     )
+
+
+def validate_api_endpoint(endpoint: str) -> str:
+    """Validate an API endpoint path to prevent path traversal and injection.
+
+    Raises:
+        ToolException: If the endpoint fails validation.
+    """
+    disallowed = ("\x00", "\r", "\n", "%00")
+    if any(c in endpoint for c in disallowed):
+        raise ToolException("Invalid endpoint")
+
+    parsed = urlsplit(endpoint)
+    if parsed.scheme or parsed.netloc or parsed.query or parsed.fragment:
+        raise ToolException(
+            "Invalid endpoint: must be a path only, use 'params' for query parameters"
+        )
+
+    decoded_path = unquote(parsed.path).replace("\\", "/")
+    if ".." in decoded_path.split("/"):
+        raise ToolException("Invalid endpoint: must not contain path traversal (..)")
+
+    if not decoded_path.startswith("/api/v4/"):
+        raise ToolException("Invalid endpoint: must resolve to a path under '/api/v4/'")
+
+    return endpoint
 
 
 class GitLabApiGet(DuoBaseTool):
@@ -129,7 +156,6 @@ class GitLabApiGet(DuoBaseTool):
         Returns:
             JSON string with the API response or error information
         """
-        # Validate that endpoint is provided
         if not endpoint:
             return json.dumps(
                 {
@@ -138,15 +164,7 @@ class GitLabApiGet(DuoBaseTool):
                 }
             )
 
-        # Validate endpoint format
-        if not endpoint.startswith("/api/v4/"):
-            return json.dumps(
-                {
-                    "error": "Invalid endpoint format",
-                    "endpoint": endpoint,
-                    "details": "Endpoint must start with '/api/v4/'",
-                }
-            )
+        endpoint = validate_api_endpoint(endpoint)
 
         # Build query string if params are provided
         query_string = ""
