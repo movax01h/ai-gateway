@@ -7,81 +7,93 @@ Do not include any explanatory text like "Based on my analysis..." or "Here is t
 When analyzing secret detection findings for false positive detection, follow these comprehensive guidelines:
 
 <guidelines>
-1. **Context Analysis**: Always examine the broader code context around the reported secret, including comments, variable names, and surrounding code.
+
+**CRITICAL PRINCIPLE**: A credential is a FALSE POSITIVE only if you have CONCRETE EVIDENCE it is fake or invalid. Context, dataset purpose, or project type are NOT sufficient reasons to dismiss a finding. Secret scanning datasets often contain REAL leaked credentials collected from public repositories.
+
+1. **Context Analysis**: Always examine the broader code context around the reported secret, including comments, variable names, and surrounding code. However, context explains WHY a secret is present, not whether it's real.
 
 2. **Secret Type Evaluation**:
   - API keys, tokens, passwords, private keys, etc.
   - Check if the detected value matches known patterns for real secrets
   - Evaluate entropy and randomness of the detected string
   - Consider the length and format of potential secrets
+  - Verify the format matches actual service specifications (e.g., GitHub PAT format, MongoDB connection string format)
 
-3. **Code Context Indicators**:
-  - Variable names (e.g., "test_key", "dummy_password", "example_token")
-  - Comments indicating test/demo data
-  - File names suggesting test or example code
-  - Presence of "TODO", "FIXME", or similar markers
-  - Code in test directories or files
+3. **What Does NOT Make a Credential Fake**:
+  - Being in a test/demo project or dataset
+  - Being in a file named "secrets-dataset" or similar
+  - Being in a repository for security research or evaluation
+  - Having a simple or memorable value
+  - Being in a test directory or file
+  - The project's stated purpose being "testing" or "evaluation"
+  - Variable names containing "test", "demo", or "example"
+  - Comments suggesting it's for testing
 
-4. **False Positive Indicators**:
-  - Obviously fake or placeholder values ("password123", "your-api-key-here")
-  - Well-known test tokens or example values
-  - Public keys (not private keys)
-  - Base64 encoded but decodes to non-sensitive data
-  - Secrets in documentation or README files
-  - Secrets in comments or docstrings
-  - Hardcoded values in test files
-  - Configuration templates with placeholder values
-  - Environment variable names without actual values
-  - Secrets that are actually public constants or identifiers
+  IMPORTANT: Secret scanning datasets contain REAL credentials found in public repositories. The presence of a credential in such a dataset means it WAS LEAKED, not that it's fake.
+
+4. **Actual False Positive Indicators** (require CONCRETE EVIDENCE):
+  - Explicit placeholder syntax: ${API_KEY}, <YOUR_KEY_HERE>, [INSERT_KEY_HERE]
+  - Documented test tokens from official sources (e.g., GitHub's official test token documentation)
+  - Credentials explicitly marked as "FAKE", "DUMMY", "EXAMPLE" in comments
+  - Credentials that have been verified as revoked/invalid through technical means
+  - Well-known public test credentials from official documentation
+  - Credentials that decode to obviously non-sensitive data
+  - Public keys (not private keys) - verify they are actually public
+  - Environment variable names without actual values (e.g., "${DB_PASSWORD}")
+  - Credentials that are actually public constants or identifiers
 
 5. **True Positive Indicators**:
-  - High-entropy strings that look like real secrets
-  - Actual API keys, tokens, or passwords in production code
-  - Private keys or certificates
-  - Secrets committed to version control in active code paths
-  - No comments indicating it's test data
-  - Variable names suggesting real credentials
+  - Credentials in valid format for their type (GitHub PAT format, MongoDB connection string, etc.)
+  - Credentials that appear to reference real services/endpoints
+  - Credentials with realistic entropy and structure
+  - Credentials used in functional code (API calls, connections, etc.)
+  - Credentials that reference real infrastructure (real hostnames, real service names)
+  - Credentials in configuration files or connection strings
+  - No explicit evidence that the credential is fake or revoked
+  - Credentials found in datasets of real leaks
 
-6. **Common Secret Detection False Positives**:
-  - Test data and fixtures
-  - Example code in documentation
-  - Placeholder values in configuration templates
-  - Public API endpoints or identifiers
-  - Base64 encoded images or binary data
-  - UUIDs or other non-secret identifiers
-  - Hash values or checksums
-  - Public keys in cryptographic code
-  - Well-known test tokens (e.g., GitHub's example tokens)
+6. **Critical Analysis Requirements**:
+  - Do NOT assume a credential is fake based on dataset context
+  - Do NOT assume a credential is fake based on project purpose
+  - Do NOT assume a credential is fake based on simple/memorable values
+  - DO verify if there is CONCRETE EVIDENCE the credential is invalid
+  - DO consider that even "test" credentials on real infrastructure pose security risks
+  - DO treat credentials in leak datasets as REAL unless proven otherwise
 
 7. **Analysis Steps**:
   - Read the file containing the detected secret
   - Examine surrounding code and comments
-  - Check variable names and context
-  - Evaluate if the value looks like a real secret
-  - Consider the file type and location
-  - Check for indicators of test/demo code
+  - Check if the credential format matches real service specifications
+  - Look for EXPLICIT evidence it's fake (placeholder syntax, "FAKE" markers, etc.)
+  - Check if the credential references real services/endpoints
+  - Determine if the credential is actually used in functional code
+  - Assess the security risk if the credential were real
+  - Default to TRUE POSITIVE unless you have concrete evidence otherwise
 
 8. **File Examination Strategy**:
   - Read the specific file mentioned in the finding
-  - Look for comments explaining the context
+  - Look for EXPLICIT comments marking it as fake/example
   - Check variable names and assignments
-  - Examine nearby code for clues about usage
-  - Consider the file path (test/, examples/, docs/)
-  - Look for other similar patterns in the codebase
+  - Examine nearby code for actual usage
+  - Look for references to real services or infrastructure
+  - Verify the credential format against service specifications
+  - Check if similar credentials in the codebase are real or fake
+  - Do NOT use file path or project type as dismissal criteria
 
 9. **Output Requirements**:
   - Create a JSON payload
   - Include false_positive_likelihood (0-100 scale)
   - Provide detailed explanation of your analysis
   - Reference specific code sections and context
-  - Explain why the finding is or isn't a real secret
+  - Explain what CONCRETE EVIDENCE supports your conclusion
+  - For any false positive claim, provide explicit proof
 
 10. **False Positive Likelihood Scale**:
-  - 0-20: Definitely a true positive (high risk) - appears to be a real secret
-  - 21-40: Likely a true positive (moderate-high risk) - suspicious but unclear
-  - 41-60: Uncertain (requires manual review) - ambiguous context
-  - 61-80: Likely a false positive (low-moderate risk) - probably test data
-  - 81-100: Definitely a false positive (very low risk) - clearly not a real secret
+  - 0-20: Definitely a true positive (high risk) - real credential with no evidence of being fake
+  - 21-40: Likely a true positive (moderate-high risk) - appears real but some uncertainty
+  - 41-60: Uncertain (requires manual review) - ambiguous, needs human verification
+  - 61-80: Likely a false positive (low-moderate risk) - has some evidence of being fake
+  - 81-100: Definitely a false positive (very low risk) - explicit proof it's fake/invalid
 
 11. **Recommendations for True Positives** (false_positive_likelihood < 61):
   When a finding is determined to be a true positive or likely true positive, provide:
@@ -90,12 +102,15 @@ When analyzing secret detection findings for false positive detection, follow th
     - Evaluate the impact of the leaked secret
     - Consider the type of secret (API key, password, private key, etc.)
     - Assess potential damage if exploited
+    - Consider access to internal systems or real infrastructure
 
   b) **Remediation Guidance**:
     - Immediate actions: revoke/regenerate the secret
     - Code changes: move to environment variables or secret management
     - Prevention: implement secret scanning in CI/CD
     - Best practices for secret management
+    - Note: Even if in a test dataset, the credential should be treated as compromised
+
 </guidelines>
 
 Analyze the following secret detection finding for false positive detection:
@@ -131,8 +146,8 @@ Where:
 **For FALSE POSITIVES (false_positive_likelihood >= 61):**
 The explanation should include:
   - Summary of the finding and why it's a false positive
-  - Code references and context that prove it's not a real secret
-  - Indicators that it's test data, placeholder, or non-sensitive
+  - EXPLICIT CONCRETE EVIDENCE proving it's not a real secret
+  - Code references and context
   - Why the secret detection tool flagged this incorrectly
 
 **For TRUE POSITIVES (false_positive_likelihood < 61):**
@@ -141,23 +156,29 @@ The explanation should include ALL of the following sections:
 1. **Secret Analysis**
   - Summary of the detected secret and why it's a true positive
   - Code references showing the secret in context
-  - Analysis of the secret value (entropy, format, etc.)
+  - Verification that the credential format matches real service specifications
+  - Analysis of the secret value (entropy, format, functionality, etc.)
   - Why it appears to be a real secret
+  - Evidence of actual usage in functional code (if applicable)
 
 2. **Impact Assessment**
   - Type of secret (API key, password, private key, etc.)
   - Potential impact if exploited
   - Scope of access granted by the secret
+  - Risk to internal systems or infrastructure
+  - Why even "test" credentials on real infrastructure pose security risks
 
 3. **Remediation Guidance**
   - Immediate actions: revoke or regenerate the secret
   - Code changes needed to secure the secret
   - Best practices for secret management
   - Prevention measures for future incidents
+  - Note: Treat as compromised even if found in a dataset
 
 4. **Contextual Factors**
   - How the secret was committed
   - Whether it's still active
   - Any mitigating factors
+  - Why dataset context or project purpose does NOT make the credential fake
 
 Provide detailed reasoning for your conclusion and create the analysis result JSON.
