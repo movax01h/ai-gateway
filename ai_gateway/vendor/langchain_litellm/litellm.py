@@ -120,8 +120,16 @@ def _create_retry_decorator(
         litellm.APIConnectionError,
         litellm.RateLimitError,
     ]
+    # As of langchain-core 1.2.11, when the `ChatLiteLLM` class is used (i.e. `model_class_provider` is `litellm`),
+    # `max_retries` is passed to `tenacity.stop.stop_after_attempt` via `create_base_retry_decorator`.
+    # Meaning, this argument actually works as "max attempts" hence increasing the count by 1
+    # to consolidate the semantic meaning of `max_retries` in model config files.
+    #
+    # NOTE: This is not the case when the anthropic official client is used (i.e. `model_class_provider` is `anthropic`),
+    # that the `max_retries` works as expected. e.g. setting max_retries=1 in model config performs one retry after the initial request failure.
+    actual_max_retries = llm.max_retries + 1
     return create_base_retry_decorator(
-        error_types=errors, max_retries=llm.max_retries, run_manager=run_manager
+        error_types=errors, max_retries=actual_max_retries, run_manager=run_manager
     )
 
 
