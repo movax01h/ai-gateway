@@ -20,7 +20,6 @@ from ai_gateway.models.vertex_text import (
     CodeBisonModelInput,
     KindVertexTextModel,
     PalmCodeBisonModel,
-    PalmTextBisonModel,
     TextBisonModelInput,
     VertexAPIConnectionError,
     VertexAPIStatusError,
@@ -95,20 +94,6 @@ TEST_SUFFIX = "some suffix"
     "model,prefix,suffix,expected_output,expected_generate_args",
     [
         (
-            PalmTextBisonModel,
-            TEST_PREFIX,
-            TEST_SUFFIX,
-            "some output",
-            [TextBisonModelInput(TEST_PREFIX), 0.2, 32, 0.95, 40, 1, None],
-        ),
-        (
-            PalmTextBisonModel,
-            "",
-            TEST_SUFFIX,
-            "",
-            [TextBisonModelInput(""), 0.2, 32, 0.95, 40, 1, None],
-        ),
-        (
             PalmCodeBisonModel,
             TEST_PREFIX,
             TEST_SUFFIX,
@@ -152,11 +137,10 @@ async def test_palm_model_generate(
     ("model", "model_name"),
     [
         (PalmCodeBisonModel, KindVertexTextModel.CODE_BISON_002),
-        (PalmTextBisonModel, KindVertexTextModel.TEXT_BISON_002),
     ],
 )
 async def test_palm_model_generate_instrumented(
-    model: Type[Union[PalmTextBisonModel, PalmCodeBisonModel]],
+    model: Type[Union[PalmCodeBisonModel]],
     model_name: KindVertexTextModel,
 ):
     mock_client = Mock()
@@ -224,11 +208,6 @@ async def test_palm_model_api_error(model, client_exception, expected_exception)
     ("model", "model_name", "expected_metadata_name"),
     [
         (
-            PalmTextBisonModel,
-            KindVertexTextModel.TEXT_BISON_002,
-            KindVertexTextModel.TEXT_BISON_002.value,
-        ),
-        (
             PalmCodeBisonModel,
             KindVertexTextModel.CODE_BISON_002,
             KindVertexTextModel.CODE_BISON_002.value,
@@ -236,7 +215,7 @@ async def test_palm_model_api_error(model, client_exception, expected_exception)
     ],
 )
 def test_palm_model_from_name(
-    model: Type[Union[PalmTextBisonModel, PalmCodeBisonModel]],
+    model: Type[Union[PalmCodeBisonModel]],
     model_name: KindVertexTextModel,
     expected_metadata_name: str,
 ):
@@ -254,11 +233,6 @@ def test_palm_model_from_name(
     ("model", "stop_sequences", "expected_stop_sequences"),
     [
         (
-            PalmTextBisonModel,
-            None,
-            None,
-        ),
-        (
             PalmCodeBisonModel,
             None,
             None,
@@ -266,7 +240,7 @@ def test_palm_model_from_name(
     ],
 )
 async def test_palm_model_stop_sequences(
-    model: Type[Union[PalmTextBisonModel, PalmCodeBisonModel]],
+    model: Type[PalmCodeBisonModel],
     stop_sequences: Sequence[str],
     expected_stop_sequences: Sequence[str],
 ):
@@ -287,18 +261,6 @@ async def test_palm_model_stop_sequences(
 @pytest.mark.parametrize(
     ("model", "prediction", "expected_safety_attributes"),
     [
-        (
-            PalmTextBisonModel,
-            {
-                "safetyAttributes": {
-                    "categories": ["Violent"],
-                    "blocked": True,
-                    "scores": [1.0],
-                },
-                "content": "",
-            },
-            SafetyAttributes(categories=["Violent"], blocked=True),
-        ),
         (
             PalmCodeBisonModel,
             {
@@ -344,7 +306,7 @@ async def test_palm_model_stop_sequences(
     ],
 )
 async def test_palm_model_safety_attributes(
-    model: Type[Union[PalmTextBisonModel, PalmCodeBisonModel]],
+    model: Type[PalmCodeBisonModel],
     prediction: dict,
     expected_safety_attributes: SafetyAttributes,
 ):
