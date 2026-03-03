@@ -7,6 +7,7 @@ using the OpenAI provider from models.yml.
 # pylint: disable=file-naming-for-tests
 
 from pathlib import Path
+from unittest.mock import Mock
 
 import pytest
 from langchain_anthropic import ChatAnthropic
@@ -76,7 +77,7 @@ prompt_template:
 
 
 @pytest.mark.usefixtures("mock_fs")
-def test_gpt5_with_base_anthropic_prompt_does_not_error(internal_event_client):
+def test_gpt5_with_base_anthropic_prompt_does_not_error():
     """Base prompt has anthropic provider, no gpt_5 prompt exists, but request with gpt_5 model should not error."""
     registry = LocalPromptRegistry.from_local_yaml(
         prompt_template_factories={},
@@ -88,7 +89,7 @@ def test_gpt5_with_base_anthropic_prompt_does_not_error(internal_event_client):
                 model=model, **kwargs
             ),
         },
-        internal_event_client=internal_event_client,
+        internal_event_client=Mock(),
         model_limits=ConfigModelLimits({}),
         custom_models_enabled=True,
         disable_streaming=True,

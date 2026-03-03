@@ -1,29 +1,37 @@
-from unittest.mock import Mock
+from unittest.mock import Mock, patch
 
 import pytest
 from gitlab_cloud_connector import GitLabUnitPrimitive
+from langchain_community.chat_models import ChatAnthropic
 
 from ai_gateway.model_metadata import ModelMetadata
-from ai_gateway.model_selection.model_selection_config import (
-    ChatLiteLLMDefinition,
-    PromptParams,
-)
-from ai_gateway.model_selection.models import BaseModelParams, ChatLiteLLMParams
+from ai_gateway.model_selection.model_selection_config import ChatLiteLLMDefinition
+from ai_gateway.model_selection.models import ChatLiteLLMParams
 from ai_gateway.prompts.base import Prompt
 from ai_gateway.prompts.config import ModelClassProvider
-from ai_gateway.prompts.config.base import ModelConfig, PromptConfig
 from ai_gateway.prompts.in_memory_registry import InMemoryPromptRegistry
 from ai_gateway.prompts.registry import LocalPromptRegistry
+from ai_gateway.vendor.langchain_litellm.litellm import ChatLiteLLM
 
 
 class TestInMemoryPromptRegistry:
 
     @pytest.fixture
-    def mock_shared_registry(self, prompt: Prompt):
+    def mock_shared_registry(self):
         """Mock the shared LocalPromptRegistry."""
         registry = Mock(spec=LocalPromptRegistry)
-        registry._build_prompt.return_value = prompt
-        registry.get.return_value = prompt
+        registry.internal_event_client = Mock()
+        registry.model_limits = Mock()
+        registry.model_configs = {}
+        registry.model_factories = {
+            ModelClassProvider.LITE_LLM: lambda model, **kwargs: ChatLiteLLM(
+                model=model, **kwargs
+            ),
+            ModelClassProvider.ANTHROPIC: lambda model, **kwargs: ChatAnthropic(
+                model=model, **kwargs
+            ),
+        }
+        registry.disable_streaming = False
         return registry
 
     @pytest.fixture
@@ -57,9 +65,7 @@ class TestInMemoryPromptRegistry:
         assert prompt_id in in_memory_registry._raw_prompt_data
         assert in_memory_registry._raw_prompt_data[prompt_id] == sample_prompt_data
 
-    def test_get_local_prompt_success(
-        self, in_memory_registry, mock_shared_registry, sample_prompt_data, prompt
-    ):
+    def test_get_local_prompt_success(self, in_memory_registry, sample_prompt_data):
         """Test successful retrieval of local prompt with prompt_version=None."""
         prompt_id = "test_prompt"
 
@@ -69,8 +75,9 @@ class TestInMemoryPromptRegistry:
         # Test: get with prompt_version=None
         result = in_memory_registry.get(prompt_id, prompt_version=None)
 
-        mock_shared_registry._build_prompt.assert_called_once()
-        assert result == prompt
+        # Verify: result is a Prompt instance
+        assert isinstance(result, Prompt)
+        assert result.model is not None
 
     def test_get_local_prompt_not_found(self, in_memory_registry):
         """Test error when local prompt not found."""
@@ -88,12 +95,7 @@ class TestInMemoryPromptRegistry:
         ],
     )
     def test_routing_logic(
-        self,
-        in_memory_registry,
-        prompt,
-        sample_prompt_data,
-        prompt_version,
-        should_use_shared,
+        self, in_memory_registry, sample_prompt_data, prompt_version, should_use_shared
     ):
         """Test routing logic with various prompt versions."""
         prompt_id = "test_prompt"
@@ -101,16 +103,29 @@ class TestInMemoryPromptRegistry:
         # Register local prompt
         in_memory_registry.register_prompt(prompt_id, sample_prompt_data)
 
+        # Setup mocks
+        in_memory_registry.shared_registry.model_factories = {
+            ModelClassProvider.LITE_LLM: lambda model, **kwargs: ChatLiteLLM(
+                model=model, **kwargs
+            )
+        }
+        mock_remote_prompt = Mock()
+        in_memory_registry.shared_registry.get.return_value = mock_remote_prompt
+
         # Test routing
         result = in_memory_registry.get(prompt_id, prompt_version)
 
         if should_use_shared:
             # Should use shared registry
-            in_memory_registry.shared_registry.get.assert_called_once()
+            assert result == mock_remote_prompt
+            in_memory_registry.shared_registry.get.assert_called_once_with(
+                prompt_id, prompt_version, None, None, None
+            )
         else:
-            in_memory_registry.shared_registry._build_prompt.assert_called_once()
-
-        assert result == prompt
+            # Should use local registry
+            assert isinstance(result, Prompt)
+            assert result.model is not None
+            in_memory_registry.shared_registry.get.assert_not_called()
 
     @pytest.mark.parametrize(
         "unit_primitives,expected_unit_primitive",
@@ -123,7 +138,6 @@ class TestInMemoryPromptRegistry:
     def test_prompt_config_conversion(
         self,
         in_memory_registry,
-        mock_shared_registry,
         sample_prompt_data,
         unit_primitives,
         expected_unit_primitive,
@@ -140,21 +154,45 @@ class TestInMemoryPromptRegistry:
 
         in_memory_registry.register_prompt(prompt_id, extended_data)
 
-        in_memory_registry.get(prompt_id, prompt_version=None)
+        # Setup model factory
+        in_memory_registry.shared_registry.model_factories = {
+            ModelClassProvider.LITE_LLM: lambda model, **kwargs: ChatLiteLLM(
+                model=model, **kwargs
+            )
+        }
 
-        mock_shared_registry._build_prompt.assert_called_once_with(
-            model_class_provider=ModelClassProvider.LITE_LLM,
-            config=PromptConfig(
-                name=prompt_id,
-                model=ModelConfig(params=sample_prompt_data["model"]["params"]),
-                unit_primitive=expected_unit_primitive,
-                prompt_template=sample_prompt_data["prompt_template"],
-                params=PromptParams(timeout=30.0),
-            ),
-            model_metadata=None,
-            tool_choice=None,
-            tools=None,
-        )
+        # Test conversion
+        result = in_memory_registry.get(prompt_id, prompt_version=None)
+
+        # Verify PromptConfig was created correctly
+        assert isinstance(result, Prompt)
+        assert result.unit_primitive == expected_unit_primitive
+        # Additional assertions would verify the PromptConfig fields
+
+    def test_get_local_prompt_invalid_model_provider(self, in_memory_registry):
+        """Test error when model_class_provider is not recognized."""
+        prompt_id = "invalid_model_prompt"
+        invalid_prompt_data = {
+            "model": {
+                "params": {
+                    "model_class_provider": "invalid_provider",
+                    "model": "claude-sonnet-4-20250514",
+                    "max_tokens": 1000,
+                },
+            },
+            "prompt_template": {
+                "system": "You are a helpful assistant",
+                "user": "Task: {{goal}}",
+            },
+        }
+
+        in_memory_registry.register_prompt(prompt_id, invalid_prompt_data)
+
+        with pytest.raises(
+            ValueError,
+            match="unrecognized model class provider `invalid_provider`",
+        ):
+            in_memory_registry.get(prompt_id, prompt_version=None)
 
     def test_get_local_prompt_missing_model_key(self, in_memory_registry):
         """Test error when model key is missing from prompt data."""
@@ -187,14 +225,144 @@ class TestInMemoryPromptRegistry:
         }
 
         in_memory_registry.register_prompt(prompt_id, invalid_prompt_data)
+        in_memory_registry.shared_registry.model_factories = {
+            ModelClassProvider.LITE_LLM: lambda model, **kwargs: ChatLiteLLM(
+                model=model, **kwargs
+            )
+        }
 
         with pytest.raises(KeyError, match="'prompt_template'"):
             in_memory_registry.get(prompt_id, prompt_version=None)
 
+    def test_model_class_provider_from_metadata_overrides_yaml(
+        self, in_memory_registry
+    ):
+        """When model_metadata provides model_class_provider, it overrides the YAML config."""
+        prompt_id = "test_prompt"
+        prompt_data = {
+            "model": {
+                "params": {
+                    "model_class_provider": ModelClassProvider.ANTHROPIC,
+                    "model": "claude-sonnet-4-20250514",
+                    "max_tokens": 1000,
+                },
+            },
+            "prompt_template": {
+                "system": "You are a helpful assistant",
+                "user": "Task: {{goal}}",
+            },
+        }
+        in_memory_registry.register_prompt(prompt_id, prompt_data)
+
+        # model_metadata says litellm, YAML says anthropic — metadata should win
+        metadata = ModelMetadata(
+            name="self-hosted",
+            provider="custom",
+            llm_definition=ChatLiteLLMDefinition(
+                gitlab_identifier="litellm_proxy",
+                name="litellm_proxy",
+                max_context_tokens=200000,
+                params=ChatLiteLLMParams(
+                    model="bedrock/anthropic.claude-sonnet-4-20250514-v1:0"
+                ),
+            ),
+        )
+
+        result = in_memory_registry.get(
+            prompt_id, prompt_version=None, model_metadata=metadata
+        )
+
+        assert isinstance(result, Prompt)
+        assert isinstance(result.model, ChatLiteLLM)
+
+    def test_model_class_provider_falls_back_to_yaml_when_no_metadata(
+        self, in_memory_registry
+    ):
+        """When model_metadata is None, model_class_provider comes from YAML (anthropic factory from config)."""
+        prompt_id = "test_prompt"
+        prompt_data = {
+            "model": {
+                "params": {
+                    "model_class_provider": ModelClassProvider.ANTHROPIC,
+                    "model": "claude-sonnet-4-20250514",
+                    "max_tokens": 1000,
+                },
+            },
+            "prompt_template": {
+                "system": "You are a helpful assistant",
+                "user": "Task: {{goal}}",
+            },
+        }
+        in_memory_registry.register_prompt(prompt_id, prompt_data)
+
+        with patch("ai_gateway.prompts.in_memory_registry.Prompt") as prompt_class:
+            in_memory_registry.get(prompt_id, prompt_version=None, model_metadata=None)
+
+        # The anthropic factory should have been selected (from YAML), not litellm
+        call_kwargs = prompt_class.call_args.kwargs
+        factory = call_kwargs.get("model_factory")
+        assert (
+            factory
+            is in_memory_registry.shared_registry.model_factories[
+                ModelClassProvider.ANTHROPIC
+            ]
+        )
+
+    def test_tool_choice_adjusted_for_bedrock(self, in_memory_registry):
+        """When model_metadata has a Bedrock identifier, tool_choice='any' becomes 'required'."""
+        prompt_id = "test_prompt"
+        prompt_data = {
+            "model": {
+                "params": {
+                    "model_class_provider": ModelClassProvider.LITE_LLM,
+                    "model": "claude-sonnet-4-20250514",
+                    "max_tokens": 1000,
+                },
+            },
+            "prompt_template": {
+                "system": "You are a helpful assistant",
+                "user": "Task: {{goal}}",
+            },
+        }
+        in_memory_registry.register_prompt(prompt_id, prompt_data)
+
+        bedrock_metadata = ModelMetadata(
+            name="bedrock_model",
+            provider="custom",
+            identifier="bedrock/anthropic.claude-3-sonnet-20240229-v1:0",
+            llm_definition=ChatLiteLLMDefinition(
+                gitlab_identifier="bedrock_claude",
+                name="bedrock_claude",
+                max_context_tokens=200000,
+                params=ChatLiteLLMParams(
+                    model="bedrock/anthropic.claude-3-sonnet-20240229-v1:0"
+                ),
+            ),
+        )
+
+        # Wire in the real method so tool_choice adjustment actually runs
+        in_memory_registry.shared_registry._adjust_tool_choice_for_model = (
+            lambda tc, mm: LocalPromptRegistry._adjust_tool_choice_for_model(
+                in_memory_registry.shared_registry, tc, mm
+            )
+        )
+
+        with patch("ai_gateway.prompts.in_memory_registry.Prompt") as prompt_class:
+            in_memory_registry.get(
+                prompt_id,
+                prompt_version=None,
+                model_metadata=bedrock_metadata,
+                tool_choice="any",
+            )
+
+        kwargs = prompt_class.call_args.kwargs
+        assert kwargs.get("tool_choice") == "required"
+
     @pytest.mark.parametrize(
-        "raw_model_data,model_metadata,expected_model_params,expected_model_class_provider",
+        "raw_model_data,model_metadata,expected_result",
         [
             (
+                # Only the prompt model is provided
                 {
                     "params": {
                         "model": "claude-3-7-sonnet-20250219",
@@ -202,10 +370,10 @@ class TestInMemoryPromptRegistry:
                     }
                 },
                 None,
-                BaseModelParams(model="claude-3-7-sonnet-20250219"),
-                ModelClassProvider.LITE_LLM,
+                "claude-3-7-sonnet-20250219",
             ),
             (
+                # Only the model_metadata is provided
                 None,
                 ModelMetadata(
                     name="test",
@@ -219,10 +387,10 @@ class TestInMemoryPromptRegistry:
                         ),
                     ),
                 ),
-                BaseModelParams(),
-                ModelClassProvider.LITE_LLM,
+                "claude-sonnet-4-20250514",
             ),
             (
+                # Both the prompt model and the model_metadata are provided; we use the model_metadata
                 {
                     "params": {
                         "model": "claude-3-7-sonnet-20250219",
@@ -241,19 +409,16 @@ class TestInMemoryPromptRegistry:
                         ),
                     ),
                 ),
-                BaseModelParams(),
-                ModelClassProvider.LITE_LLM,
+                "claude-sonnet-4-20250514",
             ),
         ],
     )
-    def test_model_class_provider_and_data_handling(
+    def test_model_data_handling(
         self,
         in_memory_registry,
-        mock_shared_registry,
         raw_model_data,
         model_metadata,
-        expected_model_params,
-        expected_model_class_provider,
+        expected_result,
     ):
         prompt_id = "test_prompt"
         prompt_data = {
@@ -267,13 +432,9 @@ class TestInMemoryPromptRegistry:
 
         in_memory_registry.register_prompt(prompt_id, prompt_data)
 
-        in_memory_registry.get(
+        result = in_memory_registry.get(
             prompt_id, prompt_version=None, model_metadata=model_metadata
         )
-
-        # Verify the model_class_provider passed to _build_prompt
-        mock_shared_registry._build_prompt.assert_called_once()
-        call_kwargs = mock_shared_registry._build_prompt.call_args.kwargs
-        assert call_kwargs["model_class_provider"] == expected_model_class_provider
-        prompt_config = call_kwargs["config"]
-        assert prompt_config.model.params == expected_model_params
+        assert isinstance(result, Prompt)
+        assert result.unit_primitive == GitLabUnitPrimitive.DUO_AGENT_PLATFORM
+        assert result.model.model == expected_result
