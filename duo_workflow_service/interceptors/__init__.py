@@ -12,3 +12,8 @@ X_GITLAB_IS_A_GITLAB_MEMBER = "x-gitlab-is-a-gitlab-member"
 X_GITLAB_IS_GITLAB_MEMBER = "x-gitlab-is-team-member"
 X_GITLAB_LANGUAGE_SERVER_VERSION = "x-gitlab-language-server-version"
 X_GITLAB_DEPLOYMENT_TYPE = "x-gitlab-deployment-type"
+
+GRPC_HEALTH_METHODS = (
+    "/grpc.health.v1.Health/Check",
+    "/grpc.health.v1.Health/Watch",
+)

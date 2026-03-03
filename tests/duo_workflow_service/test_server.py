@@ -19,6 +19,7 @@ from gitlab_cloud_connector import (
 )
 from google.protobuf import struct_pb2
 from google.protobuf.json_format import MessageToDict
+from grpc_health.v1 import health, health_pb2
 
 from ai_gateway.config import Config, ConfigCustomModels, ConfigGoogleCloudPlatform
 from ai_gateway.container import ContainerApplication
@@ -1027,15 +1028,26 @@ async def test_generate_token_unauthorized_for_any_flow():
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "reflection_enabled",
+    [False, True],
+)
 @patch("duo_workflow_service.server.setup_signal_handlers")
-async def test_grpc_server(mock_setup_signal_handlers):
+async def test_grpc_server(mock_setup_signal_handlers, reflection_enabled):
     """Test that the gRPC server starts correctly and sets up signal handlers."""
     mock_server = AsyncMock()
     mock_server.add_insecure_port.return_value = None
     mock_server.start.return_value = None
     mock_server.wait_for_termination.return_value = None
 
+    env = {
+        "DUO_WORKFLOW_GRPC_REFLECTION_ENABLED": (
+            "true" if reflection_enabled else "false"
+        )
+    }
+
     with (
+        patch.dict(os.environ, env),
         patch(
             "duo_workflow_service.server.grpc.aio.server",
             return_value=mock_server,
@@ -1046,6 +1058,7 @@ async def test_grpc_server(mock_setup_signal_handlers):
         patch(
             "duo_workflow_service.server.reflection.enable_server_reflection"
         ) as mock_enable_reflection,
+        patch("duo_workflow_service.server.MonitoringInterceptor"),
         patch("duo_workflow_service.server.connection_pool") as mock_connection_pool,
     ):
         mock_connection_pool.__aenter__ = AsyncMock(return_value=mock_connection_pool)
@@ -1058,8 +1071,58 @@ async def test_grpc_server(mock_setup_signal_handlers):
     mock_server.start.assert_called_once()
     mock_server.wait_for_termination.assert_called_once()
     mock_add_servicer.assert_called_once()
-    mock_enable_reflection.assert_called_once()
+    if reflection_enabled:
+        mock_enable_reflection.assert_called_once()
+    else:
+        mock_enable_reflection.assert_not_called()
     mock_setup_signal_handlers.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_grpc_server_sets_health_status_serving():
+    """Test that serve() sets both health statuses to SERVING on startup."""
+    mock_server = AsyncMock()
+    mock_server.add_insecure_port.return_value = None
+    mock_server.start.return_value = None
+    mock_server.wait_for_termination.return_value = None
+
+    captured = {}
+
+    original_cls = health.aio.HealthServicer
+
+    def capture_health_servicer(*args, **kwargs):
+        instance = original_cls(*args, **kwargs)
+        captured["instance"] = instance
+        return instance
+
+    with (
+        patch.dict(os.environ, {}),
+        patch(
+            "duo_workflow_service.server.grpc.aio.server",
+            return_value=mock_server,
+        ),
+        patch(
+            "duo_workflow_service.server.contract_pb2_grpc.add_DuoWorkflowServicer_to_server"
+        ),
+        patch("duo_workflow_service.server.MonitoringInterceptor"),
+        patch("duo_workflow_service.server.connection_pool") as mock_connection_pool,
+        patch(
+            "duo_workflow_service.server.health.aio.HealthServicer",
+            side_effect=capture_health_servicer,
+        ),
+    ):
+        mock_connection_pool.__aenter__ = AsyncMock(return_value=mock_connection_pool)
+        mock_connection_pool.__aexit__ = AsyncMock(return_value=None)
+
+        mock_config = MagicMock(spec=Config)
+        await serve(mock_config, 50052)
+
+    health_servicer = captured["instance"]
+    assert health_servicer._server_status[""] == health_pb2.HealthCheckResponse.SERVING
+    assert (
+        health_servicer._server_status["DuoWorkflow"]
+        == health_pb2.HealthCheckResponse.SERVING
+    )
 
 
 @pytest.mark.asyncio
@@ -1084,11 +1147,13 @@ async def test_signal_handler_calls_server_stop(
     if grace_period_env is not None:
         env_dict["DUO_WORKFLOW_SHUTDOWN_GRACE_PERIOD_S"] = grace_period_env
 
+    mock_health_servicer = AsyncMock()
+
     with (
         patch.dict(os.environ, env_dict, clear=True),
         patch("duo_workflow_service.server.log") as mock_log,
     ):
-        setup_signal_handlers(mock_server, loop)
+        setup_signal_handlers(mock_server, loop, mock_health_servicer)
 
         os.kill(os.getpid(), signal_type)
 
@@ -1101,6 +1166,27 @@ async def test_signal_handler_calls_server_stop(
 
         log_calls = [str(call) for call in mock_log.info.call_args_list]
         assert any("graceful shutdown" in log_call.lower() for log_call in log_calls)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("signal_type", [signal.SIGTERM, signal.SIGINT])
+async def test_signal_handler_sets_not_serving_on_shutdown(signal_type):
+    mock_server = AsyncMock()
+    health_servicer = health.aio.HealthServicer()
+    loop = asyncio.get_running_loop()
+
+    with patch.dict(os.environ, {}, clear=True):
+        setup_signal_handlers(mock_server, loop, health_servicer)
+        os.kill(os.getpid(), signal_type)
+        await asyncio.sleep(0.1)
+
+    assert (
+        health_servicer._server_status[""] == health_pb2.HealthCheckResponse.NOT_SERVING
+    )
+    assert (
+        health_servicer._server_status["DuoWorkflow"]
+        == health_pb2.HealthCheckResponse.NOT_SERVING
+    )
 
 
 @pytest.mark.asyncio

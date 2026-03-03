@@ -16,6 +16,7 @@ from gitlab_cloud_connector import (
 from gitlab_cloud_connector.auth import AUTH_HEADER, PREFIX_BEARER_HEADER
 from grpc.aio import ServicerContext
 
+from duo_workflow_service.interceptors import GRPC_HEALTH_METHODS
 from lib.context import cloud_connector_token_context_var
 
 current_user: contextvars.ContextVar = contextvars.ContextVar("current_user")
@@ -26,13 +27,27 @@ class AuthenticationError(Exception):
 
 
 class AuthenticationInterceptor(grpc.aio.ServerInterceptor):
-    def __init__(self):
+    _REFLECTION_METHODS = (
+        "/grpc.reflection.v1alpha.ServerReflection/ServerReflectionInfo",
+        "/grpc.reflection.v1.ServerReflection/ServerReflectionInfo",
+    )
+
+    def __init__(self, reflection_enabled: bool = False):
         self.oidc_auth_provider = self._init_oidc_auth_provider()
+        self._allow_unauthenticated_methods = GRPC_HEALTH_METHODS + (
+            self._REFLECTION_METHODS if reflection_enabled else ()
+        )
 
     @override
     async def intercept_service(
         self, continuation: Callable, handler_call_details: grpc.HandlerCallDetails
     ) -> grpc.RpcMethodHandler:
+        # Health checks (and reflection when enabled) don't require authentication
+        if handler_call_details.method in self._allow_unauthenticated_methods:
+            cloud_connector_user, _ = authenticate({}, None, bypass_auth=True)
+            current_user.set(cloud_connector_user)
+            return await continuation(handler_call_details)
+
         if os.environ.get("DUO_WORKFLOW_AUTH__ENABLED", True) == "false":
             print("[WARN] Auth is disabled, all users allowed")
             cloud_connector_user, _cloud_connector_error = authenticate(

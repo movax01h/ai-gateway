@@ -33,6 +33,58 @@ def interceptor_fixture():
     return AuthenticationInterceptor()
 
 
+@pytest.mark.parametrize(
+    "method",
+    ["/grpc.health.v1.Health/Check", "/grpc.health.v1.Health/Watch"],
+)
+@pytest.mark.asyncio
+async def test_intercept_service_health_check_skips_auth(
+    method, interceptor, mock_continuation, handler_call_details
+):
+    handler_call_details.method = method
+    await interceptor.intercept_service(mock_continuation, handler_call_details)
+    mock_continuation.assert_awaited_once_with(handler_call_details)
+
+
+@pytest.mark.parametrize(
+    "method",
+    [
+        "/grpc.reflection.v1alpha.ServerReflection/ServerReflectionInfo",
+        "/grpc.reflection.v1.ServerReflection/ServerReflectionInfo",
+    ],
+)
+@pytest.mark.asyncio
+async def test_intercept_service_reflection_skips_auth_when_enabled(
+    method, mock_continuation, handler_call_details
+):
+    interceptor = AuthenticationInterceptor(reflection_enabled=True)
+    handler_call_details.method = method
+    await interceptor.intercept_service(mock_continuation, handler_call_details)
+    mock_continuation.assert_awaited_once_with(handler_call_details)
+
+
+@pytest.mark.parametrize(
+    "method",
+    [
+        "/grpc.reflection.v1alpha.ServerReflection/ServerReflectionInfo",
+        "/grpc.reflection.v1.ServerReflection/ServerReflectionInfo",
+    ],
+)
+@patch(
+    "duo_workflow_service.interceptors.authentication_interceptor.authenticate",
+    return_value=(None, MagicMock(error_message="No authorization header presented")),
+)
+@pytest.mark.asyncio
+async def test_intercept_service_reflection_requires_auth_by_default(
+    mock_authenticate, method, mock_continuation, handler_call_details
+):
+    interceptor = AuthenticationInterceptor()
+    handler_call_details.method = method
+    handler_call_details.invocation_metadata = ()
+    await interceptor.intercept_service(mock_continuation, handler_call_details)
+    mock_continuation.assert_not_awaited()
+
+
 @patch.dict(os.environ, {"DUO_WORKFLOW_AUTH__ENABLED": "false"})
 @pytest.mark.asyncio
 async def test_intercept_service_auth_disabled(
