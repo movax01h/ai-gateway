@@ -8,6 +8,7 @@ from gitlab_cloud_connector import (
     CloudConnectorConfig,
     GitLabFeatureCategory,
     GitLabUnitPrimitive,
+    WrongUnitPrimitives,
 )
 
 from ai_gateway.api.feature_category import feature_category
@@ -33,7 +34,6 @@ from ai_gateway.code_suggestions import (
     CodeGenerations,
     CodeSuggestionsChunk,
     LanguageServerVersion,
-    ModelProvider,
 )
 from ai_gateway.code_suggestions.base import SAAS_PROMPT_MODEL_MAP
 from ai_gateway.config import Config
@@ -152,6 +152,7 @@ async def code_suggestions(
         return await code_completion(
             payload=component.payload,
             current_user=current_user,
+            prompt_registry=prompt_registry,
             code_context=code_context,
             stream_handler=stream_handler,
             snowplow_event_context=snowplow_code_suggestion_context,
@@ -174,27 +175,21 @@ async def code_suggestions(
 async def code_completion(
     payload: EditorContentCompletionPayload,
     current_user: StarletteUser,
+    prompt_registry: BasePromptRegistry,
     stream_handler: StreamHandler,
     snowplow_event_context: SnowplowEventContext,
-    completions_anthropic_factory: Factory[CodeCompletions] = Provide[
-        ContainerApplication.code_suggestions.completions.anthropic.provider
+    completions_agent_factory: Factory[CodeCompletions] = Provide[
+        ContainerApplication.code_suggestions.completions.agent_factory.provider
     ],
     completions_amazon_q_factory: Factory[CodeCompletions] = Provide[
         ContainerApplication.code_suggestions.completions.amazon_q_factory.provider
-    ],
-    completions_litellm_vertex_codestral_factory: Factory[CodeCompletions] = Provide[
-        ContainerApplication.code_suggestions.completions.litellm_vertex_codestral_factory.provider
     ],
     code_context: Optional[list[CodeContextPayload]] = None,
     model_metadata: TypeModelMetadata = None,
 ):
     kwargs = {}
 
-    if payload.model_provider == ModelProvider.ANTHROPIC:
-        # TODO: As we migrate to v3 we can rewrite this to use prompt registry
-        engine = completions_anthropic_factory(model__name=payload.model_name)
-        kwargs.update({"raw_prompt": payload.prompt})
-    elif payload.model_provider == KindModelProvider.AMAZON_Q or (
+    if payload.model_provider == KindModelProvider.AMAZON_Q or (
         model_metadata and model_metadata.provider == KindModelProvider.AMAZON_Q
     ):
         if not current_user.can(
@@ -211,7 +206,19 @@ async def code_completion(
             model__role_arn=payload.role_arn or model_metadata.role_arn,
         )
     else:
-        engine = completions_litellm_vertex_codestral_factory()
+        try:
+            prompt = prompt_registry.get_on_behalf(
+                current_user,
+                "code_suggestions/completions",
+                model_metadata=model_metadata,
+                internal_event_category=__name__,
+            )
+        except WrongUnitPrimitives:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Unauthorized to access code suggestions",
+            )
+        engine = completions_agent_factory(model__prompt=prompt)
 
     suggestions = await engine.execute(
         prefix=payload.content_above_cursor,
