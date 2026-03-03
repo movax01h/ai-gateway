@@ -8,6 +8,7 @@ from google.protobuf.json_format import ParseDict
 from google.protobuf.struct_pb2 import Struct
 
 from ai_gateway.searches.search import DataStoreNotFound, VertexAISearch
+from ai_gateway.searches.typing import SearchResult
 
 
 @pytest.fixture(name="mock_vertex_search_struct_data")
@@ -163,7 +164,14 @@ async def test_vertex_ai_search(
     )
 
     result = await vertex_search.search(query, gl_version)
-    assert result == [{**mock_vertex_search_struct_data, **{"id": "1"}}]
+    expected = [
+        {
+            "id": "1",
+            "content": mock_vertex_search_struct_data["content"],
+            "metadata": mock_vertex_search_struct_data["metadata"],
+        }
+    ]
+    assert [r.model_dump() for r in result] == expected
 
     mock_search_service_client.serving_config_path.assert_called_once_with(
         project=project,
@@ -203,3 +211,86 @@ async def test_datastore_not_found(
 
     with pytest.raises(DataStoreNotFound):
         await vertex_search.search(query, gl_version)
+
+
+class TestVertexAIDumpResults:
+    """Test the dump_results override in VertexAISearch."""
+
+    def test_dump_results_groups_by_md5(
+        self, mock_search_service_client, vertex_ai_search_factory
+    ):
+        """Test that results are grouped by md5sum."""
+        vertex_search = vertex_ai_search_factory(client=mock_search_service_client)
+
+        results = [
+            SearchResult(
+                id="1",
+                content="Snippet 1",
+                metadata={
+                    "md5sum": "abc123",
+                    "source_url": "https://docs.gitlab.com/ee/foo",
+                    "title": "Feature Foo",
+                },
+            ),
+            SearchResult(
+                id="2",
+                content="Snippet 2",
+                metadata={
+                    "md5sum": "abc123",
+                    "source_url": "https://docs.gitlab.com/ee/foo",
+                    "title": "Feature Foo",
+                },
+            ),
+        ]
+
+        dumped = vertex_search.dump_results(results)
+
+        assert len(dumped) == 1
+        assert dumped[0]["source_url"] == "https://docs.gitlab.com/ee/foo"
+        assert dumped[0]["source_title"] == "Feature Foo"
+        assert len(dumped[0]["relevant_snippets"]) == 2
+        assert "Snippet 1" in dumped[0]["relevant_snippets"]
+        assert "Snippet 2" in dumped[0]["relevant_snippets"]
+
+    def test_dump_results_handles_multiple_pages(
+        self, mock_search_service_client, vertex_ai_search_factory
+    ):
+        """Test handling of results from multiple pages."""
+        vertex_search = vertex_ai_search_factory(client=mock_search_service_client)
+
+        results = [
+            SearchResult(
+                id="1",
+                content="Content from page 1",
+                metadata={
+                    "md5sum": "page1",
+                    "source_url": "https://docs.gitlab.com/ee/page1",
+                    "title": "Page 1",
+                },
+            ),
+            SearchResult(
+                id="2",
+                content="Content from page 2",
+                metadata={
+                    "md5sum": "page2",
+                    "source_url": "https://docs.gitlab.com/ee/page2",
+                    "title": "Page 2",
+                },
+            ),
+        ]
+
+        dumped = vertex_search.dump_results(results)
+
+        assert len(dumped) == 2
+        assert dumped[0]["source_title"] == "Page 1"
+        assert dumped[1]["source_title"] == "Page 2"
+
+    def test_dump_results_empty_list(
+        self, mock_search_service_client, vertex_ai_search_factory
+    ):
+        """Test handling empty results."""
+        vertex_search = vertex_ai_search_factory(client=mock_search_service_client)
+
+        dumped = vertex_search.dump_results([])
+
+        assert dumped == []

@@ -2,9 +2,11 @@ import json
 import os.path
 import re
 import sqlite3
-from typing import Any, Dict, List, override
+from typing import Any, List, override
 
 import structlog
+
+from ai_gateway.searches.typing import SearchResult
 
 from .search import Searcher
 
@@ -23,7 +25,7 @@ class SqliteSearch(Searcher):
         gl_version: str,
         page_size: int = 20,
         **kwargs: Any,
-    ) -> List[Dict[Any, Any]]:
+    ) -> List[SearchResult]:
         if os.path.isfile(self.db_path):
             conn = sqlite3.connect(self.db_path)
             indexer = conn.cursor()
@@ -45,10 +47,16 @@ class SqliteSearch(Searcher):
             (sanitized_query, page_size),
         )
 
-        results = self._parse_response(data)
+        parsed_response: list[dict] = self._parse_response(data)
 
         if conn:
             conn.close()
+
+        results, token_count = self.limit_search_results(
+            parsed_response, max_tokens=8000
+        )
+
+        self.log_search_results(query, page_size, gl_version, results, token_count)
 
         return results
 
@@ -56,7 +64,7 @@ class SqliteSearch(Searcher):
     def provider(self):
         return "sqlite"
 
-    def _parse_response(self, response):
+    def _parse_response(self, response) -> list[dict]:
         results = []
 
         for r in response:
@@ -68,3 +76,37 @@ class SqliteSearch(Searcher):
             }
             results.append(search_result)
         return results
+
+    def limit_search_results(
+        self, response: list[dict], max_tokens: int
+    ) -> tuple[list[SearchResult], int]:
+        """Limit search results based on a maximum token count."""
+        token_count = 0
+        results = []
+
+        for result in response:
+            tokens = self.estimate_token_count(result["content"])
+            if token_count + tokens > max_tokens:
+                break
+            token_count += tokens
+            results.append(
+                {
+                    "id": result["id"],
+                    "content": result["content"],
+                    "metadata": result["metadata"],
+                }
+            )
+        search_results = [
+            SearchResult(
+                id=res["id"],
+                content=res["content"],
+                metadata=res["metadata"],
+            )
+            for res in results
+        ]
+
+        return search_results, token_count
+
+    def estimate_token_count(self, text: str) -> int:
+        """Estimate the number of tokens in a given text (approx: 1.4 x word count)."""
+        return int(len(text.split()) * 1.4)
