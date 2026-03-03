@@ -59,7 +59,8 @@ async def test_ainvoke(
         await prompt.ainvoke({"name": "Duo", "content": "What's up?"})
 
     mock_http.assert_called_once()
-    assert mock_http_handler.post.call_count == 3
+    # This model_fixture has max_retries=3 hence the total request call is 4.
+    assert mock_http_handler.post.call_count == 4
 
 
 @pytest.mark.asyncio
