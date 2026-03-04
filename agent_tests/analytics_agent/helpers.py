@@ -66,6 +66,20 @@ def mock_glql_response(
         )
 
 
+IDE_ADDITIONAL_CONTEXT = (
+    "User added additional context below enclosed in "
+    "<additional_context></additional_context> tags.\n\n"
+    "<additional_context>\n"
+    "    <agent_user_environment_os_info>\n"
+    '    {"platform": "darwin", "architecture": "arm64"}\n'
+    "    </agent_user_environment_os_info>\n"
+    "    <agent_user_environment_shell_info>\n"
+    '    {"shell_name": "zsh", "shell_type": "unix"}\n'
+    "    </agent_user_environment_shell_info>\n"
+    "</additional_context>\n\n"
+)
+
+
 SAMPLE_ISSUES = [
     {"id": "gid://gitlab/Issue/1", "iid": "1", "title": "Bug fix", "state": "opened"},
     {"id": "gid://gitlab/Issue/2", "iid": "2", "title": "Feature", "state": "opened"},
