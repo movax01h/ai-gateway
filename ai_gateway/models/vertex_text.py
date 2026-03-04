@@ -25,7 +25,6 @@ from ai_gateway.tracking import SnowplowEventContext
 __all__ = [
     "PalmCodeBisonModel",
     "PalmTextBisonModel",
-    "PalmCodeGeckoModel",
     "PalmCodeGenBaseModel",
     "KindVertexTextModel",
     "VertexAPIConnectionError",
@@ -95,27 +94,11 @@ class TextBisonModelInput(ModelInput):
         return {"content": self.prefix}
 
 
-class CodeGeckoModelInput(ModelInput):
-    def __init__(self, prefix, suffix):
-        self.prefix = prefix
-        self.suffix = suffix
-
-    @override
-    def is_valid(self) -> bool:
-        return len(self.prefix) > 0
-
-    @override
-    def dict(self) -> dict:
-        return {"prefix": self.prefix, "suffix": self.suffix}
-
-
 class KindVertexTextModel(StrEnum):
     # Avoid using model versions that only specify the major version number
     # similar to `KindAnthropicModel`.
     CODE_BISON = "code-bison"
     CODE_BISON_002 = "code-bison@002"
-    CODE_GECKO = "code-gecko"
-    CODE_GECKO_002 = "code-gecko@002"
     TEXT_BISON = "text-bison"
     TEXT_BISON_002 = "text-bison@002"
     CHAT_BISON = "chat-bison"
@@ -393,75 +376,6 @@ class PalmCodeBisonModel(PalmCodeGenBaseModel):
         **kwargs: Any,
     ):
         name = _resolve_model_name(name, "code-bison")
-
-        return cls(client, project, location, model_name=name.value, **kwargs)
-
-
-class PalmCodeGeckoModel(PalmCodeGenBaseModel):
-    DEFAULT_STOP_SEQUENCES = ["\n\n"]
-    PREFIX_MODEL_IDENTIFIER = "code-gecko"
-
-    def __init__(
-        self,
-        client: PredictionServiceAsyncClient,
-        project: str,
-        location: str,
-        *args: Any,
-        model_name: str = KindVertexTextModel.CODE_GECKO_002.value,
-        **kwargs: Any,
-    ):
-        super().__init__(model_name, client, project, location, *args, **kwargs)
-
-    @property
-    @override
-    def input_token_limit(self) -> int:
-        return 2_048
-
-    @override
-    async def generate(
-        self,
-        prefix: str,
-        suffix: str,
-        stream: bool = False,
-        temperature: float = 0.2,
-        max_output_tokens: int = 64,
-        top_p: float = 0.95,
-        top_k: int = 40,
-        candidate_count: int = 1,
-        stop_sequences: Optional[Sequence[str]] = None,
-        snowplow_event_context: Optional[SnowplowEventContext] = None,
-        code_context: Optional[list[str]] = None,
-    ) -> (
-        TextGenModelOutput | list[TextGenModelOutput] | AsyncIterator[TextGenModelChunk]
-    ):
-        model_input = CodeGeckoModelInput(prefix, suffix)
-
-        if not stop_sequences:
-            stop_sequences = PalmCodeGeckoModel.DEFAULT_STOP_SEQUENCES
-
-        res = await self._generate(
-            model_input,
-            temperature,
-            max_output_tokens,
-            top_p,
-            top_k,
-            candidate_count,
-            stop_sequences,
-            code_context,
-        )
-
-        return res
-
-    @classmethod
-    def from_model_name(
-        cls,
-        name: Union[str, KindVertexTextModel],
-        client: PredictionServiceAsyncClient,
-        project: str,
-        location: str,
-        **kwargs: Any,
-    ):
-        name = _resolve_model_name(name, "code-gecko")
 
         return cls(client, project, location, model_name=name.value, **kwargs)
 

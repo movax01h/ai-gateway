@@ -88,7 +88,7 @@ const reverseString = (inpStr) => {
         # Complete `continue` only in the `if` block
         (PYTHON_SAMPLE_1, (14, 16), LanguageId.PYTHON, [(14, 16), (14, 24)]),
         # Try to complete the next if block but not the full functions
-        # In prod, code-gecko doesn't return large amount of tokens to complete huge functions
+        # In prod, models don't return large amount of tokens to complete huge functions
         (PYTHON_SAMPLE_1, (12, 0), LanguageId.PYTHON, [(12, 0), (14, 24)]),
         # Return the rest of the file
         (JAVA_SAMPLE_1, (10, 12), LanguageId.JAVA, [(10, 12), (11, 55)]),

@@ -31,7 +31,7 @@ class TestTextGenModelInstrumentator:
         )
         prompt = Prompt(prefix=prefix, suffix=suffix, metadata=metadata)
         model_engine = "vertex-ai"
-        model_name = "code-gecko"
+        model_name = "codestral-2508"
         completion = "e f g"  # expected len: 3
 
         instrumentator = TextGenModelInstrumentator(
@@ -47,14 +47,14 @@ class TestTextGenModelInstrumentator:
         mock_labels.assert_has_calls(
             [
                 # track inference count
-                mock.call(model_engine="vertex-ai", model_name="code-gecko"),
+                mock.call(model_engine="vertex-ai", model_name="codestral-2508"),
                 mock.call().inc(),
                 # track model cost input
                 mock.call(
                     item="completions/completion/input",
                     unit="characters",
                     vendor="vertex-ai",
-                    model="code-gecko",
+                    model="codestral-2508",
                     feature_category="code_suggestions",
                 ),
                 mock.call().inc(5),  # prefix + suffix
@@ -63,7 +63,7 @@ class TestTextGenModelInstrumentator:
                     item="completions/completion/output",
                     unit="characters",
                     vendor="vertex-ai",
-                    model="code-gecko",
+                    model="codestral-2508",
                     feature_category="code_suggestions",
                 ),
                 mock.call().inc(3),
@@ -104,7 +104,7 @@ class TestTextGenModelInstrumentator:
         )
         prompt = Prompt(prefix=prefix, metadata=metadata)
         model_engine = "vertex-ai"
-        model_name = "code-gecko"
+        model_name = "codestral-2508"
 
         instrumentator = TextGenModelInstrumentator(
             model_engine=model_engine, model_name=model_name

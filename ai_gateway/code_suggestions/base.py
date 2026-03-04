@@ -55,7 +55,6 @@ PROVIDERS_MODELS_MAP = {
 USE_CASES_MODELS_MAP = {
     KindUseCase.CODE_COMPLETIONS: {
         KindAnthropicModel.CLAUDE_SONNET_4,
-        KindVertexTextModel.CODE_GECKO_002,
         KindVertexTextModel.CODESTRAL_2501,
         KindLiteLlmModel.CODESTRAL_2501,
         KindLiteLlmModel.CODESTRAL_2508,

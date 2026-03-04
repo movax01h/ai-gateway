@@ -118,7 +118,7 @@ POST /v3/code/completions
 | `prompt_components.payload.content_below_cursor` | string  | yes      | The content below cursor (max_len: **100,000**)                                                    | `def __main__:\n`        |
 | `prompt_components.payload.language_identifier`  | string  | no       | [Language identifier](https://code.visualstudio.com/docs/languages/identifiers) (max_len: **255**) | `python`                 |
 | `prompt_components.payload.model_provider`       | string  | no       | The model engine that should be used for the completion                                            | `vertex-ai`              |
-| `prompt_components.payload.model_name`           | string  | no       | The name of the model                                            | `code-gecko@002`              |
+| `prompt_components.payload.model_name`           | string  | no       | The name of the model                                            | `codestral-2508`              |
 | `prompt_components.payload.stream`               | boolean | no       | Enables streaming response, if applicable (default: false)                                         | `true`                   |
 | `prompt_components.metadata.source`              | string  | no       | Source of the completionrequest (max_len: **255**)                                                 | `GitLab EE`              |
 | `prompt_components.metadata.version`             | string  | no       | Version of the source (max_len: **255**)                                                           | `16.3`                   |
@@ -196,7 +196,7 @@ Example response:
   "metadata": {
     "model": {
       "engine": "vertex-ai",
-      "name": "code-gecko@002",
+      "name": "codestral-2508",
       "lang": "go"
     },
     "timestamp": 1702389046
@@ -357,7 +357,7 @@ This will compile and execute the program, printing "Hello World" to the console
 Given a prompt, the service will return one suggestion. This endpoint supports
 two versions of payloads.
 
-- If `vertex-ai` model provider is selected, we use `code-gecko@002`.
+- If `vertex-ai` model provider is selected, we use `codestral-2508`.
 - If `anthropic` model provider is selected, we use `claude-3-5-sonnet-20241022`.
 
 ```plaintext
@@ -389,7 +389,7 @@ third-party model provider.
 | `choices_count`                     | int    | no       | The number of code completion choices to return (max_len: **4**). Only applies for `vertex-ai`. Does not support streaming.        | `2`                                   |
 | `telemetry`                         | array  | no       | The list of telemetry data from previous request (max_len: **10**).                                              |                           |
 | `telemetry.model_engine`            | string | no       | The model engine used for completions (max_len: **50**).                                                         | `vertex-ai`               |
-| `telemetry.model_name`              | string | no       | The model name used for completions (max_len: **50**).                                                           | `code-gecko`              |
+| `telemetry.model_name`              | string | no       | The model name used for completions (max_len: **50**).                                                           | `codestral-2508`              |
 | `telemetry.lang`                    | string | no       | The language used for completions (max_len: **50**).                                                             | `python`                  |
 | `telemetry.requests`                | int    | yes      | The number of previously requested completions.                                                                  | `1`                       |
 | `telemetry.accepts`                 | int    | yes      | The number of previously accepted completions.                                                                   | `1`                       |
@@ -414,7 +414,7 @@ curl --request POST \
     "telemetry": [
       {
         "model_engine": "vertex-ai",
-        "model_name": "code-gecko",
+        "model_name": "codestral-2508",
         "lang": "python",
         "requests": 1,
         "accepts": 1,
@@ -431,7 +431,7 @@ Example response:
   "id": "id",
   "model": {
     "engine": "vertex-ai",
-    "name": "code-gecko",
+    "name": "codestral-2508",
     "lang": "python"
   },
   "experiments": [],
@@ -475,7 +475,7 @@ This accepts a pre-built `prompt` and forwards it directly to third-party provid
 | `choices_count`                     | int    | no       | The number of code completion choices to return (max_len: **4**). Only applies for `vertex-ai`. Does not support streaming. **Note:** The response may return a number of choices less than the `choices_count` as we drop suggestions with low scores.      | `2`                                   |
 | `telemetry`                         | array  | no       | The list of telemetry data from previous request (max_len: **10**)             |                                      |
 | `telemetry.model_engine`            | string | no       | The model engine used for completions (max_len: **50**)                        | `vertex-ai`                          |
-| `telemetry.model_name`              | string | no       | The model name used for completions (max_len: **50**)                          | `code-gecko`                         |
+| `telemetry.model_name`              | string | no       | The model name used for completions (max_len: **50**)                          | `codestral-2508`                         |
 | `telemetry.lang`                    | string | no       | The language used for completions (max_len: **50**)                            | `python`                             |
 | `telemetry.requests`                | int    | yes      | The number of previously requested completions                                 | `1`                                  |
 | `telemetry.accepts`                 | int    | yes      | The number of previously accepted completions                                  | `1`                                  |
@@ -582,7 +582,7 @@ This accepts a pre-built `prompt` and forwards it directly to a third-party prov
 | `choices_count`                     | int    | no       | The number of code completion choices to return (max_len: **4**). Only applies for `vertex-ai`. Does not support streaming. **Note:** The response may return a number of choices less than the `choices_count` as we drop suggestions with low scores.      | `2`                                   |
 | `telemetry`                         | array  | no       | The list of telemetry data from previous request (max_len: **10**)             |                                      |
 | `telemetry.model_engine`            | string | no       | The model engine used for completions (max_len: **50**)                        | `vertex-ai`                          |
-| `telemetry.model_name`              | string | no       | The model name used for completions (max_len: **50**)                          | `code-gecko`                         |
+| `telemetry.model_name`              | string | no       | The model name used for completions (max_len: **50**)                          | `codestral-2508`                         |
 | `telemetry.lang`                    | string | no       | The language used for completions (max_len: **50**)                            | `python`                             |
 | `telemetry.requests`                | int    | yes      | The number of previously requested completions                                 | `1`                                  |
 | `telemetry.accepts`                 | int    | yes      | The number of previously accepted completions                                  | `1`                                  |
@@ -689,7 +689,7 @@ third-party model provider.
 | `current_file.content_below_cursor` | string | yes      | The content below cursor (max_len: **100,000**).                                                                                                                                       | `def __main__:\n`         |
 | `telemetry`                         | array  | no       | The list of telemetry data from previous request (max_len: **10**).                                                                                                                    |                           |
 | `telemetry.model_engine`            | string | no       | The model engine used for completions (max_len: **50**).                                                                                                                               | `vertex-ai`               |
-| `telemetry.model_name`              | string | no       | The model name used for completions (max_len: **50**).                                                                                                                                 | `code-gecko`              |
+| `telemetry.model_name`              | string | no       | The model name used for completions (max_len: **50**).                                                                                                                                 | `codestral-2508`              |
 | `telemetry.lang`                    | string | no       | The language used for completions (max_len: **50**).                                                                                                                                   | `python`                  |
 | `telemetry.requests`                | int    | yes      | The number of previously requested completions.                                                                                                                                        | `1`                       |
 | `telemetry.accepts`                 | int    | yes      | The number of previously accepted completions.                                                                                                                                         | `1`                       |
@@ -768,7 +768,7 @@ This accepts a pre-built `prompt` and forwards it directly to the third-party pr
 | `prompt`                            | string | yes      | The content of a pre-built prompt                                                                                                                                                       | `Human: You are a code assistant...` |
 | `telemetry`                         | array  | no       | The list of telemetry data from previous request (max_len: **10**)                                                                                                                     |                                      |
 | `telemetry.model_engine`            | string | no       | The model engine used for completions (max_len: **50**)                                                                                                                                | `vertex-ai`                          |
-| `telemetry.model_name`              | string | no       | The model name used for completions (max_len: **50**)                                                                                                                                  | `code-gecko`                         |
+| `telemetry.model_name`              | string | no       | The model name used for completions (max_len: **50**)                                                                                                                                  | `codestral-2508`                         |
 | `telemetry.lang`                    | string | no       | The language used for completions (max_len: **50**)                                                                                                                                    | `python`                             |
 | `telemetry.requests`                | int    | yes      | The number of previously requested completions                                                                                                                                         | `1`                                  |
 | `telemetry.accepts`                 | int    | yes      | The number of previously accepted completions                                                                                                                                          | `1`                                  |

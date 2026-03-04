@@ -32,7 +32,7 @@ class TestTextGenBaseModel:
     class TestClass(TextGenModelBase):
         @property
         def metadata(self):
-            return ModelMetadata(engine="vertex", name="code-gecko@002")
+            return ModelMetadata(engine="vertex", name="codestral-2508")
 
         async def generate(self, **kwargs):
             pass
@@ -44,7 +44,7 @@ class TestTextGenBaseModel:
         model = TestTextGenBaseModel.TestClass()
         instrumentator = model.instrumentator
 
-        mock_config.for_model.assert_called_with(engine="vertex", name="code-gecko@002")
+        mock_config.for_model.assert_called_with(engine="vertex", name="codestral-2508")
         assert instrumentator.limits == 7
 
 

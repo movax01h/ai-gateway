@@ -21,8 +21,9 @@ from ai_gateway.code_suggestions import (
     CodeSuggestionsChunk,
     ModelProvider,
 )
-from ai_gateway.models import KindVertexTextModel, Message
+from ai_gateway.models import Message
 from ai_gateway.models.base import KindModelProvider
+from ai_gateway.models.litellm import KindGitLabModel
 
 __all__ = [
     "CodeEditorComponents",
@@ -67,7 +68,7 @@ class EditorContentPayload(BaseModel):
         ]
     ] = None
     model_name: Optional[str] = Field(
-        None, examples=[KindVertexTextModel.CODE_GECKO_002]
+        None, examples=[KindGitLabModel.CODESTRAL_2508_VERTEX]
     )
     stream: Optional[bool] = False
     role_arn: Optional[str] = None

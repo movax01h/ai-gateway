@@ -10,11 +10,7 @@ from ai_gateway.models.amazon_q import AmazonQModel
 from ai_gateway.models.anthropic import AnthropicChatModel, AnthropicModel
 from ai_gateway.models.base import grpc_connect_vertex, init_anthropic_client
 from ai_gateway.models.litellm import LiteLlmChatModel, LiteLlmTextGenModel
-from ai_gateway.models.vertex_text import (
-    PalmCodeBisonModel,
-    PalmCodeGeckoModel,
-    PalmTextBisonModel,
-)
+from ai_gateway.models.vertex_text import PalmCodeBisonModel, PalmTextBisonModel
 from ai_gateway.proxy.clients import (
     AnthropicProxyModelFactory,
     OpenAIProxyModelFactory,
@@ -96,17 +92,6 @@ class ContainerModels(containers.DeclarativeContainer):
         _mock_selector,
         original=providers.Factory(
             PalmCodeBisonModel.from_model_name,
-            client=grpc_client_vertex,
-            project=config.vertex_text_model.project,
-            location=config.vertex_text_model.location,
-        ),
-        mocked=providers.Factory(mock.LLM),
-    )
-
-    vertex_code_gecko = providers.Selector(
-        _mock_selector,
-        original=providers.Factory(
-            PalmCodeGeckoModel.from_model_name,
             client=grpc_client_vertex,
             project=config.vertex_text_model.project,
             location=config.vertex_text_model.location,
