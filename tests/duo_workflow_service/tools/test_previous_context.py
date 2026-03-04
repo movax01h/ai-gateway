@@ -53,7 +53,6 @@ class TestGetSessionContext:
                 "source": "loop",
                 "writes": {},
                 "parents": {},
-                "thread_id": "123",
             },
         }
         mock_response = GitLabHttpResponse(
@@ -78,7 +77,7 @@ class TestGetSessionContext:
         assert "workflow" in context_dict
 
         workflow = context_dict["workflow"]
-        assert workflow["id"] == "123"
+        assert workflow["id"] == 123
         assert workflow["goal"] == "Create a feature"
         assert workflow["summary"] == "Task summary"
         assert "plan" in workflow
@@ -124,15 +123,16 @@ class TestGetSessionContext:
                 "source": "loop",
                 "writes": {},
                 "parents": {},
-                "thread_id": "123",
             },
         }
 
-        context_str = get_last_checkpoint_tool._format_checkpoint_context(checkpoint)
+        context_str = get_last_checkpoint_tool._format_checkpoint_context(
+            checkpoint, 123
+        )
 
         context = json.loads(context_str)
         assert isinstance(context, dict)
-        assert context["workflow"]["id"] == "123"
+        assert context["workflow"]["id"] == 123
         assert context["workflow"]["plan"] == {"steps": []}
         assert context["workflow"]["goal"] == "No goal available"
         assert context["workflow"]["summary"] == "No summary available"
@@ -148,17 +148,16 @@ class TestGetSessionContext:
                 "source": "loop",
                 "writes": {},
                 "parents": {},
-                "thread_id": "123",
             },
         }
 
         context_str = get_last_checkpoint_tool._format_checkpoint_context(
-            invalid_checkpoint
+            invalid_checkpoint, 123
         )
 
         context = json.loads(context_str)
         assert isinstance(context, dict)
-        assert context["workflow"]["id"] == "123"
+        assert context["workflow"]["id"] == 123
         assert context["workflow"]["plan"] == {"steps": []}
         assert context["workflow"]["goal"] == "No goal available"
         assert context["workflow"]["summary"] == "No summary available"
@@ -177,7 +176,6 @@ class TestGetSessionContext:
                 "source": "loop",
                 "writes": {},
                 "parents": {},
-                "thread_id": "123",
             },
         }
 
@@ -185,4 +183,4 @@ class TestGetSessionContext:
             ValueError,
             match="Unable to parse context from last checkpoint for this session",
         ):
-            get_last_checkpoint_tool._format_checkpoint_context(bad_checkpoint)
+            get_last_checkpoint_tool._format_checkpoint_context(bad_checkpoint, 123)
