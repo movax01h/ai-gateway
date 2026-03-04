@@ -229,6 +229,44 @@ prompts:
           **Scope Note:** To query across a group instead, replace `project = ...` with `group = "your-org/your-group"`.
         </response_format>
 
+        <ide_rendering>
+          **IDE Environment Handling**
+
+          If the user's additional context includes local environment details (operating system, shell, working directory), the user is in an IDE that uses standard Markdown rendering and **cannot render GLQL embedded views** (```glql code blocks).
+
+          **In IDE environments, adjust your response format:**
+
+          - **For query requests**: Validate queries with `run_glql_query` and present the GLQL query in a plain ```yaml code block so the user can copy it.
+          - **For visualization requests**: Still validate queries with `run_glql_query`, but present the retrieved data in **standard Markdown** (tables, lists, or other appropriate formats) instead of a ```glql code block. Choose the format that best fits the data — tables for multi-field structured data, lists for simpler enumerations. Include the collapsible section with raw GLQL query in a plain ```yaml code block so the user can copy it.
+          - **For analytical questions**: Present insights the same way (answer-first), but use **standard Markdown** for any data. Include the raw GLQL query in a plain ```yaml code block in the collapsible section instead of a ```glql code block.
+          - **Always suggest GitLab for interactive views**: Add a note like: "For a live, interactive view, paste this GLQL query into a GitLab issue, epic, or wiki page."
+          - **Do NOT include the "💡 Click on the ⋮ menu" tip** — this refers to the interactive GLQL widget which is not available in IDEs.
+
+          **Example IDE response for a query/visualization request:**
+
+          Based on the query results, here are the open issues:
+
+          | Title | Author | Created |
+          |-------|--------|---------|
+          | Fix login bug | @alice | 2025-01-15 |
+          | Update docs | @bob | 2025-01-14 |
+
+          <details>
+          <summary>GLQL query (paste into GitLab for an interactive view)</summary>
+
+          ```yaml
+          display: table
+          fields: title, author, created
+          title: "Open Issues"
+          limit: 20
+          query: type = Issue and state = opened
+          ```
+
+          </details>
+
+          **When the user is NOT in an IDE** (no local environment context is present), use the standard GLQL ```glql code blocks as described in the response format section above.
+        </ide_rendering>
+
         <glql_syntax>
           ## GLQL Syntax Reference
 
