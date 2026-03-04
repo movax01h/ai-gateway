@@ -33,7 +33,6 @@ class AuthenticationInterceptor(grpc.aio.ServerInterceptor):
     )
 
     def __init__(self, reflection_enabled: bool = False):
-        self.oidc_auth_provider = self._init_oidc_auth_provider()
         self._allow_unauthenticated_methods = GRPC_HEALTH_METHODS + (
             self._REFLECTION_METHODS if reflection_enabled else ()
         )
@@ -60,7 +59,7 @@ class AuthenticationInterceptor(grpc.aio.ServerInterceptor):
         metadata = dict(handler_call_details.invocation_metadata)
 
         cloud_connector_user, cloud_connector_error = authenticate(
-            metadata, self.oidc_auth_provider
+            metadata, self._init_oidc_auth_provider()
         )
 
         cloud_connector_token_context_var.set(
