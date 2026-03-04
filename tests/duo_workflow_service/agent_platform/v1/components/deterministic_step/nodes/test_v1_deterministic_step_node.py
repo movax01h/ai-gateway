@@ -63,7 +63,7 @@ def mock_tool_fixture():
     """Fixture for mock tool."""
     mock_tool = Mock(spec=BaseTool)
     mock_tool.name = "test_tool"
-    mock_tool.arun = AsyncMock(return_value="Tool execution result")
+    mock_tool.ainvoke = AsyncMock(return_value="Tool execution result")
     mock_tool.args_schema = None
     return mock_tool
 
@@ -192,7 +192,7 @@ class TestDeterministicStepNode:
         assert result[FlowStateKeys.CONTEXT]["status"] == "success"
 
         # Verify tool execution was called
-        mock_tool.arun.assert_called_once_with({"param": "value"})
+        mock_tool.ainvoke.assert_called_once_with({"param": "value"})
 
         # Verify security sanitization was called
         mock_prompt_security.assert_called_once()
@@ -248,7 +248,7 @@ class TestDeterministicStepNode:
         """Test run handles TypeError during tool execution."""
         # Configure tool to raise TypeError
         type_error = TypeError("Invalid argument type")
-        mock_tool.arun = AsyncMock(side_effect=type_error)
+        mock_tool.ainvoke = AsyncMock(side_effect=type_error)
         mock_tool.args_schema = Mock()
         mock_tool.args_schema.model_json_schema.return_value = {
             "type": "object",
@@ -299,7 +299,7 @@ class TestDeterministicStepNode:
             "ValidationError",
             [{"type": "missing", "loc": ["field"], "msg": "Field required"}],
         )
-        mock_tool.arun = AsyncMock(side_effect=validation_error)
+        mock_tool.ainvoke = AsyncMock(side_effect=validation_error)
 
         result = await deterministic_step_node.run(workflow_state)
 
@@ -338,7 +338,7 @@ class TestDeterministicStepNode:
         """Test run handles generic exceptions during tool execution."""
         # Configure tool to raise generic exception
         generic_error = Exception("Generic error")
-        mock_tool.arun = AsyncMock(side_effect=generic_error)
+        mock_tool.ainvoke = AsyncMock(side_effect=generic_error)
 
         result = await deterministic_step_node.run(workflow_state)
 
@@ -388,7 +388,7 @@ class TestDeterministicStepNodeEdgeCases:
         result = await deterministic_step_node.run(workflow_state)
 
         # Verify tool was called with empty args
-        mock_tool.arun.assert_called_once_with({})
+        mock_tool.ainvoke.assert_called_once_with({})
         # Verify successful execution
         assert result[FlowStateKeys.CONTEXT]["status"] == "success"
 
@@ -403,7 +403,7 @@ class TestDeterministicStepNodeEdgeCases:
         """Test TypeError formatting when tool has no args_schema."""
         # Configure tool with no schema
         mock_tool.args_schema = None
-        mock_tool.arun = AsyncMock(side_effect=TypeError("No args"))
+        mock_tool.ainvoke = AsyncMock(side_effect=TypeError("No args"))
 
         result = await deterministic_step_node.run(workflow_state)
 
@@ -456,7 +456,7 @@ class TestDeterministicStepNodeEdgeCases:
         sanitized_response,
     ):
         """Test that list and dict responses are handled properly."""
-        mock_tool.arun = AsyncMock(return_value=tool_response)
+        mock_tool.ainvoke = AsyncMock(return_value=tool_response)
         mock_prompt_security.return_value = sanitized_response
 
         result = await deterministic_step_node.run(workflow_state)

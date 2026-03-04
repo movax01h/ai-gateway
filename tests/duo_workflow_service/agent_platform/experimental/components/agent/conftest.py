@@ -301,7 +301,7 @@ def mock_tool_fixture():
     """Fixture for mock tool."""
     mock_tool = Mock(spec=BaseTool)
     mock_tool.name = "test_tool"
-    mock_tool.arun = AsyncMock(return_value="Tool execution result")
+    mock_tool.ainvoke = AsyncMock(return_value="Tool execution result")
     return mock_tool
 
 
