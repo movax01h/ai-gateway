@@ -34,6 +34,7 @@ class UserInterface:
         self.checkpoint_number = 0
         self.latest_ai_message: Optional[BaseMessageChunk] = None
         self.last_sent_ui_message_id: Optional[str] = None
+        self.current_resp_id: Optional[str] = None
 
     async def send_event(
         self,
@@ -157,6 +158,8 @@ class UserInterface:
         if not isinstance(message, AIMessageChunk):
             return
 
+        self._replace_langchain_id_with_open_ai_id(message)
+
         if self.latest_ai_message and self.latest_ai_message.id == message.id:
             self.latest_ai_message += message
             self.ui_chat_log[-1]["content"] = self.latest_ai_message.text()
@@ -174,3 +177,17 @@ class UserInterface:
                 additional_context=None,
             )
             self.ui_chat_log.append(last_ui_message)
+
+    # OpenAI's response API returns the message start, and values with a resp_... ID
+    #  instead of the LangChain ID. All streamed messages still contain a LangChain ID.
+    # This causes the FE to not be able to match the streamed messages with the final message in the values.
+    # This method ensures there is a consistent ID for the same message.
+    def _replace_langchain_id_with_open_ai_id(self, message: BaseMessage):
+        if message.id is None:
+            return
+
+        if message.id.startswith("resp_"):
+            self.current_resp_id = message.id
+
+        if message.id.startswith("lc_run") and self.current_resp_id:
+            message.id = self.current_resp_id

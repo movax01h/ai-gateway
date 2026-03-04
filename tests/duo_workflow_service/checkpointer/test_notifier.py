@@ -606,6 +606,152 @@ def test_most_recent_new_checkpoint_without_incremental_streaming(checkpoint_not
     assert checkpoint3.checkpoint == expected_checkpoint3
 
 
+@pytest.mark.parametrize(
+    ("chunks", "expected_log_ids", "expected_log_contents"),
+    [
+        pytest.param(
+            [
+                AIMessageChunk(id="resp_abc", content="Hello "),
+                AIMessageChunk(id="lc_run_xyz", content="world"),
+            ],
+            ["resp_abc"],
+            ["Hello world"],
+        ),
+        pytest.param(
+            [
+                AIMessageChunk(id="lc_run_xyz", content="Hello "),
+                AIMessageChunk(id="lc_run_xyz", content="world"),
+            ],
+            ["lc_run_xyz"],
+            ["Hello world"],
+        ),
+        pytest.param(
+            [
+                AIMessageChunk(id="lc_run_1", content="Hello "),
+                AIMessageChunk(id="lc_run_2", content="world"),
+            ],
+            ["lc_run_1", "lc_run_2"],
+            ["Hello ", "world"],
+        ),
+        pytest.param(
+            [
+                AIMessageChunk(id="resp_first", content="First "),
+                AIMessageChunk(id="lc_run_a", content="chunk"),
+                AIMessageChunk(id="resp_second", content="Second "),
+                AIMessageChunk(id="lc_run_b", content="chunk"),
+            ],
+            ["resp_first", "resp_second"],
+            ["First chunk", "Second chunk"],
+        ),
+        pytest.param(
+            [AIMessageChunk(id=None, content="No id chunk")],
+            [None],
+            ["No id chunk"],
+        ),
+    ],
+)
+def test_append_chunk_to_ui_chat_log_with_id_replacement(
+    checkpoint_notifier,
+    chunks,
+    expected_log_ids,
+    expected_log_contents,
+):
+    for chunk in chunks:
+        checkpoint_notifier._append_chunk_to_ui_chat_log(chunk)
+
+    ui_chat_log = checkpoint_notifier.ui_chat_log
+    message_ids = [msg["message_id"] for msg in ui_chat_log]
+    contents = [msg["content"] for msg in ui_chat_log]
+
+    assert len(ui_chat_log) == len(expected_log_ids)
+    assert message_ids == expected_log_ids
+    assert contents == expected_log_contents
+
+
+@pytest.mark.parametrize(
+    ("incoming_messages", "expected_final_id", "expected_current_resp_id"),
+    [
+        pytest.param(
+            [AIMessageChunk(id="resp_abc123", content="hello")],
+            "resp_abc123",
+            "resp_abc123",
+        ),
+        pytest.param(
+            [
+                AIMessageChunk(id="resp_abc123", content="start"),
+                AIMessageChunk(id="lc_run_xyz", content="chunk"),
+            ],
+            "resp_abc123",
+            "resp_abc123",
+        ),
+        pytest.param(
+            [AIMessageChunk(id="lc_run_xyz", content="chunk")],
+            "lc_run_xyz",
+            None,
+        ),
+        pytest.param(
+            [
+                AIMessageChunk(id="lc_run_xyz", content="chunk"),
+                AIMessageChunk(id="lc_run_xyz", content="chunk"),
+                AIMessageChunk(id="lc_run_xyz", content="chunk"),
+            ],
+            "lc_run_xyz",
+            None,
+        ),
+        pytest.param(
+            [
+                AIMessageChunk(id="lc_run_xyz", content="chunk"),
+                AIMessageChunk(id="lc_run_2", content="chunk"),
+                AIMessageChunk(id="lc_run_3", content="chunk"),
+            ],
+            "lc_run_3",
+            None,
+        ),
+        pytest.param(
+            [
+                AIMessageChunk(id="resp_abc123", content="start"),
+                AIMessageChunk(id="some_other_id", content="other"),
+            ],
+            "some_other_id",
+            "resp_abc123",
+        ),
+        pytest.param(
+            [
+                AIMessageChunk(id="resp_first", content="first"),
+                AIMessageChunk(id="resp_second", content="second"),
+                AIMessageChunk(id="lc_run_xyz", content="chunk"),
+            ],
+            "resp_second",
+            "resp_second",
+        ),
+        pytest.param(
+            [AIMessageChunk(id=None, content="no id")],
+            None,
+            None,
+        ),
+        pytest.param(
+            [
+                AIMessageChunk(id="resp_abc123", content="start"),
+                AIMessageChunk(id=None, content="no id"),
+            ],
+            None,
+            "resp_abc123",
+        ),
+    ],
+)
+def test_replace_langchain_id_with_open_ai_id(
+    checkpoint_notifier,
+    incoming_messages,
+    expected_final_id,
+    expected_current_resp_id,
+):
+    for message in incoming_messages:
+        checkpoint_notifier._replace_langchain_id_with_open_ai_id(message)
+
+    assert incoming_messages[-1].id == expected_final_id
+    assert checkpoint_notifier.current_resp_id == expected_current_resp_id
+
+
 def test_most_recent_new_checkpoint_with_missing_message_ids(checkpoint_notifier):
     """Test that messages without message_id are handled gracefully."""
     client_capabilities.set({"incremental_streaming"})
