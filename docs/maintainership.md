@@ -28,7 +28,7 @@ While there is no strict guideline on how to become a maintainer, we generally r
 
 ### Steps to become an AI Gateway maintainer
 
-1. **Create a merge request** to update your [team member entry](https://gitlab.com/gitlab-com/www-gitlab-com/blob/master/doc/team_database.md) and indicate your role as one or both of the following:
+1. **Create a merge request** to update your [team member entry](https://gitlab.com/gitlab-com/www-gitlab-com/blob/master/doc/team_database.md) and indicate your role as the following:
    - `maintainer ai-gateway`
 1. **Assign the MR** to your manager and `@gitlab-org/maintainers/ai-gateway` for approval and merge.
 1. **Request group membership** after the MR is merged:
@@ -59,7 +59,7 @@ While there is no strict guideline on how to become a maintainer, we generally r
 
 ### Steps to become a Duo Workflow Service maintainer
 
-1. **Create a merge request** to update your [team member entry](https://gitlab.com/gitlab-com/www-gitlab-com/blob/master/doc/team_database.md) and indicate your role as one or both of the following:
+1. **Create a merge request** to update your [team member entry](https://gitlab.com/gitlab-com/www-gitlab-com/blob/master/doc/team_database.md) and indicate your role as the following:
    - `maintainer duo_workflow_service`
 1. **Assign the MR** to your manager and `@gitlab-org/maintainers/duo-workflow-service` for approval and merge.
 1. **Request group membership** after the MR is merged:
