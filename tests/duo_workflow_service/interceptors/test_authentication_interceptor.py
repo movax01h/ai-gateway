@@ -70,6 +70,7 @@ async def test_intercept_service_reflection_skips_auth_when_enabled(
         "/grpc.reflection.v1.ServerReflection/ServerReflectionInfo",
     ],
 )
+@patch.dict(os.environ, {"DUO_WORKFLOW_AUTH__ENABLED": "true"})
 @patch(
     "duo_workflow_service.interceptors.authentication_interceptor.authenticate",
     return_value=(None, MagicMock(error_message="No authorization header presented")),
