@@ -18,10 +18,8 @@ from google.rpc.error_details_pb2 import ErrorInfo
 from ai_gateway.models.base_text import TextGenModelOutput
 from ai_gateway.models.vertex_text import (
     CodeBisonModelInput,
-    CodeGeckoModelInput,
     KindVertexTextModel,
     PalmCodeBisonModel,
-    PalmCodeGeckoModel,
     PalmTextBisonModel,
     TextBisonModelInput,
     VertexAPIConnectionError,
@@ -124,38 +122,6 @@ TEST_SUFFIX = "some suffix"
             "",
             [CodeBisonModelInput(""), 0.2, 2048, 0.95, 40, 1, None],
         ),
-        (
-            PalmCodeGeckoModel,
-            TEST_PREFIX,
-            TEST_SUFFIX,
-            "some output",
-            [
-                CodeGeckoModelInput(TEST_PREFIX, TEST_SUFFIX),
-                0.2,
-                64,
-                0.95,
-                40,
-                1,
-                ["\n\n"],
-                None,
-            ],
-        ),
-        (
-            PalmCodeGeckoModel,
-            "",
-            TEST_SUFFIX,
-            "",
-            [
-                CodeGeckoModelInput("", TEST_SUFFIX),
-                0.2,
-                64,
-                0.95,
-                40,
-                1,
-                ["\n\n"],
-                None,
-            ],
-        ),
     ],
 )
 async def test_palm_model_generate(
@@ -185,13 +151,12 @@ async def test_palm_model_generate(
 @pytest.mark.parametrize(
     ("model", "model_name"),
     [
-        (PalmCodeGeckoModel, KindVertexTextModel.CODE_GECKO_002),
         (PalmCodeBisonModel, KindVertexTextModel.CODE_BISON_002),
         (PalmTextBisonModel, KindVertexTextModel.TEXT_BISON_002),
     ],
 )
 async def test_palm_model_generate_instrumented(
-    model: Type[Union[PalmTextBisonModel, PalmCodeBisonModel, PalmCodeGeckoModel]],
+    model: Type[Union[PalmTextBisonModel, PalmCodeBisonModel]],
     model_name: KindVertexTextModel,
 ):
     mock_client = Mock()
@@ -211,13 +176,6 @@ async def test_palm_model_generate_instrumented(
         (CodeBisonModelInput(""), False, None),
         (TextBisonModelInput(TEST_PREFIX), True, {"content": TEST_PREFIX}),
         (TextBisonModelInput(""), False, None),
-        (
-            CodeGeckoModelInput(TEST_PREFIX, TEST_SUFFIX),
-            True,
-            {"prefix": TEST_PREFIX, "suffix": TEST_SUFFIX},
-        ),
-        (CodeGeckoModelInput("", ""), False, None),
-        (CodeGeckoModelInput("", TEST_SUFFIX), False, None),
     ],
 )
 def test_palm_model_inputs(model_input, is_valid, output_dict):
@@ -230,7 +188,7 @@ def test_palm_model_inputs(model_input, is_valid, output_dict):
     "model,client_exception,expected_exception",
     [
         (
-            PalmCodeGeckoModel(
+            PalmCodeBisonModel(
                 Mock(spec=PredictionServiceAsyncClient),
                 "random_project",
                 "random_location",
@@ -239,7 +197,7 @@ def test_palm_model_inputs(model_input, is_valid, output_dict):
             VertexAPIConnectionError,
         ),
         (
-            PalmCodeGeckoModel(
+            PalmCodeBisonModel(
                 Mock(spec=PredictionServiceAsyncClient),
                 "random_project",
                 "random_location",
@@ -275,15 +233,10 @@ async def test_palm_model_api_error(model, client_exception, expected_exception)
             KindVertexTextModel.CODE_BISON_002,
             KindVertexTextModel.CODE_BISON_002.value,
         ),
-        (
-            PalmCodeGeckoModel,
-            KindVertexTextModel.CODE_GECKO_002,
-            KindVertexTextModel.CODE_GECKO_002.value,
-        ),
     ],
 )
 def test_palm_model_from_name(
-    model: Type[Union[PalmTextBisonModel, PalmCodeBisonModel, PalmCodeGeckoModel]],
+    model: Type[Union[PalmTextBisonModel, PalmCodeBisonModel]],
     model_name: KindVertexTextModel,
     expected_metadata_name: str,
 ):
@@ -310,25 +263,10 @@ def test_palm_model_from_name(
             None,
             None,
         ),
-        (
-            PalmCodeGeckoModel,
-            None,
-            ["\n\n"],  # we set this sequence by default
-        ),
-        (
-            PalmCodeGeckoModel,
-            ["\n\n"],
-            ["\n\n"],
-        ),
-        (
-            PalmCodeGeckoModel,
-            ["random stop sequence"],
-            ["random stop sequence"],
-        ),
     ],
 )
 async def test_palm_model_stop_sequences(
-    model: Type[Union[PalmTextBisonModel, PalmCodeBisonModel, PalmCodeGeckoModel]],
+    model: Type[Union[PalmTextBisonModel, PalmCodeBisonModel]],
     stop_sequences: Sequence[str],
     expected_stop_sequences: Sequence[str],
 ):
@@ -374,19 +312,7 @@ async def test_palm_model_stop_sequences(
             SafetyAttributes(categories=["Violent"], blocked=True),
         ),
         (
-            PalmCodeGeckoModel,
-            {
-                "safetyAttributes": {
-                    "categories": ["Violent"],
-                    "blocked": True,
-                    "scores": [1.0],
-                },
-                "content": "",
-            },
-            SafetyAttributes(categories=["Violent"], blocked=True),
-        ),
-        (
-            PalmCodeGeckoModel,
+            PalmCodeBisonModel,
             {
                 "safetyAttributes": {
                     "errors": [234],
@@ -397,7 +323,7 @@ async def test_palm_model_stop_sequences(
             SafetyAttributes(errors=[234], blocked=True),
         ),
         (
-            PalmCodeGeckoModel,
+            PalmCodeBisonModel,
             {
                 "safetyAttributes": {
                     "categories": [],
@@ -409,7 +335,7 @@ async def test_palm_model_stop_sequences(
             SafetyAttributes(categories=[], blocked=False),
         ),
         (
-            PalmCodeGeckoModel,
+            PalmCodeBisonModel,
             {
                 "content": "def awesome_func",
             },
@@ -418,7 +344,7 @@ async def test_palm_model_stop_sequences(
     ],
 )
 async def test_palm_model_safety_attributes(
-    model: Type[Union[PalmTextBisonModel, PalmCodeBisonModel, PalmCodeGeckoModel]],
+    model: Type[Union[PalmTextBisonModel, PalmCodeBisonModel]],
     prediction: dict,
     expected_safety_attributes: SafetyAttributes,
 ):

@@ -988,7 +988,7 @@ class TestCodeCompletions:
                 [
                     {
                         "model_engine": "vertex",
-                        "model_name": "code-gecko",
+                        "model_name": "codestral-2508",
                         "requests": 1,
                         "accepts": 1,
                         "errors": 0,

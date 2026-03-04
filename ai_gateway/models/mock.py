@@ -64,7 +64,7 @@ class ProxyClient(AsyncMock):  # pylint: disable=too-many-ancestors
 class LLM(TextGenModelBase):
     """Implementation of the stub model that inherits the `TextGenBaseModel` interface.
 
-    Please, use this class if you require to mock such models as `AnthropicModel` or `PalmCodeGeckoModel`
+    Please, use this class if you require to mock such models as `AnthropicModel`
     """
 
     def __init__(self, *_args: Any, **_kwargs: Any):

@@ -90,7 +90,6 @@ class ContainerCodeGenerations(containers.DeclarativeContainer):
 
 class ContainerCodeCompletions(containers.DeclarativeContainer):
     tokenizer = providers.Dependency(instance_of=PreTrainedTokenizerFast)
-    vertex_code_gecko = providers.Dependency(instance_of=TextGenModelBase)  # type: ignore[type-abstract]
     anthropic_claude = providers.Dependency(instance_of=TextGenModelBase)  # type: ignore[type-abstract]
     anthropic_claude_chat = providers.Dependency(instance_of=ChatModelBase)  # type: ignore[type-abstract]
     litellm = providers.Dependency(instance_of=TextGenModelBase)  # type: ignore[type-abstract]
@@ -203,7 +202,6 @@ class ContainerCodeSuggestions(containers.DeclarativeContainer):
     completions = providers.Container(
         ContainerCodeCompletions,
         tokenizer=tokenizer,
-        vertex_code_gecko=models.vertex_code_gecko,
         anthropic_claude=models.anthropic_claude,
         anthropic_claude_chat=models.anthropic_claude_chat,
         litellm=models.litellm,
