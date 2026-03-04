@@ -6118,14 +6118,14 @@ reference = "litellm"
 
 [[package]]
 name = "pyfakefs"
-version = "6.1.2"
+version = "6.1.4"
 description = "Implements a fake file system that mocks the Python file system modules."
 optional = false
 python-versions = ">=3.10"
 groups = ["test"]
 files = [
-    {file = "pyfakefs-6.1.2-py3-none-any.whl", hash = "sha256:f3bb5fa720b8418f5f6d5fdc15f011efbe0ef36fa9f389eadd764c5f67677971"},
-    {file = "pyfakefs-6.1.2.tar.gz", hash = "sha256:9d01641b3f65bcfc4872b5f5c8bc57f4253e4b035aaea63c57ed901c9f2e0213"},
+    {file = "pyfakefs-6.1.4-py3-none-any.whl", hash = "sha256:46bbc7520a1524af2461ddcaf4a5a800596c750bfdb75afa1afd985bf1e39536"},
+    {file = "pyfakefs-6.1.4.tar.gz", hash = "sha256:58d5902282085e8ff03f95316ce133858904096f7adbe622efef899b90695698"},
 ]
 
 [package.extras]
