@@ -234,6 +234,17 @@ configurable_unit_primitives:
         - 9970
   ```
 
+### Documentation
+
+Models per feature and default models are documented in the following pages:
+
+- [GitLab Duo Agent Platform](https://docs.gitlab.com/user/duo_agent_platform/model_selection/)
+- [GitLab Duo (Classic)](https://docs.gitlab.com/user/gitlab_duo/model_selection/)
+
+If you change models for a feature, update the corresponding page.
+
+There's an [open issue](https://gitlab.com/gitlab-org/gitlab/-/work_items/587907) to explore automation for these updates. Until then, manual updates are required to keep our customer documentation accurate.
+
 ## Developer models
 
 The `dev` configuration allows you to test experimental models with internal team members before rolling them out to everyone.
