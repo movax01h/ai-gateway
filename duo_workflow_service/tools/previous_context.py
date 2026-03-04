@@ -54,7 +54,11 @@ class GetSessionContext(DuoBaseTool):
                 )
 
             return json.dumps(
-                {"context": self._format_checkpoint_context(checkpoints[0])}
+                {
+                    "context": self._format_checkpoint_context(
+                        checkpoints[0], previous_session_id
+                    )
+                }
             )
         except Exception as e:
             return json.dumps({"error": str(e)})
@@ -64,18 +68,17 @@ class GetSessionContext(DuoBaseTool):
     ) -> Optional[str]:
         return f"Get context for session {args.previous_session_id}"
 
-    def _format_checkpoint_context(self, checkpoint: dict) -> str:
-        workflow_id = checkpoint.get("metadata", {}).get("thread_id", None)
-
-        if not workflow_id:
-            raise ValueError("Invalid checkpoint format. Valid session ID is required")
+    def _format_checkpoint_context(
+        self, checkpoint: dict, previous_session_id: int
+    ) -> str:
+        session_id = previous_session_id
 
         if not checkpoint.get("checkpoint") or not checkpoint.get("checkpoint", {}).get(
             "channel_values"
         ):
             context = Context(
                 workflow=WorkflowContext(
-                    id=workflow_id,
+                    id=session_id,
                     plan={"steps": []},
                     goal="No goal available",
                     summary="No summary available",
@@ -110,7 +113,7 @@ class GetSessionContext(DuoBaseTool):
 
         context = Context(
             workflow=WorkflowContext(
-                id=workflow_id,
+                id=session_id,
                 plan=plan,
                 goal=goal,
                 summary=summary,
