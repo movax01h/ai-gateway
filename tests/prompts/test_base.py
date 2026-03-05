@@ -768,8 +768,7 @@ def registry_fixture(
 ):
     class Registry(BasePromptRegistry):
         def __init__(self):
-            self.internal_event_client = internal_event_client
-            self.model_limits = model_limits
+            super().__init__(internal_event_client, model_limits)
 
         def get(self, *_args, **_kwargs):
             return prompt
@@ -877,7 +876,6 @@ class TestBaseRegistry:
                 )
                 == prompt
             )
-            assert prompt.internal_event_client == internal_event_client
 
             if input_model_metadata:
                 assert input_model_metadata._user == user
