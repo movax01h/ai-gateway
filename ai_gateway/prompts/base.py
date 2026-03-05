@@ -474,6 +474,14 @@ class BasePromptRegistry(ABC):
     _DEFAULT_VERSION: str | None = "^1.0.0"
     validations: set[str] | None = None
 
+    def __init__(
+        self,
+        internal_event_client: InternalEventsClient,
+        model_limits: ConfigModelLimits,
+    ):
+        self.internal_event_client = internal_event_client
+        self.model_limits = model_limits
+
     @abstractmethod
     def get(
         self,
@@ -510,7 +518,6 @@ class BasePromptRegistry(ABC):
             tools,
             **kwargs,
         )
-        prompt.internal_event_client = self.internal_event_client
         prompt.set_limits(self.model_limits)
 
         if not user.can(prompt.unit_primitive):

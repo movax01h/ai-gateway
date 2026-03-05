@@ -2,6 +2,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
+from ai_gateway.config import ConfigModelLimits
 from ai_gateway.prompts import BasePromptRegistry, Prompt
 from contract import contract_pb2
 from duo_workflow_service.executor.outbox import Outbox
@@ -13,6 +14,7 @@ from duo_workflow_service.interceptors.route.usage_billing import (
 from duo_workflow_service.workflows.abstract_workflow import AbstractWorkflow
 from lib.events import GLReportingEventContext
 from lib.events.contextvar import self_hosted_dap_billing_enabled
+from lib.internal_events.client import InternalEventsClient
 
 
 @pytest.fixture(name="workflow_id")
@@ -33,8 +35,12 @@ def mock_outbox_fixture():
 
 
 @pytest.fixture(name="mock_prompt_registry")
-def mock_prompt_registry_fixture():
+def mock_prompt_registry_fixture(
+    internal_event_client: InternalEventsClient, model_limits: ConfigModelLimits
+):
     registry = MagicMock(spec=BasePromptRegistry)
+    registry.internal_event_client = internal_event_client
+    registry.model_limits = model_limits
     mock_prompt = MagicMock(spec=Prompt)
     mock_prompt.internal_callbacks = []
     registry.get.return_value = mock_prompt

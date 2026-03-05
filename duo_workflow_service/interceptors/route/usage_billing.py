@@ -41,6 +41,7 @@ class PromptRegistrySelfHostedBillingSupport(BasePromptRegistry):
         gl_feat_context: GLReportingEventContext,
         outbox: Outbox,
     ):
+        super().__init__(instance.internal_event_client, instance.model_limits)
         self.instance = instance
         self.callback = SelfHostedBillingPromptCallbackHandler(
             workflow_id, gl_feat_context, outbox
