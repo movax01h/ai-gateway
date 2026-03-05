@@ -1,4 +1,4 @@
-from typing import Any, ClassVar, Literal
+from typing import Any, ClassVar, Literal, override
 
 from dependency_injector.wiring import Provide, inject
 from langchain_core.tools import BaseTool
@@ -145,9 +145,11 @@ class DeterministicStepComponent(BaseComponent):
         except Exception as e:
             return f"Validation error: {str(e)}"
 
+    @override
     def __entry_hook__(self) -> str:
         return f"{self.name}#deterministic_step"
 
+    @override
     def attach(self, graph: StateGraph, router: RouterProtocol) -> None:
         node = DeterministicStepNode(
             name=self.__entry_hook__(),

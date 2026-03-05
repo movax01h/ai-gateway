@@ -1,6 +1,6 @@
 from datetime import datetime, timezone
 from enum import auto
-from typing import Any, Optional
+from typing import Any, Optional, override
 
 from langchain_core.tools import BaseTool
 from pydantic import BaseModel
@@ -29,9 +29,11 @@ class UILogEventsDeterministicStep(BaseUILogEvents):
 class UILogWriterDeterministicStep(BaseUILogWriter[UILogEventsDeterministicStep]):
 
     @property
+    @override
     def events_type(self) -> type[UILogEventsDeterministicStep]:
         return UILogEventsDeterministicStep
 
+    @override
     def _log_success(
         self,
         tool: BaseTool,
@@ -53,6 +55,7 @@ class UILogWriterDeterministicStep(BaseUILogWriter[UILogEventsDeterministicStep]
             additional_context=additional_context,
         )
 
+    @override
     def _log_error(
         self,
         tool: BaseTool,

@@ -1,6 +1,6 @@
 from datetime import datetime, timezone
 from enum import auto
-from typing import Optional
+from typing import Optional, override
 
 from duo_workflow_service.agent_platform.experimental.ui_log import (
     BaseUILogEvents,
@@ -20,9 +20,11 @@ class AgentLogWriter(BaseUILogWriter[UILogEventsHumanInput]):
     """UI log writer for agent messages in HumanInputComponent."""
 
     @property
+    @override
     def events_type(self) -> type[UILogEventsHumanInput]:
         return UILogEventsHumanInput
 
+    @override
     def _log_success(
         self,
         content: str,
@@ -48,9 +50,11 @@ class UserLogWriter(BaseUILogWriter[UILogEventsHumanInput]):
     """UI log writer for user messages in HumanInputComponent."""
 
     @property
+    @override
     def events_type(self) -> type[UILogEventsHumanInput]:
         return UILogEventsHumanInput
 
+    @override
     def _log_success(
         self,
         content: str,

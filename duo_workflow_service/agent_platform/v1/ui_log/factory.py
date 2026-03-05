@@ -1,6 +1,6 @@
 from datetime import datetime, timezone
 from functools import partial
-from typing import Callable, Literal
+from typing import Callable, Literal, override
 
 from duo_workflow_service.agent_platform.v1.ui_log.base import (
     BaseUILogEvents,
@@ -25,9 +25,11 @@ class DefaultUILogWriter[E: BaseUILogEvents](BaseUILogWriter[E]):
         self._ui_roles_as = ui_role_as
 
     @property
+    @override
     def events_type(self) -> type[E]:
         return self._events_class
 
+    @override
     def _log_success(self, message: str, **kwargs) -> UiChatLog:
         return UiChatLog(
             message_type=MessageTypeEnum(self._ui_roles_as),
@@ -41,9 +43,11 @@ class DefaultUILogWriter[E: BaseUILogEvents](BaseUILogWriter[E]):
             message_id=None,
         )
 
+    @override
     def _log_warning(self, *args, **kwargs) -> UiChatLog:
         raise NotImplementedError
 
+    @override
     def _log_error(self, *args, **kwargs) -> UiChatLog:
         raise NotImplementedError
 

@@ -1,5 +1,5 @@
 from collections.abc import Mapping
-from typing import Callable, Optional, Self, Sequence, TypeAlias
+from typing import Callable, Optional, Self, Sequence, TypeAlias, override
 
 from duo_workflow_service.agent_platform.v1.components.base import BaseComponent
 
@@ -120,6 +120,7 @@ class ComponentRegistry(Mapping):
 
         return value
 
+    @override
     def __getitem__(self, key: str, /) -> ComponentClassAlias:
         """Retrieve a registered component class by name.
 
@@ -146,9 +147,11 @@ class ComponentRegistry(Mapping):
 
         return klass
 
+    @override
     def __len__(self) -> int:
         return len(self._registry)
 
+    @override
     def __iter__(self):
         yield from self._registry.__iter__()
 

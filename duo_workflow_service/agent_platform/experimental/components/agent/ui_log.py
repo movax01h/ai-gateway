@@ -1,6 +1,6 @@
 from datetime import datetime, timezone
 from enum import auto
-from typing import Any, Optional
+from typing import Any, Optional, override
 
 from langchain_core.tools import BaseTool
 from pydantic import BaseModel
@@ -31,9 +31,11 @@ class UILogEventsAgent(BaseUILogEvents):
 
 class UILogWriterAgentTools(BaseUILogWriter):
     @property
+    @override
     def events_type(self) -> type[UILogEventsAgent]:
         return UILogEventsAgent
 
+    @override
     def _log_success(
         self,
         tool: BaseTool,
@@ -54,6 +56,7 @@ class UILogWriterAgentTools(BaseUILogWriter):
             message_id=None,
         )
 
+    @override
     def _log_error(
         self,
         tool: BaseTool,
