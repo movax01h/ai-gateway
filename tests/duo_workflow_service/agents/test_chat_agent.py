@@ -21,6 +21,7 @@ from duo_workflow_service.entities.state import (
     ToolStatus,
     UiChatLog,
 )
+from duo_workflow_service.errors.typing import NotifiableException
 from duo_workflow_service.gitlab.gitlab_api import Project
 from duo_workflow_service.gitlab.gitlab_instance_info_service import GitLabInstanceInfo
 from duo_workflow_service.gitlab.gitlab_service_context import GitLabServiceContext
@@ -299,74 +300,56 @@ class TestChatAgentToolCallMessageOrdering:
 @pytest.mark.asyncio
 async def test_chat_agent_generic_error_handling(chat_agent, input):
     """Test that ChatAgent properly handles generic exceptions."""
-    chat_agent.prompt_adapter.get_response = AsyncMock(
-        side_effect=Exception("Test generic error")
-    )
+    original_error = Exception("Test generic error")
+    chat_agent.prompt_adapter.get_response = AsyncMock(side_effect=original_error)
 
-    result = await chat_agent.run(input)
+    with pytest.raises(NotifiableException) as exc_info:
+        await chat_agent.run(input)
 
-    # Verify error response structure
-    assert result["status"] == WorkflowStatusEnum.ERROR
-    assert "conversation_history" not in result
-    assert len(result["ui_chat_log"]) == 1
-    assert result["ui_chat_log"][0]["message_type"] == MessageTypeEnum.AGENT
-    assert result["ui_chat_log"][0]["status"] == ToolStatus.FAILURE
-    # pylint: disable=line-too-long
-    assert (
-        result["ui_chat_log"][0]["content"]
-        == "There was an error processing your request in the Duo Agent Platform, please contact support if the issue persists."
+    assert str(exc_info.value) == (
+        "There was an error processing your request in the Duo Agent Platform, please contact support "
+        "if the issue persists."
     )
+    assert exc_info.value.__cause__ is original_error
 
 
 @pytest.mark.asyncio
 async def test_chat_agent_provider_4xx_error_handling(chat_agent, input):
-    chat_agent.prompt_adapter.get_response = AsyncMock(
-        side_effect=APIStatusError(
-            message="Test API error",
-            response=Mock(status_code=400),
-            body={"error": {"message": "Bad request"}},
-        )
+    original_error = APIStatusError(
+        message="Test API error",
+        response=Mock(status_code=400),
+        body={"error": {"message": "Bad request"}},
     )
+    chat_agent.prompt_adapter.get_response = AsyncMock(side_effect=original_error)
 
-    result = await chat_agent.run(input)
+    with pytest.raises(NotifiableException) as exc_info:
+        await chat_agent.run(input)
 
-    # Verify error response structure
-    assert result["status"] == WorkflowStatusEnum.ERROR
-    assert "conversation_history" not in result
-    assert len(result["ui_chat_log"]) == 1
-    assert result["ui_chat_log"][0]["message_type"] == MessageTypeEnum.AGENT
-    assert result["ui_chat_log"][0]["status"] == ToolStatus.FAILURE
-    # pylint: disable=line-too-long
-    assert (
-        result["ui_chat_log"][0]["content"]
-        == "There was an error processing your request in the Duo Agent Platform, please contact support if the issue persists."
+    assert str(exc_info.value) == (
+        "There was an error processing your request in the Duo Agent Platform, please contact support "
+        "if the issue persists."
     )
+    assert exc_info.value.__cause__ is original_error
 
 
 @pytest.mark.asyncio
 async def test_chat_agent_provider_5xx_error_handling(chat_agent, input):
     """Test that ChatAgent properly handles APIStatusError exceptions."""
-    # Mock the prompt adapter to raise an APIStatusError
-    chat_agent.prompt_adapter.get_response = AsyncMock(
-        side_effect=APIStatusError(
-            message="Test API error",
-            response=Mock(status_code=500),
-            body={"error": {"message": "Internal server error"}},
-        )
+    original_error = APIStatusError(
+        message="Test API error",
+        response=Mock(status_code=500),
+        body={"error": {"message": "Internal server error"}},
     )
+    chat_agent.prompt_adapter.get_response = AsyncMock(side_effect=original_error)
 
-    result = await chat_agent.run(input)
+    with pytest.raises(NotifiableException) as exc_info:
+        await chat_agent.run(input)
 
-    # Verify error response structure
-    assert result["status"] == WorkflowStatusEnum.ERROR
-    assert "conversation_history" not in result
-    assert len(result["ui_chat_log"]) == 1
-    assert result["ui_chat_log"][0]["message_type"] == MessageTypeEnum.AGENT
-    assert result["ui_chat_log"][0]["status"] == ToolStatus.FAILURE
-    assert (
-        result["ui_chat_log"][0]["content"]
-        == "There was an error connecting to the chosen LLM provider, please contact support if the issue persists."
+    assert str(exc_info.value) == (
+        "There was an error connecting to the chosen LLM provider, please contact support "
+        "if the issue persists."
     )
+    assert exc_info.value.__cause__ is original_error
 
 
 @pytest.mark.asyncio
@@ -732,3 +715,47 @@ async def test_mixed_tool_calls_approval_only_for_requiring_tools(input):
     assert len(approval_messages) == 1
     assert approval_messages[0]["tool_info"]["name"] == "tool_requiring_approval"
     assert approval_messages[0]["tool_info"]["args"] == {"param": "value2"}
+
+
+@pytest.mark.asyncio
+async def test_chat_agent_notifiable_exception_handling(chat_agent, input):
+    """Test that ChatAgent raises NotifiableException for LLM errors."""
+    error_message = "LLM service temporarily unavailable"
+    original_error = APIStatusError(
+        message=error_message,
+        response=Mock(status_code=500),
+        body={"error": {"message": "Internal server error"}},
+    )
+
+    chat_agent.prompt_adapter.get_response = AsyncMock(side_effect=original_error)
+
+    with pytest.raises(NotifiableException) as exc_info:
+        await chat_agent.run(input)
+
+    assert str(exc_info.value) == (
+        "There was an error connecting to the chosen LLM provider, please contact support "
+        "if the issue persists."
+    )
+    assert exc_info.value.__cause__ is original_error
+
+
+@pytest.mark.asyncio
+async def test_chat_agent_notifiable_exception_non_5xx_error(chat_agent, input):
+    """Test that ChatAgent raises NotifiableException for non-500 errors with correct message."""
+    error_message = "Bad request"
+    original_error = APIStatusError(
+        message=error_message,
+        response=Mock(status_code=400),
+        body={"error": {"message": "Bad request"}},
+    )
+
+    chat_agent.prompt_adapter.get_response = AsyncMock(side_effect=original_error)
+
+    with pytest.raises(NotifiableException) as exc_info:
+        await chat_agent.run(input)
+
+    assert str(exc_info.value) == (
+        "There was an error processing your request in the Duo Agent Platform, please contact support "
+        "if the issue persists."
+    )
+    assert exc_info.value.__cause__ is original_error

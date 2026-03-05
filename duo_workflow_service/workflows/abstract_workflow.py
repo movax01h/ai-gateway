@@ -2,7 +2,9 @@
 import asyncio
 import os
 from abc import ABC, abstractmethod
+from datetime import datetime, timezone
 from typing import Any, Dict, Optional, TypedDict
+from uuid import uuid4
 
 import structlog
 from dependency_injector.wiring import Provide, inject
@@ -28,6 +30,8 @@ from duo_workflow_service.checkpointer.gitlab_workflow_utils import (
 from duo_workflow_service.checkpointer.notifier import UserInterface
 from duo_workflow_service.components import ToolsRegistry
 from duo_workflow_service.entities import DuoWorkflowStateType, WorkflowStatusEnum
+from duo_workflow_service.entities.state import MessageTypeEnum, ToolStatus, UiChatLog
+from duo_workflow_service.errors.typing import NotifiableException
 from duo_workflow_service.executor.outbox import Outbox, OutboxSignal
 from duo_workflow_service.gitlab.events import get_event
 from duo_workflow_service.gitlab.gitlab_api import (
@@ -343,6 +347,31 @@ class AbstractWorkflow(ABC):
                         )
 
                 return self._extract_trace_output(last_state)
+        except NotifiableException as e:
+            # Retrieve the original exception from the NotifiableException
+            self.last_error = e.__cause__
+
+            await self.checkpoint_notifier.send_event(
+                type="values",
+                state={
+                    "status": WorkflowStatusEnum.ERROR,
+                    "ui_chat_log": [
+                        UiChatLog(
+                            message_type=MessageTypeEnum.AGENT,
+                            message_sub_type=None,
+                            content=str(e),
+                            timestamp=datetime.now(timezone.utc).isoformat(),
+                            status=ToolStatus.FAILURE,
+                            correlation_id=None,
+                            tool_info=None,
+                            additional_context=None,
+                            message_id=f"error-{str(uuid4())}",
+                        )
+                    ],
+                },
+                stream=self._stream,
+            )
+            raise TraceableException(e)
         except BaseException as e:
             self.last_error = e
             if str(e) == AIO_CANCEL_STOP_WORKFLOW_REQUEST:

@@ -1,11 +1,19 @@
 import asyncio
 import os
+from datetime import datetime, timezone
 from unittest.mock import AsyncMock, MagicMock, Mock, patch
+from uuid import uuid4
 
 import pytest
 
 from contract import contract_pb2
-from duo_workflow_service.entities.state import WorkflowStatusEnum
+from duo_workflow_service.entities.state import (
+    MessageTypeEnum,
+    ToolStatus,
+    UiChatLog,
+    WorkflowStatusEnum,
+)
+from duo_workflow_service.errors.typing import NotifiableException
 from duo_workflow_service.tools import UNTRUSTED_MCP_WARNING
 from duo_workflow_service.workflows.abstract_workflow import (
     AbstractWorkflow,
@@ -663,3 +671,90 @@ async def test_compile_and_run_graph_returns_none_when_no_ui_chat_log(
     result = await workflow._compile_and_run_graph("Test goal")
 
     assert result is None
+
+
+@pytest.mark.asyncio
+@patch(
+    "duo_workflow_service.workflows.abstract_workflow.fetch_workflow_and_container_data"
+)
+@patch("duo_workflow_service.workflows.abstract_workflow.convert_mcp_tools_to_configs")
+@patch("duo_workflow_service.workflows.abstract_workflow.GitLabWorkflow")
+@patch("duo_workflow_service.workflows.abstract_workflow.ToolsRegistry.configure")
+@patch("duo_workflow_service.workflows.abstract_workflow.UserInterface")
+async def test_compile_and_run_graph_notifiable_exception_handling(
+    mock_user_interface,
+    mock_tools_registry,
+    mock_gitlab_workflow,
+    mock_convert_mcp_tools,
+    mock_fetch_workflow,
+    user,
+):
+    """Test that NotifiableException is caught and properly converted to error state with UI notification."""
+
+    original_error = RuntimeError("Original error details")
+
+    class MockGraphWithNotifiableException:
+        async def astream(self, input, config, stream_mode):
+            yield "updates", {"step1": {"key": "value"}}
+            raise NotifiableException(
+                "Custom error message for user"
+            ) from original_error
+
+    mock_notifier = AsyncMock()
+    mock_notifier.send_event = AsyncMock()
+    mock_user_interface.return_value = mock_notifier
+
+    mock_tools_registry.return_value = MagicMock()
+    mock_checkpointer = AsyncMock()
+    mock_checkpointer.aget_tuple = AsyncMock(return_value=None)
+    mock_checkpointer.initial_status_event = "START"
+    mock_checkpointer.send_event = AsyncMock()
+    mock_gitlab_workflow.return_value.__aenter__.return_value = mock_checkpointer
+
+    mock_project = MagicMock()
+    mock_fetch_workflow.return_value = (
+        mock_project,
+        None,
+        {
+            "project_id": 1,
+            "mcp_enabled": False,
+            "agent_privileges_names": [],
+            "pre_approved_agent_privileges_names": [],
+            "allow_agent_to_request_user": False,
+            "first_checkpoint": None,
+            "workflow_status": "",
+            "gitlab_host": "example.com",
+        },
+    )
+
+    mcp_tool = MagicMock()
+    mock_convert_mcp_tools.return_value = [mcp_tool]
+
+    workflow = MockWorkflow(
+        "test-workflow-id",
+        {},
+        CategoryEnum.WORKFLOW_SOFTWARE_DEVELOPMENT,
+        user,
+        {},
+        [mcp_tool],
+    )
+
+    workflow._compile = MagicMock(return_value=MockGraphWithNotifiableException())
+
+    with pytest.raises(TraceableException) as exc_info:
+        await workflow._compile_and_run_graph("Test goal")
+
+    exc = exc_info.value
+    assert isinstance(exc.original_exception, NotifiableException)
+    assert str(exc.original_exception) == "Custom error message for user"
+    assert workflow.last_error is original_error
+
+    mock_notifier.send_event.assert_called_once()
+    call_args = mock_notifier.send_event.call_args
+    assert call_args.kwargs["type"] == "values"
+    state = call_args.kwargs["state"]
+    assert state["status"] == WorkflowStatusEnum.ERROR
+    assert len(state["ui_chat_log"]) == 1
+    assert state["ui_chat_log"][0]["message_type"] == MessageTypeEnum.AGENT
+    assert state["ui_chat_log"][0]["content"] == "Custom error message for user"
+    assert state["ui_chat_log"][0]["status"] == ToolStatus.FAILURE

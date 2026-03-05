@@ -17,6 +17,7 @@ from duo_workflow_service.entities.state import (
     UiChatLog,
     WorkflowStatusEnum,
 )
+from duo_workflow_service.errors.typing import NotifiableException
 from duo_workflow_service.gitlab.gitlab_instance_info_service import (
     GitLabInstanceInfoService,
 )
@@ -219,22 +220,7 @@ class ChatAgent:
                 "if the issue persists."
             )
 
-        ui_chat_log = UiChatLog(
-            message_type=MessageTypeEnum.AGENT,
-            message_sub_type=None,
-            content=ui_content,
-            timestamp=datetime.now(timezone.utc).isoformat(),
-            status=ToolStatus.FAILURE,
-            correlation_id=None,
-            tool_info=None,
-            additional_context=None,
-            message_id=f"error-{str(uuid4())}",
-        )
-
-        return {
-            "status": WorkflowStatusEnum.ERROR,
-            "ui_chat_log": [ui_chat_log],
-        }
+        raise NotifiableException(ui_content) from error
 
     async def run(self, state: ChatWorkflowState) -> Dict[str, Any]:
         approval_state = state.get("approval", None)
