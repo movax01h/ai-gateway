@@ -1,11 +1,13 @@
 import asyncio
 import os
-from typing import Any, Callable
+import random
+import re
+from typing import NamedTuple
 from urllib.parse import urljoin
 
 import httpx
 import structlog
-from aiocache import Cache, cached
+from aiocache import Cache
 from aiocache.plugins import BasePlugin
 from gitlab_cloud_connector import CloudConnectorUser
 
@@ -32,35 +34,23 @@ CACHE_TTL = (
 
 MAX_KEEPALIVE_CONNECTIONS = 20  # Per client instance
 MAX_CONNECTIONS = 100  # Total connection pool size
-MAX_CACHE_SIZE = 10_000
+JITTER_FACTOR = 0.1  # ±10% jitter on cache TTLs to stagger expiry across instances
 
 SKIP_USAGE_CUTOFF_CLAIM = "skip_usage_cutoff"
 
-
-def should_skip_usage_quota_for_user(user: CloudConnectorUser | StarletteUser | None):
-    return (
-        user
-        and user.claims
-        and user.claims.extra
-        # Returns the value of SKIP_USAGE_CUTOFF_CLAIM or False if it's omitted
-        and user.claims.extra.get(SKIP_USAGE_CUTOFF_CLAIM, False)
-    )
+_CACHE_CONTROL_MAX_AGE_RE = re.compile(r"max-age=(\d+)")
 
 
-def usage_quota_cache_key_builder(
-    _fn: Callable[..., Any], *args, **_kwargs: dict[str, Any]
-) -> str:
-    context: UsageQuotaEventContext = args[1]
-    key = context.to_cache_key()
-    log.debug("Computed cache key", cache_key=key)
-    return key
+class FetchedQuota(NamedTuple):
+    allowed: bool
+    ttl: int
 
 
 class LoggingCachePlugin(BasePlugin):
     async def pre_get(self, *args, **kwargs):
         pass
 
-    async def post_get(self, _client, key: str, ret: bool | None = None, **_kwargs):
+    async def post_get(self, _client, key: str, ret=None, **_kwargs):
         message = (
             "Cache HIT - value retrieved from usage quota cache"
             if ret is not None
@@ -70,6 +60,41 @@ class LoggingCachePlugin(BasePlugin):
         log.info(message, key=key, value=ret, cache_hit=ret is not None)
 
 
+def should_skip_usage_quota_for_user(
+    user: CloudConnectorUser | StarletteUser | None,
+) -> bool:
+    skip_usage_quota = (
+        user
+        and user.claims
+        and user.claims.extra
+        # Returns the value of SKIP_USAGE_CUTOFF_CLAIM or False if it's omitted
+        and user.claims.extra.get(SKIP_USAGE_CUTOFF_CLAIM, False)
+    )
+    log.info(
+        "Usage quota skip check",
+        skip_usage_quota=bool(skip_usage_quota),
+        global_user_id=(getattr(user, "global_user_id", None) if user else None),
+    )
+    return bool(skip_usage_quota)
+
+
+def _parse_max_age(headers: httpx.Headers) -> int | None:
+    cache_control = headers.get("cache-control")
+    if not cache_control:
+        return None
+    match = _CACHE_CONTROL_MAX_AGE_RE.search(cache_control)
+    if not match:
+        return None
+    return int(match.group(1))
+
+
+def _apply_jitter(ttl: int) -> float:
+    # Apply ±10% random jitter to prevent thundering herd when multiple
+    # AI Gateway instances expire the same cache key simultaneously.
+    delta = ttl * JITTER_FACTOR
+    return ttl + random.uniform(-delta, delta)
+
+
 class UsageQuotaClient:
     """Client for checking usage quota availability via CustomersDot API.
 
@@ -77,7 +102,8 @@ class UsageQuotaClient:
     is unavailable or returns an error, quota checks will pass to avoid
     blocking legitimate users.
 
-    Results are cached for 1 hour (configurable via AIGW_MOCK_USAGE_CREDITS).
+    Results are cached in-memory using Cache-Control max-age from CustomersDot
+    responses, with a fallback TTL when the header is absent.
 
     Args:
         customersdot_url: Base URL of the CustomersDot service
@@ -106,6 +132,8 @@ class UsageQuotaClient:
         self.request_timeout = request_timeout
         self._http_client: httpx.AsyncClient | None = None
         self._client_lock = asyncio.Lock()
+        self.cache = Cache(Cache.MEMORY, plugins=[LoggingCachePlugin()])
+        self._inflight: dict[str, asyncio.Task[bool]] = {}
 
     async def _get_client(self) -> httpx.AsyncClient:
         """Get or create persistent HTTP client (lazy initialization).
@@ -138,18 +166,12 @@ class UsageQuotaClient:
                 )
         return self._http_client
 
-    @cached(
-        ttl=CACHE_TTL,
-        cache=Cache.MEMORY,
-        noself=True,
-        key_builder=usage_quota_cache_key_builder,
-        plugins=[LoggingCachePlugin()],
-    )
     async def check_quota_available(self, context: UsageQuotaEventContext) -> bool:
         """Check if the consumer has available usage quota.
 
         Makes a HEAD request to CustomersDot's /api/v1/consumers/resolve endpoint.
-        Results are cached for 1 hour to reduce load on CustomersDot and to avoid affecting latency of AIGW.
+        Results are cached using the Cache-Control max-age header from the response,
+        falling back to CACHE_TTL when the header is absent.
 
         Args:
             context: Usage quota context containing consumer identification
@@ -171,6 +193,33 @@ class UsageQuotaClient:
             log.debug("Usage quota is disabled")
             return True
 
+        cache_key = context.to_cache_key()
+        cached_value = await self.cache.get(cache_key)
+        if cached_value is not None:
+            return cached_value
+
+        # Coalesce concurrent requests for the same cache key: only the first
+        # coroutine makes the HTTP call; others await the same future.
+        if cache_key in self._inflight:
+            return await asyncio.shield(self._inflight[cache_key])
+
+        async def _fetch_and_cache() -> bool:
+            allowed, ttl = await self._fetch_quota(context, cache_key)
+            jittered_ttl = _apply_jitter(ttl)
+            await self.cache.set(cache_key, allowed, ttl=jittered_ttl)
+            return allowed
+
+        task = asyncio.get_running_loop().create_task(_fetch_and_cache())
+        self._inflight[cache_key] = task
+
+        try:
+            return await asyncio.shield(task)
+        finally:
+            self._inflight.pop(cache_key, None)
+
+    async def _fetch_quota(
+        self, context: UsageQuotaEventContext, cache_key: str
+    ) -> FetchedQuota:
         realm = getattr(context, "realm", "unknown")
         params = context.model_dump(exclude_none=True, exclude_unset=True)
         # We always send feature_ai_catalog_item even when it's None
@@ -179,7 +228,6 @@ class UsageQuotaClient:
         context_correlation_id = getattr(
             current_event_context.get(), "correlation_id", None
         )
-        cache_key = context.to_cache_key()
 
         headers = {
             "X-Admin-Email": str(self.customersdot_api_user),
@@ -213,6 +261,15 @@ class UsageQuotaClient:
             # but we currently mark them as fail-open.
 
             status = response.status_code
+            max_age = _parse_max_age(response.headers)
+            ttl = max_age if max_age is not None else CACHE_TTL
+
+            log.info(
+                "Parsed Cache-Control header",
+                max_age=max_age,
+                effective_ttl=ttl,
+                status_code=status,
+            )
 
             if status == httpx.codes.PAYMENT_REQUIRED:
                 log.info(
@@ -224,7 +281,7 @@ class UsageQuotaClient:
                 USAGE_QUOTA_CUSTOMERSDOT_REQUESTS_TOTAL.labels(
                     outcome="denied", status=str(status)
                 ).inc()
-                return False
+                return FetchedQuota(False, ttl)
 
             response.raise_for_status()
 
@@ -237,7 +294,7 @@ class UsageQuotaClient:
                 realm=realm,
                 correlation_id=context_correlation_id,
             )
-            return True
+            return FetchedQuota(True, ttl)
 
         except httpx.TimeoutException as e:
             USAGE_QUOTA_CUSTOMERSDOT_REQUESTS_TOTAL.labels(

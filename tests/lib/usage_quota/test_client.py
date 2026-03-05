@@ -1,18 +1,20 @@
 """Unit tests for UsageQuotaClient."""
 
-from typing import AsyncGenerator
+import asyncio
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import httpx
 import pytest
-import pytest_asyncio
 from gitlab_cloud_connector import CloudConnectorUser, UserClaims
 
 from lib.billing_events.context import UsageQuotaEventContext
 from lib.context import StarletteUser
 from lib.usage_quota.client import (
+    JITTER_FACTOR,
     SKIP_USAGE_CUTOFF_CLAIM,
     UsageQuotaClient,
+    _apply_jitter,
+    _parse_max_age,
     should_skip_usage_quota_for_user,
 )
 from lib.usage_quota.errors import (
@@ -20,80 +22,7 @@ from lib.usage_quota.errors import (
     UsageQuotaHTTPError,
     UsageQuotaTimeoutError,
 )
-
-
-@pytest_asyncio.fixture(name="usage_quota_client")
-async def usage_quota_client_fixture() -> AsyncGenerator[UsageQuotaClient, None]:
-    """Create a UsageQuotaClient instance for testing."""
-    usage_quota_client = UsageQuotaClient(
-        customersdot_url="https://customers.gitlab.local/",
-        customersdot_api_user="aigw@gitlab.local",
-        customersdot_api_token="customersdot_api_token",
-        request_timeout=1.0,
-    )
-
-    # NOTE: The `check_quota_available` cache is not scoped to individual instances. For clarity, we call the cache
-    # clear method on the class (even though `usage_quota_client.check_quota_available.cache.clear()` would have the
-    # same effect). It's also important to clear the cache _before_ and _after_ yielding the client, because other
-    # instances not created through this fixture could have dirtied it or be affected by our instance.
-    await UsageQuotaClient.check_quota_available.cache.clear()
-
-    yield usage_quota_client
-
-    await usage_quota_client.aclose()
-    await UsageQuotaClient.check_quota_available.cache.clear()
-
-
-@pytest.fixture(name="usage_quota_context")
-def usage_quota_context_fixture() -> UsageQuotaEventContext:
-    """Create a UsageQuotaEventContext for testing."""
-    return UsageQuotaEventContext(
-        environment="production",
-        realm="saas",
-        deployment_type="saas",
-        instance_id="00000000-1111-2222-3333-000000000000",
-        unique_instance_id="00000000-1111-2222-3333-000000000000",
-        feature_enablement_type="duo_pro",
-        ultimate_parent_namespace_id=123,
-        namespace_id=456,
-        user_id="user_123",
-        global_user_id="gid://gitlab/User/123",
-        correlation_id="correlation_id",
-    )
-
-
-@pytest.fixture(name="mock_http_client")
-def http_client_mock() -> AsyncMock:
-    """Create a mock AsyncClient for testing."""
-    mock_client = AsyncMock()
-    mock_client.__aenter__ = AsyncMock(return_value=mock_client)
-    mock_client.__aexit__ = AsyncMock(return_value=None)
-    return mock_client
-
-
-@pytest.fixture(name="mock_success_response")
-def success_response_mock() -> MagicMock:
-    """Create a mock response for successful quota check (200 OK)."""
-    mock_response = MagicMock()
-    mock_response.status_code = 200
-    mock_response.raise_for_status = MagicMock()
-    return mock_response
-
-
-@pytest.fixture(name="mock_quota_exhausted_response")
-def quota_exhausted_response_mock() -> MagicMock:
-    """Create a mock response for exhausted quota (402 Payment Required)."""
-    mock_response = MagicMock()
-    mock_response.status_code = 402
-    return mock_response
-
-
-@pytest.fixture(name="mock_error_response")
-def error_response_mock() -> MagicMock:
-    """Create a mock response for HTTP errors."""
-    mock_response = MagicMock()
-    mock_response.status_code = 500
-    return mock_response
+from tests.lib.usage_quota.conftest import _make_response
 
 
 @pytest.mark.parametrize(
@@ -442,7 +371,7 @@ class TestCheckQuotaAvailable:
             request_timeout=1.0,
         )
 
-        await client.check_quota_available.cache.clear()
+        await client.cache.clear()
 
         with patch("httpx.AsyncClient") as mock_client_class:
             mock_http_client.head = AsyncMock(return_value=mock_success_response)
@@ -471,7 +400,7 @@ class TestCheckQuotaAvailable:
             request_timeout=1.0,
         )
 
-        await client.check_quota_available.cache.clear()
+        await client.cache.clear()
 
         with patch("httpx.AsyncClient") as mock_client_class:
             mock_http_client.head = AsyncMock(return_value=mock_success_response)
@@ -498,7 +427,7 @@ class TestCheckQuotaAvailable:
             request_timeout=1.0,
         )
 
-        await client.check_quota_available.cache.clear()
+        await client.cache.clear()
 
         with patch("httpx.AsyncClient") as mock_client_class:
             mock_http_client.head = AsyncMock(return_value=mock_success_response)
@@ -786,3 +715,233 @@ class TestModelIdParameter:
             call_args = mock_http_client.head.call_args
             params = call_args[1]["params"]
             assert "model_id" not in params
+
+
+class TestParseMaxAge:
+    """Tests for _parse_max_age helper."""
+
+    @pytest.mark.parametrize(
+        "header_value,expected",
+        [
+            ("max-age=1800", 1800),
+            ("max-age=300, private", 300),
+            ("public, max-age=60", 60),
+            ("max-age=0", 0),
+            ("max-age=3600, must-revalidate", 3600),
+        ],
+    )
+    def test_parses_valid_max_age(self, header_value, expected):
+        """Should extract max-age value from valid Cache-Control headers."""
+        headers = httpx.Headers({"cache-control": header_value})
+        assert _parse_max_age(headers) == expected
+
+    @pytest.mark.parametrize(
+        "header_value",
+        [
+            "no-cache",
+            "private",
+            "no-store",
+            "max-age=abc",
+        ],
+    )
+    def test_returns_none_for_missing_max_age(self, header_value):
+        """Should return None when max-age is absent or malformed."""
+        headers = httpx.Headers({"cache-control": header_value})
+        assert _parse_max_age(headers) is None
+
+    def test_returns_none_when_no_cache_control_header(self):
+        """Should return None when Cache-Control header is absent."""
+        headers = httpx.Headers()
+        assert _parse_max_age(headers) is None
+
+
+class TestCacheControlIntegration:
+    """Tests for Cache-Control driven caching behavior."""
+
+    @pytest.mark.asyncio
+    async def test_uses_max_age_from_response(
+        self,
+        usage_quota_client: UsageQuotaClient,
+        usage_quota_context: UsageQuotaEventContext,
+        mock_http_client: AsyncMock,
+    ):
+        """Should cache using max-age from Cache-Control header."""
+        response = _make_response(200, "max-age=120, private")
+
+        with patch("httpx.AsyncClient") as mock_client_class:
+            mock_http_client.head = AsyncMock(return_value=response)
+            mock_client_class.return_value = mock_http_client
+
+            await usage_quota_client.check_quota_available(usage_quota_context)
+
+        cache_key = usage_quota_context.to_cache_key()
+        cached_value = await usage_quota_client.cache.get(cache_key)
+        assert cached_value is True
+
+    @pytest.mark.asyncio
+    async def test_falls_back_to_default_ttl_without_header(
+        self,
+        usage_quota_client: UsageQuotaClient,
+        usage_quota_context: UsageQuotaEventContext,
+        mock_http_client: AsyncMock,
+    ):
+        """Should fall back to CACHE_TTL when Cache-Control header is absent."""
+        response = _make_response(200)
+
+        with patch("httpx.AsyncClient") as mock_client_class:
+            mock_http_client.head = AsyncMock(return_value=response)
+            mock_client_class.return_value = mock_http_client
+
+            await usage_quota_client.check_quota_available(usage_quota_context)
+
+        cache_key = usage_quota_context.to_cache_key()
+        cached_value = await usage_quota_client.cache.get(cache_key)
+        assert cached_value is True
+
+    @pytest.mark.asyncio
+    async def test_caches_402_with_max_age(
+        self,
+        usage_quota_client: UsageQuotaClient,
+        usage_quota_context: UsageQuotaEventContext,
+        mock_http_client: AsyncMock,
+    ):
+        """Should cache 402 responses using max-age from header."""
+        response = _make_response(402, "max-age=300, private")
+
+        with patch("httpx.AsyncClient") as mock_client_class:
+            mock_http_client.head = AsyncMock(return_value=response)
+            mock_client_class.return_value = mock_http_client
+
+            result = await usage_quota_client.check_quota_available(usage_quota_context)
+
+        assert result is False
+        cache_key = usage_quota_context.to_cache_key()
+        cached_value = await usage_quota_client.cache.get(cache_key)
+        assert cached_value is False
+
+    @pytest.mark.asyncio
+    async def test_cache_hit_skips_http_call(
+        self,
+        usage_quota_client: UsageQuotaClient,
+        usage_quota_context: UsageQuotaEventContext,
+        mock_http_client: AsyncMock,
+    ):
+        """Should return cached value without making HTTP request on cache hit."""
+        cache_key = usage_quota_context.to_cache_key()
+        await usage_quota_client.cache.set(cache_key, True, ttl=600)
+
+        with patch("httpx.AsyncClient") as mock_client_class:
+            mock_http_client.head = AsyncMock()
+            mock_client_class.return_value = mock_http_client
+
+            result = await usage_quota_client.check_quota_available(usage_quota_context)
+
+        assert result is True
+        mock_http_client.head.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_cache_hit_returns_false_for_denied(
+        self,
+        usage_quota_client: UsageQuotaClient,
+        usage_quota_context: UsageQuotaEventContext,
+    ):
+        """Should return False from cache when quota was denied."""
+        cache_key = usage_quota_context.to_cache_key()
+        await usage_quota_client.cache.set(cache_key, False, ttl=600)
+
+        result = await usage_quota_client.check_quota_available(usage_quota_context)
+
+        assert result is False
+
+    @pytest.mark.asyncio
+    async def test_second_call_uses_cache(
+        self,
+        usage_quota_client: UsageQuotaClient,
+        usage_quota_context: UsageQuotaEventContext,
+        mock_http_client: AsyncMock,
+    ):
+        """Should use cache on second call instead of making another HTTP request."""
+        response = _make_response(200, "max-age=1800, private")
+
+        with patch("httpx.AsyncClient") as mock_client_class:
+            mock_http_client.head = AsyncMock(return_value=response)
+            mock_client_class.return_value = mock_http_client
+
+            result1 = await usage_quota_client.check_quota_available(
+                usage_quota_context
+            )
+            result2 = await usage_quota_client.check_quota_available(
+                usage_quota_context
+            )
+
+        assert result1 is True
+        assert result2 is True
+        assert mock_http_client.head.call_count == 1
+
+
+class TestJitter:
+    """Tests for TTL jitter application."""
+
+    @pytest.mark.asyncio
+    async def test_jitter_varies_cache_ttl(
+        self,
+    ):
+        """Should apply jitter so that not all entries expire at the same time."""
+        ttls = [_apply_jitter(1000) for _ in range(50)]
+
+        min_expected = 1000 * (1 - JITTER_FACTOR)
+        max_expected = 1000 * (1 + JITTER_FACTOR)
+        for ttl in ttls:
+            assert min_expected <= ttl <= max_expected
+
+        assert max(ttls) - min(ttls) > 10
+
+
+class TestConcurrentRequests:
+    """Tests for concurrent request coalescing."""
+
+    @pytest.mark.asyncio
+    async def test_concurrent_requests_coalesced_to_single_http_call(
+        self,
+        usage_quota_client: UsageQuotaClient,
+        usage_quota_context: UsageQuotaEventContext,
+        mock_http_client: AsyncMock,
+    ):
+        """Should make only one HTTP request when multiple coroutines check the same key concurrently."""
+        response = _make_response(200, "max-age=120, private")
+
+        with patch("httpx.AsyncClient") as mock_client_class:
+            mock_http_client.head = AsyncMock(return_value=response)
+            mock_client_class.return_value = mock_http_client
+
+            results = await asyncio.gather(
+                usage_quota_client.check_quota_available(usage_quota_context),
+                usage_quota_client.check_quota_available(usage_quota_context),
+                usage_quota_client.check_quota_available(usage_quota_context),
+            )
+
+        assert results == [True, True, True]
+        assert mock_http_client.head.call_count == 1
+
+    @pytest.mark.asyncio
+    async def test_concurrent_requests_propagate_errors(
+        self,
+        usage_quota_client: UsageQuotaClient,
+        usage_quota_context: UsageQuotaEventContext,
+        mock_http_client: AsyncMock,
+    ):
+        """Should propagate errors to all waiting coroutines."""
+        with patch("httpx.AsyncClient") as mock_client_class:
+            mock_http_client.head = AsyncMock(
+                side_effect=httpx.TimeoutException("timeout")
+            )
+            mock_client_class.return_value = mock_http_client
+
+            results = await asyncio.gather(
+                usage_quota_client.check_quota_available(usage_quota_context),
+                usage_quota_client.check_quota_available(usage_quota_context),
+                return_exceptions=True,
+            )
+
+        for result in results:
+            assert isinstance(result, UsageQuotaTimeoutError)
