@@ -1,5 +1,5 @@
 from functools import partial
-from typing import Any, ClassVar, Optional
+from typing import Any, ClassVar, Optional, override
 
 from dependency_injector.wiring import Provide, inject
 from langchain_core.messages import HumanMessage
@@ -86,9 +86,11 @@ class OneOffComponent(BaseComponent):
             data["inputs"] = ["context:goal"]
         return data
 
+    @override
     def __entry_hook__(self) -> str:
         return f"{self.name}#llm"
 
+    @override
     def attach(self, graph: StateGraph, router: RouterProtocol) -> None:
         tools = self.toolset.bindable
         tool_choice = "any"

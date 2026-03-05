@@ -1,6 +1,6 @@
 from abc import ABC, abstractmethod
 from enum import StrEnum, auto
-from typing import Any, Callable, NamedTuple, Protocol, Self
+from typing import Any, Callable, NamedTuple, Protocol, Self, override
 
 from pydantic import BaseModel, ConfigDict, PrivateAttr, model_validator
 
@@ -42,6 +42,7 @@ class BaseUILogEvents(StrEnum):
             # Start = "on_start"   # Key not uppercase version of value
     """
 
+    @override
     def __init_subclass__(cls, **kwargs):
         super().__init_subclass__(**kwargs)
 
@@ -60,6 +61,7 @@ class BaseUILogEvents(StrEnum):
                 )
 
     @staticmethod
+    @override
     def _generate_next_value_(
         name: str, start: int, count: int, last_values: list[str]
     ) -> str:

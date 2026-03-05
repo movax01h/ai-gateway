@@ -1,5 +1,5 @@
 from abc import ABC, abstractmethod
-from typing import Annotated, Any, ClassVar, Optional, Protocol, Self
+from typing import Annotated, Any, ClassVar, Optional, Protocol, Self, override
 
 from gitlab_cloud_connector import CloudConnectorUser
 from langgraph.graph import END, StateGraph
@@ -77,9 +77,11 @@ class BaseComponent(BaseModel, ABC):
 
 
 class EndComponent(BaseComponent):
+    @override
     def __entry_hook__(self) -> Annotated[str, "Components entry node name"]:
         return "terminate_flow"
 
+    @override
     def attach(
         self, graph: StateGraph, router: Optional[RouterProtocol] = None
     ) -> None:

@@ -1,4 +1,4 @@
-from typing import Annotated, ClassVar, Self
+from typing import Annotated, ClassVar, Self, override
 
 from langgraph.graph import StateGraph
 from pydantic import model_validator
@@ -28,9 +28,11 @@ class Router(BaseRouter):
 
         return self
 
+    @override
     def attach(self, graph: StateGraph):
         self.from_component.attach(graph, self)
 
+    @override
     def route(
         self, state: FlowState
     ) -> Annotated[str, "Next component entry hook node"]:

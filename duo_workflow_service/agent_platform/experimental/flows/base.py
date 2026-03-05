@@ -1,7 +1,7 @@
 import json
 from datetime import datetime, timezone
 from enum import StrEnum
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Optional, override
 
 import jsonschema
 from dependency_injector.wiring import Provide, inject
@@ -117,6 +117,7 @@ class Flow(AbstractWorkflow):
 
     # pylint: enable=dangerous-default-value
 
+    @override
     def get_workflow_state(self, goal: str) -> FlowState:  # type: ignore[override]
         initial_ui_chat_log = UiChatLog(
             message_type=MessageTypeEnum.TOOL,
@@ -207,6 +208,7 @@ class Flow(AbstractWorkflow):
 
         return Command(resume=event)
 
+    @override
     async def get_graph_input(
         self, goal: str, status_event: str, checkpoint_tuple: Any
     ) -> Any:
@@ -315,6 +317,7 @@ class Flow(AbstractWorkflow):
 
             router.attach(graph)
 
+    @override
     def _compile(
         self,
         goal: str,
@@ -335,6 +338,7 @@ class Flow(AbstractWorkflow):
 
         return graph.compile(checkpointer=checkpointer)
 
+    @override
     async def _handle_workflow_failure(
         self, error: BaseException, compiled_graph: Any, graph_config: Any
     ):

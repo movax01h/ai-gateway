@@ -1,4 +1,4 @@
-from typing import Annotated, ClassVar, Optional
+from typing import Annotated, ClassVar, Optional, override
 
 from dependency_injector.wiring import Provide, inject
 from langgraph.graph import StateGraph
@@ -84,10 +84,12 @@ class HumanInputComponent(BaseComponent):
 
     _allowed_input_targets = tuple(FlowState.__annotations__.keys())
 
+    @override
     def __entry_hook__(self) -> Annotated[str, "Components entry node name"]:
         return f"{self.name}#request"
 
     @property
+    @override
     def outputs(self) -> tuple[IOKey, ...]:
         replacements = {
             IOKeyTemplate.COMPONENT_NAME_TEMPLATE: self.name,
@@ -101,6 +103,7 @@ class HumanInputComponent(BaseComponent):
             {IOKeyTemplate.COMPONENT_NAME_TEMPLATE: self.name}
         )
 
+    @override
     def attach(self, graph: StateGraph, router: RouterProtocol) -> None:
         # Prepare prompt if provided
         prompt = None

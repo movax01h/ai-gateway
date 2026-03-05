@@ -1,4 +1,4 @@
-from typing import Annotated, ClassVar, Literal, Optional
+from typing import Annotated, ClassVar, Literal, Optional, override
 
 from dependency_injector.wiring import Provide, inject
 from langchain_core.messages import AIMessage, BaseMessage
@@ -106,9 +106,11 @@ class AgentComponent(BaseComponent):
             return f"{self.name}#final_response"
         return f"{self.name}#tools"
 
+    @override
     def __entry_hook__(self) -> Annotated[str, "Entry node name"]:
         return f"{self.name}#agent"
 
+    @override
     def attach(self, graph: StateGraph, router: RouterProtocol) -> None:
         tools = self.toolset.bindable + [AgentFinalOutput]
         tool_choice = "any"  # make sure the LLM always uses a tool to respond.
