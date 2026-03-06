@@ -312,8 +312,14 @@ class LocalPromptRegistry(BasePromptRegistry):
         Returns:
             The adjusted tool_choice value
         """
-
         model_identifier = getattr(model_metadata, "identifier", None)
+        if model_identifier is None:
+            # GitLab-managed models don't have an identifier field
+            # use llm_definition.params.model which contains the provider-prefixed model path
+            llm_def = getattr(model_metadata, "llm_definition", None)
+            params = getattr(llm_def, "params", None)
+            model_identifier = getattr(params, "model", None) if params else None
+
         if (
             tool_choice == "any"
             and model_identifier
