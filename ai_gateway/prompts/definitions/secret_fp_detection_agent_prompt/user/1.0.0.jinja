@@ -8,7 +8,7 @@ When analyzing secret detection findings for false positive detection, follow th
 
 <guidelines>
 
-**CRITICAL PRINCIPLE**: A credential is a FALSE POSITIVE only if you have CONCRETE EVIDENCE it is fake or invalid. Context, dataset purpose, or project type are NOT sufficient reasons to dismiss a finding. Secret scanning datasets often contain REAL leaked credentials collected from public repositories.
+**CRITICAL PRINCIPLE**: Only recommend dismissal as a false positive when you have clear, articulable evidence the credential is not real. If you are uncertain, do not flag it as a false positive — assign a likelihood in the 41-60 range and let the developer decide. It is better to miss a false positive than to incorrectly dismiss a real secret.
 
 1. **Context Analysis**: Always examine the broader code context around the reported secret, including comments, variable names, and surrounding code. However, context explains WHY a secret is present, not whether it's real.
 
@@ -29,9 +29,7 @@ When analyzing secret detection findings for false positive detection, follow th
   - Variable names containing "test", "demo", or "example"
   - Comments suggesting it's for testing
 
-  IMPORTANT: Secret scanning datasets contain REAL credentials found in public repositories. The presence of a credential in such a dataset means it WAS LEAKED, not that it's fake.
-
-4. **Actual False Positive Indicators** (require CONCRETE EVIDENCE):
+4. **False Positive Indicators** — look actively for these patterns before scoring:
   - Explicit placeholder syntax: ${API_KEY}, <YOUR_KEY_HERE>, [INSERT_KEY_HERE]
   - Documented test tokens from official sources (e.g., GitHub's official test token documentation)
   - Credentials explicitly marked as "FAKE", "DUMMY", "EXAMPLE" in comments
@@ -41,6 +39,10 @@ When analyzing secret detection findings for false positive detection, follow th
   - Public keys (not private keys) - verify they are actually public
   - Environment variable names without actual values (e.g., "${DB_PASSWORD}")
   - Credentials that are actually public constants or identifiers
+  - **Placeholder value patterns**: passwords or tokens using dictionary words (e.g. "password", "example", "topsecret"), obviously artificial repeating patterns where entire numeric segments are identical repeated digits, sequential numeric patterns, or masked characters such as repeated `x` or `*` characters
+  - **Token structure analysis**: some token formats (e.g. Slack `xoxb-`) contain a numeric workspace ID segment followed by a high-entropy token segment. Only flag numeric segments as suspicious if they consist of obviously artificial repeating or sequential digits — realistic non-repeating digits followed by high-entropy alphanumeric content indicates a real credential structure
+  - **Client-side public API keys**: API keys embedded in public HTML/JS (e.g. Google Maps `<script>` tags) may be intended for client-side use, but do not assume they are automatically low-risk. Evaluate whether there is explicit evidence of proper domain/IP restrictions. Distinguish between keys in public-facing HTML (more likely intentional) and keys in `.env` or config files
+  - **Passwords resembling personal names**: a password that looks like a person's name in a connection string is consistent with a real credential, but names are also common placeholders. Consider surrounding context — whether the connection string references real infrastructure — before deciding
 
 5. **True Positive Indicators**:
   - Credentials in valid format for their type (GitHub PAT format, MongoDB connection string, etc.)
@@ -50,43 +52,42 @@ When analyzing secret detection findings for false positive detection, follow th
   - Credentials that reference real infrastructure (real hostnames, real service names)
   - Credentials in configuration files or connection strings
   - No explicit evidence that the credential is fake or revoked
-  - Credentials found in datasets of real leaks
 
 6. **Critical Analysis Requirements**:
-  - Do NOT assume a credential is fake based on dataset context
-  - Do NOT assume a credential is fake based on project purpose
-  - Do NOT assume a credential is fake based on simple/memorable values
-  - DO verify if there is CONCRETE EVIDENCE the credential is invalid
-  - DO consider that even "test" credentials on real infrastructure pose security risks
-  - DO treat credentials in leak datasets as REAL unless proven otherwise
+  - DO actively look for placeholder patterns, masking characters, and artificial structure before scoring
+  - DO evaluate the credential's own characteristics independently of its location or context
+  - DO use 41-60 when genuinely uncertain — do not force a confident FP or TP classification on ambiguous cases
+  - Do NOT assume a credential is fake based on dataset context or project purpose alone
+  - Do NOT assume a credential is real simply because no FP evidence was found — look actively
 
 7. **Analysis Steps**:
   - Read the file containing the detected secret
   - Examine surrounding code and comments
+  - Actively check the credential value for placeholder patterns (repeating digits, dictionary words, masking characters)
   - Check if the credential format matches real service specifications
-  - Look for EXPLICIT evidence it's fake (placeholder syntax, "FAKE" markers, etc.)
+  - Look for explicit evidence it's fake (placeholder syntax, "FAKE" markers, artificial structure)
   - Check if the credential references real services/endpoints
   - Determine if the credential is actually used in functional code
   - Assess the security risk if the credential were real
-  - Default to TRUE POSITIVE unless you have concrete evidence otherwise
+  - If uncertain after all steps, score 41-60 and explain what would resolve the ambiguity
 
 8. **File Examination Strategy**:
   - Read the specific file mentioned in the finding
-  - Look for EXPLICIT comments marking it as fake/example
+  - Look for explicit comments marking it as fake/example
   - Check variable names and assignments
   - Examine nearby code for actual usage
   - Look for references to real services or infrastructure
   - Verify the credential format against service specifications
   - Check if similar credentials in the codebase are real or fake
-  - Do NOT use file path or project type as dismissal criteria
+  - Do NOT use file path or project type as the sole dismissal criteria
 
 9. **Output Requirements**:
   - Create a JSON payload
   - Include false_positive_likelihood (0-100 scale)
   - Provide detailed explanation of your analysis
   - Reference specific code sections and context
-  - Explain what CONCRETE EVIDENCE supports your conclusion
-  - For any false positive claim, provide explicit proof
+  - Explain what evidence supports your conclusion
+  - For any false positive claim, articulate the specific pattern or evidence that indicates it is not a real secret
 
 10. **False Positive Likelihood Scale**:
   - 0-20: Definitely a true positive (high risk) - real credential with no evidence of being fake
@@ -109,7 +110,6 @@ When analyzing secret detection findings for false positive detection, follow th
     - Code changes: move to environment variables or secret management
     - Prevention: implement secret scanning in CI/CD
     - Best practices for secret management
-    - Note: Even if in a test dataset, the credential should be treated as compromised
 
 </guidelines>
 
@@ -146,11 +146,17 @@ Where:
 **For FALSE POSITIVES (false_positive_likelihood >= 61):**
 The explanation should include:
   - Summary of the finding and why it's a false positive
-  - EXPLICIT CONCRETE EVIDENCE proving it's not a real secret
+  - The specific pattern or evidence that indicates it is not a real secret
   - Code references and context
   - Why the secret detection tool flagged this incorrectly
 
-**For TRUE POSITIVES (false_positive_likelihood < 61):**
+**For UNCERTAIN CASES (false_positive_likelihood 41-60):**
+The explanation should include:
+  - Summary of the finding and what makes it ambiguous
+  - What evidence points toward TP and what points toward FP
+  - What additional context or information would resolve the ambiguity
+
+**For TRUE POSITIVES (false_positive_likelihood < 41):**
 The explanation should include ALL of the following sections:
 
 1. **Secret Analysis**
