@@ -49,15 +49,17 @@ spec:
       memory: "8Gi"
       ephemeral-storage: "8Gi"
   startup_probe:
-    period_seconds: 10
-    failure_threshold: 30 # 5 minutes (30 * 10 seconds)
+    period_seconds: 15
+    failure_threshold: 20 # 5 minutes (20 * 15 seconds)
+    timeout_seconds: 3
   liveness_probe:
-    period_seconds: 10
-    failure_threshold: 6 # 60 seconds
+    period_seconds: 15
+    failure_threshold: 4 # 60 seconds (15 * 4 seconds)
+    timeout_seconds: 3
   readiness_probe:
-    period_seconds: 30
-    timeout_seconds: 5
-    failure_threshold: 2 # 60 seconds
+    period_seconds: 10
+    failure_threshold: 3 # 30 seconds (10 * 3 seconds)
+    timeout_seconds: 3
   load_balancing:
     cloudflare:
       enabled: false
