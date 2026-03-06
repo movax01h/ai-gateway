@@ -384,6 +384,20 @@ models:
       thinking_level: "low"
       streaming: "true"
 
+  - name: "GPT-5.4 - OpenAI"
+    provider: "OpenAI"
+    gitlab_identifier: "gpt_5_4"
+    description: "OpenAI's most capable frontier model for complex professional work."
+    cost_indicator: "$$$"
+    max_context_tokens: 1050000 # https://developers.openai.com/api/docs/models/gpt-5.4
+    proxy_provider: openai
+    model_class_provider: "openai"
+    family:
+      - gpt_5
+    params:
+      model: gpt-5.4-2026-03-05
+      max_tokens: 4_096
+
   - name: "GPT-5.2 - OpenAI"
     provider: "OpenAI"
     gitlab_identifier: "gpt_5_2"
