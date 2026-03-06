@@ -67,7 +67,6 @@ from duo_workflow_service.workflows.type_definitions import (
 from lib.billing_events import BillingEvent, BillingEventsClient
 from lib.context import get_llm_operations, init_llm_operations
 from lib.events import GLReportingEventContext
-from lib.feature_flags import FeatureFlag, is_feature_enabled
 from lib.internal_events import InternalEventAdditionalProperties, InternalEventsClient
 from lib.internal_events.event_enum import EventEnum, EventLabelEnum, EventPropertyEnum
 
@@ -568,7 +567,6 @@ class GitLabWorkflow(
         # https://blog.langchain.dev/langgraph-v0-2/
         # thread_ts and parent_ts have been renamed to checkpoint_id and parent_checkpoint_id , respectively
         checkpoint_id = config.get("configurable", {}).get("checkpoint_id")
-        compression_enabled = is_feature_enabled(FeatureFlag.COMPRESS_CHECKPOINT)
 
         # execution path with checkpoint_id present is triggered when LangGraph needs to fetch specific checkpoint
         # (instead of a most recent one), this happens in following situations:
@@ -577,11 +575,8 @@ class GitLabWorkflow(
         # specific checkpoint is being requested in `aget_state`
         # in both case grahp_config looks like: {'configurable': {'thread_id': '1', 'checkpoint_id': 'xyz'}}
         if checkpoint_id:
-            endpoint = (
+            endpoint = add_compression_param(
                 f"/api/v4/ai/duo_workflows/workflows/{self._workflow_id}/checkpoints"
-            )
-            endpoint = (
-                add_compression_param(endpoint) if compression_enabled else endpoint
             )
             with duo_workflow_metrics.time_gitlab_response(
                 endpoint="/api/v4/ai/duo_workflows/workflows/:id/checkpoints",
@@ -604,7 +599,7 @@ class GitLabWorkflow(
             checkpoint = next(
                 (c for c in gl_checkpoints if c["thread_ts"] == checkpoint_id), None
             )
-            if checkpoint and compression_enabled:
+            if checkpoint:
                 checkpoint["checkpoint"] = uncompress_checkpoint(
                     checkpoint["compressed_checkpoint"]
                 )
@@ -631,9 +626,8 @@ class GitLabWorkflow(
                 return None
 
             # If a flow is resumed and the latest checkpoint couldn't be fetched (<18.8 version of GitLab), fetch it
-            endpoint = f"/api/v4/ai/duo_workflows/workflows/{self._workflow_id}/checkpoints?per_page=1"
-            endpoint = (
-                add_compression_param(endpoint) if compression_enabled else endpoint
+            endpoint = add_compression_param(
+                f"/api/v4/ai/duo_workflows/workflows/{self._workflow_id}/checkpoints?per_page=1"
             )
 
             with duo_workflow_metrics.time_gitlab_response(
@@ -658,7 +652,7 @@ class GitLabWorkflow(
 
             checkpoint = gl_checkpoints[0] if gl_checkpoints else None
 
-            if checkpoint and compression_enabled:
+            if checkpoint:
                 checkpoint["checkpoint"] = uncompress_checkpoint(
                     checkpoint["compressed_checkpoint"]
                 )
@@ -676,9 +670,9 @@ class GitLabWorkflow(
         before: Optional[RunnableConfig] = None,
         limit: Optional[int] = None,
     ) -> AsyncIterator[CheckpointTuple]:
-        compression_enabled = is_feature_enabled(FeatureFlag.COMPRESS_CHECKPOINT)
-        endpoint = f"/api/v4/ai/duo_workflows/workflows/{self._workflow_id}/checkpoints"
-        endpoint = add_compression_param(endpoint) if compression_enabled else endpoint
+        endpoint = add_compression_param(
+            f"/api/v4/ai/duo_workflows/workflows/{self._workflow_id}/checkpoints"
+        )
         with duo_workflow_metrics.time_gitlab_response(
             endpoint="/api/v4/ai/duo_workflows/workflows/:id/checkpoints", method="GET"
         ):
@@ -698,10 +692,9 @@ class GitLabWorkflow(
             gl_checkpoints = response.body
         for gl_checkpoint in gl_checkpoints:
             try:
-                if compression_enabled:
-                    gl_checkpoint["checkpoint"] = uncompress_checkpoint(
-                        gl_checkpoint["compressed_checkpoint"]
-                    )
+                gl_checkpoint["checkpoint"] = uncompress_checkpoint(
+                    gl_checkpoint["compressed_checkpoint"]
+                )
 
                 yield self._convert_gitlab_checkpoint_to_checkpoint_tuple(gl_checkpoint)
             except ValueError as e:
@@ -722,8 +715,6 @@ class GitLabWorkflow(
     ) -> RunnableConfig:
         configurable = config.get("configurable", {})
 
-        compression_enabled = is_feature_enabled(FeatureFlag.COMPRESS_CHECKPOINT)
-
         # https://blog.langchain.dev/langgraph-v0-2/
         # thread_ts and parent_ts have been renamed to checkpoint_id and parent_checkpoint_id , respectively
         endpoint = f"/api/v4/ai/duo_workflows/workflows/{self._workflow_id}/checkpoints"
@@ -732,11 +723,8 @@ class GitLabWorkflow(
             "thread_ts": checkpoint["id"],
             "parent_ts": configurable.get("checkpoint_id"),
             "metadata": metadata,
+            "compressed_checkpoint": compress_checkpoint(checkpoint),
         }
-        if compression_enabled:
-            payload["compressed_checkpoint"] = compress_checkpoint(checkpoint)
-        else:
-            payload["checkpoint"] = checkpoint
 
         with duo_workflow_metrics.time_gitlab_response(
             endpoint="/api/v4/ai/duo_workflows/workflows/:id/checkpoints", method="POST"
