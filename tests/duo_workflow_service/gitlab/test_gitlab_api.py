@@ -396,8 +396,8 @@ async def test_fetch_workflow_and_container_data_without_exclusion_rules():
 
 
 @pytest.mark.asyncio
-async def test_fetch_workflow_with_prompt_injection_protection_level():
-    """Test that prompt injection protection level is parsed from project.rootGroup.aiSettings."""
+async def test_fetch_workflow_with_prompt_injection_protection_level_from_namespace():
+    """Test that prompt injection protection level is parsed from workflow namespace.aiSettings."""
     gitlab_client = AsyncMock()
     gitlab_client.graphql.return_value = {
         "duoWorkflowWorkflows": {
@@ -411,11 +411,6 @@ async def test_fetch_workflow_with_prompt_injection_protection_level():
                         "description": "Test Project",
                         "httpUrlToRepo": "http://example.com/test.git",
                         "webUrl": "http://example.com/test",
-                        "rootGroup": {
-                            "aiSettings": {
-                                "promptInjectionProtectionLevel": "INTERRUPT"
-                            }
-                        },
                     },
                     "namespaceId": "gid://gitlab/Group/123",
                     "namespace": {
@@ -423,6 +418,7 @@ async def test_fetch_workflow_with_prompt_injection_protection_level():
                         "name": "test-group",
                         "description": "Test Group",
                         "webUrl": "http://example.com/test-group",
+                        "aiSettings": {"promptInjectionProtectionLevel": "INTERRUPT"},
                     },
                     "agentPrivilegesNames": [],
                     "preApprovedAgentPrivilegesNames": [],
@@ -441,6 +437,50 @@ async def test_fetch_workflow_with_prompt_injection_protection_level():
     assert (
         workflow_config["prompt_injection_protection_level"]
         == PromptInjectionProtectionLevel.INTERRUPT
+    )
+
+
+@pytest.mark.asyncio
+async def test_fetch_workflow_with_prompt_injection_protection_level_from_project_namespace():
+    """Test fallback: when workflow has no namespace, aiSettings is read from project.namespace."""
+    gitlab_client = AsyncMock()
+    gitlab_client.graphql.return_value = {
+        "duoWorkflowWorkflows": {
+            "nodes": [
+                {
+                    "statusName": "created",
+                    "projectId": "gid://gitlab/Project/123",
+                    "project": {
+                        "id": "gid://gitlab/Project/123",
+                        "name": "test-project",
+                        "description": "Test Project",
+                        "httpUrlToRepo": "http://example.com/test.git",
+                        "webUrl": "http://example.com/test",
+                        "namespace": {
+                            "aiSettings": {
+                                "promptInjectionProtectionLevel": "NO_CHECKS"
+                            }
+                        },
+                    },
+                    "namespaceId": None,
+                    "namespace": None,
+                    "agentPrivilegesNames": [],
+                    "preApprovedAgentPrivilegesNames": [],
+                    "mcpEnabled": False,
+                    "allowAgentToRequestUser": False,
+                    "latestCheckpoint": None,
+                }
+            ]
+        }
+    }
+
+    project, namespace, workflow_config = await fetch_workflow_and_container_data(
+        gitlab_client, "123"
+    )
+
+    assert (
+        workflow_config["prompt_injection_protection_level"]
+        == PromptInjectionProtectionLevel.NO_CHECKS
     )
 
 
