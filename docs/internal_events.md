@@ -87,7 +87,7 @@ def test_track_internal_event(internal_event_client: Mock):
    AIGW_INTERNAL_EVENT__ENABLED=true
    AIGW_INTERNAL_EVENT__ENDPOINT=http://127.0.0.1:9091
    AIGW_INTERNAL_EVENT__BATCH_SIZE=1
-   AIGW_INTERNAL_EVENT__THREAD_COUNT=1
+   AIGW_INTERNAL_EVENT__THREAD_COUNT=5
    ```
 
 1. Run snowplow micro with `gdk start snowplow-micro`.
