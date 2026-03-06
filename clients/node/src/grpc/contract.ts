@@ -199,10 +199,31 @@ export interface FindFiles {
   name_pattern: string;
 }
 
+export interface Icon {
+  url: string;
+  mime_type?: string | undefined;
+  sizes: string[];
+  theme?: string | undefined;
+}
+
+export interface ToolAnnotations {
+  title?: string | undefined;
+  read_only_hint?: boolean | undefined;
+  destructive_hint?: boolean | undefined;
+  idempotent_hint?: boolean | undefined;
+  open_world_hint?: boolean | undefined;
+}
+
 export interface McpTool {
   name: string;
   description: string;
   inputSchema: string;
+  icons?: Icons | undefined;
+  annotations?: ToolAnnotations | undefined;
+}
+
+export interface Icons {
+  items: Icon[];
 }
 
 export interface RunMCPTool {
@@ -3028,8 +3049,246 @@ export const FindFiles: MessageFns<FindFiles> = {
   },
 };
 
+function createBaseIcon(): Icon {
+  return { url: "", mime_type: undefined, sizes: [], theme: undefined };
+}
+
+export const Icon: MessageFns<Icon> = {
+  encode(message: Icon, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
+    if (message.url !== "") {
+      writer.uint32(10).string(message.url);
+    }
+    if (message.mime_type !== undefined) {
+      writer.uint32(18).string(message.mime_type);
+    }
+    for (const v of message.sizes) {
+      writer.uint32(26).string(v!);
+    }
+    if (message.theme !== undefined) {
+      writer.uint32(34).string(message.theme);
+    }
+    return writer;
+  },
+
+  decode(input: BinaryReader | Uint8Array, length?: number): Icon {
+    const reader = input instanceof BinaryReader ? input : new BinaryReader(input);
+    const end = length === undefined ? reader.len : reader.pos + length;
+    const message = createBaseIcon();
+    while (reader.pos < end) {
+      const tag = reader.uint32();
+      switch (tag >>> 3) {
+        case 1: {
+          if (tag !== 10) {
+            break;
+          }
+
+          message.url = reader.string();
+          continue;
+        }
+        case 2: {
+          if (tag !== 18) {
+            break;
+          }
+
+          message.mime_type = reader.string();
+          continue;
+        }
+        case 3: {
+          if (tag !== 26) {
+            break;
+          }
+
+          message.sizes.push(reader.string());
+          continue;
+        }
+        case 4: {
+          if (tag !== 34) {
+            break;
+          }
+
+          message.theme = reader.string();
+          continue;
+        }
+      }
+      if ((tag & 7) === 4 || tag === 0) {
+        break;
+      }
+      reader.skip(tag & 7);
+    }
+    return message;
+  },
+
+  fromJSON(object: any): Icon {
+    return {
+      url: isSet(object.url) ? globalThis.String(object.url) : "",
+      mime_type: isSet(object.mime_type) ? globalThis.String(object.mime_type) : undefined,
+      sizes: globalThis.Array.isArray(object?.sizes) ? object.sizes.map((e: any) => globalThis.String(e)) : [],
+      theme: isSet(object.theme) ? globalThis.String(object.theme) : undefined,
+    };
+  },
+
+  toJSON(message: Icon): unknown {
+    const obj: any = {};
+    if (message.url !== "") {
+      obj.url = message.url;
+    }
+    if (message.mime_type !== undefined) {
+      obj.mime_type = message.mime_type;
+    }
+    if (message.sizes?.length) {
+      obj.sizes = message.sizes;
+    }
+    if (message.theme !== undefined) {
+      obj.theme = message.theme;
+    }
+    return obj;
+  },
+
+  create<I extends Exact<DeepPartial<Icon>, I>>(base?: I): Icon {
+    return Icon.fromPartial(base ?? ({} as any));
+  },
+  fromPartial<I extends Exact<DeepPartial<Icon>, I>>(object: I): Icon {
+    const message = createBaseIcon();
+    message.url = object.url ?? "";
+    message.mime_type = object.mime_type ?? undefined;
+    message.sizes = object.sizes?.map((e) => e) || [];
+    message.theme = object.theme ?? undefined;
+    return message;
+  },
+};
+
+function createBaseToolAnnotations(): ToolAnnotations {
+  return {
+    title: undefined,
+    read_only_hint: undefined,
+    destructive_hint: undefined,
+    idempotent_hint: undefined,
+    open_world_hint: undefined,
+  };
+}
+
+export const ToolAnnotations: MessageFns<ToolAnnotations> = {
+  encode(message: ToolAnnotations, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
+    if (message.title !== undefined) {
+      writer.uint32(10).string(message.title);
+    }
+    if (message.read_only_hint !== undefined) {
+      writer.uint32(16).bool(message.read_only_hint);
+    }
+    if (message.destructive_hint !== undefined) {
+      writer.uint32(24).bool(message.destructive_hint);
+    }
+    if (message.idempotent_hint !== undefined) {
+      writer.uint32(32).bool(message.idempotent_hint);
+    }
+    if (message.open_world_hint !== undefined) {
+      writer.uint32(40).bool(message.open_world_hint);
+    }
+    return writer;
+  },
+
+  decode(input: BinaryReader | Uint8Array, length?: number): ToolAnnotations {
+    const reader = input instanceof BinaryReader ? input : new BinaryReader(input);
+    const end = length === undefined ? reader.len : reader.pos + length;
+    const message = createBaseToolAnnotations();
+    while (reader.pos < end) {
+      const tag = reader.uint32();
+      switch (tag >>> 3) {
+        case 1: {
+          if (tag !== 10) {
+            break;
+          }
+
+          message.title = reader.string();
+          continue;
+        }
+        case 2: {
+          if (tag !== 16) {
+            break;
+          }
+
+          message.read_only_hint = reader.bool();
+          continue;
+        }
+        case 3: {
+          if (tag !== 24) {
+            break;
+          }
+
+          message.destructive_hint = reader.bool();
+          continue;
+        }
+        case 4: {
+          if (tag !== 32) {
+            break;
+          }
+
+          message.idempotent_hint = reader.bool();
+          continue;
+        }
+        case 5: {
+          if (tag !== 40) {
+            break;
+          }
+
+          message.open_world_hint = reader.bool();
+          continue;
+        }
+      }
+      if ((tag & 7) === 4 || tag === 0) {
+        break;
+      }
+      reader.skip(tag & 7);
+    }
+    return message;
+  },
+
+  fromJSON(object: any): ToolAnnotations {
+    return {
+      title: isSet(object.title) ? globalThis.String(object.title) : undefined,
+      read_only_hint: isSet(object.read_only_hint) ? globalThis.Boolean(object.read_only_hint) : undefined,
+      destructive_hint: isSet(object.destructive_hint) ? globalThis.Boolean(object.destructive_hint) : undefined,
+      idempotent_hint: isSet(object.idempotent_hint) ? globalThis.Boolean(object.idempotent_hint) : undefined,
+      open_world_hint: isSet(object.open_world_hint) ? globalThis.Boolean(object.open_world_hint) : undefined,
+    };
+  },
+
+  toJSON(message: ToolAnnotations): unknown {
+    const obj: any = {};
+    if (message.title !== undefined) {
+      obj.title = message.title;
+    }
+    if (message.read_only_hint !== undefined) {
+      obj.read_only_hint = message.read_only_hint;
+    }
+    if (message.destructive_hint !== undefined) {
+      obj.destructive_hint = message.destructive_hint;
+    }
+    if (message.idempotent_hint !== undefined) {
+      obj.idempotent_hint = message.idempotent_hint;
+    }
+    if (message.open_world_hint !== undefined) {
+      obj.open_world_hint = message.open_world_hint;
+    }
+    return obj;
+  },
+
+  create<I extends Exact<DeepPartial<ToolAnnotations>, I>>(base?: I): ToolAnnotations {
+    return ToolAnnotations.fromPartial(base ?? ({} as any));
+  },
+  fromPartial<I extends Exact<DeepPartial<ToolAnnotations>, I>>(object: I): ToolAnnotations {
+    const message = createBaseToolAnnotations();
+    message.title = object.title ?? undefined;
+    message.read_only_hint = object.read_only_hint ?? undefined;
+    message.destructive_hint = object.destructive_hint ?? undefined;
+    message.idempotent_hint = object.idempotent_hint ?? undefined;
+    message.open_world_hint = object.open_world_hint ?? undefined;
+    return message;
+  },
+};
+
 function createBaseMcpTool(): McpTool {
-  return { name: "", description: "", inputSchema: "" };
+  return { name: "", description: "", inputSchema: "", icons: undefined, annotations: undefined };
 }
 
 export const McpTool: MessageFns<McpTool> = {
@@ -3042,6 +3301,12 @@ export const McpTool: MessageFns<McpTool> = {
     }
     if (message.inputSchema !== "") {
       writer.uint32(26).string(message.inputSchema);
+    }
+    if (message.icons !== undefined) {
+      Icons.encode(message.icons, writer.uint32(34).fork()).join();
+    }
+    if (message.annotations !== undefined) {
+      ToolAnnotations.encode(message.annotations, writer.uint32(42).fork()).join();
     }
     return writer;
   },
@@ -3077,6 +3342,22 @@ export const McpTool: MessageFns<McpTool> = {
           message.inputSchema = reader.string();
           continue;
         }
+        case 4: {
+          if (tag !== 34) {
+            break;
+          }
+
+          message.icons = Icons.decode(reader, reader.uint32());
+          continue;
+        }
+        case 5: {
+          if (tag !== 42) {
+            break;
+          }
+
+          message.annotations = ToolAnnotations.decode(reader, reader.uint32());
+          continue;
+        }
       }
       if ((tag & 7) === 4 || tag === 0) {
         break;
@@ -3091,6 +3372,8 @@ export const McpTool: MessageFns<McpTool> = {
       name: isSet(object.name) ? globalThis.String(object.name) : "",
       description: isSet(object.description) ? globalThis.String(object.description) : "",
       inputSchema: isSet(object.inputSchema) ? globalThis.String(object.inputSchema) : "",
+      icons: isSet(object.icons) ? Icons.fromJSON(object.icons) : undefined,
+      annotations: isSet(object.annotations) ? ToolAnnotations.fromJSON(object.annotations) : undefined,
     };
   },
 
@@ -3105,6 +3388,12 @@ export const McpTool: MessageFns<McpTool> = {
     if (message.inputSchema !== "") {
       obj.inputSchema = message.inputSchema;
     }
+    if (message.icons !== undefined) {
+      obj.icons = Icons.toJSON(message.icons);
+    }
+    if (message.annotations !== undefined) {
+      obj.annotations = ToolAnnotations.toJSON(message.annotations);
+    }
     return obj;
   },
 
@@ -3116,6 +3405,68 @@ export const McpTool: MessageFns<McpTool> = {
     message.name = object.name ?? "";
     message.description = object.description ?? "";
     message.inputSchema = object.inputSchema ?? "";
+    message.icons = (object.icons !== undefined && object.icons !== null) ? Icons.fromPartial(object.icons) : undefined;
+    message.annotations = (object.annotations !== undefined && object.annotations !== null)
+      ? ToolAnnotations.fromPartial(object.annotations)
+      : undefined;
+    return message;
+  },
+};
+
+function createBaseIcons(): Icons {
+  return { items: [] };
+}
+
+export const Icons: MessageFns<Icons> = {
+  encode(message: Icons, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
+    for (const v of message.items) {
+      Icon.encode(v!, writer.uint32(10).fork()).join();
+    }
+    return writer;
+  },
+
+  decode(input: BinaryReader | Uint8Array, length?: number): Icons {
+    const reader = input instanceof BinaryReader ? input : new BinaryReader(input);
+    const end = length === undefined ? reader.len : reader.pos + length;
+    const message = createBaseIcons();
+    while (reader.pos < end) {
+      const tag = reader.uint32();
+      switch (tag >>> 3) {
+        case 1: {
+          if (tag !== 10) {
+            break;
+          }
+
+          message.items.push(Icon.decode(reader, reader.uint32()));
+          continue;
+        }
+      }
+      if ((tag & 7) === 4 || tag === 0) {
+        break;
+      }
+      reader.skip(tag & 7);
+    }
+    return message;
+  },
+
+  fromJSON(object: any): Icons {
+    return { items: globalThis.Array.isArray(object?.items) ? object.items.map((e: any) => Icon.fromJSON(e)) : [] };
+  },
+
+  toJSON(message: Icons): unknown {
+    const obj: any = {};
+    if (message.items?.length) {
+      obj.items = message.items.map((e) => Icon.toJSON(e));
+    }
+    return obj;
+  },
+
+  create<I extends Exact<DeepPartial<Icons>, I>>(base?: I): Icons {
+    return Icons.fromPartial(base ?? ({} as any));
+  },
+  fromPartial<I extends Exact<DeepPartial<Icons>, I>>(object: I): Icons {
+    const message = createBaseIcons();
+    message.items = object.items?.map((e) => Icon.fromPartial(e)) || [];
     return message;
   },
 };

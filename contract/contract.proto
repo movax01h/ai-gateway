@@ -195,10 +195,31 @@ message FindFiles {
     string name_pattern = 1 [json_name = "name_pattern"];
 }
 
+message Icon {
+    string url = 1;
+    optional string mime_type = 2;
+    repeated string sizes = 3;
+    optional string theme = 4;
+}
+
+message ToolAnnotations {
+    optional string title = 1;
+    optional bool read_only_hint = 2;
+    optional bool destructive_hint = 3;
+    optional bool idempotent_hint = 4;
+    optional bool open_world_hint = 5;
+}
+
 message McpTool {
     string name = 1;
     string description = 2;
     string inputSchema = 3;
+    optional Icons icons = 4;
+    optional ToolAnnotations annotations = 5;
+}
+
+message Icons {
+    repeated Icon items = 1;
 }
 
 message RunMCPTool {
