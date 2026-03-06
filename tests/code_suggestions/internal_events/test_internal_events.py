@@ -277,6 +277,7 @@ class TestInternalEventsClient:
             "se_ac": "test_event",
             "se_la": "test_label",
             "se_pr": "test_property",
+            "eid": "event-id-1",
         }
 
         with mock.patch.object(client._logger, "error") as mock_error:
@@ -287,6 +288,7 @@ class TestInternalEventsClient:
                 event_name="test_event",
                 label="test_label",
                 property="test_property",
+                event_id="event-id-1",
             )
 
     @mock.patch("snowplow_tracker.Tracker.__init__")
@@ -308,6 +310,7 @@ class TestInternalEventsClient:
             "se_ac": "test_event",
             "se_la": "test_label",
             "se_pr": "test_property",
+            "eid": "event-id-1",
         }
 
         with mock.patch.object(client._logger, "info") as mock_info:
@@ -318,4 +321,5 @@ class TestInternalEventsClient:
                 event_name="test_event",
                 label="test_label",
                 property="test_property",
+                event_id="event-id-1",
             )

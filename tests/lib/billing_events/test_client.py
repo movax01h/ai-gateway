@@ -559,6 +559,7 @@ class TestBillingEventsClient:
             "se_ac": "test_event",
             "se_la": "test_label",
             "se_pr": "test_property",
+            "eid": "event-id-1",
         }
 
         with mock.patch.object(client._logger, "error") as mock_error:
@@ -567,6 +568,7 @@ class TestBillingEventsClient:
             mock_error.assert_called_once_with(
                 "Billing event failed to send",
                 event_name="test_event",
+                event_id="event-id-1",
                 label="test_label",
                 property="test_property",
             )
@@ -591,6 +593,7 @@ class TestBillingEventsClient:
             "se_ac": "test_event",
             "se_la": "test_label",
             "se_pr": "test_property",
+            "eid": "event-id-1",
         }
 
         with mock.patch.object(client._logger, "info") as mock_info:
@@ -599,6 +602,7 @@ class TestBillingEventsClient:
             mock_info.assert_called_once_with(
                 "Billing event sent successfully",
                 event_name="test_event",
+                event_id="event-id-1",
                 label="test_label",
                 property="test_property",
             )
