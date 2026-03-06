@@ -296,15 +296,51 @@ class FindFiles(_message.Message):
     name_pattern: str
     def __init__(self, name_pattern: _Optional[str] = ...) -> None: ...
 
+class Icon(_message.Message):
+    __slots__ = ("url", "mime_type", "sizes", "theme")
+    URL_FIELD_NUMBER: _ClassVar[int]
+    MIME_TYPE_FIELD_NUMBER: _ClassVar[int]
+    SIZES_FIELD_NUMBER: _ClassVar[int]
+    THEME_FIELD_NUMBER: _ClassVar[int]
+    url: str
+    mime_type: str
+    sizes: _containers.RepeatedScalarFieldContainer[str]
+    theme: str
+    def __init__(self, url: _Optional[str] = ..., mime_type: _Optional[str] = ..., sizes: _Optional[_Iterable[str]] = ..., theme: _Optional[str] = ...) -> None: ...
+
+class ToolAnnotations(_message.Message):
+    __slots__ = ("title", "read_only_hint", "destructive_hint", "idempotent_hint", "open_world_hint")
+    TITLE_FIELD_NUMBER: _ClassVar[int]
+    READ_ONLY_HINT_FIELD_NUMBER: _ClassVar[int]
+    DESTRUCTIVE_HINT_FIELD_NUMBER: _ClassVar[int]
+    IDEMPOTENT_HINT_FIELD_NUMBER: _ClassVar[int]
+    OPEN_WORLD_HINT_FIELD_NUMBER: _ClassVar[int]
+    title: str
+    read_only_hint: bool
+    destructive_hint: bool
+    idempotent_hint: bool
+    open_world_hint: bool
+    def __init__(self, title: _Optional[str] = ..., read_only_hint: bool = ..., destructive_hint: bool = ..., idempotent_hint: bool = ..., open_world_hint: bool = ...) -> None: ...
+
 class McpTool(_message.Message):
-    __slots__ = ("name", "description", "inputSchema")
+    __slots__ = ("name", "description", "inputSchema", "icons", "annotations")
     NAME_FIELD_NUMBER: _ClassVar[int]
     DESCRIPTION_FIELD_NUMBER: _ClassVar[int]
     INPUTSCHEMA_FIELD_NUMBER: _ClassVar[int]
+    ICONS_FIELD_NUMBER: _ClassVar[int]
+    ANNOTATIONS_FIELD_NUMBER: _ClassVar[int]
     name: str
     description: str
     inputSchema: str
-    def __init__(self, name: _Optional[str] = ..., description: _Optional[str] = ..., inputSchema: _Optional[str] = ...) -> None: ...
+    icons: Icons
+    annotations: ToolAnnotations
+    def __init__(self, name: _Optional[str] = ..., description: _Optional[str] = ..., inputSchema: _Optional[str] = ..., icons: _Optional[_Union[Icons, _Mapping]] = ..., annotations: _Optional[_Union[ToolAnnotations, _Mapping]] = ...) -> None: ...
+
+class Icons(_message.Message):
+    __slots__ = ("items",)
+    ITEMS_FIELD_NUMBER: _ClassVar[int]
+    items: _containers.RepeatedCompositeFieldContainer[Icon]
+    def __init__(self, items: _Optional[_Iterable[_Union[Icon, _Mapping]]] = ...) -> None: ...
 
 class RunMCPTool(_message.Message):
     __slots__ = ("name", "args")
