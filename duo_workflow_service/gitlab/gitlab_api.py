@@ -150,7 +150,7 @@ query($workflowId: AiDuoWorkflowsWorkflowID!) {
                 duoContextExclusionSettings {
                     exclusionRules
                 }
-                rootGroup {
+                namespace {
                     aiSettings {
                         promptInjectionProtectionLevel
                     }
@@ -162,10 +162,8 @@ query($workflowId: AiDuoWorkflowsWorkflowID!) {
                 name
                 description
                 webUrl
-                rootNamespace {
-                    aiSettings {
-                        promptInjectionProtectionLevel
-                    }
+                aiSettings {
+                    promptInjectionProtectionLevel
                 }
             }
             agentPrivilegesNames
@@ -206,7 +204,7 @@ query($workflowId: AiDuoWorkflowsWorkflowID!) {
                 duoContextExclusionSettings {
                     exclusionRules
                 }
-                rootGroup {
+                namespace {
                     aiSettings {
                         promptInjectionProtectionLevel
                     }
@@ -218,10 +216,8 @@ query($workflowId: AiDuoWorkflowsWorkflowID!) {
                 name
                 description
                 webUrl
-                rootNamespace {
-                    aiSettings {
-                        promptInjectionProtectionLevel
-                    }
+                aiSettings {
+                    promptInjectionProtectionLevel
                 }
             }
             agentPrivilegesNames
@@ -321,7 +317,8 @@ async def fetch_workflow_and_container_data(
     )
 
     # Convert GraphQL response to expected Container format
-    # Extract prompt injection protection level from project.rootGroup.aiSettings.
+    # Extract prompt injection protection level from the workflow's namespace or the
+    # project's parent namespace.
     # Default to LOG_ONLY for GitLab < 18.8 where aiSettings is not available.
     # LOG_ONLY mode scans in background without interrupting workflow or showing UI messages.
     web_url = project_data.get("webUrl", "") or namespace_data.get("webUrl", "")
@@ -329,8 +326,8 @@ async def fetch_workflow_and_container_data(
     prompt_injection_protection_level = PromptInjectionProtectionLevel.LOG_ONLY
 
     ai_settings = (
-        project_data.get("rootGroup", {}).get("aiSettings", {})
-        or namespace_data.get("rootNamespace", {}).get("aiSettings", {})
+        project_data.get("namespace", {}).get("aiSettings", {})
+        or namespace_data.get("aiSettings", {})
         or {}  # set ai_settings default to empty dict in case project and namespace data are both None
     )
 
