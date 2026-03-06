@@ -37,7 +37,7 @@ class InternalEventsClient:
 
         if enabled:
             self._session = requests.Session()
-            emitter = AsyncEmitter(
+            self._emitter = AsyncEmitter(
                 batch_size=batch_size,
                 thread_count=thread_count,
                 endpoint=endpoint,
@@ -50,7 +50,7 @@ class InternalEventsClient:
             self.snowplow_tracker = Tracker(
                 app_id=app_id,
                 namespace=namespace,
-                emitters=[emitter],
+                emitters=[self._emitter],
             )
 
     def _on_success(self, sent_events: List[Dict[str, Any]]) -> None:
@@ -168,8 +168,18 @@ class InternalEventsClient:
         )
 
         self.snowplow_tracker.track(structured_event)
+        try:
+            queue_size = self._emitter.queue.qsize()
+        except AttributeError:
+            queue_size = -1
+        try:
+            buffer_size = self._emitter.event_store.size()
+        except AttributeError:
+            buffer_size = -1
         self._logger.info(
             "Successfully called snowplow_tracker.track()",
             event_name=event_name,
+            emitter_queue_size=queue_size,
+            emitter_buffer_size=buffer_size,
         )
         tracked_internal_events.get().add(event_name)
