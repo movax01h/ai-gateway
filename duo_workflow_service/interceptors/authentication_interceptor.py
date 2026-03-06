@@ -12,12 +12,15 @@ from gitlab_cloud_connector import (
     GitLabOidcProvider,
     LocalAuthProvider,
     authenticate,
+    cloud_connector_ready,
 )
 from gitlab_cloud_connector.auth import AUTH_HEADER, PREFIX_BEARER_HEADER
 from grpc.aio import ServicerContext
 
 from duo_workflow_service.interceptors import GRPC_HEALTH_METHODS
 from lib.context import cloud_connector_token_context_var
+
+logger = structlog.get_logger(__name__)
 
 current_user: contextvars.ContextVar = contextvars.ContextVar("current_user")
 
@@ -33,6 +36,7 @@ class AuthenticationInterceptor(grpc.aio.ServerInterceptor):
     )
 
     def __init__(self, reflection_enabled: bool = False):
+        self.oidc_auth_provider = self._init_oidc_auth_provider()
         self._allow_unauthenticated_methods = GRPC_HEALTH_METHODS + (
             self._REFLECTION_METHODS if reflection_enabled else ()
         )
@@ -48,7 +52,7 @@ class AuthenticationInterceptor(grpc.aio.ServerInterceptor):
             return await continuation(handler_call_details)
 
         if os.environ.get("DUO_WORKFLOW_AUTH__ENABLED", True) == "false":
-            print("[WARN] Auth is disabled, all users allowed")
+            logger.warn("[WARN] Auth is disabled, all users allowed")
             cloud_connector_user, _cloud_connector_error = authenticate(
                 {}, None, bypass_auth=True
             )
@@ -59,7 +63,7 @@ class AuthenticationInterceptor(grpc.aio.ServerInterceptor):
         metadata = dict(handler_call_details.invocation_metadata)
 
         cloud_connector_user, cloud_connector_error = authenticate(
-            metadata, self._init_oidc_auth_provider()
+            metadata, self.oidc_auth_provider
         )
 
         cloud_connector_token_context_var.set(
@@ -103,19 +107,35 @@ class AuthenticationInterceptor(grpc.aio.ServerInterceptor):
             "DUO_WORKFLOW_SELF_SIGNED_JWT__VALIDATION_KEY", ""
         )
 
-        return CompositeProvider(
-            [
-                LocalAuthProvider(structlog, signing_key, validation_key),
-                GitLabOidcProvider(
-                    structlog,
-                    oidc_providers={
-                        "Gitlab": gitlab_url,
-                        "CustomersDot": customer_portal_url,
-                    },
-                ),
-            ],
-            structlog,
-        )
+        try:
+            provider = CompositeProvider(
+                [
+                    LocalAuthProvider(structlog, signing_key, validation_key),
+                    GitLabOidcProvider(
+                        structlog,
+                        oidc_providers={
+                            "Gitlab": gitlab_url,
+                            "CustomersDot": customer_portal_url,
+                        },
+                    ),
+                ],
+                structlog,
+            )
+
+            if os.environ.get("DUO_WORKFLOW_AUTH__ENABLED", True) == "false":
+                logger.warn("Auth is disabled, will not prefetch keys")
+                return provider
+
+            if not cloud_connector_ready(provider):
+                error_msg = "Could not prefetch keys"
+                logger.fatal(error_msg)
+                raise AuthenticationError(error_msg)
+        except Exception as e:
+            error_msg = f"Failed to initialize OIDC auth provider: {e}"
+            logger.fatal(error_msg)
+            raise AuthenticationError(error_msg) from e
+
+        return provider
 
     def _extract_cloud_connector_token(self, headers: Dict[str, str]) -> str:
         auth_header = headers.get(AUTH_HEADER.lower())

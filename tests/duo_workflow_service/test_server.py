@@ -1033,7 +1033,13 @@ async def test_generate_token_unauthorized_for_any_flow():
     [False, True],
 )
 @patch("duo_workflow_service.server.setup_signal_handlers")
-async def test_grpc_server(mock_setup_signal_handlers, reflection_enabled):
+@patch(
+    "duo_workflow_service.interceptors.authentication_interceptor.cloud_connector_ready",
+    return_value=True,
+)
+async def test_grpc_server(
+    mock_cloud_connector_ready, mock_setup_signal_handlers, reflection_enabled
+):
     """Test that the gRPC server starts correctly and sets up signal handlers."""
     mock_server = AsyncMock()
     mock_server.add_insecure_port.return_value = None
@@ -1076,10 +1082,15 @@ async def test_grpc_server(mock_setup_signal_handlers, reflection_enabled):
     else:
         mock_enable_reflection.assert_not_called()
     mock_setup_signal_handlers.assert_called_once()
+    mock_cloud_connector_ready.assert_called_once()
 
 
+@patch(
+    "duo_workflow_service.interceptors.authentication_interceptor.cloud_connector_ready",
+    return_value=True,
+)
 @pytest.mark.asyncio
-async def test_grpc_server_sets_health_status_serving():
+async def test_grpc_server_sets_health_status_serving(mock_cloud_connector_ready):
     """Test that serve() sets both health statuses to SERVING on startup."""
     mock_server = AsyncMock()
     mock_server.add_insecure_port.return_value = None
@@ -1123,6 +1134,7 @@ async def test_grpc_server_sets_health_status_serving():
         health_servicer._server_status["DuoWorkflow"]
         == health_pb2.HealthCheckResponse.SERVING
     )
+    mock_cloud_connector_ready.assert_called_once()
 
 
 @pytest.mark.asyncio

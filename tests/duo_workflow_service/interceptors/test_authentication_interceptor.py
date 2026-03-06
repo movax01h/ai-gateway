@@ -28,24 +28,49 @@ def handler_call_details_fixture():
     return mock_details
 
 
-@pytest.fixture(name="interceptor")
-def interceptor_fixture():
-    return AuthenticationInterceptor()
-
-
+@patch(
+    "duo_workflow_service.interceptors.authentication_interceptor.authenticate",
+    return_value=(
+        CloudConnectorUser(True, claims=UserClaims(gitlab_realm="test-realm")),
+        None,
+    ),
+)
+@patch(
+    "duo_workflow_service.interceptors.authentication_interceptor.cloud_connector_ready",
+    return_value=True,
+)
 @pytest.mark.parametrize(
     "method",
     ["/grpc.health.v1.Health/Check", "/grpc.health.v1.Health/Watch"],
 )
 @pytest.mark.asyncio
-async def test_intercept_service_health_check_skips_auth(
-    method, interceptor, mock_continuation, handler_call_details
+async def test_intercept_service_health_check_prefetches_keys_but_bypasses_auth(
+    mock_cloud_connector_ready,
+    mock_authenticate,
+    method,
+    mock_continuation,
+    handler_call_details,
 ):
+    interceptor = AuthenticationInterceptor()
     handler_call_details.method = method
     await interceptor.intercept_service(mock_continuation, handler_call_details)
     mock_continuation.assert_awaited_once_with(handler_call_details)
+    mock_cloud_connector_ready.assert_called_once()
+    # Verify authenticate was called with bypass_auth=True for health checks
+    mock_authenticate.assert_called_once_with({}, None, bypass_auth=True)
 
 
+@patch(
+    "duo_workflow_service.interceptors.authentication_interceptor.authenticate",
+    return_value=(
+        CloudConnectorUser(True, claims=UserClaims(gitlab_realm="test-realm")),
+        None,
+    ),
+)
+@patch(
+    "duo_workflow_service.interceptors.authentication_interceptor.cloud_connector_ready",
+    return_value=True,
+)
 @pytest.mark.parametrize(
     "method",
     [
@@ -54,13 +79,20 @@ async def test_intercept_service_health_check_skips_auth(
     ],
 )
 @pytest.mark.asyncio
-async def test_intercept_service_reflection_skips_auth_when_enabled(
-    method, mock_continuation, handler_call_details
+async def test_intercept_service_reflection_prefetches_keys_but_bypasses_auth_when_enabled(
+    mock_cloud_connector_ready,
+    mock_authenticate,
+    method,
+    mock_continuation,
+    handler_call_details,
 ):
     interceptor = AuthenticationInterceptor(reflection_enabled=True)
     handler_call_details.method = method
     await interceptor.intercept_service(mock_continuation, handler_call_details)
     mock_continuation.assert_awaited_once_with(handler_call_details)
+    mock_cloud_connector_ready.assert_called_once()
+    # Verify authenticate was called with bypass_auth=True for reflection methods
+    mock_authenticate.assert_called_once_with({}, None, bypass_auth=True)
 
 
 @pytest.mark.parametrize(
@@ -70,31 +102,45 @@ async def test_intercept_service_reflection_skips_auth_when_enabled(
         "/grpc.reflection.v1.ServerReflection/ServerReflectionInfo",
     ],
 )
-@patch.dict(os.environ, {"DUO_WORKFLOW_AUTH__ENABLED": "true"})
+@patch(
+    "duo_workflow_service.interceptors.authentication_interceptor.cloud_connector_ready",
+    return_value=True,
+)
 @patch(
     "duo_workflow_service.interceptors.authentication_interceptor.authenticate",
     return_value=(None, MagicMock(error_message="No authorization header presented")),
 )
 @pytest.mark.asyncio
 async def test_intercept_service_reflection_requires_auth_by_default(
-    mock_authenticate, method, mock_continuation, handler_call_details
+    mock_cloud_connector_ready,
+    _mock_authenticate,
+    method,
+    mock_continuation,
+    handler_call_details,
 ):
     interceptor = AuthenticationInterceptor()
     handler_call_details.method = method
     handler_call_details.invocation_metadata = ()
     await interceptor.intercept_service(mock_continuation, handler_call_details)
     mock_continuation.assert_not_awaited()
+    mock_cloud_connector_ready.assert_called_once()
 
 
 @patch.dict(os.environ, {"DUO_WORKFLOW_AUTH__ENABLED": "false"})
+@patch(
+    "duo_workflow_service.interceptors.authentication_interceptor.cloud_connector_ready",
+    return_value=True,
+)
 @pytest.mark.asyncio
 async def test_intercept_service_auth_disabled(
-    interceptor, mock_continuation, handler_call_details
+    mock_cloud_connector_ready, mock_continuation, handler_call_details
 ):
+    interceptor = AuthenticationInterceptor()
     await interceptor.intercept_service(mock_continuation, handler_call_details)
     user = current_user.get()
     assert user.is_authenticated
     assert user.is_debug
+    mock_cloud_connector_ready.assert_not_called()
 
 
 @patch.dict(
@@ -111,10 +157,19 @@ async def test_intercept_service_auth_disabled(
         None,
     ),
 )
+@patch(
+    "duo_workflow_service.interceptors.authentication_interceptor.cloud_connector_ready",
+    return_value=True,
+)
 @pytest.mark.asyncio
 async def test_intercept_service_auth_enabled(
-    mock_authenticate, interceptor, mock_continuation, handler_call_details
+    mock_cloud_connector_ready,
+    mock_authenticate,
+    mock_continuation,
+    handler_call_details,
 ):
+    interceptor = AuthenticationInterceptor()
     await interceptor.intercept_service(mock_continuation, handler_call_details)
     user = current_user.get()
     assert user.is_authenticated
+    mock_cloud_connector_ready.assert_called_once()
