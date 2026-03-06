@@ -75,6 +75,8 @@ class TestInternalEventsClient:
         assert emitter_args["thread_count"] == 2
         assert emitter_args["endpoint"] == "https://whitechoc.local"
         assert emitter_args["request_timeout"] == (5.0, 10.0)
+        assert emitter_args["session"] is not None
+        assert emitter_args["session"] is client._session
 
         tracker_args = mock_tracker_init.call_args[1]
         assert tracker_args["app_id"] == "gitlab_ai_gateway"

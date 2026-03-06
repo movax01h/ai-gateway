@@ -1,6 +1,7 @@
 from dataclasses import asdict
 from typing import Any, Dict, List, Optional
 
+import requests
 import structlog
 from snowplow_tracker import AsyncEmitter, SelfDescribingJson, StructuredEvent, Tracker
 
@@ -35,6 +36,7 @@ class InternalEventsClient:
         self.enabled = enabled
 
         if enabled:
+            self._session = requests.Session()
             emitter = AsyncEmitter(
                 batch_size=batch_size,
                 thread_count=thread_count,
@@ -42,6 +44,7 @@ class InternalEventsClient:
                 on_success=self._on_success,
                 on_failure=self._on_failure,
                 request_timeout=self.REQUEST_TIMEOUT,
+                session=self._session,
             )
 
             self.snowplow_tracker = Tracker(

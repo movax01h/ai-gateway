@@ -13,7 +13,7 @@ spec:
     AIGW_INTERNAL_EVENT__ENDPOINT: "https://snowplowprd.trx.gitlab.net"
     AIGW_INTERNAL_EVENT__APP_ID: "gitlab_duo_workflow"
     AIGW_INTERNAL_EVENT__BATCH_SIZE: "1"
-    AIGW_INTERNAL_EVENT__THREAD_COUNT: "1"
+    AIGW_INTERNAL_EVENT__THREAD_COUNT: "5"
     GRPC_TRACE: "http_keepalive"
     GRPC_VERBOSITY: "ERROR"
     PROMETHEUS_METRICS__ADDR: "0.0.0.0"
@@ -32,7 +32,7 @@ spec:
     DUO_WORKFLOW_SHUTDOWN_GRACE_PERIOD_S: "5"
     PYTHONFAULTHANDLER: "1"
     PYTHONUNBUFFERED: "1"
-    GOOGLE_APPLICATION_CREDENTIALS: '/secrets/gcp-service-account/credentials.json'
+    GOOGLE_APPLICATION_CREDENTIALS: "/secrets/gcp-service-account/credentials.json"
   container_port: 5052
   protocol: grpc
   scalability:
@@ -50,14 +50,14 @@ spec:
       ephemeral-storage: "8Gi"
   startup_probe:
     period_seconds: 10
-    failure_threshold: 30  # 5 minutes (30 * 10 seconds)
+    failure_threshold: 30 # 5 minutes (30 * 10 seconds)
   liveness_probe:
     period_seconds: 10
-    failure_threshold: 6  # 60 seconds
+    failure_threshold: 6 # 60 seconds
   readiness_probe:
     period_seconds: 30
     timeout_seconds: 5
-    failure_threshold: 2  # 60 seconds
+    failure_threshold: 2 # 60 seconds
   load_balancing:
     cloudflare:
       enabled: false
