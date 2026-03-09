@@ -54,6 +54,9 @@ components:
         literal: True
       - from: "context:workflow_id"
         as: "workflow_id"
+      - from: "context:inputs.user_rule"
+        as: "agents_dot_md"
+        optional: True
     ui_log_events:
       - "on_tool_execution_success"
       - "on_tool_execution_failed"
@@ -65,6 +68,9 @@ components:
     inputs:
       - from: "context:project_http_url_to_repo"
         as: "repository_url"
+      - from: "context:inputs.user_rule"
+        as: "agents_dot_md"
+        optional: True
     toolset:
       - "run_git_command"
     ui_log_events:
@@ -88,6 +94,9 @@ components:
         as: "workflow_id"
       - from: "context:session_url"
         as: "session_url"
+      - from: "context:inputs.user_rule"
+        as: "agents_dot_md"
+        optional: True
     toolset:
       - "run_git_command"
       - "create_merge_request"

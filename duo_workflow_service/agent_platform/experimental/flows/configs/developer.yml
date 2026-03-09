@@ -29,6 +29,9 @@ components:
         as: "naming_context"
       - from: "context:workflow_id"
         as: "workflow_id"
+      - from: "context:inputs.user_rule"
+        as: "agents_dot_md"
+        optional: True
     ui_log_events:
       - "on_tool_execution_success"
       - "on_tool_execution_failed"
@@ -146,6 +149,9 @@ components:
         as: "plan_text"
       - from: "context:draft_merge_request_creator.tool_responses"
         as: "merge_request_details"
+      - from: "context:inputs.user_rule"
+        as: "agents_dot_md"
+        optional: True
     toolset:
       - "create_merge_request_note"
     ui_log_events:
