@@ -2,7 +2,7 @@ from abc import ABC, abstractmethod
 from typing import Annotated, Any, ClassVar, Optional, Self
 
 from langgraph.graph import StateGraph
-from pydantic import BaseModel, model_validator
+from pydantic import BaseModel, ConfigDict, model_validator
 
 from duo_workflow_service.agent_platform.experimental.state import FlowState, IOKey
 
@@ -10,6 +10,8 @@ __all__ = ["BaseRouter"]
 
 
 class BaseRouter(BaseModel, ABC):
+    model_config = ConfigDict(arbitrary_types_allowed=True)
+
     DEFAULT_ROUTE: ClassVar[str] = "default_route"
     _allowed_input_targets: ClassVar[tuple[str, ...]]
 

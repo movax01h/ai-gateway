@@ -904,3 +904,54 @@ class TestFlow:  # pylint: disable=too-many-public-methods
             "agent_user_environment": '{"user": "testuser", "home": "/home/testuser"}',
         }
         assert result == expected
+
+    def test_build_routers_always_passes_tracking_params_for_conditional_routers(
+        self,
+        mock_flow_metadata,
+        user,
+        mock_invocation_metadata,
+        mock_state_graph,  # pylint: disable=unused-argument
+        flow_type: GLReportingEventContext,
+    ):
+        """Test _build_routers always passes instrumentation params for conditional routers."""
+        config = FlowConfig(
+            version="v1",
+            environment="ambient",
+            components=[{"name": "agent", "type": "AgentComponent"}],
+            routers=[
+                {
+                    "from": "agent",
+                    "condition": {
+                        "input": "status",
+                        "routes": {"Execution": "end"},
+                    },
+                },
+            ],
+            flow=FlowConfigMetadata(entry_point="agent"),
+        )
+
+        components = {
+            "agent": self.mock_component("agent"),
+            "end": self.mock_component("end"),
+        }
+
+        with patch(
+            "duo_workflow_service.agent_platform.v1.flows.base.Router"
+        ) as mock_router_class:
+            mock_router_class.return_value = Mock(spec=Router)
+
+            flow = Flow(
+                workflow_id="test-workflow-123",
+                workflow_metadata=mock_flow_metadata,
+                workflow_type=flow_type,
+                user=user,
+                config=config,
+                invocation_metadata=mock_invocation_metadata,
+            )
+
+            flow._build_routers(components, Mock(spec=StateGraph))
+
+            call_kwargs = mock_router_class.call_args[1]
+            assert call_kwargs["flow_id"] == "test-workflow-123"
+            assert call_kwargs["flow_type"] == flow_type
+            assert "internal_event_client" in call_kwargs

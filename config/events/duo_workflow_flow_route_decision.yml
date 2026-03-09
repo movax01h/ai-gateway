@@ -1,0 +1,16 @@
+---
+description: Tracks when a flow routes through a conditional branch
+internal_events: true
+action: duo_workflow_flow_route_decision
+product_group: duo_workflow
+additional_properties:
+  label:
+    description: The component name that produced the routing decision
+  property:
+    description: The route value chosen (e.g., "add_comment", "create_fix")
+  value:
+    description: Workflow Id
+milestone: '18.10'
+introduced_by_url: https://gitlab.com/gitlab-org/modelops/applied-ml/code-suggestions/ai-assist/-/merge_requests/4755
+tiers:
+  - ultimate

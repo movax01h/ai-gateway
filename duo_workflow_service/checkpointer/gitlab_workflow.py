@@ -5,6 +5,7 @@ import base64
 import functools
 import json
 import os
+import time
 from contextlib import AbstractAsyncContextManager
 from typing import (
     Any,
@@ -300,6 +301,7 @@ class GitLabWorkflow(
                 return MemorySaver()
 
             init_llm_operations()
+            self._flow_start_time = time.time()
 
             config: RunnableConfig = {"configurable": {}}
             self.initial_status_event, event_property = (
@@ -542,10 +544,16 @@ class GitLabWorkflow(
             # No event to track for other statuses
             return
 
+        extra_kwargs = {}
+        if hasattr(self, "_flow_start_time"):
+            extra_kwargs["duration_seconds"] = round(
+                time.time() - self._flow_start_time, 3
+            )
+
         self._track_internal_event(
             event,
             InternalEventAdditionalProperties(
-                label=label, property=prop, value=self._workflow_id
+                label=label, property=prop, value=self._workflow_id, **extra_kwargs
             ),
         )
 

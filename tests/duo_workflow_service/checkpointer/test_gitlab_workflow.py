@@ -2,7 +2,7 @@ import asyncio
 import json
 from asyncio import CancelledError
 from typing import Any, Optional, Sequence, TypedDict
-from unittest.mock import AsyncMock, Mock, call, patch
+from unittest.mock import ANY, AsyncMock, Mock, call, patch
 
 import pytest
 from gitlab_cloud_connector import CloudConnectorUser, UserClaims
@@ -255,6 +255,7 @@ async def test_workflow_event_tracking_for_cancelled_workflow(
                     label=EventLabelEnum.WORKFLOW_FINISH_LABEL.value,
                     property=EventPropertyEnum.CANCELLED_BY_USER.value,
                     value="1234",
+                    duration_seconds=ANY,
                 ),
                 category=workflow_type.value,
             ),
@@ -344,6 +345,7 @@ async def test_workflow_context_manager_success(
                     label=EventLabelEnum.WORKFLOW_FINISH_LABEL.value,
                     property=EventPropertyEnum.WORKFLOW_COMPLETED.value,
                     value="1234",
+                    duration_seconds=ANY,
                 ),
                 category=workflow_type,
             ),
@@ -693,6 +695,7 @@ async def test_workflow_context_manager_retry_success(
                     label=EventLabelEnum.WORKFLOW_FINISH_LABEL.value,
                     property=EventPropertyEnum.WORKFLOW_COMPLETED.value,
                     value=workflow_id,
+                    duration_seconds=ANY,
                 ),
                 category=workflow_type,
             ),
@@ -1502,6 +1505,49 @@ async def test_aput_with_compression_enabled(
     assert post_call_body["compressed_checkpoint"] == compress_checkpoint(checkpoint)
 
     mock_compress_checkpoint_flag.assert_called_with(FeatureFlag.COMPRESS_CHECKPOINT)
+
+
+@pytest.mark.asyncio
+async def test_track_workflow_completion_includes_duration_seconds(
+    gitlab_workflow,
+    workflow_id,
+    workflow_type,
+    internal_event_client: Mock,
+):
+    """Test that completion events include duration_seconds when _flow_start_time is set."""
+    gitlab_workflow._internal_event_client = internal_event_client
+    gitlab_workflow._billing_event_client = Mock()
+    gitlab_workflow._flow_start_time = 1000.0
+
+    with patch("duo_workflow_service.checkpointer.gitlab_workflow.time") as mock_time:
+        mock_time.time.return_value = 1005.5
+        await gitlab_workflow._track_workflow_completion("finished")
+
+    internal_event_client.track_event.assert_called_once()
+    call_kwargs = internal_event_client.track_event.call_args[1]
+    additional_props = call_kwargs["additional_properties"]
+
+    assert additional_props.extra["duration_seconds"] == 5.5
+    assert additional_props.label == EventLabelEnum.WORKFLOW_FINISH_LABEL.value
+    assert call_kwargs["event_name"] == EventEnum.WORKFLOW_FINISH_SUCCESS.value
+
+
+@pytest.mark.asyncio
+async def test_track_workflow_completion_without_start_time(
+    gitlab_workflow,
+    internal_event_client: Mock,
+):
+    """Test that completion events omit duration_seconds when _flow_start_time is not set."""
+    gitlab_workflow._internal_event_client = internal_event_client
+    gitlab_workflow._billing_event_client = Mock()
+
+    await gitlab_workflow._track_workflow_completion("finished")
+
+    internal_event_client.track_event.assert_called_once()
+    call_kwargs = internal_event_client.track_event.call_args[1]
+    additional_props = call_kwargs["additional_properties"]
+
+    assert "duration_seconds" not in additional_props.extra
 
 
 @pytest.mark.asyncio
