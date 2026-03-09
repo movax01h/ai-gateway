@@ -310,6 +310,9 @@ class Flow(AbstractWorkflow):
                     from_component=from_comp,
                     input=router_config["condition"]["input"],
                     to_component=to_components,
+                    flow_id=self._workflow_id,
+                    flow_type=self._workflow_type,
+                    internal_event_client=self._internal_event_client,
                 )
             else:
                 to_comp = components[router_config["to"]]

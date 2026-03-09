@@ -154,6 +154,14 @@ class DuoWorkflowMetrics:  # pylint: disable=too-many-instance-attributes
             registry=registry,
         )
 
+        self.agent_platform_flow_route_decision_counter = Counter(
+            "agent_platform_flow_route_decision_total",
+            "Count of flow routing decisions in Duo Workflow",
+            ["flow_type", "component_name", "route_value", "is_default_route"]
+            + METADATA_LABELS,
+            registry=registry,
+        )
+
         self.time_to_first_response = Histogram(
             "duo_workflow_time_to_first_response_seconds",
             "Time from ExecuteWorkflow call to first outgoing action",
@@ -261,6 +269,21 @@ class DuoWorkflowMetrics:  # pylint: disable=too-many-instance-attributes
     ) -> None:
         self.agent_platform_receive_start_counter.labels(
             flow_type=flow_type,
+            **build_metadata_labels(),
+        ).inc()
+
+    def count_flow_route_decision(
+        self,
+        flow_type: str = "unknown",
+        component_name: str = "unknown",
+        route_value: str = "unknown",
+        is_default_route: bool = False,
+    ) -> None:
+        self.agent_platform_flow_route_decision_counter.labels(
+            flow_type=flow_type,
+            component_name=component_name,
+            route_value=route_value,
+            is_default_route=str(is_default_route).lower(),
             **build_metadata_labels(),
         ).inc()
 

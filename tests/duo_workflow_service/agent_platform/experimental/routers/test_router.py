@@ -12,6 +12,9 @@ from duo_workflow_service.agent_platform.experimental.routers.router import (
     Router,
 )
 from duo_workflow_service.agent_platform.experimental.state import FlowState, IOKey
+from lib.events import GLReportingEventContext
+from lib.internal_events.client import InternalEventsClient
+from lib.internal_events.event_enum import EventEnum
 
 
 class TestRouter:
@@ -22,6 +25,7 @@ class TestRouter:
         mock_component = MagicMock(spec=BaseComponent)
         mock_component.__entry_hook__ = MagicMock(return_value=f"{name}_entry_hook")
         mock_component.attach = Mock()
+        mock_component.configure_mock(name=name)
         mock_component._allowed_input_targets = ("context",)
         mock_component._allowed_output_targets = ("context",)
         mock_component.inputs = IOKey.parse_keys(["context:key"])
@@ -155,11 +159,14 @@ class TestRouter:
         mock_iokey.return_value.value_from_state.assert_called_once_with(state)
 
     @patch(
+        "duo_workflow_service.agent_platform.experimental.routers.router.duo_workflow_metrics"
+    )
+    @patch(
         "duo_workflow_service.agent_platform.experimental.routers.base.IOKey.parse_key",
         return_value=Mock(spec=IOKey, target="context", subkeys=["key"], literal=False),
     )
     def test_router_route_with_input_returns_default_route_when_no_match(
-        self, mock_iokey
+        self, mock_iokey, mock_metrics
     ):
         """Test Router.route returns default route when no matching route found."""
         from_component = self.create_mock_component("from")
@@ -182,13 +189,22 @@ class TestRouter:
         assert result == "default_entry_hook"
         default_component.__entry_hook__.assert_called_once()
         mock_iokey.return_value.value_from_state.assert_called_once_with(state)
+        mock_metrics.count_flow_route_decision.assert_called_once_with(
+            flow_type="unknown",
+            component_name="from",
+            route_value="non_existing_route",
+            is_default_route=True,
+        )
 
+    @patch(
+        "duo_workflow_service.agent_platform.experimental.routers.router.duo_workflow_metrics"
+    )
     @patch(
         "duo_workflow_service.agent_platform.experimental.routers.base.IOKey.parse_key",
         return_value=Mock(spec=IOKey, target="context", subkeys=["key"], literal=False),
     )
     def test_router_route_with_input_raises_keyerror_when_no_match_and_no_default(
-        self, mock_iokey
+        self, mock_iokey, mock_metrics
     ):
         """Test Router.route raises KeyError when no matching route and no default route."""
         from_component = self.create_mock_component("from")
@@ -209,12 +225,23 @@ class TestRouter:
         assert "Route key" in error_message
         assert "not found in conditions" in error_message
         mock_iokey.return_value.value_from_state.assert_called_once_with(state)
+        mock_metrics.count_flow_route_decision.assert_called_once_with(
+            flow_type="unknown",
+            component_name="from",
+            route_value="non_existing_route",
+            is_default_route=True,
+        )
 
+    @patch(
+        "duo_workflow_service.agent_platform.experimental.routers.router.duo_workflow_metrics"
+    )
     @patch(
         "duo_workflow_service.agent_platform.experimental.routers.base.IOKey.parse_key",
         return_value=Mock(spec=IOKey, target="context", subkeys=["key"], literal=False),
     )
-    def test_router_route_with_empty_variables_returns_default_route(self, mock_iokey):
+    def test_router_route_with_empty_variables_returns_default_route(
+        self, mock_iokey, mock_metrics
+    ):
         """Test Router.route returns default route when value_from_state returns empty dict."""
         from_component = self.create_mock_component("from")
         to_component_1 = self.create_mock_component("to1")
@@ -236,6 +263,12 @@ class TestRouter:
         assert result == "default_entry_hook"
         default_component.__entry_hook__.assert_called_once()
         mock_iokey.return_value.value_from_state.assert_called_once_with(state)
+        mock_metrics.count_flow_route_decision.assert_called_once_with(
+            flow_type="unknown",
+            component_name="from",
+            route_value="None",
+            is_default_route=True,
+        )
 
     @patch(
         "duo_workflow_service.agent_platform.experimental.routers.base.IOKey.parse_key",
@@ -265,3 +298,97 @@ class TestRouter:
     def test_router_allowed_input_targets(self):
         """Test that Router has correct allowed input targets."""
         assert Router._allowed_input_targets == ("context", "status")
+
+    @patch(
+        "duo_workflow_service.agent_platform.experimental.routers.router.duo_workflow_metrics"
+    )
+    def test_track_route_decision_emits_metrics_and_internal_event(self, mock_metrics):
+        """Test _track_route_decision sends to Prometheus and Snowplow."""
+        from_component = self.create_mock_component("decide_approach")
+        to_component = self.create_mock_component("to")
+        mock_event_client = Mock(spec=InternalEventsClient)
+        flow_type = GLReportingEventContext.from_workflow_definition("fix_pipeline")
+
+        router = Router(
+            from_component=from_component,
+            to_component=to_component,
+            flow_id="test-flow-id",
+            flow_type=flow_type,
+            internal_event_client=mock_event_client,
+        )
+
+        router._track_route_decision("create_fix", is_default_route=False)
+
+        mock_metrics.count_flow_route_decision.assert_called_once_with(
+            flow_type="fix_pipeline",
+            component_name="decide_approach",
+            route_value="create_fix",
+            is_default_route=False,
+        )
+
+        mock_event_client.track_event.assert_called_once()
+        call_kwargs = mock_event_client.track_event.call_args[1]
+        assert call_kwargs["event_name"] == EventEnum.WORKFLOW_ROUTE_DECISION.value
+        assert call_kwargs["category"] == "fix_pipeline"
+        assert call_kwargs["additional_properties"].label == "decide_approach"
+        assert call_kwargs["additional_properties"].property == "create_fix"
+        assert call_kwargs["additional_properties"].value == "test-flow-id"
+        assert call_kwargs["additional_properties"].extra == {"is_default_route": False}
+
+    @patch(
+        "duo_workflow_service.agent_platform.experimental.routers.router.duo_workflow_metrics"
+    )
+    def test_track_route_decision_with_default_route(self, mock_metrics):
+        """Test _track_route_decision marks default route in metrics and events."""
+        from_component = self.create_mock_component("decide_approach")
+        to_component = self.create_mock_component("to")
+        mock_event_client = Mock(spec=InternalEventsClient)
+        flow_type = GLReportingEventContext.from_workflow_definition("fix_pipeline")
+
+        router = Router(
+            from_component=from_component,
+            to_component=to_component,
+            flow_id="test-flow-id",
+            flow_type=flow_type,
+            internal_event_client=mock_event_client,
+        )
+
+        router._track_route_decision("unmatched_value", is_default_route=True)
+
+        mock_metrics.count_flow_route_decision.assert_called_once_with(
+            flow_type="fix_pipeline",
+            component_name="decide_approach",
+            route_value="unmatched_value",
+            is_default_route=True,
+        )
+
+        call_kwargs = mock_event_client.track_event.call_args[1]
+        assert call_kwargs["additional_properties"].extra == {"is_default_route": True}
+
+    @patch(
+        "duo_workflow_service.agent_platform.experimental.routers.base.IOKey.parse_key",
+        return_value=Mock(spec=IOKey, target="context", subkeys=["key"], literal=False),
+    )
+    @patch(
+        "duo_workflow_service.agent_platform.experimental.routers.router.duo_workflow_metrics"
+    )
+    def test_router_route_always_tracks_route_decisions(self, mock_metrics, mock_iokey):
+        """Test Router.route always tracks route decisions."""
+        from_component = self.create_mock_component("from")
+        to_component_1 = self.create_mock_component("to1")
+        mock_iokey.return_value.value_from_state.return_value = "route1"
+
+        router = Router(
+            input="context:key",
+            from_component=from_component,
+            to_component={"route1": to_component_1},
+        )
+
+        router.route({})
+
+        mock_metrics.count_flow_route_decision.assert_called_once_with(
+            flow_type="unknown",
+            component_name="from",
+            route_value="route1",
+            is_default_route=False,
+        )
