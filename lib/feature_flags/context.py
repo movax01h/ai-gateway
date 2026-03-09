@@ -8,6 +8,7 @@ __all__ = ["is_feature_enabled", "current_feature_flag_context", "FeatureFlag"]
 class FeatureFlag(StrEnum):
     # Definition: https://gitlab.com/gitlab-org/gitlab/-/blob/master/config/feature_flags/ops/expanded_ai_logging.yml
     EXPANDED_AI_LOGGING = "expanded_ai_logging"
+    COMPRESS_CHECKPOINT = "duo_workflow_compress_checkpoint"
     AI_PER_MODEL_CONTEXT_WINDOW = "ai_per_model_context_window"
     USE_GENERIC_GITLAB_API_TOOLS = "use_generic_gitlab_api_tools"
     AI_PROMPT_SCANNING = "ai_prompt_scanning"
