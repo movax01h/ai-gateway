@@ -221,12 +221,14 @@ class GenerateTokenRequest(_message.Message):
     def __init__(self, workflowDefinition: _Optional[str] = ...) -> None: ...
 
 class GenerateTokenResponse(_message.Message):
-    __slots__ = ("token", "expiresAt")
+    __slots__ = ("token", "expiresAt", "server_capabilities")
     TOKEN_FIELD_NUMBER: _ClassVar[int]
     EXPIRESAT_FIELD_NUMBER: _ClassVar[int]
+    SERVER_CAPABILITIES_FIELD_NUMBER: _ClassVar[int]
     token: str
     expiresAt: int
-    def __init__(self, token: _Optional[str] = ..., expiresAt: _Optional[int] = ...) -> None: ...
+    server_capabilities: _containers.RepeatedScalarFieldContainer[str]
+    def __init__(self, token: _Optional[str] = ..., expiresAt: _Optional[int] = ..., server_capabilities: _Optional[_Iterable[str]] = ...) -> None: ...
 
 class ListToolsRequest(_message.Message):
     __slots__ = ()

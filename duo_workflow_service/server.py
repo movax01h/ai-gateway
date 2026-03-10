@@ -61,6 +61,7 @@ from duo_workflow_service.interceptors.route import has_sufficient_usage_quota
 from duo_workflow_service.monitoring import duo_workflow_metrics, setup_monitoring
 from duo_workflow_service.profiling import setup_profiling
 from duo_workflow_service.security.exceptions import SecurityException
+from duo_workflow_service.server_capabilities import get_dws_capabilities
 from duo_workflow_service.structured_logging import set_workflow_id, setup_logging
 from duo_workflow_service.tools.duo_base_tool import DuoBaseTool
 from duo_workflow_service.tracking import MonitoringContext, current_monitoring_context
@@ -678,7 +679,12 @@ class DuoWorkflowService(contract_pb2_grpc.DuoWorkflowServicer):
             extra_claims=extra_claims,
         )
 
-        return contract_pb2.GenerateTokenResponse(token=token, expiresAt=expires_at)
+        # Get DWS capabilities for capability negotiation with Rails
+        capabilities = get_dws_capabilities()
+
+        return contract_pb2.GenerateTokenResponse(
+            token=token, expiresAt=expires_at, server_capabilities=capabilities
+        )
 
     @override
     @has_sufficient_usage_quota(event=UsageQuotaEvent.DAP_FLOW_ON_EXECUTE)

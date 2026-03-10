@@ -877,7 +877,9 @@ async def test_generate_token(mock_generate_token_response, mock_token_authority
         "include_file_context",
     }
     mock_generate_token_response.assert_called_once_with(
-        token="token", expiresAt=one_hour_later
+        token="token",
+        expiresAt=one_hour_later,
+        server_capabilities=["tool_call_approval"],
     )
 
 
@@ -920,8 +922,43 @@ async def test_generate_token_with_legacy_duo_workflow_execute_workflow_up(
         "include_file_context",
     }
     mock_generate_token_response.assert_called_once_with(
-        token="token", expiresAt=one_hour_later
+        token="token",
+        expiresAt=one_hour_later,
+        server_capabilities=["tool_call_approval"],
     )
+
+
+@pytest.mark.asyncio
+@patch("duo_workflow_service.server.TokenAuthority")
+@patch.dict(os.environ, {"CLOUD_CONNECTOR_SERVICE_NAME": "gitlab-duo-workflow-service"})
+async def test_generate_token_returns_server_capabilities(mock_token_authority):
+    """Test that GenerateToken returns server capabilities in the response."""
+    one_hour_later = datetime.now(tz=timezone.utc) + timedelta(hours=1)
+    expires_at_timestamp = int(one_hour_later.timestamp())
+    mock_token_authority.return_value.encode = MagicMock(
+        return_value=("token", expires_at_timestamp)
+    )
+    mock_context = MagicMock(spec=grpc.ServicerContext)
+
+    user = CloudConnectorUser(
+        authenticated=True,
+        is_debug=False,
+        claims=UserClaims(
+            issuer="gitlab.com",
+            scopes=["duo_agent_platform"],
+        ),
+    )
+    current_user.set(user)
+
+    servicer = DuoWorkflowService()
+    response = await servicer.GenerateToken(
+        contract_pb2.GenerateTokenRequest(), mock_context
+    )
+
+    # Verify the response includes server capabilities
+    assert response.token == "token"
+    assert response.expiresAt == expires_at_timestamp
+    assert response.server_capabilities == ["tool_call_approval"]
 
 
 @pytest.mark.asyncio
